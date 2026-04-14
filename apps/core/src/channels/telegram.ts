@@ -8,6 +8,8 @@ import { StreamFlavor, stream, streamApi } from '@grammyjs/stream';
 
 import {
   ASSISTANT_NAME,
+  MINI_APP_API_URL,
+  MINI_APP_FRONTEND_URL,
   PERMISSION_APPROVAL_TIMEOUT_MS,
   TELEGRAM_PERMISSION_APPROVER_IDS,
   TRIGGER_PATTERN,
@@ -22,6 +24,7 @@ import {
   OnInboundMessage,
   PermissionApprovalDecision,
   PermissionApprovalRequest,
+  PlanReviewPrompt,
   ProgressUpdateOptions,
   RegisteredGroup,
   StreamingChunkOptions,
@@ -34,6 +37,8 @@ const TELEGRAM_STREAM_CHUNK_MAX_LENGTH = 3500;
 const TELEGRAM_GROUP_EDIT_INTERVAL_MS = 900;
 const TELEGRAM_PERMISSION_CALLBACK_PATTERN =
   /^perm:(approve|deny):([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$/;
+const MINI_APP_FRONTEND_URL_VALUE = MINI_APP_FRONTEND_URL.trim();
+const MINI_APP_API_URL_VALUE = MINI_APP_API_URL.trim();
 
 type TelegramContext = StreamFlavor<Context>;
 type TelegramStreamApi = ReturnType<typeof streamApi>;
@@ -660,6 +665,29 @@ export class TelegramChannel implements Channel {
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',
           );
+          if (MINI_APP_FRONTEND_URL_VALUE) {
+            const frontendBase = MINI_APP_FRONTEND_URL_VALUE.replace(
+              /\/+$/,
+              '',
+            );
+            const menuUrl = MINI_APP_API_URL_VALUE
+              ? `${frontendBase}?api=${encodeURIComponent(MINI_APP_API_URL_VALUE)}`
+              : frontendBase;
+            this.bot?.api
+              .setChatMenuButton?.({
+                menu_button: {
+                  type: 'web_app',
+                  text: 'Plans',
+                  web_app: { url: menuUrl },
+                },
+              })
+              .catch((err) => {
+                logger.warn(
+                  { err: this.sanitizeErrorMessage(err), menuUrl },
+                  'Failed to set Telegram Mini App menu button',
+                );
+              });
+          }
           console.log(`\n  Telegram bot: @${botInfo.username}`);
           console.log(
             `  Send /chatid to the bot to get a chat's registration ID\n`,
@@ -1335,6 +1363,42 @@ export class TelegramChannel implements Channel {
         approved: false,
         reason: 'Failed to send approval prompt to Telegram',
       };
+    }
+  }
+
+  async sendPlanReviewPrompt(
+    jid: string,
+    prompt: PlanReviewPrompt,
+  ): Promise<void> {
+    if (!this.bot) return;
+    const chatId = jid.replace(/^tg:/, '');
+    if (!chatId) return;
+    const url =
+      prompt.url ||
+      (MINI_APP_FRONTEND_URL_VALUE
+        ? `${MINI_APP_FRONTEND_URL_VALUE.replace(/\/+$/, '')}/plans/${prompt.planId}${MINI_APP_API_URL_VALUE ? `?api=${encodeURIComponent(MINI_APP_API_URL_VALUE)}` : ''}`
+        : undefined);
+    const text = `📋 ${prompt.title}\n\n${prompt.sectionCount} sections ready for review.`;
+    try {
+      await this.bot.api.sendMessage(chatId, text, {
+        ...(url
+          ? {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '📋 Review Plan', web_app: { url } }],
+                ],
+              },
+            }
+          : {}),
+      });
+    } catch (err) {
+      logger.warn(
+        { jid, planId: prompt.planId, err: this.sanitizeErrorMessage(err) },
+        'Failed to send Telegram plan review prompt',
+      );
+      if (url) {
+        await this.sendMessage(jid, `${text}\n\nOpen in Mini App: ${url}`);
+      }
     }
   }
 

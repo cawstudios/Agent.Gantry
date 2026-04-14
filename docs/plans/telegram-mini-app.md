@@ -30,49 +30,53 @@ Search these when implementing:
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Telegram Client                           │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │              Mini App (React + Vite)                   │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌───────────────────────┐ │  │
-│  │  │Plan View │ │Section   │ │ Inline Editor         │ │  │
-│  │  │Navigator │ │Detail    │ │ (edit plan sections)  │ │  │
-│  │  └──────────┘ └──────────┘ └───────────────────────┘ │  │
-│  │         │           │               │                 │  │
-│  │         └───────────┴───────────────┘                 │  │
-│  │                     │                                 │  │
-│  │            @telegram-apps/sdk                         │  │
-│  │         (initData, theme, haptics)                    │  │
-│  └─────────────────────┬─────────────────────────────────┘  │
-│                        │ HTTPS / WSS                         │
-└────────────────────────┼────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Centrally Hosted Frontend (Cloudflare Pages / Vercel)        │
+│  URL: https://app.myclaw.dev                                  │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │              Mini App (React + Vite, static build)      │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌───────────────────────┐  │  │
+│  │  │Plan View │ │Section   │ │ Inline Editor         │  │  │
+│  │  │Navigator │ │Detail    │ │ (edit plan sections)  │  │  │
+│  │  └──────────┘ └──────────┘ └───────────────────────┘  │  │
+│  │         │           │               │                  │  │
+│  │         └───────────┴───────────────┘                  │  │
+│  │                     │                                  │  │
+│  │            @telegram-apps/sdk                          │  │
+│  │         (initData, theme, haptics)                     │  │
+│  └─────────────────────┬──────────────────────────────────┘  │
+│                        │ HTTPS (API URL from query param)     │
+└────────────────────────┼─────────────────────────────────────┘
+                         │
+┌────────────────────────┼─────────────────────────────────────┐
+│                    Telegram Client                             │
+│  Bot sends: web_app { url: "app.myclaw.dev/plans/X?api=..." } │
+└────────────────────────┼─────────────────────────────────────┘
                          │
 ┌────────────────────────┼────────────────────────────────────┐
-│  MyClaw Mini App Server (new package)                        │
+│  MyClaw Core (single Node.js process)                        │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │  Telegram Bot (grammy, polling)        ← existing       │ │
+│  │  Message Loop / IPC Watcher            ← existing       │ │
+│  │  Task Scheduler                        ← existing       │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
 │  ┌─────────────────────┴──────────────────────────────────┐ │
-│  │              Express/Fastify API                        │ │
+│  │  Mini App API Server (Fastify, same process) ← NEW      │ │
+│  │  POST /api/auth/validate  (initData via HMAC-SHA-256)   │ │
+│  │  GET  /api/plans/:id                                    │ │
+│  │  GET  /api/plans/:id/stream  (SSE for real-time)        │ │
 │  │  POST /api/plans/:id/sections/:idx/approve              │ │
 │  │  POST /api/plans/:id/sections/:idx/reject               │ │
 │  │  POST /api/plans/:id/sections/:idx/edit                 │ │
-│  │  GET  /api/plans/:id                                    │ │
-│  │  GET  /api/plans/:id/stream  (SSE for real-time)        │ │
-│  │  POST /api/auth/validate  (initData validation)         │ │
 │  └─────────────────────┬──────────────────────────────────┘ │
 │                        │                                     │
 │  ┌─────────────────────┴──────────────────────────────────┐ │
-│  │           Plan State Store (JSON files)                 │ │
+│  │  Plan State Store (JSON files)                          │ │
 │  │  ~/myclaw/data/plans/{groupFolder}/{planId}.json        │ │
 │  └─────────────────────┬──────────────────────────────────┘ │
-│                        │                                     │
-│  ┌─────────────────────┴──────────────────────────────────┐ │
-│  │              IPC Bridge                                 │ │
-│  │  Writes to: ~/myclaw/data/ipc/{group}/plan-events/      │ │
-│  │  Reads from: ~/myclaw/data/ipc/{group}/plan-responses/  │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-                         │
-┌────────────────────────┼────────────────────────────────────┐
-│  MyClaw Core (existing)                                      │
+│                        │ direct function call (same process) │
 │  ┌─────────────────────┴──────────────────────────────────┐ │
 │  │  IPC Watcher                                            │ │
 │  │  Picks up plan-events/, routes to active agent session  │ │
@@ -193,13 +197,33 @@ Add to root `package.json` workspaces:
 
 ---
 
-### Phase 2: Mini App Server (apps/core addition or separate)
+### Phase 2: Mini App Server (built into MyClaw core)
 
-**Goal:** HTTP API that bridges the Mini App frontend to MyClaw's IPC system.
+**Goal:** HTTP API embedded in MyClaw's existing process that bridges the Mini App frontend to the IPC system. No separate server — Fastify starts inside the same Node.js process alongside grammy and the message loop.
 
-#### 2.1 Server endpoints
+#### 2.1 Server setup
 
-Add a lightweight HTTP server (Fastify preferred — fast, typed, low overhead) that starts alongside the main MyClaw process.
+The API server runs inside MyClaw's process. It does NOT serve the frontend — that's hosted centrally on `app.myclaw.dev`. This server only handles API requests from the Mini App.
+
+```typescript
+// New file: apps/core/src/mini-app/server.ts
+// Called from apps/core/src/index.ts at startup
+
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+
+export async function startMiniAppServer(port = 3100) {
+  const app = Fastify();
+
+  // Allow requests from the centrally hosted Mini App
+  app.register(cors, { origin: 'https://app.myclaw.dev' });
+
+  // API routes (auth, plans, SSE)...
+  await app.listen({ port, host: '0.0.0.0' });
+}
+```
+
+#### 2.2 Server endpoints
 
 ```typescript
 // New file: apps/core/src/mini-app/server.ts
@@ -246,7 +270,7 @@ POST /api/plans/:id/reject
   Response: { ok: true }
 ```
 
-#### 2.2 Auth validation
+#### 2.3 Auth validation
 
 ```typescript
 // Validate Telegram initData using HMAC-SHA-256
@@ -276,7 +300,7 @@ function validateInitData(initData: string, botToken: string): boolean {
 }
 ```
 
-#### 2.3 Plan state store
+#### 2.4 Plan state store
 
 ```
 ~/myclaw/data/plans/{groupFolder}/{planId}.json
@@ -284,7 +308,7 @@ function validateInitData(initData: string, botToken: string): boolean {
 
 Simple JSON files. Read/write with atomic rename (same pattern as IPC). No database needed — plans are session-scoped and ephemeral.
 
-#### 2.4 IPC bridge
+#### 2.5 IPC bridge
 
 When user acts on a section:
 1. Server writes event to `~/myclaw/data/ipc/{groupFolder}/plan-events/{timestamp}.json`
@@ -341,13 +365,15 @@ server.tool('get_plan', {
 When agent creates a plan, MyClaw sends a Telegram message with a Mini App launch button:
 
 ```typescript
+const appUrl = `https://app.myclaw.dev/plans/${plan.id}?api=${encodeURIComponent(MINI_APP_API_URL)}`;
+
 await bot.api.sendMessage(chatId, `📋 *${plan.title}*\n\n${plan.sections.length} sections ready for review.`, {
   parse_mode: 'MarkdownV2',
   reply_markup: {
     inline_keyboard: [[
       {
         text: '📋 Review Plan',
-        web_app: { url: `${MINI_APP_URL}/plans/${plan.id}` }
+        web_app: { url: appUrl }
       }
     ]]
   }
@@ -468,41 +494,54 @@ If agent is waiting for feedback and user hasn't acted in 2 minutes:
 
 ### Phase 6: Hosting & Deployment
 
-**Goal:** Serve the Mini App so Telegram can load it.
+**Goal:** Two things to host: the React frontend (centrally) and the API server (per-user).
 
-#### Option A: Local dev (ngrok/cloudflared tunnel)
+#### Frontend: Centrally hosted (zero setup for users)
+
+Deploy the React build as a static site:
+
+```
+app.myclaw.dev → Cloudflare Pages / Vercel (free tier)
+```
+
+- Auto-deploys from `apps/mini-app/` on push to main
+- All MyClaw users share the same frontend URL
+- UI updates ship independently of MyClaw npm releases
+- No hosting burden on users
+
+#### API: Per-user MyClaw process
+
+The Fastify API server (Phase 2) runs inside each user's MyClaw process on port 3100. Users expose it via:
+
+| Method | When |
+|--------|------|
+| **Cloudflare Tunnel** | Mac / home server (free, no port forwarding) |
+| **Caddy reverse proxy** | VPS with a domain |
+| **ngrok** | Quick dev testing |
 
 ```bash
-# Mini App dev server
-cd apps/mini-app && npm run dev  # https://localhost:5173
-
-# Tunnel for Telegram to reach it
-cloudflared tunnel --url https://localhost:5173
-# or
-ngrok http 5173
+# One-time setup
+cloudflared tunnel create myclaw-api
+cloudflared tunnel --url http://localhost:3100
+# → https://myclaw-api-xyz.trycloudflare.com
 ```
 
-Set the tunnel URL as the Mini App URL in bot config. Good for development.
-
-#### Option B: Built-in server (production)
-
-The Mini App server (Phase 2) also serves the built static files:
+The tunnel URL is stored in MyClaw config as `MINI_APP_API_URL`. The bot passes it when launching the Mini App:
 
 ```typescript
-// apps/core/src/mini-app/server.ts
-app.register(fastifyStatic, {
-  root: path.join(__dirname, '../../mini-app/dist'),
-  prefix: '/',
-});
+web_app: { url: `https://app.myclaw.dev/plans/${planId}?api=${encodeURIComponent(apiUrl)}` }
 ```
 
-One process serves both the API and the frontend. HTTPS via Let's Encrypt or reverse proxy.
+MyClaw's setup flow can automate tunnel creation: detect `cloudflared`, create tunnel, store URL.
 
-#### Option C: GitHub Pages / Vercel (zero-infra)
+#### Development: Vite dev server
 
-Build and deploy the Mini App as a static site. The API runs on the user's machine with a tunnel. Mini App calls the tunnel URL for API requests.
+During Mini App frontend development:
 
-**Recommended:** Option B for production (single process, no external dependencies). Option A for development.
+```bash
+cd apps/mini-app && npm run dev     # https://localhost:5173
+# Open in browser or use BotFather test environment
+```
 
 ---
 

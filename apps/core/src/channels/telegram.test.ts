@@ -11,6 +11,8 @@ vi.mock('../core/env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 // Mock config
 vi.mock('../core/config.js', () => ({
   ASSISTANT_NAME: 'Andy',
+  MINI_APP_API_URL: '',
+  MINI_APP_FRONTEND_URL: 'https://app.myclaw.dev',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
   TELEGRAM_PERMISSION_APPROVER_IDS: new Set<string>(),
   TRIGGER_PATTERN: /^@Andy\b/i,

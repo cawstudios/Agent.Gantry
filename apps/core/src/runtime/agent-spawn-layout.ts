@@ -246,4 +246,6 @@ export function ensureGroupIpcLayout(groupIpcDir: string): void {
   fs.mkdirSync(path.join(groupIpcDir, 'permission-responses'), {
     recursive: true,
   });
+  fs.mkdirSync(path.join(groupIpcDir, 'plan-events'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'plan-responses'), { recursive: true });
 }

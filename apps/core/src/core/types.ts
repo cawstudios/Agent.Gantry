@@ -161,6 +161,13 @@ export interface ProgressUpdateOptions {
   done?: boolean;
 }
 
+export interface PlanReviewPrompt {
+  planId: string;
+  title: string;
+  sectionCount: number;
+  url?: string;
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
@@ -189,6 +196,8 @@ export interface Channel {
     jid: string,
     request: PermissionApprovalRequest,
   ): Promise<PermissionApprovalDecision>;
+  // Optional: send a rich plan review prompt when channel supports UI actions.
+  sendPlanReviewPrompt?(jid: string, prompt: PlanReviewPrompt): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
