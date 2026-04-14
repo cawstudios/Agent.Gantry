@@ -246,8 +246,13 @@ interface ParsedTaskIpcData {
   scheduleType?: 'cron' | 'interval' | 'once' | 'manual';
   linkedSessions?: string[];
   groupScope?: string;
+  threadId?: string;
+  runAt?: string;
+  deliverTo?: string[];
   createdBy?: 'agent' | 'human';
+  silent?: boolean;
   timeoutMs?: number;
+  cleanupAfterMs?: number;
   maxRetries?: number;
   retryBackoffMs?: number;
   maxConsecutiveFailures?: number;
@@ -328,7 +333,24 @@ function parseTaskIpcData(
   });
   const jobId = toTrimmedString(raw.jobId, { maxLen: 128 });
   const linkedSessions = toOptionalStringArray(raw.linkedSessions, 200, 255);
+  const deliverToArray =
+    toOptionalStringArray(raw.deliverTo, 200, 255) ??
+    toOptionalStringArray(raw.deliver_to, 200, 255);
+  const deliverToSingle =
+    toTrimmedString(raw.deliverTo, { maxLen: 255 }) ??
+    toTrimmedString(raw.deliver_to, { maxLen: 255 });
+  const deliverTo =
+    deliverToArray || (deliverToSingle ? [deliverToSingle] : undefined);
   const groupScope = toTrimmedString(raw.groupScope, { maxLen: 128 });
+  const threadId =
+    toTrimmedString(raw.threadId, { maxLen: 255, allowEmpty: true }) ??
+    toTrimmedString(raw.thread_id, { maxLen: 255, allowEmpty: true });
+  const runAt =
+    toTrimmedString(raw.runAt, {
+      maxLen: 1024,
+      allowEmpty: true,
+    }) ?? toTrimmedString(raw.run_at, { maxLen: 1024, allowEmpty: true });
+  const silent = toOptionalBoolean(raw.silent);
   const createdByRaw = toTrimmedString(raw.createdBy, { maxLen: 16 });
   const statuses = toOptionalStringArray(raw.statuses, 50, 64);
   const groupFolder = toTrimmedString(raw.groupFolder, { maxLen: 128 });
@@ -343,6 +365,15 @@ function parseTaskIpcData(
   const payload = isPlainObject(raw.payload) ? raw.payload : undefined;
   const numericFields = {
     timeoutMs: toOptionalNumber(raw.timeoutMs, { min: 1000, max: 3_600_000 }),
+    cleanupAfterMs:
+      toOptionalNumber(raw.cleanupAfterMs, {
+        min: 0,
+        max: 31_536_000_000,
+      }) ??
+      toOptionalNumber(raw.cleanup_after_ms, {
+        min: 0,
+        max: 31_536_000_000,
+      }),
     maxRetries: toOptionalNumber(raw.maxRetries, { min: 0, max: 100 }),
     retryBackoffMs: toOptionalNumber(raw.retryBackoffMs, {
       min: 0,
@@ -367,7 +398,11 @@ function parseTaskIpcData(
   if (script !== undefined) parsed.script = script;
   if (jobId) parsed.jobId = jobId;
   if (linkedSessions !== undefined) parsed.linkedSessions = linkedSessions;
+  if (deliverTo !== undefined) parsed.deliverTo = deliverTo;
   if (groupScope) parsed.groupScope = groupScope;
+  if (threadId !== undefined) parsed.threadId = threadId || '';
+  if (runAt !== undefined) parsed.runAt = runAt;
+  if (silent !== undefined) parsed.silent = silent;
   if (createdByRaw === 'agent' || createdByRaw === 'human') {
     parsed.createdBy = createdByRaw;
   }
@@ -384,6 +419,8 @@ function parseTaskIpcData(
   if (payload !== undefined) parsed.payload = payload;
   if (numericFields.timeoutMs !== undefined)
     parsed.timeoutMs = Math.round(numericFields.timeoutMs);
+  if (numericFields.cleanupAfterMs !== undefined)
+    parsed.cleanupAfterMs = Math.round(numericFields.cleanupAfterMs);
   if (numericFields.maxRetries !== undefined)
     parsed.maxRetries = Math.round(numericFields.maxRetries);
   if (numericFields.retryBackoffMs !== undefined)
@@ -1106,9 +1143,14 @@ export async function processTaskIpc(
     scheduleType?: string;
     scheduleValue?: string;
     linkedSessions?: string[];
+    deliverTo?: string[];
     groupScope?: string;
+    threadId?: string;
+    runAt?: string;
     createdBy?: 'agent' | 'human';
+    silent?: boolean;
     timeoutMs?: number;
+    cleanupAfterMs?: number;
     maxRetries?: number;
     retryBackoffMs?: number;
     maxConsecutiveFailures?: number;
@@ -1136,6 +1178,136 @@ export async function processTaskIpc(
     .map(([jid]) => jid);
 
   switch (data.type) {
+    case 'scheduler_once': {
+      const name = (data.name || '').trim();
+      const prompt = (data.prompt || '').trim();
+      const runAtRaw = (data.runAt || data.schedule_value || '').trim();
+      if (!name || !prompt || !runAtRaw) break;
+      if (typeof data.script === 'string' && data.script.trim().length > 0) {
+        logger.warn(
+          { sourceGroup, name },
+          'Rejected scheduler_once with script payload from IPC',
+        );
+        break;
+      }
+
+      const runAtDate = new Date(runAtRaw);
+      if (isNaN(runAtDate.getTime())) {
+        logger.warn({ runAtRaw }, 'Invalid run_at for scheduler_once');
+        break;
+      }
+
+      const groupScope = (data.groupScope || sourceGroup).trim();
+      if (!isMain && groupScope !== sourceGroup) {
+        logger.warn(
+          { sourceGroup, groupScope },
+          'Unauthorized scheduler_once attempt blocked',
+        );
+        break;
+      }
+
+      let linkedSessions = Array.isArray(data.deliverTo)
+        ? data.deliverTo.map((item) => String(item)).filter((item) => item)
+        : sourceGroupJids;
+      if (linkedSessions.length === 0) {
+        linkedSessions = Array.isArray(data.linkedSessions)
+          ? data.linkedSessions
+              .map((item) => String(item))
+              .filter((item) => item.length > 0)
+          : sourceGroupJids;
+      }
+      if (linkedSessions.length === 0) linkedSessions = sourceGroupJids;
+      if (linkedSessions.length === 0) {
+        logger.warn(
+          { sourceGroup, name },
+          'scheduler_once requires at least one delivery session',
+        );
+        break;
+      }
+
+      if (!isMain) {
+        const unauthorized = linkedSessions.some((jid) => {
+          const group = registeredGroups[jid];
+          return !group || group.folder !== sourceGroup;
+        });
+        if (unauthorized) {
+          logger.warn(
+            { sourceGroup, linkedSessions },
+            'Unauthorized linked sessions in scheduler_once',
+          );
+          break;
+        }
+      }
+
+      const scheduleValue = runAtDate.toISOString();
+      const requestedJobId = (data.jobId || '').toString().trim();
+      let id = generateJobId({
+        name,
+        prompt,
+        scheduleType: 'once',
+        scheduleValue,
+        groupScope,
+      });
+      if (requestedJobId) {
+        const existing = getJobById(requestedJobId);
+        if (existing) {
+          if (
+            !isMain &&
+            !jobBelongsToSourceGroup(existing, sourceGroup, registeredGroups)
+          ) {
+            logger.warn(
+              { sourceGroup, requestedJobId },
+              'Rejected scheduler_once with cross-group jobId',
+            );
+            break;
+          }
+          id = requestedJobId;
+        } else {
+          id = requestedJobId;
+        }
+      }
+
+      const upsertResult = upsertJob({
+        id,
+        name,
+        prompt,
+        model: data.model || null,
+        script: null,
+        schedule_type: 'once',
+        schedule_value: scheduleValue,
+        linked_sessions: linkedSessions,
+        thread_id: data.threadId || null,
+        group_scope: groupScope,
+        created_by: 'agent',
+        status: 'active',
+        next_run: scheduleValue,
+        silent: data.silent === true,
+        cleanup_after_ms:
+          typeof data.cleanupAfterMs === 'number'
+            ? data.cleanupAfterMs
+            : undefined,
+        timeout_ms:
+          typeof data.timeoutMs === 'number' ? data.timeoutMs : undefined,
+        max_retries:
+          typeof data.maxRetries === 'number' ? data.maxRetries : undefined,
+        retry_backoff_ms:
+          typeof data.retryBackoffMs === 'number'
+            ? data.retryBackoffMs
+            : undefined,
+        max_consecutive_failures:
+          typeof data.maxConsecutiveFailures === 'number'
+            ? data.maxConsecutiveFailures
+            : undefined,
+      });
+
+      logger.info(
+        { id, created: upsertResult.created, sourceGroup, groupScope },
+        'One-time job created via IPC',
+      );
+      deps.onSchedulerChanged();
+      break;
+    }
+
     case 'scheduler_upsert_job': {
       const scheduleType = (data.schedule_type || data.scheduleType) as
         | 'cron'
@@ -1165,11 +1337,15 @@ export async function processTaskIpc(
         break;
       }
 
-      let linkedSessions = Array.isArray(data.linkedSessions)
-        ? data.linkedSessions
+      let linkedSessions = Array.isArray(data.deliverTo)
+        ? data.deliverTo
             .map((item) => String(item))
             .filter((item) => item.length > 0)
-        : sourceGroupJids;
+        : Array.isArray(data.linkedSessions)
+          ? data.linkedSessions
+              .map((item) => String(item))
+              .filter((item) => item.length > 0)
+          : sourceGroupJids;
       if (linkedSessions.length === 0) linkedSessions = sourceGroupJids;
       if (linkedSessions.length === 0) {
         logger.warn(
@@ -1259,10 +1435,16 @@ export async function processTaskIpc(
         schedule_type: scheduleType,
         schedule_value: scheduleValue,
         linked_sessions: linkedSessions,
+        thread_id: data.threadId || null,
         group_scope: groupScope,
         created_by: 'agent',
         status: 'active',
         next_run: nextRun,
+        silent: data.silent === true,
+        cleanup_after_ms:
+          typeof data.cleanupAfterMs === 'number'
+            ? data.cleanupAfterMs
+            : undefined,
         timeout_ms:
           typeof data.timeoutMs === 'number' ? data.timeoutMs : undefined,
         max_retries:
@@ -1343,8 +1525,16 @@ export async function processTaskIpc(
         updates.retry_backoff_ms = data.retryBackoffMs;
       if (typeof data.maxConsecutiveFailures === 'number')
         updates.max_consecutive_failures = data.maxConsecutiveFailures;
-      if (Array.isArray(data.linkedSessions)) {
-        const linked = data.linkedSessions.map((item) => String(item));
+      if (typeof data.silent === 'boolean') updates.silent = data.silent;
+      if (typeof data.cleanupAfterMs === 'number')
+        updates.cleanup_after_ms = data.cleanupAfterMs;
+      if (data.threadId !== undefined)
+        updates.thread_id = data.threadId || null;
+      if (Array.isArray(data.linkedSessions) || Array.isArray(data.deliverTo)) {
+        const source = Array.isArray(data.deliverTo)
+          ? data.deliverTo
+          : data.linkedSessions || [];
+        const linked = source.map((item) => String(item));
         if (!isMain) {
           const unauthorized = linked.some((jid) => {
             const group = registeredGroups[jid];

@@ -88,12 +88,15 @@ export interface Job {
   schedule_value: string;
   status: JobStatus;
   linked_sessions: string[];
+  thread_id: string | null;
   group_scope: string;
   created_by: 'agent' | 'human';
   created_at: string;
   updated_at: string;
   next_run: string | null;
   last_run: string | null;
+  silent: boolean;
+  cleanup_after_ms: number;
   timeout_ms: number;
   max_retries: number;
   retry_backoff_ms: number;

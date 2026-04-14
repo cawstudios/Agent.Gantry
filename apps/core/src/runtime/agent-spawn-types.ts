@@ -52,10 +52,13 @@ export interface JobSnapshotRow {
   status: string;
   group_scope: string;
   linked_sessions: string[];
+  thread_id?: string | null;
   next_run: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
+  silent?: boolean;
+  cleanup_after_ms?: number;
   timeout_ms: number;
   max_retries: number;
   retry_backoff_ms: number;

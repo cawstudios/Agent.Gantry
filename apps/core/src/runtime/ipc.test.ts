@@ -290,6 +290,23 @@ describe('scheduler_upsert_job', () => {
     expect(job!.script).toBeNull();
   });
 
+  it('stores delivery metadata fields (threadId, silent, cleanupAfterMs)', async () => {
+    await upsertViaIpc({
+      jobId: 'delivery-meta-job',
+      schedule_type: 'manual',
+      schedule_value: '',
+      threadId: 'thread-42',
+      silent: true,
+      cleanupAfterMs: 60000,
+    });
+
+    const job = getJobById('delivery-meta-job');
+    expect(job).toBeDefined();
+    expect(job!.thread_id).toBe('thread-42');
+    expect(job!.silent).toBe(true);
+    expect(job!.cleanup_after_ms).toBe(60000);
+  });
+
   it('uses sourceGroupJids as linkedSessions when none provided', async () => {
     await processTaskIpc(
       {
@@ -342,6 +359,59 @@ describe('scheduler_upsert_job', () => {
 
     expect(getJobById('unknown-sched')).toBeUndefined();
     expect(deps.onSchedulerChanged).not.toHaveBeenCalled();
+  });
+});
+
+describe('scheduler_once', () => {
+  it('creates a one-time job and defaults delivery to source group JID', async () => {
+    const runAt = new Date(Date.now() + 3600000).toISOString();
+    await processTaskIpc(
+      {
+        type: 'scheduler_once',
+        jobId: 'once-convenience',
+        name: 'Reminder',
+        prompt: 'Review PR',
+        runAt,
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    const job = getJobById('once-convenience');
+    expect(job).toBeDefined();
+    expect(job!.schedule_type).toBe('once');
+    expect(job!.schedule_value).toBe(runAt);
+    expect(job!.next_run).toBe(runAt);
+    expect(job!.linked_sessions).toEqual(['other@g.us']);
+    expect(job!.group_scope).toBe('other-group');
+  });
+
+  it('applies deliverTo, threadId, silent, cleanupAfterMs', async () => {
+    const runAt = new Date(Date.now() + 7200000).toISOString();
+    await processTaskIpc(
+      {
+        type: 'scheduler_once',
+        jobId: 'once-delivery-meta',
+        name: 'Reminder',
+        prompt: 'Review PR',
+        runAt,
+        deliverTo: ['other@g.us'],
+        threadId: 'thread-7',
+        silent: true,
+        cleanupAfterMs: 0,
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const job = getJobById('once-delivery-meta');
+    expect(job).toBeDefined();
+    expect(job!.linked_sessions).toEqual(['other@g.us']);
+    expect(job!.thread_id).toBe('thread-7');
+    expect(job!.silent).toBe(true);
+    expect(job!.cleanup_after_ms).toBe(0);
   });
 });
 

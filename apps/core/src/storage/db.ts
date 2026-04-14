@@ -180,12 +180,15 @@ function createSchema(database: Database.Database): void {
       schedule_value TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
       linked_sessions TEXT NOT NULL,
+      thread_id TEXT,
       group_scope TEXT NOT NULL,
       created_by TEXT NOT NULL DEFAULT 'agent',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       next_run TEXT,
       last_run TEXT,
+      silent INTEGER NOT NULL DEFAULT 0,
+      cleanup_after_ms INTEGER NOT NULL DEFAULT 86400000,
       timeout_ms INTEGER NOT NULL DEFAULT 300000,
       max_retries INTEGER NOT NULL DEFAULT 3,
       retry_backoff_ms INTEGER NOT NULL DEFAULT 5000,
@@ -317,6 +320,14 @@ function createSchema(database: Database.Database): void {
 
     // Add per-job model override column.
     addColumnIfMissing(database, 'jobs', 'model', 'TEXT DEFAULT NULL');
+    addColumnIfMissing(database, 'jobs', 'thread_id', 'TEXT');
+    addColumnIfMissing(database, 'jobs', 'silent', 'INTEGER DEFAULT 0');
+    addColumnIfMissing(
+      database,
+      'jobs',
+      'cleanup_after_ms',
+      'INTEGER DEFAULT 86400000',
+    );
   } catch (err) {
     logger.error({ err }, 'Database schema migration failed');
     throw err;
@@ -514,7 +525,10 @@ export function getLastBotMessageTimestamp(
   return row?.ts ?? undefined;
 }
 
-type RawJobRow = Omit<Job, 'linked_sessions'> & { linked_sessions: string };
+type RawJobRow = Omit<Job, 'linked_sessions' | 'silent'> & {
+  linked_sessions: string;
+  silent: number | boolean;
+};
 
 function mapJobRow(row: RawJobRow): Job {
   let linkedSessions: string[] = [];
@@ -529,6 +543,7 @@ function mapJobRow(row: RawJobRow): Job {
   return {
     ...row,
     linked_sessions: linkedSessions,
+    silent: Boolean(row.silent),
   };
 }
 
@@ -541,10 +556,13 @@ export interface JobUpsertInput {
   schedule_type: Job['schedule_type'];
   schedule_value: string;
   linked_sessions: string[];
+  thread_id?: string | null;
   group_scope: string;
   created_by: Job['created_by'];
   status?: Job['status'];
   next_run: string | null;
+  silent?: boolean;
+  cleanup_after_ms?: number;
   timeout_ms?: number;
   max_retries?: number;
   retry_backoff_ms?: number;
@@ -561,10 +579,10 @@ export function upsertJob(job: JobUpsertInput): { created: boolean } {
     `
     INSERT INTO jobs (
       id, name, prompt, model, script, schedule_type, schedule_value, status,
-      linked_sessions, group_scope, created_by, created_at, updated_at,
-      next_run, timeout_ms, max_retries, retry_backoff_ms, max_consecutive_failures
+      linked_sessions, thread_id, group_scope, created_by, created_at, updated_at,
+      next_run, silent, cleanup_after_ms, timeout_ms, max_retries, retry_backoff_ms, max_consecutive_failures
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       prompt = excluded.prompt,
@@ -577,9 +595,12 @@ export function upsertJob(job: JobUpsertInput): { created: boolean } {
         ELSE excluded.status
       END,
       linked_sessions = excluded.linked_sessions,
+      thread_id = excluded.thread_id,
       group_scope = excluded.group_scope,
       updated_at = excluded.updated_at,
       next_run = excluded.next_run,
+      silent = excluded.silent,
+      cleanup_after_ms = excluded.cleanup_after_ms,
       timeout_ms = excluded.timeout_ms,
       max_retries = excluded.max_retries,
       retry_backoff_ms = excluded.retry_backoff_ms,
@@ -595,11 +616,14 @@ export function upsertJob(job: JobUpsertInput): { created: boolean } {
     job.schedule_value,
     job.status || 'active',
     JSON.stringify(job.linked_sessions),
+    job.thread_id || null,
     job.group_scope,
     job.created_by,
     now,
     now,
     job.next_run,
+    job.silent ? 1 : 0,
+    job.cleanup_after_ms ?? 86400000,
     job.timeout_ms ?? 300000,
     job.max_retries ?? 3,
     job.retry_backoff_ms ?? 5000,
@@ -640,9 +664,12 @@ export function updateJob(
       | 'schedule_value'
       | 'status'
       | 'linked_sessions'
+      | 'thread_id'
       | 'group_scope'
       | 'next_run'
       | 'last_run'
+      | 'silent'
+      | 'cleanup_after_ms'
       | 'timeout_ms'
       | 'max_retries'
       | 'retry_backoff_ms'
@@ -689,6 +716,10 @@ export function updateJob(
     fields.push('linked_sessions = ?');
     values.push(JSON.stringify(updates.linked_sessions));
   }
+  if (updates.thread_id !== undefined) {
+    fields.push('thread_id = ?');
+    values.push(updates.thread_id);
+  }
   if (updates.group_scope !== undefined) {
     fields.push('group_scope = ?');
     values.push(updates.group_scope);
@@ -700,6 +731,14 @@ export function updateJob(
   if (updates.last_run !== undefined) {
     fields.push('last_run = ?');
     values.push(updates.last_run);
+  }
+  if (updates.silent !== undefined) {
+    fields.push('silent = ?');
+    values.push(updates.silent ? 1 : 0);
+  }
+  if (updates.cleanup_after_ms !== undefined) {
+    fields.push('cleanup_after_ms = ?');
+    values.push(updates.cleanup_after_ms);
   }
   if (updates.timeout_ms !== undefined) {
     fields.push('timeout_ms = ?');

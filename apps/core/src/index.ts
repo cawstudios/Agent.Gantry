@@ -35,7 +35,11 @@ import {
 import { GroupQueue } from './runtime/group-queue.js';
 import { startIpcWatcher } from './runtime/ipc.js';
 import { writeSchedulerStateFileSafe } from './runtime/scheduler-state-file.js';
-import { findChannel, formatOutboundForChannel } from './messaging/router.js';
+import {
+  findChannel,
+  formatOutboundForChannel,
+  stripInternalTagsPreserveWhitespace,
+} from './messaging/router.js';
 import { restoreRemoteControl } from './runtime/remote-control.js';
 import {
   isSenderAllowed,
@@ -358,10 +362,13 @@ export async function startMyClawRuntime(): Promise<void> {
       status: job.status,
       group_scope: job.group_scope,
       linked_sessions: job.linked_sessions,
+      thread_id: job.thread_id,
       next_run: job.next_run,
       created_by: job.created_by,
       created_at: job.created_at,
       updated_at: job.updated_at,
+      silent: job.silent,
+      cleanup_after_ms: job.cleanup_after_ms,
       timeout_ms: job.timeout_ms,
       max_retries: job.max_retries,
       retry_backoff_ms: job.retry_backoff_ms,
@@ -390,6 +397,38 @@ export async function startMyClawRuntime(): Promise<void> {
       }
       const text = formatOutboundForChannel(rawText, channel.name);
       if (text) await channel.sendMessage(jid, text);
+    },
+    sendStreamingChunk: async (jid, rawText, options) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'No channel owns JID, cannot stream message');
+        return;
+      }
+      const isTelegramGroup =
+        channel.name === 'telegram' && jid.startsWith('tg:-');
+      const text = isTelegramGroup
+        ? stripInternalTagsPreserveWhitespace(rawText)
+        : formatOutboundForChannel(rawText, channel.name);
+      if (!text && !options?.done) return;
+
+      if (channel.sendStreamingChunk) {
+        await channel.sendStreamingChunk(jid, text || '', options);
+        return;
+      }
+      if (!text) return;
+      const messageOptions = options?.threadId
+        ? { threadId: options.threadId }
+        : undefined;
+      if (messageOptions) {
+        await channel.sendMessage(jid, text, messageOptions);
+      } else {
+        await channel.sendMessage(jid, text);
+      }
+    },
+    resetStreaming: (jid) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) return;
+      channel.resetStreaming?.(jid);
     },
     onSchedulerChanged: syncSchedulerState,
   });

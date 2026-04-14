@@ -969,6 +969,9 @@ describe('upsertJob edge cases', () => {
     expect(job?.max_retries).toBe(3);
     expect(job?.retry_backoff_ms).toBe(5000);
     expect(job?.max_consecutive_failures).toBe(5);
+    expect(job?.cleanup_after_ms).toBe(86400000);
+    expect(job?.silent).toBe(false);
+    expect(job?.thread_id).toBeNull();
     expect(job?.status).toBe('active');
   });
 
@@ -1053,6 +1056,18 @@ describe('updateJob field coverage', () => {
       'a@g.us',
       'b@g.us',
     ]);
+  });
+
+  it('updates thread_id', () => {
+    updateJob('upd-job', { thread_id: 'thread-123' });
+    expect(getJobById('upd-job')?.thread_id).toBe('thread-123');
+  });
+
+  it('updates silent and cleanup_after_ms', () => {
+    updateJob('upd-job', { silent: true, cleanup_after_ms: 60000 });
+    const job = getJobById('upd-job');
+    expect(job?.silent).toBe(true);
+    expect(job?.cleanup_after_ms).toBe(60000);
   });
 
   it('updates group_scope', () => {

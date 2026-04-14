@@ -958,11 +958,11 @@ describe('scheduler loop', () => {
     expect(runs.length).toBe(1);
     expect(runs[0].status).toBe('completed');
 
-    // The status message should include next_run info
     expect(sendMessage).toHaveBeenCalledWith(
       'group@g.us',
-      expect.stringContaining('next_run:'),
+      '🔔 Scheduled task: interval test',
     );
+    expect(sendMessage).toHaveBeenCalledWith('group@g.us', 'All good');
   });
 
   it('completes once job and sets status to completed (no next_run)', async () => {
@@ -993,6 +993,66 @@ describe('scheduler loop', () => {
     const job = getJobById('once-job');
     expect(job?.status).toBe('completed');
     expect(job?.next_run).toBeNull();
+  });
+
+  it('suppresses chat delivery when job is silent', async () => {
+    vi.mocked(spawnAgent).mockResolvedValueOnce({
+      status: 'success',
+      result: 'silent result',
+      newSessionId: 'session-1',
+    });
+
+    upsertJob({
+      id: 'silent-once-job',
+      name: 'silent once',
+      prompt: 'silent task',
+      schedule_type: 'once',
+      schedule_value: new Date(Date.now() - 60_000).toISOString(),
+      linked_sessions: ['group@g.us'],
+      group_scope: 'main',
+      created_by: 'agent',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      silent: true,
+      status: 'active',
+    });
+
+    const sendMessage = vi.fn(async () => {});
+    startSchedulerLoop(makeDeps({ sendMessage }));
+    await vi.advanceTimersByTimeAsync(20);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getJobById('silent-once-job')?.status).toBe('completed');
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('deletes once jobs immediately when cleanup_after_ms is 0', async () => {
+    vi.mocked(spawnAgent).mockResolvedValueOnce({
+      status: 'success',
+      result: 'done',
+      newSessionId: 'session-1',
+    });
+
+    upsertJob({
+      id: 'cleanup-immediate',
+      name: 'cleanup immediate',
+      prompt: 'cleanup now',
+      schedule_type: 'once',
+      schedule_value: new Date(Date.now() - 60_000).toISOString(),
+      linked_sessions: ['group@g.us'],
+      group_scope: 'main',
+      created_by: 'agent',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      cleanup_after_ms: 0,
+      status: 'active',
+    });
+
+    startSchedulerLoop(makeDeps());
+    await vi.advanceTimersByTimeAsync(20);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getJobById('cleanup-immediate')).toBeUndefined();
   });
 
   it('calls onSchedulerChanged after stale lease release', async () => {
@@ -1162,8 +1222,8 @@ describe('scheduler loop', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    // Should send to 2 unique jids (deduped), not 3
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    // Should send header + output to each unique jid.
+    expect(sendMessage).toHaveBeenCalledTimes(4);
     expect(sendMessage).toHaveBeenCalledWith('group@g.us', expect.any(String));
     expect(sendMessage).toHaveBeenCalledWith('other@g.us', expect.any(String));
   });
@@ -2052,10 +2112,10 @@ describe('scheduler coverage: streaming callback and edge cases', () => {
 
     const job = getJobById('null-result');
     expect(job?.status).toBe('completed');
-    // The summary should be "Completed" when result is null
+    // With null result, only the header is sent and run still completes.
     expect(sendMessage).toHaveBeenCalledWith(
       'group@g.us',
-      expect.stringContaining('summary: Completed'),
+      '🔔 Scheduled task: null result',
     );
   });
 

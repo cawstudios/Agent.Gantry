@@ -470,6 +470,10 @@ server.tool(
     schedule_type: z.enum(['cron', 'interval', 'once', 'manual']),
     schedule_value: z.string().default(''),
     linked_sessions: z.array(z.string()).optional(),
+    deliver_to: z.array(z.string()).optional(),
+    thread_id: z.string().optional(),
+    silent: z.boolean().optional(),
+    cleanup_after_ms: z.number().optional(),
     group_scope: z.string().optional(),
     timeout_ms: z.number().optional(),
     max_retries: z.number().optional(),
@@ -519,6 +523,10 @@ server.tool(
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       linkedSessions: args.linked_sessions,
+      deliverTo: args.deliver_to,
+      threadId: args.thread_id,
+      silent: args.silent,
+      cleanupAfterMs: args.cleanup_after_ms,
       groupScope: args.group_scope,
       timeoutMs: args.timeout_ms,
       maxRetries: args.max_retries,
@@ -531,6 +539,65 @@ server.tool(
     return {
       content: [
         { type: 'text' as const, text: 'Scheduler job upsert requested.' },
+      ],
+    };
+  },
+);
+
+server.tool(
+  'scheduler_once',
+  'Schedule a one-time task and deliver the result back to chat.',
+  {
+    name: z.string(),
+    prompt: z.string(),
+    run_at: z
+      .string()
+      .describe('ISO timestamp, e.g. 2026-04-14T15:00:00+05:30'),
+    deliver_to: z.array(z.string()).optional(),
+    thread_id: z.string().optional(),
+    cleanup_after_ms: z.number().default(86_400_000),
+    timeout_ms: z.number().default(300_000),
+    silent: z.boolean().default(false),
+    model: z.string().optional(),
+    group_scope: z.string().optional(),
+    max_retries: z.number().optional(),
+    retry_backoff_ms: z.number().optional(),
+    max_consecutive_failures: z.number().optional(),
+  },
+  async (args) => {
+    const runAtDate = new Date(args.run_at);
+    if (isNaN(runAtDate.getTime())) {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid run_at timestamp.' }],
+        isError: true,
+      };
+    }
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'scheduler_once',
+      name: args.name,
+      prompt: args.prompt,
+      model: args.model,
+      run_at: runAtDate.toISOString(),
+      deliverTo:
+        args.deliver_to && args.deliver_to.length > 0
+          ? args.deliver_to
+          : [chatJid],
+      threadId: args.thread_id,
+      groupScope: args.group_scope ?? groupFolder,
+      silent: args.silent,
+      cleanupAfterMs: args.cleanup_after_ms,
+      timeoutMs: args.timeout_ms,
+      maxRetries: args.max_retries,
+      retryBackoffMs: args.retry_backoff_ms,
+      maxConsecutiveFailures: args.max_consecutive_failures,
+      createdBy: 'agent',
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      content: [
+        { type: 'text' as const, text: 'One-time scheduler job requested.' },
       ],
     };
   },
@@ -599,6 +666,10 @@ server.tool(
     schedule_type: z.enum(['cron', 'interval', 'once', 'manual']).optional(),
     schedule_value: z.string().optional(),
     linked_sessions: z.array(z.string()).optional(),
+    deliver_to: z.array(z.string()).optional(),
+    thread_id: z.string().optional(),
+    silent: z.boolean().optional(),
+    cleanup_after_ms: z.number().optional(),
     group_scope: z.string().optional(),
     timeout_ms: z.number().optional(),
     max_retries: z.number().optional(),
@@ -615,6 +686,10 @@ server.tool(
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       linkedSessions: args.linked_sessions,
+      deliverTo: args.deliver_to,
+      threadId: args.thread_id,
+      silent: args.silent,
+      cleanupAfterMs: args.cleanup_after_ms,
       groupScope: args.group_scope,
       timeoutMs: args.timeout_ms,
       maxRetries: args.max_retries,

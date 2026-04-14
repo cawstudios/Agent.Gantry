@@ -21,6 +21,8 @@ import {
   addJobEvent,
   completeJobRun,
   createJobRun,
+  deleteJob,
+  getAllJobs,
   getJobById,
   listDueJobs,
   markJobRunNotified,
@@ -29,6 +31,7 @@ import {
   upsertJob,
   updateJob,
 } from '../storage/db.js';
+import { StreamingChunkOptions } from '../core/types.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -41,7 +44,53 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendStreamingChunk?: (
+    jid: string,
+    text: string,
+    options?: StreamingChunkOptions,
+  ) => Promise<void>;
+  resetStreaming?: (jid: string) => void;
   onSchedulerChanged?: () => void;
+}
+
+const DEFAULT_JOB_CLEANUP_AFTER_MS = 86_400_000;
+let schedulerStreamingGenerationCounter = 0;
+
+function nextSchedulerStreamingGeneration(): number {
+  schedulerStreamingGenerationCounter += 1;
+  return schedulerStreamingGenerationCounter;
+}
+
+function normalizeCleanupAfterMs(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_JOB_CLEANUP_AFTER_MS;
+  }
+  return Math.max(0, Math.round(value));
+}
+
+function shouldDeleteCompletedOneTimeJob(job: Job, nowMs: number): boolean {
+  if (job.schedule_type !== 'once') return false;
+  if (job.status !== 'completed' && job.status !== 'dead_lettered') {
+    return false;
+  }
+  const cleanupAfterMs = normalizeCleanupAfterMs(job.cleanup_after_ms);
+  if (cleanupAfterMs === 0) return true;
+  const anchorIso = job.last_run || job.updated_at || job.created_at;
+  const anchor = Date.parse(anchorIso);
+  const anchorMs = Number.isFinite(anchor) ? anchor : nowMs;
+  return nowMs - anchorMs >= cleanupAfterMs;
+}
+
+function sweepCompletedOneTimeJobs(): boolean {
+  const jobs = getAllJobs();
+  const nowMs = Date.now();
+  let deleted = false;
+  for (const job of jobs) {
+    if (!shouldDeleteCompletedOneTimeJob(job, nowMs)) continue;
+    deleteJob(job.id);
+    deleted = true;
+  }
+  return deleted;
 }
 
 const MEMORY_DREAM_SYSTEM_PROMPT = '__system:memory_dream';
@@ -137,11 +186,13 @@ async function notifyLinkedSessions(
   job: Job,
   text: string,
   sendMessage: SchedulerDependencies['sendMessage'],
-): Promise<void> {
+): Promise<boolean> {
   const unique = Array.from(new Set(job.linked_sessions));
+  let delivered = false;
   for (const jid of unique) {
     try {
       await sendMessage(jid, text);
+      delivered = true;
     } catch (err) {
       logger.warn(
         { jobId: job.id, jid, err },
@@ -149,6 +200,7 @@ async function notifyLinkedSessions(
       );
     }
   }
+  return delivered;
 }
 
 function registerSystemJobs(deps: SchedulerDependencies): void {
@@ -258,6 +310,7 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
 
   let result: string | null = null;
   let error: string | null = null;
+  let collectedResult = '';
 
   let groupDir: string;
   try {
@@ -272,6 +325,102 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
   const isMain = execution.group.isMain === true;
   let retrievedItemIds: string[] = [];
   let ranSystemJob = false;
+  const linkedSessions = Array.from(new Set(currentJob.linked_sessions));
+  const shouldDeliverToChat = !currentJob.silent && linkedSessions.length > 0;
+  const streamGeneration = nextSchedulerStreamingGeneration();
+
+  const buildStreamingOptions = (args: {
+    done?: boolean;
+  }): StreamingChunkOptions => {
+    const options: StreamingChunkOptions = {
+      generation: streamGeneration,
+    };
+    if (currentJob.thread_id) options.threadId = currentJob.thread_id;
+    if (args.done !== undefined) options.done = args.done;
+    return options;
+  };
+
+  const resetDeliveryStreams = () => {
+    if (!deps.resetStreaming || !shouldDeliverToChat) return;
+    for (const jid of linkedSessions) {
+      try {
+        deps.resetStreaming(jid);
+      } catch (err) {
+        logger.debug(
+          { err, jid, jobId: currentJob.id },
+          'Failed to reset scheduler stream state',
+        );
+      }
+    }
+  };
+
+  const deliverMessage = async (text: string): Promise<boolean> => {
+    if (!shouldDeliverToChat || !text) return false;
+    let delivered = false;
+    for (const jid of linkedSessions) {
+      try {
+        await deps.sendMessage(jid, text);
+        delivered = true;
+      } catch (err) {
+        logger.warn(
+          { jobId: currentJob.id, jid, err },
+          'Failed to deliver scheduler message',
+        );
+      }
+    }
+    return delivered;
+  };
+
+  const deliverStreamingChunk = async (text: string): Promise<boolean> => {
+    if (!shouldDeliverToChat || !text) return false;
+    if (!deps.sendStreamingChunk) {
+      return deliverMessage(text);
+    }
+
+    let delivered = false;
+    for (const jid of linkedSessions) {
+      try {
+        await deps.sendStreamingChunk(jid, text, buildStreamingOptions({}));
+        delivered = true;
+      } catch (err) {
+        logger.warn(
+          { jobId: currentJob.id, jid, err },
+          'Failed to deliver scheduler stream chunk',
+        );
+      }
+    }
+    return delivered;
+  };
+
+  let streamFinalized = false;
+  const finalizeStreaming = async (): Promise<boolean> => {
+    if (!shouldDeliverToChat || !deps.sendStreamingChunk || streamFinalized) {
+      return false;
+    }
+    streamFinalized = true;
+    let delivered = false;
+    for (const jid of linkedSessions) {
+      try {
+        await deps.sendStreamingChunk(
+          jid,
+          '',
+          buildStreamingOptions({ done: true }),
+        );
+        delivered = true;
+      } catch (err) {
+        logger.warn(
+          { jobId: currentJob.id, jid, err },
+          'Failed to finalize scheduler stream',
+        );
+      }
+    }
+    return delivered;
+  };
+
+  if (shouldDeliverToChat) {
+    resetDeliveryStreams();
+    await deliverMessage(`🔔 Scheduled task: ${currentJob.name}`);
+  }
 
   if (!error && currentJob.prompt.startsWith('__system:')) {
     try {
@@ -280,6 +429,7 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
         execution.group.folder,
       );
       result = JSON.stringify(systemResult);
+      collectedResult = result;
       ranSystemJob = true;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -312,6 +462,7 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
     };
 
     if (!error) {
+      let deliveredAnyOutput = false;
       try {
         const output = await spawnAgent(
           execution.group,
@@ -336,14 +487,20 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
           async (streamedOutput: AgentOutput) => {
             if (streamedOutput.result) {
               result = streamedOutput.result;
+              collectedResult += streamedOutput.result;
+              if (await deliverStreamingChunk(streamedOutput.result)) {
+                deliveredAnyOutput = true;
+              }
               scheduleClose();
             }
             if (streamedOutput.status === 'success') {
+              if (await finalizeStreaming()) deliveredAnyOutput = true;
               deps.queue.notifyIdle(execution.executionJid);
               scheduleClose();
             }
             if (streamedOutput.status === 'error') {
               error = streamedOutput.error || 'Unknown error';
+              if (await finalizeStreaming()) deliveredAnyOutput = true;
             }
           },
           { timeoutMs },
@@ -353,10 +510,21 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
           error = output.error || 'Unknown error';
         } else if (output.result) {
           result = output.result;
+          if (!collectedResult) collectedResult = output.result;
+        }
+
+        if (!error) {
+          const fallbackText = result || collectedResult;
+          if (fallbackText && !deliveredAnyOutput) {
+            if (await deliverMessage(fallbackText)) {
+              deliveredAnyOutput = true;
+            }
+          }
         }
       } catch (err) {
         error = err instanceof Error ? err.message : String(err);
       } finally {
+        await finalizeStreaming();
         if (closeTimer && error) {
           clearTimeout(closeTimer);
           closeTimer = null;
@@ -424,10 +592,11 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
     });
   }
 
+  const resultSummary = result || collectedResult || null;
   completeJobRun(
     runId,
     runStatus,
-    result ? result.slice(0, 500) : null,
+    resultSummary ? resultSummary.slice(0, 500) : null,
     error ? error.slice(0, 500) : null,
   );
 
@@ -445,20 +614,36 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
 
   const summary = error
     ? error.slice(0, 240)
-    : result
-      ? result.slice(0, 4000)
+    : resultSummary
+      ? resultSummary.slice(0, 4000)
       : 'Completed';
-  const message = formatRunStatusMessage({
-    job: currentJob,
-    runId,
-    runStatus,
-    summary,
-    nextRun,
-    retryCount,
-    pauseReason,
-  });
-  await notifyLinkedSessions(currentJob, message, deps.sendMessage);
-  markJobRunNotified(runId);
+  let notified = false;
+  if (error && !currentJob.silent) {
+    const delivered = await deliverMessage(
+      `⚠️ Scheduled task failed: ${summary}`,
+    );
+    notified = notified || delivered;
+  }
+  if (runStatus !== 'completed' && !currentJob.silent) {
+    const message = formatRunStatusMessage({
+      job: currentJob,
+      runId,
+      runStatus,
+      summary,
+      nextRun,
+      retryCount,
+      pauseReason,
+    });
+    const delivered = await notifyLinkedSessions(
+      currentJob,
+      message,
+      deps.sendMessage,
+    );
+    notified = notified || delivered;
+  }
+  if (notified) {
+    markJobRunNotified(runId);
+  }
   deps.onSchedulerChanged?.();
 
   if (!error && !ranSystemJob) {
@@ -466,7 +651,7 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
       await MemoryService.getInstance().reflectAfterTurn({
         groupFolder: execution.group.folder,
         prompt: currentJob.prompt,
-        result: result || 'Completed',
+        result: resultSummary || 'Completed',
         isMain,
         retrievedItemIds,
       });
@@ -476,6 +661,15 @@ async function runJob(job: Job, deps: SchedulerDependencies): Promise<void> {
         'Memory reflection failed after job completion',
       );
     }
+  }
+
+  if (
+    currentJob.schedule_type === 'once' &&
+    (runStatus === 'completed' || runStatus === 'dead_lettered') &&
+    normalizeCleanupAfterMs(currentJob.cleanup_after_ms) === 0
+  ) {
+    deleteJob(currentJob.id);
+    deps.onSchedulerChanged?.();
   }
 }
 
@@ -512,6 +706,11 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         deps.queue.enqueueTask(queueJid, current.id, () =>
           runJob(current, deps),
         );
+      }
+
+      const removed = sweepCompletedOneTimeJobs();
+      if (removed) {
+        deps.onSchedulerChanged?.();
       }
     } catch (err) {
       logger.error({ err }, 'Error in scheduler loop');
