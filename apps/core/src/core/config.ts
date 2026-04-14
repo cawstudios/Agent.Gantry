@@ -61,6 +61,12 @@ const envConfig = readEnvFile([
   'MEMORY_MAX_PROCEDURES_PER_GROUP',
   'PERMISSION_APPROVAL_TIMEOUT_MS',
   'TELEGRAM_PERMISSION_APPROVER_IDS',
+  'MINI_APP_ENABLED',
+  'MINI_APP_HOST',
+  'MINI_APP_PORT',
+  'MINI_APP_API_URL',
+  'MINI_APP_FRONTEND_URL',
+  'MINI_APP_CORS_ORIGIN',
 ]);
 
 export const ASSISTANT_NAME =
@@ -120,6 +126,47 @@ function parseBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
     return false;
   return fallback;
 }
+
+export const MINI_APP_ENABLED = parseBooleanEnv(
+  process.env.MINI_APP_ENABLED || envConfig.MINI_APP_ENABLED,
+  false,
+);
+
+export const MINI_APP_HOST = (
+  process.env.MINI_APP_HOST ||
+  envConfig.MINI_APP_HOST ||
+  '0.0.0.0'
+).trim();
+
+export const MINI_APP_PORT = Math.max(
+  1,
+  Math.min(
+    65535,
+    parseInt(
+      process.env.MINI_APP_PORT || envConfig.MINI_APP_PORT || '3100',
+      10,
+    ) || 3100,
+  ),
+);
+
+export const MINI_APP_API_URL = (
+  process.env.MINI_APP_API_URL ||
+  envConfig.MINI_APP_API_URL ||
+  ''
+).trim();
+
+export const MINI_APP_FRONTEND_URL = (
+  process.env.MINI_APP_FRONTEND_URL ||
+  envConfig.MINI_APP_FRONTEND_URL ||
+  'https://app.myclaw.dev'
+).trim();
+
+export const MINI_APP_CORS_ORIGIN = (
+  process.env.MINI_APP_CORS_ORIGIN ||
+  envConfig.MINI_APP_CORS_ORIGIN ||
+  MINI_APP_FRONTEND_URL ||
+  'https://app.myclaw.dev'
+).trim();
 
 function parseSourceTypeBoosts(
   raw: string | undefined,

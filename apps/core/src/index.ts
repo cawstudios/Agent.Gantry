@@ -71,6 +71,7 @@ import { createGroupProcessor } from './runtime/group-processing.js';
 import { runRuntimeStartupPreflight } from './runtime/runtime-diagnostics.js';
 import { ensurePromptProfileBootstrapped } from './runtime/prompt-profile.js';
 import { closeAllBrowsers } from './runtime/browser-manager.js';
+import { startMiniAppServer } from './mini-app/server.js';
 
 export { escapeXml, formatMessages } from './messaging/router.js';
 
@@ -264,11 +265,15 @@ export async function startMyClawRuntime(): Promise<void> {
   }
 
   restoreRemoteControl();
+  const miniAppServer = await startMiniAppServer();
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     await closeAllBrowsers();
+    if (miniAppServer) {
+      await miniAppServer.close();
+    }
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
   };
@@ -410,6 +415,22 @@ export async function startMyClawRuntime(): Promise<void> {
       writeGroupsSnapshot(gf, im, ag, rj),
     onSchedulerChanged: syncSchedulerState,
     requestPermissionApproval: requestChannelPermissionApproval,
+    sendPlanReviewPrompt: async (jid, prompt) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (channel.sendPlanReviewPrompt) {
+        await channel.sendPlanReviewPrompt(jid, prompt);
+        return;
+      }
+      const lines = [
+        `Plan ready: ${prompt.title}`,
+        `${prompt.sectionCount} sections ready for review.`,
+        ...(prompt.url ? [`Open: ${prompt.url}`] : []),
+      ];
+      const fallback = formatOutboundForChannel(lines.join('\n'), channel.name);
+      if (!fallback) return;
+      await channel.sendMessage(jid, fallback);
+    },
   });
   syncSchedulerState();
   startSessionCleanup();

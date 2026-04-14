@@ -4,7 +4,13 @@ import { createHash } from 'crypto';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from '../core/config.js';
+import {
+  DATA_DIR,
+  IPC_POLL_INTERVAL,
+  MINI_APP_API_URL,
+  MINI_APP_FRONTEND_URL,
+  TIMEZONE,
+} from '../core/config.js';
 import { AvailableGroup } from './agent-spawn.js';
 import {
   deleteJob,
@@ -27,6 +33,7 @@ import {
 import {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
+  PlanReviewPrompt,
   RegisteredGroup,
 } from '../core/types.js';
 import { validateIpcAuthToken } from './ipc-auth.js';
@@ -41,9 +48,19 @@ import {
   getBrowserStatus,
   launchBrowser,
 } from './browser-manager.js';
+import {
+  createPlan,
+  getPlanById,
+  setPlanStatus,
+  updatePlanSection,
+} from '../mini-app/plan-store.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendPlanReviewPrompt?: (
+    jid: string,
+    prompt: PlanReviewPrompt,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -66,6 +83,22 @@ const IPC_RATE_LIMIT_MAX_FILES_PER_WINDOW = 300;
 const MEMORY_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const PERMISSION_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const BROWSER_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const PLAN_TASK_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const PLAN_SECTION_STATUS_VALUES = new Set([
+  'pending',
+  'approved',
+  'rejected',
+  'editing',
+  'executing',
+  'done',
+]);
+const PLAN_STATUS_VALUES = new Set([
+  'draft',
+  'reviewing',
+  'approved',
+  'rejected',
+  'executing',
+]);
 const ipcRateLimitState = new Map<
   string,
   { windowStart: number; count: number }
@@ -228,6 +261,7 @@ interface ParsedTaskIpcData {
   trigger?: string;
   requiresTrigger?: boolean;
   agentConfig?: RegisteredGroup['agentConfig'];
+  payload?: Record<string, unknown>;
 }
 
 function toScheduleType(
@@ -305,6 +339,7 @@ function parseTaskIpcData(
   const trigger = toTrimmedString(raw.trigger, { maxLen: 255 });
   const requiresTrigger = toOptionalBoolean(raw.requiresTrigger);
   const agentConfig = parseAgentConfigPayload(raw.agentConfig);
+  const payload = isPlainObject(raw.payload) ? raw.payload : undefined;
   const numericFields = {
     timeoutMs: toOptionalNumber(raw.timeoutMs, { min: 1000, max: 3_600_000 }),
     maxRetries: toOptionalNumber(raw.maxRetries, { min: 0, max: 100 }),
@@ -345,6 +380,7 @@ function parseTaskIpcData(
   if (trigger) parsed.trigger = trigger;
   if (requiresTrigger !== undefined) parsed.requiresTrigger = requiresTrigger;
   if (agentConfig !== undefined) parsed.agentConfig = agentConfig;
+  if (payload !== undefined) parsed.payload = payload;
   if (numericFields.timeoutMs !== undefined)
     parsed.timeoutMs = Math.round(numericFields.timeoutMs);
   if (numericFields.maxRetries !== undefined)
@@ -653,6 +689,45 @@ function generateJobId(params: {
     .replace(/^-+|-+$/g, '')
     .slice(0, 40);
   return `job-${slug || 'scheduled'}-${hash}`;
+}
+
+function writeJsonAtomic(filePath: string, value: unknown): void {
+  const tempPath = `${filePath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(value, null, 2));
+  fs.renameSync(tempPath, filePath);
+}
+
+function buildPlanUrl(planId: string): string | undefined {
+  const frontend = MINI_APP_FRONTEND_URL;
+  if (!frontend) return undefined;
+  const base = `${frontend.replace(/\/+$/, '')}/plans/${planId}`;
+  const api = MINI_APP_API_URL;
+  if (!api) return base;
+  return `${base}?api=${encodeURIComponent(api)}`;
+}
+
+function writePlanTaskResponse(
+  sourceGroup: string,
+  taskId: string | undefined,
+  payload: {
+    ok: boolean;
+    planId?: string;
+    plan?: unknown;
+    url?: string;
+    error?: string;
+    warning?: string;
+  },
+): void {
+  if (!taskId || !PLAN_TASK_ID_PATTERN.test(taskId)) return;
+  if (!isValidGroupFolder(sourceGroup)) return;
+  const responseDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'plan-responses');
+  fs.mkdirSync(responseDir, { recursive: true });
+  const responsePath = path.join(responseDir, `task-${taskId}.json`);
+  writeJsonAtomic(responsePath, {
+    taskId,
+    ...payload,
+    timestamp: new Date().toISOString(),
+  });
 }
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -1047,6 +1122,7 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     agentConfig?: RegisteredGroup['agentConfig'];
+    payload?: Record<string, unknown>;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -1451,6 +1527,253 @@ export async function processTaskIpc(
 
     case 'scheduler_get_dead_letter': {
       listDeadLetterRuns(typeof data.limit === 'number' ? data.limit : 50);
+      break;
+    }
+
+    case 'plan_create': {
+      const planTaskId = toTrimmedString(data.taskId, { maxLen: 128 });
+      if (!isPlainObject(data.payload)) {
+        logger.warn({ sourceGroup }, 'Rejected plan_create without payload');
+        writePlanTaskResponse(sourceGroup, planTaskId, {
+          ok: false,
+          error: 'Missing payload',
+        });
+        break;
+      }
+      const payload = data.payload;
+      const title = toTrimmedString(payload.title, { maxLen: 400 });
+      const planId = toTrimmedString(payload.planId, { maxLen: 128 });
+      const chatJidFromPayload = toTrimmedString(payload.chatJid, {
+        maxLen: 255,
+      });
+      const agentSessionId = toTrimmedString(payload.agentSessionId, {
+        maxLen: 255,
+      });
+      const rawSections = Array.isArray(payload.sections)
+        ? payload.sections
+        : [];
+      const sections: Array<{ title: string; content: string }> = [];
+      for (const rawSection of rawSections) {
+        if (!isPlainObject(rawSection)) continue;
+        const sectionTitle = toTrimmedString(rawSection.title, { maxLen: 400 });
+        const sectionContent =
+          typeof rawSection.content === 'string'
+            ? rawSection.content
+            : undefined;
+        if (!sectionTitle || sectionContent === undefined) continue;
+        sections.push({ title: sectionTitle, content: sectionContent });
+      }
+
+      if (!title || sections.length === 0) {
+        logger.warn(
+          { sourceGroup, sectionCount: sections.length },
+          'Rejected plan_create with missing title or sections',
+        );
+        writePlanTaskResponse(sourceGroup, planTaskId, {
+          ok: false,
+          error: 'title and at least one section are required',
+        });
+        break;
+      }
+
+      let created;
+      try {
+        created = createPlan({
+          ...(planId ? { planId } : {}),
+          groupFolder: sourceGroup,
+          chatJid: chatJidFromPayload || sourceGroupJids[0],
+          title,
+          sections,
+          agentSessionId,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Failed to create plan';
+        logger.warn({ sourceGroup, err }, 'Plan creation failed via IPC task');
+        writePlanTaskResponse(sourceGroup, planTaskId, {
+          ok: false,
+          error: message,
+        });
+        break;
+      }
+
+      const targetJid = created.chatJid || sourceGroupJids[0];
+      const url = buildPlanUrl(created.id);
+      let notificationWarning: string | undefined;
+      if (!targetJid) {
+        logger.info(
+          { planId: created.id, sourceGroup },
+          'Plan created without target chat binding',
+        );
+      } else {
+        const prompt: PlanReviewPrompt = {
+          planId: created.id,
+          title: created.title,
+          sectionCount: created.sections.length,
+          ...(url ? { url } : {}),
+        };
+
+        try {
+          if (deps.sendPlanReviewPrompt) {
+            await deps.sendPlanReviewPrompt(targetJid, prompt);
+          } else {
+            const lines = [
+              `Plan ready: ${created.title}`,
+              `${created.sections.length} sections are ready for review.`,
+              ...(url ? [`Review in Mini App: ${url}`] : []),
+            ];
+            await deps.sendMessage(targetJid, lines.join('\n'));
+          }
+        } catch (err) {
+          notificationWarning =
+            err instanceof Error
+              ? err.message
+              : 'Failed to send plan review prompt';
+          logger.warn(
+            { sourceGroup, targetJid, planId: created.id, err },
+            'Plan created but review prompt delivery failed',
+          );
+        }
+      }
+
+      writePlanTaskResponse(sourceGroup, planTaskId, {
+        ok: true,
+        planId: created.id,
+        plan: getPlanById(created.id) || created,
+        ...(url ? { url } : {}),
+        ...(notificationWarning ? { warning: notificationWarning } : {}),
+      });
+      logger.info(
+        { sourceGroup, targetJid, planId: created.id },
+        'Plan created via IPC task',
+      );
+      break;
+    }
+
+    case 'plan_update_section': {
+      const planTaskId = toTrimmedString(data.taskId, { maxLen: 128 });
+      if (!isPlainObject(data.payload)) {
+        logger.warn(
+          { sourceGroup },
+          'Rejected plan_update_section without payload',
+        );
+        writePlanTaskResponse(sourceGroup, planTaskId, {
+          ok: false,
+          error: 'Missing payload',
+        });
+        break;
+      }
+      const payload = data.payload;
+      const planId = toTrimmedString(payload.planId, { maxLen: 128 });
+      const sectionIndex = toOptionalNumber(payload.sectionIndex, {
+        min: 0,
+        max: 10_000,
+      });
+      if (!planId || sectionIndex === undefined) {
+        logger.warn(
+          { sourceGroup },
+          'Rejected plan_update_section with invalid planId/sectionIndex',
+        );
+        writePlanTaskResponse(sourceGroup, planTaskId, {
+          ok: false,
+          error: 'Invalid planId or sectionIndex',
+        });
+        break;
+      }
+
+      const existingPlan = getPlanById(planId);
+      if (!existingPlan) {
+        logger.warn(
+          { sourceGroup, planId },
+          'Plan not found for section update',
+        );
+        writePlanTaskResponse(sourceGroup, planTaskId, {
+          ok: false,
+          planId,
+          error: 'Plan not found',
+        });
+        break;
+      }
+      if (!isMain && existingPlan.groupFolder !== sourceGroup) {
+        logger.warn(
+          { sourceGroup, planId, owner: existingPlan.groupFolder },
+          'Unauthorized plan_update_section attempt blocked',
+        );
+        writePlanTaskResponse(sourceGroup, planTaskId, {
+          ok: false,
+          planId,
+          error: 'Unauthorized',
+        });
+        break;
+      }
+
+      const status = toTrimmedString(payload.status, { maxLen: 40 });
+      const planStatus = toTrimmedString(payload.planStatus, { maxLen: 40 });
+      try {
+        updatePlanSection({
+          planId,
+          sectionIndex: Math.round(sectionIndex),
+          ...(toTrimmedString(payload.title, { maxLen: 400 })
+            ? { title: String(payload.title).trim() }
+            : {}),
+          ...(typeof payload.content === 'string'
+            ? { content: payload.content }
+            : {}),
+          ...(status && PLAN_SECTION_STATUS_VALUES.has(status)
+            ? {
+                status: status as
+                  | 'pending'
+                  | 'approved'
+                  | 'rejected'
+                  | 'editing'
+                  | 'executing'
+                  | 'done',
+              }
+            : {}),
+          ...(typeof payload.userFeedback === 'string'
+            ? { userFeedback: payload.userFeedback }
+            : {}),
+          ...(typeof payload.agentRevision === 'string'
+            ? { agentRevision: payload.agentRevision }
+            : {}),
+          ...(toTrimmedString(payload.decidedBy, { maxLen: 255 })
+            ? { decidedBy: String(payload.decidedBy).trim() }
+            : {}),
+        });
+        if (planStatus && PLAN_STATUS_VALUES.has(planStatus)) {
+          setPlanStatus(
+            planId,
+            planStatus as
+              | 'draft'
+              | 'reviewing'
+              | 'approved'
+              | 'rejected'
+              | 'executing',
+          );
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Failed to update plan section';
+        logger.warn(
+          { sourceGroup, planId, sectionIndex: Math.round(sectionIndex), err },
+          'Plan section update failed via IPC task',
+        );
+        writePlanTaskResponse(sourceGroup, planTaskId, {
+          ok: false,
+          planId,
+          error: message,
+        });
+        break;
+      }
+      writePlanTaskResponse(sourceGroup, planTaskId, {
+        ok: true,
+        planId,
+        plan: getPlanById(planId),
+      });
+      logger.info(
+        { sourceGroup, planId, sectionIndex: Math.round(sectionIndex) },
+        'Plan section updated via IPC task',
+      );
       break;
     }
 

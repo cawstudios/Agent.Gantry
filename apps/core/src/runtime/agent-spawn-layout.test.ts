@@ -266,7 +266,7 @@ describe('ensureGroupIpcLayout', () => {
     }
   });
 
-  it('creates all 9 IPC subdirectories', async () => {
+  it('creates all 11 IPC subdirectories', async () => {
     const root = makeTmpRoot(roots);
     const ipcDir = path.join(root, 'group-ipc');
 
@@ -287,6 +287,8 @@ describe('ensureGroupIpcLayout', () => {
       'messages',
       'permission-requests',
       'permission-responses',
+      'plan-events',
+      'plan-responses',
       'tasks',
     ];
 
@@ -296,7 +298,7 @@ describe('ensureGroupIpcLayout', () => {
       expect(fs.statSync(fullPath).isDirectory()).toBe(true);
     }
 
-    // Exactly these 9 and nothing else
+    // Exactly these 11 and nothing else
     const actual = fs.readdirSync(ipcDir).sort();
     expect(actual).toEqual(expected);
   });
@@ -324,6 +326,8 @@ describe('ensureGroupIpcLayout', () => {
       'messages',
       'permission-requests',
       'permission-responses',
+      'plan-events',
+      'plan-responses',
       'tasks',
     ]);
   });

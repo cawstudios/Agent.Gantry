@@ -1628,6 +1628,8 @@ describe('startIpcWatcher', () => {
     vi.doMock('../core/config.js', () => ({
       DATA_DIR: dataDir,
       IPC_POLL_INTERVAL: 1000,
+      MINI_APP_API_URL: '',
+      MINI_APP_FRONTEND_URL: 'https://app.myclaw.dev',
       TIMEZONE: 'UTC',
     }));
 
