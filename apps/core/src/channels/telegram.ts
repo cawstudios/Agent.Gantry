@@ -41,6 +41,9 @@ const TELEGRAM_DRAFT_MAX_LENGTH = 4096;
 const TELEGRAM_STREAM_CHUNK_MAX_LENGTH = 3500;
 const TELEGRAM_GROUP_EDIT_INTERVAL_MS = 900;
 const TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES = 56;
+// Keep question timeout aligned with permission approvals for now.
+// This can be split into a separate config knob later if UX needs diverge.
+const TELEGRAM_USER_QUESTION_TIMEOUT_MS = PERMISSION_APPROVAL_TIMEOUT_MS;
 const TELEGRAM_PERMISSION_CALLBACK_PATTERN =
   /^perm:(approve|deny):([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$/;
 const TELEGRAM_USER_QUESTION_CALLBACK_PATTERN =
@@ -1765,7 +1768,7 @@ export class TelegramChannel implements Channel {
       };
     }
 
-    const timeoutMs = PERMISSION_APPROVAL_TIMEOUT_MS;
+    const timeoutMs = TELEGRAM_USER_QUESTION_TIMEOUT_MS;
     const promptText = this.formatPermissionPromptText(request, timeoutMs);
     try {
       const sent = await this.bot.api.sendMessage(chatId, promptText, {
@@ -1857,6 +1860,8 @@ export class TelegramChannel implements Channel {
           const timer = setTimeout(() => {
             const timedOut = this.pendingUserQuestions.get(pendingKey);
             if (!timedOut) return;
+            // Fire-and-forget is intentional: timer callback should never block
+            // the event loop while we cleanup stale pending prompts.
             void this.finalizeUserQuestionPrompt(
               timedOut,
               timedOut.multiSelect ? [] : '',
@@ -1885,7 +1890,8 @@ export class TelegramChannel implements Channel {
           ? selection.selected.length === 0
           : selection.selected.trim().length === 0;
         if (isEmptySelection) {
-          // Timeout or explicit empty submission: keep existing answers untouched.
+          // Timeout or explicit empty submission: omit this answer so the SDK
+          // receives an empty answer map and treats it as unanswered/declined.
           continue;
         }
 
