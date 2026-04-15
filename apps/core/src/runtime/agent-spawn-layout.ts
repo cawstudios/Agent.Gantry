@@ -30,15 +30,15 @@ const AGENT_RUNNER_SOURCE_NODE_MODULES_DIR = path.join(
   'node_modules',
 );
 const REPO_NODE_MODULES_DIR = path.join(REPO_ROOT, 'node_modules');
+const AGENT_RUNNER_SDK_PACKAGE_PATH = path.join(
+  '@anthropic-ai',
+  'claude-agent-sdk',
+  'package.json',
+);
 const AGENT_RUNNER_REQUIRED_FILES = [
   path.join('dist', 'index.js'),
   path.join('dist', 'ipc-mcp-stdio.js'),
-  path.join(
-    'node_modules',
-    '@anthropic-ai',
-    'claude-agent-sdk',
-    'package.json',
-  ),
+  path.join('node_modules', AGENT_RUNNER_SDK_PACKAGE_PATH),
 ];
 const BUNDLED_SKILL_VERSION_FILENAME = '.version';
 
@@ -122,11 +122,39 @@ export function resolveRepoRootFromSourceDir(sourceDir: string): string {
 }
 
 function resolveAgentRunnerDependencyRoot(): string | null {
-  if (fs.existsSync(AGENT_RUNNER_SOURCE_NODE_MODULES_DIR)) {
-    return AGENT_RUNNER_SOURCE_NODE_MODULES_DIR;
+  return resolveAgentRunnerDependencyRootForPaths(
+    AGENT_RUNNER_SOURCE_NODE_MODULES_DIR,
+    REPO_NODE_MODULES_DIR,
+  );
+}
+
+function hasSdkPackage(nodeModulesDir: string): boolean {
+  return fs.existsSync(
+    path.join(nodeModulesDir, AGENT_RUNNER_SDK_PACKAGE_PATH),
+  );
+}
+
+export function resolveAgentRunnerDependencyRootForPaths(
+  sourceNodeModulesDir: string,
+  repoNodeModulesDir: string,
+): string | null {
+  const sourceExists = fs.existsSync(sourceNodeModulesDir);
+  const repoExists = fs.existsSync(repoNodeModulesDir);
+
+  // Prefer the source-local node_modules only when it actually contains
+  // the SDK dependency. In hoisted workspace installs the directory may
+  // exist but the package lives at the repo root.
+  if (sourceExists && hasSdkPackage(sourceNodeModulesDir)) {
+    return sourceNodeModulesDir;
   }
-  if (fs.existsSync(REPO_NODE_MODULES_DIR)) {
-    return REPO_NODE_MODULES_DIR;
+  if (repoExists && hasSdkPackage(repoNodeModulesDir)) {
+    return repoNodeModulesDir;
+  }
+  if (sourceExists) {
+    return sourceNodeModulesDir;
+  }
+  if (repoExists) {
+    return repoNodeModulesDir;
   }
   return null;
 }

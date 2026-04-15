@@ -524,6 +524,69 @@ describe('syncHostAgentRunnerRuntime', () => {
   });
 });
 
+describe('resolveAgentRunnerDependencyRootForPaths', () => {
+  const roots: string[] = [];
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    while (roots.length > 0) {
+      const root = roots.pop();
+      if (!root) continue;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers repo node_modules when source node_modules exists but is missing SDK package', async () => {
+    const root = makeTmpRoot(roots);
+    const sourceNodeModules = path.join(root, 'source-node_modules');
+    const repoNodeModules = path.join(root, 'repo-node_modules');
+    fs.mkdirSync(sourceNodeModules, { recursive: true });
+    fs.mkdirSync(
+      path.join(repoNodeModules, '@anthropic-ai', 'claude-agent-sdk'),
+      { recursive: true },
+    );
+    fs.writeFileSync(
+      path.join(
+        repoNodeModules,
+        '@anthropic-ai',
+        'claude-agent-sdk',
+        'package.json',
+      ),
+      '{"name":"@anthropic-ai/claude-agent-sdk"}',
+    );
+
+    const { resolveAgentRunnerDependencyRootForPaths } =
+      await import('./agent-spawn-layout.js');
+    expect(
+      resolveAgentRunnerDependencyRootForPaths(
+        sourceNodeModules,
+        repoNodeModules,
+      ),
+    ).toBe(repoNodeModules);
+  });
+
+  it('falls back to source node_modules when neither location has SDK package', async () => {
+    const root = makeTmpRoot(roots);
+    const sourceNodeModules = path.join(root, 'source-node_modules');
+    const repoNodeModules = path.join(root, 'repo-node_modules');
+    fs.mkdirSync(sourceNodeModules, { recursive: true });
+    fs.mkdirSync(repoNodeModules, { recursive: true });
+
+    const { resolveAgentRunnerDependencyRootForPaths } =
+      await import('./agent-spawn-layout.js');
+    expect(
+      resolveAgentRunnerDependencyRootForPaths(
+        sourceNodeModules,
+        repoNodeModules,
+      ),
+    ).toBe(sourceNodeModules);
+  });
+});
+
 describe('resolveRepoRootFromSourceDir', () => {
   const roots: string[] = [];
   let originalCwd: string;
