@@ -37,18 +37,25 @@ jobs:
         id: tests
         run: |
           set -o pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.debug_logs }}" = "true" ]; then
-            echo "Running tests with verbose logs"
-            timeout 20m bash -lc 'CI=true npx vitest run --maxWorkers=1 --pool=forks --reporter=verbose' 2>&1 | tee /tmp/vitest.log
-          else
-            echo "Running tests with quiet logs"
-            timeout 20m bash -lc 'LOG_LEVEL=fatal CI=true npx vitest run --maxWorkers=1 --pool=forks' 2>&1 | tee /tmp/vitest.log
-          fi
-          status=${PIPESTATUS[0]}
-          if [ "$status" -eq 124 ]; then
-            echo "::error::Vitest timed out after 20 minutes"
-          fi
-          exit "$status"
+          : > /tmp/vitest.log
+          rg --files apps/core/src | rg '\.test\.ts$' | sort > /tmp/test-files.txt
+          while IFS= read -r test_file; do
+            [ -n "$test_file" ] || continue
+            echo "Running $test_file" | tee -a /tmp/vitest.log
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.debug_logs }}" = "true" ]; then
+              timeout 120s env CI=true npx vitest run --maxWorkers=1 --pool=forks --reporter=verbose "$test_file" 2>&1 | tee -a /tmp/vitest.log
+            else
+              timeout 120s env LOG_LEVEL=fatal CI=true npx vitest run --maxWorkers=1 --pool=forks "$test_file" 2>&1 | tee -a /tmp/vitest.log
+            fi
+            status=${PIPESTATUS[0]}
+            if [ "$status" -eq 124 ]; then
+              echo "::error::Vitest timed out on $test_file after 120 seconds"
+              exit 124
+            fi
+            if [ "$status" -ne 0 ]; then
+              exit "$status"
+            fi
+          done < /tmp/test-files.txt
 
       - name: Debug CI Hang Context
         if: ${{ always() && steps.tests.outcome != 'success' }}
