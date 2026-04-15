@@ -18,6 +18,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,11 +34,48 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Tests
+        id: tests
         run: |
+          set -o pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.debug_logs }}" = "true" ]; then
             echo "Running tests with verbose logs"
-            CI=true npx vitest run --maxWorkers=1 --reporter=verbose
+            timeout 20m bash -lc 'CI=true npx vitest run --maxWorkers=1 --reporter=verbose' 2>&1 | tee /tmp/vitest.log
           else
             echo "Running tests with quiet logs"
-            LOG_LEVEL=fatal CI=true npx vitest run --maxWorkers=1
+            timeout 20m bash -lc 'LOG_LEVEL=fatal CI=true npx vitest run --maxWorkers=1' 2>&1 | tee /tmp/vitest.log
           fi
+          status=${PIPESTATUS[0]}
+          if [ "$status" -eq 124 ]; then
+            echo "::error::Vitest timed out after 20 minutes"
+          fi
+          exit "$status"
+
+      - name: Debug CI Hang Context
+        if: ${{ always() && steps.tests.outcome != 'success' }}
+        run: |
+          {
+            echo "=== Date ==="
+            date -u
+            echo
+            echo "=== Process Snapshot ==="
+            ps -eo pid,ppid,etime,stat,cmd | grep -E 'vitest|node|npm' | grep -v grep || true
+            echo
+            echo "=== Open Files for Node Processes ==="
+            pgrep -f 'node|vitest|npm' | while read -r pid; do
+              echo "--- PID $pid ---"
+              lsof -p "$pid" | head -n 120 || true
+            done
+            echo
+            echo "=== Last 300 lines of /tmp/vitest.log ==="
+            tail -n 300 /tmp/vitest.log || true
+          } | tee /tmp/ci-debug.txt
+
+      - name: Upload CI Debug Artifacts
+        if: ${{ always() && steps.tests.outcome != 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-debug-logs
+          path: |
+            /tmp/vitest.log
+            /tmp/ci-debug.txt
+          if-no-files-found: ignore
