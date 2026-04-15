@@ -55,7 +55,7 @@ describe('PromptProfileService', () => {
     const configDir = path.join(root, 'config');
     const agentsDir = path.join(root, 'agents');
 
-    writeFile(path.join(configDir, 'settings.yaml'), 'version: 2\n');
+    writeFile(path.join(configDir, 'settings.yaml'), 'channels: {}\n');
 
     const service = new PromptProfileService({ configDir, agentsDir });
     service.ensureSeedFiles();
@@ -66,7 +66,7 @@ describe('PromptProfileService', () => {
     expect(fs.existsSync(path.join(configDir, 'USER.md'))).toBe(false);
     expect(
       fs.readFileSync(path.join(configDir, 'settings.yaml'), 'utf-8'),
-    ).toBe('version: 2\n');
+    ).toBe('channels: {}\n');
   });
 
   it('compiles deterministic order: runtime rules, personal profile, global and group context', () => {
