@@ -159,7 +159,8 @@ function toOptionalNumber(
 
 const TOOL_INPUT_MAX_DEPTH = 2;
 const TOOL_INPUT_MAX_STRING_LENGTH = 500;
-const SECRET_KEY_PATTERN = /(secret|token|password|credential|api[_-]?key|key)/i;
+const SECRET_KEY_PATTERN =
+  /(secret|token|password|credential|api[_-]?key|key)/i;
 
 function sanitizeToolInputValue(value: unknown, depth: number): unknown {
   if (depth > TOOL_INPUT_MAX_DEPTH) return '[TRUNCATED_DEPTH]';
@@ -637,7 +638,9 @@ function parseUserQuestionIpcRequest(
           allowEmpty: true,
         });
         if (!label) {
-          throw new Error(`Option label missing at index ${index}:${optionIndex}`);
+          throw new Error(
+            `Option label missing at index ${index}:${optionIndex}`,
+          );
         }
         return {
           label,

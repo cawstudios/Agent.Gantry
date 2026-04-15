@@ -85,7 +85,10 @@ const IPC_PERMISSION_RESPONSES_DIR = path.join(
   IPC_BASE_DIR,
   'permission-responses',
 );
-const IPC_USER_QUESTION_REQUESTS_DIR = path.join(IPC_BASE_DIR, 'user-questions');
+const IPC_USER_QUESTION_REQUESTS_DIR = path.join(
+  IPC_BASE_DIR,
+  'user-questions',
+);
 const IPC_USER_QUESTION_RESPONSES_DIR = path.join(IPC_BASE_DIR, 'user-answers');
 const IPC_AUTH_TOKEN = process.env.MYCLAW_IPC_AUTH_TOKEN || '';
 const PERMISSION_REQUEST_TIMEOUT_MS = Math.max(
@@ -163,10 +166,7 @@ function normalizeAskUserQuestionInput(
     const multiSelect = Boolean(rawQuestion.multiSelect);
     if (!question || !header) return null;
     if (!Array.isArray(rawQuestion.options)) return null;
-    if (
-      rawQuestion.options.length < 2 ||
-      rawQuestion.options.length > 4
-    ) {
+    if (rawQuestion.options.length < 2 || rawQuestion.options.length > 4) {
       return null;
     }
     const options: UserQuestionOptionPayload[] = [];

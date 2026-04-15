@@ -40,6 +40,7 @@ const TELEGRAM_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
 const TELEGRAM_DRAFT_MAX_LENGTH = 4096;
 const TELEGRAM_STREAM_CHUNK_MAX_LENGTH = 3500;
 const TELEGRAM_GROUP_EDIT_INTERVAL_MS = 900;
+const TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES = 56;
 const TELEGRAM_PERMISSION_CALLBACK_PATTERN =
   /^perm:(approve|deny):([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$/;
 const TELEGRAM_USER_QUESTION_CALLBACK_PATTERN =
@@ -86,7 +87,10 @@ type PendingUserQuestionState = {
   chatId: string;
   messageId: number;
   timer: ReturnType<typeof setTimeout>;
-  resolve: (selection: { selected: string | string[]; answeredBy?: string }) => void;
+  resolve: (selection: {
+    selected: string | string[];
+    answeredBy?: string;
+  }) => void;
 };
 
 export interface TelegramChannelOpts {
@@ -167,6 +171,20 @@ function splitTelegramDraftChunks(text: string): string[] {
 function truncateText(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
   return `${text.slice(0, maxLen)}...`;
+}
+
+function truncateUtf8ToByteLimit(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
+  const suffix = '...';
+  const suffixBytes = Buffer.byteLength(suffix, 'utf8');
+  if (maxBytes <= suffixBytes) return suffix.slice(0, maxBytes);
+  let out = '';
+  for (const char of text) {
+    const next = out + char;
+    if (Buffer.byteLength(next, 'utf8') + suffixBytes > maxBytes) break;
+    out = next;
+  }
+  return `${out}${suffix}`;
 }
 
 function stripInternalTagsPreserveWhitespace(text: string): string {
@@ -756,7 +774,10 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  private pendingUserQuestionKey(requestId: string, questionIndex: number): string {
+  private pendingUserQuestionKey(
+    requestId: string,
+    questionIndex: number,
+  ): string {
     return `${requestId}:${questionIndex}`;
   }
 
@@ -766,11 +787,11 @@ export class TelegramChannel implements Channel {
   ): string {
     const timeoutMinutes = Math.max(1, Math.round(timeoutMs / 60000));
     const lines = [`❓ ${question.header}`, question.question, ''];
-    question.options.forEach((option) => {
+    question.options.forEach((option, optionIndex) => {
       const description = option.description
         ? ` — ${truncateText(option.description, 180)}`
         : '';
-      lines.push(`• ${option.label}${description}`);
+      lines.push(`${optionIndex + 1}. ${option.label}${description}`);
       if (option.preview) {
         lines.push(`  Preview: ${truncateText(option.preview, 180)}`);
       }
@@ -785,30 +806,53 @@ export class TelegramChannel implements Channel {
     return lines.join('\n');
   }
 
+  private formatUserQuestionButtonLabel(
+    optionLabel: string,
+    optionIndex: number,
+    multiSelect: boolean,
+    isSelected: boolean,
+  ): string {
+    const ordinal = `${optionIndex + 1}. `;
+    const selectedPrefix = multiSelect && isSelected ? '✅ ' : '';
+    const prefix = `${selectedPrefix}${ordinal}`;
+    const availableBytes = Math.max(
+      8,
+      TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES - Buffer.byteLength(prefix, 'utf8'),
+    );
+    const trimmedLabel = optionLabel.trim() || `Option ${optionIndex + 1}`;
+    const safeLabel = truncateUtf8ToByteLimit(trimmedLabel, availableBytes);
+    return `${prefix}${safeLabel}`;
+  }
+
   private buildUserQuestionKeyboard(
     requestId: string,
     questionIndex: number,
     question: UserQuestionRequest['questions'][number],
     selectedOptionIndexes: Set<number>,
-  ): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
+  ): {
+    inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+  } {
     const inline_keyboard: Array<
       Array<{ text: string; callback_data: string }>
     > = question.options.map((option, optionIndex) => {
       const isSelected = selectedOptionIndexes.has(optionIndex);
-      const label = question.multiSelect
-        ? `${isSelected ? '✅ ' : ''}${option.label}`
-        : option.label;
       return [
         {
-          text: truncateText(label, 28),
+          text: this.formatUserQuestionButtonLabel(
+            option.label,
+            optionIndex,
+            question.multiSelect,
+            isSelected,
+          ),
           callback_data: `userq:select:${requestId}:${questionIndex}:${optionIndex}`,
         },
       ];
     });
     if (question.multiSelect) {
+      const selectedCount = selectedOptionIndexes.size;
       inline_keyboard.push([
         {
-          text: 'Done',
+          text: selectedCount > 0 ? `Done (${selectedCount})` : 'Done',
           callback_data: `userq:done:${requestId}:${questionIndex}`,
         },
       ]);

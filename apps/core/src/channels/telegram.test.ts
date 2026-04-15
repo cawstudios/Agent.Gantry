@@ -1926,6 +1926,57 @@ describe('TelegramChannel', () => {
   });
 
   describe('user question prompts', () => {
+    it('uses numbered byte-safe button labels for long options', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+      currentBot().api.sendMessage.mockClear();
+
+      const longOptionA =
+        '🚀 '.repeat(30) + 'Staging rollout with extra descriptive text';
+      const longOptionB =
+        '🧪 '.repeat(30) + 'Production rollout with extra descriptive text';
+
+      const responsePromise = channel.requestUserAnswer('tg:100200300', {
+        requestId: 'userq-long',
+        sourceGroup: 'whatsapp_main',
+        questions: [
+          {
+            question: 'Where should we deploy?',
+            header: 'Deploy',
+            options: [
+              { label: longOptionA, description: 'Option A description' },
+              { label: longOptionB, description: 'Option B description' },
+            ],
+            multiSelect: false,
+          },
+        ],
+      });
+      await flushPromises();
+
+      const firstCall = currentBot().api.sendMessage.mock.calls[0];
+      const replyMarkup = firstCall[2].reply_markup;
+      const keyboard = replyMarkup.inline_keyboard as Array<
+        Array<{ text: string }>
+      >;
+      const optionButtonTexts = keyboard.slice(0, 2).map((row) => row[0].text);
+
+      expect(optionButtonTexts[0]).toMatch(/^1\. /);
+      expect(optionButtonTexts[1]).toMatch(/^2\. /);
+      optionButtonTexts.forEach((text) => {
+        expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(56);
+      });
+
+      await triggerCallbackQuery({
+        callbackQuery: { data: 'userq:select:userq-long:0:0' },
+        chat: { id: 100200300 },
+        from: { id: 222, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+      const response = await responsePromise;
+      expect(response.answers['Where should we deploy?']).toBe(longOptionA);
+    });
+
     it('resolves single-select question from callback selection', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
