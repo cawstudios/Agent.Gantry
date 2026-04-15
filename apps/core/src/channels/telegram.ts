@@ -1030,9 +1030,12 @@ export class TelegramChannel implements Channel {
                 );
               });
           }
-          console.log(`\n  Telegram bot: @${botInfo.username}`);
-          console.log(
-            `  Send /chatid to the bot to get a chat's registration ID\n`,
+          logger.info(
+            {
+              username: botInfo.username,
+              hint: 'Send /chatid to the bot to get a chat registration ID',
+            },
+            'Telegram bot connection hint',
           );
         },
       }),

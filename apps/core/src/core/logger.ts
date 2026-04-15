@@ -12,6 +12,7 @@ const KEY_COLOR = '\x1b[35m';
 const MSG_COLOR = '\x1b[36m';
 const RESET = '\x1b[39m';
 const FULL_RESET = '\x1b[0m';
+const LOGGER_HANDLER_MARK = Symbol.for('myclaw.logger.handler');
 
 const threshold =
   LEVELS[(process.env.LOG_LEVEL as Level) || 'info'] ?? LEVELS.info;
@@ -72,12 +73,35 @@ export const logger = {
     log('fatal', dataOrMsg, msg),
 };
 
-// Route uncaught errors through logger so they get timestamps in stderr
-process.on('uncaughtException', (err) => {
+type MarkedProcessListener = ((...args: unknown[]) => void) & {
+  [LOGGER_HANDLER_MARK]?: true;
+};
+
+function removeMarkedProcessListeners(
+  event: 'uncaughtException' | 'unhandledRejection',
+): void {
+  for (const listener of process.listeners(event) as MarkedProcessListener[]) {
+    if (listener[LOGGER_HANDLER_MARK]) {
+      process.removeListener(event, listener);
+    }
+  }
+}
+
+const uncaughtExceptionHandler = ((err: Error) => {
   logger.fatal({ err }, 'Uncaught exception');
   process.exit(1);
-});
+}) as MarkedProcessListener;
+uncaughtExceptionHandler[LOGGER_HANDLER_MARK] = true;
 
-process.on('unhandledRejection', (reason) => {
+const unhandledRejectionHandler = ((reason: unknown) => {
   logger.error({ err: reason }, 'Unhandled rejection');
-});
+}) as MarkedProcessListener;
+unhandledRejectionHandler[LOGGER_HANDLER_MARK] = true;
+
+// Route uncaught errors through logger so they get timestamps in stderr.
+// De-duplicate handlers because test module reloads can otherwise attach
+// unbounded listeners and eventually stall CI.
+removeMarkedProcessListeners('uncaughtException');
+removeMarkedProcessListeners('unhandledRejection');
+process.on('uncaughtException', uncaughtExceptionHandler);
+process.on('unhandledRejection', unhandledRejectionHandler);
