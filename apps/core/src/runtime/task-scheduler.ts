@@ -274,7 +274,11 @@ function formatRunStatusMessage(args: {
 function resolveExecutionContext(
   job: Job,
   groups: Record<string, RegisteredGroup>,
-): { group: RegisteredGroup; executionJid: string; stopAliasJids: string[] } | null {
+): {
+  group: RegisteredGroup;
+  executionJid: string;
+  stopAliasJids: string[];
+} | null {
   const byFolder = Object.entries(groups).find(
     ([, group]) => group.folder === job.group_scope,
   );
