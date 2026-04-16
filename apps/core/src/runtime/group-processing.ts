@@ -88,6 +88,7 @@ export interface GroupProcessingDeps {
       proc: ChildProcess,
       containerName: string,
       groupFolder?: string,
+      stopAliasJids?: string | string[],
     ) => void;
   };
 }

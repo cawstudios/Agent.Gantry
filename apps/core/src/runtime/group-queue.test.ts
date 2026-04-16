@@ -1178,6 +1178,36 @@ describe('GroupQueue', () => {
     expect(queue.stopGroup('group1@g.us')).toBe(false);
   });
 
+  it('stopGroup can stop scheduler runs via any linked chat jid alias', async () => {
+    let resolveTask: () => void;
+    const blockingTask = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    const schedulerQueueJid = '__scheduler__:main:job-1';
+    queue.enqueueTask(schedulerQueueJid, 'job-1', blockingTask);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const mockProcess = { pid: 6464, killed: false, kill: vi.fn() } as any;
+    queue.registerProcess(
+      schedulerQueueJid,
+      mockProcess,
+      'container-scheduler-1',
+      'main',
+      ['group1@g.us', 'group2@g.us'],
+    );
+
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
+    expect(queue.stopGroup('group2@g.us')).toBe(true);
+    expect(killSpy).toHaveBeenCalledWith(-6464, 'SIGTERM');
+    killSpy.mockRestore();
+
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
   it('stopGroup sends SIGTERM to the active process group', async () => {
     let resolveProcess: () => void;
     const processMessages = vi.fn(async () => {

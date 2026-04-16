@@ -221,8 +221,20 @@ const groupProcessor = createGroupProcessor({
     closeStdin: (chatJid) => queue.closeStdin(chatJid),
     notifyIdle: (chatJid) => queue.notifyIdle(chatJid),
     stopGroup: (chatJid) => queue.stopGroup(chatJid),
-    registerProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    registerProcess: (
+      groupJid,
+      proc,
+      containerName,
+      groupFolder,
+      stopAliasJids,
+    ) =>
+      queue.registerProcess(
+        groupJid,
+        proc,
+        containerName,
+        groupFolder,
+        stopAliasJids,
+      ),
   },
 });
 
@@ -422,8 +434,14 @@ export async function startMyClawRuntime(): Promise<void> {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName, groupFolder, stopAliasJids) =>
+      queue.registerProcess(
+        groupJid,
+        proc,
+        containerName,
+        groupFolder,
+        stopAliasJids,
+      ),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {

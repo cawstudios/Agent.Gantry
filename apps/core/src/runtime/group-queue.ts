@@ -34,6 +34,7 @@ interface GroupState {
 
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
+  private stopAliases = new Map<string, Set<string>>();
   private activeMessageCount = 0;
   private activeTaskCount = 0;
   private waitingMessageGroups: string[] = [];
@@ -74,6 +75,23 @@ export class GroupQueue {
     return this.activeTaskCount < MAX_JOB_CONTAINERS;
   }
 
+  private addStopAlias(aliasJid: string, queueJid: string): void {
+    if (!aliasJid || aliasJid === queueJid) return;
+    const existing = this.stopAliases.get(aliasJid);
+    if (existing) {
+      existing.add(queueJid);
+      return;
+    }
+    this.stopAliases.set(aliasJid, new Set([queueJid]));
+  }
+
+  private removeStopAliasForQueueJid(queueJid: string): void {
+    for (const [alias, queueJids] of this.stopAliases.entries()) {
+      if (!queueJids.delete(queueJid)) continue;
+      if (queueJids.size === 0) this.stopAliases.delete(alias);
+    }
+  }
+
   private isEphemeralSchedulerGroup(groupJid: string): boolean {
     return groupJid.startsWith('__scheduler__:');
   }
@@ -88,6 +106,7 @@ export class GroupQueue {
     if (state.runningTaskId || state.process || state.idleWaiting) return;
 
     this.groups.delete(groupJid);
+    this.removeStopAliasForQueueJid(groupJid);
     this.waitingMessageGroups = this.waitingMessageGroups.filter(
       (jid) => jid !== groupJid,
     );
@@ -205,11 +224,18 @@ export class GroupQueue {
     proc: ChildProcess,
     containerName: string,
     groupFolder?: string,
+    stopAliasJids?: string | string[],
   ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+    const aliases = Array.isArray(stopAliasJids)
+      ? stopAliasJids
+      : stopAliasJids
+        ? [stopAliasJids]
+        : [];
+    for (const alias of aliases) this.addStopAlias(alias, groupJid);
   }
 
   /**
@@ -274,51 +300,62 @@ export class GroupQueue {
    * Returns true when a live process was signaled, false otherwise.
    */
   stopGroup(groupJid: string): boolean {
-    const state = this.getGroup(groupJid);
-    const proc = state.process;
-    if (!state.active || !proc || proc.killed) return false;
+    const targetQueueJids = [groupJid];
+    const aliased = this.stopAliases.get(groupJid);
+    if (aliased) targetQueueJids.push(...aliased);
 
-    // Ask the runner to close cleanly as well.
-    this.closeStdin(groupJid);
+    for (const targetQueueJid of targetQueueJids) {
+      const state = this.groups.get(targetQueueJid);
+      const proc = state?.process;
+      if (!state || !state.active || !proc || proc.killed) continue;
 
-    const pid = proc.pid;
-    if (typeof pid !== 'number' || pid <= 0) {
+      // Ask the runner to close cleanly as well.
+      this.closeStdin(targetQueueJid);
+
+      const pid = proc.pid;
+      if (typeof pid !== 'number' || pid <= 0) {
+        try {
+          proc.kill('SIGTERM');
+          logger.warn(
+            { groupJid, targetQueueJid },
+            'Stop requested for active run (SIGTERM)',
+          );
+          return true;
+        } catch (err) {
+          logger.warn(
+            { groupJid, targetQueueJid, err },
+            'Failed to stop active run (missing pid)',
+          );
+          return false;
+        }
+      }
+
       try {
-        proc.kill('SIGTERM');
-        logger.warn({ groupJid }, 'Stop requested for active run (SIGTERM)');
-        return true;
-      } catch (err) {
+        process.kill(-pid, 'SIGTERM');
         logger.warn(
-          { groupJid, err },
-          'Failed to stop active run (missing pid)',
+          { groupJid, targetQueueJid, pid },
+          'Stop requested for active run (SIGTERM process group)',
         );
-        return false;
+        return true;
+      } catch {
+        try {
+          process.kill(pid, 'SIGTERM');
+          logger.warn(
+            { groupJid, targetQueueJid, pid },
+            'Stop requested for active run (SIGTERM process)',
+          );
+          return true;
+        } catch (err) {
+          logger.warn(
+            { groupJid, targetQueueJid, pid, err },
+            'Failed to stop active run (SIGTERM)',
+          );
+          return false;
+        }
       }
     }
 
-    try {
-      process.kill(-pid, 'SIGTERM');
-      logger.warn(
-        { groupJid, pid },
-        'Stop requested for active run (SIGTERM process group)',
-      );
-      return true;
-    } catch {
-      try {
-        process.kill(pid, 'SIGTERM');
-        logger.warn(
-          { groupJid, pid },
-          'Stop requested for active run (SIGTERM process)',
-        );
-        return true;
-      } catch (err) {
-        logger.warn(
-          { groupJid, pid, err },
-          'Failed to stop active run (SIGTERM)',
-        );
-        return false;
-      }
-    }
+    return false;
   }
 
   private async runForGroup(
@@ -360,6 +397,7 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeMessageCount--;
+      this.removeStopAliasForQueueJid(groupJid);
       this.drainGroup(groupJid);
     }
   }
@@ -395,6 +433,7 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeTaskCount--;
+      this.removeStopAliasForQueueJid(groupJid);
       this.drainGroup(groupJid);
     }
   }

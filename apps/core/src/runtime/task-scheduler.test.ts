@@ -1814,6 +1814,7 @@ describe('scheduler coverage: streaming callback and edge cases', () => {
       expect.anything(),
       'test-container',
       'main',
+      ['group@g.us'],
     );
   });
 

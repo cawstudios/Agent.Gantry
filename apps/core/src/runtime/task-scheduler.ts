@@ -46,6 +46,7 @@ export interface SchedulerDependencies {
     proc: ChildProcess,
     containerName: string,
     groupFolder: string,
+    stopAliasJids?: string[],
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
   sendStreamingChunk?: (
@@ -273,21 +274,28 @@ function formatRunStatusMessage(args: {
 function resolveExecutionContext(
   job: Job,
   groups: Record<string, RegisteredGroup>,
-): { group: RegisteredGroup; executionJid: string } | null {
+): { group: RegisteredGroup; executionJid: string; stopAliasJids: string[] } | null {
   const byFolder = Object.entries(groups).find(
     ([, group]) => group.folder === job.group_scope,
   );
   if (byFolder) {
+    const stopAliasJids = Array.from(
+      new Set([...(job.linked_sessions || []), byFolder[0]]),
+    );
     return {
       group: byFolder[1],
-      executionJid: job.linked_sessions[0] || byFolder[0],
+      executionJid: stopAliasJids[0] || byFolder[0],
+      stopAliasJids,
     };
   }
 
   for (const linked of job.linked_sessions) {
     const group = groups[linked];
     if (group) {
-      return { group, executionJid: linked };
+      const stopAliasJids = Array.from(
+        new Set([...(job.linked_sessions || []), linked]),
+      );
+      return { group, executionJid: linked, stopAliasJids };
     }
   }
   return null;
@@ -642,6 +650,7 @@ async function runJob(
               proc,
               containerName,
               execution.group.folder,
+              execution.stopAliasJids,
             ),
           async (streamedOutput: AgentOutput) => {
             if (streamedOutput.result) {
