@@ -2,10 +2,9 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 import { GroupQueue } from './group-queue.js';
 
-// Mock config to control concurrency limit
+// Mock config for DATA_DIR used by sendMessage/closeStdin helpers.
 vi.mock('../core/config.js', () => ({
   DATA_DIR: '/tmp/myclaw-test-data',
-  MAX_CONCURRENT_CONTAINERS: 2,
 }));
 
 // Mock fs operations used by sendMessage/closeStdin
@@ -62,9 +61,9 @@ describe('GroupQueue', () => {
     expect(maxConcurrent).toBe(1);
   });
 
-  // --- Global concurrency limit ---
+  // --- Message concurrency limit ---
 
-  it('respects global concurrency limit', async () => {
+  it('respects message concurrency limit', async () => {
     let activeCount = 0;
     let maxActive = 0;
     const completionCallbacks: Array<() => void> = [];
@@ -79,23 +78,24 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Enqueue 3 groups (limit is 2)
+    // Enqueue 4 groups (message pool limit is 3)
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group2@g.us');
     queue.enqueueMessageCheck('group3@g.us');
+    queue.enqueueMessageCheck('group4@g.us');
 
     // Let promises settle
     await vi.advanceTimersByTimeAsync(10);
 
-    // Only 2 should be active (MAX_CONCURRENT_CONTAINERS = 2)
-    expect(maxActive).toBe(2);
-    expect(activeCount).toBe(2);
+    // Only 3 should be active (message pool limit)
+    expect(maxActive).toBe(3);
+    expect(activeCount).toBe(3);
 
-    // Complete one — third should start
+    // Complete one — queued fourth should start
     completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(processMessages).toHaveBeenCalledTimes(3);
+    expect(processMessages).toHaveBeenCalledTimes(4);
   });
 
   // --- Tasks prioritized over messages ---
@@ -225,22 +225,23 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Fill both slots
+    // Fill message pool (3 slots)
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group2@g.us');
-    await vi.advanceTimersByTimeAsync(10);
-
-    // Queue a third
     queue.enqueueMessageCheck('group3@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(processed).toEqual(['group1@g.us', 'group2@g.us']);
+    // Queue a fourth
+    queue.enqueueMessageCheck('group4@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toEqual(['group1@g.us', 'group2@g.us', 'group3@g.us']);
 
     // Free up a slot
     completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(processed).toContain('group3@g.us');
+    expect(processed).toContain('group4@g.us');
   });
 
   // --- Running task dedup (Issue #138) ---
@@ -558,27 +559,28 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Fill both slots
+    // Fill message pool (3 slots)
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group2@g.us');
-    await vi.advanceTimersByTimeAsync(10);
-
-    // Queue messages for group3 (goes to waiting)
     queue.enqueueMessageCheck('group3@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(processed).toEqual(['group1@g.us', 'group2@g.us']);
+    // Queue messages for group4 (goes to waiting)
+    queue.enqueueMessageCheck('group4@g.us');
+    await vi.advanceTimersByTimeAsync(10);
 
-    // Complete group1 — group3 should drain via drainWaiting with messages path
+    expect(processed).toEqual(['group1@g.us', 'group2@g.us', 'group3@g.us']);
+
+    // Complete group1 — group4 should drain via drainWaiting with messages path
     completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(processed).toContain('group3@g.us');
+    expect(processed).toContain('group4@g.us');
   });
 
-  // --- Coverage for drainWaiting with tasks (line 337 task path) ---
+  // --- Task/message budget split ---
 
-  it('drainWaiting runs pending tasks for waiting groups when slots free up', async () => {
+  it('runs tasks even when message pool is saturated', async () => {
     const processed: string[] = [];
     const completionCallbacks: Array<() => void> = [];
 
@@ -590,23 +592,17 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Fill both slots with messages
+    // Fill message pool (3 slots)
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group2@g.us');
+    queue.enqueueMessageCheck('group3@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    // Enqueue a task for group3 — will go to waiting list
+    // Enqueue a task for another group — should still run immediately.
     const taskExecuted = vi.fn();
-    queue.enqueueTask('group3@g.us', 'task-waiting', async () => {
+    queue.enqueueTask('group4@g.us', 'task-not-starved', async () => {
       taskExecuted();
     });
-    await vi.advanceTimersByTimeAsync(10);
-
-    // Task should not have run yet
-    expect(taskExecuted).not.toHaveBeenCalled();
-
-    // Complete group1 — group3's task should drain
-    completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 
     expect(taskExecuted).toHaveBeenCalledTimes(1);
@@ -935,33 +931,31 @@ describe('GroupQueue', () => {
   // --- Coverage for enqueueTask at concurrency limit ---
 
   it('enqueueTask queues task when at concurrency limit', async () => {
-    const completionCallbacks: Array<() => void> = [];
+    const taskCompletionCallbacks: Array<() => void> = [];
 
-    const processMessages = vi.fn(async () => {
-      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
-      return true;
-    });
+    const blockingTask = () =>
+      new Promise<void>((resolve) => taskCompletionCallbacks.push(resolve));
 
-    queue.setProcessMessagesFn(processMessages);
-
-    // Fill both slots with messages
-    queue.enqueueMessageCheck('group1@g.us');
-    queue.enqueueMessageCheck('group2@g.us');
+    // Fill task pool (4 slots) with long-running tasks.
+    queue.enqueueTask('group1@g.us', 'task-1', blockingTask);
+    queue.enqueueTask('group2@g.us', 'task-2', blockingTask);
+    queue.enqueueTask('group3@g.us', 'task-3', blockingTask);
+    queue.enqueueTask('group4@g.us', 'task-4', blockingTask);
     await vi.advanceTimersByTimeAsync(10);
 
-    // Enqueue a task for a new group at the concurrency limit
+    // Enqueue a fifth task at task concurrency limit.
     const taskFn = vi.fn(async () => {});
-    queue.enqueueTask('group3@g.us', 'task-limit', taskFn);
+    queue.enqueueTask('group5@g.us', 'task-limit', taskFn);
     await vi.advanceTimersByTimeAsync(10);
 
     // Task should not have run yet
     expect(taskFn).not.toHaveBeenCalled();
 
-    // Free a slot
-    completionCallbacks[0]();
+    // Free one task slot.
+    taskCompletionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 
-    // Now the task should run
+    // Now queued task should run.
     expect(taskFn).toHaveBeenCalledTimes(1);
   });
 
@@ -1109,27 +1103,26 @@ describe('GroupQueue', () => {
   // --- Coverage for drainWaiting with tasks for waiting group (line 330) ---
 
   it('drainWaiting picks up pending tasks from waiting groups', async () => {
-    const completionCallbacks: Array<() => void> = [];
-    const processMessages = vi.fn(async () => {
-      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
-      return true;
-    });
-    queue.setProcessMessagesFn(processMessages);
+    const taskCompletionCallbacks: Array<() => void> = [];
+    const blockingTask = () =>
+      new Promise<void>((resolve) => taskCompletionCallbacks.push(resolve));
 
-    // Fill both slots with messages
-    queue.enqueueMessageCheck('group1@g.us');
-    queue.enqueueMessageCheck('group2@g.us');
+    // Fill task pool (4 slots) with running tasks.
+    queue.enqueueTask('group1@g.us', 'task-1', blockingTask);
+    queue.enqueueTask('group2@g.us', 'task-2', blockingTask);
+    queue.enqueueTask('group3@g.us', 'task-3', blockingTask);
+    queue.enqueueTask('group4@g.us', 'task-4', blockingTask);
     await vi.advanceTimersByTimeAsync(10);
-    expect(completionCallbacks).toHaveLength(2);
+    expect(taskCompletionCallbacks).toHaveLength(4);
 
-    // Enqueue a TASK for a new group — goes to waiting since concurrency is full
+    // Enqueue a task for a new group — goes to waiting since task pool is full.
     const waitingTaskFn = vi.fn(async () => {});
-    queue.enqueueTask('group3@g.us', 'task-drain-waiting', waitingTaskFn);
+    queue.enqueueTask('group5@g.us', 'task-drain-waiting', waitingTaskFn);
     await vi.advanceTimersByTimeAsync(10);
     expect(waitingTaskFn).not.toHaveBeenCalled();
 
-    // Complete group1 — drainWaiting should pick up group3's task
-    completionCallbacks[0]!();
+    // Complete group1 task — drainWaiting should pick up group5 task
+    taskCompletionCallbacks[0]!();
     await vi.advanceTimersByTimeAsync(10);
     expect(waitingTaskFn).toHaveBeenCalledTimes(1);
   });
@@ -1146,21 +1139,22 @@ describe('GroupQueue', () => {
     });
     queue.setProcessMessagesFn(processMessages);
 
-    // Fill both slots
+    // Fill message pool (3 slots)
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group2@g.us');
-    await vi.advanceTimersByTimeAsync(10);
-    expect(completionCallbacks).toHaveLength(2);
-
-    // Enqueue messages for group3 — goes to waiting
     queue.enqueueMessageCheck('group3@g.us');
     await vi.advanceTimersByTimeAsync(10);
-    expect(processed).toEqual(['group1@g.us', 'group2@g.us']);
+    expect(completionCallbacks).toHaveLength(3);
 
-    // Complete group1 — drainWaiting should pick up group3's messages
+    // Enqueue messages for group4 — goes to waiting
+    queue.enqueueMessageCheck('group4@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processed).toEqual(['group1@g.us', 'group2@g.us', 'group3@g.us']);
+
+    // Complete group1 — drainWaiting should pick up group4's messages
     completionCallbacks[0]!();
     await vi.advanceTimersByTimeAsync(10);
-    expect(processed).toContain('group3@g.us');
+    expect(processed).toContain('group4@g.us');
   });
 
   it('stopGroup returns false when no active run exists', () => {
