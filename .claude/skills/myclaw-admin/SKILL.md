@@ -92,7 +92,7 @@ Complete reference for managing the MyClaw runtime. The CLI binary is `myclaw` a
 - `MINI_APP_PORT` — Mini App port (default: 3100)
 - `ASSISTANT_NAME` — Assistant display name
 - `AGENT_ROOT` — Runtime home directory
-- `AGENT_RUNTIME` — `container` (default) or `host`
+- Runtime mode — Host runtime is the only supported mode.
 
 ### Channel Connection
 

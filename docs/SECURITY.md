@@ -27,6 +27,8 @@ There is no active container isolation boundary in the current runtime.
 - outside project root
 - not writable by runtime agents by default
 
+In host runtime, this allowlist controls what paths are exposed to the agent runner. It is a policy boundary, not a kernel isolation boundary.
+
 **Default Blocked Patterns:**
 ```
 .ssh, .gnupg, .aws, .azure, .gcloud, .kube, .docker,
@@ -59,6 +61,17 @@ Messages and scheduler operations are verified against group identity:
 | View all jobs | ✓ | Own only |
 | Manage other groups | ✓ | ✗ |
 
+## Privilege Comparison (Host Runtime)
+
+| Capability | Main Group | Non-Main Group |
+|------------|------------|----------------|
+| Project root access | Allowed by configured mounts | Not granted by default |
+| Group folder | Own group (rw) | Own group (rw) |
+| Global memory access | Read/write | Read-only (when mounted) |
+| Additional mounts | Configurable by admin policy | Read-only unless policy allows write |
+| Scheduler control scope | All groups | Own group only |
+| Session commands (`/new`, `/model`, `/runtime`) | Allowed | Admin/trusted sender only |
+
 ### 5. Credential Isolation (OneCLI Agent Vault)
 
 Credentials should be provided through OneCLI and runtime environment controls.
@@ -78,3 +91,28 @@ The following names still exist in code/schema and are tracked for cleanup:
 - `AdditionalMount.containerPath`
 
 These are naming artifacts, not evidence of active container runtime support.
+
+## Security Architecture (Host Runtime)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        UNTRUSTED INPUT                           │
+│  Incoming channel messages (prompt-injection risk)               │
+└────────────────────────────────┬─────────────────────────────────┘
+                                 │
+                                 ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                     HOST ORCHESTRATOR                            │
+│  • message routing and authorization checks                      │
+│  • scheduler and IPC policy enforcement                          │
+│  • mount/path allowlist validation                               │
+└────────────────────────────────┬─────────────────────────────────┘
+                                 │
+                                 ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                  HOST AGENT RUNTIME PROCESS                      │
+│  • per-group working dirs and session state                      │
+│  • tools and file operations scoped by runtime policy            │
+│  • outbound credentials via OneCLI/environment policy            │
+└──────────────────────────────────────────────────────────────────┘
+```

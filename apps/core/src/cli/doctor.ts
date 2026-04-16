@@ -235,13 +235,6 @@ export function runDoctor(
     });
   }
 
-  add(checks, {
-    id: 'runtime-mode',
-    title: 'Runtime Mode',
-    status: 'pass',
-    message: 'Host runtime is active and officially supported.',
-  });
-
   const settingsResult = loadSettingsForDoctor(runtimeHome);
   const settings = settingsResult.settings;
   const telegramEnabled = settings?.channels.telegram.enabled ?? false;

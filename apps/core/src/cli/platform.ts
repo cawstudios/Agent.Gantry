@@ -55,19 +55,6 @@ export function getNodeMajorVersion(): number {
   return Number.isFinite(major) ? major : 0;
 }
 
-export function hasDocker(): boolean {
-  return commandExists('docker');
-}
-
-export function isDockerRunning(): boolean {
-  if (!hasDocker()) return false;
-  return tryExec('docker', ['info']).ok;
-}
-
-export function hasAppleContainer(): boolean {
-  return commandExists('container');
-}
-
 export function hasSystemdUser(): boolean {
   if (detectPlatform() !== 'linux') return false;
   if (!commandExists('systemctl')) return false;

@@ -43,6 +43,8 @@ Decision details:
 
 - Rollback path: if a real container runtime implementation ships later, create a follow-up ADR to define supported dual-mode behavior and required validation/doctor surfaces.
 - Migration for existing users: remove use of `AGENT_RUNTIME`, `npm run dev:container`, and `npm run start:container`; use `npm run dev` / `npm start`.
+- Runtime-truth search gate must include docs, runtime surfaces, and skills:
+  - `rg -n "AGENT_RUNTIME|start:container|dev:container|container-runner|container-runtime|SETUP_CONTAINER|container mode|container-first|Container-first" README.md AGENTS.md CLAUDE.md CONTRIBUTING.md docs .claude apps/core package.json`
 - Follow-up cleanup backlog (separate tasks):
   - rename `container_config` to `agent_config` with schema migration
   - rename `containerName` to runtime-process naming
