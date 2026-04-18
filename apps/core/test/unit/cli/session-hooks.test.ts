@@ -1,0 +1,189 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  applySessionHookInstallPlan,
+  buildSessionHookInstallPlan,
+  formatSessionHookInstallDiff,
+} from '@core/cli/session-hooks.js';
+
+function makeTempDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-hooks-test-'));
+}
+
+const TEST_CLI_INDEX = '/tmp/myclaw/dist/cli/index.js';
+
+function hookCommand(cause: string): string {
+  return `node ${JSON.stringify(TEST_CLI_INDEX)} session-hook --cause=${cause}`;
+}
+
+describe('session hook settings merge', () => {
+  it('creates hook commands in an empty settings file', () => {
+    const dir = makeTempDir();
+    const settingsPath = path.join(dir, 'settings.json');
+
+    const plan = buildSessionHookInstallPlan(settingsPath, TEST_CLI_INDEX);
+    expect(plan.changed).toBe(true);
+    expect(plan.added).toHaveLength(3);
+
+    applySessionHookInstallPlan(plan);
+
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const hooks = parsed.hooks as Record<string, unknown[]>;
+    expect(Array.isArray(hooks.SessionStart)).toBe(true);
+    expect(Array.isArray(hooks.PreCompact)).toBe(true);
+    expect(Array.isArray(hooks.Stop)).toBe(true);
+  });
+
+  it('merges hooks without overwriting unrelated fields', () => {
+    const dir = makeTempDir();
+    const settingsPath = path.join(dir, 'settings.json');
+    fs.writeFileSync(
+      settingsPath,
+      `${JSON.stringify(
+        {
+          env: { FOO: 'bar' },
+          hooks: {
+            SessionStart: [
+              {
+                matcher: '*',
+                hooks: [
+                  {
+                    type: 'command',
+                    command: hookCommand('session-start'),
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf-8',
+    );
+
+    const plan = buildSessionHookInstallPlan(settingsPath, TEST_CLI_INDEX);
+    expect(plan.changed).toBe(true);
+    expect(plan.added).toHaveLength(2);
+
+    applySessionHookInstallPlan(plan);
+
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const env = parsed.env as Record<string, unknown>;
+    expect(env.FOO).toBe('bar');
+  });
+
+  it('is idempotent when hooks already exist', () => {
+    const dir = makeTempDir();
+    const settingsPath = path.join(dir, 'settings.json');
+
+    const firstPlan = buildSessionHookInstallPlan(settingsPath, TEST_CLI_INDEX);
+    applySessionHookInstallPlan(firstPlan);
+
+    const secondPlan = buildSessionHookInstallPlan(
+      settingsPath,
+      TEST_CLI_INDEX,
+    );
+    expect(secondPlan.changed).toBe(false);
+    expect(secondPlan.added).toHaveLength(0);
+  });
+
+  it('adds hooks into default matcher when only non-default matcher exists', () => {
+    const dir = makeTempDir();
+    const settingsPath = path.join(dir, 'settings.json');
+    fs.writeFileSync(
+      settingsPath,
+      `${JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [
+              {
+                matcher: 'workspace/*',
+                hooks: [
+                  {
+                    type: 'command',
+                    command: 'echo existing-command',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf-8',
+    );
+
+    const plan = buildSessionHookInstallPlan(settingsPath, TEST_CLI_INDEX);
+    expect(plan.changed).toBe(true);
+    expect(plan.added).toHaveLength(3);
+
+    applySessionHookInstallPlan(plan);
+
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const hooks = parsed.hooks as Record<string, unknown>;
+    const sessionStart = hooks.SessionStart as Array<Record<string, unknown>>;
+    const workspaceMatcher = sessionStart.find(
+      (entry) => entry.matcher === 'workspace/*',
+    );
+    const defaultMatcher = sessionStart.find((entry) => entry.matcher === '*');
+
+    expect(workspaceMatcher).toBeDefined();
+    expect(defaultMatcher).toBeDefined();
+    const defaultHooks = defaultMatcher?.hooks as Array<
+      Record<string, unknown>
+    >;
+    expect(
+      defaultHooks.some(
+        (hook) =>
+          hook.type === 'command' &&
+          hook.command === hookCommand('session-start'),
+      ),
+    ).toBe(true);
+  });
+
+  it('formats a helpful diff summary for planned hook changes', () => {
+    const dir = makeTempDir();
+    const settingsPath = path.join(dir, 'settings.json');
+
+    const plan = buildSessionHookInstallPlan(settingsPath, TEST_CLI_INDEX);
+    const diff = formatSessionHookInstallDiff(plan);
+
+    expect(diff).toContain(`Planned changes for ${settingsPath}:`);
+    expect(diff).toContain(`+ SessionStart: ${hookCommand('session-start')}`);
+    expect(diff).toContain(`+ PreCompact: ${hookCommand('pre-compact')}`);
+    expect(diff).toContain(`+ Stop: ${hookCommand('session-stop')}`);
+  });
+
+  it('throws on invalid JSON settings', () => {
+    const dir = makeTempDir();
+    const settingsPath = path.join(dir, 'settings.json');
+    fs.writeFileSync(settingsPath, '{ bad-json', 'utf-8');
+
+    expect(() => buildSessionHookInstallPlan(settingsPath)).toThrow();
+  });
+
+  it('throws when settings root is not an object', () => {
+    const dir = makeTempDir();
+    const settingsPath = path.join(dir, 'settings.json');
+    fs.writeFileSync(settingsPath, '[]', 'utf-8');
+
+    expect(() => buildSessionHookInstallPlan(settingsPath)).toThrow(
+      'Expected JSON object at root.',
+    );
+  });
+});

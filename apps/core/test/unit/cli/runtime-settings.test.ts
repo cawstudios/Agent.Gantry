@@ -77,6 +77,12 @@ memory:
     model: text-embedding-3-large
   dreaming:
     enabled: false
+  llm:
+    models:
+      extractor: claude-haiku-4-5-20251001
+      dreaming: claude-sonnet-4-6
+      consolidation: claude-sonnet-4-6
+      session_summary: claude-haiku-4-5-20251001
 `);
 
     expect(settings.channels.telegram.senderAllowlist.default.allow).toEqual([
@@ -89,6 +95,10 @@ memory:
       allow: '*',
       mode: 'drop',
     });
+    expect(settings.memory.llm.models.extractor).toBe(
+      'claude-haiku-4-5-20251001',
+    );
+    expect(settings.memory.llm.models.dreaming).toBe('claude-sonnet-4-6');
   });
 
   it('does not enforce a schema version field', () => {
@@ -136,6 +146,14 @@ memory:
     expect(settings.memory.provider).toBe('sqlite');
     expect(settings.memory.embeddings.enabled).toBe(false);
     expect(settings.memory.dreaming.enabled).toBe(false);
+    expect(settings.memory.llm.models.extractor).toBe(
+      'claude-haiku-4-5-20251001',
+    );
+    expect(settings.memory.llm.models.dreaming).toBe('claude-sonnet-4-6');
+    expect(settings.memory.llm.models.consolidation).toBe('claude-sonnet-4-6');
+    expect(settings.memory.llm.models.sessionSummary).toBe(
+      'claude-haiku-4-5-20251001',
+    );
     expect(fs.existsSync(settingsFilePath(runtimeHome))).toBe(true);
     const rendered = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
     expect(rendered).toContain('memory:');

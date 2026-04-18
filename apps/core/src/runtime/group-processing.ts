@@ -53,6 +53,8 @@ import { handleSessionCommand } from '../session/session-commands.js';
 const TYPING_HEARTBEAT_INTERVAL_MS = 4_000;
 const ELAPSED_PROGRESS_INTERVAL_MS = 60_000;
 const NO_OUTPUT_WARNING_INTERVAL_MS = 180_000;
+const NO_VISIBLE_OUTPUT_FALLBACK_MESSAGE =
+  'I finished that run but did not generate a user-visible reply. Please send your message again.';
 let streamingGenerationCounter = 0;
 
 function nextStreamingGeneration(): number {
@@ -82,7 +84,7 @@ export interface GroupProcessingDeps {
       chatJid: string,
       rawText: string,
       options?: StreamingChunkOptions,
-    ) => Promise<void>;
+    ) => Promise<boolean>;
     resetStreaming: (chatJid: string) => void;
     setTyping: (chatJid: string, isTyping: boolean) => Promise<void>;
     sendProgressUpdate: (
@@ -180,6 +182,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
         isMain,
         prompt,
         userId,
+        { isFirstPromptOfSession: !sessionId },
       );
       memoryContextFilePath = contextSnapshot.filePath;
       onMemoryContext?.(contextSnapshot.retrievedItemIds);
@@ -439,6 +442,23 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
           deleteSession(group.folder);
         },
         stopCurrentRun: () => deps.queue.stopGroup?.(chatJid) ?? false,
+        runMemoryDreaming: async () =>
+          MemoryService.getInstance().runDreamingSweep(group.folder),
+        getMemoryStatus: async () =>
+          MemoryService.getInstance().getStatus(group.folder),
+        saveProcedure: async ({ title, body }) =>
+          MemoryService.getInstance().saveProcedure(
+            {
+              scope: 'group',
+              group_folder: group.folder,
+              title,
+              body,
+              source: 'explicit',
+              confidence: 0.8,
+              tags: ['explicit'],
+            },
+            { isMain: isMainGroup, groupFolder: group.folder },
+          ),
         isSenderControlAllowlisted: (msg) => {
           const allowlistCfg = loadSenderAllowlist();
           return isSenderExplicitlyAllowed(
@@ -585,6 +605,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
     let hadError = false;
     let outputSentToUser = false;
     let collectedOutput = '';
+    let sawRawOutput = false;
     const supportsStreamingChunks =
       deps.channelRuntime.supportsStreaming(chatJid);
     let streamFinalized = false;
@@ -624,14 +645,16 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
               typeof result.result === 'string'
                 ? result.result
                 : JSON.stringify(result.result);
+            sawRawOutput = true;
             const text = formatOutboundForChannel(raw);
             logger.info(
               { group: group.name },
               `Agent output: ${raw.length} chars`,
             );
             if (text) {
+              let delivered = false;
               if (supportsStreamingChunks) {
-                await deps.channelRuntime.sendStreamingChunk(
+                delivered = await deps.channelRuntime.sendStreamingChunk(
                   chatJid,
                   raw,
                   buildStreamingOptions({}),
@@ -639,8 +662,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
               } else {
                 const messageOptions = buildMessageOptions();
                 await sendMessageToChannel(text, messageOptions);
+                delivered = true;
               }
-              outputSentToUser = true;
+              if (delivered) outputSentToUser = true;
               collectedOutput += `${text}\n`;
             }
             resetIdleTimer();
@@ -704,6 +728,44 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
         'Agent error, rolled back message cursor for retry',
       );
       return false;
+    }
+
+    if (!outputSentToUser) {
+      const fallbackText = collectedOutput.trim();
+      if (fallbackText) {
+        try {
+          const messageOptions = buildMessageOptions();
+          await sendMessageToChannel(fallbackText, messageOptions);
+          outputSentToUser = true;
+          logger.warn(
+            { group: group.name, fallbackChars: fallbackText.length },
+            'Streamed output was not confirmed as delivered; sent fallback message',
+          );
+        } catch (err) {
+          logger.warn(
+            { err, group: group.name },
+            'Failed to send fallback message after streaming run',
+          );
+        }
+      } else if (sawRawOutput) {
+        try {
+          const messageOptions = buildMessageOptions();
+          await sendMessageToChannel(
+            NO_VISIBLE_OUTPUT_FALLBACK_MESSAGE,
+            messageOptions,
+          );
+          outputSentToUser = true;
+          logger.warn(
+            { group: group.name },
+            'Agent produced only non-displayable output; sent explicit fallback notice',
+          );
+        } catch (err) {
+          logger.warn(
+            { err, group: group.name },
+            'Failed to send no-visible-output fallback notice after streaming run',
+          );
+        }
+      }
     }
 
     try {

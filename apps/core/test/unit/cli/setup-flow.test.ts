@@ -125,6 +125,14 @@ async function loadSetupFlowModule(options: SetupFlowTestOptions) {
         dreaming: {
           enabled: false,
         },
+        llm: {
+          models: {
+            extractor: 'claude-haiku-4-5-20251001',
+            dreaming: 'claude-sonnet-4-6',
+            consolidation: 'claude-sonnet-4-6',
+            sessionSummary: 'claude-haiku-4-5-20251001',
+          },
+        },
       },
     })),
   }));

@@ -39,6 +39,7 @@ export type MemoryProvider = Pick<
   | 'saveProcedure'
   | 'getProcedureById'
   | 'patchProcedure'
+  | 'softDeleteProcedure'
   | 'listTopProcedures'
   | 'saveChunks'
   | 'searchItemsByText'
@@ -48,6 +49,7 @@ export type MemoryProvider = Pick<
   | 'listSourceChunks'
   | 'applyRetentionPolicies'
   | 'recordEvent'
+  | 'getLatestEvent'
 > & {
   providerName?: string;
 };
@@ -80,9 +82,17 @@ function createNoopMemoryItem(input: {
     kind: input.kind,
     key: input.key,
     value: input.value,
+    why: undefined,
+    load_bearing: false,
+    source_turn_id: null,
     source: input.source,
     confidence: input.confidence,
     is_pinned: false,
+    used_count: 0,
+    superseded_by: null,
+    is_deleted: false,
+    deleted_at: null,
+    last_reviewed_at: null,
     version: 1,
     last_used_at: null,
     last_retrieved_at: null,
@@ -114,8 +124,12 @@ function createNoopProcedure(input: {
     title: input.title,
     body: input.body,
     tags: input.tags,
+    origin: 'explicit',
+    trigger: null,
     source: input.source,
     confidence: input.confidence,
+    is_deleted: false,
+    deleted_at: null,
     version: 1,
     last_used_at: null,
     created_at: now,
@@ -174,6 +188,7 @@ function createNoopProvider(): MemoryProvider {
     patchProcedure: () => {
       throw new Error('memory procedure not found');
     },
+    softDeleteProcedure: () => undefined,
     listTopProcedures: () => [],
     saveChunks: () => 0,
     searchItemsByText: () => [],
@@ -183,6 +198,7 @@ function createNoopProvider(): MemoryProvider {
     listSourceChunks: () => [],
     applyRetentionPolicies: () => undefined,
     recordEvent: () => undefined,
+    getLatestEvent: () => null,
   };
 }
 
@@ -294,8 +310,13 @@ function createQmdProvider(): MemoryProvider {
       store.findSimilarItems(...args),
     listActiveItems: (...args: Parameters<MemoryStore['listActiveItems']>) =>
       store.listActiveItems(...args),
-    softDeleteItem: (...args: Parameters<MemoryStore['softDeleteItem']>) =>
-      store.softDeleteItem(...args),
+    softDeleteItem: (...args: Parameters<MemoryStore['softDeleteItem']>) => {
+      store.softDeleteItem(...args);
+      const [id] = args;
+      if (typeof id === 'string' && id) {
+        memoryRoot.deleteMemoryItem(id);
+      }
+    },
     incrementRetrievalCount: (
       ...args: Parameters<MemoryStore['incrementRetrievalCount']>
     ) => store.incrementRetrievalCount(...args),
@@ -333,6 +354,15 @@ function createQmdProvider(): MemoryProvider {
       mirrorProcedure(memoryRoot, procedure, 'patched');
       return procedure;
     },
+    softDeleteProcedure: (
+      ...args: Parameters<MemoryStore['softDeleteProcedure']>
+    ) => {
+      store.softDeleteProcedure(...args);
+      const [id] = args;
+      if (typeof id === 'string' && id) {
+        memoryRoot.deleteProcedure(id);
+      }
+    },
     listTopProcedures: (
       ...args: Parameters<MemoryStore['listTopProcedures']>
     ) => store.listTopProcedures(...args),
@@ -364,6 +394,8 @@ function createQmdProvider(): MemoryProvider {
         ],
       });
     },
+    getLatestEvent: (...args: Parameters<MemoryStore['getLatestEvent']>) =>
+      store.getLatestEvent(...args),
   };
 }
 

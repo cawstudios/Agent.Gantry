@@ -1691,6 +1691,7 @@ describe('startIpcWatcher', () => {
   const mockExistsSync = vi.fn();
   const mockReadFileSync = vi.fn();
   const mockWriteFileSync = vi.fn();
+  const mockRmSync = vi.fn();
   const mockUnlinkSync = vi.fn();
   const mockRenameSync = vi.fn();
   const mockLoggerDebug = vi.fn();
@@ -1724,6 +1725,7 @@ describe('startIpcWatcher', () => {
         existsSync: (...args: unknown[]) => mockExistsSync(...args),
         readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
         writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
+        rmSync: (...args: unknown[]) => mockRmSync(...args),
         unlinkSync: (...args: unknown[]) => mockUnlinkSync(...args),
         renameSync: (...args: unknown[]) => mockRenameSync(...args),
       },
@@ -1832,6 +1834,8 @@ describe('startIpcWatcher', () => {
       kind: 'background',
       message: 'started',
     });
+    mockWriteFileSync.mockImplementation(() => undefined);
+    mockRmSync.mockImplementation(() => undefined);
     mockRenameSync.mockImplementation(() => undefined);
     mockLstatSync.mockImplementation((target: unknown) => {
       const p = String(target || '');
@@ -2187,6 +2191,143 @@ describe('startIpcWatcher', () => {
       'IPC watcher already running, skipping duplicate start',
     );
     // Should NOT log "IPC watcher started" again
+    expect(mockLoggerInfo).not.toHaveBeenCalledWith(
+      'IPC watcher started (per-group namespaces)',
+    );
+  });
+
+  it('reclaims a stale IPC root lock when the lock PID is no longer running', async () => {
+    mockReaddirSync.mockReturnValue([]);
+    let writeCount = 0;
+    mockWriteFileSync.mockImplementation(() => {
+      writeCount += 1;
+      if (writeCount === 1) {
+        throw Object.assign(new Error('lock exists'), { code: 'EEXIST' });
+      }
+    });
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        pid: 37933,
+        startedAt: '2026-04-17T17:47:47.631Z',
+      }),
+    );
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((() => {
+      throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+    }) as typeof process.kill);
+
+    try {
+      const mod = await loadIpcModule();
+      const watcherDeps: import('@core/runtime/ipc.js').IpcDeps = {
+        sendMessage: vi.fn(),
+        registeredGroups: () => ({}),
+        registerGroup: vi.fn(),
+        syncGroups: vi.fn(),
+        getAvailableGroups: vi.fn(() => []),
+        writeGroupsSnapshot: vi.fn(),
+        onSchedulerChanged: vi.fn(),
+      };
+
+      mod.startIpcWatcher(watcherDeps);
+
+      await vi.waitFor(() => {
+        expect(capturedSetTimeoutCallback).not.toBeNull();
+      });
+
+      expect(mockRmSync).toHaveBeenCalledWith('/tmp/test-ipc/ipc/.lock', {
+        force: true,
+      });
+      expect(mockLoggerWarn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lockPath: '/tmp/test-ipc/ipc/.lock',
+          holderPid: 37933,
+          reason: 'pid_not_running',
+        }),
+        'Recovered stale IPC watcher lock; retrying start',
+      );
+      expect(mockLoggerInfo).toHaveBeenCalledWith(
+        'IPC watcher started (per-group namespaces)',
+      );
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('does not take over IPC root lock when the lock PID is still alive', async () => {
+    mockReaddirSync.mockReturnValue([]);
+    mockWriteFileSync.mockImplementation(() => {
+      throw Object.assign(new Error('lock exists'), { code: 'EEXIST' });
+    });
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        pid: process.pid + 1,
+        startedAt: '2026-04-17T17:47:47.631Z',
+      }),
+    );
+    const killSpy = vi
+      .spyOn(process, 'kill')
+      .mockImplementation((() => true) as typeof process.kill);
+
+    try {
+      const mod = await loadIpcModule();
+      const watcherDeps: import('@core/runtime/ipc.js').IpcDeps = {
+        sendMessage: vi.fn(),
+        registeredGroups: () => ({}),
+        registerGroup: vi.fn(),
+        syncGroups: vi.fn(),
+        getAvailableGroups: vi.fn(() => []),
+        writeGroupsSnapshot: vi.fn(),
+        onSchedulerChanged: vi.fn(),
+      };
+
+      mod.startIpcWatcher(watcherDeps);
+
+      expect(capturedSetTimeoutCallback).toBeNull();
+      expect(mockRmSync).not.toHaveBeenCalled();
+      expect(mockLoggerWarn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lockPath: '/tmp/test-ipc/ipc/.lock',
+          holderPid: process.pid + 1,
+          reason: 'pid_alive',
+        }),
+        'IPC watcher lock already held, skipping start',
+      );
+      expect(mockLoggerInfo).not.toHaveBeenCalledWith(
+        'IPC watcher started (per-group namespaces)',
+      );
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('does not take over IPC root lock when lock metadata is malformed', async () => {
+    mockReaddirSync.mockReturnValue([]);
+    mockWriteFileSync.mockImplementation(() => {
+      throw Object.assign(new Error('lock exists'), { code: 'EEXIST' });
+    });
+    mockReadFileSync.mockReturnValue('not-json');
+
+    const mod = await loadIpcModule();
+    const watcherDeps: import('@core/runtime/ipc.js').IpcDeps = {
+      sendMessage: vi.fn(),
+      registeredGroups: () => ({}),
+      registerGroup: vi.fn(),
+      syncGroups: vi.fn(),
+      getAvailableGroups: vi.fn(() => []),
+      writeGroupsSnapshot: vi.fn(),
+      onSchedulerChanged: vi.fn(),
+    };
+
+    mod.startIpcWatcher(watcherDeps);
+
+    expect(capturedSetTimeoutCallback).toBeNull();
+    expect(mockRmSync).not.toHaveBeenCalled();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lockPath: '/tmp/test-ipc/ipc/.lock',
+        reason: 'invalid_or_missing_pid',
+      }),
+      'IPC watcher lock already held, skipping start',
+    );
     expect(mockLoggerInfo).not.toHaveBeenCalledWith(
       'IPC watcher started (per-group namespaces)',
     );

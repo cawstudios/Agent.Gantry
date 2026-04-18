@@ -1,9 +1,14 @@
 import * as p from '@clack/prompts';
+import { resolveClaudeAuthState } from '../core/config.js';
 
 import { readEnvFile } from './env-file.js';
 import { inspectMemoryHealth } from './memory-health.js';
 import { envFilePath } from './runtime-home.js';
 import {
+  applyMemoryModelProfile,
+  getMemoryModelProfileDefaults,
+  type MemoryModelProfile,
+  type MemoryModelTask,
   loadRuntimeSettings,
   saveRuntimeSettings,
   type EmbeddingProviderName,
@@ -17,13 +22,62 @@ function usage(): string {
     '  myclaw memory provider <sqlite|qmd|noop|none>',
     '  myclaw memory embeddings <off|disabled|openai>',
     '  myclaw memory dreaming <on|off>',
+    '  myclaw memory model set <extractor|dreaming|consolidation|sessionSummary> <model>',
+    '  myclaw memory model profile <cheap|balanced|quality>',
   ].join('\n');
+}
+
+interface EffectiveModelRow {
+  model: string;
+  source: 'settings.yaml' | 'ANTHROPIC_MODEL' | 'default';
+}
+
+function resolveEffectiveModel(
+  configuredModel: string | undefined,
+  globalModel: string | undefined,
+  hardDefault: string,
+): EffectiveModelRow {
+  const configured = configuredModel?.trim();
+  if (configured) {
+    return { model: configured, source: 'settings.yaml' };
+  }
+  const global = globalModel?.trim();
+  if (global) {
+    return { model: global, source: 'ANTHROPIC_MODEL' };
+  }
+  return { model: hardDefault, source: 'default' };
 }
 
 function formatMemoryStatus(runtimeHome: string): string {
   const settings = loadRuntimeSettings(runtimeHome);
   const env = readEnvFile(envFilePath(runtimeHome));
   const health = inspectMemoryHealth(runtimeHome, settings, env);
+  const globalModel = env.ANTHROPIC_MODEL;
+  const hardDefaults = getMemoryModelProfileDefaults('balanced');
+  const extractorModel = resolveEffectiveModel(
+    settings.memory.llm.models.extractor,
+    globalModel,
+    hardDefaults.extractor,
+  );
+  const dreamingModel = resolveEffectiveModel(
+    settings.memory.llm.models.dreaming,
+    globalModel,
+    hardDefaults.dreaming,
+  );
+  const consolidationModel = resolveEffectiveModel(
+    settings.memory.llm.models.consolidation,
+    globalModel,
+    hardDefaults.consolidation,
+  );
+  const sessionSummaryModel = resolveEffectiveModel(
+    settings.memory.llm.models.sessionSummary,
+    globalModel,
+    hardDefaults.sessionSummary,
+  );
+  const claudeAuth = resolveClaudeAuthState({
+    oauthToken: env.CLAUDE_CODE_OAUTH_TOKEN,
+    apiKey: env.ANTHROPIC_API_KEY,
+  });
   return [
     'MyClaw Memory',
     '',
@@ -35,6 +89,13 @@ function formatMemoryStatus(runtimeHome: string): string {
     `Embedding provider: ${health.embeddingProvider} (${health.embeddingProviderCheck.status}, source: ${health.embeddingProviderSource})`,
     `Embedding model: ${health.embeddingModel} (source: ${health.embeddingModelSource})`,
     `Dreaming: ${health.dreamingEnabled ? 'on' : 'off'} (source: ${health.dreamingSource})`,
+    `Claude OAuth token: ${claudeAuth.hasOauthToken ? 'present' : 'missing'} (CLAUDE_CODE_OAUTH_TOKEN)`,
+    `Claude API key: ${claudeAuth.hasApiKey ? 'present' : 'missing'} (ANTHROPIC_API_KEY)`,
+    `Claude auth mode: ${claudeAuth.mode} (precedence: oauth -> api_key)`,
+    `Model extractor: ${extractorModel.model} (source: ${extractorModel.source})`,
+    `Model dreaming: ${dreamingModel.model} (source: ${dreamingModel.source})`,
+    `Model consolidation: ${consolidationModel.model} (source: ${consolidationModel.source})`,
+    `Model sessionSummary: ${sessionSummaryModel.model} (source: ${sessionSummaryModel.source})`,
   ].join('\n');
 }
 
@@ -85,11 +146,51 @@ function setDreaming(runtimeHome: string, enabled: boolean): void {
   saveRuntimeSettings(runtimeHome, settings);
 }
 
+function parseModelTask(raw: string | undefined): MemoryModelTask | null {
+  if (!raw) return null;
+  const normalized = raw.trim();
+  if (normalized === 'extractor') return 'extractor';
+  if (normalized === 'dreaming') return 'dreaming';
+  if (normalized === 'consolidation') return 'consolidation';
+  if (
+    normalized === 'sessionSummary' ||
+    normalized === 'session_summary' ||
+    normalized === 'session-summary'
+  ) {
+    return 'sessionSummary';
+  }
+  return null;
+}
+
+function setTaskModel(
+  runtimeHome: string,
+  task: MemoryModelTask,
+  model: string,
+): { ok: boolean; message?: string } {
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return { ok: false, message: 'Model must be a non-empty string.' };
+  }
+  const settings = loadRuntimeSettings(runtimeHome);
+  settings.memory.llm.models[task] = trimmed;
+  saveRuntimeSettings(runtimeHome, settings);
+  return { ok: true };
+}
+
+function setModelProfile(
+  runtimeHome: string,
+  profile: MemoryModelProfile,
+): void {
+  const settings = loadRuntimeSettings(runtimeHome);
+  applyMemoryModelProfile(settings, profile);
+  saveRuntimeSettings(runtimeHome, settings);
+}
+
 export async function runMemoryCommand(
   runtimeHome: string,
   args: string[],
 ): Promise<number> {
-  const [command, value] = args;
+  const [command, value, extra] = args;
 
   if (!command || command === 'status') {
     p.note(formatMemoryStatus(runtimeHome), 'Memory');
@@ -132,6 +233,42 @@ export async function runMemoryCommand(
     setDreaming(runtimeHome, value === 'on');
     p.log.success(`Memory dreaming set to ${value} in settings.yaml.`);
     return 0;
+  }
+
+  if (command === 'model') {
+    if (value === 'set') {
+      const task = parseModelTask(args[2]);
+      const model = args[3] || '';
+      if (!task || !model.trim()) {
+        p.log.error(usage());
+        return 1;
+      }
+      const result = setTaskModel(runtimeHome, task, model);
+      if (!result.ok) {
+        p.log.error(result.message || 'Could not update model setting.');
+        return 1;
+      }
+      p.log.success(
+        `Memory model for ${task} set to ${model.trim()} in settings.yaml.`,
+      );
+      return 0;
+    }
+
+    if (value === 'profile') {
+      const profile = extra as MemoryModelProfile | undefined;
+      if (!profile || !['cheap', 'balanced', 'quality'].includes(profile)) {
+        p.log.error(usage());
+        return 1;
+      }
+      setModelProfile(runtimeHome, profile);
+      p.log.success(
+        `Memory model profile set to ${profile} in settings.yaml.`,
+      );
+      return 0;
+    }
+
+    p.log.error(usage());
+    return 1;
   }
 
   p.log.error(usage());

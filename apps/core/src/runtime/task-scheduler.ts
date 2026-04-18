@@ -7,13 +7,14 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   MEMORY_DREAMING_CRON,
-  MEMORY_DREAMING_ENABLED,
+  RUNTIME_MEMORY_DREAMING_ENABLED,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from '../core/config.js';
 import { Job, JobExecutionMode, RegisteredGroup } from '../core/types.js';
 import { logger } from '../core/logger.js';
 import { writeMemoryContextSnapshot } from '../memory/memory-ipc.js';
+import { runMemoryCleanupOnce } from '../memory/cleanup-job.js';
 import { MemoryService } from '../memory/memory-service.js';
 import {
   resolveGroupFolderPath,
@@ -53,7 +54,7 @@ export interface SchedulerDependencies {
     jid: string,
     text: string,
     options?: StreamingChunkOptions,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   resetStreaming?: (jid: string) => void;
   onSchedulerChanged?: () => void;
   runAgent?: typeof spawnAgent;
@@ -207,6 +208,7 @@ function sweepCompletedOneTimeJobs(): boolean {
 }
 
 const MEMORY_DREAM_SYSTEM_PROMPT = '__system:memory_dream';
+const MEMORY_CLEANUP_SYSTEM_PROMPT = '__system:memory_cleanup';
 
 export function computeNextJobRun(
   job: Pick<Job, 'schedule_type' | 'schedule_value'>,
@@ -328,14 +330,18 @@ async function notifyLinkedSessions(
 }
 
 function registerSystemJobs(deps: SchedulerDependencies): void {
-  if (!MEMORY_DREAMING_ENABLED) return;
+  if (!RUNTIME_MEMORY_DREAMING_ENABLED) return;
   const groups = deps.registeredGroups();
   const byFolder = new Map<string, string[]>();
+  const mainFolders = new Set<string>();
 
   for (const [jid, group] of Object.entries(groups)) {
     const linked = byFolder.get(group.folder) || [];
     linked.push(jid);
     byFolder.set(group.folder, linked);
+    if (group.isMain) {
+      mainFolders.add(group.folder);
+    }
   }
 
   const nowIso = new Date().toISOString();
@@ -373,6 +379,44 @@ function registerSystemJobs(deps: SchedulerDependencies): void {
       max_consecutive_failures: 3,
     });
   }
+
+  const cleanupOwnerEntry =
+    [...byFolder.entries()].find(([folder]) => mainFolders.has(folder)) ||
+    [...byFolder.entries()][0];
+  if (!cleanupOwnerEntry) return;
+  const [cleanupGroupFolder, cleanupLinkedSessions] = cleanupOwnerEntry;
+  const cleanupJobId = `system:cleanup:${cleanupGroupFolder}`;
+  const cleanupExisting = getJobById(cleanupJobId);
+  const cleanupNextRun =
+    cleanupExisting?.next_run ||
+    computeNextJobRun(
+      {
+        schedule_type: 'cron',
+        schedule_value: '0 4 * * *',
+      },
+      nowIso,
+    );
+  upsertJob({
+    id: cleanupJobId,
+    name: `Memory Cleanup (${cleanupGroupFolder})`,
+    prompt: MEMORY_CLEANUP_SYSTEM_PROMPT,
+    schedule_type: 'cron',
+    schedule_value: '0 4 * * *',
+    linked_sessions: cleanupLinkedSessions,
+    group_scope: cleanupGroupFolder,
+    created_by: 'agent',
+    status: cleanupExisting?.status === 'paused' ? 'paused' : 'active',
+    next_run: cleanupNextRun,
+    silent: true,
+    timeout_ms: 120_000,
+    max_retries: 1,
+    retry_backoff_ms: 15_000,
+    max_consecutive_failures: 3,
+  });
+  for (const groupFolder of byFolder.keys()) {
+    if (groupFolder === cleanupGroupFolder) continue;
+    deleteJob(`system:cleanup:${groupFolder}`);
+  }
 }
 
 async function handleSystemJob(
@@ -381,6 +425,9 @@ async function handleSystemJob(
 ): Promise<unknown> {
   if (job.prompt === MEMORY_DREAM_SYSTEM_PROMPT) {
     return MemoryService.getInstance().runDreamingSweep(groupFolder);
+  }
+  if (job.prompt === MEMORY_CLEANUP_SYSTEM_PROMPT) {
+    return runMemoryCleanupOnce();
   }
   throw new Error(`Unknown system job: ${job.prompt}`);
 }
@@ -445,10 +492,23 @@ async function runJob(
     return;
   }
 
+  let jobDeletedDuringRun = false;
+  const isJobDeleted = (): boolean => {
+    if (jobDeletedDuringRun) return true;
+    if (getJobById(currentJob.id)) return false;
+    jobDeletedDuringRun = true;
+    logger.info(
+      { jobId: currentJob.id, runId },
+      'Scheduler job deleted while run was active',
+    );
+    return true;
+  };
+
   const emitJobEvent = (
     eventType: string,
     payload: Record<string, unknown> | null,
   ): void => {
+    if (isJobDeleted()) return;
     try {
       addJobEvent({
         job_id: currentJob.id,
@@ -525,7 +585,7 @@ async function runJob(
   };
 
   const deliverMessage = async (text: string): Promise<boolean> => {
-    if (!shouldDeliverToChat || !text) return false;
+    if (!shouldDeliverToChat || !text || isJobDeleted()) return false;
     let delivered = false;
     for (const jid of linkedSessions) {
       try {
@@ -542,7 +602,7 @@ async function runJob(
   };
 
   const deliverStreamingChunk = async (text: string): Promise<boolean> => {
-    if (!shouldDeliverToChat || !text) return false;
+    if (!shouldDeliverToChat || !text || isJobDeleted()) return false;
     if (!deps.sendStreamingChunk) {
       return deliverMessage(text);
     }
@@ -550,8 +610,12 @@ async function runJob(
     let delivered = false;
     for (const jid of linkedSessions) {
       try {
-        await deps.sendStreamingChunk(jid, text, buildStreamingOptions({}));
-        delivered = true;
+        const accepted = await deps.sendStreamingChunk(
+          jid,
+          text,
+          buildStreamingOptions({}),
+        );
+        if (accepted) delivered = true;
       } catch (err) {
         logger.warn(
           { jobId: currentJob.id, jid, err },
@@ -564,19 +628,24 @@ async function runJob(
 
   let streamFinalized = false;
   const finalizeStreaming = async (): Promise<boolean> => {
-    if (!shouldDeliverToChat || !deps.sendStreamingChunk || streamFinalized) {
+    if (
+      !shouldDeliverToChat ||
+      !deps.sendStreamingChunk ||
+      streamFinalized ||
+      isJobDeleted()
+    ) {
       return false;
     }
     streamFinalized = true;
     let delivered = false;
     for (const jid of linkedSessions) {
       try {
-        await deps.sendStreamingChunk(
+        const accepted = await deps.sendStreamingChunk(
           jid,
           '',
           buildStreamingOptions({ done: true }),
         );
-        delivered = true;
+        if (accepted) delivered = true;
       } catch (err) {
         logger.warn(
           { jobId: currentJob.id, jid, err },
@@ -612,7 +681,10 @@ async function runJob(
           isMain,
           currentJob.prompt,
           undefined,
-          { fileName: memoryContextFileName },
+          {
+            fileName: memoryContextFileName,
+            isFirstPromptOfSession: !schedulerSession,
+          },
         );
         retrievedItemIds = contextSnapshot.retrievedItemIds;
         memoryContextFilePath = contextSnapshot.filePath;
@@ -717,6 +789,12 @@ async function runJob(
   }
 
   const now = new Date().toISOString();
+  isJobDeleted();
+  if (jobDeletedDuringRun) {
+    result = null;
+    collectedResult = '';
+    error = null;
+  }
   const nextRunOnSuccess = computeNextJobRun(currentJob, scheduledFor);
   let runStatus: 'completed' | 'failed' | 'timeout' | 'dead_lettered' =
     'completed';
@@ -724,7 +802,9 @@ async function runJob(
   let retryCount = currentJob.consecutive_failures;
   let pauseReason: string | null = null;
 
-  if (error) {
+  if (jobDeletedDuringRun) {
+    nextRun = null;
+  } else if (error) {
     retryCount += 1;
     runStatus = /timed out/i.test(error) ? 'timeout' : 'failed';
     const exceededRetry = retryCount > currentJob.max_retries;
@@ -783,16 +863,10 @@ async function runJob(
     error ? error.slice(0, 500) : null,
   );
 
-  addJobEvent({
-    job_id: currentJob.id,
-    run_id: runId,
-    event_type: `run_${runStatus}`,
-    payload: JSON.stringify({
-      next_run: nextRun,
-      retry_count: retryCount,
-      pause_reason: pauseReason,
-    }),
-    created_at: now,
+  emitJobEvent(`run_${runStatus}`, {
+    next_run: nextRun,
+    retry_count: retryCount,
+    pause_reason: pauseReason,
   });
 
   const summary = error
@@ -848,7 +922,7 @@ async function runJob(
   });
   deps.onSchedulerChanged?.();
 
-  if (!error && !ranSystemJob) {
+  if (!jobDeletedDuringRun && !error && !ranSystemJob) {
     void MemoryService.getInstance()
       .reflectAfterTurn({
         groupFolder: execution.group.folder,
@@ -866,6 +940,7 @@ async function runJob(
   }
 
   if (
+    !jobDeletedDuringRun &&
     currentJob.schedule_type === 'once' &&
     (runStatus === 'completed' || runStatus === 'dead_lettered') &&
     normalizeCleanupAfterMs(currentJob.cleanup_after_ms) === 0

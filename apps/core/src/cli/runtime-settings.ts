@@ -30,6 +30,19 @@ export interface RuntimeChannelSettings {
 
 export type MemoryProviderName = 'sqlite' | 'qmd' | 'noop' | 'none';
 export type EmbeddingProviderName = 'disabled' | 'none' | 'openai';
+export type MemoryModelProfile = 'cheap' | 'balanced' | 'quality';
+export type MemoryModelTask =
+  | 'extractor'
+  | 'dreaming'
+  | 'consolidation'
+  | 'sessionSummary';
+
+export interface RuntimeMemoryLlmModels {
+  extractor: string;
+  dreaming: string;
+  consolidation: string;
+  sessionSummary: string;
+}
 
 export interface RuntimeMemorySettings {
   enabled: boolean;
@@ -43,6 +56,9 @@ export interface RuntimeMemorySettings {
   };
   dreaming: {
     enabled: boolean;
+  };
+  llm: {
+    models: RuntimeMemoryLlmModels;
   };
 }
 
@@ -85,6 +101,42 @@ const VALID_EMBEDDING_PROVIDERS = new Set<EmbeddingProviderName>([
 const DEFAULT_SQLITE_PATH = 'store/memory.db';
 const DEFAULT_QMD_ROOT = 'agent-memory';
 const DEFAULT_EMBED_MODEL = 'text-embedding-3-large';
+const DEFAULT_MODEL_HAIKU = 'claude-haiku-4-5-20251001';
+const DEFAULT_MODEL_SONNET = 'claude-sonnet-4-6';
+
+const MEMORY_MODEL_PROFILES: Record<MemoryModelProfile, RuntimeMemoryLlmModels> =
+  {
+    cheap: {
+      extractor: DEFAULT_MODEL_HAIKU,
+      dreaming: DEFAULT_MODEL_HAIKU,
+      consolidation: DEFAULT_MODEL_HAIKU,
+      sessionSummary: DEFAULT_MODEL_HAIKU,
+    },
+    balanced: {
+      extractor: DEFAULT_MODEL_HAIKU,
+      dreaming: DEFAULT_MODEL_SONNET,
+      consolidation: DEFAULT_MODEL_SONNET,
+      sessionSummary: DEFAULT_MODEL_HAIKU,
+    },
+    quality: {
+      extractor: DEFAULT_MODEL_SONNET,
+      dreaming: DEFAULT_MODEL_SONNET,
+      consolidation: DEFAULT_MODEL_SONNET,
+      sessionSummary: DEFAULT_MODEL_SONNET,
+    },
+  };
+
+export function getMemoryModelProfileDefaults(
+  profile: MemoryModelProfile,
+): RuntimeMemoryLlmModels {
+  const selected = MEMORY_MODEL_PROFILES[profile];
+  return {
+    extractor: selected.extractor,
+    dreaming: selected.dreaming,
+    consolidation: selected.consolidation,
+    sessionSummary: selected.sessionSummary,
+  };
+}
 
 function unquote(value: string): string {
   const trimmed = value.trim();
@@ -356,6 +408,42 @@ function parseEmbeddingProvider(
   return raw as EmbeddingProviderName;
 }
 
+function parseMemoryLlmModels(
+  raw: unknown,
+  pathPrefix: string,
+): RuntimeMemoryLlmModels {
+  const defaults = getMemoryModelProfileDefaults('balanced');
+  if (raw === undefined) {
+    return defaults;
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${pathPrefix} must be a mapping`);
+  }
+  const map = raw as Record<string, unknown>;
+  return {
+    extractor: parseStringValue(
+      map.extractor,
+      `${pathPrefix}.extractor`,
+      defaults.extractor,
+    ),
+    dreaming: parseStringValue(
+      map.dreaming,
+      `${pathPrefix}.dreaming`,
+      defaults.dreaming,
+    ),
+    consolidation: parseStringValue(
+      map.consolidation,
+      `${pathPrefix}.consolidation`,
+      defaults.consolidation,
+    ),
+    sessionSummary: parseStringValue(
+      map.session_summary ?? map.sessionSummary,
+      `${pathPrefix}.session_summary`,
+      defaults.sessionSummary,
+    ),
+  };
+}
+
 function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error('memory must be a mapping');
@@ -372,7 +460,7 @@ function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
   }
   const dreamingRaw = map.dreaming;
   if (
-    typeof dreamingRaw !== 'object' ||
+    (dreamingRaw !== undefined && typeof dreamingRaw !== 'object') ||
     dreamingRaw === null ||
     Array.isArray(dreamingRaw)
   ) {
@@ -380,7 +468,15 @@ function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
   }
 
   const embeddingsMap = embeddingsRaw as Record<string, unknown>;
-  const dreamingMap = dreamingRaw as Record<string, unknown>;
+  const dreamingMap = (dreamingRaw || {}) as Record<string, unknown>;
+  const llmRaw = map.llm;
+  if (
+    llmRaw !== undefined &&
+    (typeof llmRaw !== 'object' || llmRaw === null || Array.isArray(llmRaw))
+  ) {
+    throw new Error('memory.llm must be a mapping');
+  }
+  const llmMap = (llmRaw || {}) as Record<string, unknown>;
   const enabled = parseBooleanValue(map.enabled, 'memory.enabled');
   const provider = parseMemoryProvider(map.provider, 'memory.provider');
   const embeddingsEnabled = parseBooleanValue(
@@ -418,7 +514,11 @@ function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
       enabled: parseBooleanValue(
         dreamingMap.enabled,
         'memory.dreaming.enabled',
+        false,
       ),
+    },
+    llm: {
+      models: parseMemoryLlmModels(llmMap.models, 'memory.llm.models'),
     },
   };
 }
@@ -561,6 +661,12 @@ function renderMemorySettingsYaml(
     `    model: ${quoteYamlString(memory.embeddings.model)}`,
     '  dreaming:',
     `    enabled: ${memory.dreaming.enabled ? 'true' : 'false'}`,
+    '  llm:',
+    '    models:',
+    `      extractor: ${quoteYamlString(memory.llm.models.extractor)}`,
+    `      dreaming: ${quoteYamlString(memory.llm.models.dreaming)}`,
+    `      consolidation: ${quoteYamlString(memory.llm.models.consolidation)}`,
+    `      session_summary: ${quoteYamlString(memory.llm.models.sessionSummary)}`,
     '',
   );
 }
@@ -635,6 +741,9 @@ function createDefaultRuntimeSettings(): RuntimeSettings {
     dreaming: {
       enabled: false,
     },
+    llm: {
+      models: getMemoryModelProfileDefaults('balanced'),
+    },
   };
   return {
     channels: {
@@ -647,6 +756,13 @@ function createDefaultRuntimeSettings(): RuntimeSettings {
 
 export function createDefaultRuntimeSettingsForTest(): RuntimeSettings {
   return createDefaultRuntimeSettings();
+}
+
+export function applyMemoryModelProfile(
+  settings: RuntimeSettings,
+  profile: MemoryModelProfile,
+): void {
+  settings.memory.llm.models = getMemoryModelProfileDefaults(profile);
 }
 
 export function parseRuntimeSettingsText(raw: string): RuntimeSettings {

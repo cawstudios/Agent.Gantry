@@ -66,6 +66,7 @@ function makeFakeProvider(name: string): MemoryProvider {
     listSourceChunks: () => [],
     applyRetentionPolicies: () => undefined,
     recordEvent: () => undefined,
+    getLatestEvent: () => null,
   };
 }
 
@@ -134,6 +135,30 @@ describe('memory provider registry', () => {
     expect(fs.existsSync(path.join(root, 'procedures', `${proc.id}.md`))).toBe(
       true,
     );
+  });
+
+  it('qmd provider removes mirrored memory markdown on soft delete', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-qmd-'));
+    tempRoots.push(root);
+    AgentMemoryRootService.setRootForTests(root);
+
+    const provider = createMemoryProvider('qmd');
+    const item = provider.saveItem({
+      scope: 'group',
+      group_folder: 'team',
+      user_id: null,
+      kind: 'fact',
+      key: 'delete-me',
+      value: 'this should be removed',
+      source: 'agent',
+      confidence: 0.8,
+    });
+    const mirrorPath = path.join(root, 'profile', `${item.id}.md`);
+    expect(fs.existsSync(mirrorPath)).toBe(true);
+
+    provider.softDeleteItem(item.id);
+    expect(fs.existsSync(mirrorPath)).toBe(false);
+    provider.close();
   });
 
   it('qmd provider records events in journal', () => {

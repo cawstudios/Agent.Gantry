@@ -221,6 +221,74 @@ function archiveIpcErrorFile(
   }
 }
 
+interface IpcRootLockDetails {
+  pid?: number;
+  startedAt?: string;
+}
+
+function readIpcRootLockDetails(lockPath: string): IpcRootLockDetails {
+  try {
+    const raw = fs.readFileSync(lockPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (!isPlainObject(parsed)) return {};
+    const pidRaw = parsed.pid;
+    const pid =
+      typeof pidRaw === 'number' && Number.isInteger(pidRaw) && pidRaw > 0
+        ? pidRaw
+        : undefined;
+    const startedAt = toTrimmedString(parsed.startedAt, { maxLen: 128 });
+    return { pid, startedAt };
+  } catch {
+    return {};
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    const code =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: string }).code)
+        : '';
+    if (code === 'ESRCH') return false;
+    if (code === 'EPERM') return true;
+    logger.warn(
+      { err, pid },
+      'Unable to validate IPC lock PID liveness, assuming process is active',
+    );
+    return true;
+  }
+}
+
+function recoverStaleIpcRootLock(
+  lockPath: string,
+): IpcRootLockDetails & { recovered: boolean; recoveryReason?: string } {
+  const details = readIpcRootLockDetails(lockPath);
+  if (typeof details.pid !== 'number') {
+    return {
+      ...details,
+      recovered: false,
+      recoveryReason: 'invalid_or_missing_pid',
+    };
+  }
+  if (details.pid === process.pid) {
+    return { ...details, recovered: false, recoveryReason: 'same_process' };
+  }
+  if (isProcessAlive(details.pid)) {
+    return { ...details, recovered: false, recoveryReason: 'pid_alive' };
+  }
+  const recoveryReason = 'pid_not_running';
+  try {
+    fs.rmSync(lockPath, { force: true });
+    return { ...details, recovered: true, recoveryReason };
+  } catch (err) {
+    logger.warn({ err, lockPath }, 'Failed to remove stale IPC watcher lock');
+    return { ...details, recovered: false, recoveryReason: 'remove_failed' };
+  }
+}
+
 function acquireIpcRootLock(ipcBaseDir: string): string {
   const lockPath = path.join(ipcBaseDir, '.lock');
   fs.writeFileSync(
@@ -627,15 +695,59 @@ export function startIpcWatcher(deps: IpcDeps): void {
   try {
     ipcRootLockPath = acquireIpcRootLock(ipcBaseDir);
   } catch (err) {
+    const lockPath = path.join(ipcBaseDir, '.lock');
     const code =
       err && typeof err === 'object' && 'code' in err
         ? String((err as { code?: string }).code)
         : '';
     if (code === 'EEXIST') {
-      logger.warn('IPC watcher lock already held, skipping start');
-      return;
+      const recoveredLock = recoverStaleIpcRootLock(lockPath);
+      if (!recoveredLock.recovered) {
+        logger.warn(
+          {
+            lockPath,
+            holderPid: recoveredLock.pid,
+            holderStartedAt: recoveredLock.startedAt,
+            reason: recoveredLock.recoveryReason,
+          },
+          'IPC watcher lock already held, skipping start',
+        );
+        return;
+      }
+      logger.warn(
+        {
+          lockPath,
+          holderPid: recoveredLock.pid,
+          holderStartedAt: recoveredLock.startedAt,
+          reason: recoveredLock.recoveryReason,
+        },
+        'Recovered stale IPC watcher lock; retrying start',
+      );
+      try {
+        ipcRootLockPath = acquireIpcRootLock(ipcBaseDir);
+      } catch (retryErr) {
+        const retryCode =
+          retryErr && typeof retryErr === 'object' && 'code' in retryErr
+            ? String((retryErr as { code?: string }).code)
+            : '';
+        if (retryCode === 'EEXIST') {
+          const retryDetails = readIpcRootLockDetails(lockPath);
+          logger.warn(
+            {
+              lockPath,
+              holderPid: retryDetails.pid,
+              holderStartedAt: retryDetails.startedAt,
+              reason: 'reacquire_raced',
+            },
+            'IPC watcher lock already held, skipping start',
+          );
+          return;
+        }
+        throw retryErr;
+      }
+    } else {
+      throw err;
     }
-    throw err;
   }
   ipcWatcherRunning = true;
   const initializedLayoutFolders = new Set<string>();

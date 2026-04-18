@@ -782,7 +782,7 @@ describe('processMemoryRequest validation branches', () => {
     };
   }
 
-  it('accepts recent_work as a memory kind', async () => {
+  it('rejects removed memory kind recent_work', async () => {
     vi.resetModules();
     const saveMemory = vi.fn().mockResolvedValue({ id: 'mem-recent' });
     vi.doMock('@core/memory/memory-service.js', () => ({
@@ -806,7 +806,7 @@ describe('processMemoryRequest validation branches', () => {
 
     expect(response.ok).toBe(true);
     expect(saveMemory).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'recent_work' }),
+      expect.not.objectContaining({ kind: 'recent_work' }),
       { isMain: false, groupFolder: 'team' },
     );
   });

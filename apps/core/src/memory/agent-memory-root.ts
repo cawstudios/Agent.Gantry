@@ -22,6 +22,12 @@ export interface AgentMemoryLayout {
   cacheDir: string;
 }
 
+export interface LatestSessionRecap {
+  filePath: string;
+  summary: string;
+  openLoops: string;
+}
+
 function ensureWithinBase(baseDir: string, resolvedPath: string): void {
   const relative = path.relative(baseDir, resolvedPath);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
@@ -168,6 +174,17 @@ export class AgentMemoryRootService {
     return filePath;
   }
 
+  deleteMemoryItem(id: string): void {
+    const filePath = this.resolveWithinRoot(
+      path.join(this.layout.profileDir, `${sanitizeSegment(id, 'memory')}.md`),
+    );
+    try {
+      fs.rmSync(filePath, { force: true });
+    } catch {
+      // Best effort cleanup.
+    }
+  }
+
   writeProcedure(procedure: MemoryProcedure): string {
     const filePath = this.resolveWithinRoot(
       path.join(
@@ -196,6 +213,20 @@ export class AgentMemoryRootService {
     ];
     writeFileAtomic(filePath, lines.join('\n'));
     return filePath;
+  }
+
+  deleteProcedure(id: string): void {
+    const filePath = this.resolveWithinRoot(
+      path.join(
+        this.layout.proceduresDir,
+        `${sanitizeSegment(id, 'procedure')}.md`,
+      ),
+    );
+    try {
+      fs.rmSync(filePath, { force: true });
+    } catch {
+      // Best effort cleanup.
+    }
   }
 
   writeSessionSummary(input: {
@@ -237,6 +268,16 @@ export class AgentMemoryRootService {
     return filePath;
   }
 
+  getLatestSessionRecap(groupFolder: string): LatestSessionRecap | null {
+    const files = this.listMarkdownFiles(this.layout.sessionsDir);
+    const sorted = files.sort((a, b) => b.localeCompare(a));
+    for (const filePath of sorted) {
+      const recap = this.parseSessionRecapFile(filePath, groupFolder);
+      if (recap) return recap;
+    }
+    return null;
+  }
+
   private ensureLayout(): void {
     fs.mkdirSync(this.layout.root, { recursive: true });
     const dirs = [
@@ -252,6 +293,70 @@ export class AgentMemoryRootService {
       const resolved = this.resolveWithinRoot(dir);
       fs.mkdirSync(resolved, { recursive: true });
     }
+  }
+
+  private listMarkdownFiles(root: string): string[] {
+    if (!fs.existsSync(root)) return [];
+    const out: string[] = [];
+    const stack = [root];
+    while (stack.length > 0) {
+      const dir = stack.pop();
+      if (!dir) break;
+      let entries: fs.Dirent[] = [];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(full);
+          continue;
+        }
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+          out.push(full);
+        }
+      }
+    }
+    return out;
+  }
+
+  private parseSessionRecapFile(
+    filePath: string,
+    groupFolder: string,
+  ): LatestSessionRecap | null {
+    let content = '';
+    try {
+      content = fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+    const normalized = content.replace(/\r\n/g, '\n');
+    const groupMatch = normalized.match(/^group_folder:\s*(.+)$/m);
+    if (!groupMatch || groupMatch[1]?.trim() !== groupFolder) {
+      return null;
+    }
+    const body = normalized.replace(/^---[\s\S]*?---\n?/, '');
+    const summary = this.extractSection(body, 'Summary');
+    const openLoops = this.extractSection(body, 'Open loops');
+    if (!summary && !openLoops) return null;
+    return {
+      filePath,
+      summary: summary || 'No summary available.',
+      openLoops: openLoops || 'No open loops recorded.',
+    };
+  }
+
+  private extractSection(markdown: string, heading: string): string {
+    const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const sectionRegex = new RegExp(
+      `^##\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=^##\\s+|\\s*$)`,
+      'im',
+    );
+    const match = markdown.match(sectionRegex);
+    if (!match) return '';
+    return match[1]!.trim();
   }
 
   private resolveWithinRoot(targetPath: string): string {

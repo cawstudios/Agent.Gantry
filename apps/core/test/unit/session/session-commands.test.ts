@@ -154,6 +154,31 @@ describe('extractSessionCommand', () => {
     });
   });
 
+  it('detects /dream and /memory-status', () => {
+    expect(extractSessionCommand('/dream', trigger)).toEqual({
+      kind: 'dream',
+      raw: '/dream',
+    });
+    expect(extractSessionCommand('/memory-status', trigger)).toEqual({
+      kind: 'memory_status',
+      raw: '/memory-status',
+    });
+  });
+
+  it('detects /save-procedure with quoted title and body', () => {
+    expect(
+      extractSessionCommand(
+        '/save-procedure "Deploy flow"\n1. Build\n2. Ship',
+        trigger,
+      ),
+    ).toEqual({
+      kind: 'save_procedure',
+      raw: '/save-procedure "Deploy flow"\n1. Build\n2. Ship',
+      title: 'Deploy flow',
+      body: '1. Build\n2. Ship',
+    });
+  });
+
   it('rejects /stop with extra text', () => {
     expect(extractSessionCommand('/stop now', trigger)).toBeNull();
   });
@@ -332,6 +357,79 @@ describe('handleSessionCommand', () => {
     });
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.sendMessage).toHaveBeenCalledWith('No active run to stop.');
+  });
+
+  it('handles /dream by invoking memory dreaming dependency', async () => {
+    const deps = makeDeps({
+      runMemoryDreaming: vi.fn().mockResolvedValue({
+        promotedCount: 2,
+        retiredCount: 1,
+      }),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/dream')],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.runMemoryDreaming).toHaveBeenCalledTimes(1);
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Dreaming completed.'),
+    );
+  });
+
+  it('handles /memory-status by formatting status output', async () => {
+    const deps = makeDeps({
+      getMemoryStatus: vi.fn().mockResolvedValue({
+        items_by_kind: { fact: 3 },
+        items_by_scope: { group: 3 },
+        top10_most_used: [{ key: 'fact:key', retrieval_count: 12 }],
+        top10_stalest: [
+          { key: 'fact:key', updated_at: '2026-04-01T00:00:00Z' },
+        ],
+        disk_kb: { profile: 10, procedures: 2, sessions: 5, journal: 1 },
+      }),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/memory-status')],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.getMemoryStatus).toHaveBeenCalledTimes(1);
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Memory status'),
+    );
+  });
+
+  it('handles /save-procedure by saving explicit procedure content', async () => {
+    const deps = makeDeps({
+      saveProcedure: vi.fn().mockResolvedValue({ id: 'proc-1' }),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [
+        makeMsg('/save-procedure "Deploy flow"\n1. Build\n2. Ship'),
+      ],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.saveProcedure).toHaveBeenCalledWith({
+      title: 'Deploy flow',
+      body: '1. Build\n2. Ship',
+    });
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Saved procedure "Deploy flow"'),
+    );
   });
 
   it('sends denial to interactable sender in non-main group', async () => {

@@ -10,6 +10,10 @@ export interface RuntimeMemorySettingsSnapshot {
   embeddingProvider?: string;
   embeddingModel?: string;
   dreamingEnabled?: boolean;
+  llmExtractorModel?: string;
+  llmDreamingModel?: string;
+  llmConsolidationModel?: string;
+  llmSessionSummaryModel?: string;
 }
 
 function stripQuotes(value: string): string {
@@ -101,6 +105,8 @@ export function readRuntimeMemorySettingsSnapshot(
   const memoryBlock = readIndentedBlock(lines, memoryIndex, 0);
   const embeddingsBlock = readNestedBlock(memoryBlock, 'embeddings', 2);
   const dreamingBlock = readNestedBlock(memoryBlock, 'dreaming', 2);
+  const llmBlock = readNestedBlock(memoryBlock, 'llm', 2);
+  const llmModelsBlock = readNestedBlock(llmBlock, 'models', 4);
 
   return {
     enabled: booleanValue(readKeyValue(memoryBlock, 'enabled', 2)),
@@ -115,5 +121,14 @@ export function readRuntimeMemorySettingsSnapshot(
     ),
     embeddingModel: stringValue(readKeyValue(embeddingsBlock, 'model', 4)),
     dreamingEnabled: booleanValue(readKeyValue(dreamingBlock, 'enabled', 4)),
+    llmExtractorModel: stringValue(readKeyValue(llmModelsBlock, 'extractor', 6)),
+    llmDreamingModel: stringValue(readKeyValue(llmModelsBlock, 'dreaming', 6)),
+    llmConsolidationModel: stringValue(
+      readKeyValue(llmModelsBlock, 'consolidation', 6),
+    ),
+    llmSessionSummaryModel: stringValue(
+      readKeyValue(llmModelsBlock, 'session_summary', 6) ||
+        readKeyValue(llmModelsBlock, 'sessionSummary', 6),
+    ),
   };
 }

@@ -514,7 +514,7 @@ describe('createGroupProcessor', () => {
       );
     });
 
-    it('does not send empty messages after stripping internal tags', async () => {
+    it('sends fallback notice when agent output is fully internal', async () => {
       const agentOutput: AgentOutput = {
         status: 'success',
         result: '<internal>all internal</internal>',
@@ -524,7 +524,10 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(channel.sendMessage).not.toHaveBeenCalled();
+      expect(channel.sendMessage).toHaveBeenCalledWith(
+        'group1@g.us',
+        'I finished that run but did not generate a user-visible reply. Please send your message again.',
+      );
     });
 
     it('calls setTyping true before and false after agent run', async () => {

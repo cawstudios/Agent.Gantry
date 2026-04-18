@@ -18,6 +18,7 @@ import { envFilePath, ensureRuntimeWritable } from './runtime-home.js';
 import { ensureRuntimeSettings, RuntimeSettings } from './runtime-settings.js';
 import { validateTelegramBotToken } from './telegram.js';
 import { inspectMemoryHealth } from './memory-health.js';
+import { resolveClaudeAuthState } from '../core/config.js';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 
@@ -367,6 +368,10 @@ export function runDoctor(
 
   const envPath = envFilePath(runtimeHome);
   const env = readEnvFile(envPath);
+  const claudeAuth = resolveClaudeAuthState({
+    oauthToken: env.CLAUDE_CODE_OAUTH_TOKEN,
+    apiKey: env.ANTHROPIC_API_KEY,
+  });
 
   const hasTelegramToken = Boolean(env.TELEGRAM_BOT_TOKEN?.trim());
   if (!telegramEnabled) {
@@ -430,6 +435,19 @@ export function runDoctor(
     status: memoryHealth.embeddingProviderCheck.status,
     message: `${memoryHealth.embeddingProvider} (source: ${memoryHealth.embeddingProviderSource}): ${memoryHealth.embeddingProviderCheck.message}`,
     nextAction: memoryHealth.embeddingProviderCheck.nextAction,
+  });
+  add(checks, {
+    id: 'claude-auth',
+    title: 'Claude Auth',
+    status: claudeAuth.mode !== 'none' ? 'pass' : 'warn',
+    message:
+      claudeAuth.mode !== 'none'
+        ? `Claude auth is configured (oauth=${claudeAuth.hasOauthToken ? 'present' : 'missing'}, api_key=${claudeAuth.hasApiKey ? 'present' : 'missing'}, mode=${claudeAuth.mode}).`
+        : 'Claude auth is missing. Memory LLM extraction/review paths will fallback.',
+    nextAction:
+      claudeAuth.mode !== 'none'
+        ? undefined
+        : 'Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in .env, then rerun `myclaw doctor`.',
   });
 
   if (telegramEnabled) {

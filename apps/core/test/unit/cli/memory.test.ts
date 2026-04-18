@@ -74,4 +74,57 @@ describe('memory CLI commands', () => {
     expect(updated.memory.provider).toBe('sqlite');
     expect(updated.memory.dreaming.enabled).toBe(true);
   });
+
+  it('sets a per-task memory model override', async () => {
+    const code = await runMemoryCommand(runtimeHome, [
+      'model',
+      'set',
+      'dreaming',
+      'claude-haiku-4-5-20251001',
+    ]);
+    expect(code).toBe(0);
+
+    const updated = loadRuntimeSettings(runtimeHome);
+    expect(updated.memory.llm.models.dreaming).toBe(
+      'claude-haiku-4-5-20251001',
+    );
+  });
+
+  it('applies the cheap model profile across all memory tasks', async () => {
+    const code = await runMemoryCommand(runtimeHome, [
+      'model',
+      'profile',
+      'cheap',
+    ]);
+    expect(code).toBe(0);
+
+    const updated = loadRuntimeSettings(runtimeHome);
+    expect(updated.memory.llm.models.extractor).toBe(
+      'claude-haiku-4-5-20251001',
+    );
+    expect(updated.memory.llm.models.dreaming).toBe(
+      'claude-haiku-4-5-20251001',
+    );
+    expect(updated.memory.llm.models.consolidation).toBe(
+      'claude-haiku-4-5-20251001',
+    );
+    expect(updated.memory.llm.models.sessionSummary).toBe(
+      'claude-haiku-4-5-20251001',
+    );
+  });
+
+  it('applies the quality model profile across all memory tasks', async () => {
+    const code = await runMemoryCommand(runtimeHome, [
+      'model',
+      'profile',
+      'quality',
+    ]);
+    expect(code).toBe(0);
+
+    const updated = loadRuntimeSettings(runtimeHome);
+    expect(updated.memory.llm.models.extractor).toBe('claude-sonnet-4-6');
+    expect(updated.memory.llm.models.dreaming).toBe('claude-sonnet-4-6');
+    expect(updated.memory.llm.models.consolidation).toBe('claude-sonnet-4-6');
+    expect(updated.memory.llm.models.sessionSummary).toBe('claude-sonnet-4-6');
+  });
 });

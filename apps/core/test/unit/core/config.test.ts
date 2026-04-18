@@ -162,29 +162,194 @@ async function loadConfigWithAllEnvAndRuntimeSnapshot(
   return import('@core/core/config.js');
 }
 
+describe('memory model defaults', () => {
+  it('falls back to ANTHROPIC_MODEL when runtime model is unset', async () => {
+    const cfg = await loadConfigWithAllEnv({
+      ANTHROPIC_MODEL: 'claude-opus-4-1-20250805',
+    });
+    expect(cfg.MODEL_CONSOLIDATION).toBe('claude-opus-4-1-20250805');
+  });
+
+  it('prefers runtime per-task model over ANTHROPIC_MODEL', async () => {
+    const cfg = await loadConfigWithAllEnvAndRuntimeSnapshot(
+      {
+        ANTHROPIC_MODEL: 'claude-opus-4-1-20250805',
+      },
+      {
+        llmConsolidationModel: 'claude-sonnet-4-6-20260301',
+      },
+    );
+    expect(cfg.MODEL_CONSOLIDATION).toBe('claude-sonnet-4-6-20260301');
+  });
+
+  it('uses hard defaults when no runtime model or ANTHROPIC_MODEL is set', async () => {
+    const cfg = await loadConfigWithAllEnvAndRuntimeSnapshot(
+      {
+        ANTHROPIC_MODEL: undefined,
+      },
+      {},
+    );
+    expect(cfg.MODEL_EXTRACTOR).toBe('claude-haiku-4-5-20251001');
+    expect(cfg.MODEL_DREAMING).toBe('claude-sonnet-4-6');
+    expect(cfg.MODEL_CONSOLIDATION).toBe('claude-sonnet-4-6');
+    expect(cfg.MODEL_SESSION_SUMMARY).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('enables LLM when CLAUDE_CODE_OAUTH_TOKEN is set', async () => {
+    const cfg = await loadConfigWithAllEnv({
+      CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+    });
+    expect(cfg.LLM_ENABLED).toBe(true);
+  });
+
+  it('disables LLM when CLAUDE_CODE_OAUTH_TOKEN is missing', async () => {
+    const cfg = await loadConfigWithAllEnv({
+      CLAUDE_CODE_OAUTH_TOKEN: undefined,
+      ANTHROPIC_API_KEY: undefined,
+    });
+    expect(cfg.LLM_ENABLED).toBe(false);
+  });
+
+  it('enables LLM when ANTHROPIC_API_KEY is set', async () => {
+    const cfg = await loadConfigWithAllEnv({
+      CLAUDE_CODE_OAUTH_TOKEN: undefined,
+      ANTHROPIC_API_KEY: 'sk-ant-test',
+    });
+    expect(cfg.LLM_ENABLED).toBe(true);
+  });
+
+  it('resolves Claude auth mode with OAuth precedence over API key', async () => {
+    const cfg = await loadConfigWithAllEnv({
+      CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+      ANTHROPIC_API_KEY: 'sk-ant-test',
+    });
+    expect(cfg.resolveClaudeAuthState().mode).toBe('oauth');
+    expect(cfg.resolveClaudeAuthState().hasOauthToken).toBe(true);
+    expect(cfg.resolveClaudeAuthState().hasApiKey).toBe(true);
+  });
+
+  it('uses runtime mixed-task model snapshot values', async () => {
+    const cfg = await loadConfigWithAllEnvAndRuntimeSnapshot(
+      {
+        ANTHROPIC_MODEL: undefined,
+      },
+      {
+        llmExtractorModel: 'claude-haiku-4-5-20251001',
+        llmDreamingModel: 'claude-sonnet-4-6',
+        llmConsolidationModel: 'claude-sonnet-4-6',
+        llmSessionSummaryModel: 'claude-haiku-4-5-20251001',
+      },
+    );
+    expect(cfg.MODEL_EXTRACTOR).toBe('claude-haiku-4-5-20251001');
+    expect(cfg.MODEL_DREAMING).toBe('claude-sonnet-4-6');
+    expect(cfg.MODEL_CONSOLIDATION).toBe('claude-sonnet-4-6');
+    expect(cfg.MODEL_SESSION_SUMMARY).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('uses ANTHROPIC_MODEL as shared fallback for all tasks', async () => {
+    const cfg = await loadConfigWithAllEnvAndRuntimeSnapshot(
+      {
+        ANTHROPIC_MODEL: 'claude-opus-4-1-20250805',
+      },
+      {},
+    );
+    expect(cfg.MODEL_EXTRACTOR).toBe('claude-opus-4-1-20250805');
+    expect(cfg.MODEL_DREAMING).toBe('claude-opus-4-1-20250805');
+    expect(cfg.MODEL_CONSOLIDATION).toBe('claude-opus-4-1-20250805');
+    expect(cfg.MODEL_SESSION_SUMMARY).toBe('claude-opus-4-1-20250805');
+  });
+
+  it('trims CLAUDE_CODE_OAUTH_TOKEN before enabling LLM', async () => {
+    const cfg = await loadConfigWithAllEnv({
+      CLAUDE_CODE_OAUTH_TOKEN: '  token  ',
+    });
+    expect(cfg.CLAUDE_OAUTH_TOKEN).toBe('token');
+    expect(cfg.LLM_ENABLED).toBe(true);
+  });
+
+  it('falls back to hard defaults when runtime model is blank', async () => {
+    const cfg = await loadConfigWithAllEnvAndRuntimeSnapshot(
+      {
+        ANTHROPIC_MODEL: undefined,
+      },
+      {
+        llmExtractorModel: '   ',
+      },
+    );
+    expect(cfg.MODEL_EXTRACTOR).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('prefers runtime dreaming model over ANTHROPIC_MODEL', async () => {
+    const cfg = await loadConfigWithAllEnvAndRuntimeSnapshot(
+      {
+        ANTHROPIC_MODEL: 'claude-opus-4-1-20250805',
+      },
+      {
+        llmDreamingModel: 'claude-sonnet-4-6',
+      },
+    );
+    expect(cfg.MODEL_DREAMING).toBe('claude-sonnet-4-6');
+  });
+
+  it('prefers runtime session summary model over ANTHROPIC_MODEL', async () => {
+    const cfg = await loadConfigWithAllEnvAndRuntimeSnapshot(
+      {
+        ANTHROPIC_MODEL: 'claude-opus-4-1-20250805',
+      },
+      {
+        llmSessionSummaryModel: 'claude-haiku-4-5-20251001',
+      },
+    );
+    expect(cfg.MODEL_SESSION_SUMMARY).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('prefers runtime extractor model over ANTHROPIC_MODEL', async () => {
+    const cfg = await loadConfigWithAllEnvAndRuntimeSnapshot(
+      {
+        ANTHROPIC_MODEL: 'claude-opus-4-1-20250805',
+      },
+      {
+        llmExtractorModel: 'claude-haiku-4-5-20251001',
+      },
+    );
+    expect(cfg.MODEL_EXTRACTOR).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('prefers runtime consolidation model over ANTHROPIC_MODEL', async () => {
+    const cfg = await loadConfigWithAllEnvAndRuntimeSnapshot(
+      {
+        ANTHROPIC_MODEL: 'claude-opus-4-1-20250805',
+      },
+      {
+        llmConsolidationModel: 'claude-sonnet-4-6',
+      },
+    );
+    expect(cfg.MODEL_CONSOLIDATION).toBe('claude-sonnet-4-6');
+  });
+});
+
 // --- Coverage for parseBooleanEnv: all branches ---
 
 describe('parseBooleanEnv all branches', () => {
   it('returns true for recognized truthy value "1"', async () => {
-    // MEMORY_CONSOLIDATION_ENABLED defaults to false; override to '1'
     const cfg = await loadConfigWithAllEnv({
-      MEMORY_CONSOLIDATION_ENABLED: '1',
+      MEMORY_SEMANTIC_DEDUP_ENABLED: '1',
     });
-    expect(cfg.MEMORY_CONSOLIDATION_ENABLED).toBe(true);
+    expect(cfg.MEMORY_SEMANTIC_DEDUP_ENABLED).toBe(true);
   });
 
   it('returns true for recognized truthy value "true"', async () => {
     const cfg = await loadConfigWithAllEnv({
-      MEMORY_CONSOLIDATION_ENABLED: 'true',
+      MEMORY_SEMANTIC_DEDUP_ENABLED: 'true',
     });
-    expect(cfg.MEMORY_CONSOLIDATION_ENABLED).toBe(true);
+    expect(cfg.MEMORY_SEMANTIC_DEDUP_ENABLED).toBe(true);
   });
 
   it('returns true for recognized truthy value "yes"', async () => {
     const cfg = await loadConfigWithAllEnv({
-      MEMORY_CONSOLIDATION_ENABLED: 'YES',
+      MEMORY_SEMANTIC_DEDUP_ENABLED: 'YES',
     });
-    expect(cfg.MEMORY_CONSOLIDATION_ENABLED).toBe(true);
+    expect(cfg.MEMORY_SEMANTIC_DEDUP_ENABLED).toBe(true);
   });
 
   it('returns false for recognized falsy value "0"', async () => {
@@ -216,11 +381,11 @@ describe('parseBooleanEnv all branches', () => {
     expect(cfg.MEMORY_SEMANTIC_DEDUP_ENABLED).toBe(true);
   });
 
-  it('returns fallback (false) when env value is unrecognized for a false-default field', async () => {
+  it('returns fallback (true) when env value is unrecognized for a true-default field', async () => {
     const cfg = await loadConfigWithAllEnv({
-      MEMORY_CONSOLIDATION_ENABLED: 'sometimes',
+      MEMORY_SEMANTIC_DEDUP_ENABLED: 'sometimes',
     });
-    expect(cfg.MEMORY_CONSOLIDATION_ENABLED).toBe(false);
+    expect(cfg.MEMORY_SEMANTIC_DEDUP_ENABLED).toBe(true);
   });
 });
 
@@ -324,12 +489,9 @@ describe('config env overrides for branch coverage', () => {
       MEMORY_CONFIDENCE_BOOST_ON_USE: '0.05',
       MEMORY_CONFIDENCE_DECAY_ON_UNUSED: '0.03',
       MEMORY_USAGE_DECAY_INTERVAL_TURNS: '10',
-      MEMORY_CONSOLIDATION_ENABLED: 'true',
       MEMORY_CONSOLIDATION_MIN_ITEMS: '100',
       MEMORY_CONSOLIDATION_CLUSTER_THRESHOLD: '0.9',
-      MEMORY_CONSOLIDATION_MODEL: 'test-model',
       MEMORY_CONSOLIDATION_MAX_CLUSTERS: '20',
-      MEMORY_DREAMING_ENABLED: 'true',
       MEMORY_DREAMING_CRON: '0 4 * * *',
       MEMORY_DREAMING_PROMOTION_THRESHOLD: '0.6',
       MEMORY_DREAMING_DECAY_THRESHOLD: '0.2',
@@ -346,6 +508,7 @@ describe('config env overrides for branch coverage', () => {
       AGENT_TIMEOUT: '3600000',
       AGENT_MAX_OUTPUT_SIZE: '20971520',
       ONECLI_URL: 'http://test-onecli',
+      ANTHROPIC_MODEL: 'test-model',
       MAX_MESSAGES_PER_PROMPT: '20',
       IDLE_TIMEOUT: '900000',
       MAX_CONCURRENT_CONTAINERS: '10',
@@ -380,12 +543,11 @@ describe('config env overrides for branch coverage', () => {
     expect(cfg.MEMORY_CONFIDENCE_BOOST_ON_USE).toBe(0.05);
     expect(cfg.MEMORY_CONFIDENCE_DECAY_ON_UNUSED).toBe(0.03);
     expect(cfg.MEMORY_USAGE_DECAY_INTERVAL_TURNS).toBe(10);
-    expect(cfg.MEMORY_CONSOLIDATION_ENABLED).toBe(true);
     expect(cfg.MEMORY_CONSOLIDATION_MIN_ITEMS).toBe(100);
     expect(cfg.MEMORY_CONSOLIDATION_CLUSTER_THRESHOLD).toBe(0.9);
-    expect(cfg.MEMORY_CONSOLIDATION_MODEL).toBe('test-model');
+    expect(cfg.MODEL_CONSOLIDATION).toBe('test-model');
     expect(cfg.MEMORY_CONSOLIDATION_MAX_CLUSTERS).toBe(20);
-    expect(cfg.MEMORY_DREAMING_ENABLED).toBe(false);
+    expect(cfg.RUNTIME_MEMORY_DREAMING_ENABLED).toBe(false);
     expect(cfg.MEMORY_DREAMING_CRON).toBe('0 4 * * *');
     expect(cfg.MEMORY_DREAMING_PROMOTION_THRESHOLD).toBe(0.6);
     expect(cfg.MEMORY_DREAMING_DECAY_THRESHOLD).toBe(0.2);
@@ -442,12 +604,10 @@ describe('config env overrides for branch coverage', () => {
       'MEMORY_CONFIDENCE_BOOST_ON_USE',
       'MEMORY_CONFIDENCE_DECAY_ON_UNUSED',
       'MEMORY_USAGE_DECAY_INTERVAL_TURNS',
-      'MEMORY_CONSOLIDATION_ENABLED',
       'MEMORY_CONSOLIDATION_MIN_ITEMS',
       'MEMORY_CONSOLIDATION_CLUSTER_THRESHOLD',
       'MEMORY_CONSOLIDATION_MODEL',
       'MEMORY_CONSOLIDATION_MAX_CLUSTERS',
-      'MEMORY_DREAMING_ENABLED',
       'MEMORY_DREAMING_CRON',
       'MEMORY_DREAMING_PROMOTION_THRESHOLD',
       'MEMORY_DREAMING_DECAY_THRESHOLD',
@@ -503,12 +663,9 @@ describe('config env overrides for branch coverage', () => {
         MEMORY_CONFIDENCE_BOOST_ON_USE: '0.04',
         MEMORY_CONFIDENCE_DECAY_ON_UNUSED: '0.02',
         MEMORY_USAGE_DECAY_INTERVAL_TURNS: '15',
-        MEMORY_CONSOLIDATION_ENABLED: 'true',
         MEMORY_CONSOLIDATION_MIN_ITEMS: '75',
         MEMORY_CONSOLIDATION_CLUSTER_THRESHOLD: '0.85',
-        MEMORY_CONSOLIDATION_MODEL: 'env-model',
         MEMORY_CONSOLIDATION_MAX_CLUSTERS: '15',
-        MEMORY_DREAMING_ENABLED: 'true',
         MEMORY_DREAMING_CRON: '0 2 * * *',
         MEMORY_DREAMING_PROMOTION_THRESHOLD: '0.65',
         MEMORY_DREAMING_DECAY_THRESHOLD: '0.1',
@@ -542,8 +699,8 @@ describe('config env overrides for branch coverage', () => {
     expect(cfg.MEMORY_CHUNK_OVERLAP).toBe(200);
     expect(cfg.MEMORY_RETRIEVAL_LIMIT).toBe(12);
     expect(cfg.MEMORY_SCOPE_POLICY).toBe('shared');
-    expect(cfg.MEMORY_CONSOLIDATION_ENABLED).toBe(true);
-    expect(cfg.MEMORY_CONSOLIDATION_MODEL).toBe('env-model');
+    expect(cfg.RUNTIME_MEMORY_DREAMING_ENABLED).toBe(false);
+    expect(cfg.MODEL_CONSOLIDATION).toBe('env-opus');
     expect(cfg.MEMORY_DREAMING_CRON).toBe('0 2 * * *');
     expect(cfg.ONECLI_URL).toBe('http://env-onecli');
     expect(cfg.ANTHROPIC_MODEL).toBe('env-opus');
@@ -604,7 +761,7 @@ describe('config fallback branches for parseInt/parseFloat || default', () => {
     expect(cfg.MEMORY_CHUNK_RETENTION_DAYS).toBe(120);
     expect(cfg.MEMORY_MAX_EVENTS).toBe(20000);
     expect(cfg.MEMORY_MAX_PROCEDURES_PER_GROUP).toBe(500);
-    expect(cfg.MEMORY_CONSOLIDATION_MIN_ITEMS).toBe(50);
+    expect(cfg.MEMORY_CONSOLIDATION_MIN_ITEMS).toBe(20);
     expect(cfg.MEMORY_ITEM_MAX_PER_GROUP).toBe(2000);
     expect(cfg.MEMORY_MAX_GLOBAL_CHUNKS).toBe(3000);
     expect(cfg.MEMORY_USAGE_DECAY_INTERVAL_TURNS).toBe(20);

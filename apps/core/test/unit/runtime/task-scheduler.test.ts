@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   _initTestDatabase,
   createJobRun,
+  deleteJob,
+  getAllJobs,
   getJobById,
   listDueJobs,
   listJobRuns,
@@ -11,6 +13,7 @@ import {
   updateJob,
   upsertJob,
 } from '@core/storage/db.js';
+import { RUNTIME_MEMORY_DREAMING_ENABLED } from '@core/core/config.js';
 import {
   _resetSchedulerLoopForTests,
   computeNextJobRun,
@@ -32,6 +35,16 @@ const runDreamingSweepMock = vi.fn(async () => ({
   topPromoted: [],
   durationMs: 1,
 }));
+const runMemoryCleanupOnceMock = vi.hoisted(() =>
+  vi.fn(() => ({
+    sweptMirrors: 0,
+    mirrorErrors: 0,
+    purgedItems: 0,
+    purgedProcedures: 0,
+    journalGzipped: 0,
+    journalDeleted: 0,
+  })),
+);
 
 vi.mock('@core/runtime/agent-spawn.js', () => ({
   spawnAgent: vi.fn(async () => ({
@@ -57,6 +70,10 @@ vi.mock('@core/memory/memory-service.js', () => ({
       runDreamingSweep: runDreamingSweepMock,
     }),
   },
+}));
+
+vi.mock('@core/memory/cleanup-job.js', () => ({
+  runMemoryCleanupOnce: runMemoryCleanupOnceMock,
 }));
 
 describe('computeNextJobRun edge cases', () => {
@@ -329,6 +346,124 @@ describe('job scheduler', () => {
     expect(runDreamingSweepMock).toHaveBeenCalledTimes(1);
     expect(spawnAgent).not.toHaveBeenCalled();
     expect(reflectAfterTurnMock).not.toHaveBeenCalled();
+  });
+
+  it('runs __system cleanup jobs without container execution', async () => {
+    upsertJob({
+      id: 'system:cleanup:main',
+      name: 'Memory Cleanup (main)',
+      prompt: '__system:memory_cleanup',
+      schedule_type: 'once',
+      schedule_value: new Date(Date.now() - 60_000).toISOString(),
+      linked_sessions: ['group@g.us'],
+      group_scope: 'main',
+      created_by: 'agent',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+    });
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group@g.us': {
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Andy',
+          added_at: '2026-01-01T00:00:00.000Z',
+          isMain: true,
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: vi.fn(async () => {}),
+    });
+
+    await vi.advanceTimersByTimeAsync(20);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runMemoryCleanupOnceMock).toHaveBeenCalledTimes(1);
+    expect(spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('keeps exactly one cleanup system job across multiple folders', async () => {
+    upsertJob({
+      id: 'system:cleanup:main',
+      name: 'Memory Cleanup (main)',
+      prompt: '__system:memory_cleanup',
+      schedule_type: 'cron',
+      schedule_value: '0 4 * * *',
+      linked_sessions: ['group@g.us'],
+      group_scope: 'main',
+      created_by: 'agent',
+      next_run: new Date(Date.now() + 600_000).toISOString(),
+      status: 'active',
+    });
+    upsertJob({
+      id: 'system:cleanup:proj',
+      name: 'Memory Cleanup (proj)',
+      prompt: '__system:memory_cleanup',
+      schedule_type: 'cron',
+      schedule_value: '0 4 * * *',
+      linked_sessions: ['proj@g.us'],
+      group_scope: 'proj',
+      created_by: 'agent',
+      next_run: new Date(Date.now() + 600_000).toISOString(),
+      status: 'active',
+    });
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group@g.us': {
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Andy',
+          added_at: '2026-01-01T00:00:00.000Z',
+          isMain: true,
+        },
+        'proj@g.us': {
+          name: 'Proj',
+          folder: 'proj',
+          trigger: '@Andy',
+          added_at: '2026-01-01T00:00:00.000Z',
+          isMain: false,
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: vi.fn(async () => {}),
+    });
+
+    await vi.advanceTimersByTimeAsync(20);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const cleanupJobs = getAllJobs().filter(
+      (job) => job.prompt === '__system:memory_cleanup',
+    );
+    if (!RUNTIME_MEMORY_DREAMING_ENABLED) {
+      expect(RUNTIME_MEMORY_DREAMING_ENABLED).toBe(false);
+      return;
+    }
+    expect(cleanupJobs).toHaveLength(1);
+    expect(getJobById('system:cleanup:proj')).toBeUndefined();
   });
 
   it('keeps dead-lettered dreaming jobs unchanged when dreaming is disabled', async () => {
@@ -2145,6 +2280,59 @@ describe('scheduler coverage: streaming callback and edge cases', () => {
     expect(sendMessage).not.toHaveBeenCalled();
 
     getJobByIdSpy.mockRestore();
+  });
+
+  it('suppresses delivery when a job is deleted after run start', async () => {
+    upsertJob({
+      id: 'deleted-after-start',
+      name: 'deleted after start',
+      prompt: 'test',
+      schedule_type: 'once',
+      schedule_value: new Date(Date.now() - 60_000).toISOString(),
+      linked_sessions: ['group@g.us'],
+      group_scope: 'main',
+      created_by: 'agent',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+    });
+
+    vi.mocked(spawnAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        deleteJob('deleted-after-start');
+        await onOutput?.({
+          status: 'success',
+          result: 'should-not-deliver-after-delete',
+          newSessionId: 'session-deleted',
+        });
+        return {
+          status: 'success',
+          result: 'should-not-deliver-after-delete',
+          newSessionId: 'session-deleted',
+        };
+      },
+    );
+
+    const sendMessage = vi.fn(async () => {});
+    const sendStreamingChunk = vi.fn(async () => true);
+    startSchedulerLoop(makeDeps({ sendMessage, sendStreamingChunk }));
+    await vi.advanceTimersByTimeAsync(20);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getJobById('deleted-after-start')).toBeUndefined();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]?.[0]).toBe('group@g.us');
+    expect(sendMessage.mock.calls[0]?.[1]).toContain(
+      '🔔 Scheduled task: deleted after start',
+    );
+    expect(
+      sendMessage.mock.calls.some(
+        (call) =>
+          typeof call[1] === 'string' &&
+          call[1].includes('should-not-deliver-after-delete'),
+      ),
+    ).toBe(false);
+    expect(sendStreamingChunk).not.toHaveBeenCalled();
   });
 
   it('handles scheduler loop error (catch block)', async () => {

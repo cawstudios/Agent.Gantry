@@ -1,3 +1,10 @@
+import {
+  MODEL_DREAMING,
+  MEMORY_DREAMING_DRY_RUN,
+} from '../core/config.js';
+import { runClaudeQuery } from './claude-query.js';
+import { firstUngroundedToken } from './grounding-check.js';
+import { MEMORY_DREAM_REVIEW_PROMPT } from './prompts/dream.js';
 import type { ConsolidationResult } from './memory-consolidation.js';
 import type { MemoryProvider } from './memory-provider.js';
 import type { MemoryItem } from './memory-types.js';
@@ -41,11 +48,11 @@ interface RunDreamingSweepArgs {
     | 'adjustConfidence'
     | 'getItemById'
     | 'pinItem'
+    | 'patchItem'
     | 'softDeleteItem'
     | 'recordEvent'
   >;
   enabled: boolean;
-  consolidationEnabled: boolean;
   consolidateGroupMemory: (groupFolder: string) => Promise<ConsolidationResult>;
   retentionPinThreshold: number;
   promotionThreshold: number;
@@ -54,6 +61,15 @@ interface RunDreamingSweepArgs {
   minUniqueQueries: number;
   confidenceBoost: number;
   confidenceDecay: number;
+  dryRun?: boolean;
+}
+
+interface DreamReviewDecision {
+  id: string;
+  action: 'keep' | 'rewrite' | 'merge_into' | 'retire';
+  target?: string;
+  rewrittenValue?: string;
+  reason?: string;
 }
 
 export async function runDreamingSweep(
@@ -104,22 +120,37 @@ export async function runDreamingSweep(
     )
     .sort((a, b) => a.score - b.score);
 
-  if (promoted.length > 0 && args.confidenceBoost > 0) {
+  const isDryRun = args.dryRun ?? MEMORY_DREAMING_DRY_RUN;
+  args.store.recordEvent('dream_started', 'memory_dreaming', args.groupFolder, {
+    group: args.groupFolder,
+    candidates_a: scoredItems.length,
+    promote_n: promoted.length,
+    decay_n: decayed.length,
+    review_n: Math.min(scoredItems.length, 30),
+    dry_run: isDryRun,
+  });
+
+  if (!isDryRun && promoted.length > 0 && args.confidenceBoost > 0) {
     args.store.adjustConfidence(
       promoted.map((entry) => entry.item.id),
       args.confidenceBoost,
     );
   }
 
-  for (const promotedItem of promoted) {
-    const latest = args.store.getItemById(promotedItem.item.id);
-    if (!latest) continue;
-    if (!latest.is_pinned && latest.confidence >= args.retentionPinThreshold) {
-      args.store.pinItem(latest.id, true);
+  if (!isDryRun) {
+    for (const promotedItem of promoted) {
+      const latest = args.store.getItemById(promotedItem.item.id);
+      if (!latest) continue;
+      if (
+        !latest.is_pinned &&
+        latest.confidence >= args.retentionPinThreshold
+      ) {
+        args.store.pinItem(latest.id, true);
+      }
     }
   }
 
-  if (decayed.length > 0 && args.confidenceDecay > 0) {
+  if (!isDryRun && decayed.length > 0 && args.confidenceDecay > 0) {
     args.store.adjustConfidence(
       decayed.map((entry) => entry.item.id),
       -Math.abs(args.confidenceDecay),
@@ -127,19 +158,112 @@ export async function runDreamingSweep(
   }
 
   let retiredCount = 0;
-  for (const decayedItem of decayed) {
-    const latest = args.store.getItemById(decayedItem.item.id);
-    if (!latest || latest.is_pinned) continue;
-    if (latest.confidence < 0.1) {
-      args.store.softDeleteItem(latest.id);
-      retiredCount += 1;
+  if (!isDryRun) {
+    for (const decayedItem of decayed) {
+      const latest = args.store.getItemById(decayedItem.item.id);
+      if (!latest || latest.is_pinned) continue;
+      if (latest.confidence < 0.1) {
+        args.store.softDeleteItem(latest.id);
+        retiredCount += 1;
+      }
     }
   }
 
-  let consolidation: ConsolidationResult | null = null;
-  if (args.consolidationEnabled) {
-    consolidation = await args.consolidateGroupMemory(args.groupFolder);
+  const reviewDecisions = await reviewDreamCandidates(
+    scoredItems.map((entry) => entry.item).slice(0, 30),
+  );
+  let reviewRewrittenCount = 0;
+  let reviewMergedCount = 0;
+  let reviewRetiredCount = 0;
+  let reviewKeptCount = 0;
+  let rejectedHallucinations = 0;
+  const candidateIds = new Set(scoredItems.map((entry) => entry.item.id));
+  for (const decision of reviewDecisions) {
+    if (!candidateIds.has(decision.id)) continue;
+    if (decision.action === 'keep') {
+      reviewKeptCount += 1;
+      if (!isDryRun) {
+        const current = args.store.getItemById(decision.id);
+        if (current) {
+          args.store.patchItem(current.id, current.version, {
+            last_reviewed_at: new Date().toISOString(),
+          });
+        }
+      }
+      continue;
+    }
+    if (decision.action === 'rewrite') {
+      const current = args.store.getItemById(decision.id);
+      if (!current || !decision.rewrittenValue) continue;
+      const ungrounded = firstUngroundedToken(decision.rewrittenValue, [
+        current.value,
+        current.why || '',
+      ]);
+      if (ungrounded) {
+        rejectedHallucinations += 1;
+        args.store.recordEvent(
+          'dream_hallucination_rejected',
+          'memory_dreaming',
+          decision.id,
+          {
+            group: args.groupFolder,
+            offending_token: ungrounded,
+            source: 'review',
+          },
+        );
+        continue;
+      }
+      if (!isDryRun) {
+        args.store.patchItem(current.id, current.version, {
+          value: decision.rewrittenValue,
+          why: `[dream-rewrite] ${decision.reason || 'review rewrite'}`,
+          last_reviewed_at: new Date().toISOString(),
+        });
+      }
+      reviewRewrittenCount += 1;
+      continue;
+    }
+    if (decision.action === 'merge_into') {
+      if (!decision.target || decision.target === decision.id) continue;
+      if (!candidateIds.has(decision.target)) continue;
+      const source = args.store.getItemById(decision.id);
+      const target = args.store.getItemById(decision.target);
+      if (!source || !target) continue;
+      const ungrounded = firstUngroundedToken(target.value, [
+        source.value,
+        source.why || '',
+        target.value,
+        target.why || '',
+      ]);
+      if (ungrounded) {
+        rejectedHallucinations += 1;
+        args.store.recordEvent(
+          'dream_hallucination_rejected',
+          'memory_dreaming',
+          decision.id,
+          {
+            group: args.groupFolder,
+            offending_token: ungrounded,
+            source: 'review',
+          },
+        );
+        continue;
+      }
+      if (!isDryRun) {
+        args.store.softDeleteItem(decision.id, decision.target);
+      }
+      reviewMergedCount += 1;
+      continue;
+    }
+    if (decision.action === 'retire') {
+      if (!isDryRun) {
+        args.store.softDeleteItem(decision.id);
+      }
+      reviewRetiredCount += 1;
+    }
   }
+
+  const consolidation = await args.consolidateGroupMemory(args.groupFolder);
 
   const result: DreamingResult = {
     groupFolder: args.groupFolder,
@@ -157,7 +281,7 @@ export async function runDreamingSweep(
   };
 
   args.store.recordEvent(
-    'dreaming_completed',
+    'dream_completed',
     'memory_dreaming',
     args.groupFolder,
     {
@@ -168,6 +292,15 @@ export async function runDreamingSweep(
         min_recalls: args.minRecalls,
         min_unique_queries: args.minUniqueQueries,
       },
+      llm_review: {
+        reviewed: reviewDecisions.length,
+        kept: reviewKeptCount,
+        rewritten: reviewRewrittenCount,
+        merged: reviewMergedCount,
+        retired: reviewRetiredCount,
+        rejected_hallucinations: rejectedHallucinations,
+      },
+      dry_run: isDryRun,
     },
   );
 
@@ -257,4 +390,97 @@ function round3(value: number): number {
 function clamp(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+async function reviewDreamCandidates(
+  items: MemoryItem[],
+): Promise<DreamReviewDecision[]> {
+  if (items.length === 0) return [];
+
+  const payload = items.map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    value: item.value,
+    why: item.why || '',
+    confidence: item.confidence,
+    retrieval_count: item.retrieval_count,
+    last_used_at: item.last_used_at,
+    age_days: Math.max(
+      0,
+      (Date.now() - Date.parse(item.updated_at || item.created_at)) /
+        86_400_000,
+    ),
+    pre_rank_signal: {
+      total_score: item.total_score,
+      max_score: item.max_score,
+    },
+  }));
+
+  try {
+    const text = await runClaudeQuery({
+      model: MODEL_DREAMING,
+      prompt: `${MEMORY_DREAM_REVIEW_PROMPT}\n\n${JSON.stringify(payload, null, 2)}`,
+    });
+    if (!text) return [];
+    return parseDreamReviewResponse(text);
+  } catch {
+    return [];
+  }
+}
+
+function parseDreamReviewResponse(text: string): DreamReviewDecision[] {
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start < 0 || end <= start) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const decisions: DreamReviewDecision[] = [];
+  for (const row of parsed) {
+    if (!row || typeof row !== 'object') continue;
+    const id =
+      'id' in row && typeof row.id === 'string' ? row.id.trim() : undefined;
+    const action =
+      'action' in row && typeof row.action === 'string'
+        ? row.action.trim()
+        : undefined;
+    if (!id || !action) continue;
+    if (
+      action !== 'keep' &&
+      action !== 'rewrite' &&
+      action !== 'merge_into' &&
+      action !== 'retire'
+    ) {
+      continue;
+    }
+    const target =
+      'target' in row && typeof row.target === 'string'
+        ? row.target.trim()
+        : undefined;
+    const targetId =
+      'target_id' in row && typeof row.target_id === 'string'
+        ? row.target_id.trim()
+        : undefined;
+    const rewrittenValue =
+      'rewritten_value' in row && typeof row.rewritten_value === 'string'
+        ? row.rewritten_value.trim().slice(0, 500)
+        : undefined;
+    const reason =
+      'reason' in row && typeof row.reason === 'string'
+        ? row.reason.trim().slice(0, 240)
+        : undefined;
+    decisions.push({
+      id,
+      action,
+      ...(target || targetId ? { target: target || targetId } : {}),
+      ...(rewrittenValue ? { rewrittenValue } : {}),
+      ...(reason ? { reason } : {}),
+    });
+  }
+  return decisions;
 }

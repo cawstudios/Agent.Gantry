@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "myclaw": "dist/cli/index.js"
+    "myclaw": "dist/cli/index.js",
+    "myclaw-session-hook": "dist/bin/session-hook.js"
   },
   "files": [
     "dist/",

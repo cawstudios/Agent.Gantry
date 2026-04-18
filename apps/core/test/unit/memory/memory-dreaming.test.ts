@@ -2,17 +2,54 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runDreamingSweep } from '@core/memory/memory-dreaming.js';
 import { MemoryStore } from '@core/memory/memory-store.js';
 
 const tempRoots: string[] = [];
+const claudeQueryMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: claudeQueryMock,
+}));
+
+function configureClaudeQueryMock(): void {
+  claudeQueryMock.mockImplementation(async function* () {
+    const headers: HeadersInit = {};
+    const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+    if (oauthToken) {
+      headers.authorization = `Bearer ${oauthToken}`;
+    }
+    const response = await globalThis.fetch('https://claude.local/mock', {
+      method: 'POST',
+      headers,
+    });
+    const json = (await response.json()) as {
+      content?: Array<{ type?: string; text?: string }>;
+    };
+    const text = json.content?.find((entry) => entry.type === 'text')?.text;
+    yield {
+      type: 'assistant',
+      message: {
+        content: text ? [{ type: 'text', text }] : [],
+      },
+    };
+  });
+}
+
+beforeEach(() => {
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+  vi.stubEnv('ANTHROPIC_API_KEY', '');
+});
 
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
   }
+  claudeQueryMock.mockReset();
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 function makeStore(): MemoryStore {
@@ -21,7 +58,78 @@ function makeStore(): MemoryStore {
   return new MemoryStore(path.join(root, 'memory.db'));
 }
 
+function defaultConsolidationResult() {
+  return {
+    enabled: true,
+    consideredItems: 0,
+    clustersFound: 0,
+    clustersProcessed: 0,
+    mergedItems: 0,
+    retiredItems: 0,
+    mode: 'none' as const,
+  };
+}
+
 describe('memory dreaming sweep', () => {
+  it('uses OAuth authToken for LLM dream review when CLAUDE_CODE_OAUTH_TOKEN is set', async () => {
+    configureClaudeQueryMock();
+    const store = makeStore();
+    const item = store.saveItem({
+      scope: 'group',
+      group_folder: 'team',
+      user_id: null,
+      kind: 'fact',
+      key: 'oauth-review',
+      value: 'use oauth for dream review',
+      source: 'test',
+      confidence: 0.7,
+    });
+    store.recordRetrievalSignal(item.id, 0.9, 'q-oauth-1');
+    store.recordRetrievalSignal(item.id, 0.85, 'q-oauth-2');
+
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-dream-token');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          content: [
+            {
+              type: 'text',
+              text: '[]',
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    try {
+      await runDreamingSweep({
+        groupFolder: 'team',
+        store,
+        enabled: true,
+        consolidateGroupMemory: async () => defaultConsolidationResult(),
+        retentionPinThreshold: 0.95,
+        promotionThreshold: 0.4,
+        decayThreshold: 0.1,
+        minRecalls: 1,
+        minUniqueQueries: 1,
+        confidenceBoost: 0.05,
+        confidenceDecay: 0.03,
+        dryRun: true,
+      });
+
+      const requestInit = fetchSpy.mock.calls[0]?.[1] as
+        | RequestInit
+        | undefined;
+      const headers = new Headers(requestInit?.headers as HeadersInit);
+      expect(headers.get('authorization')).toBe('Bearer oauth-dream-token');
+      expect(headers.get('x-api-key')).toBeNull();
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('promotes high-signal items and decays low-signal items', async () => {
     const store = makeStore();
 
@@ -65,10 +173,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.6,
       decayThreshold: 0.4,
@@ -76,6 +181,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.1,
+      dryRun: false,
     });
 
     expect(result.promotedCount).toBe(1);
@@ -94,10 +200,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: false,
-      consolidationEnabled: true,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.9,
       promotionThreshold: 0.5,
       decayThreshold: 0.2,
@@ -105,6 +208,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     expect(result.scoredItems).toBe(0);
@@ -143,10 +247,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       // Set a threshold the item can reach after the boost
       retentionPinThreshold: 0.92,
       promotionThreshold: 0.3,
@@ -155,6 +256,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     expect(result.promotedCount).toBeGreaterThanOrEqual(1);
@@ -163,7 +265,7 @@ describe('memory dreaming sweep', () => {
     expect(after.confidence).toBeGreaterThanOrEqual(0.92);
   });
 
-  it('runs consolidation when consolidationEnabled is true', async () => {
+  it('runs consolidation after dreaming scoring', async () => {
     const store = makeStore();
 
     store.saveItem({
@@ -191,7 +293,6 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: true,
       consolidateGroupMemory: async (folder) => {
         expect(folder).toBe('team');
         return fakeConsolidation;
@@ -203,6 +304,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.1,
+      dryRun: false,
     });
 
     expect(result.consolidation).toEqual(fakeConsolidation);
@@ -229,10 +331,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.6,
       decayThreshold: 0.4,
@@ -240,6 +339,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 2,
       confidenceBoost: 0.05,
       confidenceDecay: 0.1,
+      dryRun: false,
     });
 
     expect(result.scoredItems).toBe(0);
@@ -254,10 +354,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'empty_group',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.6,
       decayThreshold: 0.4,
@@ -265,6 +362,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.1,
+      dryRun: false,
     });
 
     expect(result.totalItems).toBe(0);
@@ -336,10 +434,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.9,
       decayThreshold: 0.6,
@@ -347,6 +442,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.1,
+      dryRun: false,
     });
 
     expect(result.decayedCount).toBeGreaterThanOrEqual(2);
@@ -387,10 +483,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store: wrappedStore,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.5,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -398,6 +491,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     // Item was promoted in scoring but getItemById returned null,
@@ -429,10 +523,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.9,
       decayThreshold: 0.5,
@@ -440,6 +531,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.1,
+      dryRun: false,
     });
 
     // Pinned items are excluded from decayed list (line 103 filter)
@@ -481,10 +573,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -492,6 +581,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.1,
+      dryRun: false,
     });
 
     // With malformed JSON, uniqueQueryCount returns 0, so the item is skipped
@@ -544,10 +634,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.99,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -555,6 +642,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     expect(result.promotedCount).toBe(2);
@@ -626,10 +714,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store: wrappedStore,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.9,
       decayThreshold: 0.5,
@@ -637,6 +722,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.1,
+      dryRun: false,
     });
 
     // The item is decayed but since it appears pinned on lookup,
@@ -682,10 +768,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.9,
       decayThreshold: 0.6,
@@ -693,6 +776,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.1,
+      dryRun: false,
     });
 
     // The item is decayed (score is low) but confidence stays >= 0.1
@@ -736,10 +820,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -747,6 +828,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     expect(result.scoredItems).toBe(1);
@@ -780,10 +862,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -791,6 +870,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     // Item should be scored, with recency=0 due to null lastRetrievedAt
@@ -827,10 +907,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -838,6 +915,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     // parseStringArray returns [] for non-array JSON, so uniqueQueryCount=0
@@ -883,10 +961,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store: wrappedStore,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -894,6 +969,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     // parseStringArray returns [] for empty string -> uniqueQueryCount=0
@@ -927,10 +1003,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -938,6 +1011,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     // normalizeLog(0, ...) returns 0; relevance = 0 since retrieval_count=0
@@ -982,10 +1056,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store: wrappedStore,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -993,6 +1064,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0.05,
       confidenceDecay: 0.03,
+      dryRun: false,
     });
 
     // Item should be scored despite NaN confidence (clamp returns 0)
@@ -1021,10 +1093,7 @@ describe('memory dreaming sweep', () => {
       groupFolder: 'team',
       store,
       enabled: true,
-      consolidationEnabled: false,
-      consolidateGroupMemory: async () => {
-        throw new Error('not expected');
-      },
+      consolidateGroupMemory: async () => defaultConsolidationResult(),
       retentionPinThreshold: 0.95,
       promotionThreshold: 0.3,
       decayThreshold: 0.1,
@@ -1032,6 +1101,7 @@ describe('memory dreaming sweep', () => {
       minUniqueQueries: 1,
       confidenceBoost: 0,
       confidenceDecay: 0,
+      dryRun: false,
     });
 
     expect(result.promotedCount).toBeGreaterThanOrEqual(1);

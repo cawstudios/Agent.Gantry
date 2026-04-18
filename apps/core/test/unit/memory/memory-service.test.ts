@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mutable overrides for config values. When set to non-undefined, these
 // override the real config values. This allows individual tests to toggle
@@ -11,7 +11,6 @@ const configOverrides = vi.hoisted(() => ({
   MEMORY_SCOPE_POLICY: undefined as string | undefined,
   MEMORY_SEMANTIC_DEDUP_ENABLED: undefined as boolean | undefined,
   MEMORY_USAGE_FEEDBACK_ENABLED: undefined as boolean | undefined,
-  MEMORY_CONSOLIDATION_ENABLED: undefined as boolean | undefined,
   MEMORY_GLOBAL_KNOWLEDGE_DIR: undefined as string | undefined,
   OPENAI_API_KEY: undefined as string | null | undefined,
 }));
@@ -37,12 +36,6 @@ vi.mock('@core/core/config.js', async (importOriginal) => {
         original.MEMORY_USAGE_FEEDBACK_ENABLED
       );
     },
-    get MEMORY_CONSOLIDATION_ENABLED() {
-      return (
-        configOverrides.MEMORY_CONSOLIDATION_ENABLED ??
-        original.MEMORY_CONSOLIDATION_ENABLED
-      );
-    },
     get MEMORY_GLOBAL_KNOWLEDGE_DIR() {
       return (
         configOverrides.MEMORY_GLOBAL_KNOWLEDGE_DIR ??
@@ -55,6 +48,98 @@ vi.mock('@core/core/config.js', async (importOriginal) => {
   };
 });
 
+vi.mock('@core/memory/claude-query.js', () => ({
+  hasClaudeAuthConfigured: () =>
+    Boolean(
+      process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim() ||
+        process.env.ANTHROPIC_API_KEY?.trim(),
+    ),
+  runClaudeQuery: async ({ prompt }: { prompt: string }) => {
+    const marker =
+      'Now extract from this input JSON and return strict JSON array only:';
+    const markerIndex = prompt.lastIndexOf(marker);
+    if (markerIndex < 0) return '[]';
+    const payloadRaw = prompt.slice(markerIndex + marker.length).trim();
+    let userText = '';
+    try {
+      const payload = JSON.parse(payloadRaw) as {
+        last_3_turns?: Array<{ role?: string; text?: string }>;
+      };
+      userText =
+        payload.last_3_turns?.find((turn) => turn.role === 'user')?.text || '';
+    } catch {
+      return '[]';
+    }
+
+    const trimmed = userText.trim();
+    if (!trimmed) return '[]';
+
+    const facts: Array<{
+      scope: 'user' | 'group';
+      kind: 'preference' | 'decision' | 'fact' | 'correction' | 'constraint';
+      key: string;
+      value: string;
+      confidence: number;
+    }> = [];
+
+    if (
+      /\b(prefer|call me|tokenizer|secretary|dark mode|typescript)\b/i.test(
+        trimmed,
+      )
+    ) {
+      facts.push({
+        scope: 'user',
+        kind: 'preference',
+        key: 'preference:user',
+        value: trimmed,
+        confidence: 0.9,
+      });
+    }
+    if (/\b(actually|should be|not 3000)\b/i.test(trimmed)) {
+      facts.push({
+        scope: 'user',
+        kind: 'correction',
+        key: 'correction:user',
+        value: trimmed,
+        confidence: 0.9,
+      });
+    }
+    if (/\b(decided|decision|we chose|going with)\b/i.test(trimmed)) {
+      facts.push({
+        scope: 'group',
+        kind: 'decision',
+        key: 'decision:group',
+        value: trimmed,
+        confidence: 0.9,
+      });
+    }
+    if (/\b(no legacy|must not|optional|not mandatory)\b/i.test(trimmed)) {
+      facts.push({
+        scope: 'group',
+        kind: 'constraint',
+        key: 'constraint:group',
+        value: trimmed,
+        confidence: 0.9,
+      });
+    }
+    if (
+      /\b(we use|our project uses|convention|oauth2|integration tests)\b/i.test(
+        trimmed,
+      )
+    ) {
+      facts.push({
+        scope: 'group',
+        kind: 'fact',
+        key: 'fact:group',
+        value: trimmed,
+        confidence: 0.9,
+      });
+    }
+
+    return JSON.stringify(facts);
+  },
+}));
+
 import {
   AGENTS_DIR,
   MEMORY_USAGE_DECAY_INTERVAL_TURNS,
@@ -64,19 +149,25 @@ import {
   EmbeddingProvider,
   OpenAIEmbeddingClient,
 } from '@core/memory/memory-embeddings.js';
+import { MemoryExtractionProvider } from '@core/memory/memory-extractor.js';
 import { MemoryService } from '@core/memory/memory-service.js';
 import { MemoryStore } from '@core/memory/memory-store.js';
+import { AgentMemoryRootService } from '@core/memory/agent-memory-root.js';
 
 const tempRoots: string[] = [];
 const tempGroups: string[] = [];
 const tempKnowledgeDirs: string[] = [];
+
+beforeEach(() => {
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'test-oauth-token');
+  vi.stubEnv('ANTHROPIC_API_KEY', '');
+});
 
 afterEach(() => {
   // Reset config overrides
   configOverrides.MEMORY_SCOPE_POLICY = undefined;
   configOverrides.MEMORY_SEMANTIC_DEDUP_ENABLED = undefined;
   configOverrides.MEMORY_USAGE_FEEDBACK_ENABLED = undefined;
-  configOverrides.MEMORY_CONSOLIDATION_ENABLED = undefined;
   configOverrides.MEMORY_GLOBAL_KNOWLEDGE_DIR = undefined;
   configOverrides.OPENAI_API_KEY = undefined;
 
@@ -89,6 +180,8 @@ afterEach(() => {
   for (const dir of tempKnowledgeDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  vi.unstubAllEnvs();
+  AgentMemoryRootService.resetForTests();
 });
 
 function makeService(): MemoryService {
@@ -105,13 +198,30 @@ function makeService(): MemoryService {
 
 function makeServiceWithEmbeddings(
   embeddings: EmbeddingProvider,
+  extractor?: MemoryExtractionProvider,
 ): MemoryService {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-memory-svc-'));
   tempRoots.push(root);
+  AgentMemoryRootService.setRootForTests(path.join(root, 'agent-memory'));
   return new MemoryService(
     new MemoryStore(path.join(root, 'memory.db')),
     embeddings,
+    extractor,
   );
+}
+
+function makeServiceWithExtractor(
+  extractor: MemoryExtractionProvider,
+): MemoryService {
+  const embeddings = {
+    isEnabled: () => true,
+    validateConfiguration: () => undefined,
+    embedMany: async (texts: string[]) =>
+      texts.map((text) => vectorForText(text, MEMORY_VECTOR_DIMENSIONS)),
+    embedOne: async (text: string) =>
+      vectorForText(text, MEMORY_VECTOR_DIMENSIONS),
+  } satisfies EmbeddingProvider;
+  return makeServiceWithEmbeddings(embeddings, extractor);
 }
 
 function makeStoreOnly(): MemoryStore {
@@ -170,6 +280,28 @@ describe('MemoryService', () => {
       false,
     );
     expect(context.facts.some((fact) => fact.kind === 'preference')).toBe(true);
+  });
+
+  it('stores LLM extracted facts with reflection_llm source', async () => {
+    const service = makeService();
+
+    await service.reflectAfterTurn({
+      groupFolder: 'team',
+      isMain: false,
+      prompt: 'We decided to use SQLite for local memory instead of Postgres.',
+      result: 'Decision captured.',
+    });
+
+    const store = (service as unknown as { store: MemoryStore }).store;
+    const items = store.listTopItems('group', 'team', 20);
+    expect(
+      items.some(
+        (item) =>
+          item.source === 'reflection_llm' &&
+          item.kind === 'decision' &&
+          /sqlite/i.test(item.value),
+      ),
+    ).toBe(true);
   });
 
   it('skips recall embedding search for noise queries', async () => {
@@ -616,7 +748,7 @@ describe('MemoryService', () => {
     expect(context.procedures).toHaveLength(0);
   });
 
-  it('extractProcedure succeeds with 3+ steps and no error words', async () => {
+  it('does not auto-save procedures from reflection text in explicit-only mode', async () => {
     const service = makeService();
 
     await service.reflectAfterTurn({
@@ -637,8 +769,7 @@ describe('MemoryService', () => {
       'team',
       false,
     );
-    expect(context.procedures.length).toBeGreaterThan(0);
-    expect(context.procedures[0]!.body).toContain('Clone the repository');
+    expect(context.procedures).toHaveLength(0);
   });
 
   it('patchProcedure updates an existing procedure', () => {
@@ -924,6 +1055,84 @@ describe('MemoryService', () => {
     expect(item).toBeDefined();
   });
 
+  it('reflectAfterTurn only applies supersedes to retrieved same-scope items in group', async () => {
+    const supersedesIds: string[] = [];
+    const service = makeServiceWithExtractor({
+      providerName: 'test-supersedes',
+      extractFacts: () => [
+        {
+          scope: 'group',
+          kind: 'fact',
+          key: 'pkg_manager',
+          value: 'Use pnpm for installs.',
+          confidence: 0.9,
+          supersedes: supersedesIds,
+        },
+      ],
+    });
+    const supersededInGroup = await service.saveMemory(
+      {
+        scope: 'group',
+        key: 'legacy_pkg_manager',
+        value: 'Use npm for installs.',
+        kind: 'fact',
+      },
+      { isMain: false, groupFolder: 'team' },
+    );
+    const notRetrieved = await service.saveMemory(
+      {
+        scope: 'group',
+        key: 'legacy_release_flow',
+        value: 'Use trunk deploy.',
+        kind: 'fact',
+      },
+      { isMain: false, groupFolder: 'team' },
+    );
+    const crossGroup = await service.saveMemory(
+      {
+        scope: 'group',
+        key: 'legacy_other_group',
+        value: 'Other team policy.',
+        kind: 'fact',
+      },
+      { isMain: false, groupFolder: 'other' },
+    );
+    const crossScopeUser = await service.saveMemory(
+      {
+        scope: 'user',
+        user_id: 'user-77',
+        key: 'legacy_user_pref',
+        value: 'User prefers npm.',
+        kind: 'preference',
+      },
+      { isMain: false, groupFolder: 'team' },
+    );
+    supersedesIds.push(
+      supersededInGroup.id,
+      notRetrieved.id,
+      crossGroup.id,
+      crossScopeUser.id,
+    );
+
+    await service.reflectAfterTurn({
+      groupFolder: 'team',
+      isMain: false,
+      prompt: 'What package manager should we use?',
+      result: 'We should use pnpm.',
+      retrievedItemIds: [
+        supersededInGroup.id,
+        crossGroup.id,
+        crossScopeUser.id,
+      ],
+    });
+
+    const store = (service as unknown as { store: MemoryStore }).store;
+    expect(store.getItemById(supersededInGroup.id)).toBeNull();
+    expect(store.getItemById(notRetrieved.id)).toBeDefined();
+    expect(store.getItemById(crossGroup.id)).toBeDefined();
+    expect(store.getItemById(crossScopeUser.id)).toBeDefined();
+  });
+
   it('buildMemoryContext includes recent work recap for resume queries', async () => {
     const service = makeService();
 
@@ -1065,9 +1274,32 @@ describe('MemoryService', () => {
     expect(context.facts.length).toBeGreaterThan(0);
   });
 
+  it('does not skip reflection for auth-token variable name mentions without a value', async () => {
+    const service = makeService();
+
+    await service.reflectAfterTurn({
+      groupFolder: 'team',
+      isMain: false,
+      prompt:
+        'We decided to use SQLite for memory, and CLAUDE_CODE_OAUTH_TOKEN should come from .env.',
+      result: 'Decision captured.',
+    });
+
+    const context = await service.buildMemoryContext(
+      'memory decision',
+      'team',
+      false,
+    );
+    expect(
+      context.facts.some(
+        (fact) => fact.kind === 'decision' && /sqlite/i.test(fact.value),
+      ),
+    ).toBe(true);
+  });
+
   // --- Adversarial: extractProcedure false negative on "error" in instructional text ---
 
-  it('should extract procedure from error-resolution workflow', async () => {
+  it('does not auto-save procedure from error-resolution workflow text', async () => {
     // Bug: extractProcedure rejects any result containing "error", "failed", "cannot", etc.
     // via `/\b(can't|cannot|unable|failed|error)\b/i.test(result)`.
     // This means a legitimate instructional procedure about resolving errors is rejected.
@@ -1094,8 +1326,7 @@ describe('MemoryService', () => {
       'team',
       false,
     );
-    // The procedure should be extracted despite containing the word "error"
-    expect(context.procedures.length).toBeGreaterThan(0);
+    expect(context.procedures).toHaveLength(0);
   });
 
   // =========================================================================
@@ -1714,7 +1945,7 @@ describe('MemoryService', () => {
       isMain: false,
       prompt: 'We use ESLint for linting.',
       result:
-        'Understood. Also my api_key is sk-abc.\nWe use Vitest for testing.',
+        'Understood. Also my api_key is sk-abc123456789.\nWe use Vitest for testing.',
     });
 
     // The whole combined text contains "api_key" so reflection is skipped entirely
@@ -2596,20 +2827,6 @@ describe('MemoryService', () => {
       retrievedItemIds: ['some-id'],
     });
     // With feedback disabled, the findUsedRetrievedItemIds and decay branches are skipped
-  });
-
-  it('reflectAfterTurn with consolidation disabled skips consolidation', async () => {
-    configOverrides.MEMORY_CONSOLIDATION_ENABLED = false;
-
-    const service = makeService();
-
-    await service.reflectAfterTurn({
-      groupFolder: 'team',
-      isMain: false,
-      prompt: 'We use Vitest for all tests.',
-      result: 'Noted, Vitest for testing.',
-    });
-    // With consolidation disabled, the consolidateGroupMemory call is skipped
   });
 
   it('ingestGlobalKnowledge returns early when MEMORY_GLOBAL_KNOWLEDGE_DIR is empty', async () => {

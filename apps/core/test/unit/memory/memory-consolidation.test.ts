@@ -10,10 +10,42 @@ import { consolidateMemoryItems } from '@core/memory/memory-consolidation.js';
 import { MemoryStore } from '@core/memory/memory-store.js';
 
 const tempRoots: string[] = [];
+const claudeQueryMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: claudeQueryMock,
+}));
+
+function configureClaudeQueryMock(): void {
+  claudeQueryMock.mockImplementation(async function* () {
+    const headers: HeadersInit = {};
+    const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+    if (oauthToken) {
+      headers.authorization = `Bearer ${oauthToken}`;
+    }
+    const response = await globalThis.fetch('https://claude.local/mock', {
+      method: 'POST',
+      headers,
+    });
+    const json = (await response.json()) as {
+      content?: Array<{ type?: string; text?: string }>;
+    };
+    const text = json.content?.find((entry) => entry.type === 'text')?.text;
+    yield {
+      type: 'assistant',
+      message: {
+        content: text ? [{ type: 'text', text }] : [],
+      },
+    };
+  });
+}
 
 beforeEach(() => {
   // Keep consolidation tests independent from local .env files.
   vi.stubEnv('ANTHROPIC_MODEL', 'claude-3-5-sonnet-latest');
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+  vi.stubEnv('ANTHROPIC_API_KEY', '');
+  configureClaudeQueryMock();
 });
 
 afterEach(() => {
@@ -22,6 +54,7 @@ afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });
   }
   vi.restoreAllMocks();
+  claudeQueryMock.mockReset();
 });
 
 function makeStore(): MemoryStore {
@@ -59,14 +92,7 @@ function addItem(
     key: string;
     value: string;
     confidence: number;
-    kind:
-      | 'preference'
-      | 'decision'
-      | 'fact'
-      | 'context'
-      | 'correction'
-      | 'constraint'
-      | 'recent_work';
+    kind: 'preference' | 'decision' | 'fact' | 'correction' | 'constraint';
   }> = {},
 ) {
   return store.saveItem({
@@ -146,6 +172,38 @@ describe('consolidateMemoryItems', () => {
     );
   });
 
+  it('retires conflicting consolidated source rows before inserting merged key', async () => {
+    const store = makeStore();
+    addItem(store, {
+      key: 'consolidated:deploy_policy',
+      value: 'Always run npm test before deploy.',
+      confidence: 0.95,
+      kind: 'fact',
+    });
+    addItem(store, {
+      key: 'deploy_policy_note',
+      value: 'Run tests before each deploy.',
+      confidence: 0.9,
+      kind: 'fact',
+    });
+
+    const result = await consolidateMemoryItems({
+      groupFolder: 'team',
+      store,
+      embeddings: stubEmbeddings(() => vector(7)),
+      minItems: 2,
+      clusterThreshold: 0.8,
+      maxClusters: 3,
+    });
+
+    expect(result.mergedItems).toBe(1);
+    const active = store.listActiveItems('team', 20);
+    const consolidatedWithSameKey = active.filter(
+      (item) => item.key === 'consolidated:deploy_policy',
+    );
+    expect(consolidatedWithSameKey).toHaveLength(1);
+  });
+
   // ── early-return: too few items (minItems not reached) ──────────────
 
   it('returns early when active items < minItems', async () => {
@@ -187,6 +245,7 @@ describe('consolidateMemoryItems', () => {
       minItems: 3,
       clusterThreshold: 0.8,
       maxClusters: 3,
+      embeddingFallback: false,
     });
 
     expect(result.mode).toBe('none');
@@ -217,6 +276,7 @@ describe('consolidateMemoryItems', () => {
       minItems: 2,
       clusterThreshold: 0.99, // very high threshold — nothing clusters
       maxClusters: 5,
+      embeddingFallback: false,
     });
 
     expect(result.mode).toBe('none');
@@ -409,15 +469,15 @@ describe('consolidateMemoryItems', () => {
     expect(result.mergedItems).toBe(1);
   });
 
-  // ── parseFirstJsonObject edge cases (tested via tryMergeWithAnthropic) ─
+  // ── parseFirstJsonObject edge cases (tested via tryMergeWithClaude) ─
 
   it('falls back to heuristic when LLM returns text with no JSON object', async () => {
     const store = makeStore();
     addItem(store, { key: 'llm:a', value: 'alpha' });
     addItem(store, { key: 'llm:b', value: 'beta' });
 
-    // Stub ANTHROPIC_API_KEY + model so tryMergeWithAnthropic fires
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    // Stub OAuth token so tryMergeWithClaude fires.
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     // Mock fetch to return text without any JSON object
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -457,7 +517,7 @@ describe('consolidateMemoryItems', () => {
     addItem(store, { key: 'llm:c', value: 'gamma' });
     addItem(store, { key: 'llm:d', value: 'delta' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     // The text has { and } so parseFirstJsonObject attempts JSON.parse,
     // but the content between them is not valid JSON -> catch returns null.
@@ -492,14 +552,14 @@ describe('consolidateMemoryItems', () => {
     vi.unstubAllEnvs();
   });
 
-  // ── tryMergeWithAnthropic: successful LLM merge ───────────────────
+  // ── tryMergeWithClaude: successful LLM merge ───────────────────
 
   it('uses LLM merge when Anthropic API returns valid JSON', async () => {
     const store = makeStore();
     const item1 = addItem(store, { key: 'llm:e', value: 'epsilon' });
     const item2 = addItem(store, { key: 'llm:f', value: 'phi' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -538,12 +598,52 @@ describe('consolidateMemoryItems', () => {
     vi.unstubAllEnvs();
   });
 
+  it('uses OAuth authToken when CLAUDE_CODE_OAUTH_TOKEN is present', async () => {
+    const store = makeStore();
+    const item1 = addItem(store, { key: 'llm:oauth-a', value: 'oauth alpha' });
+    const item2 = addItem(store, { key: 'llm:oauth-b', value: 'oauth beta' });
+
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-token-123');
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          content: [
+            {
+              type: 'text',
+              text: `{"key":"merged:oauth","value":"oauth alpha and beta","confidence":0.9,"retired_ids":["${item1.id}","${item2.id}"]}`,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await consolidateMemoryItems({
+      groupFolder: 'team',
+      store,
+      embeddings: stubEmbeddings(() => vector(1)),
+      minItems: 2,
+      clusterThreshold: 0.8,
+      maxClusters: 5,
+    });
+
+    expect(result.mode).toBe('llm');
+    const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    const headers = new Headers(requestInit?.headers as HeadersInit);
+    expect(headers.get('authorization')).toBe('Bearer oauth-token-123');
+    expect(headers.get('x-api-key')).toBeNull();
+
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
   it('falls back to heuristic when Anthropic API returns non-ok status', async () => {
     const store = makeStore();
     addItem(store, { key: 'llm:g', value: 'val1' });
     addItem(store, { key: 'llm:h', value: 'val2' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -573,7 +673,7 @@ describe('consolidateMemoryItems', () => {
     addItem(store, { key: 'llm:i', value: 'val3' });
     addItem(store, { key: 'llm:j', value: 'val4' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -596,14 +696,14 @@ describe('consolidateMemoryItems', () => {
     vi.unstubAllEnvs();
   });
 
-  // ── tryMergeWithAnthropic: missing key/value in LLM response ──────
+  // ── tryMergeWithClaude: missing key/value in LLM response ──────
 
   it('falls back to heuristic when LLM JSON has empty key or value', async () => {
     const store = makeStore();
     addItem(store, { key: 'llm:k', value: 'val5' });
     addItem(store, { key: 'llm:l', value: 'val6' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -630,7 +730,7 @@ describe('consolidateMemoryItems', () => {
       maxClusters: 5,
     });
 
-    // empty key/value -> tryMergeWithAnthropic returns null -> heuristic
+    // empty key/value -> tryMergeWithClaude returns null -> heuristic
     expect(result.mode).toBe('heuristic');
     fetchSpy.mockRestore();
     vi.unstubAllEnvs();
@@ -670,7 +770,7 @@ describe('consolidateMemoryItems', () => {
     const item1 = addItem(store, { key: 'clamp:a', value: 'alpha' });
     const item2 = addItem(store, { key: 'clamp:b', value: 'beta' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     // LLM returns confidence = 5.0 which should be clamped to 1.0
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -712,7 +812,7 @@ describe('consolidateMemoryItems', () => {
     const item1 = addItem(store, { key: 'neg:a', value: 'alpha' });
     const item2 = addItem(store, { key: 'neg:b', value: 'beta' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -753,7 +853,7 @@ describe('consolidateMemoryItems', () => {
     const item1 = addItem(store, { key: 'nan:c', value: 'alpha' });
     const item2 = addItem(store, { key: 'nan:d', value: 'beta' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -789,14 +889,14 @@ describe('consolidateMemoryItems', () => {
     vi.unstubAllEnvs();
   });
 
-  // ── tryMergeWithAnthropic: response with no text block ────────────
+  // ── tryMergeWithClaude: response with no text block ────────────
 
   it('falls back to heuristic when LLM response has no text block', async () => {
     const store = makeStore();
     addItem(store, { key: 'notext:a', value: 'val1' });
     addItem(store, { key: 'notext:b', value: 'val2' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -830,7 +930,7 @@ describe('consolidateMemoryItems', () => {
     const item1 = addItem(store, { key: 'ret:a', value: 'val1' });
     const item2 = addItem(store, { key: 'ret:b', value: 'val2' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -878,7 +978,7 @@ describe('consolidateMemoryItems', () => {
     const item1 = addItem(store, { key: 'retf:a', value: 'val1' });
     const item2 = addItem(store, { key: 'retf:b', value: 'val2' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
@@ -982,17 +1082,17 @@ describe('consolidateMemoryItems', () => {
       maxClusters: 5,
     });
 
-    expect(result.skippedReason).toBe('insufficient_embedded_items');
+    expect(result.skippedReason).toBe('no_similar_clusters');
   });
 
-  // ── tryMergeWithAnthropic: non-string key/value and non-array retired_ids ─
+  // ── tryMergeWithClaude: non-string key/value and non-array retired_ids ─
 
   it('falls back to heuristic when LLM JSON has non-string key/value and non-array retired_ids', async () => {
     const store = makeStore();
     addItem(store, { key: 'nonstr:a', value: 'val1' });
     addItem(store, { key: 'nonstr:b', value: 'val2' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     // key and value are numbers, retired_ids is a string — all wrong types
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -1020,7 +1120,7 @@ describe('consolidateMemoryItems', () => {
       maxClusters: 5,
     });
 
-    // key/value resolve to empty strings -> tryMergeWithAnthropic returns null -> heuristic
+    // key/value resolve to empty strings -> tryMergeWithClaude returns null -> heuristic
     expect(result.mode).toBe('heuristic');
     fetchSpy.mockRestore();
     vi.unstubAllEnvs();
@@ -1108,7 +1208,7 @@ describe('consolidateMemoryItems', () => {
     const item1 = addItem(store, { key: 'self:a', value: 'alpha' });
     const item2 = addItem(store, { key: 'self:b', value: 'beta' });
 
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-test-token');
 
     // We wrap saveItem so that the newly created item gets a predictable id,
     // and have the LLM return that same id in retired_ids.
@@ -1227,7 +1327,7 @@ describe('consolidateMemoryItems', () => {
     // We need mergeCluster to return null. Since items.length < 2 returns null,
     // we need a cluster that passes the >= 2 filter but... This is tricky since
     // buildClusters already filters. The other way: mergeCluster returns null when
-    // tryMergeWithAnthropic returns null AND the heuristic path... actually heuristic
+    // tryMergeWithClaude returns null AND the heuristic path... actually heuristic
     // always returns something for items >= 2. So merged is never null for >= 2 items.
     // This is effectively dead code.
     //

@@ -296,6 +296,76 @@ describe('real-world runtime trust-boundary and resilience integration scenarios
     ).toBe(true);
   });
 
+  it('reclaims a stale IPC root lock and continues permission/question delivery', async () => {
+    const harness = await createHermeticRuntimeHarness({
+      fakeChannel: {
+        permissionDecision: () => ({
+          approved: true,
+          decidedBy: 'ops-admin',
+          reason: 'stale lock recovered',
+        }),
+        userAnswer: (request) => ({
+          requestId: request.requestId,
+          answers: { Confirm: 'Yes' },
+          answeredBy: 'ops-admin',
+        }),
+      },
+    });
+    activeHarnesses.push(harness);
+    registerMainAndTeam(harness);
+
+    const lockPath = path.join(harness.runtimeHome, 'data', 'ipc', '.lock');
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: 999_999_999,
+        startedAt: '2026-04-17T17:47:47.631Z',
+      }),
+    );
+
+    harness.startIpcWatcher();
+    harness.writePermissionRequest('team', {
+      requestId: 'stale-lock-permission',
+      toolName: 'Write',
+      toolInput: { cmd: 'echo test' },
+    });
+    harness.writeUserQuestionRequest('team', {
+      requestId: 'stale-lock-question',
+      questions: [
+        {
+          header: 'Confirm',
+          question: 'Continue?',
+          options: [
+            { label: 'Yes', description: 'Continue' },
+            { label: 'No', description: 'Cancel' },
+          ],
+        },
+      ],
+    });
+
+    await harness.waitFor(
+      () =>
+        Boolean(
+          harness.readIpcJson(
+            'team',
+            'permission-responses',
+            'stale-lock-permission.json',
+          ),
+        ) &&
+        Boolean(
+          harness.readIpcJson(
+            'team',
+            'user-answers',
+            'stale-lock-question.json',
+          ),
+        ),
+    );
+
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(harness.channel.permissionRequests).toHaveLength(1);
+    expect(harness.channel.userQuestions).toHaveLength(1);
+  });
+
   it('bounds large permission payloads before channel rendering', async () => {
     const harness = await createHermeticRuntimeHarness({
       fakeChannel: {

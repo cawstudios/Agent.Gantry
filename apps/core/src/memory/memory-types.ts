@@ -5,10 +5,8 @@ export type MemoryKind =
   | 'preference'
   | 'decision'
   | 'fact'
-  | 'context'
   | 'correction'
-  | 'constraint'
-  | 'recent_work';
+  | 'constraint';
 
 export interface MemoryItem {
   id: string;
@@ -18,9 +16,17 @@ export interface MemoryItem {
   kind: MemoryKind;
   key: string;
   value: string;
+  why?: string;
+  load_bearing?: boolean;
+  source_turn_id?: string | null;
   source: string;
   confidence: number;
   is_pinned: boolean;
+  used_count?: number;
+  superseded_by?: string | null;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  last_reviewed_at?: string | null;
   version: number;
   last_used_at: string | null;
   last_retrieved_at: string | null;
@@ -41,8 +47,12 @@ export interface MemoryProcedure {
   title: string;
   body: string;
   tags: string[];
+  origin?: 'explicit' | 'accepted_suggestion';
+  trigger?: string | null;
   source: string;
   confidence: number;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
   version: number;
   last_used_at: string | null;
   created_at: string;
@@ -96,8 +106,12 @@ export interface SaveMemoryInput {
   kind?: MemoryKind;
   key: string;
   value: string;
+  why?: string;
+  load_bearing?: boolean;
+  source_turn_id?: string;
   confidence?: number;
   source?: string;
+  supersedes?: string[];
 }
 
 export interface PatchMemoryInput {
@@ -105,6 +119,8 @@ export interface PatchMemoryInput {
   expected_version: number;
   key?: string;
   value?: string;
+  why?: string;
+  load_bearing?: boolean;
   confidence?: number;
 }
 
@@ -114,6 +130,8 @@ export interface SaveProcedureInput {
   title: string;
   body: string;
   tags?: string[];
+  origin?: 'explicit' | 'accepted_suggestion';
+  trigger?: string;
   confidence?: number;
   source?: string;
 }
@@ -124,5 +142,6 @@ export interface PatchProcedureInput {
   title?: string;
   body?: string;
   tags?: string[];
+  trigger?: string | null;
   confidence?: number;
 }

@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { load as loadSqliteVec } from 'sqlite-vec';
 
 import {
+  AGENT_MEMORY_ROOT,
   MEMORY_CHUNK_RETENTION_DAYS,
   MEMORY_ITEM_MAX_PER_GROUP,
   MEMORY_MAX_CHUNKS_PER_GROUP,
@@ -16,6 +17,7 @@ import {
   MEMORY_SQLITE_PATH,
   MEMORY_VECTOR_DIMENSIONS,
 } from '../core/config.js';
+import { logger } from '../core/logger.js';
 import {
   MemoryChunk,
   MEMORY_GLOBAL_GROUP_FOLDER,
@@ -42,21 +44,64 @@ export interface ChunkInsert {
   embedding: number[] | null;
 }
 
+export interface MemoryStoreOptions {
+  backupRootDir?: string;
+}
+
+interface ExplicitMemoryBackupItem {
+  scope: MemoryScope;
+  group_folder: string;
+  user_id: string | null;
+  kind: MemoryItem['kind'];
+  key: string;
+  value: string;
+  why?: string;
+  load_bearing?: boolean;
+  source_turn_id?: string | null;
+  source: string;
+  confidence: number;
+}
+
+interface ExplicitMemoryBackupProcedure {
+  scope: MemoryScope;
+  group_folder: string;
+  title: string;
+  body: string;
+  tags: string[];
+  origin?: 'explicit' | 'accepted_suggestion';
+  trigger?: string | null;
+  source: string;
+  confidence: number;
+}
+
+interface ExplicitMemoryBackupPayload {
+  createdAt: string;
+  reason: string;
+  fromVersion: number;
+  toVersion: number;
+  pinnedItems: ExplicitMemoryBackupItem[];
+  procedures: ExplicitMemoryBackupProcedure[];
+  ephemeralChunkCount: number;
+}
+
 export class MemoryStore {
-  private static readonly SCHEMA_VERSION = 3;
+  private static readonly SCHEMA_VERSION = 4;
   private static readonly PRAGMA_TABLE_ALLOWLIST = new Set([
     'memory_items',
     'memory_chunks',
     'memory_procedures',
     'memory_events',
+    'memory_usage_events',
     'embedding_cache',
   ]);
   private readonly db: Database.Database;
+  private readonly backupRootDir: string;
   readonly searchItemsByText: ReturnType<typeof createItemSearcher>;
 
-  constructor(dbPath = MEMORY_SQLITE_PATH) {
+  constructor(dbPath = MEMORY_SQLITE_PATH, options: MemoryStoreOptions = {}) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
+    this.backupRootDir = options.backupRootDir || AGENT_MEMORY_ROOT;
     this.searchItemsByText = createItemSearcher(this.db);
     this.initializeSchema();
     this.initializeVectorBackend();
@@ -79,6 +124,7 @@ export class MemoryStore {
       'memory_item_vector_map',
       'memory_items_vec',
       'memory_events',
+      'memory_usage_events',
       'embedding_cache',
     ];
     for (const objectName of requiredObjects) {
@@ -95,27 +141,25 @@ export class MemoryStore {
 
   private initializeSchema(): void {
     const currentVersion = this.getSchemaVersion();
-    if (currentVersion > MemoryStore.SCHEMA_VERSION) {
-      throw new Error(
-        `memory schema version ${currentVersion} is newer than supported version ${MemoryStore.SCHEMA_VERSION}`,
-      );
-    }
-
-    this.createSchema();
-
     if (currentVersion === 0) {
+      this.createSchema();
       this.setSchemaVersion(MemoryStore.SCHEMA_VERSION);
       return;
     }
 
-    if (currentVersion < 2) {
-      this.migrateToV2();
-      this.setSchemaVersion(2);
+    if (currentVersion < MemoryStore.SCHEMA_VERSION) {
+      const migrated = this.tryApplyAdditiveMigration(currentVersion);
+      if (migrated) return;
+      this.resetSchemaWithBackup(currentVersion, 'additive_migration_failed');
+      return;
     }
-    if (currentVersion < 3) {
-      this.migrateToV3();
-      this.setSchemaVersion(3);
+
+    if (currentVersion > MemoryStore.SCHEMA_VERSION) {
+      this.resetSchemaWithBackup(currentVersion, 'binary_older_than_db');
+      return;
     }
+
+    this.createSchema();
   }
 
   private getSchemaVersion(): number {
@@ -137,70 +181,366 @@ export class MemoryStore {
     return rows.some((row) => String(row.name) === columnName);
   }
 
-  private migrateToV2(): void {
-    if (!this.columnExists('memory_items', 'is_pinned')) {
-      this.db.exec(
-        `ALTER TABLE memory_items ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0`,
-      );
-    }
-    if (!this.columnExists('memory_items', 'embedding_json')) {
-      this.db.exec(`ALTER TABLE memory_items ADD COLUMN embedding_json TEXT`);
-    }
-    if (!this.columnExists('memory_items', 'retrieval_count')) {
-      this.db.exec(
-        `ALTER TABLE memory_items ADD COLUMN retrieval_count INTEGER NOT NULL DEFAULT 0`,
-      );
-    }
-    if (!this.columnExists('memory_items', 'last_retrieved_at')) {
-      this.db.exec(
-        `ALTER TABLE memory_items ADD COLUMN last_retrieved_at TEXT`,
-      );
-    }
-    if (!this.columnExists('memory_chunks', 'importance_weight')) {
-      this.db.exec(
-        `ALTER TABLE memory_chunks ADD COLUMN importance_weight REAL NOT NULL DEFAULT 1.0`,
-      );
-    }
-
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS memory_item_vector_map (
-        item_id TEXT PRIMARY KEY,
-        vec_rowid INTEGER NOT NULL UNIQUE
-      );
-    `);
+  private tableExists(tableName: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`,
+      )
+      .get(tableName) as { present?: number } | undefined;
+    return row?.present === 1;
   }
 
-  private migrateToV3(): void {
-    if (!this.columnExists('memory_items', 'total_score')) {
-      this.db.exec(
-        `ALTER TABLE memory_items ADD COLUMN total_score REAL NOT NULL DEFAULT 0`,
-      );
-    }
-    if (!this.columnExists('memory_items', 'max_score')) {
-      this.db.exec(
-        `ALTER TABLE memory_items ADD COLUMN max_score REAL NOT NULL DEFAULT 0`,
-      );
-    }
-    if (!this.columnExists('memory_items', 'query_hashes_json')) {
-      this.db.exec(
-        `ALTER TABLE memory_items ADD COLUMN query_hashes_json TEXT NOT NULL DEFAULT '[]'`,
-      );
-    }
-    if (!this.columnExists('memory_items', 'recall_days_json')) {
-      this.db.exec(
-        `ALTER TABLE memory_items ADD COLUMN recall_days_json TEXT NOT NULL DEFAULT '[]'`,
-      );
-    }
+  private ensureColumn(
+    tableName: 'memory_items' | 'memory_procedures' | 'memory_chunks',
+    columnName: string,
+    definitionSql: string,
+  ): void {
+    if (!this.tableExists(tableName)) return;
+    if (this.columnExists(tableName, columnName)) return;
+    this.db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definitionSql}`);
+  }
 
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS embedding_cache (
-        text_hash TEXT NOT NULL,
-        model TEXT NOT NULL,
-        embedding_json TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        PRIMARY KEY (text_hash, model)
+  private tryApplyAdditiveMigration(fromVersion: number): boolean {
+    try {
+      this.applyAdditiveMigrationToV4();
+      this.createSchema();
+      this.setSchemaVersion(MemoryStore.SCHEMA_VERSION);
+      logger.info(
+        {
+          fromVersion,
+          toVersion: MemoryStore.SCHEMA_VERSION,
+        },
+        '[MyClaw] memory schema upgraded via additive migration',
       );
+      return true;
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          fromVersion,
+          toVersion: MemoryStore.SCHEMA_VERSION,
+        },
+        '[MyClaw] additive memory migration failed; falling back to reset',
+      );
+      return false;
+    }
+  }
+
+  private applyAdditiveMigrationToV4(): void {
+    const run = this.db.transaction(() => {
+      this.ensureColumn('memory_items', 'why', 'why TEXT');
+      this.ensureColumn(
+        'memory_items',
+        'load_bearing',
+        'load_bearing INTEGER NOT NULL DEFAULT 0',
+      );
+      this.ensureColumn(
+        'memory_items',
+        'source_turn_id',
+        'source_turn_id TEXT',
+      );
+      this.ensureColumn(
+        'memory_items',
+        'is_pinned',
+        'is_pinned INTEGER NOT NULL DEFAULT 0',
+      );
+      this.ensureColumn(
+        'memory_items',
+        'used_count',
+        'used_count INTEGER NOT NULL DEFAULT 0',
+      );
+      this.ensureColumn('memory_items', 'superseded_by', 'superseded_by TEXT');
+      this.ensureColumn(
+        'memory_items',
+        'last_retrieved_at',
+        'last_retrieved_at TEXT',
+      );
+      this.ensureColumn(
+        'memory_items',
+        'retrieval_count',
+        'retrieval_count INTEGER NOT NULL DEFAULT 0',
+      );
+      this.ensureColumn(
+        'memory_items',
+        'total_score',
+        'total_score REAL NOT NULL DEFAULT 0',
+      );
+      this.ensureColumn(
+        'memory_items',
+        'max_score',
+        'max_score REAL NOT NULL DEFAULT 0',
+      );
+      this.ensureColumn(
+        'memory_items',
+        'query_hashes_json',
+        "query_hashes_json TEXT NOT NULL DEFAULT '[]'",
+      );
+      this.ensureColumn(
+        'memory_items',
+        'recall_days_json',
+        "recall_days_json TEXT NOT NULL DEFAULT '[]'",
+      );
+      this.ensureColumn(
+        'memory_items',
+        'embedding_json',
+        'embedding_json TEXT',
+      );
+      this.ensureColumn('memory_items', 'deleted_at', 'deleted_at TEXT');
+      this.ensureColumn(
+        'memory_items',
+        'last_reviewed_at',
+        'last_reviewed_at TEXT',
+      );
+
+      this.ensureColumn(
+        'memory_procedures',
+        'origin',
+        "origin TEXT NOT NULL DEFAULT 'explicit' CHECK(origin IN ('explicit','accepted_suggestion'))",
+      );
+      this.ensureColumn('memory_procedures', 'trigger', 'trigger TEXT');
+      this.ensureColumn('memory_procedures', 'deleted_at', 'deleted_at TEXT');
+
+      this.ensureColumn(
+        'memory_chunks',
+        'importance_weight',
+        'importance_weight REAL NOT NULL DEFAULT 1.0',
+      );
+    });
+    run();
+  }
+
+  private resetSchemaWithBackup(fromVersion: number, reason: string): void {
+    const backup = this.exportExplicitMemoryBackup(fromVersion, reason);
+    this.migrateToV4();
+    this.setSchemaVersion(MemoryStore.SCHEMA_VERSION);
+    const restored = this.restoreExplicitMemoryBackup(backup);
+
+    this.recordEvent('memory_schema_reset', 'system', null, {
+      reason,
+      fromVersion,
+      toVersion: MemoryStore.SCHEMA_VERSION,
+      restoredPinnedItems: restored.pinnedItems,
+      restoredProcedures: restored.procedures,
+      droppedEphemeralChunks: backup.ephemeralChunkCount,
+    });
+
+    logger.warn(
+      {
+        reason,
+        fromVersion,
+        toVersion: MemoryStore.SCHEMA_VERSION,
+        restoredPinnedItems: restored.pinnedItems,
+        restoredProcedures: restored.procedures,
+        droppedEphemeralChunks: backup.ephemeralChunkCount,
+      },
+      `[MyClaw] memory schema upgraded (v${fromVersion} -> v${MemoryStore.SCHEMA_VERSION}). ${restored.pinnedItems} pinned items and ${restored.procedures} procedures restored; ${backup.ephemeralChunkCount} ephemeral chunks dropped.`,
+    );
+  }
+
+  private exportExplicitMemoryBackup(
+    fromVersion: number,
+    reason: string,
+  ): ExplicitMemoryBackupPayload {
+    const payload: ExplicitMemoryBackupPayload = {
+      createdAt: new Date().toISOString(),
+      reason,
+      fromVersion,
+      toVersion: MemoryStore.SCHEMA_VERSION,
+      pinnedItems: this.readPinnedItemsForBackup(),
+      procedures: this.readProceduresForBackup(),
+      ephemeralChunkCount: this.countEphemeralChunks(),
+    };
+    this.writeBackupFile(payload);
+    return payload;
+  }
+
+  private writeBackupFile(payload: ExplicitMemoryBackupPayload): void {
+    try {
+      const backupDir = path.join(this.backupRootDir, '.cache');
+      fs.mkdirSync(backupDir, { recursive: true });
+      const backupPath = path.join(
+        backupDir,
+        `pre-v${MemoryStore.SCHEMA_VERSION}-backup.json`,
+      );
+      fs.writeFileSync(backupPath, JSON.stringify(payload, null, 2));
+    } catch (err) {
+      logger.warn(
+        { err },
+        '[MyClaw] failed to persist memory schema backup file before reset',
+      );
+    }
+  }
+
+  private readPinnedItemsForBackup(): ExplicitMemoryBackupItem[] {
+    if (!this.tableExists('memory_items')) return [];
+    if (!this.columnExists('memory_items', 'is_pinned')) return [];
+    const hasIsDeleted = this.columnExists('memory_items', 'is_deleted');
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_items
+         WHERE is_pinned = 1
+           ${hasIsDeleted ? 'AND is_deleted = 0' : ''}`,
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      scope: this.toScope(row.scope),
+      group_folder: String(row.group_folder || ''),
+      user_id: row.user_id ? String(row.user_id) : null,
+      kind: this.toMemoryKind(row.kind),
+      key: String(row.key || ''),
+      value: String(row.value || ''),
+      why: row.why ? String(row.why) : undefined,
+      load_bearing: Number(row.load_bearing || 0) === 1,
+      source_turn_id: row.source_turn_id ? String(row.source_turn_id) : null,
+      source: String(row.source || 'schema-reset-backup'),
+      confidence: this.toConfidence(row.confidence),
+    }));
+  }
+
+  private readProceduresForBackup(): ExplicitMemoryBackupProcedure[] {
+    if (!this.tableExists('memory_procedures')) return [];
+    const hasIsDeleted = this.columnExists('memory_procedures', 'is_deleted');
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_procedures
+         ${hasIsDeleted ? 'WHERE is_deleted = 0' : ''}`,
+      )
+      .all() as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      scope: this.toScope(row.scope),
+      group_folder: String(row.group_folder || ''),
+      title: String(row.title || ''),
+      body: String(row.body || ''),
+      tags: this.parseTags(row.tags_json),
+      origin:
+        row.origin === 'accepted_suggestion'
+          ? 'accepted_suggestion'
+          : 'explicit',
+      trigger: row.trigger ? String(row.trigger) : null,
+      source: String(row.source || 'schema-reset-backup'),
+      confidence: this.toConfidence(row.confidence),
+    }));
+  }
+
+  private countEphemeralChunks(): number {
+    if (!this.tableExists('memory_chunks')) return 0;
+    const row = this.db
+      .prepare(`SELECT COUNT(1) AS count FROM memory_chunks`)
+      .get() as { count?: number } | undefined;
+    return Number(row?.count || 0);
+  }
+
+  private restoreExplicitMemoryBackup(payload: ExplicitMemoryBackupPayload): {
+    pinnedItems: number;
+    procedures: number;
+  } {
+    let restoredPinnedItems = 0;
+    let restoredProcedures = 0;
+    for (const item of payload.pinnedItems) {
+      try {
+        this.saveItem({
+          scope: item.scope,
+          group_folder: item.group_folder,
+          user_id: item.user_id,
+          kind: item.kind,
+          key: item.key,
+          value: item.value,
+          why: item.why,
+          load_bearing: item.load_bearing,
+          source_turn_id: item.source_turn_id,
+          source: item.source || 'schema-reset-backup',
+          confidence: item.confidence,
+          is_pinned: true,
+        });
+        restoredPinnedItems += 1;
+      } catch (err) {
+        logger.warn(
+          { err, key: item.key, group: item.group_folder },
+          '[MyClaw] failed to restore pinned memory item from schema backup',
+        );
+      }
+    }
+    for (const procedure of payload.procedures) {
+      try {
+        this.saveProcedure({
+          scope: procedure.scope,
+          group_folder: procedure.group_folder,
+          title: procedure.title,
+          body: procedure.body,
+          tags: procedure.tags,
+          origin: procedure.origin,
+          trigger: procedure.trigger,
+          source: procedure.source || 'schema-reset-backup',
+          confidence: procedure.confidence,
+        });
+        restoredProcedures += 1;
+      } catch (err) {
+        logger.warn(
+          { err, title: procedure.title, group: procedure.group_folder },
+          '[MyClaw] failed to restore memory procedure from schema backup',
+        );
+      }
+    }
+    return {
+      pinnedItems: restoredPinnedItems,
+      procedures: restoredProcedures,
+    };
+  }
+
+  private toScope(value: unknown): MemoryScope {
+    const scope = String(value || 'group');
+    if (scope === 'global' || scope === 'user') return scope;
+    return 'group';
+  }
+
+  private toMemoryKind(value: unknown): MemoryItem['kind'] {
+    const kind = String(value || 'fact');
+    if (
+      kind === 'preference' ||
+      kind === 'decision' ||
+      kind === 'fact' ||
+      kind === 'correction' ||
+      kind === 'constraint'
+    ) {
+      return kind;
+    }
+    return 'fact';
+  }
+
+  private toConfidence(value: unknown): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0.5;
+    return Math.max(0, Math.min(1, parsed));
+  }
+
+  private parseTags(value: unknown): string[] {
+    if (typeof value !== 'string' || !value.trim()) return [];
+    try {
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((entry): entry is string => typeof entry === 'string')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  private migrateToV4(): void {
+    this.db.exec(`
+      DROP TABLE IF EXISTS memory_item_vector_map;
+      DROP TABLE IF EXISTS memory_chunk_vector_map;
+      DROP TABLE IF EXISTS memory_chunks_fts;
+      DROP TABLE IF EXISTS memory_usage_events;
+      DROP TABLE IF EXISTS memory_events;
+      DROP TABLE IF EXISTS memory_chunks;
+      DROP TABLE IF EXISTS memory_procedures;
+      DROP TABLE IF EXISTS memory_items;
+      DROP TABLE IF EXISTS embedding_cache;
     `);
+    this.createSchema();
   }
 
   private createSchema(): void {
@@ -213,9 +553,14 @@ export class MemoryStore {
         kind TEXT NOT NULL,
         key TEXT NOT NULL,
         value TEXT NOT NULL,
+        why TEXT,
+        load_bearing INTEGER NOT NULL DEFAULT 0,
+        source_turn_id TEXT,
         source TEXT NOT NULL,
         confidence REAL NOT NULL DEFAULT 0.5,
         is_pinned INTEGER NOT NULL DEFAULT 0,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        superseded_by TEXT,
         version INTEGER NOT NULL DEFAULT 1,
         last_used_at TEXT,
         last_retrieved_at TEXT,
@@ -227,9 +572,14 @@ export class MemoryStore {
         embedding_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        is_deleted INTEGER NOT NULL DEFAULT 0
+        is_deleted INTEGER NOT NULL DEFAULT 0,
+        deleted_at TEXT,
+        last_reviewed_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_memory_items_scope_group ON memory_items(scope, group_folder, updated_at DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_items_active_unique_key
+      ON memory_items(scope, group_folder, COALESCE(user_id, ''), key)
+      WHERE is_deleted = 0;
 
       CREATE TABLE IF NOT EXISTS memory_procedures (
         id TEXT PRIMARY KEY,
@@ -238,13 +588,16 @@ export class MemoryStore {
         title TEXT NOT NULL,
         body TEXT NOT NULL,
         tags_json TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT 'explicit' CHECK(origin IN ('explicit','accepted_suggestion')),
+        trigger TEXT,
         source TEXT NOT NULL,
         confidence REAL NOT NULL DEFAULT 0.5,
         version INTEGER NOT NULL DEFAULT 1,
         last_used_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        is_deleted INTEGER NOT NULL DEFAULT 0
+        is_deleted INTEGER NOT NULL DEFAULT 0,
+        deleted_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_memory_procedures_scope_group ON memory_procedures(scope, group_folder, updated_at DESC);
 
@@ -292,6 +645,17 @@ export class MemoryStore {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_memory_events_type_time ON memory_events(event_type, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS memory_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id TEXT NOT NULL,
+        turn_id TEXT,
+        event TEXT CHECK(event IN ('retrieved', 'used', 'contradicted')) NOT NULL,
+        at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY(item_id) REFERENCES memory_items(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_usage_events_item ON memory_usage_events(item_id);
+      CREATE INDEX IF NOT EXISTS idx_usage_events_at ON memory_usage_events(at);
 
       CREATE TABLE IF NOT EXISTS embedding_cache (
         text_hash TEXT NOT NULL,
@@ -344,22 +708,36 @@ export class MemoryStore {
       | 'kind'
       | 'key'
       | 'value'
+      | 'why'
+      | 'load_bearing'
+      | 'source_turn_id'
       | 'source'
       | 'confidence'
-    > & { is_pinned?: boolean },
+    > & { is_pinned?: boolean; used_count?: number },
   ): MemoryItem {
     const now = new Date().toISOString();
     const id = MemoryStore.makeId('mem');
     this.db
       .prepare(
         `INSERT INTO memory_items
-        (id, scope, group_folder, user_id, kind, key, value, source, confidence, is_pinned, version, created_at, updated_at)
-        VALUES (@id, @scope, @group_folder, @user_id, @kind, @key, @value, @source, @confidence, @is_pinned, 1, @created_at, @updated_at)`,
+        (id, scope, group_folder, user_id, kind, key, value, why, load_bearing, source_turn_id, source, confidence, is_pinned, used_count, version, created_at, updated_at)
+        VALUES (@id, @scope, @group_folder, @user_id, @kind, @key, @value, @why, @load_bearing, @source_turn_id, @source, @confidence, @is_pinned, @used_count, 1, @created_at, @updated_at)`,
       )
       .run({
-        ...input,
         id,
+        scope: input.scope,
+        group_folder: input.group_folder,
+        user_id: input.user_id,
+        kind: input.kind,
+        key: input.key,
+        value: input.value,
+        why: input.why ?? null,
         is_pinned: input.is_pinned ? 1 : 0,
+        load_bearing: input.load_bearing ? 1 : 0,
+        source_turn_id: input.source_turn_id ?? null,
+        source: input.source,
+        confidence: input.confidence,
+        used_count: Math.max(0, Math.round(input.used_count || 0)),
         created_at: now,
         updated_at: now,
       });
@@ -432,7 +810,19 @@ export class MemoryStore {
     id: string,
     expectedVersion: number,
     patch: Partial<
-      Pick<MemoryItem, 'key' | 'value' | 'confidence' | 'kind' | 'source'>
+      Pick<
+        MemoryItem,
+        | 'key'
+        | 'value'
+        | 'why'
+        | 'load_bearing'
+        | 'confidence'
+        | 'kind'
+        | 'source'
+        | 'source_turn_id'
+        | 'superseded_by'
+        | 'last_reviewed_at'
+      >
     >,
   ): MemoryItem {
     const current = this.getItemById(id);
@@ -446,6 +836,23 @@ export class MemoryStore {
     const next = {
       key: patch.key ?? current.key,
       value: patch.value ?? current.value,
+      why: patch.why ?? current.why ?? null,
+      load_bearing:
+        patch.load_bearing !== undefined
+          ? patch.load_bearing
+          : Boolean(current.load_bearing),
+      source_turn_id:
+        patch.source_turn_id !== undefined
+          ? patch.source_turn_id
+          : current.source_turn_id || null,
+      superseded_by:
+        patch.superseded_by !== undefined
+          ? patch.superseded_by
+          : current.superseded_by || null,
+      last_reviewed_at:
+        patch.last_reviewed_at !== undefined
+          ? patch.last_reviewed_at
+          : current.last_reviewed_at || null,
       kind: patch.kind ?? current.kind,
       source: patch.source ?? current.source,
       confidence: patch.confidence ?? current.confidence,
@@ -457,10 +864,24 @@ export class MemoryStore {
     this.db
       .prepare(
         `UPDATE memory_items
-        SET key = @key, value = @value, kind = @kind, source = @source, confidence = @confidence, version = @version, updated_at = @updated_at
+        SET key = @key,
+            value = @value,
+            why = @why,
+            load_bearing = @load_bearing,
+            source_turn_id = @source_turn_id,
+            superseded_by = @superseded_by,
+            last_reviewed_at = @last_reviewed_at,
+            kind = @kind,
+            source = @source,
+            confidence = @confidence,
+            version = @version,
+            updated_at = @updated_at
         WHERE id = @id`,
       )
-      .run(next);
+      .run({
+        ...next,
+        load_bearing: next.load_bearing ? 1 : 0,
+      });
 
     return this.getItemById(id)!;
   }
@@ -610,15 +1031,18 @@ export class MemoryStore {
     return rows.map((row) => this.toItem(row));
   }
 
-  softDeleteItem(id: string): void {
+  softDeleteItem(id: string, supersededBy?: string | null): void {
     const now = new Date().toISOString();
     this.db
       .prepare(
         `UPDATE memory_items
-         SET is_deleted = 1, updated_at = ?
+         SET is_deleted = 1,
+             deleted_at = ?,
+             superseded_by = COALESCE(?, superseded_by),
+             updated_at = ?
          WHERE id = ?`,
       )
-      .run(now, id);
+      .run(now, supersededBy ?? null, now, id);
     this.deleteItemVectorsByIds([id]);
   }
 
@@ -815,7 +1239,13 @@ export class MemoryStore {
   saveProcedure(
     input: Omit<
       MemoryProcedure,
-      'id' | 'version' | 'created_at' | 'updated_at' | 'last_used_at'
+      | 'id'
+      | 'version'
+      | 'created_at'
+      | 'updated_at'
+      | 'last_used_at'
+      | 'is_deleted'
+      | 'deleted_at'
     >,
   ): MemoryProcedure {
     const now = new Date().toISOString();
@@ -823,8 +1253,8 @@ export class MemoryStore {
     this.db
       .prepare(
         `INSERT INTO memory_procedures
-        (id, scope, group_folder, title, body, tags_json, source, confidence, version, created_at, updated_at)
-        VALUES (@id, @scope, @group_folder, @title, @body, @tags_json, @source, @confidence, 1, @created_at, @updated_at)`,
+        (id, scope, group_folder, title, body, tags_json, origin, trigger, source, confidence, version, created_at, updated_at)
+        VALUES (@id, @scope, @group_folder, @title, @body, @tags_json, @origin, @trigger, @source, @confidence, 1, @created_at, @updated_at)`,
       )
       .run({
         id,
@@ -833,6 +1263,8 @@ export class MemoryStore {
         title: input.title,
         body: input.body,
         tags_json: JSON.stringify(input.tags),
+        origin: input.origin || 'explicit',
+        trigger: input.trigger || null,
         source: input.source,
         confidence: input.confidence,
         created_at: now,
@@ -855,7 +1287,10 @@ export class MemoryStore {
     id: string,
     expectedVersion: number,
     patch: Partial<
-      Pick<MemoryProcedure, 'title' | 'body' | 'tags' | 'confidence'>
+      Pick<
+        MemoryProcedure,
+        'title' | 'body' | 'tags' | 'trigger' | 'confidence'
+      >
     >,
   ): MemoryProcedure {
     const current = this.getProcedureById(id);
@@ -871,6 +1306,8 @@ export class MemoryStore {
       title: patch.title ?? current.title,
       body: patch.body ?? current.body,
       tags_json: JSON.stringify(patch.tags ?? current.tags),
+      trigger:
+        patch.trigger !== undefined ? patch.trigger : current.trigger || null,
       confidence: patch.confidence ?? current.confidence,
       version: current.version + 1,
       updated_at: new Date().toISOString(),
@@ -879,7 +1316,13 @@ export class MemoryStore {
     this.db
       .prepare(
         `UPDATE memory_procedures
-         SET title = @title, body = @body, tags_json = @tags_json, confidence = @confidence, version = @version, updated_at = @updated_at
+         SET title = @title,
+             body = @body,
+             tags_json = @tags_json,
+             trigger = @trigger,
+             confidence = @confidence,
+             version = @version,
+             updated_at = @updated_at
          WHERE id = @id`,
       )
       .run(next);
@@ -898,6 +1341,19 @@ export class MemoryStore {
       )
       .all({ group_folder: groupFolder, limit }) as Record<string, unknown>[];
     return rows.map((row) => this.toProcedure(row));
+  }
+
+  softDeleteProcedure(id: string): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE memory_procedures
+         SET is_deleted = 1,
+             deleted_at = ?,
+             updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(now, now, id);
   }
 
   saveChunks(chunks: ChunkInsert[]): number {
@@ -1140,12 +1596,14 @@ export class MemoryStore {
       const now = new Date().toISOString();
       const markDeleted = this.db.prepare(
         `UPDATE memory_items
-         SET is_deleted = 1, updated_at = ?
+         SET is_deleted = 1,
+             deleted_at = ?,
+             updated_at = ?
          WHERE id = ?`,
       );
       const txn = this.db.transaction((rows: Array<{ id: string }>) => {
         for (const row of rows) {
-          markDeleted.run(now, row.id);
+          markDeleted.run(now, now, row.id);
         }
       });
       txn(overflowItemIds);
@@ -1166,10 +1624,15 @@ export class MemoryStore {
 
     if (overflowProcedures.length > 0) {
       const markDeleted = this.db.prepare(
-        `UPDATE memory_procedures SET is_deleted = 1 WHERE id = ?`,
+        `UPDATE memory_procedures
+         SET is_deleted = 1,
+             deleted_at = ?,
+             updated_at = ?
+         WHERE id = ?`,
       );
       for (const row of overflowProcedures) {
-        markDeleted.run(row.id);
+        const now = new Date().toISOString();
+        markDeleted.run(now, now, row.id);
       }
     }
 
@@ -1201,6 +1664,39 @@ export class MemoryStore {
         JSON.stringify(payload),
         new Date().toISOString(),
       );
+  }
+
+  getLatestEvent(
+    eventType: string,
+    entityId?: string | null,
+  ): {
+    event_type: string;
+    entity_type: string;
+    entity_id: string | null;
+    payload_json: string;
+    created_at: string;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT event_type, entity_type, entity_id, payload_json, created_at
+         FROM memory_events
+         WHERE event_type = @event_type
+           AND (@entity_id IS NULL OR entity_id = @entity_id)
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get({
+        event_type: eventType,
+        entity_id: entityId ?? null,
+      }) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      event_type: String(row.event_type),
+      entity_type: String(row.entity_type),
+      entity_id: row.entity_id ? String(row.entity_id) : null,
+      payload_json: String(row.payload_json || '{}'),
+      created_at: String(row.created_at),
+    };
   }
 
   private deleteChunksByIds(ids: string[]): void {
@@ -1270,9 +1766,19 @@ export class MemoryStore {
       kind: row.kind as MemoryItem['kind'],
       key: String(row.key),
       value: String(row.value),
+      why: row.why ? String(row.why) : undefined,
+      load_bearing: Number(row.load_bearing || 0) === 1,
+      source_turn_id: row.source_turn_id ? String(row.source_turn_id) : null,
       source: String(row.source),
       confidence: Number(row.confidence),
       is_pinned: Number(row.is_pinned || 0) === 1,
+      used_count: Number(row.used_count || 0),
+      superseded_by: row.superseded_by ? String(row.superseded_by) : null,
+      is_deleted: Number(row.is_deleted || 0) === 1,
+      deleted_at: row.deleted_at ? String(row.deleted_at) : null,
+      last_reviewed_at: row.last_reviewed_at
+        ? String(row.last_reviewed_at)
+        : null,
       version: Number(row.version),
       last_used_at: row.last_used_at ? String(row.last_used_at) : null,
       last_retrieved_at: row.last_retrieved_at
@@ -1311,8 +1817,15 @@ export class MemoryStore {
       title: String(row.title),
       body: String(row.body),
       tags: JSON.parse(String(row.tags_json || '[]')) as string[],
+      origin:
+        row.origin === 'accepted_suggestion'
+          ? 'accepted_suggestion'
+          : 'explicit',
+      trigger: row.trigger ? String(row.trigger) : null,
       source: String(row.source),
       confidence: Number(row.confidence),
+      is_deleted: Number(row.is_deleted || 0) === 1,
+      deleted_at: row.deleted_at ? String(row.deleted_at) : null,
       version: Number(row.version),
       last_used_at: row.last_used_at ? String(row.last_used_at) : null,
       created_at: String(row.created_at),

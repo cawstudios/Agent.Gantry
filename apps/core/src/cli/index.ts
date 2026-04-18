@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import * as p from '@clack/prompts';
+import { runSessionHook } from '../bin/session-hook.js';
 
 import { formatDoctorReport, runDoctorWithNetwork } from './doctor.js';
 import { runConfigCommand } from './config.js';
@@ -12,6 +13,11 @@ import {
   writeOnboardingState,
 } from './onboarding-state.js';
 import { resolveRuntimeHome } from './runtime-home.js';
+import {
+  applySessionHookInstallPlan,
+  buildSessionHookInstallPlan,
+  formatSessionHookInstallDiff,
+} from './session-hooks.js';
 import {
   getServiceStatus,
   installService,
@@ -47,6 +53,9 @@ function usage(): string {
     '  myclaw memory provider <sqlite|qmd|noop|none>',
     '  myclaw memory embeddings <off|openai>',
     '  myclaw memory dreaming <on|off>',
+    '  myclaw memory model set <extractor|dreaming|consolidation|sessionSummary> <model>',
+    '  myclaw memory model profile <cheap|balanced|quality>',
+    '  myclaw session-hook --cause=<session-start|pre-compact|session-stop>',
     '  myclaw start',
     '  myclaw restart',
     '  myclaw config list',
@@ -291,6 +300,7 @@ async function runSetupCommand(
     initialStep: startStep,
   });
   if (result.status === 'completed') {
+    await promptSessionHookInstall();
     await runStatusCommand(import.meta.url, result.runtimeHome);
     return 0;
   }
@@ -298,6 +308,57 @@ async function runSetupCommand(
     return 0;
   }
   return 1;
+}
+
+async function promptSessionHookInstall(): Promise<void> {
+  let plan;
+  try {
+    plan = buildSessionHookInstallPlan();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    p.log.warn(
+      `Could not update Claude hooks automatically. Next action: fix your ~/.claude/settings.json JSON and rerun setup.\n${message}`,
+    );
+    return;
+  }
+
+  if (!plan.changed) {
+    p.note(
+      `Claude hooks already configured in ${plan.settingsPath}.`,
+      'Claude Hooks',
+    );
+    return;
+  }
+
+  p.note(formatSessionHookInstallDiff(plan), 'Claude Hooks');
+  const decision = await p.select({
+    message: 'Install these Claude session hooks now?',
+    options: [
+      {
+        value: 'install',
+        label: 'Install Hooks (Recommended)',
+      },
+      {
+        value: 'skip',
+        label: 'Skip for now',
+      },
+    ],
+  });
+
+  if (p.isCancel(decision) || decision !== 'install') {
+    p.log.info('Skipped Claude hook install.');
+    return;
+  }
+
+  try {
+    applySessionHookInstallPlan(plan);
+    p.log.success(`Claude hooks installed at ${plan.settingsPath}.`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    p.log.warn(
+      `Could not write Claude hooks. Next action: check file permissions and rerun setup.\n${message}`,
+    );
+  }
 }
 
 async function runSmartEntrypoint(runtimeHome: string): Promise<number> {
@@ -330,6 +391,11 @@ async function main(): Promise<number> {
   const runtimeHome = resolveRuntimeHome(parsed.runtimeHomeArg);
   const [command, ...rest] = parsed.command;
   const subcommand = rest[0];
+
+  if (command === 'session-hook') {
+    await runSessionHook({ argv: rest });
+    return 0;
+  }
 
   // Allow `myclaw doctor` to run even when settings.yaml is malformed so it can
   // report actionable recovery guidance instead of failing at top-level parse.

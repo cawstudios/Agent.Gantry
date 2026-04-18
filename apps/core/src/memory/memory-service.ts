@@ -6,16 +6,15 @@ import {
   AGENTS_DIR,
   MEMORY_CHUNK_OVERLAP,
   MEMORY_CHUNK_SIZE,
+  MEMORY_BRIEF_INCLUDE_LAST_SESSION,
   MEMORY_CONFIDENCE_BOOST_ON_USE,
   MEMORY_CONFIDENCE_DECAY_ON_UNUSED,
   MEMORY_CONSOLIDATION_CLUSTER_THRESHOLD,
-  MEMORY_CONSOLIDATION_ENABLED,
   MEMORY_CONSOLIDATION_MAX_CLUSTERS,
   MEMORY_CONSOLIDATION_MIN_ITEMS,
   MEMORY_DREAMING_CONFIDENCE_BOOST,
   MEMORY_DREAMING_CONFIDENCE_DECAY,
   MEMORY_DREAMING_DECAY_THRESHOLD,
-  MEMORY_DREAMING_ENABLED,
   MEMORY_DREAMING_MIN_RECALLS,
   MEMORY_DREAMING_MIN_UNIQUE_QUERIES,
   MEMORY_DREAMING_PROMOTION_THRESHOLD,
@@ -35,6 +34,7 @@ import {
   MEMORY_TEMPORAL_DECAY_HALFLIFE_DAYS,
   MEMORY_USAGE_DECAY_INTERVAL_TURNS,
   MEMORY_USAGE_FEEDBACK_ENABLED,
+  RUNTIME_MEMORY_DREAMING_ENABLED,
 } from '../core/config.js';
 import {
   createEmbeddingProvider,
@@ -59,6 +59,7 @@ import {
   createMemoryProvider,
   MemoryProvider,
 } from './memory-provider.js';
+import { AgentMemoryRootService } from './agent-memory-root.js';
 import { fuseSearchResults } from './memory-retrieval.js';
 import {
   MEMORY_GLOBAL_GROUP_FOLDER,
@@ -98,6 +99,15 @@ interface MemoryContextResult {
   retrievedItemIds: string[];
 }
 
+export interface MemoryStatusSnapshot {
+  items_by_kind: Record<string, number>;
+  items_by_scope: Record<string, number>;
+  top10_most_used: Array<{ key: string; retrieval_count: number }>;
+  top10_stalest: Array<{ key: string; updated_at: string }>;
+  last_dream_run?: { at?: string; summary?: string };
+  disk_kb?: Record<string, number>;
+}
+
 interface SourceDoc {
   sourceId: string;
   sourcePath: string;
@@ -106,6 +116,12 @@ interface SourceDoc {
 }
 
 let memoryServiceSingleton: MemoryService | null = null;
+const MEMORY_AUTO_PROCEDURE_EXTRACTION_ENABLED = (() => {
+  const raw = process.env.MEMORY_AUTO_PROCEDURE_EXTRACTION?.trim();
+  if (!raw) return false;
+  const normalized = raw.toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+})();
 
 export class MemoryService {
   private readonly store: MemoryProvider;
@@ -156,7 +172,6 @@ export class MemoryService {
     return runMemoryDreamingSweep({
       groupFolder,
       store: this.store,
-      consolidationEnabled: MEMORY_CONSOLIDATION_ENABLED,
       consolidateGroupMemory: (targetGroupFolder) =>
         this.consolidateGroupMemory(targetGroupFolder),
       retentionPinThreshold: MEMORY_RETENTION_PIN_THRESHOLD,
@@ -166,8 +181,77 @@ export class MemoryService {
       minUniqueQueries: MEMORY_DREAMING_MIN_UNIQUE_QUERIES,
       confidenceBoost: MEMORY_DREAMING_CONFIDENCE_BOOST,
       confidenceDecay: MEMORY_DREAMING_CONFIDENCE_DECAY,
-      enabled: MEMORY_DREAMING_ENABLED,
+      enabled: RUNTIME_MEMORY_DREAMING_ENABLED,
     });
+  }
+
+  async getStatus(groupFolder: string): Promise<MemoryStatusSnapshot> {
+    const groupItems = this.store.listActiveItems(groupFolder, 20_000);
+    const globalItems = this.store.listTopItems('global', groupFolder, 5_000);
+    const items = dedupeItemsById([...groupItems, ...globalItems]);
+
+    const itemsByKind: Record<string, number> = {};
+    const itemsByScope: Record<string, number> = {};
+    for (const item of items) {
+      itemsByKind[item.kind] = (itemsByKind[item.kind] || 0) + 1;
+      itemsByScope[item.scope] = (itemsByScope[item.scope] || 0) + 1;
+    }
+
+    const topUsed = [...items]
+      .sort((a, b) => b.retrieval_count - a.retrieval_count)
+      .slice(0, 10)
+      .map((item) => ({
+        key: item.key,
+        retrieval_count: item.retrieval_count,
+      }));
+    const topStalest = [...items]
+      .sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at))
+      .slice(0, 10)
+      .map((item) => ({ key: item.key, updated_at: item.updated_at }));
+
+    const latestDream =
+      this.store.getLatestEvent('dream_completed', groupFolder) ||
+      this.store.getLatestEvent('dreaming_completed', groupFolder);
+    let lastDreamRun: MemoryStatusSnapshot['last_dream_run'] = undefined;
+    if (latestDream) {
+      let summary = '';
+      try {
+        const payload = JSON.parse(latestDream.payload_json) as {
+          promotedCount?: number;
+          retiredCount?: number;
+          decayedCount?: number;
+        };
+        summary = `promoted=${payload.promotedCount ?? 0}, decayed=${payload.decayedCount ?? 0}, retired=${payload.retiredCount ?? 0}`;
+      } catch {
+        summary = '';
+      }
+      lastDreamRun = {
+        at: latestDream.created_at,
+        ...(summary ? { summary } : {}),
+      };
+    }
+
+    let diskKb: Record<string, number> | undefined;
+    try {
+      const layout = AgentMemoryRootService.getInstance().getLayout();
+      diskKb = {
+        profile: directorySizeKb(layout.profileDir),
+        procedures: directorySizeKb(layout.proceduresDir),
+        sessions: directorySizeKb(layout.sessionsDir),
+        journal: directorySizeKb(layout.journalDir),
+      };
+    } catch {
+      diskKb = undefined;
+    }
+
+    return {
+      items_by_kind: itemsByKind,
+      items_by_scope: itemsByScope,
+      top10_most_used: topUsed,
+      top10_stalest: topStalest,
+      ...(lastDreamRun ? { last_dream_run: lastDreamRun } : {}),
+      ...(diskKb ? { disk_kb: diskKb } : {}),
+    };
   }
 
   async ingestGroupSources(groupFolder: string): Promise<void> {
@@ -371,6 +455,9 @@ export class MemoryService {
       const memory = this.store.patchItem(existing.id, existing.version, {
         key: input.key,
         value: input.value,
+        why: input.why,
+        load_bearing: input.load_bearing,
+        source_turn_id: input.source_turn_id,
         kind,
         source,
         confidence,
@@ -404,6 +491,9 @@ export class MemoryService {
         const memory = this.store.patchItem(best.item.id, best.item.version, {
           key: input.key,
           value: input.value,
+          why: input.why,
+          load_bearing: input.load_bearing,
+          source_turn_id: input.source_turn_id,
           kind,
           source,
           confidence,
@@ -429,6 +519,9 @@ export class MemoryService {
       kind,
       key: input.key,
       value: input.value,
+      why: input.why,
+      load_bearing: input.load_bearing,
+      source_turn_id: input.source_turn_id,
       source,
       confidence,
       is_pinned: confidence >= MEMORY_RETENTION_PIN_THRESHOLD,
@@ -457,6 +550,8 @@ export class MemoryService {
     const patched = this.store.patchItem(input.id, input.expected_version, {
       key: input.key,
       value: input.value,
+      why: input.why,
+      load_bearing: input.load_bearing,
       confidence: input.confidence,
     });
     this.pinIfNeeded(patched.id, patched.confidence);
@@ -486,6 +581,8 @@ export class MemoryService {
       body: input.body,
       tags: input.tags || [],
       source: input.source || 'agent',
+      origin: input.origin || 'explicit',
+      trigger: input.trigger || null,
       confidence: clampConfidence(input.confidence),
     });
 
@@ -518,6 +615,7 @@ export class MemoryService {
         title: input.title,
         body: input.body,
         tags: input.tags,
+        trigger: input.trigger,
         confidence: input.confidence,
       },
     );
@@ -540,6 +638,7 @@ export class MemoryService {
     groupFolder: string,
     _isMain: boolean,
     userId?: string,
+    options?: { isFirstPromptOfSession?: boolean },
   ): Promise<MemoryContextResult> {
     const facts = selectBriefItems(
       dedupeItemsById([
@@ -581,6 +680,29 @@ export class MemoryService {
     }
 
     const lines: string[] = [];
+    const shouldIncludeLastSession =
+      MEMORY_BRIEF_INCLUDE_LAST_SESSION &&
+      (options?.isFirstPromptOfSession === true ||
+        /continue|resume|pick up|last session/i.test(prompt));
+    if (shouldIncludeLastSession) {
+      try {
+        const recap =
+          AgentMemoryRootService.getInstance().getLatestSessionRecap(
+            groupFolder,
+          );
+        if (recap) {
+          lines.push('## Last session');
+          lines.push('');
+          lines.push(recap.summary);
+          lines.push('');
+          lines.push('### Open loops');
+          lines.push(recap.openLoops);
+          lines.push('');
+        }
+      } catch {
+        // Optional context only.
+      }
+    }
     lines.push('[Memory Brief]');
     if (facts.length > 0) {
       const userPreferences = facts.filter(
@@ -665,10 +787,23 @@ export class MemoryService {
       return;
     }
 
-    const extractedFacts = this.extractor.extractFacts({
+    const retrievedItemsForTurn = (input.retrievedItemIds || [])
+      .map((id) => this.store.getItemById(id))
+      .filter((item): item is MemoryItem => Boolean(item))
+      .slice(0, 10);
+    const supersedeCandidatesById = new Map<string, MemoryItem>(
+      retrievedItemsForTurn.map((item) => [item.id, item]),
+    );
+
+    const extractedFacts = await this.extractor.extractFacts({
       prompt: input.prompt,
       result: input.result,
       userId: input.userId,
+      retrievedItems: retrievedItemsForTurn.map((item) => ({
+        id: item.id,
+        key: item.key,
+        value: item.value,
+      })),
     });
     const writableFacts = extractedFacts
       .filter((fact) => fact.confidence >= MEMORY_REFLECTION_MIN_CONFIDENCE)
@@ -687,27 +822,55 @@ export class MemoryService {
     }
 
     let savedFacts = 0;
+    const reflectionFactSource = this.extractor.providerName.startsWith('llm')
+      ? 'reflection_llm'
+      : 'reflection';
     for (let i = 0; i < writableFacts.length; i += 1) {
       const fact = writableFacts[i]!;
-      await this.saveMemory(
+      const saved = await this.saveMemory(
         {
           scope: fact.scope,
           group_folder: input.groupFolder,
           user_id: fact.user_id,
           key: fact.key,
           value: fact.value,
+          why: fact.why,
+          load_bearing: fact.load_bearing,
+          source_turn_id: fact.source_turn_id,
           kind: fact.kind,
           confidence: fact.confidence,
-          source: 'reflection',
+          source: reflectionFactSource,
         },
         { isMain: input.isMain, groupFolder: input.groupFolder },
         factEmbeddings[i] || null,
       );
+      if (Array.isArray(fact.supersedes)) {
+        const validSupersedeIds = new Set<string>();
+        for (const id of fact.supersedes) {
+          if (!id) continue;
+          const candidate = supersedeCandidatesById.get(id);
+          if (!candidate) continue;
+          if (candidate.group_folder !== input.groupFolder) continue;
+          if (candidate.scope !== fact.scope) continue;
+          if (
+            candidate.scope === 'user' &&
+            (!fact.user_id || candidate.user_id !== fact.user_id)
+          ) {
+            continue;
+          }
+          validSupersedeIds.add(id);
+        }
+        for (const id of validSupersedeIds) {
+          this.store.softDeleteItem(id, saved.id);
+        }
+      }
       savedFacts += 1;
     }
 
-    const procedure = extractProcedure(input.result);
-    if (procedure) {
+    const procedure = MEMORY_AUTO_PROCEDURE_EXTRACTION_ENABLED
+      ? extractProcedure(input.result)
+      : null;
+    if (procedure && MEMORY_AUTO_PROCEDURE_EXTRACTION_ENABLED) {
       this.saveProcedure(
         {
           scope: 'group',
@@ -753,10 +916,7 @@ export class MemoryService {
 
     this.store.applyRetentionPolicies(input.groupFolder);
 
-    let consolidation: ConsolidationResult | null = null;
-    if (MEMORY_CONSOLIDATION_ENABLED) {
-      consolidation = await this.consolidateGroupMemory(input.groupFolder);
-    }
+    const consolidation = await this.consolidateGroupMemory(input.groupFolder);
 
     this.store.recordEvent(
       'reflection_completed',
@@ -970,8 +1130,6 @@ function selectBriefItems(items: MemoryItem[], limit: number): MemoryItem[] {
     decision: 2,
     constraint: 3,
     fact: 4,
-    context: 5,
-    recent_work: 6,
   };
   return [...items]
     .sort((a, b) => {
@@ -1027,4 +1185,35 @@ function isChatterLine(line: string): boolean {
   return /^(thanks|thank you|ok|okay|cool|great|awesome|sounds good|got it|sure|hello|hi)[.!]*$/i.test(
     line,
   );
+}
+
+function directorySizeKb(root: string): number {
+  if (!root || !fs.existsSync(root)) return 0;
+  let totalBytes = 0;
+  const stack = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    if (!dir) break;
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      try {
+        if (entry.isDirectory()) {
+          stack.push(full);
+          continue;
+        }
+        if (entry.isFile()) {
+          totalBytes += fs.statSync(full).size;
+        }
+      } catch {
+        // Best-effort accounting.
+      }
+    }
+  }
+  return Math.round(totalBytes / 1024);
 }
