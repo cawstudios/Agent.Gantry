@@ -276,7 +276,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
     const missedMessages = getMessagesSince(
       chatJid,
       deps.getCursor(chatJid),
-      ASSISTANT_NAME,
       MAX_MESSAGES_PER_PROMPT,
     );
 
@@ -293,12 +292,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
         : undefined;
     const refreshActiveThreadId = () => {
       try {
-        const newerMessages = getMessagesSince(
-          chatJid,
-          latestSeenCursor,
-          ASSISTANT_NAME,
-          1,
-        );
+        const newerMessages = getMessagesSince(chatJid, latestSeenCursor, 1);
         if (newerMessages.length === 0) return;
         const newestMessage = newerMessages[newerMessages.length - 1];
         latestSeenCursor = encodeGroupMessageCursor(

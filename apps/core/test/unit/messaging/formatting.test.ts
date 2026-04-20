@@ -14,7 +14,7 @@ import {
   stripInternalTags,
 } from '@core/messaging/router.js';
 import { Channel, NewMessage } from '@core/core/types.js';
-import { parseSignalStyles, parseTextStyles } from '@core/text-styles.js';
+import { parseTextStyles } from '@core/text-styles.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -361,45 +361,6 @@ describe('parseTextStyles — code and horizontal-rule protection', () => {
     expect(parseTextStyles('above\n***\nbelow', 'telegram-html')).toBe(
       'above\n\nbelow',
     );
-  });
-});
-
-describe('parseSignalStyles', () => {
-  it('extracts style ranges from markdown', () => {
-    const { text, textStyle } = parseSignalStyles('**bold** and *italic*');
-    expect(text).toBe('bold and italic');
-    expect(textStyle).toContainEqual({ style: 'BOLD', start: 0, length: 4 });
-    expect(textStyle).toContainEqual({
-      style: 'ITALIC',
-      start: 9,
-      length: 6,
-    });
-  });
-
-  it('strips link syntax without adding styles', () => {
-    const { text, textStyle } = parseSignalStyles(
-      '[Click here](https://example.com)',
-    );
-    expect(text).toBe('Click here (https://example.com)');
-    expect(textStyle).toHaveLength(0);
-  });
-
-  it('strips horizontal rules', () => {
-    const { text, textStyle } = parseSignalStyles('above\n---\nbelow');
-    expect(text).toBe('above\nbelow');
-    expect(textStyle).toHaveLength(0);
-  });
-
-  it('marks fenced code blocks as MONOSPACE', () => {
-    const { text, textStyle } = parseSignalStyles('```\n**not bold**\n```');
-    expect(text).toBe('**not bold**');
-    expect(textStyle).toEqual([{ style: 'MONOSPACE', start: 0, length: 12 }]);
-  });
-
-  it('does not italicize snake_case', () => {
-    const { text, textStyle } = parseSignalStyles('use snake_case_here');
-    expect(text).toBe('use snake_case_here');
-    expect(textStyle).toHaveLength(0);
   });
 });
 

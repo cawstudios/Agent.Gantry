@@ -197,7 +197,7 @@ export function createChannelWiring(
         continue;
       }
 
-      const channel = provider.create(channelOpts);
+      const channel = await provider.create(channelOpts);
       if (!channel) {
         resolved.logger.warn(
           { channel: provider.id },

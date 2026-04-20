@@ -85,6 +85,41 @@ describe('listChannelProviders', () => {
     ).toThrow(/Duplicate channel provider id/);
   });
 
+  it('rejects empty provider identity fields', () => {
+    const base = listChannelProviders()[0]!;
+
+    expect(() => registerChannelProvider({ ...base, id: '   ' })).toThrow(
+      /must be non-empty/,
+    );
+    expect(() =>
+      registerChannelProvider({
+        ...base,
+        id: 'x-empty-prefix',
+        jidPrefix: ' ',
+      }),
+    ).toThrow(/jidPrefix must be non-empty/);
+    expect(() =>
+      registerChannelProvider({
+        ...base,
+        id: 'x-empty-folder',
+        jidPrefix: 'x:',
+        folderPrefix: ' ',
+      }),
+    ).toThrow(/folderPrefix must be non-empty/);
+  });
+
+  it('rejects overlapping jid prefixes', () => {
+    const base = listChannelProviders()[0]!;
+    expect(() =>
+      registerChannelProvider({
+        ...base,
+        id: 'slack-overlap',
+        jidPrefix: 'sl',
+        folderPrefix: 'slack_overlap_',
+      }),
+    ).toThrow(/jidPrefix overlap/);
+  });
+
   it('resolves providers by channel id and jid prefix', () => {
     expect(getChannelProvider('telegram')?.id).toBe('telegram');
     expect(getChannelProvider('slack')?.id).toBe('slack');

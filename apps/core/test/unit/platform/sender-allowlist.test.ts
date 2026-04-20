@@ -204,6 +204,11 @@ describe('isSenderAllowed', () => {
     expect(isSenderAllowed('tp:abc', 'tp-user', cfg)).toBe(true);
     expect(isSenderAllowed('tp:abc', 'not-allowed', cfg)).toBe(false);
   });
+
+  it('fails closed for JIDs without a registered provider prefix', () => {
+    expect(isSenderAllowed('unknown:1', 'anyone', cfg)).toBe(false);
+    expect(shouldDropMessage('unknown:1', cfg)).toBe(true);
+  });
 });
 
 describe('isSenderExplicitlyAllowed', () => {

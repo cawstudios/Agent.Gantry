@@ -23,8 +23,8 @@ const DEFAULT_CHANNEL_CONFIG: SenderAllowlistConfig = {
 };
 
 const DEFAULT_ENTRY: ChatAllowlistEntry = {
-  allow: '*',
-  mode: 'trigger',
+  allow: [],
+  mode: 'drop',
 };
 
 function cloneDefaultChannelConfig(): SenderAllowlistConfig {

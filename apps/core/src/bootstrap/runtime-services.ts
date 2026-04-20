@@ -1,4 +1,4 @@
-import { ASSISTANT_NAME, DEFAULT_TRIGGER } from '../core/config.js';
+import { DEFAULT_TRIGGER } from '../core/config.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
@@ -233,7 +233,6 @@ export function startRuntimeServices(
   };
 
   resolved.recoverPendingMessages({
-    assistantName: ASSISTANT_NAME,
     getRegisteredGroups: () => app.getRegisteredGroups(),
     getLastTimestamp: () => app.getLastTimestamp(),
     setLastTimestamp: (timestamp) => {
@@ -257,7 +256,6 @@ export function startRuntimeServices(
 
   resolved
     .startMessagePollingLoop({
-      assistantName: ASSISTANT_NAME,
       getRegisteredGroups: () => app.getRegisteredGroups(),
       getLastTimestamp: () => app.getLastTimestamp(),
       setLastTimestamp: (timestamp) => {

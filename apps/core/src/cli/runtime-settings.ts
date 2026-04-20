@@ -775,12 +775,6 @@ export function validateRuntimeSettings(
       .filter(([, channel]) => channel.enabled)
       .map(([channelId]) => channelId);
 
-    if (enabledChannelIds.length === 0) {
-      details.push(
-        'Enable at least one channel in settings.yaml (channels.<provider>.enabled: true).',
-      );
-    }
-
     for (const channelId of enabledChannelIds) {
       const provider = getChannelProvider(channelId);
       if (!provider) {

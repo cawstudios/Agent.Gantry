@@ -716,11 +716,15 @@ export const MEMORY_JOURNAL_DELETE_DAYS = Math.max(
     10,
   ) || 90,
 );
-export const MEMORY_JOURNAL_DISABLED = parseBooleanEnv(
-  process.env.MYCLAW_MEMORY_JOURNAL_DISABLED ||
-    envConfig.MYCLAW_MEMORY_JOURNAL_DISABLED,
-  false,
-);
+export function isMemoryJournalDisabled(): boolean {
+  return parseBooleanEnv(
+    process.env.MYCLAW_MEMORY_JOURNAL_DISABLED ||
+      envConfig.MYCLAW_MEMORY_JOURNAL_DISABLED,
+    false,
+  );
+}
+
+export const MEMORY_JOURNAL_DISABLED = isMemoryJournalDisabled();
 export const MEMORY_MAINTENANCE_MAX_PENDING = Math.max(
   100,
   parseInt(

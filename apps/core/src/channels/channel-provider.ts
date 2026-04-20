@@ -20,6 +20,8 @@ export interface ChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+export type MaybePromise<T> = T | Promise<T>;
+
 export type ChannelAdapter = ChannelLifecyclePort &
   ChannelOwnershipPort &
   MessageSink &
@@ -33,4 +35,6 @@ export type ChannelAdapter = ChannelLifecyclePort &
       PlanReviewSurface
   >;
 
-export type ChannelFactory = (opts: ChannelOpts) => ChannelAdapter | null;
+export type ChannelFactory = (
+  opts: ChannelOpts,
+) => MaybePromise<ChannelAdapter | null>;

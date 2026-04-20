@@ -5,6 +5,11 @@ import * as p from '@clack/prompts';
 
 import { RegisteredGroup } from '../core/types.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
+import {
+  channelFromGroupJid,
+  getChannelIds,
+  parseRuntimeChannel,
+} from './channel-utils.js';
 import { readEnvFile } from './env-file.js';
 import { envFilePath, ensureRuntimeLayout } from './runtime-home.js';
 import {
@@ -60,6 +65,7 @@ interface GroupPolicyShowOptions {
 }
 
 function usage(): string {
+  const channels = getChannelIds().join('|');
   return [
     'Agent commands:',
     '  myclaw agent list',
@@ -70,8 +76,8 @@ function usage(): string {
     '  myclaw agent trigger <jid|folder> --off',
     '  myclaw agent policy <jid|folder> --allow <\"*\"|id1,id2> [--mode trigger|drop]',
     '  myclaw agent policy <jid|folder> --clear',
-    '  myclaw agent policy-default --channel telegram|slack --allow <\"*\"|id1,id2> [--mode trigger|drop]',
-    '  myclaw agent policy-show [--channel telegram|slack]',
+    `  myclaw agent policy-default --channel ${channels} --allow <\"*\"|id1,id2> [--mode trigger|drop]`,
+    `  myclaw agent policy-show [--channel ${channels}]`,
   ].join('\n');
 }
 
@@ -102,19 +108,6 @@ function parseAllowArg(raw: string): '*' | string[] | null {
 function parseModeArg(raw: string): ChatAllowlistEntry['mode'] | null {
   const trimmed = raw.trim().toLowerCase();
   if (trimmed === 'trigger' || trimmed === 'drop') return trimmed;
-  return null;
-}
-
-function parseRuntimeChannel(raw: string): RuntimeChannel | null {
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === 'telegram' || normalized === 'tg') return 'telegram';
-  if (normalized === 'slack' || normalized === 'sl') return 'slack';
-  return null;
-}
-
-function channelFromGroupJid(jid: string): RuntimeChannel | null {
-  if (jid.startsWith('tg:')) return 'telegram';
-  if (jid.startsWith('sl:')) return 'slack';
   return null;
 }
 
@@ -667,7 +660,7 @@ function parseGroupPolicyDefaultArgs(
       const channel = parseRuntimeChannel(raw);
       if (!channel) {
         return {
-          error: 'Invalid --channel. Use telegram or slack.',
+          error: `Invalid --channel. Use one of: ${getChannelIds().join(', ')}.`,
         };
       }
       options.channel = channel;
@@ -678,7 +671,7 @@ function parseGroupPolicyDefaultArgs(
       const channel = parseRuntimeChannel(arg.slice('--channel='.length));
       if (!channel) {
         return {
-          error: 'Invalid --channel. Use telegram or slack.',
+          error: `Invalid --channel. Use one of: ${getChannelIds().join(', ')}.`,
         };
       }
       options.channel = channel;
@@ -736,7 +729,7 @@ function parseGroupPolicyDefaultArgs(
 
   if (!options.channel) {
     return {
-      error: 'Missing --channel. Use telegram or slack.',
+      error: `Missing --channel. Use one of: ${getChannelIds().join(', ')}.`,
     };
   }
   if (options.allow === undefined) {
@@ -758,7 +751,7 @@ function parseGroupPolicyShowArgs(
       const channel = parseRuntimeChannel(args[i + 1] || '');
       if (!channel) {
         return {
-          error: 'Invalid --channel. Use telegram or slack.',
+          error: `Invalid --channel. Use one of: ${getChannelIds().join(', ')}.`,
         };
       }
       options.channel = channel;
@@ -769,7 +762,7 @@ function parseGroupPolicyShowArgs(
       const channel = parseRuntimeChannel(arg.slice('--channel='.length));
       if (!channel) {
         return {
-          error: 'Invalid --channel. Use telegram or slack.',
+          error: `Invalid --channel. Use one of: ${getChannelIds().join(', ')}.`,
         };
       }
       options.channel = channel;
@@ -1298,7 +1291,7 @@ async function runPolicy(runtimeHome: string, args: string[]): Promise<number> {
     const channel = channelFromGroupJid(found.jid);
     if (!channel) {
       p.log.error(
-        `Agent ${found.group.name} (${found.jid}) does not use telegram/slack sender policy.`,
+        `Agent ${found.group.name} (${found.jid}) does not map to a registered channel provider.`,
       );
       return 1;
     }
@@ -1383,9 +1376,13 @@ async function runPolicyShow(
       printPolicyChannel(parsed.channel, settings);
       return 0;
     }
-    printPolicyChannel('telegram', settings);
-    console.log('');
-    printPolicyChannel('slack', settings);
+    const channels = getChannelIds();
+    for (let i = 0; i < channels.length; i += 1) {
+      printPolicyChannel(channels[i]!, settings);
+      if (i < channels.length - 1) {
+        console.log('');
+      }
+    }
     return 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

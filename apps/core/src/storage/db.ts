@@ -434,15 +434,12 @@ export function storeMessage(msg: NewMessage): void {
 export function getNewMessages(
   jids: string[],
   lastCursor: string,
-  botPrefix: string,
   limit: number = 200,
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastCursor };
 
   const cursor = decodeGlobalMessageCursor(lastCursor);
   const placeholders = jids.map(() => '?').join(',');
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
            thread_id,
@@ -459,7 +456,7 @@ export function getNewMessages(
           )
         )
       )
-      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND is_bot_message = 0
       AND content != '' AND content IS NOT NULL
     ORDER BY timestamp ASC, chat_jid ASC, id ASC
     LIMIT ?
@@ -474,7 +471,6 @@ export function getNewMessages(
       cursor.chatJid,
       cursor.chatJid,
       cursor.id,
-      `${botPrefix}:%`,
       limit,
     ) as Array<NewMessage & { is_from_me?: number | boolean }>;
 
@@ -495,12 +491,9 @@ export function getNewMessages(
 export function getMessagesSince(
   chatJid: string,
   sinceCursor: string,
-  botPrefix: string,
   limit: number = 200,
 ): NewMessage[] {
   const cursor = decodeGroupMessageCursor(sinceCursor);
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
            thread_id,
@@ -511,7 +504,7 @@ export function getMessagesSince(
         timestamp > ?
         OR (timestamp = ? AND id > ?)
       )
-      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND is_bot_message = 0
       AND content != '' AND content IS NOT NULL
     ORDER BY timestamp ASC, id ASC
     LIMIT ?
@@ -523,7 +516,6 @@ export function getMessagesSince(
       cursor.timestamp,
       cursor.timestamp,
       cursor.id,
-      `${botPrefix}:%`,
       limit,
     ) as Array<NewMessage & { is_from_me?: number | boolean }>;
   return rows.map((row) => ({
@@ -534,27 +526,23 @@ export function getMessagesSince(
 
 export function getLastBotMessageCursor(
   chatJid: string,
-  botPrefix: string,
 ): { timestamp: string; id: string } | undefined {
   const row = db
     .prepare(
       `SELECT timestamp, id FROM messages
-       WHERE chat_jid = ? AND (is_bot_message = 1 OR content LIKE ?)
+       WHERE chat_jid = ? AND is_bot_message = 1
        ORDER BY timestamp DESC, id DESC
        LIMIT 1`,
     )
-    .get(chatJid, `${botPrefix}:%`) as
-    | { timestamp: string; id: string }
-    | undefined;
+    .get(chatJid) as { timestamp: string; id: string } | undefined;
   if (!row) return undefined;
   return row;
 }
 
 export function getLastBotMessageTimestamp(
   chatJid: string,
-  botPrefix: string,
 ): string | undefined {
-  return getLastBotMessageCursor(chatJid, botPrefix)?.timestamp;
+  return getLastBotMessageCursor(chatJid)?.timestamp;
 }
 
 type RawJobRow = Omit<Job, 'linked_sessions' | 'silent'> & {
