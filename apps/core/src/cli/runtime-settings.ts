@@ -501,7 +501,7 @@ function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
   };
 }
 
-function parseRuntimeSettings(raw: string): RuntimeSettings {
+export function parseRuntimeSettings(raw: string): RuntimeSettings {
   const parsed = parseSimpleYamlObject(raw) as unknown;
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -699,7 +699,7 @@ function createDefaultChannelSettings(
   };
 }
 
-function createDefaultRuntimeSettings(): RuntimeSettings {
+export function createDefaultRuntimeSettings(): RuntimeSettings {
   const memory: RuntimeMemorySettings = {
     enabled: true,
     root: DEFAULT_MEMORY_ROOT,
@@ -726,19 +726,11 @@ function createDefaultRuntimeSettings(): RuntimeSettings {
   };
 }
 
-export function createDefaultRuntimeSettingsForTest(): RuntimeSettings {
-  return createDefaultRuntimeSettings();
-}
-
 export function applyMemoryModelProfile(
   settings: RuntimeSettings,
   profile: MemoryModelProfile,
 ): void {
   settings.memory.llm.models = getMemoryModelProfileDefaults(profile);
-}
-
-export function parseRuntimeSettingsText(raw: string): RuntimeSettings {
-  return parseRuntimeSettings(raw);
 }
 
 export function loadRuntimeSettingsFromPath(filePath: string): RuntimeSettings {

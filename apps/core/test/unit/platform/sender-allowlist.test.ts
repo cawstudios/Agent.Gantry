@@ -138,6 +138,8 @@ describe('loadSenderAllowlist', () => {
     expect(cfg.telegram.default.mode).toBe('trigger');
     expect(cfg.slack.default.allow).toBe('*');
     expect(cfg.telegram.logDenied).toBe(true);
+    expect(cfg['test-provider'].default.allow).toBe('*');
+    expect(cfg['test-provider'].default.mode).toBe('trigger');
   });
 
   it('loads channel-specific config', () => {

@@ -56,7 +56,7 @@ import {
 import { ChunkInsert, MemoryStore } from './memory-store.js';
 import { JournalAppendInput, MemoryJournal } from './memory-journal.js';
 import { MemoryIndexer } from './memory-indexer.js';
-import { fuseSearchResults } from './memory-retrieval.js';
+import { fuseSearchResults, mergeSearchResults } from './memory-retrieval.js';
 import { classifySensitiveMemoryMaterial } from './sensitive-material.js';
 import {
   MEMORY_GLOBAL_GROUP_FOLDER,
@@ -1826,31 +1826,6 @@ function parseTranscriptArc(
 
   if (turns.length <= maxTurns) return turns;
   return turns.slice(turns.length - maxTurns);
-}
-
-function mergeSearchResults(
-  items: MemorySearchResult[],
-  snippets: MemorySearchResult[],
-  limit: number,
-): MemorySearchResult[] {
-  const byId = new Map<string, MemorySearchResult>();
-  for (const result of [...items, ...snippets]) {
-    const existing = byId.get(result.id);
-    if (
-      !existing ||
-      result.fused_score + result.lexical_score + result.vector_score >
-        existing.fused_score + existing.lexical_score + existing.vector_score
-    ) {
-      byId.set(result.id, result);
-    }
-  }
-  return [...byId.values()]
-    .sort((a, b) => {
-      const aScore = a.fused_score + a.lexical_score + a.vector_score;
-      const bScore = b.fused_score + b.lexical_score + b.vector_score;
-      return bScore - aScore;
-    })
-    .slice(0, limit);
 }
 
 function dedupeItemsById(items: MemoryItem[]): MemoryItem[] {

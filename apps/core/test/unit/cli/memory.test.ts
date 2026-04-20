@@ -411,6 +411,31 @@ describe('memory CLI commands', () => {
     );
   });
 
+  it('rejects removed session summary task aliases for model set', async () => {
+    const baseline = loadRuntimeSettings(runtimeHome);
+    for (const taskAlias of [
+      'sessionSummary',
+      'session_summary',
+      'session-summary',
+    ]) {
+      const code = await runMemoryCommand(runtimeHome, [
+        'model',
+        'set',
+        taskAlias,
+        'claude-haiku-4-5-20251001',
+      ]);
+      expect(code).toBe(1);
+    }
+
+    expect(promptMocks.log.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'myclaw memory model set <extractor|dreaming|consolidation> <model>',
+      ),
+    );
+    const updated = loadRuntimeSettings(runtimeHome);
+    expect(updated.memory.llm.models).toEqual(baseline.memory.llm.models);
+  });
+
   it('applies the cheap model profile across all memory tasks', async () => {
     const code = await runMemoryCommand(runtimeHome, [
       'model',

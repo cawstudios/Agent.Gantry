@@ -28,7 +28,7 @@ export async function createTempRuntimeHome(
 
   const runtimeSettings = await import('@core/cli/runtime-settings.js');
   const sessionHooks = await import('@core/cli/session-hooks.js');
-  const settings = runtimeSettings.createDefaultRuntimeSettingsForTest();
+  const settings = runtimeSettings.createDefaultRuntimeSettings();
   settings.memory.enabled = true;
   settings.memory.root = 'memory';
   settings.memory.embeddings.enabled = false;

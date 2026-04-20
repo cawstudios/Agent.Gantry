@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import { RuntimeSettings } from '@core/cli/runtime-settings.js';
 import {
+  getChannelProvider,
   listChannelProviders,
+  providerForJid,
   registerChannelProvider,
 } from '@core/bootstrap/channel-providers.js';
 
@@ -81,5 +83,13 @@ describe('listChannelProviders', () => {
         ...listChannelProviders()[0],
       }),
     ).toThrow(/Duplicate channel provider id/);
+  });
+
+  it('resolves providers by channel id and jid prefix', () => {
+    expect(getChannelProvider('telegram')?.id).toBe('telegram');
+    expect(getChannelProvider('slack')?.id).toBe('slack');
+    expect(providerForJid('tg:-100123')?.id).toBe('telegram');
+    expect(providerForJid('sl:C123456')?.id).toBe('slack');
+    expect(providerForJid('unknown:123')).toBeUndefined();
   });
 });

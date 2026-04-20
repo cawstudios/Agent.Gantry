@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { fuseSearchResults } from '@core/memory/memory-retrieval.js';
+import {
+  fuseSearchResults,
+  mergeSearchResults,
+} from '@core/memory/memory-retrieval.js';
 
 const RECENT_AT = new Date().toISOString();
 
@@ -686,5 +689,95 @@ describe('fuseSearchResults', () => {
     // Should be in original relevance order
     expect(fused[0]!.id).toBe('dup-x');
     expect(fused[1]!.id).toBe('dup-y');
+  });
+});
+
+describe('mergeSearchResults', () => {
+  it('normalizes lexical and vector scales before final ranking', () => {
+    const merged = mergeSearchResults(
+      [
+        {
+          id: 'lex-heavy',
+          source_type: 'conversation',
+          source_path: 'c1',
+          text: 'lexical only',
+          scope: 'group' as const,
+          group_folder: 'g1',
+          created_at: RECENT_AT,
+          lexical_score: 200,
+          vector_score: 0,
+          fused_score: 0,
+        },
+      ],
+      [
+        {
+          id: 'semantic-heavy',
+          source_type: 'conversation',
+          source_path: 'c2',
+          text: 'semantic + fused',
+          scope: 'group' as const,
+          group_folder: 'g1',
+          created_at: RECENT_AT,
+          lexical_score: 0,
+          vector_score: 0.9,
+          fused_score: 0.7,
+        },
+      ],
+      2,
+    );
+
+    expect(merged.map((item) => item.id)).toEqual([
+      'semantic-heavy',
+      'lex-heavy',
+    ]);
+  });
+
+  it('deduplicates by id using normalized merged score', () => {
+    const merged = mergeSearchResults(
+      [
+        {
+          id: 'dup',
+          source_type: 'conversation',
+          source_path: 'c1',
+          text: 'dup lexical',
+          scope: 'group' as const,
+          group_folder: 'g1',
+          created_at: RECENT_AT,
+          lexical_score: 200,
+          vector_score: 0,
+          fused_score: 0,
+        },
+        {
+          id: 'other',
+          source_type: 'conversation',
+          source_path: 'c3',
+          text: 'other lexical',
+          scope: 'group' as const,
+          group_folder: 'g1',
+          created_at: RECENT_AT,
+          lexical_score: 150,
+          vector_score: 0,
+          fused_score: 0,
+        },
+      ],
+      [
+        {
+          id: 'dup',
+          source_type: 'conversation',
+          source_path: 'c2',
+          text: 'dup semantic',
+          scope: 'group' as const,
+          group_folder: 'g1',
+          created_at: RECENT_AT,
+          lexical_score: 0,
+          vector_score: 0.9,
+          fused_score: 0.9,
+        },
+      ],
+      2,
+    );
+
+    expect(merged.map((item) => item.id)).toEqual(['dup', 'other']);
+    expect(merged[0]?.source_path).toBe('c2');
   });
 });

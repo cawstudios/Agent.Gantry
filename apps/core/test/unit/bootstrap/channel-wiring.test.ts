@@ -274,6 +274,90 @@ describe('createChannelWiring', () => {
     expect(storeMessage).toHaveBeenCalledWith(msg);
   });
 
+  it('formats outbound messages using provider registry id for the jid', async () => {
+    const app = makeApp();
+    const outbound = makeChannel({
+      name: 'legacy-telegram-adapter-name',
+      ownsJid: vi.fn((jid: string) => jid === 'tg:123'),
+    });
+
+    const wiring = createChannelWiring(app, {
+      channelProviders: [
+        makeProvider(
+          'telegram',
+          vi.fn(() => outbound),
+        ),
+      ],
+    });
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: true, slack: false }),
+    );
+
+    await wiring.sendMessage('tg:123', '**done**');
+    expect(outbound.sendMessage).toHaveBeenCalledWith('tg:123', '*done*');
+  });
+
+  it('streams group chunks with internal tags removed but without markdown conversion', async () => {
+    const app = makeApp();
+    const outbound = makeChannel({
+      ownsJid: vi.fn((jid: string) => jid === 'tg:-123'),
+    });
+
+    const wiring = createChannelWiring(app, {
+      channelProviders: [
+        makeProvider(
+          'telegram',
+          vi.fn(() => outbound),
+        ),
+      ],
+    });
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: true, slack: false }),
+    );
+
+    const ok = await wiring.sendStreamingChunk(
+      'tg:-123',
+      '<internal>scratch</internal>**done**',
+    );
+
+    expect(ok).toBe(true);
+    expect(outbound.sendMessage).toHaveBeenCalledWith('tg:-123', '**done**');
+  });
+
+  it('flushes done=true streaming callbacks even when visible text is empty', async () => {
+    const app = makeApp();
+    const streamSink = vi.fn(async () => true);
+    const outbound = makeChannel({
+      ownsJid: vi.fn((jid: string) => jid === 'tg:123'),
+      sendStreamingChunk: streamSink,
+    });
+
+    const wiring = createChannelWiring(app, {
+      channelProviders: [
+        makeProvider(
+          'telegram',
+          vi.fn(() => outbound),
+        ),
+      ],
+    });
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: true, slack: false }),
+    );
+
+    const ok = await wiring.sendStreamingChunk(
+      'tg:123',
+      '<internal>only-internal</internal>',
+      { done: true },
+    );
+
+    expect(ok).toBe(true);
+    expect(streamSink).toHaveBeenCalledWith(
+      'tg:123',
+      '',
+      expect.objectContaining({ done: true }),
+    );
+  });
+
   it('routes permission approvals through main groups and falls back safely', async () => {
     const app = makeApp({
       'tg:main': { name: 'Main', folder: 'main', isMain: true },
