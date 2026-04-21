@@ -44,7 +44,7 @@
     "start": "node dist/index.js",
     "dev": "tsx apps/core/src/index.ts",
     "cli:dev": "tsx apps/core/src/cli/index.ts",
-    "typecheck": "npm run typecheck --workspace @myclaw/contracts && tsc --noEmit",
+    "typecheck": "npm run build:contracts && tsc --noEmit",
     "format": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\"",
     "format:fix": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\"",
     "format:check": "prettier --check \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\"",
