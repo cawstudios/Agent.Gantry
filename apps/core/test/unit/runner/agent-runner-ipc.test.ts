@@ -38,6 +38,20 @@ function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
 }
 
+function symlinkPackage(
+  root: string,
+  packageName: string,
+  target: string,
+): void {
+  const packagePath = path.join(
+    root,
+    'node_modules',
+    ...packageName.split('/'),
+  );
+  fs.mkdirSync(path.dirname(packagePath), { recursive: true });
+  fs.symlinkSync(path.resolve(target), packagePath, 'dir');
+}
+
 function createRunnerFixture(): {
   root: string;
   runnerPath: string;
@@ -47,7 +61,9 @@ function createRunnerFixture(): {
   memoryContextFile: string;
 } {
   const root = makeTempRoot();
-  const runnerPath = path.join(root, 'runner.ts');
+  const runnerDir = path.join(root, 'runner');
+  const coreDir = path.join(root, 'core');
+  const runnerPath = path.join(runnerDir, 'index.ts');
   const sdkDir = path.join(
     root,
     'node_modules',
@@ -60,7 +76,22 @@ function createRunnerFixture(): {
   const memoryContextFile = path.join(ipcDir, 'memory_context.json');
 
   fs.mkdirSync(sdkDir, { recursive: true });
+  fs.mkdirSync(runnerDir, { recursive: true });
+  fs.mkdirSync(coreDir, { recursive: true });
   fs.copyFileSync(path.resolve('apps/core/src/runner/index.ts'), runnerPath);
+  fs.copyFileSync(
+    path.resolve('apps/core/src/runner/agent-capabilities.ts'),
+    path.join(runnerDir, 'agent-capabilities.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/core/datetime.ts'),
+    path.join(coreDir, 'datetime.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/core/object.ts'),
+    path.join(coreDir, 'object.ts'),
+  );
+  symlinkPackage(root, 'dayjs', 'node_modules/dayjs');
   fs.writeFileSync(
     path.join(sdkDir, 'package.json'),
     JSON.stringify({ type: 'module', main: 'index.js' }),

@@ -3,12 +3,14 @@ import fs from 'fs';
 import path from 'path';
 
 import { STORE_DIR } from '../core/config.js';
+import { nowIso as currentIso } from '../core/datetime.js';
 import {
   decodeGlobalMessageCursor,
   decodeGroupMessageCursor,
   encodeGlobalMessageCursor,
   toGlobalMessageCursor,
 } from '../core/message-cursor.js';
+import { isPlainObject } from '../core/object.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import { logger } from '../core/logger.js';
 import {
@@ -21,10 +23,6 @@ import {
 } from '../core/types.js';
 
 let db: Database.Database;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function parseRegisteredGroupAgentConfig(
   rawConfig: string | null,
@@ -620,7 +618,7 @@ export function upsertJob(job: JobUpsertInput): { created: boolean } {
   const existing = db
     .prepare('SELECT id FROM jobs WHERE id = ?')
     .get(job.id) as { id: string } | undefined;
-  const now = new Date().toISOString();
+  const now = currentIso();
 
   db.prepare(
     `
@@ -838,7 +836,7 @@ export function updateJob(
   if (fields.length === 0) return;
 
   fields.push('updated_at = ?');
-  values.push(new Date().toISOString());
+  values.push(currentIso());
   values.push(id);
   db.prepare(`UPDATE jobs SET ${fields.join(', ')} WHERE id = ?`).run(
     ...values,
@@ -851,7 +849,7 @@ export function deleteJob(id: string): void {
   db.prepare('DELETE FROM jobs WHERE id = ?').run(id);
 }
 
-export function listDueJobs(nowIso: string = new Date().toISOString()): Job[] {
+export function listDueJobs(nowIso: string = currentIso()): Job[] {
   return db
     .prepare(
       `
@@ -880,13 +878,11 @@ export function markJobRunning(
       WHERE id = ? AND status = 'active'
     `,
     )
-    .run(runId, leaseExpiresAt, new Date().toISOString(), id).changes;
+    .run(runId, leaseExpiresAt, currentIso(), id).changes;
   return changes > 0;
 }
 
-export function releaseStaleJobLeases(
-  nowIso: string = new Date().toISOString(),
-): number {
+export function releaseStaleJobLeases(nowIso: string = currentIso()): number {
   return db
     .prepare(
       `
@@ -938,12 +934,12 @@ export function completeJobRun(
       SET status = ?, ended_at = ?, result_summary = ?, error_summary = ?
       WHERE run_id = ?
     `,
-  ).run(status, new Date().toISOString(), resultSummary, errorSummary, runId);
+  ).run(status, currentIso(), resultSummary, errorSummary, runId);
 }
 
 export function markJobRunNotified(runId: string): void {
   db.prepare('UPDATE job_runs SET notified_at = ? WHERE run_id = ?').run(
-    new Date().toISOString(),
+    currentIso(),
     runId,
   );
 }

@@ -10,6 +10,8 @@ import {
   MEMORY_JOURNAL_DELETE_DAYS,
   MEMORY_JOURNAL_GZIP_DAYS,
 } from '../core/config.js';
+import { isPathInside } from '../core/fs-paths.js';
+import { nowIso } from '../core/datetime.js';
 import { MemoryRootService } from './memory-root.js';
 
 export interface MemoryCleanupResult {
@@ -73,44 +75,11 @@ function sqlQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function safeRealpathSync(targetPath: string): string | null {
-  try {
-    return fs.realpathSync(targetPath);
-  } catch {
-    return null;
-  }
-}
-
-function resolvePathWithRealParent(targetPath: string): string | null {
-  const resolved = path.resolve(targetPath);
-  let existingParent = path.dirname(resolved);
-  while (!fs.existsSync(existingParent)) {
-    const parent = path.dirname(existingParent);
-    if (parent === existingParent) break;
-    existingParent = parent;
-  }
-  const parentReal = safeRealpathSync(existingParent);
-  if (!parentReal) return null;
-  const tail = path.relative(existingParent, resolved);
-  return path.resolve(parentReal, tail);
-}
-
-function isInsideRoot(root: string, candidatePath: string): boolean {
-  const rootResolved = safeRealpathSync(root);
-  const candidateResolved = resolvePathWithRealParent(candidatePath);
-  if (!rootResolved || !candidateResolved) return false;
-  const relative = path.relative(rootResolved, candidateResolved);
-  return (
-    relative === '' ||
-    (!relative.startsWith('..') && !path.isAbsolute(relative))
-  );
-}
-
 function isSafeManagedFileDelete(
   managedRoot: string,
   candidatePath: string,
 ): boolean {
-  if (!isInsideRoot(managedRoot, candidatePath)) return false;
+  if (!isPathInside(managedRoot, candidatePath)) return false;
   try {
     const stat = fs.lstatSync(candidatePath);
     return stat.isFile() && !stat.isSymbolicLink();
@@ -178,7 +147,7 @@ function createDailyCheckpoint(
 } {
   const checkpointsDir = path.join(journalDir, 'checkpoints');
   fs.mkdirSync(checkpointsDir, { recursive: true, mode: 0o700 });
-  const iso = new Date().toISOString();
+  const iso = nowIso();
   const stamp = `${iso.slice(0, 10).replace(/-/g, '')}-${iso
     .slice(11, 19)
     .replace(/:/g, '')}`;

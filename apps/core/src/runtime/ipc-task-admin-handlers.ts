@@ -1,4 +1,5 @@
 import { MYCLAW_HOME } from '../core/config.js';
+import { nowIso } from '../core/datetime.js';
 import { logger } from '../core/logger.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import { validateRuntimePreflight } from '../cli/runtime-preflight.js';
@@ -54,7 +55,7 @@ const registerAgentHandler: TaskHandler = (context) => {
       name: data.name,
       folder: data.folder,
       trigger: data.trigger,
-      added_at: new Date().toISOString(),
+      added_at: nowIso(),
       agentConfig: data.agentConfig,
       requiresTrigger: data.requiresTrigger,
       isMain: existingGroup?.isMain,

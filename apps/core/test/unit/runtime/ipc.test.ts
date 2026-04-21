@@ -4274,8 +4274,10 @@ describe('startIpcWatcher', () => {
       (call: unknown[]) =>
         typeof call[0] === 'string' &&
         String(call[0]).includes(
-          '/tmp/test-ipc/ipc/other-group/task-responses/task-svc-reject-1.json.tmp',
-        ),
+          '/tmp/test-ipc/ipc/other-group/task-responses',
+        ) &&
+        typeof call[1] === 'string' &&
+        String(call[1]).includes('"taskId": "svc-reject-1"'),
     );
     expect(writeCall).toBeTruthy();
     expect(String(writeCall?.[1])).toContain('"ok": false');
@@ -4306,8 +4308,10 @@ describe('startIpcWatcher', () => {
       (call: unknown[]) =>
         typeof call[0] === 'string' &&
         String(call[0]).includes(
-          '/tmp/test-ipc/ipc/whatsapp_main/task-responses/task-svc-validate-1.json.tmp',
-        ),
+          '/tmp/test-ipc/ipc/whatsapp_main/task-responses',
+        ) &&
+        typeof call[1] === 'string' &&
+        String(call[1]).includes('"taskId": "svc-validate-1"'),
     );
     expect(writeCall).toBeTruthy();
     const payload = String(writeCall?.[1]);
@@ -4335,8 +4339,10 @@ describe('startIpcWatcher', () => {
       (call: unknown[]) =>
         typeof call[0] === 'string' &&
         String(call[0]).includes(
-          '/tmp/test-ipc/ipc/whatsapp_main/task-responses/task-svc-ack-1.json.tmp',
-        ),
+          '/tmp/test-ipc/ipc/whatsapp_main/task-responses',
+        ) &&
+        typeof call[1] === 'string' &&
+        String(call[1]).includes('"taskId": "svc-ack-1"'),
     );
     expect(writeCall).toBeTruthy();
     const payload = String(writeCall?.[1]);
@@ -4366,8 +4372,10 @@ describe('startIpcWatcher', () => {
       (call: unknown[]) =>
         typeof call[0] === 'string' &&
         String(call[0]).includes(
-          '/tmp/test-ipc/ipc/whatsapp_main/task-responses/task-svc-throw-1.json.tmp',
-        ),
+          '/tmp/test-ipc/ipc/whatsapp_main/task-responses',
+        ) &&
+        typeof call[1] === 'string' &&
+        String(call[1]).includes('"taskId": "svc-throw-1"'),
     );
     expect(writeCall).toBeTruthy();
     const payload = String(writeCall?.[1]);

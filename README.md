@@ -6,7 +6,7 @@
 
 ## What MyClaw Is
 
-MyClaw is a single-process Node.js assistant runtime. Messages come in from one or more channels, get stored in SQLite, and are routed to Codex-driven agents through a host runtime process.
+MyClaw is a single-process Node.js assistant runtime. Messages come in from one or more channels, get stored in SQLite, and are routed to host-managed agents through a host runtime process.
 
 The project is intentionally small. The goal is not to be a framework with every feature built in. The goal is to give one person a secure, understandable base they can shape to fit their own workflow.
 
@@ -46,7 +46,7 @@ Defaults in v1:
 - memory provider: `sqlite` by default; `qmd` adds a markdown audit mirror
 - embeddings: off (unless OpenAI key is provided and enabled)
 - dreaming: off
-- sender allowlist: `channels.telegram.sender_allowlist` / `channels.slack.sender_allowlist` in `settings.yaml`
+- sender allowlist: `channels.<provider>.sender_allowlist` in `settings.yaml`
 
 Canonical memory settings live in `~/myclaw/settings.yaml`:
 
@@ -85,7 +85,7 @@ Notes:
 - Secure by explicit trust boundaries. The current runtime executes on host, so security depends on host controls, scoped mounts, and clear operational safeguards.
 - Customized in code. If you want different behavior, change the code instead of stacking on configuration.
 - Skills over core bloat. Reusable capabilities should be delivered as skills or narrowly scoped branches, not piled into the default runtime.
-- AI-native operations. Setup, debugging, and maintenance should be easy to drive from Claude Code or Codex.
+- AI-native operations. Setup, debugging, and maintenance should be easy to drive from Claude Code.
 
 ## What It Supports
 

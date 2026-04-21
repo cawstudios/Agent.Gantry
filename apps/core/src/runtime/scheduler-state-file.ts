@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { SCHEDULER_JOBS_JSON_PATH } from '../core/config.js';
+import { nowIso } from '../core/datetime.js';
+import { writeFileAtomic } from '../core/fs-paths.js';
 import { Job, JobEvent, JobRun } from '../core/types.js';
 import { logger } from '../core/logger.js';
 
@@ -15,15 +17,13 @@ export function writeSchedulerStateFile(
   fs.mkdirSync(dir, { recursive: true });
 
   const payload = {
-    updated_at: new Date().toISOString(),
+    updated_at: nowIso(),
     jobs,
     recent_runs: runs,
     recent_events: events,
   };
 
-  const tempPath = `${filePath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2));
-  fs.renameSync(tempPath, filePath);
+  writeFileAtomic(filePath, JSON.stringify(payload, null, 2));
 }
 
 export function writeSchedulerStateFileSafe(

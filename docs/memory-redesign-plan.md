@@ -1,6 +1,8 @@
-# Memory, Continuation, Dreaming — Implementation Plan
+# Memory, Continuation, Dreaming — Historical Plan (Archived)
 
-**Status:** Ready for handoff, 2026-04-18
+> Historical document. This file describes an older redesign proposal and is not the active implementation contract for current MyClaw runtime behavior.
+
+**Status:** Historical reference (archived), 2026-04-18
 **Owner:** Ravi
 **Audience:** coding agent implementing this plan
 **Scope:** Redesign three pipelines — turn-time extraction, session continuation, nightly dreaming — and surrounding cleanup/observability. Self-only rollout. Clean cutover. Haiku 4.5 for hot-path extraction, Sonnet 4.6 for session summary + nightly dream + consolidation. Embeddings stay optional.

@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, IPC_POLL_INTERVAL } from '../core/config.js';
+import { nowIso, nowMs } from '../core/datetime.js';
+import { isPlainObject, toTrimmedString } from '../core/object.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import { logger } from '../core/logger.js';
 import { IPC_GROUP_SUBDIRS } from './agent-spawn-layout.js';
@@ -52,21 +54,6 @@ const ipcRateLimitState = new Map<
   string,
   { windowStart: number; count: number }
 >();
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function toTrimmedString(
-  value: unknown,
-  opts: { maxLen?: number; allowEmpty?: boolean } = {},
-): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  if (!opts.allowEmpty && trimmed.length === 0) return undefined;
-  if (opts.maxLen && trimmed.length > opts.maxLen) return undefined;
-  return trimmed;
-}
 
 function toOptionalStringArray(
   value: unknown,
@@ -143,7 +130,7 @@ function sanitizeToolInput(
 }
 
 function canProcessIpcFile(sourceGroup: string, kind: string): boolean {
-  const now = Date.now();
+  const now = nowMs();
   const key = `${sourceGroup}:${kind}`;
   const state = ipcRateLimitState.get(key);
   if (!state || now - state.windowStart >= IPC_RATE_LIMIT_WINDOW_MS) {
@@ -192,7 +179,7 @@ function claimIpcFile(filePath: string): string {
   }
   const claimed = path.join(
     path.dirname(filePath),
-    `.processing-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${path.basename(filePath)}`,
+    `.processing-${process.pid}-${nowMs()}-${Math.random().toString(36).slice(2, 8)}-${path.basename(filePath)}`,
   );
   fs.renameSync(filePath, claimed);
   return claimed;
@@ -296,7 +283,7 @@ function acquireIpcRootLock(ipcBaseDir: string): string {
     lockPath,
     JSON.stringify({
       pid: process.pid,
-      startedAt: new Date().toISOString(),
+      startedAt: nowIso(),
     }),
     { flag: 'wx' },
   );

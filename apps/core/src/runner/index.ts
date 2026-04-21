@@ -24,6 +24,9 @@ import {
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { nowIso, nowMs, sleep } from '../core/datetime.js';
+import { isPlainObject } from '../core/object.js';
+import { composeAgentCapabilities } from './agent-capabilities.js';
 
 interface AgentRunnerInput {
   prompt: string;
@@ -90,10 +93,6 @@ function resolveGroupIpcDir(groupFolder: string): string {
     return IPC_BASE_DIR;
   }
   return path.join(IPC_BASE_DIR, groupFolder);
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function buildSystemPrompt(append?: string):
@@ -359,7 +358,7 @@ async function requestPermissionApproval(options: {
     );
     fs.mkdirSync(permissionRequestsDir, { recursive: true });
     fs.mkdirSync(permissionResponsesDir, { recursive: true });
-    const requestId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = `perm-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
     const requestPath = path.join(permissionRequestsDir, `${requestId}.json`);
     const requestTmpPath = `${requestPath}.tmp`;
     const envelope = {
@@ -377,14 +376,14 @@ async function requestPermissionApproval(options: {
         ? { toolInput: options.toolInput }
         : {}),
       ...(IPC_AUTH_TOKEN ? { authToken: IPC_AUTH_TOKEN } : {}),
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     };
     fs.writeFileSync(requestTmpPath, JSON.stringify(envelope, null, 2));
     fs.renameSync(requestTmpPath, requestPath);
 
     const responsePath = path.join(permissionResponsesDir, `${requestId}.json`);
-    const deadline = Date.now() + PERMISSION_REQUEST_TIMEOUT_MS;
-    while (Date.now() < deadline) {
+    const deadline = nowMs() + PERMISSION_REQUEST_TIMEOUT_MS;
+    while (nowMs() < deadline) {
       if (fs.existsSync(responsePath)) {
         try {
           const raw = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
@@ -417,7 +416,7 @@ async function requestPermissionApproval(options: {
           };
         }
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await sleep(100);
     }
     return {
       approved: false,
@@ -507,6 +506,15 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  const capabilities = composeAgentCapabilities({
+    mcpServerPath,
+    chatJid: agentInput.chatJid,
+    groupFolder: agentInput.groupFolder,
+    isMain: agentInput.isMain,
+    ipcDir: process.env.MYCLAW_IPC_DIR,
+    ipcAuthToken: process.env.MYCLAW_IPC_AUTH_TOKEN,
+  });
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -518,38 +526,11 @@ async function runQuery(
       resume: sessionId,
       resumeSessionAt: resumeAt,
       systemPrompt,
-      allowedTools: [
-        'Bash',
-        'Read',
-        'Write',
-        'Edit',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Task',
-        'TaskOutput',
-        'TaskStop',
-        'TeamCreate',
-        'TeamDelete',
-        'SendMessage',
-        'TodoWrite',
-        'ToolSearch',
-        'Skill',
-        'NotebookEdit',
-        'Config',
-        'EnterWorktree',
-        'ExitWorktree',
-        'mcp__myclaw__*',
-      ],
+      allowedTools: [...capabilities.allowedTools],
       env: sdkEnv,
-      permissionMode: 'default',
+      permissionMode: capabilities.permissionMode,
       canUseTool: async (toolName, input, permissionOpts) => {
-        if (
-          toolName === 'Config' ||
-          toolName === 'EnterWorktree' ||
-          toolName === 'ExitWorktree'
-        ) {
+        if (capabilities.alwaysAllowedTools.includes(toolName)) {
           return { behavior: 'allow' as const, updatedInput: input };
         }
 
@@ -584,25 +565,7 @@ async function runQuery(
         };
       },
       settingSources: ['user'],
-      mcpServers: {
-        myclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            MYCLAW_CHAT_JID: agentInput.chatJid,
-            MYCLAW_GROUP_FOLDER: agentInput.groupFolder,
-            MYCLAW_IS_MAIN: agentInput.isMain ? '1' : '0',
-            ...(process.env.MYCLAW_IPC_DIR
-              ? { MYCLAW_IPC_DIR: process.env.MYCLAW_IPC_DIR }
-              : {}),
-            ...(process.env.MYCLAW_IPC_AUTH_TOKEN
-              ? {
-                  MYCLAW_IPC_AUTH_TOKEN: process.env.MYCLAW_IPC_AUTH_TOKEN,
-                }
-              : {}),
-          },
-        },
-      },
+      mcpServers: capabilities.mcpServers,
       includePartialMessages: true,
     },
   })) {

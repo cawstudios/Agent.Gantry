@@ -40,7 +40,9 @@ function createMcpFixture(): {
   resultPath: string;
 } {
   const root = makeTempRoot();
-  const serverPath = path.join(root, 'ipc-mcp-stdio.ts');
+  const runnerDir = path.join(root, 'runner');
+  const coreDir = path.join(root, 'core');
+  const serverPath = path.join(runnerDir, 'ipc-mcp-stdio.ts');
   const ipcDir = path.join(root, 'ipc', 'team');
   const resultPath = path.join(root, 'mcp-result.json');
   const sdkRoot = path.join(
@@ -51,6 +53,8 @@ function createMcpFixture(): {
   );
   const sdkServerDir = path.join(sdkRoot, 'server');
 
+  fs.mkdirSync(runnerDir, { recursive: true });
+  fs.mkdirSync(coreDir, { recursive: true });
   fs.mkdirSync(sdkServerDir, { recursive: true });
   fs.writeFileSync(
     path.join(root, 'package.json'),
@@ -62,8 +66,13 @@ function createMcpFixture(): {
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/runner/memory-timeouts.ts'),
-    path.join(root, 'memory-timeouts.ts'),
+    path.join(runnerDir, 'memory-timeouts.ts'),
   );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/core/datetime.ts'),
+    path.join(coreDir, 'datetime.ts'),
+  );
+  symlinkPackage(root, 'dayjs', 'node_modules/dayjs');
   symlinkPackage(root, 'zod', 'node_modules/zod');
   symlinkPackage(root, 'cron-parser', 'node_modules/cron-parser');
   symlinkPackage(root, '@myclaw/contracts', 'packages/contracts');

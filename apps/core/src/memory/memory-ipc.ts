@@ -3,6 +3,7 @@ import path from 'path';
 import { MemoryIpcRequest, MemoryIpcResponse } from '@myclaw/contracts';
 
 import { logger } from '../core/logger.js';
+import { isPlainObject } from '../core/object.js';
 import { resolveGroupIpcPath } from '../platform/group-folder.js';
 import { MemoryService } from './memory-service.js';
 import {
@@ -13,10 +14,6 @@ import {
 } from './memory-types.js';
 
 const MEMORY_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function parseOptionalString(
   value: unknown,

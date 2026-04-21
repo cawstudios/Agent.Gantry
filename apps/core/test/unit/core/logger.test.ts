@@ -1,14 +1,19 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { fixedClock } from '@core/core/datetime.js';
+import {
+  createLogger,
+  installGlobalErrorHandlers,
+  logger,
+  type LogRecord,
+  type LogSink,
+} from '@core/core/logger.js';
 
 describe('logger', () => {
   let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
   let stderrWriteSpy: ReturnType<typeof vi.spyOn>;
-  let originalLogLevel: string | undefined;
 
   beforeEach(() => {
-    originalLogLevel = process.env.LOG_LEVEL;
-    process.env.LOG_LEVEL = 'info';
-    vi.resetModules();
     stdoutWriteSpy = vi
       .spyOn(process.stdout, 'write')
       .mockImplementation(() => true);
@@ -20,114 +25,157 @@ describe('logger', () => {
   afterEach(() => {
     stdoutWriteSpy.mockRestore();
     stderrWriteSpy.mockRestore();
-    if (originalLogLevel === undefined) {
-      delete process.env.LOG_LEVEL;
-    } else {
-      process.env.LOG_LEVEL = originalLogLevel;
-    }
   });
 
-  it('logger.fatal writes to stderr', async () => {
-    // Cover line 72: fatal log level
-    const { logger } = await import('@core/core/logger.js');
-    logger.fatal('test fatal message');
-
+  it('writes text logs to stderr for warn/error/fatal', () => {
+    const l = createLogger({
+      level: 'debug',
+      clock: fixedClock('2026-04-21T00:00:00.000Z'),
+      format: 'text',
+    });
+    l.warn('warning message');
     const output = stderrWriteSpy.mock.calls
       .map((call: unknown[]) => String(call[0]))
       .join('');
-    expect(output).toContain('FATAL');
-    expect(output).toContain('test fatal message');
+    expect(output).toContain('WARN');
+    expect(output).toContain('warning message');
+    expect(output).toContain('2026-04-21T00:00:00.000Z');
   });
 
-  it('logger.fatal with data object writes to stderr', async () => {
-    // Cover line 72: fatal with data object
-    const { logger } = await import('@core/core/logger.js');
-    logger.fatal({ key: 'val' }, 'fatal with data');
-
-    const output = stderrWriteSpy.mock.calls
+  it('writes json logs when json format is selected', () => {
+    const l = createLogger({
+      level: 'debug',
+      clock: fixedClock('2026-04-21T00:00:00.000Z'),
+      format: 'json',
+    });
+    l.info({ foo: 'bar' }, 'json log');
+    const output = stdoutWriteSpy.mock.calls
       .map((call: unknown[]) => String(call[0]))
-      .join('');
-    expect(output).toContain('FATAL');
-    expect(output).toContain('fatal with data');
+      .join('')
+      .trim();
+    const parsed = JSON.parse(output) as LogRecord;
+    expect(parsed.level).toBe('info');
+    expect(parsed.message).toBe('json log');
+    expect(parsed.context).toEqual({ foo: 'bar' });
+    expect(parsed.timestamp).toBe('2026-04-21T00:00:00.000Z');
   });
 
-  it('formatErr handles non-Error objects', async () => {
-    // Cover line 23: formatErr non-Error branch
-    const { logger } = await import('@core/core/logger.js');
-    logger.error({ err: 'string-error' }, 'non-error object');
-
-    const output = stderrWriteSpy.mock.calls
-      .map((call: unknown[]) => String(call[0]))
-      .join('');
-    expect(output).toContain('non-error object');
-    expect(output).toContain('string-error');
+  it('supports sink injection and child context', () => {
+    const records: LogRecord[] = [];
+    const sink: LogSink = {
+      write: (record) => {
+        records.push(record);
+      },
+    };
+    const l = createLogger({
+      level: 'debug',
+      sink,
+      clock: fixedClock('2026-04-21T00:00:00.000Z'),
+      context: { scope: 'root' },
+    });
+    l.child({ group: 'team-a' }).info({ event: 'start' }, 'child event');
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      level: 'info',
+      message: 'child event',
+      context: { scope: 'root', group: 'team-a', event: 'start' },
+    });
   });
 
-  it('formatErr handles Error instances', async () => {
-    // Cover line 20-21: formatErr Error branch
-    const { logger } = await import('@core/core/logger.js');
-    logger.error({ err: new Error('real-error') }, 'error instance');
-
-    const output = stderrWriteSpy.mock.calls
-      .map((call: unknown[]) => String(call[0]))
-      .join('');
-    expect(output).toContain('error instance');
-    expect(output).toContain('real-error');
+  it('keeps base and child context for string-only log calls', () => {
+    const records: LogRecord[] = [];
+    const l = createLogger({
+      level: 'debug',
+      sink: { write: (record) => records.push(record) },
+      context: { scope: 'root' },
+    });
+    l.child({ group: 'team-a' }).info('string only event');
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      level: 'info',
+      message: 'string only event',
+      context: { scope: 'root', group: 'team-a' },
+    });
   });
 
-  it('log below threshold is suppressed', async () => {
-    // Cover line 48: threshold check (debug messages suppressed at info level)
-    const { logger } = await import('@core/core/logger.js');
-    logger.debug('debug message suppressed');
-
-    // Depending on LOG_LEVEL env, debug may be suppressed
-    // At default (info level), debug output should not appear
-    const stdoutOutput = stdoutWriteSpy.mock.calls
-      .map((call: unknown[]) => String(call[0]))
-      .join('');
-    // If LOG_LEVEL is not set to debug, this will be suppressed
-    if (!process.env.LOG_LEVEL || process.env.LOG_LEVEL === 'info') {
-      expect(stdoutOutput).not.toContain('debug message suppressed');
-    }
+  it('redacts sensitive keys by default', () => {
+    const records: LogRecord[] = [];
+    const l = createLogger({
+      level: 'debug',
+      sink: { write: (record) => records.push(record) },
+    });
+    l.info(
+      {
+        apiToken: 'secret',
+        nested: { password: 'p@ss', keep: 'ok' },
+      },
+      'redaction test',
+    );
+    expect(records[0]?.context).toEqual({
+      apiToken: '[REDACTED]',
+      nested: { password: '[REDACTED]', keep: 'ok' },
+    });
   });
 
-  it('uncaughtException handler calls logger.fatal and process.exit', async () => {
+  it('filters entries below configured level', () => {
+    const records: LogRecord[] = [];
+    const l = createLogger({
+      level: 'warn',
+      sink: { write: (record) => records.push(record) },
+    });
+    l.debug('skip debug');
+    l.info('skip info');
+    l.warn('emit warn');
+    expect(records).toHaveLength(1);
+    expect(records[0]?.level).toBe('warn');
+  });
+
+  it('does not install process handlers on module import', async () => {
+    vi.resetModules();
+    const beforeUncaught = process.listeners('uncaughtException').length;
+    const beforeUnhandled = process.listeners('unhandledRejection').length;
+    await import('@core/core/logger.js');
+    const afterUncaught = process.listeners('uncaughtException').length;
+    const afterUnhandled = process.listeners('unhandledRejection').length;
+    expect(afterUncaught).toBe(beforeUncaught);
+    expect(afterUnhandled).toBe(beforeUnhandled);
+  });
+
+  it('installs global handlers only when asked', () => {
     const exitSpy = vi
       .spyOn(process, 'exit')
       .mockImplementation(() => undefined as never);
-    const { logger } = await import('@core/core/logger.js');
     const fatalSpy = vi.spyOn(logger, 'fatal');
+    const errorSpy = vi.spyOn(logger, 'error');
+    const cleanup = installGlobalErrorHandlers(logger);
 
-    // Find the uncaughtException listener registered by logger.ts
-    const listeners = process.listeners('uncaughtException');
-    const loggerListener = listeners[listeners.length - 1] as (
+    const uncaught = process.listeners('uncaughtException');
+    const unhandled = process.listeners('unhandledRejection');
+    expect(uncaught.length).toBeGreaterThan(0);
+    expect(unhandled.length).toBeGreaterThan(0);
+
+    const uncaughtHandler = uncaught[uncaught.length - 1] as (
       err: Error,
     ) => void;
-    loggerListener(new Error('test uncaught'));
+    const unhandledHandler = unhandled[unhandled.length - 1] as (
+      reason: unknown,
+    ) => void;
+    uncaughtHandler(new Error('boom'));
+    unhandledHandler(new Error('reject'));
 
     expect(fatalSpy).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
       'Uncaught exception',
     );
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    exitSpy.mockRestore();
-    fatalSpy.mockRestore();
-  });
-
-  it('unhandledRejection handler calls logger.error', async () => {
-    const { logger } = await import('@core/core/logger.js');
-    const errorSpy = vi.spyOn(logger, 'error');
-
-    const listeners = process.listeners('unhandledRejection');
-    const loggerListener = listeners[listeners.length - 1] as (
-      reason: unknown,
-    ) => void;
-    loggerListener(new Error('test rejection'));
-
     expect(errorSpy).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
       'Unhandled rejection',
     );
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    cleanup();
+    fatalSpy.mockRestore();
     errorSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 });

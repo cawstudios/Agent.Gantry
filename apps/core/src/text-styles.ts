@@ -1,5 +1,5 @@
 /**
- * parseTextStyles — convert Codex Markdown output to channel-native formatting.
+ * parseTextStyles — convert agent Markdown output to channel-native formatting.
  *
  * Code blocks (fenced and inline) are preserved exactly. Marker substitution is
  * applied only to non-code segments.

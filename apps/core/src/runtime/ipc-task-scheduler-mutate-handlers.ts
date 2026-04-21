@@ -1,6 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 
 import { TIMEZONE } from '../core/config.js';
+import { nowIso, nowMs, parseIso, toIso } from '../core/datetime.js';
 import { logger } from '../core/logger.js';
 import { deleteJob, getJobById, updateJob } from '../storage/db.js';
 import { TaskHandler } from './ipc-task-types.js';
@@ -18,14 +19,14 @@ function computeResumeNextRun(job: {
   if (job.next_run) return job.next_run;
 
   if (job.schedule_type === 'once') {
-    const date = new Date(job.schedule_value);
-    return Number.isFinite(date.getTime()) ? new Date().toISOString() : null;
+    const date = parseIso(job.schedule_value);
+    return date ? nowIso() : null;
   }
 
   if (job.schedule_type === 'cron') {
     try {
       CronExpressionParser.parse(job.schedule_value, { tz: TIMEZONE });
-      return new Date().toISOString();
+      return nowIso();
     } catch {
       return null;
     }
@@ -34,7 +35,7 @@ function computeResumeNextRun(job: {
   if (job.schedule_type === 'interval') {
     const ms = parseInt(job.schedule_value, 10);
     if (!Number.isFinite(ms) || ms <= 0) return null;
-    return new Date().toISOString();
+    return nowIso();
   }
 
   return null;
@@ -165,17 +166,17 @@ const schedulerUpdateJobHandler: TaskHandler = (context) => {
         );
         return;
       }
-      updates.next_run = new Date(Date.now() + ms).toISOString();
+      updates.next_run = toIso(nowMs() + ms);
     } else if (merged.schedule_type === 'once') {
-      const date = new Date(merged.schedule_value);
-      if (isNaN(date.getTime())) {
+      const date = parseIso(merged.schedule_value);
+      if (!date) {
         logger.warn(
           { jobId, value: merged.schedule_value },
           'Invalid once timestamp in scheduler_update_job',
         );
         return;
       }
-      updates.next_run = date.toISOString();
+      updates.next_run = toIso(date);
     } else {
       return;
     }
