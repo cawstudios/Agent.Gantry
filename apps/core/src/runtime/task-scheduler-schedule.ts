@@ -1,6 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 
 import { TIMEZONE } from '../core/config.js';
+import { parseIso } from '../core/datetime.js';
 
 interface ScheduleValidationInput {
   schedule_type: string;
@@ -12,8 +13,7 @@ export function validateScheduleConfig(
 ): string | null {
   const scheduleType = String(job.schedule_type);
   if (scheduleType === 'once') {
-    const date = new Date(job.schedule_value);
-    if (!Number.isFinite(date.getTime())) {
+    if (!parseIso(job.schedule_value)) {
       return `Invalid once schedule_value: ${job.schedule_value}`;
     }
     return null;

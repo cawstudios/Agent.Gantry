@@ -3,6 +3,8 @@ import path from 'path';
 import { createHash } from 'crypto';
 
 import { DATA_DIR } from '../core/config.js';
+import { nowIso } from '../core/datetime.js';
+import { writeFileAtomic } from '../core/fs-paths.js';
 import { JobExecutionMode, RegisteredGroup } from '../core/types.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import {
@@ -12,17 +14,7 @@ import {
 } from '../cli/service-manager.js';
 
 const TASK_IPC_RESPONSE_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-
-export function toTrimmedString(
-  value: unknown,
-  opts: { maxLen?: number; allowEmpty?: boolean } = {},
-): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  if (!opts.allowEmpty && trimmed.length === 0) return undefined;
-  if (opts.maxLen && trimmed.length > opts.maxLen) return undefined;
-  return trimmed;
-}
+export { toTrimmedString } from '../core/object.js';
 
 export function normalizeIpcExecutionMode(
   executionMode: unknown,
@@ -73,9 +65,7 @@ export function generateJobId(params: {
 }
 
 function writeJsonAtomic(filePath: string, value: unknown): void {
-  const tempPath = `${filePath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(value, null, 2));
-  fs.renameSync(tempPath, filePath);
+  writeFileAtomic(filePath, JSON.stringify(value, null, 2));
 }
 
 export function writeTaskIpcResponse(
@@ -96,7 +86,7 @@ export function writeTaskIpcResponse(
   writeJsonAtomic(responsePath, {
     taskId,
     ...payload,
-    timestamp: new Date().toISOString(),
+    timestamp: nowIso(),
   });
 }
 

@@ -70,6 +70,7 @@
     "@slack/bolt": "^4.7.0",
     "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",
+    "dayjs": "^1.11.20",
     "grammy": "^1.42.0",
     "sqlite-vec": "^0.1.9",
     "zod": "^4.0.0"

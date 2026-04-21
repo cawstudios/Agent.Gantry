@@ -31,8 +31,8 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 │                                                                       │
 │  ┌──────────────────┐                  ┌────────────────────┐        │
 │  │ Channels         │─────────────────▶│   SQLite Database  │        │
-│  │ (self-register   │◀────────────────│   (messages.db)    │        │
-│  │  at startup)     │  store/send      └─────────┬──────────┘        │
+│  │ (provider        │◀────────────────│   (messages.db)    │        │
+│  │  registry)       │  store/send      └─────────┬──────────┘        │
 │  └──────────────────┘                            │                   │
 │                                                   │                   │
 │         ┌─────────────────────────────────────────┘                   │
@@ -75,7 +75,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| Channel System | Channel registry (`apps/core/src/channels/registry.ts`) | Channels self-register at startup |
+| Channel System | Provider registry (`apps/core/src/channels/provider-registry.ts`) | Channels are looked up by provider id and JID prefix |
 | Message Storage | SQLite (better-sqlite3) | Store messages for polling |
 | Runtime Execution | Host process execution | Agent execution with runtime-home scoped paths |
 | Agent | @anthropic-ai/claude-agent-sdk (0.2.97) | Run Claude with tools and MCP servers |
@@ -86,7 +86,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 
 ## Architecture: Channel System
 
-The runtime supports multi-channel operation via a channel registry. Telegram and Slack are available in this codebase, and additional channels (for example WhatsApp, Discord, Gmail) can be added through skills. Channels self-register at startup; channels with missing credentials emit a WARN log and are skipped.
+The runtime supports multi-channel operation via a provider registry. Telegram and Slack are available in this codebase, and additional channels (for example WhatsApp, Discord, Gmail) can be added through skills. Providers are registered at startup via `register-builtins.ts`; providers with missing credentials emit a WARN log and are skipped.
 
 ### System Diagram
 
@@ -134,27 +134,23 @@ graph LR
 
 ### Channel Registry
 
-The channel system is built on a factory registry in `apps/core/src/channels/registry.ts`:
+The channel system is built on a provider registry in `apps/core/src/channels/provider-registry.ts`:
 
 ```typescript
-export type ChannelFactory = (opts: ChannelOpts) => Channel | null;
-
-const registry = new Map<string, ChannelFactory>();
-
-export function registerChannel(name: string, factory: ChannelFactory): void {
-  registry.set(name, factory);
+export interface ChannelProvider {
+  id: string;
+  jidPrefix: string;
+  folderPrefix: string;
+  create: ChannelFactory;
 }
 
-export function getChannelFactory(name: string): ChannelFactory | undefined {
-  return registry.get(name);
-}
-
-export function getRegisteredChannelNames(): string[] {
-  return [...registry.keys()];
-}
+export function registerChannelProvider(provider: ChannelProvider): void;
+export function listChannelProviders(): readonly ChannelProvider[];
+export function getChannelProvider(id: string): ChannelProvider | undefined;
+export function providerForJid(jid: string): ChannelProvider | undefined;
 ```
 
-Each factory receives `ChannelOpts` (callbacks for `onMessage`, `onChatMetadata`, and `registeredGroups`) and returns either a `Channel` instance or `null` if that channel's credentials are not configured.
+Each provider receives `ChannelOpts` through its `create` function and returns either a `Channel` instance or `null` if the provider's credentials are not configured.
 
 ### Channel Interface
 
@@ -188,53 +184,20 @@ interface Channel {
 }
 ```
 
-### Self-Registration Pattern
+### Registration Pattern
 
-Channels self-register using a barrel-import pattern:
+Providers are registered via `apps/core/src/channels/register-builtins.ts`:
 
-1. Each channel skill adds a file to `apps/core/src/channels/` (e.g. `whatsapp.ts`, `telegram.ts`) that calls `registerChannel()` at module load time:
-
-   ```typescript
-   // apps/core/src/channels/whatsapp.ts
-   import { registerChannel, ChannelOpts } from './registry.js';
-
-   export class WhatsAppChannel implements Channel { /* ... */ }
-
-   registerChannel('whatsapp', (opts: ChannelOpts) => {
-     // Return null if credentials are missing
-     if (!existsSync(authPath)) return null;
-     return new WhatsAppChannel(opts);
-   });
-   ```
-
-2. The barrel file `apps/core/src/channels/index.ts` imports all channel modules, triggering registration:
-
-   ```typescript
-   import './whatsapp.js';
-   import './telegram.js';
-   import './slack.js';
-   // ... each skill adds its import here
-   ```
-
-3. At startup, the orchestrator (`apps/core/src/index.ts`) loops through registered channels and connects whichever ones return a valid instance:
-
-   ```typescript
-   for (const name of getRegisteredChannelNames()) {
-     const factory = getChannelFactory(name);
-     const channel = factory?.(channelOpts);
-     if (channel) {
-       await channel.connect();
-       channels.push(channel);
-     }
-   }
-   ```
+1. Built-in providers (Telegram/Slack) call `registerChannelProvider(provider)`.
+2. Startup wiring iterates `listChannelProviders()`, creates enabled providers, and connects returned channel instances.
+3. Routing uses `providerForJid(jid)` to determine ownership and formatting behavior.
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
-| `apps/core/src/channels/registry.ts` | Channel factory registry |
-| `apps/core/src/channels/index.ts` | Barrel imports that trigger channel self-registration |
+| `apps/core/src/channels/provider-registry.ts` | Channel provider registry |
+| `apps/core/src/channels/register-builtins.ts` | Built-in provider registration |
 | `apps/core/src/core/types.ts` | `Channel` interface, `ChannelOpts`, message types |
 | `apps/core/src/index.ts` | Orchestrator — instantiates channels, runs message loop |
 | `apps/core/src/messaging/router.ts` | Finds the owning channel for a JID, formats messages |
@@ -244,9 +207,9 @@ Channels self-register using a barrel-import pattern:
 To add a new channel, contribute a skill to `.claude/skills/add-<name>/` that:
 
 1. Adds a `apps/core/src/channels/<name>.ts` file implementing the `Channel` interface
-2. Calls `registerChannel(name, factory)` at module load
-3. Returns `null` from the factory if credentials are missing
-4. Adds an import line to `apps/core/src/channels/index.ts`
+2. Exposes a `ChannelProvider` entry with `id`, prefixes, setup metadata, and `create`
+3. Returns `null` from `create` if credentials are missing
+4. Registers the provider via `register-builtins.ts` (or equivalent provider registration module)
 
 Channel-extension skills can follow this pattern when they are added to the bundled or user-installed skill set. The default npm package only ships the core command-discovery and administration skills.
 
@@ -271,7 +234,7 @@ myclaw/
 │   └── core/
 │       ├── src/
 │       │   ├── index.ts           # Orchestrator: state, message loop, agent invocation
-│       │   ├── channels/          # Channel registry and channel implementations
+│       │   ├── channels/          # Channel provider registry and channel implementations
 │       │   ├── core/              # Config, logging, environment, shared types
 │       │   ├── memory/            # Memory ingestion, retrieval, and storage logic
 │       │   ├── messaging/         # Routing and formatting
@@ -280,14 +243,9 @@ myclaw/
 │       │   ├── session/           # Slash commands and transcript archive flow
 │       │   └── storage/           # SQLite persistence
 │       ├── config-examples/       # Example config payloads
-│
-├── packages/
-│   └── agent-runner/             # Code that runs inside the host-synced agent runtime
-│       ├── package.json
-│       ├── tsconfig.json
-│       └── src/
-│           ├── index.ts          # Entry point (query loop, IPC polling, session resume)
-│           └── ipc-mcp-stdio.ts  # Stdio-based MCP server for host communication
+│       │   └── runner/            # Agent runner + MCP stdio runtime code
+│       │       ├── index.ts       # Entry point (query loop, IPC polling, session resume)
+│       │       └── ipc-mcp-stdio.ts # Stdio-based MCP server for host communication
 │
 ├── ops/
 │   ├── bootstrap.sh              # Local bootstrap script
@@ -820,7 +778,7 @@ MyClaw runs as a single macOS launchd service.
 
 When MyClaw starts, it:
 1. Runs runtime preflight for host execution and emits actionable fix steps on failure
-2. Auto-builds `packages/agent-runner` artifacts and fails startup if build fails
+2. Auto-builds runner artifacts from `apps/core/src/runner` and fails startup if build fails
 3. Initializes the SQLite database (migrates from JSON files if they exist)
 4. Loads state from SQLite (registered groups, sessions, router state)
 5. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `connect()` on each

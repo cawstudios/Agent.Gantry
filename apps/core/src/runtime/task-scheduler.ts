@@ -11,7 +11,17 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from '../core/config.js';
-import { Job, JobExecutionMode, RegisteredGroup } from '../core/types.js';
+import {
+  nowIso as currentIso,
+  nowMs as currentTimeMs,
+  toIso,
+} from '../core/datetime.js';
+import {
+  Job,
+  JobExecutionMode,
+  RegisteredGroup,
+  StreamingChunkOptions,
+} from '../core/types.js';
 import { logger } from '../core/logger.js';
 import { runMemoryCleanupInSubprocess } from '../memory/cleanup-job.js';
 import {
@@ -37,7 +47,6 @@ import {
   upsertJob,
   updateJob,
 } from '../storage/db.js';
-import { StreamingChunkOptions } from '../core/types.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -61,8 +70,8 @@ export interface SchedulerDependencies {
   runAgent?: typeof spawnAgent;
 }
 
-const DEFAULT_JOB_CLEANUP_AFTER_MS = 86_400_000;
-const MAX_PARALLEL_JOBS_PER_GROUP_SCOPE = 2;
+const DEFAULT_JOB_CLEANUP_AFTER_MS = 86_400_000,
+  MAX_PARALLEL_JOBS_PER_GROUP_SCOPE = 2;
 let schedulerStreamingGenerationCounter = 0;
 const activeParallelRunsByGroupScope = new Map<string, number>();
 const activeSerializedRunsByGroupScope = new Map<string, number>();
@@ -78,13 +87,11 @@ let memoryMaintenanceQueue: MemoryMaintenanceQueueLike =
   getMemoryMaintenanceQueue();
 
 function nextSchedulerStreamingGeneration(): number {
-  schedulerStreamingGenerationCounter += 1;
-  return schedulerStreamingGenerationCounter;
+  return ++schedulerStreamingGenerationCounter;
 }
 
 function schedulerQueueJid(groupScope: string, jobId?: string): string {
-  if (jobId) return `__scheduler__:${groupScope}:${jobId}`;
-  return `__scheduler__:${groupScope}`;
+  return `__scheduler__:${groupScope}${jobId ? `:${jobId}` : ''}`;
 }
 
 function canScheduleParallelRunForGroup(
@@ -163,10 +170,6 @@ function acquireSerializedRunSlot(groupScope: string): () => void {
   };
 }
 
-function normalizeExecutionMode(mode: unknown): JobExecutionMode {
-  return mode === 'serialized' ? 'serialized' : 'parallel';
-}
-
 function normalizeCleanupAfterMs(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return DEFAULT_JOB_CLEANUP_AFTER_MS;
@@ -189,7 +192,7 @@ function shouldDeleteCompletedOneTimeJob(job: Job, nowMs: number): boolean {
 
 function sweepCompletedOneTimeJobs(): boolean {
   const jobs = getAllJobs();
-  const nowMs = Date.now();
+  const nowMs = currentTimeMs();
   let deleted = false;
   for (const job of jobs) {
     if (!shouldDeleteCompletedOneTimeJob(job, nowMs)) continue;
@@ -213,7 +216,7 @@ export function computeNextJobRun(
   if (job.schedule_type === 'cron') {
     const interval = CronExpressionParser.parse(job.schedule_value, {
       tz: TIMEZONE,
-      currentDate: scheduledFor || new Date().toISOString(),
+      currentDate: scheduledFor || currentIso(),
     });
     return interval.next().toISOString();
   }
@@ -225,14 +228,16 @@ export function computeNextJobRun(
   const ms = parseInt(job.schedule_value, 10);
   if (!ms || ms <= 0) return null;
 
-  const parsedAnchor = scheduledFor ? Date.parse(scheduledFor) : Date.now();
-  const anchor = Number.isFinite(parsedAnchor) ? parsedAnchor : Date.now();
-  const now = Date.now();
+  const parsedAnchor = scheduledFor
+    ? Date.parse(scheduledFor)
+    : currentTimeMs();
+  const anchor = Number.isFinite(parsedAnchor) ? parsedAnchor : currentTimeMs();
+  const now = currentTimeMs();
   const steps = anchor >= now ? 1 : Math.floor((now - anchor) / ms) + 1;
   const next = anchor + steps * ms;
 
   if (!Number.isFinite(next) || Math.abs(next) > 8.64e15) return null;
-  return new Date(next).toISOString();
+  return toIso(next);
 }
 
 function formatRunStatusMessage(args: {
@@ -335,7 +340,7 @@ function registerSystemJobs(deps: SchedulerDependencies): void {
     }
   }
 
-  const nowIso = new Date().toISOString();
+  const nowIso = currentIso();
   if (RUNTIME_MEMORY_DREAMING_ENABLED) {
     for (const [groupFolder, linkedSessions] of byFolder.entries()) {
       const jobId = `system:dreaming:${groupFolder}`;
@@ -489,15 +494,14 @@ async function runJob(
     return;
   }
 
-  const scheduledFor = currentJob.next_run || new Date().toISOString();
+  const scheduledFor = currentJob.next_run || currentIso();
   const runId = randomUUID();
   const timeoutMs = Math.max(30_000, currentJob.timeout_ms || 300_000);
-  const executionMode = normalizeExecutionMode(
-    executionModeHint ?? currentJob.execution_mode,
-  );
-  const leaseExpiresAt = new Date(
-    Date.now() + timeoutMs + 30_000,
-  ).toISOString();
+  const executionMode: JobExecutionMode =
+    (executionModeHint ?? currentJob.execution_mode) === 'serialized'
+      ? 'serialized'
+      : 'parallel';
+  const leaseExpiresAt = toIso(currentTimeMs() + timeoutMs + 30_000);
 
   if (!markJobRunning(currentJob.id, runId, leaseExpiresAt)) {
     return;
@@ -507,7 +511,7 @@ async function runJob(
     run_id: runId,
     job_id: currentJob.id,
     scheduled_for: scheduledFor,
-    started_at: new Date().toISOString(),
+    started_at: currentIso(),
     ended_at: null,
     status: 'running',
     result_summary: null,
@@ -524,11 +528,21 @@ async function runJob(
     deps.onSchedulerChanged?.();
     return;
   }
-
   let jobDeletedDuringRun = false;
   const isJobDeleted = (): boolean => {
     if (jobDeletedDuringRun) return true;
-    if (getJobById(currentJob.id)) return false;
+    let jobStillExists: boolean;
+    try {
+      jobStillExists = Boolean(getJobById(currentJob.id));
+    } catch (err) {
+      jobDeletedDuringRun = true;
+      logger.debug(
+        { jobId: currentJob.id, runId, err },
+        'Scheduler run observed closed storage while checking job state',
+      );
+      return true;
+    }
+    if (jobStillExists) return false;
     jobDeletedDuringRun = true;
     logger.info(
       { jobId: currentJob.id, runId },
@@ -536,7 +550,6 @@ async function runJob(
     );
     return true;
   };
-
   const emitJobEvent = (
     eventType: string,
     payload: Record<string, unknown> | null,
@@ -548,7 +561,7 @@ async function runJob(
         run_id: runId,
         event_type: eventType,
         payload: payload ? JSON.stringify(payload) : null,
-        created_at: new Date().toISOString(),
+        created_at: currentIso(),
       });
     } catch (err) {
       logger.warn(
@@ -563,12 +576,10 @@ async function runJob(
     scheduled_for: scheduledFor,
     timeout_ms: timeoutMs,
   });
-
   let result: string | null = null;
   let error: string | null = null;
   let collectedResult = '';
   let pendingSessionId: string | undefined;
-
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(execution.group.folder);
@@ -583,7 +594,6 @@ async function runJob(
   const linkedSessions = Array.from(new Set(currentJob.linked_sessions));
   const shouldDeliverToChat = !currentJob.silent && linkedSessions.length > 0;
   const streamGeneration = nextSchedulerStreamingGeneration();
-
   const buildStreamingOptions = (args: {
     done?: boolean;
   }): StreamingChunkOptions => {
@@ -594,7 +604,6 @@ async function runJob(
     if (args.done !== undefined) options.done = args.done;
     return options;
   };
-
   const resetDeliveryStreams = () => {
     if (!deps.resetStreaming || !shouldDeliverToChat) return;
     for (const jid of linkedSessions) {
@@ -608,7 +617,6 @@ async function runJob(
       }
     }
   };
-
   const deliverMessage = async (text: string): Promise<boolean> => {
     if (!shouldDeliverToChat || !text || isJobDeleted()) return false;
     let delivered = false;
@@ -625,7 +633,6 @@ async function runJob(
     }
     return delivered;
   };
-
   const deliverStreamingChunk = async (text: string): Promise<boolean> => {
     if (!shouldDeliverToChat || !text || isJobDeleted()) return false;
     if (!deps.sendStreamingChunk) {
@@ -650,7 +657,6 @@ async function runJob(
     }
     return delivered;
   };
-
   let streamFinalized = false;
   const finalizeStreaming = async (): Promise<boolean> => {
     if (
@@ -680,7 +686,6 @@ async function runJob(
     }
     return delivered;
   };
-
   if (shouldDeliverToChat) {
     resetDeliveryStreams();
     await deliverMessage(`🔔 Scheduled task: ${currentJob.name}`);
@@ -706,7 +711,7 @@ async function runJob(
       let lastStreamingEventMs = 0;
       const flushStreamingEvent = (force = false): void => {
         if (bufferedStreamingChars <= 0) return;
-        const nowMs = Date.now();
+        const nowMs = currentTimeMs();
         if (!force && nowMs - lastStreamingEventMs < 1000) return;
         emitJobEvent('job.streaming', {
           buffered_chars: bufferedStreamingChars,
@@ -787,7 +792,7 @@ async function runJob(
     }
   }
 
-  const now = new Date().toISOString();
+  const now = currentIso();
   isJobDeleted();
   if (jobDeletedDuringRun) {
     result = null;
@@ -832,7 +837,7 @@ async function runJob(
       const boundedDelay = Number.isFinite(rawDelay)
         ? Math.min(rawDelay, 30 * 24 * 60 * 60 * 1000)
         : 30 * 24 * 60 * 60 * 1000;
-      nextRun = new Date(Date.now() + boundedDelay).toISOString();
+      nextRun = toIso(currentTimeMs() + boundedDelay);
       updateJob(currentJob.id, {
         status: 'active',
         next_run: nextRun,
@@ -975,7 +980,8 @@ export async function runSchedulerTick(
         deps.onSchedulerChanged?.();
         continue;
       }
-      const executionMode = normalizeExecutionMode(current.execution_mode);
+      const executionMode: JobExecutionMode =
+        current.execution_mode === 'serialized' ? 'serialized' : 'parallel';
       if (
         executionMode === 'parallel' &&
         !canScheduleParallelRunForGroup(
@@ -1020,6 +1026,11 @@ export async function runSchedulerTick(
               : acquireSerializedRunSlot(current.group_scope);
           try {
             await runJob(current, deps, queueJid, executionMode);
+          } catch (err) {
+            logger.warn(
+              { err, jobId: current.id, queueJid },
+              'Scheduler run crashed before completion',
+            );
           } finally {
             releaseSlot?.();
           }

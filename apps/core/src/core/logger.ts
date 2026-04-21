@@ -1,81 +1,198 @@
-const LEVELS = { debug: 20, info: 30, warn: 40, error: 50, fatal: 60 } as const;
-type Level = keyof typeof LEVELS;
+import { Clock, nowIso, systemClock, toIso } from './datetime.js';
+import { isPlainObject } from './object.js';
 
-const COLORS: Record<Level, string> = {
-  debug: '\x1b[34m',
-  info: '\x1b[32m',
-  warn: '\x1b[33m',
-  error: '\x1b[31m',
-  fatal: '\x1b[41m\x1b[37m',
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+
+const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 20,
+  info: 30,
+  warn: 40,
+  error: 50,
+  fatal: 60,
 };
-const KEY_COLOR = '\x1b[35m';
-const MSG_COLOR = '\x1b[36m';
-const RESET = '\x1b[39m';
-const FULL_RESET = '\x1b[0m';
+
+export interface LogRecord {
+  timestamp: string;
+  level: LogLevel;
+  message: string;
+  pid: number;
+  context?: Record<string, unknown>;
+}
+
+export interface LogSink {
+  write: (record: LogRecord) => void;
+}
+
+export interface Logger {
+  debug: (dataOrMsg: Record<string, unknown> | string, msg?: string) => void;
+  info: (dataOrMsg: Record<string, unknown> | string, msg?: string) => void;
+  warn: (dataOrMsg: Record<string, unknown> | string, msg?: string) => void;
+  error: (dataOrMsg: Record<string, unknown> | string, msg?: string) => void;
+  fatal: (dataOrMsg: Record<string, unknown> | string, msg?: string) => void;
+  child: (context: Record<string, unknown>) => Logger;
+}
+
+export interface CreateLoggerOptions {
+  level?: LogLevel;
+  sink?: LogSink;
+  format?: 'json' | 'text';
+  clock?: Clock;
+  context?: Record<string, unknown>;
+  redact?: (value: unknown) => unknown;
+}
+
+const DEFAULT_REDACT_KEY_PATTERN =
+  /(token|secret|password|credential|api[_-]?key|authorization|auth)/i;
 const LOGGER_HANDLER_MARK = Symbol.for('myclaw.logger.handler');
 
-const threshold =
-  LEVELS[(process.env.LOG_LEVEL as Level) || 'info'] ?? LEVELS.info;
-
-function formatErr(err: unknown): string {
-  if (err instanceof Error) {
-    return `{\n      "type": "${err.constructor.name}",\n      "message": "${err.message}",\n      "stack":\n          ${err.stack}\n    }`;
-  }
-  return JSON.stringify(err);
+function sanitizeError(err: Error): Record<string, unknown> {
+  return {
+    type: err.constructor.name,
+    message: err.message,
+    stack: err.stack,
+  };
 }
 
-function formatData(data: Record<string, unknown>): string {
-  let out = '';
-  for (const [k, v] of Object.entries(data)) {
-    if (k === 'err') {
-      out += `\n    ${KEY_COLOR}err${RESET}: ${formatErr(v)}`;
-    } else {
-      out += `\n    ${KEY_COLOR}${k}${RESET}: ${JSON.stringify(v)}`;
+function defaultRedact(value: unknown): unknown {
+  return redactValue(value, 0);
+}
+
+function redactValue(value: unknown, depth: number): unknown {
+  if (depth > 6) return '[TRUNCATED_DEPTH]';
+  if (value instanceof Error) return sanitizeError(value);
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactValue(entry, depth + 1));
+  }
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (DEFAULT_REDACT_KEY_PATTERN.test(key)) {
+        out[key] = '[REDACTED]';
+        continue;
+      }
+      out[key] = redactValue(entry, depth + 1);
     }
+    return out;
   }
-  return out;
+  return value;
 }
 
-function ts(): string {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+function createTextSink(opts: { stderrOnly?: boolean }): LogSink {
+  return {
+    write(record) {
+      const forceStderr = opts.stderrOnly === true;
+      const stream =
+        forceStderr ||
+        LOG_LEVEL_PRIORITY[record.level] >= LOG_LEVEL_PRIORITY.warn
+          ? process.stderr
+          : process.stdout;
+      if (!record.context || Object.keys(record.context).length === 0) {
+        stream.write(
+          `[${record.timestamp}] ${record.level.toUpperCase()} (${record.pid}): ${record.message}\n`,
+        );
+        return;
+      }
+      stream.write(
+        `[${record.timestamp}] ${record.level.toUpperCase()} (${record.pid}): ${record.message} ${JSON.stringify(record.context)}\n`,
+      );
+    },
+  };
 }
 
-function log(
-  level: Level,
-  dataOrMsg: Record<string, unknown> | string,
-  msg?: string,
-): void {
-  if (LEVELS[level] < threshold) return;
-  const tag = `${COLORS[level]}${level.toUpperCase()}${level === 'fatal' ? FULL_RESET : RESET}`;
-  const forceStderr = process.env.MYCLAW_LOG_STDERR === '1';
-  const stream =
-    forceStderr || LEVELS[level] >= LEVELS.warn
-      ? process.stderr
-      : process.stdout;
-  if (typeof dataOrMsg === 'string') {
-    stream.write(
-      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${dataOrMsg}${RESET}\n`,
-    );
-  } else {
-    stream.write(
-      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg)}\n`,
-    );
+function createJsonSink(opts: { stderrOnly?: boolean }): LogSink {
+  return {
+    write(record) {
+      const forceStderr = opts.stderrOnly === true;
+      const stream =
+        forceStderr ||
+        LOG_LEVEL_PRIORITY[record.level] >= LOG_LEVEL_PRIORITY.warn
+          ? process.stderr
+          : process.stdout;
+      stream.write(`${JSON.stringify(record)}\n`);
+    },
+  };
+}
+
+function mergeContexts(
+  left?: Record<string, unknown>,
+  right?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (!left && !right) return undefined;
+  return {
+    ...(left || {}),
+    ...(right || {}),
+  };
+}
+
+function normalizeLevel(raw?: string): LogLevel {
+  const value = (raw || '').trim().toLowerCase();
+  if (
+    value === 'debug' ||
+    value === 'info' ||
+    value === 'warn' ||
+    value === 'error' ||
+    value === 'fatal'
+  ) {
+    return value;
   }
+  return 'info';
 }
 
-export const logger = {
-  debug: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('debug', dataOrMsg, msg),
-  info: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('info', dataOrMsg, msg),
-  warn: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('warn', dataOrMsg, msg),
-  error: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('error', dataOrMsg, msg),
-  fatal: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('fatal', dataOrMsg, msg),
-};
+export function createLogger(options: CreateLoggerOptions = {}): Logger {
+  const level = options.level || normalizeLevel(process.env.LOG_LEVEL);
+  const clock = options.clock || systemClock;
+  const redact = options.redact || defaultRedact;
+  const baseContext = options.context;
+  const stderrOnly = process.env.MYCLAW_LOG_STDERR === '1';
+  const sink =
+    options.sink ||
+    (options.format === 'json'
+      ? createJsonSink({ stderrOnly })
+      : createTextSink({ stderrOnly }));
+
+  const log = (
+    currentLevel: LogLevel,
+    dataOrMsg: Record<string, unknown> | string,
+    msg?: string,
+    childContext?: Record<string, unknown>,
+  ) => {
+    if (LOG_LEVEL_PRIORITY[currentLevel] < LOG_LEVEL_PRIORITY[level]) return;
+    const record: LogRecord = {
+      timestamp: nowIso(clock),
+      level: currentLevel,
+      message: typeof dataOrMsg === 'string' ? dataOrMsg : msg || '',
+      pid: process.pid,
+      ...(() => {
+        if (typeof dataOrMsg === 'string') {
+          const context = mergeContexts(baseContext, childContext);
+          return context ? { context } : {};
+        }
+        const context = mergeContexts(
+          mergeContexts(baseContext, childContext),
+          redact(dataOrMsg) as Record<string, unknown>,
+        );
+        return context ? { context } : {};
+      })(),
+    };
+    sink.write(record);
+  };
+
+  const makeChildLogger = (childContext?: Record<string, unknown>): Logger => ({
+    debug: (dataOrMsg, msg) => log('debug', dataOrMsg, msg, childContext),
+    info: (dataOrMsg, msg) => log('info', dataOrMsg, msg, childContext),
+    warn: (dataOrMsg, msg) => log('warn', dataOrMsg, msg, childContext),
+    error: (dataOrMsg, msg) => log('error', dataOrMsg, msg, childContext),
+    fatal: (dataOrMsg, msg) => log('fatal', dataOrMsg, msg, childContext),
+    child: (nextContext) =>
+      makeChildLogger(mergeContexts(childContext, nextContext)),
+  });
+
+  return makeChildLogger();
+}
+
+export const logger = createLogger({
+  format: process.env.LOG_FORMAT === 'json' ? 'json' : 'text',
+});
 
 type MarkedUncaughtExceptionHandler = ((err: Error) => void) & {
   [LOGGER_HANDLER_MARK]?: true;
@@ -101,7 +218,6 @@ function removeMarkedProcessListeners(
     }
     return;
   }
-
   for (const listener of process.listeners(
     event,
   ) as MarkedUnhandledRejectionHandler[]) {
@@ -111,21 +227,43 @@ function removeMarkedProcessListeners(
   }
 }
 
-const uncaughtExceptionHandler = ((err: Error) => {
-  logger.fatal({ err }, 'Uncaught exception');
-  process.exit(1);
-}) as MarkedUncaughtExceptionHandler;
-uncaughtExceptionHandler[LOGGER_HANDLER_MARK] = true;
+export function installGlobalErrorHandlers(
+  target: Logger = logger,
+): () => void {
+  removeMarkedProcessListeners('uncaughtException');
+  removeMarkedProcessListeners('unhandledRejection');
 
-const unhandledRejectionHandler = ((reason: unknown) => {
-  logger.error({ err: reason }, 'Unhandled rejection');
-}) as MarkedUnhandledRejectionHandler;
-unhandledRejectionHandler[LOGGER_HANDLER_MARK] = true;
+  const uncaughtExceptionHandler = ((err: Error) => {
+    target.fatal({ err }, 'Uncaught exception');
+    process.exit(1);
+  }) as MarkedUncaughtExceptionHandler;
+  uncaughtExceptionHandler[LOGGER_HANDLER_MARK] = true;
 
-// Route uncaught errors through logger so they get timestamps in stderr.
-// De-duplicate handlers because test module reloads can otherwise attach
-// unbounded listeners and eventually stall CI.
-removeMarkedProcessListeners('uncaughtException');
-removeMarkedProcessListeners('unhandledRejection');
-process.on('uncaughtException', uncaughtExceptionHandler);
-process.on('unhandledRejection', unhandledRejectionHandler);
+  const unhandledRejectionHandler = ((reason: unknown) => {
+    target.error({ err: reason }, 'Unhandled rejection');
+  }) as MarkedUnhandledRejectionHandler;
+  unhandledRejectionHandler[LOGGER_HANDLER_MARK] = true;
+
+  process.on('uncaughtException', uncaughtExceptionHandler);
+  process.on('unhandledRejection', unhandledRejectionHandler);
+
+  return () => {
+    process.removeListener('uncaughtException', uncaughtExceptionHandler);
+    process.removeListener('unhandledRejection', unhandledRejectionHandler);
+  };
+}
+
+export function createLogRecord(
+  level: LogLevel,
+  message: string,
+  context?: Record<string, unknown>,
+  clock: Clock = systemClock,
+): LogRecord {
+  return {
+    level,
+    message,
+    pid: process.pid,
+    timestamp: toIso(clock.now()),
+    ...(context ? { context } : {}),
+  };
+}

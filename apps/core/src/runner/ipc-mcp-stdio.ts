@@ -11,6 +11,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import { nowIso, nowMs, parseIso, sleep } from '../core/datetime.js';
 import {
   formatMemoryTimeoutError,
   getMemoryActionTimeoutMs,
@@ -46,7 +47,7 @@ const isMain = process.env.MYCLAW_IS_MAIN === '1';
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
 
-  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+  const filename = `${nowMs()}-${Math.random().toString(36).slice(2, 8)}.json`;
   const filepath = path.join(dir, filename);
 
   // Atomic write: temp file then rename
@@ -78,7 +79,7 @@ async function requestMemoryAction(
   fs.mkdirSync(MEMORY_REQUESTS_DIR, { recursive: true });
   fs.mkdirSync(MEMORY_RESPONSES_DIR, { recursive: true });
 
-  const requestId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const requestId = `mem-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
   const reqPath = path.join(MEMORY_REQUESTS_DIR, `${requestId}.json`);
   const tmpReqPath = `${reqPath}.tmp`;
   fs.writeFileSync(
@@ -97,10 +98,10 @@ async function requestMemoryAction(
   fs.renameSync(tmpReqPath, reqPath);
 
   const timeoutMs = getMemoryActionTimeoutMs(action);
-  const deadline = Date.now() + timeoutMs;
+  const deadline = nowMs() + timeoutMs;
   const responsePath = path.join(MEMORY_RESPONSES_DIR, `${requestId}.json`);
 
-  while (Date.now() < deadline) {
+  while (nowMs() < deadline) {
     if (fs.existsSync(responsePath)) {
       try {
         const data = JSON.parse(fs.readFileSync(responsePath, 'utf-8')) as {
@@ -138,7 +139,7 @@ async function requestBrowserAction(
   fs.mkdirSync(BROWSER_REQUESTS_DIR, { recursive: true });
   fs.mkdirSync(BROWSER_RESPONSES_DIR, { recursive: true });
 
-  const requestId = `browser-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const requestId = `browser-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
   const reqPath = path.join(BROWSER_REQUESTS_DIR, `${requestId}.json`);
   const tmpReqPath = `${reqPath}.tmp`;
 
@@ -157,10 +158,10 @@ async function requestBrowserAction(
   );
   fs.renameSync(tmpReqPath, reqPath);
 
-  const deadline = Date.now() + 30_000;
+  const deadline = nowMs() + 30_000;
   const responsePath = path.join(BROWSER_RESPONSES_DIR, `${requestId}.json`);
 
-  while (Date.now() < deadline) {
+  while (nowMs() < deadline) {
     if (fs.existsSync(responsePath)) {
       try {
         const data = JSON.parse(fs.readFileSync(responsePath, 'utf-8')) as {
@@ -213,10 +214,6 @@ function formatBrowserToolResponse(response: { data?: unknown }): string {
     return JSON.stringify(response.data, null, 2);
   }
   return JSON.stringify({ data: response.data }, null, 2);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeExecutionMode(
@@ -350,8 +347,8 @@ async function waitForTaskResponse(
 ): Promise<TaskResponseEnvelope | null> {
   fs.mkdirSync(TASK_RESPONSES_DIR, { recursive: true });
   const responsePath = path.join(TASK_RESPONSES_DIR, `task-${taskId}.json`);
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = nowMs() + timeoutMs;
+  while (nowMs() < deadline) {
     if (fs.existsSync(responsePath)) {
       try {
         const parsed = parseTaskResponseEnvelope(
@@ -416,7 +413,7 @@ server.tool(
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     };
 
     writeIpcFile(MESSAGES_DIR, data);
@@ -468,7 +465,7 @@ server.tool(
     fs.mkdirSync(userQuestionRequestsDir, { recursive: true });
     fs.mkdirSync(userQuestionResponsesDir, { recursive: true });
 
-    const requestId = `userq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = `userq-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
     const requestPath = path.join(userQuestionRequestsDir, `${requestId}.json`);
     const responsePath = path.join(
       userQuestionResponsesDir,
@@ -481,14 +478,14 @@ server.tool(
       sourceGroup: groupFolder,
       questions: args.questions,
       ...(IPC_AUTH_TOKEN ? { authToken: IPC_AUTH_TOKEN } : {}),
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     };
 
     fs.writeFileSync(tmpPath, JSON.stringify(envelope, null, 2));
     fs.renameSync(tmpPath, requestPath);
 
-    const deadline = Date.now() + USER_QUESTION_TIMEOUT_MS;
-    while (Date.now() < deadline) {
+    const deadline = nowMs() + USER_QUESTION_TIMEOUT_MS;
+    while (nowMs() < deadline) {
       if (context?.signal?.aborted) {
         return {
           content: [
@@ -612,8 +609,8 @@ server.tool(
       }
     }
     if (args.schedule_type === 'once') {
-      const date = new Date(args.schedule_value);
-      if (isNaN(date.getTime())) {
+      const date = parseIso(args.schedule_value);
+      if (!date) {
         return {
           content: [{ type: 'text' as const, text: 'Invalid once timestamp.' }],
           isError: true,
@@ -645,7 +642,7 @@ server.tool(
       ),
       serialize: args.serialize,
       createdBy: 'agent',
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     };
     writeIpcFile(TASKS_DIR, data);
     return {
@@ -756,7 +753,7 @@ server.tool(
       maxConsecutiveFailures: args.max_consecutive_failures,
       executionMode,
       serialize: args.serialize,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     });
     return {
       content: [
@@ -774,7 +771,7 @@ server.tool(
     writeIpcFile(TASKS_DIR, {
       type: 'scheduler_delete_job',
       jobId: args.job_id,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     });
     return {
       content: [
@@ -792,7 +789,7 @@ server.tool(
     writeIpcFile(TASKS_DIR, {
       type: 'scheduler_pause_job',
       jobId: args.job_id,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     });
     return {
       content: [
@@ -810,7 +807,7 @@ server.tool(
     writeIpcFile(TASKS_DIR, {
       type: 'scheduler_resume_job',
       jobId: args.job_id,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     });
     return {
       content: [
@@ -872,7 +869,7 @@ server.tool(
       eventType: args.event_type,
       sinceId: args.since_id,
       limit: args.limit,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     });
     return {
       content: [
@@ -900,8 +897,8 @@ server.tool(
       Math.min(args.timeout_ms ?? 30_000, 120_000),
     );
     const limit = Math.max(1, Math.min(args.limit ?? 100, 500));
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
+    const deadline = nowMs() + timeoutMs;
+    while (nowMs() < deadline) {
       const events = readJsonArraySnapshot(
         path.join(IPC_DIR, 'current_job_events.json'),
       );
@@ -914,7 +911,7 @@ server.tool(
           eventType: args.event_type,
           sinceId: args.since_id,
           limit,
-          timestamp: new Date().toISOString(),
+          timestamp: nowIso(),
         });
         return {
           content: [
@@ -1265,11 +1262,11 @@ server.tool(
       };
     }
 
-    const taskId = `service-restart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const taskId = `service-restart-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
     writeIpcFile(TASKS_DIR, {
       type: 'service_restart',
       taskId,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     });
 
     const response = await waitForTaskResponse(taskId, 20_000);
@@ -1345,7 +1342,7 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       };
     }
 
-    const taskId = `register-agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const taskId = `register-agent-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
     const data = {
       type: 'register_agent',
       taskId,
@@ -1354,7 +1351,7 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       folder: args.folder,
       trigger: args.trigger,
       requiresTrigger: args.requiresTrigger ?? false,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
     };
 
     writeIpcFile(TASKS_DIR, data);

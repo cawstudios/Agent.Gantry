@@ -12,6 +12,11 @@ import {
   ONECLI_URL,
 } from '../core/config.js';
 import { resolveHostCredentialMode } from '../core/credential-mode.js';
+import {
+  isPathInside,
+  resolvePathWithRealParent,
+  safeRealpathSync,
+} from '../core/fs-paths.js';
 import { logger } from '../core/logger.js';
 import { RegisteredGroup } from '../core/types.js';
 import {
@@ -30,42 +35,6 @@ const onecli = new OneCLI({ url: ONECLI_URL });
 
 const ONECLI_ALLOWED_ENV_KEY_SET = new Set<string>(ONECLI_ALLOWED_ENV_KEYS);
 const ONECLI_CA_CERT_ROOT = path.resolve(DATA_DIR, 'onecli', 'certs');
-
-function isPathInside(root: string, candidate: string): boolean {
-  const relative = path.relative(path.resolve(root), path.resolve(candidate));
-  return (
-    relative === '' ||
-    (!relative.startsWith('..') && !path.isAbsolute(relative))
-  );
-}
-
-function safeRealpathSync(targetPath: string): string {
-  const maybeRealpath = (
-    fs as unknown as { realpathSync?: (p: string) => string }
-  ).realpathSync;
-  if (typeof maybeRealpath !== 'function') {
-    return path.resolve(targetPath);
-  }
-  try {
-    return maybeRealpath(targetPath);
-  } catch {
-    return path.resolve(targetPath);
-  }
-}
-
-function resolvePathWithRealParent(targetPath: string): string {
-  const resolved = path.resolve(targetPath);
-  const suffix: string[] = [path.basename(resolved)];
-  let anchor = path.dirname(resolved);
-  while (!fs.existsSync(anchor)) {
-    const parent = path.dirname(anchor);
-    if (parent === anchor) break;
-    suffix.unshift(path.basename(anchor));
-    anchor = parent;
-  }
-  const realAnchor = safeRealpathSync(anchor);
-  return path.join(realAnchor, ...suffix);
-}
 
 function sanitizeCertFileSegment(value?: string): string {
   const trimmed = value?.trim();

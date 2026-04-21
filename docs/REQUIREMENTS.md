@@ -31,7 +31,7 @@ If a behavior matters, it should be easy to change in code. Avoid building large
 
 ### AI-Native Operations
 
-Setup, debugging, and maintenance should work well through Claude Code or Codex without requiring a heavyweight admin UI.
+Setup, debugging, and maintenance should work well through Claude Code without requiring a heavyweight admin UI.
 
 ### Skills Over Core Bloat
 

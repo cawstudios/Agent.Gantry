@@ -4,14 +4,14 @@ Personal AI assistant runtime. See [README.md](README.md) for philosophy and set
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK via host runtime processes. Each group has isolated filesystem and memory boundaries.
+Single Node.js process with skill-based channel provider system. Built-in providers (Telegram, Slack) are registered through `apps/core/src/channels/register-builtins.ts`; additional providers can be added through skills. Messages route to the Claude Agent SDK via host runtime processes. Each group has isolated filesystem and memory boundaries.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `apps/core/src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `apps/core/src/channels/registry.ts` | Channel registry (self-registration at startup) |
+| `apps/core/src/channels/provider-registry.ts` | Channel provider registry |
 | `apps/core/src/runtime/ipc.ts` | IPC watcher and task processing |
 | `apps/core/src/messaging/router.ts` | Message formatting and outbound routing |
 | `apps/core/src/core/config.ts` | Trigger pattern, paths, intervals |
@@ -81,4 +81,4 @@ Available gstack skills: `/office-hours`, `/plan-ceo-review`, `/plan-eng-review`
 
 ## Agent Runner Build Cache
 
-If you add or update the agent runner, rebuild from the repo root with `npm run build` so both the app and `packages/agent-runner` stay in sync.
+If you add or update the agent runner, rebuild from the repo root with `npm run build` so `apps/core/src/runner` and emitted dist artifacts stay in sync.

@@ -1,4 +1,4 @@
-import { logger } from './core/logger.js';
+import { installGlobalErrorHandlers, logger } from './core/logger.js';
 import { createChannelWiring } from './bootstrap/channel-wiring.js';
 import { getDefaultRuntimeApp } from './bootstrap/runtime-app.js';
 import { startRuntimeServices } from './bootstrap/runtime-services.js';
@@ -55,6 +55,7 @@ const isDirectRun =
     new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
+  installGlobalErrorHandlers(logger);
   startMyClawRuntime().catch((err) => {
     logger.error({ err }, 'Failed to start MyClaw');
     process.exit(1);

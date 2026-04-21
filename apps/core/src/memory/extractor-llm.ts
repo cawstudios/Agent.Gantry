@@ -4,6 +4,7 @@ import {
   MEMORY_EXTRACTOR_MIN_CONFIDENCE,
 } from '../core/config.js';
 import { logger } from '../core/logger.js';
+import { sleep } from '../core/datetime.js';
 import {
   MEMORY_EXTRACTION_FEW_SHOTS,
   MEMORY_EXTRACTION_SYSTEM_PROMPT,
@@ -310,12 +311,6 @@ function isTransientExtractorError(err: unknown): boolean {
     );
   }
   return false;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 export class LlmMemoryExtractionProvider implements MemoryExtractionProvider {

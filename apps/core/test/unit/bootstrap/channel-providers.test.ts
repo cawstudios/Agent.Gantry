@@ -12,6 +12,7 @@ import {
 function makeRuntimeSettings(enabled: {
   telegram: boolean;
   slack: boolean;
+  [key: string]: boolean;
 }): RuntimeSettings {
   const allowlist = {
     default: { allow: '*', mode: 'trigger' as const },
@@ -22,6 +23,14 @@ function makeRuntimeSettings(enabled: {
     channels: {
       telegram: { enabled: enabled.telegram, senderAllowlist: allowlist },
       slack: { enabled: enabled.slack, senderAllowlist: allowlist },
+      ...Object.fromEntries(
+        Object.entries(enabled)
+          .filter(([key]) => key !== 'telegram' && key !== 'slack')
+          .map(([key, value]) => [
+            key,
+            { enabled: value, senderAllowlist: allowlist },
+          ]),
+      ),
     },
     memory: {
       enabled: true,
@@ -127,5 +136,25 @@ describe('listChannelProviders', () => {
     expect(providerForJid('tg:-100123')?.id).toBe('telegram');
     expect(providerForJid('sl:C123456')?.id).toBe('slack');
     expect(providerForJid('unknown:123')).toBeUndefined();
+  });
+
+  it('supports a third provider in registry and settings checks', () => {
+    const id = `test-provider-${Date.now()}`;
+    registerChannelProvider({
+      ...listChannelProviders()[0]!,
+      id,
+      jidPrefix: `tp${Date.now()}:`,
+      folderPrefix: `tp_${Date.now()}_`,
+      isEnabled: (settings) => settings.channels[id]?.enabled === true,
+    });
+
+    const provider = getChannelProvider(id);
+    expect(provider).toBeDefined();
+    expect(
+      provider?.isEnabled(
+        makeRuntimeSettings({ telegram: false, slack: false, [id]: true }),
+      ),
+    ).toBe(true);
+    expect(providerForJid(provider!.jidPrefix + 'abc')?.id).toBe(id);
   });
 });

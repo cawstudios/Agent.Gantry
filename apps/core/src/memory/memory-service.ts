@@ -34,6 +34,7 @@ import {
   MEMORY_TEMPORAL_DECAY_HALFLIFE_DAYS,
   RUNTIME_MEMORY_DREAMING_ENABLED,
 } from '../core/config.js';
+import { isPathInside, writeFileAtomic } from '../core/fs-paths.js';
 import { logger } from '../core/logger.js';
 import {
   createEmbeddingProvider,
@@ -1613,7 +1614,7 @@ export class MemoryService {
       managedSubdir === '.'
         ? memoryStorageDir
         : path.join(memoryStorageDir, managedSubdir);
-    if (!isInsideRoot(managedRoot, filePath)) return;
+    if (!isPathInside(managedRoot, filePath)) return;
     try {
       const stat = fs.lstatSync(filePath);
       if (!stat.isFile() || stat.isSymbolicLink()) return;
@@ -1675,50 +1676,8 @@ function yamlSafe(value: string): string {
   return JSON.stringify(value);
 }
 
-function writeFileAtomic(filePath: string, content: string): void {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const tmpPath = path.join(
-    dir,
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
-  );
-  fs.writeFileSync(tmpPath, content, { mode: 0o600 });
-  fs.renameSync(tmpPath, filePath);
-}
-
 function sha256(content: string): string {
   return createHash('sha256').update(content).digest('hex');
-}
-
-function safeRealpathSync(targetPath: string): string {
-  try {
-    return fs.realpathSync(targetPath);
-  } catch {
-    return path.resolve(targetPath);
-  }
-}
-
-function resolvePathWithRealParent(targetPath: string): string {
-  const resolved = path.resolve(targetPath);
-  let existingParent = path.dirname(resolved);
-  while (!fs.existsSync(existingParent)) {
-    const parent = path.dirname(existingParent);
-    if (parent === existingParent) break;
-    existingParent = parent;
-  }
-  const parentReal = safeRealpathSync(existingParent);
-  const tail = path.relative(existingParent, resolved);
-  return path.resolve(parentReal, tail);
-}
-
-function isInsideRoot(rootDir: string, candidatePath: string): boolean {
-  const rootResolved = safeRealpathSync(rootDir);
-  const candidateResolved = resolvePathWithRealParent(candidatePath);
-  const relative = path.relative(rootResolved, candidateResolved);
-  return (
-    relative === '' ||
-    (!relative.startsWith('..') && !path.isAbsolute(relative))
-  );
 }
 
 function fingerprintSensitiveToken(value: string): string {

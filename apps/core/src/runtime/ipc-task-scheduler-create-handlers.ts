@@ -1,6 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 
 import { TIMEZONE } from '../core/config.js';
+import { nowMs, parseIso, toIso } from '../core/datetime.js';
 import { logger } from '../core/logger.js';
 import { getJobById, upsertJob } from '../storage/db.js';
 import { TaskHandler } from './ipc-task-types.js';
@@ -88,14 +89,14 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
       logger.warn({ scheduleValue }, 'Invalid interval for job');
       return;
     }
-    nextRun = new Date(Date.now() + ms).toISOString();
+    nextRun = toIso(nowMs() + ms);
   } else if (scheduleType === 'once') {
-    const date = new Date(scheduleValue);
-    if (isNaN(date.getTime())) {
+    const date = parseIso(scheduleValue);
+    if (!date) {
       logger.warn({ scheduleValue }, 'Invalid once timestamp for job');
       return;
     }
-    nextRun = date.toISOString();
+    nextRun = toIso(date);
   } else {
     return;
   }
