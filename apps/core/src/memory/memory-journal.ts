@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
+import { isMemoryJournalDisabled } from '../core/config.js';
 import { MEMORY_GLOBAL_GROUP_FOLDER, MemoryScope } from './memory-types.js';
 
 export type JournalRecordKind =
@@ -38,11 +39,6 @@ function resolveDirectoryGroupFolder(groupFolder: string): string {
   return sanitized || '_';
 }
 
-function isJournalDisabledByEnv(): boolean {
-  const raw = process.env.MYCLAW_MEMORY_JOURNAL_DISABLED?.trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes';
-}
-
 export class MemoryJournal {
   private readonly rootDir: string;
   private readonly disabled: boolean;
@@ -57,7 +53,7 @@ export class MemoryJournal {
   }
 
   append(record: JournalAppendInput): JournalRecord | null {
-    if (this.disabled || isJournalDisabledByEnv()) return null;
+    if (this.disabled || isMemoryJournalDisabled()) return null;
 
     const full: JournalRecord = {
       event_id: record.event_id || randomUUID(),

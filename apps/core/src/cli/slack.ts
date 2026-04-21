@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 
 import * as p from '@clack/prompts';
+import '../channels/register-builtins.js';
+import { getChannelProvider } from '../channels/provider-registry.js';
 
 import { readEnvFile, upsertEnvFile } from './env-file.js';
 import { openRuntimeGroupDb } from './runtime-group-db.js';
@@ -556,7 +558,10 @@ export async function runSlackConnectCommand(
     SLACK_APP_TOKEN: appTokenInput,
   });
   const settings = loadRuntimeSettings(runtimeHome);
-  settings.channels.slack.enabled = true;
+  const provider = getChannelProvider('slack');
+  if (provider && settings.channels[provider.id]) {
+    settings.channels[provider.id].enabled = true;
+  }
   saveRuntimeSettings(runtimeHome, settings);
 
   if (normalizedChatJid) {

@@ -69,7 +69,7 @@ describe('startRuntimeServices', () => {
         prompt: 'Do thing',
         model: '',
         script: '',
-        schedule_type: 'manual',
+        schedule_type: 'interval',
         schedule_value: '',
         status: 'active',
         group_scope: 'tg:main',
@@ -124,9 +124,6 @@ describe('startRuntimeServices', () => {
         getAllJobs: vi.fn(() => jobs) as any,
         getRecentJobRuns: vi.fn(() => []) as any,
         listRecentJobEvents: vi.fn(() => []) as any,
-        startSessionCleanup: vi.fn(() => {
-          order.push('startSessionCleanup');
-        }) as any,
         recoverPendingMessages: vi.fn(() => {
           order.push('recoverPendingMessages');
         }) as any,
@@ -152,7 +149,6 @@ describe('startRuntimeServices', () => {
       'writeJobsSnapshot',
       'writeJobRunsSnapshot',
       'writeJobEventsSnapshot',
-      'startSessionCleanup',
       'recoverPendingMessages',
       'runtime-ready-log',
       'startMessagePollingLoop',

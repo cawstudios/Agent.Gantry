@@ -1,10 +1,12 @@
 import * as p from '@clack/prompts';
+import '../channels/register-builtins.js';
+import { listChannelProviders } from '../channels/provider-registry.js';
 
 import { resolveHostCredentialMode } from '../core/credential-mode.js';
 import type { HostCredentialMode } from '../core/credential-mode.js';
 import {
   formatDoctorReport,
-  hasRegisteredTelegramGroup,
+  hasProcessableGroupForConfiguredChannel,
   hasRuntimeConfig,
   runDoctorWithNetwork,
 } from './doctor.js';
@@ -24,7 +26,10 @@ import {
   resolveRuntimeHome,
   savePreferredRuntimeHome,
 } from './runtime-home.js';
-import { loadRuntimeSettings } from './runtime-settings.js';
+import {
+  createDefaultRuntimeSettings,
+  loadRuntimeSettings,
+} from './runtime-settings.js';
 import {
   normalizeTelegramChatJid,
   registerTelegramMainGroup,
@@ -166,46 +171,7 @@ function restoreDraft(
     try {
       return loadRuntimeSettings(runtimeHome);
     } catch {
-      return {
-        channels: {
-          telegram: {
-            enabled: false,
-            senderAllowlist: {
-              default: { allow: '*', mode: 'trigger' },
-              agents: {},
-              logDenied: true,
-            },
-          },
-          slack: {
-            enabled: false,
-            senderAllowlist: {
-              default: { allow: '*', mode: 'trigger' },
-              agents: {},
-              logDenied: true,
-            },
-          },
-        },
-        memory: {
-          enabled: true,
-          root: 'memory',
-          embeddings: {
-            enabled: false,
-            provider: 'disabled',
-            model: 'text-embedding-3-large',
-          },
-          dreaming: {
-            enabled: false,
-          },
-          llm: {
-            models: {
-              extractor: 'claude-haiku-4-5-20251001',
-              dreaming: 'claude-sonnet-4-6',
-              consolidation: 'claude-sonnet-4-6',
-              sessionSummary: 'claude-haiku-4-5-20251001',
-            },
-          },
-        },
-      };
+      return createDefaultRuntimeSettings();
     }
   })();
   const savedChatJid = state?.data.telegramChatJid || '';
@@ -816,15 +782,26 @@ async function runVerifyStep(
 ): Promise<FlowAction> {
   const report = await runDoctorWithNetwork(importMetaUrl, draft.runtimeHome);
   const runtimeConfigured = hasRuntimeConfig(draft.runtimeHome);
-  const hasTelegramGroup = hasRegisteredTelegramGroup(draft.runtimeHome);
+  const hasProcessableGroup = hasProcessableGroupForConfiguredChannel(
+    draft.runtimeHome,
+  );
 
   p.note(formatDoctorReport(report), 'Verification');
 
-  if (!runtimeConfigured || !hasTelegramGroup) {
+  if (!runtimeConfigured) {
     p.log.warn(
-      'Setup is not complete yet. Next action: reconnect Telegram now.',
+      'Setup is not complete yet. Next action: connect a channel now.',
     );
     return { type: 'goto', step: 'telegram' };
+  }
+  if (!hasProcessableGroup) {
+    const connectCommands = listChannelProviders().map(
+      (provider) => `\`myclaw ${provider.id} connect\``,
+    );
+    p.log.warn(
+      `Setup is not complete yet. Next action: ensure one enabled channel has credentials and a registered group (${connectCommands.join(' or ')}).`,
+    );
+    return { type: 'resume' };
   }
 
   if (!report.ok) {

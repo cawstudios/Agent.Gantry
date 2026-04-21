@@ -9,9 +9,13 @@ import {
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
-  shouldDropMessage,
   shouldLogDenied,
+  shouldDropMessage,
 } from '@core/platform/sender-allowlist.js';
+import {
+  getChannelProvider,
+  registerChannelProvider,
+} from '@core/channels/provider-registry.js';
 
 let tmpDir: string;
 
@@ -104,6 +108,23 @@ function writeSettings(
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'allowlist-test-'));
+  if (!getChannelProvider('test-provider')) {
+    registerChannelProvider({
+      id: 'test-provider',
+      label: 'Test Provider',
+      jidPrefix: 'tp:',
+      folderPrefix: 'test_',
+      isGroupJid: () => false,
+      formatting: 'none',
+      isEnabled: () => false,
+      create: () => null,
+      setup: {
+        envKeys: [],
+        describe: () => 'test',
+        run: async () => {},
+      },
+    });
+  }
 });
 
 afterEach(() => {
@@ -117,6 +138,8 @@ describe('loadSenderAllowlist', () => {
     expect(cfg.telegram.default.mode).toBe('trigger');
     expect(cfg.slack.default.allow).toBe('*');
     expect(cfg.telegram.logDenied).toBe(true);
+    expect(cfg['test-provider'].default.allow).toBe('*');
+    expect(cfg['test-provider'].default.mode).toBe('trigger');
   });
 
   it('loads channel-specific config', () => {
@@ -156,6 +179,11 @@ describe('isSenderAllowed', () => {
       agents: {},
       logDenied: true,
     },
+    'test-provider': {
+      default: { allow: ['tp-user'], mode: 'trigger' },
+      agents: {},
+      logDenied: true,
+    },
   };
 
   it('allow=* allows any sender', () => {
@@ -170,6 +198,16 @@ describe('isSenderAllowed', () => {
   it('applies channel default when folder override missing', () => {
     expect(isSenderAllowed('sl:C1', 'U1', cfg)).toBe(true);
     expect(isSenderAllowed('sl:C1', 'U2', cfg)).toBe(false);
+  });
+
+  it('supports a third provider id via provider-registry jid resolution', () => {
+    expect(isSenderAllowed('tp:abc', 'tp-user', cfg)).toBe(true);
+    expect(isSenderAllowed('tp:abc', 'not-allowed', cfg)).toBe(false);
+  });
+
+  it('fails closed for JIDs without a registered provider prefix', () => {
+    expect(isSenderAllowed('unknown:1', 'anyone', cfg)).toBe(false);
+    expect(shouldDropMessage('unknown:1', cfg)).toBe(true);
   });
 });
 

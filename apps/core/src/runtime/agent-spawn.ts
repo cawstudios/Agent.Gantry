@@ -5,8 +5,8 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  MYCLAW_HOME,
   DATA_DIR,
-  MEMORY_ROOT,
   PERMISSION_APPROVAL_TIMEOUT_MS,
   TIMEZONE,
   getEffectiveModelConfig,
@@ -118,9 +118,11 @@ export async function spawnAgent(
   const hostRuntime = prepareHostRuntimeContext(group);
   ensureGroupIpcLayout(hostRuntime.groupIpcDir);
   const hostCredentials = await getHostRuntimeCredentialEnv(agentIdentifier);
-  const agentRunnerDir = path.join(hostRuntime.runnerRoot, 'dist');
-  const hostRunnerPath = path.join(agentRunnerDir, 'index.js');
-  const mcpServerPath = path.join(agentRunnerDir, 'ipc-mcp-stdio.js');
+  const hostRunnerPath = path.join(hostRuntime.runnerDistDir, 'index.js');
+  const mcpServerPath = path.join(
+    hostRuntime.runnerDistDir,
+    'ipc-mcp-stdio.js',
+  );
   if (!fs.existsSync(hostRunnerPath) || !fs.existsSync(mcpServerPath)) {
     return {
       status: 'error',
@@ -148,9 +150,7 @@ export async function spawnAgent(
     MYCLAW_IPC_INPUT_DIR: path.join(hostRuntime.groupIpcDir, 'input'),
     MYCLAW_IPC_AUTH_TOKEN: computeIpcAuthToken(group.folder),
     MYCLAW_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
-    ...((MEMORY_ROOT || '').trim()
-      ? { MEMORY_ROOT: (MEMORY_ROOT || '').trim() }
-      : {}),
+    CLAUDE_CONFIG_DIR: path.join(MYCLAW_HOME, '.claude'),
     ...(input.memoryContextFile
       ? { MYCLAW_IPC_MEMORY_CONTEXT_FILE: input.memoryContextFile }
       : {}),

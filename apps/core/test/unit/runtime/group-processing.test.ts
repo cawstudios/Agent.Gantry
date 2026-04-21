@@ -1312,7 +1312,6 @@ describe('createGroupProcessor', () => {
       expect(mockGetMessagesSince).toHaveBeenCalledWith(
         'group1@g.us',
         'cursor-ts-123',
-        'Andy',
         50,
       );
     });

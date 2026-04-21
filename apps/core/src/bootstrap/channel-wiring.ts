@@ -1,5 +1,6 @@
 import { RuntimeSettings } from '../cli/runtime-settings.js';
 import { logger } from '../core/logger.js';
+import '../channels/register-builtins.js';
 import {
   GroupDiscoverySource,
   MessageSendOptions,
@@ -40,9 +41,10 @@ import {
   asUserQuestionSurface,
 } from './channel-capability-ports.js';
 import {
-  BUILTIN_CHANNEL_PROVIDERS,
   ChannelProvider,
-} from './channel-providers.js';
+  listChannelProviders,
+  providerForJid,
+} from '../channels/provider-registry.js';
 
 interface ChannelWiringDeps {
   channelProviders: readonly ChannelProvider[];
@@ -96,7 +98,7 @@ export function createChannelWiring(
   deps: Partial<ChannelWiringDeps> = {},
 ): ChannelWiring {
   const resolved: ChannelWiringDeps = {
-    channelProviders: BUILTIN_CHANNEL_PROVIDERS,
+    channelProviders: listChannelProviders(),
     storeMessage,
     storeChatMetadata,
     loadSenderAllowlist,
@@ -196,7 +198,7 @@ export function createChannelWiring(
         continue;
       }
 
-      const channel = provider.create(channelOpts);
+      const channel = await provider.create(channelOpts);
       if (!channel) {
         resolved.logger.warn(
           { channel: provider.id },
@@ -246,7 +248,10 @@ export function createChannelWiring(
       return;
     }
 
-    const formatted = formatOutboundForChannel(rawText, channel.name);
+    const formatted = formatOutboundForChannel(
+      rawText,
+      providerForJid(jid)?.id ?? channel.name,
+    );
     if (!formatted) return;
     if (options.messageOptions) {
       await channel.sendMessage(jid, formatted, options.messageOptions);
@@ -269,11 +274,11 @@ export function createChannelWiring(
       return false;
     }
 
-    const isTelegramGroup =
-      channel.name === 'telegram' && jid.startsWith('tg:-');
-    const text = isTelegramGroup
+    const provider = providerForJid(jid);
+    const isGroup = provider?.isGroupJid(jid) ?? false;
+    const text = isGroup
       ? stripInternalTagsPreserveWhitespace(rawText)
-      : formatOutboundForChannel(rawText, channel.name);
+      : formatOutboundForChannel(rawText, provider?.id ?? channel.name);
     if (!text && !options?.done) return false;
 
     const streamingSink = asStreamingSink(channel);

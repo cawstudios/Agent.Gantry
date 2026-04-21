@@ -49,7 +49,7 @@ function usage(): string {
     '  myclaw memory health journal-status',
     '  myclaw memory health divergence',
     '  myclaw memory counters',
-    '  myclaw memory model set <extractor|dreaming|consolidation|sessionSummary> <model>',
+    '  myclaw memory model set <extractor|dreaming|consolidation> <model>',
     '  myclaw memory model profile <cheap|balanced|quality>',
   ].join('\n');
 }
@@ -175,11 +175,6 @@ function formatMemoryStatus(runtimeHome: string): string {
     globalModel,
     hardDefaults.consolidation,
   );
-  const sessionSummaryModel = resolveEffectiveModel(
-    settings.memory.llm.models.sessionSummary,
-    globalModel,
-    hardDefaults.sessionSummary,
-  );
   const claudeAuth = resolveClaudeAuthState({
     oauthToken: env.CLAUDE_CODE_OAUTH_TOKEN,
     apiKey: env.ANTHROPIC_API_KEY,
@@ -201,14 +196,13 @@ function formatMemoryStatus(runtimeHome: string): string {
     `Model extractor: ${extractorModel.model} (source: ${extractorModel.source})`,
     `Model dreaming: ${dreamingModel.model} (source: ${dreamingModel.source})`,
     `Model consolidation: ${consolidationModel.model} (source: ${consolidationModel.source})`,
-    `Model sessionSummary: ${sessionSummaryModel.model} (source: ${sessionSummaryModel.source})`,
   ].join('\n');
 }
 
 function formatJournalStatus(runtimeHome: string): string {
   const settings = loadRuntimeSettings(runtimeHome);
   const env = readEnvFile(envFilePath(runtimeHome));
-  const report = inspectMemoryJournalStatus(runtimeHome, settings, env);
+  const report = inspectMemoryJournalStatus(runtimeHome, settings);
   const lines = [
     'Memory Journal Status',
     '',
@@ -277,13 +271,6 @@ function parseModelTask(raw: string | undefined): MemoryModelTask | null {
   if (normalized === 'extractor') return 'extractor';
   if (normalized === 'dreaming') return 'dreaming';
   if (normalized === 'consolidation') return 'consolidation';
-  if (
-    normalized === 'sessionSummary' ||
-    normalized === 'session_summary' ||
-    normalized === 'session-summary'
-  ) {
-    return 'sessionSummary';
-  }
   return null;
 }
 
@@ -313,15 +300,10 @@ function setModelProfile(
 
 function resolveMemoryRoot(
   runtimeHome: string,
-  env: Record<string, string | undefined>,
   settingsOverride?: RuntimeSettings,
 ): string {
   const settings = settingsOverride || loadRuntimeSettings(runtimeHome);
-  const raw =
-    process.env.MEMORY_ROOT?.trim() ||
-    env.MEMORY_ROOT?.trim() ||
-    settings.memory.root?.trim() ||
-    'memory';
+  const raw = settings.memory.root?.trim() || 'memory';
   return path.isAbsolute(raw)
     ? path.resolve(raw)
     : path.resolve(runtimeHome, raw);
@@ -382,8 +364,7 @@ function createReindexEmbeddingProvider(
       `Unknown embedding provider "${settings.memory.embeddings.provider}"`,
     );
   }
-  const apiKey =
-    process.env.OPENAI_API_KEY?.trim() || env.OPENAI_API_KEY?.trim() || null;
+  const apiKey = env.OPENAI_API_KEY?.trim() || null;
   return new OpenAIEmbeddingClient(apiKey, settings.memory.embeddings.model);
 }
 
@@ -561,7 +542,7 @@ export async function runMemoryCommand(
     const sourceFilter = parseOption(flags, 'source')?.trim();
     const limit = parseLimit(parseOption(flags, 'limit'), 20);
     const env = readEnvFile(envFilePath(runtimeHome));
-    const memoryRoot = resolveMemoryRoot(runtimeHome, env);
+    const memoryRoot = resolveMemoryRoot(runtimeHome);
     const queryLower = query.toLowerCase();
     const matches: Array<{
       filePath: string;
@@ -620,7 +601,7 @@ export async function runMemoryCommand(
     const kindFilter = parseOption(flags, 'kind')?.trim();
     const limit = parseLimit(parseOption(flags, 'limit'), 50);
     const env = readEnvFile(envFilePath(runtimeHome));
-    const memoryRoot = resolveMemoryRoot(runtimeHome, env);
+    const memoryRoot = resolveMemoryRoot(runtimeHome);
     const rows: Array<{
       source: string;
       kind: string;
@@ -674,7 +655,7 @@ export async function runMemoryCommand(
       return 1;
     }
     const env = readEnvFile(envFilePath(runtimeHome));
-    const memoryRoot = resolveMemoryRoot(runtimeHome, env);
+    const memoryRoot = resolveMemoryRoot(runtimeHome);
     let skippedUnreadable = 0;
     for (const filePath of walkMemoryFiles(memoryRoot)) {
       let raw = '';
@@ -701,7 +682,7 @@ export async function runMemoryCommand(
     const full = args.includes('--full');
     const settings = loadRuntimeSettings(runtimeHome);
     const env = readEnvFile(envFilePath(runtimeHome));
-    const configuredMemoryRoot = resolveMemoryRoot(runtimeHome, env, settings);
+    const configuredMemoryRoot = resolveMemoryRoot(runtimeHome, settings);
     const expectedDbPath = path.resolve(
       configuredMemoryRoot,
       '.cache',

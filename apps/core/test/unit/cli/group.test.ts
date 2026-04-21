@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseRuntimeSettingsText } from '@core/cli/runtime-settings.js';
+import { parseRuntimeSettings } from '@core/cli/runtime-settings.js';
 import { settingsFilePath } from '@core/cli/runtime-home.js';
 
 function createRuntimeHome(): string {
@@ -20,7 +20,7 @@ let runtimeHome = '';
 beforeEach(() => {
   vi.resetModules();
   runtimeHome = createRuntimeHome();
-  process.env.AGENT_ROOT = runtimeHome;
+  process.env.MYCLAW_HOME = runtimeHome;
 });
 
 afterEach(() => {
@@ -194,7 +194,7 @@ describe('group CLI commands', () => {
       ]),
     ).toBe(0);
 
-    const settings = parseRuntimeSettingsText(
+    const settings = parseRuntimeSettings(
       fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8'),
     );
     expect(
@@ -208,7 +208,7 @@ describe('group CLI commands', () => {
       0,
     );
 
-    const updated = parseRuntimeSettingsText(
+    const updated = parseRuntimeSettings(
       fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8'),
     );
     expect(updated.channels.slack.senderAllowlist.agents).toEqual({});
@@ -229,7 +229,7 @@ describe('group CLI commands', () => {
       ]),
     ).toBe(0);
 
-    const settings = parseRuntimeSettingsText(
+    const settings = parseRuntimeSettings(
       fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8'),
     );
     expect(settings.channels.slack.senderAllowlist.default).toEqual({
@@ -268,7 +268,7 @@ describe('group CLI commands', () => {
       0,
     );
 
-    const settings = parseRuntimeSettingsText(
+    const settings = parseRuntimeSettings(
       fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8'),
     );
     expect(

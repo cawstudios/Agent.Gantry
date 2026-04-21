@@ -16,7 +16,7 @@ export interface ThinkingOverride {
 
 /**
  * Mount allowlist configuration for additional host mounts.
- * Stored at `AGENT_ROOT/mount-allowlist.json` and only editable from the host.
+ * Stored at `MYCLAW_HOME/mount-allowlist.json` and only editable from the host.
  */
 export interface MountAllowlist {
   // Directories that can be exposed to agent runs.
@@ -68,7 +68,7 @@ export interface NewMessage {
   reply_to_sender_name?: string;
 }
 
-export type JobScheduleType = 'cron' | 'interval' | 'once' | 'manual';
+export type JobScheduleType = 'cron' | 'interval' | 'once';
 export type JobExecutionMode = 'parallel' | 'serialized';
 
 export type JobStatus =
@@ -88,6 +88,7 @@ export interface Job {
   schedule_value: string;
   status: JobStatus;
   linked_sessions: string[];
+  session_id: string | null;
   thread_id: string | null;
   group_scope: string;
   created_by: 'agent' | 'human';

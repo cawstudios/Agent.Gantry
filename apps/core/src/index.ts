@@ -38,8 +38,9 @@ export async function startMyClawRuntime(): Promise<void> {
   await channelWiring.connectEnabledChannels(runtimeSettings);
 
   if (!channelWiring.hasConnectedChannels()) {
-    logger.fatal('No channels connected');
-    process.exit(1);
+    logger.warn(
+      'No channels connected; runtime will continue without inbound/outbound channel delivery',
+    );
   }
 
   startRuntimeServices({

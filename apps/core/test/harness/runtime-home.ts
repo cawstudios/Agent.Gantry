@@ -19,16 +19,16 @@ export async function createTempRuntimeHome(
     path.join(os.tmpdir(), 'myclaw-hermetic-runtime-'),
   );
 
-  const previousAgentRoot = process.env.AGENT_ROOT;
+  const previousAgentRoot = process.env.MYCLAW_HOME;
   const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
   const previousHome = process.env.HOME;
-  process.env.AGENT_ROOT = runtimeHome;
+  process.env.MYCLAW_HOME = runtimeHome;
   process.env.HOME = runtimeHome;
   delete process.env.OPENAI_API_KEY;
 
   const runtimeSettings = await import('@core/cli/runtime-settings.js');
-  const sessionHooks = await import('@core/cli/session-hooks.js');
-  const settings = runtimeSettings.createDefaultRuntimeSettingsForTest();
+  const runtimeLayout = await import('@core/runtime/agent-spawn-layout.js');
+  const settings = runtimeSettings.createDefaultRuntimeSettings();
   settings.memory.enabled = true;
   settings.memory.root = 'memory';
   settings.memory.embeddings.enabled = false;
@@ -40,19 +40,16 @@ export async function createTempRuntimeHome(
   fs.mkdirSync(path.join(runtimeHome, 'store'), { recursive: true });
   fs.mkdirSync(path.join(runtimeHome, 'data'), { recursive: true });
   fs.mkdirSync(path.join(runtimeHome, 'agents'), { recursive: true });
-  const hookPlan = sessionHooks.buildSessionHookInstallPlan(
-    path.join(runtimeHome, '.claude', 'settings.json'),
-  );
-  sessionHooks.applySessionHookInstallPlan(hookPlan);
+  runtimeLayout.ensureSharedSessionSettings(runtimeHome);
 
   return {
     runtimeHome,
     settings,
     cleanup: () => {
       if (previousAgentRoot === undefined) {
-        delete process.env.AGENT_ROOT;
+        delete process.env.MYCLAW_HOME;
       } else {
-        process.env.AGENT_ROOT = previousAgentRoot;
+        process.env.MYCLAW_HOME = previousAgentRoot;
       }
       if (previousOpenAiApiKey === undefined) {
         delete process.env.OPENAI_API_KEY;

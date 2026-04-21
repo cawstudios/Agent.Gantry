@@ -69,6 +69,117 @@ export function fuseSearchResults(
   return applyMmr(ranked, limit, mmrLambda);
 }
 
+export function mergeSearchResults(
+  items: MemorySearchResult[],
+  snippets: MemorySearchResult[],
+  limit: number,
+): MemorySearchResult[] {
+  if (limit <= 0) return [];
+
+  const candidates = [...items, ...snippets];
+  if (candidates.length === 0) return [];
+
+  const fusedBounds = computeScoreBounds(
+    candidates,
+    (item) => item.fused_score,
+  );
+  const lexicalBounds = computeScoreBounds(
+    candidates,
+    (item) => item.lexical_score,
+  );
+  const vectorBounds = computeScoreBounds(
+    candidates,
+    (item) => item.vector_score,
+  );
+
+  const rankedById = new Map<
+    string,
+    { result: MemorySearchResult; normalized: number; raw: number }
+  >();
+  for (const result of candidates) {
+    const normalized = normalizedMergeScore(
+      result,
+      fusedBounds,
+      lexicalBounds,
+      vectorBounds,
+    );
+    const raw = rawMergeScore(result);
+    const existing = rankedById.get(result.id);
+    if (
+      !existing ||
+      normalized > existing.normalized ||
+      (normalized === existing.normalized && raw > existing.raw)
+    ) {
+      rankedById.set(result.id, { result, normalized, raw });
+    }
+  }
+
+  return [...rankedById.values()]
+    .sort((a, b) => {
+      if (b.normalized !== a.normalized) {
+        return b.normalized - a.normalized;
+      }
+      return b.raw - a.raw;
+    })
+    .slice(0, limit)
+    .map((entry) => entry.result);
+}
+
+interface ScoreBounds {
+  min: number;
+  max: number;
+}
+
+function computeScoreBounds(
+  values: MemorySearchResult[],
+  getter: (item: MemorySearchResult) => number,
+): ScoreBounds {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    const score = sanitizeScore(getter(value));
+    if (score < min) min = score;
+    if (score > max) max = score;
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { min: 0, max: 0 };
+  }
+  return { min, max };
+}
+
+function normalizedMergeScore(
+  item: MemorySearchResult,
+  fusedBounds: ScoreBounds,
+  lexicalBounds: ScoreBounds,
+  vectorBounds: ScoreBounds,
+): number {
+  return (
+    normalizeScore(item.fused_score, fusedBounds) +
+    normalizeScore(item.lexical_score, lexicalBounds) +
+    normalizeScore(item.vector_score, vectorBounds)
+  );
+}
+
+function rawMergeScore(item: MemorySearchResult): number {
+  return (
+    sanitizeScore(item.fused_score) +
+    sanitizeScore(item.lexical_score) +
+    sanitizeScore(item.vector_score)
+  );
+}
+
+function normalizeScore(value: number, bounds: ScoreBounds): number {
+  const score = sanitizeScore(value);
+  if (score <= 0) return 0;
+  if (bounds.max <= bounds.min) return 1;
+  const normalized = (score - bounds.min) / (bounds.max - bounds.min);
+  return Math.max(0, Math.min(1, normalized));
+}
+
+function sanitizeScore(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
 function computeTemporalDecay(createdAt: string, halfLifeDays: number): number {
   if (!Number.isFinite(halfLifeDays)) return 1;
 

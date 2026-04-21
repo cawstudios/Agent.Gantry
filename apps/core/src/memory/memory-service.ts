@@ -4,7 +4,7 @@ import path from 'path';
 
 import {
   AGENTS_DIR,
-  MEMORY_ROOT,
+  memoryStorageDir,
   MEMORY_CHUNK_OVERLAP,
   MEMORY_CHUNK_SIZE,
   MEMORY_CONSOLIDATION_CLUSTER_THRESHOLD,
@@ -48,15 +48,15 @@ import {
   DreamingResult,
   runDreamingSweep as runMemoryDreamingSweep,
 } from './memory-dreaming.js';
-import {
-  createMemoryExtractionProvider,
+import { createLlmMemoryExtractionProvider } from './extractor-llm.js';
+import type {
   MemoryExtractorUsage,
   MemoryExtractionProvider,
-} from './memory-extractor.js';
+} from './extractor-types.js';
 import { ChunkInsert, MemoryStore } from './memory-store.js';
 import { JournalAppendInput, MemoryJournal } from './memory-journal.js';
 import { MemoryIndexer } from './memory-indexer.js';
-import { fuseSearchResults } from './memory-retrieval.js';
+import { fuseSearchResults, mergeSearchResults } from './memory-retrieval.js';
 import { classifySensitiveMemoryMaterial } from './sensitive-material.js';
 import {
   MEMORY_GLOBAL_GROUP_FOLDER,
@@ -165,9 +165,9 @@ export class MemoryService {
   constructor(
     store: MemoryStore = new MemoryStore(),
     embeddings: EmbeddingProvider = createEmbeddingProvider(),
-    extractor: MemoryExtractionProvider = createMemoryExtractionProvider(),
+    extractor: MemoryExtractionProvider = createLlmMemoryExtractionProvider(),
     journal: MemoryJournal = new MemoryJournal(
-      path.join(MEMORY_ROOT, '.journal'),
+      path.join(memoryStorageDir, '.journal'),
       MEMORY_JOURNAL_DISABLED,
     ),
   ) {
@@ -175,7 +175,11 @@ export class MemoryService {
     this.embeddings = new CachedEmbeddingProvider(embeddings, this.store);
     this.extractor = extractor;
     this.journal = journal;
-    this.indexer = new MemoryIndexer(MEMORY_ROOT, this.store, this.embeddings);
+    this.indexer = new MemoryIndexer(
+      memoryStorageDir,
+      this.store,
+      this.embeddings,
+    );
     this.embeddings.validateConfiguration();
   }
 
@@ -292,10 +296,10 @@ export class MemoryService {
     let diskKb: Record<string, number> | undefined;
     try {
       const layout = {
-        itemsDir: path.join(MEMORY_ROOT, 'items'),
-        proceduresDir: path.join(MEMORY_ROOT, 'procedures'),
-        sessionsDir: path.join(MEMORY_ROOT, 'sessions'),
-        journalDir: path.join(MEMORY_ROOT, '.journal'),
+        itemsDir: path.join(memoryStorageDir, 'items'),
+        proceduresDir: path.join(memoryStorageDir, 'procedures'),
+        sessionsDir: path.join(memoryStorageDir, 'sessions'),
+        journalDir: path.join(memoryStorageDir, '.journal'),
       };
       diskKb = {
         items: directorySizeKb(layout.itemsDir),
@@ -1493,7 +1497,7 @@ export class MemoryService {
     const slugBase = sanitizePathSegment(memory.key || memory.id, 'memory');
     const slugId = sanitizePathSegment(memory.id, 'item');
     const filePath = path.join(
-      MEMORY_ROOT,
+      memoryStorageDir,
       'items',
       sanitizePathSegment(memory.kind, 'fact'),
       `${slugBase}-${slugId}.md`,
@@ -1536,7 +1540,11 @@ export class MemoryService {
       'procedure',
     );
     const slugId = sanitizePathSegment(procedure.id, 'procedure');
-    return path.join(MEMORY_ROOT, 'procedures', `${slugBase}-${slugId}.md`);
+    return path.join(
+      memoryStorageDir,
+      'procedures',
+      `${slugBase}-${slugId}.md`,
+    );
   }
 
   private persistProcedureMarkdown(procedure: MemoryProcedure): string {
@@ -1581,7 +1589,7 @@ export class MemoryService {
 
   private removeProcedureMirrorById(procedureId: string): void {
     const normalizedId = sanitizePathSegment(procedureId, 'procedure');
-    const proceduresDir = path.join(MEMORY_ROOT, 'procedures');
+    const proceduresDir = path.join(memoryStorageDir, 'procedures');
     if (!fs.existsSync(proceduresDir)) return;
     const suffix = `-${normalizedId}.md`;
     let entries: fs.Dirent[] = [];
@@ -1603,8 +1611,8 @@ export class MemoryService {
   ): void {
     const managedRoot =
       managedSubdir === '.'
-        ? MEMORY_ROOT
-        : path.join(MEMORY_ROOT, managedSubdir);
+        ? memoryStorageDir
+        : path.join(memoryStorageDir, managedSubdir);
     if (!isInsideRoot(managedRoot, filePath)) return;
     try {
       const stat = fs.lstatSync(filePath);
@@ -1826,31 +1834,6 @@ function parseTranscriptArc(
 
   if (turns.length <= maxTurns) return turns;
   return turns.slice(turns.length - maxTurns);
-}
-
-function mergeSearchResults(
-  items: MemorySearchResult[],
-  snippets: MemorySearchResult[],
-  limit: number,
-): MemorySearchResult[] {
-  const byId = new Map<string, MemorySearchResult>();
-  for (const result of [...items, ...snippets]) {
-    const existing = byId.get(result.id);
-    if (
-      !existing ||
-      result.fused_score + result.lexical_score + result.vector_score >
-        existing.fused_score + existing.lexical_score + existing.vector_score
-    ) {
-      byId.set(result.id, result);
-    }
-  }
-  return [...byId.values()]
-    .sort((a, b) => {
-      const aScore = a.fused_score + a.lexical_score + a.vector_score;
-      const bScore = b.fused_score + b.lexical_score + b.vector_score;
-      return bScore - aScore;
-    })
-    .slice(0, limit);
 }
 
 function dedupeItemsById(items: MemoryItem[]): MemoryItem[] {

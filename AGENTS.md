@@ -46,6 +46,7 @@ Important constraints:
 - MyClaw is early-stage: do not add legacy compatibility layers for breaking changes unless explicitly requested by the user.
 - Prefer clean cutovers over dual-path behavior (no fallback branches, shim flags, or backward-compat code by default).
 - Remove obsolete code paths in the same change when introducing a breaking replacement.
+- Do not add test-only or local-checkout branches to production code. Keep shipped behavior deterministic for the supported install/runtime path; handle local testing differences manually in local runtime files or inside test harnesses.
 - Every implementation task must end with a subagent review pass before marking the work complete.
 
 ## Hard Gates

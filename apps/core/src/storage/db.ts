@@ -148,6 +148,7 @@ const REQUIRED_SCHEMA_COLUMNS = {
     'schedule_value',
     'status',
     'linked_sessions',
+    'session_id',
     'thread_id',
     'group_scope',
     'created_by',
@@ -209,6 +210,23 @@ function assertSchemaCompatibility(database: Database.Database): void {
   );
 }
 
+function hasTableColumn(
+  database: Database.Database,
+  tableName: string,
+  columnName: string,
+): boolean {
+  const rows = database
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all() as Array<{ name?: string }>;
+  return rows.some((row) => String(row.name || '') === columnName);
+}
+
+function applySchemaMigrations(database: Database.Database): void {
+  if (!hasTableColumn(database, 'jobs', 'session_id')) {
+    database.exec('ALTER TABLE jobs ADD COLUMN session_id TEXT');
+  }
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -247,6 +265,7 @@ function createSchema(database: Database.Database): void {
       schedule_value TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
       linked_sessions TEXT NOT NULL,
+      session_id TEXT,
       thread_id TEXT,
       group_scope TEXT NOT NULL,
       created_by TEXT NOT NULL DEFAULT 'agent',
@@ -324,6 +343,7 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  applySchemaMigrations(db);
   assertSchemaCompatibility(db);
 }
 
@@ -331,12 +351,14 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+  applySchemaMigrations(db);
   assertSchemaCompatibility(db);
 }
 
 /** @internal - for tests only. Applies schema/migrations to a provided DB. */
 export function _createSchemaForTest(database: Database.Database): void {
   createSchema(database);
+  applySchemaMigrations(database);
   assertSchemaCompatibility(database);
 }
 
@@ -434,15 +456,12 @@ export function storeMessage(msg: NewMessage): void {
 export function getNewMessages(
   jids: string[],
   lastCursor: string,
-  botPrefix: string,
   limit: number = 200,
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastCursor };
 
   const cursor = decodeGlobalMessageCursor(lastCursor);
   const placeholders = jids.map(() => '?').join(',');
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
            thread_id,
@@ -459,7 +478,7 @@ export function getNewMessages(
           )
         )
       )
-      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND is_bot_message = 0
       AND content != '' AND content IS NOT NULL
     ORDER BY timestamp ASC, chat_jid ASC, id ASC
     LIMIT ?
@@ -474,7 +493,6 @@ export function getNewMessages(
       cursor.chatJid,
       cursor.chatJid,
       cursor.id,
-      `${botPrefix}:%`,
       limit,
     ) as Array<NewMessage & { is_from_me?: number | boolean }>;
 
@@ -495,12 +513,9 @@ export function getNewMessages(
 export function getMessagesSince(
   chatJid: string,
   sinceCursor: string,
-  botPrefix: string,
   limit: number = 200,
 ): NewMessage[] {
   const cursor = decodeGroupMessageCursor(sinceCursor);
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
            thread_id,
@@ -511,7 +526,7 @@ export function getMessagesSince(
         timestamp > ?
         OR (timestamp = ? AND id > ?)
       )
-      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND is_bot_message = 0
       AND content != '' AND content IS NOT NULL
     ORDER BY timestamp ASC, id ASC
     LIMIT ?
@@ -523,7 +538,6 @@ export function getMessagesSince(
       cursor.timestamp,
       cursor.timestamp,
       cursor.id,
-      `${botPrefix}:%`,
       limit,
     ) as Array<NewMessage & { is_from_me?: number | boolean }>;
   return rows.map((row) => ({
@@ -534,27 +548,23 @@ export function getMessagesSince(
 
 export function getLastBotMessageCursor(
   chatJid: string,
-  botPrefix: string,
 ): { timestamp: string; id: string } | undefined {
   const row = db
     .prepare(
       `SELECT timestamp, id FROM messages
-       WHERE chat_jid = ? AND (is_bot_message = 1 OR content LIKE ?)
+       WHERE chat_jid = ? AND is_bot_message = 1
        ORDER BY timestamp DESC, id DESC
        LIMIT 1`,
     )
-    .get(chatJid, `${botPrefix}:%`) as
-    | { timestamp: string; id: string }
-    | undefined;
+    .get(chatJid) as { timestamp: string; id: string } | undefined;
   if (!row) return undefined;
   return row;
 }
 
 export function getLastBotMessageTimestamp(
   chatJid: string,
-  botPrefix: string,
 ): string | undefined {
-  return getLastBotMessageCursor(chatJid, botPrefix)?.timestamp;
+  return getLastBotMessageCursor(chatJid)?.timestamp;
 }
 
 type RawJobRow = Omit<Job, 'linked_sessions' | 'silent'> & {
@@ -591,6 +601,7 @@ export interface JobUpsertInput {
   schedule_type: Job['schedule_type'];
   schedule_value: string;
   linked_sessions: string[];
+  session_id?: string | null;
   thread_id?: string | null;
   group_scope: string;
   created_by: Job['created_by'];
@@ -615,11 +626,11 @@ export function upsertJob(job: JobUpsertInput): { created: boolean } {
     `
     INSERT INTO jobs (
       id, name, prompt, model, script, schedule_type, schedule_value, status,
-      linked_sessions, thread_id, group_scope, created_by, created_at, updated_at,
+      linked_sessions, session_id, thread_id, group_scope, created_by, created_at, updated_at,
       next_run, silent, cleanup_after_ms, timeout_ms, max_retries, retry_backoff_ms, max_consecutive_failures,
       execution_mode
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       prompt = excluded.prompt,
@@ -632,6 +643,7 @@ export function upsertJob(job: JobUpsertInput): { created: boolean } {
         ELSE excluded.status
       END,
       linked_sessions = excluded.linked_sessions,
+      session_id = excluded.session_id,
       thread_id = excluded.thread_id,
       group_scope = excluded.group_scope,
       updated_at = excluded.updated_at,
@@ -654,6 +666,7 @@ export function upsertJob(job: JobUpsertInput): { created: boolean } {
     job.schedule_value,
     job.status || 'active',
     JSON.stringify(job.linked_sessions),
+    job.session_id || null,
     job.thread_id || null,
     job.group_scope,
     job.created_by,
@@ -703,6 +716,7 @@ export function updateJob(
       | 'schedule_value'
       | 'status'
       | 'linked_sessions'
+      | 'session_id'
       | 'thread_id'
       | 'group_scope'
       | 'next_run'
@@ -755,6 +769,10 @@ export function updateJob(
   if (updates.linked_sessions !== undefined) {
     fields.push('linked_sessions = ?');
     values.push(JSON.stringify(updates.linked_sessions));
+  }
+  if (updates.session_id !== undefined) {
+    fields.push('session_id = ?');
+    values.push(updates.session_id);
   }
   if (updates.thread_id !== undefined) {
     fields.push('thread_id = ?');

@@ -64,13 +64,12 @@ function setChannelEnabled(
 }
 
 describe('validateRuntimePreflight', () => {
-  it('fails when credentials are missing and points to env file', () => {
+  it('passes when all channels are disabled', () => {
     const runtimeHome = createRuntimeHome();
     const result = validateRuntimePreflight(runtimeHome);
 
-    expect(result.ok).toBe(false);
-    expect(result.failure?.summary).toContain('invalid');
-    expect(result.failure?.details.join('\n')).toContain('Enable at least one');
+    expect(result.ok).toBe(true);
+    expect(result.failure).toBeUndefined();
     expect(fs.existsSync(settingsFilePath(runtimeHome))).toBe(true);
   });
 
@@ -87,7 +86,7 @@ describe('validateRuntimePreflight', () => {
     expect(result.ok).toBe(false);
     expect(result.failure?.summary).toContain('invalid');
     expect(result.failure?.details.join('\n')).toContain(
-      'no Telegram chats are registered',
+      "Channel 'telegram' is enabled but no chats are registered",
     );
   });
 

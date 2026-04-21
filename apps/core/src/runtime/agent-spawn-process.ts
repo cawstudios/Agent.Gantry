@@ -6,13 +6,13 @@ import {
   AGENT_MAX_OUTPUT_SIZE,
   AGENT_TIMEOUT,
   IDLE_TIMEOUT,
+  LOG_LEVEL,
 } from '../core/config.js';
 import { logger } from '../core/logger.js';
-import {
-  OUTPUT_END_MARKER,
-  OUTPUT_START_MARKER,
-} from './agent-spawn-markers.js';
 import { AgentOutput, RunnerProcessSpec } from './agent-spawn-types.js';
+
+const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
 
 const SENSITIVE_TEXT_PATTERNS: RegExp[] = [
   /\b(ANTHROPIC_API_KEY|OPENAI_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_AUTH_TOKEN|GITHUB_TOKEN|GH_TOKEN)\s*[:=]\s*([^\s"']+)/gi,
@@ -272,8 +272,7 @@ export function executeRunnerProcess(
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const logFile = path.join(logsDir, `agent-${timestamp}.log`);
-      const isVerbose =
-        process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
+      const isVerbose = LOG_LEVEL === 'debug' || LOG_LEVEL === 'trace';
 
       const logLines = [
         `=== Agent Run Log ===`,

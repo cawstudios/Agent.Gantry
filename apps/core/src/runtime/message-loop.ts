@@ -28,7 +28,6 @@ import {
 import type { SessionCommand } from '../session/session-commands.js';
 
 export interface MessageLoopDeps {
-  assistantName: string;
   getRegisteredGroups: () => Record<string, RegisteredGroup>;
   getLastTimestamp: () => string;
   setLastTimestamp: (timestamp: string) => void;
@@ -65,7 +64,6 @@ export async function runMessagePollingTick(
     const { messages, newTimestamp } = getNewMessages(
       jids,
       deps.getLastTimestamp(),
-      deps.assistantName,
     );
 
     if (messages.length > 0) {
@@ -158,7 +156,6 @@ export async function runMessagePollingTick(
         let initialBatch = getMessagesSince(
           chatJid,
           deps.getOrRecoverCursor(chatJid),
-          deps.assistantName,
           MAX_MESSAGES_PER_PROMPT,
         );
         if (initialBatch.length === 0) {
@@ -205,7 +202,6 @@ export async function runMessagePollingTick(
           nextBatch = getMessagesSince(
             chatJid,
             deps.getOrRecoverCursor(chatJid),
-            deps.assistantName,
             MAX_MESSAGES_PER_PROMPT,
           );
         }
@@ -258,7 +254,6 @@ export function recoverPendingMessages(deps: MessageLoopDeps): void {
     const pending = getMessagesSince(
       chatJid,
       deps.getOrRecoverCursor(chatJid),
-      deps.assistantName,
       MAX_MESSAGES_PER_PROMPT,
     );
     if (pending.length > 0) {

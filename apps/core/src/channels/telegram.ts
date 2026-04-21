@@ -8,11 +8,11 @@ import { StreamFlavor, stream, streamApi } from '@grammyjs/stream';
 
 import {
   ASSISTANT_NAME,
+  getTelegramBotToken,
   PERMISSION_APPROVAL_TIMEOUT_MS,
   TELEGRAM_PERMISSION_APPROVER_IDS,
   TRIGGER_PATTERN,
 } from '../core/config.js';
-import { readEnvFile } from '../core/env.js';
 import { resolveGroupFolderPath } from '../platform/group-folder.js';
 import { logger } from '../core/logger.js';
 import { ChannelAdapter, ChannelOpts } from './channel-provider.js';
@@ -82,8 +82,6 @@ type PendingUserQuestionState = {
     answeredBy?: string;
   }) => void;
 };
-
-export interface TelegramChannelOpts extends ChannelOpts {}
 
 function escapeTelegramMarkdownV2Plain(text: string): string {
   return text.replace(/[\[\]()`>#+\-=|{}.!\\]/g, '\\$&');
@@ -180,7 +178,7 @@ function stripInternalTagsPreserveWhitespace(text: string): string {
 function formatTelegramStreamingText(rawText: string, done?: boolean): string {
   const text = stripInternalTagsPreserveWhitespace(rawText);
   if (!text) return '';
-  return done ? parseTextStyles(text, 'telegram') : text;
+  return done ? parseTextStyles(text, 'telegram-html') : text;
 }
 
 /**
@@ -289,7 +287,7 @@ export class TelegramChannel implements ChannelAdapter {
   private draftStreamApi: TelegramStreamApi | null = null;
   private isStopping = false;
   private pollingRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  private opts: TelegramChannelOpts;
+  private opts: ChannelOpts;
   private botToken: string;
   private pendingPermissionPrompts = new Map<
     string,
@@ -308,7 +306,7 @@ export class TelegramChannel implements ChannelAdapter {
   private activeProgressMessages = new Map<string, ActiveProgressState>();
   private nextDraftIdOffset = 1;
 
-  constructor(botToken: string, opts: TelegramChannelOpts) {
+  constructor(botToken: string, opts: ChannelOpts) {
     this.botToken = botToken;
     this.opts = opts;
   }
@@ -1025,8 +1023,7 @@ export class TelegramChannel implements ChannelAdapter {
 
   /**
    * Download a Telegram file to the group's attachments directory.
-   * Returns the agent workspace path (e.g. /workspace/group/attachments/photo_123.jpg)
-   * or null if the download fails.
+   * Returns the absolute attachment path on disk or null if the download fails.
    */
   private async downloadFile(
     fileId: string,
@@ -1079,7 +1076,7 @@ export class TelegramChannel implements ChannelAdapter {
       if (!wrote) return null;
 
       logger.info({ fileId, dest: destPath }, 'Telegram file downloaded');
-      return `/workspace/group/attachments/${finalName}`;
+      return destPath;
     } catch (err) {
       logger.error(
         { fileId, error: this.sanitizeErrorMessage(err) },
@@ -1964,9 +1961,7 @@ export class TelegramChannel implements ChannelAdapter {
 export function createTelegramChannel(
   opts: ChannelOpts,
 ): TelegramChannel | null {
-  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
-  const token =
-    process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
+  const token = getTelegramBotToken();
   if (!token) {
     logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
     return null;

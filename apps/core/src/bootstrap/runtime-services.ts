@@ -1,4 +1,4 @@
-import { ASSISTANT_NAME, DEFAULT_TRIGGER } from '../core/config.js';
+import { DEFAULT_TRIGGER } from '../core/config.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
@@ -18,7 +18,6 @@ import {
 } from '../runtime/message-loop.js';
 import { writeSchedulerStateFileSafe } from '../runtime/scheduler-state-file.js';
 import { startSchedulerLoop } from '../runtime/task-scheduler.js';
-import { startSessionCleanup } from '../session/session-cleanup.js';
 import {
   getAllJobs,
   getRecentJobRuns,
@@ -40,7 +39,6 @@ interface RuntimeServicesDeps {
   listRecentJobEvents: typeof listRecentJobEvents;
   recoverPendingMessages: typeof recoverPendingMessages;
   startMessagePollingLoop: typeof startMessagePollingLoop;
-  startSessionCleanup: typeof startSessionCleanup;
   logger: Pick<typeof logger, 'info' | 'warn' | 'fatal'>;
   exit: (code: number) => never;
 }
@@ -64,7 +62,6 @@ function makeDefaultDeps(): RuntimeServicesDeps {
     listRecentJobEvents,
     recoverPendingMessages,
     startMessagePollingLoop,
-    startSessionCleanup,
     logger,
     exit: (code: number) => process.exit(code),
   };
@@ -179,7 +176,6 @@ export function startRuntimeServices(
   });
 
   syncSchedulerState();
-  resolved.startSessionCleanup();
 
   app.queue.setProcessMessagesFn((chatJid) =>
     app.processGroupMessages(chatJid),
@@ -233,7 +229,6 @@ export function startRuntimeServices(
   };
 
   resolved.recoverPendingMessages({
-    assistantName: ASSISTANT_NAME,
     getRegisteredGroups: () => app.getRegisteredGroups(),
     getLastTimestamp: () => app.getLastTimestamp(),
     setLastTimestamp: (timestamp) => {
@@ -257,7 +252,6 @@ export function startRuntimeServices(
 
   resolved
     .startMessagePollingLoop({
-      assistantName: ASSISTANT_NAME,
       getRegisteredGroups: () => app.getRegisteredGroups(),
       getLastTimestamp: () => app.getLastTimestamp(),
       setLastTimestamp: (timestamp) => {

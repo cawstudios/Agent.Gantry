@@ -4,7 +4,7 @@ import path from 'path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { readRuntimeMemorySettingsSnapshot } from '@core/core/runtime-memory-settings.js';
+import { readRuntimeMemorySettingsSnapshot } from '@core/cli/runtime-settings.js';
 
 const tempDirs: string[] = [];
 
@@ -80,7 +80,6 @@ memory:
             llm: {
               models: {
                 extractor: 'claude-haiku-4-5-20251001',
-                session_summary: 'claude-haiku-4-5-20251001',
               },
             },
           },
@@ -96,6 +95,52 @@ memory:
     expect(snapshot.embeddingsEnabled).toBe(false);
     expect(snapshot.dreamingEnabled).toBe(true);
     expect(snapshot.llmExtractorModel).toBe('claude-haiku-4-5-20251001');
-    expect(snapshot.llmSessionSummaryModel).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('ignores legacy session summary model keys in JSON snapshot', () => {
+    const runtimeHome = writeSettings(
+      JSON.stringify(
+        {
+          memory: {
+            enabled: true,
+            root: 'memory-json',
+            llm: {
+              models: {
+                extractor: 'claude-haiku-4-5-20251001',
+                session_summary: 'legacy-model',
+                sessionSummary: 'legacy-model-2',
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const snapshot = readRuntimeMemorySettingsSnapshot(runtimeHome);
+    expect(snapshot.llmExtractorModel).toBe('claude-haiku-4-5-20251001');
+    expect((snapshot as Record<string, unknown>).llmSessionSummaryModel).toBe(
+      undefined,
+    );
+  });
+
+  it('ignores legacy session summary model keys in YAML snapshot', () => {
+    const runtimeHome = writeSettings(`
+memory:
+  enabled: true
+  root: memory
+  llm:
+    models:
+      extractor: claude-haiku-4-5-20251001
+      session_summary: legacy-model
+      sessionSummary: legacy-model-2
+`);
+
+    const snapshot = readRuntimeMemorySettingsSnapshot(runtimeHome);
+    expect(snapshot.llmExtractorModel).toBe('claude-haiku-4-5-20251001');
+    expect((snapshot as Record<string, unknown>).llmSessionSummaryModel).toBe(
+      undefined,
+    );
   });
 });

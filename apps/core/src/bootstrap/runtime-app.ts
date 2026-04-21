@@ -122,7 +122,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     const existing = lastAgentTimestamp[chatJid];
     if (existing) return existing;
 
-    const botCursor = getLastBotMessageCursor(chatJid, ASSISTANT_NAME);
+    const botCursor = getLastBotMessageCursor(chatJid);
     if (botCursor) {
       const encoded = encodeGroupMessageCursor(botCursor);
       logger.info(

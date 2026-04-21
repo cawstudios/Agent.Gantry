@@ -2,22 +2,25 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
-// Sentinel markers must match agent-spawn-markers.ts
+// Sentinel markers must match runtime agent output framing.
 const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('@core/core/config.js', () => ({
-  MEMORY_ROOT: '/tmp/myclaw-memory',
   AGENT_MAX_OUTPUT_SIZE: 10485760,
   AGENT_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/myclaw-test-data',
   AGENTS_DIR: '/tmp/myclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
-  AGENT_ROOT: '/tmp/myclaw-config',
+  MYCLAW_HOME: '/tmp/myclaw-config',
+  MYCLAW_HOME: '/tmp/myclaw-config',
+  CHROME_PATH: undefined,
   ONECLI_URL: 'http://localhost:10254',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
   TIMEZONE: 'America/Los_Angeles',
+  LOG_LEVEL: 'info',
+  MYCLAW_IPC_AUTH_SECRET: 'test-ipc-secret',
   getEffectiveModelConfig: vi.fn((groupModel?: string) =>
     groupModel
       ? { model: groupModel, source: 'group.agentConfig.model' }
@@ -62,7 +65,7 @@ vi.mock('@core/runtime/agent-spawn-host.js', () => ({
   prepareHostRuntimeContext: vi.fn(() => ({
     groupDir: '/tmp/myclaw-test-data/agents/test-group',
     groupIpcDir: '/tmp/myclaw-test-data/ipc/test-group',
-    runnerRoot: '/tmp/myclaw-home/packages/agent-runner',
+    runnerDistDir: '/tmp/myclaw-home/dist/runner',
   })),
 }));
 
@@ -302,22 +305,6 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.ANTHROPIC_MODEL).toBe('claude-sonnet-4-6');
   });
 
-  it('forwards MEMORY_ROOT via env when configured', async () => {
-    const resultPromise = spawnAgent(testGroup, testInput, () => {});
-    await vi.advanceTimersByTimeAsync(10);
-    fakeProc.emit('close', 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
-
-    const spawnCalls = vi.mocked(spawn).mock.calls;
-    expect(spawnCalls.length).toBeGreaterThan(0);
-    const env = spawnCalls[spawnCalls.length - 1][2]?.env as Record<
-      string,
-      string
-    >;
-    expect(env.MEMORY_ROOT).toBe('/tmp/myclaw-memory');
-  });
-
   it('passes compiled system prompt through runner stdin for normal message runs', async () => {
     vi.mocked(getPromptProfileService).mockReturnValueOnce({
       compileSystemPrompt: vi.fn(() => 'compiled profile prompt'),
@@ -414,6 +401,20 @@ describe('agent-spawn timeout behavior', () => {
         process.env.OPENAI_API_KEY = originalKey;
       }
     }
+  });
+
+  it('points Claude SDK settings at the runtime config directory', async () => {
+    const resultPromise = spawnAgent(testGroup, testInput, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.CLAUDE_CONFIG_DIR).toBe('/tmp/myclaw-config/.claude');
   });
 
   it('continues without custom system prompt when compileSystemPrompt throws (line 70)', async () => {

@@ -1,6 +1,8 @@
 import { ChannelOwnershipPort, NewMessage } from '../core/types.js';
 import { formatLocalTime } from '../core/timezone.js';
-import { ChannelType, parseTextStyles } from '../text-styles.js';
+import '../channels/register-builtins.js';
+import { getChannelProvider } from '../channels/provider-registry.js';
+import { parseTextStyles } from '../text-styles.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -40,30 +42,19 @@ export function stripInternalTagsPreserveWhitespace(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '');
 }
 
-export function formatOutbound(rawText: string): string {
-  const text = stripInternalTags(rawText);
-  if (!text) return '';
-  return text;
-}
-
-const SUPPORTED_FORMATTING_CHANNELS = new Set<ChannelType>([
-  'signal',
-  'whatsapp',
-  'telegram',
-  'slack',
-  'discord',
-]);
-
 export function formatOutboundForChannel(
   rawText: string,
-  channel?: string,
+  channelId?: string,
 ): string {
   const text = stripInternalTags(rawText);
-  if (!text) return '';
-  if (!channel || !SUPPORTED_FORMATTING_CHANNELS.has(channel as ChannelType)) {
+  if (!text || !channelId) {
     return text;
   }
-  return parseTextStyles(text, channel as ChannelType);
+  const provider = getChannelProvider(channelId);
+  if (!provider || provider.formatting === 'none') {
+    return text;
+  }
+  return parseTextStyles(text, provider.formatting);
 }
 
 export function findChannel<T extends ChannelOwnershipPort>(

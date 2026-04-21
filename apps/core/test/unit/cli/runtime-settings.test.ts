@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ensureRuntimeSettings,
-  parseRuntimeSettingsText,
+  parseRuntimeSettings,
   validateRuntimeSettings,
 } from '@core/cli/runtime-settings.js';
 import { upsertEnvFile } from '@core/cli/env-file.js';
@@ -45,7 +45,7 @@ function seedRegisteredGroups(runtimeHome: string): void {
 
 describe('runtime-settings', () => {
   it('parses channel sender allowlist entries from yaml', () => {
-    const settings = parseRuntimeSettingsText(`
+    const settings = parseRuntimeSettings(`
 channels:
   telegram:
     enabled: true
@@ -100,7 +100,7 @@ memory:
   });
 
   it('does not enforce a schema version field', () => {
-    const settings = parseRuntimeSettingsText(`
+    const settings = parseRuntimeSettings(`
 channels:
   telegram:
     enabled: false
@@ -133,7 +133,7 @@ memory:
   });
 
   it('parses memory scalars with inline comments consistently', () => {
-    const settings = parseRuntimeSettingsText(`
+    const settings = parseRuntimeSettings(`
 channels:
   telegram:
     enabled: false
@@ -182,9 +182,6 @@ memory:
     );
     expect(settings.memory.llm.models.dreaming).toBe('claude-sonnet-4-6');
     expect(settings.memory.llm.models.consolidation).toBe('claude-sonnet-4-6');
-    expect(settings.memory.llm.models.sessionSummary).toBe(
-      'claude-haiku-4-5-20251001',
-    );
     expect(fs.existsSync(settingsFilePath(runtimeHome))).toBe(true);
     const rendered = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
     expect(rendered).toContain('memory:');
@@ -284,5 +281,55 @@ memory:
     const result = validateRuntimeSettings(runtimeHome);
     expect(result.ok).toBe(false);
     expect(result.failure?.details.join('\n')).toContain('unknown_folder');
+  });
+
+  it('fails validation when an enabled channel has no registered provider', () => {
+    const runtimeHome = createRuntimeHome();
+    fs.writeFileSync(
+      settingsFilePath(runtimeHome),
+      `
+channels:
+  telegram:
+    enabled: false
+    sender_allowlist:
+      default:
+        allow: "*"
+        mode: trigger
+      agents: {}
+      log_denied: true
+  slack:
+    enabled: false
+    sender_allowlist:
+      default:
+        allow: "*"
+        mode: trigger
+      agents: {}
+      log_denied: true
+  custom-provider:
+    enabled: true
+    sender_allowlist:
+      default:
+        allow: "*"
+        mode: trigger
+      agents: {}
+      log_denied: true
+memory:
+  enabled: true
+  root: memory
+  embeddings:
+    enabled: false
+    provider: disabled
+    model: text-embedding-3-large
+  dreaming:
+    enabled: false
+`.trimStart(),
+      'utf-8',
+    );
+
+    const result = validateRuntimeSettings(runtimeHome);
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      "no provider is registered for 'custom-provider'",
+    );
   });
 });

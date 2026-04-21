@@ -6,11 +6,12 @@ import { OneCLI } from '@onecli-sh/sdk';
 import {
   DATA_DIR,
   AGENTS_DIR,
-  AGENT_ROOT,
+  getHostCredentialEnv,
+  MYCLAW_CREDENTIAL_MODE,
+  ONECLI_ALLOWED_ENV_KEYS,
   ONECLI_URL,
 } from '../core/config.js';
 import { resolveHostCredentialMode } from '../core/credential-mode.js';
-import { readEnvFile } from '../core/env.js';
 import { logger } from '../core/logger.js';
 import { RegisteredGroup } from '../core/types.js';
 import {
@@ -19,7 +20,7 @@ import {
 } from '../platform/group-folder.js';
 import {
   ensureGroupIpcLayout,
-  getHostAgentRunnerRoot,
+  getHostAgentRunnerDistDir,
   ensureSharedSessionSettings,
   syncGroupSkills,
 } from './agent-spawn-layout.js';
@@ -27,26 +28,7 @@ import { HostRuntimeContext } from './agent-spawn-types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
-const HOST_AUTH_ENV_KEYS = [
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'ANTHROPIC_MODEL',
-  'MEMORY_EXTRACTOR_MAX_TURNS',
-];
-const ONECLI_ALLOWED_ENV_KEYS = new Set<string>([
-  ...HOST_AUTH_ENV_KEYS,
-  'OPENAI_API_KEY',
-  'OPENAI_BASE_URL',
-  'OPENAI_ORG_ID',
-  'OPENAI_PROJECT',
-  'SSL_CERT_FILE',
-  'NODE_EXTRA_CA_CERTS',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'NO_PROXY',
-]);
+const ONECLI_ALLOWED_ENV_KEY_SET = new Set<string>(ONECLI_ALLOWED_ENV_KEYS);
 const ONECLI_CA_CERT_ROOT = path.resolve(DATA_DIR, 'onecli', 'certs');
 
 function isPathInside(root: string, candidate: string): boolean {
@@ -126,7 +108,7 @@ function filterOnecliEnv(
   const dropped: string[] = [];
   for (const [key, value] of Object.entries(source)) {
     if (
-      !ONECLI_ALLOWED_ENV_KEYS.has(key) ||
+      !ONECLI_ALLOWED_ENV_KEY_SET.has(key) ||
       typeof value !== 'string' ||
       value.length === 0
     ) {
@@ -169,10 +151,8 @@ export async function getHostRuntimeCredentialEnv(
   onecliApplied: boolean;
   onecliCaPath?: string;
 }> {
-  const envFromFile = readEnvFile(HOST_AUTH_ENV_KEYS);
-  const credentialModeRaw =
-    process.env.MYCLAW_CREDENTIAL_MODE ||
-    readEnvFile(['MYCLAW_CREDENTIAL_MODE']).MYCLAW_CREDENTIAL_MODE;
+  const envFromFile = getHostCredentialEnv();
+  const credentialModeRaw = MYCLAW_CREDENTIAL_MODE;
   const credentialMode = resolveHostCredentialMode(
     credentialModeRaw,
     ONECLI_URL,
@@ -282,10 +262,10 @@ export function prepareHostRuntimeContext(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  // Shared .claude/ under AGENT_ROOT for skills, settings, plugins
+  // Shared .claude/ under runtime home for skills, settings, plugins.
   ensureSharedSessionSettings();
   syncGroupSkills();
-  const runnerRoot = getHostAgentRunnerRoot();
+  const runnerDistDir = getHostAgentRunnerDistDir();
 
   const groupIpcDir = resolveGroupIpcPath(group.folder);
   ensureGroupIpcLayout(groupIpcDir);
@@ -299,6 +279,6 @@ export function prepareHostRuntimeContext(
     groupDir,
     globalDir,
     groupIpcDir,
-    runnerRoot,
+    runnerDistDir,
   };
 }

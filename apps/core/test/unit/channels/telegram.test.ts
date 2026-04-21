@@ -2,13 +2,11 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // --- Mocks ---
 
-// Mock env reader (used by the factory, not needed in unit tests)
-vi.mock('@core/core/env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
-
 // Mock config
 vi.mock('@core/core/config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
+  getTelegramBotToken: () => process.env.TELEGRAM_BOT_TOKEN || '',
   TELEGRAM_PERMISSION_APPROVER_IDS: new Set<string>(),
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));
@@ -99,7 +97,6 @@ import {
   TelegramChannel,
   TelegramChannelOpts,
 } from '@core/channels/telegram.js';
-import { readEnvFile } from '@core/core/env.js';
 import { logger } from '@core/core/logger.js';
 
 // --- Test helpers ---
@@ -728,7 +725,8 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
         expect.objectContaining({
-          content: '[Photo] (/workspace/group/attachments/photo_1.jpg)',
+          content:
+            '[Photo] (/tmp/test-groups/test-group/attachments/photo_1.jpg)',
         }),
       );
     });
@@ -749,7 +747,7 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.objectContaining({
           content:
-            '[Photo] (/workspace/group/attachments/photo_1.jpg) Look at this',
+            '[Photo] (/tmp/test-groups/test-group/attachments/photo_1.jpg) Look at this',
         }),
       );
     });
@@ -945,7 +943,7 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.objectContaining({
           content:
-            '[Document: report.pdf] (/workspace/group/attachments/report.pdf)',
+            '[Document: report.pdf] (/tmp/test-groups/test-group/attachments/report.pdf)',
         }),
       );
     });
@@ -969,7 +967,8 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
         expect.objectContaining({
-          content: '[Video] (/workspace/group/attachments/video_1.mp4)',
+          content:
+            '[Video] (/tmp/test-groups/test-group/attachments/video_1.mp4)',
         }),
       );
     });
@@ -993,7 +992,8 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
         expect.objectContaining({
-          content: '[Voice message] (/workspace/group/attachments/voice_1.oga)',
+          content:
+            '[Voice message] (/tmp/test-groups/test-group/attachments/voice_1.oga)',
         }),
       );
     });
@@ -1016,7 +1016,7 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
         expect.objectContaining({
-          content: '[Audio] (/workspace/group/attachments/song.mp3)',
+          content: '[Audio] (/tmp/test-groups/test-group/attachments/song.mp3)',
         }),
       );
     });
@@ -1096,7 +1096,8 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
         expect.objectContaining({
-          content: '[Document: file] (/workspace/group/attachments/file.bin)',
+          content:
+            '[Document: file] (/tmp/test-groups/test-group/attachments/file.bin)',
         }),
       );
     });
@@ -2072,8 +2073,6 @@ describe('TelegramChannel', () => {
 
 describe('createTelegramChannel factory', () => {
   it('returns null when TELEGRAM_BOT_TOKEN is not set', () => {
-    vi.mocked(readEnvFile).mockReturnValueOnce({});
-
     const saved = process.env.TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
     try {
@@ -2092,12 +2091,8 @@ describe('createTelegramChannel factory', () => {
   });
 
   it('returns a TelegramChannel when token is available', () => {
-    vi.mocked(readEnvFile).mockReturnValueOnce({
-      TELEGRAM_BOT_TOKEN: 'test-token-from-env',
-    });
-
     const saved = process.env.TELEGRAM_BOT_TOKEN;
-    delete process.env.TELEGRAM_BOT_TOKEN;
+    process.env.TELEGRAM_BOT_TOKEN = 'test-token-from-env';
     try {
       const result = createTelegramChannel({
         onMessage: vi.fn(),
@@ -2108,6 +2103,7 @@ describe('createTelegramChannel factory', () => {
       expect(result).toBeInstanceOf(TelegramChannel);
     } finally {
       if (saved !== undefined) process.env.TELEGRAM_BOT_TOKEN = saved;
+      else delete process.env.TELEGRAM_BOT_TOKEN;
     }
   });
 });
