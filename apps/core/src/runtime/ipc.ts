@@ -548,6 +548,9 @@ function parseTaskIpcData(raw: unknown, sourceGroup: string): TaskIpcData {
   if (linkedSessions !== undefined) parsed.linkedSessions = linkedSessions;
   if (deliverTo !== undefined) parsed.deliverTo = deliverTo;
   if (groupScope) parsed.groupScope = groupScope;
+  if (threadBinding.authThreadId) {
+    parsed.authThreadId = threadBinding.authThreadId;
+  }
   if (threadBinding.payloadThreadId !== undefined) {
     parsed.threadId = threadBinding.payloadThreadId;
   }

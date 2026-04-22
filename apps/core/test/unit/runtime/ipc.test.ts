@@ -687,6 +687,68 @@ describe('scheduler_update_job', () => {
     // next_run should be recalculated (may differ from previous)
     expect(job!.next_run).toBeTruthy();
   });
+
+  it('blocks cross-thread scheduler updates for thread-bound auth context', async () => {
+    await processTaskIpc(
+      {
+        type: 'scheduler_update_job',
+        jobId: 'upd-job',
+        threadId: 'thread-b',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+    vi.mocked(deps.onSchedulerChanged).mockClear();
+
+    await processTaskIpc(
+      {
+        type: 'scheduler_update_job',
+        jobId: 'upd-job',
+        prompt: 'should not apply',
+        authThreadId: 'thread-a',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const job = getJobById('upd-job');
+    expect(job!.prompt).toBe('old prompt');
+    expect(job!.thread_id).toBe('thread-b');
+    expect(deps.onSchedulerChanged).not.toHaveBeenCalled();
+  });
+
+  it('allows scheduler updates for matching thread-bound auth context', async () => {
+    await processTaskIpc(
+      {
+        type: 'scheduler_update_job',
+        jobId: 'upd-job',
+        threadId: 'thread-a',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+    vi.mocked(deps.onSchedulerChanged).mockClear();
+
+    await processTaskIpc(
+      {
+        type: 'scheduler_update_job',
+        jobId: 'upd-job',
+        prompt: 'new prompt',
+        authThreadId: 'thread-a',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const job = getJobById('upd-job');
+    expect(job!.prompt).toBe('new prompt');
+    expect(job!.thread_id).toBe('thread-a');
+    expect(deps.onSchedulerChanged).toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -731,6 +793,34 @@ describe('scheduler_delete_job', () => {
     );
     expect(deps.onSchedulerChanged).not.toHaveBeenCalled();
   });
+
+  it('blocks cross-thread scheduler deletes for thread-bound auth context', async () => {
+    await processTaskIpc(
+      {
+        type: 'scheduler_update_job',
+        jobId: 'del-job',
+        threadId: 'thread-b',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+    vi.mocked(deps.onSchedulerChanged).mockClear();
+
+    await processTaskIpc(
+      {
+        type: 'scheduler_delete_job',
+        jobId: 'del-job',
+        authThreadId: 'thread-a',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getJobById('del-job')).toBeDefined();
+    expect(deps.onSchedulerChanged).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -773,6 +863,35 @@ describe('scheduler_pause_job', () => {
       true,
       deps,
     );
+    expect(deps.onSchedulerChanged).not.toHaveBeenCalled();
+  });
+
+  it('blocks cross-thread scheduler pause for thread-bound auth context', async () => {
+    await processTaskIpc(
+      {
+        type: 'scheduler_update_job',
+        jobId: 'pause-job',
+        threadId: 'thread-b',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+    vi.mocked(deps.onSchedulerChanged).mockClear();
+
+    await processTaskIpc(
+      {
+        type: 'scheduler_pause_job',
+        jobId: 'pause-job',
+        authThreadId: 'thread-a',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const job = getJobById('pause-job');
+    expect(job!.status).toBe('active');
     expect(deps.onSchedulerChanged).not.toHaveBeenCalled();
   });
 });
@@ -852,6 +971,41 @@ describe('scheduler_resume_job', () => {
       true,
       deps,
     );
+    expect(deps.onSchedulerChanged).not.toHaveBeenCalled();
+  });
+
+  it('blocks cross-thread scheduler resume for thread-bound auth context', async () => {
+    await processTaskIpc(
+      {
+        type: 'scheduler_update_job',
+        jobId: 'resume-job',
+        threadId: 'thread-b',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+    await processTaskIpc(
+      { type: 'scheduler_pause_job', jobId: 'resume-job' },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+    vi.mocked(deps.onSchedulerChanged).mockClear();
+
+    await processTaskIpc(
+      {
+        type: 'scheduler_resume_job',
+        jobId: 'resume-job',
+        authThreadId: 'thread-a',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const job = getJobById('resume-job');
+    expect(job!.status).toBe('paused');
     expect(deps.onSchedulerChanged).not.toHaveBeenCalled();
   });
 });
