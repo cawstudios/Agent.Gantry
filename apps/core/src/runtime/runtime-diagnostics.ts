@@ -14,6 +14,7 @@ import {
   getRuntimeAgentRunnerRoot,
   syncHostAgentRunnerRuntime,
 } from './agent-spawn-layout.js';
+import { getConfiguredAgents } from './agent-config-registry.js';
 
 export interface RuntimeDiagnosticDetails {
   runtimeBinary: string;
@@ -24,6 +25,8 @@ export interface RuntimeDiagnosticDetails {
   runtimeConfigRoot: string;
   hostBuildAttempted: boolean;
   hostBuildSucceeded: boolean;
+  configuredAgentCount: number;
+  configuredAgentIds: string[];
   onecliUrlConfigured: boolean;
   credentialMode: HostCredentialMode;
   credentialPathStatus: 'onecli+env' | 'onecli-only' | 'env-only' | 'missing';
@@ -199,6 +202,8 @@ export async function collectRuntimeDiagnostics(
     }
   }
 
+  const configuredAgentIds = Object.keys(getConfiguredAgents()).sort();
+
   const diagnostics: RuntimeDiagnostics = {
     ok: errors.length === 0,
     errors,
@@ -214,6 +219,8 @@ export async function collectRuntimeDiagnostics(
       runtimeConfigRoot: AGENT_ROOT,
       hostBuildAttempted,
       hostBuildSucceeded,
+      configuredAgentCount: configuredAgentIds.length,
+      configuredAgentIds,
       onecliUrlConfigured: Boolean(ONECLI_URL?.trim()),
       credentialMode,
       credentialPathStatus,
@@ -240,6 +247,13 @@ export function formatRuntimeDiagnosticsMessage(
   lines.push(`Credential mode: ${diagnostics.details.credentialMode}`);
   lines.push(
     `Host artifacts: ${diagnostics.details.hostArtifactsPresent ? 'present' : 'missing'}`,
+  );
+  const configuredAgents =
+    diagnostics.details.configuredAgentIds.length > 0
+      ? diagnostics.details.configuredAgentIds.join(', ')
+      : '(none)';
+  lines.push(
+    `Configured agents: ${diagnostics.details.configuredAgentCount} ${configuredAgents}`,
   );
   if (diagnostics.details.hostBuildAttempted) {
     lines.push(

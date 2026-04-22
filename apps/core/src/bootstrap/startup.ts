@@ -6,6 +6,7 @@ import { AGENT_ROOT } from '../core/config.js';
 import { logger } from '../core/logger.js';
 import { ensureRuntimeLayoutDirectories } from '../platform/runtime-layout.js';
 import { ensurePromptProfileBootstrapped } from '../runtime/prompt-profile.js';
+import { refreshConfiguredAgentsFromDisk } from '../runtime/agent-config-registry.js';
 import { restoreRemoteControl } from '../runtime/remote-control.js';
 import { runRuntimeStartupPreflight } from '../runtime/runtime-diagnostics.js';
 import { initDatabase } from '../storage/db.js';
@@ -17,6 +18,7 @@ interface StartupDeps {
   runRuntimeStartupPreflight: typeof runRuntimeStartupPreflight;
   initDatabase: typeof initDatabase;
   loadRuntimeSettings: typeof loadRuntimeSettings;
+  refreshConfiguredAgentsFromDisk: typeof refreshConfiguredAgentsFromDisk;
   restoreRemoteControl: typeof restoreRemoteControl;
   logger: Pick<typeof logger, 'info' | 'warn'>;
 }
@@ -32,6 +34,7 @@ function makeDefaultDeps(): StartupDeps {
     runRuntimeStartupPreflight,
     initDatabase,
     loadRuntimeSettings,
+    refreshConfiguredAgentsFromDisk,
     restoreRemoteControl,
     logger,
   };
@@ -61,6 +64,7 @@ export async function runStartup(
   resolved.logger.info('Database initialized');
 
   const runtimeSettings = resolved.loadRuntimeSettings(AGENT_ROOT);
+  resolved.refreshConfiguredAgentsFromDisk();
   app.loadState();
   app.ensureOneCLIAgentsForRegisteredGroups();
 

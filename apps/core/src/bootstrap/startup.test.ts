@@ -61,6 +61,10 @@ describe('runStartup', () => {
         order.push('load-settings');
         return runtimeSettings;
       }),
+      refreshConfiguredAgentsFromDisk: vi.fn(() => {
+        order.push('load-agent-config-registry');
+        return {};
+      }),
       restoreRemoteControl: vi.fn(() => {
         order.push('restore-remote-control');
       }),
@@ -73,6 +77,7 @@ describe('runStartup', () => {
       'init-db',
       'log-db-init',
       'load-settings',
+      'load-agent-config-registry',
       'load-state',
       'ensure-onecli',
       'restore-remote-control',
@@ -98,6 +103,7 @@ describe('runStartup', () => {
         order.push('init-db');
       }),
       loadRuntimeSettings: vi.fn(() => ({ channels: {}, features: {} }) as any),
+      refreshConfiguredAgentsFromDisk: vi.fn(() => ({})),
       restoreRemoteControl: vi.fn(() => {
         order.push('restore-remote-control');
       }),

@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-A platform in MyClaw where an admin configures a virtual employee's behavior **by typing plain English in a Slack channel** — no code, no deploys. Rahul is the first deployment (HR junior reporting to Pramod). The platform is designed so the next virtual teammate (recruiter, finance, ops) is 30 minutes of YAML + a provisioning run, not a new project.
+A platform in MyClaw where an admin configures a virtual employee's behavior **by typing plain English in a Slack channel** — no code, no deploys. The People Ops agent is the first deployment. The platform is designed so the next virtual teammate (recruiter, finance, ops) is 30 minutes of YAML + a provisioning run, not a new project.
 
 ## Why this exists
 
@@ -12,7 +12,7 @@ A platform in MyClaw where an admin configures a virtual employee's behavior **b
 Pramod (HR lead) spends 2–3 hours a day on manual ops: pinging 47 people for attendance, chasing non-responders, updating a sheet, nudging people about appraisal forms, writing daily summaries. Repeats forever.
 
 ### The trap we're avoiding
-The obvious thing to build is "Rahul the attendance bot." A weekend script: cron + Slack SDK + Google Sheets. **It works for attendance and dies on everything else.** Every new HR behavior becomes a new project.
+The obvious thing to build is "the attendance bot." A weekend script: cron + Slack SDK + Google Sheets. **It works for attendance and dies on everything else.** Every new HR behavior becomes a new project.
 
 ### The leverage
 If we build the platform properly:
@@ -24,23 +24,23 @@ That's the CEO's real ask. "Don't design this only for attendance."
 
 ## What success looks like — example use case
 
-**Monday morning, 9am.** Pramod types in `#hr-rahul`:
+**Monday morning, 9am.** Pramod types in `#people-ops-agent`:
 
 > "Every weekday 10am, DM everyone asking office/WFH/leave. If working, also ask project and allocation %. Log to the Attendance 2026 sheet. Send me a noon summary."
 
-Rahul responds: *"Got it — first run today at 10am, 47 people from the Employees sheet, logging to Attendance 2026, noon digest. Confirm?"*
+The agent responds: *"Got it — first run today at 10am, 47 people from the Employees sheet, logging to Attendance 2026, noon digest. Confirm?"*
 
 Pramod taps **Approve**.
 
-**10:00am.** Rahul DMs each of 47 employees: *"Morning! Office, WFH, or leave today?"* The conversations are "parked" — Rahul doesn't block waiting.
+**10:00am.** The agent DMs each of 47 employees: *"Morning! Office, WFH, or leave today?"* The conversations are "parked" — the agent doesn't block waiting.
 
-**10:17am.** Priya replies: *"wfh, billing, 80%"*. Rahul parses, writes the row to the Sheet, marks her done.
+**10:17am.** Priya replies: *"wfh, billing, 80%"*. The agent parses, writes the row to the Sheet, marks her done.
 
 **Throughout the morning.** As each person replies, their row gets logged. 3 people don't reply by noon — they get flagged.
 
-**12:00pm.** Rahul posts in `#hr-rahul`: *"Attendance Apr 20: 42/47 replied, 3 pending, 2 on leave. [thread]"*.
+**12:00pm.** The agent posts in `#people-ops-agent`: *"Attendance Apr 20: 42/47 replied, 3 pending, 2 on leave. [thread]"*.
 
-**Day 2 — same path, new behavior.** Pramod types: *"Remind anyone who hasn't filled the April self-appraisal."* Confirmation button. Approved. Rahul reads the Forms responses via CLI, diffs against the roster Sheet, DMs the gap, reports back. **Zero code changes.**
+**Day 2 — same path, new behavior.** Pramod types: *"Remind anyone who hasn't filled the April self-appraisal."* Confirmation button. Approved. The agent reads the Forms responses via CLI, diffs against the roster Sheet, DMs the gap, reports back. **Zero code changes.**
 
 That second instruction is the proof that the architecture is right.
 
@@ -60,13 +60,13 @@ A step executor that wakes up on cron, loads a recipe, and walks through its ste
 
 ### 3. Capabilities = CLIs on the VM
 
-Rahul's "Google Sheets access," "Gmail access," "Calendar access" are **not code we write**. They're CLIs installed on the VM: `gworkspace`, `slack-cli`, `gh`, etc. OneCLI wraps credential injection (`onecli exec -- gworkspace sheets append ...`). Claude composes the right command via the Bash tool he already has.
+The People Ops agent's "Google Sheets access," "Gmail access," "Calendar access" are **not code we write**. They're CLIs installed on the VM: `gworkspace`, `slack-cli`, `gh`, etc. OneCLI wraps credential injection (`onecli exec -- gworkspace sheets append ...`). Claude composes the right command via the Bash tool he already has.
 
-**Why:** Vendors ship CLIs. We don't need to own glue code for every system Rahul might need. Adding Jira next quarter = install `jira-cli`, add to capability manifest, done. Zero MyClaw change.
+**Why:** Vendors ship CLIs. We don't need to own glue code for every system the agent might need. Adding Jira next quarter = install `jira-cli`, add to capability manifest, done. Zero MyClaw change.
 
 ### 4. Safety hooks (this is load-bearing)
 
-Because Bash is powerful, we need a `PreToolUse` hook that inspects every shell command Rahul tries to run:
+Because Bash is powerful, we need a `PreToolUse` hook that inspects every shell command the agent tries to run:
 - Rate-limit outbound actions (DMs/hour, Gmail sends/day)
 - Block dangerous patterns (`rm -rf`, raw network tools, unwrapped credentials)
 - Enforce admin-channel-only for behavior-changing commands
@@ -95,11 +95,11 @@ Step executor. `ask_and_collect` parks a step in `conversation_state`; inbound m
 
 ### PR 3 — Intake subagent + admin channel gate + Bash safety hook
 NL → WorkflowSpec subagent. Admin-channel allowlist in `settings.yaml`. `PreToolUse` hook with rate limits, dangerous-pattern blocks, `onecli exec` enforcement.
-**Done when:** admin types an instruction in `#hr-rahul`, confirmation echo fires, workflow lands in DB, scheduler arms. A recipe that tries to loop-DM 1000 people gets throttled by the hook.
+**Done when:** admin types an instruction in `#people-ops-agent`, confirmation echo fires, workflow lands in DB, scheduler arms. A recipe that tries to loop-DM 1000 people gets throttled by the hook.
 
 ### PR 4 — Persona + capability manifest + audit + polish
-Per-agent `config.yaml` and `capabilities.md` loader. Persona module (photo, title, intro post). Audit hook writes every Bash invocation to `audit_log`. Kill switch `@rahul stop`.
-**Done when:** Rahul appears as a person in Slack with photo and intro. A second non-attendance workflow is created purely via admin chat — no MyClaw code change. **This is the architectural validation gate.**
+Per-agent `config.yaml` and `capabilities.md` loader. Persona module (photo, title, intro post). Audit hook writes every Bash invocation to `audit_log`. Kill switch `@people-ops-agent stop`.
+**Done when:** the People Ops agent appears as a person in Slack with photo and intro. A second non-attendance workflow is created purely via admin chat — no MyClaw code change. **This is the architectural validation gate.**
 
 ## The validation test
 
@@ -109,7 +109,7 @@ Before declaring this done, confirm Pramod can dictate **5–10 different HR ins
 
 VM provisioning is Srinivas's scope and lives in a sibling repo (provisioning playbook):
 - Install MyClaw + `gworkspace` + `slack-cli` + `onecli` + `gh` with pinned versions
-- Register Rahul's credentials in OneCLI per-CLI
+- Register the agent's credentials in OneCLI per-CLI
 - Generate (or hand-author) `capabilities.md` that matches the installed CLIs
 
 PR 4 can't close until the VM is up and the capability manifest is real.
@@ -120,4 +120,4 @@ PR 4 can't close until the VM is up and the capability manifest is real.
 - Google Workspace OAuth scope — domain-wide delegation or per-user consent?
 - Slack CLI — which package (vendor vs. community)?
 - Capability manifest — generated by provisioning, or hand-authored, or discovered via `which`?
-- First non-Rahul use case to force extensibility beyond HR?
+- First non-People-Ops use case to force extensibility beyond HR?

@@ -1,19 +1,3 @@
-/**
- * MyClaw Agent Runner
- * Runs inside a container, receives config via stdin, outputs result to stdout
- *
- * Input protocol:
- *   Stdin: Full ContainerInput JSON (read until EOF, like before)
- *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
- *          Files: {type:"message", text:"..."}.json — polled and consumed
- *          Sentinel: /workspace/ipc/input/_close — signals session end
- *
- * Stdout protocol:
- *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
- *   Multiple results may be emitted (one per agent teams result).
- *   Final marker after loop ends signals completion.
- */
-
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -24,10 +8,7 @@ import {
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
-import {
-  processAutomaticMemory,
-  type ConversationMetadata,
-} from './auto-memory.js';
+import { runAutomaticMemoryPass } from './auto-memory.js';
 
 interface ContainerInput {
   prompt: string;
@@ -1189,22 +1170,14 @@ async function main(): Promise<void> {
 
       log('Query ended, waiting for next IPC message...');
 
-      // Automatic memory processing: capture important learnings from conversation
       try {
-        const conversationMetadata: ConversationMetadata = {
+        const memoryResult = runAutomaticMemoryPass({
           userMessage: prompt || '',
           sessionId: sessionId || '',
-          timestamp: new Date().toISOString(),
-          hasErrors: false, // Could be enhanced to detect actual errors
-        };
-
-        const groupIpcDir = resolveGroupIpcDir(containerInput.groupFolder);
-
-        const memoryResult = processAutomaticMemory(
-          conversationMetadata,
-          sessionId || '',
-          groupIpcDir,
-        );
+          groupFolder: containerInput.groupFolder,
+          ipcDir: resolveGroupIpcDir(containerInput.groupFolder),
+          authToken: IPC_AUTH_TOKEN,
+        });
 
         if (memoryResult.saved > 0) {
           log(

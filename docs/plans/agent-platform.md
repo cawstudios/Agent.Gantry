@@ -158,7 +158,7 @@ Capabilities now live on the VM filesystem. This needs an explicit provisioning 
 ### PR 4 — Persona + capability manifest + audit + polish
 - `agents/persona.ts`, per-agent `config.yaml` loader, `capabilities.md` injection into system prompt, `runtime/hooks/audit.ts`, kill switch
 - Runs in parallel with VM provisioning work (Srinivas installs `gworkspace`, `slack-cli`, `onecli` on the target VM)
-- **Done when:** Rahul's persona posts to #general; a second non-attendance workflow (e.g., appraisal reminders using `gworkspace forms`) is created purely via admin chat with no MyClaw code change. **Architectural validation gate.**
+- **Done when:** the primary agent persona posts to #general; a second non-attendance workflow (e.g., appraisal reminders using `gworkspace forms`) is created purely via admin chat with no MyClaw code change. **Architectural validation gate.**
 
 ## Critical path
 
@@ -191,7 +191,7 @@ Bash is a sharp knife. With typed MCP tools we'd get "max 60 DMs/hour" enforceme
 ## Open questions
 
 - First target channel surface — Slack only, or Slack + Telegram from day one?
-- What's the first non-Rahul use case that exercises the platform? (important to force extensibility)
+- What's the first non-primary-agent use case that exercises the platform? (important to force extensibility)
 - Do workflow-mutating tools go through `requestPermissionApproval` (explicit per-tool approval) or is the intake-subagent confirmation echo sufficient? (probably the latter for v1)
 - Baseline Bash rate-limit policy — what are the actual per-CLI budgets? (e.g., DMs per hour, Gmail sends per day)
 - How is the capability manifest kept in sync with what's actually installed on the VM? (provisioning playbook generates it?)

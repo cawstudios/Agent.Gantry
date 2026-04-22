@@ -21,6 +21,12 @@ export interface ConversationMetadata {
   hasErrors: boolean;
 }
 
+export interface AutoMemoryResult {
+  processed: number;
+  saved: number;
+  skipped: string;
+}
+
 export interface AutoMemoryConfig {
   enabled: boolean;
   importanceThreshold: number;
@@ -28,6 +34,12 @@ export interface AutoMemoryConfig {
   saveUserFeedback: boolean;
   saveToolDiscoveries: boolean;
   saveWorkflowPatterns: boolean;
+}
+
+interface AutoMemoryIpcOptions {
+  authToken?: string;
+  groupFolder?: string;
+  userId?: string;
 }
 
 const DEFAULT_CONFIG: AutoMemoryConfig = {
@@ -38,6 +50,32 @@ const DEFAULT_CONFIG: AutoMemoryConfig = {
   saveToolDiscoveries: true,
   saveWorkflowPatterns: true,
 };
+
+const AUTO_MEMORY_KIND_MAP: Record<
+  string,
+  'preference' | 'fact' | 'context' | 'correction' | 'recent_work'
+> = {
+  preference: 'preference',
+  fact: 'fact',
+  context: 'context',
+  correction: 'correction',
+  recent_work: 'recent_work',
+  lesson: 'correction',
+};
+
+function sanitizeIdComponent(value: string, fallback: string): string {
+  const sanitized = value
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, '-')
+    .slice(0, 80);
+  return sanitized || fallback;
+}
+
+function normalizeMemoryKind(
+  kind: string,
+): 'preference' | 'fact' | 'context' | 'correction' | 'recent_work' {
+  return AUTO_MEMORY_KIND_MAP[kind] || 'context';
+}
 
 /**
  * Analyzes conversation for important patterns worth remembering
@@ -176,33 +214,47 @@ export function saveMemoriesViaIpc(
   }>,
   sessionId: string,
   ipcDir: string,
-): boolean {
+  options: AutoMemoryIpcOptions = {},
+): number {
   try {
-    const timestamp = Date.now();
-    const memoryFile = path.join(
-      ipcDir,
-      'input',
-      `auto_memory_${sessionId}_${timestamp}.json`,
-    );
+    const memoryRequestsDir = path.join(ipcDir, 'memory-requests');
+    fs.mkdirSync(memoryRequestsDir, { recursive: true });
 
-    const memoryRequest = {
-      type: 'message',
-      requestId: `auto_memory_${timestamp}`,
-      action: 'memory_save',
-      payload: {
-        memories: memories.map((memory) => ({
-          ...memory,
-          source: `auto_memory_${sessionId}`,
-          timestamp: new Date().toISOString(),
-        })),
-      },
-    };
+    const safeSessionId = sanitizeIdComponent(sessionId, 'session');
+    const sourceLabel = `auto_memory_${safeSessionId}`;
+    let saved = 0;
 
-    fs.writeFileSync(memoryFile, JSON.stringify(memoryRequest, null, 2));
-    return true;
+    for (const [index, memory] of memories.entries()) {
+      const timestamp = Date.now();
+      const nonce = Math.random().toString(36).slice(2, 8);
+      const requestId = `mem-auto-${timestamp}-${index}-${nonce}`;
+      const filePath = path.join(memoryRequestsDir, `${requestId}.json`);
+      const tempPath = `${filePath}.tmp`;
+      const memoryRequest = {
+        requestId,
+        action: 'memory_save' as const,
+        payload: {
+          scope: 'group' as const,
+          kind: normalizeMemoryKind(memory.kind),
+          key: memory.key,
+          value: memory.value,
+          confidence: memory.confidence,
+          source: sourceLabel,
+          ...(options.groupFolder ? { group_folder: options.groupFolder } : {}),
+          ...(options.userId ? { user_id: options.userId } : {}),
+        },
+        ...(options.authToken ? { authToken: options.authToken } : {}),
+      };
+
+      fs.writeFileSync(tempPath, JSON.stringify(memoryRequest, null, 2));
+      fs.renameSync(tempPath, filePath);
+      saved += 1;
+    }
+
+    return saved;
   } catch (error) {
     console.error('Failed to save memories via IPC:', error);
-    return false;
+    return 0;
   }
 }
 
@@ -213,11 +265,8 @@ export function processAutomaticMemory(
   metadata: ConversationMetadata,
   sessionId: string,
   ipcDir: string,
-): {
-  processed: number;
-  saved: number;
-  skipped: string;
-} {
+  options: AutoMemoryIpcOptions = {},
+): AutoMemoryResult {
   if (!DEFAULT_CONFIG.enabled) {
     return {
       processed: 0,
@@ -250,12 +299,12 @@ export function processAutomaticMemory(
     }
 
     // Save memories
-    const saved = saveMemoriesViaIpc(memories, sessionId, ipcDir);
+    const saved = saveMemoriesViaIpc(memories, sessionId, ipcDir, options);
 
     return {
       processed: memories.length,
-      saved: saved ? memories.length : 0,
-      skipped: saved ? '' : 'Failed to write IPC file',
+      saved,
+      skipped: saved > 0 ? '' : 'Failed to write memory request IPC files',
     };
   } catch (error) {
     return {
@@ -271,6 +320,32 @@ export function processAutomaticMemory(
  */
 export function configureAutoMemory(config: Partial<AutoMemoryConfig>): void {
   Object.assign(DEFAULT_CONFIG, config);
+}
+
+/**
+ * Builds standard metadata for the runner and executes an automatic memory pass.
+ */
+export function runAutomaticMemoryPass(options: {
+  userMessage: string;
+  sessionId: string;
+  groupFolder: string;
+  ipcDir: string;
+  authToken?: string;
+}): AutoMemoryResult {
+  return processAutomaticMemory(
+    {
+      userMessage: options.userMessage,
+      sessionId: options.sessionId,
+      timestamp: new Date().toISOString(),
+      hasErrors: false,
+    },
+    options.sessionId,
+    options.ipcDir,
+    {
+      authToken: options.authToken,
+      groupFolder: options.groupFolder,
+    },
+  );
 }
 
 /**
