@@ -24,9 +24,16 @@ import {
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
-import { nowIso, nowMs, sleep } from '../core/datetime.js';
+import { sleep } from '../core/datetime.js';
 import { isPlainObject } from '../core/object.js';
 import { composeAgentCapabilities } from './agent-capabilities.js';
+import {
+  formatAskUserQuestionAnswers,
+  normalizePermissionSuggestions,
+  parseAskUserQuestionInput,
+  requestPermissionApproval,
+  requestUserQuestion,
+} from './sdk-interactions.js';
 
 interface AgentRunnerInput {
   prompt: string;
@@ -38,6 +45,7 @@ interface AgentRunnerInput {
   assistantName?: string;
   script?: string;
   compiledSystemPrompt?: string;
+  memoryContextBlock?: string;
   thinking?: {
     mode: 'adaptive' | 'enabled' | 'disabled';
     effort?: EffortLevel;
@@ -73,27 +81,8 @@ const WORKSPACE_EXTRA_DIR = requirePathEnv('MYCLAW_WORKSPACE_EXTRA_DIR');
 const IPC_BASE_DIR = requirePathEnv('MYCLAW_IPC_DIR');
 const IPC_INPUT_DIR = requirePathEnv('MYCLAW_IPC_INPUT_DIR');
 const IPC_AUTH_TOKEN = process.env.MYCLAW_IPC_AUTH_TOKEN || '';
-const PERMISSION_REQUEST_TIMEOUT_MS = Math.max(
-  10_000,
-  parseInt(process.env.MYCLAW_PERMISSION_TIMEOUT_MS || '300000', 10) || 300_000,
-);
-const IPC_MEMORY_CONTEXT_FILE =
-  process.env.MYCLAW_IPC_MEMORY_CONTEXT_FILE?.trim() || '';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-
-interface PermissionDecision {
-  approved: boolean;
-  decidedBy?: string;
-  reason?: string;
-}
-
-function resolveGroupIpcDir(groupFolder: string): string {
-  if (path.basename(IPC_BASE_DIR) === groupFolder) {
-    return IPC_BASE_DIR;
-  }
-  return path.join(IPC_BASE_DIR, groupFolder);
-}
 
 function buildSystemPrompt(append?: string):
   | {
@@ -339,100 +328,6 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
-async function requestPermissionApproval(options: {
-  groupFolder: string;
-  toolName: string;
-  title?: string;
-  displayName?: string;
-  description?: string;
-  decisionReason?: string;
-  blockedPath?: string;
-  toolInput?: unknown;
-}): Promise<PermissionDecision> {
-  try {
-    const groupIpcDir = resolveGroupIpcDir(options.groupFolder);
-    const permissionRequestsDir = path.join(groupIpcDir, 'permission-requests');
-    const permissionResponsesDir = path.join(
-      groupIpcDir,
-      'permission-responses',
-    );
-    fs.mkdirSync(permissionRequestsDir, { recursive: true });
-    fs.mkdirSync(permissionResponsesDir, { recursive: true });
-    const requestId = `perm-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
-    const requestPath = path.join(permissionRequestsDir, `${requestId}.json`);
-    const requestTmpPath = `${requestPath}.tmp`;
-    const envelope = {
-      requestId,
-      sourceGroup: options.groupFolder,
-      toolName: options.toolName,
-      ...(options.title ? { title: options.title } : {}),
-      ...(options.displayName ? { displayName: options.displayName } : {}),
-      ...(options.description ? { description: options.description } : {}),
-      ...(options.decisionReason
-        ? { decisionReason: options.decisionReason }
-        : {}),
-      ...(options.blockedPath ? { blockedPath: options.blockedPath } : {}),
-      ...(isPlainObject(options.toolInput)
-        ? { toolInput: options.toolInput }
-        : {}),
-      ...(IPC_AUTH_TOKEN ? { authToken: IPC_AUTH_TOKEN } : {}),
-      timestamp: nowIso(),
-    };
-    fs.writeFileSync(requestTmpPath, JSON.stringify(envelope, null, 2));
-    fs.renameSync(requestTmpPath, requestPath);
-
-    const responsePath = path.join(permissionResponsesDir, `${requestId}.json`);
-    const deadline = nowMs() + PERMISSION_REQUEST_TIMEOUT_MS;
-    while (nowMs() < deadline) {
-      if (fs.existsSync(responsePath)) {
-        try {
-          const raw = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
-          fs.unlinkSync(responsePath);
-          if (
-            raw &&
-            typeof raw === 'object' &&
-            (raw as { requestId?: string }).requestId === requestId
-          ) {
-            return {
-              approved: Boolean((raw as { approved?: unknown }).approved),
-              decidedBy:
-                typeof (raw as { decidedBy?: unknown }).decidedBy === 'string'
-                  ? (raw as { decidedBy: string }).decidedBy
-                  : undefined,
-              reason:
-                typeof (raw as { reason?: unknown }).reason === 'string'
-                  ? (raw as { reason: string }).reason
-                  : undefined,
-            };
-          }
-          return { approved: false, reason: 'Malformed permission response' };
-        } catch (err) {
-          return {
-            approved: false,
-            reason:
-              err instanceof Error
-                ? err.message
-                : 'Failed to read permission response',
-          };
-        }
-      }
-      await sleep(100);
-    }
-    return {
-      approved: false,
-      reason: 'Timed out waiting for host permission approval',
-    };
-  } catch (err) {
-    return {
-      approved: false,
-      reason:
-        err instanceof Error
-          ? `Permission request failed: ${err.message}`
-          : 'Permission request failed',
-    };
-  }
-}
-
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -456,7 +351,7 @@ async function runQuery(
   closedDuringQuery: boolean;
 }> {
   const stream = new MessageStream();
-  const memoryBlock = readMemoryContextBlock();
+  const memoryBlock = readMemoryContextBlock(agentInput);
   stream.push(memoryBlock ? `${prompt}\n\n${memoryBlock}` : prompt);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
@@ -530,6 +425,36 @@ async function runQuery(
       env: sdkEnv,
       permissionMode: capabilities.permissionMode,
       canUseTool: async (toolName, input, permissionOpts) => {
+        if (toolName === 'AskUserQuestion') {
+          try {
+            const questions = parseAskUserQuestionInput(input);
+            const response = await requestUserQuestion({
+              ipcBaseDir: IPC_BASE_DIR,
+              ipcAuthToken: IPC_AUTH_TOKEN,
+              groupFolder: agentInput.groupFolder,
+              questions,
+              signal: permissionOpts.signal,
+            });
+            return {
+              behavior: 'allow' as const,
+              updatedInput: {
+                ...(isPlainObject(input) ? input : {}),
+                questions,
+                answers: formatAskUserQuestionAnswers(response.answers),
+              },
+            };
+          } catch (err) {
+            const reason =
+              err instanceof Error ? err.message : 'AskUserQuestion failed';
+            log(`AskUserQuestion denied: ${reason}`);
+            return {
+              behavior: 'deny' as const,
+              message: `AskUserQuestion failed: ${reason}`,
+              interrupt: false,
+            };
+          }
+        }
+
         if (capabilities.alwaysAllowedTools.includes(toolName)) {
           return { behavior: 'allow' as const, updatedInput: input };
         }
@@ -541,6 +466,8 @@ async function runQuery(
           };
         }
         const decision = await requestPermissionApproval({
+          ipcBaseDir: IPC_BASE_DIR,
+          ipcAuthToken: IPC_AUTH_TOKEN,
           groupFolder: agentInput.groupFolder,
           toolName,
           title: permissionOpts.title,
@@ -549,12 +476,22 @@ async function runQuery(
           decisionReason: permissionOpts.decisionReason,
           blockedPath: permissionOpts.blockedPath,
           toolInput: input,
+          suggestions: normalizePermissionSuggestions(
+            permissionOpts.suggestions,
+          ),
         });
         if (decision.approved) {
           log(
             `Permission approved for tool ${toolName} by ${decision.decidedBy || 'unknown'}`,
           );
-          return { behavior: 'allow' as const, updatedInput: input };
+          return {
+            behavior: 'allow' as const,
+            updatedInput: input,
+            ...(decision.updatedPermissions &&
+            decision.updatedPermissions.length > 0
+              ? { updatedPermissions: decision.updatedPermissions }
+              : {}),
+          };
         }
         const reason = decision.reason || 'Denied by operator';
         log(`Permission denied for tool ${toolName}: ${reason}`);
@@ -686,14 +623,11 @@ async function runQuery(
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
-function readMemoryContextBlock(): string {
+function readMemoryContextBlock(agentInput: AgentRunnerInput): string {
   try {
-    if (!IPC_MEMORY_CONTEXT_FILE) return '';
-    if (!fs.existsSync(IPC_MEMORY_CONTEXT_FILE)) return '';
-    const parsed = JSON.parse(
-      fs.readFileSync(IPC_MEMORY_CONTEXT_FILE, 'utf-8'),
-    ) as { block?: unknown };
-    return typeof parsed.block === 'string' ? parsed.block.trim() : '';
+    return typeof agentInput.memoryContextBlock === 'string'
+      ? agentInput.memoryContextBlock.trim()
+      : '';
   } catch (err) {
     log(
       `Failed to load memory context block: ${err instanceof Error ? err.message : String(err)}`,

@@ -88,6 +88,12 @@ myclaw memory model set <extractor|dreaming|consolidation> <model>
 myclaw memory model profile <cheap|balanced|quality>
 ```
 
+Runtime continuity injection:
+
+- Host runtime injects a memory/continuity block on every run (message turns and scheduler runs).
+- This injection is baseline context. Memory MCP tools are for deeper lookup and explicit writes.
+- Dream lifecycle metadata is part of the injected brief when available.
+
 Memory hooks:
 
 ```bash
@@ -168,6 +174,11 @@ Rules:
 - `memory.embeddings.enabled: true` with `provider: openai` requires `OPENAI_API_KEY`.
 - Sender policy `allow` is `"*"` or a string array.
 - Sender policy `mode` is `trigger` or `drop`.
+- Scope policy for memory writes:
+  - `user`: personal preferences/corrections.
+  - `group`: default active chat/channel memory.
+  - `global`: only explicit cross-chat/org-wide intent.
+  - If `thread_id` exists, treat it as a topic boundary and include a topic marker in keys.
 
 ## .env
 
@@ -233,9 +244,14 @@ When changing credentials:
     myclaw.error.log
   memory/
     .cache/memory.db
+    .journal/
     items/
     procedures/
     sessions/
+    dreams/
+    daily/
+    knowledge/
+    .raw/
   agents/
     <agent-folder>/
   .claude/
@@ -249,7 +265,9 @@ When changing credentials:
 Messaging and interaction:
 
 - `mcp__myclaw__send_message`
-- `mcp__myclaw__ask_user_question`
+
+Structured user questions use the Claude Agent SDK `AskUserQuestion` tool via
+the runner permission/input path. Do not call a MyClaw MCP question tool.
 
 Service and agents:
 

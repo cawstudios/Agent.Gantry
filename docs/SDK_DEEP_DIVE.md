@@ -99,6 +99,13 @@ Full `Options` type from the official docs:
 | `systemPrompt` | `string \| { type: 'preset'; preset: 'claude_code'; append?: string }` | `undefined` | System prompt. Use preset to get Claude Code's prompt, with optional `append` |
 | `tools` | `string[] \| { type: 'preset'; preset: 'claude_code' }` | `undefined` | Tool configuration |
 
+MyClaw routes SDK `AskUserQuestion` through `canUseTool` so structured
+questions use the same host/channel interaction boundary as permission prompts.
+Permission suggestions from the SDK are returned as session-scoped
+`updatedPermissions`; they are not persisted to settings or local policy files.
+`ToolSearch` remains an agent-side SDK capability for deferred tool discovery
+and is not surfaced as a MyClaw command.
+
 ### PermissionMode
 
 ```typescript

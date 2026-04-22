@@ -50,6 +50,20 @@ memory:
 - Optional background memory refinement.
 - Disabled by default.
 - Should be used only with persistent memory enabled.
+- When enabled, dream lifecycle metadata (enabled state, schedule, last outcome) is included in the injected continuity brief.
+
+## Injection Model
+
+- Host runtime injects memory/continuity context for every agent run (message turns and scheduler jobs).
+- Injection does not rely on the agent deciding to call `memory_search` first.
+- Memory tools remain available for deeper retrieval, explicit saves, and patch operations.
+
+## Scope Defaults
+
+- `user`: personal preferences/corrections for one user.
+- `group`: active channel/chat memory (default).
+- `global`: cross-chat memory; use only with explicit user intent.
+- If a `thread_id` exists, treat it as a topic boundary and include topic markers in memory keys.
 
 ## User Controls
 

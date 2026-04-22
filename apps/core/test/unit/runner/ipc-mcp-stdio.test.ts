@@ -218,47 +218,12 @@ async function runMcpFixture(
 }
 
 describe('agent-runner MCP stdio tools', () => {
-  it('consumes ask_user_question responses, formats answers, and unlinks the response file', async () => {
+  it('does not expose the legacy ask_user_question MCP tool', async () => {
     const fixture = createMcpFixture();
 
-    const result = await runMcpFixture(fixture, 'ask_user_question', {
-      questions: [
-        {
-          question: 'Choose deployment?',
-          header: 'Deploy',
-          options: [
-            { label: 'Staging', description: 'Use test environment' },
-            { label: 'Canary', description: 'Limited production rollout' },
-          ],
-          multiSelect: true,
-        },
-        {
-          question: 'Ship now?',
-          header: 'Ship',
-          options: [
-            { label: 'Yes', description: 'Proceed' },
-            { label: 'No', description: 'Wait' },
-          ],
-          multiSelect: false,
-        },
-      ],
-    });
+    const result = await runMcpFixture(fixture, 'ask_user_question', {});
 
-    expect(result.exitCode, result.stderr).toBe(0);
-    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
-    expect(record.observedRequest).toEqual(
-      expect.objectContaining({
-        sourceGroup: 'team',
-        authToken: 'mcp-test-token',
-      }),
-    );
-    expect(record.result.content[0].text).toContain(
-      'Choose deployment?: Staging, Canary',
-    );
-    expect(record.result.content[0].text).toContain('Ship now?: Yes');
-    expect(record.result.content[0].text).toContain(
-      '(answered by runner-mcp-test-admin)',
-    );
-    expect(record.responseFiles).toHaveLength(0);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('tool not registered: ask_user_question');
   });
 });

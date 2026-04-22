@@ -12,6 +12,7 @@ import {
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from './runtime-settings.js';
+import { chooseSlackChatForConnect } from './slack-connect-chat-picker.js';
 
 export interface SlackTokenValidation {
   ok: boolean;
@@ -467,6 +468,16 @@ export async function runSlackConnectCommand(
 ): Promise<number> {
   ensureRuntimeLayout(runtimeHome);
   const env = readEnvFile(envFilePath(runtimeHome));
+  p.note(
+    [
+      'Create the Slack app first: create an app in the target workspace, add a bot user, then install it.',
+      'Recommended bot scopes: chat:write, app_mentions:read, channels:read, groups:read, im:read, mpim:read, plus message history scopes for the conversation types MyClaw should read.',
+      'Enable Socket Mode and generate an app-level xapp token with connections:write.',
+      'After scope changes, reinstall the app and invite it to the target channel or DM it once before discovery.',
+      'Docs: https://docs.slack.dev/apis/events-api/using-socket-mode/',
+    ].join('\n'),
+    'Slack app setup',
+  );
 
   const botTokenInput = await promptForValue({
     message: 'Slack bot token (xoxb-...)',
@@ -508,27 +519,13 @@ export async function runSlackConnectCommand(
   }
   p.log.success(appValidation.message);
 
-  const chatIdInput = await p.text({
-    message:
-      'Slack conversation ID for main group (optional, e.g. C0123456789)',
-    placeholder: 'Press Enter to skip registration now',
-    validate: (value) => {
-      const trimmed = (value || '').trim();
-      if (!trimmed) return undefined;
-      return normalizeSlackChatJid(trimmed)
-        ? undefined
-        : 'Use a valid Slack conversation ID (C..., G..., D...).';
-    },
-  });
-
-  if (p.isCancel(chatIdInput)) {
+  const chatChoice = await chooseSlackChatForConnect(botTokenInput);
+  if (chatChoice.type === 'cancel') {
     p.outro('Slack connect cancelled.');
     return 1;
   }
-
-  const normalizedChatJid = normalizeSlackChatJid(
-    String(chatIdInput).trim() || '',
-  );
+  const normalizedChatJid =
+    chatChoice.type === 'selected' ? chatChoice.chatJid : '';
 
   if (normalizedChatJid) {
     const access = await verifySlackChatAccess({

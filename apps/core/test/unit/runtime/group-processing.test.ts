@@ -35,12 +35,14 @@ vi.mock('@core/core/logger.js', () => ({
 const mockRunDreamingSweep = vi.fn();
 const mockGetMemoryStatus = vi.fn();
 const mockSaveProcedure = vi.fn();
+const mockBuildBrief = vi.fn();
 vi.mock('@core/memory/memory-service.js', () => ({
   MemoryService: {
     getInstance: () => ({
       runDreamingSweep: (...args: unknown[]) => mockRunDreamingSweep(...args),
       getStatus: (...args: unknown[]) => mockGetMemoryStatus(...args),
       saveProcedure: (...args: unknown[]) => mockSaveProcedure(...args),
+      buildBrief: (...args: unknown[]) => mockBuildBrief(...args),
     }),
   },
 }));
@@ -227,6 +229,7 @@ function setupHappyPath(
     decayedCount: 0,
     retiredCount: 0,
   });
+  mockBuildBrief.mockResolvedValue('## Memory Brief\n\nNo durable memory.');
   mockGetMemoryStatus.mockResolvedValue({
     items_by_kind: {},
     items_by_scope: {},

@@ -454,7 +454,7 @@
 
         Here's the interesting part. I checked both OpenClaw and Hermes. Neither uses canUseTool in their runtime — not one match. They built their own approval systems from scratch because the raw Anthropic SDK doesn't have this hook. Doing that for just bash is reasonable. Doing it for every tool would be a substantial rewrite. MyClaw gets it free because it sits on the SDK that ships with it.
 
-        There's also a separate tool called ask_user_question for multi-choice prompts — 'draft this formal or casual?' Same IPC plumbing, buttons in Telegram, modals in Slack.
+        Structured prompts use the SDK AskUserQuestion path — 'draft this formal or casual?' Same host interaction boundary, buttons in Telegram, modals in Slack.
 
         (This is the slide where the audience starts tweeting. Don't rush it. If demo fails: switch to pre-recorded screencast.)
       </aside>

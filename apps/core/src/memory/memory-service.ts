@@ -10,6 +10,7 @@ import {
   MEMORY_CONSOLIDATION_CLUSTER_THRESHOLD,
   MEMORY_CONSOLIDATION_MAX_CLUSTERS,
   MEMORY_CONSOLIDATION_MIN_ITEMS,
+  MEMORY_DREAMING_CRON,
   MEMORY_DREAMING_CONFIDENCE_BOOST,
   MEMORY_DREAMING_CONFIDENCE_DECAY,
   MEMORY_DREAMING_DECAY_THRESHOLD,
@@ -57,6 +58,7 @@ import type {
 import { ChunkInsert, MemoryStore } from './memory-store.js';
 import { JournalAppendInput, MemoryJournal } from './memory-journal.js';
 import { MemoryIndexer } from './memory-indexer.js';
+import { MemoryRootService } from './memory-root.js';
 import { fuseSearchResults, mergeSearchResults } from './memory-retrieval.js';
 import { classifySensitiveMemoryMaterial } from './sensitive-material.js';
 import {
@@ -969,14 +971,52 @@ export class MemoryService {
       .slice(0, input.maxItems);
     const procedures = this.store.listTopProcedures(input.groupFolder, 5);
 
-    for (const item of scoped) {
-      this.store.touchItem(item.id);
-    }
-
     const decisions = scoped.filter((item) => item.kind === 'decision');
     const facts = scoped.filter((item) => item.kind !== 'decision');
+    const latestSessionRecap =
+      MemoryRootService.getInstance().getLatestSessionRecap(input.groupFolder);
+    const latestDreamEvent =
+      this.store.getLatestEvent('dream_completed', input.groupFolder) ||
+      this.store.getLatestEvent('dreaming_completed', input.groupFolder);
 
     const lines: string[] = ['## Memory Brief', ''];
+    if (latestSessionRecap) {
+      lines.push('### Session Recap');
+      lines.push(
+        `- Summary: ${truncate(normalizeSingleLine(latestSessionRecap.summary), 260)}`,
+      );
+      lines.push(
+        `- Open loops: ${truncate(normalizeSingleLine(latestSessionRecap.openLoops), 260)}`,
+      );
+      lines.push('');
+    }
+
+    lines.push('### Dream Lifecycle');
+    lines.push(
+      `- dreaming_enabled: ${RUNTIME_MEMORY_DREAMING_ENABLED ? 'yes' : 'no'}`,
+    );
+    if (RUNTIME_MEMORY_DREAMING_ENABLED) {
+      lines.push(`- schedule: ${MEMORY_DREAMING_CRON}`);
+    }
+    if (latestDreamEvent) {
+      let summary = 'summary unavailable';
+      try {
+        const payload = JSON.parse(latestDreamEvent.payload_json) as {
+          promotedCount?: number;
+          decayedCount?: number;
+          retiredCount?: number;
+        };
+        summary = `promoted=${payload.promotedCount ?? 0}, decayed=${payload.decayedCount ?? 0}, retired=${payload.retiredCount ?? 0}`;
+      } catch {
+        summary = 'summary unavailable';
+      }
+      lines.push(`- last_run: ${latestDreamEvent.created_at}`);
+      lines.push(`- last_result: ${summary}`);
+    } else {
+      lines.push('- last_run: never');
+    }
+    lines.push('');
+
     if (decisions.length > 0) {
       lines.push('### Active Decisions');
       for (const item of decisions) {
@@ -1709,6 +1749,10 @@ function chunkText(text: string, size: number, overlap: number): string[] {
 function truncate(value: string, max: number): string {
   if (value.length <= max) return value;
   return `${value.slice(0, max - 1)}…`;
+}
+
+function normalizeSingleLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function extractUserText(content: unknown): string {

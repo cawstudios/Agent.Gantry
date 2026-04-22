@@ -1598,6 +1598,7 @@ describe('startIpcWatcher', () => {
     }));
 
     vi.doMock('@core/runtime/ipc-auth.js', () => ({
+      computeIpcAuthToken: vi.fn(() => 'ok'),
       validateIpcAuthToken: vi.fn(() => opts.authValid ?? true),
     }));
 
@@ -3135,22 +3136,129 @@ describe('startIpcWatcher', () => {
       expect(capturedSetTimeoutCallback).not.toBeNull();
     });
 
-    expect(requestUserAnswer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requestId: 'userq-001',
-        sourceGroup: 'whatsapp_main',
-      }),
-    );
-    expect(
-      mockWriteFileSync.mock.calls.some(
-        (call: unknown[]) =>
-          typeof call[0] === 'string' &&
-          String(call[0]).includes('/user-answers/userq-001.json.tmp') &&
-          typeof call[1] === 'string' &&
-          String(call[1]).includes('"Staging"'),
-      ),
-    ).toBe(true);
+    await vi.waitFor(() => {
+      expect(requestUserAnswer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: 'userq-001',
+          sourceGroup: 'whatsapp_main',
+        }),
+      );
+    });
+    await vi.waitFor(() => {
+      expect(
+        mockWriteFileSync.mock.calls.some(
+          (call: unknown[]) =>
+            typeof call[0] === 'string' &&
+            String(call[0]).includes('/user-answers/userq-001.json.tmp') &&
+            typeof call[1] === 'string' &&
+            String(call[1]).includes('"Staging"'),
+        ),
+      ).toBe(true);
+    });
     expect(mockUnlinkSync).toHaveBeenCalled();
+  });
+
+  it('does not reprocess claimed user question IPC files while answers are pending', async () => {
+    const userQuestionRequest = {
+      requestId: 'userq-pending',
+      questions: [
+        {
+          question: 'Which env should we deploy to?',
+          header: 'Deploy',
+          options: [
+            { label: 'Staging', description: 'Safe test first' },
+            { label: 'Production', description: 'Go live now' },
+          ],
+          multiSelect: false,
+        },
+      ],
+    };
+    let userQuestionReads = 0;
+    mockReaddirSync.mockImplementation((dir: string) => {
+      if (dir === '/tmp/test-ipc/ipc') return ['whatsapp_main'];
+      if (dir.endsWith('/user-questions')) {
+        userQuestionReads += 1;
+        return userQuestionReads === 1
+          ? ['uq1.json']
+          : [
+              `.processing-${process.pid}-${Date.now() - 60_000}-abc123-uq1.json`,
+            ];
+      }
+      return [];
+    });
+    mockStatSync.mockReturnValue({ isDirectory: () => true });
+    mockExistsSync.mockImplementation((p: string) =>
+      p.endsWith('/user-questions') ? true : false,
+    );
+    mockReadFileSync.mockReturnValue(JSON.stringify(userQuestionRequest));
+
+    let resolveAnswer:
+      | ((value: {
+          requestId: string;
+          answers: Record<string, string>;
+          answeredBy: string;
+        }) => void)
+      | undefined;
+    const pendingAnswer = new Promise<{
+      requestId: string;
+      answers: Record<string, string>;
+      answeredBy: string;
+    }>((resolve) => {
+      resolveAnswer = resolve;
+    });
+    const requestUserAnswer = vi.fn(() => pendingAnswer);
+
+    const mod = await loadIpcModule();
+    const watcherDeps: import('@core/runtime/ipc.js').IpcDeps = {
+      sendMessage: vi.fn(),
+      requestUserAnswer,
+      registeredGroups: () => ({
+        'main@g.us': {
+          name: 'Main',
+          folder: 'whatsapp_main',
+          trigger: 'always',
+          added_at: '2024-01-01',
+          isMain: true,
+        },
+      }),
+      registerGroup: vi.fn(),
+      syncGroups: vi.fn(),
+      getAvailableGroups: vi.fn(() => []),
+      writeGroupsSnapshot: vi.fn(),
+      onSchedulerChanged: vi.fn(),
+    };
+
+    mod.startIpcWatcher(watcherDeps);
+
+    await vi.waitFor(() => {
+      expect(requestUserAnswer).toHaveBeenCalledTimes(1);
+      expect(capturedSetTimeoutCallback).not.toBeNull();
+    });
+
+    const nextPoll = capturedSetTimeoutCallback;
+    expect(nextPoll).not.toBeNull();
+    nextPoll?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(requestUserAnswer).toHaveBeenCalledTimes(1);
+
+    resolveAnswer?.({
+      requestId: 'userq-pending',
+      answers: {
+        'Which env should we deploy to?': 'Staging',
+      },
+      answeredBy: 'Ravi',
+    });
+    await vi.waitFor(() => {
+      expect(
+        mockWriteFileSync.mock.calls.some(
+          (call: unknown[]) =>
+            typeof call[0] === 'string' &&
+            String(call[0]).includes('/user-answers/userq-pending.json.tmp'),
+        ),
+      ).toBe(true);
+    });
   });
 
   it('ignores symlinked IPC subdirectories', async () => {

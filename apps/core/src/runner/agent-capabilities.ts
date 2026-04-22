@@ -35,6 +35,7 @@ const DEFAULT_ALLOWED_TOOLS = [
   'Grep',
   'WebSearch',
   'WebFetch',
+  'AskUserQuestion',
   'Task',
   'TaskOutput',
   'TaskStop',

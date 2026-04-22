@@ -33,6 +33,9 @@ const runDreamingSweepMock = vi.fn(async () => ({
   topPromoted: [],
   durationMs: 1,
 }));
+const buildBriefMock = vi.fn(
+  async () => '## Memory Brief\n\nNo durable memory.',
+);
 const runMemoryCleanupInSubprocessMock = vi.hoisted(() =>
   vi.fn(async () => ({
     sweptMirrors: 0,
@@ -61,6 +64,7 @@ vi.mock('@core/memory/memory-service.js', () => ({
   MemoryService: {
     getInstance: () => ({
       runDreamingSweep: runDreamingSweepMock,
+      buildBrief: buildBriefMock,
     }),
   },
 }));

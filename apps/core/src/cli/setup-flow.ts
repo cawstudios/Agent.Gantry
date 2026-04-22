@@ -35,17 +35,29 @@ import {
   validateTelegramBotToken,
   verifyTelegramChatAccess,
 } from './telegram.js';
+import { listTelegramRecentChats } from './telegram-chat-discovery.js';
 import { runCredentialsStep } from './setup-credentials.js';
 import { runReadyStep } from './setup-ready.js';
 import { installService, startService } from './service-manager.js';
+import {
+  normalizeSlackChatJid,
+  registerSlackMainGroup,
+  validateSlackAppToken,
+  validateSlackBotToken,
+  verifySlackChatAccess,
+} from './slack.js';
+import { listSlackRecentChats } from './slack-chat-discovery.js';
 
 const FULL_SEQUENCE: OnboardingStep[] = [
   'welcome',
-  'doctor',
   'runtime_home',
+  'storage',
   'prerequisites',
-  'credentials',
+  'channel',
   'telegram',
+  'slack',
+  'credentials',
+  'model',
   'memory',
   'embeddings',
   'dreaming',
@@ -58,6 +70,7 @@ const FULL_SEQUENCE: OnboardingStep[] = [
 
 type FlowAction =
   | { type: 'next' }
+  | { type: 'start_now' }
   | { type: 'back' }
   | { type: 'resume' }
   | { type: 'cancel' }
@@ -67,17 +80,27 @@ type ServiceChoice = 'skip' | 'install' | 'install_start';
 
 interface SetupDraft {
   runtimeHome: string;
+  storageProvider: 'sqlite';
+  primaryProvider: 'telegram' | 'slack';
   credentialMode: HostCredentialMode;
   onecliUrl: string;
+  selectedModel: string;
+  claudeOauthToken: string;
+  anthropicApiKey: string;
   telegramBotToken: string;
   telegramChatJid: string;
   telegramDisplayName: string;
   telegramBotUsername: string;
+  slackBotToken: string;
+  slackAppToken: string;
+  slackChatJid: string;
+  slackDisplayName: string;
   memoryEnabled: boolean;
   embeddingsEnabled: boolean;
   dreamingEnabled: boolean;
   openAiApiKey: string;
   serviceChoice: ServiceChoice;
+  startAfterSetup: boolean;
 }
 
 export interface SetupFlowOptions {
@@ -90,11 +113,13 @@ export interface SetupFlowOptions {
 export interface SetupFlowResult {
   status: 'completed' | 'resumed' | 'cancelled';
   runtimeHome: string;
+  startAfterSetup: boolean;
 }
 
 function toAction(value: unknown): FlowAction {
   if (p.isCancel(value)) return { type: 'resume' };
   if (value === 'next') return { type: 'next' };
+  if (value === 'start_now') return { type: 'start_now' };
   if (value === 'back') return { type: 'back' };
   if (value === 'resume') return { type: 'resume' };
   if (value === 'cancel') return { type: 'cancel' };
@@ -103,6 +128,25 @@ function toAction(value: unknown): FlowAction {
     return { type: 'goto', step };
   }
   return { type: 'next' };
+}
+
+function isInputFlowControl(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized === '/back' ||
+    normalized === '/resume' ||
+    normalized === '/cancel'
+  );
+}
+
+function parseInputFlowControl(value: unknown): FlowAction | null {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (normalized === '/back') return { type: 'back' };
+  if (normalized === '/resume') return { type: 'resume' };
+  if (normalized === '/cancel') return { type: 'cancel' };
+  return null;
 }
 
 async function chooseProgressAction(options: {
@@ -144,13 +188,23 @@ function defaultStepIndex(step: OnboardingStep | undefined): number {
   return idx >= 0 ? idx : 0;
 }
 
+function shouldSkipStep(step: OnboardingStep, draft: SetupDraft): boolean {
+  if (step === 'telegram' && draft.primaryProvider !== 'telegram') return true;
+  if (step === 'slack' && draft.primaryProvider !== 'slack') return true;
+  return false;
+}
+
 function updateStateData(state: OnboardingState, draft: SetupDraft): void {
   state.data = {
     runtimeHome: draft.runtimeHome,
+    primaryProvider: draft.primaryProvider,
+    storageProvider: draft.storageProvider,
     telegramBotUsername: draft.telegramBotUsername || undefined,
     telegramChatJid: draft.telegramChatJid || undefined,
+    slackChatJid: draft.slackChatJid || undefined,
     credentialMode: draft.credentialMode,
     onecliUrl: draft.onecliUrl || undefined,
+    selectedModel: draft.selectedModel || undefined,
     memoryEnabled: draft.memoryEnabled,
     embeddingsEnabled: draft.embeddingsEnabled,
     dreamingEnabled: draft.dreamingEnabled,
@@ -173,34 +227,54 @@ function restoreDraft(
       return createDefaultRuntimeSettings();
     }
   })();
-  const savedChatJid = state?.data.telegramChatJid || '';
+  const savedTelegramChatJid = state?.data.telegramChatJid || '';
+  const savedSlackChatJid = state?.data.slackChatJid || '';
   const savedOnecliUrl = state?.data.onecliUrl || env.ONECLI_URL?.trim() || '';
+  const primaryProvider =
+    state?.data.primaryProvider ||
+    (settings.channels.slack?.enabled ? 'slack' : 'telegram');
+  const hasConfiguredChannel = Object.values(settings.channels).some(
+    (channel) => channel.enabled,
+  );
+  const defaultDreamingEnabled = hasConfiguredChannel
+    ? settings.memory.dreaming.enabled
+    : true;
   const credentialMode = resolveHostCredentialMode(
     state?.data.credentialMode || env.MYCLAW_CREDENTIAL_MODE,
     savedOnecliUrl,
   );
   return {
     runtimeHome,
+    storageProvider: 'sqlite',
+    primaryProvider,
     credentialMode,
     onecliUrl: savedOnecliUrl,
+    selectedModel:
+      state?.data.selectedModel || env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+    claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || '',
+    anthropicApiKey: env.ANTHROPIC_API_KEY || '',
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || '',
-    telegramChatJid: savedChatJid,
+    telegramChatJid: savedTelegramChatJid,
     telegramDisplayName: 'Telegram Main',
     telegramBotUsername: state?.data.telegramBotUsername || '',
+    slackBotToken: env.SLACK_BOT_TOKEN || '',
+    slackAppToken: env.SLACK_APP_TOKEN || '',
+    slackChatJid: savedSlackChatJid,
+    slackDisplayName: 'Slack Main',
     memoryEnabled: state?.data.memoryEnabled ?? settings.memory.enabled,
     embeddingsEnabled:
       state?.data.embeddingsEnabled ?? settings.memory.embeddings.enabled,
-    dreamingEnabled:
-      state?.data.dreamingEnabled ?? settings.memory.dreaming.enabled,
+    dreamingEnabled: state?.data.dreamingEnabled ?? defaultDreamingEnabled,
     openAiApiKey: env.OPENAI_API_KEY || '',
     serviceChoice: 'skip',
+    startAfterSetup: false,
   };
 }
 
 async function runWelcomeStep(): Promise<FlowAction> {
   p.note(
     [
-      'This setup will connect Telegram and prepare your MyClaw runtime home.',
+      'This setup will connect your first channel and prepare your MyClaw runtime home.',
       'You can go Back, Resume Later, or Cancel at any step.',
     ].join('\n'),
     'Welcome',
@@ -212,50 +286,16 @@ async function runWelcomeStep(): Promise<FlowAction> {
   });
 }
 
-async function runDoctorStep(
-  importMetaUrl: string,
-  runtimeHome: string,
-): Promise<FlowAction> {
-  const report = await runDoctorWithNetwork(importMetaUrl, runtimeHome);
-  p.note(formatDoctorReport(report), 'Machine Doctor');
-
-  if (!report.ok) {
-    const action = await p.select({
-      message: 'Doctor found blocking issues. What do you want to do?',
-      options: [
-        {
-          value: 'resume',
-          label: 'Resume Later (Recommended)',
-        },
-        {
-          value: 'back',
-          label: 'Back',
-        },
-        {
-          value: 'cancel',
-          label: 'Cancel Setup',
-        },
-      ],
-    });
-    return toAction(action);
-  }
-
-  return chooseProgressAction({
-    message: 'Doctor checks passed. Continue?',
-    continueLabel: 'Continue',
-    includeBack: true,
-  });
-}
-
 async function runRuntimeHomeStep(
   draft: SetupDraft,
 ): Promise<{ action: FlowAction; changedHome?: string }> {
+  const defaultRuntimeHome = draft.runtimeHome || '~/myclaw';
   const value = await p.text({
     message: 'Where should MyClaw store runtime data?',
     placeholder: '~/myclaw',
-    defaultValue: draft.runtimeHome,
+    defaultValue: defaultRuntimeHome,
     validate: (input) => {
-      if (!input || !input.trim()) {
+      if ((!input || !input.trim()) && !defaultRuntimeHome) {
         return 'Please enter a path (for example: ~/myclaw).';
       }
       return undefined;
@@ -266,7 +306,9 @@ async function runRuntimeHomeStep(
     return { action: { type: 'resume' } };
   }
 
-  const resolved = resolveRuntimeHome(String(value));
+  const resolved = resolveRuntimeHome(
+    String(value).trim() || defaultRuntimeHome,
+  );
   try {
     ensureRuntimeWritable(resolved);
   } catch (err) {
@@ -299,6 +341,49 @@ async function runRuntimeHomeStep(
   };
 }
 
+async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
+  p.note(
+    [
+      'Choose where MyClaw stores runtime state.',
+      'SQLite is the production-ready host runtime database today.',
+      'Postgres is intentionally not offered here until runtime persistence is fully provider-backed.',
+    ].join('\n'),
+    'Storage',
+  );
+
+  const provider = await p.select({
+    message: 'Choose storage backend',
+    options: [
+      {
+        value: 'sqlite',
+        label: 'SQLite (Recommended)',
+        hint: 'Zero-config local DB under runtime home.',
+      },
+      {
+        value: 'back',
+        label: 'Back',
+      },
+      {
+        value: 'resume',
+        label: 'Resume Later',
+      },
+      {
+        value: 'cancel',
+        label: 'Cancel Setup',
+      },
+    ],
+    initialValue: draft.storageProvider,
+  });
+
+  if (p.isCancel(provider)) return { type: 'resume' };
+  if (provider === 'back') return { type: 'back' };
+  if (provider === 'resume') return { type: 'resume' };
+  if (provider === 'cancel') return { type: 'cancel' };
+
+  draft.storageProvider = 'sqlite';
+  return { type: 'next' };
+}
+
 async function runPrerequisitesStep(): Promise<FlowAction> {
   p.note(
     [
@@ -309,13 +394,104 @@ async function runPrerequisitesStep(): Promise<FlowAction> {
   );
 
   return chooseProgressAction({
-    message: 'Continue to agent credential setup?',
+    message: 'Continue to provider selection?',
     continueLabel: 'Continue',
     includeBack: true,
   });
 }
 
+async function runChannelStep(draft: SetupDraft): Promise<FlowAction> {
+  const value = await p.select({
+    message: 'Choose your first channel provider',
+    options: [
+      {
+        value: 'telegram',
+        label: 'Telegram (Recommended)',
+        hint: 'Bot token from BotFather + chat auto-discovery.',
+      },
+      {
+        value: 'slack',
+        label: 'Slack',
+        hint: 'Bot token + app token + conversation auto-discovery.',
+      },
+      {
+        value: 'back',
+        label: 'Back',
+      },
+      {
+        value: 'resume',
+        label: 'Resume Later',
+      },
+      {
+        value: 'cancel',
+        label: 'Cancel Setup',
+      },
+    ],
+    initialValue: draft.primaryProvider,
+  });
+
+  if (p.isCancel(value)) return { type: 'resume' };
+  if (value === 'back') return { type: 'back' };
+  if (value === 'resume') return { type: 'resume' };
+  if (value === 'cancel') return { type: 'cancel' };
+
+  draft.primaryProvider = value === 'slack' ? 'slack' : 'telegram';
+  return { type: 'next' };
+}
+
+async function runModelStep(draft: SetupDraft): Promise<FlowAction> {
+  const value = await p.select({
+    message: 'Choose main model',
+    options: [
+      {
+        value: 'claude-sonnet-4-6',
+        label: 'Sonnet (Recommended)',
+        hint: 'Balanced speed/cost/quality.',
+      },
+      {
+        value: 'claude-opus-4-1-20250805',
+        label: 'Opus',
+        hint: 'Higher quality, slower and more expensive.',
+      },
+      {
+        value: 'back',
+        label: 'Back',
+      },
+      {
+        value: 'resume',
+        label: 'Resume Later',
+      },
+      {
+        value: 'cancel',
+        label: 'Cancel Setup',
+      },
+    ],
+    initialValue: draft.selectedModel || 'claude-sonnet-4-6',
+  });
+
+  if (p.isCancel(value)) return { type: 'resume' };
+  if (value === 'back') return { type: 'back' };
+  if (value === 'resume') return { type: 'resume' };
+  if (value === 'cancel') return { type: 'cancel' };
+  draft.selectedModel = String(value);
+  return { type: 'next' };
+}
+
 async function runTelegramStep(draft: SetupDraft): Promise<FlowAction> {
+  if (draft.primaryProvider !== 'telegram') {
+    return { type: 'next' };
+  }
+  p.note(
+    [
+      '1. Open Telegram and start a chat with @BotFather.',
+      '2. Send /newbot, choose a display name, then choose a username ending in "bot".',
+      '3. Copy the token BotFather returns and paste it here.',
+      '4. For a group: add the bot to the group, send a message in that group, then retry discovery.',
+      '5. If group discovery or message pickup is inconsistent, make the bot an admin or disable Group Privacy in BotFather with /setprivacy.',
+      'Docs: https://core.telegram.org/bots/faq',
+    ].join('\n'),
+    'Telegram bot setup',
+  );
   let token = draft.telegramBotToken;
   while (true) {
     if (token) {
@@ -356,13 +532,18 @@ async function runTelegramStep(draft: SetupDraft): Promise<FlowAction> {
 
     if (!token) {
       const entered = await p.password({
-        message: 'Paste your Telegram bot token from BotFather',
+        message:
+          'Paste your Telegram bot token from BotFather (/back, /resume, /cancel)',
         validate: (value) => {
-          if (!String(value ?? '').trim()) return 'Token is required.';
+          const trimmed = String(value ?? '').trim();
+          if (isInputFlowControl(trimmed)) return undefined;
+          if (!trimmed) return 'Token is required.';
           return undefined;
         },
       });
       if (p.isCancel(entered)) return { type: 'resume' };
+      const control = parseInputFlowControl(entered);
+      if (control) return control;
       token = String(entered).trim();
     }
 
@@ -398,23 +579,101 @@ async function runTelegramStep(draft: SetupDraft): Promise<FlowAction> {
     draft.telegramBotToken = token;
     draft.telegramBotUsername = validation.username || '';
 
-    const chatInput = await p.text({
-      message: 'Enter your Telegram chat ID',
-      placeholder: '-1001234567890',
-      defaultValue: draft.telegramChatJid.replace(/^tg:/, ''),
-      validate: (value) => {
-        if (!normalizeTelegramChatJid(String(value ?? ''))) {
-          return 'Use a numeric chat ID (for example: -1001234567890).';
-        }
-        return undefined;
-      },
+    let normalizedJid = '';
+    const discoverySpinner = p.spinner();
+    discoverySpinner.start('Looking for recent Telegram chats...');
+    const discovered = await listTelegramRecentChats({
+      token,
+      limit: 30,
     });
-    if (p.isCancel(chatInput)) return { type: 'resume' };
+    if (discovered.ok && discovered.chats.length > 0) {
+      discoverySpinner.stop(
+        `Found ${discovered.chats.length} recent Telegram chat(s).`,
+      );
+      const selected = await p.select({
+        message: 'Choose the Telegram chat for MyClaw',
+        options: [
+          ...discovered.chats.slice(0, 15).map((chat) => ({
+            value: chat.chatJid,
+            label: `${chat.chatTitle} (${chat.chatJid.replace(/^tg:/, '')})`,
+            hint: chat.chatType,
+          })),
+          {
+            value: 'manual',
+            label: 'Enter chat ID manually',
+          },
+          {
+            value: 'back',
+            label: 'Back',
+          },
+          {
+            value: 'resume',
+            label: 'Resume Later',
+          },
+          {
+            value: 'cancel',
+            label: 'Cancel Setup',
+          },
+        ],
+      });
+      if (p.isCancel(selected)) return { type: 'resume' };
+      if (selected === 'back') return { type: 'back' };
+      if (selected === 'resume') return { type: 'resume' };
+      if (selected === 'cancel') return { type: 'cancel' };
+      if (selected === 'manual') {
+        const defaultChatId = draft.telegramChatJid.replace(/^tg:/, '');
+        const chatInput = await p.text({
+          message: 'Enter your Telegram chat ID (/back, /resume, /cancel)',
+          placeholder: '-1001234567890',
+          defaultValue: defaultChatId,
+          validate: (value) => {
+            const trimmed = String(value ?? '').trim();
+            if (isInputFlowControl(trimmed)) return undefined;
+            if (!trimmed && defaultChatId) return undefined;
+            if (!normalizeTelegramChatJid(trimmed)) {
+              return 'Use a numeric chat ID (for example: -1001234567890).';
+            }
+            return undefined;
+          },
+        });
+        if (p.isCancel(chatInput)) return { type: 'resume' };
+        const control = parseInputFlowControl(chatInput);
+        if (control) return control;
+        normalizedJid =
+          normalizeTelegramChatJid(String(chatInput).trim() || defaultChatId) ||
+          '';
+      } else {
+        normalizedJid = normalizeTelegramChatJid(String(selected)) || '';
+      }
+    } else {
+      discoverySpinner.stop('No recent Telegram chat found.');
+      if (discovered.nextAction) p.log.info(discovered.nextAction);
+      const defaultChatId = draft.telegramChatJid.replace(/^tg:/, '');
+      const chatInput = await p.text({
+        message: 'Enter your Telegram chat ID (/back, /resume, /cancel)',
+        placeholder: '-1001234567890',
+        defaultValue: defaultChatId,
+        validate: (value) => {
+          const trimmed = String(value ?? '').trim();
+          if (isInputFlowControl(trimmed)) return undefined;
+          if (!trimmed && defaultChatId) return undefined;
+          if (!normalizeTelegramChatJid(trimmed)) {
+            return 'Use a numeric chat ID (for example: -1001234567890).';
+          }
+          return undefined;
+        },
+      });
+      if (p.isCancel(chatInput)) return { type: 'resume' };
+      const control = parseInputFlowControl(chatInput);
+      if (control) return control;
+      normalizedJid =
+        normalizeTelegramChatJid(String(chatInput).trim() || defaultChatId) ||
+        '';
+    }
 
-    const normalizedJid = normalizeTelegramChatJid(String(chatInput));
     if (!normalizedJid) {
       p.log.error(
-        'Invalid chat ID format. Next action: paste a numeric chat ID.',
+        'Invalid chat ID format. Next action: use a numeric Telegram chat ID.',
       );
       continue;
     }
@@ -460,16 +719,23 @@ async function runTelegramStep(draft: SetupDraft): Promise<FlowAction> {
         chatAccess.chatTitle || draft.telegramDisplayName;
     }
 
+    const defaultGroupName = draft.telegramDisplayName || 'Telegram Main';
     const groupName = await p.text({
-      message: 'Choose a name for this Telegram chat in MyClaw',
-      defaultValue: draft.telegramDisplayName || 'Telegram Main',
+      message:
+        'Choose a name for this Telegram chat in MyClaw (/back, /resume, /cancel)',
+      defaultValue: defaultGroupName,
       validate: (value) => {
-        if (!String(value ?? '').trim()) return 'Group name is required.';
+        const trimmed = String(value ?? '').trim();
+        if (isInputFlowControl(trimmed)) return undefined;
+        if (!trimmed && defaultGroupName) return undefined;
+        if (!trimmed) return 'Group name is required.';
         return undefined;
       },
     });
     if (p.isCancel(groupName)) return { type: 'resume' };
-    draft.telegramDisplayName = String(groupName).trim();
+    const groupNameControl = parseInputFlowControl(groupName);
+    if (groupNameControl) return groupNameControl;
+    draft.telegramDisplayName = String(groupName).trim() || defaultGroupName;
 
     p.note(
       [
@@ -487,11 +753,343 @@ async function runTelegramStep(draft: SetupDraft): Promise<FlowAction> {
   }
 }
 
+async function runSlackStep(draft: SetupDraft): Promise<FlowAction> {
+  if (draft.primaryProvider !== 'slack') {
+    return { type: 'next' };
+  }
+  p.note(
+    [
+      '1. Create a Slack app from app settings for the target workspace.',
+      '2. Add a bot user and bot scopes for posting, conversation discovery, and message events.',
+      '   Minimum practical scopes: chat:write, app_mentions:read, channels:read, groups:read, im:read, mpim:read, plus message history scopes for the conversation types you want MyClaw to read.',
+      '3. Enable Socket Mode and generate an app-level token with connections:write.',
+      '4. Install or reinstall the app to the workspace after scope changes.',
+      '5. Invite the app to the target channel or DM it once before discovery.',
+      'Docs: https://docs.slack.dev/apis/events-api/using-socket-mode/',
+    ].join('\n'),
+    'Slack app setup',
+  );
+
+  let botToken = draft.slackBotToken;
+  while (true) {
+    if (botToken) {
+      const tokenChoice = await p.select({
+        message: 'Slack bot token',
+        options: [
+          {
+            value: 'use_saved',
+            label: 'Use saved token (Recommended)',
+            hint: 'Reuse the token already found in this runtime home.',
+          },
+          {
+            value: 'enter_new',
+            label: 'Enter a new bot token',
+          },
+          {
+            value: 'back',
+            label: 'Back',
+          },
+          {
+            value: 'resume',
+            label: 'Resume Later',
+          },
+          {
+            value: 'cancel',
+            label: 'Cancel Setup',
+          },
+        ],
+      });
+      if (p.isCancel(tokenChoice)) return { type: 'resume' };
+      if (tokenChoice === 'back') return { type: 'back' };
+      if (tokenChoice === 'resume') return { type: 'resume' };
+      if (tokenChoice === 'cancel') return { type: 'cancel' };
+      if (tokenChoice === 'enter_new') botToken = '';
+    }
+
+    if (!botToken) {
+      const entered = await p.password({
+        message:
+          'Paste your Slack bot token (xoxb-...) (/back, /resume, /cancel)',
+        validate: (value) => {
+          const trimmed = String(value ?? '').trim();
+          if (isInputFlowControl(trimmed)) return undefined;
+          return trimmed ? undefined : 'Slack bot token is required.';
+        },
+      });
+      if (p.isCancel(entered)) return { type: 'resume' };
+      const control = parseInputFlowControl(entered);
+      if (control) return control;
+      botToken = String(entered).trim();
+    }
+
+    const botValidation = await validateSlackBotToken(botToken);
+    if (!botValidation.ok) {
+      p.note(
+        `${botValidation.message}\nNext action: ${botValidation.nextAction || 'Try again with a valid token.'}`,
+        'Bot Token Error',
+      );
+      const retryChoice = await p.select({
+        message: 'What do you want to do?',
+        options: [
+          { value: 'retry', label: 'Try token again (Recommended)' },
+          { value: 'back', label: 'Back' },
+          { value: 'resume', label: 'Resume Later' },
+          { value: 'cancel', label: 'Cancel Setup' },
+        ],
+      });
+      if (p.isCancel(retryChoice)) return { type: 'resume' };
+      if (retryChoice === 'retry') {
+        botToken = '';
+        continue;
+      }
+      if (retryChoice === 'back') return { type: 'back' };
+      if (retryChoice === 'resume') return { type: 'resume' };
+      return { type: 'cancel' };
+    }
+    draft.slackBotToken = botToken;
+    p.log.success(botValidation.message);
+
+    let appToken = draft.slackAppToken;
+    if (appToken) {
+      const appChoice = await p.select({
+        message: 'Slack app token',
+        options: [
+          {
+            value: 'use_saved',
+            label: 'Use saved token (Recommended)',
+          },
+          {
+            value: 'enter_new',
+            label: 'Enter a new app token',
+          },
+          {
+            value: 'back',
+            label: 'Back',
+          },
+          {
+            value: 'resume',
+            label: 'Resume Later',
+          },
+          {
+            value: 'cancel',
+            label: 'Cancel Setup',
+          },
+        ],
+      });
+      if (p.isCancel(appChoice)) return { type: 'resume' };
+      if (appChoice === 'back') return { type: 'back' };
+      if (appChoice === 'resume') return { type: 'resume' };
+      if (appChoice === 'cancel') return { type: 'cancel' };
+      if (appChoice === 'enter_new') appToken = '';
+    }
+
+    if (!appToken) {
+      const entered = await p.password({
+        message:
+          'Paste your Slack app token (xapp-...) for Socket Mode (/back, /resume, /cancel)',
+        validate: (value) => {
+          const trimmed = String(value ?? '').trim();
+          if (isInputFlowControl(trimmed)) return undefined;
+          return trimmed ? undefined : 'Slack app token is required.';
+        },
+      });
+      if (p.isCancel(entered)) return { type: 'resume' };
+      const control = parseInputFlowControl(entered);
+      if (control) return control;
+      appToken = String(entered).trim();
+    }
+
+    const appValidation = await validateSlackAppToken(appToken);
+    if (!appValidation.ok) {
+      p.note(
+        `${appValidation.message}\nNext action: ${appValidation.nextAction || 'Try again with a valid app token.'}`,
+        'App Token Error',
+      );
+      const retryChoice = await p.select({
+        message: 'What do you want to do?',
+        options: [
+          { value: 'retry', label: 'Try app token again (Recommended)' },
+          { value: 'back', label: 'Back' },
+          { value: 'resume', label: 'Resume Later' },
+          { value: 'cancel', label: 'Cancel Setup' },
+        ],
+      });
+      if (p.isCancel(retryChoice)) return { type: 'resume' };
+      if (retryChoice === 'retry') {
+        draft.slackAppToken = '';
+        continue;
+      }
+      if (retryChoice === 'back') return { type: 'back' };
+      if (retryChoice === 'resume') return { type: 'resume' };
+      return { type: 'cancel' };
+    }
+    draft.slackAppToken = appToken;
+    p.log.success(appValidation.message);
+
+    let normalizedJid = '';
+    const discoverySpinner = p.spinner();
+    discoverySpinner.start('Looking for accessible Slack conversations...');
+    const discovered = await listSlackRecentChats({ botToken, limit: 100 });
+    if (discovered.ok && discovered.chats.length > 0) {
+      discoverySpinner.stop(`Found ${discovered.chats.length} conversations.`);
+      const selected = await p.select({
+        message: 'Choose the Slack conversation for MyClaw',
+        options: [
+          ...discovered.chats.slice(0, 20).map((chat) => ({
+            value: chat.chatJid,
+            label: `${chat.chatTitle} (${chat.chatJid.replace(/^sl:/, '')})`,
+            hint: chat.chatType,
+          })),
+          {
+            value: 'manual',
+            label: 'Enter conversation ID manually',
+          },
+          {
+            value: 'back',
+            label: 'Back',
+          },
+          {
+            value: 'resume',
+            label: 'Resume Later',
+          },
+          {
+            value: 'cancel',
+            label: 'Cancel Setup',
+          },
+        ],
+      });
+      if (p.isCancel(selected)) return { type: 'resume' };
+      if (selected === 'back') return { type: 'back' };
+      if (selected === 'resume') return { type: 'resume' };
+      if (selected === 'cancel') return { type: 'cancel' };
+      if (selected === 'manual') {
+        const defaultChatId = draft.slackChatJid.replace(/^sl:/, '');
+        const chatInput = await p.text({
+          message: 'Enter Slack conversation ID (/back, /resume, /cancel)',
+          placeholder: 'C0123456789',
+          defaultValue: defaultChatId,
+          validate: (value) => {
+            const trimmed = String(value ?? '').trim();
+            if (isInputFlowControl(trimmed)) return undefined;
+            if (!trimmed && defaultChatId) return undefined;
+            if (!normalizeSlackChatJid(trimmed)) {
+              return 'Use a valid Slack conversation ID (C..., G..., D...).';
+            }
+            return undefined;
+          },
+        });
+        if (p.isCancel(chatInput)) return { type: 'resume' };
+        const control = parseInputFlowControl(chatInput);
+        if (control) return control;
+        normalizedJid =
+          normalizeSlackChatJid(String(chatInput).trim() || defaultChatId) ||
+          '';
+      } else {
+        normalizedJid = normalizeSlackChatJid(String(selected)) || '';
+      }
+    } else {
+      discoverySpinner.stop('No accessible Slack conversation found.');
+      if (discovered.nextAction) p.log.info(discovered.nextAction);
+      const defaultChatId = draft.slackChatJid.replace(/^sl:/, '');
+      const chatInput = await p.text({
+        message: 'Enter Slack conversation ID (/back, /resume, /cancel)',
+        placeholder: 'C0123456789',
+        defaultValue: defaultChatId,
+        validate: (value) => {
+          const trimmed = String(value ?? '').trim();
+          if (isInputFlowControl(trimmed)) return undefined;
+          if (!trimmed && defaultChatId) return undefined;
+          if (!normalizeSlackChatJid(trimmed)) {
+            return 'Use a valid Slack conversation ID (C..., G..., D...).';
+          }
+          return undefined;
+        },
+      });
+      if (p.isCancel(chatInput)) return { type: 'resume' };
+      const control = parseInputFlowControl(chatInput);
+      if (control) return control;
+      normalizedJid =
+        normalizeSlackChatJid(String(chatInput).trim() || defaultChatId) || '';
+    }
+
+    if (!normalizedJid) {
+      p.log.error(
+        'Invalid conversation ID format. Next action: use a valid Slack conversation ID.',
+      );
+      continue;
+    }
+    draft.slackChatJid = normalizedJid;
+
+    const access = await verifySlackChatAccess({
+      botToken,
+      chatJid: draft.slackChatJid,
+      sendTestMessage: true,
+    });
+    if (!access.ok) {
+      p.note(
+        `${access.message}\nNext action: ${access.nextAction || 'Fix channel access and retry.'}`,
+        'Conversation Access Error',
+      );
+      const retryChoice = await p.select({
+        message: 'What do you want to do?',
+        options: [
+          { value: 'retry', label: 'Try again (Recommended)' },
+          { value: 'back', label: 'Back' },
+          { value: 'resume', label: 'Resume Later' },
+          { value: 'cancel', label: 'Cancel Setup' },
+        ],
+      });
+      if (p.isCancel(retryChoice)) return { type: 'resume' };
+      if (retryChoice === 'retry') {
+        continue;
+      }
+      if (retryChoice === 'back') return { type: 'back' };
+      if (retryChoice === 'resume') return { type: 'resume' };
+      return { type: 'cancel' };
+    }
+    if (!draft.slackDisplayName || draft.slackDisplayName === 'Slack Main') {
+      draft.slackDisplayName = access.chatTitle || draft.slackDisplayName;
+    }
+
+    const defaultGroupName = draft.slackDisplayName || 'Slack Main';
+    const groupName = await p.text({
+      message:
+        'Choose a name for this Slack chat in MyClaw (/back, /resume, /cancel)',
+      defaultValue: defaultGroupName,
+      validate: (value) => {
+        const trimmed = String(value ?? '').trim();
+        if (isInputFlowControl(trimmed)) return undefined;
+        if (!trimmed && defaultGroupName) return undefined;
+        if (!trimmed) return 'Group name is required.';
+        return undefined;
+      },
+    });
+    if (p.isCancel(groupName)) return { type: 'resume' };
+    const groupNameControl = parseInputFlowControl(groupName);
+    if (groupNameControl) return groupNameControl;
+    draft.slackDisplayName = String(groupName).trim() || defaultGroupName;
+
+    p.note(
+      [
+        `Conversation: ${draft.slackChatJid}`,
+        `Name: ${draft.slackDisplayName}`,
+      ].join('\n'),
+      'Slack',
+    );
+    return chooseProgressAction({
+      message: 'Use these Slack settings?',
+      continueLabel: 'Continue',
+      includeBack: true,
+    });
+  }
+}
+
 async function runMemoryStep(draft: SetupDraft): Promise<FlowAction> {
   p.note(
     [
       'Memory stores durable facts, preferences, decisions, corrections, constraints, and procedures.',
       'Continuity uses that memory context to help agents resume current work and open loops instead of starting cold.',
+      'Default is enabled.',
     ].join('\n'),
     'Memory and continuity',
   );
@@ -587,15 +1185,20 @@ async function runEmbeddingsStep(draft: SetupDraft): Promise<FlowAction> {
 
   if (!draft.openAiApiKey) {
     const key = await p.password({
-      message: 'Paste your OpenAI API key for embeddings',
+      message:
+        'Paste your OpenAI API key for embeddings (/back, /resume, /cancel)',
       validate: (input) => {
-        if (!String(input ?? '').trim()) {
+        const trimmed = String(input ?? '').trim();
+        if (isInputFlowControl(trimmed)) return undefined;
+        if (!trimmed) {
           return 'OpenAI API key is required to enable embeddings.';
         }
         return undefined;
       },
     });
     if (p.isCancel(key)) return { type: 'resume' };
+    const control = parseInputFlowControl(key);
+    if (control) return control;
     draft.openAiApiKey = String(key).trim();
   }
 
@@ -603,8 +1206,18 @@ async function runEmbeddingsStep(draft: SetupDraft): Promise<FlowAction> {
 }
 
 async function runDreamingStep(draft: SetupDraft): Promise<FlowAction> {
+  if (!draft.memoryEnabled) {
+    draft.dreamingEnabled = false;
+    p.note('Dreaming is disabled because memory is currently off.', 'Dreaming');
+    return chooseProgressAction({
+      message: 'Continue?',
+      continueLabel: 'Continue',
+      includeBack: true,
+    });
+  }
+
   p.note(
-    'Dreaming runs background memory cleanup and improvement. Default is off.',
+    'Dreaming runs background memory cleanup and improvement. Default is enabled.',
     'Dreaming',
   );
 
@@ -612,12 +1225,12 @@ async function runDreamingStep(draft: SetupDraft): Promise<FlowAction> {
     message: 'Dreaming setting',
     options: [
       {
-        value: 'off',
-        label: 'Keep dreaming off (Recommended)',
+        value: 'on',
+        label: 'Keep dreaming on (Recommended)',
       },
       {
-        value: 'on',
-        label: 'Enable dreaming',
+        value: 'off',
+        label: 'Turn dreaming off',
       },
       {
         value: 'back',
@@ -651,7 +1264,14 @@ async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
     ensureRuntimeWritable(draft.runtimeHome);
     persistOnboardingConfig({
       runtimeHome: draft.runtimeHome,
+      storageProvider: draft.storageProvider,
+      primaryProvider: draft.primaryProvider,
+      claudeOauthToken: draft.claudeOauthToken || undefined,
+      anthropicApiKey: draft.anthropicApiKey || undefined,
+      anthropicModel: draft.selectedModel || undefined,
       telegramBotToken: draft.telegramBotToken,
+      slackBotToken: draft.slackBotToken,
+      slackAppToken: draft.slackAppToken,
       credentialMode: draft.credentialMode,
       onecliUrl: draft.onecliUrl || undefined,
       memoryEnabled: draft.memoryEnabled,
@@ -678,23 +1298,32 @@ async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
 
 async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
   const spinner = p.spinner();
-  spinner.start('Creating Telegram group runtime data...');
+  spinner.start('Creating channel group runtime data...');
   try {
-    const result = await registerTelegramMainGroup({
-      runtimeHome: draft.runtimeHome,
-      chatJid: draft.telegramChatJid,
-      displayName: draft.telegramDisplayName,
-    });
-    spinner.stop(`Registered ${result.groupName} (${result.folder})`);
+    if (draft.primaryProvider === 'slack') {
+      const result = await registerSlackMainGroup({
+        runtimeHome: draft.runtimeHome,
+        chatJid: draft.slackChatJid,
+        displayName: draft.slackDisplayName,
+      });
+      spinner.stop(`Registered ${result.groupName} (${result.folder})`);
+    } else {
+      const result = await registerTelegramMainGroup({
+        runtimeHome: draft.runtimeHome,
+        chatJid: draft.telegramChatJid,
+        displayName: draft.telegramDisplayName,
+      });
+      spinner.stop(`Registered ${result.groupName} (${result.folder})`);
+    }
   } catch (err) {
     spinner.stop('Group registration failed');
     const message = err instanceof Error ? err.message : String(err);
     p.log.error(
-      `Could not register Telegram group. Next action: verify chat ID and token, then retry.\n${message}`,
+      `Could not register ${draft.primaryProvider} group. Next action: verify chat access and token(s), then retry.\n${message}`,
     );
     return {
       type: 'goto',
-      step: 'telegram',
+      step: draft.primaryProvider === 'slack' ? 'slack' : 'telegram',
     };
   }
 
@@ -791,7 +1420,10 @@ async function runVerifyStep(
     p.log.warn(
       'Setup is not complete yet. Next action: connect a channel now.',
     );
-    return { type: 'goto', step: 'telegram' };
+    return {
+      type: 'goto',
+      step: draft.primaryProvider === 'slack' ? 'slack' : 'telegram',
+    };
   }
   if (!hasProcessableGroup) {
     const connectCommands = listChannelProviders().map(
@@ -800,7 +1432,10 @@ async function runVerifyStep(
     p.log.warn(
       `Setup is not complete yet. Next action: ensure one enabled channel has credentials and a registered group (${connectCommands.join(' or ')}).`,
     );
-    return { type: 'resume' };
+    return {
+      type: 'goto',
+      step: draft.primaryProvider === 'slack' ? 'slack' : 'telegram',
+    };
   }
 
   if (!report.ok) {
@@ -837,7 +1472,7 @@ export async function runSetupFlow(
   p.intro(options.title || 'MyClaw Setup');
 
   let runtimeHome = resolveRuntimeHome(options.runtimeHome);
-  let state =
+  const state =
     readOnboardingState(runtimeHome) || createInitialState(runtimeHome);
   const draft = restoreDraft(runtimeHome, state);
 
@@ -850,6 +1485,10 @@ export async function runSetupFlow(
 
   while (index < FULL_SEQUENCE.length) {
     const step = FULL_SEQUENCE[index];
+    if (shouldSkipStep(step, draft)) {
+      index += 1;
+      continue;
+    }
     state.currentStep = step;
     state.status = 'in_progress';
     updateStateData(state, draft);
@@ -859,8 +1498,6 @@ export async function runSetupFlow(
 
     if (step === 'welcome') {
       action = await runWelcomeStep();
-    } else if (step === 'doctor') {
-      action = await runDoctorStep(options.importMetaUrl, runtimeHome);
     } else if (step === 'runtime_home') {
       const result = await runRuntimeHomeStep(draft);
       action = result.action;
@@ -873,12 +1510,20 @@ export async function runSetupFlow(
           clearOnboardingState(previous);
         }
       }
+    } else if (step === 'storage') {
+      action = await runStorageStep(draft);
     } else if (step === 'prerequisites') {
       action = await runPrerequisitesStep();
+    } else if (step === 'channel') {
+      action = await runChannelStep(draft);
     } else if (step === 'credentials') {
       action = await runCredentialsStep(draft);
+    } else if (step === 'model') {
+      action = await runModelStep(draft);
     } else if (step === 'telegram') {
       action = await runTelegramStep(draft);
+    } else if (step === 'slack') {
+      action = await runSlackStep(draft);
     } else if (step === 'memory') {
       action = await runMemoryStep(draft);
     } else if (step === 'embeddings') {
@@ -900,7 +1545,7 @@ export async function runSetupFlow(
     if (action.type === 'cancel') {
       clearOnboardingState(runtimeHome);
       p.outro('Setup cancelled.');
-      return { status: 'cancelled', runtimeHome };
+      return { status: 'cancelled', runtimeHome, startAfterSetup: false };
     }
 
     if (action.type === 'resume') {
@@ -909,7 +1554,7 @@ export async function runSetupFlow(
       updateStateData(state, draft);
       persistProgress(state, runtimeHome);
       p.outro('Setup paused. Run `myclaw` or `myclaw setup` to resume.');
-      return { status: 'resumed', runtimeHome };
+      return { status: 'resumed', runtimeHome, startAfterSetup: false };
     }
 
     if (action.type === 'goto') {
@@ -918,8 +1563,18 @@ export async function runSetupFlow(
       continue;
     }
 
+    if (action.type === 'start_now') {
+      draft.startAfterSetup = true;
+      index += 1;
+      continue;
+    }
+
     if (action.type === 'back') {
-      index = Math.max(0, index - 1);
+      let previous = index - 1;
+      while (previous >= 0 && shouldSkipStep(FULL_SEQUENCE[previous], draft)) {
+        previous -= 1;
+      }
+      index = Math.max(0, previous);
       continue;
     }
 
@@ -931,5 +1586,9 @@ export async function runSetupFlow(
   updateStateData(state, draft);
   persistProgress(state, runtimeHome);
   p.outro('MyClaw is ready.');
-  return { status: 'completed', runtimeHome };
+  return {
+    status: 'completed',
+    runtimeHome,
+    startAfterSetup: draft.startAfterSetup,
+  };
 }

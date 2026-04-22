@@ -45,6 +45,41 @@ describe('runtime IPC recovery integration', () => {
     expect(harness.listIpcFiles('main', 'messages')).toHaveLength(0);
   });
 
+  it('processes canonical stale claimed message IPC files from dead processes', async () => {
+    const harness = await createHermeticRuntimeHarness();
+    activeHarnesses.push(harness);
+
+    harness.registerGroup({
+      jid: 'tg:main',
+      name: 'Main',
+      folder: 'main',
+      trigger: 'Andy',
+      isMain: true,
+      requiresTrigger: false,
+    });
+
+    harness.writeRawFile(
+      'main',
+      'messages',
+      `.processing-999999999-${Date.now() - 60_000}-abc123-message.json`,
+      JSON.stringify({
+        authToken: harness.authTokenFor('main'),
+        type: 'message',
+        chatJid: 'tg:main',
+        text: 'recovered canonical stale claimed message',
+      }),
+    );
+    harness.startIpcWatcher();
+
+    await harness.waitFor(() =>
+      harness.channel.outbound.some(
+        (message) =>
+          message.text === 'recovered canonical stale claimed message',
+      ),
+    );
+    expect(harness.listIpcFiles('main', 'messages')).toHaveLength(0);
+  });
+
   it('archives malformed runner-adjacent IPC files without blocking valid files in the same namespace', async () => {
     const harness = await createHermeticRuntimeHarness();
     activeHarnesses.push(harness);

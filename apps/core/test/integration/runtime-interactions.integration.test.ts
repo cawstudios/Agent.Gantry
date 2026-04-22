@@ -76,16 +76,20 @@ describe('runtime interactive IPC integration', () => {
     );
     const response = harness.readIpcJson<{
       requestId: string;
+      authToken?: string;
       approved: boolean;
       decidedBy?: string;
       reason?: string;
     }>('team', 'permission-responses', 'perm-001.json');
-    expect(response).toEqual({
-      requestId: 'perm-001',
-      approved: true,
-      decidedBy: 'admin-user',
-      reason: 'approved Bash',
-    });
+    expect(response).toEqual(
+      expect.objectContaining({
+        requestId: 'perm-001',
+        approved: true,
+        decidedBy: 'admin-user',
+        reason: 'approved Bash',
+        authToken: expect.any(String),
+      }),
+    );
   });
 
   it('fails permission requests closed when payloads are malformed or approval surfaces throw', async () => {
@@ -359,15 +363,19 @@ describe('runtime interactive IPC integration', () => {
     );
     const response = harness.readIpcJson<{
       approved: boolean;
+      authToken?: string;
       decidedBy?: string;
       reason?: string;
     }>('team', 'permission-responses', 'perm-denied.json');
-    expect(response).toEqual({
-      requestId: 'perm-denied',
-      approved: false,
-      decidedBy: 'security-reviewer',
-      reason: 'denied Write',
-    });
+    expect(response).toEqual(
+      expect.objectContaining({
+        requestId: 'perm-denied',
+        approved: false,
+        decidedBy: 'security-reviewer',
+        reason: 'denied Write',
+        authToken: expect.any(String),
+      }),
+    );
   });
 
   it('[BUG-TEST-002-PERM-DUP] does not overwrite a permission decision when a duplicate request id arrives later', async () => {

@@ -1829,6 +1829,151 @@ describe('TelegramChannel', () => {
       expect(decision.decidedBy).toBe('Admin');
     });
 
+    it('resolves deny with note from ForceReply text', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const decisionPromise = channel.requestPermissionApproval(
+        'tg:100200300',
+        {
+          requestId: 'perm-note',
+          sourceGroup: 'whatsapp_main',
+          toolName: 'Bash',
+        },
+      );
+      await flushPromises();
+
+      await triggerCallbackQuery({
+        callbackQuery: { data: 'perm:note:perm-note' },
+        chat: { id: 100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+
+      await triggerTextMessage(
+        createTextCtx({
+          text: 'Command touches production.',
+          fromId: 12345,
+          firstName: 'Ravi',
+          reply_to_message: { message_id: 987 },
+        }),
+      );
+
+      await expect(decisionPromise).resolves.toEqual({
+        approved: false,
+        decidedBy: 'Ravi',
+        reason: 'Command touches production.',
+      });
+    });
+
+    it('resolves permission suggestions as session-scoped updates', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const decisionPromise = channel.requestPermissionApproval(
+        'tg:100200300',
+        {
+          requestId: 'perm-suggest',
+          sourceGroup: 'whatsapp_main',
+          toolName: 'Bash',
+          suggestions: [
+            {
+              type: 'addRules',
+              rules: [{ toolName: 'Bash', ruleContent: 'npm test' }],
+              behavior: 'allow',
+              destination: 'projectSettings',
+            },
+          ],
+        },
+      );
+      await flushPromises();
+
+      await triggerCallbackQuery({
+        callbackQuery: { data: 'perm:suggest:perm-suggest:0' },
+        chat: { id: 100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+
+      await expect(decisionPromise).resolves.toEqual({
+        approved: true,
+        decidedBy: 'Ravi',
+        reason: 'approved similar tools for this session via Telegram',
+        updatedPermissions: [
+          {
+            type: 'addRules',
+            rules: [{ toolName: 'Bash', ruleContent: 'npm test' }],
+            behavior: 'allow',
+            destination: 'session',
+          },
+        ],
+      });
+    });
+
+    it('rejects permission suggestion callbacks outside the rendered range', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const suggestions = Array.from({ length: 5 }, (_, index) => ({
+        type: 'addRules' as const,
+        rules: [
+          {
+            toolName: 'Bash',
+            ruleContent: `npm run check:${index}`,
+          },
+        ],
+        behavior: 'allow' as const,
+        destination: 'projectSettings' as const,
+      }));
+
+      const decisionPromise = channel.requestPermissionApproval(
+        'tg:100200300',
+        {
+          requestId: 'perm-hidden-suggest',
+          sourceGroup: 'whatsapp_main',
+          toolName: 'Bash',
+          suggestions,
+        },
+      );
+      await flushPromises();
+
+      const hiddenCtx = {
+        callbackQuery: { data: 'perm:suggest:perm-hidden-suggest:4' },
+        chat: { id: 100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      };
+      await triggerCallbackQuery(hiddenCtx);
+      expect(hiddenCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: 'Invalid permission suggestion.',
+        show_alert: true,
+      });
+
+      await triggerCallbackQuery({
+        callbackQuery: { data: 'perm:suggest:perm-hidden-suggest:3' },
+        chat: { id: 100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+
+      await expect(decisionPromise).resolves.toEqual({
+        approved: true,
+        decidedBy: 'Ravi',
+        reason: 'approved similar tools for this session via Telegram',
+        updatedPermissions: [
+          {
+            type: 'addRules',
+            rules: [{ toolName: 'Bash', ruleContent: 'npm run check:3' }],
+            behavior: 'allow',
+            destination: 'session',
+          },
+        ],
+      });
+    });
+
     it('auto-denies approval request after timeout', async () => {
       vi.useFakeTimers();
       try {
@@ -1962,6 +2107,106 @@ describe('TelegramChannel', () => {
       expect(callbackCtx.answerCallbackQuery).toHaveBeenCalledWith({
         text: 'Saved.',
       });
+    });
+
+    it('resolves Other answers from ForceReply text', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const responsePromise = channel.requestUserAnswer('tg:100200300', {
+        requestId: 'userq-other',
+        sourceGroup: 'whatsapp_main',
+        questions: [
+          {
+            question: 'Which environment should we deploy to?',
+            header: 'Deploy',
+            options: [
+              { label: 'Staging', description: 'Safer first' },
+              { label: 'Production', description: 'Go live now' },
+            ],
+            multiSelect: false,
+          },
+        ],
+      });
+      await flushPromises();
+
+      const callbackCtx = {
+        callbackQuery: { data: 'userq:other:userq-other:0' },
+        chat: { id: 100200300 },
+        from: { id: 222, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      };
+      await triggerCallbackQuery(callbackCtx);
+
+      await triggerTextMessage(
+        createTextCtx({
+          text: 'Canary',
+          fromId: 222,
+          firstName: 'Ravi',
+          reply_to_message: { message_id: 987 },
+        }),
+      );
+
+      const response = await responsePromise;
+      expect(response).toEqual({
+        requestId: 'userq-other',
+        answers: {
+          'Which environment should we deploy to?': 'Canary',
+        },
+        answeredBy: 'Ravi',
+      });
+      expect(callbackCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: 'Reply with your answer.',
+      });
+    });
+
+    it('rejects unauthorized question callbacks and keeps the prompt pending', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+      currentBot()
+        .api.getChatMember.mockResolvedValueOnce({ status: 'member' })
+        .mockResolvedValueOnce({ status: 'administrator' });
+
+      const responsePromise = channel.requestUserAnswer('tg:100200300', {
+        requestId: 'userq-auth',
+        sourceGroup: 'whatsapp_main',
+        questions: [
+          {
+            question: 'Where should we deploy?',
+            header: 'Deploy',
+            options: [
+              { label: 'Staging', description: 'Safer first' },
+              { label: 'Production', description: 'Go live now' },
+            ],
+            multiSelect: false,
+          },
+        ],
+      });
+      await flushPromises();
+
+      const deniedCtx = {
+        callbackQuery: { data: 'userq:select:userq-auth:0:1' },
+        chat: { id: 100200300 },
+        from: { id: 333, first_name: 'Visitor' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      };
+      await triggerCallbackQuery(deniedCtx);
+      expect(deniedCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: 'Only approved admins can answer this question.',
+        show_alert: true,
+      });
+
+      await triggerCallbackQuery({
+        callbackQuery: { data: 'userq:select:userq-auth:0:0' },
+        chat: { id: 100200300 },
+        from: { id: 444, first_name: 'Admin' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const response = await responsePromise;
+      expect(response.answers['Where should we deploy?']).toBe('Staging');
     });
 
     it('resolves multi-select question when Done is pressed', async () => {

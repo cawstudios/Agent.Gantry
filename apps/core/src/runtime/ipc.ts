@@ -4,6 +4,7 @@ import path from 'path';
 import { DATA_DIR, IPC_POLL_INTERVAL } from '../core/config.js';
 import { nowIso, nowMs } from '../core/datetime.js';
 import { isPlainObject, toTrimmedString } from '../core/object.js';
+import { sanitizePermissionUpdates } from '../core/permission-updates.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import { logger } from '../core/logger.js';
 import { IPC_GROUP_SUBDIRS } from './agent-spawn-layout.js';
@@ -22,7 +23,7 @@ import {
   RegisteredGroup,
   UserQuestionRequest,
 } from '../core/types.js';
-import { validateIpcAuthToken } from './ipc-auth.js';
+import { computeIpcAuthToken, validateIpcAuthToken } from './ipc-auth.js';
 import {
   processBrowserIpcRequest,
   writeBrowserIpcResponse,
@@ -50,6 +51,9 @@ const PERMISSION_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const BROWSER_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const USER_QUESTION_IPC_REQUEST_ID_PATTERN =
   /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const PROCESSING_IPC_FILE_STALE_MS = 30_000;
+const PROCESSING_IPC_FILE_PATTERN =
+  /^\.processing-(\d+)-(\d+)-[a-z0-9]+-.+\.json$/;
 const ipcRateLimitState = new Map<
   string,
   { windowStart: number; count: number }
@@ -151,6 +155,29 @@ function isTrustedDirectory(dirPath: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isPendingIpcJsonFile(
+  filename: string,
+  opts: { recoverCurrentProcessStale?: boolean } = {},
+): boolean {
+  if (!filename.endsWith('.json')) return false;
+  if (!filename.startsWith('.processing-')) return true;
+
+  const match = PROCESSING_IPC_FILE_PATTERN.exec(filename);
+  if (!match) return true;
+
+  const ownerPid = Number.parseInt(match[1], 10);
+  const claimedAt = Number.parseInt(match[2], 10);
+  if (ownerPid !== process.pid) return true;
+  if (opts.recoverCurrentProcessStale === false) return false;
+  return nowMs() - claimedAt >= PROCESSING_IPC_FILE_STALE_MS;
+}
+
+function isPendingUserQuestionIpcJsonFile(filename: string): boolean {
+  return isPendingIpcJsonFile(filename, {
+    recoverCurrentProcessStale: false,
+  });
 }
 
 function ensureGroupIpcLayout(ipcBaseDir: string, groupFolder: string): void {
@@ -581,6 +608,7 @@ function parsePermissionIpcRequest(
   const decisionReason = toTrimmedString(raw.decisionReason, { maxLen: 2000 });
   const blockedPath = toTrimmedString(raw.blockedPath, { maxLen: 2048 });
   const toolInput = sanitizeToolInput(raw.toolInput);
+  const suggestions = sanitizePermissionUpdates(raw.suggestions);
 
   return {
     requestId,
@@ -592,6 +620,7 @@ function parsePermissionIpcRequest(
     ...(decisionReason ? { decisionReason } : {}),
     ...(blockedPath ? { blockedPath } : {}),
     ...(toolInput ? { toolInput } : {}),
+    ...(suggestions ? { suggestions } : {}),
   };
 }
 
@@ -894,7 +923,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         if (isTrustedDirectory(messagesDir)) {
           const messageFiles = fs
             .readdirSync(messagesDir)
-            .filter((f) => f.endsWith('.json'));
+            .filter((file) => isPendingIpcJsonFile(file));
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             let claimedPath = filePath;
@@ -949,7 +978,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         if (isTrustedDirectory(tasksDir)) {
           const taskFiles = fs
             .readdirSync(tasksDir)
-            .filter((f) => f.endsWith('.json'));
+            .filter((file) => isPendingIpcJsonFile(file));
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
             let claimedPath = filePath;
@@ -998,7 +1027,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         if (isTrustedDirectory(memoryRequestsDir)) {
           const memoryFiles = fs
             .readdirSync(memoryRequestsDir)
-            .filter((f) => f.endsWith('.json'));
+            .filter((file) => isPendingIpcJsonFile(file));
           for (const file of memoryFiles) {
             const filePath = path.join(memoryRequestsDir, file);
             let claimedPath = filePath;
@@ -1049,7 +1078,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         if (isTrustedDirectory(browserRequestsDir)) {
           const browserFiles = fs
             .readdirSync(browserRequestsDir)
-            .filter((f) => f.endsWith('.json'));
+            .filter((file) => isPendingIpcJsonFile(file));
           for (const file of browserFiles) {
             const filePath = path.join(browserRequestsDir, file);
             let claimedPath = filePath;
@@ -1115,7 +1144,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         if (isTrustedDirectory(permissionRequestsDir)) {
           const permissionFiles = fs
             .readdirSync(permissionRequestsDir)
-            .filter((f) => f.endsWith('.json'));
+            .filter((file) => isPendingIpcJsonFile(file));
           for (const file of permissionFiles) {
             const filePath = path.join(permissionRequestsDir, file);
             let claimedPath = filePath;
@@ -1138,9 +1167,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
               });
               writePermissionIpcResponse(ipcBaseDir, sourceGroup, {
                 requestId,
+                authToken: computeIpcAuthToken(sourceGroup),
                 approved: decision.approved,
                 decidedBy: decision.decidedBy,
                 reason: decision.reason,
+                updatedPermissions: decision.updatedPermissions,
               });
               fs.unlinkSync(claimedPath);
             } catch (err) {
@@ -1148,6 +1179,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 try {
                   writePermissionIpcResponse(ipcBaseDir, sourceGroup, {
                     requestId,
+                    authToken: computeIpcAuthToken(sourceGroup),
                     approved: false,
                     reason: 'Failed to process permission request',
                   });
@@ -1183,7 +1215,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         if (isTrustedDirectory(userQuestionRequestsDir)) {
           const questionFiles = fs
             .readdirSync(userQuestionRequestsDir)
-            .filter((f) => f.endsWith('.json'));
+            .filter(isPendingUserQuestionIpcJsonFile);
           for (const file of questionFiles) {
             const filePath = path.join(userQuestionRequestsDir, file);
             let claimedPath = filePath;
@@ -1201,20 +1233,60 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 sourceGroup,
               );
               requestId = request.requestId;
-              const response = await processUserQuestionIpcRequest(request, {
-                requestUserAnswer: deps.requestUserAnswer,
-              });
-              writeUserQuestionIpcResponse(ipcBaseDir, sourceGroup, {
-                requestId,
-                answers: response.answers || {},
-                answeredBy: response.answeredBy,
-              });
-              fs.unlinkSync(claimedPath);
+              void (async () => {
+                try {
+                  const response = await processUserQuestionIpcRequest(
+                    request,
+                    {
+                      requestUserAnswer: deps.requestUserAnswer,
+                    },
+                  );
+                  writeUserQuestionIpcResponse(ipcBaseDir, sourceGroup, {
+                    requestId,
+                    authToken: computeIpcAuthToken(sourceGroup),
+                    answers: response.answers || {},
+                    answeredBy: response.answeredBy,
+                  });
+                } catch (err) {
+                  try {
+                    writeUserQuestionIpcResponse(ipcBaseDir, sourceGroup, {
+                      requestId,
+                      authToken: computeIpcAuthToken(sourceGroup),
+                      answers: {},
+                    });
+                  } catch (writeErr) {
+                    logger.warn(
+                      { sourceGroup, requestId, err: writeErr },
+                      'Failed to write user question IPC fallback response',
+                    );
+                  }
+                  logger.error(
+                    { file, sourceGroup, err },
+                    'Error processing user question IPC request',
+                  );
+                  archiveIpcErrorFile(
+                    ipcBaseDir,
+                    sourceGroup,
+                    file,
+                    claimedPath,
+                  );
+                  return;
+                }
+                try {
+                  fs.unlinkSync(claimedPath);
+                } catch (unlinkErr) {
+                  logger.warn(
+                    { sourceGroup, requestId, err: unlinkErr },
+                    'Failed to remove processed user question IPC file',
+                  );
+                }
+              })();
             } catch (err) {
               if (requestId) {
                 try {
                   writeUserQuestionIpcResponse(ipcBaseDir, sourceGroup, {
                     requestId,
+                    authToken: computeIpcAuthToken(sourceGroup),
                     answers: {},
                   });
                 } catch (writeErr) {

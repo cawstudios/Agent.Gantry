@@ -34,9 +34,17 @@ function toTrimmedString(
   return trimmed;
 }
 
+function protectResponseDirectory(dirPath: string): void {
+  try {
+    fs.chmodSync(dirPath, 0o700);
+  } catch {
+    // Best effort hardening only.
+  }
+}
+
 function protectTerminalResponseFile(filePath: string): void {
   try {
-    fs.chmodSync(filePath, 0o444);
+    fs.chmodSync(filePath, 0o400);
   } catch {
     // Best effort hardening only.
   }
@@ -45,14 +53,18 @@ function protectTerminalResponseFile(filePath: string): void {
 export function writePermissionIpcResponse(
   ipcBaseDir: string,
   sourceGroup: string,
-  decision: PermissionApprovalDecision & { requestId: string },
+  decision: PermissionApprovalDecision & {
+    requestId: string;
+    authToken?: string;
+  },
 ): void {
   const responseDir = path.join(
     ipcBaseDir,
     sourceGroup,
     'permission-responses',
   );
-  fs.mkdirSync(responseDir, { recursive: true });
+  fs.mkdirSync(responseDir, { recursive: true, mode: 0o700 });
+  protectResponseDirectory(responseDir);
   const responsePath = path.join(responseDir, `${decision.requestId}.json`);
   if (fs.existsSync(responsePath)) return;
   const tmpPath = `${responsePath}.tmp`;
@@ -61,9 +73,14 @@ export function writePermissionIpcResponse(
     JSON.stringify(
       {
         requestId: decision.requestId,
+        ...(decision.authToken ? { authToken: decision.authToken } : {}),
         approved: decision.approved,
         ...(decision.decidedBy ? { decidedBy: decision.decidedBy } : {}),
         ...(decision.reason ? { reason: decision.reason } : {}),
+        ...(decision.updatedPermissions &&
+        decision.updatedPermissions.length > 0
+          ? { updatedPermissions: decision.updatedPermissions }
+          : {}),
       },
       null,
       2,
@@ -80,10 +97,11 @@ export function writePermissionIpcResponse(
 export function writeUserQuestionIpcResponse(
   ipcBaseDir: string,
   sourceGroup: string,
-  response: UserQuestionResponse,
+  response: UserQuestionResponse & { authToken?: string },
 ): void {
   const responseDir = path.join(ipcBaseDir, sourceGroup, 'user-answers');
-  fs.mkdirSync(responseDir, { recursive: true });
+  fs.mkdirSync(responseDir, { recursive: true, mode: 0o700 });
+  protectResponseDirectory(responseDir);
   const responsePath = path.join(responseDir, `${response.requestId}.json`);
   if (fs.existsSync(responsePath)) return;
   const tmpPath = `${responsePath}.tmp`;
@@ -108,6 +126,7 @@ export function writeUserQuestionIpcResponse(
     JSON.stringify(
       {
         requestId: response.requestId,
+        ...(response.authToken ? { authToken: response.authToken } : {}),
         answers: safeAnswers,
         ...(response.answeredBy ? { answeredBy: response.answeredBy } : {}),
       },

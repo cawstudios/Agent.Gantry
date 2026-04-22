@@ -100,6 +100,7 @@ describe('ipc-interaction-handler', () => {
       approved: false,
       reason: 'denied',
     });
+    expect(fs.statSync(responsePath).mode & 0o777).toBe(0o400);
   });
 
   it('sanitizes user answer keys and values when writing responses', () => {
@@ -125,5 +126,6 @@ describe('ipc-interaction-handler', () => {
       },
       answeredBy: 'user',
     });
+    expect(fs.statSync(responsePath).mode & 0o777).toBe(0o400);
   });
 });

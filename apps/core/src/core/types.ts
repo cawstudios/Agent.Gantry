@@ -149,13 +149,54 @@ export interface PermissionApprovalRequest {
   decisionReason?: string;
   blockedPath?: string;
   toolInput?: Record<string, unknown>;
+  suggestions?: PermissionApprovalSuggestion[];
 }
 
 export interface PermissionApprovalDecision {
   approved: boolean;
   decidedBy?: string;
   reason?: string;
+  updatedPermissions?: PermissionApprovalSuggestion[];
 }
+
+export type PermissionApprovalSuggestion =
+  | {
+      type: 'addRules' | 'replaceRules' | 'removeRules';
+      rules: Array<{ toolName: string; ruleContent?: string }>;
+      behavior: 'allow' | 'deny' | 'ask';
+      destination:
+        | 'userSettings'
+        | 'projectSettings'
+        | 'localSettings'
+        | 'session'
+        | 'cliArg';
+    }
+  | {
+      type: 'setMode';
+      mode:
+        | 'default'
+        | 'acceptEdits'
+        | 'bypassPermissions'
+        | 'plan'
+        | 'dontAsk'
+        | 'auto';
+      destination:
+        | 'userSettings'
+        | 'projectSettings'
+        | 'localSettings'
+        | 'session'
+        | 'cliArg';
+    }
+  | {
+      type: 'addDirectories' | 'removeDirectories';
+      directories: string[];
+      destination:
+        | 'userSettings'
+        | 'projectSettings'
+        | 'localSettings'
+        | 'session'
+        | 'cliArg';
+    };
 
 export interface UserQuestionOption {
   label: string;

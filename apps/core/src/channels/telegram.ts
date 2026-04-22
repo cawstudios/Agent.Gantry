@@ -13,6 +13,7 @@ import {
   TELEGRAM_PERMISSION_APPROVER_IDS,
   TRIGGER_PATTERN,
 } from '../core/config.js';
+import { sanitizePermissionUpdate } from '../core/permission-updates.js';
 import { resolveGroupFolderPath } from '../platform/group-folder.js';
 import { logger } from '../core/logger.js';
 import { ChannelAdapter, ChannelOpts } from './channel-provider.js';
@@ -26,19 +27,24 @@ import {
   UserQuestionResponse,
 } from '../core/types.js';
 import { parseTextStyles } from '../text-styles.js';
+import {
+  buildUserQuestionKeyboard,
+  formatPermissionPromptText,
+  formatPermissionSuggestionButton,
+  formatUserQuestionPromptText,
+  pendingReplyKey,
+  pendingUserQuestionKey,
+  TELEGRAM_PERMISSION_CALLBACK_PATTERN,
+  TELEGRAM_USER_QUESTION_CALLBACK_PATTERN,
+} from './telegram-interaction-format.js';
 
 const TELEGRAM_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
 const TELEGRAM_DRAFT_MAX_LENGTH = 4096;
 const TELEGRAM_STREAM_CHUNK_MAX_LENGTH = 3500;
 const TELEGRAM_GROUP_EDIT_INTERVAL_MS = 900;
-const TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES = 56;
 // Keep question timeout aligned with permission approvals for now.
 // This can be split into a separate config knob later if UX needs diverge.
 const TELEGRAM_USER_QUESTION_TIMEOUT_MS = PERMISSION_APPROVAL_TIMEOUT_MS;
-const TELEGRAM_PERMISSION_CALLBACK_PATTERN =
-  /^perm:(approve|deny):([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$/;
-const TELEGRAM_USER_QUESTION_CALLBACK_PATTERN =
-  /^userq:(select|done):([a-zA-Z0-9][a-zA-Z0-9._-]{0,127}):(\d+)(?::(\d+))?$/;
 
 type TelegramContext = StreamFlavor<Context>;
 type TelegramStreamApi = ReturnType<typeof streamApi>;
@@ -72,6 +78,7 @@ type PendingUserQuestionState = {
   questionText: string;
   promptText: string;
   optionLabels: string[];
+  options: UserQuestionRequest['questions'][number]['options'];
   multiSelect: boolean;
   selectedOptionIndexes: Set<number>;
   chatId: string;
@@ -82,6 +89,15 @@ type PendingUserQuestionState = {
     answeredBy?: string;
   }) => void;
 };
+type PendingReplyState =
+  | {
+      kind: 'user-question-other';
+      key: string;
+    }
+  | {
+      kind: 'permission-note';
+      requestId: string;
+    };
 
 function escapeTelegramMarkdownV2Plain(text: string): string {
   return text.replace(/[\[\]()`>#+\-=|{}.!\\]/g, '\\$&');
@@ -155,20 +171,6 @@ function splitTelegramDraftChunks(text: string): string[] {
 function truncateText(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
   return `${text.slice(0, maxLen)}...`;
-}
-
-function truncateUtf8ToByteLimit(text: string, maxBytes: number): string {
-  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
-  const suffix = '...';
-  const suffixBytes = Buffer.byteLength(suffix, 'utf8');
-  if (maxBytes <= suffixBytes) return suffix.slice(0, maxBytes);
-  let out = '';
-  for (const char of text) {
-    const next = out + char;
-    if (Buffer.byteLength(next, 'utf8') + suffixBytes > maxBytes) break;
-    out = next;
-  }
-  return `${out}${suffix}`;
 }
 
 function stripInternalTagsPreserveWhitespace(text: string): string {
@@ -294,11 +296,13 @@ export class TelegramChannel implements ChannelAdapter {
     {
       chatId: string;
       messageId: number;
+      suggestions: NonNullable<PermissionApprovalRequest['suggestions']>;
       timer: ReturnType<typeof setTimeout>;
       resolve: (decision: PermissionApprovalDecision) => void;
     }
   >();
   private pendingUserQuestions = new Map<string, PendingUserQuestionState>();
+  private pendingReplyPrompts = new Map<string, PendingReplyState>();
   private activeDraftStreams = new Map<string, ActiveDraftStreamState>();
   private activeGroupStreams = new Map<string, ActiveGroupStreamState>();
   private streamGenerationByJid = new Map<string, number>();
@@ -719,141 +723,19 @@ export class TelegramChannel implements ChannelAdapter {
     }, retryDelayMs);
   }
 
-  private formatPermissionPromptText(
-    request: PermissionApprovalRequest,
-    timeoutMs: number,
-  ): string {
-    const timeoutMinutes = Math.max(1, Math.round(timeoutMs / 60000));
-    const lines = [
-      `Permission request: ${request.requestId}`,
-      `Tool: ${request.displayName || request.toolName}`,
-      `Source: ${request.sourceGroup}`,
-    ];
-    if (request.title) lines.push(`Action: ${request.title}`);
-    if (request.blockedPath) lines.push(`Path: ${request.blockedPath}`);
-    if (request.decisionReason) lines.push(`Reason: ${request.decisionReason}`);
-    if (request.description) lines.push(`Details: ${request.description}`);
-    lines.push(...this.formatPermissionToolInputLines(request));
-    lines.push(`Reply timeout: ${timeoutMinutes} minute(s)`);
-    return lines.join('\n');
-  }
-
-  private formatPermissionToolInputLines(
-    request: PermissionApprovalRequest,
-  ): string[] {
-    if (!request.toolInput || typeof request.toolInput !== 'object') return [];
-    const input = request.toolInput;
-    if (
-      request.toolName === 'Bash' &&
-      typeof input.command === 'string' &&
-      input.command.trim()
-    ) {
-      return [`Command: \`${truncateText(input.command.trim(), 300)}\``];
-    }
-    if (request.toolName === 'Edit' || request.toolName === 'Write') {
-      const lines: string[] = [];
-      if (typeof input.file_path === 'string' && input.file_path.trim()) {
-        lines.push(`File: ${truncateText(input.file_path.trim(), 250)}`);
+  private clearPendingReplyPromptsForParent(parent: PendingReplyState): void {
+    for (const [replyKey, pendingReply] of this.pendingReplyPrompts.entries()) {
+      if (
+        (parent.kind === 'user-question-other' &&
+          pendingReply.kind === 'user-question-other' &&
+          pendingReply.key === parent.key) ||
+        (parent.kind === 'permission-note' &&
+          pendingReply.kind === 'permission-note' &&
+          pendingReply.requestId === parent.requestId)
+      ) {
+        this.pendingReplyPrompts.delete(replyKey);
       }
-      if (typeof input.old_string === 'string' && input.old_string.trim()) {
-        lines.push(`Replacing: ${truncateText(input.old_string.trim(), 150)}`);
-      }
-      if (typeof input.new_string === 'string' && input.new_string.trim()) {
-        lines.push(`With: ${truncateText(input.new_string.trim(), 150)}`);
-      }
-      if (lines.length > 0) return lines;
     }
-    try {
-      return [`Input: ${truncateText(JSON.stringify(input), 300)}`];
-    } catch {
-      return ['Input: [unserializable]'];
-    }
-  }
-
-  private pendingUserQuestionKey(
-    requestId: string,
-    questionIndex: number,
-  ): string {
-    return `${requestId}:${questionIndex}`;
-  }
-
-  private formatUserQuestionPromptText(
-    question: UserQuestionRequest['questions'][number],
-    timeoutMs: number,
-  ): string {
-    const timeoutMinutes = Math.max(1, Math.round(timeoutMs / 60000));
-    const lines = [`❓ ${question.header}`, question.question, ''];
-    question.options.forEach((option, optionIndex) => {
-      const description = option.description
-        ? ` — ${truncateText(option.description, 180)}`
-        : '';
-      lines.push(`${optionIndex + 1}. ${option.label}${description}`);
-      if (option.preview) {
-        lines.push(`  Preview: ${truncateText(option.preview, 180)}`);
-      }
-    });
-    lines.push('');
-    if (question.multiSelect) {
-      lines.push('Select one or more options, then tap Done.');
-    } else {
-      lines.push('Select one option.');
-    }
-    lines.push(`Reply timeout: ${timeoutMinutes} minute(s)`);
-    return lines.join('\n');
-  }
-
-  private formatUserQuestionButtonLabel(
-    optionLabel: string,
-    optionIndex: number,
-    multiSelect: boolean,
-    isSelected: boolean,
-  ): string {
-    const ordinal = `${optionIndex + 1}. `;
-    const selectedPrefix = multiSelect && isSelected ? '✅ ' : '';
-    const prefix = `${selectedPrefix}${ordinal}`;
-    const availableBytes = Math.max(
-      8,
-      TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES - Buffer.byteLength(prefix, 'utf8'),
-    );
-    const trimmedLabel = optionLabel.trim() || `Option ${optionIndex + 1}`;
-    const safeLabel = truncateUtf8ToByteLimit(trimmedLabel, availableBytes);
-    return `${prefix}${safeLabel}`;
-  }
-
-  private buildUserQuestionKeyboard(
-    requestId: string,
-    questionIndex: number,
-    question: UserQuestionRequest['questions'][number],
-    selectedOptionIndexes: Set<number>,
-  ): {
-    inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
-  } {
-    const inline_keyboard: Array<
-      Array<{ text: string; callback_data: string }>
-    > = question.options.map((option, optionIndex) => {
-      const isSelected = selectedOptionIndexes.has(optionIndex);
-      return [
-        {
-          text: this.formatUserQuestionButtonLabel(
-            option.label,
-            optionIndex,
-            question.multiSelect,
-            isSelected,
-          ),
-          callback_data: `userq:select:${requestId}:${questionIndex}:${optionIndex}`,
-        },
-      ];
-    });
-    if (question.multiSelect) {
-      const selectedCount = selectedOptionIndexes.size;
-      inline_keyboard.push([
-        {
-          text: selectedCount > 0 ? `Done (${selectedCount})` : 'Done',
-          callback_data: `userq:done:${requestId}:${questionIndex}`,
-        },
-      ]);
-    }
-    return { inline_keyboard };
   }
 
   private async isTelegramApproverAuthorized(
@@ -887,6 +769,10 @@ export class TelegramChannel implements ChannelAdapter {
     const pending = this.pendingPermissionPrompts.get(requestId);
     if (!pending || !this.bot) return;
     this.pendingPermissionPrompts.delete(requestId);
+    this.clearPendingReplyPromptsForParent({
+      kind: 'permission-note',
+      requestId,
+    });
     clearTimeout(pending.timer);
     pending.resolve(decision);
 
@@ -921,16 +807,13 @@ export class TelegramChannel implements ChannelAdapter {
         pending.messageId,
         pending.promptText,
         {
-          reply_markup: this.buildUserQuestionKeyboard(
+          reply_markup: buildUserQuestionKeyboard(
             pending.requestId,
             pending.questionIndex,
             {
               question: pending.questionText,
               header: pending.questionHeader,
-              options: pending.optionLabels.map((label) => ({
-                label,
-                description: '',
-              })),
+              options: pending.options,
               multiSelect: pending.multiSelect,
             },
             pending.selectedOptionIndexes,
@@ -956,8 +839,12 @@ export class TelegramChannel implements ChannelAdapter {
     reason?: string,
   ): Promise<void> {
     this.pendingUserQuestions.delete(
-      this.pendingUserQuestionKey(pending.requestId, pending.questionIndex),
+      pendingUserQuestionKey(pending.requestId, pending.questionIndex),
     );
+    this.clearPendingReplyPromptsForParent({
+      kind: 'user-question-other',
+      key: pendingUserQuestionKey(pending.requestId, pending.questionIndex),
+    });
     clearTimeout(pending.timer);
     pending.resolve({ selected: selection, answeredBy });
 
@@ -967,7 +854,7 @@ export class TelegramChannel implements ChannelAdapter {
       : selection;
     const status = reason || 'answered';
     const actor = answeredBy ? ` by ${answeredBy}` : '';
-    const text = `❓ ${pending.questionHeader}\n${pending.questionText}\n\nAnswer: ${selectionText || '[none]'}\nStatus: ${status}${actor}`;
+    const text = `? ${pending.questionHeader}\n${pending.questionText}\n\nAnswer: ${selectionText || '[none]'}\nStatus: ${status}${actor}`;
     try {
       await this.bot.api.editMessageText(
         pending.chatId,
@@ -987,6 +874,70 @@ export class TelegramChannel implements ChannelAdapter {
         'Failed to finalize Telegram user question prompt',
       );
     }
+  }
+
+  private async handlePendingReply(ctx: any): Promise<boolean> {
+    const replyToMessageId = ctx.message?.reply_to_message?.message_id;
+    if (!replyToMessageId) return false;
+    const chatId = ctx.chat?.id?.toString() || '';
+    const pendingReply = this.pendingReplyPrompts.get(
+      pendingReplyKey(chatId, Number(replyToMessageId)),
+    );
+    if (!pendingReply) return false;
+
+    const userId = ctx.from?.id?.toString() || '';
+    const authorized =
+      userId && (await this.isTelegramApproverAuthorized(chatId, userId));
+    if (!authorized) {
+      await ctx.reply('Only approved admins can answer this prompt.');
+      return true;
+    }
+
+    const answer =
+      typeof ctx.message?.text === 'string' ? ctx.message.text : '';
+    const trimmedAnswer = truncateText(answer.trim(), 1000);
+    if (!trimmedAnswer) {
+      await ctx.reply('Empty replies are ignored.');
+      return true;
+    }
+
+    this.pendingReplyPrompts.delete(
+      pendingReplyKey(chatId, Number(replyToMessageId)),
+    );
+    const answeredBy =
+      ctx.from?.first_name ||
+      ctx.from?.username ||
+      ctx.from?.id?.toString() ||
+      'unknown';
+
+    if (pendingReply.kind === 'user-question-other') {
+      const pending = this.pendingUserQuestions.get(pendingReply.key);
+      if (!pending) {
+        await ctx.reply('Question is no longer active.');
+        return true;
+      }
+      await this.finalizeUserQuestionPrompt(
+        pending,
+        trimmedAnswer,
+        answeredBy,
+        'answered via Telegram',
+      );
+      await ctx.reply('Answer saved.');
+      return true;
+    }
+
+    const pending = this.pendingPermissionPrompts.get(pendingReply.requestId);
+    if (!pending) {
+      await ctx.reply('Permission request is no longer active.');
+      return true;
+    }
+    await this.resolvePermissionPrompt(pendingReply.requestId, {
+      approved: false,
+      decidedBy: answeredBy,
+      reason: trimmedAnswer,
+    });
+    await ctx.reply('Permission denied with note.');
+    return true;
   }
 
   private startPolling(): void {
@@ -1126,13 +1077,13 @@ export class TelegramChannel implements ChannelAdapter {
       const userQuestionMatch =
         TELEGRAM_USER_QUESTION_CALLBACK_PATTERN.exec(data);
       if (userQuestionMatch) {
-        const action = userQuestionMatch[1] as 'select' | 'done';
+        const action = userQuestionMatch[1] as 'select' | 'done' | 'other';
         const requestId = userQuestionMatch[2];
         const questionIndex = Number.parseInt(userQuestionMatch[3], 10);
         const optionIndex = userQuestionMatch[4]
           ? Number.parseInt(userQuestionMatch[4], 10)
           : undefined;
-        const key = this.pendingUserQuestionKey(requestId, questionIndex);
+        const key = pendingUserQuestionKey(requestId, questionIndex);
         const pending = this.pendingUserQuestions.get(key);
         if (!pending) {
           await ctx.answerCallbackQuery({
@@ -1154,6 +1105,49 @@ export class TelegramChannel implements ChannelAdapter {
           ctx.from?.username ||
           ctx.from?.id?.toString() ||
           'unknown';
+        const userId = ctx.from?.id?.toString() || '';
+        if (!userId) {
+          await ctx.answerCallbackQuery({
+            text: 'Unable to verify responder identity.',
+            show_alert: true,
+          });
+          return;
+        }
+        const authorized = await this.isTelegramApproverAuthorized(
+          pending.chatId,
+          userId,
+        );
+        if (!authorized) {
+          await ctx.answerCallbackQuery({
+            text: 'Only approved admins can answer this question.',
+            show_alert: true,
+          });
+          return;
+        }
+        if (action === 'other') {
+          if (!this.bot) return;
+          const sent = await this.bot.api.sendMessage(
+            pending.chatId,
+            `Reply with your answer for: ${truncateText(pending.questionText, 180)}`,
+            {
+              reply_markup: {
+                force_reply: true,
+                selective: true,
+              },
+            },
+          );
+          this.pendingReplyPrompts.set(
+            pendingReplyKey(pending.chatId, sent.message_id),
+            {
+              kind: 'user-question-other',
+              key,
+            },
+          );
+          await ctx.answerCallbackQuery({
+            text: 'Reply with your answer.',
+          });
+          return;
+        }
         if (action === 'done') {
           if (!pending.multiSelect) {
             await ctx.answerCallbackQuery({
@@ -1219,8 +1213,15 @@ export class TelegramChannel implements ChannelAdapter {
 
       const permissionMatch = TELEGRAM_PERMISSION_CALLBACK_PATTERN.exec(data);
       if (!permissionMatch) return;
-      const action = permissionMatch[1] as 'approve' | 'deny';
+      const action = permissionMatch[1] as
+        | 'approve'
+        | 'deny'
+        | 'note'
+        | 'suggest';
       const requestId = permissionMatch[2];
+      const suggestionIndex = permissionMatch[3]
+        ? Number.parseInt(permissionMatch[3], 10)
+        : undefined;
       const pending = this.pendingPermissionPrompts.get(requestId);
       if (!pending) {
         await ctx.answerCallbackQuery({
@@ -1261,6 +1262,67 @@ export class TelegramChannel implements ChannelAdapter {
 
       const decidedBy =
         ctx.from?.first_name || ctx.from?.username || userId || 'unknown';
+      if (action === 'note') {
+        if (!this.bot) return;
+        const sent = await this.bot.api.sendMessage(
+          pending.chatId,
+          `Reply with the denial reason for permission request ${requestId}.`,
+          {
+            reply_markup: {
+              force_reply: true,
+              selective: true,
+            },
+          },
+        );
+        this.pendingReplyPrompts.set(
+          pendingReplyKey(pending.chatId, sent.message_id),
+          {
+            kind: 'permission-note',
+            requestId,
+          },
+        );
+        await ctx.answerCallbackQuery({
+          text: 'Reply with the denial reason.',
+        });
+        return;
+      }
+
+      if (action === 'suggest') {
+        if (
+          suggestionIndex === undefined ||
+          !Number.isInteger(suggestionIndex) ||
+          suggestionIndex < 0 ||
+          suggestionIndex >= pending.suggestions.length
+        ) {
+          await ctx.answerCallbackQuery({
+            text: 'Invalid permission suggestion.',
+            show_alert: true,
+          });
+          return;
+        }
+        const sessionUpdate = sanitizePermissionUpdate(
+          pending.suggestions[suggestionIndex],
+          { forceSessionDestination: true },
+        );
+        if (!sessionUpdate) {
+          await ctx.answerCallbackQuery({
+            text: 'Invalid permission suggestion.',
+            show_alert: true,
+          });
+          return;
+        }
+        await this.resolvePermissionPrompt(requestId, {
+          approved: true,
+          decidedBy,
+          reason: 'approved similar tools for this session via Telegram',
+          updatedPermissions: [sessionUpdate],
+        });
+        await ctx.answerCallbackQuery({
+          text: 'Approved for this session.',
+        });
+        return;
+      }
+
       await this.resolvePermissionPrompt(requestId, {
         approved: action === 'approve',
         decidedBy,
@@ -1283,6 +1345,8 @@ export class TelegramChannel implements ChannelAdapter {
         const cmd = ctx.message.text.slice(1).split(/[\s@]/)[0].toLowerCase();
         if (TELEGRAM_BOT_COMMANDS.has(cmd)) return;
       }
+
+      if (await this.handlePendingReply(ctx)) return;
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
@@ -1744,19 +1808,37 @@ export class TelegramChannel implements ChannelAdapter {
     }
 
     const timeoutMs = TELEGRAM_USER_QUESTION_TIMEOUT_MS;
-    const promptText = this.formatPermissionPromptText(request, timeoutMs);
+    const promptText = formatPermissionPromptText(request, timeoutMs);
+    const suggestions = (request.suggestions || []).slice(0, 4);
+    const inline_keyboard: Array<
+      Array<{ text: string; callback_data: string }>
+    > = [
+      [
+        {
+          text: 'Approve',
+          callback_data: `perm:approve:${request.requestId}`,
+        },
+        { text: 'Deny', callback_data: `perm:deny:${request.requestId}` },
+      ],
+      [
+        {
+          text: 'Deny with note',
+          callback_data: `perm:note:${request.requestId}`,
+        },
+      ],
+    ];
+    suggestions.forEach((suggestion, index) => {
+      inline_keyboard.push([
+        {
+          text: formatPermissionSuggestionButton(suggestion, index),
+          callback_data: `perm:suggest:${request.requestId}:${index}`,
+        },
+      ]);
+    });
     try {
       const sent = await this.bot.api.sendMessage(chatId, promptText, {
         reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: 'Approve',
-                callback_data: `perm:approve:${request.requestId}`,
-              },
-              { text: 'Deny', callback_data: `perm:deny:${request.requestId}` },
-            ],
-          ],
+          inline_keyboard,
         },
       });
       return await new Promise<PermissionApprovalDecision>((resolve) => {
@@ -1770,6 +1852,7 @@ export class TelegramChannel implements ChannelAdapter {
         this.pendingPermissionPrompts.set(request.requestId, {
           chatId,
           messageId: sent.message_id,
+          suggestions,
           timer,
           resolve,
         });
@@ -1802,13 +1885,16 @@ export class TelegramChannel implements ChannelAdapter {
       return { requestId: request.requestId, answers: {} };
     }
 
-    const timeoutMs = PERMISSION_APPROVAL_TIMEOUT_MS;
+    const timeoutMs = Math.max(
+      10_000,
+      Math.floor(PERMISSION_APPROVAL_TIMEOUT_MS / request.questions.length),
+    );
     const answers: Record<string, string | string[]> = {};
     let answeredBy: string | undefined;
 
     for (let i = 0; i < request.questions.length; i += 1) {
       const question = request.questions[i];
-      const pendingKey = this.pendingUserQuestionKey(request.requestId, i);
+      const pendingKey = pendingUserQuestionKey(request.requestId, i);
       if (this.pendingUserQuestions.has(pendingKey)) {
         logger.warn(
           { requestId: request.requestId, questionIndex: i },
@@ -1817,10 +1903,10 @@ export class TelegramChannel implements ChannelAdapter {
         continue;
       }
 
-      const promptText = this.formatUserQuestionPromptText(question, timeoutMs);
+      const promptText = formatUserQuestionPromptText(question, timeoutMs);
       try {
         const sent = await this.bot.api.sendMessage(chatId, promptText, {
-          reply_markup: this.buildUserQuestionKeyboard(
+          reply_markup: buildUserQuestionKeyboard(
             request.requestId,
             i,
             question,
@@ -1852,6 +1938,7 @@ export class TelegramChannel implements ChannelAdapter {
             questionText: question.question,
             promptText,
             optionLabels: question.options.map((option) => option.label),
+            options: question.options,
             multiSelect: question.multiSelect,
             selectedOptionIndexes: new Set<number>(),
             chatId,
@@ -1939,6 +2026,7 @@ export class TelegramChannel implements ChannelAdapter {
       });
       this.pendingUserQuestions.delete(key);
     }
+    this.pendingReplyPrompts.clear();
     if (this.bot) {
       this.bot.stop();
       this.bot = null;

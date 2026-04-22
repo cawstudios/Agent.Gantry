@@ -19,11 +19,12 @@ interface RunnerRecord {
     streamMessages?: string[];
     stringPrompt?: string;
     systemPromptAppend?: string;
-    memoryContextFile?: string;
     closeExistsAtQueryStart?: boolean;
     streamEnded?: boolean;
     permissionRequest?: Record<string, unknown>;
     permissionDecision?: Record<string, unknown>;
+    userQuestionRequest?: Record<string, unknown>;
+    userQuestionDecision?: Record<string, unknown>;
   }>;
 }
 
@@ -58,7 +59,6 @@ function createRunnerFixture(): {
   ipcDir: string;
   inputDir: string;
   recordPath: string;
-  memoryContextFile: string;
 } {
   const root = makeTempRoot();
   const runnerDir = path.join(root, 'runner');
@@ -73,7 +73,6 @@ function createRunnerFixture(): {
   const ipcDir = path.join(root, 'ipc', 'team');
   const inputDir = path.join(ipcDir, 'input');
   const recordPath = path.join(root, 'sdk-record.json');
-  const memoryContextFile = path.join(ipcDir, 'memory_context.json');
 
   fs.mkdirSync(sdkDir, { recursive: true });
   fs.mkdirSync(runnerDir, { recursive: true });
@@ -84,12 +83,20 @@ function createRunnerFixture(): {
     path.join(runnerDir, 'agent-capabilities.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/runner/sdk-interactions.ts'),
+    path.join(runnerDir, 'sdk-interactions.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/core/datetime.ts'),
     path.join(coreDir, 'datetime.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/core/object.ts'),
     path.join(coreDir, 'object.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/core/permission-updates.ts'),
+    path.join(coreDir, 'permission-updates.ts'),
   );
   symlinkPackage(root, 'dayjs', 'node_modules/dayjs');
   fs.writeFileSync(
@@ -147,7 +154,6 @@ export async function* query({ prompt, options }) {
   const call = {
     promptKind: typeof prompt === 'string' ? 'string' : 'stream',
     systemPromptAppend: options?.systemPrompt?.append,
-    memoryContextFile: process.env.MYCLAW_IPC_MEMORY_CONTEXT_FILE,
     closeExistsAtQueryStart: fs.existsSync(
       path.join(process.env.MYCLAW_IPC_INPUT_DIR, '_close'),
     ),
@@ -166,6 +172,17 @@ export async function* query({ prompt, options }) {
         description: 'Needs shell access',
         decisionReason: 'Agent wants to verify tests',
         blockedPath: process.env.MYCLAW_WORKSPACE_GROUP_DIR,
+        suggestions:
+          process.env.TEST_PERMISSION_SUGGESTION === '1'
+            ? [
+                {
+                  type: 'addRules',
+                  rules: [{ toolName: 'Bash', ruleContent: 'npm test' }],
+                  behavior: 'allow',
+                  destination: 'session',
+                },
+              ]
+            : undefined,
       },
     );
     const requestDir = path.join(process.env.MYCLAW_IPC_DIR, 'permission-requests');
@@ -177,13 +194,58 @@ export async function* query({ prompt, options }) {
       path.join(responseDir, request.requestId + '.json'),
       JSON.stringify({
         requestId: request.requestId,
+        authToken: request.authToken,
         approved: process.env.TEST_PERMISSION_DECISION === 'approve',
         decidedBy: 'runner-test-admin',
         reason: process.env.TEST_PERMISSION_DECISION,
+        updatedPermissions:
+          process.env.TEST_PERMISSION_SUGGESTION === '1'
+            ? request.suggestions
+            : undefined,
       }),
     );
     call.permissionRequest = request;
     call.permissionDecision = await decisionPromise;
+  }
+
+  if (process.env.TEST_ASK_USER_QUESTION === '1') {
+    const answerPromise = options.canUseTool(
+      'AskUserQuestion',
+      {
+        questions: [
+          {
+            question: 'Deploy where?',
+            header: 'Deploy',
+            options: [
+              { label: 'Staging', description: 'Safer first' },
+              { label: 'Production', description: 'Go live' },
+            ],
+            multiSelect: false,
+          },
+        ],
+      },
+      {
+        signal: new AbortController().signal,
+      },
+    );
+    const requestDir = path.join(process.env.MYCLAW_IPC_DIR, 'user-questions');
+    const responseDir = path.join(process.env.MYCLAW_IPC_DIR, 'user-answers');
+    const requestPath = await waitForFile(requestDir, 1000);
+    const request = JSON.parse(fs.readFileSync(requestPath, 'utf-8'));
+    fs.mkdirSync(responseDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(responseDir, request.requestId + '.json'),
+      JSON.stringify({
+        requestId: request.requestId,
+        authToken: request.authToken,
+        answers: {
+          'Deploy where?': 'Staging',
+        },
+        answeredBy: 'runner-test-admin',
+      }),
+    );
+    call.userQuestionRequest = request;
+    call.userQuestionDecision = await answerPromise;
   }
 
   if (typeof prompt === 'string') {
@@ -226,7 +288,7 @@ export async function* query({ prompt, options }) {
 `,
   );
 
-  return { root, runnerPath, ipcDir, inputDir, recordPath, memoryContextFile };
+  return { root, runnerPath, ipcDir, inputDir, recordPath };
 }
 
 function baseInput(
@@ -257,7 +319,6 @@ async function runRunner(
         MYCLAW_IPC_DIR: fixture.ipcDir,
         MYCLAW_IPC_INPUT_DIR: fixture.inputDir,
         MYCLAW_IPC_AUTH_TOKEN: 'runner-test-token',
-        MYCLAW_IPC_MEMORY_CONTEXT_FILE: fixture.memoryContextFile,
         MYCLAW_WORKSPACE_GROUP_DIR: path.join(fixture.root, 'group'),
         MYCLAW_WORKSPACE_EXTRA_DIR: path.join(fixture.root, 'extra'),
         TEST_SDK_RECORD_PATH: fixture.recordPath,
@@ -426,13 +487,16 @@ describe('agent-runner IPC lifecycle', () => {
 
   it('appends memory context blocks to the first streamed user prompt only', async () => {
     const fixture = createRunnerFixture();
-    writeJson(fixture.memoryContextFile, {
-      block: 'Memory brief: user prefers concise updates.',
-    });
 
-    const result = await runRunner(fixture, baseInput(), {
-      TEST_EXIT_AFTER_QUERY: '1',
-    });
+    const result = await runRunner(
+      fixture,
+      baseInput({
+        memoryContextBlock: 'Memory brief: user prefers concise updates.',
+      }),
+      {
+        TEST_EXIT_AFTER_QUERY: '1',
+      },
+    );
 
     expect(result.exitCode).toBe(0);
     const call = readRecord(fixture.recordPath).calls[0];
@@ -441,7 +505,6 @@ describe('agent-runner IPC lifecycle', () => {
     expect(call?.streamMessages?.[0]).toContain(
       'Memory brief: user prefers concise updates.',
     );
-    expect(call?.memoryContextFile).toBe(fixture.memoryContextFile);
   });
 
   it('routes SDK canUseTool approval through permission request and response IPC', async () => {
@@ -471,6 +534,87 @@ describe('agent-runner IPC lifecycle', () => {
     expect(
       fs.readdirSync(path.join(fixture.ipcDir, 'permission-responses')),
     ).toHaveLength(0);
+  });
+
+  it('returns session-scoped SDK permission updates when a suggestion is selected', async () => {
+    const fixture = createRunnerFixture();
+
+    const result = await runRunner(fixture, baseInput(), {
+      TEST_PERMISSION_DECISION: 'approve',
+      TEST_PERMISSION_SUGGESTION: '1',
+      TEST_EXIT_AFTER_QUERY: '1',
+    });
+
+    expect(result.exitCode).toBe(0);
+    const call = readRecord(fixture.recordPath).calls[0];
+    expect(call?.permissionRequest?.suggestions).toEqual([
+      {
+        type: 'addRules',
+        rules: [{ toolName: 'Bash', ruleContent: 'npm test' }],
+        behavior: 'allow',
+        destination: 'session',
+      },
+    ]);
+    expect(call?.permissionDecision).toEqual({
+      behavior: 'allow',
+      updatedInput: { cmd: 'npm test', apiToken: 'secret-token' },
+      updatedPermissions: [
+        {
+          type: 'addRules',
+          rules: [{ toolName: 'Bash', ruleContent: 'npm test' }],
+          behavior: 'allow',
+          destination: 'session',
+        },
+      ],
+    });
+  });
+
+  it('routes SDK AskUserQuestion through user question IPC', async () => {
+    const fixture = createRunnerFixture();
+
+    const result = await runRunner(fixture, baseInput(), {
+      TEST_ASK_USER_QUESTION: '1',
+      TEST_EXIT_AFTER_QUERY: '1',
+    });
+
+    expect(result.exitCode).toBe(0);
+    const call = readRecord(fixture.recordPath).calls[0];
+    expect(call?.userQuestionRequest).toEqual(
+      expect.objectContaining({
+        sourceGroup: 'team',
+        authToken: 'runner-test-token',
+        questions: [
+          {
+            question: 'Deploy where?',
+            header: 'Deploy',
+            options: [
+              { label: 'Staging', description: 'Safer first' },
+              { label: 'Production', description: 'Go live' },
+            ],
+            multiSelect: false,
+          },
+        ],
+      }),
+    );
+    expect(call?.userQuestionDecision).toEqual({
+      behavior: 'allow',
+      updatedInput: {
+        questions: [
+          {
+            question: 'Deploy where?',
+            header: 'Deploy',
+            options: [
+              { label: 'Staging', description: 'Safer first' },
+              { label: 'Production', description: 'Go live' },
+            ],
+            multiSelect: false,
+          },
+        ],
+        answers: {
+          'Deploy where?': 'Staging',
+        },
+      },
+    });
   });
 
   it('fails SDK canUseTool closed when permission response denies the request', async () => {

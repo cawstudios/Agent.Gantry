@@ -740,6 +740,12 @@ The `myclaw` MCP server is created dynamically per agent call with the current g
 | `scheduler_get_dead_letter` | List dead-lettered runs |
 | `send_message` | Send a message to the group via its channel |
 
+Structured user questions are handled by the Claude Agent SDK
+`AskUserQuestion` tool through the runner `canUseTool` path. MyClaw does not
+expose a separate MCP question tool. `ToolSearch` is likewise SDK agent
+infrastructure for deferred tool discovery, not a MyClaw slash command or MCP
+tool.
+
 ---
 
 ## Deployment
