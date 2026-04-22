@@ -147,6 +147,8 @@ storage:
   provider: sqlite
   sqlite:
     path: store/myclaw.db
+  postgres:
+    url_env: MYCLAW_DATABASE_URL
 
 memory:
   enabled: true
@@ -169,7 +171,7 @@ Rules:
 - At least one channel should be enabled for normal operation.
 - Enabled channels require matching credentials in `.env`.
 - `memory.root` is resolved relative to runtime home unless absolute.
-- `storage.provider` must be `sqlite` in host runtime.
+- `storage.provider` defaults to `sqlite`; `postgres` requires `MYCLAW_DATABASE_URL` in `.env`.
 - `memory.embeddings.provider` is `disabled` or `openai`.
 - `memory.embeddings.enabled: true` with `provider: openai` requires `OPENAI_API_KEY`.
 - Sender policy `allow` is `"*"` or a string array.

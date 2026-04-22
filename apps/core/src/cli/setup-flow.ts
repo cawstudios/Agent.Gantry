@@ -51,6 +51,7 @@ import {
   verifySlackChatAccess,
 } from './slack.js';
 import { listSlackRecentChats } from './slack-chat-discovery.js';
+import { validatePostgresConnectionUrl } from '../storage/postgres-url.js';
 
 const FULL_SEQUENCE: OnboardingStep[] = [
   'welcome',
@@ -84,7 +85,8 @@ type ServiceChoice = 'skip' | 'install' | 'install_start';
 
 interface SetupDraft {
   runtimeHome: string;
-  storageProvider: 'sqlite';
+  storageProvider: 'sqlite' | 'postgres';
+  postgresDatabaseUrl: string;
   primaryProvider: 'telegram' | 'slack';
   credentialMode: HostCredentialMode;
   onecliUrl: string;
@@ -251,7 +253,8 @@ function restoreDraft(
     : true;
   return {
     runtimeHome,
-    storageProvider: 'sqlite',
+    storageProvider: state?.data.storageProvider || settings.storage.provider,
+    postgresDatabaseUrl: env.MYCLAW_DATABASE_URL || '',
     primaryProvider,
     credentialMode,
     onecliUrl: savedOnecliUrl,
@@ -359,8 +362,8 @@ async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
   p.note(
     [
       'Choose where MyClaw stores runtime state.',
-      'SQLite is the production-ready host runtime database today.',
-      'Postgres is intentionally not offered here until runtime persistence is fully provider-backed.',
+      'SQLite is recommended for first-time local installs.',
+      'Choose Postgres only if you already have a database URL ready.',
     ].join('\n'),
     'Storage',
   );
@@ -372,6 +375,11 @@ async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
         value: 'sqlite',
         label: 'SQLite (Recommended)',
         hint: 'Zero-config local DB under runtime home.',
+      },
+      {
+        value: 'postgres',
+        label: 'Postgres',
+        hint: 'Use MYCLAW_DATABASE_URL from .env.',
       },
       {
         value: 'back',
@@ -393,9 +401,49 @@ async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
   if (provider === 'back') return { type: 'back' };
   if (provider === 'resume') return { type: 'resume' };
   if (provider === 'cancel') return { type: 'cancel' };
+  if (provider !== 'sqlite' && provider !== 'postgres')
+    return { type: 'resume' };
 
-  draft.storageProvider = 'sqlite';
-  return { type: 'next' };
+  draft.storageProvider = provider;
+  if (provider === 'sqlite') {
+    draft.postgresDatabaseUrl = '';
+    return { type: 'next' };
+  }
+
+  while (true) {
+    const value = await p.password({
+      message:
+        'Paste Postgres URL (remote URLs need sslmode=require; /back, /resume, /cancel)',
+      validate: (input) => {
+        const trimmed = String(input ?? '').trim();
+        if (isInputFlowControl(trimmed)) return undefined;
+        try {
+          validatePostgresConnectionUrl(trimmed);
+          return undefined;
+        } catch (err) {
+          return err instanceof Error ? err.message : String(err);
+        }
+      },
+    });
+    if (p.isCancel(value)) return { type: 'resume' };
+    const control = parseInputFlowControl(value);
+    if (control) return control;
+
+    const url = value.trim();
+    try {
+      validatePostgresConnectionUrl(url);
+      draft.postgresDatabaseUrl = url;
+      return { type: 'next' };
+    } catch (err) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+      const action = await chooseProgressAction({
+        message: 'Postgres URL is invalid. What do you want to do?',
+        continueLabel: 'Try Again',
+        includeBack: true,
+      });
+      if (action.type !== 'next') return action;
+    }
+  }
 }
 
 async function runPrerequisitesStep(): Promise<FlowAction> {
@@ -1307,6 +1355,7 @@ async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
     persistOnboardingConfig({
       runtimeHome: draft.runtimeHome,
       storageProvider: draft.storageProvider,
+      postgresDatabaseUrl: draft.postgresDatabaseUrl || undefined,
       primaryProvider: draft.primaryProvider,
       claudeOauthToken: draft.claudeOauthToken || undefined,
       anthropicApiKey: draft.anthropicApiKey || undefined,

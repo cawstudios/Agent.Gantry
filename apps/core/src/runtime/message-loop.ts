@@ -58,6 +58,7 @@ export interface MessageLoopDeps {
   };
   handleActiveControlCommand?: (args: {
     chatJid: string;
+    queueJid: string;
     group: RegisteredGroup;
     message: NewMessage;
     command: SessionCommand;
@@ -129,6 +130,7 @@ export async function runMessagePollingTick(
             if (loopCommand && deps.handleActiveControlCommand) {
               const handled = await deps.handleActiveControlCommand({
                 chatJid,
+                queueJid,
                 group,
                 message: loopCmdMsg,
                 command: loopCommand,

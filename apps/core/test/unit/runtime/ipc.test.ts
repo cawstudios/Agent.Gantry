@@ -2328,6 +2328,55 @@ describe('startIpcWatcher', () => {
     expect(sendMessage).toHaveBeenCalledWith('other@g.us', 'Hello self!');
   });
 
+  it('routes IPC send_message to the authenticated thread', async () => {
+    mockReaddirSync.mockImplementation((dir: string) => {
+      if (dir === '/tmp/test-ipc/ipc') return ['other-group'];
+      if (dir.endsWith('/messages')) return ['msg1.json'];
+      return [];
+    });
+    mockStatSync.mockReturnValue({ isDirectory: () => true });
+    mockExistsSync.mockImplementation((p: string) =>
+      p.endsWith('/messages') ? true : false,
+    );
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        type: 'message',
+        chatJid: 'other@g.us',
+        text: 'Hello topic!',
+        threadId: 'topic-42',
+      }),
+    );
+
+    const sendMessage = vi.fn(async () => {});
+    const mod = await loadIpcModule();
+    const watcherDeps: import('@core/runtime/ipc.js').IpcDeps = {
+      sendMessage,
+      registeredGroups: () => ({
+        'other@g.us': {
+          name: 'Other',
+          folder: 'other-group',
+          trigger: '@Bot',
+          added_at: '2024-01-01',
+        },
+      }),
+      registerGroup: vi.fn(),
+      syncGroups: vi.fn(),
+      getAvailableGroups: vi.fn(() => []),
+      writeGroupsSnapshot: vi.fn(),
+      onSchedulerChanged: vi.fn(),
+    };
+
+    mod.startIpcWatcher(watcherDeps);
+
+    await vi.waitFor(() => {
+      expect(capturedSetTimeoutCallback).not.toBeNull();
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith('other@g.us', 'Hello topic!', {
+      threadId: 'topic-42',
+    });
+  });
+
   it('blocks unauthorized IPC message from non-main group to different group', async () => {
     mockReaddirSync.mockImplementation((dir: string) => {
       if (dir === '/tmp/test-ipc/ipc') return ['other-group'];

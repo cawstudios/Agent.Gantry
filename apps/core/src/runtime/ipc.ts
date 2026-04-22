@@ -328,18 +328,25 @@ interface ParsedIpcMessage {
   chatJid: string;
   text: string;
   sender?: string;
+  threadId?: string;
 }
 
 function parseIpcMessage(raw: unknown, sourceGroup: string): ParsedIpcMessage {
   if (!isPlainObject(raw)) throw new Error('Invalid IPC message payload');
-  assertValidIpcAuth(raw, sourceGroup, 'IPC message');
+  const threadId = assertValidIpcAuth(raw, sourceGroup, 'IPC message');
   const type = toTrimmedString(raw.type, { maxLen: 64 });
   if (type !== 'message') throw new Error('Invalid IPC message type');
   const chatJid = toTrimmedString(raw.chatJid, { maxLen: 255 });
   const text = toTrimmedString(raw.text, { maxLen: 20000 });
   if (!chatJid || !text) throw new Error('Invalid IPC message fields');
   const sender = toTrimmedString(raw.sender, { maxLen: 255 });
-  return { type: 'message', chatJid, text, ...(sender ? { sender } : {}) };
+  return {
+    type: 'message',
+    chatJid,
+    text,
+    ...(sender ? { sender } : {}),
+    ...(threadId ? { threadId } : {}),
+  };
 }
 
 function toScheduleType(
@@ -914,7 +921,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 isMain ||
                 (targetGroup && targetGroup.folder === sourceGroup)
               ) {
-                await deps.sendMessage(data.chatJid, data.text);
+                if (data.threadId) {
+                  await deps.sendMessage(data.chatJid, data.text, {
+                    threadId: data.threadId,
+                  });
+                } else {
+                  await deps.sendMessage(data.chatJid, data.text);
+                }
                 logger.info(
                   { chatJid: data.chatJid, sourceGroup },
                   'IPC message sent',

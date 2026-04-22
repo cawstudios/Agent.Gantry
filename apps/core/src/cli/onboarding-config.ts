@@ -10,7 +10,8 @@ import {
 
 export interface OnboardingConfigInput {
   runtimeHome: string;
-  storageProvider: 'sqlite';
+  storageProvider: 'sqlite' | 'postgres';
+  postgresDatabaseUrl?: string;
   primaryProvider: 'telegram' | 'slack';
   telegramBotToken?: string;
   slackBotToken?: string;
@@ -44,7 +45,10 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
         ? null
         : input.anthropicApiKey?.trim() || null,
     ANTHROPIC_MODEL: input.anthropicModel?.trim() || null,
-    MYCLAW_DATABASE_URL: null,
+    MYCLAW_DATABASE_URL:
+      input.storageProvider === 'postgres'
+        ? input.postgresDatabaseUrl?.trim() || null
+        : null,
     MYCLAW_CREDENTIAL_MODE: input.credentialMode,
     ONECLI_URL:
       input.credentialMode === 'env-only'
@@ -60,6 +64,7 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
 
   const settings = loadRuntimeSettings(input.runtimeHome);
   settings.storage.provider = input.storageProvider;
+  settings.storage.postgres.urlEnv = 'MYCLAW_DATABASE_URL';
   const telegramProvider = getChannelProvider('telegram');
   if (telegramProvider && settings.channels[telegramProvider.id]) {
     const shouldEnable =

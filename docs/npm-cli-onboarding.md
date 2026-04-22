@@ -21,7 +21,7 @@ The first run is guided and channel-agnostic:
 
 1. welcome
 2. runtime home confirmation (`~/myclaw` by default)
-3. storage confirmation (`sqlite`; Postgres is not selectable until runtime persistence is fully provider-backed)
+3. storage selection (`SQLite` recommended; `Postgres` asks for `MYCLAW_DATABASE_URL`)
 4. runtime prerequisite check
 5. channel selection (`Telegram` or `Slack`)
 6. provider token + chat/conversation connection
@@ -106,8 +106,9 @@ myclaw slack connect
 
 - Memory: remember durable facts, preferences, decisions, corrections, constraints, and procedures.
 - Continuity: use remembered context so the agent can resume current work instead of starting cold.
-- Storage backend: SQLite (`storage.provider=sqlite`) is the only production-ready host runtime database today.
+- Storage backend: SQLite (`storage.provider=sqlite`) by default. Postgres (`storage.provider=postgres`) is optional and requires `MYCLAW_DATABASE_URL`.
 - SQLite path: default local database at `store/myclaw.db`.
+- Postgres URL: use `postgres://` or `postgresql://`; remote URLs must include `sslmode=require` or stronger.
 - Embeddings: optional OpenAI-powered ranking improvement for memory search.
 - Dreaming: background memory cleanup and improvement.
 
@@ -124,6 +125,8 @@ storage:
   provider: sqlite
   sqlite:
     path: store/myclaw.db
+  postgres:
+    url_env: MYCLAW_DATABASE_URL
 
 memory:
   enabled: true

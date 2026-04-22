@@ -151,8 +151,13 @@ export function startRuntimeServices(
   });
 
   resolved.startIpcWatcher({
-    sendMessage: (jid, text) =>
-      channelWiring.sendMessage(jid, text, { throwOnMissing: true }),
+    sendMessage: (jid, text, options) =>
+      channelWiring.sendMessage(jid, text, {
+        throwOnMissing: true,
+        ...(options?.threadId
+          ? { messageOptions: { threadId: options.threadId } }
+          : {}),
+      }),
     registeredGroups: () => app.getRegisteredGroups(),
     registerGroup: app.registerGroup,
     syncGroups: async (force: boolean) => {
@@ -184,10 +189,12 @@ export function startRuntimeServices(
 
   const handleActiveControlCommand = async ({
     chatJid,
+    queueJid,
     command,
     message,
   }: {
     chatJid: string;
+    queueJid: string;
     command: { kind: string };
     message: NewMessage;
   }): Promise<boolean> => {
@@ -195,11 +202,11 @@ export function startRuntimeServices(
       return false;
     }
 
-    if (!app.queue.isGroupActive(chatJid)) {
+    if (!app.queue.isGroupActive(queueJid)) {
       return false;
     }
 
-    const stopped = app.queue.stopGroup(chatJid);
+    const stopped = app.queue.stopGroup(queueJid);
     if (!stopped) {
       return false;
     }

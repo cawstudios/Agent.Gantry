@@ -135,4 +135,31 @@ describe('persistOnboardingConfig', () => {
     expect(settings.storage.provider).toBe('sqlite');
     expect(settings.channels.slack.enabled).toBe(true);
   });
+
+  it('persists postgres database URL when selected', () => {
+    const runtimeHome = createRuntimeHome();
+    const envPath = envFilePath(runtimeHome);
+
+    persistOnboardingConfig({
+      runtimeHome,
+      storageProvider: 'postgres',
+      postgresDatabaseUrl: 'postgresql://user:pass@localhost:5432/myclaw',
+      primaryProvider: 'telegram',
+      telegramBotToken: 'token',
+      anthropicModel: 'claude-sonnet-4-6',
+      credentialMode: 'env-only',
+      memoryEnabled: true,
+      embeddingsEnabled: false,
+      dreamingEnabled: true,
+    });
+
+    const env = readEnvFile(envPath);
+    expect(env.MYCLAW_DATABASE_URL).toBe(
+      'postgresql://user:pass@localhost:5432/myclaw',
+    );
+
+    const settings = loadRuntimeSettings(runtimeHome);
+    expect(settings.storage.provider).toBe('postgres');
+    expect(settings.storage.postgres.urlEnv).toBe('MYCLAW_DATABASE_URL');
+  });
 });

@@ -6,7 +6,7 @@
 
 ## What MyClaw Is
 
-MyClaw is a single-process Node.js assistant runtime. Messages come in from one or more channels, get stored in SQLite, and are routed to host-managed agents through a host runtime process.
+MyClaw is a single-process Node.js assistant runtime. Messages come in from one or more channels, get stored in the configured runtime database, and are routed to host-managed agents through a host runtime process.
 
 The project is intentionally small. The goal is not to be a framework with every feature built in. The goal is to give one person a secure, understandable base they can shape to fit their own workflow.
 
@@ -31,7 +31,7 @@ npm i -g myclaw && myclaw
 Then follow this order:
 
 1. Run `myclaw` with no args.
-2. Confirm runtime home and storage (`sqlite`; Postgres is not exposed until runtime persistence is fully provider-backed).
+2. Confirm runtime home and storage (`SQLite` recommended; optional `Postgres` asks for `MYCLAW_DATABASE_URL`).
 3. Choose your first provider: `Telegram` or `Slack`.
 4. Follow the in-CLI provider guide, paste credentials, and pick a discovered chat/channel (or enter an ID manually).
 5. Choose credential mode (`env-only` by default), then set Claude auth (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) when that mode needs local credentials.
@@ -65,7 +65,7 @@ Defaults in v1:
 - runtime home: `~/myclaw`
 - runtime settings file: `~/myclaw/settings.yaml` (validated before `start`/`restart`)
 - setup flow: guided multi-channel first run (choose Telegram or Slack)
-- storage provider: `sqlite` (host runtime database)
+- storage provider: `sqlite` by default; `postgres` is available when you provide `MYCLAW_DATABASE_URL`
 - storage SQLite path: `store/myclaw.db`
 - memory: on
 - embeddings: off (unless OpenAI key is provided and enabled)
@@ -81,6 +81,8 @@ storage:
   provider: sqlite
   sqlite:
     path: store/myclaw.db
+  postgres:
+    url_env: MYCLAW_DATABASE_URL
 
 memory:
   enabled: true

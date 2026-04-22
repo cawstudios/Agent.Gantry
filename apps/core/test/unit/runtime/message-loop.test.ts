@@ -263,6 +263,40 @@ describe('thread queue routing', () => {
       'group@g.us::thread:thread-b',
     ]);
   });
+
+  it('passes the exact thread queue key to active control commands', async () => {
+    const msg = {
+      id: '1',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      content: '@Andy /stop',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      thread_id: 'thread-b',
+      is_from_me: false,
+      sender_name: 'User',
+    };
+    mockGetNewMessages.mockReturnValueOnce({
+      messages: [msg],
+      newTimestamp: '2024-01-01T00:00:01.000Z',
+    });
+    mockExtractSessionCommand.mockReturnValue({ kind: 'stop', raw: '/stop' });
+    mockIsSessionCommandAllowed.mockReturnValue(true);
+
+    const handleActiveControlCommand = vi.fn(() => true);
+    const deps = makeDeps({ handleActiveControlCommand });
+    const { runMessagePollingTick } =
+      await import('@core/runtime/message-loop.js');
+
+    await runMessagePollingTick(deps);
+
+    expect(handleActiveControlCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatJid: 'group@g.us',
+        queueJid: 'group@g.us::thread:thread-b',
+      }),
+    );
+    expect(deps.stoppedGroups).toHaveLength(0);
+  });
 });
 
 describe('startMessagePollingLoop', () => {

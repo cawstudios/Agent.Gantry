@@ -19,6 +19,8 @@ storage:
   provider: sqlite
   sqlite:
     path: store/myclaw.db
+  postgres:
+    url_env: MYCLAW_DATABASE_URL
 
 memory:
   enabled: true
@@ -35,7 +37,7 @@ Fresh guided setup writes the block above by default: memory on, embeddings off,
 
 ## Storage
 
-- Runtime storage backend in host runtime is `sqlite`.
+- Runtime storage backend defaults to `sqlite`; `postgres` is optional and requires `MYCLAW_DATABASE_URL`.
 - Memory SQLite database path is derived from `memory.root`: `~/myclaw/memory/.cache/memory.db` by default.
 - `memory.root` resolves under the runtime home unless it is absolute.
 - Journal path is `~/myclaw/memory/.journal`.

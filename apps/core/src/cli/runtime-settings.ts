@@ -24,6 +24,7 @@ import {
   parseSimpleYamlObject,
   quoteYamlString,
 } from './runtime-settings-yaml.js';
+import { validatePostgresConnectionUrl } from '../storage/postgres-url.js';
 
 export interface ChatAllowlistEntry {
   allow: '*' | string[];
@@ -649,6 +650,8 @@ function renderStorageSettingsYaml(
     `  provider: ${storage.provider}`,
     '  sqlite:',
     `    path: ${quoteYamlString(storage.sqlite.path)}`,
+    '  postgres:',
+    `    url_env: ${quoteYamlString(storage.postgres.urlEnv)}`,
     '',
   );
 }
@@ -877,9 +880,19 @@ export function validateRuntimeSettings(
     }
 
     if (settings.storage.provider === 'postgres') {
-      details.push(
-        'storage.provider=postgres is not available in host runtime. Use storage.provider=sqlite.',
-      );
+      const postgresEnvKey = settings.storage.postgres.urlEnv;
+      const postgresUrl = env[postgresEnvKey]?.trim() || '';
+      if (!postgresUrl) {
+        details.push(
+          `${postgresEnvKey} is required when storage.provider=postgres.`,
+        );
+      } else {
+        try {
+          validatePostgresConnectionUrl(postgresUrl);
+        } catch (err) {
+          details.push(err instanceof Error ? err.message : String(err));
+        }
+      }
     }
 
     if (

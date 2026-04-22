@@ -406,6 +406,26 @@ describe('runSetupFlow credential step', () => {
     expect(mod.password).not.toHaveBeenCalled();
   });
 
+  it('asks for a database URL when postgres storage is selected', async () => {
+    const mod = await loadSetupFlowModule({
+      selectQueue: ['postgres'],
+      passwordQueue: ['postgresql://user:pass@localhost:5432/myclaw'],
+    });
+
+    const result = await mod.runSetupFlow({
+      importMetaUrl: import.meta.url,
+      runtimeHome: '/tmp/myclaw-test',
+      initialStep: 'storage',
+    });
+
+    expect(result.status).toBe('resumed');
+    expect(mod.password).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('Postgres URL'),
+      }),
+    );
+  });
+
   it('asks fresh-user setup questions in the expected order', async () => {
     const mod = await loadSetupFlowModule({
       selectQueue: [
