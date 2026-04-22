@@ -64,8 +64,7 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
   if (telegramProvider && settings.channels[telegramProvider.id]) {
     const shouldEnable =
       input.primaryProvider === 'telegram' && Boolean(input.telegramBotToken);
-    settings.channels[telegramProvider.id].enabled =
-      settings.channels[telegramProvider.id].enabled || shouldEnable;
+    settings.channels[telegramProvider.id].enabled = shouldEnable;
   }
   const slackProvider = getChannelProvider('slack');
   if (slackProvider && settings.channels[slackProvider.id]) {
@@ -73,8 +72,7 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
       input.primaryProvider === 'slack' &&
       Boolean(input.slackBotToken) &&
       Boolean(input.slackAppToken);
-    settings.channels[slackProvider.id].enabled =
-      settings.channels[slackProvider.id].enabled || shouldEnable;
+    settings.channels[slackProvider.id].enabled = shouldEnable;
   }
   settings.memory = {
     ...settings.memory,

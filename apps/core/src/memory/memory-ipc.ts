@@ -84,6 +84,9 @@ function parseSaveMemoryInput(payload: unknown): SaveMemoryInput {
     maxLen: 128,
   });
   const userId = parseOptionalString(payload.user_id, { maxLen: 255 });
+  const topicId =
+    parseOptionalString(payload.topic_id, { maxLen: 255 }) ||
+    parseOptionalString(payload.thread_id, { maxLen: 255 });
   const confidence = parseOptionalNumber(payload.confidence, {
     min: 0,
     max: 1,
@@ -109,6 +112,7 @@ function parseSaveMemoryInput(payload: unknown): SaveMemoryInput {
     ...(kind ? { kind } : {}),
     ...(groupFolder ? { group_folder: groupFolder } : {}),
     ...(userId ? { user_id: userId } : {}),
+    ...(topicId ? { topic_id: topicId } : {}),
     ...(confidence !== undefined ? { confidence } : {}),
     ...(why ? { why } : {}),
     ...(sourceTurnId ? { source_turn_id: sourceTurnId } : {}),

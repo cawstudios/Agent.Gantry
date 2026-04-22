@@ -33,6 +33,7 @@ interface AgentRunnerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  threadId?: string;
   isMain: boolean;
   isScheduledJob?: boolean;
   assistantName?: string;
@@ -509,6 +510,7 @@ async function runQuery(
     mcpServerPath,
     chatJid: agentInput.chatJid,
     groupFolder: agentInput.groupFolder,
+    threadId: agentInput.threadId,
     isMain: agentInput.isMain,
     ipcDir: process.env.MYCLAW_IPC_DIR,
     ipcAuthToken: process.env.MYCLAW_IPC_AUTH_TOKEN,

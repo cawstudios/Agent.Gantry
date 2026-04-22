@@ -8,6 +8,7 @@ export interface AgentInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  threadId?: string;
   isMain: boolean;
   isScheduledJob?: boolean;
   assistantName?: string;

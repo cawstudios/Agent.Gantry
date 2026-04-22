@@ -349,6 +349,33 @@ describe('cli telegram helpers', () => {
     expect(result.nextAction).not.toContain('api.telegram.org/bot');
   });
 
+  it('sanitizes token-bearing Telegram JSON discovery descriptions', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          description:
+            'Bad Request: proxy echoed https://api.telegram.org/botsecret-token/getUpdates',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const result = await listTelegramRecentChats({
+      token: 'secret-token',
+      limit: 20,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe('Telegram did not return update history.');
+    expect(result.message).not.toContain('secret-token');
+    expect(result.message).not.toContain('api.telegram.org/bot');
+  });
+
   it('telegram connect saves token when chat registration is skipped', async () => {
     vi.resetModules();
     const runtimeHome = makeRuntimeHome();

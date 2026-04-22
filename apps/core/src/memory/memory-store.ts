@@ -112,6 +112,7 @@ export class MemoryStore {
       'scope',
       'group_folder',
       'user_id',
+      'topic_id',
       'kind',
       'key',
       'value',
@@ -148,6 +149,7 @@ export class MemoryStore {
       'id',
       'scope',
       'group_folder',
+      'topic_id',
       'title',
       'body',
       'tags_json',
@@ -201,6 +203,7 @@ export class MemoryStore {
         scope TEXT NOT NULL,
         group_folder TEXT NOT NULL,
         user_id TEXT,
+        topic_id TEXT,
         kind TEXT NOT NULL,
         key TEXT NOT NULL,
         value TEXT NOT NULL,
@@ -233,16 +236,17 @@ export class MemoryStore {
         deleted_at TEXT,
         last_reviewed_at TEXT
       );
-      CREATE INDEX IF NOT EXISTS idx_memory_items_scope_group ON memory_items(scope, group_folder, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_items_scope_group ON memory_items(scope, group_folder, topic_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_memory_items_file_path ON memory_items(file_path);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_items_active_unique_key
-      ON memory_items(scope, group_folder, COALESCE(user_id, ''), key)
+      ON memory_items(scope, group_folder, COALESCE(user_id, ''), COALESCE(topic_id, ''), key)
       WHERE is_deleted = 0;
 
       CREATE TABLE IF NOT EXISTS memory_procedures (
         id TEXT PRIMARY KEY,
         scope TEXT NOT NULL,
         group_folder TEXT NOT NULL,
+        topic_id TEXT,
         title TEXT NOT NULL,
         body TEXT NOT NULL,
         tags_json TEXT NOT NULL,
@@ -257,7 +261,7 @@ export class MemoryStore {
         is_deleted INTEGER NOT NULL DEFAULT 0,
         deleted_at TEXT
       );
-      CREATE INDEX IF NOT EXISTS idx_memory_procedures_scope_group ON memory_procedures(scope, group_folder, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_procedures_scope_group ON memory_procedures(scope, group_folder, topic_id, updated_at DESC);
 
       CREATE TABLE IF NOT EXISTS memory_chunks (
         id TEXT PRIMARY KEY,
@@ -380,6 +384,7 @@ export class MemoryStore {
       | 'scope'
       | 'group_folder'
       | 'user_id'
+      | 'topic_id'
       | 'kind'
       | 'key'
       | 'value'
@@ -431,14 +436,15 @@ export class MemoryStore {
     const result = this.db
       .prepare(
         `INSERT INTO memory_items
-        (id, scope, group_folder, user_id, kind, key, value, why, load_bearing, source_turn_id, source, source_folder, file_path, content_hash, indexed_at, embedding_pending, blocked_reason, confidence, is_pinned, used_count, superseded_by, version, last_used_at, last_retrieved_at, retrieval_count, total_score, max_score, query_hashes_json, recall_days_json, embedding_json, created_at, updated_at, is_deleted, deleted_at, last_reviewed_at)
-        VALUES (@id, @scope, @group_folder, @user_id, @kind, @key, @value, @why, @load_bearing, @source_turn_id, @source, @source_folder, @file_path, @content_hash, @indexed_at, @embedding_pending, @blocked_reason, @confidence, @is_pinned, @used_count, @superseded_by, @version, @last_used_at, @last_retrieved_at, @retrieval_count, @total_score, @max_score, @query_hashes_json, @recall_days_json, @embedding_json, @created_at, @updated_at, @is_deleted, @deleted_at, @last_reviewed_at)`,
+        (id, scope, group_folder, user_id, topic_id, kind, key, value, why, load_bearing, source_turn_id, source, source_folder, file_path, content_hash, indexed_at, embedding_pending, blocked_reason, confidence, is_pinned, used_count, superseded_by, version, last_used_at, last_retrieved_at, retrieval_count, total_score, max_score, query_hashes_json, recall_days_json, embedding_json, created_at, updated_at, is_deleted, deleted_at, last_reviewed_at)
+        VALUES (@id, @scope, @group_folder, @user_id, @topic_id, @kind, @key, @value, @why, @load_bearing, @source_turn_id, @source, @source_folder, @file_path, @content_hash, @indexed_at, @embedding_pending, @blocked_reason, @confidence, @is_pinned, @used_count, @superseded_by, @version, @last_used_at, @last_retrieved_at, @retrieval_count, @total_score, @max_score, @query_hashes_json, @recall_days_json, @embedding_json, @created_at, @updated_at, @is_deleted, @deleted_at, @last_reviewed_at)`,
       )
       .run({
         id,
         scope: input.scope,
         group_folder: input.group_folder,
         user_id: input.user_id,
+        topic_id: input.topic_id ?? null,
         kind: input.kind,
         key: input.key,
         value: input.value,
@@ -480,6 +486,7 @@ export class MemoryStore {
     groupFolder: string;
     key: string;
     userId?: string | null;
+    topicId?: string | null;
   }): MemoryItem | null {
     let row: Record<string, unknown> | undefined;
 
@@ -490,10 +497,13 @@ export class MemoryStore {
            WHERE is_deleted = 0
              AND scope = 'global'
              AND key = ?
+             AND COALESCE(topic_id, '') = COALESCE(?, '')
            ORDER BY updated_at DESC
            LIMIT 1`,
         )
-        .get(input.key) as Record<string, unknown> | undefined;
+        .get(input.key, input.topicId || null) as
+        | Record<string, unknown>
+        | undefined;
     } else if (input.scope === 'user') {
       if (!input.userId) return null;
       row = this.db
@@ -504,12 +514,16 @@ export class MemoryStore {
              AND group_folder = ?
              AND user_id = ?
              AND key = ?
+             AND COALESCE(topic_id, '') = COALESCE(?, '')
            ORDER BY updated_at DESC
            LIMIT 1`,
         )
-        .get(input.groupFolder, input.userId, input.key) as
-        | Record<string, unknown>
-        | undefined;
+        .get(
+          input.groupFolder,
+          input.userId,
+          input.key,
+          input.topicId || null,
+        ) as Record<string, unknown> | undefined;
     } else {
       row = this.db
         .prepare(
@@ -518,10 +532,11 @@ export class MemoryStore {
              AND scope = 'group'
              AND group_folder = ?
              AND key = ?
+             AND COALESCE(topic_id, '') = COALESCE(?, '')
            ORDER BY updated_at DESC
            LIMIT 1`,
         )
-        .get(input.groupFolder, input.key) as
+        .get(input.groupFolder, input.key, input.topicId || null) as
         | Record<string, unknown>
         | undefined;
     }
@@ -889,6 +904,7 @@ export class MemoryStore {
     scope: MemoryScope;
     groupFolder: string;
     userId?: string | null;
+    topicId?: string | null;
     embedding: number[];
     limit?: number;
   }): SimilarMemoryItemMatch[] {
@@ -910,6 +926,7 @@ export class MemoryStore {
            AND i.scope = @scope
            AND (@scope = 'global' OR i.group_folder = @group_folder)
            AND (@scope != 'user' OR (@user_id IS NOT NULL AND i.user_id = @user_id))
+           AND COALESCE(i.topic_id, '') = COALESCE(@topic_id, '')
          ORDER BY n.distance ASC
          LIMIT @limit`,
       )
@@ -919,6 +936,7 @@ export class MemoryStore {
         scope: input.scope,
         group_folder: input.groupFolder,
         user_id: input.userId ?? null,
+        topic_id: input.topicId ?? null,
         limit,
       }) as Array<Record<string, unknown>>;
 
@@ -1117,6 +1135,7 @@ export class MemoryStore {
     groupFolder: string,
     limit: number,
     userId?: string,
+    topicId?: string,
   ): MemoryItem[] {
     const rows = this.db
       .prepare(
@@ -1125,6 +1144,7 @@ export class MemoryStore {
          AND scope = @scope
          AND (scope = 'global' OR group_folder = @group_folder)
          AND (@scope != 'user' OR (@user_id IS NOT NULL AND user_id = @user_id))
+         AND COALESCE(topic_id, '') = COALESCE(@topic_id, '')
          ORDER BY confidence DESC, COALESCE(last_used_at, updated_at) DESC
          LIMIT @limit`,
       )
@@ -1132,6 +1152,7 @@ export class MemoryStore {
         scope,
         group_folder: groupFolder,
         user_id: userId || null,
+        topic_id: topicId || null,
         limit,
       }) as Record<string, unknown>[];
     return rows.map((row) => this.toItem(row));
@@ -1179,13 +1200,14 @@ export class MemoryStore {
     this.db
       .prepare(
         `INSERT INTO memory_procedures
-        (id, scope, group_folder, title, body, tags_json, origin, trigger, source, confidence, version, last_used_at, created_at, updated_at, is_deleted, deleted_at)
-        VALUES (@id, @scope, @group_folder, @title, @body, @tags_json, @origin, @trigger, @source, @confidence, @version, @last_used_at, @created_at, @updated_at, @is_deleted, @deleted_at)`,
+        (id, scope, group_folder, topic_id, title, body, tags_json, origin, trigger, source, confidence, version, last_used_at, created_at, updated_at, is_deleted, deleted_at)
+        VALUES (@id, @scope, @group_folder, @topic_id, @title, @body, @tags_json, @origin, @trigger, @source, @confidence, @version, @last_used_at, @created_at, @updated_at, @is_deleted, @deleted_at)`,
       )
       .run({
         id,
         scope: input.scope,
         group_folder: input.group_folder,
+        topic_id: input.topic_id ?? null,
         title: input.title,
         body: input.body,
         tags_json: JSON.stringify(input.tags),
@@ -1290,16 +1312,25 @@ export class MemoryStore {
     return this.getProcedureById(id)!;
   }
 
-  listTopProcedures(groupFolder: string, limit: number): MemoryProcedure[] {
+  listTopProcedures(
+    groupFolder: string,
+    limit: number,
+    topicId?: string,
+  ): MemoryProcedure[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM memory_procedures
          WHERE is_deleted = 0
          AND (scope = 'global' OR (scope = 'group' AND group_folder = @group_folder))
+         AND COALESCE(topic_id, '') = COALESCE(@topic_id, '')
          ORDER BY confidence DESC, COALESCE(last_used_at, updated_at) DESC
          LIMIT @limit`,
       )
-      .all({ group_folder: groupFolder, limit }) as Record<string, unknown>[];
+      .all({
+        group_folder: groupFolder,
+        topic_id: topicId || null,
+        limit,
+      }) as Record<string, unknown>[];
     return rows.map((row) => this.toProcedure(row));
   }
 
@@ -1756,6 +1787,7 @@ export class MemoryStore {
       scope: row.scope as MemoryScope,
       group_folder: String(row.group_folder),
       user_id: row.user_id ? String(row.user_id) : null,
+      topic_id: row.topic_id ? String(row.topic_id) : null,
       kind: row.kind as MemoryItem['kind'],
       key: String(row.key),
       value: String(row.value),
@@ -1813,6 +1845,7 @@ export class MemoryStore {
       id: String(row.id),
       scope: row.scope as MemoryScope,
       group_folder: String(row.group_folder),
+      topic_id: row.topic_id ? String(row.topic_id) : null,
       title: String(row.title),
       body: String(row.body),
       tags: JSON.parse(String(row.tags_json || '[]')) as string[],

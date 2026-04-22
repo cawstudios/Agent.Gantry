@@ -149,6 +149,7 @@ export async function spawnAgent(
     MYCLAW_IPC_DIR: hostRuntime.groupIpcDir,
     MYCLAW_IPC_INPUT_DIR: path.join(hostRuntime.groupIpcDir, 'input'),
     MYCLAW_IPC_AUTH_TOKEN: computeIpcAuthToken(group.folder),
+    MYCLAW_THREAD_ID: input.threadId || '',
     MYCLAW_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
     CLAUDE_CONFIG_DIR: path.join(MYCLAW_HOME, '.claude'),
   };

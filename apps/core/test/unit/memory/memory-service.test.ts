@@ -15,6 +15,7 @@ function makeItem(overrides: Partial<MemoryItem> = {}): MemoryItem {
     scope: overrides.scope || 'group',
     group_folder: overrides.group_folder || 'team',
     user_id: overrides.user_id ?? null,
+    topic_id: overrides.topic_id ?? null,
     kind: overrides.kind || 'fact',
     key: overrides.key || 'fact:key',
     value: overrides.value || 'value',
@@ -46,6 +47,7 @@ function makeProcedure(
     id: overrides.id || 'proc-1',
     scope: overrides.scope || 'group',
     group_folder: overrides.group_folder || 'team',
+    topic_id: overrides.topic_id ?? null,
     title: overrides.title || 'Deploy',
     body: overrides.body || 'Run build and tests.',
     tags: overrides.tags || [],
@@ -95,6 +97,7 @@ function makeServiceFixture() {
         scope: 'user' | 'group' | 'global';
         group_folder: string;
         user_id: string | null;
+        topic_id?: string | null;
         key: string;
         value: string;
         kind: MemoryItem['kind'];
@@ -111,6 +114,7 @@ function makeServiceFixture() {
           scope: input.scope,
           group_folder: input.group_folder,
           user_id: input.user_id,
+          topic_id: input.topic_id ?? null,
           key: input.key,
           value: input.value,
           kind: input.kind,
@@ -396,6 +400,72 @@ describe('MemoryService boundary extraction', () => {
     });
 
     expect(brief).toContain('Ravi prefers terse replies.');
+  });
+
+  it('buildBrief filters injected records to the active thread topic', async () => {
+    const fixture = makeServiceFixture();
+    fixture.store.listTopItems.mockReturnValue([]);
+
+    const brief = await fixture.service.buildBrief({
+      groupFolder: 'team',
+      maxItems: 20,
+      userId: 'user-1',
+      threadId: 'thread-a',
+    });
+
+    expect(brief).toContain('### Topic Boundary');
+    expect(brief).toContain('thread_id: thread-a');
+    expect(fixture.store.listTopItems).toHaveBeenNthCalledWith(
+      1,
+      'user',
+      'team',
+      20,
+      'user-1',
+      'thread-a',
+    );
+    expect(fixture.store.listTopItems).toHaveBeenNthCalledWith(
+      2,
+      'group',
+      'team',
+      20,
+      undefined,
+      'thread-a',
+    );
+    expect(fixture.store.listTopItems).toHaveBeenNthCalledWith(
+      3,
+      'global',
+      'team',
+      20,
+      undefined,
+      'thread-a',
+    );
+    expect(fixture.store.listTopProcedures).toHaveBeenCalledWith(
+      'team',
+      5,
+      'thread-a',
+    );
+  });
+
+  it('saveMemory defaults topic_id from write context thread id', async () => {
+    const fixture = makeServiceFixture();
+
+    const saved = await fixture.service.saveMemory(
+      {
+        key: 'decision:ship',
+        value: 'Ship the onboarding fix.',
+      },
+      {
+        isMain: false,
+        groupFolder: 'team',
+        actor: 'mcp-tool',
+        threadId: 't-1',
+      },
+    );
+
+    expect(saved.topic_id).toBe('t-1');
+    expect(fixture.store.saveItem).toHaveBeenCalledWith(
+      expect.objectContaining({ topic_id: 't-1' }),
+    );
   });
 
   it('buildBrief includes dream lifecycle details from latest dream event', async () => {

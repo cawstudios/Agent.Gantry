@@ -736,6 +736,7 @@ async function runJob(
             sessionId,
             groupFolder: execution.group.folder,
             chatJid: execution.executionJid,
+            threadId: currentJob.thread_id || undefined,
             isMain,
             isScheduledJob: true,
             assistantName: ASSISTANT_NAME,

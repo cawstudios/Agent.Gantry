@@ -1,3 +1,5 @@
+import { safeSlackErrorCode } from './provider-error-guidance.js';
+
 export interface SlackRecentChat {
   chatJid: string;
   chatTitle: string;
@@ -131,7 +133,7 @@ export async function listSlackRecentChats(options: {
       return {
         ok: false,
         chats: [],
-        message: `Slack conversation discovery failed: ${payload.error || 'unknown_error'}.`,
+        message: `Slack conversation discovery failed: ${safeSlackErrorCode(payload.error)}.`,
         nextAction:
           'Ensure bot has conversations:read and is invited to target channels.',
       };

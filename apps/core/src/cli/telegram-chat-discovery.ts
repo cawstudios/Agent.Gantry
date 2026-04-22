@@ -1,4 +1,5 @@
 import { normalizeTelegramChatJid } from './telegram.js';
+import { safeTelegramDescription } from './provider-error-guidance.js';
 
 export interface TelegramRecentChat {
   chatJid: string;
@@ -152,8 +153,10 @@ export async function listTelegramRecentChats(options: {
       return {
         ok: false,
         chats: [],
-        message:
-          payload.description || 'Telegram did not return update history.',
+        message: safeTelegramDescription(
+          payload.description,
+          'Telegram did not return update history.',
+        ),
         nextAction:
           'Send a message in the target chat to the bot, then retry Telegram connect.',
       };

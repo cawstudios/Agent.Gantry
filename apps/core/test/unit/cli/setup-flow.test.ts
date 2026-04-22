@@ -428,7 +428,7 @@ describe('runSetupFlow credential step', () => {
     expect(mod.runDoctorWithNetwork).toHaveBeenCalledTimes(1);
     expect(mod.promptCalls.map((call) => call.message)).toEqual([
       'Start guided setup now?',
-      'Where should MyClaw store runtime data?',
+      'Where should MyClaw store runtime data? (/back, /resume, /cancel)',
       'Use this runtime home?',
       'Choose storage backend',
       'Continue to provider selection?',
@@ -444,10 +444,8 @@ describe('runSetupFlow credential step', () => {
       'Memory setting',
       'Embeddings setting',
       'Dreaming setting',
-      'Continue to group creation?',
-      'Continue to optional service setup?',
       'Background service (optional)',
-      'Verification passed. Continue to ready screen?',
+      'Create this MyClaw runtime now? After this point setup writes config and cannot be cancelled transactionally.',
       'Setup complete. What should MyClaw do now?',
     ]);
     expect(

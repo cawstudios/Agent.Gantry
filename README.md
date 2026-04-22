@@ -37,8 +37,10 @@ Then follow this order:
 5. Choose credential mode (`env-only` by default), then set Claude auth (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) when that mode needs local credentials.
 6. Choose main model (`Sonnet` recommended, `Opus` optional).
 7. Confirm memory settings (memory on, embeddings off, dreaming on by default).
-8. Let setup run final doctor verification.
-9. Finish setup. The default is to exit cleanly; choose `Start MyClaw now` only if you want the runtime to begin listening immediately.
+8. Choose whether to install/start a background service.
+9. Review the final summary and choose `Create Runtime`; before this point Back, Resume Later, and Cancel are transactional.
+10. Let setup write config, register the group, run final doctor verification, and show the ready screen.
+11. Finish setup. The default is to exit cleanly; choose `Start MyClaw now` only if you want the runtime to begin listening immediately.
 
 ### CLI Commands
 
@@ -67,7 +69,7 @@ Defaults in v1:
 - storage SQLite path: `store/myclaw.db`
 - memory: on
 - embeddings: off (unless OpenAI key is provided and enabled)
-- dreaming: on (guided setup default)
+- dreaming: on in guided setup; disable with `myclaw memory dreaming off`
 - sender allowlist: `channels.<provider>.sender_allowlist` in `settings.yaml`
 
 Runtime home is a single-cut contract. MyClaw reads `~/myclaw` by default unless `--runtime-home` or `MYCLAW_HOME` is set.
@@ -157,7 +159,7 @@ Scope defaults:
 - `user` for personal preferences and per-user corrections
 - `group` for active channel/chat memory (default)
 - `global` only for explicitly cross-chat knowledge
-- when `thread_id` exists, treat it as a topic boundary and include topic markers in memory keys
+- when `thread_id` exists, injected group/global memory is filtered to records saved with the same `topic_id`/`thread_id`
 
 Runtime state storage defaults to `~/myclaw/store/myclaw.db`.
 Memory data uses `~/myclaw/memory/.cache/memory.db` by default (derived from `memory.root`).

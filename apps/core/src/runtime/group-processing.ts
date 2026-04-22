@@ -214,6 +214,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
           sessionId,
           groupFolder: group.folder,
           chatJid,
+          threadId: options?.memoryContext?.threadId,
           isMain,
           assistantName: ASSISTANT_NAME,
           thinking: group.agentConfig?.thinking,

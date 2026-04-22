@@ -68,6 +68,7 @@ import {
   MemoryScope,
   MemorySearchResult,
   MemoryWriteContext,
+  normalizeMemoryTopicId,
   PatchMemoryInput,
   PatchProcedureInput,
   SaveMemoryInput,
@@ -94,6 +95,7 @@ interface BuildBriefInput {
   groupFolder: string;
   maxItems: number;
   userId?: string;
+  threadId?: string;
 }
 
 interface ArcTurn {
@@ -523,6 +525,7 @@ export class MemoryService {
     const confidence = clampConfidence(input.confidence);
     const kind = input.kind || 'fact';
     const source = input.source || 'agent';
+    const topicId = normalizeMemoryTopicId(input.topic_id || ctx.threadId);
     const actor = this.resolveWriteActor(ctx, source);
     this.assertNoSensitiveMaterialOrThrow({
       groupFolder,
@@ -540,6 +543,7 @@ export class MemoryService {
       groupFolder,
       key: input.key,
       userId: input.user_id || null,
+      topicId: topicId || null,
     });
 
     let embedding =
@@ -570,6 +574,7 @@ export class MemoryService {
             groupFolder,
             key: input.key,
             userId: input.user_id || null,
+            topicId: topicId || null,
           }),
         patch,
       });
@@ -627,6 +632,7 @@ export class MemoryService {
         scope,
         groupFolder,
         userId: input.user_id || null,
+        topicId: topicId || null,
         embedding,
         limit: 3,
       });
@@ -698,6 +704,7 @@ export class MemoryService {
       scope,
       group_folder: groupFolder,
       user_id: input.user_id || null,
+      topic_id: topicId || null,
       kind,
       key: input.key,
       value: input.value,
@@ -836,6 +843,7 @@ export class MemoryService {
     }
     this.enforceScope(scope, ctx);
     const groupFolder = this.resolveTargetGroupFolder(input.group_folder, ctx);
+    const topicId = normalizeMemoryTopicId(input.topic_id || ctx.threadId);
     const actor = this.resolveWriteActor(ctx, input.source || 'agent');
     this.assertNoSensitiveMaterialOrThrow({
       groupFolder,
@@ -850,6 +858,7 @@ export class MemoryService {
     const procedure = this.store.saveProcedure({
       scope,
       group_folder: groupFolder,
+      topic_id: topicId || null,
       title: input.title,
       body: input.body,
       tags: input.tags || [],
@@ -944,18 +953,32 @@ export class MemoryService {
   async buildBrief(input: BuildBriefInput): Promise<string> {
     if (!RUNTIME_MEMORY_ENABLED) return 'No durable memory available yet.';
     const resolvedUserId = input.userId?.trim() || undefined;
+    const topicId = normalizeMemoryTopicId(input.threadId);
     const userScopedItems = resolvedUserId
       ? this.store.listTopItems(
           'user',
           input.groupFolder,
           input.maxItems,
           resolvedUserId,
+          topicId,
         )
       : [];
     const scoped = dedupeItemsById([
       ...userScopedItems,
-      ...this.store.listTopItems('group', input.groupFolder, input.maxItems),
-      ...this.store.listTopItems('global', input.groupFolder, input.maxItems),
+      ...this.store.listTopItems(
+        'group',
+        input.groupFolder,
+        input.maxItems,
+        undefined,
+        topicId,
+      ),
+      ...this.store.listTopItems(
+        'global',
+        input.groupFolder,
+        input.maxItems,
+        undefined,
+        topicId,
+      ),
     ])
       .sort((a, b) => {
         if (a.is_pinned !== b.is_pinned) {
@@ -969,17 +992,32 @@ export class MemoryService {
         return bLast - aLast;
       })
       .slice(0, input.maxItems);
-    const procedures = this.store.listTopProcedures(input.groupFolder, 5);
+    const procedures = this.store.listTopProcedures(
+      input.groupFolder,
+      5,
+      topicId,
+    );
 
     const decisions = scoped.filter((item) => item.kind === 'decision');
     const facts = scoped.filter((item) => item.kind !== 'decision');
-    const latestSessionRecap =
-      MemoryRootService.getInstance().getLatestSessionRecap(input.groupFolder);
+    const latestSessionRecap = topicId
+      ? null
+      : MemoryRootService.getInstance().getLatestSessionRecap(
+          input.groupFolder,
+        );
     const latestDreamEvent =
       this.store.getLatestEvent('dream_completed', input.groupFolder) ||
       this.store.getLatestEvent('dreaming_completed', input.groupFolder);
 
     const lines: string[] = ['## Memory Brief', ''];
+    if (topicId) {
+      lines.push('### Topic Boundary');
+      lines.push(`- thread_id: ${normalizeSingleLine(topicId)}`);
+      lines.push(
+        '- injected memories are limited to records explicitly saved for this thread_id',
+      );
+      lines.push('');
+    }
     if (latestSessionRecap) {
       lines.push('### Session Recap');
       lines.push(
@@ -1549,6 +1587,7 @@ export class MemoryService {
       `scope: ${memory.scope}`,
       `group_folder: ${memory.group_folder}`,
       ...(memory.user_id ? [`user_id: ${memory.user_id}`] : []),
+      ...(memory.topic_id ? [`topic_id: ${memory.topic_id}`] : []),
       `kind: ${memory.kind}`,
       `key: ${yamlSafe(memory.key)}`,
       `source: ${memory.source}`,

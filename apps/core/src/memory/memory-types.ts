@@ -15,6 +15,7 @@ export interface MemoryItem {
   scope: MemoryScope;
   group_folder: string;
   user_id: string | null;
+  topic_id?: string | null;
   kind: MemoryKind;
   key: string;
   value: string;
@@ -52,6 +53,7 @@ export interface MemoryProcedure {
   id: string;
   scope: MemoryScope;
   group_folder: string;
+  topic_id?: string | null;
   title: string;
   body: string;
   tags: string[];
@@ -106,12 +108,14 @@ export interface MemoryWriteContext {
   isMain: boolean;
   groupFolder: string;
   actor?: string;
+  threadId?: string;
 }
 
 export interface SaveMemoryInput {
   scope?: MemoryScope;
   group_folder?: string;
   user_id?: string;
+  topic_id?: string;
   kind?: MemoryKind;
   key: string;
   value: string;
@@ -136,6 +140,7 @@ export interface PatchMemoryInput {
 export interface SaveProcedureInput {
   scope?: MemoryScope;
   group_folder?: string;
+  topic_id?: string;
   title: string;
   body: string;
   tags?: string[];
@@ -153,4 +158,11 @@ export interface PatchProcedureInput {
   tags?: string[];
   trigger?: string | null;
   confidence?: number;
+}
+
+export function normalizeMemoryTopicId(
+  value: string | undefined,
+): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, 255) : undefined;
 }

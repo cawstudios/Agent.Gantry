@@ -16,12 +16,7 @@ export interface SetupReadyDraft {
   dreamingEnabled: boolean;
 }
 
-export type ReadyStepAction =
-  | { type: 'next' }
-  | { type: 'start_now' }
-  | { type: 'back' }
-  | { type: 'resume' }
-  | { type: 'cancel' };
+export type ReadyStepAction = { type: 'next' } | { type: 'start_now' };
 
 function summarizeToggle(value: boolean): string {
   return value ? 'on' : 'off';
@@ -68,24 +63,10 @@ export async function runReadyStep(
         label: 'Start MyClaw now',
         hint: `Begin listening on ${draft.primaryProvider} immediately.`,
       },
-      {
-        value: 'back',
-        label: 'Back',
-      },
-      {
-        value: 'resume',
-        label: 'Resume Later',
-      },
-      {
-        value: 'cancel',
-        label: 'Cancel Setup',
-      },
     ],
   });
 
-  if (p.isCancel(value) || value === 'resume') return { type: 'resume' };
-  if (value === 'back') return { type: 'back' };
-  if (value === 'cancel') return { type: 'cancel' };
+  if (p.isCancel(value)) return { type: 'next' };
   if (value === 'start_now') return { type: 'start_now' };
   return { type: 'next' };
 }

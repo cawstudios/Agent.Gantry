@@ -56,19 +56,8 @@ const isDirectRun =
 
 if (isDirectRun) {
   installGlobalErrorHandlers(logger);
-  const shouldStartCli =
-    process.stdin.isTTY && process.stdout.isTTY && process.argv.length <= 2;
-  if (shouldStartCli) {
-    import('./cli/index.js').catch((err) => {
-      logger.error({ err }, 'Failed to start MyClaw CLI');
-      process.exit(1);
-    });
-    // CLI module owns process lifecycle once imported.
-    // Avoid starting runtime concurrently.
-  } else {
-    startMyClawRuntime().catch((err) => {
-      logger.error({ err }, 'Failed to start MyClaw');
-      process.exit(1);
-    });
-  }
+  startMyClawRuntime().catch((err) => {
+    logger.error({ err }, 'Failed to start MyClaw');
+    process.exit(1);
+  });
 }

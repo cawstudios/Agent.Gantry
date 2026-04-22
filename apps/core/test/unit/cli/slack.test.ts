@@ -280,6 +280,34 @@ describe('cli slack helpers', () => {
     expect(result.nextAction).not.toContain('Bearer');
   });
 
+  it('sanitizes token-bearing Slack JSON discovery errors', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: 'invalid_auth Bearer xoxb-secret-token',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const result = await listSlackRecentChats({
+      botToken: 'xoxb-secret-token',
+      limit: 20,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe(
+      'Slack conversation discovery failed: unknown_error.',
+    );
+    expect(result.message).not.toContain('xoxb-secret-token');
+    expect(result.message).not.toContain('Bearer');
+  });
+
   it('slack chat selection asks for confirmation even with one discovered chat', async () => {
     vi.resetModules();
     const select = vi.fn(async () => 'skip');

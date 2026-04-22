@@ -14,9 +14,9 @@ Make continuity deterministic and production-safe:
 ## 2) Runtime Injection Contract
 
 1. For every message turn and scheduler run, host builds a continuity block.
-2. Host writes block to an ephemeral JSON file and passes it through `memoryContextFile`.
+2. Host passes the block through the runner input as `memoryContextBlock`.
 3. Runner appends that block to the first prompt stream item.
-4. File is cleaned up after run (success or error).
+4. No temp memory-context file is created on the hot path.
 
 ## 3) Continuity Block Contents
 
@@ -25,7 +25,7 @@ Make continuity deterministic and production-safe:
   - `user` personal memory
   - `group` active chat/channel memory
   - `global` explicit cross-chat sharing only
-  - `thread_id` treated as topic boundary
+  - `thread_id` enforced as a topic boundary for injected group/global memory
 - memory brief:
   - session recap + open loops (latest archived session summary)
   - dream lifecycle (enabled/schedule/last run/outcome)
@@ -39,7 +39,7 @@ Make continuity deterministic and production-safe:
 - Slack DM: prefer `user` + `group`.
 - Telegram group: default `group`; `global` only explicit.
 - Telegram personal chat: prefer `user` + `group`; avoid `global` unless explicit.
-- Telegram/Slack thread topics: include topic marker in keys to prevent cross-topic bleed.
+- Telegram/Slack thread topics: save topic-specific memory with `topic_id`/`thread_id`; injected recall is filtered to that exact topic boundary.
 
 ## 5) Dreaming Lifecycle
 

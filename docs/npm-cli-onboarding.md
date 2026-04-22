@@ -31,15 +31,17 @@ The first run is guided and channel-agnostic:
 10. memory decision
 11. embeddings decision (off by default; asks for OpenAI key only if enabled)
 12. dreaming decision (on by default)
-13. config write
-14. group registration
-15. optional service install/start
-16. final doctor verification
-17. ready screen that exits by default and starts the runtime only when explicitly selected
+13. optional service choice
+14. final review + `Create Runtime`
+15. config write
+16. group registration
+17. optional service install/start
+18. final doctor verification
+19. ready screen that exits by default and starts the runtime only when explicitly selected
 
 Doctor verification is intentionally last in first-run setup. A fresh runtime is expected to be incomplete until channel credentials, model credentials, memory settings, and the first group are written.
 
-If setup is interrupted, rerun `myclaw` to resume.
+Until `Create Runtime`, Back, Resume Later, and Cancel are transactional: setup may save onboarding progress, but it does not enable channels or register a group. If setup is interrupted, rerun `myclaw` to resume.
 
 Slack can still be connected later (or as an additional channel) with `myclaw slack connect`.
 

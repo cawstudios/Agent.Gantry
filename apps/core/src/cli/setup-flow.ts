@@ -61,9 +61,9 @@ const FULL_SEQUENCE: OnboardingStep[] = [
   'memory',
   'embeddings',
   'dreaming',
+  'service',
   'config',
   'group',
-  'service',
   'verify',
   'ready',
 ];
@@ -275,7 +275,7 @@ async function runWelcomeStep(): Promise<FlowAction> {
   p.note(
     [
       'This setup will connect your first channel and prepare your MyClaw runtime home.',
-      'You can go Back, Resume Later, or Cancel at any step.',
+      'You can go Back, Resume Later, or Cancel until the final create-runtime confirmation.',
     ].join('\n'),
     'Welcome',
   );
@@ -291,10 +291,13 @@ async function runRuntimeHomeStep(
 ): Promise<{ action: FlowAction; changedHome?: string }> {
   const defaultRuntimeHome = draft.runtimeHome || '~/myclaw';
   const value = await p.text({
-    message: 'Where should MyClaw store runtime data?',
+    message:
+      'Where should MyClaw store runtime data? (/back, /resume, /cancel)',
     placeholder: '~/myclaw',
     defaultValue: defaultRuntimeHome,
     validate: (input) => {
+      const trimmed = String(input ?? '').trim();
+      if (isInputFlowControl(trimmed)) return undefined;
       if ((!input || !input.trim()) && !defaultRuntimeHome) {
         return 'Please enter a path (for example: ~/myclaw).';
       }
@@ -304,6 +307,10 @@ async function runRuntimeHomeStep(
 
   if (p.isCancel(value)) {
     return { action: { type: 'resume' } };
+  }
+  const control = parseInputFlowControl(value);
+  if (control) {
+    return { action: control };
   }
 
   const resolved = resolveRuntimeHome(
@@ -685,7 +692,7 @@ async function runTelegramStep(draft: SetupDraft): Promise<FlowAction> {
       token,
       chatJid: draft.telegramChatJid,
       botId: validation.botId,
-      sendTestMessage: true,
+      sendTestMessage: false,
     });
     if (!chatAccess.ok) {
       chatCheckSpinner.stop('Chat access check failed');
@@ -1023,7 +1030,7 @@ async function runSlackStep(draft: SetupDraft): Promise<FlowAction> {
     const access = await verifySlackChatAccess({
       botToken,
       chatJid: draft.slackChatJid,
-      sendTestMessage: true,
+      sendTestMessage: false,
     });
     if (!access.ok) {
       p.note(
@@ -1258,6 +1265,34 @@ async function runDreamingStep(draft: SetupDraft): Promise<FlowAction> {
 }
 
 async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
+  const channelLabel =
+    draft.primaryProvider === 'slack'
+      ? `Slack ${draft.slackChatJid}`
+      : `Telegram ${draft.telegramChatJid}`;
+  p.note(
+    [
+      `Runtime home: ${draft.runtimeHome}`,
+      `Storage: ${draft.storageProvider}`,
+      `Channel: ${channelLabel}`,
+      `Credential mode: ${draft.credentialMode}`,
+      `Main model: ${draft.selectedModel}`,
+      `Memory: ${draft.memoryEnabled ? 'on' : 'off'}`,
+      `Embeddings: ${draft.embeddingsEnabled ? 'openai' : 'disabled'}`,
+      `Dreaming: ${draft.dreamingEnabled ? 'on' : 'off'}`,
+      `Service: ${draft.serviceChoice === 'skip' ? 'skip for now' : draft.serviceChoice.replace('_', ' + ')}`,
+    ].join('\n'),
+    'Review setup',
+  );
+  const action = await chooseProgressAction({
+    message:
+      'Create this MyClaw runtime now? After this point setup writes config and cannot be cancelled transactionally.',
+    continueLabel: 'Create Runtime',
+    includeBack: true,
+  });
+  if (action.type !== 'next') {
+    return action;
+  }
+
   const spinner = p.spinner();
   spinner.start('Writing runtime config...');
   try {
@@ -1289,11 +1324,7 @@ async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
     return { type: 'resume' };
   }
 
-  return chooseProgressAction({
-    message: 'Continue to group creation?',
-    continueLabel: 'Continue',
-    includeBack: true,
-  });
+  return { type: 'next' };
 }
 
 async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
@@ -1327,17 +1358,10 @@ async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
     };
   }
 
-  return chooseProgressAction({
-    message: 'Continue to optional service setup?',
-    continueLabel: 'Continue',
-    includeBack: true,
-  });
+  return { type: 'next' };
 }
 
-async function runServiceStep(
-  importMetaUrl: string,
-  draft: SetupDraft,
-): Promise<FlowAction> {
+async function runServiceStep(draft: SetupDraft): Promise<FlowAction> {
   const choice = await p.select({
     message: 'Background service (optional)',
     options: [
@@ -1377,16 +1401,21 @@ async function runServiceStep(
 
   draft.serviceChoice = choice as ServiceChoice;
 
-  if (draft.serviceChoice === 'skip') {
-    return { type: 'next' };
-  }
+  return { type: 'next' };
+}
+
+async function applyServiceChoice(
+  importMetaUrl: string,
+  draft: SetupDraft,
+): Promise<void> {
+  if (draft.serviceChoice === 'skip') return;
 
   const installOutcome = installService(importMetaUrl, draft.runtimeHome);
   if (!installOutcome.ok) {
     p.log.warn(
       `Service install failed. Next action: run \`myclaw service install\` later.\n${installOutcome.message}`,
     );
-    return { type: 'next' };
+    return;
   }
   p.log.success(installOutcome.message);
 
@@ -1400,8 +1429,6 @@ async function runServiceStep(
       p.log.success(startOutcome.message);
     }
   }
-
-  return { type: 'next' };
 }
 
 async function runVerifyStep(
@@ -1439,31 +1466,14 @@ async function runVerifyStep(
   }
 
   if (!report.ok) {
-    const action = await p.select({
-      message: 'Verification found blocking issues. What next?',
-      options: [
-        {
-          value: 'resume',
-          label: 'Resume Later (Recommended)',
-        },
-        {
-          value: 'back',
-          label: 'Back',
-        },
-        {
-          value: 'cancel',
-          label: 'Cancel Setup',
-        },
-      ],
-    });
-    return toAction(action);
+    p.log.warn(
+      'Verification found blocking issues after runtime creation. Setup is saved; run `myclaw doctor` after fixing the next actions above.',
+    );
+    return { type: 'next' };
   }
 
-  return chooseProgressAction({
-    message: 'Verification passed. Continue to ready screen?',
-    continueLabel: 'Continue',
-    includeBack: true,
-  });
+  p.log.success('Verification passed.');
+  return { type: 'next' };
 }
 
 export async function runSetupFlow(
@@ -1530,12 +1540,15 @@ export async function runSetupFlow(
       action = await runEmbeddingsStep(draft);
     } else if (step === 'dreaming') {
       action = await runDreamingStep(draft);
+    } else if (step === 'service') {
+      action = await runServiceStep(draft);
     } else if (step === 'config') {
       action = await runConfigStep(draft);
     } else if (step === 'group') {
       action = await runGroupStep(draft);
-    } else if (step === 'service') {
-      action = await runServiceStep(options.importMetaUrl, draft);
+      if (action.type === 'next') {
+        await applyServiceChoice(options.importMetaUrl, draft);
+      }
     } else if (step === 'verify') {
       action = await runVerifyStep(options.importMetaUrl, draft);
     } else if (step === 'ready') {

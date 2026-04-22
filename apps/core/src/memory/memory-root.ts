@@ -208,11 +208,62 @@ export class MemoryRootService {
   getLatestSessionRecap(groupFolder: string): LatestSessionRecap | null {
     const index = this.readLatestSessionRecapIndex();
     const entry = index.groups[groupFolder];
-    if (!entry) return null;
+    if (!entry) {
+      return this.rebuildLatestSessionRecapForGroup(groupFolder);
+    }
     return {
       filePath: entry.filePath,
       summary: entry.summary,
       openLoops: entry.openLoops,
+    };
+  }
+
+  private rebuildLatestSessionRecapForGroup(
+    groupFolder: string,
+  ): LatestSessionRecap | null {
+    let latest: (LatestSessionRecap & { archivedAt: string }) | null = null;
+    const scan = (dir: string): void => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          scan(fullPath);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+        let content = '';
+        try {
+          content = fs.readFileSync(fullPath, 'utf-8');
+        } catch {
+          continue;
+        }
+        const recap = this.parseSessionRecapContent(
+          content,
+          fullPath,
+          groupFolder,
+        );
+        if (!recap) continue;
+        const archivedAt =
+          content.match(/^archived_at:\s*(.+)$/m)?.[1]?.trim() ||
+          '1970-01-01T00:00:00.000Z';
+        if (!latest || archivedAt > latest.archivedAt) {
+          latest = { ...recap, archivedAt };
+        }
+      }
+    };
+    scan(this.layout.sessionsDir);
+    if (!latest) return null;
+    const latestRecap = latest as LatestSessionRecap & { archivedAt: string };
+    this.updateLatestSessionRecapIndex(groupFolder, latestRecap);
+    return {
+      filePath: latestRecap.filePath,
+      summary: latestRecap.summary,
+      openLoops: latestRecap.openLoops,
     };
   }
 

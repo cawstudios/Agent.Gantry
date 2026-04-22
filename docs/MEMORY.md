@@ -28,8 +28,10 @@ memory:
     provider: disabled
     model: text-embedding-3-large
   dreaming:
-    enabled: false
+    enabled: true
 ```
+
+Fresh guided setup writes the block above by default: memory on, embeddings off, dreaming on. A raw generated settings file outside guided setup may start with dreaming off until the user explicitly enables it.
 
 ## Storage
 
@@ -48,7 +50,7 @@ memory:
 ## Dreaming
 
 - Optional background memory refinement.
-- Disabled by default.
+- Enabled by default in guided setup; optional and can be disabled with `myclaw memory dreaming off`.
 - Should be used only with persistent memory enabled.
 - When enabled, dream lifecycle metadata (enabled state, schedule, last outcome) is included in the injected continuity brief.
 
@@ -56,6 +58,7 @@ memory:
 
 - Host runtime injects memory/continuity context for every agent run (message turns and scheduler jobs).
 - Injection does not rely on the agent deciding to call `memory_search` first.
+- The injected block is structured JSON marked as untrusted data-only evidence, not executable instructions.
 - Memory tools remain available for deeper retrieval, explicit saves, and patch operations.
 
 ## Scope Defaults
@@ -63,7 +66,7 @@ memory:
 - `user`: personal preferences/corrections for one user.
 - `group`: active channel/chat memory (default).
 - `global`: cross-chat memory; use only with explicit user intent.
-- If a `thread_id` exists, treat it as a topic boundary and include topic markers in memory keys.
+- If a `thread_id` exists, MyClaw treats it as a hard topic boundary for injected memory and filters group/global memory to records saved with that exact `topic_id`/`thread_id`.
 
 ## User Controls
 

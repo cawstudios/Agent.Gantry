@@ -42,6 +42,7 @@ const USER_QUESTION_MAX_ANSWERED_BY_LENGTH = 120;
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.MYCLAW_CHAT_JID!;
 const groupFolder = process.env.MYCLAW_GROUP_FOLDER!;
+const threadId = process.env.MYCLAW_THREAD_ID?.trim() || undefined;
 const isMain = process.env.MYCLAW_IS_MAIN === '1';
 
 function writeIpcFile(dir: string, data: object): string {
@@ -996,6 +997,14 @@ server.tool(
     scope: z.enum(['user', 'group', 'global']).optional(),
     group_folder: z.string().optional(),
     user_id: z.string().optional(),
+    topic_id: z
+      .string()
+      .optional()
+      .describe('Optional topic/thread boundary for topic-scoped memories'),
+    thread_id: z
+      .string()
+      .optional()
+      .describe('Alias for topic_id; defaults to current thread when present'),
     kind: z
       .enum([
         'preference',
@@ -1019,7 +1028,10 @@ server.tool(
     source: z.string().optional(),
   },
   async (args) => {
-    const response = await requestMemoryAction('memory_save', args);
+    const response = await requestMemoryAction('memory_save', {
+      ...args,
+      topic_id: args.topic_id || args.thread_id || threadId,
+    });
     if (!response.ok) {
       return {
         content: [
