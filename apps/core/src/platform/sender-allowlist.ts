@@ -1,12 +1,13 @@
-import { MYCLAW_HOME } from '../core/config.js';
-import { logger } from '../core/logger.js';
+import { MYCLAW_HOME } from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import '../channels/register-builtins.js';
-import {
+import { loadRuntimeSettingsFromPath } from '../config/settings/runtime-settings.js';
+import type { SenderControlAllowlistConfig } from '../config/settings/control-allowlist.js';
+import type {
   ChatAllowlistEntry,
   SenderAllowlistConfig,
-  loadRuntimeSettingsFromPath,
-} from '../cli/runtime-settings.js';
-import { settingsFilePath } from '../cli/runtime-home.js';
+} from '../config/settings/sender-allowlist.js';
+import { settingsFilePath } from '../config/settings/runtime-home.js';
 import {
   listChannelProviders,
   providerForJid,
@@ -16,11 +17,19 @@ export type RuntimeSenderAllowlistConfig = Record<
   string,
   SenderAllowlistConfig
 >;
+export type RuntimeSenderControlAllowlistConfig = Record<
+  string,
+  SenderControlAllowlistConfig
+>;
 
 const DEFAULT_CHANNEL_CONFIG: SenderAllowlistConfig = {
   default: { allow: '*', mode: 'trigger' },
   agents: {},
   logDenied: true,
+};
+const DEFAULT_CONTROL_CHANNEL_CONFIG: SenderControlAllowlistConfig = {
+  default: [],
+  agents: {},
 };
 
 const DEFAULT_ENTRY: ChatAllowlistEntry = {
@@ -44,10 +53,34 @@ function createDefaultConfig(): RuntimeSenderAllowlistConfig {
   return cfg;
 }
 
+function cloneDefaultControlChannelConfig(): SenderControlAllowlistConfig {
+  return {
+    default: [...DEFAULT_CONTROL_CHANNEL_CONFIG.default],
+    agents: {},
+  };
+}
+
+function createDefaultControlConfig(): RuntimeSenderControlAllowlistConfig {
+  const cfg: RuntimeSenderControlAllowlistConfig = {};
+  for (const provider of listChannelProviders()) {
+    cfg[provider.id] = cloneDefaultControlChannelConfig();
+  }
+  return cfg;
+}
+
 function getChannelConfig(
   chatJid: string,
   cfg: RuntimeSenderAllowlistConfig,
 ): SenderAllowlistConfig | undefined {
+  const channelId = providerForJid(chatJid)?.id;
+  if (!channelId) return undefined;
+  return cfg[channelId];
+}
+
+function getControlChannelConfig(
+  chatJid: string,
+  cfg: RuntimeSenderControlAllowlistConfig,
+): SenderControlAllowlistConfig | undefined {
   const channelId = providerForJid(chatJid)?.id;
   if (!channelId) return undefined;
   return cfg[channelId];
@@ -81,6 +114,34 @@ export function loadSenderAllowlist(
   }
 }
 
+export function loadSenderControlAllowlist(
+  settingsPathOverride?: string,
+): RuntimeSenderControlAllowlistConfig {
+  const filePath = settingsPathOverride ?? settingsFilePath(MYCLAW_HOME);
+
+  try {
+    const settings = loadRuntimeSettingsFromPath(filePath);
+    const cfg = createDefaultControlConfig();
+    for (const [channelId, channelSettings] of Object.entries(
+      settings.channels,
+    )) {
+      cfg[channelId] = channelSettings.controlAllowlist;
+    }
+    return cfg;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'ENOENT') return createDefaultControlConfig();
+    logger.warn(
+      {
+        err: err instanceof Error ? err.message : String(err),
+        path: filePath,
+      },
+      'sender-control-allowlist: invalid settings.yaml; using defaults',
+    );
+    return createDefaultControlConfig();
+  }
+}
+
 function getEntry(
   chatJid: string,
   cfg: RuntimeSenderAllowlistConfig,
@@ -88,6 +149,20 @@ function getEntry(
 ): ChatAllowlistEntry {
   const channelCfg = getChannelConfig(chatJid, cfg);
   if (!channelCfg) return DEFAULT_ENTRY;
+  if (groupFolder) {
+    const byAgent = channelCfg.agents[groupFolder];
+    if (byAgent) return byAgent;
+  }
+  return channelCfg.default;
+}
+
+function getControlSenders(
+  chatJid: string,
+  cfg: RuntimeSenderControlAllowlistConfig,
+  groupFolder?: string,
+): string[] {
+  const channelCfg = getControlChannelConfig(chatJid, cfg);
+  if (!channelCfg) return [];
   if (groupFolder) {
     const byAgent = channelCfg.agents[groupFolder];
     if (byAgent) return byAgent;
@@ -115,6 +190,15 @@ export function isSenderExplicitlyAllowed(
   const entry = getEntry(chatJid, cfg, groupFolder);
   if (entry.allow === '*') return false;
   return entry.allow.includes(sender);
+}
+
+export function isSenderControlAllowed(
+  chatJid: string,
+  sender: string,
+  cfg: RuntimeSenderControlAllowlistConfig,
+  groupFolder?: string,
+): boolean {
+  return getControlSenders(chatJid, cfg, groupFolder).includes(sender);
 }
 
 export function shouldDropMessage(

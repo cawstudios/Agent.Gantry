@@ -134,7 +134,7 @@ MyClaw:
 > For a personal assistant, this is perfect — simple, debuggable, and it survives crashes because files don't disappear when processes die. At a million users per day, I'd pick something else. Different tool for a different scale."
 
 **Speaker-reference files:**
-- `packages/agent-runner/src/ipc-mcp-stdio.ts:38-52` — atomic write via temp + rename
+- `apps/core/src/runner/mcp/stdio.ts` — atomic write via temp + rename
 - `apps/core/src/runtime/ipc-auth.ts:1-32` — per-group secret token (HMAC)
 - `apps/core/src/runtime/ipc.ts:42-44` — 300/min rate limit
 
@@ -162,7 +162,7 @@ Trigger the agent. Phone lights up with a Telegram notification. Hold it up. Tap
 
 **Speaker-reference files:**
 - `packages/agent-runner/src/index.ts:545-583` — the permission hook
-- `packages/agent-runner/src/ipc-mcp-stdio.ts:420-557` — multi-choice question tool
+- `apps/core/src/runner/mcp/stdio.ts` — multi-choice question tool
 - `packages/agent-runner/src/index.ts:70` — 5-minute default timeout
 
 **If the demo fails:** fallback to pre-recorded screencast. Do NOT skip. This is the slide the audience will remember.
@@ -260,7 +260,7 @@ Keep it tight. The last thing they see should be the thesis line.
 A: Technically, yes — the OAuth token path in MyClaw's code is the same one Anthropic restricted. I'm open about that. MyClaw is a personal tool. For real daily usage I'm on API keys — that's what I architected for, and the whole talk is about making that path affordable. The OAuth code exists because I wrote it before enforcement and because the SDK supports it. I don't pitch subscription use as a feature. If I shipped it to other people as a subscription-evasion layer, I'd feel bad about that. I don't.
 
 **Q: How does MyClaw authenticate with Anthropic for real usage?**
-A: `ANTHROPIC_API_KEY`. Directly, or through a credential gateway called OneCLI that ships with MyClaw — supports env-only, managed-only, or hybrid credential modes.
+A: Agent model credentials are brokered through OneCLI; runtime `.env` keeps app/channel/Postgres secrets, not raw Claude credentials for agent runs.
 
 **Q: Can you actually swap to a different provider?**
 A: Yes. Set `ANTHROPIC_BASE_URL` and point it at LiteLLM, OpenRouter's "Anthropic Skin", or any Anthropic-protocol-compatible proxy. You can also use AWS Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`) or Google Vertex (`CLAUDE_CODE_USE_VERTEX=1`) directly. Caveat: prompt caching semantics don't travel cleanly through a proxy targeting a non-Anthropic upstream, so the cost win on slide 8 becomes provider-specific.
@@ -275,7 +275,7 @@ A: Yes, eventually. Rate-limited to 300 files/minute/group. Single-user or small
 A: Not first-class — the codebase targets Claude. Via `ANTHROPIC_BASE_URL` + a proxy like LiteLLM, you can route to any of them. Native multi-provider support would mean writing my own agent loop, which is exactly what I was trying to avoid.
 
 **Q: How is memory different from something like Mem0 or LangChain's memory modules?**
-A: Different shape, different tradeoff. Mem0 is a service. LangChain's memory is usually conversation buffer or vector store. MyClaw's is a local SQLite with a two-way search, semantic dedup at write time, usage feedback, and a nightly consolidation job. It's tuned for long-lived single-user context, not for general-purpose use.
+A: Different shape, different tradeoff. Mem0 is a service. LangChain's memory is usually conversation buffer or vector store. MyClaw uses Postgres with full-text search, pgvector semantic retrieval, semantic dedup at write time, usage feedback, and a scheduled consolidation job. It's tuned for long-lived single-user context, not for general-purpose use.
 
 **Q: Can the agent schedule its own future tasks?**
 A: Yes — there's a scheduler exposed to the agent as a tool. It can create cron jobs, intervals, or one-shot tasks that fire later and deliver results back to the channel. I didn't have stage time for it, happy to walk through after.

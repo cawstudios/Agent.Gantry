@@ -41,7 +41,7 @@ function writeTranscript(options: {
 
 async function loadArchiveModule() {
   vi.resetModules();
-  vi.doMock('@core/core/config.js', () => ({
+  vi.doMock('@core/config/index.js', () => ({
     DATA_DIR: dataDir,
     AGENTS_DIR: agentsDir,
     memoryStorageDir: memoryRoot,
@@ -61,7 +61,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.resetModules();
-  vi.doUnmock('@core/core/config.js');
+  vi.doUnmock('@core/config/index.js');
   if (tempRoot) {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -744,7 +744,7 @@ describe('archiveSessionTranscript', () => {
 
   it('catches and returns null when AgentMemoryRootService.getInstance throws', async () => {
     vi.resetModules();
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       DATA_DIR: dataDir,
       AGENTS_DIR: agentsDir,
       memoryStorageDir: memoryRoot,
@@ -782,7 +782,7 @@ describe('archiveSessionTranscript', () => {
 
   it('catches and returns null when writeSessionSummary throws', async () => {
     vi.resetModules();
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       DATA_DIR: dataDir,
       AGENTS_DIR: agentsDir,
       memoryStorageDir: memoryRoot,

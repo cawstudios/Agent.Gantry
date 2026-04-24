@@ -1,6 +1,6 @@
 import { ChildProcess } from 'child_process';
 
-import { RegisteredGroup, ThinkingOverride } from '../core/types.js';
+import { RegisteredGroup, ThinkingOverride } from '../domain/types.js';
 
 export interface AgentInput {
   prompt: string;

@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fixedClock } from '@core/core/datetime.js';
+import { fixedClock } from '@core/infrastructure/time/datetime.js';
 import {
   createLogger,
   installGlobalErrorHandlers,
   logger,
   type LogRecord,
   type LogSink,
-} from '@core/core/logger.js';
+} from '@core/infrastructure/logging/logger.js';
 
 describe('logger', () => {
   let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
@@ -134,7 +134,7 @@ describe('logger', () => {
     vi.resetModules();
     const beforeUncaught = process.listeners('uncaughtException').length;
     const beforeUnhandled = process.listeners('unhandledRejection').length;
-    await import('@core/core/logger.js');
+    await import('@core/infrastructure/logging/logger.js');
     const afterUncaught = process.listeners('uncaughtException').length;
     const afterUnhandled = process.listeners('unhandledRejection').length;
     expect(afterUncaught).toBe(beforeUncaught);

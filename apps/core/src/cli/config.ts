@@ -1,7 +1,10 @@
 import * as p from '@clack/prompts';
 
-import { readEnvFile, upsertEnvFile } from './env-file.js';
-import { envFilePath, ensureRuntimeLayout } from './runtime-home.js';
+import { readEnvFile, upsertEnvFile } from '../config/env/file.js';
+import {
+  envFilePath,
+  ensureRuntimeLayout,
+} from '../config/settings/runtime-home.js';
 
 function usage(): string {
   return [

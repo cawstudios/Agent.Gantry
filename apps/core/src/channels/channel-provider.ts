@@ -12,7 +12,7 @@ import {
   StreamingSink,
   StreamingStateSink,
   TypingSink,
-} from '../core/types.js';
+} from '../domain/types.js';
 
 export interface ChannelOpts {
   onMessage: OnInboundMessage;

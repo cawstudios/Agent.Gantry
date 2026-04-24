@@ -5,7 +5,7 @@ import {
   ASSISTANT_NAME,
   getTriggerPattern,
   TRIGGER_PATTERN,
-} from '@core/core/config.js';
+} from '@core/config/index.js';
 import {
   escapeXml,
   findChannel,
@@ -13,7 +13,7 @@ import {
   formatOutboundForChannel,
   stripInternalTags,
 } from '@core/messaging/router.js';
-import { Channel, NewMessage } from '@core/core/types.js';
+import { Channel, NewMessage } from '@core/domain/types.js';
 import { parseTextStyles } from '@core/text-styles.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {

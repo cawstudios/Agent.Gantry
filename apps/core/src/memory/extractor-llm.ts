@@ -2,9 +2,9 @@ import {
   MODEL_EXTRACTOR,
   MEMORY_EXTRACTOR_MAX_FACTS,
   MEMORY_EXTRACTOR_MIN_CONFIDENCE,
-} from '../core/config.js';
-import { logger } from '../core/logger.js';
-import { sleep } from '../core/datetime.js';
+} from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { sleep } from '../infrastructure/time/datetime.js';
 import {
   MEMORY_EXTRACTION_FEW_SHOTS,
   MEMORY_EXTRACTION_SYSTEM_PROMPT,

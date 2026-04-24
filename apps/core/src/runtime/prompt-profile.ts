@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-import { AGENTS_DIR } from '../core/config.js';
-import { logger } from '../core/logger.js';
+import { AGENTS_DIR } from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 
 type PromptSectionName =

@@ -3,31 +3,34 @@ import path from 'path';
 import '../channels/register-builtins.js';
 import {
   getChannelProvider,
-  listChannelProviders,
+  listConnectableChannelProviders,
 } from '../channels/provider-registry.js';
 
-import { readEnvFile } from './env-file.js';
+import { readEnvFile } from '../config/env/file.js';
 import {
   assertRuntimeEntryExists,
   getRuntimeEntryPath,
-} from './package-paths.js';
+} from '../infrastructure/service/package-paths.js';
 import {
   commandExists,
   detectPlatform,
   getNodeMajorVersion,
   getNodeVersion,
   hasSystemdUser,
-} from './platform.js';
-import { envFilePath, ensureRuntimeWritable } from './runtime-home.js';
-import { ensureRuntimeSettings, RuntimeSettings } from './runtime-settings.js';
+} from '../infrastructure/service/platform.js';
+import {
+  envFilePath,
+  ensureRuntimeWritable,
+} from '../config/settings/runtime-home.js';
+import {
+  ensureRuntimeSettings,
+  RuntimeSettings,
+} from '../config/settings/runtime-settings.js';
 import { validateTelegramBotToken } from './telegram.js';
 import { inspectMemoryHealth } from './memory-health.js';
-import {
-  inspectProviderGroupCount,
-  inspectRegisteredGroupCount,
-  inspectRegisteredGroupFolders,
-  inspectTelegramGroupCount,
-} from './doctor-db-inspection.js';
+import { validatePostgresConnectionUrl } from '../infrastructure/postgres/url.js';
+import { inspectRuntimeStorageReadiness } from '../infrastructure/postgres/storage-readiness.js';
+import { openRuntimeGroupDb } from './runtime-group-db.js';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 
@@ -49,28 +52,6 @@ export interface DoctorReport {
 export interface DoctorNetworkOptions {
   validateTelegramToken?: boolean;
   telegramTimeoutMs?: number;
-}
-
-type ClaudeAuthMode = 'oauth' | 'api_key' | 'none';
-
-function resolveClaudeAuthState(input: {
-  oauthToken?: string;
-  apiKey?: string;
-}): {
-  hasOauthToken: boolean;
-  hasApiKey: boolean;
-  mode: ClaudeAuthMode;
-} {
-  const oauthToken = input.oauthToken?.trim() || '';
-  const apiKey = input.apiKey?.trim() || '';
-  const hasOauthToken = Boolean(oauthToken);
-  const hasApiKey = Boolean(apiKey);
-  const mode: ClaudeAuthMode = hasOauthToken
-    ? 'oauth'
-    : hasApiKey
-      ? 'api_key'
-      : 'none';
-  return { hasOauthToken, hasApiKey, mode };
 }
 
 function statusLabel(status: DoctorStatus): string {
@@ -118,7 +99,7 @@ export function runDoctor(
 
   const nodeMajor = getNodeMajorVersion();
   const nodeVersion = getNodeVersion();
-  if (nodeMajor >= 20) {
+  if (nodeMajor >= 25) {
     add(checks, {
       id: 'node-version',
       title: 'Node.js Version',
@@ -130,8 +111,8 @@ export function runDoctor(
       id: 'node-version',
       title: 'Node.js Version',
       status: 'fail',
-      message: `Node ${nodeVersion} detected. MyClaw requires Node 20 or newer.`,
-      nextAction: 'Install Node.js 20+ and run `myclaw doctor` again.',
+      message: `Node ${nodeVersion} detected. MyClaw requires Node 25 or newer.`,
+      nextAction: 'Install Node.js 25+ and run `myclaw doctor` again.',
     });
   }
 
@@ -175,62 +156,15 @@ export function runDoctor(
   }
 
   const ipcBaseDir = path.join(runtimeHome, 'data', 'ipc');
-  const ipcSubdirs = [
-    'messages',
-    'tasks',
-    'input',
-    'memory-requests',
-    'memory-responses',
-    'permission-requests',
-    'permission-responses',
-    'browser-requests',
-    'browser-responses',
-    'user-questions',
-    'user-answers',
-    'plan-events',
-    'plan-responses',
-    'task-responses',
-  ];
   try {
     fs.mkdirSync(ipcBaseDir, { recursive: true });
-    const ipcFolders = inspectRegisteredGroupFolders(runtimeHome);
-    if (ipcFolders.unavailable) {
-      add(checks, {
-        id: 'ipc-layout',
-        title: 'IPC Layout',
-        status: 'warn',
-        message:
-          'IPC base directory is writable, but registered group folders are unavailable for non-sqlite storage.',
-        nextAction:
-          'Registered IPC folder bootstrapping for non-sqlite storage will be enabled after repository cutover.',
-      });
-    } else if (ipcFolders.error) {
-      add(checks, {
-        id: 'ipc-layout',
-        title: 'IPC Layout',
-        status: 'warn',
-        message:
-          'IPC base directory is writable, but registered group folders could not be inspected.',
-        nextAction: `Check storage.sqlite.path in settings.yaml. Details: ${ipcFolders.error}`,
-      });
-    } else {
-      for (const folder of ipcFolders.folders) {
-        for (const subdir of ipcSubdirs) {
-          fs.mkdirSync(path.join(ipcBaseDir, folder, subdir), {
-            recursive: true,
-          });
-        }
-      }
-      add(checks, {
-        id: 'ipc-layout',
-        title: 'IPC Layout',
-        status: 'pass',
-        message:
-          ipcFolders.folders.length > 0
-            ? `IPC layout is ready for ${ipcFolders.folders.length} registered group folder(s).`
-            : 'IPC base directory is writable.',
-      });
-    }
+    add(checks, {
+      id: 'ipc-layout',
+      title: 'IPC Layout',
+      status: 'pass',
+      message:
+        'IPC base directory is writable. Use `myclaw status` for Postgres-backed group counts.',
+    });
   } catch (err) {
     add(checks, {
       id: 'ipc-layout',
@@ -244,9 +178,12 @@ export function runDoctor(
     });
   }
 
+  const envPath = envFilePath(runtimeHome);
+  const env = readEnvFile(envPath);
+
   const settingsResult = loadSettingsForDoctor(runtimeHome);
   const settings = settingsResult.settings;
-  const providers = listChannelProviders();
+  const providers = listConnectableChannelProviders();
   const enabledProviders = settings
     ? providers.filter((provider) => settings.channels[provider.id]?.enabled)
     : [];
@@ -268,6 +205,36 @@ export function runDoctor(
         nextAction: `Run ${providers.map((provider) => `\`myclaw ${provider.id} connect\``).join(' or ')} to enable a channel.`,
       });
     }
+    const postgresUrlEnv = settings.storage.postgres.urlEnv;
+    const postgresUrl =
+      env[postgresUrlEnv]?.trim() || process.env[postgresUrlEnv]?.trim() || '';
+    let storageStatus: DoctorStatus = 'pass';
+    let storageMessage = `Postgres runtime storage is configured via ${postgresUrlEnv}.`;
+    let storageNextAction: string | undefined;
+    if (!postgresUrl) {
+      storageStatus = 'fail';
+      storageMessage = `${postgresUrlEnv} is missing.`;
+      storageNextAction = `Set ${postgresUrlEnv} in ${envPath}.`;
+    } else {
+      try {
+        validatePostgresConnectionUrl(postgresUrl, {
+          allowLocalhost: true,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        storageStatus = 'fail';
+        storageMessage = `${postgresUrlEnv} is invalid: ${message}`;
+        storageNextAction = `Update ${postgresUrlEnv} in ${envPath}.`;
+      }
+    }
+
+    add(checks, {
+      id: 'runtime-storage',
+      title: 'Runtime Storage',
+      status: storageStatus,
+      message: storageMessage,
+      nextAction: storageNextAction,
+    });
   } else {
     add(checks, {
       id: 'runtime-settings',
@@ -277,13 +244,7 @@ export function runDoctor(
       nextAction: `Fix ${path.join(runtimeHome, 'settings.yaml')}. Details: ${settingsResult.error}`,
     });
   }
-
-  const envPath = envFilePath(runtimeHome);
-  const env = readEnvFile(envPath);
-  const claudeAuth = resolveClaudeAuthState({
-    oauthToken: env.CLAUDE_CODE_OAUTH_TOKEN,
-    apiKey: env.ANTHROPIC_API_KEY,
-  });
+  const onecliUrl = env.ONECLI_URL?.trim() || '';
 
   for (const provider of providers) {
     const enabled = settings?.channels[provider.id]?.enabled ?? false;
@@ -358,88 +319,16 @@ export function runDoctor(
     nextAction: memoryHealth.embeddingCheck.nextAction,
   });
   add(checks, {
-    id: 'claude-auth',
-    title: 'Claude Auth',
-    status: claudeAuth.mode !== 'none' ? 'pass' : 'warn',
-    message:
-      claudeAuth.mode !== 'none'
-        ? `Claude auth is configured (oauth=${claudeAuth.hasOauthToken ? 'present' : 'missing'}, api_key=${claudeAuth.hasApiKey ? 'present' : 'missing'}, mode=${claudeAuth.mode}).`
-        : 'Claude auth is missing. Memory LLM extraction/review paths will fallback.',
-    nextAction:
-      claudeAuth.mode !== 'none'
-        ? undefined
-        : 'Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in .env, then rerun `myclaw doctor`.',
+    id: 'claude-broker',
+    title: 'Claude Broker',
+    status: onecliUrl ? 'pass' : 'warn',
+    message: onecliUrl
+      ? `OneCLI broker is configured at ${onecliUrl}.`
+      : 'OneCLI broker is missing. Agent execution and memory LLM extraction require brokered model access.',
+    nextAction: onecliUrl
+      ? undefined
+      : 'Run `myclaw setup` and configure ONECLI_URL, then rerun `myclaw doctor`.',
   });
-
-  for (const provider of providers) {
-    const enabled = settings?.channels[provider.id]?.enabled ?? false;
-    const groupCheckId =
-      provider.id === 'telegram'
-        ? 'telegram-groups'
-        : provider.id === 'slack'
-          ? 'slack-groups'
-          : `${provider.id}-groups`;
-    const groupCheckTitle =
-      provider.id === 'telegram'
-        ? 'Telegram Group Registry'
-        : provider.id === 'slack'
-          ? 'Slack Group Registry'
-          : `${provider.label} Group Registry`;
-
-    if (!enabled) {
-      add(checks, {
-        id: groupCheckId,
-        title: groupCheckTitle,
-        status: 'pass',
-        message: `${provider.label} channel is disabled in settings.yaml.`,
-      });
-      continue;
-    }
-
-    const groupSummary = inspectProviderGroupCount(
-      runtimeHome,
-      provider.jidPrefix,
-    );
-    if (groupSummary.unavailable) {
-      add(checks, {
-        id: groupCheckId,
-        title: groupCheckTitle,
-        status: 'warn',
-        message: `${provider.label} group registry inspection is unavailable for non-sqlite storage in doctor.`,
-        nextAction:
-          'Runtime group inspection for non-sqlite storage will be enabled after repository cutover.',
-      });
-      continue;
-    }
-    if (groupSummary.error) {
-      add(checks, {
-        id: groupCheckId,
-        title: groupCheckTitle,
-        status: 'fail',
-        message: `Could not read registered ${provider.label} groups; runtime database may be corrupted.`,
-        nextAction: `Repair or replace storage.sqlite.path in settings.yaml. Details: ${groupSummary.error}`,
-      });
-      continue;
-    }
-
-    if (groupSummary.count > 0) {
-      add(checks, {
-        id: groupCheckId,
-        title: groupCheckTitle,
-        status: 'pass',
-        message: `${groupSummary.count} ${provider.label} group(s) registered.`,
-      });
-      continue;
-    }
-
-    add(checks, {
-      id: groupCheckId,
-      title: groupCheckTitle,
-      status: 'warn',
-      message: `No ${provider.label} groups are registered.`,
-      nextAction: `Run \`myclaw ${provider.id} connect\` (or \`myclaw agent add <jid>\`) to connect ${provider.label}.`,
-    });
-  }
 
   const platform = detectPlatform();
   if (platform === 'linux') {
@@ -496,47 +385,50 @@ export async function runDoctorWithNetwork(
 ): Promise<DoctorReport> {
   let report = runDoctor(importMetaUrl, runtimeHome);
   const validateTelegramToken = options.validateTelegramToken !== false;
-  if (!validateTelegramToken) {
-    return report;
+  if (validateTelegramToken) {
+    const telegramProvider = getChannelProvider('telegram');
+    if (telegramProvider) {
+      const settings = loadSettingsForDoctor(runtimeHome).settings;
+      if (settings?.channels[telegramProvider.id]?.enabled) {
+        const env = readEnvFile(envFilePath(runtimeHome));
+        const token = env.TELEGRAM_BOT_TOKEN?.trim() || '';
+        if (token) {
+          const validation = await validateTelegramBotToken(
+            token,
+            options.telegramTimeoutMs,
+          );
+          if (validation.ok) {
+            report = addToReport(report, {
+              id: 'telegram-token-api',
+              title: 'Telegram Token API Validation',
+              status: 'pass',
+              message: validation.message,
+            });
+          } else {
+            report = addToReport(report, {
+              id: 'telegram-token-api',
+              title: 'Telegram Token API Validation',
+              status: 'warn',
+              message: validation.message,
+              nextAction:
+                validation.nextAction ||
+                'Refresh TELEGRAM_BOT_TOKEN and rerun doctor.',
+            });
+          }
+        }
+      }
+    }
   }
 
-  const telegramProvider = getChannelProvider('telegram');
-  if (!telegramProvider) {
-    return report;
-  }
-
-  const settings = loadSettingsForDoctor(runtimeHome).settings;
-  if (!settings?.channels[telegramProvider.id]?.enabled) {
-    return report;
-  }
-
-  const env = readEnvFile(envFilePath(runtimeHome));
-  const token = env.TELEGRAM_BOT_TOKEN?.trim() || '';
-  if (!token) {
-    return report;
-  }
-
-  const validation = await validateTelegramBotToken(
-    token,
-    options.telegramTimeoutMs,
-  );
-  if (validation.ok) {
-    report = addToReport(report, {
-      id: 'telegram-token-api',
-      title: 'Telegram Token API Validation',
-      status: 'pass',
-      message: validation.message,
-    });
-    return report;
-  }
-
+  const storageReadiness = await inspectRuntimeStorageReadiness(runtimeHome);
   report = addToReport(report, {
-    id: 'telegram-token-api',
-    title: 'Telegram Token API Validation',
-    status: 'warn',
-    message: validation.message,
-    nextAction:
-      validation.nextAction || 'Refresh TELEGRAM_BOT_TOKEN and rerun doctor.',
+    id: 'storage-capabilities',
+    title: 'Storage Capabilities',
+    status: storageReadiness.status,
+    message: storageReadiness.details?.length
+      ? `${storageReadiness.message} ${storageReadiness.details.join(' | ')}`
+      : storageReadiness.message,
+    nextAction: storageReadiness.nextAction,
   });
   return report;
 }
@@ -565,7 +457,7 @@ export function formatDoctorReport(report: DoctorReport): string {
 export function hasRuntimeConfig(runtimeHome: string): boolean {
   try {
     const settings = ensureRuntimeSettings(runtimeHome);
-    return listChannelProviders().some(
+    return listConnectableChannelProviders().some(
       (provider) => settings.channels[provider.id]?.enabled,
     );
   } catch {
@@ -573,19 +465,9 @@ export function hasRuntimeConfig(runtimeHome: string): boolean {
   }
 }
 
-export function hasRegisteredTelegramGroup(runtimeHome: string): boolean {
-  const inspection = inspectTelegramGroupCount(runtimeHome);
-  return !inspection.error && inspection.count > 0;
-}
-
-export function hasRegisteredAnyGroup(runtimeHome: string): boolean {
-  const inspection = inspectRegisteredGroupCount(runtimeHome);
-  return !inspection.unavailable && !inspection.error && inspection.count > 0;
-}
-
-export function hasProcessableGroupForConfiguredChannel(
+export async function hasProcessableGroupForConfiguredChannel(
   runtimeHome: string,
-): boolean {
+): Promise<boolean> {
   let settings: RuntimeSettings;
   try {
     settings = ensureRuntimeSettings(runtimeHome);
@@ -595,15 +477,23 @@ export function hasProcessableGroupForConfiguredChannel(
 
   const env = readEnvFile(envFilePath(runtimeHome));
 
-  for (const provider of listChannelProviders()) {
+  for (const provider of listConnectableChannelProviders()) {
     if (!settings.channels[provider.id]?.enabled) continue;
     const hasRequiredCredentials = provider.setup.envKeys.every((envKey) =>
       Boolean(env[envKey]?.trim()),
     );
     if (!hasRequiredCredentials) continue;
-    const groups = inspectProviderGroupCount(runtimeHome, provider.jidPrefix);
-    if (!groups.unavailable && !groups.error && groups.count > 0) {
-      return true;
+    let db: Awaited<ReturnType<typeof openRuntimeGroupDb>> | undefined;
+    try {
+      db = await openRuntimeGroupDb(runtimeHome, { migrate: false });
+      const count = await db.countRegisteredGroupsByJidPrefix(
+        provider.jidPrefix,
+      );
+      if (count > 0) return true;
+    } catch {
+      continue;
+    } finally {
+      await db?.close();
     }
   }
 

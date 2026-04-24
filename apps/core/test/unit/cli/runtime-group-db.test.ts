@@ -2,13 +2,22 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { openRuntimeGroupDb } from '@core/cli/runtime-group-db.js';
 import {
   loadRuntimeSettings,
   saveRuntimeSettings,
-} from '@core/cli/runtime-settings.js';
+} from '@core/config/settings/runtime-settings.js';
+
+const createStorageRuntimeMock = vi.hoisted(() => vi.fn());
+const migrateMock = vi.hoisted(() => vi.fn(async () => {}));
+const closeMock = vi.hoisted(() => vi.fn(async () => {}));
+const groupsStore = vi.hoisted(() => new Map<string, any>());
+
+vi.mock('@core/infrastructure/postgres/factory.js', () => ({
+  createStorageRuntime: createStorageRuntimeMock,
+}));
 
 const runtimeHomesToCleanup: string[] = [];
 
@@ -21,67 +30,100 @@ function createRuntimeHome(): string {
   fs.mkdirSync(path.join(runtimeHome, 'agents'), { recursive: true });
   fs.mkdirSync(path.join(runtimeHome, 'logs'), { recursive: true });
   fs.mkdirSync(path.join(runtimeHome, 'data'), { recursive: true });
+  const settings = loadRuntimeSettings(runtimeHome);
+  saveRuntimeSettings(runtimeHome, settings);
   return runtimeHome;
 }
 
+function configureMockRuntime(): void {
+  createStorageRuntimeMock.mockImplementation(() => ({
+    service: {
+      migrate: migrateMock,
+      close: closeMock,
+    },
+    ops: {
+      getAllRegisteredGroups: async () =>
+        Object.fromEntries(groupsStore.entries()),
+      setRegisteredGroup: async (jid: string, group: any) => {
+        groupsStore.set(jid, group);
+      },
+      deleteRegisteredGroup: async (jid: string) => {
+        groupsStore.delete(jid);
+      },
+      deleteSessionsByGroupFolder: async () => {},
+    },
+  }));
+}
+
+beforeEach(() => {
+  groupsStore.clear();
+  migrateMock.mockClear();
+  closeMock.mockClear();
+  createStorageRuntimeMock.mockReset();
+  configureMockRuntime();
+});
+
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const runtimeHome of runtimeHomesToCleanup.splice(0)) {
     fs.rmSync(runtimeHome, { recursive: true, force: true });
   }
 });
 
 describe('runtime-group-db', () => {
-  it('uses storage.sqlite.path for registered group persistence', () => {
+  it('persists registered groups through the Postgres repository', async () => {
     const runtimeHome = createRuntimeHome();
-    const settings = loadRuntimeSettings(runtimeHome);
-    settings.storage.provider = 'sqlite';
-    settings.storage.sqlite.path = 'store/custom/myclaw-groups.db';
-    saveRuntimeSettings(runtimeHome, settings);
 
-    const groupDb = openRuntimeGroupDb(runtimeHome);
-    groupDb.setRegisteredGroup('tg:123', {
+    const groupDb = await openRuntimeGroupDb(runtimeHome);
+    await groupDb.setRegisteredGroup('tg:123', {
       name: 'Main',
       folder: 'main',
       trigger: '@myclaw',
       added_at: '2026-04-21T00:00:00.000Z',
     });
-    groupDb.close();
+    await groupDb.close();
 
-    const sqlitePath = path.join(
-      runtimeHome,
-      'store',
-      'custom',
-      'myclaw-groups.db',
+    const reopened = await openRuntimeGroupDb(runtimeHome, { migrate: false });
+    expect((await reopened.getAllRegisteredGroups())['tg:123']?.folder).toBe(
+      'main',
     );
-    expect(fs.existsSync(sqlitePath)).toBe(true);
+    await reopened.close();
 
-    const reopened = openRuntimeGroupDb(runtimeHome);
-    expect(reopened.getAllRegisteredGroups()['tg:123']?.folder).toBe('main');
-    reopened.close();
+    expect(migrateMock).toHaveBeenCalled();
+    expect(closeMock).toHaveBeenCalled();
   });
 
-  it('rejects postgres storage until runtime persistence is provider-backed', () => {
+  it('counts groups by JID prefix', async () => {
     const runtimeHome = createRuntimeHome();
-    const settings = loadRuntimeSettings(runtimeHome);
-    settings.storage.provider = 'postgres';
-    settings.storage.sqlite.path = 'store/postgres-groups.db';
-    settings.storage.postgres.urlEnv = 'MYCLAW_DATABASE_URL';
-    saveRuntimeSettings(runtimeHome, settings);
-
-    expect(() => openRuntimeGroupDb(runtimeHome)).toThrow(
-      /storage\.provider=postgres is not available/i,
-    );
+    const groupDb = await openRuntimeGroupDb(runtimeHome, { migrate: false });
+    await groupDb.setRegisteredGroup('tg:1', {
+      name: 'A',
+      folder: 'a',
+      trigger: '@a',
+      added_at: '2026-04-21T00:00:00.000Z',
+    });
+    await groupDb.setRegisteredGroup('sl:C1', {
+      name: 'B',
+      folder: 'b',
+      trigger: '@b',
+      added_at: '2026-04-21T00:00:00.000Z',
+    });
+    expect(await groupDb.countRegisteredGroupsByJidPrefix('tg:')).toBe(1);
+    expect(await groupDb.countRegisteredGroupsByJidPrefix('sl:%')).toBe(1);
+    await groupDb.close();
   });
 
-  it('rejects sqlite paths that escape runtime home', () => {
+  it('rejects invalid folders before writing', async () => {
     const runtimeHome = createRuntimeHome();
-    const settings = loadRuntimeSettings(runtimeHome);
-    settings.storage.provider = 'sqlite';
-    settings.storage.sqlite.path = '/tmp/myclaw-outside.db';
-    saveRuntimeSettings(runtimeHome, settings);
-
-    expect(() => openRuntimeGroupDb(runtimeHome)).toThrow(
-      /storage\.sqlite\.path must resolve under runtime home/i,
-    );
+    const groupDb = await openRuntimeGroupDb(runtimeHome, { migrate: false });
+    await expect(
+      groupDb.setRegisteredGroup('tg:999', {
+        name: 'Invalid',
+        folder: '../escape',
+        trigger: '@bad',
+        added_at: '2026-04-21T00:00:00.000Z',
+      }),
+    ).rejects.toThrow(/Invalid group folder/);
+    await groupDb.close();
   });
 });

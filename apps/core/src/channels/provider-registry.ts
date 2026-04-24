@@ -25,6 +25,7 @@ export type ChannelFormattingDialect =
 export interface ChannelProvider {
   id: string;
   label: string;
+  internal?: boolean;
   jidPrefix: string;
   folderPrefix: string;
   isGroupJid: (jid: string) => boolean;
@@ -83,6 +84,12 @@ export function getChannelProvider(id: string): ChannelProvider | undefined {
 
 export function listChannelProviders(): readonly ChannelProvider[] {
   return Array.from(registry.values());
+}
+
+export function listConnectableChannelProviders(): readonly ChannelProvider[] {
+  return listChannelProviders().filter(
+    (provider) => provider.internal !== true,
+  );
 }
 
 export function providerForJid(jid: string): ChannelProvider | undefined {

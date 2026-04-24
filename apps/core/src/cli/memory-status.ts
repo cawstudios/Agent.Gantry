@@ -1,21 +1,19 @@
 import fs from 'fs';
 import path from 'path';
 
-import Database from 'better-sqlite3';
-
 import {
   MemoryService,
   type MemoryServiceCounters,
 } from '../memory/memory-service.js';
-import { readEnvFile } from './env-file.js';
+import { readEnvFile } from '../config/env/file.js';
 import {
   inspectMemoryHealth,
   inspectMemoryJournalStatus,
   type MemoryHealthInspection,
   type MemoryJournalStatusReport,
 } from './memory-health.js';
-import { envFilePath } from './runtime-home.js';
-import { loadRuntimeSettings } from './runtime-settings.js';
+import { envFilePath } from '../config/settings/runtime-home.js';
+import { loadRuntimeSettings } from '../config/settings/runtime-settings.js';
 
 export type MemoryMode =
   | 'keyword-mode'
@@ -55,11 +53,6 @@ export interface MemoryStatusSnapshot {
   health: MemoryHealthInspection;
   mode: MemoryMode;
   modeNote: string | null;
-  liveDbPath: string;
-  liveDbExists: boolean;
-  liveDbError: string | null;
-  liveCounts: MemoryLiveCounts | null;
-  recentEvents: MemoryRecentEvent[];
   journal: MemoryJournalStatusReport;
   latestCheckpoint: MemoryCheckpointInfo | null;
   sourceCounts: MemorySourceCount[];
@@ -96,124 +89,6 @@ export function deriveMemoryMode(health: MemoryHealthInspection): {
     mode: 'keyword-mode',
     note: null,
   };
-}
-
-function resolveLiveDbPath(health: MemoryHealthInspection): string {
-  return health.sqlitePath;
-}
-
-function tableExists(db: Database.Database, tableName: string): boolean {
-  const row = db
-    .prepare(
-      `SELECT name
-       FROM sqlite_master
-       WHERE type = 'table'
-         AND name = ?
-       LIMIT 1`,
-    )
-    .get(tableName) as { name?: string } | undefined;
-  return typeof row?.name === 'string' && row.name.length > 0;
-}
-
-function countRows(db: Database.Database, sql: string): number {
-  const row = db.prepare(sql).get() as { count?: number } | undefined;
-  return Number(row?.count || 0);
-}
-
-function readLiveCounts(dbPath: string): {
-  counts: MemoryLiveCounts | null;
-  recentEvents: MemoryRecentEvent[];
-  error: string | null;
-} | null {
-  if (!fs.existsSync(dbPath)) return null;
-
-  let db: Database.Database | null = null;
-  try {
-    db = new Database(dbPath, { readonly: true, fileMustExist: true });
-    const hasItems = tableExists(db, 'memory_items');
-    const hasProcedures = tableExists(db, 'memory_procedures');
-    const hasEvents = tableExists(db, 'memory_events');
-    const counts: MemoryLiveCounts = {
-      items: hasItems
-        ? countRows(
-            db,
-            `SELECT COUNT(1) AS count
-             FROM memory_items
-             WHERE is_deleted = 0`,
-          )
-        : 0,
-      procedures: hasProcedures
-        ? countRows(
-            db,
-            `SELECT COUNT(1) AS count
-             FROM memory_procedures
-             WHERE is_deleted = 0`,
-          )
-        : 0,
-      pinnedItems: hasItems
-        ? countRows(
-            db,
-            `SELECT COUNT(1) AS count
-             FROM memory_items
-             WHERE is_deleted = 0
-               AND is_pinned = 1`,
-          )
-        : 0,
-      loadBearingItems: hasItems
-        ? countRows(
-            db,
-            `SELECT COUNT(1) AS count
-             FROM memory_items
-             WHERE is_deleted = 0
-               AND load_bearing = 1`,
-          )
-        : 0,
-      events: hasEvents
-        ? countRows(
-            db,
-            `SELECT COUNT(1) AS count
-             FROM memory_events`,
-          )
-        : 0,
-    };
-
-    const recentEvents: MemoryRecentEvent[] = hasEvents
-      ? (
-          db
-            .prepare(
-              `SELECT event_type, entity_type, entity_id, created_at
-               FROM memory_events
-               ORDER BY created_at DESC, id DESC
-               LIMIT 5`,
-            )
-            .all() as Array<{
-            event_type: string;
-            entity_type: string;
-            entity_id: string | null;
-            created_at: string;
-          }>
-        ).map((row) => ({
-          eventType: row.event_type,
-          entityType: row.entity_type,
-          entityId: row.entity_id,
-          createdAt: row.created_at,
-        }))
-      : [];
-
-    return {
-      counts,
-      recentEvents,
-      error: null,
-    };
-  } catch (err) {
-    return {
-      counts: null,
-      recentEvents: [],
-      error: err instanceof Error ? err.message : String(err),
-    };
-  } finally {
-    db?.close();
-  }
 }
 
 function findLatestCheckpoint(
@@ -313,9 +188,6 @@ export function collectMemoryStatus(runtimeHome: string): MemoryStatusSnapshot {
   const env = readEnvFile(envFilePath(runtimeHome));
   const health = inspectMemoryHealth(runtimeHome, settings, env);
   const { mode, note } = deriveMemoryMode(health);
-  const liveDbPath = resolveLiveDbPath(health);
-  const liveDbExists = fs.existsSync(liveDbPath);
-  const liveData = readLiveCounts(liveDbPath);
   const journal = inspectMemoryJournalStatus(runtimeHome, settings);
   const latestCheckpoint = findLatestCheckpoint(journal.journalRoot);
   const sourceCounts = collectSourceCounts(health.memoryRoot);
@@ -325,11 +197,6 @@ export function collectMemoryStatus(runtimeHome: string): MemoryStatusSnapshot {
     health,
     mode,
     modeNote: note,
-    liveDbPath,
-    liveDbExists,
-    liveDbError: liveDbExists ? liveData?.error || null : null,
-    liveCounts: liveData?.counts || null,
-    recentEvents: liveData?.recentEvents || [],
     journal,
     latestCheckpoint,
     sourceCounts,
@@ -347,19 +214,11 @@ export function formatMemoryStatusExtras(
     lines.push(`  note: ${snapshot.modeNote}`);
   }
   lines.push('');
-  lines.push('Live DB');
-  lines.push(`  path: ${snapshot.liveDbPath}`);
-  if (!snapshot.liveDbExists) {
-    lines.push('  status: not created yet (no memory writes have landed)');
-  } else if (snapshot.liveDbError) {
-    lines.push(`  status: read failed (${snapshot.liveDbError})`);
-  } else if (!snapshot.liveCounts) {
-    lines.push('  status: unavailable');
-  } else {
-    lines.push(
-      `  items=${snapshot.liveCounts.items} procedures=${snapshot.liveCounts.procedures} pinned=${snapshot.liveCounts.pinnedItems} load_bearing=${snapshot.liveCounts.loadBearingItems} events=${snapshot.liveCounts.events}`,
-    );
-  }
+  lines.push('Live Store');
+  lines.push('  backend: Postgres runtime storage');
+  lines.push(
+    '  counts: available through runtime control events and DB observability',
+  );
   lines.push('');
   lines.push('Sources');
   if (snapshot.sourceCounts.length === 0) {
@@ -403,15 +262,6 @@ export function formatMemoryStatusExtras(
   lines.push('  scope: process-local (this CLI invocation only)');
   for (const [key, value] of Object.entries(snapshot.counters)) {
     lines.push(`  ${key}: ${value}`);
-  }
-  if (snapshot.recentEvents.length > 0) {
-    lines.push('');
-    lines.push('Recent events');
-    for (const event of snapshot.recentEvents) {
-      lines.push(
-        `  ${event.createdAt}  ${event.eventType}  ${event.entityType}${event.entityId ? ` ${event.entityId}` : ''}`,
-      );
-    }
   }
   return lines.join('\n');
 }

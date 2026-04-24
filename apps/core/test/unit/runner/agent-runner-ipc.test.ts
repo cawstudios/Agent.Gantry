@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
+import { generateKeyPairSync } from 'crypto';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -23,6 +24,7 @@ interface RunnerRecord {
     streamEnded?: boolean;
     permissionRequest?: Record<string, unknown>;
     permissionDecision?: Record<string, unknown>;
+    sdkEnv?: Record<string, string>;
   }>;
 }
 
@@ -57,11 +59,23 @@ function createRunnerFixture(): {
   ipcDir: string;
   inputDir: string;
   recordPath: string;
+  responseVerifyKey: string;
+  responseSigningKey: string;
 } {
   const root = makeTempRoot();
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const responseVerifyKey = publicKey
+    .export({ format: 'pem', type: 'spki' })
+    .toString();
+  const responseSigningKey = privateKey
+    .export({ format: 'pem', type: 'pkcs8' })
+    .toString();
   const runnerDir = path.join(root, 'runner');
-  const coreDir = path.join(root, 'core');
-  const runnerPath = path.join(runnerDir, 'index.ts');
+  const runnerClaudeDir = path.join(runnerDir, 'claude');
+  const infrastructureTimeDir = path.join(root, 'infrastructure', 'time');
+  const sharedDir = path.join(root, 'shared');
+  const modelsDir = path.join(root, 'models');
+  const runnerPath = path.join(runnerClaudeDir, 'index.ts');
   const sdkDir = path.join(
     root,
     'node_modules',
@@ -74,8 +88,20 @@ function createRunnerFixture(): {
 
   fs.mkdirSync(sdkDir, { recursive: true });
   fs.mkdirSync(runnerDir, { recursive: true });
-  fs.mkdirSync(coreDir, { recursive: true });
-  fs.copyFileSync(path.resolve('apps/core/src/runner/index.ts'), runnerPath);
+  fs.mkdirSync(runnerClaudeDir, { recursive: true });
+  fs.mkdirSync(infrastructureTimeDir, { recursive: true });
+  fs.mkdirSync(sharedDir, { recursive: true });
+  fs.mkdirSync(modelsDir, { recursive: true });
+  for (const file of fs.readdirSync(
+    path.resolve('apps/core/src/runner/claude'),
+  )) {
+    if (file.endsWith('.ts')) {
+      fs.copyFileSync(
+        path.resolve('apps/core/src/runner/claude', file),
+        path.join(runnerClaudeDir, file),
+      );
+    }
+  }
   fs.copyFileSync(
     path.resolve('apps/core/src/runner/agent-capabilities.ts'),
     path.join(runnerDir, 'agent-capabilities.ts'),
@@ -85,12 +111,20 @@ function createRunnerFixture(): {
     path.join(runnerDir, 'memory-boundary.ts'),
   );
   fs.copyFileSync(
-    path.resolve('apps/core/src/core/datetime.ts'),
-    path.join(coreDir, 'datetime.ts'),
+    path.resolve('apps/core/src/runner/claude/message-stream.ts'),
+    path.join(runnerClaudeDir, 'message-stream.ts'),
   );
   fs.copyFileSync(
-    path.resolve('apps/core/src/core/object.ts'),
-    path.join(coreDir, 'object.ts'),
+    path.resolve('apps/core/src/infrastructure/time/datetime.ts'),
+    path.join(infrastructureTimeDir, 'datetime.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/object.ts'),
+    path.join(sharedDir, 'object.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/models/claude-model-registry.ts'),
+    path.join(modelsDir, 'claude-model-registry.ts'),
   );
   symlinkPackage(root, 'dayjs', 'node_modules/dayjs');
   fs.writeFileSync(
@@ -102,6 +136,7 @@ function createRunnerFixture(): {
     `
 import fs from 'fs';
 import path from 'path';
+import { sign as cryptoSign } from 'crypto';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -112,6 +147,12 @@ function appendRecord(call) {
     : { calls: [] };
   current.calls.push(call);
   fs.writeFileSync(recordPath, JSON.stringify(current, null, 2));
+}
+
+function signPayload(payload) {
+  const signingKey = process.env.TEST_IPC_RESPONSE_SIGNING_KEY || '';
+  if (!signingKey) return undefined;
+  return cryptoSign(null, Buffer.from(JSON.stringify(payload)), signingKey).toString('base64');
 }
 
 function writeInput(name, text) {
@@ -147,6 +188,7 @@ async function waitForFile(dir, timeoutMs) {
 export async function* query({ prompt, options }) {
   const call = {
     promptKind: typeof prompt === 'string' ? 'string' : 'stream',
+    sdkEnv: options?.env,
     systemPromptAppend: options?.systemPrompt?.append,
     closeExistsAtQueryStart: fs.existsSync(
       path.join(process.env.MYCLAW_IPC_INPUT_DIR, '_close'),
@@ -188,13 +230,18 @@ export async function* query({ prompt, options }) {
     const requestPath = await waitForFile(requestDir, 1000);
     const request = JSON.parse(fs.readFileSync(requestPath, 'utf-8'));
     fs.mkdirSync(responseDir, { recursive: true });
+    const responsePayload = {
+      requestId: request.requestId,
+      approved: process.env.TEST_PERMISSION_DECISION === 'approve',
+      decidedBy: 'runner-test-admin',
+      reason: process.env.TEST_PERMISSION_DECISION,
+    };
+    const signature = signPayload(responsePayload);
     fs.writeFileSync(
       path.join(responseDir, request.requestId + '.json'),
       JSON.stringify({
-        requestId: request.requestId,
-        approved: process.env.TEST_PERMISSION_DECISION === 'approve',
-        decidedBy: 'runner-test-admin',
-        reason: process.env.TEST_PERMISSION_DECISION,
+        ...responsePayload,
+        ...(signature ? { signature } : {}),
       }),
     );
     call.permissionRequest = request;
@@ -247,7 +294,15 @@ export async function* query({ prompt, options }) {
 `,
   );
 
-  return { root, runnerPath, ipcDir, inputDir, recordPath };
+  return {
+    root,
+    runnerPath,
+    ipcDir,
+    inputDir,
+    recordPath,
+    responseVerifyKey,
+    responseSigningKey,
+  };
 }
 
 function baseInput(
@@ -278,6 +333,8 @@ async function runRunner(
         MYCLAW_IPC_DIR: fixture.ipcDir,
         MYCLAW_IPC_INPUT_DIR: fixture.inputDir,
         MYCLAW_IPC_AUTH_TOKEN: 'runner-test-token',
+        MYCLAW_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
+        TEST_IPC_RESPONSE_SIGNING_KEY: fixture.responseSigningKey,
         MYCLAW_WORKSPACE_GROUP_DIR: path.join(fixture.root, 'group'),
         MYCLAW_WORKSPACE_EXTRA_DIR: path.join(fixture.root, 'extra'),
         TEST_SDK_RECORD_PATH: fixture.recordPath,
@@ -324,6 +381,31 @@ function readRecord(recordPath: string): RunnerRecord {
 const RUNNER_IPC_TEST_TIMEOUT_MS = 15_000;
 
 describe('agent-runner IPC lifecycle', () => {
+  it(
+    'passes only broker-safe values into the Agent SDK env',
+    async () => {
+      const fixture = createRunnerFixture();
+
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_EXIT_AFTER_QUERY: '1',
+        ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+        ANTHROPIC_API_KEY: 'raw-provider-key',
+        CLAUDE_CODE_OAUTH_TOKEN: 'raw-oauth-token',
+        MYCLAW_IPC_AUTH_TOKEN: 'runner-test-token',
+        MYCLAW_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
+      });
+
+      expect(result.exitCode).toBe(0);
+      const sdkEnv = readRecord(fixture.recordPath).calls[0]?.sdkEnv || {};
+      expect(sdkEnv.ANTHROPIC_BASE_URL).toBe('https://broker.local/anthropic');
+      expect(sdkEnv.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(sdkEnv.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+      expect(sdkEnv.MYCLAW_IPC_AUTH_TOKEN).toBeUndefined();
+      expect(sdkEnv.MYCLAW_IPC_RESPONSE_VERIFY_KEY).toBeUndefined();
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
   it(
     'removes stale _close at startup before starting the SDK query',
     async () => {
@@ -473,7 +555,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'streams memory context as a separate untrusted message before the user prompt',
+    'bundles memory context with the first user prompt so it cannot produce a standalone reply',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -494,13 +576,17 @@ describe('agent-runner IPC lifecycle', () => {
         'MyClaw Durable Memory Boundary',
       );
       expect(call?.systemPromptAppend).not.toContain('user prefers');
+      expect(call?.streamMessages).toHaveLength(1);
       expect(call?.streamMessages?.[0]).toEqual([
         {
           type: 'text',
           text: 'Memory brief: user prefers concise updates.',
         },
+        {
+          type: 'text',
+          text: 'initial prompt',
+        },
       ]);
-      expect(call?.streamMessages?.[1]).toBe('initial prompt');
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
@@ -521,7 +607,7 @@ describe('agent-runner IPC lifecycle', () => {
         expect.objectContaining({
           sourceGroup: 'team',
           toolName: 'Bash',
-          authToken: 'runner-test-token',
+          signature: expect.any(String),
         }),
       );
       expect(call?.permissionRequest?.toolInput).toEqual(

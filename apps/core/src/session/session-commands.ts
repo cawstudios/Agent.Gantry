@@ -3,8 +3,14 @@ import type {
   NewMessage,
   ThinkingEffort,
   ThinkingOverride,
-} from '../core/types.js';
-import { logger } from '../core/logger.js';
+} from '../domain/types.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { normalizeClaudeModelSelection } from '../models/claude-model-registry.js';
+import {
+  describeThinking,
+  formatCurrentModel,
+  formatMemoryStatus,
+} from './session-command-format.js';
 
 export type SessionCommand =
   | { kind: 'compact'; raw: '/compact' }
@@ -98,21 +104,6 @@ function parseThinkingCommand(text: string): SessionCommand | null {
   return null;
 }
 
-function describeThinking(value: ThinkingOverride): string {
-  if (value.mode === 'disabled') return 'disabled';
-  if (value.mode === 'adaptive') {
-    if (value.effort) return `adaptive (effort ${value.effort})`;
-    return 'adaptive';
-  }
-  if (value.mode === 'enabled') {
-    if (typeof value.budgetTokens === 'number') {
-      return `enabled (budget ${value.budgetTokens} tokens)`;
-    }
-    return 'enabled';
-  }
-  return value.mode;
-}
-
 /**
  * Extract a session slash command from a message, stripping the trigger prefix if present.
  * Returns the parsed command or null if not a session command.
@@ -150,7 +141,7 @@ export function extractSessionCommand(
 
   const modelMatch = text.match(/^\/model\s+(\S+)$/);
   if (modelMatch) {
-    const value = modelMatch[1];
+    const value = normalizeClaudeModelSelection(modelMatch[1]) || modelMatch[1];
     if (value === 'default') {
       return { kind: 'model_default', raw: '/model default' };
     }
@@ -198,16 +189,18 @@ export interface SessionCommandDeps {
   formatMessages: (msgs: NewMessage[], timezone: string) => string;
   getDefaultModel: () => string | undefined;
   getGroupModelOverride: () => string | undefined;
-  setGroupModelOverride: (value: string | undefined) => void;
+  setGroupModelOverride: (value: string | undefined) => Promise<void> | void;
   getGroupThinkingOverride: () => ThinkingOverride | undefined;
-  setGroupThinkingOverride: (value: ThinkingOverride | undefined) => void;
+  setGroupThinkingOverride: (
+    value: ThinkingOverride | undefined,
+  ) => Promise<void> | void;
   archiveCurrentSession: (
     cause?: 'new-session' | 'manual-compact',
   ) => Promise<void>;
   onSessionArchived?: (
     cause?: 'new-session' | 'manual-compact',
   ) => Promise<void>;
-  clearCurrentSession: () => void;
+  clearCurrentSession: () => Promise<void> | void;
   stopCurrentRun?: () => boolean;
   runMemoryDreaming?: () => Promise<unknown>;
   getMemoryStatus?: () => Promise<MemoryStatusSnapshot>;
@@ -219,38 +212,6 @@ export interface SessionCommandDeps {
   isSenderControlAllowlisted: (msg: NewMessage) => boolean;
   /** Whether the denied sender would normally be allowed to interact (for denial messages). */
   canSenderInteract: (msg: NewMessage) => boolean;
-}
-
-function formatMemoryStatus(status: MemoryStatusSnapshot): string {
-  const kinds = Object.entries(status.items_by_kind || {})
-    .map(([kind, count]) => `${kind}:${count}`)
-    .join(', ');
-  const scopes = Object.entries(status.items_by_scope || {})
-    .map(([scope, count]) => `${scope}:${count}`)
-    .join(', ');
-  const used = (status.top10_most_used || [])
-    .slice(0, 5)
-    .map((row) => `${row.key}(${row.retrieval_count})`)
-    .join(', ');
-  const stalest = (status.top10_stalest || [])
-    .slice(0, 5)
-    .map((row) => `${row.key}@${row.updated_at.slice(0, 10)}`)
-    .join(', ');
-  const dream = status.last_dream_run?.at || 'never';
-  const disk = status.disk_kb
-    ? Object.entries(status.disk_kb)
-        .map(([k, v]) => `${k}:${v}kb`)
-        .join(', ')
-    : 'n/a';
-  return [
-    'Memory status',
-    `kinds: ${kinds || 'none'}`,
-    `scopes: ${scopes || 'none'}`,
-    `top_used: ${used || 'none'}`,
-    `stale: ${stalest || 'none'}`,
-    `last_dream: ${dream}`,
-    `disk: ${disk}`,
-  ].join('\n');
 }
 
 const MODEL_VALIDATION_TIMEOUT_MS = 90_000;
@@ -393,8 +354,19 @@ export async function handleSessionCommand(opts: {
 
   // Forward the literal slash command as the prompt (no XML formatting)
   if (command.kind === 'new') {
+    let archived = false;
     try {
-      deps.clearCurrentSession();
+      await deps.archiveCurrentSession('new-session');
+      archived = true;
+    } catch (err) {
+      logger.warn(
+        { group: groupName, err },
+        'Session archive failed during /new; continuing with reset',
+      );
+    }
+
+    try {
+      await deps.clearCurrentSession();
     } catch (err) {
       logger.error(
         { group: groupName, err },
@@ -404,14 +376,15 @@ export async function handleSessionCommand(opts: {
       return { handled: true, success: false };
     }
 
-    try {
-      await deps.archiveCurrentSession('new-session');
-      await deps.onSessionArchived?.('new-session');
-    } catch (err) {
-      logger.warn(
-        { group: groupName, err },
-        'Session archive failed during /new; continuing with reset',
-      );
+    if (archived) {
+      try {
+        await deps.onSessionArchived?.('new-session');
+      } catch (err) {
+        logger.warn(
+          { group: groupName, err },
+          'Session archive hook failed during /new; continuing with reset',
+        );
+      }
     }
 
     deps.advanceCursor(cmdMsg);
@@ -538,16 +511,10 @@ export async function handleSessionCommand(opts: {
   const groupThinkingOverride = deps.getGroupThinkingOverride();
 
   if (command.kind === 'model_show') {
-    let message: string;
-    if (groupOverrideModel) {
-      message = `Current model: ${groupOverrideModel} (group override).`;
-    } else if (defaultModel) {
-      message = `Current model: ${defaultModel} (default).`;
-    } else {
-      message = 'Current model: CLI default (no explicit override).';
-    }
     deps.advanceCursor(cmdMsg);
-    await deps.sendMessage(message);
+    await deps.sendMessage(
+      formatCurrentModel(defaultModel, groupOverrideModel),
+    );
     return { handled: true, success: true };
   }
 
@@ -587,14 +554,38 @@ export async function handleSessionCommand(opts: {
       return { handled: true, success: true };
     }
 
+    try {
+      await deps.setGroupModelOverride(command.value);
+    } catch (err) {
+      logger.error(
+        { group: groupName, err, model: command.value },
+        'Failed to persist /model override',
+      );
+      await deps.sendMessage(
+        `Failed to set model to ${command.value}. Override unchanged.`,
+      );
+      return { handled: true, success: false };
+    }
+
     deps.advanceCursor(cmdMsg);
-    deps.setGroupModelOverride(command.value);
     await deps.sendMessage(`Model set to ${command.value} for this group.`);
     return { handled: true, success: true };
   }
 
   if (command.kind === 'model_default') {
-    deps.setGroupModelOverride(undefined);
+    try {
+      await deps.setGroupModelOverride(undefined);
+    } catch (err) {
+      logger.error(
+        { group: groupName, err },
+        'Failed to clear /model override',
+      );
+      await deps.sendMessage(
+        'Failed to clear model override. Override unchanged.',
+      );
+      return { handled: true, success: false };
+    }
+
     deps.advanceCursor(cmdMsg);
     if (defaultModel) {
       await deps.sendMessage(
@@ -609,7 +600,17 @@ export async function handleSessionCommand(opts: {
   }
 
   if (command.kind === 'thinking_set') {
-    deps.setGroupThinkingOverride(command.value);
+    try {
+      await deps.setGroupThinkingOverride(command.value);
+    } catch (err) {
+      logger.error(
+        { group: groupName, err, thinking: command.value },
+        'Failed to persist /thinking override',
+      );
+      await deps.sendMessage('Failed to set thinking. Override unchanged.');
+      return { handled: true, success: false };
+    }
+
     deps.advanceCursor(cmdMsg);
     await deps.sendMessage(
       `Thinking set to ${describeThinking(command.value)} for this group.`,
@@ -618,7 +619,19 @@ export async function handleSessionCommand(opts: {
   }
 
   if (command.kind === 'thinking_default') {
-    deps.setGroupThinkingOverride(undefined);
+    try {
+      await deps.setGroupThinkingOverride(undefined);
+    } catch (err) {
+      logger.error(
+        { group: groupName, err },
+        'Failed to clear /thinking override',
+      );
+      await deps.sendMessage(
+        'Failed to clear thinking override. Override unchanged.',
+      );
+      return { handled: true, success: false };
+    }
+
     deps.advanceCursor(cmdMsg);
     await deps.sendMessage(
       'Thinking override cleared. Using default thinking: adaptive (effort medium).',

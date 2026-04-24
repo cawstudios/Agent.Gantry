@@ -63,7 +63,7 @@ check_node() {
 
 install_deps() {
   DEPS_OK="false"
-  NATIVE_OK="false"
+  RUNTIME_DEPS_OK="false"
 
   if [ "$NODE_OK" = "false" ]; then
     log "Skipping npm install — Node not available"
@@ -88,13 +88,13 @@ install_deps() {
     return
   fi
 
-  # Verify native module (better-sqlite3)
-  log "Verifying native modules"
-  if node -e "require('better-sqlite3')" >> "$LOG_FILE" 2>&1; then
-    NATIVE_OK="true"
-    log "better-sqlite3 loads OK"
+  # Verify core Postgres-era runtime dependencies load.
+  log "Verifying runtime dependencies"
+  if node -e "require('pg'); require('pg-boss')" >> "$LOG_FILE" 2>&1; then
+    RUNTIME_DEPS_OK="true"
+    log "runtime dependencies load OK"
   else
-    log "better-sqlite3 failed to load"
+    log "runtime dependency verification failed"
   fi
 }
 
@@ -132,14 +132,14 @@ if [ "$NODE_OK" = "false" ]; then
   STATUS="node_missing"
 elif [ "$DEPS_OK" = "false" ]; then
   STATUS="deps_failed"
-elif [ "$NATIVE_OK" = "false" ]; then
-  STATUS="native_failed"
+elif [ "$RUNTIME_DEPS_OK" = "false" ]; then
+  STATUS="runtime_deps_failed"
 fi
 
 # Anonymous setup start event (non-blocking, best-effort)
 curl -sS --max-time 3 -X POST https://us.i.posthog.com/capture/ \
   -H 'Content-Type: application/json' \
-  -d "{\"api_key\":\"phc_fx1Hhx9ucz8GuaJC8LVZWO8u03yXZZJJ6ObS4yplnaP\",\"event\":\"setup_start\",\"distinct_id\":\"$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo unknown)\",\"properties\":{\"platform\":\"$PLATFORM\",\"is_wsl\":\"$IS_WSL\",\"is_root\":\"$IS_ROOT\",\"node_version\":\"$NODE_VERSION\",\"deps_ok\":\"$DEPS_OK\",\"native_ok\":\"$NATIVE_OK\",\"has_build_tools\":\"$HAS_BUILD_TOOLS\"}}" \
+  -d "{\"api_key\":\"phc_fx1Hhx9ucz8GuaJC8LVZWO8u03yXZZJJ6ObS4yplnaP\",\"event\":\"setup_start\",\"distinct_id\":\"$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo unknown)\",\"properties\":{\"platform\":\"$PLATFORM\",\"is_wsl\":\"$IS_WSL\",\"is_root\":\"$IS_ROOT\",\"node_version\":\"$NODE_VERSION\",\"deps_ok\":\"$DEPS_OK\",\"runtime_deps_ok\":\"$RUNTIME_DEPS_OK\",\"has_build_tools\":\"$HAS_BUILD_TOOLS\"}}" \
   >/dev/null 2>&1 &
 
 cat <<EOF
@@ -151,7 +151,7 @@ NODE_VERSION: $NODE_VERSION
 NODE_OK: $NODE_OK
 NODE_PATH: ${NODE_PATH_FOUND:-not_found}
 DEPS_OK: $DEPS_OK
-NATIVE_OK: $NATIVE_OK
+RUNTIME_DEPS_OK: $RUNTIME_DEPS_OK
 HAS_BUILD_TOOLS: $HAS_BUILD_TOOLS
 STATUS: $STATUS
 LOG: logs/setup.log
@@ -163,6 +163,6 @@ log "=== Bootstrap completed: $STATUS ==="
 if [ "$NODE_OK" = "false" ]; then
   exit 2
 fi
-if [ "$DEPS_OK" = "false" ] || [ "$NATIVE_OK" = "false" ]; then
+if [ "$DEPS_OK" = "false" ] || [ "$RUNTIME_DEPS_OK" = "false" ]; then
   exit 1
 fi

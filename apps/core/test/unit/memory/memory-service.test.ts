@@ -328,7 +328,7 @@ describe('MemoryService boundary extraction', () => {
     );
   });
 
-  it('pinIfNeeded updates in-memory pin state after persisting pin', () => {
+  it('pinIfNeeded updates in-memory pin state after persisting pin', async () => {
     const fixture = makeServiceFixture();
     const item = makeItem({
       id: 'pin-1',
@@ -336,7 +336,7 @@ describe('MemoryService boundary extraction', () => {
       confidence: 0.95,
     });
 
-    const changed = (fixture.service as any).pinIfNeeded(item);
+    const changed = await (fixture.service as any).pinIfNeeded(item);
 
     expect(changed).toBe(true);
     expect(item.is_pinned).toBe(true);
@@ -720,7 +720,7 @@ describe('MemoryService boundary extraction', () => {
     );
   });
 
-  it('patchProcedure deletes stale markdown file when title slug changes', () => {
+  it('patchProcedure updates procedure without writing filesystem mirrors', async () => {
     const fixture = makeServiceFixture();
     const existing = makeProcedure({
       id: 'proc-1',
@@ -738,17 +738,7 @@ describe('MemoryService boundary extraction', () => {
     fixture.store.getProcedureById.mockReturnValue(existing);
     fixture.store.patchProcedure.mockReturnValue(patched);
 
-    const removeSpy = vi.spyOn(
-      fixture.service as unknown as {
-        removeManagedMemoryFile: (
-          filePath: string,
-          managedSubdir: string,
-        ) => void;
-      },
-      'removeManagedMemoryFile',
-    );
-
-    const result = fixture.service.patchProcedure(
+    const result = await fixture.service.patchProcedure(
       {
         id: 'proc-1',
         expected_version: 1,
@@ -761,23 +751,16 @@ describe('MemoryService boundary extraction', () => {
     );
 
     expect(result.title).toBe('New Title');
-    expect(removeSpy).toHaveBeenCalledWith(
-      expect.stringContaining(path.join('procedures', 'old-title-proc-1.md')),
-      'procedures',
-    );
+    expect(fixture.store.patchProcedure).toHaveBeenCalled();
   });
 
-  it('does not delete stale item file paths outside memory root', async () => {
+  it('does not write or delete item filesystem mirrors on memory save', async () => {
     const fixture = makeServiceFixture();
-    const outsideFilePath = path.join(os.tmpdir(), 'outside-memory-root.md');
     const existing = makeItem({
       id: 'item-outside',
       key: 'preference:style',
       value: 'Verbose responses.',
       source: 'agent',
-      file_path: outsideFilePath,
-      content_hash: 'old-hash',
-      indexed_at: '2026-01-01T00:00:00.000Z',
     });
     const patched = makeItem({
       ...existing,
@@ -805,9 +788,8 @@ describe('MemoryService boundary extraction', () => {
       },
     );
 
-    expect(rmSpy).not.toHaveBeenCalledWith(path.resolve(outsideFilePath), {
-      force: true,
-    });
+    expect(rmSpy).not.toHaveBeenCalled();
+    expect(fixture.store.setItemFileMetadata).not.toHaveBeenCalled();
   });
 
   it('treats missing cache usage fields as zero for counters', async () => {

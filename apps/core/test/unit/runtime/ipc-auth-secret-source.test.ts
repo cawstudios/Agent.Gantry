@@ -23,16 +23,19 @@ describe('ipc auth secret source', () => {
   });
 
   it('loads MYCLAW_IPC_AUTH_SECRET from .env when process env is missing', async () => {
-    vi.doMock('@core/core/config-env.js', () =>
+    vi.doMock('@core/config/env/index.js', () =>
       mockConfigEnvModule({
         MYCLAW_IPC_AUTH_SECRET: 'env-file-secret',
       }),
     );
-    vi.doMock('@core/cli/runtime-settings.js', () => ({
+    vi.doMock('@core/config/settings/runtime-settings.js', () => ({
       readRuntimeMemorySettingsSnapshot: () => ({}),
-      readRuntimeStorageSettingsSnapshot: () => ({}),
+      readRuntimeStorageSettingsSnapshot: () => ({
+        postgresUrlEnv: 'MYCLAW_DATABASE_URL',
+        postgresSchema: 'myclaw',
+      }),
     }));
-    vi.doMock('@core/core/logger.js', () => ({
+    vi.doMock('@core/infrastructure/logging/logger.js', () => ({
       logger: { warn: vi.fn() },
     }));
 
@@ -48,16 +51,19 @@ describe('ipc auth secret source', () => {
   it('prefers process.env over .env secret when both are present', async () => {
     process.env.MYCLAW_IPC_AUTH_SECRET = 'process-secret';
 
-    vi.doMock('@core/core/config-env.js', () =>
+    vi.doMock('@core/config/env/index.js', () =>
       mockConfigEnvModule({
         MYCLAW_IPC_AUTH_SECRET: 'env-file-secret',
       }),
     );
-    vi.doMock('@core/cli/runtime-settings.js', () => ({
+    vi.doMock('@core/config/settings/runtime-settings.js', () => ({
       readRuntimeMemorySettingsSnapshot: () => ({}),
-      readRuntimeStorageSettingsSnapshot: () => ({}),
+      readRuntimeStorageSettingsSnapshot: () => ({
+        postgresUrlEnv: 'MYCLAW_DATABASE_URL',
+        postgresSchema: 'myclaw',
+      }),
     }));
-    vi.doMock('@core/core/logger.js', () => ({
+    vi.doMock('@core/infrastructure/logging/logger.js', () => ({
       logger: { warn: vi.fn() },
     }));
 

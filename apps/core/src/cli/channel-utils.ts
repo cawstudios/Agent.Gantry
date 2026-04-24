@@ -1,21 +1,25 @@
 import '../channels/register-builtins.js';
 import {
-  listChannelProviders,
+  listConnectableChannelProviders,
   providerForJid,
 } from '../channels/provider-registry.js';
-import { RuntimeChannel } from './runtime-settings.js';
+import { RuntimeChannel } from '../config/settings/runtime-settings.js';
 
 export function getChannelIds(): RuntimeChannel[] {
-  return listChannelProviders().map((provider) => provider.id);
+  return listConnectableChannelProviders().map((provider) => provider.id);
 }
 
 export function parseRuntimeChannel(raw: string): RuntimeChannel | null {
   const normalized = raw.trim().toLowerCase();
   if (!normalized) return null;
-  if (getChannelIds().includes(normalized)) {
+  if (
+    listConnectableChannelProviders().some(
+      (provider) => provider.id === normalized,
+    )
+  ) {
     return normalized;
   }
-  for (const provider of listChannelProviders()) {
+  for (const provider of listConnectableChannelProviders()) {
     const shortPrefix = provider.jidPrefix.replace(/:$/, '').toLowerCase();
     if (normalized === shortPrefix) {
       return provider.id;

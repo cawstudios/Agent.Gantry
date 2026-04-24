@@ -4,7 +4,7 @@ import {
   handleSessionCommand,
   isSessionCommandAllowed,
 } from '@core/session/session-commands.js';
-import type { NewMessage } from '@core/core/types.js';
+import type { NewMessage } from '@core/domain/types.js';
 import type { SessionCommandDeps } from '@core/session/session-commands.js';
 
 describe('extractSessionCommand', () => {
@@ -40,12 +40,18 @@ describe('extractSessionCommand', () => {
   });
 
   it('detects /model with full model name', () => {
-    expect(
-      extractSessionCommand('/model claude-opus-4-1-20250805', trigger),
-    ).toEqual({
+    expect(extractSessionCommand('/model claude-opus-4-7', trigger)).toEqual({
       kind: 'model_set',
-      raw: '/model claude-opus-4-1-20250805',
-      value: 'claude-opus-4-1-20250805',
+      raw: '/model claude-opus-4-7',
+      value: 'claude-opus-4-7',
+    });
+  });
+
+  it('normalizes /model shorthand before validation', () => {
+    expect(extractSessionCommand('/model opus-4-7', trigger)).toEqual({
+      kind: 'model_set',
+      raw: '/model opus',
+      value: 'opus',
     });
   });
 
@@ -316,6 +322,13 @@ describe('handleSessionCommand', () => {
     expect(deps.archiveCurrentSession).toHaveBeenCalledWith('new-session');
     expect(deps.onSessionArchived).toHaveBeenCalledWith('new-session');
     expect(deps.clearCurrentSession).toHaveBeenCalledTimes(1);
+    expect(
+      (deps.archiveCurrentSession as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      (deps.clearCurrentSession as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0],
+    );
     expect(deps.sendMessage).toHaveBeenCalledWith('Started a fresh session.');
     expect(deps.advanceCursor).toHaveBeenCalledWith(
       expect.objectContaining({ timestamp: '100' }),
@@ -701,7 +714,7 @@ describe('handleSessionCommand', () => {
 
   it('handles /model by showing group override when present', async () => {
     const deps = makeDeps({
-      getGroupModelOverride: vi.fn().mockReturnValue('claude-opus-4-6'),
+      getGroupModelOverride: vi.fn().mockReturnValue('claude-opus-4-7'),
     });
     const result = await handleSessionCommand({
       missedMessages: [makeMsg('/model')],
@@ -715,13 +728,13 @@ describe('handleSessionCommand', () => {
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.runAgent).not.toHaveBeenCalled();
     expect(deps.sendMessage).toHaveBeenCalledWith(
-      'Current model: claude-opus-4-6 (group override).',
+      'Current model: claude-opus-4-7 (group override).',
     );
   });
 
   it('handles /model by showing default model when no group override', async () => {
     const deps = makeDeps({
-      getDefaultModel: vi.fn().mockReturnValue('claude-sonnet-4-5'),
+      getDefaultModel: vi.fn().mockReturnValue('claude-sonnet-4-6'),
     });
     const result = await handleSessionCommand({
       missedMessages: [makeMsg('/model')],
@@ -735,7 +748,7 @@ describe('handleSessionCommand', () => {
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.runAgent).not.toHaveBeenCalled();
     expect(deps.sendMessage).toHaveBeenCalledWith(
-      'Current model: claude-sonnet-4-5 (default).',
+      'Current model: claude-sonnet-4-6 (default).',
     );
   });
 
@@ -824,6 +837,29 @@ describe('handleSessionCommand', () => {
     );
   });
 
+  it('fails /thinking when override persistence rejects', async () => {
+    const deps = makeDeps({
+      setGroupThinkingOverride: vi
+        .fn()
+        .mockRejectedValue(new Error('persist failed')),
+    });
+
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/thinking high')],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'Failed to set thinking. Override unchanged.',
+    );
+  });
+
   it('handles /thinking default by clearing override', async () => {
     const deps = makeDeps();
 
@@ -840,6 +876,29 @@ describe('handleSessionCommand', () => {
     expect(deps.setGroupThinkingOverride).toHaveBeenCalledWith(undefined);
     expect(deps.sendMessage).toHaveBeenCalledWith(
       'Thinking override cleared. Using default thinking: adaptive (effort medium).',
+    );
+  });
+
+  it('fails /thinking default when override persistence rejects', async () => {
+    const deps = makeDeps({
+      setGroupThinkingOverride: vi
+        .fn()
+        .mockRejectedValue(new Error('persist failed')),
+    });
+
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/thinking default')],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'Failed to clear thinking override. Override unchanged.',
     );
   });
 
@@ -863,6 +922,30 @@ describe('handleSessionCommand', () => {
     expect(deps.setGroupModelOverride).toHaveBeenCalledWith('opus');
     expect(deps.sendMessage).toHaveBeenCalledWith(
       'Model set to opus for this group.',
+    );
+  });
+
+  it('fails /model when override persistence rejects', async () => {
+    const deps = makeDeps({
+      setGroupModelOverride: vi
+        .fn()
+        .mockRejectedValue(new Error('persist failed')),
+    });
+
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/model opus')],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.runAgent).toHaveBeenCalled();
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'Failed to set model to opus. Override unchanged.',
     );
   });
 
@@ -893,7 +976,7 @@ describe('handleSessionCommand', () => {
 
   it('handles /model default by clearing override and using env default when configured', async () => {
     const deps = makeDeps({
-      getDefaultModel: vi.fn().mockReturnValue('claude-opus-4-1-20250805'),
+      getDefaultModel: vi.fn().mockReturnValue('claude-opus-4-7'),
     });
     const result = await handleSessionCommand({
       missedMessages: [makeMsg('/model default')],
@@ -908,7 +991,31 @@ describe('handleSessionCommand', () => {
     expect(deps.runAgent).not.toHaveBeenCalled();
     expect(deps.setGroupModelOverride).toHaveBeenCalledWith(undefined);
     expect(deps.sendMessage).toHaveBeenCalledWith(
-      'Model override cleared. Using default model: claude-opus-4-1-20250805.',
+      'Model override cleared. Using default model: claude-opus-4-7.',
+    );
+  });
+
+  it('fails /model default when override persistence rejects', async () => {
+    const deps = makeDeps({
+      setGroupModelOverride: vi
+        .fn()
+        .mockRejectedValue(new Error('persist failed')),
+    });
+
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/model default')],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.runAgent).not.toHaveBeenCalled();
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'Failed to clear model override. Override unchanged.',
     );
   });
 
@@ -976,18 +1083,9 @@ describe('handleSessionCommand', () => {
     expect(deps.setGroupModelOverride).not.toHaveBeenCalled();
   });
 
-  it('/new should not archive session if clear will fail (inconsistent state)', async () => {
-    // Bug: archiveCurrentSession runs first, then clearCurrentSession throws.
-    // The session transcript is archived but the session is not cleared.
-    // User is told "session is unchanged" but the archive already happened.
-    // On retry, the session gets archived again (duplicate archive).
-    //
-    // Correct behavior: either don't archive until clear succeeds,
-    // or don't claim "session is unchanged" when archive already happened.
+  it('/new archives first but does not advance cursor when clearing rejects', async () => {
     const deps = makeDeps({
-      clearCurrentSession: vi.fn(() => {
-        throw new Error('clear failed');
-      }),
+      clearCurrentSession: vi.fn().mockRejectedValue(new Error('clear failed')),
     });
     const result = await handleSessionCommand({
       missedMessages: [makeMsg('/new')],
@@ -998,15 +1096,13 @@ describe('handleSessionCommand', () => {
       deps,
     });
 
-    // The command should fail
     expect(result).toEqual({ handled: true, success: false });
-
-    // BUG: archive was called BEFORE clear was attempted.
-    // If clear fails, the session is in an inconsistent state:
-    // transcript archived, but session still active.
-    // The assertion below tests that archive should NOT be called
-    // when the overall /new operation fails.
-    expect(deps.archiveCurrentSession).not.toHaveBeenCalled();
+    expect(deps.archiveCurrentSession).toHaveBeenCalledWith('new-session');
+    expect(deps.onSessionArchived).not.toHaveBeenCalled();
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      '/new failed. The session is unchanged.',
+    );
   });
 
   it('denies unauthorized /thinking in non-main group', async () => {

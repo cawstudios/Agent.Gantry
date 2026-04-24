@@ -1,22 +1,27 @@
-import { upsertEnvFile } from './env-file.js';
-import type { HostCredentialMode } from '../core/credential-mode.js';
+import { upsertEnvFile } from '../config/env/file.js';
+import type { HostCredentialMode } from '../config/credentials/mode.js';
 import '../channels/register-builtins.js';
 import { getChannelProvider } from '../channels/provider-registry.js';
-import { envFilePath, ensureRuntimeLayout } from './runtime-home.js';
+import {
+  envFilePath,
+  ensureRuntimeLayout,
+} from '../config/settings/runtime-home.js';
 import {
   loadRuntimeSettings,
   saveRuntimeSettings,
-} from './runtime-settings.js';
+} from '../config/settings/runtime-settings.js';
+import { normalizeClaudeModelSelection } from '../models/claude-model-registry.js';
 
 export interface OnboardingConfigInput {
   runtimeHome: string;
-  storageProvider: 'sqlite';
+  postgresDatabaseUrl?: string;
+  postgresSchema?: string;
   primaryProvider: 'telegram' | 'slack';
   telegramBotToken?: string;
+  telegramPermissionApproverIds?: string;
   slackBotToken?: string;
   slackAppToken?: string;
-  claudeOauthToken?: string;
-  anthropicApiKey?: string;
+  slackPermissionApproverIds?: string;
   anthropicModel?: string;
   credentialMode: HostCredentialMode;
   onecliUrl?: string;
@@ -33,25 +38,27 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
 
   upsertEnvFile(envFilePath(input.runtimeHome), {
     TELEGRAM_BOT_TOKEN: input.telegramBotToken?.trim() || null,
+    TELEGRAM_PERMISSION_APPROVER_IDS:
+      input.primaryProvider === 'telegram'
+        ? input.telegramPermissionApproverIds?.trim() || null
+        : null,
     SLACK_BOT_TOKEN: input.slackBotToken?.trim() || null,
     SLACK_APP_TOKEN: input.slackAppToken?.trim() || null,
-    CLAUDE_CODE_OAUTH_TOKEN:
-      input.credentialMode === 'onecli-only'
-        ? null
-        : input.claudeOauthToken?.trim() || null,
-    ANTHROPIC_API_KEY:
-      input.credentialMode === 'onecli-only'
-        ? null
-        : input.anthropicApiKey?.trim() || null,
-    ANTHROPIC_MODEL: input.anthropicModel?.trim() || null,
-    MYCLAW_DATABASE_URL: null,
+    SLACK_PERMISSION_APPROVER_IDS:
+      input.primaryProvider === 'slack'
+        ? input.slackPermissionApproverIds?.trim() || null
+        : null,
+    CLAUDE_CODE_OAUTH_TOKEN: null,
+    ANTHROPIC_API_KEY: null,
+    ANTHROPIC_AUTH_TOKEN: null,
+    ANTHROPIC_MODEL:
+      normalizeClaudeModelSelection(input.anthropicModel) || null,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: null,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: null,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: null,
+    MYCLAW_DATABASE_URL: input.postgresDatabaseUrl?.trim() || null,
     MYCLAW_CREDENTIAL_MODE: input.credentialMode,
-    ONECLI_URL:
-      input.credentialMode === 'env-only'
-        ? null
-        : onecliUrl.length > 0
-          ? onecliUrl
-          : null,
+    ONECLI_URL: onecliUrl.length > 0 ? onecliUrl : null,
     OPENAI_API_KEY:
       input.embeddingsEnabled && input.openAiApiKey?.trim()
         ? input.openAiApiKey.trim()
@@ -59,9 +66,8 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
   });
 
   const settings = loadRuntimeSettings(input.runtimeHome);
-  settings.storage.provider = input.storageProvider;
   settings.storage.postgres.urlEnv = 'MYCLAW_DATABASE_URL';
-  settings.storage.postgres.schema = 'myclaw';
+  settings.storage.postgres.schema = input.postgresSchema?.trim() || 'myclaw';
   const telegramProvider = getChannelProvider('telegram');
   if (telegramProvider && settings.channels[telegramProvider.id]) {
     const shouldEnable =

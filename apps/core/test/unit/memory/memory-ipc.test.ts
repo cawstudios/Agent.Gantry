@@ -21,6 +21,10 @@ function writeMemorySettings(runtimeHome: string): void {
       '    model: text-embedding-3-large',
       '  dreaming:',
       '    enabled: false',
+      'storage:',
+      '  postgres:',
+      '    url_env: MYCLAW_DATABASE_URL',
+      '    schema: myclaw',
       '',
     ].join('\n'),
     'utf-8',
@@ -31,6 +35,7 @@ beforeEach(() => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-memory-ipc-'));
   tempRoots.push(root);
   process.env.MYCLAW_HOME = root;
+  writeMemorySettings(root);
 });
 
 afterEach(async () => {
@@ -65,6 +70,14 @@ describe('memory IPC provider integration', () => {
     process.env.MEMORY_SEMANTIC_DEDUP_ENABLED = 'false';
 
     vi.resetModules();
+    vi.doMock('@core/memory/memory-service.js', () => ({
+      MemoryService: {
+        getInstance: () => ({
+          getProviderName: () => 'postgres',
+          saveMemory: vi.fn(async () => ({ id: 'mem_1' })),
+        }),
+      },
+    }));
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
 
     const response = await processMemoryRequest(
@@ -81,7 +94,7 @@ describe('memory IPC provider integration', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(response.provider).toBe('sqlite');
+    expect(response.provider).toBe('postgres');
   });
 
   it('returns IPC error responses when memory service init fails', async () => {
@@ -288,6 +301,14 @@ describe('memory IPC provider integration', () => {
     process.env.MEMORY_SEMANTIC_DEDUP_ENABLED = 'false';
 
     vi.resetModules();
+    vi.doMock('@core/memory/memory-service.js', () => ({
+      MemoryService: {
+        getInstance: () => ({
+          getProviderName: () => 'postgres',
+          search: vi.fn(async () => []),
+        }),
+      },
+    }));
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
 
     const response = await processMemoryRequest(
@@ -302,7 +323,7 @@ describe('memory IPC provider integration', () => {
 
     expect(response.ok).toBe(true);
     expect(response.requestId).toBe('req-search');
-    expect(response.provider).toBe('sqlite');
+    expect(response.provider).toBe('postgres');
   });
 
   it('returns error for empty search query', async () => {
@@ -821,7 +842,7 @@ describe('writeMemoryResponse', () => {
     const response = {
       ok: true as const,
       requestId: 'req-42',
-      provider: 'sqlite',
+      provider: 'postgres',
       data: { results: [1, 2, 3] },
     };
 

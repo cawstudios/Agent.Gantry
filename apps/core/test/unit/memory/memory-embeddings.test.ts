@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { MEMORY_EMBED_BATCH_SIZE } from '@core/core/config.js';
+import { MEMORY_EMBED_BATCH_SIZE } from '@core/config/index.js';
 
 import {
   createEmbeddingProvider,

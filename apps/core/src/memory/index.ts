@@ -6,5 +6,5 @@ export * from './memory-ipc.js';
 export * from './memory-root.js';
 export * from './memory-retrieval.js';
 export * from './memory-service.js';
-export * from './memory-store.js';
+export * from './persistence/store.js';
 export * from './memory-types.js';

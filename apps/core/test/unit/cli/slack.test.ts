@@ -11,10 +11,38 @@ import {
   validateSlackBotToken,
   verifySlackChatAccess,
 } from '@core/cli/slack.js';
-import { readEnvFile } from '@core/cli/env-file.js';
-import { envFilePath } from '@core/cli/runtime-home.js';
-import { loadRuntimeSettings } from '@core/cli/runtime-settings.js';
+import { readEnvFile } from '@core/config/env/file.js';
+import { envFilePath } from '@core/config/settings/runtime-home.js';
+import {
+  loadRuntimeSettings,
+  saveRuntimeSettings,
+} from '@core/config/settings/runtime-settings.js';
 import { listSlackRecentChats } from '@core/cli/slack-chat-discovery.js';
+
+const groupsStore = vi.hoisted(() => new Map<string, any>());
+
+vi.mock('@core/cli/runtime-group-db.js', () => ({
+  openRuntimeGroupDb: async () => ({
+    countRegisteredGroupsByJidPrefix: async (jidPrefix: string) => {
+      const normalized = jidPrefix.endsWith('%')
+        ? jidPrefix.slice(0, -1)
+        : jidPrefix;
+      return Array.from(groupsStore.keys()).filter((jid) =>
+        jid.startsWith(normalized),
+      ).length;
+    },
+    getAllRegisteredGroups: async () =>
+      Object.fromEntries(groupsStore.entries()),
+    setRegisteredGroup: async (jid: string, group: any) => {
+      groupsStore.set(jid, group);
+    },
+    deleteRegisteredGroup: async (jid: string) => {
+      groupsStore.delete(jid);
+    },
+    deleteSession: async () => {},
+    close: async () => {},
+  }),
+}));
 
 const runtimeHomes: string[] = [];
 
@@ -22,6 +50,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
   vi.unstubAllGlobals();
+  groupsStore.clear();
   while (runtimeHomes.length > 0) {
     const runtimeHome = runtimeHomes.pop();
     if (runtimeHome) fs.rmSync(runtimeHome, { recursive: true, force: true });
@@ -33,6 +62,8 @@ describe('cli slack helpers', () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'myclaw-slack-test-'),
     );
+    const settings = loadRuntimeSettings(runtimeHome);
+    saveRuntimeSettings(runtimeHome, settings);
     runtimeHomes.push(runtimeHome);
     return runtimeHome;
   }

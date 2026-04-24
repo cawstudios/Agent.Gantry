@@ -4,7 +4,7 @@ import {
   formatLocalTime,
   isValidTimezone,
   resolveTimezone,
-} from '@core/core/timezone.js';
+} from '@core/shared/timezone.js';
 
 // --- formatLocalTime ---
 

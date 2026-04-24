@@ -1,13 +1,13 @@
 import '../channels/register-builtins.js';
-import { listChannelProviders } from '../channels/provider-registry.js';
+import { listConnectableChannelProviders } from '../channels/provider-registry.js';
 
-import { readEnvFile } from './env-file.js';
-import { DoctorReport, runDoctor } from './doctor.js';
-import { getServiceStatus } from './service-manager.js';
-import { envFilePath } from './runtime-home.js';
-import { ensureRuntimeSettings } from './runtime-settings.js';
+import { readEnvFile } from '../config/env/file.js';
+import { DoctorReport, runDoctorWithNetwork } from './doctor.js';
+import { getServiceStatus } from '../infrastructure/service/manager.js';
+import { envFilePath } from '../config/settings/runtime-home.js';
+import { ensureRuntimeSettings } from '../config/settings/runtime-settings.js';
 import { inspectMemoryHealth } from './memory-health.js';
-import { openRuntimeGroupReadonlyDb } from './runtime-group-db.js';
+import { openRuntimeGroupDb } from './runtime-group-db.js';
 
 export interface RuntimeStatusSummary {
   runtimeHome: string;
@@ -29,9 +29,9 @@ export interface RuntimeStatusSummary {
   memoryHealth: string;
   memoryRoot: string;
   memoryRootSource: string;
-  memorySqlitePath: string;
-  memorySqlitePathSource: string;
-  storageProvider: string;
+  storageCapabilityHealth: string;
+  storageCapabilityMessage: string;
+  storageCapabilityNextAction?: string;
   embeddingsEnabled: boolean;
   embeddingProvider: string;
   embeddingProviderSource: string;
@@ -43,33 +43,44 @@ export interface RuntimeStatusSummary {
 }
 
 function countRegisteredGroupsByPrefix(
-  runtimeHome: string,
+  groups: Record<string, { folder: string }>,
   jidPrefix: string,
 ): number {
-  let groupDb: ReturnType<typeof openRuntimeGroupReadonlyDb> | null = null;
-  try {
-    groupDb = openRuntimeGroupReadonlyDb(runtimeHome);
-    return groupDb.countRegisteredGroupsByJidPrefix(jidPrefix);
-  } catch {
-    return 0;
-  } finally {
-    groupDb?.close();
-  }
+  const prefix = jidPrefix.endsWith('%') ? jidPrefix.slice(0, -1) : jidPrefix;
+  return Object.keys(groups).filter((jid) => jid.startsWith(prefix)).length;
 }
 
-export function collectRuntimeStatus(
+export async function collectRuntimeStatus(
   importMetaUrl: string,
   runtimeHome: string,
-): RuntimeStatusSummary {
+): Promise<RuntimeStatusSummary> {
   const env = readEnvFile(envFilePath(runtimeHome));
   const settings = ensureRuntimeSettings(runtimeHome);
   const service = getServiceStatus(runtimeHome);
-  const doctor = runDoctor(importMetaUrl, runtimeHome);
+  const doctor = await runDoctorWithNetwork(importMetaUrl, runtimeHome, {
+    validateTelegramToken: false,
+  });
   const memoryHealth = inspectMemoryHealth(runtimeHome, settings, env);
   const embeddingsProviderCheck = doctor.checks.find(
     (check) => check.id === 'embeddings-provider',
   );
-  const channels = listChannelProviders().map((provider) => {
+  const storageCapabilityCheck = doctor.checks.find(
+    (check) => check.id === 'storage-capabilities',
+  );
+  let registeredGroups: Record<string, { folder: string }> = {};
+  let groupDb: Awaited<ReturnType<typeof openRuntimeGroupDb>> | null = null;
+  try {
+    groupDb = await openRuntimeGroupDb(runtimeHome, { migrate: false });
+    registeredGroups = await groupDb.getAllRegisteredGroups();
+  } catch {
+    registeredGroups = {};
+  } finally {
+    if (groupDb) {
+      await groupDb.close();
+    }
+  }
+
+  const channels = listConnectableChannelProviders().map((provider) => {
     const configuredEnvKeys: string[] = [];
     const missingEnvKeys: string[] = [];
     for (const envKey of provider.setup.envKeys) {
@@ -86,7 +97,10 @@ export function collectRuntimeStatus(
       enabled: settings.channels[provider.id]?.enabled ?? false,
       configuredEnvKeys,
       missingEnvKeys,
-      groups: countRegisteredGroupsByPrefix(runtimeHome, provider.jidPrefix),
+      groups: countRegisteredGroupsByPrefix(
+        registeredGroups,
+        provider.jidPrefix,
+      ),
     };
   });
 
@@ -100,9 +114,11 @@ export function collectRuntimeStatus(
     memoryHealth: memoryHealth.memoryCheck.status,
     memoryRoot: memoryHealth.memoryRoot,
     memoryRootSource: memoryHealth.memoryRootSource,
-    memorySqlitePath: memoryHealth.sqlitePath,
-    memorySqlitePathSource: memoryHealth.sqlitePathSource,
-    storageProvider: memoryHealth.storageProvider,
+    storageCapabilityHealth: storageCapabilityCheck?.status || 'unknown',
+    storageCapabilityMessage:
+      storageCapabilityCheck?.message ||
+      'Storage capability checks were not available.',
+    storageCapabilityNextAction: storageCapabilityCheck?.nextAction,
     embeddingsEnabled: memoryHealth.embeddingsEnabled,
     embeddingProvider: memoryHealth.embeddingProvider,
     embeddingProviderSource: memoryHealth.embeddingProviderSource,
@@ -149,10 +165,12 @@ export function formatRuntimeStatus(summary: RuntimeStatusSummary): string {
   lines.push(
     `Memory storage: ${summary.memoryHealth} (root: ${summary.memoryRoot}, source: ${summary.memoryRootSource})`,
   );
-  lines.push(`Storage provider: ${summary.storageProvider}`);
   lines.push(
-    `Memory DB path: ${summary.memorySqlitePath} (source: ${summary.memorySqlitePathSource})`,
+    `Storage capabilities: ${summary.storageCapabilityHealth} (${summary.storageCapabilityMessage})`,
   );
+  if (summary.storageCapabilityNextAction) {
+    lines.push(`Storage next action: ${summary.storageCapabilityNextAction}`);
+  }
   lines.push(`Embeddings: ${statusWord(summary.embeddingsEnabled)}`);
   lines.push(
     `Embedding provider: ${summary.embeddingProvider} (${summary.embeddingProviderHealth}, source: ${summary.embeddingProviderSource})`,

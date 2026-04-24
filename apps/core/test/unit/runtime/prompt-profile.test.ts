@@ -9,7 +9,7 @@ const loggerSpies = vi.hoisted(() => ({
   warn: vi.fn(),
 }));
 
-vi.mock('@core/core/logger.js', () => ({
+vi.mock('@core/infrastructure/logging/logger.js', () => ({
   logger: {
     info: loggerSpies.info,
     warn: loggerSpies.warn,

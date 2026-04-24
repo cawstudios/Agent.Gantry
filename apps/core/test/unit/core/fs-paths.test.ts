@@ -4,7 +4,7 @@ import path from 'path';
 
 import { describe, expect, it } from 'vitest';
 
-import { writeFileAtomic } from '@core/core/fs-paths.js';
+import { writeFileAtomic } from '@core/infrastructure/filesystem/paths.js';
 
 describe('fs-path helpers', () => {
   it('uses restrictive default permissions for atomic writes', () => {

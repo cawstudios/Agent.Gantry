@@ -352,7 +352,6 @@ Update Runtime File Layout:
   settings.yaml
   .env
   service-meta.json
-  scheduler-jobs.json
   agent-memory/
   agents/
     shared/

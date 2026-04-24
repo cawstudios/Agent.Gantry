@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { MYCLAW_HOME } from '@core/core/config.js';
-import { Channel, NewMessage, RegisteredGroup } from '@core/core/types.js';
+vi.mock('@core/config/index.js', () => ({
+  DATA_DIR: '/tmp/myclaw-remote-control-test/data',
+  MYCLAW_HOME: '/tmp/myclaw-remote-control-test',
+  REMOTE_CONTROL_AUTO_ACCEPT: false,
+}));
+
+import { MYCLAW_HOME } from '@core/config/index.js';
+import { Channel, NewMessage, RegisteredGroup } from '@core/domain/types.js';
 import {
   asRemoteControlCommand,
   handleRemoteControlCommand,

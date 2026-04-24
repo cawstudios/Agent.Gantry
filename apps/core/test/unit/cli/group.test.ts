@@ -3,8 +3,33 @@ import os from 'os';
 import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseRuntimeSettings } from '@core/cli/runtime-settings.js';
-import { settingsFilePath } from '@core/cli/runtime-home.js';
+import { parseRuntimeSettings } from '@core/config/settings/runtime-settings.js';
+import { settingsFilePath } from '@core/config/settings/runtime-home.js';
+
+const groupsStore = vi.hoisted(() => new Map<string, any>());
+
+vi.mock('@core/cli/runtime-group-db.js', () => ({
+  openRuntimeGroupDb: async () => ({
+    countRegisteredGroupsByJidPrefix: async (jidPrefix: string) => {
+      const normalized = jidPrefix.endsWith('%')
+        ? jidPrefix.slice(0, -1)
+        : jidPrefix;
+      return Array.from(groupsStore.keys()).filter((jid) =>
+        jid.startsWith(normalized),
+      ).length;
+    },
+    getAllRegisteredGroups: async () =>
+      Object.fromEntries(groupsStore.entries()),
+    setRegisteredGroup: async (jid: string, group: any) => {
+      groupsStore.set(jid, group);
+    },
+    deleteRegisteredGroup: async (jid: string) => {
+      groupsStore.delete(jid);
+    },
+    deleteSession: async () => {},
+    close: async () => {},
+  }),
+}));
 
 function createRuntimeHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-group-test-'));
@@ -12,6 +37,54 @@ function createRuntimeHome(): string {
   fs.mkdirSync(path.join(home, 'agents'), { recursive: true });
   fs.mkdirSync(path.join(home, 'logs'), { recursive: true });
   fs.mkdirSync(path.join(home, 'data'), { recursive: true });
+  fs.writeFileSync(
+    settingsFilePath(home),
+    [
+      'channels:',
+      '  telegram:',
+      '    enabled: false',
+      '    sender_allowlist:',
+      '      default:',
+      '        allow: "*"',
+      '        mode: trigger',
+      '      agents: {}',
+      '      log_denied: true',
+      '    control_allowlist:',
+      '      default: []',
+      '      agents: {}',
+      '  slack:',
+      '    enabled: false',
+      '    sender_allowlist:',
+      '      default:',
+      '        allow: "*"',
+      '        mode: trigger',
+      '      agents: {}',
+      '      log_denied: true',
+      '    control_allowlist:',
+      '      default: []',
+      '      agents: {}',
+      'storage:',
+      '  postgres:',
+      '    url_env: MYCLAW_DATABASE_URL',
+      '    schema: myclaw',
+      'memory:',
+      '  enabled: true',
+      '  root: memory',
+      '  embeddings:',
+      '    enabled: false',
+      '    provider: disabled',
+      '    model: text-embedding-3-large',
+      '  dreaming:',
+      '    enabled: false',
+      '  llm:',
+      '    models:',
+      '      extractor: claude-haiku-4-5-20251001',
+      '      dreaming: claude-sonnet-4-6',
+      '      consolidation: claude-sonnet-4-6',
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
   return home;
 }
 
@@ -19,15 +92,44 @@ let runtimeHome = '';
 
 beforeEach(() => {
   vi.resetModules();
+  groupsStore.clear();
   runtimeHome = createRuntimeHome();
   process.env.MYCLAW_HOME = runtimeHome;
+  process.env.MYCLAW_DATABASE_URL =
+    'postgres://user:pass@127.0.0.1:5432/myclaw';
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.MYCLAW_DATABASE_URL;
 });
 
 describe('group CLI commands', () => {
+  it('rejects unsupported runtime and storage settings', () => {
+    const base = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
+
+    expect(() =>
+      parseRuntimeSettings(
+        base.replace('storage:\n', 'runtime:\n  profile: personal\nstorage:\n'),
+      ),
+    ).toThrow(/runtime settings are not supported/);
+
+    expect(() =>
+      parseRuntimeSettings(
+        base.replace('storage:\n', 'storage:\n  provider: sqlite\n'),
+      ),
+    ).toThrow(/storage\.provider is not supported/);
+
+    expect(() =>
+      parseRuntimeSettings(
+        base.replace(
+          '  postgres:\n',
+          '  sqlite:\n    path: ./store/myclaw.db\n  postgres:\n',
+        ),
+      ),
+    ).toThrow(/storage\.sqlite is not supported/);
+  });
+
   it('seeds SOUL.md when adding an agent', async () => {
     const { runAgentCommand } = await import('@core/cli/group.js');
     const jid = `dc:soul-seed-${Date.now().toString(36)}`;

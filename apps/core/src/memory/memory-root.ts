@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { memoryStorageDir } from '../core/config.js';
+import { memoryStorageDir } from '../config/index.js';
 
 export type SessionArchiveCause =
   | 'new-session'
@@ -118,10 +118,6 @@ export class MemoryRootService {
 
   getLayout(): MemoryLayout {
     return { ...this.layout };
-  }
-
-  getSqliteCachePath(): string {
-    return this.resolveWithinRoot(path.join(this.layout.cacheDir, 'memory.db'));
   }
 
   resolveJournalPath(date = new Date()): string {

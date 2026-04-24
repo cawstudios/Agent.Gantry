@@ -21,12 +21,12 @@ The first run is guided and channel-agnostic:
 
 1. welcome
 2. runtime home confirmation (`~/myclaw` by default)
-3. storage selection (`SQLite`; Postgres is not exposed in guided setup yet)
-4. runtime prerequisite check
+3. Postgres storage configuration (`MYCLAW_DATABASE_URL`)
+4. runtime home writability check
 5. channel selection (`Telegram` or `Slack`)
-6. provider token + chat/conversation connection
-7. credential source mode selection (`env-only` default, optional OneCLI)
-8. Claude auth selection (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) for credential modes that need local credentials
+6. channel token + chat/conversation connection
+7. OneCLI credential broker configuration for agent model access
+8. model credential validation through OneCLI; raw Claude credentials are not stored in runtime `.env`
 9. model selection (`Sonnet` recommended, optional `Opus`)
 10. memory decision
 11. embeddings decision (off by default; asks for OpenAI key only if enabled)
@@ -65,7 +65,11 @@ Contains:
 - `logs/`
 - `.onboarding-state.json`
 
-`settings.yaml` is the single user-editable runtime settings file for channel, storage, and memory behavior (including sender allowlist).
+`settings.yaml` is the single user-editable runtime settings file for channel, storage, and memory behavior.
+
+- `sender_allowlist` controls who can trigger or post messages into an agent.
+- `control_allowlist` controls who can run session/admin commands such as `/new`, `/model`, `/dream`, and `/memory-status`.
+- Wildcard sender access (`allow: "*"`) is not admin access.
 
 Override at runtime:
 
@@ -80,6 +84,8 @@ Required values:
 - Telegram bot token from BotFather (`@BotFather` -> `/newbot`)
 - Telegram chat ID (for example `-1001234567890`)
 - For group chats, add the bot to the group and send a message before discovery; use admin rights or BotFather `/setprivacy` if the bot must see every group message.
+- During discovery-based setup, the human who sent the selected Telegram message is saved to `control_allowlist` for that agent so session/admin commands work on first use.
+- If you enter a chat ID manually, MyClaw can register the chat but cannot infer the admin sender. Send a message to the bot and rerun `myclaw telegram connect` if session commands say admin access is required.
 
 Reconnect Telegram later:
 
@@ -106,8 +112,8 @@ myclaw slack connect
 
 - Memory: remember durable facts, preferences, decisions, corrections, constraints, and procedures.
 - Continuity: use remembered context so the agent can resume current work instead of starting cold.
-- Storage backend: SQLite (`storage.provider=sqlite`). Postgres is not exposed until runtime persistence is provider-backed end to end.
-- SQLite path: default local database at `store/myclaw.db`.
+- Storage backend: Postgres using `MYCLAW_DATABASE_URL`.
+- Required Postgres capabilities: `pgvector`, `pg_trgm`, and `pg-boss` schema readiness.
 - Embeddings: optional OpenAI-powered ranking improvement for memory search.
 - Dreaming: background memory cleanup and improvement.
 
@@ -121,9 +127,9 @@ Canonical memory block written by setup:
 
 ```yaml
 storage:
-  provider: sqlite
-  sqlite:
-    path: store/myclaw.db
+  postgres:
+    url_env: MYCLAW_DATABASE_URL
+    schema: myclaw
 
 memory:
   enabled: true
@@ -134,6 +140,35 @@ memory:
     model: text-embedding-3-large
   dreaming:
     enabled: true
+```
+
+Local Postgres Docker convenience:
+
+```bash
+docker run --name myclaw-postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_DB=myclaw \
+  -p 5432:5432 \
+  -v "${MYCLAW_HOME:-$HOME/myclaw}/postgres:/var/lib/postgresql/data" \
+  -d pgvector/pgvector:pg16
+
+docker exec -i myclaw-postgres \
+  psql -U postgres -d myclaw \
+  -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+```
+
+Use:
+
+```bash
+MYCLAW_DATABASE_URL='postgresql://postgres:postgres@localhost:5432/myclaw'
+```
+
+When running from a repo checkout, equivalent helpers are available:
+
+```bash
+npm run postgres:up
+npm run postgres:url
 ```
 
 Memory and continuity work without embeddings. Enable embeddings only when you want better semantic ranking and are comfortable providing an OpenAI API key.

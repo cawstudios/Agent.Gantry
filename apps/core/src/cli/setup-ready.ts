@@ -1,15 +1,14 @@
 import * as p from '@clack/prompts';
 
-import { getServiceStatus } from './service-manager.js';
+import { getServiceStatus } from '../infrastructure/service/manager.js';
 
 export interface SetupReadyDraft {
   runtimeHome: string;
-  storageProvider: 'sqlite' | 'postgres';
   primaryProvider: 'telegram' | 'slack';
   telegramChatJid: string;
   slackChatJid: string;
   selectedModel: string;
-  credentialMode: 'env-only' | 'onecli-only' | 'hybrid';
+  credentialMode: 'onecli';
   onecliUrl: string;
   memoryEnabled: boolean;
   embeddingsEnabled: boolean;
@@ -36,7 +35,6 @@ export async function runReadyStep(
   p.note(
     [
       `Runtime home: ${draft.runtimeHome}`,
-      `Storage: ${draft.storageProvider}`,
       `Primary provider: ${draft.primaryProvider}`,
       `${providerLabel}: ${providerChatJid}`,
       `Main model: ${draft.selectedModel}`,

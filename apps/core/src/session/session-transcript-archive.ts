@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR } from '../core/config.js';
-import { logger } from '../core/logger.js';
-import { getClaudeProjectDirName } from '../core/myclaw-home.js';
+import { DATA_DIR } from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { getClaudeProjectDirName } from '../shared/myclaw-home.js';
 import {
   MemoryRootService,
   SessionArchiveCause,

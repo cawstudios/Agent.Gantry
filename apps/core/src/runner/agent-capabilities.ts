@@ -6,6 +6,7 @@ export interface AgentCapabilityContext {
   isMain: boolean;
   ipcDir?: string;
   ipcAuthToken?: string;
+  ipcResponseVerifyKey?: string;
 }
 
 export interface AgentCapabilityProfile {
@@ -88,6 +89,9 @@ const myclawMcpProvider: AgentCapabilityProvider = {
           ...(ctx.ipcDir ? { MYCLAW_IPC_DIR: ctx.ipcDir } : {}),
           ...(ctx.ipcAuthToken
             ? { MYCLAW_IPC_AUTH_TOKEN: ctx.ipcAuthToken }
+            : {}),
+          ...(ctx.ipcResponseVerifyKey
+            ? { MYCLAW_IPC_RESPONSE_VERIFY_KEY: ctx.ipcResponseVerifyKey }
             : {}),
         },
       },

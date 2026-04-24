@@ -1,6 +1,6 @@
 name = "security-reviewer"
 description = "Framework-independent security reviewer aligned to OWASP-style trust-boundary and abuse-case analysis."
-model = "gpt-5.3-codex"
+model = "gpt-5.5"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 nickname_candidates = ["Shield", "Aegis", "Sentinel"]

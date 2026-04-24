@@ -1,194 +1,62 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, IPC_POLL_INTERVAL } from '../core/config.js';
-import { nowIso, nowMs } from '../core/datetime.js';
-import { isPlainObject, toTrimmedString } from '../core/object.js';
+import { DATA_DIR, IPC_POLL_INTERVAL } from '../config/index.js';
+import { nowMs } from '../infrastructure/time/datetime.js';
+import { isPlainObject, toTrimmedString } from '../shared/object.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
-import { logger } from '../core/logger.js';
-import { IPC_GROUP_SUBDIRS } from './agent-spawn-layout.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import {
   processMemoryRequest,
   writeMemoryResponse,
 } from '../memory/memory-ipc.js';
-import {
-  BROWSER_IPC_ACTIONS,
-  BrowserIpcAction,
-  MEMORY_IPC_ACTIONS,
-  MemoryIpcAction,
-} from '@myclaw/contracts';
-import {
-  PermissionApprovalRequest,
-  RegisteredGroup,
-  UserQuestionRequest,
-} from '../core/types.js';
-import { validateIpcAuthToken } from './ipc-auth.js';
+import { getIpcResponseSigningPrivateKey } from './ipc-auth.js';
 import {
   processBrowserIpcRequest,
   writeBrowserIpcResponse,
 } from './ipc-browser-handler.js';
 import type { IpcDeps } from './ipc-domain-types.js';
-import { writeTaskIpcResponse } from './ipc-task-shared.js';
+import { writeTaskIpcResponse } from '../jobs/ipc-shared.js';
 import {
   processPermissionIpcRequest,
   processUserQuestionIpcRequest,
   writePermissionIpcResponse,
   writeUserQuestionIpcResponse,
 } from './ipc-interaction-handler.js';
-import { processTaskIpc, TaskIpcData } from './ipc-task-handler.js';
+import { processTaskIpc } from '../jobs/ipc-handler.js';
+import {
+  acquireIpcRootLock,
+  archiveIpcErrorFile,
+  claimIpcFile,
+  ensureGroupIpcLayout,
+  hasCompleteTrustedGroupIpcLayout,
+  isTrustedDirectory,
+  readIpcRootLockDetails,
+  recoverStaleIpcRootLock,
+} from './ipc-filesystem.js';
+import {
+  parseBrowserIpcRequest,
+  parseIpcMessage,
+  parseMemoryIpcRequest,
+  parsePermissionIpcRequest,
+  parseUserQuestionIpcRequest,
+} from './ipc-parsing.js';
+import { parseTaskIpcData } from './ipc-task-parsing.js';
+import { clearConsumedIpcRequestIds } from './ipc-auth-validation.js';
 
 export type { IpcDeps } from './ipc-domain-types.js';
-export { processTaskIpc } from './ipc-task-handler.js';
+export { processTaskIpc } from '../jobs/ipc-handler.js';
+export { validateIpcAuthRequest } from './ipc-auth-validation.js';
 
 let ipcWatcherRunning = false;
 let ipcWatcherTimer: ReturnType<typeof setTimeout> | undefined;
 let ipcRootLockPath: string | undefined;
 const IPC_RATE_LIMIT_WINDOW_MS = 60_000;
 const IPC_RATE_LIMIT_MAX_FILES_PER_WINDOW = 300;
-const MEMORY_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-const PERMISSION_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-const BROWSER_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-const USER_QUESTION_IPC_REQUEST_ID_PATTERN =
-  /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const ipcRateLimitState = new Map<
   string,
   { windowStart: number; count: number }
 >();
-
-function toOptionalStringArray(
-  value: unknown,
-  maxItems = 100,
-  maxLen = 255,
-): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  if (value.length > maxItems) return undefined;
-  const out: string[] = [];
-  for (const entry of value) {
-    const parsed = toTrimmedString(entry, { maxLen });
-    if (!parsed) return undefined;
-    out.push(parsed);
-  }
-  return out;
-}
-
-function toOptionalBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined;
-}
-
-function toOptionalNumber(
-  value: unknown,
-  opts: { min?: number; max?: number } = {},
-): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  if (opts.min !== undefined && value < opts.min) return undefined;
-  if (opts.max !== undefined && value > opts.max) return undefined;
-  return value;
-}
-
-const TOOL_INPUT_MAX_DEPTH = 2;
-const TOOL_INPUT_MAX_STRING_LENGTH = 500;
-const SECRET_KEY_PATTERN =
-  /(secret|token|password|credential|api[_-]?key|key)/i;
-
-function sanitizeToolInputValue(value: unknown, depth: number): unknown {
-  if (depth > TOOL_INPUT_MAX_DEPTH) return '[TRUNCATED_DEPTH]';
-  if (typeof value === 'string') {
-    if (value.length <= TOOL_INPUT_MAX_STRING_LENGTH) return value;
-    return `${value.slice(0, TOOL_INPUT_MAX_STRING_LENGTH)}...[truncated]`;
-  }
-  if (
-    typeof value === 'number' ||
-    typeof value === 'boolean' ||
-    value === null
-  ) {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 20)
-      .map((entry) => sanitizeToolInputValue(entry, depth + 1));
-  }
-  if (isPlainObject(value)) {
-    const out: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      if (SECRET_KEY_PATTERN.test(key)) {
-        out[key] = '[REDACTED]';
-        continue;
-      }
-      out[key] = sanitizeToolInputValue(entry, depth + 1);
-    }
-    return out;
-  }
-  return String(value);
-}
-
-function sanitizeToolInput(
-  value: unknown,
-): Record<string, unknown> | undefined {
-  if (!isPlainObject(value)) return undefined;
-  return sanitizeToolInputValue(value, 0) as Record<string, unknown>;
-}
-
-interface IpcThreadBinding {
-  authThreadId?: string;
-  payloadThreadId?: string;
-}
-
-function readThreadIdField(value: unknown, label: string): string | undefined {
-  const parsed = toTrimmedString(value, { maxLen: 255, allowEmpty: true });
-  if (parsed === undefined) {
-    throw new Error(`${label} must be a string up to 255 characters`);
-  }
-  return parsed;
-}
-
-function readTrustedThreadBinding(
-  raw: Record<string, unknown>,
-  label: string,
-): IpcThreadBinding {
-  const context = isPlainObject(raw.context) ? raw.context : undefined;
-  const hasContextThreadId =
-    !!context && Object.prototype.hasOwnProperty.call(context, 'threadId');
-  const hasPayloadThreadId = Object.prototype.hasOwnProperty.call(
-    raw,
-    'threadId',
-  );
-  const contextThreadId = hasContextThreadId
-    ? readThreadIdField(context?.threadId, `${label} context.threadId`)
-    : undefined;
-  const payloadThreadId = hasPayloadThreadId
-    ? readThreadIdField(raw.threadId, `${label} threadId`)
-    : undefined;
-
-  if (
-    hasContextThreadId &&
-    hasPayloadThreadId &&
-    contextThreadId !== payloadThreadId
-  ) {
-    throw new Error(`${label} threadId mismatch`);
-  }
-
-  const trustedThreadId = hasContextThreadId
-    ? contextThreadId
-    : payloadThreadId;
-  return {
-    authThreadId: trustedThreadId || undefined,
-    ...(hasPayloadThreadId ? { payloadThreadId } : {}),
-  };
-}
-
-function assertValidIpcAuth(
-  raw: Record<string, unknown>,
-  sourceGroup: string,
-  label: string,
-): IpcThreadBinding {
-  const authToken = toTrimmedString(raw.authToken, { maxLen: 512 }) || '';
-  const binding = readTrustedThreadBinding(raw, label);
-  if (!validateIpcAuthToken(sourceGroup, authToken, binding.authThreadId)) {
-    throw new Error(`Invalid ${label} auth token`);
-  }
-  return binding;
-}
 
 function canProcessIpcFile(sourceGroup: string, kind: string): boolean {
   const now = nowMs();
@@ -205,152 +73,6 @@ function canProcessIpcFile(sourceGroup: string, kind: string): boolean {
   return true;
 }
 
-function isTrustedDirectory(dirPath: string): boolean {
-  try {
-    const stat = fs.lstatSync(dirPath);
-    return stat.isDirectory() && !stat.isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
-function ensureGroupIpcLayout(ipcBaseDir: string, groupFolder: string): void {
-  const groupDir = path.join(ipcBaseDir, groupFolder);
-  for (const subdir of IPC_GROUP_SUBDIRS) {
-    fs.mkdirSync(path.join(groupDir, subdir), { recursive: true });
-  }
-}
-
-function hasCompleteTrustedGroupIpcLayout(
-  ipcBaseDir: string,
-  groupFolder: string,
-): boolean {
-  const groupDir = path.join(ipcBaseDir, groupFolder);
-  if (!isTrustedDirectory(groupDir)) return false;
-  for (const subdir of IPC_GROUP_SUBDIRS) {
-    if (!isTrustedDirectory(path.join(groupDir, subdir))) return false;
-  }
-  return true;
-}
-
-function claimIpcFile(filePath: string): string {
-  const stat = fs.lstatSync(filePath);
-  if (!stat.isFile() || stat.isSymbolicLink()) {
-    throw new Error('IPC payload must be a regular file');
-  }
-  const claimed = path.join(
-    path.dirname(filePath),
-    `.processing-${process.pid}-${nowMs()}-${Math.random().toString(36).slice(2, 8)}-${path.basename(filePath)}`,
-  );
-  fs.renameSync(filePath, claimed);
-  return claimed;
-}
-
-function archiveIpcErrorFile(
-  ipcBaseDir: string,
-  sourceGroup: string,
-  filename: string,
-  claimedPath: string,
-): void {
-  const errorDir = path.join(ipcBaseDir, 'errors');
-  fs.mkdirSync(errorDir, { recursive: true });
-  try {
-    fs.renameSync(
-      claimedPath,
-      path.join(errorDir, `${sourceGroup}-${filename}`),
-    );
-  } catch (err) {
-    const code =
-      err && typeof err === 'object' && 'code' in err
-        ? String((err as { code?: string }).code)
-        : '';
-    if (code !== 'ENOENT') {
-      throw err;
-    }
-  }
-}
-
-interface IpcRootLockDetails {
-  pid?: number;
-  startedAt?: string;
-}
-
-function readIpcRootLockDetails(lockPath: string): IpcRootLockDetails {
-  try {
-    const raw = fs.readFileSync(lockPath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (!isPlainObject(parsed)) return {};
-    const pidRaw = parsed.pid;
-    const pid =
-      typeof pidRaw === 'number' && Number.isInteger(pidRaw) && pidRaw > 0
-        ? pidRaw
-        : undefined;
-    const startedAt = toTrimmedString(parsed.startedAt, { maxLen: 128 });
-    return { pid, startedAt };
-  } catch {
-    return {};
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    const code =
-      err && typeof err === 'object' && 'code' in err
-        ? String((err as { code?: string }).code)
-        : '';
-    if (code === 'ESRCH') return false;
-    if (code === 'EPERM') return true;
-    logger.warn(
-      { err, pid },
-      'Unable to validate IPC lock PID liveness, assuming process is active',
-    );
-    return true;
-  }
-}
-
-function recoverStaleIpcRootLock(
-  lockPath: string,
-): IpcRootLockDetails & { recovered: boolean; recoveryReason?: string } {
-  const details = readIpcRootLockDetails(lockPath);
-  if (typeof details.pid !== 'number') {
-    return {
-      ...details,
-      recovered: false,
-      recoveryReason: 'invalid_or_missing_pid',
-    };
-  }
-  if (details.pid === process.pid) {
-    return { ...details, recovered: false, recoveryReason: 'same_process' };
-  }
-  if (isProcessAlive(details.pid)) {
-    return { ...details, recovered: false, recoveryReason: 'pid_alive' };
-  }
-  const recoveryReason = 'pid_not_running';
-  try {
-    fs.rmSync(lockPath, { force: true });
-    return { ...details, recovered: true, recoveryReason };
-  } catch (err) {
-    logger.warn({ err, lockPath }, 'Failed to remove stale IPC watcher lock');
-    return { ...details, recovered: false, recoveryReason: 'remove_failed' };
-  }
-}
-
-function acquireIpcRootLock(ipcBaseDir: string): string {
-  const lockPath = path.join(ipcBaseDir, '.lock');
-  fs.writeFileSync(
-    lockPath,
-    JSON.stringify({
-      pid: process.pid,
-      startedAt: nowIso(),
-    }),
-    { flag: 'wx' },
-  );
-  return lockPath;
-}
-
 function releaseIpcRootLock(): void {
   if (!ipcRootLockPath) return;
   try {
@@ -363,412 +85,6 @@ function releaseIpcRootLock(): void {
   } finally {
     ipcRootLockPath = undefined;
   }
-}
-
-interface ParsedIpcMessage {
-  type: 'message';
-  chatJid: string;
-  text: string;
-  sender?: string;
-  threadId?: string;
-}
-
-function parseIpcMessage(raw: unknown, sourceGroup: string): ParsedIpcMessage {
-  if (!isPlainObject(raw)) throw new Error('Invalid IPC message payload');
-  const { authThreadId: threadId } = assertValidIpcAuth(
-    raw,
-    sourceGroup,
-    'IPC message',
-  );
-  const type = toTrimmedString(raw.type, { maxLen: 64 });
-  if (type !== 'message') throw new Error('Invalid IPC message type');
-  const chatJid = toTrimmedString(raw.chatJid, { maxLen: 255 });
-  const text = toTrimmedString(raw.text, { maxLen: 20000 });
-  if (!chatJid || !text) throw new Error('Invalid IPC message fields');
-  const sender = toTrimmedString(raw.sender, { maxLen: 255 });
-  return {
-    type: 'message',
-    chatJid,
-    text,
-    ...(sender ? { sender } : {}),
-    ...(threadId ? { threadId } : {}),
-  };
-}
-
-function toScheduleType(
-  value: unknown,
-): 'cron' | 'interval' | 'once' | undefined {
-  const parsed = toTrimmedString(value, { maxLen: 32 });
-  if (parsed === 'cron' || parsed === 'interval' || parsed === 'once') {
-    return parsed;
-  }
-  return undefined;
-}
-
-const DISALLOWED_TASK_FIELDS = [
-  'task_id',
-  'job_id',
-  'schedule_type',
-  'schedule_value',
-  'context_mode',
-  'deliver_to',
-  'linked_sessions',
-  'group_scope',
-  'thread_id',
-  'run_at',
-  'created_by',
-  'cleanup_after_ms',
-  'timeout_ms',
-  'max_retries',
-  'retry_backoff_ms',
-  'max_consecutive_failures',
-  'execution_mode',
-  'run_id',
-  'event_type',
-  'group_folder',
-  'chat_jid',
-  'target_jid',
-  'since_id',
-] as const;
-
-function findDisallowedTaskFields(raw: Record<string, unknown>): string[] {
-  const found: string[] = [];
-  for (const key of DISALLOWED_TASK_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(raw, key)) {
-      found.push(key);
-    }
-  }
-  return found;
-}
-
-function assertNoDisallowedTaskFields(raw: Record<string, unknown>): void {
-  const fields = findDisallowedTaskFields(raw);
-  if (fields.length === 0) return;
-  throw new Error(
-    `Unsupported IPC task fields: ${fields.join(
-      ', ',
-    )}. IPC tasks accept camelCase fields only.`,
-  );
-}
-
-function parseAgentConfigPayload(
-  value: unknown,
-): RegisteredGroup['agentConfig'] | undefined {
-  if (value === undefined) return undefined;
-  if (!isPlainObject(value)) return undefined;
-  const model = toTrimmedString(value.model, { maxLen: 120 });
-  const timeout = toOptionalNumber(value.timeout, {
-    min: 1000,
-    max: 3_600_000,
-  });
-  const parsed: RegisteredGroup['agentConfig'] = {};
-  if (model) parsed.model = model;
-  if (timeout !== undefined) parsed.timeout = Math.round(timeout);
-  return Object.keys(parsed).length > 0 ? parsed : undefined;
-}
-
-function parseTaskIpcData(raw: unknown, sourceGroup: string): TaskIpcData {
-  if (!isPlainObject(raw)) throw new Error('Invalid IPC task payload');
-  assertNoDisallowedTaskFields(raw);
-  const threadBinding = assertValidIpcAuth(raw, sourceGroup, 'IPC task');
-  const type = toTrimmedString(raw.type, { maxLen: 80 });
-  if (!type) throw new Error('IPC task type is required');
-  const parsed: TaskIpcData = { type };
-  const taskId = toTrimmedString(raw.taskId, { maxLen: 128 });
-  const prompt = toTrimmedString(raw.prompt, { maxLen: 20000 });
-  const model = toTrimmedString(raw.model, { maxLen: 120 });
-  const scheduleType = toScheduleType(raw.scheduleType);
-  const scheduleValue = toTrimmedString(raw.scheduleValue, {
-    maxLen: 1024,
-    allowEmpty: true,
-  });
-  const contextMode = toTrimmedString(raw.contextMode, { maxLen: 64 });
-  const script = toTrimmedString(raw.script, {
-    maxLen: 50_000,
-    allowEmpty: true,
-  });
-  const jobId = toTrimmedString(raw.jobId, { maxLen: 128 });
-  const linkedSessions = toOptionalStringArray(raw.linkedSessions, 200, 255);
-  const deliverToArray = toOptionalStringArray(raw.deliverTo, 200, 255);
-  const deliverToSingle = toTrimmedString(raw.deliverTo, { maxLen: 255 });
-  const deliverTo =
-    deliverToArray || (deliverToSingle ? [deliverToSingle] : undefined);
-  const groupScope = toTrimmedString(raw.groupScope, { maxLen: 128 });
-  const silent = toOptionalBoolean(raw.silent);
-  const serialize = toOptionalBoolean(raw.serialize);
-  const executionModeRaw = toTrimmedString(raw.executionMode, { maxLen: 32 });
-  const executionMode =
-    executionModeRaw === 'parallel' || executionModeRaw === 'serialized'
-      ? executionModeRaw
-      : undefined;
-  const createdByRaw = toTrimmedString(raw.createdBy, { maxLen: 16 });
-  const statuses = toOptionalStringArray(raw.statuses, 50, 64);
-  const runId = toTrimmedString(raw.runId, { maxLen: 128 });
-  const eventType = toTrimmedString(raw.eventType, { maxLen: 128 });
-  const groupFolder = toTrimmedString(raw.groupFolder, { maxLen: 128 });
-  const chatJid = toTrimmedString(raw.chatJid, { maxLen: 255 });
-  const targetJid = toTrimmedString(raw.targetJid, { maxLen: 255 });
-  const jid = toTrimmedString(raw.jid, { maxLen: 255 });
-  const name = toTrimmedString(raw.name, { maxLen: 255 });
-  const folder = toTrimmedString(raw.folder, { maxLen: 128 });
-  const trigger = toTrimmedString(raw.trigger, { maxLen: 255 });
-  const requiresTrigger = toOptionalBoolean(raw.requiresTrigger);
-  const agentConfig = parseAgentConfigPayload(raw.agentConfig);
-  const payload = isPlainObject(raw.payload) ? raw.payload : undefined;
-  const numericFields = {
-    timeoutMs: toOptionalNumber(raw.timeoutMs, { min: 1000, max: 3_600_000 }),
-    cleanupAfterMs: toOptionalNumber(raw.cleanupAfterMs, {
-      min: 0,
-      max: 31_536_000_000,
-    }),
-    maxRetries: toOptionalNumber(raw.maxRetries, { min: 0, max: 100 }),
-    retryBackoffMs: toOptionalNumber(raw.retryBackoffMs, {
-      min: 0,
-      max: 86_400_000,
-    }),
-    maxConsecutiveFailures: toOptionalNumber(raw.maxConsecutiveFailures, {
-      min: 1,
-      max: 1000,
-    }),
-    sinceId: toOptionalNumber(raw.sinceId, {
-      min: 0,
-      max: Number.MAX_SAFE_INTEGER,
-    }),
-    limit: toOptionalNumber(raw.limit, { min: 1, max: 1000 }),
-  };
-
-  if (taskId) parsed.taskId = taskId;
-  if (prompt !== undefined) parsed.prompt = prompt;
-  if (model !== undefined) parsed.model = model;
-  if (scheduleType !== undefined) parsed.scheduleType = scheduleType;
-  if (scheduleValue !== undefined) parsed.scheduleValue = scheduleValue;
-  if (contextMode) parsed.contextMode = contextMode;
-  if (script !== undefined) parsed.script = script;
-  if (jobId) parsed.jobId = jobId;
-  if (linkedSessions !== undefined) parsed.linkedSessions = linkedSessions;
-  if (deliverTo !== undefined) parsed.deliverTo = deliverTo;
-  if (groupScope) parsed.groupScope = groupScope;
-  if (threadBinding.authThreadId) {
-    parsed.authThreadId = threadBinding.authThreadId;
-  }
-  if (threadBinding.payloadThreadId !== undefined) {
-    parsed.threadId = threadBinding.payloadThreadId;
-  }
-  if (silent !== undefined) parsed.silent = silent;
-  if (serialize !== undefined) parsed.serialize = serialize;
-  if (executionMode !== undefined) parsed.executionMode = executionMode;
-  if (createdByRaw === 'agent' || createdByRaw === 'human') {
-    parsed.createdBy = createdByRaw;
-  }
-  if (statuses !== undefined) parsed.statuses = statuses;
-  if (runId) parsed.runId = runId;
-  if (eventType) parsed.eventType = eventType;
-  if (groupFolder) parsed.groupFolder = groupFolder;
-  if (chatJid) parsed.chatJid = chatJid;
-  if (targetJid) parsed.targetJid = targetJid;
-  if (jid) parsed.jid = jid;
-  if (name) parsed.name = name;
-  if (folder) parsed.folder = folder;
-  if (trigger) parsed.trigger = trigger;
-  if (requiresTrigger !== undefined) parsed.requiresTrigger = requiresTrigger;
-  if (agentConfig !== undefined) parsed.agentConfig = agentConfig;
-  if (payload !== undefined) parsed.payload = payload;
-  if (numericFields.timeoutMs !== undefined)
-    parsed.timeoutMs = Math.round(numericFields.timeoutMs);
-  if (numericFields.cleanupAfterMs !== undefined)
-    parsed.cleanupAfterMs = Math.round(numericFields.cleanupAfterMs);
-  if (numericFields.maxRetries !== undefined)
-    parsed.maxRetries = Math.round(numericFields.maxRetries);
-  if (numericFields.retryBackoffMs !== undefined)
-    parsed.retryBackoffMs = Math.round(numericFields.retryBackoffMs);
-  if (numericFields.maxConsecutiveFailures !== undefined)
-    parsed.maxConsecutiveFailures = Math.round(
-      numericFields.maxConsecutiveFailures,
-    );
-  if (numericFields.sinceId !== undefined)
-    parsed.sinceId = Math.round(numericFields.sinceId);
-  if (numericFields.limit !== undefined)
-    parsed.limit = Math.round(numericFields.limit);
-  return parsed;
-}
-
-function parseMemoryIpcRequest(
-  raw: unknown,
-  sourceGroup: string,
-): {
-  requestId: string;
-  action: MemoryIpcAction;
-  payload: Record<string, unknown>;
-  context?: { threadId?: string };
-} {
-  if (!isPlainObject(raw)) throw new Error('Invalid memory IPC payload');
-  const { authThreadId: threadId } = assertValidIpcAuth(
-    raw,
-    sourceGroup,
-    'memory IPC',
-  );
-  const requestId = toTrimmedString(raw.requestId, { maxLen: 128 });
-  const action = toTrimmedString(raw.action, { maxLen: 64 });
-  if (!requestId || !action) {
-    throw new Error('Invalid memory IPC request envelope');
-  }
-  if (!MEMORY_IPC_REQUEST_ID_PATTERN.test(requestId)) {
-    throw new Error('Invalid memory IPC requestId');
-  }
-  if (!MEMORY_IPC_ACTIONS.includes(action as MemoryIpcAction)) {
-    throw new Error(`Unsupported memory IPC action: ${action}`);
-  }
-  const payload = raw.payload === undefined ? {} : raw.payload;
-  if (!isPlainObject(payload)) {
-    throw new Error('Invalid memory IPC payload body');
-  }
-  return {
-    requestId,
-    action: action as MemoryIpcAction,
-    payload,
-    ...(threadId ? { context: { threadId } } : {}),
-  };
-}
-
-function parsePermissionIpcRequest(
-  raw: unknown,
-  sourceGroup: string,
-): PermissionApprovalRequest {
-  if (!isPlainObject(raw)) throw new Error('Invalid permission IPC payload');
-  assertValidIpcAuth(raw, sourceGroup, 'permission IPC');
-  const requestId = toTrimmedString(raw.requestId, { maxLen: 128 });
-  if (!requestId || !PERMISSION_IPC_REQUEST_ID_PATTERN.test(requestId)) {
-    throw new Error('Invalid permission IPC requestId');
-  }
-  const toolName = toTrimmedString(raw.toolName, { maxLen: 120 });
-  if (!toolName) throw new Error('Permission IPC toolName is required');
-  const title = toTrimmedString(raw.title, { maxLen: 2000 });
-  const displayName = toTrimmedString(raw.displayName, { maxLen: 200 });
-  const description = toTrimmedString(raw.description, { maxLen: 4000 });
-  const decisionReason = toTrimmedString(raw.decisionReason, { maxLen: 2000 });
-  const blockedPath = toTrimmedString(raw.blockedPath, { maxLen: 2048 });
-  const toolInput = sanitizeToolInput(raw.toolInput);
-
-  return {
-    requestId,
-    sourceGroup,
-    toolName,
-    ...(title ? { title } : {}),
-    ...(displayName ? { displayName } : {}),
-    ...(description ? { description } : {}),
-    ...(decisionReason ? { decisionReason } : {}),
-    ...(blockedPath ? { blockedPath } : {}),
-    ...(toolInput ? { toolInput } : {}),
-  };
-}
-
-function parseUserQuestionIpcRequest(
-  raw: unknown,
-  sourceGroup: string,
-): UserQuestionRequest {
-  if (!isPlainObject(raw)) throw new Error('Invalid user question IPC payload');
-  assertValidIpcAuth(raw, sourceGroup, 'user question IPC');
-
-  const requestId = toTrimmedString(raw.requestId, { maxLen: 128 });
-  if (!requestId || !USER_QUESTION_IPC_REQUEST_ID_PATTERN.test(requestId)) {
-    throw new Error('Invalid user question IPC requestId');
-  }
-
-  if (!Array.isArray(raw.questions)) {
-    throw new Error('User question IPC questions are required');
-  }
-  if (raw.questions.length < 1 || raw.questions.length > 4) {
-    throw new Error('User question IPC must include 1-4 questions');
-  }
-
-  const questions: UserQuestionRequest['questions'] = raw.questions.map(
-    (item, index) => {
-      if (!isPlainObject(item)) {
-        throw new Error(`Invalid question payload at index ${index}`);
-      }
-      const question = toTrimmedString(item.question, { maxLen: 500 });
-      const header = toTrimmedString(item.header, { maxLen: 64 });
-      if (!question || !header) {
-        throw new Error(`Missing question/header at index ${index}`);
-      }
-      if (!Array.isArray(item.options)) {
-        throw new Error(`Missing options at index ${index}`);
-      }
-      if (item.options.length < 2 || item.options.length > 4) {
-        throw new Error(`Question at index ${index} must have 2-4 options`);
-      }
-      const options = item.options.map((option, optionIndex) => {
-        if (!isPlainObject(option)) {
-          throw new Error(
-            `Invalid option payload at index ${index}:${optionIndex}`,
-          );
-        }
-        const label = toTrimmedString(option.label, { maxLen: 120 });
-        const description = toTrimmedString(option.description, {
-          maxLen: 500,
-          allowEmpty: true,
-        });
-        const preview = toTrimmedString(option.preview, {
-          maxLen: 1200,
-          allowEmpty: true,
-        });
-        if (!label) {
-          throw new Error(
-            `Option label missing at index ${index}:${optionIndex}`,
-          );
-        }
-        return {
-          label,
-          description: description || '',
-          ...(preview ? { preview } : {}),
-        };
-      });
-      return {
-        question,
-        header,
-        options,
-        multiSelect: Boolean(item.multiSelect),
-      };
-    },
-  );
-
-  return {
-    requestId,
-    sourceGroup,
-    questions,
-  };
-}
-
-function parseBrowserIpcRequest(
-  raw: unknown,
-  sourceGroup: string,
-): {
-  requestId: string;
-  action: BrowserIpcAction;
-  payload: Record<string, unknown>;
-} {
-  if (!isPlainObject(raw)) throw new Error('Invalid browser IPC payload');
-  assertValidIpcAuth(raw, sourceGroup, 'browser IPC');
-  const requestId = toTrimmedString(raw.requestId, { maxLen: 128 });
-  const action = toTrimmedString(raw.action, { maxLen: 64 });
-  if (!requestId || !action) {
-    throw new Error('Invalid browser IPC request envelope');
-  }
-  if (!BROWSER_IPC_REQUEST_ID_PATTERN.test(requestId)) {
-    throw new Error('Invalid browser IPC requestId');
-  }
-  if (!BROWSER_IPC_ACTIONS.includes(action as BrowserIpcAction)) {
-    throw new Error(`Unsupported browser IPC action: ${action}`);
-  }
-  const payload = raw.payload === undefined ? {} : raw.payload;
-  if (!isPlainObject(payload)) {
-    throw new Error('Invalid browser IPC payload body');
-  }
-  return {
-    requestId,
-    action: action as BrowserIpcAction,
-    payload,
-  };
 }
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -1089,7 +405,15 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 sourceGroup,
                 isMain,
               );
-              writeMemoryResponse(sourceGroup, request.requestId, response);
+              writeMemoryResponse(
+                sourceGroup,
+                request.requestId,
+                response,
+                getIpcResponseSigningPrivateKey(
+                  sourceGroup,
+                  request.context?.threadId,
+                ),
+              );
               fs.unlinkSync(claimedPath);
             } catch (err) {
               logger.error(
@@ -1136,21 +460,31 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 sourceGroup,
                 isMain,
               });
-              writeBrowserIpcResponse(ipcBaseDir, sourceGroup, {
-                requestId,
-                ok: response.ok,
-                data: response.data,
-                error: response.error,
-              });
+              writeBrowserIpcResponse(
+                ipcBaseDir,
+                sourceGroup,
+                {
+                  requestId,
+                  ok: response.ok,
+                  data: response.data,
+                  error: response.error,
+                },
+                getIpcResponseSigningPrivateKey(sourceGroup, request.threadId),
+              );
               fs.unlinkSync(claimedPath);
             } catch (err) {
               if (requestId) {
                 try {
-                  writeBrowserIpcResponse(ipcBaseDir, sourceGroup, {
-                    requestId,
-                    ok: false,
-                    error: 'Failed to process browser request',
-                  });
+                  writeBrowserIpcResponse(
+                    ipcBaseDir,
+                    sourceGroup,
+                    {
+                      requestId,
+                      ok: false,
+                      error: 'Failed to process browser request',
+                    },
+                    getIpcResponseSigningPrivateKey(sourceGroup),
+                  );
                 } catch (writeErr) {
                   logger.warn(
                     { sourceGroup, requestId, err: writeErr },
@@ -1204,21 +538,31 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const decision = await processPermissionIpcRequest(request, {
                 requestPermissionApproval: deps.requestPermissionApproval,
               });
-              writePermissionIpcResponse(ipcBaseDir, sourceGroup, {
-                requestId,
-                approved: decision.approved,
-                decidedBy: decision.decidedBy,
-                reason: decision.reason,
-              });
+              writePermissionIpcResponse(
+                ipcBaseDir,
+                sourceGroup,
+                {
+                  requestId,
+                  approved: decision.approved,
+                  decidedBy: decision.decidedBy,
+                  reason: decision.reason,
+                },
+                getIpcResponseSigningPrivateKey(sourceGroup, request.threadId),
+              );
               fs.unlinkSync(claimedPath);
             } catch (err) {
               if (requestId) {
                 try {
-                  writePermissionIpcResponse(ipcBaseDir, sourceGroup, {
-                    requestId,
-                    approved: false,
-                    reason: 'Failed to process permission request',
-                  });
+                  writePermissionIpcResponse(
+                    ipcBaseDir,
+                    sourceGroup,
+                    {
+                      requestId,
+                      approved: false,
+                      reason: 'Failed to process permission request',
+                    },
+                    getIpcResponseSigningPrivateKey(sourceGroup),
+                  );
                 } catch (writeErr) {
                   logger.warn(
                     { sourceGroup, requestId, err: writeErr },
@@ -1272,19 +616,29 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const response = await processUserQuestionIpcRequest(request, {
                 requestUserAnswer: deps.requestUserAnswer,
               });
-              writeUserQuestionIpcResponse(ipcBaseDir, sourceGroup, {
-                requestId,
-                answers: response.answers || {},
-                answeredBy: response.answeredBy,
-              });
+              writeUserQuestionIpcResponse(
+                ipcBaseDir,
+                sourceGroup,
+                {
+                  requestId,
+                  answers: response.answers || {},
+                  answeredBy: response.answeredBy,
+                },
+                getIpcResponseSigningPrivateKey(sourceGroup, request.threadId),
+              );
               fs.unlinkSync(claimedPath);
             } catch (err) {
               if (requestId) {
                 try {
-                  writeUserQuestionIpcResponse(ipcBaseDir, sourceGroup, {
-                    requestId,
-                    answers: {},
-                  });
+                  writeUserQuestionIpcResponse(
+                    ipcBaseDir,
+                    sourceGroup,
+                    {
+                      requestId,
+                      answers: {},
+                    },
+                    getIpcResponseSigningPrivateKey(sourceGroup),
+                  );
                 } catch (writeErr) {
                   logger.warn(
                     { sourceGroup, requestId, err: writeErr },
@@ -1327,6 +681,7 @@ export function stopIpcWatcher(): void {
   }
   ipcWatcherRunning = false;
   ipcRateLimitState.clear();
+  clearConsumedIpcRequestIds();
   releaseIpcRootLock();
   logger.info('IPC watcher stopped');
 }

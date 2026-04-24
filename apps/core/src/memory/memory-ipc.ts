@@ -2,8 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { MemoryIpcRequest, MemoryIpcResponse } from '@myclaw/contracts';
 
-import { logger } from '../core/logger.js';
-import { isPlainObject } from '../core/object.js';
+import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { isPlainObject } from '../shared/object.js';
 import { resolveGroupIpcPath } from '../platform/group-folder.js';
 import { MemoryService } from './memory-service.js';
 import {
@@ -293,7 +294,7 @@ export async function processMemoryRequest(
       }
       case 'memory_patch': {
         const input = parsePatchMemoryInput(request.payload);
-        const patched = memory.patchMemory(input, {
+        const patched = await memory.patchMemory(input, {
           isMain,
           groupFolder: sourceGroup,
           actor: 'mcp-tool',
@@ -332,7 +333,7 @@ export async function processMemoryRequest(
             ? { topic_id: request.context.threadId }
             : {}),
         };
-        const saved = memory.saveProcedure(input, {
+        const saved = await memory.saveProcedure(input, {
           isMain,
           groupFolder: sourceGroup,
           actor: 'mcp-tool',
@@ -347,7 +348,7 @@ export async function processMemoryRequest(
       }
       case 'procedure_patch': {
         const input = parsePatchProcedureInput(request.payload);
-        const patched = memory.patchProcedure(input, {
+        const patched = await memory.patchProcedure(input, {
           isMain,
           groupFolder: sourceGroup,
           actor: 'mcp-tool',
@@ -378,6 +379,7 @@ export function writeMemoryResponse(
   groupFolder: string,
   requestId: string,
   response: MemoryIpcResponse,
+  privateKeyPem?: string,
 ): void {
   assertValidRequestId(requestId);
   const ipcDir = resolveGroupIpcPath(groupFolder);
@@ -386,6 +388,17 @@ export function writeMemoryResponse(
 
   const filePath = path.join(responsesDir, `${requestId}.json`);
   const tmpPath = `${filePath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(response, null, 2));
+  const payload: Record<string, unknown> = {
+    ok: response.ok,
+    requestId: response.requestId,
+    ...(response.provider ? { provider: response.provider } : {}),
+    ...(response.data !== undefined ? { data: response.data } : {}),
+    ...(response.error ? { error: response.error } : {}),
+  };
+  const signature = signIpcResponsePayload(privateKeyPem, payload);
+  if (signature) {
+    payload.signature = signature;
+  }
+  fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
   fs.renameSync(tmpPath, filePath);
 }

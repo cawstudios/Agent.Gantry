@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { startRuntimeServices } from '@core/bootstrap/runtime-services.js';
-import { RuntimeApp } from '@core/bootstrap/runtime-app.js';
-import { ChannelWiring } from '@core/bootstrap/channel-wiring.js';
+import { startRuntimeServices } from '@core/app/bootstrap/runtime-services.js';
+import { RuntimeApp } from '@core/app/bootstrap/runtime-app.js';
+import { ChannelWiring } from '@core/app/bootstrap/channel-wiring.js';
 
 function makeApp(): RuntimeApp {
   const queue = {
@@ -59,7 +59,7 @@ function makeChannelWiring(): ChannelWiring {
 }
 
 describe('startRuntimeServices', () => {
-  it('preserves runtime-services startup order and snapshot shape', () => {
+  it('preserves runtime-services startup order and snapshot shape', async () => {
     const order: string[] = [];
     const app = makeApp();
     const channelWiring = makeChannelWiring();
@@ -100,7 +100,7 @@ describe('startRuntimeServices', () => {
       expect(rows[0].pause_reason).toBeNull();
     });
 
-    startRuntimeServices(
+    await startRuntimeServices(
       {
         app,
         channelWiring,
@@ -112,9 +112,6 @@ describe('startRuntimeServices', () => {
         startIpcWatcher: vi.fn(() => {
           order.push('startIpcWatcher');
         }) as any,
-        writeSchedulerStateFileSafe: vi.fn(() => {
-          order.push('writeSchedulerStateFileSafe');
-        }) as any,
         writeJobsSnapshot: writeJobsSnapshot as any,
         writeJobRunsSnapshot: vi.fn(() => {
           order.push('writeJobRunsSnapshot');
@@ -123,9 +120,11 @@ describe('startRuntimeServices', () => {
           order.push('writeJobEventsSnapshot');
         }) as any,
         writeGroupsSnapshot: vi.fn() as any,
-        getAllJobs: vi.fn(() => jobs) as any,
-        getRecentJobRuns: vi.fn(() => []) as any,
-        listRecentJobEvents: vi.fn(() => []) as any,
+        opsRepository: {
+          getAllJobs: vi.fn(async () => jobs),
+          getRecentJobRuns: vi.fn(async () => []),
+          listRecentJobEvents: vi.fn(async () => []),
+        } as any,
         recoverPendingMessages: vi.fn(() => {
           order.push('recoverPendingMessages');
         }) as any,
@@ -144,16 +143,17 @@ describe('startRuntimeServices', () => {
       },
     );
 
+    await new Promise((resolve) => setImmediate(resolve));
+
     expect(order).toEqual([
       'startSchedulerLoop',
       'startIpcWatcher',
-      'writeSchedulerStateFileSafe',
-      'writeJobsSnapshot',
-      'writeJobRunsSnapshot',
-      'writeJobEventsSnapshot',
       'recoverPendingMessages',
       'runtime-ready-log',
       'startMessagePollingLoop',
+      'writeJobsSnapshot',
+      'writeJobRunsSnapshot',
+      'writeJobEventsSnapshot',
     ]);
 
     expect((app.queue.setProcessMessagesFn as any).mock.calls).toHaveLength(1);
@@ -169,7 +169,7 @@ describe('startRuntimeServices', () => {
     vi.mocked(app.queue.isGroupActive as any).mockReturnValue(true);
     vi.mocked(app.queue.stopGroup as any).mockReturnValue(true);
 
-    startRuntimeServices(
+    await startRuntimeServices(
       {
         app,
         channelWiring,
@@ -177,14 +177,15 @@ describe('startRuntimeServices', () => {
       {
         startSchedulerLoop: vi.fn() as any,
         startIpcWatcher: vi.fn() as any,
-        writeSchedulerStateFileSafe: vi.fn() as any,
         writeJobsSnapshot: vi.fn() as any,
         writeJobRunsSnapshot: vi.fn() as any,
         writeJobEventsSnapshot: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
-        getAllJobs: vi.fn(() => []) as any,
-        getRecentJobRuns: vi.fn(() => []) as any,
-        listRecentJobEvents: vi.fn(() => []) as any,
+        opsRepository: {
+          getAllJobs: vi.fn(async () => []),
+          getRecentJobRuns: vi.fn(async () => []),
+          listRecentJobEvents: vi.fn(async () => []),
+        } as any,
         recoverPendingMessages: vi.fn() as any,
         startMessagePollingLoop: vi.fn((deps) => {
           capturedDeps = deps;
@@ -235,6 +236,68 @@ describe('startRuntimeServices', () => {
     );
   });
 
+  it('coalesces overlapping scheduler snapshot refreshes', async () => {
+    let schedulerDeps:
+      | import('@core/jobs/scheduler.js').SchedulerDependencies
+      | undefined;
+    let releaseFirstRead: (() => void) | undefined;
+    const app = makeApp();
+    const channelWiring = makeChannelWiring();
+    const getAllJobs = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseFirstRead = () => resolve([]);
+          }),
+      )
+      .mockResolvedValue([]);
+
+    await startRuntimeServices(
+      {
+        app,
+        channelWiring,
+      },
+      {
+        startSchedulerLoop: vi.fn((deps) => {
+          schedulerDeps = deps;
+        }) as any,
+        startIpcWatcher: vi.fn() as any,
+        writeJobsSnapshot: vi.fn() as any,
+        writeJobRunsSnapshot: vi.fn() as any,
+        writeJobEventsSnapshot: vi.fn() as any,
+        writeGroupsSnapshot: vi.fn() as any,
+        opsRepository: {
+          getAllJobs,
+          getRecentJobRuns: vi.fn(async () => []),
+          listRecentJobEvents: vi.fn(async () => []),
+        } as any,
+        recoverPendingMessages: vi.fn() as any,
+        startMessagePollingLoop: vi.fn(
+          () => new Promise<never>(() => {}),
+        ) as any,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          fatal: vi.fn(),
+        },
+        exit: vi.fn() as any,
+      },
+    );
+
+    schedulerDeps?.onSchedulerChanged?.();
+    schedulerDeps?.onSchedulerChanged?.();
+    schedulerDeps?.onSchedulerChanged?.();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(getAllJobs).toHaveBeenCalledTimes(1);
+    releaseFirstRead?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(getAllJobs).toHaveBeenCalledTimes(2);
+  });
+
   it('clears only the originating thread session for active /new commands', async () => {
     let capturedDeps:
       | import('@core/runtime/message-loop.js').MessageLoopDeps
@@ -245,7 +308,7 @@ describe('startRuntimeServices', () => {
     vi.mocked(app.queue.isGroupActive as any).mockReturnValue(true);
     vi.mocked(app.queue.stopGroup as any).mockReturnValue(true);
 
-    startRuntimeServices(
+    await startRuntimeServices(
       {
         app,
         channelWiring,
@@ -253,14 +316,15 @@ describe('startRuntimeServices', () => {
       {
         startSchedulerLoop: vi.fn() as any,
         startIpcWatcher: vi.fn() as any,
-        writeSchedulerStateFileSafe: vi.fn() as any,
         writeJobsSnapshot: vi.fn() as any,
         writeJobRunsSnapshot: vi.fn() as any,
         writeJobEventsSnapshot: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
-        getAllJobs: vi.fn(() => []) as any,
-        getRecentJobRuns: vi.fn(() => []) as any,
-        listRecentJobEvents: vi.fn(() => []) as any,
+        opsRepository: {
+          getAllJobs: vi.fn(async () => []),
+          getRecentJobRuns: vi.fn(async () => []),
+          listRecentJobEvents: vi.fn(async () => []),
+        } as any,
         recoverPendingMessages: vi.fn() as any,
         startMessagePollingLoop: vi.fn((deps) => {
           capturedDeps = deps;

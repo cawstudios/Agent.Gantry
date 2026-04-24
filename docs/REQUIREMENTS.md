@@ -50,7 +50,7 @@ Optional capabilities should land as skills or narrow extensions whenever possib
 ### Orchestrator
 
 - single Node.js process
-- SQLite-backed persistence
+- Postgres-backed persistence
 - queue-driven message execution
 - deterministic session and runtime behavior
 

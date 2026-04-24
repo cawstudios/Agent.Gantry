@@ -22,13 +22,13 @@ describe('cli/platform', () => {
 
   it('detectPlatform maps win32 to windows', async () => {
     mockPlatform.mockReturnValue('win32');
-    const mod = await import('@core/cli/platform.js');
+    const mod = await import('@core/infrastructure/service/platform.js');
     expect(mod.detectPlatform()).toBe('windows');
   });
 
   it('commandExists uses where on windows', async () => {
     mockPlatform.mockReturnValue('win32');
-    const mod = await import('@core/cli/platform.js');
+    const mod = await import('@core/infrastructure/service/platform.js');
     expect(mod.commandExists('node')).toBe(true);
     expect(mockExecFileSync).toHaveBeenCalledWith('where', ['node'], {
       stdio: 'ignore',
@@ -37,7 +37,7 @@ describe('cli/platform', () => {
 
   it('commandExists uses which on non-windows hosts', async () => {
     mockPlatform.mockReturnValue('linux');
-    const mod = await import('@core/cli/platform.js');
+    const mod = await import('@core/infrastructure/service/platform.js');
     expect(mod.commandExists('node')).toBe(true);
     expect(mockExecFileSync).toHaveBeenCalledWith('which', ['node'], {
       stdio: 'ignore',
@@ -48,7 +48,7 @@ describe('cli/platform', () => {
     mockExecFileSync.mockImplementation(() => {
       throw new Error('not found');
     });
-    const mod = await import('@core/cli/platform.js');
+    const mod = await import('@core/infrastructure/service/platform.js');
     expect(mod.commandExists('missing-bin')).toBe(false);
   });
 });

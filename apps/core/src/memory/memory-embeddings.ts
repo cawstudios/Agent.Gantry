@@ -4,7 +4,7 @@ import {
   MEMORY_EMBED_PROVIDER,
   MEMORY_VECTOR_DIMENSIONS,
   OPENAI_API_KEY,
-} from '../core/config.js';
+} from '../config/index.js';
 
 interface EmbeddingResponse {
   data: Array<{ embedding: number[] }>;

@@ -4,9 +4,10 @@ Store architecture-level design inputs for planning and decomposition here.
 
 For MyClaw, canonical architecture references are:
 
+- `docs/architecture/runtime-components.md`
+- `docs/architecture/agent-runtime.md`
 - `docs/REQUIREMENTS.md`
 - `docs/SPEC.md`
-- `docs/SDK_DEEP_DIVE.md`
 
 When adding architecture docs for a feature run:
 

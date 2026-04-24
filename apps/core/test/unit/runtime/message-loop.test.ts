@@ -5,18 +5,15 @@ const mockGetMessagesSince = vi.fn();
 const mockGetMessageThreadIds = vi.fn();
 const mockGetTriggerPattern = vi.fn();
 const mockLoadSenderAllowlist = vi.fn();
+const mockLoadSenderControlAllowlist = vi.fn();
 const mockIsSenderExplicitlyAllowed = vi.fn();
+const mockIsSenderControlAllowed = vi.fn();
 const mockIsTriggerAllowed = vi.fn();
 const mockExtractSessionCommand = vi.fn();
 const mockIsSessionCommandAllowed = vi.fn();
 const mockFormatMessages = vi.fn();
 
-vi.mock('@core/storage/db.js', () => ({
-  getNewMessages: (...args: unknown[]) => mockGetNewMessages(...args),
-  getMessagesSince: (...args: unknown[]) => mockGetMessagesSince(...args),
-  getMessageThreadIds: (...args: unknown[]) => mockGetMessageThreadIds(...args),
-}));
-vi.mock('@core/core/config.js', () => ({
+vi.mock('@core/config/index.js', () => ({
   getTriggerPattern: (...args: unknown[]) => mockGetTriggerPattern(...args),
   POLL_INTERVAL: 100,
   MAX_MESSAGES_PER_PROMPT: 50,
@@ -24,8 +21,12 @@ vi.mock('@core/core/config.js', () => ({
 }));
 vi.mock('@core/platform/sender-allowlist.js', () => ({
   loadSenderAllowlist: (...args: unknown[]) => mockLoadSenderAllowlist(...args),
+  loadSenderControlAllowlist: (...args: unknown[]) =>
+    mockLoadSenderControlAllowlist(...args),
   isSenderExplicitlyAllowed: (...args: unknown[]) =>
     mockIsSenderExplicitlyAllowed(...args),
+  isSenderControlAllowed: (...args: unknown[]) =>
+    mockIsSenderControlAllowed(...args),
   isTriggerAllowed: (...args: unknown[]) => mockIsTriggerAllowed(...args),
 }));
 vi.mock('@core/session/session-commands.js', () => ({
@@ -42,8 +43,8 @@ import {
   MessageLoopDeps,
   recoverPendingMessages,
 } from '@core/runtime/message-loop.js';
-import { decodeGroupMessageCursor } from '@core/core/message-cursor.js';
-import { RegisteredGroup } from '@core/core/types.js';
+import { decodeGroupMessageCursor } from '@core/shared/message-cursor.js';
+import { RegisteredGroup } from '@core/domain/types.js';
 
 function makeDeps(overrides: Partial<MessageLoopDeps> = {}): MessageLoopDeps & {
   enqueued: string[];
@@ -59,6 +60,12 @@ function makeDeps(overrides: Partial<MessageLoopDeps> = {}): MessageLoopDeps & {
   const closedStdin: string[] = [];
   const stoppedGroups: string[] = [];
   let savedCount = 0;
+  const opsRepository = {
+    getNewMessages: (...args: unknown[]) => mockGetNewMessages(...args),
+    getMessagesSince: (...args: unknown[]) => mockGetMessagesSince(...args),
+    getMessageThreadIds: (...args: unknown[]) =>
+      mockGetMessageThreadIds(...args),
+  } as unknown as MessageLoopDeps['opsRepository'];
 
   const deps: MessageLoopDeps & {
     enqueued: string[];
@@ -107,6 +114,7 @@ function makeDeps(overrides: Partial<MessageLoopDeps> = {}): MessageLoopDeps & {
         return true;
       },
     },
+    opsRepository,
     enqueued,
     cursors,
     sentTo,
@@ -125,7 +133,9 @@ beforeEach(() => {
   mockGetMessageThreadIds.mockReturnValue([null]);
   mockGetTriggerPattern.mockReturnValue(/@Andy/i);
   mockLoadSenderAllowlist.mockReturnValue({});
+  mockLoadSenderControlAllowlist.mockReturnValue({});
   mockIsSenderExplicitlyAllowed.mockReturnValue(false);
+  mockIsSenderControlAllowed.mockReturnValue(false);
   mockIsTriggerAllowed.mockReturnValue(true);
   mockExtractSessionCommand.mockReturnValue(null);
   mockIsSessionCommandAllowed.mockReturnValue(false);
@@ -137,7 +147,7 @@ afterEach(() => {
 });
 
 describe('recoverPendingMessages', () => {
-  it('enqueues message checks for groups with pending messages', () => {
+  it('enqueues message checks for groups with pending messages', async () => {
     mockGetMessagesSince.mockReturnValue([
       {
         id: 1,
@@ -154,21 +164,21 @@ describe('recoverPendingMessages', () => {
     ]);
 
     const deps = makeDeps();
-    recoverPendingMessages(deps);
+    await recoverPendingMessages(deps);
 
     expect(deps.enqueued).toContain('group@g.us');
   });
 
-  it('does not enqueue when no pending messages exist', () => {
+  it('does not enqueue when no pending messages exist', async () => {
     mockGetMessagesSince.mockReturnValue([]);
 
     const deps = makeDeps();
-    recoverPendingMessages(deps);
+    await recoverPendingMessages(deps);
 
     expect(deps.enqueued).toHaveLength(0);
   });
 
-  it('recovers pending thread messages using the thread cursor, not the root cursor', () => {
+  it('recovers pending thread messages using the thread cursor, not the root cursor', async () => {
     mockGetMessageThreadIds.mockReturnValue([null, 'topic-1']);
     mockGetMessagesSince.mockImplementation(
       (_chatJid: string, cursor: string, _limit: number, options: any) => {
@@ -199,12 +209,12 @@ describe('recoverPendingMessages', () => {
       getOrRecoverCursor: (queueJid: string) =>
         queueJid.includes('::thread:') ? '' : 'root-cursor',
     });
-    recoverPendingMessages(deps);
+    await recoverPendingMessages(deps);
 
     expect(deps.enqueued).toEqual(['group@g.us::thread:topic-1']);
   });
 
-  it('checks all registered groups', () => {
+  it('checks all registered groups', async () => {
     mockGetMessagesSince.mockReturnValue([
       {
         id: 1,
@@ -237,7 +247,7 @@ describe('recoverPendingMessages', () => {
       }),
     });
 
-    recoverPendingMessages(deps);
+    await recoverPendingMessages(deps);
     expect(deps.enqueued).toEqual(['group1@g.us', 'group2@g.us']);
   });
 });

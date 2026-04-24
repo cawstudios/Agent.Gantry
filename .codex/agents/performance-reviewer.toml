@@ -1,6 +1,6 @@
 name = "performance-reviewer"
 description = "Framework-independent reviewer for latency, throughput, resource efficiency, and scalability risks."
-model = "gpt-5.3-codex"
+model = "gpt-5.5"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 nickname_candidates = ["Vector", "Pulse", "Swift"]

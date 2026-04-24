@@ -16,9 +16,9 @@ Runtime storage + memory behavior are configured in `~/myclaw/settings.yaml`:
 
 ```yaml
 storage:
-  provider: sqlite
-  sqlite:
-    path: store/myclaw.db
+  postgres:
+    url_env: MYCLAW_DATABASE_URL
+    schema: myclaw
 
 memory:
   enabled: true
@@ -35,8 +35,10 @@ Fresh guided setup writes the block above by default: memory on, embeddings off,
 
 ## Storage
 
-- Runtime storage backend is `sqlite`; Postgres is not exposed until runtime persistence is provider-backed end to end.
-- Memory SQLite database path is derived from `memory.root`: `~/myclaw/memory/.cache/memory.db` by default.
+- MyClaw uses Postgres runtime storage via `MYCLAW_DATABASE_URL`.
+- Runtime tables store messages, jobs, runs, control events, webhook delivery state, and memory records.
+- `pgvector` powers semantic memory search and dedupe.
+- Postgres full-text search powers lexical retrieval and filtering.
 - `memory.root` resolves under the runtime home unless it is absolute.
 - Journal path is `~/myclaw/memory/.journal`.
 
@@ -45,7 +47,8 @@ Fresh guided setup writes the block above by default: memory on, embeddings off,
 - Optional.
 - Disabled by default.
 - Memory save/search/injection works when embeddings are disabled.
-- `openai` requires `OPENAI_API_KEY` in `.env`.
+- `openai` embeddings are host-side only. The key is never forwarded to the
+  runner, tools, or Agent SDK environment.
 
 ## Dreaming
 

@@ -28,8 +28,8 @@ MyClaw must present one runtime truth across runtime code, CLI, diagnostics, set
 
 ## Notes
 
-- Host runtime storage provider is `sqlite` via `storage.provider`.
-- Default runtime SQLite database path is `store/myclaw.db`.
-- Default memory SQLite database path is `memory/.cache/memory.db`.
+- Runtime storage is Postgres via `MYCLAW_DATABASE_URL`.
+- Memory data is stored in Postgres.
+- `memory.root` remains the local artifact root.
 - Embeddings are optional and disabled by default.
 - Dreaming is optional and disabled by default.

@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const tempRoots: string[] = [];
 
 afterEach(() => {
-  vi.doUnmock('@core/core/config.js');
-  vi.doUnmock('@core/core/logger.js');
+  vi.doUnmock('@core/config/index.js');
+  vi.doUnmock('@core/infrastructure/logging/logger.js');
   vi.doUnmock('@core/runtime/agent-spawn-host.js');
   vi.doUnmock('@core/runtime/agent-spawn-layout.js');
   vi.doUnmock('@core/runtime/prompt-profile.js');
@@ -27,9 +27,12 @@ function makeTempRoot(): string {
 }
 
 function writeHostRunner(runnerDistDir: string, recordPath: string): void {
-  fs.mkdirSync(runnerDistDir, { recursive: true });
+  const claudeRunnerDir = path.join(runnerDistDir, 'claude');
+  const mcpRunnerDir = path.join(runnerDistDir, 'mcp');
+  fs.mkdirSync(claudeRunnerDir, { recursive: true });
+  fs.mkdirSync(mcpRunnerDir, { recursive: true });
   fs.writeFileSync(
-    path.join(runnerDistDir, 'index.js'),
+    path.join(claudeRunnerDir, 'index.js'),
     `
 import fs from 'node:fs';
 
@@ -61,7 +64,7 @@ process.stdin.on('end', () => {
 });
 `,
   );
-  fs.writeFileSync(path.join(runnerDistDir, 'ipc-mcp-stdio.js'), '');
+  fs.writeFileSync(path.join(mcpRunnerDir, 'stdio.js'), '');
 }
 
 describe('host child-process runtime smoke', () => {
@@ -75,10 +78,10 @@ describe('host child-process runtime smoke', () => {
     const recordPath = path.join(root, 'child-record.json');
     writeHostRunner(runnerDistDir, recordPath);
 
-    vi.doMock('@core/core/config.js', async () => {
+    vi.doMock('@core/config/index.js', async () => {
       const actual = await vi.importActual<
-        typeof import('@core/core/config.js')
-      >('@core/core/config.js');
+        typeof import('@core/config/index.js')
+      >('@core/config/index.js');
       return {
         ...actual,
         AGENT_MAX_OUTPUT_SIZE: 1024 * 1024,
@@ -94,13 +97,14 @@ describe('host child-process runtime smoke', () => {
         getEffectiveModelConfig: () => ({ source: 'unset' }),
       };
     });
-    vi.doMock('@core/core/logger.js', () => ({
+    vi.doMock('@core/infrastructure/logging/logger.js', () => ({
       logger: {
         debug: vi.fn(),
         info: vi.fn(),
         warn: vi.fn(),
         error: vi.fn(),
       },
+      redactString: (value: string) => value,
     }));
     vi.doMock('@core/runtime/agent-spawn-host.js', () => ({
       getHostRuntimeCredentialEnv: async () => ({

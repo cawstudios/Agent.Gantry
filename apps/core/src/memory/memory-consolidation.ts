@@ -2,9 +2,9 @@ import {
   MODEL_CONSOLIDATION,
   MEMORY_CONSOLIDATION_EMBEDDING_FALLBACK,
   MEMORY_RETENTION_PIN_THRESHOLD,
-} from '../core/config.js';
+} from '../config/index.js';
 import { EmbeddingProvider } from './memory-embeddings.js';
-import { MemoryStore } from './memory-store.js';
+import { MemoryStore } from './persistence/store.js';
 import { MemoryItem } from './memory-types.js';
 import { buildConsolidationPrompt } from './prompts/consolidate.js';
 import { runClaudeQuery } from './claude-query.js';
@@ -50,7 +50,7 @@ export async function consolidateMemoryItems(
 ): Promise<ConsolidationResult> {
   const allowLexicalFallback =
     input.embeddingFallback ?? MEMORY_CONSOLIDATION_EMBEDDING_FALLBACK;
-  const active = input.store.listActiveItems(input.groupFolder, 10_000);
+  const active = await input.store.listActiveItems(input.groupFolder, 10_000);
   if (active.length < input.minItems) {
     return {
       enabled: true,
@@ -130,12 +130,12 @@ export async function consolidateMemoryItems(
       );
     });
     for (const id of retireBeforeInsert) {
-      input.store.softDeleteItem(id);
+      await input.store.softDeleteItem(id);
       retiredIds.delete(id);
       retiredItems += 1;
     }
 
-    const saved = input.store.saveItem({
+    const saved = await input.store.saveItem({
       scope: 'group',
       group_folder: input.groupFolder,
       user_id: null,
@@ -152,22 +152,27 @@ export async function consolidateMemoryItems(
       const embedding = await input.embeddings.embedOne(
         `${saved.key}: ${saved.value}`,
       );
-      input.store.saveItemEmbedding(saved.id, embedding);
+      await input.store.saveItemEmbedding(saved.id, embedding);
     }
 
     for (const id of retiredIds) {
       if (id === saved.id) continue;
-      input.store.softDeleteItem(id);
+      await input.store.softDeleteItem(id);
       retiredItems += 1;
     }
 
-    input.store.recordEvent('memory_consolidated', 'memory_item', saved.id, {
-      group_folder: input.groupFolder,
-      merged_key: saved.key,
-      merged_confidence: saved.confidence,
-      retired_ids: merged.retiredIds,
-      mode: merged.mode,
-    });
+    await input.store.recordEvent(
+      'memory_consolidated',
+      'memory_item',
+      saved.id,
+      {
+        group_folder: input.groupFolder,
+        merged_key: saved.key,
+        merged_confidence: saved.confidence,
+        retired_ids: merged.retiredIds,
+        mode: merged.mode,
+      },
+    );
 
     mergedItems += 1;
     mode = merged.mode;
@@ -209,7 +214,7 @@ async function ensureEmbeddings(
       const item = missing[i]!;
       const embedding = vectors[i];
       if (!embedding || embedding.length === 0) continue;
-      store.saveItemEmbedding(item.id, embedding);
+      await store.saveItemEmbedding(item.id, embedding);
       out.push({ item, embedding });
     }
   }

@@ -1,4 +1,4 @@
-import { logger } from '../core/logger.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import { MemoryService } from '../memory/memory-service.js';
 
 const DEFAULT_MEMORY_BRIEF_ITEMS = 8;

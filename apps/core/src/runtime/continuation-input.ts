@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR } from '../core/config.js';
+import { DATA_DIR } from '../config/index.js';
 import { normalizeThreadQueueId } from './thread-queue-key.js';
 
 const THREAD_INPUT_PREFIX = 'thread-';

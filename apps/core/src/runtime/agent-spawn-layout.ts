@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { MYCLAW_HOME } from '../core/config.js';
+import { MYCLAW_HOME } from '../config/index.js';
 import {
   ensureSharedSessionSettings as ensureRuntimeSharedSessionSettings,
   resolvePackageRootFromSourceDir,

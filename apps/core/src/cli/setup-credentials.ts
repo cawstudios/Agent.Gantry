@@ -1,13 +1,12 @@
 import * as p from '@clack/prompts';
 import { OneCLI } from '@onecli-sh/sdk';
 
-import type { HostCredentialMode } from '../core/credential-mode.js';
+import type { HostCredentialMode } from '../config/credentials/mode.js';
+import { validateOnecliUrl } from '../infrastructure/onecli/policy.js';
 
 export interface CredentialSetupDraft {
   credentialMode: HostCredentialMode;
   onecliUrl: string;
-  claudeOauthToken: string;
-  anthropicApiKey: string;
 }
 
 export type CredentialStepAction =
@@ -38,9 +37,16 @@ function parseInputFlowControl(value: unknown): CredentialStepAction | null {
 async function validateOneCLIReachability(
   onecliUrl: string,
 ): Promise<{ ok: boolean; message: string }> {
-  const client = new OneCLI({ url: onecliUrl });
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
+    const urlValidation = validateOnecliUrl(onecliUrl);
+    if (!urlValidation.ok || !urlValidation.normalizedUrl) {
+      return {
+        ok: false,
+        message: urlValidation.error || 'Invalid OneCLI URL.',
+      };
+    }
+    const client = new OneCLI({ url: urlValidation.normalizedUrl });
     await Promise.race([
       client.getContainerConfig(),
       new Promise<never>((_, reject) => {
@@ -49,7 +55,10 @@ async function validateOneCLIReachability(
         }, 8_000);
       }),
     ]);
-    return { ok: true, message: `Connected to OneCLI at ${onecliUrl}` };
+    return {
+      ok: true,
+      message: `Connected to OneCLI at ${urlValidation.normalizedUrl}`,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -61,182 +70,20 @@ async function validateOneCLIReachability(
   }
 }
 
-async function promptClaudeAuth(
-  draft: CredentialSetupDraft,
-): Promise<CredentialStepAction | null> {
-  const authMode = await p.select({
-    message: 'How should MyClaw authenticate with Claude?',
-    options: [
-      {
-        value: 'oauth',
-        label: 'Claude OAuth token (Recommended)',
-        hint: 'Uses CLAUDE_CODE_OAUTH_TOKEN in runtime .env.',
-      },
-      {
-        value: 'api_key',
-        label: 'Anthropic API key',
-        hint: 'Uses ANTHROPIC_API_KEY in runtime .env.',
-      },
-      {
-        value: 'back',
-        label: 'Back',
-      },
-      {
-        value: 'resume',
-        label: 'Resume Later',
-      },
-      {
-        value: 'cancel',
-        label: 'Cancel Setup',
-      },
-    ],
-    initialValue:
-      draft.claudeOauthToken || !draft.anthropicApiKey ? 'oauth' : 'api_key',
-  });
-
-  if (p.isCancel(authMode)) return { type: 'resume' };
-  if (authMode === 'back') return { type: 'back' };
-  if (authMode === 'resume') return { type: 'resume' };
-  if (authMode === 'cancel') return { type: 'cancel' };
-
-  if (authMode === 'oauth') {
-    let token = draft.claudeOauthToken.trim();
-    if (token) {
-      const reuse = await p.select({
-        message: 'Claude OAuth token',
-        options: [
-          {
-            value: 'use_saved',
-            label: 'Use saved token (Recommended)',
-          },
-          {
-            value: 'enter_new',
-            label: 'Enter a new token',
-          },
-        ],
-      });
-      if (p.isCancel(reuse)) return { type: 'resume' };
-      if (reuse === 'enter_new') token = '';
-    }
-    if (!token) {
-      const input = await p.password({
-        message: 'Paste CLAUDE_CODE_OAUTH_TOKEN (/back, /resume, /cancel)',
-        validate: (value) => {
-          const trimmed = String(value ?? '').trim();
-          if (isInputFlowControl(trimmed)) return undefined;
-          return trimmed ? undefined : 'Claude OAuth token is required.';
-        },
-      });
-      if (p.isCancel(input)) return { type: 'resume' };
-      const control = parseInputFlowControl(input);
-      if (control) return control;
-      token = String(input).trim();
-    }
-    draft.claudeOauthToken = token;
-    draft.anthropicApiKey = '';
-    return null;
-  }
-
-  let apiKey = draft.anthropicApiKey.trim();
-  if (apiKey) {
-    const reuse = await p.select({
-      message: 'Anthropic API key',
-      options: [
-        {
-          value: 'use_saved',
-          label: 'Use saved key (Recommended)',
-        },
-        {
-          value: 'enter_new',
-          label: 'Enter a new key',
-        },
-      ],
-    });
-    if (p.isCancel(reuse)) return { type: 'resume' };
-    if (reuse === 'enter_new') apiKey = '';
-  }
-  if (!apiKey) {
-    const input = await p.password({
-      message: 'Paste ANTHROPIC_API_KEY (/back, /resume, /cancel)',
-      validate: (value) => {
-        const trimmed = String(value ?? '').trim();
-        if (isInputFlowControl(trimmed)) return undefined;
-        return trimmed ? undefined : 'Anthropic API key is required.';
-      },
-    });
-    if (p.isCancel(input)) return { type: 'resume' };
-    const control = parseInputFlowControl(input);
-    if (control) return control;
-    apiKey = String(input).trim();
-  }
-  draft.anthropicApiKey = apiKey;
-  draft.claudeOauthToken = '';
-  return null;
-}
-
 export async function runCredentialsStep(
   draft: CredentialSetupDraft,
 ): Promise<CredentialStepAction> {
   p.note(
     [
-      'Choose where host-agent credentials come from.',
-      'Default is local .env only (OneCLI disabled).',
-      'OneCLI-only never prompts for or persists local Claude credentials.',
+      'Host-agent credentials are brokered through OneCLI.',
+      'The agent runner receives broker/proxy config only; raw Claude credentials are not persisted in runtime .env.',
+      'Channel, Postgres, and runtime-owned secrets still live in runtime .env.',
     ].join('\n'),
     'Agent Credentials',
   );
 
   while (true) {
-    const modeValue = await p.select({
-      message: 'Credential source mode',
-      options: [
-        {
-          value: 'env-only',
-          label: 'Local .env only (Recommended)',
-          hint: 'Use credentials from runtime .env only.',
-        },
-        {
-          value: 'hybrid',
-          label: 'Hybrid (.env + OneCLI)',
-          hint: 'Use .env fallback and prefer OneCLI values when both exist.',
-        },
-        {
-          value: 'onecli-only',
-          label: 'OneCLI only',
-          hint: 'Require OneCLI and do not fall back to .env credentials.',
-        },
-        {
-          value: 'back',
-          label: 'Back',
-        },
-        {
-          value: 'resume',
-          label: 'Resume Later',
-        },
-        {
-          value: 'cancel',
-          label: 'Cancel Setup',
-        },
-      ],
-      initialValue: draft.credentialMode,
-    });
-
-    if (p.isCancel(modeValue)) return { type: 'resume' };
-    if (modeValue === 'back') return { type: 'back' };
-    if (modeValue === 'resume') return { type: 'resume' };
-    if (modeValue === 'cancel') return { type: 'cancel' };
-
-    draft.credentialMode = modeValue as HostCredentialMode;
-    if (draft.credentialMode === 'env-only') {
-      draft.onecliUrl = '';
-      const authResult = await promptClaudeAuth(draft);
-      if (authResult) return authResult;
-      p.note(
-        'Credential mode set to env-only. Host agents will read runtime .env only.',
-        'Agent Credentials',
-      );
-      return { type: 'next' };
-    }
+    draft.credentialMode = 'onecli';
 
     const defaultOnecliUrl = draft.onecliUrl || 'http://localhost:10254';
     const onecliUrlInput = await p.text({
@@ -250,10 +97,8 @@ export async function runCredentialsStep(
         if (!trimmed) {
           return 'OneCLI URL is required for this mode.';
         }
-        if (!/^https?:\/\//i.test(trimmed)) {
-          return 'Use an http:// or https:// URL.';
-        }
-        return undefined;
+        const result = validateOnecliUrl(trimmed);
+        return result.ok ? undefined : result.error;
       },
     });
     if (p.isCancel(onecliUrlInput)) return { type: 'resume' };
@@ -269,18 +114,10 @@ export async function runCredentialsStep(
     );
 
     if (check.ok) {
-      if (draft.credentialMode === 'onecli-only') {
-        draft.claudeOauthToken = '';
-        draft.anthropicApiKey = '';
-        p.note(
-          `${check.message}\nCredential mode set to onecli-only. Local Claude credentials will be removed from runtime .env.`,
-          'Agent Credentials',
-        );
-        return { type: 'next' };
-      }
-      const authResult = await promptClaudeAuth(draft);
-      if (authResult) return authResult;
-      p.note(check.message, 'Agent Credentials');
+      p.note(
+        `${check.message}\nCredential mode set to onecli. Local Claude credentials will be removed from runtime .env.`,
+        'Agent Credentials',
+      );
       return { type: 'next' };
     }
 
@@ -290,61 +127,29 @@ export async function runCredentialsStep(
     );
 
     const followUp = await p.select({
-      message:
-        draft.credentialMode === 'onecli-only'
-          ? 'OneCLI-only mode requires a reachable OneCLI gateway.'
-          : 'Hybrid mode can continue with .env fallback if OneCLI is unavailable.',
-      options:
-        draft.credentialMode === 'onecli-only'
-          ? [
-              {
-                value: 'retry',
-                label: 'Retry OneCLI check (Recommended)',
-              },
-              {
-                value: 'back',
-                label: 'Back',
-              },
-              {
-                value: 'resume',
-                label: 'Resume Later',
-              },
-              {
-                value: 'cancel',
-                label: 'Cancel Setup',
-              },
-            ]
-          : [
-              {
-                value: 'continue',
-                label: 'Continue with .env fallback (Recommended)',
-              },
-              {
-                value: 'retry',
-                label: 'Retry OneCLI check',
-              },
-              {
-                value: 'back',
-                label: 'Back',
-              },
-              {
-                value: 'resume',
-                label: 'Resume Later',
-              },
-              {
-                value: 'cancel',
-                label: 'Cancel Setup',
-              },
-            ],
+      message: 'OneCLI-only mode requires a reachable OneCLI gateway.',
+      options: [
+        {
+          value: 'retry',
+          label: 'Retry OneCLI check (Recommended)',
+        },
+        {
+          value: 'back',
+          label: 'Back',
+        },
+        {
+          value: 'resume',
+          label: 'Resume Later',
+        },
+        {
+          value: 'cancel',
+          label: 'Cancel Setup',
+        },
+      ],
     });
     if (p.isCancel(followUp)) return { type: 'resume' };
     if (followUp === 'retry') {
       continue;
-    }
-    if (followUp === 'continue' && draft.credentialMode === 'hybrid') {
-      const authResult = await promptClaudeAuth(draft);
-      if (authResult) return authResult;
-      return { type: 'next' };
     }
     if (followUp === 'back') return { type: 'back' };
     if (followUp === 'resume') return { type: 'resume' };

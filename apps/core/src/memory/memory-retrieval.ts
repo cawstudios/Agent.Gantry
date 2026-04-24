@@ -1,4 +1,4 @@
-import { MEMORY_SOURCE_TYPE_BOOSTS } from '../core/config.js';
+import { MEMORY_SOURCE_TYPE_BOOSTS } from '../config/index.js';
 import { MemorySearchResult } from './memory-types.js';
 
 export interface FuseOptions {

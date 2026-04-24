@@ -16,6 +16,7 @@ describe('agent capability composition', () => {
       isMain: false,
       ipcDir: '/tmp/ipc/team',
       ipcAuthToken: 'token',
+      ipcResponseVerifyKey: 'verify-key',
     });
 
     expect(profile.allowedTools).toContain('Bash');
@@ -34,6 +35,7 @@ describe('agent capability composition', () => {
         MYCLAW_IS_MAIN: '0',
         MYCLAW_IPC_DIR: '/tmp/ipc/team',
         MYCLAW_IPC_AUTH_TOKEN: 'token',
+        MYCLAW_IPC_RESPONSE_VERIFY_KEY: 'verify-key',
       },
     });
   });

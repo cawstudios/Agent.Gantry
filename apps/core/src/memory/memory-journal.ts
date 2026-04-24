@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import { isMemoryJournalDisabled } from '../core/config.js';
+import { isMemoryJournalDisabled } from '../config/index.js';
 import { MEMORY_GLOBAL_GROUP_FOLDER, MemoryScope } from './memory-types.js';
 
 export type JournalRecordKind =

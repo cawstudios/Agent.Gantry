@@ -28,7 +28,7 @@ describe('browser-profiles', () => {
 
   it('creates, lists, and reads browser profiles', async () => {
     const root = makeTmpRoot(roots);
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       DATA_DIR: root,
     }));
 
@@ -49,7 +49,7 @@ describe('browser-profiles', () => {
 
   it('writes and loads profile state', async () => {
     const root = makeTmpRoot(roots);
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       DATA_DIR: root,
     }));
 
@@ -71,7 +71,7 @@ describe('browser-profiles', () => {
 
   it('acquires and releases locks', async () => {
     const root = makeTmpRoot(roots);
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       DATA_DIR: root,
     }));
 

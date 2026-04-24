@@ -1,10 +1,11 @@
 import { ChildProcess } from 'child_process';
 
-import { logger } from '../core/logger.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import {
   writeCloseSignal,
   writeContinuationInput,
 } from './continuation-input.js';
+import { stopActiveGroupRun } from './group-queue-stop.js';
 import { normalizeThreadQueueId } from './thread-queue-key.js';
 
 type QueueKind = 'message' | 'task';
@@ -47,6 +48,7 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  private activeRuns = new Set<Promise<void>>();
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -179,8 +181,10 @@ export class GroupQueue {
       return;
     }
 
-    this.runForGroup(groupJid, 'messages').catch((err) =>
-      logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
+    this.trackRun(
+      this.runForGroup(groupJid, 'messages').catch((err) =>
+        logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
+      ),
     );
   }
 
@@ -217,10 +221,32 @@ export class GroupQueue {
       return;
     }
 
-    this.runTask(groupJid, { id: taskId, kind: 'task', groupJid, fn }).catch(
-      (err) =>
-        logger.error({ groupJid, taskId, err }, 'Unhandled error in runTask'),
+    this.trackRun(
+      this.runTask(groupJid, { id: taskId, kind: 'task', groupJid, fn }).catch(
+        (err) =>
+          logger.error({ groupJid, taskId, err }, 'Unhandled error in runTask'),
+      ),
     );
+  }
+
+  private trackRun(promise: Promise<void>): void {
+    const tracked = promise.finally(() => {
+      this.activeRuns.delete(tracked);
+    });
+    this.activeRuns.add(tracked);
+    tracked.catch((err) =>
+      logger.error({ err }, 'Unhandled error in tracked queue run'),
+    );
+  }
+
+  private waitForActiveRuns(timeoutMs: number): Promise<void> {
+    if (this.activeRuns.size === 0 || timeoutMs <= 0) {
+      return Promise.resolve();
+    }
+    return Promise.race([
+      Promise.allSettled([...this.activeRuns]).then(() => undefined),
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
   }
 
   registerProcess(
@@ -305,49 +331,12 @@ export class GroupQueue {
       const proc = state?.process;
       if (!state || !state.active || !proc || proc.killed) continue;
 
-      this.closeStdin(targetQueueJid);
-
-      const pid = proc.pid;
-      if (typeof pid !== 'number' || pid <= 0) {
-        try {
-          proc.kill('SIGTERM');
-          logger.warn(
-            { groupJid, targetQueueJid },
-            'Stop requested for active run (SIGTERM)',
-          );
-          return true;
-        } catch (err) {
-          logger.warn(
-            { groupJid, targetQueueJid, err },
-            'Failed to stop active run (missing pid)',
-          );
-          return false;
-        }
-      }
-
-      try {
-        process.kill(-pid, 'SIGTERM');
-        logger.warn(
-          { groupJid, targetQueueJid, pid },
-          'Stop requested for active run (SIGTERM process group)',
-        );
-        return true;
-      } catch {
-        try {
-          process.kill(pid, 'SIGTERM');
-          logger.warn(
-            { groupJid, targetQueueJid, pid },
-            'Stop requested for active run (SIGTERM process)',
-          );
-          return true;
-        } catch (err) {
-          logger.warn(
-            { groupJid, targetQueueJid, pid, err },
-            'Failed to stop active run (SIGTERM)',
-          );
-          return false;
-        }
-      }
+      return stopActiveGroupRun({
+        groupJid,
+        targetQueueJid,
+        proc,
+        closeStdin: () => this.closeStdin(targetQueueJid),
+      });
     }
 
     return false;
@@ -485,10 +474,12 @@ export class GroupQueue {
         return;
       }
       const task = state.pendingTasks.shift()!;
-      this.runTask(groupJid, task).catch((err) =>
-        logger.error(
-          { groupJid, taskId: task.id, err },
-          'Unhandled error in runTask (drain)',
+      this.trackRun(
+        this.runTask(groupJid, task).catch((err) =>
+          logger.error(
+            { groupJid, taskId: task.id, err },
+            'Unhandled error in runTask (drain)',
+          ),
         ),
       );
       return;
@@ -500,10 +491,12 @@ export class GroupQueue {
         this.drainWaiting();
         return;
       }
-      this.runForGroup(groupJid, 'drain').catch((err) =>
-        logger.error(
-          { groupJid, err },
-          'Unhandled error in runForGroup (drain)',
+      this.trackRun(
+        this.runForGroup(groupJid, 'drain').catch((err) =>
+          logger.error(
+            { groupJid, err },
+            'Unhandled error in runForGroup (drain)',
+          ),
         ),
       );
       return;
@@ -522,10 +515,12 @@ export class GroupQueue {
       if (this.canStartMessageRun()) {
         const nextMessageJid = this.dequeueWaitingGroup('message');
         if (nextMessageJid) {
-          this.runForGroup(nextMessageJid, 'drain').catch((err) =>
-            logger.error(
-              { groupJid: nextMessageJid, err },
-              'Unhandled error in runForGroup (waiting)',
+          this.trackRun(
+            this.runForGroup(nextMessageJid, 'drain').catch((err) =>
+              logger.error(
+                { groupJid: nextMessageJid, err },
+                'Unhandled error in runForGroup (waiting)',
+              ),
             ),
           );
           started = true;
@@ -539,10 +534,12 @@ export class GroupQueue {
           const state = this.getGroup(nextTaskJid);
           const task = state.pendingTasks.shift();
           if (task) {
-            this.runTask(nextTaskJid, task).catch((err) =>
-              logger.error(
-                { groupJid: nextTaskJid, taskId: task.id, err },
-                'Unhandled error in runTask (waiting)',
+            this.trackRun(
+              this.runTask(nextTaskJid, task).catch((err) =>
+                logger.error(
+                  { groupJid: nextTaskJid, taskId: task.id, err },
+                  'Unhandled error in runTask (waiting)',
+                ),
               ),
             );
             started = true;
@@ -552,7 +549,7 @@ export class GroupQueue {
     }
   }
 
-  async shutdown(_gracePeriodMs: number): Promise<void> {
+  async shutdown(gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
     const activeContainers: string[] = [];
@@ -570,5 +567,6 @@ export class GroupQueue {
       },
       'GroupQueue shutting down (agent runs detached, not killed)',
     );
+    await this.waitForActiveRuns(gracePeriodMs);
   }
 }

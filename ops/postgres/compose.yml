@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    ports:
+      - "${MYCLAW_POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${MYCLAW_POSTGRES_DB:-myclaw}
+      POSTGRES_USER: ${MYCLAW_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${MYCLAW_POSTGRES_PASSWORD:-postgres}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${MYCLAW_POSTGRES_USER:-postgres} -d ${MYCLAW_POSTGRES_DB:-myclaw}",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - ${MYCLAW_POSTGRES_DATA_DIR:?set-by-launcher}:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro

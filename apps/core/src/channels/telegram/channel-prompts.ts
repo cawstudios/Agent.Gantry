@@ -1,0 +1,412 @@
+import fs from 'fs';
+import https from 'https';
+import path from 'path';
+
+import { Api, Bot, Context } from 'grammy';
+import { autoRetry } from '@grammyjs/auto-retry';
+import { StreamFlavor, stream, streamApi } from '@grammyjs/stream';
+
+import {
+  ASSISTANT_NAME,
+  PERMISSION_APPROVAL_TIMEOUT_MS,
+  TELEGRAM_PERMISSION_APPROVER_IDS,
+  TRIGGER_PATTERN,
+} from '../../config/index.js';
+import { resolveGroupFolderPath } from '../../platform/group-folder.js';
+import { logger } from '../../infrastructure/logging/logger.js';
+import { ChannelAdapter, ChannelOpts } from '../channel-provider.js';
+import {
+  MessageSendOptions,
+  PermissionApprovalDecision,
+  PermissionApprovalRequest,
+  ProgressUpdateOptions,
+  StreamingChunkOptions,
+  UserQuestionRequest,
+  UserQuestionResponse,
+} from '../../domain/types.js';
+import { PartialMessageDeliveryError } from '../../runtime/partial-delivery.js';
+import { parseTextStyles } from '../../text-styles.js';
+import { AsyncTaskQueue } from '../../app/bootstrap/async-task-queue.js';
+import { writeTelegramFetchResponseToFile } from '../telegram-file-download.js';
+
+import { TelegramChannelState } from './channel-state.js';
+import {
+  PendingUserQuestionState,
+  TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES,
+  TELEGRAM_USER_QUESTION_CALLBACK_PATTERN,
+  TELEGRAM_PERMISSION_CALLBACK_PATTERN,
+  TELEGRAM_USER_QUESTION_TIMEOUT_MS,
+  truncateText,
+  truncateUtf8ToByteLimit,
+  telegramThreadOptionsFromString,
+} from './channel-shared.js';
+
+export abstract class TelegramChannelPrompts extends TelegramChannelState {
+  protected formatPermissionPromptText(
+    request: PermissionApprovalRequest,
+    timeoutMs: number,
+  ): string {
+    const timeoutMinutes = Math.max(1, Math.round(timeoutMs / 60000));
+    const lines = [
+      `Permission request: ${request.requestId}`,
+      `Tool: ${request.displayName || request.toolName}`,
+      `Source: ${request.sourceGroup}`,
+    ];
+    if (request.threadId) {
+      lines.push(`Thread: ${truncateText(request.threadId, 80)}`);
+    }
+    if (request.title) lines.push(`Action: ${request.title}`);
+    if (request.blockedPath) lines.push(`Path: ${request.blockedPath}`);
+    if (request.decisionReason) lines.push(`Reason: ${request.decisionReason}`);
+    if (request.description) lines.push(`Details: ${request.description}`);
+    lines.push(...this.formatPermissionToolInputLines(request));
+    lines.push(`Reply timeout: ${timeoutMinutes} minute(s)`);
+    return lines.join('\n');
+  }
+
+  protected formatPermissionToolInputLines(
+    request: PermissionApprovalRequest,
+  ): string[] {
+    if (!request.toolInput || typeof request.toolInput !== 'object') return [];
+    const input = request.toolInput;
+    if (
+      request.toolName === 'Bash' &&
+      typeof input.command === 'string' &&
+      input.command.trim()
+    ) {
+      return [`Command: \`${truncateText(input.command.trim(), 300)}\``];
+    }
+    if (request.toolName === 'Edit' || request.toolName === 'Write') {
+      const lines: string[] = [];
+      if (typeof input.file_path === 'string' && input.file_path.trim()) {
+        lines.push(`File: ${truncateText(input.file_path.trim(), 250)}`);
+      }
+      if (typeof input.old_string === 'string' && input.old_string.trim()) {
+        lines.push(`Replacing: ${truncateText(input.old_string.trim(), 150)}`);
+      }
+      if (typeof input.new_string === 'string' && input.new_string.trim()) {
+        lines.push(`With: ${truncateText(input.new_string.trim(), 150)}`);
+      }
+      if (lines.length > 0) return lines;
+    }
+    try {
+      return [`Input: ${truncateText(JSON.stringify(input), 300)}`];
+    } catch {
+      return ['Input: [unserializable]'];
+    }
+  }
+
+  protected pendingUserQuestionKey(
+    requestId: string,
+    questionIndex: number,
+  ): string {
+    return `${requestId}:${questionIndex}`;
+  }
+
+  protected formatUserQuestionPromptText(
+    request: UserQuestionRequest,
+    question: UserQuestionRequest['questions'][number],
+    timeoutMs: number,
+  ): string {
+    const timeoutMinutes = Math.max(1, Math.round(timeoutMs / 60000));
+    const lines = [
+      `❓ ${question.header}`,
+      `Source: ${truncateText(request.sourceGroup, 80)}`,
+    ];
+    if (request.threadId) {
+      lines.push(`Thread: ${truncateText(request.threadId, 80)}`);
+    }
+    lines.push(question.question, '');
+    question.options.forEach((option, optionIndex) => {
+      const description = option.description
+        ? ` — ${truncateText(option.description, 180)}`
+        : '';
+      lines.push(`${optionIndex + 1}. ${option.label}${description}`);
+      if (option.preview) {
+        lines.push(`  Preview: ${truncateText(option.preview, 180)}`);
+      }
+    });
+    lines.push('');
+    if (question.multiSelect) {
+      lines.push('Select one or more options, then tap Done.');
+    } else {
+      lines.push('Select one option.');
+    }
+    lines.push(`Reply timeout: ${timeoutMinutes} minute(s)`);
+    return lines.join('\n');
+  }
+
+  protected formatUserQuestionButtonLabel(
+    optionLabel: string,
+    optionIndex: number,
+    multiSelect: boolean,
+    isSelected: boolean,
+  ): string {
+    const ordinal = `${optionIndex + 1}. `;
+    const selectedPrefix = multiSelect && isSelected ? '✅ ' : '';
+    const prefix = `${selectedPrefix}${ordinal}`;
+    const availableBytes = Math.max(
+      8,
+      TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES - Buffer.byteLength(prefix, 'utf8'),
+    );
+    const trimmedLabel = optionLabel.trim() || `Option ${optionIndex + 1}`;
+    const safeLabel = truncateUtf8ToByteLimit(trimmedLabel, availableBytes);
+    return `${prefix}${safeLabel}`;
+  }
+
+  protected buildUserQuestionKeyboard(
+    requestId: string,
+    questionIndex: number,
+    question: UserQuestionRequest['questions'][number],
+    selectedOptionIndexes: Set<number>,
+  ): {
+    inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+  } {
+    const inline_keyboard: Array<
+      Array<{ text: string; callback_data: string }>
+    > = question.options.map((option, optionIndex) => {
+      const isSelected = selectedOptionIndexes.has(optionIndex);
+      return [
+        {
+          text: this.formatUserQuestionButtonLabel(
+            option.label,
+            optionIndex,
+            question.multiSelect,
+            isSelected,
+          ),
+          callback_data: `userq:select:${requestId}:${questionIndex}:${optionIndex}`,
+        },
+      ];
+    });
+    if (question.multiSelect) {
+      const selectedCount = selectedOptionIndexes.size;
+      inline_keyboard.push([
+        {
+          text: selectedCount > 0 ? `Done (${selectedCount})` : 'Done',
+          callback_data: `userq:done:${requestId}:${questionIndex}`,
+        },
+      ]);
+    }
+    return { inline_keyboard };
+  }
+
+  protected async isTelegramApproverAuthorized(
+    chatId: string,
+    userId: string,
+  ): Promise<boolean> {
+    if (TELEGRAM_PERMISSION_APPROVER_IDS.size === 0) {
+      logger.warn(
+        { chatId, userId },
+        'Permission decision denied: TELEGRAM_PERMISSION_APPROVER_IDS is empty',
+      );
+      return false;
+    }
+    return TELEGRAM_PERMISSION_APPROVER_IDS.has(userId);
+  }
+
+  protected async resolvePermissionPrompt(
+    requestId: string,
+    decision: PermissionApprovalDecision,
+  ): Promise<void> {
+    const pending = this.pendingPermissionPrompts.get(requestId);
+    if (!pending || !this.bot) return;
+    this.pendingPermissionPrompts.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.resolve(decision);
+
+    const status = decision.approved ? 'APPROVED' : 'DENIED';
+    const actor = decision.decidedBy || 'unknown';
+    const reasonSuffix = decision.reason ? ` (${decision.reason})` : '';
+    const text = `Permission request ${requestId}\nStatus: ${status} by ${actor}${reasonSuffix}`;
+    try {
+      await this.bot.api.editMessageText(
+        pending.chatId,
+        pending.messageId,
+        text,
+        {
+          reply_markup: { inline_keyboard: [] },
+        },
+      );
+    } catch (err) {
+      logger.debug(
+        { requestId, err: this.sanitizeErrorMessage(err) },
+        'Failed to update Telegram permission prompt message',
+      );
+    }
+  }
+
+  protected async refreshUserQuestionPrompt(
+    pending: PendingUserQuestionState,
+  ): Promise<void> {
+    if (!this.bot) return;
+    try {
+      await this.bot.api.editMessageText(
+        pending.chatId,
+        pending.messageId,
+        pending.promptText,
+        {
+          reply_markup: this.buildUserQuestionKeyboard(
+            pending.requestId,
+            pending.questionIndex,
+            {
+              question: pending.questionText,
+              header: pending.questionHeader,
+              options: pending.optionLabels.map((label) => ({
+                label,
+                description: '',
+              })),
+              multiSelect: pending.multiSelect,
+            },
+            pending.selectedOptionIndexes,
+          ),
+        },
+      );
+    } catch (err) {
+      logger.debug(
+        {
+          requestId: pending.requestId,
+          questionIndex: pending.questionIndex,
+          err: this.sanitizeErrorMessage(err),
+        },
+        'Failed to refresh Telegram user question keyboard',
+      );
+    }
+  }
+
+  protected async finalizeUserQuestionPrompt(
+    pending: PendingUserQuestionState,
+    selection: string | string[],
+    answeredBy?: string,
+    reason?: string,
+  ): Promise<void> {
+    this.pendingUserQuestions.delete(
+      this.pendingUserQuestionKey(pending.requestId, pending.questionIndex),
+    );
+    clearTimeout(pending.timer);
+    pending.resolve({ selected: selection, answeredBy });
+
+    if (!this.bot) return;
+    const selectionText = Array.isArray(selection)
+      ? selection.join(', ')
+      : selection;
+    const status = reason || 'answered';
+    const actor = answeredBy ? ` by ${answeredBy}` : '';
+    const text = `❓ ${pending.questionHeader}\n${pending.questionText}\n\nAnswer: ${selectionText || '[none]'}\nStatus: ${status}${actor}`;
+    try {
+      await this.bot.api.editMessageText(
+        pending.chatId,
+        pending.messageId,
+        text,
+        {
+          reply_markup: { inline_keyboard: [] },
+        },
+      );
+    } catch (err) {
+      logger.debug(
+        {
+          requestId: pending.requestId,
+          questionIndex: pending.questionIndex,
+          err: this.sanitizeErrorMessage(err),
+        },
+        'Failed to finalize Telegram user question prompt',
+      );
+    }
+  }
+
+  protected startPolling(): void {
+    if (!this.bot || this.isStopping) return;
+
+    Promise.resolve(
+      this.bot.start({
+        onStart: (botInfo) => {
+          logger.info(
+            { username: botInfo.username, id: botInfo.id },
+            'Telegram bot connected',
+          );
+          logger.info(
+            {
+              username: botInfo.username,
+              hint: 'Send /chatid to the bot to get a chat registration ID',
+            },
+            'Telegram bot connection hint',
+          );
+        },
+      }),
+    )
+      .then(() => {
+        if (this.isStopping) return;
+        logger.warn('Telegram polling stopped unexpectedly');
+        this.schedulePollingRetry();
+      })
+      .catch((err) => {
+        if (this.isStopping) return;
+        logger.error({ err }, 'Telegram polling failed');
+        this.schedulePollingRetry();
+      });
+  }
+
+  /**
+   * Download a Telegram file to the group's attachments directory.
+   * Returns the absolute attachment path on disk or null if the download fails.
+   */
+  protected async downloadFile(
+    fileId: string,
+    groupFolder: string,
+    filename: string,
+  ): Promise<string | null> {
+    if (!this.bot) return null;
+
+    try {
+      const file = await this.bot.api.getFile(fileId);
+      if (!file.file_path) {
+        logger.warn({ fileId }, 'Telegram getFile returned no file_path');
+        return null;
+      }
+      const safeFilePath = this.sanitizeTelegramFilePath(file.file_path);
+      if (!safeFilePath) {
+        logger.warn(
+          { fileId, filePath: '[unsafe-file-path]' },
+          'Rejected unsafe Telegram file path',
+        );
+        return null;
+      }
+
+      const groupDir = resolveGroupFolderPath(groupFolder);
+      const attachDir = path.join(groupDir, 'attachments');
+      await fs.promises.mkdir(attachDir, { recursive: true });
+
+      // Sanitize filename and add extension from Telegram's file_path if missing
+      const tgExt = path.extname(safeFilePath);
+      const localExt = path.extname(filename);
+      const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const finalName = localExt ? safeName : `${safeName}${tgExt}`;
+      const destPath = path.join(attachDir, finalName);
+
+      const encodedPath = safeFilePath
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+      const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${encodedPath}`;
+      const resp = await fetch(fileUrl);
+      if (!resp.ok) {
+        logger.warn(
+          { fileId, status: resp.status },
+          'Telegram file download failed',
+        );
+        return null;
+      }
+
+      const wrote = await writeTelegramFetchResponseToFile(resp, destPath);
+      if (!wrote) return null;
+
+      logger.info({ fileId, dest: destPath }, 'Telegram file downloaded');
+      return destPath;
+    } catch (err) {
+      logger.error(
+        { fileId, error: this.sanitizeErrorMessage(err) },
+        'Failed to download Telegram file',
+      );
+      return null;
+    }
+  }
+}

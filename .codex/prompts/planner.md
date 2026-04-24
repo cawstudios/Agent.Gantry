@@ -3,6 +3,7 @@
 You are the planning phase of the factory.
 
 Inputs:
+
 - `docs/product/BRIEF.md`
 - `docs/architecture/`
 - `docs/decisions/`
@@ -10,6 +11,7 @@ Inputs:
 - any existing plans under `plans/`
 
 Output exactly these sections:
+
 1. Problem
 2. Scope / Non-goals
 3. Acceptance Criteria
@@ -19,7 +21,8 @@ Output exactly these sections:
 7. Verify Plan
 
 Rules:
-- Planning model is high-reasoning (`gpt-5.4` or `claude-opus-4-6`).
+
+- Planning model is high-reasoning `gpt-5.5`.
 - Treat the in-repo docs as the system of record.
 - Produce a decision-complete plan before implementation starts.
 - Keep implementation tasks bounded so Codex workers can own disjoint write scopes.

@@ -6,7 +6,8 @@ import {
   PermissionApprovalRequest,
   UserQuestionRequest,
   UserQuestionResponse,
-} from '../core/types.js';
+} from '../domain/types.js';
+import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
 import { IpcDeps } from './ipc-domain-types.js';
 
 export async function processPermissionIpcRequest(
@@ -42,10 +43,20 @@ function protectTerminalResponseFile(filePath: string): void {
   }
 }
 
+function withSignature(
+  privateKeyPem: string | undefined,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const signature = signIpcResponsePayload(privateKeyPem, payload);
+  if (!signature) return payload;
+  return { ...payload, signature };
+}
+
 export function writePermissionIpcResponse(
   ipcBaseDir: string,
   sourceGroup: string,
   decision: PermissionApprovalDecision & { requestId: string },
+  privateKeyPem?: string,
 ): void {
   const responseDir = path.join(
     ipcBaseDir,
@@ -56,19 +67,13 @@ export function writePermissionIpcResponse(
   const responsePath = path.join(responseDir, `${decision.requestId}.json`);
   if (fs.existsSync(responsePath)) return;
   const tmpPath = `${responsePath}.tmp`;
-  fs.writeFileSync(
-    tmpPath,
-    JSON.stringify(
-      {
-        requestId: decision.requestId,
-        approved: decision.approved,
-        ...(decision.decidedBy ? { decidedBy: decision.decidedBy } : {}),
-        ...(decision.reason ? { reason: decision.reason } : {}),
-      },
-      null,
-      2,
-    ),
-  );
+  const payload = withSignature(privateKeyPem, {
+    requestId: decision.requestId,
+    approved: decision.approved,
+    ...(decision.decidedBy ? { decidedBy: decision.decidedBy } : {}),
+    ...(decision.reason ? { reason: decision.reason } : {}),
+  });
+  fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
   if (fs.existsSync(responsePath)) {
     fs.rmSync(tmpPath, { force: true });
     return;
@@ -81,6 +86,7 @@ export function writeUserQuestionIpcResponse(
   ipcBaseDir: string,
   sourceGroup: string,
   response: UserQuestionResponse,
+  privateKeyPem?: string,
 ): void {
   const responseDir = path.join(ipcBaseDir, sourceGroup, 'user-answers');
   fs.mkdirSync(responseDir, { recursive: true });
@@ -103,18 +109,12 @@ export function writeUserQuestionIpcResponse(
       safeAnswers[safeKey] = filtered;
     }
   }
-  fs.writeFileSync(
-    tmpPath,
-    JSON.stringify(
-      {
-        requestId: response.requestId,
-        answers: safeAnswers,
-        ...(response.answeredBy ? { answeredBy: response.answeredBy } : {}),
-      },
-      null,
-      2,
-    ),
-  );
+  const payload = withSignature(privateKeyPem, {
+    requestId: response.requestId,
+    answers: safeAnswers,
+    ...(response.answeredBy ? { answeredBy: response.answeredBy } : {}),
+  });
+  fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
   if (fs.existsSync(responsePath)) {
     fs.rmSync(tmpPath, { force: true });
     return;

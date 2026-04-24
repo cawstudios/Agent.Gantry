@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR } from '../core/config.js';
+import { DATA_DIR } from '../config/index.js';
 
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const PROFILE_LOCK_STALE_MS = 10 * 60 * 1000;

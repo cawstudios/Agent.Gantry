@@ -30,9 +30,6 @@ describe('MemoryRootService', () => {
     expect(fs.existsSync(layout.knowledgeDir)).toBe(true);
     expect(fs.existsSync(layout.rawDir)).toBe(true);
     expect(fs.existsSync(layout.cacheDir)).toBe(true);
-    expect(service.getSqliteCachePath()).toContain(
-      path.join('.cache', 'memory.db'),
-    );
   });
 
   it('uses singleton root override for tests', () => {

@@ -1,8 +1,8 @@
-import { MODEL_DREAMING, MEMORY_DREAMING_DRY_RUN } from '../core/config.js';
+import { MODEL_DREAMING, MEMORY_DREAMING_DRY_RUN } from '../config/index.js';
 import { runClaudeQuery } from './claude-query.js';
 import { MEMORY_DREAM_REVIEW_PROMPT } from './prompts/dream.js';
 import type { ConsolidationResult } from './memory-consolidation.js';
-import type { MemoryStore } from './memory-store.js';
+import type { MemoryStore } from './persistence/store.js';
 import { sanitizeOutboundLlmText } from './sensitive-material.js';
 import type { MemoryItem } from './memory-types.js';
 
@@ -74,7 +74,7 @@ export async function runDreamingSweep(
 ): Promise<DreamingResult> {
   const startedAt = Date.now();
   // Cap sweep at 5000 items to bound per-sweep maintenance and LLM cost.
-  const items = args.store.listActiveItems(args.groupFolder, 5000);
+  const items = await args.store.listActiveItems(args.groupFolder, 5000);
 
   if (!args.enabled) {
     return {
@@ -119,17 +119,22 @@ export async function runDreamingSweep(
     .sort((a, b) => a.score - b.score);
 
   const isDryRun = args.dryRun ?? MEMORY_DREAMING_DRY_RUN;
-  args.store.recordEvent('dream_started', 'memory_dreaming', args.groupFolder, {
-    group: args.groupFolder,
-    candidates_a: scoredItems.length,
-    promote_n: promoted.length,
-    decay_n: decayed.length,
-    review_n: Math.min(scoredItems.length, 30),
-    dry_run: isDryRun,
-  });
+  await args.store.recordEvent(
+    'dream_started',
+    'memory_dreaming',
+    args.groupFolder,
+    {
+      group: args.groupFolder,
+      candidates_a: scoredItems.length,
+      promote_n: promoted.length,
+      decay_n: decayed.length,
+      review_n: Math.min(scoredItems.length, 30),
+      dry_run: isDryRun,
+    },
+  );
 
   if (!isDryRun && promoted.length > 0 && args.confidenceBoost > 0) {
-    args.store.adjustConfidence(
+    await args.store.adjustConfidence(
       promoted.map((entry) => entry.item.id),
       args.confidenceBoost,
     );
@@ -137,19 +142,19 @@ export async function runDreamingSweep(
 
   if (!isDryRun) {
     for (const promotedItem of promoted) {
-      const latest = args.store.getItemById(promotedItem.item.id);
+      const latest = await args.store.getItemById(promotedItem.item.id);
       if (!latest) continue;
       if (
         !latest.is_pinned &&
         latest.confidence >= args.retentionPinThreshold
       ) {
-        args.store.pinItem(latest.id, true);
+        await args.store.pinItem(latest.id, true);
       }
     }
   }
 
   if (!isDryRun && decayed.length > 0 && args.confidenceDecay > 0) {
-    args.store.adjustConfidence(
+    await args.store.adjustConfidence(
       decayed.map((entry) => entry.item.id),
       -Math.abs(args.confidenceDecay),
     );
@@ -158,10 +163,10 @@ export async function runDreamingSweep(
   let retiredCount = 0;
   if (!isDryRun) {
     for (const decayedItem of decayed) {
-      const latest = args.store.getItemById(decayedItem.item.id);
+      const latest = await args.store.getItemById(decayedItem.item.id);
       if (!latest || latest.is_pinned) continue;
       if (latest.confidence < 0.1) {
-        args.store.softDeleteItem(latest.id);
+        await args.store.softDeleteItem(latest.id);
         retiredCount += 1;
       }
     }
@@ -181,9 +186,9 @@ export async function runDreamingSweep(
     if (decision.action === 'keep') {
       reviewKeptCount += 1;
       if (!isDryRun) {
-        const current = args.store.getItemById(decision.id);
+        const current = await args.store.getItemById(decision.id);
         if (current) {
-          args.store.patchItem(current.id, current.version, {
+          await args.store.patchItem(current.id, current.version, {
             last_reviewed_at: new Date().toISOString(),
           });
         }
@@ -191,7 +196,7 @@ export async function runDreamingSweep(
       continue;
     }
     if (decision.action === 'rewrite') {
-      const current = args.store.getItemById(decision.id);
+      const current = await args.store.getItemById(decision.id);
       if (!current || !decision.rewrittenValue) continue;
       const ungrounded = firstUngroundedToken(decision.rewrittenValue, [
         current.value,
@@ -199,7 +204,7 @@ export async function runDreamingSweep(
       ]);
       if (ungrounded) {
         rejectedHallucinations += 1;
-        args.store.recordEvent(
+        await args.store.recordEvent(
           'dream_hallucination_rejected',
           'memory_dreaming',
           decision.id,
@@ -212,7 +217,7 @@ export async function runDreamingSweep(
         continue;
       }
       if (!isDryRun) {
-        args.store.patchItem(current.id, current.version, {
+        await args.store.patchItem(current.id, current.version, {
           value: decision.rewrittenValue,
           why: `[dream-rewrite] ${decision.reason || 'review rewrite'}`,
           last_reviewed_at: new Date().toISOString(),
@@ -224,8 +229,8 @@ export async function runDreamingSweep(
     if (decision.action === 'merge_into') {
       if (!decision.target || decision.target === decision.id) continue;
       if (!candidateIds.has(decision.target)) continue;
-      const source = args.store.getItemById(decision.id);
-      const target = args.store.getItemById(decision.target);
+      const source = await args.store.getItemById(decision.id);
+      const target = await args.store.getItemById(decision.target);
       if (!source || !target) continue;
       const ungrounded = firstUngroundedToken(target.value, [
         source.value,
@@ -235,7 +240,7 @@ export async function runDreamingSweep(
       ]);
       if (ungrounded) {
         rejectedHallucinations += 1;
-        args.store.recordEvent(
+        await args.store.recordEvent(
           'dream_hallucination_rejected',
           'memory_dreaming',
           decision.id,
@@ -248,14 +253,14 @@ export async function runDreamingSweep(
         continue;
       }
       if (!isDryRun) {
-        args.store.softDeleteItem(decision.id, decision.target);
+        await args.store.softDeleteItem(decision.id, decision.target);
       }
       reviewMergedCount += 1;
       continue;
     }
     if (decision.action === 'retire') {
       if (!isDryRun) {
-        args.store.softDeleteItem(decision.id);
+        await args.store.softDeleteItem(decision.id);
       }
       reviewRetiredCount += 1;
     }
@@ -278,7 +283,7 @@ export async function runDreamingSweep(
     durationMs: Date.now() - startedAt,
   };
 
-  args.store.recordEvent(
+  await args.store.recordEvent(
     'dream_completed',
     'memory_dreaming',
     args.groupFolder,

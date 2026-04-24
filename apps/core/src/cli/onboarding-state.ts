@@ -1,7 +1,7 @@
 import fs from 'fs';
 
-import type { HostCredentialMode } from '../core/credential-mode.js';
-import { onboardingStatePath } from './runtime-home.js';
+import type { HostCredentialMode } from '../config/credentials/mode.js';
+import { onboardingStatePath } from '../config/settings/runtime-home.js';
 
 export type OnboardingStep =
   | 'welcome'
@@ -25,11 +25,14 @@ export type OnboardingStep =
 export interface OnboardingData {
   runtimeHome: string;
   primaryProvider?: 'telegram' | 'slack';
-  storageProvider?: 'sqlite';
   serviceChoice?: 'skip' | 'install' | 'install_start';
   telegramBotUsername?: string;
   telegramChatJid?: string;
+  telegramAdminSenderId?: string;
+  telegramAdminSenderName?: string;
+  telegramPermissionApproverIds?: string;
   slackChatJid?: string;
+  slackPermissionApproverIds?: string;
   memoryEnabled?: boolean;
   embeddingsEnabled?: boolean;
   dreamingEnabled?: boolean;

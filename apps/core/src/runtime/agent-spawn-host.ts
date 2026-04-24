@@ -6,19 +6,19 @@ import { OneCLI } from '@onecli-sh/sdk';
 import {
   DATA_DIR,
   AGENTS_DIR,
-  getHostCredentialEnv,
   MYCLAW_CREDENTIAL_MODE,
-  ONECLI_ALLOWED_ENV_KEYS,
   ONECLI_URL,
-} from '../core/config.js';
-import { resolveHostCredentialMode } from '../core/credential-mode.js';
+} from '../config/index.js';
+import { resolveHostCredentialMode } from '../config/credentials/mode.js';
 import {
   isPathInside,
   resolvePathWithRealParent,
   safeRealpathSync,
-} from '../core/fs-paths.js';
-import { logger } from '../core/logger.js';
-import { RegisteredGroup } from '../core/types.js';
+} from '../infrastructure/filesystem/paths.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { filterTrustedOnecliEnv } from '../infrastructure/onecli/env-policy.js';
+import { assertValidOnecliUrl } from '../infrastructure/onecli/policy.js';
+import { RegisteredGroup } from '../domain/types.js';
 import {
   resolveGroupFolderPath,
   resolveGroupIpcPath,
@@ -31,9 +31,6 @@ import {
 } from './agent-spawn-layout.js';
 import { HostRuntimeContext } from './agent-spawn-types.js';
 
-const onecli = new OneCLI({ url: ONECLI_URL });
-
-const ONECLI_ALLOWED_ENV_KEY_SET = new Set<string>(ONECLI_ALLOWED_ENV_KEYS);
 const ONECLI_CA_CERT_ROOT = path.resolve(DATA_DIR, 'onecli', 'certs');
 
 function sanitizeCertFileSegment(value?: string): string {
@@ -73,29 +70,17 @@ function resolveOnecliCaTargetPath(
 function filterOnecliEnv(
   source: Record<string, string>,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
-  const dropped: string[] = [];
-  for (const [key, value] of Object.entries(source)) {
-    if (
-      !ONECLI_ALLOWED_ENV_KEY_SET.has(key) ||
-      typeof value !== 'string' ||
-      value.length === 0
-    ) {
-      dropped.push(key);
-      continue;
-    }
-    out[key] = value;
-  }
-  if (dropped.length > 0) {
+  const { env, droppedKeys } = filterTrustedOnecliEnv(source);
+  if (droppedKeys.length > 0) {
     logger.warn(
       {
-        droppedKeys: dropped.sort().slice(0, 20),
-        droppedCount: dropped.length,
+        droppedKeys: droppedKeys.sort().slice(0, 20),
+        droppedCount: droppedKeys.length,
       },
       'Dropped disallowed OneCLI env keys',
     );
   }
-  return out;
+  return env;
 }
 
 function remapOnecliEnvCertificatePath(
@@ -120,24 +105,10 @@ export async function getHostRuntimeCredentialEnv(
   onecliApplied: boolean;
   onecliCaPath?: string;
 }> {
-  const envFromFile = getHostCredentialEnv();
   const credentialModeRaw = MYCLAW_CREDENTIAL_MODE;
-  const credentialMode = resolveHostCredentialMode(
-    credentialModeRaw,
-    ONECLI_URL,
-  );
+  const credentialMode = resolveHostCredentialMode(credentialModeRaw);
   const onecliUrl = ONECLI_URL?.trim();
-  const onecliRequired = credentialMode === 'onecli-only';
-  const onecliEnabled = credentialMode === 'hybrid' || onecliRequired;
-
-  if (!onecliEnabled) {
-    return {
-      env: {
-        ...envFromFile,
-      },
-      onecliApplied: false,
-    };
-  }
+  const onecliRequired = credentialMode === 'onecli';
   if (!onecliUrl) {
     if (onecliRequired) {
       throw new Error(
@@ -145,12 +116,12 @@ export async function getHostRuntimeCredentialEnv(
       );
     }
     return {
-      env: {
-        ...envFromFile,
-      },
+      env: {},
       onecliApplied: false,
     };
   }
+  const trustedOnecliUrl = assertValidOnecliUrl(onecliUrl);
+  const onecli = new OneCLI({ url: trustedOnecliUrl });
 
   let onecliEnv: Record<string, string> = {};
   let onecliApplied = false;
@@ -216,10 +187,7 @@ export async function getHostRuntimeCredentialEnv(
   }
 
   return {
-    env: {
-      ...(onecliRequired ? {} : envFromFile),
-      ...onecliEnv,
-    },
+    env: onecliEnv,
     onecliApplied,
     onecliCaPath,
   };

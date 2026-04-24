@@ -470,15 +470,15 @@
         <div class="cell"><div class="lbl">recency</div><div class="tech">decay</div></div>
         <div class="cell"><div class="lbl">diversity</div><div class="tech">MMR</div></div>
       </div>
-      <p class="mem-coda">SQLite + sqlite-vec · scheduled consolidation</p>
+      <p class="mem-coda">Postgres FTS + pgvector · scheduled consolidation</p>
       <aside class="notes">
         Last piece. Memory.
 
-        Memory in MyClaw is a SQLite database per group, with the sqlite-vec extension for vector search. No Redis. No Pinecone. The retrieval query isn't just cosine similarity — it's reciprocal-rank fusion of BM25 lexical search and vector similarity, with temporal decay (newer memories outrank older ones) and maximal marginal relevance to deduplicate near-identical results. Four standard IR techniques. Combined, they produce a ranked list that's meaningfully better than any one of them alone.
+        Memory in MyClaw is stored in Postgres, with full-text search for lexical ranking and pgvector for vector search. No Redis. No Pinecone. The retrieval query isn't just cosine similarity — it's reciprocal-rank fusion of lexical search and vector similarity, with temporal decay (newer memories outrank older ones) and maximal marginal relevance to deduplicate near-identical results. Four standard IR techniques. Combined, they produce a ranked list that's meaningfully better than any one of them alone.
 
         The top results go into a hidden message block that prepends the user prompt. The agent sees it as context. You never see the mechanism.
 
-        The interesting piece is what happens on a schedule. MyClaw has a persistent cron scheduler. One of the jobs is memory DREAMING. It runs on a schedule, reads raw memory chunks from recent conversations, groups them, rewrites them as higher-level items — facts, procedures, preferences — and puts them back in the same SQLite.
+        The interesting piece is what happens on a schedule. MyClaw has a persistent job scheduler. One of the jobs is memory DREAMING. It runs on a schedule, reads raw memory chunks from recent conversations, groups them, rewrites them as higher-level items — facts, procedures, preferences — and puts them back in Postgres.
 
         Think about that for a second. The agent's memory is being rewritten by the agent itself, on a schedule, with no human in the loop. It's consolidation. Like what your brain does during sleep. Hence 'dreaming'. Over weeks, the raw noise fades and the useful abstractions stay.
 

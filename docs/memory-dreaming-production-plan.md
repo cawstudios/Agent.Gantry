@@ -51,7 +51,6 @@ Make continuity deterministic and production-safe:
 
 `~/myclaw/memory/`:
 
-- `.cache/memory.db`
 - `.journal/`
 - `items/`
 - `procedures/`

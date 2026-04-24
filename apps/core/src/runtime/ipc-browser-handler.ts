@@ -3,7 +3,8 @@ import path from 'path';
 
 import { BrowserIpcAction } from '@myclaw/contracts';
 
-import { logger } from '../core/logger.js';
+import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import {
   DEFAULT_BROWSER_PROFILE_NAME,
   closeBrowser,
@@ -158,23 +159,22 @@ export function writeBrowserIpcResponse(
   ipcBaseDir: string,
   sourceGroup: string,
   response: { requestId: string; ok: boolean; data?: unknown; error?: string },
+  privateKeyPem?: string,
 ): void {
   const responseDir = path.join(ipcBaseDir, sourceGroup, 'browser-responses');
   fs.mkdirSync(responseDir, { recursive: true });
   const responsePath = path.join(responseDir, `${response.requestId}.json`);
   const tmpPath = `${responsePath}.tmp`;
-  fs.writeFileSync(
-    tmpPath,
-    JSON.stringify(
-      {
-        requestId: response.requestId,
-        ok: response.ok,
-        ...(response.data !== undefined ? { data: response.data } : {}),
-        ...(response.error ? { error: response.error } : {}),
-      },
-      null,
-      2,
-    ),
-  );
+  const payload: Record<string, unknown> = {
+    requestId: response.requestId,
+    ok: response.ok,
+    ...(response.data !== undefined ? { data: response.data } : {}),
+    ...(response.error ? { error: response.error } : {}),
+  };
+  const signature = signIpcResponsePayload(privateKeyPem, payload);
+  if (signature) {
+    payload.signature = signature;
+  }
+  fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
   fs.renameSync(tmpPath, responsePath);
 }

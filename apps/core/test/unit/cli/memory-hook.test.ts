@@ -5,9 +5,9 @@ import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runMemoryHookCommand } from '@core/cli/memory-hook.js';
-import { logger } from '@core/core/logger.js';
+import { logger } from '@core/infrastructure/logging/logger.js';
 
-vi.mock('@core/core/logger.js', () => ({
+vi.mock('@core/infrastructure/logging/logger.js', () => ({
   logger: {
     warn: vi.fn(),
     info: vi.fn(),
@@ -93,6 +93,38 @@ describe('memory-hook command', () => {
       expect(output).toContain('brief-content');
     } finally {
       writeSpy.mockRestore();
+    }
+  });
+
+  it('infers runtime home and group from hook cwd under agents directory', async () => {
+    const runtimeHome = createRuntimeHome();
+    const groupFolder = 'telegram_main';
+    const agentDir = path.join(runtimeHome, 'agents', groupFolder);
+    fs.mkdirSync(agentDir, { recursive: true });
+    const service = createServiceMock();
+    const env: NodeJS.ProcessEnv = {};
+    const writeSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    try {
+      const code = await runMemoryHookCommand(
+        ['load'],
+        env,
+        async () => ({ cwd: agentDir }),
+        async () => service,
+      );
+      expect(code).toBe(0);
+      expect(env.MYCLAW_HOME).toBe(runtimeHome);
+      expect(service.ingestGroupSources).toHaveBeenCalledWith(groupFolder);
+      expect(service.buildBrief).toHaveBeenCalledWith({
+        groupFolder,
+        maxItems: 20,
+        userId: undefined,
+      });
+    } finally {
+      writeSpy.mockRestore();
+      fs.rmSync(runtimeHome, { recursive: true, force: true });
     }
   });
 

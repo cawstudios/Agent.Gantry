@@ -1,18 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ChildProcess } from 'child_process';
-import type { NewMessage, RegisteredGroup } from '@core/core/types.js';
+import type { NewMessage, RegisteredGroup } from '@core/domain/types.js';
 import {
   decodeGroupMessageCursor,
   encodeGroupMessageCursor,
-} from '@core/core/message-cursor.js';
+} from '@core/shared/message-cursor.js';
 import type { AgentOutput } from '@core/runtime/agent-spawn-types.js';
 import type { GroupProcessingDeps } from '@core/runtime/group-processing.js';
+import { PartialMessageDeliveryError } from '@core/runtime/partial-delivery.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('@core/core/config.js', () => ({
+vi.mock('@core/config/index.js', () => ({
   ASSISTANT_NAME: 'Andy',
   IDLE_TIMEOUT: 1_800_000,
   MEMORY_MAINTENANCE_MAX_PENDING: 5_000,
@@ -23,7 +24,7 @@ vi.mock('@core/core/config.js', () => ({
     trigger ? new RegExp(`^@${trigger}\\b`, 'i') : /^@Andy\b/i,
 }));
 
-vi.mock('@core/core/logger.js', () => ({
+vi.mock('@core/infrastructure/logging/logger.js', () => ({
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -67,14 +68,6 @@ const mockGetAllJobs = vi.fn();
 const mockGetMessagesSince = vi.fn();
 const mockGetRecentJobRuns = vi.fn();
 const mockListRecentJobEvents = vi.fn();
-vi.mock('@core/storage/db.js', () => ({
-  deleteSession: (...args: unknown[]) => mockDeleteSession(...args),
-  getAllJobs: (...args: unknown[]) => mockGetAllJobs(...args),
-  getMessagesSince: (...args: unknown[]) => mockGetMessagesSince(...args),
-  getRecentJobRuns: (...args: unknown[]) => mockGetRecentJobRuns(...args),
-  listRecentJobEvents: (...args: unknown[]) => mockListRecentJobEvents(...args),
-}));
-
 const mockSpawnAgent = vi.fn();
 const mockWriteJobRunsSnapshot = vi.fn();
 const mockWriteJobsSnapshot = vi.fn();
@@ -170,6 +163,15 @@ function makeChannel(
 function makeDeps(
   overrides: Partial<GroupProcessingDeps> = {},
 ): GroupProcessingDeps {
+  const opsRepository = {
+    getAllJobs: (...args: unknown[]) => mockGetAllJobs(...args),
+    getMessagesSince: (...args: unknown[]) => mockGetMessagesSince(...args),
+    getRecentJobRuns: (...args: unknown[]) => mockGetRecentJobRuns(...args),
+    listRecentJobEvents: (...args: unknown[]) =>
+      mockListRecentJobEvents(...args),
+    getAllChats: vi.fn().mockResolvedValue([]),
+  } as unknown as GroupProcessingDeps['opsRepository'];
+
   return {
     channelRuntime: makeChannel(),
     getGroup: vi.fn().mockReturnValue(undefined),
@@ -183,6 +185,7 @@ function makeDeps(
     setGroupThinkingOverride: vi.fn(),
     getAvailableGroups: vi.fn().mockReturnValue([]),
     getRegisteredJids: vi.fn().mockReturnValue(new Set<string>()),
+    opsRepository,
     queue: {
       closeStdin: vi.fn(),
       notifyIdle: vi.fn(),
@@ -565,16 +568,19 @@ describe('createGroupProcessor', () => {
       expect(deps.queue.closeStdin).toHaveBeenCalledWith('group1@g.us');
     });
 
-    it('writes job and group snapshots via runAgent', async () => {
+    it('does not write scheduler snapshots on the message hot path', async () => {
       const { deps } = setupHappyPath();
       mockGetAllJobs.mockReturnValue([]);
 
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(mockWriteJobsSnapshot).toHaveBeenCalled();
-      expect(mockWriteJobRunsSnapshot).toHaveBeenCalled();
-      expect(mockWriteGroupsSnapshot).toHaveBeenCalled();
+      expect(mockGetAllJobs).not.toHaveBeenCalled();
+      expect(mockGetRecentJobRuns).not.toHaveBeenCalled();
+      expect(mockListRecentJobEvents).not.toHaveBeenCalled();
+      expect(mockWriteJobsSnapshot).not.toHaveBeenCalled();
+      expect(mockWriteJobRunsSnapshot).not.toHaveBeenCalled();
+      expect(mockWriteGroupsSnapshot).not.toHaveBeenCalled();
     });
   });
 
@@ -676,6 +682,42 @@ describe('createGroupProcessor', () => {
       // First call advances cursor to message timestamp; there should be no second rollback call
       expect(setCursorCalls).toHaveLength(1);
       expect(setCursorCalls[0][0]).toBe('group1@g.us');
+      expect(decodeGroupMessageCursor(setCursorCalls[0][1])).toEqual({
+        timestamp: '1700000001',
+        id: 'msg-1',
+      });
+    });
+
+    it('treats partial channel delivery as output sent and avoids cursor rollback', async () => {
+      const group = makeGroup({ isMain: true });
+      const messages = [makeMessage({ timestamp: '1700000001' })];
+      const { deps, channel } = setupHappyPath({ group, messages });
+      const partialDeliveryError = new PartialMessageDeliveryError({
+        cause: new Error('network failure on second chunk'),
+        deliveredChunks: 1,
+        message: 'one Telegram chunk was delivered before failure',
+        name: 'PartialTelegramDeliveryError',
+        totalChunks: 2,
+      });
+
+      (channel.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        partialDeliveryError,
+      );
+      (deps.getCursor as ReturnType<typeof vi.fn>).mockReturnValue(
+        'prev-cursor',
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      const result = await processGroupMessages('group1@g.us');
+
+      expect(result).toBe(true);
+      expect(channel.sendMessage).toHaveBeenCalledWith(
+        'group1@g.us',
+        'Agent reply text',
+      );
+      const setCursorCalls = (deps.setCursor as ReturnType<typeof vi.fn>).mock
+        .calls;
+      expect(setCursorCalls).toHaveLength(1);
       expect(decodeGroupMessageCursor(setCursorCalls[0][1])).toEqual({
         timestamp: '1700000001',
         id: 'msg-1',
@@ -1316,7 +1358,7 @@ describe('createGroupProcessor', () => {
       expect(deps.getSession).toHaveBeenCalledWith('test-group', 'thread-a');
     });
 
-    it('refreshes thread context when a newer message arrives during processing', async () => {
+    it('keeps the run thread stable without per-output storage refreshes', async () => {
       const initialMessages = [
         makeMessage({
           id: 'msg-initial',
@@ -1324,25 +1366,9 @@ describe('createGroupProcessor', () => {
           thread_id: 'initial-thread',
         }),
       ];
-      const followUpMessage = makeMessage({
-        id: 'msg-followup',
-        timestamp: '1700000002',
-        thread_id: 'live-thread',
-      });
 
       const { deps, channel } = setupHappyPath({ messages: initialMessages });
-      let providedFollowUp = false;
-      mockGetMessagesSince.mockImplementation((_jid: string, since: string) => {
-        if (since === '0') return initialMessages;
-        if (
-          decodeGroupMessageCursor(since).timestamp === '1700000001' &&
-          !providedFollowUp
-        ) {
-          providedFollowUp = true;
-          return [followUpMessage];
-        }
-        return [];
-      });
+      mockGetMessagesSince.mockReturnValue(initialMessages);
 
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
@@ -1350,8 +1376,9 @@ describe('createGroupProcessor', () => {
       expect(channel.sendMessage).toHaveBeenCalledWith(
         'group1@g.us',
         'Agent reply text',
-        { threadId: 'live-thread' },
+        { threadId: 'initial-thread' },
       );
+      expect(mockGetMessagesSince).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -1581,6 +1608,25 @@ describe('createGroupProcessor', () => {
       expect(deps.saveState).toHaveBeenCalled();
     });
 
+    it('advanceCursor catches saveState rejection', async () => {
+      const { capturedDeps, deps } = await captureSessionDeps();
+      (deps.saveState as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('state write failed'),
+      );
+      const advanceCursor = capturedDeps.advanceCursor as (
+        message: Pick<NewMessage, 'timestamp' | 'id'>,
+      ) => void;
+
+      advanceCursor({ timestamp: '1700099999', id: 'msg-advance' });
+      await Promise.resolve();
+
+      expect(deps.saveState).toHaveBeenCalled();
+      expect(deps.setCursor).toHaveBeenCalledWith(
+        'group1@g.us',
+        expect.any(String),
+      );
+    });
+
     it('getDefaultModel returns model from config', async () => {
       const { capturedDeps } = await captureSessionDeps();
       const getDefaultModel = capturedDeps.getDefaultModel as () =>
@@ -1699,12 +1745,11 @@ describe('createGroupProcessor', () => {
     it('clearCurrentSession clears session and deletes from DB', async () => {
       const { capturedDeps, deps } = await captureSessionDeps();
       const clearCurrentSession =
-        capturedDeps.clearCurrentSession as () => void;
+        capturedDeps.clearCurrentSession as () => Promise<void> | void;
 
-      clearCurrentSession();
+      await clearCurrentSession();
 
       expect(deps.clearSession).toHaveBeenCalledWith('grp-folder', undefined);
-      expect(mockDeleteSession).toHaveBeenCalledWith('grp-folder', undefined);
     });
 
     describe('canSenderInteract', () => {

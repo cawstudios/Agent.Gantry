@@ -6,10 +6,10 @@ import {
   MEMORY_CHUNK_OVERLAP,
   MEMORY_CHUNK_SIZE,
   MEMORY_SEMANTIC_DEDUP_ENABLED,
-} from '../core/config.js';
-import { logger } from '../core/logger.js';
+} from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import type { EmbeddingProvider } from './memory-embeddings.js';
-import { MemoryStore } from './memory-store.js';
+import { MemoryStore } from './persistence/store.js';
 import {
   MEMORY_GLOBAL_GROUP_FOLDER,
   type MemoryItem,
@@ -141,9 +141,9 @@ export class MemoryIndexer {
     return this.walkFrom(root);
   }
 
-  reindexStaleFiles(): { scanned: number; reindexed: number } {
-    const indexedRows = this.store.listIndexedFiles();
-    const indexedChunkRows = this.store.listIndexedChunkFiles();
+  async reindexStaleFiles(): Promise<{ scanned: number; reindexed: number }> {
+    const indexedRows = await this.store.listIndexedFiles();
+    const indexedChunkRows = await this.store.listIndexedChunkFiles();
     const indexedByPath = new Map(
       indexedRows.map((row) => [path.resolve(row.file_path), row]),
     );
@@ -191,28 +191,28 @@ export class MemoryIndexer {
       ) {
         continue;
       }
-      this.indexFile(resolved);
+      await this.indexFile(resolved);
       reindexed += 1;
     }
 
     for (const row of indexedRows) {
       const resolved = path.resolve(row.file_path);
       if (!resolved || seen.has(resolved)) continue;
-      const current = this.store.getItemById(row.id);
+      const current = await this.store.getItemById(row.id);
       if (current?.file_path) {
         const currentResolved = path.resolve(current.file_path);
         if (currentResolved !== resolved) {
           continue;
         }
       }
-      this.removeFile(resolved);
+      await this.removeFile(resolved);
     }
 
     for (const row of indexedChunkRows) {
       const resolved = path.resolve(row.source_path);
       if (!resolved || seen.has(resolved)) continue;
       this.invalidateSourceWrite(row.source_type, resolved);
-      this.store.deleteSourceChunks(row.source_type, row.source_id);
+      await this.store.deleteSourceChunks(row.source_type, row.source_id);
     }
 
     return { scanned, reindexed };
@@ -222,14 +222,14 @@ export class MemoryIndexer {
     scanned: number;
     reindexed: number;
   }> {
-    const result = this.reindexStaleFiles();
+    const result = await this.reindexStaleFiles();
     if (this.pendingWrites.size > 0) {
       await Promise.allSettled([...this.pendingWrites]);
     }
     return result;
   }
 
-  indexFile(absPath: string): void {
+  async indexFile(absPath: string): Promise<void> {
     const resolvedPath = path.resolve(absPath);
     const source = this.deriveSource(resolvedPath);
     if (!source) return;
@@ -251,12 +251,12 @@ export class MemoryIndexer {
         ? frontmatter.id.trim()
         : null;
     const indexedById = frontmatterId
-      ? this.store.getItemByIdAny(frontmatterId)
+      ? await this.store.getItemByIdAny(frontmatterId)
       : null;
     if (indexedById?.is_deleted) {
       return;
     }
-    const indexedByPath = this.store.getItemByFilePathAny(resolvedPath);
+    const indexedByPath = await this.store.getItemByFilePathAny(resolvedPath);
     if (!indexedById && indexedByPath?.is_deleted) {
       return;
     }
@@ -268,7 +268,7 @@ export class MemoryIndexer {
         path.resolve(indexed.file_path) !== resolvedPath &&
         !indexed.is_deleted
       ) {
-        this.store.setItemFileMetadata({
+        await this.store.setItemFileMetadata({
           itemId: indexed.id,
           source_folder: source,
           file_path: resolvedPath,
@@ -290,23 +290,23 @@ export class MemoryIndexer {
     };
 
     if (source === 'items') {
-      this.indexItemFile(record, indexed || null);
+      await this.indexItemFile(record, indexed || null);
       return;
     }
 
     if (source === 'procedures') {
-      this.indexProcedureChunks(record);
+      await this.indexProcedureChunks(record);
       return;
     }
 
-    this.indexSourceChunks(record);
+    await this.indexSourceChunks(record);
   }
 
-  removeFile(absPath: string): void {
+  async removeFile(absPath: string): Promise<void> {
     const resolvedPath = path.resolve(absPath);
-    const item = this.store.getItemByFilePath(resolvedPath);
+    const item = await this.store.getItemByFilePath(resolvedPath);
     if (item) {
-      this.store.softDeleteItem(item.id);
+      await this.store.softDeleteItem(item.id);
     }
   }
 
@@ -335,10 +335,10 @@ export class MemoryIndexer {
     return source;
   }
 
-  private indexItemFile(
+  private async indexItemFile(
     record: IndexerFileRecord,
     existing: MemoryItem | null,
-  ): void {
+  ): Promise<void> {
     const fm = record.frontmatter || {};
     const value = extractSection(record.body, 'Value') || record.body.trim();
     const why = extractSection(record.body, 'Why') || undefined;
@@ -360,7 +360,7 @@ export class MemoryIndexer {
       ? classifySensitiveMemoryMaterial(why)
       : null;
     if (sensitiveValueReason || sensitiveWhyReason) {
-      this.store.recordEvent(
+      await this.store.recordEvent(
         'sensitive_material_filtered',
         'memory_indexer',
         groupFolder,
@@ -373,7 +373,7 @@ export class MemoryIndexer {
         },
       );
       if (existing) {
-        this.patchIndexedItemWithRetry(existing.id, {
+        await this.patchIndexedItemWithRetry(existing.id, {
           blocked_reason: 'sensitive',
           embedding_pending: true,
           content_hash: record.contentHash,
@@ -413,11 +413,11 @@ export class MemoryIndexer {
 
     let item = existing;
     if (item) {
-      const patched = this.patchIndexedItemWithRetry(item.id, base);
+      const patched = await this.patchIndexedItemWithRetry(item.id, base);
       if (!patched) return;
       item = patched;
     } else {
-      item = this.store.saveItem({
+      item = await this.store.saveItem({
         id:
           typeof fm.id === 'string' && fm.id.trim() ? fm.id.trim() : undefined,
         scope: normalizeScope(fm.scope),
@@ -430,7 +430,7 @@ export class MemoryIndexer {
     }
 
     if (!MEMORY_SEMANTIC_DEDUP_ENABLED || !this.embeddings.isEnabled()) {
-      this.store.markItemEmbeddingPending(item.id, null);
+      await this.store.markItemEmbeddingPending(item.id, null);
       return;
     }
 
@@ -438,62 +438,62 @@ export class MemoryIndexer {
       const task = Promise.resolve(
         this.embeddings.embedOne(`${item.key}: ${item.value}`),
       )
-        .then((vector) => {
-          this.store.saveItemEmbedding(item.id, vector);
+        .then(async (vector) => {
+          await this.store.saveItemEmbedding(item.id, vector);
         })
-        .catch((err) => {
+        .catch(async (err) => {
           logger.warn(
             { err, itemId: item.id },
             'memory_indexer_embedding_failed',
           );
-          this.store.markItemEmbeddingPending(item.id, null);
+          await this.store.markItemEmbeddingPending(item.id, null);
         });
       this.trackPendingWrite(task);
     } catch (err) {
       logger.warn({ err, itemId: item.id }, 'memory_indexer_embedding_failed');
-      this.store.markItemEmbeddingPending(item.id, null);
+      await this.store.markItemEmbeddingPending(item.id, null);
     }
 
     void actor;
   }
 
-  private indexProcedureChunks(record: IndexerFileRecord): void {
+  private async indexProcedureChunks(record: IndexerFileRecord): Promise<void> {
     const procedureId =
       typeof record.frontmatter?.id === 'string'
         ? record.frontmatter.id.trim()
         : '';
     if (procedureId) {
-      const activeProcedure = this.store.getProcedureById(procedureId);
+      const activeProcedure = await this.store.getProcedureById(procedureId);
       if (!activeProcedure) {
-        this.store.deleteSourceChunks(record.source, record.path);
+        await this.store.deleteSourceChunks(record.source, record.path);
         return;
       }
     }
-    this.indexSourceChunks(record);
+    await this.indexSourceChunks(record);
   }
 
-  private patchIndexedItemWithRetry(
+  private async patchIndexedItemWithRetry(
     id: string,
     patch: Parameters<MemoryStore['patchItem']>[2],
-  ): MemoryItem | null {
-    const initial = this.store.getItemByIdAny(id);
+  ): Promise<MemoryItem | null> {
+    const initial = await this.store.getItemByIdAny(id);
     if (!initial || initial.is_deleted) {
       return null;
     }
     try {
-      return this.store.patchItem(id, initial.version, patch);
+      return await this.store.patchItem(id, initial.version, patch);
     } catch (err) {
       if (!isStalePatchError(err)) throw err;
-      const refreshed = this.store.getItemByIdAny(id);
+      const refreshed = await this.store.getItemByIdAny(id);
       if (!refreshed || refreshed.is_deleted) return null;
-      return this.store.patchItem(id, refreshed.version, patch);
+      return await this.store.patchItem(id, refreshed.version, patch);
     }
   }
 
-  private indexSourceChunks(record: IndexerFileRecord): void {
+  private async indexSourceChunks(record: IndexerFileRecord): Promise<void> {
     const sourceWriteKey = this.buildSourceWriteKey(record.source, record.path);
     const writeGeneration = this.bumpSourceWriteGeneration(sourceWriteKey);
-    this.store.deleteSourceChunks(record.source, record.path);
+    await this.store.deleteSourceChunks(record.source, record.path);
     const scope =
       record.source === 'knowledge'
         ? ('global' as const)
@@ -525,14 +525,14 @@ export class MemoryIndexer {
 
     if (!this.embeddings.isEnabled()) {
       if (this.canApplySourceWrite(sourceWriteKey, writeGeneration, record)) {
-        this.store.saveChunks(chunks);
+        await this.store.saveChunks(chunks);
       }
       return;
     }
 
     const task = this.embeddings
       .embedMany(chunks.map((chunk) => chunk.text))
-      .then((vectors) => {
+      .then(async (vectors) => {
         if (vectors.length !== chunks.length) {
           throw new Error(
             `embedding provider returned ${vectors.length} vectors for ${chunks.length} chunks`,
@@ -546,9 +546,9 @@ export class MemoryIndexer {
         ) {
           return;
         }
-        this.store.saveChunks(chunks);
+        await this.store.saveChunks(chunks);
       })
-      .catch((err) => {
+      .catch(async (err) => {
         logger.warn(
           { err, path: record.path, source: record.source },
           'memory_indexer_chunk_embedding_failed',
@@ -558,7 +558,7 @@ export class MemoryIndexer {
         ) {
           return;
         }
-        this.store.saveChunks(chunks);
+        await this.store.saveChunks(chunks);
       });
     this.trackPendingWrite(task);
   }

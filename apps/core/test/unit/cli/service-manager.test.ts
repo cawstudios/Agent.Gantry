@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { settingsFilePath } from '@core/cli/runtime-home.js';
+import { settingsFilePath } from '@core/config/settings/runtime-home.js';
 
 function createRuntimeHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-service-test-'));
@@ -32,7 +32,7 @@ async function loadServiceManagerWithMocks(
   vi.spyOn(os, 'homedir').mockReturnValue(options.homeDir ?? actualHomeDir);
   const platform = options.platform ?? 'unknown';
   const systemdUser = options.hasSystemdUser ?? false;
-  vi.doMock('@core/cli/platform.js', () => ({
+  vi.doMock('@core/infrastructure/service/platform.js', () => ({
     detectPlatform: () => platform,
     hasSystemdUser: () => systemdUser,
     tryExec: tryExecMock,
@@ -45,7 +45,7 @@ async function loadServiceManagerWithMocks(
       spawn: spawnMock,
     };
   });
-  return import('@core/cli/service-manager.js');
+  return import('@core/infrastructure/service/manager.js');
 }
 
 function writeFallbackMetadata(runtimeHome: string): string {

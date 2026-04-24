@@ -21,6 +21,13 @@ async function createSlackBuiltInChannel(
   return mod.createSlackChannel(opts);
 }
 
+async function createAppBuiltInChannel(
+  opts: ChannelOpts,
+): Promise<import('./channel-provider.js').ChannelAdapter | null> {
+  const mod = await import('./app.js');
+  return await mod.createAppChannel(opts);
+}
+
 async function runBuiltInSetup(
   providerLabel: string,
   setup: (runtimeHome: string) => Promise<number>,
@@ -85,5 +92,23 @@ const slackProvider: ChannelProvider = {
   },
 };
 
+const appProvider: ChannelProvider = {
+  id: 'app',
+  label: 'App',
+  internal: true,
+  jidPrefix: 'app:',
+  folderPrefix: 'app_',
+  isGroupJid: () => true,
+  formatting: 'none',
+  isEnabled: () => true,
+  create: createAppBuiltInChannel,
+  setup: {
+    envKeys: [],
+    describe: () => 'Internal SDK/app control plane channel',
+    run: async () => {},
+  },
+};
+
+registerChannelProvider(appProvider);
 registerChannelProvider(slackProvider);
 registerChannelProvider(telegramProvider);

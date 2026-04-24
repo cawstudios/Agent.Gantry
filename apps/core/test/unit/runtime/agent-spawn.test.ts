@@ -7,7 +7,7 @@ const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
 
 // Mock config
-vi.mock('@core/core/config.js', () => ({
+vi.mock('@core/config/index.js', () => ({
   AGENT_MAX_OUTPUT_SIZE: 10485760,
   AGENT_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/myclaw-test-data',
@@ -29,13 +29,14 @@ vi.mock('@core/core/config.js', () => ({
 }));
 
 // Mock logger
-vi.mock('@core/core/logger.js', () => ({
+vi.mock('@core/infrastructure/logging/logger.js', () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
   },
+  redactString: (value: string) => value,
 }));
 
 // Mock fs
@@ -119,12 +120,12 @@ vi.mock('child_process', async () => {
 });
 
 import { spawnAgent, AgentOutput } from '@core/runtime/agent-spawn.js';
-import { getEffectiveModelConfig } from '@core/core/config.js';
+import { getEffectiveModelConfig } from '@core/config/index.js';
 import { spawn } from 'child_process';
 import fs from 'fs';
-import type { RegisteredGroup } from '@core/core/types.js';
+import type { RegisteredGroup } from '@core/domain/types.js';
 import { getPromptProfileService } from '@core/runtime/prompt-profile.js';
-import { logger } from '@core/core/logger.js';
+import { logger } from '@core/infrastructure/logging/logger.js';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
