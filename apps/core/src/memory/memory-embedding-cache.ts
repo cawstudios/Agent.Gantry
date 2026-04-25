@@ -3,10 +3,18 @@ import crypto from 'crypto';
 import {
   MEMORY_EMBED_MODEL,
   OPENAI_DAILY_EMBED_LIMIT,
-} from '../core/config.js';
-import { logger } from '../core/logger.js';
-import type { MemoryStore } from './memory-store.js';
+} from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import type { EmbeddingProvider } from './memory-embeddings.js';
+
+export interface EmbeddingCacheStore {
+  getCachedEmbedding(textHash: string, model: string): Promise<number[] | null>;
+  putCachedEmbedding(
+    textHash: string,
+    model: string,
+    embedding: number[],
+  ): Promise<void>;
+}
 
 let dailyApiCalls = 0;
 let dailyResetDate = new Date().toDateString();
@@ -40,10 +48,7 @@ function trackAndCheckBudget(callCount: number): boolean {
 export class CachedEmbeddingProvider implements EmbeddingProvider {
   constructor(
     private readonly inner: EmbeddingProvider,
-    private readonly store: Pick<
-      MemoryStore,
-      'getCachedEmbedding' | 'putCachedEmbedding'
-    >,
+    private readonly store: EmbeddingCacheStore,
     private readonly model: string = MEMORY_EMBED_MODEL,
   ) {}
 
@@ -57,7 +62,7 @@ export class CachedEmbeddingProvider implements EmbeddingProvider {
 
   async embedOne(text: string): Promise<number[]> {
     const hash = hashText(text);
-    const cached = this.store.getCachedEmbedding(hash, this.model);
+    const cached = await this.store.getCachedEmbedding(hash, this.model);
     if (cached) return cached;
 
     if (!trackAndCheckBudget(1)) {
@@ -65,7 +70,7 @@ export class CachedEmbeddingProvider implements EmbeddingProvider {
     }
 
     const embedding = await this.inner.embedOne(text);
-    this.store.putCachedEmbedding(hash, this.model, embedding);
+    await this.store.putCachedEmbedding(hash, this.model, embedding);
     return embedding;
   }
 
@@ -75,22 +80,24 @@ export class CachedEmbeddingProvider implements EmbeddingProvider {
     const results: Array<number[] | null> = new Array(texts.length).fill(null);
     const misses = new Map<string, { text: string; indexes: number[] }>();
 
-    texts.forEach((text, index) => {
-      const hash = hashText(text);
-      const cached = this.store.getCachedEmbedding(hash, this.model);
-      if (cached) {
-        results[index] = cached;
-        return;
-      }
+    await Promise.all(
+      texts.map(async (text, index) => {
+        const hash = hashText(text);
+        const cached = await this.store.getCachedEmbedding(hash, this.model);
+        if (cached) {
+          results[index] = cached;
+          return;
+        }
 
-      const existing = misses.get(hash);
-      if (existing) {
-        existing.indexes.push(index);
-        return;
-      }
+        const existing = misses.get(hash);
+        if (existing) {
+          existing.indexes.push(index);
+          return;
+        }
 
-      misses.set(hash, { text, indexes: [index] });
-    });
+        misses.set(hash, { text, indexes: [index] });
+      }),
+    );
 
     if (misses.size > 0) {
       const missEntries = [...misses.entries()];
@@ -106,14 +113,16 @@ export class CachedEmbeddingProvider implements EmbeddingProvider {
         );
       }
 
-      missEntries.forEach(([hash, value], index) => {
-        const embedding = embeddings[index];
-        if (!embedding) return;
-        this.store.putCachedEmbedding(hash, this.model, embedding);
-        for (const resultIndex of value.indexes) {
-          results[resultIndex] = embedding;
-        }
-      });
+      await Promise.all(
+        missEntries.map(async ([hash, value], index) => {
+          const embedding = embeddings[index];
+          if (!embedding) return;
+          await this.store.putCachedEmbedding(hash, this.model, embedding);
+          for (const resultIndex of value.indexes) {
+            results[resultIndex] = embedding;
+          }
+        }),
+      );
     }
 
     return results.map((embedding, index) => {

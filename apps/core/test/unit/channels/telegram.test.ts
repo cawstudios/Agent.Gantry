@@ -3,16 +3,21 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 // --- Mocks ---
 
 // Mock config
-vi.mock('@core/core/config.js', () => ({
+vi.mock('@core/config/index.js', () => ({
   ASSISTANT_NAME: 'Andy',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
   getTelegramBotToken: () => process.env.TELEGRAM_BOT_TOKEN || '',
-  TELEGRAM_PERMISSION_APPROVER_IDS: new Set<string>(),
+  TELEGRAM_PERMISSION_APPROVER_IDS: new Set<string>([
+    '12345',
+    '222',
+    '333',
+    '444',
+  ]),
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));
 
 // Mock logger
-vi.mock('@core/core/logger.js', () => ({
+vi.mock('@core/infrastructure/logging/logger.js', () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -97,7 +102,8 @@ import {
   TelegramChannel,
   TelegramChannelOpts,
 } from '@core/channels/telegram.js';
-import { logger } from '@core/core/logger.js';
+import { writeTelegramFetchResponseToFile } from '@core/channels/telegram-file-download.js';
+import { logger } from '@core/infrastructure/logging/logger.js';
 
 // --- Test helpers ---
 
@@ -226,8 +232,8 @@ describe('TelegramChannel', () => {
     vi.clearAllMocks();
 
     // Mock fs operations used by downloadFile
-    vi.spyOn(fs, 'mkdirSync').mockReturnValue(undefined);
-    vi.spyOn(fs, 'writeFileSync').mockReturnValue(undefined);
+    vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as any);
+    vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
 
     // Mock global fetch for file downloads
     vi.stubGlobal(
@@ -1107,10 +1113,8 @@ describe('TelegramChannel', () => {
 
   describe('download + polling edge cases', () => {
     it('throws when download response has neither reader nor arrayBuffer', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-
       await expect(
-        (channel as any).writeFetchResponseToFile(
+        writeTelegramFetchResponseToFile(
           { body: null, headers: { get: () => null } },
           '/tmp/missing-body.bin',
         ),
@@ -1118,10 +1122,8 @@ describe('TelegramChannel', () => {
     });
 
     it('returns false when arrayBuffer response exceeds max size', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-
       const large = new Uint8Array(51 * 1024 * 1024).buffer;
-      const wrote = await (channel as any).writeFetchResponseToFile(
+      const wrote = await writeTelegramFetchResponseToFile(
         {
           body: null,
           headers: { get: () => null },
@@ -1138,11 +1140,15 @@ describe('TelegramChannel', () => {
     });
 
     it('streams chunks to disk when reader is available', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-      const openSpy = vi.spyOn(fs, 'openSync').mockReturnValue(77 as any);
-      const writeSpy = vi.spyOn(fs, 'writeSync').mockReturnValue(1 as any);
-      const closeSpy = vi.spyOn(fs, 'closeSync').mockReturnValue(undefined);
-      const unlinkSpy = vi.spyOn(fs, 'unlinkSync').mockReturnValue(undefined);
+      const write = vi.fn().mockResolvedValue(undefined);
+      const close = vi.fn().mockResolvedValue(undefined);
+      const openSpy = vi.spyOn(fs.promises, 'open').mockResolvedValue({
+        write,
+        close,
+      } as any);
+      const unlinkSpy = vi
+        .spyOn(fs.promises, 'unlink')
+        .mockResolvedValue(undefined);
       const reader = {
         read: vi
           .fn()
@@ -1157,7 +1163,7 @@ describe('TelegramChannel', () => {
           .mockResolvedValueOnce({ done: true }),
       };
 
-      const wrote = await (channel as any).writeFetchResponseToFile(
+      const wrote = await writeTelegramFetchResponseToFile(
         {
           body: { getReader: () => reader },
           headers: { get: () => null },
@@ -1167,16 +1173,19 @@ describe('TelegramChannel', () => {
 
       expect(wrote).toBe(true);
       expect(openSpy).toHaveBeenCalled();
-      expect(writeSpy).toHaveBeenCalledTimes(2);
-      expect(closeSpy).toHaveBeenCalledWith(77);
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(close).toHaveBeenCalled();
       expect(unlinkSpy).not.toHaveBeenCalled();
     });
 
     it('cleans up partial file when streamed download exceeds max size', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-      vi.spyOn(fs, 'openSync').mockReturnValue(88 as any);
-      vi.spyOn(fs, 'closeSync').mockReturnValue(undefined);
-      const unlinkSpy = vi.spyOn(fs, 'unlinkSync').mockReturnValue(undefined);
+      vi.spyOn(fs.promises, 'open').mockResolvedValue({
+        write: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+      } as any);
+      const unlinkSpy = vi
+        .spyOn(fs.promises, 'unlink')
+        .mockResolvedValue(undefined);
       const reader = {
         read: vi.fn().mockResolvedValueOnce({
           done: false,
@@ -1184,7 +1193,7 @@ describe('TelegramChannel', () => {
         }),
       };
 
-      const wrote = await (channel as any).writeFetchResponseToFile(
+      const wrote = await writeTelegramFetchResponseToFile(
         {
           body: { getReader: () => reader },
           headers: { get: () => null },
@@ -1197,16 +1206,19 @@ describe('TelegramChannel', () => {
     });
 
     it('rethrows stream read errors and marks partial file for cleanup', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-      vi.spyOn(fs, 'openSync').mockReturnValue(99 as any);
-      vi.spyOn(fs, 'closeSync').mockReturnValue(undefined);
-      const unlinkSpy = vi.spyOn(fs, 'unlinkSync').mockReturnValue(undefined);
+      vi.spyOn(fs.promises, 'open').mockResolvedValue({
+        write: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+      } as any);
+      const unlinkSpy = vi
+        .spyOn(fs.promises, 'unlink')
+        .mockResolvedValue(undefined);
       const reader = {
         read: vi.fn().mockRejectedValue(new Error('stream read failed')),
       };
 
       await expect(
-        (channel as any).writeFetchResponseToFile(
+        writeTelegramFetchResponseToFile(
           {
             body: { getReader: () => reader },
             headers: { get: () => null },
@@ -1296,6 +1308,30 @@ describe('TelegramChannel', () => {
       );
     });
 
+    it('splits long messages without breaking emoji surrogate pairs', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const emoji = '🙂';
+      const longText = `${'x'.repeat(4095)}${emoji}tail`;
+      await channel.sendMessage('tg:100200300', longText);
+
+      expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(2);
+      expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
+        1,
+        '100200300',
+        'x'.repeat(4095),
+        { parse_mode: 'MarkdownV2' },
+      );
+      expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        '100200300',
+        `${emoji}tail`,
+        { parse_mode: 'MarkdownV2' },
+      );
+    });
+
     it('sends exactly one message at 4096 characters', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
@@ -1307,7 +1343,27 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(1);
     });
 
-    it('handles send failure gracefully', async () => {
+    it.each([799, 800, 801])(
+      'sends %i character messages without splitting',
+      async (length) => {
+        const opts = createTestOpts();
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+        currentBot().api.sendMessage.mockClear();
+
+        const text = 'z'.repeat(length);
+        await channel.sendMessage('tg:100200300', text);
+
+        expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(1);
+        expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+          '100200300',
+          text,
+          { parse_mode: 'MarkdownV2' },
+        );
+      },
+    );
+
+    it('falls back when the first send attempt fails', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
@@ -1316,10 +1372,34 @@ describe('TelegramChannel', () => {
         new Error('Network error'),
       );
 
-      // Should not throw
       await expect(
         channel.sendMessage('tg:100200300', 'Will fail'),
       ).resolves.toBeUndefined();
+      expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('marks long message failures after an earlier chunk as partial delivery', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const apiError = new Error('Network lost on second chunk');
+      currentBot()
+        .api.sendMessage.mockReset()
+        .mockResolvedValueOnce({ message_id: 1 })
+        .mockRejectedValueOnce(apiError)
+        .mockRejectedValueOnce(apiError)
+        .mockRejectedValueOnce(apiError);
+
+      await expect(
+        channel.sendMessage('tg:100200300', 'x'.repeat(5000)),
+      ).rejects.toMatchObject({
+        name: 'PartialTelegramDeliveryError',
+        partialMessageDelivery: true,
+        deliveredChunks: 1,
+        totalChunks: 2,
+      });
+      expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(4);
     });
 
     it('falls back to escaped MarkdownV2 when raw MarkdownV2 fails', async () => {
@@ -1348,14 +1428,13 @@ describe('TelegramChannel', () => {
       );
     });
 
-    it('does nothing when bot is not initialized', async () => {
+    it('rejects when bot is not initialized', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
 
-      // Don't connect — bot is null
-      await channel.sendMessage('tg:100200300', 'No bot');
-
-      // No error, no API call
+      await expect(
+        channel.sendMessage('tg:100200300', 'No bot'),
+      ).rejects.toThrow('Telegram bot not initialized');
     });
   });
 
@@ -1707,6 +1786,7 @@ describe('TelegramChannel', () => {
         {
           requestId: 'perm-command',
           sourceGroup: 'whatsapp_main',
+          threadId: '42',
           toolName: 'Bash',
           toolInput: {
             command: 'rm -rf /tmp/old-cache && npm install',
@@ -1717,10 +1797,15 @@ describe('TelegramChannel', () => {
 
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
+        expect.stringContaining('Thread: 42'),
+        expect.objectContaining({ message_thread_id: 42 }),
+      );
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        '100200300',
         expect.stringContaining(
           'Command: `rm -rf /tmp/old-cache && npm install`',
         ),
-        expect.any(Object),
+        expect.objectContaining({ message_thread_id: 42 }),
       );
 
       const callbackCtx = {
@@ -1791,10 +1876,6 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      currentBot()
-        .api.getChatMember.mockResolvedValueOnce({ status: 'member' })
-        .mockResolvedValueOnce({ status: 'administrator' });
-
       const decisionPromise = channel.requestPermissionApproval(
         'tg:100200300',
         {
@@ -1808,7 +1889,7 @@ describe('TelegramChannel', () => {
       const deniedCtx = {
         callbackQuery: { data: 'perm:deny:perm-2' },
         chat: { id: 100200300 },
-        from: { id: 333, first_name: 'Visitor' },
+        from: { id: 111, first_name: 'Visitor' },
         answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
       };
       await triggerCallbackQuery(deniedCtx);
@@ -1874,6 +1955,7 @@ describe('TelegramChannel', () => {
       const responsePromise = channel.requestUserAnswer('tg:100200300', {
         requestId: 'userq-long',
         sourceGroup: 'whatsapp_main',
+        threadId: '99abc',
         questions: [
           {
             question: 'Where should we deploy?',
@@ -1889,6 +1971,9 @@ describe('TelegramChannel', () => {
       await flushPromises();
 
       const firstCall = currentBot().api.sendMessage.mock.calls[0];
+      expect(firstCall[1]).toContain('Source: whatsapp_main');
+      expect(firstCall[1]).toContain('Thread: 99abc');
+      expect(firstCall[2]).not.toHaveProperty('message_thread_id');
       const replyMarkup = firstCall[2].reply_markup;
       const keyboard = replyMarkup.inline_keyboard as Array<
         Array<{ text: string }>
@@ -1919,6 +2004,7 @@ describe('TelegramChannel', () => {
       const responsePromise = channel.requestUserAnswer('tg:100200300', {
         requestId: 'userq-1',
         sourceGroup: 'whatsapp_main',
+        threadId: '77',
         questions: [
           {
             question: 'Which environment should we deploy to?',
@@ -1937,6 +2023,7 @@ describe('TelegramChannel', () => {
         '100200300',
         expect.stringContaining('Which environment should we deploy to?'),
         expect.objectContaining({
+          message_thread_id: 77,
           reply_markup: expect.objectContaining({
             inline_keyboard: expect.any(Array),
           }),
@@ -1962,6 +2049,53 @@ describe('TelegramChannel', () => {
       expect(callbackCtx.answerCallbackQuery).toHaveBeenCalledWith({
         text: 'Saved.',
       });
+    });
+
+    it('rejects non-admin user-question callbacks and keeps the prompt pending', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const responsePromise = channel.requestUserAnswer('tg:100200300', {
+        requestId: 'userq-auth',
+        sourceGroup: 'whatsapp_main',
+        questions: [
+          {
+            question: 'Approve rollout?',
+            header: 'Rollout',
+            options: [
+              { label: 'Yes', description: 'Proceed' },
+              { label: 'No', description: 'Stop' },
+            ],
+            multiSelect: false,
+          },
+        ],
+      });
+      await flushPromises();
+
+      const deniedCtx = {
+        callbackQuery: { data: 'userq:select:userq-auth:0:0' },
+        chat: { id: 100200300 },
+        from: { id: 111, first_name: 'Visitor' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      };
+      await triggerCallbackQuery(deniedCtx);
+      expect(deniedCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: 'Only approved admins can answer this prompt.',
+        show_alert: true,
+      });
+
+      const approvedCtx = {
+        callbackQuery: { data: 'userq:select:userq-auth:0:1' },
+        chat: { id: 100200300 },
+        from: { id: 222, first_name: 'Admin' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      };
+      await triggerCallbackQuery(approvedCtx);
+
+      const response = await responsePromise;
+      expect(response.answers['Approve rollout?']).toBe('No');
+      expect(response.answeredBy).toBe('Admin');
     });
 
     it('resolves multi-select question when Done is pressed', async () => {
@@ -2040,7 +2174,8 @@ describe('TelegramChannel', () => {
       // Invoke the error handler as grammy would
       errorHandler({ message: 'Polling error occurred' });
 
-      const { logger: mockLogger } = await import('@core/core/logger.js');
+      const { logger: mockLogger } =
+        await import('@core/infrastructure/logging/logger.js');
       expect(mockLogger.error).toHaveBeenCalledWith(
         { error: 'Polling error occurred' },
         'Telegram bot error',
@@ -2060,9 +2195,12 @@ describe('TelegramChannel', () => {
       const apiError = new Error('Chat not found');
       currentBot().api.sendMessage.mockRejectedValue(apiError);
 
-      await channel.sendMessage('tg:100200300', 'This will fail');
+      await expect(
+        channel.sendMessage('tg:100200300', 'This will fail'),
+      ).rejects.toThrow('Chat not found');
 
-      const { logger: mockLogger } = await import('@core/core/logger.js');
+      const { logger: mockLogger } =
+        await import('@core/infrastructure/logging/logger.js');
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.objectContaining({ jid: 'tg:100200300' }),
         'Failed to send Telegram message',

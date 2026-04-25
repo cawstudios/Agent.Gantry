@@ -30,7 +30,7 @@ def write_lines(path: Path, count: int) -> None:
 
 def make_base_fixture(root: Path) -> Path:
     write_text(root / "README.md", "# Fixture\n")
-    write_lines(root / "apps/core/src/core/ok.ts", 10)
+    write_lines(root / "apps/core/src/domain/ok.ts", 10)
     write_json(
         root / ".codex/architecture-exceptions.json",
         {"version": 1, "exceptions": []},
@@ -64,16 +64,40 @@ class CheckArchitectureTests(unittest.TestCase):
     def test_over_budget_file_fails_without_exception(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))
-            write_lines(root / "apps/core/src/core/oversized.ts", 401)
+            write_lines(root / "apps/core/src/domain/oversized.ts", 701)
             result = run_architecture_check(root)
             self.assertEqual(result.returncode, 1)
             self.assertIn("[File Size Budget]", result.stdout)
-            self.assertIn("apps/core/src/core/oversized.ts has 401 lines", result.stdout)
+            self.assertIn("apps/core/src/domain/oversized.ts has 701 lines", result.stdout)
+
+    def test_target_specific_file_size_limit_allows_postgres_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_lines(
+                root / "apps/core/src/infrastructure/postgres/schema/schema.ts",
+                900,
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    def test_target_specific_file_size_limit_fails_above_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_lines(
+                root / "apps/core/src/infrastructure/postgres/schema/schema.ts",
+                901,
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(
+                "apps/core/src/infrastructure/postgres/schema/schema.ts has 901 lines (limit 900)",
+                result.stdout,
+            )
 
     def test_valid_and_expired_exception_behavior(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))
-            write_lines(root / "apps/core/src/core/oversized.ts", 401)
+            write_lines(root / "apps/core/src/domain/oversized.ts", 701)
             write_json(
                 root / ".codex/architecture-exceptions.json",
                 {
@@ -81,11 +105,11 @@ class CheckArchitectureTests(unittest.TestCase):
                     "exceptions": [
                         {
                             "rule": "file_size_budget",
-                            "target": "apps/core/src/core/oversized.ts",
+                            "target": "apps/core/src/domain/oversized.ts",
                             "owner": "TEST-1",
                             "reason": "Fixture baseline",
                             "expires_on": "2099-12-31",
-                            "max_lines": 401,
+                            "max_lines": 701,
                         }
                     ],
                 },
@@ -100,11 +124,11 @@ class CheckArchitectureTests(unittest.TestCase):
                     "exceptions": [
                         {
                             "rule": "file_size_budget",
-                            "target": "apps/core/src/core/oversized.ts",
+                            "target": "apps/core/src/domain/oversized.ts",
                             "owner": "TEST-1",
                             "reason": "Fixture baseline",
                             "expires_on": "2000-01-01",
-                            "max_lines": 401,
+                            "max_lines": 701,
                         }
                     ],
                 },
@@ -117,7 +141,7 @@ class CheckArchitectureTests(unittest.TestCase):
     def test_excepted_file_growth_beyond_max_lines_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))
-            write_lines(root / "apps/core/src/core/oversized.ts", 402)
+            write_lines(root / "apps/core/src/domain/oversized.ts", 702)
             write_json(
                 root / ".codex/architecture-exceptions.json",
                 {
@@ -125,31 +149,58 @@ class CheckArchitectureTests(unittest.TestCase):
                     "exceptions": [
                         {
                             "rule": "file_size_budget",
-                            "target": "apps/core/src/core/oversized.ts",
+                            "target": "apps/core/src/domain/oversized.ts",
                             "owner": "TEST-1",
                             "reason": "Fixture baseline",
                             "expires_on": "2099-12-31",
-                            "max_lines": 401,
+                            "max_lines": 701,
                         }
                     ],
                 },
             )
             result = run_architecture_check(root)
             self.assertEqual(result.returncode, 1)
-            self.assertIn("max_lines is 401", result.stdout)
+            self.assertIn("max_lines is 701", result.stdout)
+
+    def test_stale_target_specific_exception_mentions_target_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_lines(
+                root / "apps/core/src/infrastructure/postgres/schema/schema.ts",
+                900,
+            )
+            write_json(
+                root / ".codex/architecture-exceptions.json",
+                {
+                    "version": 1,
+                    "exceptions": [
+                        {
+                            "rule": "file_size_budget",
+                            "target": "apps/core/src/infrastructure/postgres/schema/schema.ts",
+                            "owner": "TEST-1",
+                            "reason": "Fixture baseline",
+                            "expires_on": "2099-12-31",
+                            "max_lines": 901,
+                        }
+                    ],
+                },
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("within 900 lines", result.stdout)
 
     def test_forbidden_import_edge_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))
             write_lines(root / "apps/core/src/runtime/worker.ts", 5)
             write_text(
-                root / "apps/core/src/core/boundary-break.ts",
+                root / "apps/core/src/domain/boundary-break.ts",
                 'import { run } from "../runtime/worker";\nexport const value = run;\n',
             )
             result = run_architecture_check(root)
             self.assertEqual(result.returncode, 1)
             self.assertIn("[Forbidden Import Edges]", result.stdout)
-            self.assertIn("apps/core/src/core/boundary-break.ts imports apps/core/src/runtime/worker.ts", result.stdout)
+            self.assertIn("apps/core/src/domain/boundary-break.ts imports apps/core/src/runtime/worker.ts", result.stdout)
 
     def test_forbidden_channel_registration_surface_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -204,7 +255,7 @@ class CheckArchitectureTests(unittest.TestCase):
     def test_malformed_exception_missing_owner_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))
-            write_lines(root / "apps/core/src/core/oversized.ts", 401)
+            write_lines(root / "apps/core/src/domain/oversized.ts", 701)
             write_json(
                 root / ".codex/architecture-exceptions.json",
                 {
@@ -212,10 +263,10 @@ class CheckArchitectureTests(unittest.TestCase):
                     "exceptions": [
                         {
                             "rule": "file_size_budget",
-                            "target": "apps/core/src/core/oversized.ts",
+                            "target": "apps/core/src/domain/oversized.ts",
                             "reason": "Fixture baseline",
                             "expires_on": "2099-12-31",
-                            "max_lines": 401,
+                            "max_lines": 701,
                         }
                     ],
                 },
@@ -240,10 +291,14 @@ class VerifyContractTests(unittest.TestCase):
         phases = [line.split(":", 1)[0] for line in result.stdout.splitlines() if ":" in line]
         self.assertIn("architecture", phases)
         self.assertIn("runtime-truth", phases)
+        self.assertIn("build", phases)
+        self.assertIn("e2e", phases)
         self.assertLess(phases.index("structural"), phases.index("architecture"))
+        self.assertLess(phases.index("structural"), phases.index("build"))
         self.assertLess(phases.index("architecture"), phases.index("runtime-truth"))
         self.assertLess(phases.index("runtime-truth"), phases.index("factory-python-tests"))
         self.assertLess(phases.index("factory-python-tests"), phases.index("typecheck"))
+        self.assertLess(phases.index("tests"), phases.index("e2e"))
 
 
 if __name__ == "__main__":

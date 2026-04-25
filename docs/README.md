@@ -4,6 +4,8 @@ This directory holds in-repo product, architecture, factory, and operational doc
 
 Use these files as the local source of truth when planning or reviewing work:
 
+- [architecture/runtime-components.md](architecture/runtime-components.md) for the contributor runtime component map and source-reading paths
+- [MEMORY.md](MEMORY.md) for the app-grade memory boundary model and dreaming lifecycle
 - [npm-cli-onboarding.md](npm-cli-onboarding.md) for end-user npm install and first-run setup
 - [SPEC.md](SPEC.md) for behavior and architecture expectations
 - [SECURITY.md](SECURITY.md) for the security model

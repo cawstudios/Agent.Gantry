@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { GroupQueue } from '@core/runtime/group-queue.js';
 
 // Mock config for DATA_DIR used by sendMessage/closeStdin helpers.
-vi.mock('@core/core/config.js', () => ({
+vi.mock('@core/config/index.js', () => ({
   DATA_DIR: '/tmp/myclaw-test-data',
 }));
 
@@ -172,7 +172,7 @@ describe('GroupQueue', () => {
     const processMessages = vi.fn(async () => true);
     queue.setProcessMessagesFn(processMessages);
 
-    await queue.shutdown(1000);
+    await queue.shutdown(0);
 
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(100);
@@ -650,7 +650,7 @@ describe('GroupQueue', () => {
     );
 
     // Shutdown should complete without killing the process
-    await queue.shutdown(5000);
+    await queue.shutdown(0);
 
     // The process should still not be killed (detached)
     expect(mockProcess.killed).toBe(false);
@@ -662,6 +662,32 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('shutdown waits for active runs within the grace period', async () => {
+    let resolveProcess: () => void;
+    let shutdownResolved = false;
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    const shutdownPromise = queue.shutdown(5000).then(() => {
+      shutdownResolved = true;
+    });
+    await Promise.resolve();
+    expect(shutdownResolved).toBe(false);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+    await shutdownPromise;
+    expect(shutdownResolved).toBe(true);
   });
 
   // --- Coverage for runTask error handling ---
@@ -806,7 +832,7 @@ describe('GroupQueue', () => {
   it('enqueueTask does nothing after shutdown', async () => {
     const taskFn = vi.fn(async () => {});
 
-    await queue.shutdown(1000);
+    await queue.shutdown(0);
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
     await vi.advanceTimersByTimeAsync(100);
 
@@ -874,7 +900,7 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group1@g.us');
 
     // Shutdown while first is still running
-    await queue.shutdown(1000);
+    await queue.shutdown(0);
 
     // Complete first — drainGroup should see shuttingDown and skip
     resolveProcess!();

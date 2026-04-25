@@ -4,21 +4,15 @@ import path from 'path';
 import { OneCLI } from '@onecli-sh/sdk';
 
 import {
-  DATA_DIR,
   AGENTS_DIR,
-  getHostCredentialEnv,
   MYCLAW_CREDENTIAL_MODE,
-  ONECLI_ALLOWED_ENV_KEYS,
   ONECLI_URL,
-} from '../core/config.js';
-import { resolveHostCredentialMode } from '../core/credential-mode.js';
-import {
-  isPathInside,
-  resolvePathWithRealParent,
-  safeRealpathSync,
-} from '../core/fs-paths.js';
-import { logger } from '../core/logger.js';
-import { RegisteredGroup } from '../core/types.js';
+} from '../config/index.js';
+import { resolveHostCredentialMode } from '../config/credentials/mode.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { filterTrustedOnecliEnv } from '../infrastructure/onecli/env-policy.js';
+import { assertValidOnecliUrl } from '../infrastructure/onecli/policy.js';
+import { RegisteredGroup } from '../domain/types.js';
 import {
   resolveGroupFolderPath,
   resolveGroupIpcPath,
@@ -31,86 +25,20 @@ import {
 } from './agent-spawn-layout.js';
 import { HostRuntimeContext } from './agent-spawn-types.js';
 
-const onecli = new OneCLI({ url: ONECLI_URL });
-
-const ONECLI_ALLOWED_ENV_KEY_SET = new Set<string>(ONECLI_ALLOWED_ENV_KEYS);
-const ONECLI_CA_CERT_ROOT = path.resolve(DATA_DIR, 'onecli', 'certs');
-
-function sanitizeCertFileSegment(value?: string): string {
-  const trimmed = value?.trim();
-  if (!trimmed) return 'default';
-  return (
-    trimmed
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80) || 'default'
-  );
-}
-
-function resolveOnecliCaTargetPath(
-  requestedPath: string | undefined,
-  agentIdentifier?: string,
-): { targetPath: string; remapped: boolean } {
-  const realRoot = safeRealpathSync(ONECLI_CA_CERT_ROOT);
-  const fallbackPath = path.join(
-    realRoot,
-    `${sanitizeCertFileSegment(agentIdentifier)}.pem`,
-  );
-  if (!requestedPath) {
-    return { targetPath: fallbackPath, remapped: false };
-  }
-
-  const resolvedRequestedPath = resolvePathWithRealParent(requestedPath);
-  if (isPathInside(realRoot, resolvedRequestedPath)) {
-    return { targetPath: resolvedRequestedPath, remapped: false };
-  }
-
-  return { targetPath: fallbackPath, remapped: true };
-}
-
 function filterOnecliEnv(
   source: Record<string, string>,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
-  const dropped: string[] = [];
-  for (const [key, value] of Object.entries(source)) {
-    if (
-      !ONECLI_ALLOWED_ENV_KEY_SET.has(key) ||
-      typeof value !== 'string' ||
-      value.length === 0
-    ) {
-      dropped.push(key);
-      continue;
-    }
-    out[key] = value;
-  }
-  if (dropped.length > 0) {
+  const { env, droppedKeys } = filterTrustedOnecliEnv(source);
+  if (droppedKeys.length > 0) {
     logger.warn(
       {
-        droppedKeys: dropped.sort().slice(0, 20),
-        droppedCount: dropped.length,
+        droppedKeys: droppedKeys.sort().slice(0, 20),
+        droppedCount: droppedKeys.length,
       },
       'Dropped disallowed OneCLI env keys',
     );
   }
-  return out;
-}
-
-function remapOnecliEnvCertificatePath(
-  env: Record<string, string>,
-  originalPath: string | undefined,
-  targetPath: string,
-): void {
-  if (originalPath) {
-    for (const [key, value] of Object.entries(env)) {
-      if (value === originalPath) {
-        env[key] = targetPath;
-      }
-    }
-  }
-  env.NODE_EXTRA_CA_CERTS = targetPath;
+  return env;
 }
 
 export async function getHostRuntimeCredentialEnv(
@@ -118,26 +46,11 @@ export async function getHostRuntimeCredentialEnv(
 ): Promise<{
   env: Record<string, string>;
   onecliApplied: boolean;
-  onecliCaPath?: string;
 }> {
-  const envFromFile = getHostCredentialEnv();
   const credentialModeRaw = MYCLAW_CREDENTIAL_MODE;
-  const credentialMode = resolveHostCredentialMode(
-    credentialModeRaw,
-    ONECLI_URL,
-  );
+  const credentialMode = resolveHostCredentialMode(credentialModeRaw);
   const onecliUrl = ONECLI_URL?.trim();
-  const onecliRequired = credentialMode === 'onecli-only';
-  const onecliEnabled = credentialMode === 'hybrid' || onecliRequired;
-
-  if (!onecliEnabled) {
-    return {
-      env: {
-        ...envFromFile,
-      },
-      onecliApplied: false,
-    };
-  }
+  const onecliRequired = credentialMode === 'onecli';
   if (!onecliUrl) {
     if (onecliRequired) {
       throw new Error(
@@ -145,63 +58,25 @@ export async function getHostRuntimeCredentialEnv(
       );
     }
     return {
-      env: {
-        ...envFromFile,
-      },
+      env: {},
       onecliApplied: false,
     };
   }
+  const trustedOnecliUrl = assertValidOnecliUrl(onecliUrl);
+  const onecli = new OneCLI({ url: trustedOnecliUrl });
 
   let onecliEnv: Record<string, string> = {};
   let onecliApplied = false;
-  let onecliCaPath: string | undefined;
 
   try {
     const config = await onecli.getContainerConfig(agentIdentifier);
     onecliEnv = filterOnecliEnv(config.env || {});
     onecliApplied = true;
     if (config.caCertificate) {
-      const requestedPath = config.caCertificateContainerPath?.trim();
-      const { targetPath, remapped } = resolveOnecliCaTargetPath(
-        requestedPath,
-        agentIdentifier,
+      logger.warn(
+        { agentIdentifier: agentIdentifier || 'default' },
+        'Ignored OneCLI CA certificate; broker config cannot modify runner trust roots',
       );
-      try {
-        if (remapped && requestedPath) {
-          logger.warn(
-            {
-              requestedPath,
-              targetPath,
-            },
-            'Remapped OneCLI CA certificate path outside runtime data directory',
-          );
-        }
-        fs.mkdirSync(path.dirname(targetPath), {
-          recursive: true,
-          mode: 0o700,
-        });
-        const realRoot = safeRealpathSync(ONECLI_CA_CERT_ROOT);
-        const writeTargetPath = resolvePathWithRealParent(targetPath);
-        if (!isPathInside(realRoot, writeTargetPath)) {
-          throw new Error(
-            `Refusing to write OneCLI CA certificate outside runtime root: ${writeTargetPath}`,
-          );
-        }
-        fs.writeFileSync(writeTargetPath, config.caCertificate, {
-          mode: 0o600,
-        });
-        remapOnecliEnvCertificatePath(
-          onecliEnv,
-          requestedPath,
-          writeTargetPath,
-        );
-        onecliCaPath = writeTargetPath;
-      } catch (err) {
-        logger.warn(
-          { certificatePath: targetPath, err },
-          'Failed to write OneCLI CA certificate',
-        );
-      }
     }
   } catch (err) {
     logger.warn(
@@ -216,12 +91,8 @@ export async function getHostRuntimeCredentialEnv(
   }
 
   return {
-    env: {
-      ...(onecliRequired ? {} : envFromFile),
-      ...onecliEnv,
-    },
+    env: onecliEnv,
     onecliApplied,
-    onecliCaPath,
   };
 }
 

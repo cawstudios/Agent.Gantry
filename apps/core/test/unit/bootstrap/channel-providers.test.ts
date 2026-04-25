@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { RuntimeSettings } from '@core/cli/runtime-settings.js';
+import { RuntimeSettings } from '@core/config/settings/runtime-settings.js';
 import '@core/channels/register-builtins.js';
 import {
   getChannelProvider,
@@ -34,7 +34,6 @@ function makeRuntimeSettings(enabled: {
     },
     memory: {
       enabled: true,
-      root: 'memory',
       embeddings: {
         enabled: false,
         provider: 'disabled',
@@ -57,13 +56,16 @@ function makeRuntimeSettings(enabled: {
 describe('listChannelProviders', () => {
   it('keeps deterministic provider order and ids', () => {
     expect(listChannelProviders().map((provider) => provider.id)).toEqual([
+      'app',
       'slack',
       'telegram',
     ]);
   });
 
   it('resolves enablement from runtime settings', () => {
-    const [slackProvider, telegramProvider] = listChannelProviders();
+    const slackProvider = getChannelProvider('slack')!;
+    const telegramProvider = getChannelProvider('telegram')!;
+    const appProvider = getChannelProvider('app')!;
 
     expect(
       slackProvider.isEnabled(
@@ -85,6 +87,11 @@ describe('listChannelProviders', () => {
         makeRuntimeSettings({ telegram: false, slack: false }),
       ),
     ).toBe(false);
+    expect(
+      appProvider.isEnabled(
+        makeRuntimeSettings({ telegram: false, slack: false }),
+      ),
+    ).toBe(true);
   });
 
   it('throws on duplicate provider ids', () => {

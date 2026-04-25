@@ -3,26 +3,23 @@ import {
   MAX_MESSAGES_PER_PROMPT,
   POLL_INTERVAL,
   TIMEZONE,
-} from '../core/config.js';
+} from '../config/index.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
-} from '../core/message-cursor.js';
-import { logger } from '../core/logger.js';
+} from '../shared/message-cursor.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import {
   NewMessage,
   ProgressUpdateOptions,
   RegisteredGroup,
-} from '../core/types.js';
-import {
-  getMessagesSince,
-  getMessageThreadIds,
-  getNewMessages,
-} from '../storage/db.js';
+} from '../domain/types.js';
+import type { OpsRepository } from '../domain/repositories/ops-repo.js';
 import { formatMessages } from '../messaging/router.js';
 import {
-  isSenderExplicitlyAllowed,
+  isSenderControlAllowed,
   isTriggerAllowed,
+  loadSenderControlAllowlist,
   loadSenderAllowlist,
 } from '../platform/sender-allowlist.js';
 import {
@@ -40,9 +37,9 @@ export interface MessageLoopDeps {
   getRegisteredGroups: () => Record<string, RegisteredGroup>;
   getLastTimestamp: () => string;
   setLastTimestamp: (timestamp: string) => void;
-  getOrRecoverCursor: (chatJid: string) => string;
+  getOrRecoverCursor: (chatJid: string) => Promise<string> | string;
   setAgentCursor: (chatJid: string, timestamp: string) => void;
-  saveState: () => void;
+  saveState: () => Promise<void> | void;
   hasChannel: (chatJid: string) => boolean;
   setTyping: (chatJid: string, isTyping: boolean) => Promise<void>;
   sendProgressUpdate: (
@@ -67,24 +64,46 @@ export interface MessageLoopDeps {
     message: NewMessage;
     command: SessionCommand;
   }) => Promise<boolean> | boolean;
+  opsRepository?: OpsRepository;
+}
+
+function resolveOpsRepository(deps: MessageLoopDeps): OpsRepository {
+  if (!deps.opsRepository) {
+    throw new Error('Message loop requires an OpsRepository');
+  }
+  return deps.opsRepository;
+}
+
+function saveStateBestEffort(deps: MessageLoopDeps, chatJid: string): void {
+  Promise.resolve(deps.saveState()).catch((err) =>
+    logger.warn({ chatJid, err }, 'Failed to persist message cursor state'),
+  );
 }
 
 export async function runMessagePollingTick(
   deps: MessageLoopDeps,
 ): Promise<void> {
   try {
+    const opsRepository = resolveOpsRepository(deps);
     const registeredGroups = deps.getRegisteredGroups();
     const jids = Object.keys(registeredGroups);
-    const { messages, newTimestamp } = getNewMessages(
+    const lastTimestamp = deps.getLastTimestamp();
+    const { messages, newTimestamp } = await opsRepository.getNewMessages(
       jids,
-      deps.getLastTimestamp(),
+      lastTimestamp,
     );
+
+    if (newTimestamp !== lastTimestamp) {
+      deps.setLastTimestamp(newTimestamp);
+      if (messages.length > 0) {
+        await deps.saveState();
+      } else {
+        saveStateBestEffort(deps, '*');
+      }
+    }
 
     if (messages.length > 0) {
       logger.info({ count: messages.length }, 'New messages');
-
-      deps.setLastTimestamp(newTimestamp);
-      deps.saveState();
 
       const messagesByGroup = new Map<string, NewMessage[]>();
       for (const msg of messages) {
@@ -119,14 +138,14 @@ export async function runMessagePollingTick(
             loopCmdMsg.content,
             triggerPattern,
           );
-          const allowlistCfg = loadSenderAllowlist();
+          const controlAllowlistCfg = loadSenderControlAllowlist();
           if (
             isSessionCommandAllowed(
               loopCmdMsg.is_from_me === true,
-              isSenderExplicitlyAllowed(
+              isSenderControlAllowed(
                 chatJid,
                 loopCmdMsg.sender,
-                allowlistCfg,
+                controlAllowlistCfg,
                 group.folder,
               ),
             )
@@ -170,9 +189,9 @@ export async function runMessagePollingTick(
           if (!hasTrigger) continue;
         }
 
-        let initialBatch = getMessagesSince(
+        let initialBatch = await opsRepository.getMessagesSince(
           chatJid,
-          deps.getOrRecoverCursor(queueJid),
+          await deps.getOrRecoverCursor(queueJid),
           MAX_MESSAGES_PER_PROMPT,
           { threadId: threadId ?? null },
         );
@@ -209,15 +228,15 @@ export async function runMessagePollingTick(
               toGroupMessageCursor(messagesToSend[messagesToSend.length - 1]),
             ),
           );
-          deps.saveState();
+          saveStateBestEffort(deps, chatJid);
 
           if (messagesToSend.length < MAX_MESSAGES_PER_PROMPT) {
             break;
           }
 
-          nextBatch = getMessagesSince(
+          nextBatch = await opsRepository.getMessagesSince(
             chatJid,
-            deps.getOrRecoverCursor(queueJid),
+            await deps.getOrRecoverCursor(queueJid),
             MAX_MESSAGES_PER_PROMPT,
             { threadId: threadId ?? null },
           );
@@ -266,16 +285,19 @@ export async function startMessagePollingLoop(
   }
 }
 
-export function recoverPendingMessages(deps: MessageLoopDeps): void {
+export async function recoverPendingMessages(
+  deps: MessageLoopDeps,
+): Promise<void> {
+  const opsRepository = resolveOpsRepository(deps);
   for (const [chatJid, group] of Object.entries(deps.getRegisteredGroups())) {
     const queuedThreads = new Set<string>();
     let pendingCount = 0;
 
-    for (const threadId of getMessageThreadIds(chatJid)) {
+    for (const threadId of await opsRepository.getMessageThreadIds(chatJid)) {
       const queueJid = makeThreadQueueKey(chatJid, threadId);
-      const pending = getMessagesSince(
+      const pending = await opsRepository.getMessagesSince(
         chatJid,
-        deps.getOrRecoverCursor(queueJid),
+        await deps.getOrRecoverCursor(queueJid),
         MAX_MESSAGES_PER_PROMPT,
         { threadId },
       );

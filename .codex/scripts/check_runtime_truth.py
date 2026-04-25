@@ -17,6 +17,10 @@ ACTIVE_DOCS = [
     REPO_ROOT / ".claude" / "skills" / "myclaw-admin" / "SKILL.md",
 ]
 
+CLI_CONTRACT_FILES = [
+    REPO_ROOT / "apps" / "core" / "src" / "cli" / "index.ts",
+]
+
 RUNTIME_PATTERNS = [
     re.compile(r"\bAGENT_RUNTIME\b"),
     re.compile(r"\bSETUP_CONTAINER\b"),
@@ -33,6 +37,15 @@ FEATURES_PATTERNS = [
 EMBED_REQUIRED_PATTERNS = [
     re.compile(r"embeddings.{0,40}required.{0,40}memory", re.IGNORECASE),
     re.compile(r"OpenAI.{0,40}required.{0,40}memory", re.IGNORECASE),
+]
+
+STALE_STORAGE_PATTERNS = [
+    re.compile(r"Postgres is not exposed", re.IGNORECASE),
+    re.compile(r"SQLite is the supported runtime database", re.IGNORECASE),
+]
+
+DISALLOWED_POSTGRES_CLI_PATTERNS = [
+    re.compile(r"\bmyclaw\s+postgres\s+(up|down|status|url)\b", re.IGNORECASE),
 ]
 
 
@@ -66,23 +79,28 @@ def _check_bundled_skill_claims() -> list[str]:
 
 def _check_runtime_settings_renderer() -> list[str]:
     failures: list[str] = []
-    content = (
-        REPO_ROOT / "apps" / "core" / "src" / "cli" / "runtime-settings.ts"
-    ).read_text(encoding="utf-8")
+    runtime_settings_path = (
+        REPO_ROOT / "apps" / "core" / "src" / "config" / "settings" / "runtime-settings.ts"
+    )
+    renderer_path = (
+        REPO_ROOT / "apps" / "core" / "src" / "config" / "settings" / "runtime-settings-renderer.ts"
+    )
+    content = renderer_path.read_text(encoding="utf-8")
     required_fragments = [
-        "memory:",
-        "root:",
-        "embeddings:",
-        "dreaming:",
+        "'memory:'",
+        "'  embeddings:'",
+        "'  dreaming:'",
+        "'  llm:'",
     ]
     for fragment in required_fragments:
         if fragment not in content:
             failures.append(
-                f"apps/core/src/cli/runtime-settings.ts missing canonical memory fragment `{fragment}`"
+                f"{renderer_path.relative_to(REPO_ROOT)} missing canonical memory fragment `{fragment.strip('`').strip(chr(39))}`"
             )
-    if "features:" in content and "features block is not supported" not in content:
+    combined_content = content + "\n" + runtime_settings_path.read_text(encoding="utf-8")
+    if "features:" in combined_content and "features block is not supported" not in combined_content:
         failures.append(
-            "apps/core/src/cli/runtime-settings.ts must not render features settings."
+            "runtime settings modules must not render features settings."
         )
     return failures
 
@@ -97,6 +115,13 @@ def main() -> int:
         failures.extend(_scan_patterns(doc, RUNTIME_PATTERNS))
         failures.extend(_scan_patterns(doc, FEATURES_PATTERNS))
         failures.extend(_scan_patterns(doc, EMBED_REQUIRED_PATTERNS))
+        failures.extend(_scan_patterns(doc, STALE_STORAGE_PATTERNS))
+
+    for code_file in CLI_CONTRACT_FILES:
+        if not code_file.exists():
+            failures.append(f"Missing required file: {code_file.relative_to(REPO_ROOT)}")
+            continue
+        failures.extend(_scan_patterns(code_file, DISALLOWED_POSTGRES_CLI_PATTERNS))
 
     failures.extend(_check_bundled_skill_claims())
     failures.extend(_check_runtime_settings_renderer())

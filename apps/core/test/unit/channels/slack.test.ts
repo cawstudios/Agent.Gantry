@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@core/core/config.js', () => ({
+vi.mock('@core/config/index.js', () => ({
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
   getSlackBotToken: () => process.env.SLACK_BOT_TOKEN || '',
   getSlackAppToken: () => process.env.SLACK_APP_TOKEN || '',
   SLACK_PERMISSION_APPROVER_IDS: new Set<string>(),
 }));
 
-vi.mock('@core/core/logger.js', () => ({
+vi.mock('@core/infrastructure/logging/logger.js', () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -97,7 +97,7 @@ vi.mock('@slack/bolt', () => ({
   },
 }));
 
-import { SLACK_PERMISSION_APPROVER_IDS } from '@core/core/config.js';
+import { SLACK_PERMISSION_APPROVER_IDS } from '@core/config/index.js';
 import { createSlackChannel, SlackChannel } from '@core/channels/slack.js';
 
 function createOpts() {
@@ -147,6 +147,62 @@ describe('Slack channel', () => {
     }
   });
 
+  it('records metadata only for unregistered Slack conversations', async () => {
+    const opts = createOpts();
+    const channel = new SlackChannel('xoxb-token', 'xapp-token', opts as any);
+    await channel.connect();
+
+    const handlers = appRef.current.eventHandlers.get('message') || [];
+    expect(handlers.length).toBeGreaterThan(0);
+    await handlers[0]({
+      event: {
+        channel: 'C123',
+        ts: '1710000000.000100',
+        user: 'U123',
+        text: 'hello',
+      },
+    });
+
+    expect(opts.onChatMetadata).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.any(String),
+      'ops',
+      'slack',
+      true,
+    );
+    expect(opts.onMessage).not.toHaveBeenCalled();
+  });
+
+  it('delivers Slack messages for registered conversations', async () => {
+    const opts = createOpts();
+    opts.registeredGroups.mockReturnValue({
+      'sl:C123': { folder: 'slack_ops', name: 'Ops' },
+    });
+    const channel = new SlackChannel('xoxb-token', 'xapp-token', opts as any);
+    await channel.connect();
+
+    const handlers = appRef.current.eventHandlers.get('message') || [];
+    expect(handlers.length).toBeGreaterThan(0);
+    await handlers[0]({
+      event: {
+        channel: 'C123',
+        ts: '1710000000.000100',
+        user: 'U123',
+        text: 'hello',
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.objectContaining({
+        chat_jid: 'sl:C123',
+        sender: 'U123',
+        sender_name: 'Alice',
+        content: 'hello',
+      }),
+    );
+  });
+
   it('sends threaded Slack messages with thread_ts', async () => {
     const channel = new SlackChannel(
       'xoxb-token',
@@ -188,6 +244,7 @@ describe('Slack channel', () => {
   });
 
   it('includes Bash command summary in Slack permission prompts', async () => {
+    SLACK_PERMISSION_APPROVER_IDS.add('U_APPROVER');
     const channel = new SlackChannel(
       'xoxb-token',
       'xapp-token',
@@ -200,6 +257,7 @@ describe('Slack channel', () => {
       {
         requestId: 'perm-cmd',
         sourceGroup: 'slack_main',
+        threadId: '1711111111.000100',
         toolName: 'Bash',
         toolInput: {
           command: 'git status --short',
@@ -210,6 +268,8 @@ describe('Slack channel', () => {
     const postCall = vi
       .mocked(appRef.current.client.chat.postMessage)
       .mock.calls.at(-1)?.[0];
+    expect(postCall?.thread_ts).toBe('1711111111.000100');
+    expect(postCall?.text).toContain('Thread: 1711111111.000100');
     expect(postCall?.text).toContain('Command: `git status --short`');
 
     const actionHandler = appRef.current.actionHandlers.get(
@@ -228,7 +288,53 @@ describe('Slack channel', () => {
     );
   });
 
+  it('denies Slack permission decisions when no approver IDs are configured', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOpts() as any,
+    );
+    await channel.connect();
+
+    const approvalPromise = channel.requestPermissionApproval(
+      'sl:C1234567890',
+      {
+        requestId: 'perm-no-approver',
+        sourceGroup: 'slack_main',
+        toolName: 'Bash',
+      },
+    );
+
+    const actionHandler = appRef.current.actionHandlers.get(
+      'myclaw_perm_decision',
+    );
+    await actionHandler?.({
+      ack: vi.fn().mockResolvedValue(undefined),
+      body: { user: { id: 'U_ANY', name: 'Any User' } },
+      action: {
+        value: JSON.stringify({
+          requestId: 'perm-no-approver',
+          decision: 'approve',
+        }),
+      },
+    });
+
+    expect(appRef.current.client.chat.postEphemeral).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C1234567890',
+        user: 'U_ANY',
+        text: 'You are not allowed to decide this permission request.',
+      }),
+    );
+
+    await channel.disconnect();
+    await expect(approvalPromise).resolves.toEqual(
+      expect.objectContaining({ approved: false }),
+    );
+  });
+
   it('resolves Slack single-select user question from action callback', async () => {
+    SLACK_PERMISSION_APPROVER_IDS.add('U123');
     const channel = new SlackChannel(
       'xoxb-token',
       'xapp-token',
@@ -239,6 +345,7 @@ describe('Slack channel', () => {
     const answerPromise = channel.requestUserAnswer('sl:C1234567890', {
       requestId: 'userq-1',
       sourceGroup: 'slack_main',
+      threadId: '1711111111.000200',
       questions: [
         {
           header: 'Pick one',
@@ -251,6 +358,13 @@ describe('Slack channel', () => {
         },
       ],
     });
+
+    const postCall = vi
+      .mocked(appRef.current.client.chat.postMessage)
+      .mock.calls.at(-1)?.[0];
+    expect(postCall?.thread_ts).toBe('1711111111.000200');
+    expect(postCall?.text).toContain('Source: slack_main');
+    expect(postCall?.text).toContain('Thread: 1711111111.000200');
 
     const actionHandler = appRef.current.actionHandlers.get(
       'myclaw_userq_select',
@@ -351,6 +465,7 @@ describe('Slack channel', () => {
   });
 
   it('resolves Slack multi-select user question after Done action', async () => {
+    SLACK_PERMISSION_APPROVER_IDS.add('U123');
     const channel = new SlackChannel(
       'xoxb-token',
       'xapp-token',
@@ -694,6 +809,7 @@ describe('Slack channel', () => {
 
   it('resolves permission prompt once even if timeout is reached later', async () => {
     vi.useFakeTimers();
+    SLACK_PERMISSION_APPROVER_IDS.add('U_APPROVER');
     const channel = new SlackChannel(
       'xoxb-token',
       'xapp-token',

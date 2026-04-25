@@ -165,7 +165,7 @@ export async function listSlackRecentChats(options: {
         chats: [],
         message: 'No discoverable Slack conversations found for this bot.',
         nextAction:
-          'Invite the bot to a channel/DM and rerun `myclaw slack connect`.',
+          'Invite the bot to a channel/DM and rerun `myclaw channel connect slack`.',
       };
     }
 

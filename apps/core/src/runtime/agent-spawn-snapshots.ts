@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -9,30 +10,84 @@ import {
   JobSnapshotRow,
 } from './agent-spawn-types.js';
 
-export function writeJobsSnapshot(
+const MAX_SNAPSHOT_DIGEST_CACHE_ENTRIES = 512;
+const snapshotContentDigestCache = new Map<string, string>();
+
+function hashSnapshotContent(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+function rememberSnapshotDigest(file: string, digest: string): void {
+  snapshotContentDigestCache.delete(file);
+  snapshotContentDigestCache.set(file, digest);
+  while (snapshotContentDigestCache.size > MAX_SNAPSHOT_DIGEST_CACHE_ENTRIES) {
+    const oldest = snapshotContentDigestCache.keys().next().value;
+    if (!oldest) break;
+    snapshotContentDigestCache.delete(oldest);
+  }
+}
+
+async function writeSnapshotJson(file: string, value: unknown): Promise<void> {
+  const content = JSON.stringify(value, null, 2);
+  const digest = hashSnapshotContent(content);
+  if (snapshotContentDigestCache.get(file) === digest) return;
+
+  const dir = path.dirname(file);
+  await fs.promises.mkdir(dir, { recursive: true });
+
+  try {
+    const current = await fs.promises.readFile(file, 'utf-8');
+    if (current === content) {
+      rememberSnapshotDigest(file, digest);
+      return;
+    }
+  } catch (err) {
+    const code =
+      typeof err === 'object' && err && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : '';
+    if (code !== 'ENOENT') throw err;
+  }
+
+  const tempFile = path.join(
+    dir,
+    `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  try {
+    await fs.promises.writeFile(tempFile, content, 'utf-8');
+    await fs.promises.rename(tempFile, file);
+    rememberSnapshotDigest(file, digest);
+  } catch (err) {
+    await fs.promises.rm(tempFile, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+export function clearSnapshotWriteCacheForTests(): void {
+  snapshotContentDigestCache.clear();
+}
+
+export async function writeJobsSnapshot(
   groupFolder: string,
   isMain: boolean,
   jobs: JobSnapshotRow[],
-): void {
+): Promise<void> {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
-  fs.mkdirSync(groupIpcDir, { recursive: true });
-
   const filtered = isMain
     ? jobs
     : jobs.filter((job) => job.group_scope === groupFolder);
 
   const file = path.join(groupIpcDir, 'current_jobs.json');
-  fs.writeFileSync(file, JSON.stringify(filtered, null, 2));
+  await writeSnapshotJson(file, filtered);
 }
 
-export function writeJobRunsSnapshot(
+export async function writeJobRunsSnapshot(
   groupFolder: string,
   isMain: boolean,
   runs: JobRunSnapshotRow[],
   jobs: JobSnapshotRow[],
-): void {
+): Promise<void> {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
-  fs.mkdirSync(groupIpcDir, { recursive: true });
 
   let allowedJobIds: Set<string> | null = null;
   if (!isMain) {
@@ -49,17 +104,16 @@ export function writeJobRunsSnapshot(
       : runs.filter((run) => allowedJobIds.has(run.job_id));
 
   const file = path.join(groupIpcDir, 'current_job_runs.json');
-  fs.writeFileSync(file, JSON.stringify(filtered, null, 2));
+  await writeSnapshotJson(file, filtered);
 }
 
-export function writeJobEventsSnapshot(
+export async function writeJobEventsSnapshot(
   groupFolder: string,
   isMain: boolean,
   events: JobEventSnapshotRow[],
   jobs: JobSnapshotRow[],
-): void {
+): Promise<void> {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
-  fs.mkdirSync(groupIpcDir, { recursive: true });
 
   let allowedJobIds: Set<string> | null = null;
   if (!isMain) {
@@ -76,29 +130,20 @@ export function writeJobEventsSnapshot(
       : events.filter((event) => allowedJobIds.has(event.job_id));
 
   const file = path.join(groupIpcDir, 'current_job_events.json');
-  fs.writeFileSync(file, JSON.stringify(filtered, null, 2));
+  await writeSnapshotJson(file, filtered);
 }
 
-export function writeGroupsSnapshot(
+export async function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
   groups: AvailableGroup[],
   _registeredJids: Set<string>,
-): void {
+): Promise<void> {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
-  fs.mkdirSync(groupIpcDir, { recursive: true });
-
   const visibleGroups = isMain ? groups : [];
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
-  fs.writeFileSync(
-    groupsFile,
-    JSON.stringify(
-      {
-        groups: visibleGroups,
-        lastSync: new Date().toISOString(),
-      },
-      null,
-      2,
-    ),
-  );
+  await writeSnapshotJson(groupsFile, {
+    groups: visibleGroups,
+    lastSync: new Date().toISOString(),
+  });
 }

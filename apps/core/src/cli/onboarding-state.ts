@@ -1,7 +1,7 @@
 import fs from 'fs';
 
-import type { HostCredentialMode } from '../core/credential-mode.js';
-import { onboardingStatePath } from './runtime-home.js';
+import type { HostCredentialMode } from '../config/credentials/mode.js';
+import { onboardingStatePath } from '../config/settings/runtime-home.js';
 
 export type OnboardingStep =
   | 'welcome'
@@ -24,12 +24,18 @@ export type OnboardingStep =
 
 export interface OnboardingData {
   runtimeHome: string;
+  postgresSetupKind?: 'local' | 'hosted' | 'existing';
+  postgresSchema?: string;
+  onecliPostgresSchema?: string;
   primaryProvider?: 'telegram' | 'slack';
-  storageProvider?: 'sqlite';
   serviceChoice?: 'skip' | 'install' | 'install_start';
   telegramBotUsername?: string;
   telegramChatJid?: string;
+  telegramAdminSenderId?: string;
+  telegramAdminSenderName?: string;
+  telegramPermissionApproverIds?: string;
   slackChatJid?: string;
+  slackPermissionApproverIds?: string;
   memoryEnabled?: boolean;
   embeddingsEnabled?: boolean;
   dreamingEnabled?: boolean;
@@ -97,7 +103,15 @@ export function writeOnboardingState(
     },
   };
   fs.mkdirSync(runtimeHome, { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
+  fs.writeFileSync(filePath, `${JSON.stringify(next, null, 2)}\n`, {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch {
+    // Best effort on filesystems without POSIX modes.
+  }
 }
 
 export function clearOnboardingState(runtimeHome: string): void {

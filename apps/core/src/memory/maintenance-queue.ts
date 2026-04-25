@@ -1,5 +1,5 @@
-import { MEMORY_MAINTENANCE_MAX_PENDING } from '../core/config.js';
-import { logger } from '../core/logger.js';
+import { MEMORY_MAINTENANCE_MAX_PENDING } from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
 
 type MaintenanceTask = () => Promise<void>;
 

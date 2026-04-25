@@ -46,6 +46,7 @@ A provider `id` becomes:
 - `settings.yaml` key under `channels.<id>`
 - runtime enablement selector (`settings.channels[id].enabled`)
 - sender allowlist key (`settings.channels[id].sender_allowlist`)
+- session/admin allowlist key (`settings.channels[id].control_allowlist`)
 
 A provider `jidPrefix` is used for:
 

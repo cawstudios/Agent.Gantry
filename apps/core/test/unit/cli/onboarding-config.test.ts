@@ -2,165 +2,120 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { readEnvFile } from '@core/cli/env-file.js';
 import { persistOnboardingConfig } from '@core/cli/onboarding-config.js';
-import { envFilePath } from '@core/cli/runtime-home.js';
-import { loadRuntimeSettings } from '@core/cli/runtime-settings.js';
+import { readEnvFile } from '@core/config/env/file.js';
+import {
+  envFilePath,
+  settingsFilePath,
+} from '@core/config/settings/runtime-home.js';
 
-function createRuntimeHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-onboarding-config-'));
+const runtimeHomes: string[] = [];
+
+function makeRuntimeHome(): string {
+  const runtimeHome = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'myclaw-onboarding-config-'),
+  );
+  runtimeHomes.push(runtimeHome);
+  return runtimeHome;
 }
 
-describe('persistOnboardingConfig', () => {
-  it('persists env-only credential mode and removes ONECLI_URL', () => {
-    const runtimeHome = createRuntimeHome();
-    const envPath = envFilePath(runtimeHome);
+function baseInput(runtimeHome: string) {
+  return {
+    runtimeHome,
+    postgresDatabaseUrl: 'postgresql://myclaw_app:pass@localhost:15432/myclaw',
+    onecliPostgresDatabaseUrl:
+      'postgresql://onecli_app:pass@localhost:15432/myclaw?schema=onecli',
+    postgresSchema: 'myclaw',
+    onecliPostgresSchema: 'onecli',
+    primaryProvider: 'telegram' as const,
+    telegramBotToken: 'telegram-token',
+    telegramPermissionApproverIds: '123',
+    credentialMode: 'onecli' as const,
+    onecliUrl: 'http://localhost:10254',
+    anthropicModel: 'sonnet',
+    memoryEnabled: true,
+    embeddingsEnabled: false,
+    dreamingEnabled: true,
+  };
+}
+
+afterEach(() => {
+  for (const runtimeHome of runtimeHomes.splice(0)) {
+    fs.rmSync(runtimeHome, { recursive: true, force: true });
+  }
+});
+
+describe('onboarding config persistence', () => {
+  it('clears raw provider credentials while writing brokered runtime config', () => {
+    const runtimeHome = makeRuntimeHome();
+    fs.mkdirSync(runtimeHome, { recursive: true });
     fs.writeFileSync(
-      envPath,
+      envFilePath(runtimeHome),
       [
-        'ONECLI_URL=http://localhost:10254',
-        'MYCLAW_CREDENTIAL_MODE=hybrid',
+        'OPENAI_API_KEY=sk-old',
+        'ANTHROPIC_API_KEY=sk-ant-old',
+        'ANTHROPIC_AUTH_TOKEN=ant-token',
+        'CLAUDE_CODE_OAUTH_TOKEN=oauth-old',
+        'SECRET_ENCRYPTION_KEY=123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
+        '',
       ].join('\n'),
-      'utf-8',
     );
 
-    persistOnboardingConfig({
-      runtimeHome,
-      storageProvider: 'sqlite',
-      primaryProvider: 'telegram',
-      telegramBotToken: 'token',
-      anthropicModel: 'claude-sonnet-4-6',
-      credentialMode: 'env-only',
-      memoryEnabled: true,
-      embeddingsEnabled: false,
-      dreamingEnabled: false,
-    });
+    persistOnboardingConfig(baseInput(runtimeHome));
 
-    const env = readEnvFile(envPath);
-    expect(env.MYCLAW_CREDENTIAL_MODE).toBe('env-only');
-    expect(env.ONECLI_URL).toBeUndefined();
-
-    const settings = loadRuntimeSettings(runtimeHome);
-    expect(settings.channels.telegram.enabled).toBe(true);
-    expect(settings.memory.enabled).toBe(true);
-    expect(settings.memory.root).toBe('memory');
-    expect(settings.memory.embeddings.enabled).toBe(false);
-    expect(settings.memory.embeddings.provider).toBe('disabled');
-    expect(settings.memory.dreaming.enabled).toBe(false);
-  });
-
-  it('persists onecli URL for hybrid mode', () => {
-    const runtimeHome = createRuntimeHome();
-    const envPath = envFilePath(runtimeHome);
-
-    persistOnboardingConfig({
-      runtimeHome,
-      storageProvider: 'sqlite',
-      primaryProvider: 'telegram',
-      telegramBotToken: 'token',
-      anthropicModel: 'claude-sonnet-4-6',
-      credentialMode: 'hybrid',
-      onecliUrl: 'http://localhost:10254',
-      memoryEnabled: true,
-      embeddingsEnabled: true,
-      dreamingEnabled: true,
-      openAiApiKey: 'sk-openai',
-    });
-
-    const env = readEnvFile(envPath);
-    expect(env.MYCLAW_CREDENTIAL_MODE).toBe('hybrid');
-    expect(env.ONECLI_URL).toBe('http://localhost:10254');
-    expect(env.OPENAI_API_KEY).toBe('sk-openai');
-    expect(env.MEMORY_PROVIDER).toBeUndefined();
-    expect(env.MEMORY_EMBED_PROVIDER).toBeUndefined();
-    expect(env.MEMORY_DREAMING_ENABLED).toBeUndefined();
-
-    const settings = loadRuntimeSettings(runtimeHome);
-    expect(settings.memory.enabled).toBe(true);
-    expect(settings.memory.root).toBe('memory');
-    expect(settings.memory.embeddings.enabled).toBe(true);
-    expect(settings.memory.embeddings.provider).toBe('openai');
-    expect(settings.memory.dreaming.enabled).toBe(true);
-  });
-
-  it('removes local Claude credentials in onecli-only mode', () => {
-    const runtimeHome = createRuntimeHome();
-    const envPath = envFilePath(runtimeHome);
-
-    persistOnboardingConfig({
-      runtimeHome,
-      storageProvider: 'sqlite',
-      primaryProvider: 'telegram',
-      telegramBotToken: 'token',
-      claudeOauthToken: 'oauth-secret',
-      anthropicApiKey: 'api-secret',
-      anthropicModel: 'claude-sonnet-4-6',
-      credentialMode: 'onecli-only',
-      onecliUrl: 'http://localhost:10254',
-      memoryEnabled: true,
-      embeddingsEnabled: false,
-      dreamingEnabled: true,
-    });
-
-    const env = readEnvFile(envPath);
-    expect(env.MYCLAW_CREDENTIAL_MODE).toBe('onecli-only');
-    expect(env.ONECLI_URL).toBe('http://localhost:10254');
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    const env = readEnvFile(envFilePath(runtimeHome));
+    expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-  });
-
-  it('does not persist a database URL for sqlite setup', () => {
-    const runtimeHome = createRuntimeHome();
-    const envPath = envFilePath(runtimeHome);
-
-    persistOnboardingConfig({
-      runtimeHome,
-      storageProvider: 'sqlite',
-      primaryProvider: 'slack',
-      slackBotToken: 'xoxb-test',
-      slackAppToken: 'xapp-test',
-      anthropicModel: 'claude-sonnet-4-6',
-      credentialMode: 'env-only',
-      memoryEnabled: true,
-      embeddingsEnabled: false,
-      dreamingEnabled: true,
-    });
-
-    const env = readEnvFile(envPath);
-    expect(env.MYCLAW_DATABASE_URL).toBeUndefined();
-
-    const settings = loadRuntimeSettings(runtimeHome);
-    expect(settings.storage.provider).toBe('sqlite');
-    expect(settings.channels.slack.enabled).toBe(true);
-  });
-
-  it('clears stale database URL and persists sqlite storage', () => {
-    const runtimeHome = createRuntimeHome();
-    const envPath = envFilePath(runtimeHome);
-    fs.writeFileSync(
-      envPath,
-      'MYCLAW_DATABASE_URL=postgresql://user:pass@localhost:5432/myclaw\n',
-      'utf-8',
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(env.MYCLAW_DATABASE_URL).toContain('myclaw_app');
+    expect(env.ONECLI_DATABASE_URL).toContain('onecli_app');
+    expect(env.SECRET_ENCRYPTION_KEY).toBe(
+      '123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
     );
+    expect(env.ONECLI_URL).toBe('http://localhost:10254');
+  });
 
-    persistOnboardingConfig({
-      runtimeHome,
-      storageProvider: 'sqlite',
-      primaryProvider: 'telegram',
-      telegramBotToken: 'token',
-      anthropicModel: 'claude-sonnet-4-6',
-      credentialMode: 'env-only',
-      memoryEnabled: true,
-      embeddingsEnabled: false,
-      dreamingEnabled: true,
-    });
+  it('generates a stable OneCLI encryption key when none exists', () => {
+    const runtimeHome = makeRuntimeHome();
 
-    const env = readEnvFile(envPath);
-    expect(env.MYCLAW_DATABASE_URL).toBeUndefined();
+    persistOnboardingConfig(baseInput(runtimeHome));
 
-    const settings = loadRuntimeSettings(runtimeHome);
-    expect(settings.storage.provider).toBe('sqlite');
+    const env = readEnvFile(envFilePath(runtimeHome));
+    expect(env.SECRET_ENCRYPTION_KEY).toHaveLength(44);
+    expect(fs.existsSync(settingsFilePath(runtimeHome))).toBe(true);
+  });
+
+  it('requires OneCLI database URL when MyClaw database URL is configured', () => {
+    const runtimeHome = makeRuntimeHome();
+
+    expect(() =>
+      persistOnboardingConfig({
+        ...baseInput(runtimeHome),
+        onecliPostgresDatabaseUrl: '',
+      }),
+    ).toThrow(/ONECLI_DATABASE_URL is required/);
+
+    expect(
+      readEnvFile(envFilePath(runtimeHome)).MYCLAW_DATABASE_URL,
+    ).toBeUndefined();
+  });
+
+  it('rejects OneCLI database URLs that do not share the MyClaw database', () => {
+    const runtimeHome = makeRuntimeHome();
+
+    expect(() =>
+      persistOnboardingConfig({
+        ...baseInput(runtimeHome),
+        onecliPostgresDatabaseUrl:
+          'postgresql://onecli_app:pass@localhost:15432/other?schema=onecli',
+      }),
+    ).toThrow(/same Postgres database/);
+
+    expect(
+      readEnvFile(envFilePath(runtimeHome)).MYCLAW_DATABASE_URL,
+    ).toBeUndefined();
   });
 });

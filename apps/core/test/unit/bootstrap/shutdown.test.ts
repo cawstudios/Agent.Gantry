@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { installShutdownHandlers } from '@core/bootstrap/shutdown.js';
+import { installShutdownHandlers } from '@core/app/bootstrap/shutdown.js';
 
 function flushPromises(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));

@@ -17,6 +17,7 @@ commands = [
         os.environ.get("FACTORY_STRUCTURAL_CMD")
         or "npm run format:check",
     ),
+    ("build", os.environ.get("FACTORY_BUILD_CMD") or "npm run build"),
     (
         "architecture",
         os.environ.get("FACTORY_ARCHITECTURE_CMD")
@@ -34,6 +35,7 @@ commands = [
     ),
     ("typecheck", os.environ.get("FACTORY_TYPECHECK_CMD") or "npm run typecheck"),
     ("tests", os.environ.get("FACTORY_TEST_CMD") or "npm test"),
+    ("e2e", os.environ.get("FACTORY_E2E_CMD") or "npm run test:e2e"),
 ]
 
 results = []

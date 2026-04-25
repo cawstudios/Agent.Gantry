@@ -1,15 +1,14 @@
 import * as p from '@clack/prompts';
 
-import { getServiceStatus } from './service-manager.js';
+import { getServiceStatus } from '../infrastructure/service/manager.js';
 
 export interface SetupReadyDraft {
   runtimeHome: string;
-  storageProvider: 'sqlite' | 'postgres';
   primaryProvider: 'telegram' | 'slack';
   telegramChatJid: string;
   slackChatJid: string;
   selectedModel: string;
-  credentialMode: 'env-only' | 'onecli-only' | 'hybrid';
+  credentialMode: 'onecli';
   onecliUrl: string;
   memoryEnabled: boolean;
   embeddingsEnabled: boolean;
@@ -36,15 +35,13 @@ export async function runReadyStep(
   p.note(
     [
       `Runtime home: ${draft.runtimeHome}`,
-      `Storage: ${draft.storageProvider}`,
       `Primary provider: ${draft.primaryProvider}`,
       `${providerLabel}: ${providerChatJid}`,
       `Main model: ${draft.selectedModel}`,
       `Credential mode: ${draft.credentialMode}`,
-      ...(draft.onecliUrl ? [`OneCLI URL: ${draft.onecliUrl}`] : []),
+      ...(draft.onecliUrl ? [`Model Access URL: ${draft.onecliUrl}`] : []),
       `Memory: ${summarizeToggle(draft.memoryEnabled)}`,
-      `Memory root: memory/`,
-      `Embeddings: ${draft.embeddingsEnabled ? 'openai' : 'disabled'}`,
+      `Embeddings: ${draft.embeddingsEnabled ? 'brokered provider' : 'disabled'}`,
       `Dreaming: ${summarizeToggle(draft.dreamingEnabled)}`,
       `Service (${service.kind}): ${service.status}`,
     ].join('\n'),

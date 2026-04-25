@@ -1,6 +1,6 @@
-import { MYCLAW_HOME } from '../core/config.js';
-import { logger } from '../core/logger.js';
-import { MessageSink, NewMessage, RegisteredGroup } from '../core/types.js';
+import { MYCLAW_HOME } from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { MessageSink, NewMessage, RegisteredGroup } from '../domain/types.js';
 import { startRemoteControl, stopRemoteControl } from './remote-control.js';
 
 export type RemoteControlCommand = '/remote-control' | '/remote-control-end';

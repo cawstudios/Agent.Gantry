@@ -1,0 +1,201 @@
+import path from 'path';
+
+import {
+  CLAUDE_CODE_MODEL_PIN_ENV,
+  CLAUDE_CODE_MODEL_PIN_ENV_KEYS,
+  normalizeClaudeModelSelection,
+} from '../models/claude-model-registry.js';
+import { envConfig, envValue } from './env/index.js';
+import { parseBooleanEnv } from './env/parse.js';
+import { getMemoryModelConfig } from './memory.js';
+import { getMyclawHome } from '../shared/myclaw-home.js';
+import { resolveRuntimeStorageConfig } from './settings/storage.js';
+import { isValidTimezone } from '../shared/timezone.js';
+
+export * from './memory.js';
+
+export const ASSISTANT_NAME =
+  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
+export const POLL_INTERVAL = 2000;
+
+const MYCLAW_HOME_RAW =
+  process.env.MYCLAW_HOME?.trim() || envConfig.MYCLAW_HOME?.trim() || '';
+export const MYCLAW_HOME = getMyclawHome(MYCLAW_HOME_RAW);
+const RUNTIME_ROOT = MYCLAW_HOME;
+
+export const STORE_DIR = path.resolve(RUNTIME_ROOT, 'store');
+export const AGENTS_DIR = path.resolve(RUNTIME_ROOT, 'agents');
+export const DATA_DIR = path.resolve(RUNTIME_ROOT, 'data');
+
+const runtimeStorageConfig = resolveRuntimeStorageConfig(
+  MYCLAW_HOME,
+  RUNTIME_ROOT,
+);
+export const STORAGE_POSTGRES_URL_ENV = runtimeStorageConfig.postgresUrlEnv;
+export const STORAGE_POSTGRES_URL = runtimeStorageConfig.postgresUrl;
+export const STORAGE_POSTGRES_SCHEMA = runtimeStorageConfig.postgresSchema;
+export const PERMISSION_APPROVAL_TIMEOUT_MS = Math.max(
+  10_000,
+  parseInt(
+    process.env.PERMISSION_APPROVAL_TIMEOUT_MS ||
+      envConfig.PERMISSION_APPROVAL_TIMEOUT_MS ||
+      '300000',
+    10,
+  ) || 300_000,
+);
+function parseIdAllowlist(raw: string | undefined): Set<string> {
+  if (!raw?.trim()) return new Set<string>();
+  return new Set(
+    raw
+      .split(/[,\s]+/)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  );
+}
+export const TELEGRAM_PERMISSION_APPROVER_IDS = parseIdAllowlist(
+  process.env.TELEGRAM_PERMISSION_APPROVER_IDS ||
+    envConfig.TELEGRAM_PERMISSION_APPROVER_IDS,
+);
+export const SLACK_PERMISSION_APPROVER_IDS = parseIdAllowlist(
+  process.env.SLACK_PERMISSION_APPROVER_IDS ||
+    envConfig.SLACK_PERMISSION_APPROVER_IDS,
+);
+export const AGENT_TIMEOUT = parseInt(
+  process.env.AGENT_TIMEOUT || '1800000',
+  10,
+);
+export const AGENT_MAX_OUTPUT_SIZE = parseInt(
+  process.env.AGENT_MAX_OUTPUT_SIZE || '10485760',
+  10,
+); // 10MB default
+export const ONECLI_URL = envValue('ONECLI_URL');
+export const ONECLI_DATABASE_URL = envValue('ONECLI_DATABASE_URL');
+export const ONECLI_SECRET_ENCRYPTION_KEY = envValue('SECRET_ENCRYPTION_KEY');
+const normModel = normalizeClaudeModelSelection;
+export const ANTHROPIC_MODEL = normModel(envValue('ANTHROPIC_MODEL'));
+export const TELEGRAM_BOT_TOKEN = envValue('TELEGRAM_BOT_TOKEN');
+export const SLACK_BOT_TOKEN = envValue('SLACK_BOT_TOKEN');
+export const SLACK_APP_TOKEN = envValue('SLACK_APP_TOKEN');
+export const MYCLAW_IPC_AUTH_SECRET = envValue('MYCLAW_IPC_AUTH_SECRET');
+export const MYCLAW_CREDENTIAL_MODE = envValue('MYCLAW_CREDENTIAL_MODE');
+export const REMOTE_CONTROL_AUTO_ACCEPT = parseBooleanEnv(
+  envValue('REMOTE_CONTROL_AUTO_ACCEPT'),
+  false,
+);
+export const CHROME_PATH = envValue('CHROME_PATH') || undefined;
+export const LOG_LEVEL = envValue('LOG_LEVEL') || 'info';
+export const HOST_CREDENTIAL_ENV_KEYS = [
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_MODEL',
+  ...CLAUDE_CODE_MODEL_PIN_ENV_KEYS,
+] as const;
+export const ONECLI_ALLOWED_ENV_KEYS = [...HOST_CREDENTIAL_ENV_KEYS] as const;
+export function getHostCredentialEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  Object.assign(env, CLAUDE_CODE_MODEL_PIN_ENV);
+  for (const key of HOST_CREDENTIAL_ENV_KEYS) {
+    const value = envValue(key);
+    if (value) env[key] = value;
+  }
+  return env;
+}
+export function getTelegramBotToken(): string {
+  return envValue('TELEGRAM_BOT_TOKEN');
+}
+export function getSlackBotToken(): string {
+  return envValue('SLACK_BOT_TOKEN');
+}
+export function getSlackAppToken(): string {
+  return envValue('SLACK_APP_TOKEN');
+}
+export type ClaudeAuthMode = 'broker' | 'none';
+
+export interface ClaudeAuthState {
+  hasOauthToken: boolean;
+  hasApiKey: boolean;
+  mode: ClaudeAuthMode;
+}
+
+export function resolveClaudeAuthState(): ClaudeAuthState {
+  const configured = Boolean(envValue('ONECLI_URL').trim());
+  return {
+    hasOauthToken: false,
+    hasApiKey: false,
+    mode: configured ? 'broker' : 'none',
+  };
+}
+
+export const LLM_ENABLED = resolveClaudeAuthState().mode !== 'none';
+
+const memoryModelConfig = getMemoryModelConfig(ANTHROPIC_MODEL);
+export const MODEL_EXTRACTOR = memoryModelConfig.extractor;
+export const MODEL_DREAMING = memoryModelConfig.dreaming;
+export const MODEL_CONSOLIDATION = memoryModelConfig.consolidation;
+
+export type DefaultModelSource = 'ANTHROPIC_MODEL' | 'unset';
+export type EffectiveModelSource =
+  | 'group.agentConfig.model'
+  | DefaultModelSource;
+
+export function getDefaultModelConfig(): {
+  model?: string;
+  source: DefaultModelSource;
+} {
+  if (ANTHROPIC_MODEL) {
+    return { model: ANTHROPIC_MODEL, source: 'ANTHROPIC_MODEL' };
+  }
+  return { source: 'unset' };
+}
+
+export function getEffectiveModelConfig(groupModel?: string): {
+  model?: string;
+  source: EffectiveModelSource;
+} {
+  const normalizedGroupModel = normModel(groupModel);
+  if (normalizedGroupModel) {
+    return {
+      model: normalizedGroupModel,
+      source: 'group.agentConfig.model',
+    };
+  }
+  return getDefaultModelConfig();
+}
+
+export const MAX_MESSAGES_PER_PROMPT = Math.max(
+  1,
+  parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
+);
+export const IPC_POLL_INTERVAL = 1000;
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep the agent run alive after last result
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function buildTriggerPattern(trigger: string): RegExp {
+  return new RegExp(`^${escapeRegex(trigger.trim())}\\b`, 'i');
+}
+
+export const DEFAULT_TRIGGER = `@${ASSISTANT_NAME}`;
+
+export function getTriggerPattern(trigger?: string): RegExp {
+  const normalizedTrigger = trigger?.trim();
+  return buildTriggerPattern(normalizedTrigger || DEFAULT_TRIGGER);
+}
+
+export const TRIGGER_PATTERN = buildTriggerPattern(DEFAULT_TRIGGER);
+
+// Timezone for scheduler jobs, message formatting, etc.
+// Validates each candidate is a real IANA identifier before accepting.
+function resolveConfigTimezone(): string {
+  const candidates = [
+    process.env.TZ,
+    envConfig.TZ,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+  ];
+  for (const tz of candidates) {
+    if (tz && isValidTimezone(tz)) return tz;
+  }
+  return 'UTC';
+}
+export const TIMEZONE = resolveConfigTimezone();

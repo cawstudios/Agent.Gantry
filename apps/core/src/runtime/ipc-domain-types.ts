@@ -5,7 +5,8 @@ import {
   RegisteredGroup,
   UserQuestionRequest,
   UserQuestionResponse,
-} from '../core/types.js';
+} from '../domain/types.js';
+import type { OpsRepository } from '../domain/repositories/ops-repo.js';
 
 export interface IpcDeps {
   sendMessage: (
@@ -14,22 +15,23 @@ export interface IpcDeps {
     options?: { threadId?: string },
   ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
-  registerGroup: (jid: string, group: RegisteredGroup) => void;
+  registerGroup: (jid: string, group: RegisteredGroup) => Promise<void> | void;
   syncGroups: (force: boolean) => Promise<void>;
-  getAvailableGroups: () => AvailableGroup[];
+  getAvailableGroups: () => Promise<AvailableGroup[]> | AvailableGroup[];
   writeGroupsSnapshot: (
     groupFolder: string,
     isMain: boolean,
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
-  ) => void;
-  onSchedulerChanged: () => void;
+  ) => Promise<void> | void;
+  onSchedulerChanged: (jobId?: string) => void;
   requestPermissionApproval: (
     request: PermissionApprovalRequest,
   ) => Promise<PermissionApprovalDecision>;
   requestUserAnswer: (
     request: UserQuestionRequest,
   ) => Promise<UserQuestionResponse>;
+  opsRepository: OpsRepository;
 }
 
 export interface IpcDomainContext {

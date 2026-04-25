@@ -30,8 +30,8 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 ├──────────────────────────────────────────────────────────────────────┤
 │                                                                       │
 │  ┌──────────────────┐                  ┌────────────────────┐        │
-│  │ Channels         │─────────────────▶│   Storage Database │        │
-│  │ (provider        │◀────────────────│   (myclaw.db)      │        │
+│  │ Channels         │─────────────────▶│   Postgres Store  │        │
+│  │ (provider        │◀────────────────│   (runtime state) │        │
 │  │  registry)       │  store/send      └─────────┬──────────┘        │
 │  └──────────────────┘                            │                   │
 │                                                   │                   │
@@ -40,7 +40,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 │         ▼                                                             │
 │  ┌──────────────────┐    ┌──────────────────┐    ┌───────────────┐   │
 │  │  Message Loop    │    │  Scheduler Loop  │    │  IPC Watcher  │   │
-│  │  (polls SQLite)  │    │  (checks tasks)  │    │  (file-based) │   │
+│  │  (polls Postgres)│    │  (pg-boss jobs)  │    │  (file-based) │   │
 │  └────────┬─────────┘    └────────┬─────────┘    └───────────────┘   │
 │           │                       │                                   │
 │           └───────────┬───────────┘                                   │
@@ -73,55 +73,55 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 
 ### Technology Stack
 
-| Component          | Technology                                                        | Purpose                                              |
-| ------------------ | ----------------------------------------------------------------- | ---------------------------------------------------- |
-| Channel System     | Provider registry (`apps/core/src/channels/provider-registry.ts`) | Channels are looked up by provider id and JID prefix |
-| Message Storage    | SQLite (better-sqlite3)                                           | Store messages for polling                           |
-| Runtime Execution  | Host process execution                                            | Agent execution with runtime-home scoped paths       |
-| Agent              | @anthropic-ai/claude-agent-sdk (0.2.97)                           | Run Claude with tools and MCP servers                |
+| Component          | Technology                                                        | Purpose                                                        |
+| ------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------- |
+| Channel System     | Provider registry (`apps/core/src/channels/provider-registry.ts`) | Channels are looked up by provider id and JID prefix           |
+| Message Storage    | Postgres with Drizzle                                             | Store messages, jobs, events, memory, and runtime state        |
+| Runtime Execution  | Host process execution                                            | Agent execution with runtime-home scoped paths                 |
+| Agent              | @anthropic-ai/claude-agent-sdk                                    | Run Claude with tools and MCP servers                          |
 | Browser Automation | agent-browser + Chromium                                          | Web interaction and screenshots with explicit CDP port handoff |
-| Runtime            | Node.js 20+                                                       | Host process for routing and scheduling              |
+| Runtime            | Node.js 25+                                                       | Host process for routing and pg-boss job execution             |
 
 ---
 
 ## Architecture: Channel System
 
-The runtime supports multi-channel operation via a provider registry. Telegram and Slack are available in this codebase, and additional channels (for example WhatsApp, Discord, Gmail) can be added through skills. Providers are registered at startup via `register-builtins.ts`; providers with missing credentials emit a WARN log and are skipped.
+The runtime supports multi-channel operation via a provider registry. The built-in providers in this codebase are `app`, `slack`, and `telegram`. Providers are registered at startup via `register-builtins.ts`; providers with missing credentials emit a WARN log and are skipped.
 
 ### System Diagram
 
 ```mermaid
 graph LR
     subgraph Channels["Channels"]
-        WA[WhatsApp]
+        APP["SDK App Channel"]
         TG[Telegram]
         SL[Slack]
-        DC[Discord]
-        New["Other Channel (Signal, Gmail...)"]
+        New["Additional Provider"]
     end
 
     subgraph Orchestrator["Orchestrator — index.ts"]
         ML[Message Loop]
         GQ[Group Queue]
-        RT[Router]
+        GP[Group Processor]
+        CW[Channel Wiring]
         TS[Task Scheduler]
-        DB[(SQLite)]
+        DB[(Postgres Store)]
     end
 
     subgraph Execution["Host Runtime Execution"]
         CR[Agent Runner Process]
-        LC["Host Runtime"]
         IPC[IPC Watcher]
     end
 
     %% Flow
-    WA & TG & SL & DC & New -->|onMessage| ML
+    APP & TG & SL & New -->|inbound/control message| ML
     ML --> GQ
-    GQ -->|concurrency| CR
-    CR --> LC
-    LC -->|filesystem IPC| IPC
-    IPC -->|tasks & messages| RT
-    RT -->|Channel.sendMessage| Channels
+    GQ -->|ordered work| GP
+    GP -->|spawn| CR
+    CR -->|filesystem IPC| IPC
+    IPC -->|host-owned actions| CW
+    GP -->|send/stream/progress| CW
+    CW -->|adapter output| Channels
     TS -->|due tasks| CR
 
     %% DB Connections
@@ -134,14 +134,19 @@ graph LR
 
 ### Channel Registry
 
-The channel system is built on a provider registry in `apps/core/src/channels/provider-registry.ts`:
+The channel system is built on a provider registry in `apps/core/src/channels/provider-registry.ts`. The abbreviated shape below shows the contract; use the source file for helper type definitions and exact imports.
 
 ```typescript
 export interface ChannelProvider {
   id: string;
+  label: string;
   jidPrefix: string;
   folderPrefix: string;
+  isGroupJid: (jid: string) => boolean;
+  formatting: ChannelFormattingDialect;
+  isEnabled: (settings: ChannelProviderSettingsLike) => boolean;
   create: ChannelFactory;
+  setup: ChannelProviderSetup;
 }
 
 export function registerChannelProvider(provider: ChannelProvider): void;
@@ -150,63 +155,51 @@ export function getChannelProvider(id: string): ChannelProvider | undefined;
 export function providerForJid(jid: string): ChannelProvider | undefined;
 ```
 
-Each provider receives `ChannelOpts` through its `create` function and returns either a `Channel` instance or `null` if the provider's credentials are not configured.
+Each provider receives `ChannelOpts` through its `create` function and returns either a `ChannelAdapter` instance or `null` if the provider's credentials are not configured.
 
 ### Channel Interface
 
-Every channel implements this interface (defined in `apps/core/src/core/types.ts`):
+Every channel implements the `ChannelAdapter` contract from `apps/core/src/channels/channel-provider.ts`. It combines required lifecycle, ownership, and message-sink ports with optional streaming, typing, progress, group discovery, interaction, and plan-review ports from `apps/core/src/domain/types.ts`:
 
 ```typescript
-interface Channel {
-  name: string;
-  connect(): Promise<void>;
-  sendMessage(
-    jid: string,
-    text: string,
-    options?: { threadId?: string },
-  ): Promise<void>;
-  isConnected(): boolean;
-  ownsJid(jid: string): boolean;
-  disconnect(): Promise<void>;
-  setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  sendStreamingChunk?(
-    jid: string,
-    text: string,
-    options?: { threadId?: string; done?: boolean },
-  ): Promise<void>;
-  sendProgressUpdate?(
-    jid: string,
-    text: string,
-    options?: { threadId?: string; done?: boolean },
-  ): Promise<void>;
-  syncGroups?(force: boolean): Promise<void>;
-  requestPermissionApproval?(jid: string, request: unknown): Promise<unknown>;
-}
+export type ChannelAdapter = ChannelLifecyclePort &
+  ChannelOwnershipPort &
+  MessageSink &
+  Partial<
+    StreamingSink &
+      StreamingStateSink &
+      TypingSink &
+      ProgressSink &
+      GroupDiscoverySource &
+      InteractionSurface &
+      PlanReviewSurface
+  >;
 ```
 
 ### Registration Pattern
 
 Providers are registered via `apps/core/src/channels/register-builtins.ts`:
 
-1. Built-in providers (Telegram/Slack) call `registerChannelProvider(provider)`.
+1. Built-in providers (`app`, `slack`, and `telegram`) call `registerChannelProvider(provider)`.
 2. Startup wiring iterates `listChannelProviders()`, creates enabled providers, and connects returned channel instances.
 3. Routing uses `providerForJid(jid)` to determine ownership and formatting behavior.
 
 ### Key Files
 
-| File                                          | Purpose                                                 |
-| --------------------------------------------- | ------------------------------------------------------- |
-| `apps/core/src/channels/provider-registry.ts` | Channel provider registry                               |
-| `apps/core/src/channels/register-builtins.ts` | Built-in provider registration                          |
-| `apps/core/src/core/types.ts`                 | `Channel` interface, `ChannelOpts`, message types       |
-| `apps/core/src/index.ts`                      | Orchestrator — instantiates channels, runs message loop |
-| `apps/core/src/messaging/router.ts`           | Finds the owning channel for a JID, formats messages    |
+| File                                            | Purpose                                                 |
+| ----------------------------------------------- | ------------------------------------------------------- |
+| `apps/core/src/channels/provider-registry.ts`   | Channel provider registry                               |
+| `apps/core/src/channels/register-builtins.ts`   | Built-in provider registration                          |
+| `apps/core/src/channels/channel-provider.ts`    | `ChannelAdapter`, `ChannelOpts`, and provider factory   |
+| `apps/core/src/domain/types.ts`                 | Channel ports, message types, and group metadata        |
+| `apps/core/src/index.ts`                        | Orchestrator — instantiates channels, runs message loop |
+| `apps/core/src/app/bootstrap/channel-wiring.ts` | Owns channel output, streaming, progress, and approvals |
 
 ### Adding a New Channel
 
 To add a new channel, contribute a skill to `.claude/skills/add-<name>/` that:
 
-1. Adds a `apps/core/src/channels/<name>.ts` file implementing the `Channel` interface
+1. Adds a `apps/core/src/channels/<name>.ts` file implementing the `ChannelAdapter` contract
 2. Exposes a `ChannelProvider` entry with `id`, prefixes, setup metadata, and `create`
 3. Returns `null` from `create` if credentials are missing
 4. Registers the provider via `register-builtins.ts` (or equivalent provider registration module)
@@ -233,19 +226,21 @@ myclaw/
 ├── apps/
 │   └── core/
 │       ├── src/
-│       │   ├── index.ts           # Orchestrator: state, message loop, agent invocation
+│       │   ├── index.ts           # Package/runtime entrypoint
+│       │   ├── app/               # Process bootstrap, lifecycle, runtime composition
 │       │   ├── channels/          # Channel provider registry and channel implementations
-│       │   ├── core/              # Config, logging, environment, shared types
+│       │   ├── config/            # Env, settings, credentials, redaction
+│       │   ├── control/           # HTTP/SSE SDK control server
+│       │   ├── domain/            # Pure domain types and repository contracts
+│       │   ├── infrastructure/    # Postgres, pg-boss, IPC, OneCLI, logging, service wrappers
+│       │   ├── jobs/              # MyClaw job lifecycle and scheduler ports
 │       │   ├── memory/            # Memory ingestion, retrieval, and storage logic
 │       │   ├── messaging/         # Routing and formatting
 │       │   ├── platform/          # Group folder and sender allowlist helpers
-│       │   ├── runtime/           # Agent spawn, IPC, browser, queue, scheduler
+│       │   ├── runtime/           # Host orchestration, queues, agent spawn, permissions
+│       │   ├── runner/            # Child runner, Claude Agent SDK, MCP tools
 │       │   ├── session/           # Slash commands and transcript archive flow
-│       │   └── storage/           # SQLite persistence
-│       ├── config-examples/       # Example config payloads
-│       │   └── runner/            # Agent runner + MCP stdio runtime code
-│       │       ├── index.ts       # Entry point (query loop, IPC polling, session resume)
-│       │       └── ipc-mcp-stdio.ts # Stdio-based MCP server for host communication
+│       │   └── shared/            # Small dependency-light helpers
 │
 ├── ops/
 │   ├── bootstrap.sh              # Local bootstrap script
@@ -267,15 +262,9 @@ myclaw/
 │       ├── CLAUDE.md              # Static group-specific prompt guidance
 │       └── logs/                  # Task execution logs
 │
-├── store/                         # Local data (gitignored)
-│   └── myclaw.db                  # Default SQLite app database (messages, chats, jobs, job_runs, job_events, registered_groups, sessions, router_state)
-│
-├── memory/                        # Durable memory root (gitignored)
-│   ├── .cache/memory.db           # Default SQLite memory database
-│   └── .journal/                  # Memory journal events
-│
 ├── data/                          # Application state (gitignored)
 │   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
+│   ├── session-archives/          # Best-effort transcript archives from /new and compaction
 │   ├── env/env                    # Copy of .env for runtime loading
 │   └── ipc/                       # Runtime IPC (messages/, tasks/)
 │
@@ -292,26 +281,21 @@ myclaw/
 
 ## Configuration
 
-Configuration constants are in `apps/core/src/core/config.ts`:
+Configuration constants are in `apps/core/src/config/index.ts`:
 
 ```typescript
 import path from 'path';
+import { getMyclawHome } from './myclaw-home.js';
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
 export const POLL_INTERVAL = 2000;
-export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Paths are absolute (required for runtime path enforcement)
-const MYCLAW_HOME = path.resolve(process.env.MYCLAW_HOME || '~/myclaw');
-export const STORE_DIR = path.resolve(MYCLAW_HOME, 'store');
+// Paths are absolute and resolve from the configured runtime home.
+const MYCLAW_HOME = getMyclawHome(process.env.MYCLAW_HOME);
 export const AGENTS_DIR = path.resolve(MYCLAW_HOME, 'agents');
 export const DATA_DIR = path.resolve(MYCLAW_HOME, 'data');
 
-// Runtime configuration
-export const AGENT_TIMEOUT = parseInt(
-  process.env.AGENT_TIMEOUT || '1800000',
-  10,
-); // 30min default
+// Durable runtime state is stored in Postgres, configured by settings.yaml.
 export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL;
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep runtime worker alive after last result
@@ -326,9 +310,9 @@ export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
 Groups can have additional directories exposed to the agent workspace through the registered group agent config. Example registration:
 
 ```typescript
-setRegisteredGroup('1234567890@g.us', {
+setRegisteredGroup('telegram:dev-team', {
   name: 'Dev Team',
-  folder: 'whatsapp_dev-team',
+  folder: 'telegram_dev-team',
   trigger: '@Andy',
   added_at: new Date().toISOString(),
   agentConfig: {
@@ -344,7 +328,7 @@ setRegisteredGroup('1234567890@g.us', {
 });
 ```
 
-Folder names follow the convention `{channel}_{group-name}` (e.g., `whatsapp_family-chat`, `telegram_dev-team`). The main group has `isMain: true` set during registration.
+Folder names follow the convention `{channel}_{group-name}` (e.g., `slack_engineering`, `telegram_dev-team`). The main group has `isMain: true` set during registration.
 
 Additional mounts appear under `/workspace/extra/` in the runtime workspace.
 
@@ -357,23 +341,17 @@ Use `/model` in a group session to switch the live model (`/model`, `/model <ali
 
 ### Claude Authentication
 
-Configure authentication in a `.env` file in the project root. Two options:
-
-**Option 1: Claude Subscription (OAuth token)**
-
-```bash
-CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
-```
-
-The token can be extracted from `~/.claude/.credentials.json` if you're logged in to Claude Code.
-
-**Option 2: Pay-per-use API Key**
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-api03-...
-```
-
-Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and written to `data/env/env` for runtime loading. This ensures other environment variables in `.env` are not exposed to agent prompts by default.
+MyClaw uses OneCLI as the broker for agent and memory LLM credentials. Runtime
+`.env` stores `ONECLI_URL`, `ONECLI_DATABASE_URL`, a generated base64-encoded 32-byte
+`SECRET_ENCRYPTION_KEY`, and model selection, not raw Claude credentials.
+MyClaw and OneCLI can share one Postgres database with separate schemas and
+roles: `myclaw`, `onecli`, and `pgboss`. OneCLI owns its schema and migrations;
+MyClaw only provisions and verifies the schema boundary. `MYCLAW_DATABASE_URL`
+and `ONECLI_DATABASE_URL` must use different Postgres users. The runner receives
+broker-safe model endpoint settings from OneCLI; raw provider tokens, database
+URLs, broker-provided proxy variables, and broker-provided CA certificate
+variables are not forwarded to tools, the child runner, or the Agent SDK
+environment.
 
 ### Changing the Assistant Name
 
@@ -383,7 +361,7 @@ Set the `ASSISTANT_NAME` environment variable:
 ASSISTANT_NAME=Bot npm start
 ```
 
-Or edit the default in `apps/core/src/core/config.ts`. This changes:
+Or edit the default in `apps/core/src/config/index.ts`. This changes:
 
 - The trigger pattern (messages must start with `@YourName`)
 - The response prefix (`YourName:` added automatically)
@@ -431,19 +409,23 @@ See [CONTINUITY.md](CONTINUITY.md) for the continuity model.
 
 ### Structured Memory Store
 
-The structured memory store provides scoped recall for durable statements and learned procedures. It stores facts, decisions, preferences, corrections, constraints, and procedures in a dedicated memory SQLite database.
+The structured memory store provides boundary-aware recall for durable
+statements, learned procedures, evidence, recall signals, and auditable dreaming
+decisions. It stores app-grade memory in Postgres.
 
 #### Storage Backend
 
-| Component                          | Technology                                   | Purpose                                                            |
-| ---------------------------------- | -------------------------------------------- | ------------------------------------------------------------------ |
-| **Memory statements & procedures** | SQLite (`memory_items`, `memory_procedures`) | Human-readable memory entries with scoping, confidence, versioning |
-| **Chunks**                         | SQLite (`memory_chunks`)                     | Chunked text from ingested source files                            |
-| **Lexical search**                 | SQLite FTS5/BM25                             | Keyword search                                                     |
-| **Vector search**                  | sqlite-vec                                   | Optional semantic similarity search on embeddings                  |
-| **Audit log**                      | SQLite (`memory_events`)                     | All memory operations logged for debugging                         |
-
-Default SQLite database path: `~/myclaw/memory/.cache/memory.db`
+| Component           | Technology                          | Purpose                                                             |
+| ------------------- | ----------------------------------- | ------------------------------------------------------------------- |
+| **Subjects**        | Postgres (`memory_subjects`)        | App/agent/user/group/channel/thread boundary registry               |
+| **Evidence**        | Postgres (`memory_evidence`)        | Grounding from sessions, messages, tools, manual saves, and sources |
+| **Candidates**      | Postgres (`memory_candidates`)      | Extracted facts awaiting promotion or review                        |
+| **Memory items**    | Postgres (`memory_items`)           | Durable statements with confidence, versioning, and evidence links  |
+| **Recall events**   | Postgres (`memory_recall_events`)   | Search/usefulness signals for future dreaming                       |
+| **Dream runs**      | Postgres (`memory_dream_runs`)      | Dreaming lifecycle runs per boundary                                |
+| **Dream decisions** | Postgres (`memory_dream_decisions`) | Auditable promotion, merge, rewrite, decay, retire, or review rows  |
+| **Lexical search**  | Postgres full-text search           | Keyword search and filtering                                        |
+| **Vector search**   | `pgvector`                          | Optional semantic similarity search when embeddings are enabled     |
 
 #### MCP Tools (Exposed to Agents)
 
@@ -457,40 +439,40 @@ Agents interact with memory via MCP tools over IPC:
 | `procedure_save`  | Save a reusable multi-step procedure                                               |
 | `procedure_patch` | Update an existing procedure                                                       |
 
-#### Memory Scoping
+#### Memory Boundaries
 
-Three-tier scope model with strict isolation:
+Every memory record belongs to an `appId` and `agentId`. One subject determines
+the primary visibility boundary:
 
-| Scope    | Write Access | Read Access | Use Case                              |
-| -------- | ------------ | ----------- | ------------------------------------- |
-| `global` | Main only    | All groups  | Cross-group preferences, shared facts |
-| `group`  | That group   | That group  | Group-specific knowledge              |
-| `user`   | That group   | That group  | Per-user facts within a group         |
+| Subject   | Meaning                                                             |
+| --------- | ------------------------------------------------------------------- |
+| `user`    | Human actor preferences, corrections, or durable facts              |
+| `group`   | Logical MyClaw/app group or configured agent group                  |
+| `channel` | External provider conversation where the bot is present             |
+| `common`  | App-wide shared memory, write-restricted to admin/service workflows |
 
-Default scope is controlled by `MEMORY_SCOPE_POLICY` (default: `group`).
+Provider ids are stored without changing the boundary meaning:
+
+- `channelId` is the provider conversation id: Telegram private/group/supergroup
+  chat, Slack channel/DM/MPIM, Microsoft Teams channel/chat, or SDK
+  conversation.
+- `groupId` is the configured MyClaw/app group, not a Telegram-only group id.
+- `threadId` is a topic or reply boundary such as Slack `thread_ts`, Telegram
+  forum topic id, or Teams reply chain id.
 
 #### Search Architecture (Hybrid Retrieval)
 
 Search combines lexical recall with optional semantic recall using Reciprocal Rank Fusion (K=60):
 
-1. **Lexical (BM25)**: SQLite FTS5 rank.
-2. **Vector (Semantic)**: `sqlite-vec` when enabled and available. Score: `1 / (1 + distance)`
+1. **Lexical**: Postgres full-text rank.
+2. **Vector (Semantic)**: `pgvector` cosine similarity when embeddings are enabled.
 3. **Fusion**: RRF merges both ranked lists. For each result at rank i: `score += 1 / (K + i + 1)`. Top-K returned.
 
 #### Source Ingestion
 
-On each message or scheduled task, MyClaw auto-ingests group source files into the chunk store:
-
-| Source                    | Path                              | Source Type |
-| ------------------------- | --------------------------------- | ----------- |
-| CLAUDE.md                 | `agents/{name}/CLAUDE.md`         | `claude_md` |
-| Group knowledge directory | `agents/{name}/knowledge/**/*.md` | `local_doc` |
-
-**Chunking**: Sliding window (default 1400 chars, 240 overlap). Chunks < 30 chars are filtered. Deduplication via SHA256 hash of `scope:group:source_type:source_id:text`.
-
-**Embedding**: Optional batch embedding via the configured provider (default batch size 16). Only new chunks (not matching existing hashes) are embedded when embeddings are enabled.
-
-**Retention**: Chunks older than `MEMORY_CHUNK_RETENTION_DAYS` (default 120) are pruned. Max `MEMORY_MAX_CHUNKS_PER_GROUP` (default 6000) per group.
+Markdown/file ingestion is an explicit knowledge-source feature. It is not the
+primary memory store. Runtime memories are captured as grounded evidence,
+candidates, durable items, recall events, and dream decisions in Postgres.
 
 #### Reflection (Auto-Capture)
 
@@ -501,53 +483,37 @@ After each successful agent turn, the system extracts durable memory statements 
 - Stores real human-readable statements with reflection-derived confidence scores.
 - Filters sensitive material (API keys, tokens, passwords)
 - Rejects prompt-injection style text before it becomes future context
-- Controlled by `MEMORY_REFLECTION_MIN_CONFIDENCE` (default 0.7) and `MEMORY_REFLECTION_MAX_FACTS_PER_TURN` (default 6)
+- Controlled by memory extractor settings and the app-grade memory service.
 
 ### Memory Storage
 
-MyClaw memory uses a dedicated SQLite database derived from `memory.root`.
+MyClaw memory uses Postgres tables in the configured runtime schema.
 
-- Default SQLite database: `~/myclaw/memory/.cache/memory.db`
-- Memory artifact root: `~/myclaw/memory`
-- Journal files: `~/myclaw/memory/.journal`
-- Vector search: optional `sqlite-vec` support
+- Runtime database: `MYCLAW_DATABASE_URL`
+- Runtime schema: `storage.postgres.schema` (default `myclaw`)
+- Vector search: `pgvector` when embeddings are enabled
+- Lexical search: Postgres full-text search
 
-**Filesystem layout**:
-
-```
-{MYCLAW_HOME}/
-├── store/
-│   └── myclaw.db     # App storage database
-└── memory/
-    ├── .cache/
-    │   └── memory.db # Memory database
-    ├── .journal/     # Daily audit log of memory operations
-    └── ...           # Optional memory artifacts
-```
+Session transcript archives are operational artifacts under
+`<runtime home>/data/session-archives`; they are not the memory store.
 
 ### Memory Configuration Reference
 
-| Setting                                | Default                  | Description                                                   |
-| -------------------------------------- | ------------------------ | ------------------------------------------------------------- |
-| `storage.provider`                     | `sqlite`                 | Host runtime storage backend                                 |
-| `storage.sqlite.path`                  | `store/myclaw.db`        | SQLite DB path (runtime-home relative unless absolute)        |
-| `memory.enabled`                       | `true`                   | Enables durable memory                                        |
-| `memory.root`                          | `memory`                 | Memory root path, resolved under runtime home unless absolute |
-| `memory.embeddings.enabled`            | `false`                  | Optional embedding toggle                                     |
-| `memory.embeddings.provider`           | `disabled`               | Embedding provider (`disabled` or `openai`)                   |
-| `memory.embeddings.model`              | `text-embedding-3-large` | Embedding model                                               |
-| `MEMORY_VECTOR_DIMENSIONS`             | `3072`                   | Vector dimensions (must match model output)                   |
-| `MEMORY_EMBED_BATCH_SIZE`              | `16`                     | Texts per embedding API call                                  |
-| `MEMORY_CHUNK_SIZE`                    | `1400`                   | Characters per chunk                                          |
-| `MEMORY_CHUNK_OVERLAP`                 | `240`                    | Overlap between chunks                                        |
-| `MEMORY_RETRIEVAL_LIMIT`               | `8`                      | Default results per search                                    |
-| `MEMORY_SCOPE_POLICY`                  | `group`                  | Default scope for new items                                   |
-| `MEMORY_REFLECTION_MIN_CONFIDENCE`     | `0.7`                    | Min confidence for auto-captured facts                        |
-| `MEMORY_REFLECTION_MAX_FACTS_PER_TURN` | `6`                      | Max facts extracted per turn                                  |
-| `MEMORY_MAX_CHUNKS_PER_GROUP`          | `6000`                   | Chunk cap per group                                           |
-| `MEMORY_CHUNK_RETENTION_DAYS`          | `120`                    | Days before chunks are pruned                                 |
-| `MEMORY_MAX_EVENTS`                    | `20000`                  | Max audit log entries                                         |
-| `MEMORY_MAX_PROCEDURES_PER_GROUP`      | `500`                    | Procedure cap per group                                       |
+| Setting                                     | Default                  | Description                                              |
+| ------------------------------------------- | ------------------------ | -------------------------------------------------------- |
+| `storage.postgres.url_env`                  | `MYCLAW_DATABASE_URL`    | Env key for Postgres connection URL                      |
+| `storage.postgres.schema`                   | `myclaw`                 | Postgres schema name                                     |
+| `credential_broker.onecli.postgres.url_env` | `ONECLI_DATABASE_URL`    | Env key for the OneCLI Postgres URL with `schema=onecli` |
+| `credential_broker.onecli.postgres.schema`  | `onecli`                 | OneCLI-owned Postgres schema                             |
+| `memory.enabled`                            | `true`                   | Enables durable memory                                   |
+| `memory.embeddings.enabled`                 | `false`                  | Optional embedding toggle                                |
+| `memory.embeddings.provider`                | `disabled`               | Embedding provider (`disabled` or `openai`)              |
+| `memory.embeddings.model`                   | `text-embedding-3-large` | Embedding model                                          |
+| `MEMORY_EMBED_BATCH_SIZE`                   | `16`                     | Texts per embedding API call                             |
+| `MEMORY_EXTRACTOR_MAX_FACTS`                | `8`                      | Max candidate facts extracted per evidence batch         |
+| `MEMORY_EXTRACTOR_MIN_CONFIDENCE`           | `0.6`                    | Min confidence for extracted candidates                  |
+| `MEMORY_DREAMING_CRON`                      | `17 3 * * *`             | Dreaming maintenance schedule                            |
+| `MEMORY_MAINTENANCE_MAX_PENDING`            | `100`                    | Max pending memory maintenance items per pass            |
 
 ---
 
@@ -572,42 +538,51 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 1. User sends a message via any connected channel
    │
    ▼
-2. Channel receives message (e.g. Baileys for WhatsApp, Bot API for Telegram)
+2. Channel adapter or SDK control server receives the message
    │
    ▼
-3. Message stored in the runtime database (SQLite at `store/myclaw.db` by default)
+3. Runtime stores chat metadata and the message in Postgres
    │
    ▼
-4. Message loop polls the runtime database (every 2 seconds)
+4. Message loop polls Postgres or recovers pending messages after restart
    │
    ▼
-5. Router checks:
-   ├── Is chat_jid in registered groups? → No: ignore
-   └── Does message match trigger pattern? → No: store but don't process
+5. Message loop checks:
+   ├── Is chat_jid in registered groups? -> No: ignore
+   ├── Is sender allowed to interact? -> No: drop or store only
+   └── Does message match trigger/session command policy? -> No: store but don't process
    │
    ▼
-6. Router catches up conversation:
+6. GroupQueue enqueues ordered work for the group/thread
+   │
+   ▼
+7. Group processor catches up conversation:
    ├── Fetch all messages since last agent interaction
    ├── Format with timestamp and sender name
-   └── Build prompt with full conversation context
+   ├── Add job/session context when present
+   └── Build prompt with memory and continuity context
    │
    ▼
-7. Router invokes Claude Agent SDK:
+8. Agent spawn starts the child runner:
    ├── cwd: agents/{group-name}/
    ├── prompt: conversation history + current message
    ├── resume: session_id (for continuity)
-   └── mcpServers: myclaw (scheduler)
+   └── mcpServers: myclaw (runtime tools over IPC)
    │
    ▼
-8. Claude processes message:
+9. Child runner invokes Claude Agent SDK:
    ├── Uses injected prompt profile and memory/continuity context
-   └── Uses tools as needed
+   ├── Uses MessageStream for safe follow-up input
+   └── Requests host permission for policy-gated tools
    │
    ▼
-9. Router prefixes response with assistant name and sends via the owning channel
+10. Group processor forwards streaming/progress/final output through channel wiring
    │
    ▼
-10. Router updates last agent timestamp and saves session ID
+11. Slack/Telegram send network responses; the app channel writes durable control events
+   │
+   ▼
+12. Runtime advances cursor and saves the resumed Claude session ID
 ```
 
 ### Trigger Word Matching
@@ -744,7 +719,10 @@ The `myclaw` MCP server is created dynamically per agent call with the current g
 
 ## Deployment
 
-MyClaw runs as a single macOS launchd service.
+MyClaw runs as one local runtime service. The installer chooses launchd on
+macOS, systemd user units on Linux when available, and a nohup/background
+fallback otherwise. Managed local services are started before the runtime when
+they are configured.
 
 ### Startup Sequence
 
@@ -752,8 +730,8 @@ When MyClaw starts, it:
 
 1. Runs runtime preflight for host execution and emits actionable fix steps on failure
 2. Auto-builds runner artifacts from `apps/core/src/runner` and fails startup if build fails
-3. Initializes the configured runtime database (SQLite by default)
-4. Loads state from runtime storage (registered groups, sessions, router state)
+3. Initializes Postgres runtime storage
+4. Loads state from runtime storage (registered groups, sessions, runtime cursor state)
 5. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `connect()` on each
 6. Once at least one channel is connected:
    - Starts the scheduler loop
@@ -762,9 +740,21 @@ When MyClaw starts, it:
    - Recovers any unprocessed messages from before shutdown
    - Starts the message polling loop
 
-### Service: com.myclaw
+### Service Lifecycle
 
-**ops/launchd/com.myclaw.plist:**
+The generated service sets `MYCLAW_HOME`, uses the resolved Node runtime entry,
+and runs the local dependency prestart command before the main runtime:
+
+```bash
+myclaw start
+myclaw
+```
+
+On macOS this is written into `com.myclaw.plist` through a shell command. On
+Linux systemd it is represented as `ExecStartPre`. The fallback script performs
+the same prestart step before launching the runtime.
+
+**launchd shape:**
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -775,8 +765,9 @@ When MyClaw starts, it:
     <string>com.myclaw</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{{NODE_PATH}}</string>
-        <string>{{RUNTIME_ENTRY}}</string>
+        <string>/bin/sh</string>
+        <string>-lc</string>
+        <string>{{NODE_PATH}} {{RUNTIME_ENTRY}}</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{{RUNTIME_HOME}}</string>
@@ -804,20 +795,23 @@ When MyClaw starts, it:
 ### Managing the Service
 
 ```bash
-# Install service
+# Start, stop, or restart the whole local runtime stack
+myclaw start
+myclaw stop
+myclaw restart
+
+# Install the background service
 myclaw service install
-
-# Start service
-myclaw service start
-
-# Stop service
-myclaw service stop
 
 # Check status
 myclaw status
 
 # View logs
-tail -f ~/myclaw/logs/myclaw.log
+myclaw logs
+
+# Manage local Postgres + Model Access together
+myclaw local status
+docker compose logs --tail 160
 ```
 
 ---
@@ -831,7 +825,7 @@ Security boundaries are enforced through per-group directory scope, runtime-home
 
 ### Prompt Injection Risk
 
-WhatsApp messages could contain malicious instructions attempting to manipulate Claude's behavior.
+Inbound channel and SDK messages could contain malicious instructions attempting to manipulate Claude's behavior.
 
 **Mitigations:**
 
@@ -850,17 +844,17 @@ WhatsApp messages could contain malicious instructions attempting to manipulate 
 
 ### Credential Storage
 
-| Credential       | Storage Location               | Notes                                               |
-| ---------------- | ------------------------------ | --------------------------------------------------- |
-| Claude CLI Auth  | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/ |
-| WhatsApp Session | store/auth/                    | Auto-created, persists ~20 days                     |
+| Credential      | Storage Location               | Notes                                                |
+| --------------- | ------------------------------ | ---------------------------------------------------- |
+| Claude CLI Auth | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/  |
+| Channel secrets | Runtime environment or OneCLI  | Loaded by provider setup and never exposed to agents |
 
 ### File Permissions
 
-The runtime agents and store directories contain personal context and should be protected:
+The runtime agents and data directories contain personal context and should be protected:
 
 ```bash
-chmod 700 ~/myclaw/agents ~/myclaw/store
+chmod 700 ~/myclaw/agents ~/myclaw/data
 ```
 
 ---
@@ -874,7 +868,7 @@ chmod 700 ~/myclaw/agents ~/myclaw/store
 | No response to messages                  | Service not running               | Run `myclaw status` and check the service line                              |
 | Startup fails at runtime preflight       | Host runtime prerequisites failed | Run `npm run build` and re-check runtime diagnostics                        |
 | "Claude Code process exited with code 1" | Session mount path wrong          | Ensure mount is to `/home/node/.claude/` not `/root/.claude/`               |
-| Session not continuing                   | Session ID not saved              | Check SQLite: `sqlite3 store/myclaw.db "SELECT * FROM sessions"`            |
+| Session not continuing                   | Session state not persisted       | Run `myclaw status` and verify Postgres runtime storage readiness           |
 | Session not continuing                   | Session path mismatch             | Ensure per-group session paths exist under `data/sessions/{group}/.claude/` |
 | "No groups registered"                   | Haven't added groups              | Register a channel group with the current channel setup flow                |
 

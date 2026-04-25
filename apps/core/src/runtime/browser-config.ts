@@ -1,4 +1,4 @@
-import { CHROME_PATH as configuredChromePath } from '../core/config.js';
+import { CHROME_PATH as configuredChromePath } from '../config/index.js';
 
 export const DEFAULT_CHROME_ARGS = [
   '--disable-blink-features=AutomationControlled',

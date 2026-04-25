@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { MEMORY_EMBED_BATCH_SIZE } from '@core/core/config.js';
+import { MEMORY_EMBED_BATCH_SIZE } from '@core/config/index.js';
 
 import {
   createEmbeddingProvider,
+  DisabledEmbeddingClient,
   EmbeddingProvider,
   OpenAIEmbeddingClient,
   registerEmbeddingProvider,
@@ -37,6 +38,19 @@ describe('memory embedding providers', () => {
 
     const provider = createEmbeddingProvider(providerName);
     expect(await provider.embedOne('hello')).toEqual([0.1, 0.2, 0.3, 0.4]);
+  });
+
+  it('does not synthesize zero vectors when disabled', async () => {
+    const provider = new DisabledEmbeddingClient();
+
+    expect(provider.isEnabled()).toBe(false);
+    await expect(provider.embedMany(['hello'])).rejects.toThrow(
+      'memory embeddings are disabled',
+    );
+    await expect(provider.embedOne('hello')).rejects.toThrow(
+      'memory embeddings are disabled',
+    );
+    await expect(provider.embedMany([])).resolves.toEqual([]);
   });
 });
 
@@ -93,14 +107,14 @@ describe('OpenAIEmbeddingClient', () => {
         'text-embedding-test',
       );
       expect(() => client.validateConfiguration()).toThrow(
-        'OPENAI_API_KEY is required for memory embeddings',
+        'Brokered Model Access is required for external memory embeddings',
       );
     });
 
     it('throws when API key is empty', () => {
       const client = new OpenAIEmbeddingClient('', 'text-embedding-test');
       expect(() => client.validateConfiguration()).toThrow(
-        'OPENAI_API_KEY is required for memory embeddings',
+        'Brokered Model Access is required for external memory embeddings',
       );
     });
 

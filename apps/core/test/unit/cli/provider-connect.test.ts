@@ -1,0 +1,42 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import * as prompts from '@clack/prompts';
+
+import { runProviderConnectCommand } from '@core/cli/provider-connect.js';
+
+const runtimeHomes: string[] = [];
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  while (runtimeHomes.length > 0) {
+    const runtimeHome = runtimeHomes.pop();
+    if (runtimeHome) fs.rmSync(runtimeHome, { recursive: true, force: true });
+  }
+});
+
+function makeRuntimeHome(): string {
+  const runtimeHome = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'myclaw-provider-connect-test-'),
+  );
+  runtimeHomes.push(runtimeHome);
+  return runtimeHome;
+}
+
+describe('runProviderConnectCommand', () => {
+  it('rejects internal app channel connect commands', async () => {
+    const errorSpy = vi
+      .spyOn(prompts.log, 'error')
+      .mockImplementation(() => {});
+
+    const code = await runProviderConnectCommand(makeRuntimeHome(), 'app');
+
+    expect(code).toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown channel provider: app'),
+    );
+  });
+});

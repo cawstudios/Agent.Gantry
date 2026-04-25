@@ -1,0 +1,97 @@
+# MyClaw SDK Overview
+
+`@myclaw/sdk` is the server-side integration surface for backend applications that want to treat MyClaw as a sidecar agent runtime.
+
+Use it from:
+
+- NestJS services/providers
+- Next.js route handlers and server actions
+- background workers
+- local CLIs
+
+Do not use it from browser bundles.
+
+## Transport
+
+The runtime exposes a small internal control API over:
+
+- Unix domain socket by default
+- loopback TCP only when explicitly enabled
+
+Authentication is bearer-token based and scoped. The runtime reads keys from:
+
+- `MYCLAW_CONTROL_API_KEYS_JSON` for production scoped keys
+- `MYCLAW_CONTROL_API_KEY` only for local development full-access runtimes
+
+Production apps should use the narrowest key needed. A typical chat backend
+uses `sessions:read` and `sessions:write`; job dashboards add `jobs:read` and
+`jobs:write`; webhook administration uses `webhooks:read` and
+`webhooks:write`.
+
+## Core flow
+
+1. The app calls `sessions.ensure()`.
+2. The app calls `sessions.sendMessage()`.
+3. MyClaw persists the inbound message to the runtime store.
+4. The message enters the normal group queue.
+5. The agent runs through the normal host runtime.
+6. Outbound replies/progress/streaming are emitted as durable `control_events`.
+7. The app consumes those events through `sessions.wait()`, `sessions.stream()`, or signed webhooks.
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant SDK
+  participant Control as Control Server
+  participant Store as Postgres
+  participant Queue as Group Queue
+  participant Agent
+
+  App->>SDK: sessions.sendMessage()
+  SDK->>Control: POST /v1/sessions/:id/messages
+  Control->>Store: persist inbound message + control event
+  Control->>Queue: enqueue message check
+  Queue->>Agent: run agent normally
+  Agent->>Control: outbound reply via app channel
+  Control->>Store: append control event
+  Store-->>SDK: SSE / wait / webhook delivery
+```
+
+## Public resources
+
+- `sessions`
+- `jobs`
+- `runs`
+- `webhooks`
+- `health`
+- `doctor`
+
+For the runtime boundary, message lifecycle, job lifecycle, and webhook delivery internals, see [Agent Internals For SDK Consumers](./agent-internals.md).
+
+## Event model
+
+The SDK does not read agent stdout directly. It reads durable runtime events.
+
+Important event types in this cut:
+
+- `session.message.inbound`
+- `session.message.outbound`
+- `session.message.streaming`
+- `session.progress`
+- `session.typing`
+- `job.triggered`
+- `job.run.started`
+- `job.run.completed`
+- `job.run.failed`
+- `webhook.test`
+
+## Minimal client setup
+
+```ts
+import { createClient } from '@myclaw/sdk';
+
+const client = createClient({
+  socketPath: process.env.MYCLAW_CONTROL_SOCKET_PATH,
+  apiKey: process.env.MYCLAW_SESSIONS_API_KEY!,
+});
+```

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { RegisteredGroup, ThinkingOverride } from '@core/core/types.js';
+import type { RegisteredGroup, ThinkingOverride } from '@core/domain/types.js';
 
 // --- Mocks ---
 
@@ -12,11 +12,11 @@ vi.mock('fs', () => ({
   },
 }));
 
-vi.mock('@core/core/config.js', () => ({
+vi.mock('@core/config/index.js', () => ({
   ASSISTANT_NAME: 'Andy',
 }));
 
-vi.mock('@core/core/logger.js', () => ({
+vi.mock('@core/infrastructure/logging/logger.js', () => ({
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -31,7 +31,7 @@ vi.mock('@core/platform/group-folder.js', () => ({
 
 // Vitest hoists vi.mock calls, so these imports resolve to the mocked versions.
 import fs from 'fs';
-import { logger } from '@core/core/logger.js';
+import { logger } from '@core/infrastructure/logging/logger.js';
 import { resolveGroupFolderPath } from '@core/platform/group-folder.js';
 import {
   registerGroup,
@@ -79,9 +79,12 @@ describe('registerGroup', () => {
     mockFs.existsSync.mockReturnValue(false);
   });
 
-  it('registers the group and calls persist + ensureOneCLIAgent', () => {
+  it('registers the group and calls persist + ensureOneCLIAgent', async () => {
     const group = makeGroup();
-    registerGroup(groups, 'g1@g.us', group, { persist, ensureOneCLIAgent });
+    await registerGroup(groups, 'g1@g.us', group, {
+      persist,
+      ensureOneCLIAgent,
+    });
 
     expect(groups['g1@g.us']).toBe(group);
     expect(persist).toHaveBeenCalledWith('g1@g.us', group);
@@ -95,13 +98,16 @@ describe('registerGroup', () => {
     );
   });
 
-  it('rejects registration when resolveGroupFolderPath throws', () => {
+  it('rejects registration when resolveGroupFolderPath throws', async () => {
     mockResolve.mockImplementation(() => {
       throw new Error('invalid folder');
     });
     const group = makeGroup({ folder: '../../etc' });
 
-    registerGroup(groups, 'bad@g.us', group, { persist, ensureOneCLIAgent });
+    await registerGroup(groups, 'bad@g.us', group, {
+      persist,
+      ensureOneCLIAgent,
+    });
 
     expect(groups).not.toHaveProperty('bad@g.us');
     expect(persist).not.toHaveBeenCalled();
@@ -112,11 +118,14 @@ describe('registerGroup', () => {
     );
   });
 
-  it('creates default CLAUDE.md when template file does not exist', () => {
+  it('creates default CLAUDE.md when template file does not exist', async () => {
     const group = makeGroup({ isMain: false });
     mockFs.existsSync.mockReturnValueOnce(false).mockReturnValueOnce(false);
 
-    registerGroup(groups, 'g1@g.us', group, { persist, ensureOneCLIAgent });
+    await registerGroup(groups, 'g1@g.us', group, {
+      persist,
+      ensureOneCLIAgent,
+    });
 
     expect(mockFs.writeFileSync).toHaveBeenCalledWith(
       '/resolved/test-group/CLAUDE.md',
@@ -128,11 +137,11 @@ describe('registerGroup', () => {
     );
   });
 
-  it('uses provided assistant name in default CLAUDE.md', () => {
+  it('uses provided assistant name in default CLAUDE.md', async () => {
     const group = makeGroup({ isMain: true });
     mockFs.existsSync.mockReturnValueOnce(false);
 
-    registerGroup(groups, 'g1@g.us', group, {
+    await registerGroup(groups, 'g1@g.us', group, {
       assistantName: 'Kai',
       persist,
       ensureOneCLIAgent,
@@ -148,12 +157,15 @@ describe('registerGroup', () => {
     );
   });
 
-  it('skips template creation when CLAUDE.md already exists', () => {
+  it('skips template creation when CLAUDE.md already exists', async () => {
     const group = makeGroup();
     // existsSync for groupMdFile => true (file already exists)
     mockFs.existsSync.mockReturnValue(true);
 
-    registerGroup(groups, 'g1@g.us', group, { persist, ensureOneCLIAgent });
+    await registerGroup(groups, 'g1@g.us', group, {
+      persist,
+      ensureOneCLIAgent,
+    });
 
     expect(mockFs.readFileSync).not.toHaveBeenCalled();
     expect(mockFs.writeFileSync).not.toHaveBeenCalled();
@@ -225,6 +237,17 @@ describe('setGroupModelOverride', () => {
 
     expect(groups['g1@g.us'].agentConfig).toBeUndefined();
     expect(persist).toHaveBeenCalled();
+  });
+
+  it('does not mutate model when async persistence rejects', async () => {
+    groups['g1@g.us'] = makeGroup({ agentConfig: { model: 'old-model' } });
+    persist = vi.fn<PersistGroupFn>().mockRejectedValue(new Error('db down'));
+
+    await expect(
+      setGroupModelOverride(groups, 'g1@g.us', 'new-model', persist),
+    ).rejects.toThrow('db down');
+
+    expect(groups['g1@g.us'].agentConfig?.model).toBe('old-model');
   });
 });
 
@@ -306,6 +329,21 @@ describe('setGroupThinkingOverride', () => {
 
     expect(groups['g1@g.us'].agentConfig).toBeUndefined();
     expect(persist).toHaveBeenCalled();
+  });
+
+  it('does not mutate thinking when async persistence rejects', async () => {
+    groups['g1@g.us'] = makeGroup({
+      agentConfig: { thinking: { mode: 'disabled' } },
+    });
+    persist = vi.fn<PersistGroupFn>().mockRejectedValue(new Error('db down'));
+
+    await expect(
+      setGroupThinkingOverride(groups, 'g1@g.us', { mode: 'enabled' }, persist),
+    ).rejects.toThrow('db down');
+
+    expect(groups['g1@g.us'].agentConfig?.thinking).toEqual({
+      mode: 'disabled',
+    });
   });
 });
 

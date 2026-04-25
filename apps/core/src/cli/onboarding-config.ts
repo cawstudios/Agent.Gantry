@@ -1,67 +1,113 @@
-import { upsertEnvFile } from './env-file.js';
-import type { HostCredentialMode } from '../core/credential-mode.js';
+import { readEnvFile, upsertEnvFile } from '../config/env/file.js';
+import type { HostCredentialMode } from '../config/credentials/mode.js';
 import '../channels/register-builtins.js';
 import { getChannelProvider } from '../channels/provider-registry.js';
-import { envFilePath, ensureRuntimeLayout } from './runtime-home.js';
+import {
+  envFilePath,
+  ensureRuntimeLayout,
+} from '../config/settings/runtime-home.js';
 import {
   loadRuntimeSettings,
   saveRuntimeSettings,
-} from './runtime-settings.js';
+} from '../config/settings/runtime-settings.js';
+import { normalizeClaudeModelSelection } from '../models/claude-model-registry.js';
+import {
+  generateOnecliSecretEncryptionKey,
+  ONECLI_DATABASE_URL_ENV,
+  ONECLI_DEFAULT_SCHEMA,
+  ONECLI_SECRET_ENCRYPTION_KEY_ENV,
+  validateSharedPostgresDatabase,
+  validateOnecliSecretEncryptionKey,
+} from '../infrastructure/onecli/persistence.js';
 
 export interface OnboardingConfigInput {
   runtimeHome: string;
-  storageProvider: 'sqlite';
+  postgresDatabaseUrl?: string;
+  postgresSchema?: string;
+  onecliPostgresDatabaseUrl?: string;
+  onecliPostgresSchema?: string;
   primaryProvider: 'telegram' | 'slack';
   telegramBotToken?: string;
+  telegramPermissionApproverIds?: string;
   slackBotToken?: string;
   slackAppToken?: string;
-  claudeOauthToken?: string;
-  anthropicApiKey?: string;
+  slackPermissionApproverIds?: string;
   anthropicModel?: string;
   credentialMode: HostCredentialMode;
   onecliUrl?: string;
   memoryEnabled: boolean;
   embeddingsEnabled: boolean;
   dreamingEnabled: boolean;
-  openAiApiKey?: string;
 }
 
 export function persistOnboardingConfig(input: OnboardingConfigInput): void {
   ensureRuntimeLayout(input.runtimeHome);
 
   const onecliUrl = input.onecliUrl?.trim() || '';
+  const envPath = envFilePath(input.runtimeHome);
+  const existingEnv = readEnvFile(envPath);
+  const onecliPostgresSchema =
+    input.onecliPostgresSchema?.trim() || ONECLI_DEFAULT_SCHEMA;
+  const onecliDatabaseUrl = input.onecliPostgresDatabaseUrl?.trim() || null;
+  if (input.postgresDatabaseUrl?.trim() && !onecliDatabaseUrl) {
+    throw new Error(
+      'ONECLI_DATABASE_URL is required and must use a Postgres role separate from MYCLAW_DATABASE_URL.',
+    );
+  }
+  if (input.postgresDatabaseUrl?.trim() && onecliDatabaseUrl) {
+    const sharedDatabase = validateSharedPostgresDatabase({
+      myclawPostgresUrl: input.postgresDatabaseUrl.trim(),
+      onecliPostgresUrl: onecliDatabaseUrl,
+    });
+    if (!sharedDatabase.ok) {
+      throw new Error(sharedDatabase.message);
+    }
+  }
+  const existingOnecliSecret =
+    existingEnv[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim() ||
+    process.env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim() ||
+    '';
+  const onecliSecretEncryptionKey = validateOnecliSecretEncryptionKey(
+    existingOnecliSecret,
+  ).ok
+    ? existingOnecliSecret
+    : generateOnecliSecretEncryptionKey();
 
-  upsertEnvFile(envFilePath(input.runtimeHome), {
+  upsertEnvFile(envPath, {
     TELEGRAM_BOT_TOKEN: input.telegramBotToken?.trim() || null,
+    TELEGRAM_PERMISSION_APPROVER_IDS:
+      input.primaryProvider === 'telegram'
+        ? input.telegramPermissionApproverIds?.trim() || null
+        : null,
     SLACK_BOT_TOKEN: input.slackBotToken?.trim() || null,
     SLACK_APP_TOKEN: input.slackAppToken?.trim() || null,
-    CLAUDE_CODE_OAUTH_TOKEN:
-      input.credentialMode === 'onecli-only'
-        ? null
-        : input.claudeOauthToken?.trim() || null,
-    ANTHROPIC_API_KEY:
-      input.credentialMode === 'onecli-only'
-        ? null
-        : input.anthropicApiKey?.trim() || null,
-    ANTHROPIC_MODEL: input.anthropicModel?.trim() || null,
-    MYCLAW_DATABASE_URL: null,
-    MYCLAW_CREDENTIAL_MODE: input.credentialMode,
-    ONECLI_URL:
-      input.credentialMode === 'env-only'
-        ? null
-        : onecliUrl.length > 0
-          ? onecliUrl
-          : null,
-    OPENAI_API_KEY:
-      input.embeddingsEnabled && input.openAiApiKey?.trim()
-        ? input.openAiApiKey.trim()
+    SLACK_PERMISSION_APPROVER_IDS:
+      input.primaryProvider === 'slack'
+        ? input.slackPermissionApproverIds?.trim() || null
         : null,
+    CLAUDE_CODE_OAUTH_TOKEN: null,
+    ANTHROPIC_API_KEY: null,
+    ANTHROPIC_AUTH_TOKEN: null,
+    ANTHROPIC_MODEL:
+      normalizeClaudeModelSelection(input.anthropicModel) || null,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: null,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: null,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: null,
+    MYCLAW_DATABASE_URL: input.postgresDatabaseUrl?.trim() || null,
+    [ONECLI_DATABASE_URL_ENV]: onecliDatabaseUrl,
+    [ONECLI_SECRET_ENCRYPTION_KEY_ENV]: onecliDatabaseUrl
+      ? onecliSecretEncryptionKey
+      : null,
+    MYCLAW_CREDENTIAL_MODE: input.credentialMode,
+    ONECLI_URL: onecliUrl.length > 0 ? onecliUrl : null,
+    OPENAI_API_KEY: null,
   });
 
   const settings = loadRuntimeSettings(input.runtimeHome);
-  settings.storage.provider = input.storageProvider;
   settings.storage.postgres.urlEnv = 'MYCLAW_DATABASE_URL';
-  settings.storage.postgres.schema = 'myclaw';
+  settings.storage.postgres.schema = input.postgresSchema?.trim() || 'myclaw';
+  settings.credentialBroker.onecli.postgres.urlEnv = ONECLI_DATABASE_URL_ENV;
+  settings.credentialBroker.onecli.postgres.schema = onecliPostgresSchema;
   const telegramProvider = getChannelProvider('telegram');
   if (telegramProvider && settings.channels[telegramProvider.id]) {
     const shouldEnable =

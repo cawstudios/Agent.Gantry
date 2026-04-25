@@ -8,7 +8,7 @@ import {
   parseEnvContent,
   readEnvFile,
   upsertEnvFile,
-} from '@core/cli/env-file.js';
+} from '@core/config/env/file.js';
 
 describe('cli env-file helpers', () => {
   it('parses env content and strips quotes', () => {

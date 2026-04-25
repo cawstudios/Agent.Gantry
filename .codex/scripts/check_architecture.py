@@ -9,6 +9,7 @@ from architecture_rules import (
     check_forbidden_channel_registration_surface,
     check_forbidden_ipc_contract_surface,
     check_forbidden_ipc_orchestrator_monolith,
+    check_forbidden_runtime_runner_materialization,
     check_doc_references,
     check_file_size_budget,
     check_forbidden_import_edges,
@@ -38,6 +39,7 @@ def print_grouped_failures(issues: dict[str, list[str]]) -> None:
         ("forbidden_channel_registration_surface", "Channel Registration Surface"),
         ("forbidden_ipc_contract_surface", "IPC Contract Surface"),
         ("forbidden_ipc_orchestrator_monolith", "IPC Orchestrator"),
+        ("forbidden_runtime_runner_materialization", "Runtime Runner Materialization"),
         ("doc_references", "Active Doc References"),
     )
     for key, label in groups:
@@ -72,6 +74,9 @@ def main() -> int:
         ),
         "forbidden_ipc_orchestrator_monolith": check_forbidden_ipc_orchestrator_monolith(
             root
+        ),
+        "forbidden_runtime_runner_materialization": check_forbidden_runtime_runner_materialization(
+            production_files, root
         ),
         "doc_references": check_doc_references(root),
     }

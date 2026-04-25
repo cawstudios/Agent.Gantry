@@ -1,5 +1,3 @@
-import { ChildProcess } from 'child_process';
-
 import {
   ASSISTANT_NAME,
   getDefaultModelConfig,
@@ -7,51 +5,42 @@ import {
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
   TIMEZONE,
-} from '../core/config.js';
+} from '../config/index.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
-} from '../core/message-cursor.js';
-import { logger } from '../core/logger.js';
+} from '../shared/message-cursor.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import {
   MessageSendOptions,
   NewMessage,
   ProgressUpdateOptions,
   RegisteredGroup,
   StreamingChunkOptions,
-  ThinkingOverride,
-} from '../core/types.js';
-import { MemoryService } from '../memory/memory-service.js';
+} from '../domain/types.js';
 import {
   formatMessages,
   formatOutboundForChannel,
 } from '../messaging/router.js';
 import {
-  isSenderExplicitlyAllowed,
+  isSenderControlAllowed,
   isTriggerAllowed,
+  loadSenderControlAllowlist,
   loadSenderAllowlist,
 } from '../platform/sender-allowlist.js';
-import {
-  deleteSession,
-  getAllJobs,
-  getMessagesSince,
-  listRecentJobEvents,
-  getRecentJobRuns,
-} from '../storage/db.js';
-import {
-  AvailableGroup,
-  AgentOutput,
-  spawnAgent,
-  writeJobEventsSnapshot,
-  writeJobRunsSnapshot,
-  writeJobsSnapshot,
-  writeGroupsSnapshot,
-} from './agent-spawn.js';
+import { AgentOutput, spawnAgent } from './agent-spawn.js';
 import { archiveSessionTranscript } from '../session/session-transcript-archive.js';
 import { handleSessionCommand } from '../session/session-commands.js';
 import { createInjectedMemoryContextBlock } from './memory-context.js';
+import type { GroupProcessingDeps } from './group-processing-types.js';
+import {
+  getGroupMemoryStatus,
+  saveGroupProcedureMemory,
+} from './group-memory-commands.js';
 import { runDreamingForGroup } from './memory-dreaming-runner.js';
+import { sendWithPartialDeliveryGuard } from './partial-delivery.js';
 import { firstThreadQueueId, parseThreadQueueKey } from './thread-queue-key.js';
+import { formatElapsed } from './time-format.js';
 
 const TYPING_HEARTBEAT_INTERVAL_MS = 4_000;
 const ELAPSED_PROGRESS_INTERVAL_MS = 60_000;
@@ -59,79 +48,12 @@ const NO_OUTPUT_WARNING_INTERVAL_MS = 180_000;
 const NO_VISIBLE_OUTPUT_FALLBACK_MESSAGE =
   'I finished that run but did not generate a user-visible reply. Please send your message again.';
 let streamingGenerationCounter = 0;
-
 function nextStreamingGeneration(): number {
   streamingGenerationCounter += 1;
   return streamingGenerationCounter;
 }
 
-function formatElapsed(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes <= 0) return `${seconds}s`;
-  return `${minutes}m ${seconds}s`;
-}
-
-export interface GroupProcessingDeps {
-  channelRuntime: {
-    hasChannel: (chatJid: string) => boolean;
-    supportsStreaming: (chatJid: string) => boolean;
-    supportsProgress: (chatJid: string) => boolean;
-    sendMessage: (
-      chatJid: string,
-      rawText: string,
-      options?: MessageSendOptions,
-    ) => Promise<void>;
-    sendStreamingChunk: (
-      chatJid: string,
-      rawText: string,
-      options?: StreamingChunkOptions,
-    ) => Promise<boolean>;
-    resetStreaming: (chatJid: string) => void;
-    setTyping: (chatJid: string, isTyping: boolean) => Promise<void>;
-    sendProgressUpdate: (
-      chatJid: string,
-      text: string,
-      options?: ProgressUpdateOptions,
-    ) => Promise<void>;
-  };
-  getGroup: (chatJid: string) => RegisteredGroup | undefined;
-  getSession: (
-    groupFolder: string,
-    threadId?: string | null,
-  ) => string | undefined;
-  setSession: (
-    groupFolder: string,
-    sessionId: string,
-    threadId?: string | null,
-  ) => void;
-  clearSession: (groupFolder: string, threadId?: string | null) => void;
-  getCursor: (chatJid: string) => string;
-  setCursor: (chatJid: string, timestamp: string) => void;
-  saveState: () => void;
-  setGroupModelOverride: (chatJid: string, model: string | undefined) => void;
-  setGroupThinkingOverride: (
-    chatJid: string,
-    thinking: ThinkingOverride | undefined,
-  ) => void;
-  getAvailableGroups: () => AvailableGroup[];
-  getRegisteredJids: () => Set<string>;
-  queue: {
-    closeStdin: (chatJid: string) => void;
-    notifyIdle: (chatJid: string) => void;
-    stopGroup?: (chatJid: string) => boolean;
-    registerProcess: (
-      groupJid: string,
-      proc: ChildProcess,
-      containerName: string,
-      groupFolder?: string,
-      stopAliasJids?: string | string[],
-      threadId?: string | null,
-    ) => void;
-  };
-  runAgent?: typeof spawnAgent;
-}
+export type { GroupProcessingDeps } from './group-processing-types.js';
 
 export function createGroupProcessor(deps: GroupProcessingDeps): {
   processGroupMessages: (
@@ -140,6 +62,13 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
   ) => Promise<boolean>;
 } {
   const runAgentImpl = deps.runAgent ?? spawnAgent;
+  const ops = () => {
+    const repository = deps.opsRepository ?? deps.getOpsRepository?.();
+    if (!repository) {
+      throw new Error('Group processor requires an OpsRepository');
+    }
+    return repository;
+  };
 
   async function runAgent(
     group: RegisteredGroup,
@@ -159,48 +88,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
     const isMain = group.isMain === true;
     const sessionThreadId = options?.memoryContext?.threadId ?? null;
     const sessionId = deps.getSession(group.folder, sessionThreadId);
-
-    const jobs = getAllJobs().map((job) => ({
-      id: job.id,
-      name: job.name,
-      prompt: job.prompt,
-      model: job.model || null,
-      script: job.script || undefined,
-      schedule_type: job.schedule_type,
-      schedule_value: job.schedule_value,
-      status: job.status,
-      group_scope: job.group_scope,
-      linked_sessions: job.linked_sessions,
-      thread_id: job.thread_id,
-      next_run: job.next_run,
-      created_by: job.created_by,
-      created_at: job.created_at,
-      updated_at: job.updated_at,
-      silent: job.silent,
-      cleanup_after_ms: job.cleanup_after_ms,
-      timeout_ms: job.timeout_ms,
-      max_retries: job.max_retries,
-      retry_backoff_ms: job.retry_backoff_ms,
-      max_consecutive_failures: job.max_consecutive_failures,
-      consecutive_failures: job.consecutive_failures,
-      execution_mode: job.execution_mode,
-      pause_reason: job.pause_reason,
-    }));
-    writeJobsSnapshot(group.folder, isMain, jobs);
-    writeJobRunsSnapshot(group.folder, isMain, getRecentJobRuns(200), jobs);
-    writeJobEventsSnapshot(
-      group.folder,
-      isMain,
-      listRecentJobEvents(500),
-      jobs,
-    );
-
-    writeGroupsSnapshot(
-      group.folder,
-      isMain,
-      deps.getAvailableGroups(),
-      deps.getRegisteredJids(),
-    );
 
     let pendingSessionId: string | null = null;
 
@@ -273,7 +160,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
             errorSummary: output.error,
             writePlaceholderOnMissing: true,
           });
-          deps.clearSession(group.folder, sessionThreadId);
+          await deps.clearSession(group.folder, sessionThreadId);
         }
 
         logger.error(
@@ -285,7 +172,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
 
       const nextSessionId = output.newSessionId || pendingSessionId;
       if (nextSessionId) {
-        deps.setSession(group.folder, nextSessionId, sessionThreadId);
+        await deps.setSession(group.folder, nextSessionId, sessionThreadId);
       }
 
       return 'success';
@@ -314,9 +201,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
     const messageFilter = scopedQueue
       ? { threadId: queueThreadId ?? null }
       : undefined;
-    const missedMessages = getMessagesSince(
+    const missedMessages = await ops().getMessagesSince(
       chatJid,
-      deps.getCursor(queueJid),
+      await deps.getCursor(queueJid),
       MAX_MESSAGES_PER_PROMPT,
       messageFilter,
     );
@@ -324,50 +211,28 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
     if (missedMessages.length === 0) return true;
 
     const latestMessage = missedMessages[missedMessages.length - 1];
-    let latestSeenCursor = encodeGroupMessageCursor(
-      toGroupMessageCursor(latestMessage),
+    const activeThreadId = firstThreadQueueId(
+      queueThreadId,
+      latestMessage.thread_id,
     );
-    const getActiveThreadId = (message?: NewMessage) =>
-      firstThreadQueueId(queueThreadId, message?.thread_id);
-    let activeThreadId = getActiveThreadId(latestMessage);
-    const refreshActiveThreadId = () => {
-      try {
-        const newerMessages = getMessagesSince(
-          chatJid,
-          latestSeenCursor,
-          1,
-          messageFilter,
-        );
-        if (newerMessages.length === 0) return;
-        const newestMessage = newerMessages[newerMessages.length - 1];
-        latestSeenCursor = encodeGroupMessageCursor(
-          toGroupMessageCursor(newestMessage),
-        );
-        activeThreadId = getActiveThreadId(newestMessage);
-      } catch (err) {
-        logger.debug(
-          { err, group: group.name },
-          'Failed to refresh latest thread context during run',
-        );
-      }
-    };
-    const resolveThreadId = (threadId?: string): string | undefined => {
+    const resolveThreadId = async (
+      threadId?: string,
+    ): Promise<string | undefined> => {
       if (threadId) return threadId;
-      refreshActiveThreadId();
       return activeThreadId;
     };
     const streamGeneration = nextStreamingGeneration();
-    const buildMessageOptions = (
+    const buildMessageOptions = async (
       threadId?: string,
-    ): { threadId: string } | undefined => {
-      const resolved = resolveThreadId(threadId);
+    ): Promise<{ threadId: string } | undefined> => {
+      const resolved = await resolveThreadId(threadId);
       return resolved ? { threadId: resolved } : undefined;
     };
-    const buildStreamingOptions = (args: {
+    const buildStreamingOptions = async (args: {
       threadId?: string;
       done?: boolean;
-    }): { threadId?: string; done?: boolean; generation: number } => {
-      const resolvedThread = resolveThreadId(args.threadId);
+    }): Promise<{ threadId?: string; done?: boolean; generation: number }> => {
+      const resolvedThread = await resolveThreadId(args.threadId);
       const base = { generation: streamGeneration } as const;
       if (resolvedThread && args.done !== undefined) {
         return { ...base, threadId: resolvedThread, done: args.done };
@@ -422,7 +287,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
       timezone: TIMEZONE,
       deps: {
         sendMessage: (text, options) =>
-          sendMessageToChannel(text, buildMessageOptions(options?.threadId)),
+          buildMessageOptions(options?.threadId).then((messageOptions) =>
+            sendMessageToChannel(text, messageOptions),
+          ),
         setTyping: (typing) => deps.channelRuntime.setTyping(chatJid, typing),
         runAgent: (prompt, onOutput, options) =>
           runAgent(group, prompt, chatJid, queueJid, onOutput, {
@@ -439,15 +306,20 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
             queueJid,
             encodeGroupMessageCursor(toGroupMessageCursor(message)),
           );
-          deps.saveState();
+          void Promise.resolve(deps.saveState()).catch((err: unknown) => {
+            logger.warn(
+              { group: group.name, err },
+              'Failed to persist session command cursor',
+            );
+          });
         },
         formatMessages,
         getDefaultModel: () => getDefaultModelConfig().model,
         getGroupModelOverride: () => group.agentConfig?.model,
-        setGroupModelOverride: (value) =>
+        setGroupModelOverride: async (value) =>
           deps.setGroupModelOverride(chatJid, value),
         getGroupThinkingOverride: () => group.agentConfig?.thinking,
-        setGroupThinkingOverride: (value) =>
+        setGroupThinkingOverride: async (value) =>
           deps.setGroupThinkingOverride(chatJid, value),
         archiveCurrentSession: async (cause = 'new-session') => {
           const sessionId = deps.getSession(group.folder, activeThreadId);
@@ -459,36 +331,22 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
             cause,
           });
         },
-        clearCurrentSession: () => {
-          deps.clearSession(group.folder, activeThreadId);
-          deleteSession(group.folder, activeThreadId);
-        },
+        clearCurrentSession: () =>
+          deps.clearSession(group.folder, activeThreadId),
         stopCurrentRun: () => deps.queue.stopGroup?.(queueJid) ?? false,
         runMemoryDreaming: () => runDreamingForGroup(group.folder),
-        getMemoryStatus: async () =>
-          MemoryService.getInstance().getStatus(group.folder),
+        getMemoryStatus: async () => getGroupMemoryStatus(group.folder),
         saveProcedure: async ({ title, body }) =>
-          MemoryService.getInstance().saveProcedure(
-            {
-              scope: 'group',
-              group_folder: group.folder,
-              topic_id: activeThreadId,
-              title,
-              body,
-              source: 'explicit',
-              confidence: 0.8,
-              tags: ['explicit'],
-            },
-            {
-              isMain: isMainGroup,
-              groupFolder: group.folder,
-              actor: 'agent',
-              threadId: activeThreadId,
-            },
-          ),
+          saveGroupProcedureMemory({
+            groupFolder: group.folder,
+            threadId: activeThreadId,
+            isAdminWrite: isMainGroup,
+            title,
+            body,
+          }),
         isSenderControlAllowlisted: (msg) => {
-          const allowlistCfg = loadSenderAllowlist();
-          return isSenderExplicitlyAllowed(
+          const allowlistCfg = loadSenderControlAllowlist();
+          return isSenderControlAllowed(
             chatJid,
             msg.sender,
             allowlistCfg,
@@ -532,14 +390,14 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
     }
 
     const prompt = formatMessages(missedMessages, TIMEZONE);
-    const previousCursor = deps.getCursor(queueJid) || '';
+    const previousCursor = (await deps.getCursor(queueJid)) || '';
     deps.setCursor(
       queueJid,
       encodeGroupMessageCursor(
         toGroupMessageCursor(missedMessages[missedMessages.length - 1]),
       ),
     );
-    deps.saveState();
+    await deps.saveState();
 
     logger.info(
       { group: group.name, messageCount: missedMessages.length },
@@ -576,7 +434,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
     const supportsProgress = deps.channelRuntime.supportsProgress(chatJid);
     if (supportsProgress) {
       try {
-        const progressOptions = buildMessageOptions();
+        const progressOptions = await buildMessageOptions();
         await sendProgressToChannel('Working on it...', progressOptions);
       } catch (err) {
         logger.debug(
@@ -596,38 +454,40 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
         );
     }, TYPING_HEARTBEAT_INTERVAL_MS);
     progressTimer = setInterval(() => {
-      if (!supportsProgress) return;
-      const now = Date.now();
-      const elapsedMs = now - startedAt;
-      if (now - lastElapsedProgressAt >= ELAPSED_PROGRESS_INTERVAL_MS) {
-        lastElapsedProgressAt = now;
-        const progressOptions = buildMessageOptions();
-        void sendProgressToChannel(
-          `Still working (${formatElapsed(elapsedMs)})...`,
-          progressOptions,
-        ).catch((err) =>
-          logger.debug(
-            { err, group: group.name },
-            'Failed to send elapsed progress update',
-          ),
-        );
-      }
-      if (
-        now - lastAgentProgressAt >= NO_OUTPUT_WARNING_INTERVAL_MS &&
-        now - lastNoOutputWarningAt >= NO_OUTPUT_WARNING_INTERVAL_MS
-      ) {
-        lastNoOutputWarningAt = now;
-        const progressOptions = buildMessageOptions();
-        void sendProgressToChannel(
-          `No new output yet, still running (${formatElapsed(elapsedMs)})...`,
-          progressOptions,
-        ).catch((err) =>
-          logger.debug(
-            { err, group: group.name },
-            'Failed to send no-output warning',
-          ),
-        );
-      }
+      void (async () => {
+        if (!supportsProgress) return;
+        const now = Date.now();
+        const elapsedMs = now - startedAt;
+        if (now - lastElapsedProgressAt >= ELAPSED_PROGRESS_INTERVAL_MS) {
+          lastElapsedProgressAt = now;
+          const progressOptions = await buildMessageOptions();
+          void sendProgressToChannel(
+            `Still working (${formatElapsed(elapsedMs)})...`,
+            progressOptions,
+          ).catch((err) =>
+            logger.debug(
+              { err, group: group.name },
+              'Failed to send elapsed progress update',
+            ),
+          );
+        }
+        if (
+          now - lastAgentProgressAt >= NO_OUTPUT_WARNING_INTERVAL_MS &&
+          now - lastNoOutputWarningAt >= NO_OUTPUT_WARNING_INTERVAL_MS
+        ) {
+          lastNoOutputWarningAt = now;
+          const progressOptions = await buildMessageOptions();
+          void sendProgressToChannel(
+            `No new output yet, still running (${formatElapsed(elapsedMs)})...`,
+            progressOptions,
+          ).catch((err) =>
+            logger.debug(
+              { err, group: group.name },
+              'Failed to send no-output warning',
+            ),
+          );
+        }
+      })();
     }, 5_000);
     let hadError = false;
     let outputSentToUser = false;
@@ -645,7 +505,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
         await deps.channelRuntime.sendStreamingChunk(
           chatJid,
           '',
-          buildStreamingOptions({ done: true }),
+          await buildStreamingOptions({ done: true }),
         );
       } catch (err) {
         logger.warn(
@@ -680,12 +540,14 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
                 delivered = await deps.channelRuntime.sendStreamingChunk(
                   chatJid,
                   raw,
-                  buildStreamingOptions({}),
+                  await buildStreamingOptions({}),
                 );
               } else {
-                const messageOptions = buildMessageOptions();
-                await sendMessageToChannel(text, messageOptions);
-                delivered = true;
+                const messageOptions = await buildMessageOptions();
+                delivered = await sendWithPartialDeliveryGuard(
+                  () => sendMessageToChannel(text, messageOptions),
+                  { group: group.name },
+                );
               }
               if (delivered) outputSentToUser = true;
               collectedOutput += `${text}\n`;
@@ -725,7 +587,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
             ? `Failed after ${elapsed}.`
             : `Done in ${elapsed}.`;
         try {
-          const finalProgressOptions = buildStreamingOptions({ done: true });
+          const finalProgressOptions = await buildStreamingOptions({
+            done: true,
+          });
           await sendProgressToChannel(finalStatus, finalProgressOptions);
         } catch (err) {
           logger.debug(
@@ -747,7 +611,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
         return true;
       }
       deps.setCursor(queueJid, previousCursor);
-      deps.saveState();
+      await deps.saveState();
       logger.warn(
         { group: group.name },
         'Agent error, rolled back message cursor for retry',
@@ -759,7 +623,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
       const fallbackText = collectedOutput.trim();
       if (fallbackText) {
         try {
-          const messageOptions = buildMessageOptions();
+          const messageOptions = await buildMessageOptions();
           await sendMessageToChannel(fallbackText, messageOptions);
           outputSentToUser = true;
           logger.warn(
@@ -774,7 +638,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
         }
       } else if (sawRawOutput) {
         try {
-          const messageOptions = buildMessageOptions();
+          const messageOptions = await buildMessageOptions();
           await sendMessageToChannel(
             NO_VISIBLE_OUTPUT_FALLBACK_MESSAGE,
             messageOptions,

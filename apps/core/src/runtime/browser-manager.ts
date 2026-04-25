@@ -2,7 +2,7 @@ import fs from 'fs';
 import { ChildProcess, spawn } from 'child_process';
 import net from 'net';
 
-import { logger } from '../core/logger.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import {
   CHROME_PATH,
   DEFAULT_BROWSER_KEEPALIVE_MS,

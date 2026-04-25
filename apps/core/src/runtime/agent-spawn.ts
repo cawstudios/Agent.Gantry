@@ -10,9 +10,10 @@ import {
   PERMISSION_APPROVAL_TIMEOUT_MS,
   TIMEZONE,
   getEffectiveModelConfig,
-} from '../core/config.js';
-import { logger } from '../core/logger.js';
-import { RegisteredGroup } from '../core/types.js';
+} from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { RegisteredGroup } from '../domain/types.js';
+import { normalizeClaudeModelSelection } from '../models/claude-model-registry.js';
 import { resolveGroupFolderPath } from '../platform/group-folder.js';
 import {
   getHostRuntimeCredentialEnv,
@@ -23,7 +24,7 @@ import {
   DEFAULT_BROWSER_PROFILE_NAME,
   listActiveBrowserSessions,
 } from './browser-manager.js';
-import { computeIpcAuthToken } from './ipc-auth.js';
+import { createIpcAuthEnvelope } from './ipc-auth.js';
 import { getContinuationInputDir } from './continuation-input.js';
 import { getPromptProfileService } from './prompt-profile.js';
 import { executeRunnerProcess } from './agent-spawn-process.js';
@@ -57,11 +58,6 @@ const SAFE_HOST_ENV_KEYS = [
   'COLORTERM',
   'NO_COLOR',
   'FORCE_COLOR',
-  'SSL_CERT_FILE',
-  'NODE_EXTRA_CA_CERTS',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'NO_PROXY',
 ] as const;
 
 function pickSafeHostEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -119,11 +115,12 @@ export async function spawnAgent(
   const hostRuntime = prepareHostRuntimeContext(group);
   ensureGroupIpcLayout(hostRuntime.groupIpcDir);
   const hostCredentials = await getHostRuntimeCredentialEnv(agentIdentifier);
-  const hostRunnerPath = path.join(hostRuntime.runnerDistDir, 'index.js');
-  const mcpServerPath = path.join(
+  const hostRunnerPath = path.join(
     hostRuntime.runnerDistDir,
-    'ipc-mcp-stdio.js',
+    'claude',
+    'index.js',
   );
+  const mcpServerPath = path.join(hostRuntime.runnerDistDir, 'mcp', 'stdio.js');
   if (!fs.existsSync(hostRunnerPath) || !fs.existsSync(mcpServerPath)) {
     return {
       status: 'error',
@@ -136,6 +133,7 @@ export async function spawnAgent(
   const command = process.execPath;
   const args = [hostRunnerPath];
   const ipcInputDir = getContinuationInputDir(group.folder, input.threadId);
+  const ipcAuth = createIpcAuthEnvelope(group.folder, input.threadId);
   const env: NodeJS.ProcessEnv = {
     ...pickSafeHostEnv(process.env),
     ...hostCredentials.env,
@@ -150,13 +148,16 @@ export async function spawnAgent(
     ),
     MYCLAW_IPC_DIR: hostRuntime.groupIpcDir,
     MYCLAW_IPC_INPUT_DIR: ipcInputDir,
-    MYCLAW_IPC_AUTH_TOKEN: computeIpcAuthToken(group.folder, input.threadId),
+    MYCLAW_IPC_AUTH_TOKEN: ipcAuth.authToken,
+    MYCLAW_IPC_RESPONSE_VERIFY_KEY: ipcAuth.responseVerifyKey,
     MYCLAW_THREAD_ID: input.threadId || '',
     MYCLAW_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
     CLAUDE_CONFIG_DIR: path.join(MYCLAW_HOME, '.claude'),
   };
   // Job-level model overrides group-level model.
-  const effectiveModel = input.model || modelConfig.model;
+  const effectiveModel = normalizeClaudeModelSelection(
+    input.model || modelConfig.model,
+  );
   const effectiveModelSource = input.model ? 'job.model' : modelConfig.source;
   if (effectiveModel) {
     env.ANTHROPIC_MODEL = effectiveModel;
@@ -176,7 +177,6 @@ export async function spawnAgent(
     `globalDir=${hostRuntime.globalDir || '(none)'}`,
     `ipcInput=${ipcInputDir}`,
     `onecliApplied=${hostCredentials.onecliApplied}`,
-    `onecliCaPath=${hostCredentials.onecliCaPath || '(none)'}`,
     `runner=${hostRunnerPath}`,
   ];
 

@@ -7,15 +7,15 @@ import {
   AGENT_TIMEOUT,
   IDLE_TIMEOUT,
   LOG_LEVEL,
-} from '../core/config.js';
-import { logger } from '../core/logger.js';
+} from '../config/index.js';
+import { logger, redactString } from '../infrastructure/logging/logger.js';
 import { AgentOutput, RunnerProcessSpec } from './agent-spawn-types.js';
 
 const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
 
 const SENSITIVE_TEXT_PATTERNS: RegExp[] = [
-  /\b(ANTHROPIC_API_KEY|OPENAI_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_AUTH_TOKEN|GITHUB_TOKEN|GH_TOKEN)\s*[:=]\s*([^\s"']+)/gi,
+  /\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|AUTH)[A-Z0-9_]*)\s*[:=]\s*([^\s"']+)/gi,
   /\b(Bearer)\s+[A-Za-z0-9._\-~+/]+=*/gi,
   /\bsk-[A-Za-z0-9_-]{16,}\b/g,
   /\bsk-ant-[A-Za-z0-9_-]{16,}\b/g,
@@ -27,7 +27,7 @@ const SENSITIVE_TEXT_PATTERNS: RegExp[] = [
 const STREAM_PARSE_BUFFER_LIMIT = Math.max(AGENT_MAX_OUTPUT_SIZE * 4, 131_072);
 
 function sanitizeLogText(value: string, maxChars = 4000): string {
-  let text = value;
+  let text = redactString(value);
   for (const pattern of SENSITIVE_TEXT_PATTERNS) {
     text = text.replace(pattern, (match, p1) => {
       if (typeof p1 === 'string' && p1.length > 0) {

@@ -1,7 +1,10 @@
 import * as p from '@clack/prompts';
 
-import { readEnvFile, upsertEnvFile } from './env-file.js';
-import { envFilePath, ensureRuntimeLayout } from './runtime-home.js';
+import { readEnvFile, upsertEnvFile } from '../config/env/file.js';
+import {
+  envFilePath,
+  ensureRuntimeLayout,
+} from '../config/settings/runtime-home.js';
 
 function usage(): string {
   return [
@@ -17,8 +20,30 @@ function isValidEnvKey(key: string): boolean {
   return /^[A-Z][A-Z0-9_]*$/.test(key);
 }
 
+function isBlockedDirectProviderCredential(key: string): boolean {
+  return (
+    key === 'OPENAI_API_KEY' ||
+    key === 'OPENAI_ORG_ID' ||
+    key === 'OPENAI_PROJECT' ||
+    key === 'ANTHROPIC_API_KEY' ||
+    key === 'ANTHROPIC_AUTH_TOKEN' ||
+    key === 'CLAUDE_CODE_OAUTH_TOKEN'
+  );
+}
+
 function isSensitiveKey(key: string): boolean {
-  return /(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY)/i.test(key);
+  return /(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY|DATABASE_URL|DB_URL|POSTGRES_URL)/i.test(
+    key,
+  );
+}
+
+function hasUrlUserInfo(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return Boolean(parsed.username || parsed.password);
+  } catch {
+    return false;
+  }
 }
 
 function maskValue(value: string): string {
@@ -28,7 +53,7 @@ function maskValue(value: string): string {
 }
 
 function formatValue(key: string, value: string, raw: boolean): string {
-  if (raw || !isSensitiveKey(key)) {
+  if (raw || (!isSensitiveKey(key) && !hasUrlUserInfo(value))) {
     return value;
   }
   return maskValue(value);
@@ -62,6 +87,12 @@ function runGet(runtimeHome: string, args: string[]): number {
     p.log.error(`Invalid key \"${key}\". Use uppercase env-style keys.`);
     return 1;
   }
+  if (isBlockedDirectProviderCredential(key)) {
+    p.log.error(
+      `${key} must be configured through Model Access, not MyClaw .env.`,
+    );
+    return 1;
+  }
 
   const raw = rest.includes('--raw');
   const env = readEnvFile(envFilePath(runtimeHome));
@@ -83,6 +114,12 @@ function runSet(runtimeHome: string, args: string[]): number {
   }
   if (!isValidEnvKey(key)) {
     p.log.error(`Invalid key \"${key}\". Use uppercase env-style keys.`);
+    return 1;
+  }
+  if (isBlockedDirectProviderCredential(key)) {
+    p.log.error(
+      `${key} must be configured through Model Access, not MyClaw .env.`,
+    );
     return 1;
   }
 

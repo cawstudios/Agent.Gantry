@@ -5,9 +5,12 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { afterEach, vi } from 'vitest';
 
-import { readEnvFile } from '@core/cli/env-file.js';
-import { envFilePath } from '@core/cli/runtime-home.js';
-import { loadRuntimeSettings } from '@core/cli/runtime-settings.js';
+import { readEnvFile } from '@core/config/env/file.js';
+import { envFilePath } from '@core/config/settings/runtime-home.js';
+import {
+  loadRuntimeSettings,
+  saveRuntimeSettings,
+} from '@core/config/settings/runtime-settings.js';
 import {
   normalizeTelegramChatJid,
   registerTelegramMainGroup,
@@ -16,12 +19,38 @@ import {
 } from '@core/cli/telegram.js';
 import { listTelegramRecentChats } from '@core/cli/telegram-chat-discovery.js';
 
+const groupsStore = vi.hoisted(() => new Map<string, any>());
+
+vi.mock('@core/cli/runtime-group-db.js', () => ({
+  openRuntimeGroupDb: async () => ({
+    countRegisteredGroupsByJidPrefix: async (jidPrefix: string) => {
+      const normalized = jidPrefix.endsWith('%')
+        ? jidPrefix.slice(0, -1)
+        : jidPrefix;
+      return Array.from(groupsStore.keys()).filter((jid) =>
+        jid.startsWith(normalized),
+      ).length;
+    },
+    getAllRegisteredGroups: async () =>
+      Object.fromEntries(groupsStore.entries()),
+    setRegisteredGroup: async (jid: string, group: any) => {
+      groupsStore.set(jid, group);
+    },
+    deleteRegisteredGroup: async (jid: string) => {
+      groupsStore.delete(jid);
+    },
+    deleteSession: async () => {},
+    close: async () => {},
+  }),
+}));
+
 const runtimeHomes: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
   vi.unstubAllGlobals();
+  groupsStore.clear();
   while (runtimeHomes.length > 0) {
     const runtimeHome = runtimeHomes.pop();
     if (runtimeHome) fs.rmSync(runtimeHome, { recursive: true, force: true });
@@ -33,6 +62,8 @@ describe('cli telegram helpers', () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'myclaw-telegram-test-'),
     );
+    const settings = loadRuntimeSettings(runtimeHome);
+    saveRuntimeSettings(runtimeHome, settings);
     runtimeHomes.push(runtimeHome);
     return runtimeHome;
   }
@@ -283,12 +314,19 @@ describe('cli telegram helpers', () => {
               update_id: 101,
               message: {
                 chat: { id: -100123, type: 'supergroup', title: 'Kai Squad' },
+                from: {
+                  id: 5759865942,
+                  username: 'ravi',
+                  first_name: 'Ravi',
+                  is_bot: false,
+                },
               },
             },
             {
               update_id: 102,
               message: {
                 chat: { id: 99887766, type: 'private', first_name: 'Ravi' },
+                from: { id: 5759865942, first_name: 'Ravi', is_bot: false },
               },
             },
           ],
@@ -305,7 +343,11 @@ describe('cli telegram helpers', () => {
     expect(result.ok).toBe(true);
     expect(result.chats).toHaveLength(2);
     expect(result.chats[0]?.chatJid).toBe('tg:99887766');
+    expect('adminSenderId' in result.chats[0]!).toBe(false);
+    expect('adminSenderName' in result.chats[0]!).toBe(false);
     expect(result.chats[1]?.chatJid).toBe('tg:-100123');
+    expect('adminSenderId' in result.chats[1]!).toBe(false);
+    expect('adminSenderName' in result.chats[1]!).toBe(false);
   });
 
   it('does not leak token-bearing transport details when discovery fails', async () => {
@@ -431,7 +473,7 @@ describe('cli telegram helpers', () => {
       true,
     );
     expect(outro).toHaveBeenCalledWith(
-      'Telegram token saved. Next: run `myclaw agent add <chat-id> --main --requires-trigger false`.',
+      'Telegram token saved. Next: run `myclaw channel connect telegram` to register a chat.',
     );
   });
 
@@ -502,6 +544,77 @@ describe('cli telegram helpers', () => {
     expect(readEnvFile(envFilePath(runtimeHome)).TELEGRAM_BOT_TOKEN).toBe(
       'telegram-token',
     );
+  });
+
+  it('telegram connect enables session admin commands for an explicitly entered sender', async () => {
+    vi.resetModules();
+    const runtimeHome = makeRuntimeHome();
+    const select = vi.fn(async () => 'tg:-100123');
+
+    vi.doMock('@clack/prompts', () => ({
+      isCancel: () => false,
+      note: vi.fn(),
+      password: vi.fn(async () => 'telegram-token'),
+      select,
+      text: vi.fn(async () => '5759865942'),
+      outro: vi.fn(),
+      log: {
+        success: vi.fn(),
+        info: vi.fn(),
+        error: vi.fn(),
+      },
+      spinner: vi.fn(() => ({
+        start: vi.fn(),
+        stop: vi.fn(),
+      })),
+    }));
+    vi.doMock('@core/cli/telegram-chat-discovery.js', () => ({
+      listTelegramRecentChats: vi.fn(async () => ({
+        ok: true,
+        message: 'Discovered 1 Telegram chat.',
+        chats: [
+          {
+            chatJid: 'tg:-100123',
+            chatTitle: 'Ops Room',
+            chatType: 'supergroup',
+          },
+        ],
+      })),
+    }));
+    vi.doMock('@core/cli/telegram.js', () => ({
+      normalizeTelegramChatJid: vi.fn((value: string) => {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        return trimmed.startsWith('tg:') ? trimmed : `tg:${trimmed}`;
+      }),
+      readTelegramFromRuntimeEnv: vi.fn(() => ({ token: '' })),
+      registerTelegramMainGroup: vi.fn(async () => ({
+        groupName: 'Ops Room',
+        folder: 'telegram_main',
+      })),
+      validateTelegramBotToken: vi.fn(async () => ({
+        ok: true,
+        message: 'ok',
+        botId: 123,
+      })),
+      verifyTelegramChatAccess: vi.fn(async () => ({
+        ok: true,
+        message: 'ok',
+        chatTitle: 'Ops Room',
+      })),
+    }));
+
+    const { runTelegramConnectCommand } =
+      await import('@core/cli/telegram-connect.js');
+    const code = await runTelegramConnectCommand(runtimeHome);
+
+    expect(code).toBe(0);
+    const settings = loadRuntimeSettings(runtimeHome);
+    expect(settings.channels.telegram.enabled).toBe(true);
+    expect(settings.channels.telegram.senderAllowlist.default.allow).toBe('*');
+    expect(
+      settings.channels.telegram.controlAllowlist.agents.telegram_main,
+    ).toEqual(['5759865942']);
   });
 
   it('seeds CLAUDE.md and SOUL.md when registering the main group', async () => {

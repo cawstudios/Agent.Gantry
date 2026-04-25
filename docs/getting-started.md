@@ -8,7 +8,7 @@ MyClaw factory mode is a doc-driven harness for planning, decomposition, impleme
 
 | Tool | Minimum version |
 |------|-----------------|
-| Node.js | 20.x |
+| Node.js | 25.x |
 | npm | 10.x |
 | Python | 3.10+ |
 | Git | 2.x |

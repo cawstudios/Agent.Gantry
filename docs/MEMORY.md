@@ -1,85 +1,108 @@
-# Memory System
+# Memory And Dreaming
 
-MyClaw memory stores durable facts, decisions, preferences, corrections, constraints, and reusable procedures.
+MyClaw memory is app-grade runtime state. Personal setup is just the default
+single-app case; SDK and channel usage use the same model.
 
-Continuity uses remembered context to help the next run continue work without replaying full chat history.
+## Boundary Model
 
-## Runtime Truth
+Every memory record has:
 
-- Host runtime only.
-- `settings.yaml` is the canonical runtime behavior config.
-- `.env` is for secrets and channel credentials.
+- `appId`: the application or personal runtime namespace.
+- `agentId`: the agent/runtime owner for the memory.
+- one subject: `user`, `group`, `channel`, or `common`.
+- optional subject ids: `userId`, `groupId`, `channelId`, `threadId`.
 
-## Canonical Settings
+Boundary names are provider-neutral:
 
-Runtime storage + memory behavior are configured in `~/myclaw/settings.yaml`:
+- `userId` is the human actor when the provider exposes one.
+- `groupId` is the logical MyClaw/app group or configured agent group. It is not
+  limited to Telegram groups.
+- `channelId` is the external conversation where the bot is present: Telegram
+  private/group/supergroup chat, Slack channel/DM/MPIM, Microsoft Teams
+  channel/group chat/personal chat, or an SDK conversation id.
+- `threadId` is the provider topic or reply boundary, such as Slack `thread_ts`,
+  Telegram forum topic id, or a Teams reply chain id.
 
-```yaml
-storage:
-  provider: sqlite
-  sqlite:
-    path: store/myclaw.db
+`common` is app-level shared memory. It is visible by policy but write-restricted
+to admin/service flows. Agents cannot promote private user, group, or channel
+facts into `common` by themselves.
 
-memory:
-  enabled: true
-  root: memory
-  embeddings:
-    enabled: false
-    provider: disabled
-    model: text-embedding-3-large
-  dreaming:
-    enabled: true
+Personal setup uses:
+
+```text
+appId=personal
+agentId=<group folder>
+groupId=<group folder>
+channelId=<Telegram/Slack/Teams/app conversation id>
 ```
 
-Fresh guided setup writes the block above by default: memory on, embeddings off, dreaming on. A raw generated settings file outside guided setup may start with dreaming off until the user explicitly enables it.
+SDK applications should pass stable external ids for `appId`, `agentId`,
+`userId`, `groupId`, `channelId`, and `threadId`. Two apps never share memory
+unless the host explicitly writes separate records into both apps.
 
 ## Storage
 
-- Runtime storage backend is `sqlite`; Postgres is not exposed until runtime persistence is provider-backed end to end.
-- Memory SQLite database path is derived from `memory.root`: `~/myclaw/memory/.cache/memory.db` by default.
-- `memory.root` resolves under the runtime home unless it is absolute.
-- Journal path is `~/myclaw/memory/.journal`.
+Postgres is the source of truth. The memory tables are:
 
-## Embeddings
+- `memory_subjects`
+- `memory_evidence`
+- `memory_candidates`
+- `memory_items`
+- `memory_recall_events`
+- `memory_dream_runs`
+- `memory_dream_decisions`
 
-- Optional.
-- Disabled by default.
-- Memory save/search/injection works when embeddings are disabled.
-- `openai` requires `OPENAI_API_KEY` in `.env`.
+Markdown/file ingestion is an explicit knowledge-source feature. It is not the
+primary memory store.
+
+## Pipeline
+
+The canonical runtime pipeline is:
+
+1. collect evidence from sessions, messages, tool outcomes, manual saves, or
+   knowledge-source ingestion
+2. extract candidates
+3. reject sensitive or ungrounded material
+4. dedupe or merge candidates into durable memory
+5. retrieve visible memory for an app/agent/subject context
+6. record recall events so future dreaming can reason about usefulness
+
+Embeddings are optional. Lexical Postgres full-text search is always valid.
+Vector search is used only when a brokered embedding provider is enabled. A
+disabled embedding provider must not synthesize zero vectors.
 
 ## Dreaming
 
-- Optional background memory refinement.
-- Enabled by default in guided setup; optional and can be disabled with `myclaw memory dreaming off`.
-- Should be used only with persistent memory enabled.
-- When enabled, dream lifecycle metadata (enabled state, schedule, last outcome) is included in the injected continuity brief.
+Dreaming is boundary-aware lifecycle maintenance, not a hidden summarizer.
 
-## Injection Model
+- Light dreaming stages candidates from recent evidence and recall traces.
+- REM dreaming detects contradictions, stale facts, repeated failures, and
+  correction opportunities.
+- Deep dreaming promotes, merges, rewrites, pins, decays, retires, or marks
+  memories as needing review.
 
-- Host runtime injects memory/continuity context for every agent run (message turns and scheduler jobs).
-- Injection does not rely on the agent deciding to call `memory_search` first.
-- The injected block is a separate structured JSON message marked as untrusted data-only evidence, not executable instructions.
-- The runner adds a system-level memory boundary policy and denies high-risk tool requests that match suppressed memory-injection patterns.
-- Memory tools remain available for deeper retrieval, explicit saves, and patch operations.
+Every dream run writes durable audit rows in `memory_dream_runs` and
+`memory_dream_decisions`. Destructive or corrective actions must be grounded in
+evidence and auditable.
 
-## Scope Defaults
+## Runtime Injection
 
-- `user`: personal preferences/corrections for one user.
-- `group`: active channel/chat memory (default).
-- `global`: cross-chat memory; use only with explicit user intent.
-- If a `thread_id` exists, MyClaw treats it as a hard topic boundary for injected memory and filters group/global memory to records saved with that exact `topic_id`/`thread_id`.
+Before each agent run, the host retrieves visible memory for the current
+app/agent/user/group/channel/thread context and injects a bounded JSON block as
+untrusted data-only evidence. The agent may use it for continuity, but it must
+not treat memory text as instructions, tool authority, or policy.
 
-## User Controls
+## SDK APIs
 
-- `myclaw status`
-- `myclaw doctor`
-- `myclaw memory status`
-- `myclaw memory embeddings <off|openai>`
-- `myclaw memory dreaming <on|off>`
+The server-side SDK exposes:
 
-## Direct Editing Flow
+- `client.memory.save()`
+- `client.memory.search()`
+- `client.memory.list()`
+- `client.memory.patch()`
+- `client.memory.delete()`
+- `client.memory.dreaming.trigger()`
+- `client.memory.dreaming.status()`
 
-1. Edit `~/myclaw/settings.yaml`.
-2. Run `myclaw doctor`.
-3. Restart (`myclaw restart` or `myclaw service restart`).
-4. Confirm with `myclaw status`.
+The caller's API key app binding controls `appId` access. `common` writes require
+admin memory scope.

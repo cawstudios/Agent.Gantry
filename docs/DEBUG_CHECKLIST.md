@@ -57,18 +57,18 @@ grep -E 'Scheduling retry|retry|Max retries' logs/myclaw.log | tail -10
 # Check processing pipeline
 grep -E 'Processing messages|Spawning host agent|Piped messages' logs/myclaw.log | tail -20
 
-# Compare router cursor vs latest messages
-sqlite3 store/myclaw.db "SELECT chat_jid, MAX(timestamp) as latest FROM messages GROUP BY chat_jid ORDER BY latest DESC LIMIT 5;"
+# Confirm runtime health before DB-level checks
+myclaw status
 ```
 
 ## Group Config Inspection
 
 ```bash
-# Review registered groups
-sqlite3 store/myclaw.db "SELECT name, folder, trigger_pattern FROM registered_groups;"
-
 # Review runtime settings
 cat ~/myclaw/settings.yaml
+
+# Inspect registered groups
+psql "$MYCLAW_DATABASE_URL" -c "SELECT name, folder, trigger_pattern FROM myclaw.registered_groups;"
 ```
 
 ## Channel Auth Issues

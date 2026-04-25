@@ -32,28 +32,35 @@
     "dist/",
     "packages/contracts/dist/",
     "packages/contracts/package.json",
+    "packages/sdk/dist/",
+    "packages/sdk/package.json",
+    "docker-compose.yml",
+    "ops/postgres/init/",
     "!**/*.map",
     ".claude/skills/*/SKILL.md",
     ".claude/skills/agent-browser/browser_cdp.py"
   ],
   "workspaces": [
-    "packages/contracts"
+    "packages/contracts",
+    "packages/sdk"
   ],
   "scripts": {
     "build:contracts": "npm run build --workspace @myclaw/contracts",
-    "clean": "rm -rf dist packages/contracts/dist",
-    "build": "npm run clean && npm run build:contracts && tsc",
+    "build:sdk": "npm run build --workspace @myclaw/sdk",
+    "clean": "rm -rf dist packages/contracts/dist packages/sdk/dist",
+    "build": "npm run clean && npm run build:contracts && npm run build:sdk && tsc && npm run copy:migrations",
+    "copy:migrations": "mkdir -p dist/infrastructure/postgres/schema && cp -R apps/core/src/infrastructure/postgres/schema/migrations dist/infrastructure/postgres/schema/",
     "start": "node dist/index.js",
     "dev": "tsx apps/core/src/index.ts",
     "cli:dev": "tsx apps/core/src/cli/index.ts",
     "typecheck": "npm run build:contracts && tsc --noEmit",
-    "format": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\"",
-    "format:fix": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\"",
-    "format:check": "prettier --check \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\"",
+    "format": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/sdk/src/**/*.ts\"",
+    "format:fix": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/sdk/src/**/*.ts\"",
+    "format:check": "prettier --check \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/sdk/src/**/*.ts\"",
     "prepare": "HUSKY=1 husky || true",
     "prepublishOnly": "npm run build",
-    "lint": "eslint apps/core/src packages/contracts/src",
-    "lint:fix": "eslint apps/core/src packages/contracts/src --fix",
+    "lint": "eslint apps/core/src packages/contracts/src packages/sdk/src",
+    "lint:fix": "eslint apps/core/src packages/contracts/src packages/sdk/src --fix",
     "test": "npm run build:contracts && npm run test:unit && npm run test:integration",
     "test:unit": "npm run build:contracts && vitest run -c vitest.unit.config.ts",
     "test:integration": "npm run build:contracts && vitest run -c vitest.integration.config.ts",
@@ -70,19 +77,17 @@
     "@myclaw/contracts": "file:packages/contracts",
     "@onecli-sh/sdk": "^0.2.0",
     "@slack/bolt": "^4.7.0",
-    "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",
     "dayjs": "^1.11.20",
     "drizzle-orm": "^0.45.2",
     "grammy": "^1.42.0",
     "pg": "^8.16.3",
-    "sqlite-vec": "^0.1.9",
+    "pg-boss": "^12.16.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.10.0",
+    "@types/node": "^25.6.0",
     "@types/pg": "^8.15.5",
     "@vitest/coverage-v8": "^4.1.4",
     "drizzle-kit": "^0.31.5",
@@ -97,6 +102,6 @@
     "vitest": "^4.0.18"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=25"
   }
 }

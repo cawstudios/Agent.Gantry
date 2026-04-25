@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
+import { generateKeyPairSync } from 'crypto';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -33,16 +34,39 @@ function symlinkPackage(
   fs.symlinkSync(path.resolve(target), packagePath, 'dir');
 }
 
+function copyDirectory(source: string, destination: string): void {
+  fs.mkdirSync(destination, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const sourcePath = path.join(source, entry.name);
+    const destinationPath = path.join(destination, entry.name);
+    if (entry.isDirectory()) {
+      copyDirectory(sourcePath, destinationPath);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(sourcePath, destinationPath);
+    }
+  }
+}
+
 function createMcpFixture(): {
   root: string;
   serverPath: string;
   ipcDir: string;
   resultPath: string;
+  responseVerifyKey: string;
+  responseSigningKey: string;
 } {
   const root = makeTempRoot();
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const responseVerifyKey = publicKey
+    .export({ format: 'pem', type: 'spki' })
+    .toString();
+  const responseSigningKey = privateKey
+    .export({ format: 'pem', type: 'pkcs8' })
+    .toString();
   const runnerDir = path.join(root, 'runner');
-  const coreDir = path.join(root, 'core');
-  const serverPath = path.join(runnerDir, 'ipc-mcp-stdio.ts');
+  const runnerMcpDir = path.join(runnerDir, 'mcp');
+  const infrastructureTimeDir = path.join(root, 'infrastructure', 'time');
+  const serverPath = path.join(runnerMcpDir, 'stdio.ts');
   const ipcDir = path.join(root, 'ipc', 'team');
   const resultPath = path.join(root, 'mcp-result.json');
   const sdkRoot = path.join(
@@ -54,23 +78,21 @@ function createMcpFixture(): {
   const sdkServerDir = path.join(sdkRoot, 'server');
 
   fs.mkdirSync(runnerDir, { recursive: true });
-  fs.mkdirSync(coreDir, { recursive: true });
+  fs.mkdirSync(runnerMcpDir, { recursive: true });
+  fs.mkdirSync(infrastructureTimeDir, { recursive: true });
   fs.mkdirSync(sdkServerDir, { recursive: true });
   fs.writeFileSync(
     path.join(root, 'package.json'),
     JSON.stringify({ type: 'module' }),
   );
-  fs.copyFileSync(
-    path.resolve('apps/core/src/runner/ipc-mcp-stdio.ts'),
-    serverPath,
-  );
+  copyDirectory(path.resolve('apps/core/src/runner/mcp'), runnerMcpDir);
   fs.copyFileSync(
     path.resolve('apps/core/src/runner/memory-timeouts.ts'),
     path.join(runnerDir, 'memory-timeouts.ts'),
   );
   fs.copyFileSync(
-    path.resolve('apps/core/src/core/datetime.ts'),
-    path.join(coreDir, 'datetime.ts'),
+    path.resolve('apps/core/src/infrastructure/time/datetime.ts'),
+    path.join(infrastructureTimeDir, 'datetime.ts'),
   );
   symlinkPackage(root, 'dayjs', 'node_modules/dayjs');
   symlinkPackage(root, 'zod', 'node_modules/zod');
@@ -90,9 +112,16 @@ function createMcpFixture(): {
     `
 import fs from 'fs';
 import path from 'path';
+import { sign as cryptoSign } from 'crypto';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const tools = new Map();
+
+function signPayload(payload) {
+  const signingKey = process.env.TEST_IPC_RESPONSE_SIGNING_KEY || '';
+  if (!signingKey) return undefined;
+  return cryptoSign(null, Buffer.from(JSON.stringify(payload)), signingKey).toString('base64');
+}
 
 async function waitForQuestionRequest(ipcDir) {
   const requestDir = path.join(ipcDir, 'user-questions');
@@ -113,6 +142,27 @@ async function waitForQuestionRequest(ipcDir) {
   throw new Error('timed out waiting for user question request');
 }
 
+async function waitForTaskRequest(ipcDir) {
+  const requestDir = path.join(ipcDir, 'tasks');
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(requestDir)) {
+      const files = fs
+        .readdirSync(requestDir)
+        .filter((file) => file.endsWith('.json'));
+      if (files.length > 0) {
+        const filePath = path.join(requestDir, files[0]);
+        return {
+          filePath,
+          body: JSON.parse(fs.readFileSync(filePath, 'utf-8')),
+        };
+      }
+    }
+    await delay(25);
+  }
+  return null;
+}
+
 export class McpServer {
   tool(name, _description, _schema, handler) {
     tools.set(name, handler);
@@ -131,15 +181,49 @@ export class McpServer {
         observedRequest = await waitForQuestionRequest(ipcDir);
         const responseDir = path.join(ipcDir, 'user-answers');
         fs.mkdirSync(responseDir, { recursive: true });
+        const responsePayload = {
+          requestId: observedRequest.body.requestId,
+          answers: {
+            'Choose deployment?': ['Staging', 'Canary'],
+            'Ship now?': 'Yes',
+          },
+          answeredBy: 'runner-mcp-test-admin',
+        };
+        const signature = signPayload(responsePayload);
         fs.writeFileSync(
           path.join(responseDir, observedRequest.body.requestId + '.json'),
           JSON.stringify({
-            requestId: observedRequest.body.requestId,
-            answers: {
-              'Choose deployment?': ['Staging', 'Canary'],
-              'Ship now?': 'Yes',
-            },
-            answeredBy: 'runner-mcp-test-admin',
+            ...responsePayload,
+            ...(signature ? { signature } : {}),
+          }),
+        );
+      })();
+    }
+    if (process.env.TEST_MCP_AUTO_RESPOND_TASKS === '1') {
+      void (async () => {
+        const observedTask = await waitForTaskRequest(ipcDir);
+        const taskId =
+          typeof observedTask?.body?.taskId === 'string'
+            ? observedTask.body.taskId
+            : '';
+        if (!taskId) return;
+        const responseDir = path.join(ipcDir, 'task-responses');
+        fs.mkdirSync(responseDir, { recursive: true });
+        const responsePayload = {
+          taskId,
+          ok: true,
+          message: 'Scheduler task confirmed.',
+        };
+    const signature = signPayload(responsePayload);
+        fs.writeFileSync(
+          path.join(responseDir, 'task-' + taskId + '.json'),
+          JSON.stringify({
+            ...responsePayload,
+            ...(process.env.TEST_MCP_UNSIGNED_TASK_RESPONSE === '1'
+              ? {}
+              : signature
+                ? { signature }
+                : {}),
           }),
         );
       })();
@@ -165,7 +249,14 @@ export class McpServer {
 `,
   );
 
-  return { root, serverPath, ipcDir, resultPath };
+  return {
+    root,
+    serverPath,
+    ipcDir,
+    resultPath,
+    responseVerifyKey,
+    responseSigningKey,
+  };
 }
 
 async function runMcpFixture(
@@ -183,6 +274,8 @@ async function runMcpFixture(
         ...process.env,
         MYCLAW_IPC_DIR: fixture.ipcDir,
         MYCLAW_IPC_AUTH_TOKEN: 'mcp-test-token',
+        MYCLAW_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
+        TEST_IPC_RESPONSE_SIGNING_KEY: fixture.responseSigningKey,
         MYCLAW_CHAT_JID: 'tg:team',
         MYCLAW_GROUP_FOLDER: 'team',
         MYCLAW_IS_MAIN: '0',
@@ -191,6 +284,7 @@ async function runMcpFixture(
         TEST_MCP_TOOL_ARGS: JSON.stringify(args),
         TEST_MCP_RESULT_PATH: fixture.resultPath,
         TEST_MCP_ANSWER_QUESTION: toolName === 'ask_user_question' ? '1' : '0',
+        TEST_MCP_AUTO_RESPOND_TASKS: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
@@ -251,7 +345,7 @@ describe('agent-runner MCP stdio tools', () => {
     expect(record.observedRequest).toEqual(
       expect.objectContaining({
         sourceGroup: 'team',
-        authToken: 'mcp-test-token',
+        signature: expect.any(String),
       }),
     );
     expect(record.result.content[0].text).toContain(
@@ -290,6 +384,32 @@ describe('agent-runner MCP stdio tools', () => {
     );
     expect(task.threadId).toBe('trusted-thread');
     expect(task.context.threadId).toBe('trusted-thread');
+    expect(task.requestId).toEqual(expect.any(String));
+    expect(task.nonce).toEqual(expect.any(String));
+    expect(Date.parse(task.expiresAt)).toBeGreaterThan(Date.now());
+  });
+
+  it('rejects unsigned task responses from the host boundary', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(
+      fixture,
+      'scheduler_upsert_job',
+      {
+        name: 'Daily review',
+        prompt: 'Review memory',
+        schedule_type: 'interval',
+        schedule_value: '60000',
+      },
+      { TEST_MCP_UNSIGNED_TASK_RESPONSE: '1' },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
+    expect(record.result.isError).toBe(true);
+    expect(record.result.content[0].text).toContain(
+      'Invalid task response signature',
+    );
   });
 
   it('rejects scheduler upsert thread targets outside the current runtime thread', async () => {

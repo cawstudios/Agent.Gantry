@@ -1,242 +1,85 @@
-import fs from 'fs';
-import path from 'path';
-
-import Database from 'better-sqlite3';
-import { count, eq, like } from 'drizzle-orm';
-import { drizzle as drizzleSqlite } from 'drizzle-orm/better-sqlite3';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-
-import { RegisteredGroup } from '../core/types.js';
+import { RegisteredGroup } from '../domain/types.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
-import { SQLITE_MIGRATIONS } from '../storage/migrations.js';
-import * as sqliteSchema from '../storage/schema/sqlite.js';
-import {
-  ensureRuntimeSettings,
-  resolveRuntimeStorageSqlitePath,
-} from './runtime-settings.js';
+import { createStorageRuntime } from '../infrastructure/postgres/factory.js';
+import type { StorageRuntime } from '../infrastructure/postgres/factory.js';
+import type { ResolvedStorageConfig } from '../infrastructure/postgres/storage-service.js';
+import { readEnvFile } from '../config/env/file.js';
+import { envFilePath } from '../config/settings/runtime-home.js';
+import { ensureRuntimeSettings } from '../config/settings/runtime-settings.js';
 
 export interface RuntimeGroupDb {
-  countRegisteredGroupsByJidPrefix(jidPrefix: string): number;
-  getAllRegisteredGroups(): Record<string, RegisteredGroup>;
-  setRegisteredGroup(jid: string, group: RegisteredGroup): void;
-  deleteRegisteredGroup(jid: string): void;
-  deleteSession(groupFolder: string): void;
-  close(): void;
+  countRegisteredGroupsByJidPrefix(jidPrefix: string): Promise<number>;
+  getAllRegisteredGroups(): Promise<Record<string, RegisteredGroup>>;
+  setRegisteredGroup(jid: string, group: RegisteredGroup): Promise<void>;
+  deleteRegisteredGroup(jid: string): Promise<void>;
+  deleteSession(groupFolder: string): Promise<void>;
+  close(): Promise<void>;
 }
 
-function openDatabase(
-  runtimeHome: string,
-  options: { migrate?: boolean; readonly?: boolean } = {},
-): {
-  sqlite: Database.Database;
-  db: BetterSQLite3Database<typeof sqliteSchema>;
-} {
+function resolveStorageConfig(runtimeHome: string): ResolvedStorageConfig {
   const settings = ensureRuntimeSettings(runtimeHome);
-  if (settings.storage.provider !== 'sqlite') {
-    throw new Error(
-      'storage.provider=postgres is not available in host runtime yet. Use storage.provider=sqlite.',
-    );
-  }
-  const dbPath = resolveRuntimeStorageSqlitePath(runtimeHome, settings);
-  if (!options.readonly) {
-    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  }
-  const sqlite = new Database(dbPath, {
-    readonly: options.readonly === true,
-    fileMustExist: options.readonly === true,
-  });
-  if (!options.readonly) {
-    sqlite.pragma('journal_mode = WAL');
-  }
-  sqlite.pragma('foreign_keys = ON');
-
-  if (options.migrate !== false && !options.readonly) {
-    for (const statement of SQLITE_MIGRATIONS) {
-      sqlite.exec(statement);
-    }
-  }
-
+  const env = readEnvFile(envFilePath(runtimeHome));
+  const postgresUrlEnv = settings.storage.postgres.urlEnv;
   return {
-    sqlite,
-    db: drizzleSqlite(sqlite, { schema: sqliteSchema }),
+    postgresUrl:
+      env[postgresUrlEnv]?.trim() ||
+      process.env[postgresUrlEnv]?.trim() ||
+      null,
+    postgresUrlEnv,
+    postgresSchema: settings.storage.postgres.schema,
   };
 }
 
-function parseAgentConfig(
-  raw: string | null,
-): RegisteredGroup['agentConfig'] | undefined {
-  if (!raw) return undefined;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return undefined;
-    }
-    return parsed as RegisteredGroup['agentConfig'];
-  } catch {
-    return undefined;
-  }
+function normalizePrefix(jidPrefix: string): string {
+  return jidPrefix.endsWith('%') ? jidPrefix.slice(0, -1) : jidPrefix;
 }
 
-export function openRuntimeGroupDb(runtimeHome: string): RuntimeGroupDb {
-  const { sqlite, db } = openDatabase(runtimeHome);
-
+function createProviderRuntimeGroupDb(runtime: StorageRuntime): RuntimeGroupDb {
   return {
-    countRegisteredGroupsByJidPrefix(jidPrefix: string): number {
-      const row = db
-        .select({ count: count() })
-        .from(sqliteSchema.registeredGroupsSqlite)
-        .where(like(sqliteSchema.registeredGroupsSqlite.jid, `${jidPrefix}%`))
-        .get();
-      return row?.count ?? 0;
+    async countRegisteredGroupsByJidPrefix(jidPrefix: string): Promise<number> {
+      const prefix = normalizePrefix(jidPrefix);
+      const groups = await runtime.ops.getAllRegisteredGroups();
+      return Object.keys(groups).filter((jid) => jid.startsWith(prefix)).length;
     },
 
-    getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-      const rows = db.select().from(sqliteSchema.registeredGroupsSqlite).all();
-
-      const groups: Record<string, RegisteredGroup> = {};
-      for (const row of rows) {
-        if (!isValidGroupFolder(row.folder)) {
-          continue;
-        }
-
-        groups[row.jid] = {
-          name: row.name,
-          folder: row.folder,
-          trigger: row.triggerPattern,
-          added_at: row.addedAt,
-          agentConfig: parseAgentConfig(row.containerConfig),
-          requiresTrigger:
-            row.requiresTrigger === null
-              ? undefined
-              : row.requiresTrigger === 1,
-          isMain: row.isMain === 1 ? true : undefined,
-        };
-      }
-      return groups;
+    async getAllRegisteredGroups(): Promise<Record<string, RegisteredGroup>> {
+      return runtime.ops.getAllRegisteredGroups();
     },
 
-    setRegisteredGroup(jid: string, group: RegisteredGroup): void {
+    async setRegisteredGroup(
+      jid: string,
+      group: RegisteredGroup,
+    ): Promise<void> {
       if (!isValidGroupFolder(group.folder)) {
         throw new Error(
           `Invalid group folder "${group.folder}" for JID ${jid}`,
         );
       }
-
-      db.insert(sqliteSchema.registeredGroupsSqlite)
-        .values({
-          jid,
-          name: group.name,
-          folder: group.folder,
-          triggerPattern: group.trigger,
-          addedAt: group.added_at,
-          containerConfig: group.agentConfig
-            ? JSON.stringify(group.agentConfig)
-            : null,
-          requiresTrigger:
-            group.requiresTrigger === undefined
-              ? 1
-              : group.requiresTrigger
-                ? 1
-                : 0,
-          isMain: group.isMain ? 1 : 0,
-        })
-        .onConflictDoUpdate({
-          target: sqliteSchema.registeredGroupsSqlite.jid,
-          set: {
-            name: group.name,
-            folder: group.folder,
-            triggerPattern: group.trigger,
-            addedAt: group.added_at,
-            containerConfig: group.agentConfig
-              ? JSON.stringify(group.agentConfig)
-              : null,
-            requiresTrigger:
-              group.requiresTrigger === undefined
-                ? 1
-                : group.requiresTrigger
-                  ? 1
-                  : 0,
-            isMain: group.isMain ? 1 : 0,
-          },
-        })
-        .run();
+      await runtime.ops.setRegisteredGroup(jid, group);
     },
 
-    deleteRegisteredGroup(jid: string): void {
-      db.delete(sqliteSchema.registeredGroupsSqlite)
-        .where(eq(sqliteSchema.registeredGroupsSqlite.jid, jid))
-        .run();
+    async deleteRegisteredGroup(jid: string): Promise<void> {
+      await runtime.ops.deleteRegisteredGroup(jid);
     },
 
-    deleteSession(groupFolder: string): void {
-      db.delete(sqliteSchema.sessionsSqlite)
-        .where(eq(sqliteSchema.sessionsSqlite.groupFolder, groupFolder))
-        .run();
+    async deleteSession(groupFolder: string): Promise<void> {
+      await runtime.ops.deleteSessionsByGroupFolder(groupFolder);
     },
 
-    close(): void {
-      sqlite.close();
+    async close(): Promise<void> {
+      await runtime.service.close();
     },
   };
 }
 
-export function openRuntimeGroupReadonlyDb(
+export async function openRuntimeGroupDb(
   runtimeHome: string,
-): RuntimeGroupDb {
-  const { sqlite, db } = openDatabase(runtimeHome, {
-    migrate: false,
-    readonly: true,
-  });
-
-  return {
-    countRegisteredGroupsByJidPrefix(jidPrefix: string): number {
-      const row = db
-        .select({ count: count() })
-        .from(sqliteSchema.registeredGroupsSqlite)
-        .where(like(sqliteSchema.registeredGroupsSqlite.jid, `${jidPrefix}%`))
-        .get();
-      return row?.count ?? 0;
-    },
-
-    getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-      const rows = db.select().from(sqliteSchema.registeredGroupsSqlite).all();
-
-      const groups: Record<string, RegisteredGroup> = {};
-      for (const row of rows) {
-        if (!isValidGroupFolder(row.folder)) {
-          continue;
-        }
-
-        groups[row.jid] = {
-          name: row.name,
-          folder: row.folder,
-          trigger: row.triggerPattern,
-          added_at: row.addedAt,
-          agentConfig: parseAgentConfig(row.containerConfig),
-          requiresTrigger:
-            row.requiresTrigger === null
-              ? undefined
-              : row.requiresTrigger === 1,
-          isMain: row.isMain === 1 ? true : undefined,
-        };
-      }
-      return groups;
-    },
-
-    setRegisteredGroup(): void {
-      throw new Error('Runtime group DB is readonly');
-    },
-
-    deleteRegisteredGroup(): void {
-      throw new Error('Runtime group DB is readonly');
-    },
-
-    deleteSession(): void {
-      throw new Error('Runtime group DB is readonly');
-    },
-
-    close(): void {
-      sqlite.close();
-    },
-  };
+  options: { migrate?: boolean } = {},
+): Promise<RuntimeGroupDb> {
+  const config = resolveStorageConfig(runtimeHome);
+  const runtime = createStorageRuntime(config);
+  if (options.migrate !== false) {
+    await runtime.service.migrate();
+  }
+  return createProviderRuntimeGroupDb(runtime);
 }

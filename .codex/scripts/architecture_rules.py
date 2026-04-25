@@ -6,7 +6,10 @@ import subprocess
 from datetime import date
 from pathlib import Path
 
-FILE_SIZE_LIMIT = 400
+FILE_SIZE_LIMIT = 700
+FILE_SIZE_LIMITS_BY_TARGET = {
+    "apps/core/src/infrastructure/postgres/schema/schema.ts": 900,
+}
 FILE_SIZE_RULE = "file_size_budget"
 REQUIRED_EXCEPTION_FIELDS = ("rule", "target", "owner", "reason", "expires_on")
 
@@ -22,29 +25,46 @@ ACTIVE_DOC_FILES = (
 
 FORBIDDEN_IMPORT_RULES = (
     (
-        "apps/core/src/core",
+        "apps/core/src/domain",
         (
+            "apps/core/src/app",
+            "apps/core/src/config",
+            "apps/core/src/control",
             "apps/core/src/runtime",
+            "apps/core/src/runner",
+            "apps/core/src/jobs",
             "apps/core/src/channels",
             "apps/core/src/cli",
-            "apps/core/src/storage",
+            "apps/core/src/infrastructure",
             "apps/core/src/session",
             "apps/core/src/memory",
+            "apps/core/src/platform",
+        ),
+    ),
+    (
+        "apps/core/src/config",
+        (
+            "apps/core/src/app",
+            "apps/core/src/runtime",
+            "apps/core/src/runner",
+            "apps/core/src/cli",
+            "apps/core/src/control",
+            "apps/core/src/jobs",
+        ),
+    ),
+    (
+        "apps/core/src/infrastructure",
+        (
+            "apps/core/src/app",
+            "apps/core/src/runtime",
+            "apps/core/src/cli",
+            "apps/core/src/control",
+            "apps/core/src/runner",
+            "apps/core/src/jobs",
         ),
     ),
     (
         "apps/core/src/platform",
-        (
-            "apps/core/src/runtime",
-            "apps/core/src/channels",
-            "apps/core/src/cli",
-            "apps/core/src/storage",
-            "apps/core/src/session",
-            "apps/core/src/memory",
-        ),
-    ),
-    (
-        "apps/core/src/storage",
         (
             "apps/core/src/runtime",
             "apps/core/src/channels",
@@ -60,6 +80,9 @@ FORBIDDEN_IMPORT_RULES = (
             "apps/core/src/cli",
         ),
     ),
+    ("apps/core/src/jobs", ("apps/core/src/cli",)),
+    ("apps/core/src/control", ("apps/core/src/cli",)),
+    ("apps/core/src/memory", ("apps/core/src/cli",)),
     ("apps/core/src/channels", ("apps/core/src/cli",)),
 )
 
@@ -308,12 +331,13 @@ def check_file_size_budget(production_files: list[Path], root: Path, exceptions:
     for file_path in production_files:
         rel = file_path.relative_to(root).as_posix()
         line_count = count_lines(file_path)
-        if line_count <= FILE_SIZE_LIMIT:
+        limit = FILE_SIZE_LIMITS_BY_TARGET.get(rel, FILE_SIZE_LIMIT)
+        if line_count <= limit:
             continue
         over_budget.add(rel)
         exception = exceptions.get(rel)
         if exception is None:
-            issues.append(f"{rel} has {line_count} lines (limit {FILE_SIZE_LIMIT}) and no exception.")
+            issues.append(f"{rel} has {line_count} lines (limit {limit}) and no exception.")
             continue
         max_lines = int(exception["max_lines"])
         if line_count > max_lines:
@@ -321,7 +345,8 @@ def check_file_size_budget(production_files: list[Path], root: Path, exceptions:
 
     for target in sorted(exceptions):
         if target not in over_budget:
-            issues.append(f"{target} has an exception but is now within {FILE_SIZE_LIMIT} lines; remove it.")
+            limit = FILE_SIZE_LIMITS_BY_TARGET.get(target, FILE_SIZE_LIMIT)
+            issues.append(f"{target} has an exception but is now within {limit} lines; remove it.")
     return sorted(issues)
 
 

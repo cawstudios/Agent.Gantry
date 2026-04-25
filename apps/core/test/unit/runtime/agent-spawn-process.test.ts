@@ -24,7 +24,7 @@ const { mockLogger, mockWriteFileSync } = vi.hoisted(() => ({
 /*  Mocks                                                              */
 /* ------------------------------------------------------------------ */
 
-vi.mock('@core/core/config.js', () => ({
+vi.mock('@core/config/index.js', () => ({
   AGENT_MAX_OUTPUT_SIZE: 512, // small limit so truncation tests are manageable
   AGENT_TIMEOUT: 5000, // 5 s
   IDLE_TIMEOUT: 5000, // 5 s
@@ -33,8 +33,12 @@ vi.mock('@core/core/config.js', () => ({
   },
 }));
 
-vi.mock('@core/core/logger.js', () => ({
+vi.mock('@core/infrastructure/logging/logger.js', () => ({
   logger: mockLogger,
+  redactString: (value: string) =>
+    value
+      .replace(/\bxox[baprs]-[A-Za-z0-9-]+\b/g, '[REDACTED]')
+      .replace(/\b\d{6,12}:[A-Za-z0-9_-]{20,}\b/g, '[REDACTED]'),
 }));
 
 vi.mock('fs', async () => {
@@ -89,7 +93,7 @@ vi.mock('child_process', async () => {
 
 import { executeRunnerProcess } from '@core/runtime/agent-spawn-process.js';
 import type { RunnerProcessSpec } from '@core/runtime/agent-spawn-types.js';
-import type { RegisteredGroup } from '@core/core/types.js';
+import type { RegisteredGroup } from '@core/domain/types.js';
 
 /* ------------------------------------------------------------------ */
 /*  Shared fixtures                                                    */
@@ -221,6 +225,32 @@ describe('executeRunnerProcess', () => {
         }),
         expect.stringContaining('exited with error'),
       );
+    });
+
+    it('redacts channel and runtime secrets from durable runner logs', async () => {
+      const spec = makeSpec();
+      const resultP = executeRunnerProcess(spec);
+
+      fakeProc.stdout.push('SLACK_BOT_TOKEN=xoxb-secret-token\n');
+      fakeProc.stderr.push(
+        'TELEGRAM_BOT_TOKEN=123456789:telegramSecretTokenValue\n',
+      );
+      fakeProc.stderr.push('WEBHOOK_SECRET=super-secret-value\n');
+      fakeProc.emit('close', 1);
+
+      await vi.advanceTimersByTimeAsync(10);
+      const result = await resultP;
+
+      expect(result.status).toBe('error');
+      const logContent = String(mockWriteFileSync.mock.calls[0]?.[1] ?? '');
+      expect(logContent).toContain('[REDACTED]');
+      expect(logContent).not.toContain('xoxb-secret-token');
+      expect(logContent).not.toContain('telegramSecretTokenValue');
+      expect(logContent).not.toContain('super-secret-value');
+      const errorPayload = JSON.stringify(mockLogger.error.mock.calls);
+      expect(errorPayload).not.toContain('xoxb-secret-token');
+      expect(errorPayload).not.toContain('telegramSecretTokenValue');
+      expect(errorPayload).not.toContain('super-secret-value');
     });
   });
 

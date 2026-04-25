@@ -1,0 +1,108 @@
+# Agent Internals For SDK Consumers
+
+This document explains what a backend developer is using when they call `@myclaw/sdk`.
+
+## Boundary
+
+The SDK talks to the MyClaw control server. The control server is a host runtime surface, not an agent feature. ACP/ACPS remain harness/runtime concerns and are not part of the public SDK contract.
+
+Agents cannot choose callback URLs, API keys, webhook headers, or channel destinations. They can only react to durable inbound messages and emit structured events through host-owned tools.
+
+For contributor-level runtime internals and source-reading paths, see [runtime components](../architecture/runtime-components.md).
+
+## Message Flow
+
+```mermaid
+sequenceDiagram
+  participant App as Backend App
+  participant SDK as @myclaw/sdk
+  participant Control as MyClaw Control Server
+  participant Store as Postgres
+  participant Queue as Per-Session Queue
+  participant Agent as Host Agent
+
+  App->>SDK: sessions.ensure()
+  SDK->>Control: POST /v1/sessions/ensure
+  Control->>Store: upsert app session
+  App->>SDK: sessions.sendMessage()
+  SDK->>Control: POST /v1/sessions/:id/messages
+  Control->>Store: insert inbound message + control event
+  Control->>Queue: enqueue normal processing
+  Queue->>Agent: spawn host agent run
+  Agent->>Control: app channel outbound event
+  Control->>Store: append durable control event
+  SDK-->>App: wait, stream, or webhook event
+```
+
+`sendMessage()` is intentionally not an RPC call into the model. It writes an inbound message, then the normal runtime processor claims work. This makes retries, ordering, status events, and webhook delivery durable.
+
+## Job Flow
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant SDK
+  participant Control
+  participant Boss as pg-boss
+  participant Store as Postgres
+  participant Agent
+
+  App->>SDK: jobs.create({ kind })
+  SDK->>Control: POST /v1/jobs
+  Control->>Store: persist MyClaw job definition
+  Control->>Boss: schedule/queue execution
+  App->>SDK: jobs.trigger(jobId)
+  SDK->>Control: POST /v1/jobs/:id/trigger
+  Control->>Store: create triggerId
+  Control->>Boss: enqueue run claim
+  Boss->>Control: run claimed
+  Control->>Store: bind triggerId to runId
+  Control->>Agent: run prompt in session/group context
+  Agent->>Store: run events and result
+  SDK-->>App: jobs.wait(triggerId)
+```
+
+The SDK exposes MyClaw jobs, triggers, runs, events, and results. It does not expose raw `pg-boss` concepts. `trigger()` returns `triggerId` immediately; execution later binds a `runId`.
+
+## Webhook Flow
+
+```mermaid
+sequenceDiagram
+  participant Store as Postgres
+  participant Dispatcher as Webhook Dispatcher
+  participant App as Backend App
+
+  Store->>Dispatcher: claim pending delivery
+  Dispatcher->>App: POST signed event
+  alt accepted
+    Dispatcher->>Store: mark delivered
+  else retryable failure
+    Dispatcher->>Store: backoff retry
+  else final failure
+    Dispatcher->>Store: dead-letter
+  end
+```
+
+Webhook URLs are registered by the app, signed with per-destination secrets, retried durably, and dead-lettered after bounded failures. Apps should deduplicate on event id.
+
+## Storage
+
+Postgres is the runtime store:
+
+- `pg-boss` schedules and claims jobs.
+- `pgvector` stores embeddings for semantic memory and dedupe.
+- Postgres full-text search handles lexical retrieval and filtering.
+- Control events, messages, jobs, runs, triggers, sessions, webhooks, deliveries, and memory records are first-party MyClaw tables.
+
+## Event Contract
+
+Every control event has:
+
+- monotonic `eventId`
+- typed `eventType`
+- JSON payload
+- optional `sessionId`, `jobId`, `runId`, `triggerId`
+- optional correlation id
+- timestamp
+
+Backend apps should treat events as the durable integration stream. The current agent transcript and stdout are implementation details.

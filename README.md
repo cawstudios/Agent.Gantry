@@ -13,7 +13,8 @@ The project is intentionally small. The goal is not to be a framework with every
 ## Quick Start
 
 ```bash
-npx myclaw
+npm i -g myclaw
+myclaw
 ```
 
 The first run is a guided CLI flow that collects setup choices first, then runs final doctor verification before marking the runtime ready.
@@ -23,19 +24,18 @@ The first run is a guided CLI flow that collects setup choices first, then runs 
 If you install from npm and want the fastest path to a working bot:
 
 ```bash
-npx myclaw
-# or
-npm i -g myclaw && myclaw
+npm i -g myclaw
+myclaw
 ```
 
 Then follow this order:
 
 1. Run `myclaw` with no args.
-2. Confirm runtime home and storage (`SQLite` is the supported runtime database in this release).
-3. Choose your first provider: `Telegram` or `Slack`.
-4. Follow the in-CLI provider guide, paste credentials, and pick a discovered chat/channel (or enter an ID manually).
-5. Choose credential mode (`env-only` by default), then set Claude auth (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) when that mode needs local credentials.
-6. Choose main model (`Sonnet` recommended, `Opus` optional).
+2. Choose `Use local Postgres URL` if you started the provided Compose stack, or choose hosted/existing Postgres and paste those URLs.
+3. Choose your first channel: `Telegram` or `Slack`.
+4. Follow the in-CLI channel guide, paste channel credentials, and pick a discovered chat/channel (or enter an ID manually).
+5. Connect Model Access for agent model calls. MyClaw and OneCLI can share one Postgres database with separate schemas; agents never receive the database URLs or raw Claude credentials.
+6. Choose main model (`opus` recommended as the Claude Code alias; `sonnet` or `opusplan` optional).
 7. Confirm memory settings (memory on, embeddings off, dreaming on by default).
 8. Choose whether to install/start a background service.
 9. Review the final summary and choose `Create Runtime`; before this point Back, Resume Later, and Cancel are transactional.
@@ -49,15 +49,15 @@ myclaw
 myclaw setup
 myclaw doctor
 myclaw status
-myclaw memory status
-myclaw memory embeddings <off|openai>
-myclaw memory dreaming <on|off>
 myclaw start
-myclaw telegram connect
-myclaw slack connect
-myclaw service install
-myclaw service start
-myclaw service stop
+myclaw stop
+myclaw restart
+myclaw logs
+myclaw local setup|start|stop|status|logs|doctor
+myclaw channel connect telegram
+myclaw channel connect slack
+myclaw channel list
+myclaw channel doctor
 ```
 
 Defaults in v1:
@@ -65,12 +65,12 @@ Defaults in v1:
 - runtime home: `~/myclaw`
 - runtime settings file: `~/myclaw/settings.yaml` (validated before `start`/`restart`)
 - setup flow: guided multi-channel first run (choose Telegram or Slack)
-- storage provider: `sqlite`; Postgres is not exposed until runtime persistence is provider-backed end to end
-- storage SQLite path: `store/myclaw.db`
+- storage: Postgres through `MYCLAW_DATABASE_URL`; guided setup validates URLs but does not create Docker containers
 - memory: on
-- embeddings: off (unless OpenAI key is provided and enabled)
+- embeddings: off by default; external embedding providers require brokered Model Access and are not configured through MyClaw `.env`
 - dreaming: on in guided setup; disable with `myclaw memory dreaming off`
 - sender allowlist: `channels.<provider>.sender_allowlist` in `settings.yaml`
+- session/admin allowlist: `channels.<provider>.control_allowlist` in `settings.yaml`
 
 Runtime home is a single-cut contract. MyClaw reads `~/myclaw` by default unless `--runtime-home` or `MYCLAW_HOME` is set.
 
@@ -78,13 +78,18 @@ Canonical runtime settings live in `~/myclaw/settings.yaml`:
 
 ```yaml
 storage:
-  provider: sqlite
-  sqlite:
-    path: store/myclaw.db
+  postgres:
+    url_env: MYCLAW_DATABASE_URL
+    schema: myclaw
+
+credential_broker:
+  onecli:
+    postgres:
+      url_env: ONECLI_DATABASE_URL
+      schema: onecli
 
 memory:
   enabled: true
-  root: memory
   embeddings:
     enabled: false
     provider: disabled
@@ -93,24 +98,36 @@ memory:
     enabled: true
 ```
 
+MyClaw uses Postgres for runtime state, jobs, events, memory, semantic search, and lexical search. Runtime readiness expects `pgvector`, `pg_trgm`, and `pg-boss` schema readiness. The supported deployment model is one database with separate schemas and roles: `myclaw` for runtime state, `onecli` for broker state, and `pgboss` for job queue internals. `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL` must use different Postgres users.
+
+No Postgres or Model Access service installed? Use the provided Compose file, then paste the resulting URLs during setup:
+
+```bash
+docker compose --env-file ~/myclaw/.env up -d
+myclaw setup
+```
+
+The Compose file hardcodes the local ports, schema names, and non-secret role names. `~/myclaw/.env` only needs local passwords, `SECRET_ENCRYPTION_KEY`, and the runtime connection URLs. MyClaw setup does not start Docker or create containers; it asks for `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL`, then defaults `ONECLI_URL` to `http://localhost:10254`.
+
+For hosted Postgres, use Neon, Supabase, or another provider that supports `vector` and `pg_trgm`, then paste two URLs during setup: one MyClaw-role URL with `sslmode=require`, and one OneCLI-role URL for the same database with `sslmode=require` and `schema=onecli`.
+
 ### Channel Setup
 
 MyClaw supports multiple channels. You can connect Telegram and/or Slack:
 
 ```bash
-myclaw telegram connect
-myclaw slack connect
+myclaw channel connect telegram
+myclaw channel connect slack
 ```
 
 Notes:
 
 - Telegram uses `TELEGRAM_BOT_TOKEN`; create it in Telegram by chatting with `@BotFather` and sending `/newbot`.
 - For Telegram groups, add the bot to the group and send a message before discovery; if MyClaw must see every group message, make the bot an admin or disable Group Privacy in BotFather with `/setprivacy`.
-- `myclaw telegram connect` auto-discovers recent chats and can register one without manual chat ID copy/paste.
-- Manual Telegram chat IDs like `tg:-1001234567890` are still supported as fallback.
+- `myclaw channel connect telegram` auto-discovers recent chats and can register one without manual chat ID copy/paste. The human sender from the selected discovery message is added to `control_allowlist`, so `/new`, `/model`, `/dream`, and `/memory-status` work immediately.
 - Slack uses Socket Mode with `SLACK_BOT_TOKEN` (`xoxb-...`) and `SLACK_APP_TOKEN` (`xapp-...`); create a Slack app, add a bot user/scopes, enable Socket Mode, generate the app-level token, install/reinstall the app, then invite it to the target channel or DM it once.
-- `myclaw slack connect` auto-discovers accessible conversations and can register one directly.
-- Manual Slack IDs like `sl:C0123456789` are still supported as fallback.
+- `myclaw channel connect slack` auto-discovers accessible conversations and can register one directly.
+- Slack tool permission approvals are deny-by-default until `SLACK_PERMISSION_APPROVER_IDS` is set. Guided setup asks for comma-separated Slack member IDs like `U0123456789`; these users can approve tool permissions and answer interactive prompts.
 - Slack UX uses native Slack surfaces (threads, streaming updates, actions).
 
 ## Philosophy
@@ -154,16 +171,15 @@ Embeddings are off by default. Memory search and context injection still work wi
 
 Host runtime now injects a fresh memory/continuity block for every agent run (message and scheduler), so baseline recall does not depend on the agent deciding to call memory tools first. The block is sent as a separate structured untrusted data message, with a system-level boundary policy that forbids treating memory records as instructions or tool-use authority.
 
-Scope defaults:
+Memory boundaries:
 
-- `user` for personal preferences and per-user corrections
-- `group` for active channel/chat memory (default)
-- `global` only for explicitly cross-chat knowledge
-- when `thread_id` exists, injected group/global memory is filtered to records saved with the same `topic_id`/`thread_id`
+- `appId` and `agentId` are mandatory for every memory record.
+- `user`, `group`, and `channel` subjects isolate application, team, and channel context.
+- `common` is app-wide shared memory and is write-restricted to admin/service flows.
+- `threadId` narrows recall without crossing app, agent, user, group, or channel boundaries.
 
-Runtime state storage defaults to `~/myclaw/store/myclaw.db`.
-Memory data uses `~/myclaw/memory/.cache/memory.db` by default (derived from `memory.root`).
-Memory artifacts (journal, sessions, optional mirrors) remain under `memory.root`.
+Runtime state and memory records are stored in Postgres through `MYCLAW_DATABASE_URL`.
+See [docs/MEMORY.md](docs/MEMORY.md) for the app developer memory model and dreaming lifecycle.
 
 ## Runtime
 
@@ -239,30 +255,43 @@ Use these as standalone chat messages:
 /new
 /model
 /model opus
-/model claude-opus-4-1-20250805
+/model sonnet
+/model opusplan
 /model default
 ```
 
 - `/new` resets the current group session and archives the previous transcript.
-- `/model <value>` switches the group model override only when validation succeeds.
+- `/model <value>` switches the group model override only when validation succeeds. Prefer Claude Code aliases (`sonnet`, `opus`, `opusplan`) so MyClaw tracks current Claude defaults; pin exact model IDs only for advanced rollout control.
+- Human shorthand such as `/model opus-4-7` is normalized to the safe Claude Code `opus` alias. Exact Opus 4.7 model IDs require a recent Claude Code version and account access, so MyClaw does not pin new installs to them by default.
+- Session commands require `is_from_me` or explicit `control_allowlist` membership. `sender_allowlist: "*"` allows interaction; it does not grant admin/session-command rights.
+
+## Claude Model Policy
+
+MyClaw setup uses Claude Code aliases for user choices and does not pin those aliases by default:
+
+- Default session model: `opus`
+- Allowed Claude Code choices: `sonnet`, `opus`, `haiku`, `best`, `opusplan`, `sonnet[1m]`, `opus[1m]`
+- Memory LLM API defaults: extractor `claude-haiku-4-5-20251001`, dreaming `claude-sonnet-4-6`, consolidation `claude-sonnet-4-6`
+- The generated Claude settings JSON includes `model`, `availableModels`, and memory hooks.
+
+The allowed model list is centralized in `apps/core/src/models/claude-model-registry.ts`. Keep Claude Code interactive defaults alias-first; only add exact model IDs when they are broadly supported and tested across Claude Code versions.
 
 ## Project Layout
 
 Key paths:
 
-- `apps/core/src/index.ts` - orchestrator loop and runtime wiring
+- `apps/core/src/index.ts` - package/runtime entrypoint
+- `apps/core/src/app/bootstrap/runtime-app.ts` - orchestrator lifecycle and runtime wiring
 - `apps/core/src/runtime/group-queue.ts` - per-group queueing and retries
 - `apps/core/src/runtime/agent-spawn.ts` - host agent execution path
 - `apps/core/src/session/session-commands.ts` - host-managed slash commands
-- `apps/core/src/storage/db.ts` - runtime persistence
+- `apps/core/src/infrastructure/postgres/schema/` - Postgres runtime, control-plane, job, and memory persistence
 - `~/myclaw/agents/shared/CLAUDE.md` - static shared prompt guidance
 - `~/myclaw/agents/*/SOUL.md` - per-agent personality prompt
 - `~/myclaw/agents/*/CLAUDE.md` - static group-specific prompt guidance
-- `~/myclaw/store/myclaw.db` - default app storage database
-- `~/myclaw/memory/.cache/memory.db` - default memory database
-- `~/myclaw/memory/sessions/` - archived session summaries used for continuity recap
-- `~/myclaw/memory/dreams/` - dream/refinement artifacts
-- `~/myclaw/memory/.journal/` - memory journal files
+- `MYCLAW_DATABASE_URL` - Postgres runtime and memory database
+- `ONECLI_DATABASE_URL` - Same Postgres database with a separate OneCLI role and `schema=onecli` for broker persistence
+- `SECRET_ENCRYPTION_KEY` - Stable generated base64-encoded 32-byte OneCLI broker encryption secret for stateless restarts
 
 ## Factory Mode
 
@@ -297,8 +326,6 @@ Reusable guided workflows can be added as skills under `~/myclaw/.claude/skills/
 ## Contributing
 
 Contributions should keep the core runtime small and maintainable. Bug fixes, simplifications, docs improvements, and reusable skills are good fits. Broad feature creep in the default runtime is not.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution policy and branch-based skill model.
 
 ## Documentation
 

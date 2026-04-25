@@ -1,6 +1,6 @@
 import path from 'path';
 
-import { DATA_DIR, AGENTS_DIR } from '../core/config.js';
+import { DATA_DIR, AGENTS_DIR } from '../config/index.js';
 import { isValidGroupFolder } from './group-folder-rules.js';
 
 export { isValidGroupFolder } from './group-folder-rules.js';

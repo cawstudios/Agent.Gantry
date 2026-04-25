@@ -11,13 +11,13 @@ MyClaw must present one runtime truth across runtime code, CLI, diagnostics, set
 3. `.env` is for secrets and channel credentials only.
 4. Memory runtime behavior is controlled only by `settings.yaml`:
    - `memory.enabled`
-   - `memory.root`
    - `memory.embeddings.enabled`
-   - `memory.embeddings.provider` (`disabled`, `openai`)
+   - `memory.embeddings.provider` (`disabled`, built-in provider ids, or registered provider ids)
    - `memory.embeddings.model`
    - `memory.dreaming.enabled`
-5. `settings.yaml` runtime behavior schema is `channels.*`, `storage.*`, and `memory.*`.
-6. Continuity currently means injected remembered context plus memory tooling; commitment/inbox/digest controls are separate future work.
+5. `settings.yaml` runtime behavior schema is `channels.*`, `storage.*`, `credential_broker.*`, and `memory.*`.
+6. `credential_broker.onecli.postgres.*` declares the OneCLI persistence contract. It stores only the env key and schema name; the URL and encryption key stay in `.env`.
+7. Continuity currently means injected remembered context plus memory tooling; commitment/inbox/digest controls are separate future work.
 
 ## Consequences
 
@@ -28,8 +28,9 @@ MyClaw must present one runtime truth across runtime code, CLI, diagnostics, set
 
 ## Notes
 
-- Host runtime storage provider is `sqlite` via `storage.provider`.
-- Default runtime SQLite database path is `store/myclaw.db`.
-- Default memory SQLite database path is `memory/.cache/memory.db`.
+- Runtime storage is Postgres via `MYCLAW_DATABASE_URL`.
+- Memory data is stored in Postgres.
+- Session transcript archives are operational artifacts under runtime `data/`,
+  not the memory store.
 - Embeddings are optional and disabled by default.
 - Dreaming is optional and disabled by default.

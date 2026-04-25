@@ -1,10 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { RuntimeSettings } from '@core/cli/runtime-settings.js';
+vi.mock('@core/platform/sender-allowlist.js', () => ({
+  loadSenderAllowlist: vi.fn(() => ({})),
+  loadSenderControlAllowlist: vi.fn(() => ({})),
+  shouldDropMessage: vi.fn(() => false),
+  isSenderAllowed: vi.fn(() => true),
+  isSenderControlAllowed: vi.fn(() => true),
+  shouldLogDenied: vi.fn(() => false),
+}));
+
+import { RuntimeSettings } from '@core/config/settings/runtime-settings.js';
 import { ChannelAdapter } from '@core/channels/channel-provider.js';
 import { ChannelProvider } from '@core/channels/provider-registry.js';
-import { createChannelWiring } from '@core/bootstrap/channel-wiring.js';
-import { RuntimeApp } from '@core/bootstrap/runtime-app.js';
+import { AsyncTaskQueue } from '@core/app/bootstrap/async-task-queue.js';
+import { createChannelPersistenceHandlers } from '@core/app/bootstrap/channel-persistence-handlers.js';
+import { createChannelWiring } from '@core/app/bootstrap/channel-wiring.js';
+import { RuntimeApp } from '@core/app/bootstrap/runtime-app.js';
 
 function makeRuntimeSettings(enabled: {
   telegram: boolean;
@@ -22,7 +33,6 @@ function makeRuntimeSettings(enabled: {
     },
     memory: {
       enabled: true,
-      root: 'memory',
       embeddings: {
         enabled: false,
         provider: 'disabled',
@@ -163,8 +173,8 @@ describe('createChannelWiring', () => {
     const app = makeApp({
       'tg:123': { name: 'Main', folder: 'main', isMain: true },
     });
-    const storeMessage = vi.fn();
-    let onMessage: ((chatJid: string, msg: any) => void) | undefined;
+    const storeMessage = vi.fn(async () => {});
+    let onMessage: ((chatJid: string, msg: any) => Promise<void>) | undefined;
 
     const wiring = createChannelWiring(app, {
       channelProviders: [
@@ -173,7 +183,7 @@ describe('createChannelWiring', () => {
           return makeChannel();
         }),
       ],
-      storeMessage,
+      opsRepository: { storeMessage } as any,
       loadSenderAllowlist: vi.fn(() => ({}) as any),
       shouldDropMessage: vi.fn(() => true),
       isSenderAllowed: vi.fn(() => false),
@@ -184,7 +194,7 @@ describe('createChannelWiring', () => {
       makeRuntimeSettings({ telegram: true, slack: false }),
     );
 
-    onMessage?.('tg:123', {
+    await onMessage?.('tg:123', {
       id: 'm1',
       chat_jid: 'tg:123',
       sender: 'user-1',
@@ -202,9 +212,9 @@ describe('createChannelWiring', () => {
     const app = makeApp({
       'tg:123': { name: 'Main', folder: 'main', isMain: true },
     });
-    const storeMessage = vi.fn();
+    const storeMessage = vi.fn(async () => {});
     const handleRemoteControl = vi.fn(async () => {});
-    let onMessage: ((chatJid: string, msg: any) => void) | undefined;
+    let onMessage: ((chatJid: string, msg: any) => Promise<void>) | undefined;
 
     const wiring = createChannelWiring(app, {
       channelProviders: [
@@ -213,7 +223,7 @@ describe('createChannelWiring', () => {
           return makeChannel();
         }),
       ],
-      storeMessage,
+      opsRepository: { storeMessage } as any,
       asRemoteControlCommand: vi.fn(() => ({ command: 'start' }) as any),
       handleRemoteControlCommand: handleRemoteControl as any,
     });
@@ -222,7 +232,7 @@ describe('createChannelWiring', () => {
       makeRuntimeSettings({ telegram: true, slack: false }),
     );
 
-    onMessage?.('tg:123', {
+    await onMessage?.('tg:123', {
       id: 'm2',
       chat_jid: 'tg:123',
       sender: 'user-1',
@@ -239,8 +249,8 @@ describe('createChannelWiring', () => {
     const app = makeApp({
       'tg:123': { name: 'Main', folder: 'main', isMain: true },
     });
-    const storeMessage = vi.fn();
-    let onMessage: ((chatJid: string, msg: any) => void) | undefined;
+    const storeMessage = vi.fn(async () => {});
+    let onMessage: ((chatJid: string, msg: any) => Promise<void>) | undefined;
 
     const wiring = createChannelWiring(app, {
       channelProviders: [
@@ -249,7 +259,7 @@ describe('createChannelWiring', () => {
           return makeChannel();
         }),
       ],
-      storeMessage,
+      opsRepository: { storeMessage } as any,
       asRemoteControlCommand: vi.fn(() => null),
       shouldDropMessage: vi.fn(() => false),
     });
@@ -267,7 +277,73 @@ describe('createChannelWiring', () => {
       timestamp: '2026-01-01T00:00:00.000Z',
     };
 
-    onMessage?.('tg:123', msg);
+    await onMessage?.('tg:123', msg);
+
+    expect(storeMessage).toHaveBeenCalledWith(msg);
+  });
+
+  it('waits for queue capacity when message persistence queue is full', async () => {
+    const app = makeApp({
+      'tg:123': { name: 'Main', folder: 'main', isMain: true },
+    });
+    const storeMessage = vi.fn(async () => {});
+    const warn = vi.fn();
+    const persistenceQueue = new AsyncTaskQueue(1, 1);
+    let releaseFirst!: () => void;
+    expect(
+      persistenceQueue.enqueue(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          }),
+      ),
+    ).toBe(true);
+    const handlers = createChannelPersistenceHandlers({
+      app,
+      resolved: {
+        channelProviders: [],
+        loadSenderAllowlist: vi.fn(() => ({}) as any),
+        loadSenderControlAllowlist: vi.fn(() => ({}) as any),
+        shouldDropMessage: vi.fn(() => false),
+        isSenderAllowed: vi.fn(() => true),
+        isSenderControlAllowed: vi.fn(() => true),
+        shouldLogDenied: vi.fn(() => false),
+        asRemoteControlCommand: vi.fn(() => null),
+        handleRemoteControlCommand: vi.fn(async () => {}),
+        logger: {
+          info: vi.fn(),
+          warn,
+          debug: vi.fn(),
+          error: vi.fn(),
+        },
+        opsRepository: { storeMessage } as any,
+      },
+      ops: () => ({ storeMessage }) as any,
+      findBoundChannel: vi.fn(),
+      persistenceQueue,
+    });
+
+    const msg = {
+      id: 'm4',
+      chat_jid: 'tg:123',
+      sender: 'user-1',
+      sender_name: 'User',
+      content: 'normal message',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    };
+
+    const handled = handlers.onMessage('tg:123', msg);
+
+    await Promise.resolve();
+    expect(storeMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      { chatJid: 'tg:123', queueSize: 1 },
+      'Persistence queue full; waiting to enqueue message persistence',
+    );
+
+    releaseFirst();
+    await handled;
+    await persistenceQueue.waitForIdle();
 
     expect(storeMessage).toHaveBeenCalledWith(msg);
   });
@@ -275,7 +351,7 @@ describe('createChannelWiring', () => {
   it('formats outbound messages using provider registry id for the jid', async () => {
     const app = makeApp();
     const outbound = makeChannel({
-      name: 'legacy-telegram-adapter-name',
+      name: 'telegram-adapter-name',
       ownsJid: vi.fn((jid: string) => jid === 'tg:123'),
     });
 

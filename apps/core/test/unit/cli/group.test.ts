@@ -3,8 +3,38 @@ import os from 'os';
 import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseRuntimeSettings } from '@core/cli/runtime-settings.js';
-import { settingsFilePath } from '@core/cli/runtime-home.js';
+import * as p from '@clack/prompts';
+import {
+  parseRuntimeSettings,
+  validateRuntimeSettings,
+} from '@core/config/settings/runtime-settings.js';
+import { parseRuntimeMemorySnapshotFromRoot } from '@core/config/settings/memory-snapshot.js';
+import { settingsFilePath } from '@core/config/settings/runtime-home.js';
+
+const groupsStore = vi.hoisted(() => new Map<string, any>());
+
+vi.mock('@core/cli/runtime-group-db.js', () => ({
+  openRuntimeGroupDb: async () => ({
+    countRegisteredGroupsByJidPrefix: async (jidPrefix: string) => {
+      const normalized = jidPrefix.endsWith('%')
+        ? jidPrefix.slice(0, -1)
+        : jidPrefix;
+      return Array.from(groupsStore.keys()).filter((jid) =>
+        jid.startsWith(normalized),
+      ).length;
+    },
+    getAllRegisteredGroups: async () =>
+      Object.fromEntries(groupsStore.entries()),
+    setRegisteredGroup: async (jid: string, group: any) => {
+      groupsStore.set(jid, group);
+    },
+    deleteRegisteredGroup: async (jid: string) => {
+      groupsStore.delete(jid);
+    },
+    deleteSession: async () => {},
+    close: async () => {},
+  }),
+}));
 
 function createRuntimeHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-group-test-'));
@@ -12,6 +42,53 @@ function createRuntimeHome(): string {
   fs.mkdirSync(path.join(home, 'agents'), { recursive: true });
   fs.mkdirSync(path.join(home, 'logs'), { recursive: true });
   fs.mkdirSync(path.join(home, 'data'), { recursive: true });
+  fs.writeFileSync(
+    settingsFilePath(home),
+    [
+      'channels:',
+      '  telegram:',
+      '    enabled: false',
+      '    sender_allowlist:',
+      '      default:',
+      '        allow: "*"',
+      '        mode: trigger',
+      '      agents: {}',
+      '      log_denied: true',
+      '    control_allowlist:',
+      '      default: []',
+      '      agents: {}',
+      '  slack:',
+      '    enabled: false',
+      '    sender_allowlist:',
+      '      default:',
+      '        allow: "*"',
+      '        mode: trigger',
+      '      agents: {}',
+      '      log_denied: true',
+      '    control_allowlist:',
+      '      default: []',
+      '      agents: {}',
+      'storage:',
+      '  postgres:',
+      '    url_env: MYCLAW_DATABASE_URL',
+      '    schema: myclaw',
+      'memory:',
+      '  enabled: true',
+      '  embeddings:',
+      '    enabled: false',
+      '    provider: disabled',
+      '    model: text-embedding-3-large',
+      '  dreaming:',
+      '    enabled: false',
+      '  llm:',
+      '    models:',
+      '      extractor: claude-haiku-4-5-20251001',
+      '      dreaming: claude-sonnet-4-6',
+      '      consolidation: claude-sonnet-4-6',
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
   return home;
 }
 
@@ -19,15 +96,206 @@ let runtimeHome = '';
 
 beforeEach(() => {
   vi.resetModules();
+  groupsStore.clear();
   runtimeHome = createRuntimeHome();
   process.env.MYCLAW_HOME = runtimeHome;
+  process.env.MYCLAW_DATABASE_URL =
+    'postgres://user:pass@127.0.0.1:5432/myclaw';
+  process.env.ONECLI_DATABASE_URL =
+    'postgres://onecli:pass@127.0.0.1:5432/myclaw?schema=onecli';
+  process.env.ONECLI_URL = 'http://localhost:10254';
+  process.env.SECRET_ENCRYPTION_KEY =
+    'MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=';
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.MYCLAW_DATABASE_URL;
+  delete process.env.ONECLI_DATABASE_URL;
+  delete process.env.ONECLI_URL;
+  delete process.env.SECRET_ENCRYPTION_KEY;
 });
 
 describe('group CLI commands', () => {
+  it('rejects unsupported runtime and storage settings', () => {
+    const base = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
+
+    expect(() =>
+      parseRuntimeSettings(
+        base.replace('storage:\n', 'runtime:\n  profile: personal\nstorage:\n'),
+      ),
+    ).toThrow(/runtime settings are not supported/);
+
+    expect(() =>
+      parseRuntimeSettings(
+        base.replace('storage:\n', 'storage:\n  provider: sqlite\n'),
+      ),
+    ).toThrow(/storage\.provider is not supported/);
+
+    expect(() =>
+      parseRuntimeSettings(
+        base.replace(
+          '  postgres:\n',
+          '  sqlite:\n    path: ./store/myclaw.db\n  postgres:\n',
+        ),
+      ),
+    ).toThrow(/storage\.sqlite is not supported/);
+
+    expect(() =>
+      parseRuntimeSettings(
+        `${base}\ncredential_broker:\n  vault:\n    url_env: VAULT_URL\n`,
+      ),
+    ).toThrow(/credential_broker\.vault is not supported/);
+  });
+
+  it('defaults partial OneCLI broker persistence settings to the onecli schema', () => {
+    const base = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
+    const settings = parseRuntimeSettings(
+      `${base}\ncredential_broker:\n  onecli:\n    postgres:\n      url_env: CUSTOM_ONECLI_DATABASE_URL\n`,
+    );
+
+    expect(settings.credentialBroker.onecli.postgres).toEqual({
+      urlEnv: 'CUSTOM_ONECLI_DATABASE_URL',
+      schema: 'onecli',
+    });
+  });
+
+  it('rejects mixed-case Postgres schema settings', () => {
+    const base = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
+
+    expect(() =>
+      parseRuntimeSettings(
+        base.replace('    schema: myclaw', '    schema: MyClaw'),
+      ),
+    ).toThrow(
+      /storage\.postgres\.schema must be a lowercase PostgreSQL schema identifier/,
+    );
+
+    expect(() =>
+      parseRuntimeSettings(
+        `${base}\ncredential_broker:\n  onecli:\n    postgres:\n      schema: OneCLI\n`,
+      ),
+    ).toThrow(
+      /credential_broker\.onecli\.postgres\.schema must be a lowercase PostgreSQL schema identifier/,
+    );
+  });
+
+  it('accepts custom lowercase embedding provider ids in settings', () => {
+    const base = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
+    const settings = parseRuntimeSettings(
+      base.replace(
+        '    enabled: false\n    provider: disabled',
+        '    enabled: true\n    provider: custom_provider-1',
+      ),
+    );
+
+    expect(settings.memory.embeddings.provider).toBe('custom_provider-1');
+  });
+
+  it('rejects invalid embedding provider ids in settings', () => {
+    const base = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
+
+    expect(() =>
+      parseRuntimeSettings(
+        base.replace('    provider: disabled', '    provider: CustomProvider'),
+      ),
+    ).toThrow(/memory\.embeddings\.provider must be a lowercase provider id/);
+  });
+
+  it('accepts custom lowercase embedding provider ids in memory snapshots', () => {
+    const snapshot = parseRuntimeMemorySnapshotFromRoot({
+      memory: {
+        enabled: true,
+        embeddings: {
+          enabled: true,
+          provider: 'custom_provider-1',
+          model: 'custom-embedding-model',
+        },
+      },
+    });
+
+    expect(snapshot.embeddingProvider).toBe('custom_provider-1');
+  });
+
+  it('rejects invalid embedding provider ids in memory snapshots', () => {
+    expect(() =>
+      parseRuntimeMemorySnapshotFromRoot({
+        memory: {
+          enabled: true,
+          embeddings: { provider: 'CustomProvider' },
+        },
+      }),
+    ).toThrow(/memory\.embeddings\.provider must be a lowercase provider id/);
+  });
+
+  it('rejects runtime settings when MyClaw and OneCLI use the same database role', () => {
+    process.env.ONECLI_DATABASE_URL =
+      'postgres://user:pass@127.0.0.1:5432/myclaw?schema=onecli';
+
+    const result = validateRuntimeSettings(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'must use different Postgres roles',
+    );
+  });
+
+  it('rejects runtime settings when MyClaw and OneCLI use different databases', () => {
+    process.env.ONECLI_DATABASE_URL =
+      'postgres://onecli:pass@127.0.0.1:5432/other?schema=onecli';
+
+    const result = validateRuntimeSettings(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'same Postgres database',
+    );
+  });
+
+  it('rejects runtime settings when OneCLI database URL is missing', () => {
+    delete process.env.ONECLI_DATABASE_URL;
+
+    const result = validateRuntimeSettings(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'ONECLI_DATABASE_URL is required',
+    );
+  });
+
+  it('rejects runtime settings when OneCLI URL is missing', () => {
+    delete process.env.ONECLI_URL;
+
+    const result = validateRuntimeSettings(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'ONECLI_URL is required',
+    );
+  });
+
+  it('rejects runtime settings when OneCLI encryption key is weak', () => {
+    process.env.SECRET_ENCRYPTION_KEY = 'short';
+
+    const result = validateRuntimeSettings(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'base64-encoded 32-byte',
+    );
+  });
+
+  it('prints current channel connect commands when no agents are registered', async () => {
+    const { runAgentCommand } = await import('@core/cli/group.js');
+    const info = vi.spyOn(p.log, 'info').mockImplementation(() => undefined);
+
+    expect(await runAgentCommand(runtimeHome, ['list'])).toBe(0);
+
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('myclaw channel connect telegram'),
+    );
+  });
+
   it('seeds SOUL.md when adding an agent', async () => {
     const { runAgentCommand } = await import('@core/cli/group.js');
     const jid = `dc:soul-seed-${Date.now().toString(36)}`;

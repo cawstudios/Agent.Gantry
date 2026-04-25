@@ -1,44 +1,35 @@
 #!/usr/bin/env node
 
+import './runtime-home-env-bootstrap.js';
+import fs from 'fs';
+import path from 'path';
+import { pathToFileURL } from 'url';
 import * as p from '@clack/prompts';
 import '../channels/register-builtins.js';
-import {
-  getChannelProvider,
-  listChannelProviders,
-} from '../channels/provider-registry.js';
 
-import {
-  formatDoctorReport,
-  hasProcessableGroupForConfiguredChannel,
-  hasRuntimeConfig,
-  runDoctorWithNetwork,
-} from './doctor.js';
-import { runConfigCommand } from './config.js';
-import { runAgentCommand } from './group.js';
 import {
   clearOnboardingState,
   createInitialState,
   readOnboardingState,
   writeOnboardingState,
 } from './onboarding-state.js';
-import { resolveRuntimeHome } from './runtime-home.js';
+import {
+  resolveRuntimeHome,
+  runtimeErrorLogPath,
+  runtimeLogPath,
+  settingsFilePath,
+} from '../config/settings/runtime-home.js';
 import {
   getServiceStatus,
   installService,
   startService,
   stopService,
-} from './service-manager.js';
+} from '../infrastructure/service/manager.js';
 import {
   formatRuntimePreflightFailure,
-  validateRuntimePreflight,
-} from './runtime-preflight.js';
-import { runProviderConnectCommand } from './provider-connect.js';
-import { runSetupFlow } from './setup-flow.js';
-import { collectRuntimeStatus, formatRuntimeStatus } from './status.js';
-import { ensureRuntimeSettings } from './runtime-settings.js';
-import { runMemoryCommand } from './memory.js';
-import { runMemoryHookCommand } from './memory-hook.js';
-import { runMemoryReplayCommand } from './memory-replay.js';
+  validateRuntimePreflightWithStorage,
+} from '../config/preflight.js';
+import { ensureRuntimeSettings } from '../config/settings/runtime-settings.js';
 
 interface ParsedArgs {
   command: string[];
@@ -47,10 +38,6 @@ interface ParsedArgs {
 }
 
 function usage(): string {
-  const providerConnectCommands = listChannelProviders().map(
-    (provider) => `  myclaw ${provider.id} connect`,
-  );
-
   return [
     'MyClaw CLI',
     '',
@@ -59,37 +46,14 @@ function usage(): string {
     '  myclaw setup',
     '  myclaw doctor',
     '  myclaw status',
-    '  myclaw memory status',
-    '  myclaw memory search <query> [--source=<source>] [--limit=<n>]',
-    '  myclaw memory list [--source=<source>] [--kind=<kind>] [--limit=<n>]',
-    '  myclaw memory show <id>',
-    '  myclaw memory reindex [--full]',
-    '  myclaw memory embeddings <off|openai>',
-    '  myclaw memory dreaming <on|off>',
-    '  myclaw memory health journal-status',
-    '  myclaw memory health divergence',
-    '  myclaw memory counters',
-    '  myclaw memory model set <extractor|dreaming|consolidation> <model>',
-    '  myclaw memory model profile <cheap|balanced|quality>',
-    '  myclaw memory-hook load',
-    '  myclaw memory-hook extract --trigger=<precompact|session-end>',
-    '  myclaw memory-replay --from=<journal-dir> --to=<target.db> [--since=YYYY-MM-DD] [--dry-run] [--overwrite] [--compare-with=<live.db>]',
     '  myclaw start',
+    '  myclaw stop',
     '  myclaw restart',
-    '  myclaw config list',
-    '  myclaw config get <KEY>',
-    '  myclaw config set <KEY> <VALUE>',
-    '  myclaw config unset <KEY>',
-    '  myclaw agent list',
-    '  myclaw agent info <jid|folder>',
-    '  myclaw agent add <jid|chat-id>',
-    '  myclaw agent remove <jid|folder>',
-    '  myclaw agent trigger <jid|folder> <word>',
-    ...providerConnectCommands,
-    '  myclaw service install',
-    '  myclaw service start',
-    '  myclaw service stop',
-    '  myclaw service restart',
+    '  myclaw logs',
+    '  myclaw local setup|start|stop|status|logs|doctor',
+    '  myclaw channel connect <telegram|slack>',
+    '  myclaw channel list',
+    '  myclaw channel doctor',
     '',
     'Options:',
     '  --runtime-home <path>   Override runtime home (default: ~/myclaw)',
@@ -127,6 +91,8 @@ async function runDoctorCommand(
   importMetaUrl: string,
   runtimeHome: string,
 ): Promise<number> {
+  const { formatDoctorReport, runDoctorWithNetwork } =
+    await import('./doctor.js');
   const report = await runDoctorWithNetwork(importMetaUrl, runtimeHome);
   p.note(formatDoctorReport(report), 'Doctor');
   return report.ok ? 0 : 1;
@@ -136,21 +102,64 @@ async function runStatusCommand(
   importMetaUrl: string,
   runtimeHome: string,
 ): Promise<number> {
-  const summary = collectRuntimeStatus(importMetaUrl, runtimeHome);
+  const { collectRuntimeStatus, formatRuntimeStatus } =
+    await import('./status.js');
+  const summary = await collectRuntimeStatus(importMetaUrl, runtimeHome);
   p.note(formatRuntimeStatus(summary), 'Status');
   return summary.doctor.ok ? 0 : 1;
 }
 
 async function runStartCommand(runtimeHome: string): Promise<number> {
-  const validation = validateRuntimePreflight(runtimeHome);
+  const validation = await validateRuntimePreflightWithStorage(runtimeHome);
   if (!validation.ok && validation.failure) {
     p.log.error(formatRuntimePreflightFailure(validation.failure));
     return 1;
   }
 
   process.env.MYCLAW_HOME = runtimeHome;
-  const runtime = await import('../index.js');
+  const runtime = await import('../app/index.js');
   await runtime.startMyClawRuntime();
+  return 0;
+}
+
+async function runStopCommand(runtimeHome: string): Promise<number> {
+  const serviceOutcome = stopService(runtimeHome);
+  if (!serviceOutcome.ok) {
+    const message = `Runtime stop failed: ${serviceOutcome.message}`;
+    p.log.error(message);
+    return 1;
+  } else {
+    p.log.success(serviceOutcome.message);
+  }
+  return 0;
+}
+
+function tailFile(filePath: string, maxBytes = 20_000): string {
+  try {
+    const stat = fs.statSync(filePath);
+    const start = Math.max(0, stat.size - maxBytes);
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const buffer = Buffer.alloc(stat.size - start);
+      fs.readSync(fd, buffer, 0, buffer.length, start);
+      return buffer.toString('utf-8').trim() || '<no logs>';
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return '<log file not found>';
+  }
+}
+
+async function runLogsCommand(runtimeHome: string): Promise<number> {
+  const logPath = runtimeLogPath(runtimeHome);
+  const errorLogPath = runtimeErrorLogPath(runtimeHome);
+  p.note(tailFile(logPath), `Runtime Log (${path.basename(logPath)})`);
+  p.note(
+    tailFile(errorLogPath),
+    `Runtime Error Log (${path.basename(errorLogPath)})`,
+  );
+
   return 0;
 }
 
@@ -179,7 +188,7 @@ function restartService(runtimeHome: string): ReturnType<typeof stopService> {
 }
 
 async function runRestartCommand(runtimeHome: string): Promise<number> {
-  const validation = validateRuntimePreflight(runtimeHome);
+  const validation = await validateRuntimePreflightWithStorage(runtimeHome);
   if (!validation.ok && validation.failure) {
     p.log.error(formatRuntimePreflightFailure(validation.failure));
     return 1;
@@ -209,7 +218,7 @@ async function runServiceCommand(
   }
 
   if (action === 'start') {
-    const validation = validateRuntimePreflight(runtimeHome);
+    const validation = await validateRuntimePreflightWithStorage(runtimeHome);
     if (!validation.ok && validation.failure) {
       p.log.error(formatRuntimePreflightFailure(validation.failure));
       return 1;
@@ -234,7 +243,7 @@ async function runServiceCommand(
   }
 
   if (action === 'restart') {
-    const validation = validateRuntimePreflight(runtimeHome);
+    const validation = await validateRuntimePreflightWithStorage(runtimeHome);
     if (!validation.ok && validation.failure) {
       p.log.error(formatRuntimePreflightFailure(validation.failure));
       return 1;
@@ -314,6 +323,7 @@ async function runSetupCommand(
     }
   }
 
+  const { runSetupFlow } = await import('./setup-flow.js');
   const result = await runSetupFlow({
     importMetaUrl: import.meta.url,
     runtimeHome,
@@ -333,11 +343,17 @@ async function runSetupCommand(
 
 async function runSmartEntrypoint(runtimeHome: string): Promise<number> {
   const state = readOnboardingState(runtimeHome);
-  const validation = validateRuntimePreflight(runtimeHome);
+  if (!fs.existsSync(settingsFilePath(runtimeHome))) {
+    return runSetupCommand(runtimeHome);
+  }
+
+  const validation = await validateRuntimePreflightWithStorage(runtimeHome);
+  const { hasProcessableGroupForConfiguredChannel, hasRuntimeConfig } =
+    await import('./doctor.js');
   const isReady =
     validation.ok &&
     hasRuntimeConfig(runtimeHome) &&
-    hasProcessableGroupForConfiguredChannel(runtimeHome);
+    (await hasProcessableGroupForConfiguredChannel(runtimeHome));
 
   if (state?.status === 'in_progress') {
     return runSetupCommand(runtimeHome);
@@ -350,8 +366,8 @@ async function runSmartEntrypoint(runtimeHome: string): Promise<number> {
   return runStatusCommand(import.meta.url, runtimeHome);
 }
 
-async function main(): Promise<number> {
-  const parsed = parseArgs(process.argv.slice(2));
+export async function main(argv = process.argv.slice(2)): Promise<number> {
+  const parsed = parseArgs(argv);
   if (parsed.help) {
     console.log(usage());
     return 0;
@@ -362,16 +378,20 @@ async function main(): Promise<number> {
   const subcommand = rest[0];
 
   if (command === 'memory-hook') {
+    const { runMemoryHookCommand } = await import('./memory-hook.js');
     return runMemoryHookCommand(rest);
-  }
-
-  if (command === 'memory-replay') {
-    return runMemoryReplayCommand(rest);
   }
 
   // Allow `myclaw doctor` to run even when settings.yaml is malformed so it can
   // report actionable recovery guidance instead of failing at top-level parse.
-  if (command !== 'doctor') {
+  if (
+    command &&
+    command !== 'doctor' &&
+    command !== 'setup' &&
+    command !== 'local' &&
+    command !== 'stop' &&
+    command !== 'logs'
+  ) {
     ensureRuntimeSettings(runtimeHome);
   }
 
@@ -391,7 +411,18 @@ async function main(): Promise<number> {
     return runStatusCommand(import.meta.url, runtimeHome);
   }
 
+  if (command === 'local') {
+    const { runLocalCommand } = await import('./local.js');
+    return runLocalCommand(runtimeHome, rest);
+  }
+
+  if (command === 'channel') {
+    const { runChannelCommand } = await import('./channel.js');
+    return runChannelCommand(import.meta.url, runtimeHome, rest);
+  }
+
   if (command === 'memory') {
+    const { runMemoryCommand } = await import('./memory.js');
     return runMemoryCommand(runtimeHome, rest);
   }
 
@@ -399,20 +430,26 @@ async function main(): Promise<number> {
     return runStartCommand(runtimeHome);
   }
 
+  if (command === 'stop') {
+    return runStopCommand(runtimeHome);
+  }
+
   if (command === 'restart') {
     return runRestartCommand(runtimeHome);
   }
 
+  if (command === 'logs') {
+    return runLogsCommand(runtimeHome);
+  }
+
   if (command === 'agent') {
+    const { runAgentCommand } = await import('./group.js');
     return runAgentCommand(runtimeHome, rest);
   }
 
   if (command === 'config') {
+    const { runConfigCommand } = await import('./config.js');
     return runConfigCommand(runtimeHome, rest);
-  }
-
-  if (subcommand === 'connect' && getChannelProvider(command)) {
-    return runProviderConnectCommand(runtimeHome, command);
   }
 
   if (command === 'service' && subcommand) {
@@ -423,12 +460,17 @@ async function main(): Promise<number> {
   return 1;
 }
 
-main()
-  .then((code) => {
-    process.exit(code);
-  })
-  .catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    p.log.error(`MyClaw CLI failed: ${message}`);
-    process.exit(1);
-  });
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main()
+    .then((code) => {
+      process.exit(code);
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      p.log.error(`MyClaw CLI failed: ${message}`);
+      process.exit(1);
+    });
+}

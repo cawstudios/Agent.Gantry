@@ -14,13 +14,16 @@ function writeMemorySettings(runtimeHome: string): void {
     [
       'memory:',
       '  enabled: true',
-      '  root: memory',
       '  embeddings:',
       '    enabled: false',
       '    provider: disabled',
       '    model: text-embedding-3-large',
       '  dreaming:',
       '    enabled: false',
+      'storage:',
+      '  postgres:',
+      '    url_env: MYCLAW_DATABASE_URL',
+      '    schema: myclaw',
       '',
     ].join('\n'),
     'utf-8',
@@ -31,13 +34,15 @@ beforeEach(() => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-memory-ipc-'));
   tempRoots.push(root);
   process.env.MYCLAW_HOME = root;
+  writeMemorySettings(root);
 });
 
 afterEach(async () => {
   vi.resetModules();
   try {
-    const { MemoryService } = await import('@core/memory/memory-service.js');
-    MemoryService.closeInstance();
+    const { AppMemoryService } =
+      await import('@core/memory/app-memory-service.js');
+    AppMemoryService.resetForTest();
   } catch {
     // Best-effort teardown.
   }
@@ -65,6 +70,13 @@ describe('memory IPC provider integration', () => {
     process.env.MEMORY_SEMANTIC_DEDUP_ENABLED = 'false';
 
     vi.resetModules();
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
+        getInstance: () => ({
+          save: vi.fn(async () => ({ id: 'mem_1' })),
+        }),
+      },
+    }));
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
 
     const response = await processMemoryRequest(
@@ -81,17 +93,17 @@ describe('memory IPC provider integration', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(response.provider).toBe('sqlite');
+    expect(response.provider).toBe('postgres');
   });
 
   it('returns IPC error responses when memory service init fails', async () => {
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: {
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
         getInstance: () => {
           throw new Error('memory init failed');
         },
-        closeInstance: () => undefined,
+        resetForTest: () => undefined,
       },
     }));
 
@@ -110,17 +122,17 @@ describe('memory IPC provider integration', () => {
     expect(response.provider).toBe('uninitialized');
     expect(response.error).toContain('memory init failed');
 
-    vi.doUnmock('@core/memory/memory-service.js');
+    vi.doUnmock('@core/memory/app-memory-service.js');
   });
 
   it('rejects invalid memory IPC requestId before processing', async () => {
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: {
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
         getInstance: () => ({
-          getProviderName: () => 'mock-provider',
+          search: vi.fn(),
         }),
-        closeInstance: () => undefined,
+        resetForTest: () => undefined,
       },
     }));
 
@@ -137,19 +149,18 @@ describe('memory IPC provider integration', () => {
 
     expect(response.ok).toBe(false);
     expect(response.error).toContain('Invalid memory IPC requestId');
-    vi.doUnmock('@core/memory/memory-service.js');
+    vi.doUnmock('@core/memory/app-memory-service.js');
   });
 
   it('rejects malformed memory_save payloads before calling memory service', async () => {
     const saveMemory = vi.fn();
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: {
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
         getInstance: () => ({
-          getProviderName: () => 'mock',
-          saveMemory,
+          save: saveMemory,
         }),
-        closeInstance: () => undefined,
+        resetForTest: () => undefined,
       },
     }));
 
@@ -170,19 +181,18 @@ describe('memory IPC provider integration', () => {
     expect(response.ok).toBe(false);
     expect(response.error).toContain('memory_save requires key and value');
     expect(saveMemory).not.toHaveBeenCalled();
-    vi.doUnmock('@core/memory/memory-service.js');
+    vi.doUnmock('@core/memory/app-memory-service.js');
   });
 
   it('ignores cross-group overrides in IPC memory_search payloads', async () => {
     const search = vi.fn().mockResolvedValue([]);
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: {
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
         getInstance: () => ({
-          getProviderName: () => 'mock',
           search,
         }),
-        closeInstance: () => undefined,
+        resetForTest: () => undefined,
       },
     }));
 
@@ -202,21 +212,25 @@ describe('memory IPC provider integration', () => {
 
     expect(response.ok).toBe(true);
     expect(search).toHaveBeenCalledWith(
-      expect.objectContaining({ query: 'status', groupFolder: 'main-group' }),
+      expect.objectContaining({
+        query: 'status',
+        appId: 'personal',
+        agentId: 'main-group',
+        groupId: 'main-group',
+      }),
     );
-    vi.doUnmock('@core/memory/memory-service.js');
+    vi.doUnmock('@core/memory/app-memory-service.js');
   });
 
   it('scopes IPC memory_search to trusted thread context', async () => {
     const search = vi.fn().mockResolvedValue([]);
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: {
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
         getInstance: () => ({
-          getProviderName: () => 'mock',
           search,
         }),
-        closeInstance: () => undefined,
+        resetForTest: () => undefined,
       },
     }));
 
@@ -236,23 +250,23 @@ describe('memory IPC provider integration', () => {
     expect(search).toHaveBeenCalledWith(
       expect.objectContaining({
         query: 'status',
-        groupFolder: 'main-group',
+        agentId: 'main-group',
+        groupId: 'main-group',
         threadId: 'trusted-thread',
       }),
     );
-    vi.doUnmock('@core/memory/memory-service.js');
+    vi.doUnmock('@core/memory/app-memory-service.js');
   });
 
   it('ignores caller-supplied topic overrides in IPC memory_save payloads', async () => {
     const saveMemory = vi.fn().mockResolvedValue({ id: 'mem-1' });
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: {
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
         getInstance: () => ({
-          getProviderName: () => 'mock',
-          saveMemory,
+          save: saveMemory,
         }),
-        closeInstance: () => undefined,
+        resetForTest: () => undefined,
       },
     }));
 
@@ -274,10 +288,9 @@ describe('memory IPC provider integration', () => {
 
     expect(response.ok).toBe(true);
     expect(saveMemory).toHaveBeenCalledWith(
-      expect.objectContaining({ topic_id: 'trusted-thread' }),
       expect.objectContaining({ threadId: 'trusted-thread' }),
     );
-    vi.doUnmock('@core/memory/memory-service.js');
+    vi.doUnmock('@core/memory/app-memory-service.js');
   });
 
   it('memory_search succeeds when embeddings are disabled by default', async () => {
@@ -288,6 +301,13 @@ describe('memory IPC provider integration', () => {
     process.env.MEMORY_SEMANTIC_DEDUP_ENABLED = 'false';
 
     vi.resetModules();
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
+        getInstance: () => ({
+          search: vi.fn(async () => []),
+        }),
+      },
+    }));
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
 
     const response = await processMemoryRequest(
@@ -302,7 +322,7 @@ describe('memory IPC provider integration', () => {
 
     expect(response.ok).toBe(true);
     expect(response.requestId).toBe('req-search');
-    expect(response.provider).toBe('sqlite');
+    expect(response.provider).toBe('postgres');
   });
 
   it('returns error for empty search query', async () => {
@@ -355,23 +375,30 @@ describe('memory IPC provider integration', () => {
 /* ------------------------------------------------------------------ */
 describe('processMemoryRequest additional branches', () => {
   function mockMemoryService(overrides: Record<string, unknown> = {}) {
+    const save =
+      overrides.save ||
+      overrides.saveMemory ||
+      overrides.saveProcedure ||
+      vi.fn().mockResolvedValue({ id: 'mem-1' });
+    const patch =
+      overrides.patch ||
+      overrides.patchMemory ||
+      overrides.patchProcedure ||
+      vi.fn().mockResolvedValue({ id: 'patched-mem' });
+    const triggerDreaming =
+      overrides.triggerDreaming ||
+      overrides.consolidateGroupMemory ||
+      overrides.runDreamingSweep ||
+      vi.fn().mockResolvedValue({ runId: 'dream-1' });
     return {
       getInstance: () => ({
-        getProviderName: () => 'mock-provider',
         search: vi.fn(),
-        saveMemory: vi.fn(),
-        patchMemory: vi.fn().mockReturnValue({ id: 'patched-mem' }),
-        consolidateGroupMemory: vi.fn().mockResolvedValue({ merged: 1 }),
-        runDreamingSweep: vi
-          .fn()
-          .mockResolvedValue({ promoted: 2, decayed: 1 }),
-        saveProcedure: vi.fn().mockReturnValue({ id: 'proc-1' }),
-        patchProcedure: vi.fn().mockReturnValue({ id: 'proc-patched' }),
-        ingestGroupSources: vi.fn(),
-        ingestGlobalKnowledge: vi.fn(),
+        save,
+        patch,
+        triggerDreaming,
         ...overrides,
       }),
-      closeInstance: () => undefined,
+      resetForTest: () => undefined,
     };
   }
 
@@ -380,8 +407,8 @@ describe('processMemoryRequest additional branches', () => {
     const patchMemory = vi
       .fn()
       .mockReturnValue({ id: 'patched-mem', version: 2 });
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockMemoryService({ patchMemory }),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ patchMemory }),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -397,22 +424,27 @@ describe('processMemoryRequest additional branches', () => {
 
     expect(response.ok).toBe(true);
     expect(response.requestId).toBe('req-patch');
-    expect(response.provider).toBe('mock-provider');
+    expect(response.provider).toBe('postgres');
     expect((response.data as { memory: unknown }).memory).toEqual({
       id: 'patched-mem',
       version: 2,
     });
     expect(patchMemory).toHaveBeenCalledWith(
-      { id: 'mem-1', expected_version: 1, value: 'updated' },
-      { isMain: false, groupFolder: 'team', actor: 'mcp-tool' },
+      expect.objectContaining({
+        id: 'mem-1',
+        appId: 'personal',
+        agentId: 'team',
+        value: 'updated',
+        expectedVersion: 1,
+      }),
     );
   });
 
   it('handles memory_consolidate action (non-main)', async () => {
     vi.resetModules();
     const consolidateGroupMemory = vi.fn().mockResolvedValue({ merged: 3 });
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockMemoryService({ consolidateGroupMemory }),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ consolidateGroupMemory }),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -434,14 +466,20 @@ describe('processMemoryRequest additional branches', () => {
       },
     );
     // non-main agents cannot override groupFolder
-    expect(consolidateGroupMemory).toHaveBeenCalledWith('team');
+    expect(consolidateGroupMemory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'personal',
+        agentId: 'team',
+        groupId: 'team',
+      }),
+    );
   });
 
   it('scopes memory_consolidate to source group even for main', async () => {
     vi.resetModules();
     const consolidateGroupMemory = vi.fn().mockResolvedValue({ merged: 5 });
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockMemoryService({ consolidateGroupMemory }),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ consolidateGroupMemory }),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -456,7 +494,13 @@ describe('processMemoryRequest additional branches', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(consolidateGroupMemory).toHaveBeenCalledWith('team');
+    expect(consolidateGroupMemory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'personal',
+        agentId: 'team',
+        groupId: 'team',
+      }),
+    );
   });
 
   it('handles memory_dream action (non-main)', async () => {
@@ -464,8 +508,8 @@ describe('processMemoryRequest additional branches', () => {
     const runDreamingSweep = vi
       .fn()
       .mockResolvedValue({ promoted: 2, decayed: 1 });
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockMemoryService({ runDreamingSweep }),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ runDreamingSweep }),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -486,7 +530,13 @@ describe('processMemoryRequest additional branches', () => {
       decayed: 1,
     });
     // non-main: ignores requested group_folder
-    expect(runDreamingSweep).toHaveBeenCalledWith('team');
+    expect(runDreamingSweep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'personal',
+        agentId: 'team',
+        groupId: 'team',
+      }),
+    );
   });
 
   it('scopes memory_dream to source group even for main', async () => {
@@ -494,8 +544,8 @@ describe('processMemoryRequest additional branches', () => {
     const runDreamingSweep = vi
       .fn()
       .mockResolvedValue({ promoted: 4, decayed: 0 });
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockMemoryService({ runDreamingSweep }),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ runDreamingSweep }),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -510,7 +560,13 @@ describe('processMemoryRequest additional branches', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(runDreamingSweep).toHaveBeenCalledWith('team');
+    expect(runDreamingSweep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'personal',
+        agentId: 'team',
+        groupId: 'team',
+      }),
+    );
   });
 
   it('handles procedure_save action', async () => {
@@ -518,8 +574,8 @@ describe('processMemoryRequest additional branches', () => {
     const saveProcedure = vi
       .fn()
       .mockReturnValue({ id: 'proc-1', title: 'Deploy' });
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockMemoryService({ saveProcedure }),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ saveProcedure }),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -540,8 +596,13 @@ describe('processMemoryRequest additional branches', () => {
       title: 'Deploy',
     });
     expect(saveProcedure).toHaveBeenCalledWith(
-      { title: 'Deploy', body: 'steps...', tags: ['devops'] },
-      { isMain: true, groupFolder: 'team', actor: 'mcp-tool' },
+      expect.objectContaining({
+        appId: 'personal',
+        agentId: 'team',
+        groupId: 'team',
+        key: 'procedure:Deploy',
+        value: 'steps...',
+      }),
     );
   });
 
@@ -550,8 +611,8 @@ describe('processMemoryRequest additional branches', () => {
     const saveProcedure = vi
       .fn()
       .mockReturnValue({ id: 'proc-1', title: 'Deploy' });
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockMemoryService({ saveProcedure }),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ saveProcedure }),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -568,7 +629,6 @@ describe('processMemoryRequest additional branches', () => {
 
     expect(response.ok).toBe(true);
     expect(saveProcedure).toHaveBeenCalledWith(
-      expect.objectContaining({ topic_id: 'trusted-thread' }),
       expect.objectContaining({ threadId: 'trusted-thread' }),
     );
   });
@@ -578,8 +638,8 @@ describe('processMemoryRequest additional branches', () => {
     const patchProcedure = vi
       .fn()
       .mockReturnValue({ id: 'proc-patched', version: 2 });
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockMemoryService({ patchProcedure }),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ patchProcedure }),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -600,15 +660,20 @@ describe('processMemoryRequest additional branches', () => {
       version: 2,
     });
     expect(patchProcedure).toHaveBeenCalledWith(
-      { id: 'proc-1', expected_version: 1, body: 'updated steps' },
-      { isMain: false, groupFolder: 'team', actor: 'mcp-tool' },
+      expect.objectContaining({
+        id: 'proc-1',
+        appId: 'personal',
+        agentId: 'team',
+        value: 'updated steps',
+        expectedVersion: 1,
+      }),
     );
   });
 
   it('returns error when memory_patch throws', async () => {
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockMemoryService({
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({
         patchMemory: () => {
           throw new Error('version conflict');
         },
@@ -628,30 +693,36 @@ describe('processMemoryRequest additional branches', () => {
 
     expect(response.ok).toBe(false);
     expect(response.error).toContain('version conflict');
-    expect(response.provider).toBe('mock-provider');
+    expect(response.provider).toBe('postgres');
   });
 });
 
 describe('processMemoryRequest validation branches', () => {
   function mockValidatedService(overrides: Record<string, unknown> = {}) {
+    const save =
+      overrides.save ||
+      overrides.saveMemory ||
+      vi.fn().mockResolvedValue({ id: 'mem-1' });
+    const patch =
+      overrides.patch ||
+      overrides.patchMemory ||
+      vi.fn().mockResolvedValue({ id: 'mem-1' });
     return {
       getInstance: () => ({
-        getProviderName: () => 'mock-provider',
-        saveMemory: vi.fn().mockResolvedValue({ id: 'mem-1' }),
-        patchMemory: vi.fn().mockReturnValue({ id: 'mem-1' }),
-        saveProcedure: vi.fn().mockReturnValue({ id: 'proc-1' }),
-        patchProcedure: vi.fn().mockReturnValue({ id: 'proc-1' }),
+        save,
+        patch,
+        triggerDreaming: vi.fn().mockResolvedValue({ runId: 'dream-1' }),
         ...overrides,
       }),
-      closeInstance: () => undefined,
+      resetForTest: () => undefined,
     };
   }
 
   it('rejects removed memory kind recent_work', async () => {
     vi.resetModules();
     const saveMemory = vi.fn().mockResolvedValue({ id: 'mem-recent' });
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockValidatedService({ saveMemory }),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockValidatedService({ saveMemory }),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -672,14 +743,13 @@ describe('processMemoryRequest validation branches', () => {
     expect(response.ok).toBe(true);
     expect(saveMemory).toHaveBeenCalledWith(
       expect.not.objectContaining({ kind: 'recent_work' }),
-      { isMain: false, groupFolder: 'team', actor: 'mcp-tool' },
     );
   });
 
   it('rejects non-object payloads for memory_save', async () => {
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockValidatedService(),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockValidatedService(),
     }));
 
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
@@ -699,8 +769,8 @@ describe('processMemoryRequest validation branches', () => {
 
   it('rejects non-object payloads and missing required fields for memory_patch', async () => {
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockValidatedService(),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockValidatedService(),
     }));
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
 
@@ -733,8 +803,8 @@ describe('processMemoryRequest validation branches', () => {
 
   it('rejects invalid procedure_save payload shapes', async () => {
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockValidatedService(),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockValidatedService(),
     }));
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
 
@@ -769,8 +839,8 @@ describe('processMemoryRequest validation branches', () => {
 
   it('rejects invalid procedure_patch payload shapes', async () => {
     vi.resetModules();
-    vi.doMock('@core/memory/memory-service.js', () => ({
-      MemoryService: mockValidatedService(),
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockValidatedService(),
     }));
     const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
 
@@ -821,7 +891,7 @@ describe('writeMemoryResponse', () => {
     const response = {
       ok: true as const,
       requestId: 'req-42',
-      provider: 'sqlite',
+      provider: 'postgres',
       data: { results: [1, 2, 3] },
     };
 

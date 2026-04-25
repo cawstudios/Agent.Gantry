@@ -2,9 +2,7 @@ import {
   MEMORY_EMBED_BATCH_SIZE,
   MEMORY_EMBED_MODEL,
   MEMORY_EMBED_PROVIDER,
-  MEMORY_VECTOR_DIMENSIONS,
-  OPENAI_API_KEY,
-} from '../core/config.js';
+} from '../config/index.js';
 
 interface EmbeddingResponse {
   data: Array<{ embedding: number[] }>;
@@ -25,7 +23,7 @@ export class OpenAIEmbeddingClient implements EmbeddingProvider {
   private readonly apiKey: string | null;
   private readonly model: string;
 
-  constructor(apiKey = OPENAI_API_KEY, model = MEMORY_EMBED_MODEL) {
+  constructor(apiKey: string | null = null, model = MEMORY_EMBED_MODEL) {
     this.apiKey = apiKey;
     this.model = model;
   }
@@ -36,7 +34,9 @@ export class OpenAIEmbeddingClient implements EmbeddingProvider {
 
   validateConfiguration(): void {
     if (!this.apiKey?.trim()) {
-      throw new Error('OPENAI_API_KEY is required for memory embeddings');
+      throw new Error(
+        'Brokered Model Access is required for external memory embeddings',
+      );
     }
     if (!this.model.trim()) {
       throw new Error('MEMORY_EMBED_MODEL is required for memory embeddings');
@@ -111,12 +111,12 @@ export class DisabledEmbeddingClient implements EmbeddingProvider {
   }
 
   async embedMany(texts: string[]): Promise<number[][]> {
-    const zeroVector = new Array<number>(MEMORY_VECTOR_DIMENSIONS).fill(0);
-    return texts.map(() => [...zeroVector]);
+    if (texts.length === 0) return [];
+    throw new Error('memory embeddings are disabled');
   }
 
   async embedOne(_text: string): Promise<number[]> {
-    return new Array<number>(MEMORY_VECTOR_DIMENSIONS).fill(0);
+    throw new Error('memory embeddings are disabled');
   }
 }
 
@@ -125,6 +125,14 @@ export function registerEmbeddingProvider(
   factory: EmbeddingProviderFactory,
 ): void {
   embeddingProviderFactories.set(name, factory);
+}
+
+export function isEmbeddingProviderRegistered(name: string): boolean {
+  return embeddingProviderFactories.has(name);
+}
+
+export function listEmbeddingProviderNames(): string[] {
+  return [...embeddingProviderFactories.keys()].sort();
 }
 
 export function createEmbeddingProvider(

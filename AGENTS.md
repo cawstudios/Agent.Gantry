@@ -7,11 +7,12 @@ Messages are ingested from channels, persisted in the configured runtime store, 
 
 Primary surfaces:
 
-- `apps/core/src/index.ts`: orchestrator loop and runtime wiring
+- `apps/core/src/index.ts`: package/runtime entrypoint
+- `apps/core/src/app/bootstrap/runtime-app.ts`: runtime wiring and lifecycle
 - `apps/core/src/runtime/group-queue.ts`: per-group queue and retry behavior
 - `apps/core/src/runtime/agent-spawn.ts`: host execution path
 - `apps/core/src/session/session-commands.ts`: host-managed slash commands
-- `apps/core/src/storage/db.ts`: persistence for groups, messages, tasks, and sessions
+- `apps/core/src/infrastructure/postgres/schema/`: Postgres persistence for groups, messages, jobs, control events, and memory
 
 ## Mandatory Read Order
 
@@ -19,7 +20,6 @@ Primary surfaces:
 2. [WORKFLOW.md](WORKFLOW.md)
 3. [docs/FACTORY.md](docs/FACTORY.md)
 4. [docs/QUALITY.md](docs/QUALITY.md)
-5. [CONTRIBUTING.md](CONTRIBUTING.md)
 
 Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands and required artifacts.
 

@@ -1,53 +1,10 @@
-import { installGlobalErrorHandlers, logger } from './core/logger.js';
-import { createChannelWiring } from './bootstrap/channel-wiring.js';
-import { getDefaultRuntimeApp } from './bootstrap/runtime-app.js';
-import { startRuntimeServices } from './bootstrap/runtime-services.js';
-import { installShutdownHandlers } from './bootstrap/shutdown.js';
-import { runStartup } from './bootstrap/startup.js';
+import {
+  installGlobalErrorHandlers,
+  logger,
+} from './infrastructure/logging/logger.js';
+import { startMyClawRuntime } from './app/index.js';
 
-export { escapeXml, formatMessages } from './messaging/router.js';
-export {
-  getAvailableGroups,
-  _setRegisteredGroups,
-} from './bootstrap/runtime-app.js';
-
-export async function startMyClawRuntime(): Promise<void> {
-  const app = getDefaultRuntimeApp();
-  const channelWiring = createChannelWiring(app);
-  app.setChannelRuntime({
-    hasChannel: channelWiring.hasChannel,
-    supportsStreaming: channelWiring.supportsStreaming,
-    supportsProgress: channelWiring.supportsProgress,
-    sendMessage: (chatJid, rawText, options) =>
-      channelWiring.sendMessage(chatJid, rawText, {
-        messageOptions: options,
-      }),
-    sendStreamingChunk: channelWiring.sendStreamingChunk,
-    resetStreaming: channelWiring.resetStreaming,
-    setTyping: channelWiring.setTyping,
-    sendProgressUpdate: channelWiring.sendProgressUpdate,
-  });
-
-  const { runtimeSettings } = await runStartup(app);
-
-  installShutdownHandlers({
-    queue: app.queue,
-    disconnectChannels: channelWiring.disconnectChannels,
-  });
-
-  await channelWiring.connectEnabledChannels(runtimeSettings);
-
-  if (!channelWiring.hasConnectedChannels()) {
-    logger.warn(
-      'No channels connected; runtime will continue without inbound/outbound channel delivery',
-    );
-  }
-
-  startRuntimeServices({
-    app,
-    channelWiring,
-  });
-}
+export * from './app/index.js';
 
 const isDirectRun =
   process.argv[1] &&

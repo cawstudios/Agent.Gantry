@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { settingsFilePath } from '@core/cli/runtime-home.js';
+import { settingsFilePath } from '@core/config/settings/runtime-home.js';
 
 function createRuntimeHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-service-test-'));
@@ -32,7 +32,7 @@ async function loadServiceManagerWithMocks(
   vi.spyOn(os, 'homedir').mockReturnValue(options.homeDir ?? actualHomeDir);
   const platform = options.platform ?? 'unknown';
   const systemdUser = options.hasSystemdUser ?? false;
-  vi.doMock('@core/cli/platform.js', () => ({
+  vi.doMock('@core/infrastructure/service/platform.js', () => ({
     detectPlatform: () => platform,
     hasSystemdUser: () => systemdUser,
     tryExec: tryExecMock,
@@ -45,7 +45,7 @@ async function loadServiceManagerWithMocks(
       spawn: spawnMock,
     };
   });
-  return import('@core/cli/service-manager.js');
+  return import('@core/infrastructure/service/manager.js');
 }
 
 function writeFallbackMetadata(runtimeHome: string): string {
@@ -96,6 +96,35 @@ describe('service manager background start', () => {
     const installedAt = outcome.message.match(/at (.+)\.$/)?.[1];
     expect(installedAt).toBeTruthy();
     expect(fs.existsSync(installedAt!)).toBe(true);
+    const unit = fs.readFileSync(installedAt!, 'utf-8');
+    expect(unit).not.toContain('ExecStartPre=');
+    expect(unit).not.toContain('--local-services-start');
+    expect(unit).toContain('Environment="MYCLAW_HOME=');
+    expect(unit).toContain('WorkingDirectory="');
+    expect(unit).toContain('StandardOutput="append:');
+  });
+
+  it('rejects control characters in systemd unit values', async () => {
+    const runtimeHome = `${createRuntimeHome()}\nInjected=bad`;
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-home-'));
+    const tryExecMock = vi
+      .fn()
+      .mockReturnValue({ ok: true, stdout: '', stderr: '' });
+
+    const mod = await loadServiceManagerWithMocks(vi.fn(), tryExecMock, {
+      platform: 'linux',
+      hasSystemdUser: true,
+      homeDir,
+      runtimeHome,
+    });
+    const outcome = mod.installService(import.meta.url, runtimeHome);
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.message).toMatch(/control characters/);
+    expect(tryExecMock).not.toHaveBeenCalledWith('systemctl', [
+      '--user',
+      'daemon-reload',
+    ]);
   });
 
   it('starts systemd user service on linux', async () => {
@@ -122,6 +151,26 @@ describe('service manager background start', () => {
     ]);
   });
 
+  it('installs nohup service script without local services prestart on linux without systemd', async () => {
+    const runtimeHome = createRuntimeHome();
+    const mod = await loadServiceManagerWithMocks(vi.fn(), undefined, {
+      platform: 'linux',
+      hasSystemdUser: false,
+      runtimeHome,
+    });
+
+    const outcome = mod.installService(import.meta.url, runtimeHome);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.kind).toBe('nohup');
+    const script = fs.readFileSync(
+      path.join(runtimeHome, 'start-myclaw.sh'),
+      'utf-8',
+    );
+    expect(script).not.toContain('--local-services-start');
+    expect(script).toContain('nohup');
+  });
+
   it('installs launchd service with MYCLAW_HOME in the plist', async () => {
     const runtimeHome = createRuntimeHome();
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-home-'));
@@ -146,6 +195,8 @@ describe('service manager background start', () => {
     const plist = fs.readFileSync(plistPath, 'utf-8');
     expect(plist).toContain('<key>MYCLAW_HOME</key>');
     expect(plist).toContain(`<string>${runtimeHome}</string>`);
+    expect(plist).not.toContain('--local-services-start');
+    expect(plist).not.toContain('&quot;');
     expect(plist).not.toContain('<key>AGENT_ROOT</key>');
   });
 

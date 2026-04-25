@@ -6,7 +6,7 @@ import type {
   StreamingChunkOptions,
   UserQuestionRequest,
   UserQuestionResponse,
-} from '@core/core/types.js';
+} from '@core/domain/types.js';
 
 export interface OutboundMessageRecord {
   chatJid: string;

@@ -4,12 +4,21 @@ import type { ArcExtractionInput } from '@core/memory/extractor-types.js';
 import { LlmMemoryExtractionProvider } from '@core/memory/extractor-llm.js';
 
 const claudeQueryMock = vi.hoisted(() => vi.fn());
+const getContainerConfigMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: claudeQueryMock,
 }));
 
-vi.mock('@core/core/logger.js', () => ({
+vi.mock('@onecli-sh/sdk', () => ({
+  OneCLI: vi.fn(function OneCLI() {
+    return {
+      getContainerConfig: getContainerConfigMock,
+    };
+  }),
+}));
+
+vi.mock('@core/infrastructure/logging/logger.js', () => ({
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -18,19 +27,27 @@ vi.mock('@core/core/logger.js', () => ({
   },
 }));
 
-import { logger } from '@core/core/logger.js';
+import { logger } from '@core/infrastructure/logging/logger.js';
 
 function configureClaudeQueryMock(): void {
   claudeQueryMock.mockImplementation(async function* () {
-    const headers: HeadersInit = {};
-    const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
-    if (oauthToken) {
-      headers.authorization = `Bearer ${oauthToken}`;
-    }
-    const response = await globalThis.fetch('https://claude.local/mock', {
-      method: 'POST',
-      headers,
-    });
+    const call = claudeQueryMock.mock.calls.at(-1)?.[0] as
+      | {
+          options?: {
+            env?: Record<string, string>;
+          };
+        }
+      | undefined;
+    const env = call?.options?.env || {};
+    const response = await globalThis.fetch(
+      env.ANTHROPIC_BASE_URL || 'https://claude.local/mock',
+      {
+        method: 'POST',
+        headers: env.ANTHROPIC_MODEL
+          ? { 'x-myclaw-model': env.ANTHROPIC_MODEL }
+          : undefined,
+      },
+    );
     const json = (await response.json()) as {
       content?: Array<{ type?: string; text?: string }>;
     };
@@ -47,18 +64,26 @@ function configureClaudeQueryMock(): void {
 beforeEach(() => {
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
   vi.stubEnv('ANTHROPIC_API_KEY', '');
+  vi.stubEnv('ONECLI_URL', 'http://localhost:10254');
+  getContainerConfigMock.mockReset();
+  getContainerConfigMock.mockResolvedValue({
+    env: {
+      ANTHROPIC_BASE_URL: 'https://broker.local/mock',
+      ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001',
+    },
+  });
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   claudeQueryMock.mockReset();
+  getContainerConfigMock.mockReset();
 });
 
 describe('LlmMemoryExtractionProvider', () => {
-  it('uses OAuth authToken when CLAUDE_CODE_OAUTH_TOKEN is set', async () => {
+  it('uses broker-safe OneCLI env when extraction is enabled', async () => {
     configureClaudeQueryMock();
-    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-extractor-token');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -109,13 +134,22 @@ describe('LlmMemoryExtractionProvider', () => {
 
     const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = new Headers(requestInit?.headers as HeadersInit);
-    expect(headers.get('authorization')).toBe('Bearer oauth-extractor-token');
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('https://broker.local/mock');
+    expect(headers.get('x-myclaw-model')).toBe('claude-haiku-4-5-20251001');
+    expect(headers.get('authorization')).toBeNull();
     expect(headers.get('x-api-key')).toBeNull();
+    expect(claudeQueryMock.mock.calls[0]?.[0]).toMatchObject({
+      options: {
+        env: {
+          ANTHROPIC_BASE_URL: 'https://broker.local/mock',
+          ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001',
+        },
+      },
+    });
   });
 
   it('does not pre-filter non-keyword turns before LLM extraction', async () => {
     configureClaudeQueryMock();
-    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-extractor-token');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -141,7 +175,6 @@ describe('LlmMemoryExtractionProvider', () => {
 
   it('runs LLM extraction for role assignment facts like CTO', async () => {
     configureClaudeQueryMock();
-    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-extractor-token');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -189,7 +222,6 @@ describe('LlmMemoryExtractionProvider', () => {
 
   it('redacts sensitive retrieved items before building outbound LLM prompt', async () => {
     configureClaudeQueryMock();
-    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-extractor-token');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -232,7 +264,6 @@ describe('LlmMemoryExtractionProvider', () => {
 
   it('blocks outbound extraction when transcript contains uncertain secret-like material', async () => {
     configureClaudeQueryMock();
-    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-extractor-token');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -269,7 +300,6 @@ describe('LlmMemoryExtractionProvider', () => {
 
   it('retries once on transient extractor failures', async () => {
     configureClaudeQueryMock();
-    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-extractor-token');
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     fetchSpy
       .mockRejectedValueOnce(new Error('429 rate limit'))
@@ -321,7 +351,6 @@ describe('LlmMemoryExtractionProvider', () => {
 
   it('logs LLM extraction failures and skips extraction when auth is configured', async () => {
     configureClaudeQueryMock();
-    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-extractor-token');
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(
       new Error('oauth request rejected'),
     );
@@ -347,6 +376,7 @@ describe('LlmMemoryExtractionProvider', () => {
   });
 
   it('skips extraction when Claude auth is unavailable', async () => {
+    vi.stubEnv('ONECLI_URL', '');
     const provider = new LlmMemoryExtractionProvider();
 
     const facts = await provider.extractFacts({

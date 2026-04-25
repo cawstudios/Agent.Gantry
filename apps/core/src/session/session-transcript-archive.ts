@@ -1,17 +1,20 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR } from '../core/config.js';
-import { logger } from '../core/logger.js';
-import { getClaudeProjectDirName } from '../core/myclaw-home.js';
-import {
-  MemoryRootService,
-  SessionArchiveCause,
-} from '../memory/memory-root.js';
+import { DATA_DIR } from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { getClaudeProjectDirName } from '../shared/myclaw-home.js';
 import {
   isValidGroupFolder,
   resolveGroupFolderPath,
 } from '../platform/group-folder.js';
+
+export type SessionArchiveCause =
+  | 'new-session'
+  | 'manual-compact'
+  | 'auto-compact'
+  | 'stale-session'
+  | 'abandoned-session';
 
 interface SessionEntry {
   sessionId?: string;
@@ -67,6 +70,77 @@ function generateTimestampName(now: Date): string {
     String(now.getSeconds()).padStart(2, '0'),
   ];
   return `conversation-${parts[0]}${parts[1]}${parts[2]}-${parts[3]}${parts[4]}${parts[5]}`;
+}
+
+function formatDateParts(date: Date): {
+  year: string;
+  month: string;
+  day: string;
+} {
+  const [year, month, day] = date.toISOString().slice(0, 10).split('-');
+  return { year: year!, month: month!, day: day! };
+}
+
+function sanitizeSegment(input: string, fallback: string): string {
+  const normalized = input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || fallback;
+}
+
+function ensureWithinBase(baseDir: string, resolvedPath: string): void {
+  const relative = path.relative(baseDir, resolvedPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`Path escapes session archive root: ${resolvedPath}`);
+  }
+}
+
+function writeFileAtomic(filePath: string, content: string): void {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmpPath = path.join(
+    dir,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
+  );
+  fs.writeFileSync(tmpPath, content, { mode: 0o600 });
+  fs.renameSync(tmpPath, filePath);
+}
+
+function writeSessionArchive(input: {
+  groupFolder: string;
+  sessionId: string;
+  cause: SessionArchiveCause;
+  title: string;
+  markdown: string;
+  timestamp: Date;
+  slug: string;
+}): string {
+  const archiveRoot = path.resolve(DATA_DIR, 'session-archives');
+  const { year, month, day } = formatDateParts(input.timestamp);
+  const dayDir = path.resolve(archiveRoot, year, month, day);
+  ensureWithinBase(archiveRoot, dayDir);
+  fs.mkdirSync(dayDir, { recursive: true });
+
+  const hhmmss = input.timestamp.toISOString().slice(11, 19).replace(/:/g, '');
+  const fileName = `${hhmmss}-${sanitizeSegment(input.cause, 'session')}-${sanitizeSegment(input.slug || input.title || input.sessionId, 'session')}.md`;
+  const filePath = path.resolve(dayDir, fileName);
+  ensureWithinBase(archiveRoot, filePath);
+  const content = [
+    '---',
+    `session_id: ${input.sessionId}`,
+    `group_folder: ${input.groupFolder}`,
+    `cause: ${input.cause}`,
+    `archived_at: ${input.timestamp.toISOString()}`,
+    '---',
+    '',
+    input.markdown.trim(),
+    '',
+  ].join('\n');
+  writeFileAtomic(filePath, content);
+  return filePath;
 }
 
 function getSessionSummary(
@@ -301,7 +375,6 @@ export function archiveSessionTranscript(
   }
 
   try {
-    const memoryRoot = MemoryRootService.getInstance();
     const transcriptPath = findTranscriptPath(groupFolder, sessionId);
     if (!transcriptPath) {
       logger.info(
@@ -316,7 +389,7 @@ export function archiveSessionTranscript(
         cause,
         errorSummary,
       });
-      return memoryRoot.writeSessionSummary({
+      return writeSessionArchive({
         groupFolder,
         sessionId,
         cause,
@@ -347,7 +420,7 @@ export function archiveSessionTranscript(
         cause,
         errorSummary,
       });
-      return memoryRoot.writeSessionSummary({
+      return writeSessionArchive({
         groupFolder,
         sessionId,
         cause,
@@ -364,7 +437,7 @@ export function archiveSessionTranscript(
       assistantName,
       now,
     );
-    const filePath = memoryRoot.writeSessionSummary({
+    const filePath = writeSessionArchive({
       groupFolder,
       sessionId,
       cause,

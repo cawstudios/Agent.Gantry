@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let tempRoot = '';
 let dataDir = '';
 let agentsDir = '';
-let memoryRoot = '';
+let archiveRoot = '';
 
 function writeTranscript(options: {
   groupFolder: string;
@@ -41,10 +41,9 @@ function writeTranscript(options: {
 
 async function loadArchiveModule() {
   vi.resetModules();
-  vi.doMock('@core/core/config.js', () => ({
+  vi.doMock('@core/config/index.js', () => ({
     DATA_DIR: dataDir,
     AGENTS_DIR: agentsDir,
-    memoryStorageDir: memoryRoot,
   }));
   return import('@core/session/session-transcript-archive.js');
 }
@@ -53,22 +52,21 @@ beforeEach(() => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-session-archive-'));
   dataDir = path.join(tempRoot, 'data');
   agentsDir = path.join(tempRoot, 'agents');
-  memoryRoot = path.join(tempRoot, 'memory');
+  archiveRoot = path.join(dataDir, 'session-archives');
   fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(agentsDir, { recursive: true });
-  fs.mkdirSync(memoryRoot, { recursive: true });
 });
 
 afterEach(() => {
   vi.resetModules();
-  vi.doUnmock('@core/core/config.js');
+  vi.doUnmock('@core/config/index.js');
   if (tempRoot) {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
 describe('archiveSessionTranscript', () => {
-  it('archives a valid transcript into memoryStorageDir sessions', async () => {
+  it('archives a valid transcript into data session archives', async () => {
     writeTranscript({
       groupFolder: 'team1',
       sessionId: 'sess-1',
@@ -89,7 +87,7 @@ describe('archiveSessionTranscript', () => {
     });
 
     expect(filePath).toBeTruthy();
-    expect(filePath).toContain(path.join('memory', 'sessions'));
+    expect(filePath).toContain(path.join('data', 'session-archives'));
     expect(fs.existsSync(filePath!)).toBe(true);
 
     const markdown = fs.readFileSync(filePath!, 'utf-8');
@@ -177,7 +175,7 @@ describe('archiveSessionTranscript', () => {
     });
 
     expect(filePath).toBeNull();
-    const sessionsDir = path.join(memoryRoot, 'sessions');
+    const sessionsDir = archiveRoot;
     const sessionFiles = fs.existsSync(sessionsDir)
       ? fs
           .readdirSync(sessionsDir, { recursive: true })
@@ -742,82 +740,39 @@ describe('archiveSessionTranscript', () => {
 
   // ── Error handling: catch block ──────────────────────────────────────────
 
-  it('catches and returns null when AgentMemoryRootService.getInstance throws', async () => {
+  it('catches and returns null when archive write fails', async () => {
     vi.resetModules();
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       DATA_DIR: dataDir,
       AGENTS_DIR: agentsDir,
-      memoryStorageDir: memoryRoot,
-    }));
-    vi.doMock('@core/memory/memory-root.js', () => ({
-      MemoryRootService: {
-        getInstance: () => {
-          throw new Error('Service unavailable');
-        },
-      },
     }));
 
     const mod = await import('@core/session/session-transcript-archive.js');
 
-    writeTranscript({
-      groupFolder: 'team-err',
-      sessionId: 'sess-err',
-      lines: [
-        JSON.stringify({
-          type: 'user',
-          message: { content: 'hi' },
-        }),
-      ],
-    });
+    try {
+      writeTranscript({
+        groupFolder: 'team-diskfull',
+        sessionId: 'sess-diskfull',
+        lines: [
+          JSON.stringify({
+            type: 'user',
+            message: { content: 'hi' },
+          }),
+        ],
+      });
+      vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
+        throw new Error('Disk full');
+      });
 
-    const result = mod.archiveSessionTranscript({
-      groupFolder: 'team-err',
-      sessionId: 'sess-err',
-    });
+      const result = mod.archiveSessionTranscript({
+        groupFolder: 'team-diskfull',
+        sessionId: 'sess-diskfull',
+      });
 
-    expect(result).toBeNull();
-
-    vi.doUnmock('@core/memory/memory-root.js');
-  });
-
-  it('catches and returns null when writeSessionSummary throws', async () => {
-    vi.resetModules();
-    vi.doMock('@core/core/config.js', () => ({
-      DATA_DIR: dataDir,
-      AGENTS_DIR: agentsDir,
-      memoryStorageDir: memoryRoot,
-    }));
-    vi.doMock('@core/memory/memory-root.js', () => ({
-      MemoryRootService: {
-        getInstance: () => ({
-          writeSessionSummary: () => {
-            throw new Error('Disk full');
-          },
-        }),
-      },
-    }));
-
-    const mod = await import('@core/session/session-transcript-archive.js');
-
-    writeTranscript({
-      groupFolder: 'team-diskfull',
-      sessionId: 'sess-diskfull',
-      lines: [
-        JSON.stringify({
-          type: 'user',
-          message: { content: 'hi' },
-        }),
-      ],
-    });
-
-    const result = mod.archiveSessionTranscript({
-      groupFolder: 'team-diskfull',
-      sessionId: 'sess-diskfull',
-    });
-
-    expect(result).toBeNull();
-
-    vi.doUnmock('@core/memory/memory-root.js');
+      expect(result).toBeNull();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   // ── sanitizeFilename edge cases ──────────────────────────────────────────
@@ -885,7 +840,7 @@ describe('archiveSessionTranscript', () => {
 
     expect(filePath).toBeTruthy();
     const md = fs.readFileSync(filePath!, 'utf-8');
-    // Contains YAML front matter from writeSessionSummary
+    // Contains YAML front matter from the session archive writer.
     expect(md).toContain('session_id: sess-md');
     expect(md).toContain('group_folder: team-md');
     // Contains the markdown body structure

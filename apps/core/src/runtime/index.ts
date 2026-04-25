@@ -6,4 +6,4 @@ export * from './ipc.js';
 export * from './message-loop.js';
 export * from './remote-control.js';
 export * from './remote-control-command.js';
-export * from './task-scheduler.js';
+export * from '../jobs/scheduler.js';

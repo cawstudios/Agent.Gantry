@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-import { AGENTS_DIR } from '../core/config.js';
-import { logger } from '../core/logger.js';
+import { AGENTS_DIR } from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 
 type PromptSectionName =
@@ -50,7 +50,7 @@ const DEFAULT_SHARED_TEMPLATE = `# Shared Agent Profile
 
 - Save only durable facts, preferences, decisions, corrections, constraints, and reusable procedures.
 - Do not save raw chat logs, terminal output, temporary task progress, secrets, credentials, or vague importance scores.
-- Prefer group-scoped memory unless the user explicitly asks for global memory.
+- Prefer group/channel/user memory boundaries; common app memory is host-controlled and write-restricted.
 - Search memory before assuming a user preference or prior decision is unknown.
 - Treat explicit user corrections as higher priority than older remembered facts.
 
@@ -66,7 +66,7 @@ const DEFAULT_SHARED_TEMPLATE = `# Shared Agent Profile
 
 - Keep private context private.
 - Never expose secrets, tokens, credentials, or unrelated local paths.
-- Do not promote group-specific facts to global memory without explicit user intent.
+- Do not promote group-, channel-, or user-specific facts to common app memory unless host policy explicitly allows it.
 
 ## Tool Conventions
 

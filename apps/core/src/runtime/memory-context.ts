@@ -1,5 +1,5 @@
-import { logger } from '../core/logger.js';
-import { MemoryService } from '../memory/memory-service.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { AppMemoryService } from '../memory/app-memory-service.js';
 
 const DEFAULT_MEMORY_BRIEF_ITEMS = 8;
 const MAX_MEMORY_CONTEXT_CHARS = 6_000;
@@ -20,7 +20,7 @@ export interface PreparedMemoryContext {
 }
 
 interface ConversationMode {
-  channel: 'slack' | 'telegram' | 'unknown';
+  channel: 'slack' | 'telegram' | 'teams' | 'unknown';
   audience: 'direct' | 'group';
 }
 
@@ -42,14 +42,18 @@ function inferConversationMode(chatJid: string): ConversationMode {
       Number.isFinite(numeric) && numeric > 0 ? 'direct' : 'group';
     return { channel: 'telegram', audience };
   }
+  if (chatJid.startsWith('ms:') || chatJid.startsWith('teams:')) {
+    return { channel: 'teams', audience: 'group' };
+  }
   return { channel: 'unknown', audience: 'group' };
 }
 
 function scopeGuidance(mode: ConversationMode, hasTopic: boolean): string[] {
   const baseline = [
     '`user` scope is for personal preferences/corrections tied to one person.',
-    '`group` scope is the default working memory for this active chat.',
-    '`global` scope is cross-chat memory and should be used only when the user explicitly asks to share broadly.',
+    '`group` memory is shared inside the configured MyClaw/app agent group, independent of provider naming.',
+    '`channel` memory is tied to the external provider conversation where the bot is present: Telegram private/group/supergroup chat, Slack channel/DM, or Teams channel/chat.',
+    '`common` memory is app-wide shared memory and can only be written by admin/service flows.',
   ];
 
   const channelSpecific =
@@ -57,21 +61,25 @@ function scopeGuidance(mode: ConversationMode, hasTopic: boolean): string[] {
       ? [
           mode.audience === 'direct'
             ? 'Slack DM: prefer `user` for personal preferences and `group` for current thread/task context.'
-            : 'Slack channel: prefer `group` for channel memory; move to `global` only for explicit org-wide facts.',
+            : 'Slack channel: prefer `channel` for workspace channel facts and `group` for configured app/agent group context.',
         ]
       : mode.channel === 'telegram'
         ? [
             mode.audience === 'direct'
-              ? 'Telegram personal chat: prefer `user` + `group`; avoid `global` unless explicitly requested.'
-              : 'Telegram group: keep shared chat memory in `group`; reserve `global` for intentionally universal rules.',
+              ? 'Telegram personal chat: prefer `user` for personal facts and `group` for the configured personal agent context.'
+              : 'Telegram group/supergroup: prefer `channel` for chat facts and `group` for configured app/agent group context; reserve `common` for admin-approved universal rules.',
           ]
-        : [
-            'Default to `group` scope unless explicit user intent says otherwise.',
-          ];
+        : mode.channel === 'teams'
+          ? [
+              'Microsoft Teams channel/chat: prefer `channel` for Teams conversation facts and `group` for configured app/agent group context.',
+            ]
+          : [
+              'Default to `group` memory unless channel or user boundaries are clearer.',
+            ];
 
   const topicRule = hasTopic
     ? [
-        'A `thread_id` is present: injected group/global memory is filtered to records saved with this exact thread boundary. Save new topic-specific memories with `topic_id`/`thread_id`; do not infer cross-thread recall.',
+        'A `thread_id` is present: injected memories include broad boundary records and exact thread records. Save new topic-specific memories with `thread_id`; do not infer cross-thread recall.',
       ]
     : [];
 
@@ -123,13 +131,15 @@ function buildStructuredUntrustedMemoryData(
     record.text.includes('[suppressed: instruction-like memory content]'),
   ).length;
   const payload = {
-    schema: 'myclaw.memory_context.v2',
+    schema: 'myclaw.memory_context.v3',
     trust: 'untrusted_data_only',
     provenance: 'durable_memory_store',
     use: 'continuity_evidence_only',
     envelope: {
       source: input.source,
-      group_folder: input.groupFolder,
+      app_id: 'personal',
+      agent_id: input.groupFolder,
+      group_id: input.groupFolder,
       chat_jid: input.chatJid,
       ...(threadId ? { thread_id: threadId } : {}),
       ...(userId ? { user_id: userId } : {}),
@@ -160,12 +170,24 @@ export async function createInjectedMemoryContextBlock(
 ): Promise<PreparedMemoryContext | null> {
   try {
     const userId = normalizeId(input.userId);
-    const brief = await MemoryService.getInstance().buildBrief({
-      groupFolder: input.groupFolder,
-      maxItems: input.maxItems ?? DEFAULT_MEMORY_BRIEF_ITEMS,
+    const service = AppMemoryService.getInstance();
+    if (!service.isEnabled()) return null;
+    const memories = await service.search({
+      appId: 'personal',
+      agentId: input.groupFolder,
+      groupId: input.groupFolder,
+      channelId: input.chatJid,
       userId,
       threadId: normalizeId(input.threadId),
+      limit: input.maxItems ?? DEFAULT_MEMORY_BRIEF_ITEMS,
     });
+    const brief = memories
+      .map(({ item }) =>
+        [`[${item.subjectType}:${item.subjectId}]`, item.key, item.value]
+          .filter(Boolean)
+          .join(' '),
+      )
+      .join('\n');
     const block = buildInjectedBlock(brief, input);
     return { block };
   } catch (err) {

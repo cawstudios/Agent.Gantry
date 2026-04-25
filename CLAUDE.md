@@ -8,17 +8,18 @@ Single Node.js process with skill-based channel provider system. Built-in provid
 
 ## Key Files
 
-| File                                          | Purpose                                                    |
-| --------------------------------------------- | ---------------------------------------------------------- |
-| `apps/core/src/index.ts`                      | Orchestrator: state, message loop, agent invocation        |
-| `apps/core/src/channels/provider-registry.ts` | Channel provider registry                                  |
-| `apps/core/src/runtime/ipc.ts`                | IPC watcher and task processing                            |
-| `apps/core/src/messaging/router.ts`           | Message formatting and outbound routing                    |
-| `apps/core/src/core/config.ts`                | Trigger pattern, paths, intervals                          |
-| `apps/core/src/runtime/task-scheduler.ts`     | Runs scheduled tasks                                       |
-| `apps/core/src/storage/db.ts`                 | SQLite operations                                          |
-| `~/myclaw/agents/{name}/CLAUDE.md`            | Runtime per-agent prompt guidance                          |
-| `~/myclaw/.claude/skills/`                    | Custom skills (single source of truth, managed externally) |
+| File                                             | Purpose                                                    |
+| ------------------------------------------------ | ---------------------------------------------------------- |
+| `apps/core/src/index.ts`                         | Orchestrator: state, message loop, agent invocation        |
+| `apps/core/src/channels/provider-registry.ts`    | Channel provider registry                                  |
+| `apps/core/src/runtime/ipc.ts`                   | IPC watcher and task processing                            |
+| `apps/core/src/messaging/router.ts`              | Message formatting and outbound routing                    |
+| `apps/core/src/config/index.ts`                   | Trigger pattern, paths, intervals                          |
+| `apps/core/src/jobs/scheduler.ts`        | Scheduler domain execution                                 |
+| `apps/core/src/infrastructure/pgboss/scheduler-engine.ts` | Postgres-backed pg-boss queue adapter                      |
+| `apps/core/src/infrastructure/postgres/schema/`                | Postgres schema, migrations, and repositories              |
+| `~/myclaw/agents/{name}/CLAUDE.md`               | Runtime per-agent prompt guidance                          |
+| `~/myclaw/.claude/skills/`                       | Custom skills (single source of truth, managed externally) |
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
@@ -39,7 +40,7 @@ Four types of skills exist in MyClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) for
 | `/setup`         | First-time installation, authentication, service configuration  |
 | `/customize`     | Adding channels, integrations, changing behavior                |
 | `/debug`         | Runtime issues, logs, troubleshooting                           |
-| `/update-myclaw` | Bring upstream MyClaw updates into a customized install         |
+| `/update-myclaw` | Bring MyClaw updates into a customized install                  |
 | `/init-onecli`   | Install OneCLI Agent Vault and migrate `.env` credentials to it |
 
 ## Contributing
@@ -67,7 +68,7 @@ myclaw status
 
 ## Troubleshooting
 
-**Channel skill missing after upgrade:** Channels ship as skills, not built-in core modules. Install the relevant skill and then rebuild with `npm run build`.
+**Channel unavailable after upgrade:** Built-in channels are registered by the core runtime. Rebuild with `npm run build`, then run `myclaw doctor` to verify channel settings and credentials.
 
 ## gstack
 

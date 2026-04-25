@@ -2,47 +2,46 @@
 
 ## Context
 
-MyClaw runtime persistence and memory persistence were SQLite-specific and implemented through raw SQL modules. Public settings/docs still mixed runtime storage and memory semantics, and historical provider-era terms (`qmd`, `memory.provider`, `memory.sqlite_path`, `memory.qmd_root`) remained in active guidance.
+MyClaw runtime persistence, memory persistence, jobs, control events, and SDK callbacks need one production storage model. Public settings and docs must present Postgres as the runtime substrate.
 
 We need a single cut to:
-- keep runtime storage configuration under `storage.*`
-- keep memory settings under `memory.*` with a dedicated memory DB path derived from `memory.root`
-- remove QMD/provider-era interfaces and compatibility paths
+- keep runtime storage configuration under `storage.postgres.*`
+- keep memory behavior settings under `memory.*`
+- remove storage provider/profile branching and transition paths
 
 ## Decision
 
-1. Runtime storage settings are configured in `settings.yaml` under `storage.*`:
-   - `storage.provider` (`sqlite` in host runtime)
-   - `storage.sqlite.path`
-2. Memory settings remain storage-neutral under `memory.*`.
-3. QMD provider semantics are removed from active code/docs/CLI/skills.
-4. Deprecated interfaces are removed with no fallback aliases:
-   - `memory.provider`
-   - `memory.sqlite_path`
-   - `memory.qmd_root`
-   - `myclaw memory provider <...>`
-5. Existing runtime memory SQLite artifacts are intentionally reset at cutover; no import/migration path is provided for old `~/myclaw/memory/.cache/memory.db`.
+1. Runtime storage settings are configured in `settings.yaml` under `storage.postgres.*`:
+   - `storage.postgres.url_env`
+   - `storage.postgres.schema`
+2. Memory records, chunks, embeddings, usage events, and audit events are stored in Postgres.
+3. Storage provider/profile semantics are removed from active code/docs/CLI/skills.
+4. Deprecated interfaces are removed with no fallback aliases.
+5. No import/migration path is provided for prior local storage artifacts.
+6. Postgres requires `pgvector`, `pg_trgm`, and `pg-boss` readiness.
+7. Localhost Docker Postgres is supported for development.
 
 ## Alternatives Considered
 
-- Keep SQLite-only runtime:
-  accepted for host runtime in this cut.
-- Add temporary compatibility shims for removed memory provider keys:
+- Add a local file-backed runtime:
+  rejected because jobs, webhooks, memory search, and SDK control events need one production data model.
+- Add temporary transition shims for removed keys:
   rejected due complexity and policy preference for clean cutovers in early-stage code.
 - Auto-migrate previous memory DB into new schema:
   rejected; acceptable live impact and lower operational risk than one-off migration code.
 
 ## Consequences
 
-- Runtime state continues on SQLite in host runtime (`storage.sqlite.path`).
-- Memory database path is separate and derived from `memory.root` (`memory/.cache/memory.db` by default).
-- Existing local memory content must be manually re-saved when needed after cutover.
-- Health/diagnostics report runtime storage provider and memory DB path explicitly.
+- Runtime requires Postgres through `MYCLAW_DATABASE_URL`.
+- Health/diagnostics report Postgres capabilities explicitly.
+- Local Dockerized Postgres is documented for development.
+- Memory state lives in Postgres. Session transcript archives live under
+  runtime `data/session-archives` as operational artifacts.
 
 ## Rollback Or Migration Notes
 
 - Rollback means restoring an earlier build and restoring old runtime storage files manually from backup.
-- Product code does not include previous-schema DB import, compatibility readers, or automatic migration routines.
+- Product code does not include previous-schema DB import, transition readers, or automatic migration routines.
 
 ## Supersedes
 

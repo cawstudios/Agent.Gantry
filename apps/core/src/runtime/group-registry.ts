@@ -1,9 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME as DEFAULT_ASSISTANT_NAME } from '../core/config.js';
-import { logger } from '../core/logger.js';
-import { RegisteredGroup, ThinkingOverride } from '../core/types.js';
+import { ASSISTANT_NAME as DEFAULT_ASSISTANT_NAME } from '../config/index.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { RegisteredGroup, ThinkingOverride } from '../domain/types.js';
+import { normalizeClaudeModelSelection } from '../models/claude-model-registry.js';
 import { resolveGroupFolderPath } from '../platform/group-folder.js';
 import { AvailableGroup } from './agent-spawn.js';
 
@@ -16,8 +17,35 @@ interface ChatRow {
 
 interface RegisterGroupOptions {
   assistantName?: string;
-  persist: (jid: string, group: RegisteredGroup) => void;
+  persist: (jid: string, group: RegisteredGroup) => void | Promise<void>;
   ensureOneCLIAgent: (jid: string, group: RegisteredGroup) => void;
+}
+
+function isPromiseLike(value: unknown): value is Promise<void> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'then' in value &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
+function commitGroupOverride(
+  registeredGroups: Record<string, RegisteredGroup>,
+  chatJid: string,
+  updatedGroup: RegisteredGroup,
+  persisted: void | Promise<void>,
+  logContext: Record<string, unknown>,
+  logMessage: string,
+): void | Promise<void> {
+  const commit = () => {
+    registeredGroups[chatJid] = updatedGroup;
+    logger.info(logContext, logMessage);
+  };
+  if (isPromiseLike(persisted)) {
+    return persisted.then(commit);
+  }
+  commit();
 }
 
 function defaultAgentClaudeMarkdown(
@@ -39,12 +67,12 @@ function defaultAgentClaudeMarkdown(
   ].join('\n');
 }
 
-export function registerGroup(
+export async function registerGroup(
   registeredGroups: Record<string, RegisteredGroup>,
   jid: string,
   group: RegisteredGroup,
   options: RegisterGroupOptions,
-): void {
+): Promise<void> {
   const assistantName = options.assistantName ?? DEFAULT_ASSISTANT_NAME;
 
   let groupDir: string;
@@ -59,7 +87,7 @@ export function registerGroup(
   }
 
   registeredGroups[jid] = group;
-  options.persist(jid, group);
+  await options.persist(jid, group);
 
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
@@ -87,17 +115,18 @@ export function setGroupModelOverride(
   registeredGroups: Record<string, RegisteredGroup>,
   chatJid: string,
   model: string | undefined,
-  persist: (jid: string, group: RegisteredGroup) => void,
-): void {
+  persist: (jid: string, group: RegisteredGroup) => void | Promise<void>,
+): Promise<void> | void {
   const existingGroup = registeredGroups[chatJid];
   if (!existingGroup) return;
 
+  const normalizedModel = normalizeClaudeModelSelection(model);
   const prevModel = existingGroup.agentConfig?.model;
-  if (prevModel === model) return;
+  if (prevModel === normalizedModel) return;
 
   const nextAgentConfig = { ...(existingGroup.agentConfig || {}) };
-  if (model) {
-    nextAgentConfig.model = model;
+  if (normalizedModel) {
+    nextAgentConfig.model = normalizedModel;
   } else {
     delete nextAgentConfig.model;
   }
@@ -108,12 +137,15 @@ export function setGroupModelOverride(
       Object.keys(nextAgentConfig).length > 0 ? nextAgentConfig : undefined,
   };
 
-  registeredGroups[chatJid] = updatedGroup;
-  persist(chatJid, updatedGroup);
-  logger.info(
+  const persisted = persist(chatJid, updatedGroup);
+  return commitGroupOverride(
+    registeredGroups,
+    chatJid,
+    updatedGroup,
+    persisted,
     {
       group: updatedGroup.name,
-      modelOverride: model ?? null,
+      modelOverride: normalizedModel ?? null,
     },
     'Updated group model override',
   );
@@ -123,8 +155,8 @@ export function setGroupThinkingOverride(
   registeredGroups: Record<string, RegisteredGroup>,
   chatJid: string,
   thinking: ThinkingOverride | undefined,
-  persist: (jid: string, group: RegisteredGroup) => void,
-): void {
+  persist: (jid: string, group: RegisteredGroup) => void | Promise<void>,
+): Promise<void> | void {
   const existingGroup = registeredGroups[chatJid];
   if (!existingGroup) return;
 
@@ -145,9 +177,12 @@ export function setGroupThinkingOverride(
       Object.keys(nextAgentConfig).length > 0 ? nextAgentConfig : undefined,
   };
 
-  registeredGroups[chatJid] = updatedGroup;
-  persist(chatJid, updatedGroup);
-  logger.info(
+  const persisted = persist(chatJid, updatedGroup);
+  return commitGroupOverride(
+    registeredGroups,
+    chatJid,
+    updatedGroup,
+    persisted,
     {
       group: updatedGroup.name,
       thinkingOverride: thinking ?? null,

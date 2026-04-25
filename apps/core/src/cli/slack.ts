@@ -5,18 +5,21 @@ import * as p from '@clack/prompts';
 import '../channels/register-builtins.js';
 import { getChannelProvider } from '../channels/provider-registry.js';
 
-import { readEnvFile, upsertEnvFile } from './env-file.js';
+import { readEnvFile, upsertEnvFile } from '../config/env/file.js';
 import {
   safeSlackErrorCode,
   TOKEN_BOUND_HTTP_GUIDANCE,
   TOKEN_BOUND_NETWORK_GUIDANCE,
 } from './provider-error-guidance.js';
 import { openRuntimeGroupDb } from './runtime-group-db.js';
-import { envFilePath, ensureRuntimeLayout } from './runtime-home.js';
+import {
+  envFilePath,
+  ensureRuntimeLayout,
+} from '../config/settings/runtime-home.js';
 import {
   loadRuntimeSettings,
   saveRuntimeSettings,
-} from './runtime-settings.js';
+} from '../config/settings/runtime-settings.js';
 import { chooseSlackChatForConnect } from './slack-connect-chat-picker.js';
 
 export interface SlackTokenValidation {
@@ -408,9 +411,9 @@ export async function registerSlackMainGroup(options: {
   displayName: string;
 }): Promise<{ folder: string; groupName: string }> {
   ensureRuntimeLayout(options.runtimeHome);
-  const db = openRuntimeGroupDb(options.runtimeHome);
+  const db = await openRuntimeGroupDb(options.runtimeHome);
   try {
-    const existing = db.getAllRegisteredGroups();
+    const existing = await db.getAllRegisteredGroups();
     const existingGroup = existing[options.chatJid];
     const folder =
       existingGroup?.folder || buildGroupFolder(options.runtimeHome, existing);
@@ -429,7 +432,7 @@ export async function registerSlackMainGroup(options: {
       fs.writeFileSync(soulPath, defaultSoulMarkdown(groupName), 'utf-8');
     }
 
-    db.setRegisteredGroup(options.chatJid, {
+    await db.setRegisteredGroup(options.chatJid, {
       name: groupName,
       folder,
       trigger: '@Andy',
@@ -441,7 +444,7 @@ export async function registerSlackMainGroup(options: {
 
     return { folder, groupName };
   } finally {
-    db.close();
+    await db.close();
   }
 }
 
@@ -568,7 +571,7 @@ export async function runSlackConnectCommand(
     p.outro('Slack channel is configured and ready.');
   } else {
     p.outro(
-      'Slack tokens saved. Next: run `myclaw agent add sl:<channel-id> --main --requires-trigger false`.',
+      'Slack tokens saved. Next: run `myclaw channel connect slack` to register a channel.',
     );
   }
 

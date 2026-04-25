@@ -1,14 +1,17 @@
 import fs from 'fs';
 import path from 'path';
 
-import { readEnvFile } from './env-file.js';
+import { readEnvFile } from '../config/env/file.js';
 import {
   safeTelegramDescription,
   TOKEN_BOUND_HTTP_GUIDANCE,
   TOKEN_BOUND_NETWORK_GUIDANCE,
 } from './provider-error-guidance.js';
 import { openRuntimeGroupDb } from './runtime-group-db.js';
-import { envFilePath, ensureRuntimeLayout } from './runtime-home.js';
+import {
+  envFilePath,
+  ensureRuntimeLayout,
+} from '../config/settings/runtime-home.js';
 
 export interface TelegramTokenValidation {
   ok: boolean;
@@ -376,16 +379,16 @@ export async function registerTelegramMainGroup(options: {
   displayName: string;
 }): Promise<{ folder: string; groupName: string }> {
   ensureRuntimeLayout(options.runtimeHome);
-  const db = openRuntimeGroupDb(options.runtimeHome);
+  const db = await openRuntimeGroupDb(options.runtimeHome);
   try {
-    const existing = db.getAllRegisteredGroups();
+    const existing = await db.getAllRegisteredGroups();
     const existingGroup = existing[options.chatJid];
     const folder =
       existingGroup?.folder || buildGroupFolder(options.runtimeHome, existing);
     const groupName =
       options.displayName || existingGroup?.name || 'Telegram Main';
 
-    db.setRegisteredGroup(options.chatJid, {
+    await db.setRegisteredGroup(options.chatJid, {
       name: groupName,
       folder,
       trigger: '@Andy',
@@ -408,17 +411,18 @@ export async function registerTelegramMainGroup(options: {
 
     return { folder, groupName };
   } finally {
-    db.close();
+    await db.close();
   }
 }
 
 export function readTelegramFromRuntimeEnv(runtimeHome: string): {
   token: string;
-  openAiKey: string;
+  TELEGRAM_PERMISSION_APPROVER_IDS: string;
 } {
   const env = readEnvFile(envFilePath(runtimeHome));
   return {
     token: env.TELEGRAM_BOT_TOKEN || '',
-    openAiKey: env.OPENAI_API_KEY || '',
+    TELEGRAM_PERMISSION_APPROVER_IDS:
+      env.TELEGRAM_PERMISSION_APPROVER_IDS || '',
   };
 }

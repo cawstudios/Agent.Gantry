@@ -29,11 +29,12 @@ MyClaw currently has these layers:
    - `~/myclaw/agents/<group>/SOUL.md`
    - `~/myclaw/agents/<group>/CLAUDE.md`
 
-2. Structured memory
+2. Structured memory in Postgres
    - `memory_items` for durable facts and decisions
-   - `memory_procedures` for reusable workflows
-   - `memory_chunks` for ingested markdown knowledge
-   - SQLite as the live search source
+   - `memory_candidates` for staged extracted facts
+   - `memory_items` for durable facts, procedures, and references
+   - Postgres full-text search for lexical recall
+   - `pgvector` for semantic recall when embeddings are enabled
 
 3. Hook-driven continuity context
    - Session hooks load a concise memory brief at session boundaries.
@@ -78,7 +79,7 @@ Save durable, reusable statements:
 - "User prefers direct engineering answers without filler."
 - "Decision: embeddings are optional and provider-based."
 - "Correction: do not store raw logs as memory."
-- "Fact: default memory DB path is `~/myclaw/memory/.cache/memory.db`."
+- "Fact: MyClaw stores runtime and memory state in Postgres."
 - "Procedure: before changing memory, run focused memory tests."
 
 Do not save:
@@ -115,11 +116,11 @@ Dynamic facts, task state, and open loops belong in structured memory and contin
 
 ## Storage Model
 
-MyClaw stores live memory in the memory SQLite database derived from `memory.root`.
+MyClaw stores live memory in Postgres.
 
-- Default memory database: `~/myclaw/memory/.cache/memory.db`
-- Default memory artifact root: `~/myclaw/memory`
-- Default journal: `~/myclaw/memory/.journal`
+- Runtime database: `MYCLAW_DATABASE_URL`
+- Runtime schema: `storage.postgres.schema` (default `myclaw`)
+- Session transcript archives: `<runtime home>/data/session-archives`
 
 ## Embeddings Are Optional
 
@@ -129,7 +130,7 @@ Without embeddings, MyClaw uses:
 
 - exact text search
 - token matching
-- FTS/BM25 where available
+- Postgres full-text ranking
 - recency
 - scope priority
 - memory kind priority

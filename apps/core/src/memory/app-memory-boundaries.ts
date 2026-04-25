@@ -1,0 +1,111 @@
+import { and, eq, type SQL } from 'drizzle-orm';
+
+import * as pgSchema from '../infrastructure/postgres/schema/schema.js';
+import type {
+  MemoryBoundaryContext,
+  MemorySubjectType,
+  NormalizedMemorySubject,
+} from './memory-types.js';
+
+const DEFAULT_APP_ID = 'personal';
+const DEFAULT_AGENT_ID = 'main';
+const DEFAULT_GROUP_ID = 'default';
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
+
+function normalizeId(value: string | undefined, fallback: string): string {
+  const next = value?.trim() || fallback;
+  if (!ID_PATTERN.test(next)) {
+    throw new Error(
+      `Invalid memory id "${next}". Use letters, numbers, dot, underscore, colon, at, or dash.`,
+    );
+  }
+  return next;
+}
+
+export function normalizeSubject(
+  input: Partial<MemoryBoundaryContext> & {
+    subjectType?: MemorySubjectType;
+    subjectId?: string;
+    visibility?: MemorySubjectType;
+  },
+): NormalizedMemorySubject {
+  const appId = normalizeId(input.appId, DEFAULT_APP_ID);
+  const agentId = normalizeId(input.agentId, DEFAULT_AGENT_ID);
+  const userId = input.userId?.trim() || undefined;
+  const groupId = input.groupId?.trim() || undefined;
+  const channelId = input.channelId?.trim() || undefined;
+  const threadId = input.threadId?.trim() || undefined;
+  const subjectType =
+    input.subjectType ||
+    input.visibility ||
+    (channelId ? 'channel' : groupId ? 'group' : userId ? 'user' : 'group');
+  const subjectId =
+    input.subjectId?.trim() ||
+    (subjectType === 'common'
+      ? 'common'
+      : subjectType === 'channel'
+        ? channelId
+        : subjectType === 'group'
+          ? groupId
+          : userId) ||
+    DEFAULT_GROUP_ID;
+  return {
+    appId,
+    agentId,
+    subjectType,
+    subjectId: normalizeId(subjectId, DEFAULT_GROUP_ID),
+    ...(userId ? { userId } : {}),
+    ...(groupId ? { groupId } : {}),
+    ...(channelId ? { channelId } : {}),
+    ...(threadId ? { threadId } : {}),
+  };
+}
+
+export function toLegacyScope(
+  subjectType: MemorySubjectType,
+): 'user' | 'group' | 'global' {
+  if (subjectType === 'common') return 'global';
+  if (subjectType === 'user') return 'user';
+  return 'group';
+}
+
+export function visibleSubjectFilters(
+  i: typeof pgSchema.memoryItemsPostgres,
+  input: Partial<MemoryBoundaryContext> & {
+    includeCommon?: boolean;
+    subjectTypes?: MemorySubjectType[];
+  },
+): SQL[] {
+  const context = normalizeSubject(input);
+  const allowed = new Set(
+    input.subjectTypes || ['user', 'group', 'channel', 'common'],
+  );
+  const filters: SQL[] = [];
+  if (input.includeCommon !== false && allowed.has('common')) {
+    filters.push(and(eq(i.subjectType, 'common'), eq(i.subjectId, 'common'))!);
+  }
+  if (context.userId && allowed.has('user')) {
+    filters.push(
+      and(eq(i.subjectType, 'user'), eq(i.subjectId, context.userId))!,
+    );
+  }
+  if (context.groupId && allowed.has('group')) {
+    filters.push(
+      and(eq(i.subjectType, 'group'), eq(i.subjectId, context.groupId))!,
+    );
+  }
+  if (context.channelId && allowed.has('channel')) {
+    filters.push(
+      and(eq(i.subjectType, 'channel'), eq(i.subjectId, context.channelId))!,
+    );
+  }
+  if (filters.length === 0 && allowed.has(context.subjectType)) {
+    filters.push(
+      and(
+        eq(i.subjectType, context.subjectType),
+        eq(i.subjectId, context.subjectId),
+      )!,
+    );
+  }
+  return filters;
+}

@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fixedClock } from '@core/core/datetime.js';
+import { fixedClock } from '@core/infrastructure/time/datetime.js';
 import {
   createLogger,
   installGlobalErrorHandlers,
   logger,
+  redactString,
   type LogRecord,
   type LogSink,
-} from '@core/core/logger.js';
+} from '@core/infrastructure/logging/logger.js';
 
 describe('logger', () => {
   let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
@@ -117,6 +118,20 @@ describe('logger', () => {
     });
   });
 
+  it('redacts credential-bearing URLs and assignment strings', () => {
+    const input =
+      "postgresql://postgres:secret@localhost:5432/myclaw?sslmode=require POSTGRES_PASSWORD=secret ALTER ROLE myclaw_app PASSWORD 'role-secret' https://user:pass@example.com/path?token=secret";
+
+    const redacted = redactString(input);
+
+    expect(redacted).not.toContain('secret');
+    expect(redacted).not.toContain('pass@example');
+    expect(redacted).toContain('postgresql://[REDACTED]@localhost');
+    expect(redacted).toContain('POSTGRES_PASSWORD=[REDACTED]');
+    expect(redacted).toContain("PASSWORD '[REDACTED]'");
+    expect(redacted).toContain('token=[REDACTED]');
+  });
+
   it('filters entries below configured level', () => {
     const records: LogRecord[] = [];
     const l = createLogger({
@@ -134,7 +149,7 @@ describe('logger', () => {
     vi.resetModules();
     const beforeUncaught = process.listeners('uncaughtException').length;
     const beforeUnhandled = process.listeners('unhandledRejection').length;
-    await import('@core/core/logger.js');
+    await import('@core/infrastructure/logging/logger.js');
     const afterUncaught = process.listeners('uncaughtException').length;
     const afterUnhandled = process.listeners('unhandledRejection').length;
     expect(afterUncaught).toBe(beforeUncaught);

@@ -5,9 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   isSenderExplicitlyAllowed,
+  isSenderControlAllowed,
   RuntimeSenderAllowlistConfig,
+  RuntimeSenderControlAllowlistConfig,
   isSenderAllowed,
   isTriggerAllowed,
+  loadSenderControlAllowlist,
   loadSenderAllowlist,
   shouldLogDenied,
   shouldDropMessage,
@@ -42,6 +45,8 @@ function renderSettingsYaml(overrides: {
     { allow: '*' | string[]; mode: 'trigger' | 'drop' }
   >;
   slackLogDenied?: boolean;
+  telegramControlAgents?: Record<string, string[]>;
+  slackControlAgents?: Record<string, string[]>;
 }): string {
   const lines = [
     'version: 3',
@@ -65,6 +70,18 @@ function renderSettingsYaml(overrides: {
 
   lines.push(
     `      log_denied: ${overrides.telegramLogDenied === false ? 'false' : 'true'}`,
+    '    control_allowlist:',
+    '      default: []',
+    '      agents:',
+  );
+
+  for (const [folder, senders] of Object.entries(
+    overrides.telegramControlAgents || {},
+  )) {
+    lines.push(`        ${folder}: ${JSON.stringify(senders)}`);
+  }
+
+  lines.push(
     '  slack:',
     '    enabled: true',
     '    sender_allowlist:',
@@ -82,9 +99,24 @@ function renderSettingsYaml(overrides: {
 
   lines.push(
     `      log_denied: ${overrides.slackLogDenied === false ? 'false' : 'true'}`,
+    '    control_allowlist:',
+    '      default: []',
+    '      agents:',
+  );
+
+  for (const [folder, senders] of Object.entries(
+    overrides.slackControlAgents || {},
+  )) {
+    lines.push(`        ${folder}: ${JSON.stringify(senders)}`);
+  }
+
+  lines.push(
+    'storage:',
+    '  postgres:',
+    '    url_env: MYCLAW_DATABASE_URL',
+    '    schema: myclaw',
     'memory:',
     '  enabled: true',
-    '  root: memory',
     '  embeddings:',
     '    enabled: false',
     '    provider: disabled',
@@ -241,6 +273,53 @@ describe('isSenderExplicitlyAllowed', () => {
   it('uses explicit channel default allowlist for non-* defaults', () => {
     expect(isSenderExplicitlyAllowed('sl:C1', 'U1', cfg)).toBe(true);
     expect(isSenderExplicitlyAllowed('sl:C1', 'U2', cfg)).toBe(false);
+  });
+});
+
+describe('sender control allowlist', () => {
+  const cfg: RuntimeSenderControlAllowlistConfig = {
+    telegram: {
+      default: [],
+      agents: { telegram_kai: ['alice'] },
+    },
+    slack: {
+      default: ['U1'],
+      agents: {},
+    },
+  };
+
+  it('does not grant control access from sender allowlist wildcard', () => {
+    expect(isSenderControlAllowed('tg:1', 'anyone', cfg)).toBe(false);
+  });
+
+  it('uses explicit per-agent control senders', () => {
+    expect(isSenderControlAllowed('tg:1', 'alice', cfg, 'telegram_kai')).toBe(
+      true,
+    );
+    expect(isSenderControlAllowed('tg:1', 'bob', cfg, 'telegram_kai')).toBe(
+      false,
+    );
+  });
+
+  it('loads control allowlist separately from sender allowlist', () => {
+    const p = writeSettings({
+      telegramDefaultAllow: '*',
+      telegramDefaultMode: 'trigger',
+      telegramControlAgents: { telegram_kai: ['alice'] },
+      slackControlAgents: { slack_ops: ['U999'] },
+    });
+    const controlCfg = loadSenderControlAllowlist(p);
+    const senderCfg = loadSenderAllowlist(p);
+
+    expect(
+      isSenderControlAllowed('tg:1', 'alice', controlCfg, 'telegram_kai'),
+    ).toBe(true);
+    expect(isSenderAllowed('tg:1', 'bob', senderCfg, 'telegram_kai')).toBe(
+      true,
+    );
+    expect(
+      isSenderControlAllowed('tg:1', 'bob', controlCfg, 'telegram_kai'),
+    ).toBe(false);
   });
 });
 

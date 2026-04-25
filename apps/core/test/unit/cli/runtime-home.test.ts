@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_RUNTIME_HOME,
   resolveRuntimeHome,
-} from '@core/cli/runtime-home.js';
+} from '@core/config/settings/runtime-home.js';
 
 describe('resolveRuntimeHome', () => {
   afterEach(() => {

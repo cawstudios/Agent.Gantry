@@ -2,10 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { MemoryIpcRequest, MemoryIpcResponse } from '@myclaw/contracts';
 
-import { logger } from '../core/logger.js';
-import { isPlainObject } from '../core/object.js';
+import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
+import { logger } from '../infrastructure/logging/logger.js';
+import { isPlainObject } from '../shared/object.js';
 import { resolveGroupIpcPath } from '../platform/group-folder.js';
-import { MemoryService } from './memory-service.js';
+import { AppMemoryService } from './app-memory-service.js';
 import {
   PatchMemoryInput,
   PatchProcedureInput,
@@ -67,6 +68,14 @@ function parseMemoryKind(value: unknown): SaveMemoryInput['kind'] | undefined {
     return kind;
   }
   return undefined;
+}
+
+function subjectTypeFromScope(
+  scope: SaveMemoryInput['scope'] | SaveProcedureInput['scope'] | undefined,
+): 'user' | 'group' | 'common' {
+  if (scope === 'global') return 'common';
+  if (scope === 'user') return 'user';
+  return 'group';
 }
 
 function parseSaveMemoryInput(payload: unknown): SaveMemoryInput {
@@ -237,8 +246,8 @@ export async function processMemoryRequest(
 
   try {
     assertValidRequestId(request.requestId);
-    const memory = MemoryService.getInstance();
-    provider = memory.getProviderName();
+    const memory = AppMemoryService.getInstance();
+    provider = 'postgres';
     logger.debug(
       { action: request.action, sourceGroup, isMain, provider },
       'Processing memory IPC request',
@@ -252,10 +261,11 @@ export async function processMemoryRequest(
         }
         // IPC memory reads are always scoped to the source group to prevent
         // cross-group data access from agent processes.
-        const groupFolder = sourceGroup;
         const results = await memory.search({
           query,
-          groupFolder,
+          appId: 'personal',
+          agentId: sourceGroup,
+          groupId: sourceGroup,
           userId: request.payload.user_id
             ? String(request.payload.user_id)
             : undefined,
@@ -278,11 +288,22 @@ export async function processMemoryRequest(
             ? { topic_id: request.context.threadId }
             : {}),
         };
-        const saved = await memory.saveMemory(input, {
-          isMain,
-          groupFolder: sourceGroup,
-          actor: 'mcp-tool',
+        const saved = await memory.save({
+          appId: 'personal',
+          agentId: sourceGroup,
+          groupId: sourceGroup,
+          userId: input.user_id,
           threadId: request.context?.threadId,
+          subjectType: subjectTypeFromScope(input.scope),
+          kind: input.kind,
+          key: input.key,
+          value: input.value,
+          why: input.why,
+          confidence: input.confidence,
+          source: input.source || 'mcp-tool',
+          actorId: 'mcp-tool',
+          isAdminWrite: isMain,
+          evidenceText: input.why || input.value,
         });
         return {
           ok: true,
@@ -293,10 +314,19 @@ export async function processMemoryRequest(
       }
       case 'memory_patch': {
         const input = parsePatchMemoryInput(request.payload);
-        const patched = memory.patchMemory(input, {
-          isMain,
-          groupFolder: sourceGroup,
-          actor: 'mcp-tool',
+        const patched = await memory.patch({
+          id: input.id,
+          appId: 'personal',
+          agentId: sourceGroup,
+          groupId: sourceGroup,
+          threadId: request.context?.threadId,
+          key: input.key,
+          value: input.value,
+          why: input.why,
+          confidence: input.confidence,
+          isPinned: input.load_bearing,
+          expectedVersion: input.expected_version,
+          isAdminWrite: isMain,
         });
         return {
           ok: true,
@@ -306,8 +336,13 @@ export async function processMemoryRequest(
         };
       }
       case 'memory_consolidate': {
-        const groupFolder = sourceGroup;
-        const result = await memory.consolidateGroupMemory(groupFolder);
+        const result = await memory.triggerDreaming({
+          appId: 'personal',
+          agentId: sourceGroup,
+          groupId: sourceGroup,
+          phase: 'deep',
+          dryRun: false,
+        });
         return {
           ok: true,
           requestId: request.requestId,
@@ -316,8 +351,13 @@ export async function processMemoryRequest(
         };
       }
       case 'memory_dream': {
-        const groupFolder = sourceGroup;
-        const result = await memory.runDreamingSweep(groupFolder);
+        const result = await memory.triggerDreaming({
+          appId: 'personal',
+          agentId: sourceGroup,
+          groupId: sourceGroup,
+          phase: 'all',
+          dryRun: false,
+        });
         return {
           ok: true,
           requestId: request.requestId,
@@ -332,11 +372,21 @@ export async function processMemoryRequest(
             ? { topic_id: request.context.threadId }
             : {}),
         };
-        const saved = memory.saveProcedure(input, {
-          isMain,
-          groupFolder: sourceGroup,
-          actor: 'mcp-tool',
+        const saved = await memory.save({
+          appId: 'personal',
+          agentId: sourceGroup,
+          groupId: sourceGroup,
           threadId: request.context?.threadId,
+          subjectType: subjectTypeFromScope(input.scope),
+          kind: 'reference',
+          key: `procedure:${input.title}`,
+          value: input.body,
+          why: input.trigger || undefined,
+          confidence: input.confidence,
+          source: input.source || 'mcp-tool',
+          actorId: 'mcp-tool',
+          isAdminWrite: isMain,
+          evidenceText: input.body,
         });
         return {
           ok: true,
@@ -347,10 +397,18 @@ export async function processMemoryRequest(
       }
       case 'procedure_patch': {
         const input = parsePatchProcedureInput(request.payload);
-        const patched = memory.patchProcedure(input, {
-          isMain,
-          groupFolder: sourceGroup,
-          actor: 'mcp-tool',
+        const patched = await memory.patch({
+          id: input.id,
+          appId: 'personal',
+          agentId: sourceGroup,
+          groupId: sourceGroup,
+          threadId: request.context?.threadId,
+          key: input.title ? `procedure:${input.title}` : undefined,
+          value: input.body,
+          why: input.trigger === null ? null : input.trigger,
+          confidence: input.confidence,
+          expectedVersion: input.expected_version,
+          isAdminWrite: isMain,
         });
         return {
           ok: true,
@@ -378,6 +436,7 @@ export function writeMemoryResponse(
   groupFolder: string,
   requestId: string,
   response: MemoryIpcResponse,
+  privateKeyPem?: string,
 ): void {
   assertValidRequestId(requestId);
   const ipcDir = resolveGroupIpcPath(groupFolder);
@@ -386,6 +445,17 @@ export function writeMemoryResponse(
 
   const filePath = path.join(responsesDir, `${requestId}.json`);
   const tmpPath = `${filePath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(response, null, 2));
+  const payload: Record<string, unknown> = {
+    ok: response.ok,
+    requestId: response.requestId,
+    ...(response.provider ? { provider: response.provider } : {}),
+    ...(response.data !== undefined ? { data: response.data } : {}),
+    ...(response.error ? { error: response.error } : {}),
+  };
+  const signature = signIpcResponsePayload(privateKeyPem, payload);
+  if (signature) {
+    payload.signature = signature;
+  }
+  fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
   fs.renameSync(tmpPath, filePath);
 }

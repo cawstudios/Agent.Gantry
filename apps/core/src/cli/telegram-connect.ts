@@ -1,13 +1,17 @@
 import * as p from '@clack/prompts';
 import '../channels/register-builtins.js';
 import { getChannelProvider } from '../channels/provider-registry.js';
-import { upsertEnvFile } from './env-file.js';
-import { envFilePath, ensureRuntimeLayout } from './runtime-home.js';
+import { upsertEnvFile } from '../config/env/file.js';
+import {
+  envFilePath,
+  ensureRuntimeLayout,
+} from '../config/settings/runtime-home.js';
 import { listTelegramRecentChats } from './telegram-chat-discovery.js';
 import {
+  addControlSenderForAgent,
   loadRuntimeSettings,
   saveRuntimeSettings,
-} from './runtime-settings.js';
+} from '../config/settings/runtime-settings.js';
 import {
   normalizeTelegramChatJid,
   readTelegramFromRuntimeEnv,
@@ -17,7 +21,11 @@ import {
 } from './telegram.js';
 
 type TelegramChatChoice =
-  | { type: 'selected'; chatJid: string }
+  | {
+      type: 'selected';
+      chatJid: string;
+      adminSenderId?: string;
+    }
   | { type: 'skip' }
   | { type: 'cancel' };
 
@@ -52,9 +60,58 @@ async function promptManualTelegramChatId(
   });
   if (p.isCancel(result)) return { type: 'cancel' };
   const normalized = normalizeTelegramChatJid(String(result || '').trim());
-  return normalized
-    ? { type: 'selected', chatJid: normalized }
-    : { type: 'skip' };
+  if (!normalized) return { type: 'skip' };
+
+  const adminSenderId = await promptManualTelegramAdminSenderId();
+  if (adminSenderId === null) return { type: 'cancel' };
+  return adminSenderId
+    ? { type: 'selected', chatJid: normalized, adminSenderId }
+    : { type: 'selected', chatJid: normalized };
+}
+
+async function promptManualTelegramAdminSenderId(): Promise<string | null> {
+  const result = await p.text({
+    message: 'Telegram sender/user ID for session admin (optional)',
+    placeholder:
+      'Press Enter to skip; enter only your own trusted Telegram user ID',
+    validate: (value) => {
+      const trimmed = String(value || '').trim();
+      if (!trimmed) return undefined;
+      return /^-?\d+$/.test(trimmed)
+        ? undefined
+        : 'Use a numeric Telegram user ID.';
+    },
+  });
+  if (p.isCancel(result)) return null;
+  return String(result || '').trim();
+}
+
+function normalizeTelegramPermissionApproverIds(raw: string): string {
+  return raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => /^-?\d+$/.test(entry))
+    .join(',');
+}
+
+async function promptTelegramPermissionApproverIds(
+  defaultValue: string,
+): Promise<string | null> {
+  const result = await p.text({
+    message: 'Telegram approver user IDs for permissions (required)',
+    placeholder: '12345,67890',
+    defaultValue,
+    validate: (value) => {
+      const parsed = normalizeTelegramPermissionApproverIds(
+        String(value || '').trim(),
+      );
+      return parsed
+        ? undefined
+        : 'Enter one or more numeric Telegram user IDs separated by commas.';
+    },
+  });
+  if (p.isCancel(result)) return null;
+  return normalizeTelegramPermissionApproverIds(String(result || '').trim());
 }
 
 async function chooseChatFromDiscovery(
@@ -102,9 +159,12 @@ async function chooseChatFromDiscovery(
   }
   if (selected === 'skip') return { type: 'skip' };
   const normalized = normalizeTelegramChatJid(String(selected || '').trim());
-  return normalized
-    ? { type: 'selected', chatJid: normalized }
-    : { type: 'skip' };
+  if (!normalized) return { type: 'skip' };
+  const adminSenderId = await promptManualTelegramAdminSenderId();
+  if (adminSenderId === null) return { type: 'cancel' };
+  return adminSenderId
+    ? { type: 'selected', chatJid: normalized, adminSenderId }
+    : { type: 'selected', chatJid: normalized };
 }
 
 export async function runTelegramConnectCommand(
@@ -143,6 +203,16 @@ export async function runTelegramConnectCommand(
   }
   const normalizedChatJid =
     chatChoice.type === 'selected' ? chatChoice.chatJid : '';
+  const adminSenderId =
+    chatChoice.type === 'selected' ? chatChoice.adminSenderId : undefined;
+  const approverInput = await promptTelegramPermissionApproverIds(
+    adminSenderId || env.TELEGRAM_PERMISSION_APPROVER_IDS || '',
+  );
+  if (approverInput === null) {
+    p.outro('Telegram connect cancelled.');
+    return 1;
+  }
+  let registeredFolder = '';
 
   if (normalizedChatJid) {
     const access = await verifyTelegramChatAccess({
@@ -162,6 +232,7 @@ export async function runTelegramConnectCommand(
       chatJid: normalizedChatJid,
       displayName: access.chatTitle || 'Telegram Main',
     });
+    registeredFolder = registered.folder;
 
     p.log.success(
       `Registered Telegram main group ${registered.groupName} (${normalizedChatJid}) in folder ${registered.folder}.`,
@@ -170,11 +241,27 @@ export async function runTelegramConnectCommand(
 
   upsertEnvFile(envFilePath(runtimeHome), {
     TELEGRAM_BOT_TOKEN: tokenInput,
+    TELEGRAM_PERMISSION_APPROVER_IDS: approverInput || null,
   });
   const settings = loadRuntimeSettings(runtimeHome);
   const provider = getChannelProvider('telegram');
   if (provider && settings.channels[provider.id]) {
     settings.channels[provider.id].enabled = true;
+    if (registeredFolder && adminSenderId) {
+      addControlSenderForAgent(
+        settings,
+        provider.id,
+        registeredFolder,
+        adminSenderId,
+      );
+      p.log.success(
+        `Enabled session/admin commands for Telegram sender ${adminSenderId}.`,
+      );
+    } else if (registeredFolder) {
+      p.log.info(
+        'No Telegram session/admin sender was configured. Run `myclaw channel connect telegram` again and enter your own Telegram user ID if you want chat commands.',
+      );
+    }
   }
   saveRuntimeSettings(runtimeHome, settings);
 
@@ -182,7 +269,7 @@ export async function runTelegramConnectCommand(
     p.outro('Telegram channel is configured and ready.');
   } else {
     p.outro(
-      'Telegram token saved. Next: run `myclaw agent add <chat-id> --main --requires-trigger false`.',
+      'Telegram token saved. Next: run `myclaw channel connect telegram` to register a chat.',
     );
   }
 

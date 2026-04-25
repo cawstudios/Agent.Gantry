@@ -8,7 +8,9 @@ Make continuity deterministic and production-safe:
 
 - memory + dream context is injected by host on every run
 - agent tools are optional depth, not required for baseline recall
-- scope policy is explicit across Slack/Telegram/thread topics
+- boundary policy is explicit across Telegram chats, Slack conversations,
+  Microsoft Teams conversations, SDK conversations, and provider thread/topic
+  ids
 - docs and admin skill match real runtime behavior
 
 ## 2) Runtime Injection Contract
@@ -47,18 +49,20 @@ Make continuity deterministic and production-safe:
 - If enabled, scheduler runs dream sweeps on configured cron.
 - Brief always shows latest lifecycle status, so agent can weight memory quality.
 
-## 6) Memory Root Structure (runtime home)
+## 6) Memory Storage Structure
 
-`~/myclaw/memory/`:
+Live memory and dreaming state are Postgres runtime state:
 
-- `.cache/memory.db`
-- `.journal/`
-- `items/`
-- `procedures/`
-- `sessions/`
-- `dreams/`
-- `daily/`
-- `knowledge/`
+- `memory_subjects`
+- `memory_evidence`
+- `memory_candidates`
+- `memory_items`
+- `memory_recall_events`
+- `memory_dream_runs`
+- `memory_dream_decisions`
+
+Session transcript archives live under `<runtime home>/data/session-archives`
+as operational artifacts. They are not the memory store.
 - `.raw/`
 
 ## 7) Prompt + Skill Updates
@@ -67,8 +71,8 @@ Make continuity deterministic and production-safe:
 - Continuity rules now reference dream lifecycle signals.
 - `myclaw-admin` skill updated with:
   - injection contract
-  - scope policy
-  - runtime memory folder map
+  - app/agent/subject boundary policy
+  - Postgres memory table map
 
 ## 8) Release Gates
 

@@ -4,6 +4,8 @@ import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DEFAULT_SETUP_MODEL } from '@core/models/claude-model-registry.js';
+
 /** Helper: create a temp dir and register it for cleanup. */
 function makeTmpRoot(roots: string[]): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-layout-'));
@@ -52,7 +54,7 @@ describe('ensureSharedSessionSettings', () => {
     );
 
     // Mock runtime paths to point to our temp root.
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: root,
       DATA_DIR: root,
     }));
@@ -63,13 +65,22 @@ describe('ensureSharedSessionSettings', () => {
 
     const updated = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as {
       env: Record<string, string>;
+      availableModels: string[];
+      model: string;
       autoMemoryEnabled: boolean;
       hooks: Record<string, unknown[]>;
     };
 
     expect(updated.env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD).toBe('0');
     expect(updated.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
+    expect(updated.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
+    expect(updated.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined();
+    expect(updated.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBeUndefined();
     expect(updated.env.CUSTOM_FLAG).toBeUndefined();
+    expect(updated.model).toBe(DEFAULT_SETUP_MODEL);
+    expect(updated.availableModels).toEqual(
+      expect.arrayContaining(['opus', 'sonnet', 'haiku', 'opusplan']),
+    );
     expect(updated.autoMemoryEnabled).toBe(false);
     expect(Array.isArray(updated.hooks.SessionStart)).toBe(true);
     expect(Array.isArray(updated.hooks.PreCompact)).toBe(true);
@@ -77,15 +88,17 @@ describe('ensureSharedSessionSettings', () => {
     expect(updated.hooks.Stop).toBeUndefined();
     expect(Object.keys(updated).sort()).toEqual([
       'autoMemoryEnabled',
+      'availableModels',
       'env',
       'hooks',
+      'model',
     ]);
   });
 
   it('creates settings from scratch when no file exists', async () => {
     const root = makeTmpRoot(roots);
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: root,
       DATA_DIR: root,
     }));
@@ -99,11 +112,17 @@ describe('ensureSharedSessionSettings', () => {
 
     const written = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as {
       env: Record<string, string>;
+      availableModels: string[];
+      model: string;
       autoMemoryEnabled: boolean;
       hooks: Record<string, unknown[]>;
     };
     expect(written.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
     expect(written.env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD).toBe('0');
+    expect(written.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
+    expect(written.model).toBe('opus');
+    expect(written.availableModels).toContain('opus');
+    expect(written.availableModels).not.toContain('claude-opus-4-7');
     expect(written.autoMemoryEnabled).toBe(false);
     expect(Object.keys(written.hooks).sort()).toEqual([
       'PreCompact',
@@ -120,7 +139,7 @@ describe('ensureSharedSessionSettings', () => {
     const settingsPath = path.join(claudeDir, 'settings.json');
     fs.writeFileSync(settingsPath, '{{not valid json}}');
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: root,
       DATA_DIR: root,
     }));
@@ -138,8 +157,10 @@ describe('ensureSharedSessionSettings', () => {
     expect(written.env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD).toBe('0');
     expect(Object.keys(written).sort()).toEqual([
       'autoMemoryEnabled',
+      'availableModels',
       'env',
       'hooks',
+      'model',
     ]);
     expect(written.hooks).toHaveProperty('SessionStart');
   });
@@ -153,7 +174,7 @@ describe('ensureSharedSessionSettings', () => {
     // A valid JSON value that is not an object
     fs.writeFileSync(settingsPath, '"just a string"');
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: root,
       DATA_DIR: root,
     }));
@@ -168,8 +189,10 @@ describe('ensureSharedSessionSettings', () => {
     expect(written.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
     expect(Object.keys(written).sort()).toEqual([
       'autoMemoryEnabled',
+      'availableModels',
       'env',
       'hooks',
+      'model',
     ]);
   });
 
@@ -214,7 +237,7 @@ describe('ensureSharedSessionSettings', () => {
       ),
     );
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: root,
       DATA_DIR: root,
     }));
@@ -229,7 +252,11 @@ describe('ensureSharedSessionSettings', () => {
     };
 
     expect(writtenText).not.toContain('old-hook');
-    expect(writtenText).toContain('npx --yes');
+    expect(writtenText).not.toContain('npx --yes');
+    const sessionStartCommand =
+      written.hooks.SessionStart[0]?.hooks[0]?.command || '';
+    expect(sessionStartCommand).toContain(JSON.stringify(process.execPath));
+    expect(sessionStartCommand).toContain('dist/cli/index.js');
     expect(writtenText).toContain('memory-hook load');
     expect(writtenText).toContain('memory-hook extract --trigger=precompact');
     expect(writtenText).toContain('memory-hook extract --trigger=session-end');
@@ -291,7 +318,7 @@ describe('syncGroupSkills', () => {
 
     process.chdir(cwdRoot);
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: configRoot,
       DATA_DIR: configRoot,
     }));
@@ -312,7 +339,7 @@ describe('syncGroupSkills', () => {
     originalCwd = process.cwd();
     process.chdir(cwdRoot);
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: configRoot,
       DATA_DIR: configRoot,
     }));
@@ -338,7 +365,7 @@ describe('syncGroupSkills', () => {
 
     process.chdir(cwdRoot);
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: configRoot,
       DATA_DIR: configRoot,
     }));
@@ -359,7 +386,7 @@ describe('syncGroupSkills', () => {
     originalCwd = process.cwd();
     process.chdir(cwdRoot);
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: configRoot,
       DATA_DIR: configRoot,
     }));
@@ -385,7 +412,7 @@ describe('syncGroupSkills', () => {
     originalCwd = process.cwd();
     process.chdir(cwdRoot);
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: configRoot,
       DATA_DIR: configRoot,
     }));
@@ -428,7 +455,7 @@ describe('syncGroupSkills', () => {
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# stale');
     fs.writeFileSync(path.join(skillDir, 'LOCAL.txt'), 'remove me');
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: configRoot,
       DATA_DIR: configRoot,
     }));
@@ -458,7 +485,7 @@ describe('syncGroupSkills', () => {
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# My Custom Skill');
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: configRoot,
       DATA_DIR: configRoot,
     }));
@@ -495,7 +522,7 @@ describe('ensureGroupIpcLayout', () => {
     const root = makeTmpRoot(roots);
     const ipcDir = path.join(root, 'group-ipc');
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: root,
       DATA_DIR: root,
     }));
@@ -534,7 +561,7 @@ describe('ensureGroupIpcLayout', () => {
     const root = makeTmpRoot(roots);
     const ipcDir = path.join(root, 'ipc-idem');
 
-    vi.doMock('@core/core/config.js', () => ({
+    vi.doMock('@core/config/index.js', () => ({
       MYCLAW_HOME: root,
       DATA_DIR: root,
     }));

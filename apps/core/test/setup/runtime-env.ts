@@ -2,7 +2,10 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const runtimeHome = path.join(os.tmpdir(), 'myclaw-vitest-runtime');
+const runtimeHome = path.join(
+  os.tmpdir(),
+  `myclaw-vitest-runtime-${process.pid}`,
+);
 const settingsPath = path.join(runtimeHome, 'settings.yaml');
 
 const settingsYaml = [
@@ -15,6 +18,9 @@ const settingsYaml = [
   '        mode: trigger',
   '      agents: {}',
   '      log_denied: true',
+  '    control_allowlist:',
+  '      default: []',
+  '      agents: {}',
   '  slack:',
   '    enabled: false',
   '    sender_allowlist:',
@@ -23,9 +29,11 @@ const settingsYaml = [
   '        mode: trigger',
   '      agents: {}',
   '      log_denied: true',
+  '    control_allowlist:',
+  '      default: []',
+  '      agents: {}',
   'memory:',
   '  enabled: true',
-  '  root: memory',
   '  embeddings:',
   '    enabled: false',
   '    provider: disabled',
@@ -37,7 +45,10 @@ const settingsYaml = [
   '      extractor: claude-haiku-4-5-20251001',
   '      dreaming: claude-sonnet-4-6',
   '      consolidation: claude-sonnet-4-6',
-  '      session_summary: claude-haiku-4-5-20251001',
+  'storage:',
+  '  postgres:',
+  '    url_env: MYCLAW_DATABASE_URL',
+  '    schema: myclaw',
   '',
 ].join('\n');
 

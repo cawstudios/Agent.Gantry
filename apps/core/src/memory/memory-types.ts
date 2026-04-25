@@ -1,6 +1,140 @@
 export type MemoryScope = 'user' | 'group' | 'global';
 export const MEMORY_GLOBAL_GROUP_FOLDER = '_global';
 
+export type MemorySubjectType = 'user' | 'group' | 'channel' | 'common';
+export type MemoryVisibility = MemorySubjectType;
+export type MemoryEvidenceSource =
+  | 'session'
+  | 'message'
+  | 'tool'
+  | 'manual'
+  | 'knowledge_source';
+export type DreamPhase = 'light' | 'rem' | 'deep' | 'all';
+export type DreamDecisionAction =
+  | 'stage_candidate'
+  | 'promote'
+  | 'merge'
+  | 'rewrite'
+  | 'pin'
+  | 'decay'
+  | 'retire'
+  | 'needs_review'
+  | 'no_op';
+
+export interface MemoryBoundaryContext {
+  /** Application namespace. Personal setup uses "personal"; SDK apps provide their stable app id. */
+  appId: string;
+  /** Agent/runtime owner. For channel agents this is the configured MyClaw agent folder/id. */
+  agentId: string;
+  /** Human actor identity when known. */
+  userId?: string;
+  /** Logical MyClaw/app group, not a provider-specific Telegram group. */
+  groupId?: string;
+  /** External provider conversation id: Telegram chat, Slack conversation, Teams channel/chat, or SDK conversation. */
+  channelId?: string;
+  /** Provider thread/topic/reply-chain id, such as Slack thread_ts, Telegram forum topic, or Teams reply chain. */
+  threadId?: string;
+}
+
+export interface NormalizedMemorySubject extends MemoryBoundaryContext {
+  subjectType: MemorySubjectType;
+  subjectId: string;
+}
+
+export interface AppMemoryItem extends MemoryBoundaryContext {
+  id: string;
+  subjectType: MemorySubjectType;
+  subjectId: string;
+  kind: MemoryKind;
+  key: string;
+  value: string;
+  why?: string | null;
+  confidence: number;
+  isPinned: boolean;
+  version: number;
+  source: string;
+  evidenceIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryEvidenceRecord extends NormalizedMemorySubject {
+  id: string;
+  sourceType: MemoryEvidenceSource;
+  sourceId?: string | null;
+  actorId?: string | null;
+  text: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AppMemorySearchResult {
+  item: AppMemoryItem;
+  score: number;
+  lexicalScore: number;
+  vectorScore: number;
+  reasons: string[];
+}
+
+export interface SaveAppMemoryInput extends Partial<MemoryBoundaryContext> {
+  subjectType?: MemorySubjectType;
+  subjectId?: string;
+  visibility?: MemoryVisibility;
+  kind?: MemoryKind;
+  key: string;
+  value: string;
+  why?: string;
+  confidence?: number;
+  source?: string;
+  evidenceText?: string;
+  evidenceIds?: string[];
+  actorId?: string;
+  isAdminWrite?: boolean;
+}
+
+export interface AppMemorySearchInput extends Partial<MemoryBoundaryContext> {
+  query?: string;
+  limit?: number;
+  includeCommon?: boolean;
+  subjectTypes?: MemorySubjectType[];
+}
+
+export interface PatchAppMemoryInput extends Partial<MemoryBoundaryContext> {
+  id: string;
+  expectedVersion?: number;
+  key?: string;
+  value?: string;
+  why?: string | null;
+  confidence?: number;
+  isPinned?: boolean;
+  isAdminWrite?: boolean;
+}
+
+export interface DeleteAppMemoryInput extends Partial<MemoryBoundaryContext> {
+  id: string;
+  isAdminWrite?: boolean;
+}
+
+export interface DreamingTriggerInput extends Partial<MemoryBoundaryContext> {
+  subjectType?: MemorySubjectType;
+  subjectId?: string;
+  phase?: DreamPhase;
+  dryRun?: boolean;
+}
+
+export interface DreamingRunStatus {
+  runId: string;
+  appId: string;
+  agentId: string;
+  subjectType: MemorySubjectType;
+  subjectId: string;
+  phase: DreamPhase;
+  status: 'running' | 'completed' | 'failed';
+  summary: Record<string, unknown>;
+  startedAt: string;
+  completedAt?: string | null;
+}
+
 export type MemoryKind =
   | 'preference'
   | 'decision'
