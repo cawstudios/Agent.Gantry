@@ -202,6 +202,62 @@ class CheckArchitectureTests(unittest.TestCase):
             self.assertIn("[Forbidden Import Edges]", result.stdout)
             self.assertIn("apps/core/src/domain/boundary-break.ts imports apps/core/src/runtime/worker.ts", result.stdout)
 
+    def test_enterprise_framework_import_in_runtime_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "apps/core/src/runtime/nest-break.ts",
+                'import { Injectable } from "@nestjs/common";\nexport const value = Injectable;\n',
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("[Framework Boundary Imports]", result.stdout)
+            self.assertIn("NestJS and NextJS must integrate through SDK/control API", result.stdout)
+
+    def test_fastify_import_outside_control_http_adapter_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "apps/core/src/runtime/http-break.ts",
+                'import Fastify from "fastify";\nexport const value = Fastify;\n',
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("[Framework Boundary Imports]", result.stdout)
+            self.assertIn("Fastify is allowed only in the control HTTP adapter", result.stdout)
+
+    def test_fastify_import_inside_control_http_adapter_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "apps/core/src/adapters/control-http/server.ts",
+                'import Fastify from "fastify";\nexport const value = Fastify;\n',
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    def test_anthropic_import_outside_provider_adapter_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "apps/core/src/runtime/model-break.ts",
+                'import { query } from "@anthropic-ai/claude-agent-sdk";\nexport const value = query;\n',
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("[Framework Boundary Imports]", result.stdout)
+            self.assertIn("Anthropic SDK imports must stay in approved provider adapter paths", result.stdout)
+
+    def test_current_anthropic_provider_adapter_path_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "apps/core/src/runner/claude/query-loop.ts",
+                'import { query } from "@anthropic-ai/claude-agent-sdk";\nexport const value = query;\n',
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
     def test_forbidden_channel_registration_surface_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))

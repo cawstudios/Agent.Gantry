@@ -12,6 +12,7 @@ from architecture_rules import (
     check_forbidden_runtime_runner_materialization,
     check_doc_references,
     check_file_size_budget,
+    check_framework_boundary_imports,
     check_forbidden_import_edges,
     iter_production_sources,
     repo_root_from_git,
@@ -35,6 +36,7 @@ def print_grouped_failures(issues: dict[str, list[str]]) -> None:
     groups = (
         ("exception_hygiene", "Exception Hygiene"),
         ("file_size_budget", "File Size Budget"),
+        ("framework_boundary_imports", "Framework Boundary Imports"),
         ("forbidden_import_edges", "Forbidden Import Edges"),
         ("forbidden_channel_registration_surface", "Channel Registration Surface"),
         ("forbidden_ipc_contract_surface", "IPC Contract Surface"),
@@ -65,6 +67,9 @@ def main() -> int:
     grouped_issues = {
         "exception_hygiene": exception_hygiene,
         "file_size_budget": check_file_size_budget(production_files, root, exceptions),
+        "framework_boundary_imports": check_framework_boundary_imports(
+            production_files, root
+        ),
         "forbidden_import_edges": check_forbidden_import_edges(production_files, root),
         "forbidden_channel_registration_surface": check_forbidden_channel_registration_surface(
             production_files, root

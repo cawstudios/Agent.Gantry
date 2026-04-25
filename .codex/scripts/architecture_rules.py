@@ -156,6 +156,38 @@ INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 IMPORT_FROM_RE = re.compile(r"(?:^|\n)\s*(?:import|export)\b[^;]*?\bfrom\s*['\"]([^'\"]+)['\"]", re.MULTILINE)
 SIDE_EFFECT_IMPORT_RE = re.compile(r"(?:^|\n)\s*import\s*['\"]([^'\"]+)['\"]", re.MULTILINE)
 
+FRAMEWORK_BOUNDARY_RULES = (
+    {
+        "name": "enterprise frameworks in core runtime layers",
+        "source_prefixes": (
+            "apps/core/src/domain",
+            "apps/core/src/application",
+            "apps/core/src/runtime",
+        ),
+        "specifier_prefixes": ("@nestjs/", "next", "next/"),
+        "allowed_prefixes": (),
+        "message": "NestJS and NextJS must integrate through SDK/control API, not core runtime internals.",
+    },
+    {
+        "name": "Fastify outside control HTTP adapter",
+        "source_prefixes": ("apps/core/src",),
+        "specifier_prefixes": ("fastify", "@fastify/"),
+        "allowed_prefixes": ("apps/core/src/adapters/control-http",),
+        "message": "Fastify is allowed only in the control HTTP adapter.",
+    },
+    {
+        "name": "Anthropic SDK outside provider adapter",
+        "source_prefixes": ("apps/core/src",),
+        "specifier_prefixes": ("@anthropic-ai/sdk", "@anthropic-ai/claude-agent-sdk"),
+        "allowed_prefixes": (
+            "apps/core/src/adapters/llm/anthropic",
+            "apps/core/src/runner/claude",
+            "apps/core/src/memory/claude-query.ts",
+        ),
+        "message": "Anthropic SDK imports must stay in approved provider adapter paths.",
+    },
+)
+
 RECOGNIZED_CODE_PATH_EXTENSIONS = {
     ".md",
     ".ts",
@@ -391,6 +423,12 @@ def path_matches_prefix(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(f"{prefix}/")
 
 
+def import_matches_prefix(specifier: str, prefix: str) -> bool:
+    if prefix.endswith("/"):
+        return specifier.startswith(prefix)
+    return specifier == prefix or specifier.startswith(f"{prefix}/")
+
+
 def check_forbidden_import_edges(production_files: list[Path], root: Path) -> list[str]:
     violations: set[str] = set()
     for source_file in production_files:
@@ -409,6 +447,35 @@ def check_forbidden_import_edges(production_files: list[Path], root: Path) -> li
                             f"{source_rel} imports {target_rel} via `{specifier}` "
                             f"(forbidden {source_prefix} -> {forbidden_prefix})."
                         )
+    return sorted(violations)
+
+
+def check_framework_boundary_imports(production_files: list[Path], root: Path) -> list[str]:
+    violations: set[str] = set()
+    for source_file in production_files:
+        source_rel = source_file.relative_to(root).as_posix()
+        source_text = source_file.read_text()
+        for specifier in extract_import_specifiers(source_text):
+            for rule in FRAMEWORK_BOUNDARY_RULES:
+                if not any(
+                    path_matches_prefix(source_rel, prefix)
+                    for prefix in rule["source_prefixes"]
+                ):
+                    continue
+                if not any(
+                    import_matches_prefix(specifier, prefix)
+                    for prefix in rule["specifier_prefixes"]
+                ):
+                    continue
+                if any(
+                    path_matches_prefix(source_rel, prefix)
+                    for prefix in rule["allowed_prefixes"]
+                ):
+                    continue
+                line = source_text.count("\n", 0, source_text.find(specifier)) + 1
+                violations.add(
+                    f"{source_rel}:{line}: imports `{specifier}` ({rule['message']})"
+                )
     return sorted(violations)
 
 
