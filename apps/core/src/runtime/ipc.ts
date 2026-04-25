@@ -56,6 +56,10 @@ import {
   startService,
   stopService,
 } from '../cli/service-manager.js';
+import {
+  checkChannelSendPermission,
+  getPermissionProfileForAgent,
+} from './permission-profile-registry.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -91,6 +95,7 @@ const ipcRateLimitState = new Map<
   string,
   { windowStart: number; count: number }
 >();
+const warnedUnknownIpcFolders = new Set<string>();
 
 function normalizeIpcExecutionMode(
   executionMode: unknown,
@@ -103,6 +108,44 @@ function normalizeIpcExecutionMode(
     return serialize ? 'serialized' : 'parallel';
   }
   return fallback;
+}
+
+function formatSchedulerRunAt(runAt: Date): string {
+  return new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: TIMEZONE,
+  }).format(runAt);
+}
+
+async function notifySchedulerJobCreated(args: {
+  deps: IpcDeps;
+  registeredGroups: Record<string, RegisteredGroup>;
+  linkedSessions: string[];
+  sourceGroupJids: string[];
+  name: string;
+  runAtDate: Date;
+}): Promise<void> {
+  const candidateJids = [
+    ...args.linkedSessions.filter((jid) => args.registeredGroups[jid]),
+    ...args.sourceGroupJids,
+  ];
+  const notificationJids = Array.from(new Set(candidateJids));
+  const message = [
+    `✅ Scheduled task: ${args.name}`,
+    `Runs at: ${formatSchedulerRunAt(args.runAtDate)}`,
+  ].join('\n');
+
+  for (const jid of notificationJids) {
+    try {
+      await args.deps.sendMessage(jid, message);
+    } catch (err) {
+      logger.warn(
+        { err, jid, jobName: args.name },
+        'Failed to send scheduler creation confirmation',
+      );
+    }
+  }
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -1003,9 +1046,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
     const groupFolders: string[] = [];
     for (const folder of discoveredGroupFolders) {
       if (allowedFolders.size > 0 && !allowedFolders.has(folder)) {
-        logger.warn({ sourceGroup: folder }, 'Ignoring unknown IPC directory');
+        if (!warnedUnknownIpcFolders.has(folder)) {
+          warnedUnknownIpcFolders.add(folder);
+          logger.warn(
+            { sourceGroup: folder },
+            'Ignoring unknown IPC directory',
+          );
+        }
         continue;
       }
+      warnedUnknownIpcFolders.delete(folder);
       groupFolders.push(folder);
     }
 
@@ -1062,6 +1112,25 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 isMain ||
                 (targetGroup && targetGroup.folder === sourceGroup)
               ) {
+                const permission = checkChannelSendPermission(
+                  getPermissionProfileForAgent(sourceGroup),
+                  {
+                    jid: data.chatJid,
+                    group: targetGroup,
+                  },
+                );
+                if (!permission.allowed) {
+                  logger.warn(
+                    {
+                      chatJid: data.chatJid,
+                      sourceGroup,
+                      reason: permission.reason,
+                    },
+                    'IPC message blocked by permission profile',
+                  );
+                  fs.unlinkSync(claimedPath);
+                  continue;
+                }
                 await deps.sendMessage(data.chatJid, data.text);
                 logger.info(
                   { chatJid: data.chatJid, sourceGroup },
@@ -1582,6 +1651,16 @@ export async function processTaskIpc(
         { id, created: upsertResult.created, sourceGroup, groupScope },
         'One-time job created via IPC',
       );
+      if (data.silent !== true) {
+        await notifySchedulerJobCreated({
+          deps,
+          registeredGroups,
+          linkedSessions,
+          sourceGroupJids,
+          name,
+          runAtDate,
+        });
+      }
       deps.onSchedulerChanged();
       break;
     }

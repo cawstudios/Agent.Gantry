@@ -44,6 +44,8 @@ describe('agent-config-registry', () => {
         'channel: slack',
         'timezone: Asia/Kolkata',
         'manager_target: "slack:#hr-managers"',
+        'channel_jids:',
+        '  - "sl:C0AT4JNGA9Z"',
         'enabled_workflows:',
         '  - attendance-daily',
         '  - attendance-followup',
@@ -61,6 +63,7 @@ describe('agent-config-registry', () => {
       folder: 'people-ops-agent',
       channel: 'slack',
       timezone: 'Asia/Kolkata',
+      channelJids: ['sl:C0AT4JNGA9Z'],
       enabledWorkflows: ['attendance-daily', 'attendance-followup'],
     });
     expect(getConfiguredAgents()['people-ops-agent']?.id).toBe(
@@ -109,5 +112,38 @@ describe('agent-config-registry', () => {
         logger: { info: () => undefined, warn: () => undefined },
       }),
     ).toThrow(/Duplicate agent id "people-ops-agent"/);
+  });
+
+  it('throws on duplicate channel bindings across agents', () => {
+    const agentsDir = makeTempAgentsDir();
+    writeAgentYaml(
+      agentsDir,
+      'people-ops-agent',
+      [
+        'id: people-ops-agent',
+        'channel: slack',
+        'timezone: Asia/Kolkata',
+        'channel_jids:',
+        '  - "sl:C123"',
+      ].join('\n'),
+    );
+    writeAgentYaml(
+      agentsDir,
+      'finance-agent',
+      [
+        'id: finance-agent',
+        'channel: slack',
+        'timezone: Asia/Kolkata',
+        'channel_jids:',
+        '  - "sl:C123"',
+      ].join('\n'),
+    );
+
+    expect(() =>
+      refreshConfiguredAgentsFromDisk({
+        agentsDir,
+        logger: { info: () => undefined, warn: () => undefined },
+      }),
+    ).toThrow(/Duplicate channel_jids entry "sl:C123"/);
   });
 });

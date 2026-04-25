@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 const LEVELS = { debug: 20, info: 30, warn: 40, error: 50, fatal: 60 } as const;
 type Level = keyof typeof LEVELS;
 
@@ -16,6 +19,25 @@ const LOGGER_HANDLER_MARK = Symbol.for('myclaw.logger.handler');
 
 const threshold =
   LEVELS[(process.env.LOG_LEVEL as Level) || 'info'] ?? LEVELS.info;
+
+let fileStream: fs.WriteStream | null = null;
+
+function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
+
+export function initFileLogging(logPath: string): void {
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fileStream = fs.createWriteStream(logPath, { flags: 'a' });
+    fileStream.on('error', () => {
+      fileStream = null;
+    });
+  } catch {
+    // file logging is best-effort
+  }
+}
 
 function formatErr(err: unknown): string {
   if (err instanceof Error) {
@@ -49,15 +71,14 @@ function log(
   if (LEVELS[level] < threshold) return;
   const tag = `${COLORS[level]}${level.toUpperCase()}${level === 'fatal' ? FULL_RESET : RESET}`;
   const stream = LEVELS[level] >= LEVELS.warn ? process.stderr : process.stdout;
+  let line: string;
   if (typeof dataOrMsg === 'string') {
-    stream.write(
-      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${dataOrMsg}${RESET}\n`,
-    );
+    line = `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${dataOrMsg}${RESET}\n`;
   } else {
-    stream.write(
-      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg)}\n`,
-    );
+    line = `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg)}\n`;
   }
+  stream.write(line);
+  fileStream?.write(stripAnsi(line));
 }
 
 export const logger = {

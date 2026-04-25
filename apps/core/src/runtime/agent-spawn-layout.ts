@@ -351,6 +351,12 @@ export function syncHostAgentRunnerRuntime(): string {
     return AGENT_RUNNER_RUNTIME_DIR;
   }
 
+  // Wipe the dist directory before copying so stale build artifacts from
+  // previous versions don't survive the sync.
+  const runtimeDist = path.join(AGENT_RUNNER_RUNTIME_DIR, 'dist');
+  if (fs.existsSync(runtimeDist)) {
+    fs.rmSync(runtimeDist, { recursive: true, force: true });
+  }
   fs.cpSync(AGENT_RUNNER_SOURCE_DIR, AGENT_RUNNER_RUNTIME_DIR, {
     recursive: true,
     force: true,

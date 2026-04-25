@@ -15,6 +15,19 @@ export interface AgentInput {
   compiledSystemPrompt?: string;
   thinking?: ThinkingOverride;
   memoryContextFile?: string;
+  permissionProfile?: {
+    agentId: string;
+    valid: boolean;
+    denyReason?: string;
+    tools: Record<string, boolean>;
+    allowedClis: string[];
+    requireOnecli: boolean;
+    allowedChannelTargets: Record<string, string[]>;
+    rateLimits: {
+      messagesPerHour?: number;
+      summariesPerHour?: number;
+    };
+  };
 }
 
 export interface AgentOutput {

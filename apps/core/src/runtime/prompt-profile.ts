@@ -10,14 +10,17 @@ import {
   DISABLED_HOST_CAPABILITIES,
   type HostCapabilitiesSettings,
 } from '../platform/host-capabilities.js';
+import type { AgentPermissionProfile } from './permission-profile-registry.js';
 
 type PromptSectionName =
   | 'RUNTIME_RULES'
+  | 'PERMISSION_BOUNDARY'
   | 'SOUL'
   | 'SHARED_CONTEXT'
   | 'GROUP_CONTEXT';
 
 const SOUL_FILENAME = 'SOUL.md';
+const PERMISSION_BOUNDARY_SOURCE = 'myclaw://permission-boundary';
 const SOUL_SOURCE = 'myclaw://soul';
 const SHARED_CONTEXT_SOURCE = 'myclaw://shared-context';
 const GROUP_CONTEXT_SOURCE = 'myclaw://group-context';
@@ -26,6 +29,7 @@ export const DEFAULT_PROMPT_SECTION_BUDGETS: Readonly<
   Record<PromptSectionName, number>
 > = {
   RUNTIME_RULES: 1200,
+  PERMISSION_BOUNDARY: 2200,
   SOUL: 3000,
   SHARED_CONTEXT: 8000,
   GROUP_CONTEXT: 5000,
@@ -67,12 +71,105 @@ function buildRuntimeRulesBlock(
   return lines.join('\n');
 }
 
+function formatBoolean(value: boolean): string {
+  return value ? 'yes' : 'no';
+}
+
+function formatToolList(tools: Record<string, boolean>): string {
+  const entries = Object.entries(tools).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  if (entries.length === 0) return '- No tools are explicitly enabled.';
+  return entries
+    .map(([tool, enabled]) => `- ${tool}: ${enabled ? 'allowed' : 'blocked'}`)
+    .join('\n');
+}
+
+function formatChannelTargets(targets: Record<string, string[]>): string {
+  const entries = Object.entries(targets).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  if (entries.length === 0) return '- No outbound channel targets are allowed.';
+  return entries
+    .map(([platform, allowedTargets]) => {
+      const value =
+        allowedTargets.length > 0 ? allowedTargets.join(', ') : '(none)';
+      return `- ${platform}: ${value}`;
+    })
+    .join('\n');
+}
+
+function formatRateLimits(
+  rateLimits: AgentPermissionProfile['rateLimits'],
+): string {
+  const lines: string[] = [];
+  if (rateLimits.messagesPerHour !== undefined) {
+    lines.push(`- messages_per_hour: ${rateLimits.messagesPerHour}`);
+  }
+  if (rateLimits.summariesPerHour !== undefined) {
+    lines.push(`- summaries_per_hour: ${rateLimits.summariesPerHour}`);
+  }
+  return lines.length > 0 ? lines.join('\n') : '- No explicit rate limits.';
+}
+
+export function buildPermissionBoundaryPromptText(
+  profile?: AgentPermissionProfile,
+): string {
+  if (!profile) {
+    return [
+      '# Agent Permission Boundary',
+      '- No agent permission profile was loaded.',
+      '- Do not claim access to host-wide tools, CLIs, messaging targets, Git, web, subagents, image analysis, or shell commands as your own permissions.',
+      '- If asked what permissions you have, say your effective permissions are not configured and that actions should be treated as denied until configured.',
+    ].join('\n');
+  }
+
+  if (!profile.valid) {
+    return [
+      '# Agent Permission Boundary',
+      `- Agent: ${profile.agentId}`,
+      `- Runtime folder: ${profile.folder}`,
+      `- Permission profile status: invalid (${profile.denyReason || 'unknown reason'})`,
+      '- Effective policy: deny all configured actions until permissions.yaml is fixed.',
+      '- If asked what permissions you have, say this agent currently has no usable permissions because its permission profile is invalid.',
+    ].join('\n');
+  }
+
+  const allowedClis =
+    profile.allowedClis.length > 0 ? profile.allowedClis.join(', ') : '(none)';
+
+  return [
+    '# Agent Permission Boundary',
+    `- Agent: ${profile.agentId}`,
+    `- Runtime folder: ${profile.folder}`,
+    '- This section is the source of truth for what this specific agent may claim and use.',
+    '- Do not describe host/runtime/global Codex capabilities as your own unless they are explicitly allowed below.',
+    '- If asked what permissions, tools, or capabilities you have, answer only from this section.',
+    '- Tools not listed as allowed here are denied by default, even if the MyClaw runtime supports them for other agents.',
+    '',
+    '## Tools',
+    formatToolList(profile.tools),
+    '',
+    '## CLI Access',
+    `- allowed_clis: ${allowedClis}`,
+    `- require_onecli: ${formatBoolean(profile.requireOnecli)}`,
+    '- Do not claim unrestricted bash, Git, PR, web scraping, subagent, or image-analysis access unless the relevant tool is explicitly allowed above.',
+    '',
+    '## Channel Targets',
+    formatChannelTargets(profile.allowedChannelTargets),
+    '',
+    '## Rate Limits',
+    formatRateLimits(profile.rateLimits),
+  ].join('\n');
+}
+
 const DEFAULT_SHARED_TEMPLATE = `# Shared Agent Profile\n\n## Operating Rules\nDefine stable behavior rules, priorities, and constraints.\n\n## User Preferences\nCapture durable preferences that apply broadly.\n\n## Privacy Rules\nSpecify what must remain private.\n\n## Tool Conventions\nDefine tool usage conventions.\n\n## Capabilities\nList what the agent can do.\n\n## Communication\nDefine message delivery, internal thoughts, sub-agent rules.\n\n## Message Formatting\nChannel-specific formatting rules.\n`;
 
 export interface CompilePromptProfileOptions {
   groupFolder: string;
   runtimeHome?: string;
   hostCapabilities?: HostCapabilitiesSettings;
+  permissionProfile?: AgentPermissionProfile;
 }
 
 export interface PromptProfileServiceOptions {
@@ -141,6 +238,15 @@ export class PromptProfileService {
       content: truncateDeterministically(
         buildRuntimeRulesBlock(options.runtimeHome, options.hostCapabilities),
         this.sectionBudgets.RUNTIME_RULES,
+      ),
+    });
+
+    sections.push({
+      name: 'PERMISSION_BOUNDARY',
+      source: PERMISSION_BOUNDARY_SOURCE,
+      content: truncateDeterministically(
+        buildPermissionBoundaryPromptText(options.permissionProfile),
+        this.sectionBudgets.PERMISSION_BOUNDARY,
       ),
     });
 

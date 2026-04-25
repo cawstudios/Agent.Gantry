@@ -682,6 +682,7 @@ describe('scheduler loop', () => {
       notifyIdle: () => void;
       onProcess: () => void;
       sendMessage: (...args: any[]) => Promise<void>;
+      sendStreamingChunk: (...args: any[]) => Promise<void>;
       onSchedulerChanged: () => void;
     }>,
   ) {
@@ -711,6 +712,7 @@ describe('scheduler loop', () => {
       } as any,
       onProcess: overrides?.onProcess ?? vi.fn(),
       sendMessage: overrides?.sendMessage ?? vi.fn(async () => {}),
+      sendStreamingChunk: overrides?.sendStreamingChunk,
       onSchedulerChanged: overrides?.onSchedulerChanged,
     };
   }
@@ -961,9 +963,16 @@ describe('scheduler loop', () => {
 
     expect(sendMessage).toHaveBeenCalledWith(
       'group@g.us',
-      '🔔 Scheduled task: interval test',
+      '🔔 Running scheduled task: interval test',
     );
-    expect(sendMessage).toHaveBeenCalledWith('group@g.us', 'All good');
+    expect(sendMessage).toHaveBeenCalledWith(
+      'group@g.us',
+      [
+        '✅ Scheduled task completed: interval test',
+        'Summary: All good',
+        `Next run: ${job!.next_run}`,
+      ].join('\n'),
+    );
   });
 
   it('completes once job and sets status to completed (no next_run)', async () => {
@@ -1670,6 +1679,55 @@ describe('scheduler coverage: streaming callback and edge cases', () => {
     expect(closeStdin).not.toHaveBeenCalled();
   });
 
+  it('does not expose partial streamed chunks as scheduler chat output', async () => {
+    const sendMessage = vi.fn(async () => {});
+    const sendStreamingChunk = vi.fn(async () => {});
+    vi.mocked(spawnAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput, _options) => {
+        if (onOutput) {
+          await onOutput({ status: 'success', result: 'I' });
+          await onOutput({ status: 'success', result: ' sent the email.' });
+        }
+        return {
+          status: 'success',
+          result: 'I sent the email.',
+          newSessionId: 'sess-1',
+        };
+      },
+    );
+
+    upsertJob({
+      id: 'stream-no-chat-fragments',
+      name: 'BMW Photos Email',
+      prompt: 'send an email',
+      schedule_type: 'once',
+      schedule_value: new Date(Date.now() - 60_000).toISOString(),
+      linked_sessions: ['group@g.us'],
+      group_scope: 'main',
+      created_by: 'agent',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+    });
+
+    startSchedulerLoop(makeDeps({ sendMessage, sendStreamingChunk }));
+    await vi.advanceTimersByTimeAsync(20);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sendStreamingChunk).not.toHaveBeenCalledWith(
+      'group@g.us',
+      'I',
+      expect.anything(),
+    );
+    expect(sendMessage).toHaveBeenCalledWith(
+      'group@g.us',
+      [
+        '✅ Scheduled task completed: BMW Photos Email',
+        'Summary: I sent the email.',
+      ].join('\n'),
+    );
+  });
+
   it('invokes streaming callback with error status', async () => {
     vi.mocked(spawnAgent).mockImplementationOnce(
       async (_group, _input, _onProcess, onOutput, _options) => {
@@ -1818,26 +1876,33 @@ describe('scheduler coverage: streaming callback and edge cases', () => {
     );
   });
 
-  it('handles createJobRun returning false (run creation failure)', async () => {
+  it('completes one-time jobs when a duplicate scheduled run already exists', async () => {
+    const scheduledFor = new Date(Date.now() - 60_000).toISOString();
     upsertJob({
       id: 'run-fail',
-      name: 'run creation fail',
+      name: 'duplicate run',
       prompt: 'test',
       schedule_type: 'once',
-      schedule_value: new Date(Date.now() - 60_000).toISOString(),
+      schedule_value: scheduledFor,
       linked_sessions: ['group@g.us'],
       group_scope: 'main',
       created_by: 'agent',
-      next_run: new Date(Date.now() - 60_000).toISOString(),
+      next_run: scheduledFor,
       status: 'active',
     });
 
-    // Spy on createJobRun to return false
-    const createJobRunSpy = vi.spyOn(
-      await import('../storage/db.js'),
-      'createJobRun',
-    );
-    createJobRunSpy.mockReturnValueOnce(false);
+    createJobRun({
+      run_id: 'existing-run',
+      job_id: 'run-fail',
+      scheduled_for: scheduledFor,
+      started_at: scheduledFor,
+      ended_at: null,
+      status: 'running',
+      result_summary: null,
+      error_summary: null,
+      retry_count: 0,
+      notified_at: null,
+    });
 
     const onSchedulerChanged = vi.fn();
     const sendMessage = vi.fn(async () => {});
@@ -1846,16 +1911,111 @@ describe('scheduler coverage: streaming callback and edge cases', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    // Job should be reset to active (not running, not completed)
     const job = getJobById('run-fail');
+    expect(job?.status).toBe('completed');
+    expect(job?.next_run).toBeNull();
+    expect(job?.lease_run_id).toBeNull();
+    expect(onSchedulerChanged).toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('advances recurring jobs when a duplicate scheduled run already exists', async () => {
+    const scheduledFor = new Date(Date.now() - 60_000).toISOString();
+    upsertJob({
+      id: 'duplicate-recurring',
+      name: 'duplicate recurring',
+      prompt: 'test',
+      schedule_type: 'interval',
+      schedule_value: '3600000',
+      linked_sessions: ['group@g.us'],
+      group_scope: 'main',
+      created_by: 'agent',
+      next_run: scheduledFor,
+      status: 'active',
+    });
+
+    createJobRun({
+      run_id: 'existing-recurring-run',
+      job_id: 'duplicate-recurring',
+      scheduled_for: scheduledFor,
+      started_at: scheduledFor,
+      ended_at: null,
+      status: 'running',
+      result_summary: null,
+      error_summary: null,
+      retry_count: 0,
+      notified_at: null,
+    });
+
+    const onSchedulerChanged = vi.fn();
+    const sendMessage = vi.fn(async () => {});
+    startSchedulerLoop(makeDeps({ sendMessage, onSchedulerChanged }));
+    await vi.advanceTimersByTimeAsync(20);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const job = getJobById('duplicate-recurring');
     expect(job?.status).toBe('active');
     expect(job?.lease_run_id).toBeNull();
-    // onSchedulerChanged should be called
+    expect(job?.next_run).not.toBe(scheduledFor);
+    expect(Date.parse(job?.next_run || '')).toBeGreaterThan(
+      Date.parse(scheduledFor),
+    );
+    expect(listJobRuns('duplicate-recurring', 10)).toHaveLength(1);
     expect(onSchedulerChanged).toHaveBeenCalled();
-    // No message sent since the job didn't actually run
     expect(sendMessage).not.toHaveBeenCalled();
+    expect(spawnAgent).not.toHaveBeenCalled();
+  });
 
-    createJobRunSpy.mockRestore();
+  it('falls back to the registered group JID for invalid linked sessions', async () => {
+    const scheduledFor = new Date(Date.now() - 60_000).toISOString();
+    upsertJob({
+      id: 'invalid-linked-session',
+      name: 'invalid linked session',
+      prompt: 'test invalid delivery target',
+      schedule_type: 'once',
+      schedule_value: scheduledFor,
+      linked_sessions: ['slack'],
+      group_scope: 'main',
+      created_by: 'agent',
+      next_run: scheduledFor,
+      status: 'active',
+    });
+
+    const sendMessage = vi.fn(async () => {});
+    const onProcess = vi.fn();
+    vi.mocked(spawnAgent).mockImplementationOnce(
+      async (_group, _input, onProc, _onOutput, _options) => {
+        onProc({} as any, 'test-container');
+        return { status: 'success', result: 'ok', newSessionId: 'sess-1' };
+      },
+    );
+
+    startSchedulerLoop(makeDeps({ sendMessage, onProcess }));
+    await vi.advanceTimersByTimeAsync(20);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      'group@g.us',
+      expect.stringContaining('Scheduled task'),
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith('slack', expect.any(String));
+    expect(spawnAgent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ chatJid: 'group@g.us' }),
+      expect.any(Function),
+      expect.any(Function),
+      expect.anything(),
+    );
+    expect(onProcess).toHaveBeenCalledWith(
+      '__scheduler__:main:invalid-linked-session',
+      expect.anything(),
+      expect.any(String),
+      'main',
+      ['group@g.us'],
+    );
   });
 
   it('handles resolveGroupFolderPath throwing an error', async () => {
@@ -2139,10 +2299,17 @@ describe('scheduler coverage: streaming callback and edge cases', () => {
 
     const job = getJobById('null-result');
     expect(job?.status).toBe('completed');
-    // With null result, only the header is sent and run still completes.
+    // With null result, the scheduler still sends a human-readable completion.
     expect(sendMessage).toHaveBeenCalledWith(
       'group@g.us',
-      '🔔 Scheduled task: null result',
+      '🔔 Running scheduled task: null result',
+    );
+    expect(sendMessage).toHaveBeenCalledWith(
+      'group@g.us',
+      [
+        '✅ Scheduled task completed: null result',
+        'Summary: Completed successfully.',
+      ].join('\n'),
     );
   });
 

@@ -68,6 +68,7 @@ Cross-cutting: observability, rate limits, permissions, guardrails
 | **Admin channel** (`#people-ops-agent`) | Only surface where behavior can change | `settings.yaml` sender allowlist + new policy hook |
 | **Intent parser** | NL instruction → structured `WorkflowSpec` | New `workflow/intake.ts` subagent |
 | **Confirmation loop** | Agent echoes spec, asks for approval | [bootstrap/channel-wiring.ts](../../../apps/core/src/bootstrap/channel-wiring.ts) `requestUserAnswer` |
+| **Permission/tool draft path** | Chat request → structured permission or capability draft | `permissions.yaml` / capability config + approval gate |
 | **Workflow registry** | Durable store; list/pause/edit/delete via chat | New `workflow/store.ts` + `workflows` SQLite table |
 | **Scheduler** | Cron-like; triggers workflow runs | Existing [task-scheduler.ts](../../../apps/core/src/runtime/task-scheduler.ts) |
 | **Approval gates** | First run = dry-run + admin confirm | `requestPermissionApproval` (Slack Block Kit / inline buttons) |
@@ -95,7 +96,7 @@ Cross-cutting: observability, rate limits, permissions, guardrails
 | `gh` | GitHub operations (if HR workflows ever touch PRs/issues) | `onecli exec -- gh ...` |
 | Built-in SDK tools | `Read`, `Write`, `Edit`, `Glob`, `Grep`, `WebFetch`, `WebSearch` | n/a |
 
-**Adding a capability (e.g., Jira):** install `jira-cli` on the VM, add it to OneCLI, update `capabilities.md`. Zero MyClaw code change.
+**Adding a capability (e.g., Jira):** install `jira-cli` on the VM, add it to OneCLI, update `capabilities.md`. In Phase 1, the agent may draft that capability change from chat, but approval is still required before it becomes active.
 
 **Roster** — source of truth is a Google Sheet (`Employees 2026`). The agent reads it via `gworkspace sheets read` when it needs to enumerate people. No separate directory system, no `employees` DB table required for v1.
 
@@ -125,6 +126,8 @@ SQLite on the VM is enough for v1; Postgres if multiple instances later.
 - **Credential enforcement**: policy hook requires credentialed CLIs to be invoked via `onecli exec -- <cli>`; rejects raw invocation
 - **Failure surfacing**: ambiguous reply, timeout, or non-zero exit from a CLI escalates to Pramod in-thread — never silently dropped
 - **Kill switch**: `@people-ops-agent stop` in `#people-ops-agent` pauses all workflows immediately
+- **Workflow activation rule**: chat-authored workflows stay in draft until a human explicitly approves them
+- **Tool/permission activation rule**: chat-authored tool or permission changes stay in draft until a human explicitly approves them
 
 ## User flows
 
@@ -137,6 +140,16 @@ SQLite on the VM is enough for v1; Postgres if multiple instances later.
 > **Pramod**: taps "Approve" on Slack Block Kit confirmation
 >
 > → workflow saved + scheduler armed
+
+Phase 1 boundary:
+- Admin can author workflows in chat.
+- AI can draft and normalize them.
+- Approval is required before activation.
+- Fully unapproved autonomous workflow creation is out of scope.
+- Admin can also request tool or permission changes in chat.
+- AI can draft those changes.
+- Approval is required before those changes take effect.
+- Fully unapproved autonomous permission escalation is out of scope.
 
 ### Employee flow — natural conversation
 

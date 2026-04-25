@@ -36,6 +36,8 @@ import {
   updateJob,
 } from '../storage/db.js';
 import { StreamingChunkOptions } from '../core/types.js';
+import { skipDuplicateScheduledRun } from './scheduler-duplicate-run.js';
+import { resolveExecutionContext } from './scheduler-execution-context.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -271,38 +273,27 @@ function formatRunStatusMessage(args: {
   return base.join('\n');
 }
 
-function resolveExecutionContext(
-  job: Job,
-  groups: Record<string, RegisteredGroup>,
-): {
-  group: RegisteredGroup;
-  executionJid: string;
-  stopAliasJids: string[];
-} | null {
-  const byFolder = Object.entries(groups).find(
-    ([, group]) => group.folder === job.group_scope,
-  );
-  if (byFolder) {
-    const stopAliasJids = Array.from(
-      new Set([...(job.linked_sessions || []), byFolder[0]]),
-    );
-    return {
-      group: byFolder[1],
-      executionJid: stopAliasJids[0] || byFolder[0],
-      stopAliasJids,
-    };
+function normalizeSchedulerSummary(summary: string | null): string {
+  const trimmed = (summary || '').replace(/\s+/g, ' ').trim();
+  if (!trimmed || /^[\s.\-_,:;!?]+$/.test(trimmed) || trimmed.length < 3) {
+    return 'Completed successfully.';
   }
+  return trimmed.length > 500 ? `${trimmed.slice(0, 497)}...` : trimmed;
+}
 
-  for (const linked of job.linked_sessions) {
-    const group = groups[linked];
-    if (group) {
-      const stopAliasJids = Array.from(
-        new Set([...(job.linked_sessions || []), linked]),
-      );
-      return { group, executionJid: linked, stopAliasJids };
-    }
+function formatCompletedRunMessage(args: {
+  job: Job;
+  summary: string | null;
+  nextRun: string | null;
+}): string {
+  const lines = [
+    `✅ Scheduled task completed: ${args.job.name}`,
+    `Summary: ${normalizeSchedulerSummary(args.summary)}`,
+  ];
+  if (args.nextRun) {
+    lines.push(`Next run: ${args.nextRun}`);
   }
-  return null;
+  return lines.join('\n');
 }
 
 async function notifyLinkedSessions(
@@ -430,11 +421,8 @@ async function runJob(
     notified_at: null,
   });
   if (!runCreated) {
-    updateJob(currentJob.id, {
-      status: 'active',
-      lease_run_id: null,
-      lease_expires_at: null,
-    });
+    const nextRun = computeNextJobRun(currentJob, scheduledFor);
+    skipDuplicateScheduledRun(currentJob, runId, scheduledFor, nextRun);
     deps.onSchedulerChanged?.();
     return;
   }
@@ -489,9 +477,20 @@ async function runJob(
   const isMain = execution.group.isMain === true;
   let retrievedItemIds: string[] = [];
   let ranSystemJob = false;
-  const linkedSessions = Array.from(new Set(currentJob.linked_sessions));
+  const linkedSessions = execution.deliveryJids;
   const shouldDeliverToChat = !currentJob.silent && linkedSessions.length > 0;
   const streamGeneration = nextSchedulerStreamingGeneration();
+
+  if (execution.invalidLinkedSessionJids.length > 0) {
+    logger.warn(
+      {
+        jobId: currentJob.id,
+        invalidLinkedSessions: execution.invalidLinkedSessionJids,
+        deliveryJids: linkedSessions,
+      },
+      'Ignoring invalid scheduler linked sessions',
+    );
+  }
 
   const buildStreamingOptions = (args: {
     done?: boolean;
@@ -536,24 +535,11 @@ async function runJob(
   };
 
   const deliverStreamingChunk = async (text: string): Promise<boolean> => {
-    if (!shouldDeliverToChat || !text) return false;
-    if (!deps.sendStreamingChunk) {
-      return deliverMessage(text);
-    }
-
-    let delivered = false;
-    for (const jid of linkedSessions) {
-      try {
-        await deps.sendStreamingChunk(jid, text, buildStreamingOptions({}));
-        delivered = true;
-      } catch (err) {
-        logger.warn(
-          { jobId: currentJob.id, jid, err },
-          'Failed to deliver scheduler stream chunk',
-        );
-      }
-    }
-    return delivered;
+    // Scheduled jobs should produce deterministic status messages instead of
+    // leaking partial model chunks like "I" into chat. We still collect chunks
+    // for run summaries and lifecycle events.
+    void text;
+    return false;
   };
 
   let streamFinalized = false;
@@ -583,7 +569,7 @@ async function runJob(
 
   if (shouldDeliverToChat) {
     resetDeliveryStreams();
-    await deliverMessage(`🔔 Scheduled task: ${currentJob.name}`);
+    await deliverMessage(`🔔 Running scheduled task: ${currentJob.name}`);
   }
 
   if (!error && currentJob.prompt.startsWith('__system:')) {
@@ -695,7 +681,7 @@ async function runJob(
 
         if (!error) {
           const fallbackText = result || collectedResult;
-          if (fallbackText && !deliveredAnyOutput) {
+          if (fallbackText && !deliveredAnyOutput && currentJob.silent) {
             if (await deliverMessage(fallbackText)) {
               deliveredAnyOutput = true;
             }
@@ -797,6 +783,16 @@ async function runJob(
   if (error && !currentJob.silent) {
     const delivered = await deliverMessage(
       `⚠️ Scheduled task failed: ${summary}`,
+    );
+    notified = notified || delivered;
+  }
+  if (!error && !currentJob.silent) {
+    const delivered = await deliverMessage(
+      formatCompletedRunMessage({
+        job: currentJob,
+        summary: resultSummary,
+        nextRun,
+      }),
     );
     notified = notified || delivered;
   }

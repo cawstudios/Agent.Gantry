@@ -15,6 +15,7 @@ import {
   syncHostAgentRunnerRuntime,
 } from './agent-spawn-layout.js';
 import { getConfiguredAgents } from './agent-config-registry.js';
+import { getPermissionProfiles } from './permission-profile-registry.js';
 
 export interface RuntimeDiagnosticDetails {
   runtimeBinary: string;
@@ -27,6 +28,9 @@ export interface RuntimeDiagnosticDetails {
   hostBuildSucceeded: boolean;
   configuredAgentCount: number;
   configuredAgentIds: string[];
+  permissionProfileCount: number;
+  permissionProfileIds: string[];
+  invalidPermissionProfileIds: string[];
   onecliUrlConfigured: boolean;
   credentialMode: HostCredentialMode;
   credentialPathStatus: 'onecli+env' | 'onecli-only' | 'env-only' | 'missing';
@@ -203,6 +207,12 @@ export async function collectRuntimeDiagnostics(
   }
 
   const configuredAgentIds = Object.keys(getConfiguredAgents()).sort();
+  const permissionProfiles = getPermissionProfiles();
+  const permissionProfileIds = Object.keys(permissionProfiles).sort();
+  const invalidPermissionProfileIds = Object.values(permissionProfiles)
+    .filter((profile) => !profile.valid)
+    .map((profile) => profile.agentId)
+    .sort();
 
   const diagnostics: RuntimeDiagnostics = {
     ok: errors.length === 0,
@@ -221,6 +231,9 @@ export async function collectRuntimeDiagnostics(
       hostBuildSucceeded,
       configuredAgentCount: configuredAgentIds.length,
       configuredAgentIds,
+      permissionProfileCount: permissionProfileIds.length,
+      permissionProfileIds,
+      invalidPermissionProfileIds,
       onecliUrlConfigured: Boolean(ONECLI_URL?.trim()),
       credentialMode,
       credentialPathStatus,
@@ -255,6 +268,18 @@ export function formatRuntimeDiagnosticsMessage(
   lines.push(
     `Configured agents: ${diagnostics.details.configuredAgentCount} ${configuredAgents}`,
   );
+  const permissionProfiles =
+    diagnostics.details.permissionProfileIds.length > 0
+      ? diagnostics.details.permissionProfileIds.join(', ')
+      : '(none)';
+  lines.push(
+    `Permission profiles: ${diagnostics.details.permissionProfileCount} ${permissionProfiles}`,
+  );
+  if (diagnostics.details.invalidPermissionProfileIds.length > 0) {
+    lines.push(
+      `Invalid permission profiles: ${diagnostics.details.invalidPermissionProfileIds.join(', ')}`,
+    );
+  }
   if (diagnostics.details.hostBuildAttempted) {
     lines.push(
       `Host auto-build: ${diagnostics.details.hostBuildSucceeded ? 'succeeded' : 'failed'}`,

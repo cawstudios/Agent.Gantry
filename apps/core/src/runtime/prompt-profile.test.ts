@@ -26,6 +26,7 @@ vi.mock('../platform/host-capabilities.js', () => ({
 
 import {
   PromptProfileService,
+  buildPermissionBoundaryPromptText,
   getPromptProfileService,
   ensurePromptProfileBootstrapped,
 } from './prompt-profile.js';
@@ -104,6 +105,9 @@ describe('PromptProfileService', () => {
     const prompt = service.compileSystemPrompt({ groupFolder: 'team' });
 
     expect(prompt.indexOf('[[RUNTIME_RULES]]')).toBeLessThan(
+      prompt.indexOf('[[PERMISSION_BOUNDARY]]'),
+    );
+    expect(prompt.indexOf('[[PERMISSION_BOUNDARY]]')).toBeLessThan(
       prompt.indexOf('[[SOUL]]'),
     );
     expect(prompt.indexOf('[[SOUL]]')).toBeLessThan(
@@ -113,9 +117,84 @@ describe('PromptProfileService', () => {
       prompt.indexOf('[[GROUP_CONTEXT]]'),
     );
     expect(prompt).toContain('source: myclaw://soul');
+    expect(prompt).toContain('source: myclaw://permission-boundary');
     expect(prompt).toContain('source: myclaw://shared-context');
     expect(prompt).toContain('source: myclaw://group-context');
     expect(prompt).not.toContain(root);
+  });
+
+  it('includes permission boundary from the agent permission profile', () => {
+    const root = makeTempRoot();
+    roots.push(root);
+    const agentsDir = path.join(root, 'agents');
+    writeFile(path.join(agentsDir, 'shared', 'CLAUDE.md'), 'shared');
+
+    const service = new PromptProfileService({ agentsDir });
+    const prompt = service.compileSystemPrompt({
+      groupFolder: 'people-ops-agent',
+      permissionProfile: {
+        agentId: 'people-ops-agent',
+        folder: 'people-ops-agent',
+        sourcePath: path.join(
+          agentsDir,
+          'people-ops-agent',
+          'permissions.yaml',
+        ),
+        valid: true,
+        tools: {
+          message_send: true,
+          message_read: true,
+          bash: false,
+        },
+        allowedClis: ['gworkspace'],
+        requireOnecli: true,
+        allowedChannelTargets: {
+          slack: ['#hr-managers', '@hr-manager'],
+        },
+        rateLimits: {
+          messagesPerHour: 80,
+          summariesPerHour: 10,
+        },
+      },
+    });
+
+    expect(prompt).toContain('[[PERMISSION_BOUNDARY]]');
+    expect(prompt).toContain('Agent: people-ops-agent');
+    expect(prompt).toContain('message_send: allowed');
+    expect(prompt).toContain('bash: blocked');
+    expect(prompt).toContain('allowed_clis: gworkspace');
+    expect(prompt).toContain('slack: #hr-managers, @hr-manager');
+    expect(prompt).toContain(
+      'Do not claim unrestricted bash, Git, PR, web scraping, subagent, or image-analysis access',
+    );
+    expect(prompt).toContain('answer only from this section');
+  });
+
+  it('renders deny-first permission boundary when profile is missing', () => {
+    const boundary = buildPermissionBoundaryPromptText();
+
+    expect(boundary).toContain('No agent permission profile was loaded');
+    expect(boundary).toContain('effective permissions are not configured');
+    expect(boundary).toContain('treated as denied');
+  });
+
+  it('renders invalid permission profile as deny all', () => {
+    const boundary = buildPermissionBoundaryPromptText({
+      agentId: 'people-ops-agent',
+      folder: 'people-ops-agent',
+      sourcePath: '/tmp/permissions.yaml',
+      valid: false,
+      denyReason: 'permissions.yaml is missing',
+      tools: {},
+      allowedClis: [],
+      requireOnecli: true,
+      allowedChannelTargets: {},
+      rateLimits: {},
+    });
+
+    expect(boundary).toContain('Permission profile status: invalid');
+    expect(boundary).toContain('deny all configured actions');
+    expect(boundary).toContain('no usable permissions');
   });
 
   it('includes SOUL section with identity directive when SOUL.md exists', () => {
@@ -226,14 +305,15 @@ describe('PromptProfileService', () => {
         SHARED_CONTEXT: 300,
         GROUP_CONTEXT: 200,
       },
-      totalBudget: 1100,
+      totalBudget: 1700,
     });
     const prompt = service.compileSystemPrompt({ groupFolder: 'team' });
 
-    expect(prompt.length).toBeLessThanOrEqual(1100);
+    expect(prompt.length).toBeLessThanOrEqual(1700);
+    expect(prompt).toContain('[[RUNTIME_RULES]]');
+    expect(prompt).toContain('[[PERMISSION_BOUNDARY]]');
     expect(prompt).toContain('[[SOUL]]');
     expect(prompt).toContain('[[SHARED_CONTEXT]]');
-    expect(prompt).toContain('[[RUNTIME_RULES]]');
   });
 
   it('omits sections when section budgets are zero', () => {

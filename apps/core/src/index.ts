@@ -1,9 +1,12 @@
-import { logger } from './core/logger.js';
+import path from 'path';
+import { logger, initFileLogging } from './core/logger.js';
 import { createChannelWiring } from './bootstrap/channel-wiring.js';
+import { acquireRuntimeProcessLock } from './bootstrap/runtime-process-lock.js';
 import { getDefaultRuntimeApp } from './bootstrap/runtime-app.js';
 import { startRuntimeServices } from './bootstrap/runtime-services.js';
 import { installShutdownHandlers } from './bootstrap/shutdown.js';
 import { runStartup } from './bootstrap/startup.js';
+import { AGENT_ROOT, DATA_DIR } from './core/config.js';
 
 export { escapeXml, formatMessages } from './messaging/router.js';
 export {
@@ -12,6 +15,12 @@ export {
 } from './bootstrap/runtime-app.js';
 
 export async function startMyClawRuntime(): Promise<void> {
+  acquireRuntimeProcessLock(DATA_DIR, {
+    onExit: (handler) => process.once('exit', handler),
+  });
+
+  initFileLogging(path.join(AGENT_ROOT, 'logs', 'runtime.log'));
+
   const app = getDefaultRuntimeApp();
   const channelWiring = createChannelWiring(app);
 

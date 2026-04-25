@@ -365,6 +365,9 @@ describe('scheduler_upsert_job', () => {
 describe('scheduler_once', () => {
   it('creates a one-time job and defaults delivery to source group JID', async () => {
     const runAt = new Date(Date.now() + 3600000).toISOString();
+    const sendMessage = vi.fn(async () => {});
+    deps.sendMessage = sendMessage;
+
     await processTaskIpc(
       {
         type: 'scheduler_once',
@@ -385,6 +388,10 @@ describe('scheduler_once', () => {
     expect(job!.next_run).toBe(runAt);
     expect(job!.linked_sessions).toEqual(['other@g.us']);
     expect(job!.group_scope).toBe('other-group');
+    expect(sendMessage).toHaveBeenCalledWith(
+      'other@g.us',
+      expect.stringContaining('✅ Scheduled task: Reminder'),
+    );
   });
 
   it('applies deliverTo, threadId, silent, cleanupAfterMs', async () => {
@@ -412,6 +419,35 @@ describe('scheduler_once', () => {
     expect(job!.thread_id).toBe('thread-7');
     expect(job!.silent).toBe(true);
     expect(job!.cleanup_after_ms).toBe(0);
+  });
+
+  it('confirms one-time jobs back to the source chat when delivery target is not a registered chat', async () => {
+    const runAt = new Date(Date.now() + 7200000).toISOString();
+    const sendMessage = vi.fn(async () => {});
+    deps.sendMessage = sendMessage;
+
+    await processTaskIpc(
+      {
+        type: 'scheduler_once',
+        jobId: 'once-invalid-delivery-confirmation',
+        name: 'BMW Photos Email',
+        prompt: 'Send email to user@example.com',
+        runAt,
+        deliverTo: ['email:user@example.com'],
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const job = getJobById('once-invalid-delivery-confirmation');
+    expect(job).toBeDefined();
+    expect(job!.linked_sessions).toEqual(['email:user@example.com']);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      'main@g.us',
+      expect.stringContaining('✅ Scheduled task: BMW Photos Email'),
+    );
   });
 });
 
@@ -1708,7 +1744,10 @@ describe('startIpcWatcher', () => {
 
   async function loadIpcModule(
     dataDir = '/tmp/test-ipc',
-    opts: { authValid?: boolean } = {},
+    opts: {
+      authValid?: boolean;
+      permissionDecision?: { allowed: boolean; reason?: string };
+    } = {},
   ) {
     vi.resetModules();
 
@@ -1788,6 +1827,13 @@ describe('startIpcWatcher', () => {
 
     vi.doMock('./ipc-auth.js', () => ({
       validateIpcAuthToken: vi.fn(() => opts.authValid ?? true),
+    }));
+
+    vi.doMock('./permission-profile-registry.js', () => ({
+      getPermissionProfileForAgent: vi.fn(() => ({})),
+      checkChannelSendPermission: vi.fn(
+        () => opts.permissionDecision ?? { allowed: true },
+      ),
     }));
 
     // Capture setTimeout callback so we can trigger poll cycles manually
@@ -2168,6 +2214,66 @@ describe('startIpcWatcher', () => {
       'Unauthorized IPC message attempt blocked',
     );
     // File should still be unlinked after processing
+    expect(mockUnlinkSync).toHaveBeenCalled();
+  });
+
+  it('blocks IPC messages denied by the permission profile', async () => {
+    mockReaddirSync.mockImplementation((dir: string) => {
+      if (dir === '/tmp/test-ipc/ipc') return ['other-group'];
+      if (dir.endsWith('/messages')) return ['msg1.json'];
+      return [];
+    });
+    mockStatSync.mockReturnValue({ isDirectory: () => true });
+    mockExistsSync.mockImplementation((p: string) =>
+      p.endsWith('/messages') ? true : false,
+    );
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        type: 'message',
+        chatJid: 'other@g.us',
+        text: 'blocked by profile',
+      }),
+    );
+
+    const sendMessage = vi.fn(async () => {});
+    const mod = await loadIpcModule('/tmp/test-ipc', {
+      permissionDecision: {
+        allowed: false,
+        reason: 'message_send is not allowed',
+      },
+    });
+    const watcherDeps: import('./ipc.js').IpcDeps = {
+      sendMessage,
+      registeredGroups: () => ({
+        'other@g.us': {
+          name: 'Other',
+          folder: 'other-group',
+          trigger: '@Bot',
+          added_at: '2024-01-01',
+        },
+      }),
+      registerGroup: vi.fn(),
+      syncGroups: vi.fn(),
+      getAvailableGroups: vi.fn(() => []),
+      writeGroupsSnapshot: vi.fn(),
+      onSchedulerChanged: vi.fn(),
+    };
+
+    mod.startIpcWatcher(watcherDeps);
+
+    await vi.waitFor(() => {
+      expect(capturedSetTimeoutCallback).not.toBeNull();
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatJid: 'other@g.us',
+        sourceGroup: 'other-group',
+        reason: 'message_send is not allowed',
+      }),
+      'IPC message blocked by permission profile',
+    );
     expect(mockUnlinkSync).toHaveBeenCalled();
   });
 
@@ -3439,6 +3545,54 @@ describe('startIpcWatcher', () => {
       expect(capturedSetTimeoutCallback).not.toBeNull();
     });
 
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      { sourceGroup: 'rogue-folder' },
+      'Ignoring unknown IPC directory',
+    );
+  });
+
+  it('logs each unknown IPC group folder only once while it remains unknown', async () => {
+    mockReaddirSync.mockImplementation((dir: string) => {
+      if (dir === '/tmp/test-ipc/ipc') return ['whatsapp_main', 'rogue-folder'];
+      return [];
+    });
+    mockExistsSync.mockReturnValue(false);
+
+    const mod = await loadIpcModule();
+    const watcherDeps: import('./ipc.js').IpcDeps = {
+      sendMessage: vi.fn(),
+      registeredGroups: () => ({
+        'main@g.us': {
+          name: 'Main',
+          folder: 'whatsapp_main',
+          trigger: 'always',
+          added_at: '2024-01-01',
+          isMain: true,
+        },
+      }),
+      registerGroup: vi.fn(),
+      syncGroups: vi.fn(),
+      getAvailableGroups: vi.fn(() => []),
+      writeGroupsSnapshot: vi.fn(),
+      onSchedulerChanged: vi.fn(),
+    };
+
+    mod.startIpcWatcher(watcherDeps);
+    await vi.waitFor(() => {
+      expect(capturedSetTimeoutCallback).not.toBeNull();
+    });
+
+    const firstScheduledPoll = capturedSetTimeoutCallback;
+    expect(firstScheduledPoll).not.toBeNull();
+    const initialReadCount = mockReaddirSync.mock.calls.length;
+    await firstScheduledPoll!();
+    await vi.waitFor(() => {
+      expect(mockReaddirSync.mock.calls.length).toBeGreaterThan(
+        initialReadCount,
+      );
+    });
+
+    expect(mockLoggerWarn).toHaveBeenCalledTimes(1);
     expect(mockLoggerWarn).toHaveBeenCalledWith(
       { sourceGroup: 'rogue-folder' },
       'Ignoring unknown IPC directory',

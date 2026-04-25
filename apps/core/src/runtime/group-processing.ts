@@ -476,8 +476,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
         } else {
           await channel.sendProgressUpdate(chatJid, 'Working on it...');
         }
+        logger.info({ group: group.name }, 'Sent initial acknowledgment');
       } catch (err) {
-        logger.debug(
+        logger.warn(
           { err, group: group.name },
           'Failed to send initial progress update',
         );
@@ -603,27 +604,17 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
               typeof result.result === 'string'
                 ? result.result
                 : JSON.stringify(result.result);
-            const text = supportsStreamingChunks
-              ? stripInternalTagsPreserveWhitespace(raw)
-              : formatOutboundForChannel(raw, channel.name);
+            const text = formatOutboundForChannel(raw, channel.name);
             logger.info(
               { group: group.name },
               `Agent output: ${raw.length} chars`,
             );
             if (text) {
-              if (supportsStreamingChunks) {
-                await channel.sendStreamingChunk!(
-                  chatJid,
-                  text,
-                  buildStreamingOptions({}),
-                );
+              const messageOptions = buildMessageOptions();
+              if (messageOptions) {
+                await channel.sendMessage(chatJid, text, messageOptions);
               } else {
-                const messageOptions = buildMessageOptions();
-                if (messageOptions) {
-                  await channel.sendMessage(chatJid, text, messageOptions);
-                } else {
-                  await channel.sendMessage(chatJid, text);
-                }
+                await channel.sendMessage(chatJid, text);
               }
               outputSentToUser = true;
               collectedOutput += `${text}\n`;

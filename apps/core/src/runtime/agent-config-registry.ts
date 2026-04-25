@@ -16,6 +16,7 @@ export interface ConfiguredAgent {
   timezone: string;
   managerTarget?: string;
   rosterSource?: string;
+  channelJids: string[];
   enabledWorkflows: string[];
 }
 
@@ -203,6 +204,27 @@ function parseEnabledWorkflows(value: unknown): string[] {
     .filter((item) => item.length > 0);
 }
 
+function parseChannelJids(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error('channel_jids must be an array of strings');
+  }
+  const seen = new Set<string>();
+  const jids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      throw new Error('channel_jids must contain only strings');
+    }
+    const jid = item.trim();
+    if (!jid) continue;
+    if (!seen.has(jid)) {
+      seen.add(jid);
+      jids.push(jid);
+    }
+  }
+  return jids;
+}
+
 function validateAgentConfig(
   parsed: Record<string, unknown>,
   context: { folder: string; sourcePath: string },
@@ -211,6 +233,7 @@ function validateAgentConfig(
   const channel = assertChannel(parsed.channel);
   const timezone = assertTimezone(parsed.timezone);
   const enabledWorkflows = parseEnabledWorkflows(parsed.enabled_workflows);
+  const channelJids = parseChannelJids(parsed.channel_jids);
 
   return {
     id,
@@ -220,6 +243,7 @@ function validateAgentConfig(
     timezone,
     managerTarget: optionalTrimmedString(parsed.manager_target),
     rosterSource: optionalTrimmedString(parsed.roster_source),
+    channelJids,
     enabledWorkflows,
   };
 }
@@ -274,6 +298,17 @@ export function refreshConfiguredAgentsFromDisk(
       throw new Error(
         `Duplicate agent id "${validated.id}" in "${sourcePath}" and "${duplicate.sourcePath}"`,
       );
+    }
+
+    for (const jid of validated.channelJids) {
+      const duplicateBinding = Object.values(nextAgentsById).find((agent) =>
+        agent.channelJids.includes(jid),
+      );
+      if (duplicateBinding) {
+        throw new Error(
+          `Duplicate channel_jids entry "${jid}" in "${sourcePath}" and "${duplicateBinding.sourcePath}"`,
+        );
+      }
     }
     nextAgentsById[validated.id] = validated;
   }

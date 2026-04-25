@@ -27,6 +27,7 @@ import { readEnvFile } from '../core/env.js';
 import { ChannelOpts, registerChannel } from './registry.js';
 
 const SLACK_STREAM_UPDATE_INTERVAL_MS = 900;
+const SLACK_MSG_CHAR_LIMIT = 39_000;
 const SLACK_MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const SLACK_BUTTON_TEXT_MAX_LENGTH = 75;
 const SLACK_ACTION_VALUE_MAX_LENGTH = 2000;
@@ -41,6 +42,7 @@ interface ActiveStreamState {
   nativeStreamTs?: string;
   nativeEnabled: boolean;
   lastFlushAt: number;
+  sealedFallbackLength: number;
 }
 
 interface ActiveProgressState {
@@ -633,9 +635,20 @@ export class SlackChannel implements Channel {
         return url;
       }
 
+      // Reject HTML responses — Slack returns a login page (HTTP 200) when the
+      // bot token lacks files:read scope or auth fails on CDN redirect.
+      const contentType = resp.headers.get('content-type') ?? '';
+      if (contentType.startsWith('text/html')) {
+        logger.warn(
+          { jid, filename, contentType },
+          'Slack attachment download returned HTML — bot token may lack files:read scope',
+        );
+        return url;
+      }
+
       const wrote = await this.writeFetchResponseToFile(resp, destPath);
       if (!wrote) return url;
-      return `/workspace/group/attachments/${filename}`;
+      return destPath;
     } catch (err) {
       logger.warn({ jid, err, filename }, 'Slack attachment download failed');
       return url;
@@ -1070,6 +1083,11 @@ export class SlackChannel implements Channel {
       token: this.botToken,
       appToken: this.appToken,
       socketMode: true,
+      clientOptions: {
+        // Prevent any API call from hanging indefinitely. All callers have
+        // try/catch so a timeout error is handled gracefully.
+        timeout: 30_000,
+      },
     });
 
     this.registerBoltHandlers();
@@ -1136,6 +1154,7 @@ export class SlackChannel implements Channel {
         lastNativeText: '',
         nativeEnabled: true,
         lastFlushAt: 0,
+        sealedFallbackLength: 0,
       };
       this.activeStreams.set(key, state);
     }
@@ -1212,24 +1231,47 @@ export class SlackChannel implements Channel {
 
       if (!this.isCurrentStreamingGeneration(jid, options.generation)) return;
       if (!state.nativeEnabled) {
-        const fallbackText =
+        const baseFallbackText =
           state.lastNativeText && nextText.startsWith(state.lastNativeText)
             ? nextText.slice(state.lastNativeText.length)
             : nextText;
-        if (!state.messageTs) {
-          if (fallbackText) {
+        const currentMsgText = baseFallbackText.slice(
+          state.sealedFallbackLength,
+        );
+
+        if (state.messageTs && currentMsgText.length > SLACK_MSG_CHAR_LIMIT) {
+          // Current message is full — seal it and open a continuation.
+          const toSeal = currentMsgText.slice(0, SLACK_MSG_CHAR_LIMIT);
+          await this.app.client.chat.update({
+            channel: state.channelId,
+            ts: state.messageTs,
+            text: toSeal,
+          });
+          state.sealedFallbackLength += toSeal.length;
+          state.messageTs = undefined;
+          const overflow = currentMsgText.slice(toSeal.length);
+          if (overflow) {
             const posted = (await this.app.client.chat.postMessage({
               channel: state.channelId,
-              text: fallbackText,
+              text: overflow,
               ...(state.threadId ? { thread_ts: state.threadId } : {}),
             })) as { ts?: string };
             state.messageTs = posted.ts;
           }
-        } else if (fallbackText) {
+        } else if (!state.messageTs) {
+          if (currentMsgText) {
+            const posted = (await this.app.client.chat.postMessage({
+              channel: state.channelId,
+              text: currentMsgText,
+              ...(state.threadId ? { thread_ts: state.threadId } : {}),
+            })) as { ts?: string };
+            state.messageTs = posted.ts;
+          }
+        } else if (currentMsgText) {
           await this.app.client.chat.update({
             channel: state.channelId,
             ts: state.messageTs,
-            text: fallbackText,
+            text: currentMsgText,
           });
         }
       }
@@ -1284,20 +1326,22 @@ export class SlackChannel implements Channel {
     const existing = this.activeProgress.get(key);
 
     if (!existing) {
+      // Don't post a completion notice if no "Still working" was ever shown —
+      // it would be a spurious message for fast responses.
+      if (options.done) return;
+
       const sent = (await this.app.client.chat.postMessage({
         channel: parsed.channelId,
         text: trimmed,
         ...(options.threadId ? { thread_ts: options.threadId } : {}),
       })) as { ts?: string };
 
-      if (!options.done) {
-        this.activeProgress.set(key, {
-          channelId: parsed.channelId,
-          threadId: options.threadId,
-          messageTs: sent.ts,
-          lastText: trimmed,
-        });
-      }
+      this.activeProgress.set(key, {
+        channelId: parsed.channelId,
+        threadId: options.threadId,
+        messageTs: sent.ts,
+        lastText: trimmed,
+      });
       return;
     }
 

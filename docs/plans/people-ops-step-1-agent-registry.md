@@ -1,7 +1,8 @@
 # People Ops Agent Step 1 - Agent Registry From Config
 
-**Status:** Draft  
+**Status:** Completed  
 **Date:** 2026-04-22  
+**Completed On:** 2026-04-23  
 **Parent Plan:** `docs/plans/people-ops-phase1-step-by-step.md`
 
 ## Goal
@@ -14,7 +15,8 @@ Complete Step 1 by loading agent identity and runtime basics from file config so
 2. Agent config is validated at startup with clear failure logs.
 3. `people-ops-agent` appears in runtime diagnostics/registration path as config-loaded.
 4. No hardcoded `people-ops-agent` behavior remains in startup/registration code.
-5. Existing non-HR behavior remains unaffected.
+5. Configured agents can declare owned channel JIDs so runtime groups do not stay on anonymous folders like `g1`.
+6. Existing non-HR behavior remains unaffected.
 
 ## Scope
 
@@ -24,6 +26,7 @@ Complete Step 1 by loading agent identity and runtime basics from file config so
 2. Minimal `agent.yaml` schema validation.
 3. Startup integration so loaded agents are registered for runtime use.
 4. Boot-time diagnostics/logging for loaded agents.
+5. Channel-to-agent binding reconciliation for declared registered channels.
 
 ### Out Of Scope (Step 2+)
 
@@ -52,6 +55,8 @@ channel: slack
 timezone: Asia/Kolkata
 manager_target: "slack:#hr-managers"
 roster_source: "file:roster/employees.csv"
+channel_jids:
+  - "sl:C0AT4JNGA9Z"
 enabled_workflows:
   - attendance-daily
   - attendance-followup
@@ -71,14 +76,15 @@ enabled_workflows:
 8. Capability: Build in-memory registry
 9. Construct a runtime registry keyed by agent `id`.
 10. Enforce duplicate `id` detection at startup.
+11. Enforce duplicate `channel_jids` detection at startup.
 
-11. Capability: Wire registry into runtime startup
-12. Replace hardcoded agent boot assumptions with registry-driven loading.
-13. Register `people-ops-agent` through the same path used for runtime agent setup.
+12. Capability: Wire registry into runtime startup
+13. Replace hardcoded agent boot assumptions with registry-driven loading.
+14. Reconcile declared `channel_jids` so registered channel rows point at the configured agent folder.
 
-14. Capability: Expose startup observability
-15. Log loaded agent ids, source paths, and validation failures.
-16. Surface loaded agents in diagnostics output.
+15. Capability: Expose startup observability
+16. Log loaded agent ids, source paths, channel binding updates, and validation failures.
+17. Surface loaded agents in diagnostics output.
 
 ## Implementation Notes
 
@@ -106,3 +112,11 @@ Manual checks:
 1. Step 1 acceptance criteria all pass.
 2. Main plan still unchanged for Step 2+ scope.
 3. No workflow, permission, or scheduler behavior is introduced in this step.
+
+## Completion Notes
+
+1. Runtime now discovers config-backed agents from `~/myclaw/agents/*/agent.yaml`.
+2. Startup validation, duplicate-id checks, and duplicate-channel binding checks run before registration.
+3. Runtime diagnostics expose configured agent ids for operational visibility.
+4. Real runtime validation was completed with `people-ops-agent` loaded from disk.
+5. `claw-test-channel` is now declared in `people-ops-agent/agent.yaml` through `channel_jids` and reconciled from anonymous folder `g1` to `people-ops-agent`.

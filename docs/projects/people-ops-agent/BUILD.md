@@ -4,7 +4,11 @@
 
 ## TL;DR
 
-A platform in MyClaw where an admin configures a virtual employee's behavior **by typing plain English in a Slack channel** — no code, no deploys. The People Ops agent is the first deployment. The platform is designed so the next virtual teammate (recruiter, finance, ops) is 30 minutes of YAML + a provisioning run, not a new project.
+A platform in MyClaw where an admin configures a virtual employee's behavior **by typing plain English in an approved chat channel** — no code, no deploys. Slack is the first Phase 1 channel adapter, and the reusable runtime/policy model stays channel-agnostic so Teams or another chat surface can be added later without rewriting workflow or permission logic. The People Ops agent is the first deployment. The platform is designed so the next virtual teammate (recruiter, finance, ops) is 30 minutes of YAML + a provisioning run, not a new project.
+
+For Phase 1, the chat flow is:
+- **workflow changes**: admin asks in Slack -> AI drafts a structured workflow -> human approves -> workflow activates
+- **tool/permission changes**: admin asks in Slack -> AI drafts the config change -> human approves -> change activates
 
 ## Why this exists
 
@@ -52,6 +56,8 @@ When Pramod types an instruction in English, a small AI subagent translates it *
 
 **Why:** English is fuzzy. "Everyone" means different things. Translating once into a recipe gives us a machine-readable plan that cron can replay forever, and that Pramod can later edit/pause/delete via chat.
 
+**Phase 1 guardrail:** the draft must be explicitly approved before it becomes active. The agent should not silently create or modify live workflows in production.
+
 ### 2. An engine that runs recipes step-by-step
 
 A step executor that wakes up on cron, loads a recipe, and walks through its steps. When a step waits for a human reply ("ask Priya and collect her answer"), the engine **parks** that step in the database and moves on. When the reply arrives, the engine resumes at the parked step.
@@ -63,6 +69,8 @@ A step executor that wakes up on cron, loads a recipe, and walks through its ste
 The People Ops agent's "Google Sheets access," "Gmail access," "Calendar access" are **not code we write**. They're CLIs installed on the VM: `gworkspace`, `slack-cli`, `gh`, etc. OneCLI wraps credential injection (`onecli exec -- gworkspace sheets append ...`). Claude composes the right command via the Bash tool he already has.
 
 **Why:** Vendors ship CLIs. We don't need to own glue code for every system the agent might need. Adding Jira next quarter = install `jira-cli`, add to capability manifest, done. Zero MyClaw change.
+
+**Phase 1 guardrail:** tool and permission changes also go through approval. The agent can draft updates to `permissions.yaml` or capability-related config, but those drafts should not become active without an explicit human decision.
 
 ### 4. Safety hooks (this is load-bearing)
 

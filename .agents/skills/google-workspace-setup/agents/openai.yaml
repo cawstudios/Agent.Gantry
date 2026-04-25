@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Workspace Setup"
+  short_description: "Set up gws OAuth for MyClaw agents on a new machine."
+  default_prompt: "Help me set up Google Workspace CLI authentication for MyClaw agents."

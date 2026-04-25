@@ -15,6 +15,7 @@ function makeApp(overrides: Partial<RuntimeApp> = {}): RuntimeApp {
     setGroupThinkingOverride: vi.fn(),
     getAvailableGroups: vi.fn(() => []),
     setRegisteredGroupsForTest: vi.fn(),
+    reconcileConfiguredAgentChannelBindings: vi.fn(),
     ensureOneCLIAgentsForRegisteredGroups: vi.fn(),
     processGroupMessages: vi.fn(),
     getRegisteredGroups: vi.fn(() => ({})),
@@ -31,6 +32,9 @@ describe('runStartup', () => {
     const app = makeApp({
       loadState: vi.fn(() => {
         order.push('load-state');
+      }),
+      reconcileConfiguredAgentChannelBindings: vi.fn(() => {
+        order.push('reconcile-channel-bindings');
       }),
       ensureOneCLIAgentsForRegisteredGroups: vi.fn(() => {
         order.push('ensure-onecli');
@@ -65,6 +69,10 @@ describe('runStartup', () => {
         order.push('load-agent-config-registry');
         return {};
       }),
+      refreshPermissionProfilesFromDisk: vi.fn(() => {
+        order.push('load-permission-profiles');
+        return {};
+      }),
       restoreRemoteControl: vi.fn(() => {
         order.push('restore-remote-control');
       }),
@@ -78,7 +86,9 @@ describe('runStartup', () => {
       'log-db-init',
       'load-settings',
       'load-agent-config-registry',
+      'load-permission-profiles',
       'load-state',
+      'reconcile-channel-bindings',
       'ensure-onecli',
       'restore-remote-control',
     ]);
@@ -104,6 +114,7 @@ describe('runStartup', () => {
       }),
       loadRuntimeSettings: vi.fn(() => ({ channels: {}, features: {} }) as any),
       refreshConfiguredAgentsFromDisk: vi.fn(() => ({})),
+      refreshPermissionProfilesFromDisk: vi.fn(() => ({})),
       restoreRemoteControl: vi.fn(() => {
         order.push('restore-remote-control');
       }),

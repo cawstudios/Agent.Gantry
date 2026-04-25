@@ -9,6 +9,10 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import { runAutomaticMemoryPass } from './auto-memory.js';
+import {
+  checkRunnerToolPermission,
+  type RunnerPermissionProfile,
+} from './permission-policy.js';
 
 interface ContainerInput {
   prompt: string;
@@ -20,6 +24,7 @@ interface ContainerInput {
   assistantName?: string;
   script?: string;
   compiledSystemPrompt?: string;
+  permissionProfile?: RunnerPermissionProfile;
   thinking?: {
     mode: 'adaptive' | 'enabled' | 'disabled';
     effort?: EffortLevel;
@@ -471,7 +476,6 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
-  let sawPartialTextSinceLastResult = false;
   const systemPrompt = buildSystemPrompt(containerInput.compiledSystemPrompt);
 
   // Discover additional directories mounted at runtime-specific extra dir.
@@ -534,6 +538,21 @@ async function runQuery(
           toolName === 'ExitWorktree'
         ) {
           return { behavior: 'allow' as const, updatedInput: input };
+        }
+
+        const policy = checkRunnerToolPermission(
+          containerInput.permissionProfile,
+          toolName,
+          input,
+        );
+        if (!policy.allowed) {
+          const reason = policy.reason || 'Denied by permission profile';
+          log(`Permission profile denied tool ${toolName}: ${reason}`);
+          return {
+            behavior: 'deny' as const,
+            message: `Permission denied by profile: ${reason}`,
+            interrupt: false,
+          };
         }
 
         if (permissionOpts.signal.aborted) {
@@ -619,26 +638,6 @@ async function runQuery(
       );
     }
 
-    if (message.type === 'stream_event') {
-      const event = (message as { event?: unknown }).event as
-        | {
-            type?: string;
-            delta?: { type?: string; text?: string };
-          }
-        | undefined;
-      if (event?.type === 'content_block_delta') {
-        const delta = event.delta;
-        if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
-          sawPartialTextSinceLastResult = true;
-          writeOutput({
-            status: 'success',
-            result: delta.text,
-            newSessionId,
-          });
-        }
-      }
-    }
-
     if (message.type === 'result') {
       resultCount++;
       const textResult =
@@ -691,11 +690,9 @@ async function runQuery(
 
       writeOutput({
         status: 'success',
-        result:
-          textResult && !sawPartialTextSinceLastResult ? textResult : null,
+        result: textResult || null,
         newSessionId,
       });
-      sawPartialTextSinceLastResult = false;
     }
   }
 
@@ -1215,4 +1212,4 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+main().then(() => process.exit(0));

@@ -38,6 +38,7 @@ import {
   AgentOutput,
   RunAgentOptions,
 } from './agent-spawn-types.js';
+import { getPermissionProfileForAgent } from './permission-profile-registry.js';
 
 export {
   writeJobEventsSnapshot,
@@ -100,6 +101,7 @@ export async function spawnAgent(
   const processName = `myclaw-${safeName}-${Date.now()}`;
   const modelConfig = getEffectiveModelConfig(group.agentConfig?.model);
   const promptProfileService = getPromptProfileService();
+  const permissionProfile = getPermissionProfileForAgent(group.folder);
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
@@ -122,6 +124,7 @@ export async function spawnAgent(
       groupFolder: group.folder,
       runtimeHome: AGENT_ROOT,
       hostCapabilities,
+      permissionProfile,
     });
   } catch (err) {
     logger.warn(
@@ -133,6 +136,7 @@ export async function spawnAgent(
   const runnerInput: AgentInput = {
     ...input,
     compiledSystemPrompt,
+    permissionProfile,
   };
 
   const hostRuntime = prepareHostRuntimeContext(group);
@@ -203,6 +207,7 @@ export async function spawnAgent(
     `onecliApplied=${hostCredentials.onecliApplied}`,
     `onecliCaPath=${hostCredentials.onecliCaPath || '(none)'}`,
     `fastLookupCli=${fs.existsSync(fastLookupCliPath) ? fastLookupCliPath : '(none)'}`,
+    `permissionProfile=${runnerInput.permissionProfile?.agentId || '(none)'}`,
     `runner=${hostRunnerPath}`,
   ];
 

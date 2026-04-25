@@ -73,6 +73,10 @@ vi.mock('./prompt-profile.js', () => ({
   })),
 }));
 
+vi.mock('./permission-profile-registry.js', () => ({
+  getPermissionProfileForAgent: vi.fn(() => undefined),
+}));
+
 vi.mock('../cli/runtime-settings.js', () => ({
   loadRuntimeSettings: vi.fn(() => ({
     hostCapabilities: {
@@ -147,6 +151,7 @@ import { getPromptProfileService } from './prompt-profile.js';
 import { logger } from '../core/logger.js';
 import { buildGoogleWorkspaceCliEnv } from '../platform/host-capabilities.js';
 import { loadRuntimeSettings } from '../cli/runtime-settings.js';
+import { getPermissionProfileForAgent } from './permission-profile-registry.js';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -374,6 +379,51 @@ describe('agent-spawn timeout behavior', () => {
     >;
     expect(env.GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND).toBe('file');
     expect(env.SSL_CERT_FILE).toBe('/etc/ssl/cert.pem');
+  });
+
+  it('passes configured agent permission profile to the runner input', async () => {
+    const compileSystemPrompt = vi.fn(() => '');
+    vi.mocked(getPromptProfileService).mockReturnValueOnce({
+      compileSystemPrompt,
+    } as any);
+    vi.mocked(getPermissionProfileForAgent).mockReturnValueOnce({
+      agentId: 'test-group',
+      folder: 'test-group',
+      sourcePath: '/tmp/test-group/permissions.yaml',
+      valid: true,
+      tools: { message_send: true, bash: false },
+      allowedClis: [],
+      requireOnecli: true,
+      allowedChannelTargets: {
+        slack: ['#test-group'],
+      },
+      rateLimits: { messagesPerHour: 1 },
+    });
+
+    const resultPromise = spawnAgent(testGroup, testInput, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const writtenInput = JSON.parse(
+      fakeProc.stdin.read()?.toString() || '{}',
+    ) as {
+      permissionProfile?: { agentId?: string; tools?: Record<string, boolean> };
+    };
+    expect(writtenInput.permissionProfile).toMatchObject({
+      agentId: 'test-group',
+      tools: { message_send: true, bash: false },
+    });
+    expect(compileSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupFolder: 'test-group',
+        permissionProfile: expect.objectContaining({
+          agentId: 'test-group',
+          tools: { message_send: true, bash: false },
+        }),
+      }),
+    );
   });
 
   it('passes fast lookup enablement into runner env', async () => {

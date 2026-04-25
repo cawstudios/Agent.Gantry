@@ -4,6 +4,8 @@ import { ASSISTANT_NAME, ONECLI_URL } from '../core/config.js';
 import { logger } from '../core/logger.js';
 import { Channel, RegisteredGroup, ThinkingOverride } from '../core/types.js';
 import { findChannel } from '../messaging/router.js';
+import { reconcileAgentChannelBindings } from '../runtime/agent-channel-bindings.js';
+import type { ConfiguredAgent } from '../runtime/agent-config-registry.js';
 import { createGroupProcessor } from '../runtime/group-processing.js';
 import { listAvailableGroups } from '../runtime/group-registry.js';
 import { GroupQueue } from '../runtime/group-queue.js';
@@ -40,6 +42,9 @@ export interface RuntimeApp {
   ) => void;
   getAvailableGroups: () => import('../runtime/agent-spawn.js').AvailableGroup[];
   setRegisteredGroupsForTest: (groups: Record<string, RegisteredGroup>) => void;
+  reconcileConfiguredAgentChannelBindings: (
+    configuredAgents: Record<string, ConfiguredAgent>,
+  ) => void;
   ensureOneCLIAgentsForRegisteredGroups: () => void;
   processGroupMessages: (chatJid: string) => Promise<boolean>;
   getRegisteredGroups: () => Record<string, RegisteredGroup>;
@@ -163,6 +168,16 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     registeredGroups = groups;
   }
 
+  function reconcileConfiguredAgentChannelBindings(
+    configuredAgents: Record<string, ConfiguredAgent>,
+  ): void {
+    reconcileAgentChannelBindings({
+      configuredAgents,
+      registeredGroups,
+      persist: setRegisteredGroup,
+    });
+  }
+
   function ensureOneCLIAgentsForRegisteredGroups(): void {
     for (const [jid, group] of Object.entries(registeredGroups)) {
       ensureOneCLIAgent(jid, group);
@@ -222,6 +237,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     setGroupThinkingOverride,
     getAvailableGroups,
     setRegisteredGroupsForTest,
+    reconcileConfiguredAgentChannelBindings,
     ensureOneCLIAgentsForRegisteredGroups,
     processGroupMessages: (chatJid) =>
       groupProcessor.processGroupMessages(chatJid),
