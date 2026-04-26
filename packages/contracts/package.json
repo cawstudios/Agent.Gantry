@@ -1,19 +1,116 @@
 {
   "name": "@myclaw/contracts",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
-  "description": "Canonical IPC contracts for MyClaw host and runner.",
+  "description": "Canonical DTO and schema contracts for MyClaw integrations.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist/"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./agents": {
+      "types": "./dist/agents/index.d.ts",
+      "import": "./dist/agents/index.js",
+      "default": "./dist/agents/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser/index.d.ts",
+      "import": "./dist/browser/index.js",
+      "default": "./dist/browser/index.js"
+    },
+    "./channels": {
+      "types": "./dist/channels/index.d.ts",
+      "import": "./dist/channels/index.js",
+      "default": "./dist/channels/index.js"
+    },
+    "./conversations": {
+      "types": "./dist/conversations/index.d.ts",
+      "import": "./dist/conversations/index.js",
+      "default": "./dist/conversations/index.js"
+    },
+    "./contract-primitives": {
+      "types": "./dist/contract-primitives.d.ts",
+      "import": "./dist/contract-primitives.js",
+      "default": "./dist/contract-primitives.js"
+    },
+    "./errors": {
+      "types": "./dist/errors/index.d.ts",
+      "import": "./dist/errors/index.js",
+      "default": "./dist/errors/index.js"
+    },
+    "./jobs": {
+      "types": "./dist/jobs/index.d.ts",
+      "import": "./dist/jobs/index.js",
+      "default": "./dist/jobs/index.js"
+    },
+    "./memory": {
+      "types": "./dist/memory/index.d.ts",
+      "import": "./dist/memory/index.js",
+      "default": "./dist/memory/index.js"
+    },
+    "./messages": {
+      "types": "./dist/messages/index.d.ts",
+      "import": "./dist/messages/index.js",
+      "default": "./dist/messages/index.js"
+    },
+    "./pagination": {
+      "types": "./dist/pagination/index.d.ts",
+      "import": "./dist/pagination/index.js",
+      "default": "./dist/pagination/index.js"
+    },
+    "./primitives": {
+      "types": "./dist/contract-primitives.d.ts",
+      "import": "./dist/contract-primitives.js",
+      "default": "./dist/contract-primitives.js"
+    },
+    "./permissions": {
+      "types": "./dist/permissions/index.d.ts",
+      "import": "./dist/permissions/index.js",
+      "default": "./dist/permissions/index.js"
+    },
+    "./runs": {
+      "types": "./dist/runs/index.d.ts",
+      "import": "./dist/runs/index.js",
+      "default": "./dist/runs/index.js"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox/index.d.ts",
+      "import": "./dist/sandbox/index.js",
+      "default": "./dist/sandbox/index.js"
+    },
+    "./sessions": {
+      "types": "./dist/sessions/index.d.ts",
+      "import": "./dist/sessions/index.js",
+      "default": "./dist/sessions/index.js"
+    },
+    "./skills": {
+      "types": "./dist/skills/index.d.ts",
+      "import": "./dist/skills/index.js",
+      "default": "./dist/skills/index.js"
+    },
+    "./streaming": {
+      "types": "./dist/streaming/index.d.ts",
+      "import": "./dist/streaming/index.js",
+      "default": "./dist/streaming/index.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "import": "./dist/tools/index.js",
+      "default": "./dist/tools/index.js"
     }
   },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",

@@ -95,7 +95,7 @@
     "packages/contracts": {
       "paths": ["packages/contracts/src"],
       "allowedImportLayers": ["packages/contracts"],
-      "allowedExternalImports": []
+      "allowedExternalImports": ["zod"]
     },
     "packages/sdk": {
       "paths": ["packages/sdk/src"],
