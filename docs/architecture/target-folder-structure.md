@@ -174,6 +174,11 @@ Owns published and internal shared contracts:
 Contracts must not expose internal database rows, provider SDK payloads, or
 runtime-only implementation details.
 
+This package is the integration boundary for control API clients, the
+server-side SDK, Web UI applications, and external NestJS/NextJS integrations.
+Those consumers should import DTOs and schemas from `@myclaw/contracts`, not
+from runtime, adapters, Postgres, channel, or provider-specific source paths.
+
 ### `packages/sdk/`
 
 Owns the server-side SDK over the control API:

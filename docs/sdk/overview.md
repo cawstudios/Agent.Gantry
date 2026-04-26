@@ -18,6 +18,11 @@ The runtime exposes a small internal control API over:
 - Unix domain socket by default
 - loopback TCP only when explicitly enabled
 
+`@myclaw/contracts` is the shared DTO and schema boundary for the control API,
+the server-side SDK, future Web UI integrations, and framework integrations
+such as NestJS providers or Next.js route handlers. Application code should
+depend on those contracts instead of importing MyClaw runtime internals.
+
 Authentication is bearer-token based and scoped. The runtime reads keys from:
 
 - `MYCLAW_CONTROL_API_KEYS_JSON` for production scoped keys
