@@ -77,6 +77,12 @@ Important constraints:
 - Run full checks at the end of a phase.
 - Use [docs/architecture/current-verification-commands.md](docs/architecture/current-verification-commands.md) as the command reference.
 
+## Codex Harness
+
+- Use relevant local skills under `.codex/skills/` for architecture refactors, permission safety, schema changes, and provider adapters.
+- Record new lessons with `python3 .codex/scripts/record_lesson.py` after repeated failures or review findings.
+- Run `python3 .codex/scripts/check_task_completion.py` before final response when possible.
+
 ## Safety Rules
 
 - Do not read production secrets.
