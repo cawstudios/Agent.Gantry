@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 
 import {
   CLAUDE_CODE_MODEL_PIN_ENV,
@@ -10,8 +11,10 @@ import { parseBooleanEnv } from './env/parse.js';
 import { getMemoryModelConfig } from './memory.js';
 import { getMyclawHome } from '../shared/myclaw-home.js';
 import { resolveRuntimeStorageConfig } from './settings/storage.js';
+import { ensureRuntimeSettings } from './settings/runtime-settings.js';
+import { settingsFilePath } from './settings/runtime-home.js';
+import type { RuntimeSettings } from './settings/runtime-settings-types.js';
 import { isValidTimezone } from '../shared/timezone.js';
-import { resolveHostCredentialMode } from './credentials/mode.js';
 
 export * from './memory.js';
 
@@ -23,6 +26,47 @@ const MYCLAW_HOME_RAW =
   process.env.MYCLAW_HOME?.trim() || envConfig.MYCLAW_HOME?.trim() || '';
 export const MYCLAW_HOME = getMyclawHome(MYCLAW_HOME_RAW);
 const RUNTIME_ROOT = MYCLAW_HOME;
+let runtimeSettingsCache:
+  | {
+      filePath: string;
+      mtimeMs: number;
+      size: number;
+      settings: RuntimeSettings;
+    }
+  | undefined;
+
+export function getRuntimeSettingsForConfig(): RuntimeSettings {
+  const filePath = settingsFilePath(MYCLAW_HOME);
+  try {
+    const stat = fs.statSync(filePath);
+    if (
+      runtimeSettingsCache?.filePath === filePath &&
+      runtimeSettingsCache.mtimeMs === stat.mtimeMs &&
+      runtimeSettingsCache.size === stat.size
+    ) {
+      return runtimeSettingsCache.settings;
+    }
+    const settings = ensureRuntimeSettings(MYCLAW_HOME);
+    runtimeSettingsCache = {
+      filePath,
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      settings,
+    };
+    return settings;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    const settings = ensureRuntimeSettings(MYCLAW_HOME);
+    const stat = fs.statSync(filePath);
+    runtimeSettingsCache = {
+      filePath,
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      settings,
+    };
+    return settings;
+  }
+}
 
 export const STORE_DIR = path.resolve(RUNTIME_ROOT, 'store');
 export const AGENTS_DIR = path.resolve(RUNTIME_ROOT, 'agents');
@@ -44,19 +88,25 @@ export const PERMISSION_APPROVAL_TIMEOUT_MS = Math.max(
     10,
   ) || 300_000,
 );
-function parseIdAllowlist(raw: string | undefined): Set<string> {
-  if (!raw?.trim()) return new Set<string>();
-  return new Set(
-    raw
-      .split(/[,\s]+/)
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0),
-  );
+function collectChannelControlAllowlist(
+  channelId: string,
+  sourceGroup?: string,
+): Set<string> {
+  const runtimeSettings = getRuntimeSettingsForConfig();
+  const controlAllowlist =
+    runtimeSettings.channels?.[channelId]?.controlAllowlist;
+  if (!controlAllowlist) return new Set<string>();
+  const scoped =
+    sourceGroup && controlAllowlist.agents[sourceGroup] !== undefined
+      ? controlAllowlist.agents[sourceGroup]
+      : controlAllowlist.default;
+  return new Set(scoped.filter((entry) => entry.trim().length > 0));
 }
-export const SLACK_PERMISSION_APPROVER_IDS = parseIdAllowlist(
-  process.env.SLACK_PERMISSION_APPROVER_IDS ||
-    envConfig.SLACK_PERMISSION_APPROVER_IDS,
-);
+export function getSlackPermissionApproverIds(
+  sourceGroup?: string,
+): Set<string> {
+  return collectChannelControlAllowlist('slack', sourceGroup);
+}
 export const AGENT_TIMEOUT = parseInt(
   process.env.AGENT_TIMEOUT || '1800000',
   10,
@@ -65,16 +115,29 @@ export const AGENT_MAX_OUTPUT_SIZE = parseInt(
   process.env.AGENT_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
-export const ONECLI_URL = envValue('ONECLI_URL');
+export function getCredentialBrokerRuntimeConfig(): {
+  mode: RuntimeSettings['credentialBroker']['mode'];
+  onecliUrl: string;
+  externalBrokerBaseUrl: string;
+} {
+  const settings = getRuntimeSettingsForConfig();
+  return {
+    mode: settings.credentialBroker.mode,
+    onecliUrl: settings.credentialBroker.onecli.url,
+    externalBrokerBaseUrl: settings.credentialBroker.external.baseUrl,
+  };
+}
+
 export const ONECLI_DATABASE_URL = envValue('ONECLI_DATABASE_URL');
 export const ONECLI_SECRET_ENCRYPTION_KEY = envValue('SECRET_ENCRYPTION_KEY');
 const normModel = normalizeClaudeModelSelection;
-export const ANTHROPIC_MODEL = normModel(runtimeEnvValue('ANTHROPIC_MODEL'));
+export function getConfiguredDefaultModel(): string {
+  return normModel(getRuntimeSettingsForConfig().agent.defaultModel) || '';
+}
 export const TELEGRAM_BOT_TOKEN = envValue('TELEGRAM_BOT_TOKEN');
 export const SLACK_BOT_TOKEN = envValue('SLACK_BOT_TOKEN');
 export const SLACK_APP_TOKEN = envValue('SLACK_APP_TOKEN');
 export const MYCLAW_IPC_AUTH_SECRET = envValue('MYCLAW_IPC_AUTH_SECRET');
-export const MYCLAW_CREDENTIAL_MODE = envValue('MYCLAW_CREDENTIAL_MODE');
 export const REMOTE_CONTROL_AUTO_ACCEPT = parseBooleanEnv(
   envValue('REMOTE_CONTROL_AUTO_ACCEPT'),
   false,
@@ -86,9 +149,6 @@ export const HOST_CREDENTIAL_ENV_KEYS = [
   'ANTHROPIC_MODEL',
   ...CLAUDE_CODE_MODEL_PIN_ENV_KEYS,
 ] as const;
-export const HOST_CREDENTIAL_REQUIRED_ENV_KEYS = [
-  'ANTHROPIC_BASE_URL',
-] as const;
 export const ONECLI_ALLOWED_ENV_KEYS = [...HOST_CREDENTIAL_ENV_KEYS] as const;
 type HostCredentialSource = Partial<Record<string, string | undefined>>;
 
@@ -96,12 +156,7 @@ function readHostCredentialValue(
   key: (typeof HOST_CREDENTIAL_ENV_KEYS)[number],
   source?: HostCredentialSource,
 ): string {
-  return (
-    source?.[key]?.trim() ||
-    envConfig[key]?.trim() ||
-    process.env[key]?.trim() ||
-    ''
-  );
+  return source?.[key]?.trim() || '';
 }
 
 export function getHostCredentialEnv(
@@ -114,13 +169,6 @@ export function getHostCredentialEnv(
     if (value) env[key] = value;
   }
   return env;
-}
-export function hasHostCredentialBrokerEnv(
-  source?: HostCredentialSource,
-): boolean {
-  return HOST_CREDENTIAL_REQUIRED_ENV_KEYS.some((key) =>
-    Boolean(readHostCredentialValue(key, source)),
-  );
 }
 export function getTelegramBotToken(): string {
   return runtimeEnvValue('TELEGRAM_BOT_TOKEN');
@@ -140,12 +188,12 @@ export interface ClaudeAuthState {
 }
 
 export function resolveClaudeAuthState(): ClaudeAuthState {
-  const credentialMode = resolveHostCredentialMode(
-    envValue('MYCLAW_CREDENTIAL_MODE'),
-  );
+  const brokerConfig = getCredentialBrokerRuntimeConfig();
+  const credentialMode = brokerConfig.mode;
   const configured =
-    (credentialMode === 'onecli' && Boolean(envValue('ONECLI_URL').trim())) ||
-    (credentialMode === 'external' && hasHostCredentialBrokerEnv());
+    (credentialMode === 'onecli' && Boolean(brokerConfig.onecliUrl.trim())) ||
+    (credentialMode === 'external' &&
+      Boolean(brokerConfig.externalBrokerBaseUrl.trim()));
   return {
     hasOauthToken: false,
     hasApiKey: false,
@@ -153,14 +201,13 @@ export function resolveClaudeAuthState(): ClaudeAuthState {
   };
 }
 
-export const LLM_ENABLED = resolveClaudeAuthState().mode !== 'none';
+export function getMemoryModelRuntimeConfig(): ReturnType<
+  typeof getMemoryModelConfig
+> {
+  return getMemoryModelConfig(getConfiguredDefaultModel());
+}
 
-const memoryModelConfig = getMemoryModelConfig(ANTHROPIC_MODEL);
-export const MODEL_EXTRACTOR = memoryModelConfig.extractor;
-export const MODEL_DREAMING = memoryModelConfig.dreaming;
-export const MODEL_CONSOLIDATION = memoryModelConfig.consolidation;
-
-export type DefaultModelSource = 'ANTHROPIC_MODEL' | 'unset';
+export type DefaultModelSource = 'settings.yaml agent.default_model' | 'unset';
 export type EffectiveModelSource =
   | 'group.agentConfig.model'
   | DefaultModelSource;
@@ -169,8 +216,12 @@ export function getDefaultModelConfig(): {
   model?: string;
   source: DefaultModelSource;
 } {
-  if (ANTHROPIC_MODEL) {
-    return { model: ANTHROPIC_MODEL, source: 'ANTHROPIC_MODEL' };
+  const configuredModel = getConfiguredDefaultModel();
+  if (configuredModel) {
+    return {
+      model: configuredModel,
+      source: 'settings.yaml agent.default_model',
+    };
   }
   return { source: 'unset' };
 }

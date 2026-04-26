@@ -64,6 +64,7 @@ export function validateBrokerUrl(
 
 export function validateExternalBrokerUrl(
   rawUrl: string,
+  label = 'ANTHROPIC_BASE_URL',
 ): BrokerUrlValidationResult {
-  return validateBrokerUrl(rawUrl, 'ANTHROPIC_BASE_URL');
+  return validateBrokerUrl(rawUrl, label);
 }

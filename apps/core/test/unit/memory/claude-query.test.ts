@@ -21,26 +21,47 @@ vi.mock('@onecli-sh/sdk', () => ({
 describe('runClaudeQuery', () => {
   let runtimeRoot = '';
 
+  function writeCredentialSettings(
+    mode: 'none' | 'onecli' | 'external',
+    externalBaseUrl = '',
+  ): void {
+    fs.writeFileSync(
+      path.join(runtimeRoot, 'settings.yaml'),
+      [
+        'channels: {}',
+        'storage:',
+        '  postgres:',
+        '    url_env: MYCLAW_DATABASE_URL',
+        '    schema: myclaw',
+        'credential_broker:',
+        `  mode: ${mode}`,
+        '  onecli:',
+        '    url: http://localhost:10254',
+        '  external:',
+        `    base_url: "${externalBaseUrl}"`,
+        'memory:',
+        '  enabled: true',
+        '  embeddings:',
+        '    enabled: false',
+        '    provider: disabled',
+        '    model: text-embedding-3-large',
+        '  dreaming:',
+        '    enabled: false',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+  }
+
   beforeEach(() => {
     vi.resetModules();
     runtimeRoot = fs.mkdtempSync(
       path.join(os.tmpdir(), 'myclaw-claude-query-'),
     );
-    fs.writeFileSync(
-      path.join(runtimeRoot, 'settings.yaml'),
-      [
-        'storage:',
-        '  postgres:',
-        '    url_env: MYCLAW_DATABASE_URL',
-        '    schema: myclaw',
-        '',
-      ].join('\n'),
-      'utf-8',
-    );
+    writeCredentialSettings('onecli');
     vi.stubEnv('MYCLAW_HOME', runtimeRoot);
     vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
     vi.stubEnv('ANTHROPIC_API_KEY', '');
-    vi.stubEnv('ONECLI_URL', 'http://localhost:10254');
     queryMock.mockReset();
     getContainerConfigMock.mockReset();
     getContainerConfigMock.mockResolvedValue({
@@ -90,8 +111,44 @@ describe('runClaudeQuery', () => {
         }
       | undefined;
     expect(call?.prompt).toBe('Extract facts');
-    expect(call?.options?.env).toEqual({
+    expect(call?.options?.env).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+      ANTHROPIC_API_KEY: '',
+      CLAUDE_CODE_OAUTH_TOKEN: '',
+    });
+  });
+
+  it('scrubs ambient raw provider credentials from SDK query env', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-ambient');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'oauth-ambient');
+    queryMock.mockImplementation(() =>
+      (async function* () {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'text', text: '[{"kind":"fact"}]' }],
+          },
+        };
+      })(),
+    );
+
+    const { runClaudeQuery } = await import('@core/memory/claude-query.js');
+    await runClaudeQuery({
+      model: 'claude-haiku-4-5-20251001',
+      prompt: 'Extract facts',
+    });
+
+    const call = queryMock.mock.calls[0]?.[0] as
+      | {
+          options?: {
+            env?: Record<string, string>;
+          };
+        }
+      | undefined;
+    expect(call?.options?.env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+      ANTHROPIC_API_KEY: '',
+      CLAUDE_CODE_OAUTH_TOKEN: '',
     });
   });
 
@@ -148,13 +205,15 @@ describe('runClaudeQuery', () => {
           };
         }
       | undefined;
-    expect(call?.options?.env).toEqual({
+    expect(call?.options?.env).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+      ANTHROPIC_API_KEY: '',
+      CLAUDE_CODE_OAUTH_TOKEN: '',
     });
   });
 
   it('does not treat leftover ONECLI_URL as auth in none mode', async () => {
-    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'none');
+    writeCredentialSettings('none');
     vi.stubEnv('ONECLI_URL', 'http://localhost:10254');
 
     const { hasClaudeAuthConfigured, runClaudeQuery } =
@@ -172,10 +231,8 @@ describe('runClaudeQuery', () => {
   });
 
   it('does not treat model-only external mode as configured auth', async () => {
-    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'external');
-    vi.stubEnv('ONECLI_URL', '');
+    writeCredentialSettings('external');
     vi.stubEnv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001');
-    vi.stubEnv('ANTHROPIC_BASE_URL', '');
 
     const { hasClaudeAuthConfigured, runClaudeQuery } =
       await import('@core/memory/claude-query.js');
@@ -192,10 +249,8 @@ describe('runClaudeQuery', () => {
   });
 
   it('allows external mode when a broker endpoint is configured', async () => {
-    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'external');
-    vi.stubEnv('ONECLI_URL', '');
+    writeCredentialSettings('external', 'https://broker.local/anthropic');
     vi.stubEnv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001');
-    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://broker.local/anthropic');
     queryMock.mockImplementation(() =>
       (async function* () {
         yield {
@@ -226,25 +281,18 @@ describe('runClaudeQuery', () => {
       | undefined;
     expect(call?.options?.env).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
-      ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001',
+      ANTHROPIC_API_KEY: '',
+      CLAUDE_CODE_OAUTH_TOKEN: '',
     });
     expect(getContainerConfigMock).not.toHaveBeenCalled();
   });
 
-  it('uses runtime .env before ambient env for memory credential mode', async () => {
-    fs.writeFileSync(
-      path.join(runtimeRoot, '.env'),
-      [
-        'MYCLAW_CREDENTIAL_MODE=external',
-        'ANTHROPIC_BASE_URL=https://broker.local/anthropic',
-        'ANTHROPIC_MODEL=claude-haiku-4-5-20251001',
-        '',
-      ].join('\n'),
-      'utf-8',
-    );
+  it('uses settings before ambient env for memory credential mode and does not read model from env', async () => {
+    writeCredentialSettings('external', 'https://broker.local/anthropic');
     vi.resetModules();
     vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'none');
     vi.stubEnv('ANTHROPIC_BASE_URL', '');
+    vi.stubEnv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001');
     queryMock.mockImplementation(() =>
       (async function* () {
         yield {
@@ -275,16 +323,15 @@ describe('runClaudeQuery', () => {
       | undefined;
     expect(call?.options?.env).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
-      ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001',
+      ANTHROPIC_API_KEY: '',
+      CLAUDE_CODE_OAUTH_TOKEN: '',
     });
     expect(getContainerConfigMock).not.toHaveBeenCalled();
   });
 
   it('rejects unsafe external broker endpoints before memory SDK queries', async () => {
-    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'external');
-    vi.stubEnv('ONECLI_URL', '');
-    vi.stubEnv(
-      'ANTHROPIC_BASE_URL',
+    writeCredentialSettings(
+      'external',
       'https://user:pass@broker.local/anthropic',
     );
 
@@ -296,7 +343,7 @@ describe('runClaudeQuery', () => {
         prompt: 'Extract facts',
       }),
     ).rejects.toThrow(
-      'ANTHROPIC_BASE_URL must not contain embedded credentials',
+      'credential_broker.external.base_url must not contain embedded credentials',
     );
     expect(queryMock).not.toHaveBeenCalled();
     expect(getContainerConfigMock).not.toHaveBeenCalled();

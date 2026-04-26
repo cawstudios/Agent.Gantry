@@ -28,11 +28,13 @@ function composeGuidance(): string {
 function localEnvSummary(runtimeHome: string): string {
   const env = readEnvFile(envFilePath(runtimeHome));
   let onecliDatabaseUrlEnv = ONECLI_DATABASE_URL_ENV;
+  let onecliUrl = LOCAL_ONECLI_URL;
   let onecliSchema = ONECLI_DEFAULT_SCHEMA;
   let myclawSchema = 'myclaw';
   try {
     const settings = ensureRuntimeSettings(runtimeHome);
     onecliDatabaseUrlEnv = settings.credentialBroker.onecli.postgres.urlEnv;
+    onecliUrl = settings.credentialBroker.onecli.url || LOCAL_ONECLI_URL;
     onecliSchema = settings.credentialBroker.onecli.postgres.schema;
     myclawSchema = settings.storage.postgres.schema;
   } catch {
@@ -41,7 +43,7 @@ function localEnvSummary(runtimeHome: string): string {
   return [
     `MYCLAW_DATABASE_URL: ${env.MYCLAW_DATABASE_URL ? 'configured' : 'missing'}`,
     `${onecliDatabaseUrlEnv}: ${env[onecliDatabaseUrlEnv] ? 'configured' : 'missing'}`,
-    `ONECLI_URL: ${env.ONECLI_URL || LOCAL_ONECLI_URL}`,
+    `OneCLI URL: ${onecliUrl} (settings.yaml credential_broker.onecli.url)`,
     `MyClaw schema: ${myclawSchema}`,
     `OneCLI schema: ${onecliSchema}`,
   ].join('\n');

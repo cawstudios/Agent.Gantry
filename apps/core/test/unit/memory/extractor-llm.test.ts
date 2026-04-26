@@ -1,7 +1,10 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArcExtractionInput } from '@core/memory/extractor-types.js';
-import { LlmMemoryExtractionProvider } from '@core/memory/extractor-llm.js';
 
 const claudeQueryMock = vi.hoisted(() => vi.fn());
 const getContainerConfigMock = vi.hoisted(() => vi.fn());
@@ -28,6 +31,43 @@ vi.mock('@core/infrastructure/logging/logger.js', () => ({
 }));
 
 import { logger } from '@core/infrastructure/logging/logger.js';
+
+let runtimeRoot = '';
+
+function writeCredentialSettings(mode: 'none' | 'onecli' | 'external'): void {
+  fs.writeFileSync(
+    path.join(runtimeRoot, 'settings.yaml'),
+    [
+      'channels: {}',
+      'storage:',
+      '  postgres:',
+      '    url_env: MYCLAW_DATABASE_URL',
+      '    schema: myclaw',
+      'credential_broker:',
+      `  mode: ${mode}`,
+      '  onecli:',
+      '    url: http://localhost:10254',
+      '  external:',
+      '    base_url: ""',
+      'memory:',
+      '  enabled: true',
+      '  embeddings:',
+      '    enabled: false',
+      '    provider: disabled',
+      '    model: text-embedding-3-large',
+      '  dreaming:',
+      '    enabled: false',
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
+}
+
+async function createProvider() {
+  const { LlmMemoryExtractionProvider } =
+    await import('@core/memory/extractor-llm.js');
+  return new LlmMemoryExtractionProvider();
+}
 
 function configureClaudeQueryMock(): void {
   claudeQueryMock.mockImplementation(async function* () {
@@ -62,9 +102,12 @@ function configureClaudeQueryMock(): void {
 }
 
 beforeEach(() => {
+  vi.resetModules();
+  runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-extractor-llm-'));
+  writeCredentialSettings('onecli');
+  vi.stubEnv('MYCLAW_HOME', runtimeRoot);
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
   vi.stubEnv('ANTHROPIC_API_KEY', '');
-  vi.stubEnv('ONECLI_URL', 'http://localhost:10254');
   getContainerConfigMock.mockReset();
   getContainerConfigMock.mockResolvedValue({
     env: {
@@ -75,8 +118,13 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (runtimeRoot) {
+    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+    runtimeRoot = '';
+  }
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+  vi.resetModules();
   claudeQueryMock.mockReset();
   getContainerConfigMock.mockReset();
 });
@@ -107,7 +155,7 @@ describe('LlmMemoryExtractionProvider', () => {
       ),
     );
 
-    const provider = new LlmMemoryExtractionProvider();
+    const provider = await createProvider();
     const input: ArcExtractionInput = {
       turns: [
         { role: 'user', text: 'Team decision: use npm test before deploy.' },
@@ -159,7 +207,7 @@ describe('LlmMemoryExtractionProvider', () => {
       ),
     );
 
-    const provider = new LlmMemoryExtractionProvider();
+    const provider = await createProvider();
     const facts = await provider.extractFacts({
       turns: [
         { role: 'user', text: 'Check again please.' },
@@ -198,7 +246,7 @@ describe('LlmMemoryExtractionProvider', () => {
       ),
     );
 
-    const provider = new LlmMemoryExtractionProvider();
+    const provider = await createProvider();
     const facts = await provider.extractFacts({
       turns: [
         { role: 'user', text: 'My CTO is Kartik Bansal.' },
@@ -231,7 +279,7 @@ describe('LlmMemoryExtractionProvider', () => {
       ),
     );
 
-    const provider = new LlmMemoryExtractionProvider();
+    const provider = await createProvider();
     await provider.extractFacts({
       turns: [
         {
@@ -273,7 +321,7 @@ describe('LlmMemoryExtractionProvider', () => {
       ),
     );
 
-    const provider = new LlmMemoryExtractionProvider();
+    const provider = await createProvider();
     const facts = await provider.extractFacts({
       turns: [
         {
@@ -326,7 +374,7 @@ describe('LlmMemoryExtractionProvider', () => {
         ),
       );
 
-    const provider = new LlmMemoryExtractionProvider();
+    const provider = await createProvider();
     const facts = await provider.extractFacts({
       turns: [
         { role: 'user', text: 'Retry recovered extraction.' },
@@ -355,7 +403,7 @@ describe('LlmMemoryExtractionProvider', () => {
       new Error('oauth request rejected'),
     );
 
-    const provider = new LlmMemoryExtractionProvider();
+    const provider = await createProvider();
     const facts = await provider.extractFacts({
       turns: [
         { role: 'user', text: 'Team decision: use npm test before deploy.' },
@@ -376,8 +424,9 @@ describe('LlmMemoryExtractionProvider', () => {
   });
 
   it('skips extraction when Claude auth is unavailable', async () => {
-    vi.stubEnv('ONECLI_URL', '');
-    const provider = new LlmMemoryExtractionProvider();
+    writeCredentialSettings('none');
+    vi.resetModules();
+    const provider = await createProvider();
 
     const facts = await provider.extractFacts({
       turns: [

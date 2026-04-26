@@ -8,8 +8,9 @@ import {
 import { validatePostgresConnectionUrl } from '../../infrastructure/postgres/url.js';
 import { isValidGroupFolder } from '../../platform/group-folder-rules.js';
 import { readEnvFile } from '../env/file.js';
-import { resolveHostCredentialMode } from '../credentials/mode.js';
 import { validateOnecliUrl } from '../../adapters/credentials/onecli/policy.js';
+import { validateExternalBrokerUrl } from '../credentials/broker-url-policy.js';
+import { validateRuntimeEnvPolicy } from '../source-classification.js';
 import { envFilePath, settingsFilePath } from './runtime-home.js';
 import type {
   RuntimeSettings,
@@ -23,9 +24,18 @@ export function validateLoadedRuntimeSettings(
   const details: string[] = [];
 
   const env = readEnvFile(envFilePath(runtimeHome));
-  const credentialMode = resolveHostCredentialMode(
-    env.MYCLAW_CREDENTIAL_MODE || process.env.MYCLAW_CREDENTIAL_MODE,
+  const envPolicy = validateRuntimeEnvPolicy(env);
+  for (const violation of envPolicy.violations) {
+    details.push(violation.message);
+  }
+  const processEnvPolicy = validateRuntimeEnvPolicy(
+    process.env,
+    'the process environment',
   );
+  for (const violation of processEnvPolicy.violations) {
+    details.push(violation.message);
+  }
+  const credentialMode = settings.credentialBroker.mode;
   const postgresUrlEnv = settings.storage.postgres.urlEnv;
   const postgresUrl =
     env[postgresUrlEnv]?.trim() || process.env[postgresUrlEnv]?.trim() || '';
@@ -98,14 +108,39 @@ export function validateLoadedRuntimeSettings(
     }
   }
 
-  const onecliUrl =
-    env.ONECLI_URL?.trim() || process.env.ONECLI_URL?.trim() || '';
+  const onecliUrl = settings.credentialBroker.onecli.url.trim();
   if (!onecliUrl && credentialMode === 'onecli') {
-    details.push('ONECLI_URL is required for OneCLI broker access.');
+    details.push(
+      'credential_broker.onecli.url is required for OneCLI broker access.',
+    );
   } else if (onecliUrl && credentialMode === 'onecli') {
-    const onecliUrlValidation = validateOnecliUrl(onecliUrl);
+    const onecliUrlValidation = validateOnecliUrl(
+      onecliUrl,
+      'credential_broker.onecli.url',
+    );
     if (!onecliUrlValidation.ok) {
-      details.push(onecliUrlValidation.error || 'ONECLI_URL is invalid.');
+      details.push(
+        onecliUrlValidation.error || 'credential_broker.onecli.url is invalid.',
+      );
+    }
+  }
+  if (credentialMode === 'external') {
+    const externalUrl = settings.credentialBroker.external.baseUrl.trim();
+    if (!externalUrl) {
+      details.push(
+        'credential_broker.external.base_url is required for external credential broker access.',
+      );
+    } else {
+      const externalUrlValidation = validateExternalBrokerUrl(
+        externalUrl,
+        'credential_broker.external.base_url',
+      );
+      if (!externalUrlValidation.ok) {
+        details.push(
+          externalUrlValidation.error ||
+            'credential_broker.external.base_url is invalid.',
+        );
+      }
     }
   }
 

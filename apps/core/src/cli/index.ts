@@ -118,7 +118,7 @@ async function runStartCommand(runtimeHome: string): Promise<number> {
 
   process.env.MYCLAW_HOME = runtimeHome;
   const runtime = await import('../app/index.js');
-  await runtime.startMyClawRuntime();
+  await runtime.startMyClawRuntime({ skipPreflight: true });
   return 0;
 }
 

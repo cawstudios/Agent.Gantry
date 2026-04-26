@@ -10,7 +10,6 @@ import {
 } from '../adapters/credentials/onecli/local/persistence.js';
 import { EnvRuntimeSecretProvider } from '../adapters/credentials/env-runtime-secret-provider.js';
 import { inspectRuntimeStorageReadiness } from '../infrastructure/postgres/storage-readiness.js';
-import { resolveHostCredentialMode } from './credentials/mode.js';
 
 export interface RuntimePreflightFailure {
   summary: string;
@@ -68,20 +67,19 @@ export async function validateRuntimePreflightWithStorage(
     ...env,
   };
   const runtimeSecrets = new EnvRuntimeSecretProvider(runtimeSecretsSource);
-  const credentialMode = resolveHostCredentialMode(
-    runtimeSecrets.getOptionalSecret({ env: 'MYCLAW_CREDENTIAL_MODE' }),
-  );
+  const credentialMode = settings.credentialBroker.mode;
   if (credentialMode === 'external') {
     try {
       const { getAgentCredentialInjection } =
         await import('../application/credentials/agent-credential-service.js');
       const injection = await getAgentCredentialInjection({
         mode: credentialMode,
+        externalBrokerUrl: settings.credentialBroker.external.baseUrl,
         env: runtimeSecretsSource,
       });
       if (!injection.env.ANTHROPIC_BASE_URL) {
         throw new Error(
-          'External credential mode is enabled but ANTHROPIC_BASE_URL is not configured.',
+          'External credential mode is enabled but credential_broker.external.base_url is not configured.',
         );
       }
       return { ok: true };
@@ -94,7 +92,7 @@ export async function validateRuntimePreflightWithStorage(
               ? err.message
               : 'External credential broker is not configured.',
           details: [
-            'Next action: Set ANTHROPIC_BASE_URL to a broker-safe external credential endpoint.',
+            'Next action: Set credential_broker.external.base_url in settings.yaml to a broker-safe external credential endpoint.',
           ],
         },
       };

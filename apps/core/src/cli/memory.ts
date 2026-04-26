@@ -34,7 +34,7 @@ function usage(): string {
 
 interface EffectiveModelRow {
   model: string;
-  source: 'settings.yaml' | 'ANTHROPIC_MODEL' | 'default';
+  source: 'settings.yaml' | 'settings.yaml agent.default_model' | 'default';
 }
 
 function resolveEffectiveModel(
@@ -48,7 +48,7 @@ function resolveEffectiveModel(
   }
   const global = globalModel?.trim();
   if (global) {
-    return { model: global, source: 'ANTHROPIC_MODEL' };
+    return { model: global, source: 'settings.yaml agent.default_model' };
   }
   return { model: hardDefault, source: 'default' };
 }
@@ -57,7 +57,7 @@ function formatMemoryStatus(runtimeHome: string): string {
   const settings = loadRuntimeSettings(runtimeHome);
   const env = readEnvFile(envFilePath(runtimeHome));
   const health = inspectMemoryHealth(runtimeHome, settings, env);
-  const globalModel = env.ANTHROPIC_MODEL;
+  const globalModel = settings.agent.defaultModel;
   const hardDefaults = getMemoryModelProfileDefaults('balanced');
   const extractorModel = resolveEffectiveModel(
     settings.memory.llm.models.extractor,
@@ -74,7 +74,12 @@ function formatMemoryStatus(runtimeHome: string): string {
     globalModel,
     hardDefaults.consolidation,
   );
-  const onecliUrl = env.ONECLI_URL?.trim() || '';
+  const brokerConfigured =
+    settings.credentialBroker.mode === 'onecli'
+      ? Boolean(settings.credentialBroker.onecli.url.trim())
+      : settings.credentialBroker.mode === 'external'
+        ? Boolean(settings.credentialBroker.external.baseUrl.trim())
+        : false;
   return [
     'MyClaw Memory',
     '',
@@ -86,7 +91,7 @@ function formatMemoryStatus(runtimeHome: string): string {
     `Embedding provider: ${health.embeddingProvider} (${health.embeddingCheck.status}, source: ${health.embeddingProviderSource})`,
     `Embedding model: ${health.embeddingModel} (source: ${health.embeddingModelSource})`,
     `Dreaming: ${health.dreamingEnabled ? 'on' : 'off'} (source: ${health.dreamingSource})`,
-    `Claude broker: ${onecliUrl ? 'configured' : 'missing'} (ONECLI_URL)`,
+    `Claude broker: ${brokerConfigured ? 'configured' : 'missing'} (settings.yaml credential_broker)`,
     `Model extractor: ${extractorModel.model} (source: ${extractorModel.source})`,
     `Model dreaming: ${dreamingModel.model} (source: ${dreamingModel.source})`,
     `Model consolidation: ${consolidationModel.model} (source: ${consolidationModel.source})`,

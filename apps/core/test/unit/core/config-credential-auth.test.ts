@@ -6,6 +6,49 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 describe('resolveClaudeAuthState', () => {
   let runtimeRoot = '';
 
+  function writeCredentialSettings(
+    mode: 'none' | 'onecli' | 'external',
+    externalBaseUrl = '',
+  ): void {
+    fs.writeFileSync(
+      path.join(runtimeRoot, 'settings.yaml'),
+      [
+        'channels: {}',
+        'storage:',
+        '  postgres:',
+        '    url_env: MYCLAW_DATABASE_URL',
+        '    schema: myclaw',
+        'agent:',
+        '  default_model: ""',
+        'credential_broker:',
+        `  mode: ${mode}`,
+        '  onecli:',
+        '    url: http://localhost:10254',
+        '  external:',
+        `    base_url: "${externalBaseUrl}"`,
+        'memory:',
+        '  enabled: true',
+        '  embeddings:',
+        '    enabled: false',
+        '    provider: disabled',
+        '    model: text-embedding-3-large',
+        '  dreaming:',
+        '    enabled: false',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+  }
+
+  function createRuntimeHome(
+    mode: 'none' | 'onecli' | 'external',
+    externalBaseUrl = '',
+  ): void {
+    runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-config-'));
+    writeCredentialSettings(mode, externalBaseUrl);
+    vi.stubEnv('MYCLAW_HOME', runtimeRoot);
+  }
+
   afterEach(() => {
     if (runtimeRoot) {
       fs.rmSync(runtimeRoot, { recursive: true, force: true });
@@ -16,10 +59,9 @@ describe('resolveClaudeAuthState', () => {
   });
 
   it('does not treat model-only external mode as broker auth', async () => {
-    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'external');
+    createRuntimeHome('external');
     vi.stubEnv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001');
     vi.stubEnv('ANTHROPIC_BASE_URL', '');
-    vi.stubEnv('ONECLI_URL', '');
     vi.resetModules();
 
     const { resolveClaudeAuthState } = await import('@core/config/index.js');
@@ -28,10 +70,8 @@ describe('resolveClaudeAuthState', () => {
   });
 
   it('treats external mode as broker auth when a broker endpoint exists', async () => {
-    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'external');
+    createRuntimeHome('external', 'https://broker.local/anthropic');
     vi.stubEnv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001');
-    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://broker.local/anthropic');
-    vi.stubEnv('ONECLI_URL', '');
     vi.resetModules();
 
     const { resolveClaudeAuthState } = await import('@core/config/index.js');
@@ -39,19 +79,37 @@ describe('resolveClaudeAuthState', () => {
     expect(resolveClaudeAuthState().mode).toBe('broker');
   });
 
-  it('uses runtime .env before ambient env for channel credential getters', async () => {
+  it('reads credential broker settings live after module import', async () => {
+    createRuntimeHome('none');
+    vi.resetModules();
+
+    const { getCredentialBrokerRuntimeConfig, resolveClaudeAuthState } =
+      await import('@core/config/index.js');
+    expect(getCredentialBrokerRuntimeConfig().mode).toBe('none');
+    expect(resolveClaudeAuthState().mode).toBe('none');
+
+    writeCredentialSettings('external', 'https://broker.local/anthropic');
+
+    expect(getCredentialBrokerRuntimeConfig()).toMatchObject({
+      mode: 'external',
+      externalBrokerBaseUrl: 'https://broker.local/anthropic',
+    });
+    expect(resolveClaudeAuthState().mode).toBe('broker');
+  });
+
+  it('does not silently fall back when settings.yaml is malformed', async () => {
     runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-config-'));
-    fs.writeFileSync(
-      path.join(runtimeRoot, 'settings.yaml'),
-      [
-        'storage:',
-        '  postgres:',
-        '    url_env: MYCLAW_DATABASE_URL',
-        '    schema: myclaw',
-        '',
-      ].join('\n'),
-      'utf-8',
+    fs.writeFileSync(path.join(runtimeRoot, 'settings.yaml'), 'not: [yaml');
+    vi.stubEnv('MYCLAW_HOME', runtimeRoot);
+    vi.resetModules();
+
+    await expect(import('@core/config/index.js')).rejects.toThrow(
+      /Invalid runtime storage settings|settings file is invalid|expected/i,
     );
+  });
+
+  it('uses runtime .env before ambient env for channel credential getters', async () => {
+    createRuntimeHome('onecli');
     fs.writeFileSync(
       path.join(runtimeRoot, '.env'),
       [
@@ -62,7 +120,6 @@ describe('resolveClaudeAuthState', () => {
       ].join('\n'),
       'utf-8',
     );
-    vi.stubEnv('MYCLAW_HOME', runtimeRoot);
     vi.stubEnv('TELEGRAM_BOT_TOKEN', 'ambient-telegram-token');
     vi.stubEnv('SLACK_BOT_TOKEN', 'ambient-slack-bot-token');
     vi.stubEnv('SLACK_APP_TOKEN', 'ambient-slack-app-token');
@@ -76,23 +133,22 @@ describe('resolveClaudeAuthState', () => {
     expect(getSlackAppToken()).toBe('file-slack-app-token');
   });
 
-  it('uses runtime .env before ambient env for default model and storage URL', async () => {
-    runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-config-'));
+  it('uses settings for default model and runtime .env before ambient env for storage URL', async () => {
+    createRuntimeHome('onecli');
+    const settingsPath = path.join(runtimeRoot, 'settings.yaml');
     fs.writeFileSync(
-      path.join(runtimeRoot, 'settings.yaml'),
-      [
-        'storage:',
-        '  postgres:',
-        '    url_env: MYCLAW_DATABASE_URL',
-        '    schema: myclaw',
-        '',
-      ].join('\n'),
+      settingsPath,
+      fs
+        .readFileSync(settingsPath, 'utf-8')
+        .replace(
+          'agent:\n  default_model: ""',
+          'agent:\n  default_model: claude-file-model',
+        ),
       'utf-8',
     );
     fs.writeFileSync(
       path.join(runtimeRoot, '.env'),
       [
-        'ANTHROPIC_MODEL=claude-file-model',
         'MYCLAW_DATABASE_URL=postgres://file:pass@localhost:15432/myclaw',
         '',
       ].join('\n'),
@@ -106,10 +162,10 @@ describe('resolveClaudeAuthState', () => {
     );
     vi.resetModules();
 
-    const { ANTHROPIC_MODEL, STORAGE_POSTGRES_URL } =
+    const { getConfiguredDefaultModel, STORAGE_POSTGRES_URL } =
       await import('@core/config/index.js');
 
-    expect(ANTHROPIC_MODEL).toBe('claude-file-model');
+    expect(getConfiguredDefaultModel()).toBe('claude-file-model');
     expect(STORAGE_POSTGRES_URL).toBe(
       'postgres://file:pass@localhost:15432/myclaw',
     );

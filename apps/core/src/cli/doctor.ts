@@ -5,9 +5,7 @@ import {
   getChannelProvider,
   listConnectableChannelProviders,
 } from '../channels/provider-registry.js';
-
 import { readEnvFile } from '../config/env/file.js';
-import { resolveHostCredentialMode } from '../config/credentials/mode.js';
 import {
   assertRuntimeEntryExists,
   getRuntimeEntryPath,
@@ -38,12 +36,12 @@ import {
 } from '../adapters/credentials/onecli/local/persistence.js';
 import { validateOnecliUrl } from '../adapters/credentials/onecli/policy.js';
 import { validateExternalBrokerUrl } from '../config/credentials/broker-url-policy.js';
+import { validateRuntimeEnvPolicy } from '../config/source-classification.js';
 import { openRuntimeGroupDb } from './runtime-group-db.js';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 
 const ONECLI_DOCTOR_TIMEOUT_MS = 3_000;
-
 export interface DoctorCheck {
   id: string;
   title: string;
@@ -265,9 +263,7 @@ export function runDoctor(
     }
     const onecliDatabaseUrlEnv =
       settings.credentialBroker.onecli.postgres.urlEnv;
-    const credentialMode = resolveHostCredentialMode(
-      env.MYCLAW_CREDENTIAL_MODE || process.env.MYCLAW_CREDENTIAL_MODE,
-    );
+    const credentialMode = settings.credentialBroker.mode;
     const onecliDatabaseUrl =
       env[onecliDatabaseUrlEnv]?.trim() ||
       process.env[onecliDatabaseUrlEnv]?.trim() ||
@@ -320,16 +316,43 @@ export function runDoctor(
       nextAction: `Fix ${path.join(runtimeHome, 'settings.yaml')}. Details: ${settingsResult.error}`,
     });
   }
-  const onecliUrl = resolveRuntimeEnvValue(env, 'ONECLI_URL');
-  const credentialMode = resolveHostCredentialMode(
-    env.MYCLAW_CREDENTIAL_MODE || process.env.MYCLAW_CREDENTIAL_MODE,
-  );
+  const envViolations = validateRuntimeEnvPolicy(env).violations;
+  const processViolations = validateRuntimeEnvPolicy(
+    process.env,
+    'process environment',
+  ).violations;
+  const allEnvPolicyViolations = envViolations.concat(processViolations);
+  const runtimeEnvBoundaryNextActions = [
+    envViolations.length
+      ? 'Manually move wrong-lane MyClaw .env values to settings.yaml or the selected credential broker.'
+      : '',
+    processViolations.length
+      ? 'Unset wrong-lane keys from your shell or service environment.'
+      : '',
+    allEnvPolicyViolations.length
+      ? 'Move non-secret settings to settings.yaml and agent credentials to Model Access or the selected credential broker.'
+      : '',
+  ].filter(Boolean);
+  add(checks, {
+    id: 'runtime-env-boundary',
+    title: 'Runtime Env Boundary',
+    status: allEnvPolicyViolations.length === 0 ? 'pass' : 'fail',
+    message: allEnvPolicyViolations.length
+      ? allEnvPolicyViolations.map((violation) => violation.message).join(' ')
+      : '.env and process env contain runtime-owned secrets only.',
+    nextAction: runtimeEnvBoundaryNextActions.length
+      ? runtimeEnvBoundaryNextActions.join(' ')
+      : undefined,
+  });
+  const onecliUrl = settings?.credentialBroker.onecli.url.trim() || '';
+  const credentialMode = settings?.credentialBroker.mode || 'onecli';
   const externalBrokerUrl =
-    env.ANTHROPIC_BASE_URL?.trim() ||
-    process.env.ANTHROPIC_BASE_URL?.trim() ||
-    '';
+    settings?.credentialBroker.external.baseUrl.trim() || '';
   const externalBrokerValidation = externalBrokerUrl
-    ? validateExternalBrokerUrl(externalBrokerUrl)
+    ? validateExternalBrokerUrl(
+        externalBrokerUrl,
+        'credential_broker.external.base_url',
+      )
     : undefined;
 
   for (const provider of providers) {
@@ -411,19 +434,20 @@ export function runDoctor(
     if (!externalBrokerUrl) {
       modelAccessStatus = 'fail';
       modelAccessMessage =
-        'External credential mode requires ANTHROPIC_BASE_URL.';
+        'External credential mode requires credential_broker.external.base_url.';
       modelAccessNextAction =
-        'Set ANTHROPIC_BASE_URL to the external credential broker endpoint, then rerun `myclaw doctor`.';
+        'Set credential_broker.external.base_url to the external credential broker endpoint, then rerun `myclaw doctor`.';
     } else if (!externalBrokerValidation?.ok) {
       modelAccessStatus = 'fail';
       modelAccessMessage =
-        externalBrokerValidation?.error || 'ANTHROPIC_BASE_URL is invalid.';
+        externalBrokerValidation?.error ||
+        'credential_broker.external.base_url is invalid.';
       modelAccessNextAction =
-        'Set ANTHROPIC_BASE_URL to an HTTPS broker URL without embedded credentials, query parameters, or fragments.';
+        'Set credential_broker.external.base_url to an HTTPS broker URL without embedded credentials, query parameters, or fragments.';
     }
   } else if (credentialMode === 'onecli') {
     const onecliUrlValidation = onecliUrl
-      ? validateOnecliUrl(onecliUrl)
+      ? validateOnecliUrl(onecliUrl, 'credential_broker.onecli.url')
       : undefined;
     if (!onecliUrl) {
       modelAccessStatus = 'warn';
@@ -551,14 +575,11 @@ export async function runDoctorWithNetwork(
   const settings = loadSettingsForDoctor(runtimeHome).settings;
   if (settings) {
     const env = readEnvFile(envFilePath(runtimeHome));
-    const credentialMode = resolveHostCredentialMode(
-      env.MYCLAW_CREDENTIAL_MODE || process.env.MYCLAW_CREDENTIAL_MODE,
-    );
+    const credentialMode = settings.credentialBroker.mode;
     if (credentialMode !== 'onecli') {
       return report;
     }
-    const onecliUrl =
-      env.ONECLI_URL?.trim() || process.env.ONECLI_URL?.trim() || '';
+    const onecliUrl = settings.credentialBroker.onecli.url;
     const onecliDatabaseUrlEnv =
       settings.credentialBroker.onecli.postgres.urlEnv;
     const onecliDatabaseUrl = resolveRuntimeEnvValue(env, onecliDatabaseUrlEnv);

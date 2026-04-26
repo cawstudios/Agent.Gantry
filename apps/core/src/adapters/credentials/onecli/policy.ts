@@ -5,8 +5,11 @@ import {
 
 export type OnecliUrlValidationResult = BrokerUrlValidationResult;
 
-export function validateOnecliUrl(rawUrl: string): OnecliUrlValidationResult {
-  return validateBrokerUrl(rawUrl, 'ONECLI_URL');
+export function validateOnecliUrl(
+  rawUrl: string,
+  label = 'ONECLI_URL',
+): OnecliUrlValidationResult {
+  return validateBrokerUrl(rawUrl, label);
 }
 
 export function assertValidOnecliUrl(rawUrl: string): string {

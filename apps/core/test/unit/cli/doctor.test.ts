@@ -41,10 +41,14 @@ function makeRuntimeHome(envLines: string[] = []): string {
       '    url_env: MYCLAW_DATABASE_URL',
       '    schema: myclaw',
       'credential_broker:',
+      '  mode: onecli',
       '  onecli:',
+      '    url: http://localhost:10254',
       '    postgres:',
       '      url_env: ONECLI_DATABASE_URL',
       '      schema: onecli',
+      '  external:',
+      '    base_url: ""',
       'memory:',
       '  enabled: true',
       '  embeddings:',
@@ -62,6 +66,24 @@ function makeRuntimeHome(envLines: string[] = []): string {
     ].join('\n'),
   );
   return runtimeHome;
+}
+
+function setCredentialBrokerSettings(
+  runtimeHome: string,
+  mode: 'none' | 'onecli' | 'external',
+  externalBaseUrl = '',
+): void {
+  const settingsPath = path.join(runtimeHome, 'settings.yaml');
+  const raw = fs.readFileSync(settingsPath, 'utf-8');
+  fs.writeFileSync(
+    settingsPath,
+    raw
+      .replace('  mode: onecli', `  mode: ${mode}`)
+      .replace(
+        '  external:\n    base_url: ""',
+        `  external:\n    base_url: ${externalBaseUrl ? externalBaseUrl : '""'}`,
+      ),
+  );
 }
 
 function enableChannel(runtimeHome: string, channelId: string): void {
@@ -147,8 +169,8 @@ describe('doctor', () => {
   it('fails external model access when the broker endpoint is missing', async () => {
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'MYCLAW_CREDENTIAL_MODE=external',
     ]);
+    setCredentialBrokerSettings(runtimeHome, 'external');
     const { runDoctor } = await loadDoctor();
 
     const report = runDoctor(import.meta.url, runtimeHome);
@@ -156,17 +178,20 @@ describe('doctor', () => {
 
     expect(check).toMatchObject({
       status: 'fail',
-      message: 'External credential mode requires ANTHROPIC_BASE_URL.',
-      nextAction: expect.stringContaining('ANTHROPIC_BASE_URL'),
+      message:
+        'External credential mode requires credential_broker.external.base_url.',
+      nextAction: expect.stringContaining(
+        'credential_broker.external.base_url',
+      ),
     });
   });
 
   it('prioritizes external broker checks over stale OneCLI URL env', async () => {
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'MYCLAW_CREDENTIAL_MODE=external',
       'ONECLI_URL=http://localhost:10254',
     ]);
+    setCredentialBrokerSettings(runtimeHome, 'external');
     const { runDoctor } = await loadDoctor();
 
     const report = runDoctor(import.meta.url, runtimeHome);
@@ -174,17 +199,44 @@ describe('doctor', () => {
 
     expect(check).toMatchObject({
       status: 'fail',
-      message: 'External credential mode requires ANTHROPIC_BASE_URL.',
-      nextAction: expect.stringContaining('ANTHROPIC_BASE_URL'),
+      message:
+        'External credential mode requires credential_broker.external.base_url.',
+      nextAction: expect.stringContaining(
+        'credential_broker.external.base_url',
+      ),
+    });
+  });
+
+  it('reports process env wrong-lane keys in the runtime env boundary check', async () => {
+    const runtimeHome = makeRuntimeHome([
+      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+    ]);
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-process');
+    const { runDoctor } = await loadDoctor();
+
+    const report = runDoctor(import.meta.url, runtimeHome);
+    const check = report.checks.find(
+      (entry) => entry.id === 'runtime-env-boundary',
+    );
+
+    expect(check).toMatchObject({
+      status: 'fail',
+      message: expect.stringContaining('process environment'),
+      nextAction: expect.stringContaining(
+        'Unset wrong-lane keys from your shell or service environment',
+      ),
     });
   });
 
   it('fails external model access when the broker endpoint URL is unsafe', async () => {
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'MYCLAW_CREDENTIAL_MODE=external',
-      'ANTHROPIC_BASE_URL=https://user:pass@broker.example.com',
     ]);
+    setCredentialBrokerSettings(
+      runtimeHome,
+      'external',
+      'https://user:pass@broker.example.com',
+    );
     const { runDoctor } = await loadDoctor();
 
     const report = runDoctor(import.meta.url, runtimeHome);
@@ -192,7 +244,8 @@ describe('doctor', () => {
 
     expect(check).toMatchObject({
       status: 'fail',
-      message: 'ANTHROPIC_BASE_URL must not contain embedded credentials.',
+      message:
+        'credential_broker.external.base_url must not contain embedded credentials.',
       nextAction: expect.stringContaining('HTTPS broker URL'),
     });
   });
@@ -200,9 +253,12 @@ describe('doctor', () => {
   it('passes external model access when the broker endpoint is safe', async () => {
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'MYCLAW_CREDENTIAL_MODE=external',
-      'ANTHROPIC_BASE_URL=https://broker.example.com/anthropic',
     ]);
+    setCredentialBrokerSettings(
+      runtimeHome,
+      'external',
+      'https://broker.example.com/anthropic',
+    );
     const { runDoctor } = await loadDoctor();
 
     const report = runDoctor(import.meta.url, runtimeHome);
@@ -221,9 +277,12 @@ describe('doctor', () => {
     );
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'MYCLAW_CREDENTIAL_MODE=external',
-      'ANTHROPIC_BASE_URL=https://broker.example.com/anthropic',
     ]);
+    setCredentialBrokerSettings(
+      runtimeHome,
+      'external',
+      'https://broker.example.com/anthropic',
+    );
     const { runDoctor } = await loadDoctor();
 
     const report = runDoctor(import.meta.url, runtimeHome);
@@ -238,7 +297,6 @@ describe('doctor', () => {
   it('reports missing OneCLI database configuration with a concrete next action', async () => {
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'ONECLI_URL=http://localhost:10254',
     ]);
     const { runDoctor } = await loadDoctor();
 
@@ -258,7 +316,6 @@ describe('doctor', () => {
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
       'ONECLI_DATABASE_URL=postgres://onecli_app:pass@localhost:15432/myclaw?schema=onecli',
-      'ONECLI_URL=http://localhost:10254',
       'SECRET_ENCRYPTION_KEY=123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
     ]);
     const { runDoctorWithNetwork } = await loadDoctor({
@@ -283,7 +340,6 @@ describe('doctor', () => {
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
       'ONECLI_DATABASE_URL=postgres://onecli_app:pass@localhost:15432/myclaw?schema=onecli',
-      'ONECLI_URL=http://localhost:10254',
       'SECRET_ENCRYPTION_KEY=123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
     ]);
     const { runDoctorWithNetwork } = await loadDoctor({
@@ -303,8 +359,8 @@ describe('doctor', () => {
   it('treats process-env channel credentials as processable group readiness', async () => {
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'MYCLAW_CREDENTIAL_MODE=none',
     ]);
+    setCredentialBrokerSettings(runtimeHome, 'none');
     enableChannel(runtimeHome, 'telegram');
     vi.stubEnv('TELEGRAM_BOT_TOKEN', '123456:test-token');
     const { hasProcessableGroupForConfiguredChannel } = await loadDoctor({

@@ -10,6 +10,7 @@ import {
   envFilePath,
   settingsFilePath,
 } from '@core/config/settings/runtime-home.js';
+import { loadRuntimeSettingsFromPath } from '@core/config/settings/runtime-settings.js';
 
 const runtimeHomes: string[] = [];
 
@@ -70,13 +71,20 @@ describe('onboarding config persistence', () => {
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(env.ANTHROPIC_MODEL).toBeUndefined();
     expect(env.MYCLAW_DATABASE_URL).toContain('myclaw_app');
     expect(env.ONECLI_DATABASE_URL).toContain('onecli_app');
     expect(env.SECRET_ENCRYPTION_KEY).toBe(
       '123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
     );
-    expect(env.ONECLI_URL).toBe('http://localhost:10254');
+    expect(env.ONECLI_URL).toBeUndefined();
+    expect(env.MYCLAW_CREDENTIAL_MODE).toBeUndefined();
+    expect(env.SLACK_PERMISSION_APPROVER_IDS).toBeUndefined();
     expect(env.TELEGRAM_PERMISSION_APPROVER_IDS).toBeUndefined();
+    const settings = loadRuntimeSettingsFromPath(settingsFilePath(runtimeHome));
+    expect(settings.credentialBroker.mode).toBe('onecli');
+    expect(settings.credentialBroker.onecli.url).toBe('http://localhost:10254');
+    expect(settings.agent.defaultModel).toBe('sonnet');
   });
 
   it('generates a stable OneCLI encryption key when none exists', () => {
@@ -87,6 +95,27 @@ describe('onboarding config persistence', () => {
     const env = readEnvFile(envFilePath(runtimeHome));
     expect(env.SECRET_ENCRYPTION_KEY).toHaveLength(44);
     expect(fs.existsSync(settingsFilePath(runtimeHome))).toBe(true);
+  });
+
+  it('writes Slack approvers to settings instead of .env', () => {
+    const runtimeHome = makeRuntimeHome();
+
+    persistOnboardingConfig({
+      ...baseInput(runtimeHome),
+      primaryProvider: 'slack',
+      telegramBotToken: undefined,
+      slackBotToken: 'xoxb-token',
+      slackAppToken: 'xapp-token',
+      slackPermissionApproverIds: 'U123,U456 U123',
+    });
+
+    const env = readEnvFile(envFilePath(runtimeHome));
+    expect(env.SLACK_PERMISSION_APPROVER_IDS).toBeUndefined();
+    const settings = loadRuntimeSettingsFromPath(settingsFilePath(runtimeHome));
+    expect(settings.channels.slack.controlAllowlist.default).toEqual([
+      'U123',
+      'U456',
+    ]);
   });
 
   it('requires OneCLI database URL when MyClaw database URL is configured', () => {

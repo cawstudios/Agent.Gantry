@@ -43,12 +43,23 @@ export interface RuntimeStorageSettings {
   };
 }
 
+export interface RuntimeAgentSettings {
+  defaultModel: string;
+}
+
+export type RuntimeCredentialBrokerMode = 'none' | 'onecli' | 'external';
+
 export interface RuntimeCredentialBrokerSettings {
+  mode: RuntimeCredentialBrokerMode;
   onecli: {
+    url: string;
     postgres: {
       urlEnv: string;
       schema: string;
     };
+  };
+  external: {
+    baseUrl: string;
   };
 }
 
@@ -57,6 +68,7 @@ export type { RuntimeMemorySettingsSnapshot, RuntimeStorageSettingsSnapshot };
 export interface RuntimeSettings {
   channels: Record<string, RuntimeChannelSettings>;
   storage: RuntimeStorageSettings;
+  agent: RuntimeAgentSettings;
   credentialBroker: RuntimeCredentialBrokerSettings;
   memory: RuntimeMemorySettings;
 }

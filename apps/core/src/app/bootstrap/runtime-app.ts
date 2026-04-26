@@ -1,5 +1,8 @@
-import { ASSISTANT_NAME, DATA_DIR } from '../../config/index.js';
-import { resolveHostCredentialMode } from '../../config/credentials/mode.js';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  getCredentialBrokerRuntimeConfig,
+} from '../../config/index.js';
 import { envConfig } from '../../config/env/index.js';
 import {
   createAgentCredentialBroker,
@@ -79,12 +82,10 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   let stateSaveDirty = false;
 
   const queue = options.queue ?? new GroupQueue();
-  const credentialMode = resolveHostCredentialMode(
-    envConfig.MYCLAW_CREDENTIAL_MODE || process.env.MYCLAW_CREDENTIAL_MODE,
-  );
   let credentialBrokerPromise:
     | Promise<AgentCredentialBroker | undefined>
     | undefined;
+  let credentialBrokerCacheKey = '';
   const ops = () => options.opsRepository ?? getRuntimeOpsRepository();
   let channelRuntime: GroupProcessingDeps['channelRuntime'] = {
     hasChannel: () => false,
@@ -98,8 +99,16 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   };
 
   function getCredentialBroker(): Promise<AgentCredentialBroker | undefined> {
+    const brokerConfig = getCredentialBrokerRuntimeConfig();
+    const cacheKey = `${brokerConfig.mode}:${brokerConfig.onecliUrl}:${brokerConfig.externalBrokerBaseUrl}`;
+    if (credentialBrokerCacheKey !== cacheKey) {
+      credentialBrokerPromise = undefined;
+      credentialBrokerCacheKey = cacheKey;
+    }
     credentialBrokerPromise ??= createAgentCredentialBroker({
-      mode: credentialMode,
+      mode: brokerConfig.mode,
+      onecliUrl: brokerConfig.onecliUrl,
+      externalBrokerUrl: brokerConfig.externalBrokerBaseUrl,
       env: envConfig,
       dataDir: DATA_DIR,
     });
@@ -112,6 +121,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   ): Promise<void> {
     if (group.isMain) return;
     const identifier = group.folder.toLowerCase().replace(/_/g, '-');
+    const brokerConfig = getCredentialBrokerRuntimeConfig();
     try {
       const res = options.ensureCredentialBinding
         ? await options.ensureCredentialBinding({
@@ -120,7 +130,8 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
             agentIdentifier: identifier,
           })
         : await ensureAgentCredentialBinding({
-            mode: credentialMode,
+            mode: brokerConfig.mode,
+            onecliUrl: brokerConfig.onecliUrl,
             env: envConfig,
             dataDir: DATA_DIR,
             broker: await getCredentialBroker(),
@@ -129,12 +140,22 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
           });
       if (!res) return;
       logger.info(
-        { jid, identifier, created: res.created, credentialMode },
+        {
+          jid,
+          identifier,
+          created: res.created,
+          credentialMode: brokerConfig.mode,
+        },
         'Agent credential binding ensured',
       );
     } catch (err) {
       logger.debug(
-        { jid, identifier, credentialMode, err: String(err) },
+        {
+          jid,
+          identifier,
+          credentialMode: brokerConfig.mode,
+          err: String(err),
+        },
         'Agent credential binding ensure skipped',
       );
     }

@@ -15,7 +15,7 @@ MyClaw must present one runtime truth across runtime code, CLI, diagnostics, set
    - `memory.embeddings.provider` (`disabled`, built-in provider ids, or registered provider ids)
    - `memory.embeddings.model`
    - `memory.dreaming.enabled`
-5. `settings.yaml` runtime behavior schema is `channels.*`, `storage.*`, `credential_broker.*`, and `memory.*`.
+5. `settings.yaml` runtime behavior schema is `channels.*`, `storage.*`, `agent.*`, `credential_broker.*`, and `memory.*`.
 6. `credential_broker.onecli.postgres.*` declares the OneCLI persistence contract. It stores only the env key and schema name; the URL and encryption key stay in `.env`.
 7. Continuity currently means injected remembered context plus memory tooling; commitment/inbox/digest controls are separate future work.
 

@@ -31,6 +31,17 @@ describe('ipc auth secret source', () => {
       }),
     );
     vi.doMock('@core/config/settings/runtime-settings.js', () => ({
+      ensureRuntimeSettings: () => ({
+        agent: { defaultModel: '' },
+        credentialBroker: {
+          mode: 'none',
+          onecli: {
+            url: '',
+            postgres: { urlEnv: 'ONECLI_DATABASE_URL', schema: 'onecli' },
+          },
+          external: { baseUrl: '' },
+        },
+      }),
       readRuntimeMemorySettingsSnapshot: () => ({}),
       readRuntimeStorageSettingsSnapshot: () => ({
         postgresUrlEnv: 'MYCLAW_DATABASE_URL',
@@ -59,6 +70,17 @@ describe('ipc auth secret source', () => {
       }),
     );
     vi.doMock('@core/config/settings/runtime-settings.js', () => ({
+      ensureRuntimeSettings: () => ({
+        agent: { defaultModel: '' },
+        credentialBroker: {
+          mode: 'none',
+          onecli: {
+            url: '',
+            postgres: { urlEnv: 'ONECLI_DATABASE_URL', schema: 'onecli' },
+          },
+          external: { baseUrl: '' },
+        },
+      }),
       readRuntimeMemorySettingsSnapshot: () => ({}),
       readRuntimeStorageSettingsSnapshot: () => ({
         postgresUrlEnv: 'MYCLAW_DATABASE_URL',

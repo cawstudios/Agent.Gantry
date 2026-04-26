@@ -5,7 +5,9 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as p from '@clack/prompts';
 import {
+  loadRuntimeSettingsFromPath,
   parseRuntimeSettings,
+  saveRuntimeSettings,
   validateRuntimeSettings,
 } from '@core/config/settings/runtime-settings.js';
 import { parseRuntimeMemorySnapshotFromRoot } from '@core/config/settings/memory-snapshot.js';
@@ -92,6 +94,23 @@ function createRuntimeHome(): string {
   return home;
 }
 
+function updateCredentialBrokerSettings(updates: {
+  mode?: 'none' | 'onecli' | 'external';
+  onecliUrl?: string;
+  externalBaseUrl?: string;
+}): void {
+  const filePath = settingsFilePath(runtimeHome);
+  const settings = loadRuntimeSettingsFromPath(filePath);
+  if (updates.mode) settings.credentialBroker.mode = updates.mode;
+  if (updates.onecliUrl !== undefined) {
+    settings.credentialBroker.onecli.url = updates.onecliUrl;
+  }
+  if (updates.externalBaseUrl !== undefined) {
+    settings.credentialBroker.external.baseUrl = updates.externalBaseUrl;
+  }
+  saveRuntimeSettings(runtimeHome, settings);
+}
+
 let runtimeHome = '';
 
 beforeEach(() => {
@@ -103,7 +122,6 @@ beforeEach(() => {
     'postgres://user:pass@127.0.0.1:5432/myclaw';
   process.env.ONECLI_DATABASE_URL =
     'postgres://onecli:pass@127.0.0.1:5432/myclaw?schema=onecli';
-  process.env.ONECLI_URL = 'http://localhost:10254';
   process.env.SECRET_ENCRYPTION_KEY =
     'MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=';
 });
@@ -266,21 +284,20 @@ describe('group CLI commands', () => {
   });
 
   it('rejects runtime settings when OneCLI URL is missing', () => {
-    delete process.env.ONECLI_URL;
+    updateCredentialBrokerSettings({ onecliUrl: '' });
 
     const result = validateRuntimeSettings(runtimeHome);
 
     expect(result.ok).toBe(false);
     expect(result.failure?.details.join('\n')).toContain(
-      'ONECLI_URL is required',
+      'credential_broker.onecli.url is required',
     );
   });
 
   it('allows none credential mode without OneCLI URL or persistence', () => {
-    delete process.env.ONECLI_URL;
     delete process.env.ONECLI_DATABASE_URL;
     delete process.env.SECRET_ENCRYPTION_KEY;
-    process.env.MYCLAW_CREDENTIAL_MODE = 'none';
+    updateCredentialBrokerSettings({ mode: 'none', onecliUrl: '' });
 
     const result = validateRuntimeSettings(runtimeHome);
 
@@ -288,11 +305,13 @@ describe('group CLI commands', () => {
   });
 
   it('allows external credential mode without OneCLI URL or persistence', () => {
-    delete process.env.ONECLI_URL;
     delete process.env.ONECLI_DATABASE_URL;
     delete process.env.SECRET_ENCRYPTION_KEY;
-    process.env.MYCLAW_CREDENTIAL_MODE = 'external';
-    process.env.ANTHROPIC_BASE_URL = 'https://llm-proxy.example.com';
+    updateCredentialBrokerSettings({
+      mode: 'external',
+      onecliUrl: '',
+      externalBaseUrl: 'https://llm-proxy.example.com',
+    });
 
     const result = validateRuntimeSettings(runtimeHome);
 
