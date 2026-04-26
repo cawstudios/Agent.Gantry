@@ -120,6 +120,97 @@ afterEach(() => {
 });
 
 describe('doctor', () => {
+  it('fails external model access when the broker endpoint is missing', async () => {
+    const runtimeHome = makeRuntimeHome([
+      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'MYCLAW_CREDENTIAL_MODE=external',
+    ]);
+    const { runDoctor } = await loadDoctor();
+
+    const report = runDoctor(import.meta.url, runtimeHome);
+    const check = report.checks.find((entry) => entry.id === 'claude-broker');
+
+    expect(check).toMatchObject({
+      status: 'fail',
+      message: 'External credential mode requires ANTHROPIC_BASE_URL.',
+      nextAction: expect.stringContaining('ANTHROPIC_BASE_URL'),
+    });
+  });
+
+  it('prioritizes external broker checks over stale OneCLI URL env', async () => {
+    const runtimeHome = makeRuntimeHome([
+      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'MYCLAW_CREDENTIAL_MODE=external',
+      'ONECLI_URL=http://localhost:10254',
+    ]);
+    const { runDoctor } = await loadDoctor();
+
+    const report = runDoctor(import.meta.url, runtimeHome);
+    const check = report.checks.find((entry) => entry.id === 'claude-broker');
+
+    expect(check).toMatchObject({
+      status: 'fail',
+      message: 'External credential mode requires ANTHROPIC_BASE_URL.',
+      nextAction: expect.stringContaining('ANTHROPIC_BASE_URL'),
+    });
+  });
+
+  it('fails external model access when the broker endpoint URL is unsafe', async () => {
+    const runtimeHome = makeRuntimeHome([
+      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'MYCLAW_CREDENTIAL_MODE=external',
+      'ANTHROPIC_BASE_URL=https://user:pass@broker.example.com',
+    ]);
+    const { runDoctor } = await loadDoctor();
+
+    const report = runDoctor(import.meta.url, runtimeHome);
+    const check = report.checks.find((entry) => entry.id === 'claude-broker');
+
+    expect(check).toMatchObject({
+      status: 'fail',
+      message: 'ANTHROPIC_BASE_URL must not contain embedded credentials.',
+      nextAction: expect.stringContaining('HTTPS broker URL'),
+    });
+  });
+
+  it('passes external model access when the broker endpoint is safe', async () => {
+    const runtimeHome = makeRuntimeHome([
+      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'MYCLAW_CREDENTIAL_MODE=external',
+      'ANTHROPIC_BASE_URL=https://broker.example.com/anthropic',
+    ]);
+    const { runDoctor } = await loadDoctor();
+
+    const report = runDoctor(import.meta.url, runtimeHome);
+    const check = report.checks.find((entry) => entry.id === 'claude-broker');
+
+    expect(check).toMatchObject({
+      status: 'pass',
+      message: 'Model Access is managed by external credential mode.',
+    });
+  });
+
+  it('uses runtime-home broker endpoint before ambient process env in doctor', async () => {
+    vi.stubEnv(
+      'ANTHROPIC_BASE_URL',
+      'https://user:pass@ambient-broker.example.com/anthropic',
+    );
+    const runtimeHome = makeRuntimeHome([
+      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'MYCLAW_CREDENTIAL_MODE=external',
+      'ANTHROPIC_BASE_URL=https://broker.example.com/anthropic',
+    ]);
+    const { runDoctor } = await loadDoctor();
+
+    const report = runDoctor(import.meta.url, runtimeHome);
+    const check = report.checks.find((entry) => entry.id === 'claude-broker');
+
+    expect(check).toMatchObject({
+      status: 'pass',
+      message: 'Model Access is managed by external credential mode.',
+    });
+  });
+
   it('reports missing OneCLI database configuration with a concrete next action', async () => {
     const runtimeHome = makeRuntimeHome([
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',

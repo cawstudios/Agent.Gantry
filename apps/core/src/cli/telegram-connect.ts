@@ -216,12 +216,16 @@ export async function runTelegramConnectCommand(
     chatChoice.type === 'selected' ? chatChoice.chatJid : '';
   const adminSenderId =
     chatChoice.type === 'selected' ? chatChoice.adminSenderId : undefined;
-  const approverInput = await promptTelegramPermissionApproverIds(
-    adminSenderId || '',
-  );
-  if (approverInput === null) {
-    p.outro('Telegram connect cancelled.');
-    return 1;
+  let approverInput = '';
+  if (normalizedChatJid) {
+    const promptedApprovers = await promptTelegramPermissionApproverIds(
+      adminSenderId || '',
+    );
+    if (promptedApprovers === null) {
+      p.outro('Telegram connect cancelled.');
+      return 1;
+    }
+    approverInput = promptedApprovers;
   }
   let registeredFolder = '';
 

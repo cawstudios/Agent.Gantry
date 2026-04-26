@@ -58,6 +58,14 @@ export function envValue(key: (typeof CONFIG_ENV_KEYS)[number]): string {
   return process.env[key]?.trim() || envConfig[key]?.trim() || '';
 }
 
+export function runtimeEnvValue(key: (typeof CONFIG_ENV_KEYS)[number]): string {
+  return envConfig[key]?.trim() || process.env[key]?.trim() || '';
+}
+
 export function envValueDynamic(key: string): string {
   return process.env[key]?.trim() || runtimeEnvConfig[key]?.trim() || '';
+}
+
+export function runtimeEnvValueDynamic(key: string): string {
+  return runtimeEnvConfig[key]?.trim() || process.env[key]?.trim() || '';
 }

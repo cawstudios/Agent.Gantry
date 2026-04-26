@@ -7,7 +7,9 @@ function mockConfigEnvModule(values: Record<string, string> = {}) {
   return {
     envConfig: values,
     envValue: readValue,
+    runtimeEnvValue: readValue,
     envValueDynamic: readValue,
+    runtimeEnvValueDynamic: readValue,
   };
 }
 

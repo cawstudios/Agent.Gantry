@@ -125,6 +125,28 @@ describe('CLI local routing', () => {
     }));
     vi.doMock('@core/config/settings/runtime-settings.js', () => ({
       ensureRuntimeSettings: vi.fn(),
+      readRuntimeMemorySettingsSnapshot: vi.fn(() => ({
+        memoryEnabled: false,
+        storage: {
+          postgresUrlEnv: 'MYCLAW_DATABASE_URL',
+          postgresSchema: 'myclaw',
+        },
+        embeddings: {
+          enabled: false,
+          provider: 'disabled',
+          model: 'text-embedding-3-large',
+        },
+        dreaming: { enabled: false },
+        llmModels: {
+          extractor: 'claude-haiku-4-5-20251001',
+          dreaming: 'claude-sonnet-4-6',
+          consolidation: 'claude-sonnet-4-6',
+        },
+      })),
+      readRuntimeStorageSettingsSnapshot: vi.fn(() => ({
+        postgresUrlEnv: 'MYCLAW_DATABASE_URL',
+        postgresSchema: 'myclaw',
+      })),
     }));
     vi.doMock('@core/cli/channel.js', () => ({ runChannelCommand }));
 

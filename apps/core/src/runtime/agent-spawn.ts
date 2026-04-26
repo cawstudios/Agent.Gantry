@@ -176,7 +176,8 @@ export async function spawnAgent(
     `groupDir=${hostRuntime.groupDir}`,
     `globalDir=${hostRuntime.globalDir || '(none)'}`,
     `ipcInput=${ipcInputDir}`,
-    `onecliApplied=${hostCredentials.onecliApplied}`,
+    `broker=${hostCredentials.brokerProfile}`,
+    `brokerApplied=${hostCredentials.brokerApplied}`,
     `runner=${hostRunnerPath}`,
   ];
 

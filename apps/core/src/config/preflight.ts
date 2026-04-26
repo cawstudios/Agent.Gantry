@@ -11,6 +11,7 @@ import {
 import { EnvRuntimeSecretProvider } from '../adapters/credentials/env-runtime-secret-provider.js';
 import { inspectRuntimeStorageReadiness } from '../infrastructure/postgres/storage-readiness.js';
 import { resolveHostCredentialMode } from './credentials/mode.js';
+import { getAgentCredentialInjection } from '../application/credentials/agent-credential-service.js';
 
 export interface RuntimePreflightFailure {
   summary: string;
@@ -63,13 +64,36 @@ export async function validateRuntimePreflightWithStorage(
 
   const settings = ensureRuntimeSettings(runtimeHome);
   const env = readEnvFile(envFilePath(runtimeHome));
-  const runtimeSecrets = new EnvRuntimeSecretProvider({
+  const runtimeSecretsSource = {
     ...process.env,
     ...env,
-  });
+  };
+  const runtimeSecrets = new EnvRuntimeSecretProvider(runtimeSecretsSource);
   const credentialMode = resolveHostCredentialMode(
     runtimeSecrets.getOptionalSecret({ env: 'MYCLAW_CREDENTIAL_MODE' }),
   );
+  if (credentialMode === 'external') {
+    try {
+      await getAgentCredentialInjection({
+        mode: credentialMode,
+        env: runtimeSecretsSource,
+      });
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        failure: {
+          summary:
+            err instanceof Error
+              ? err.message
+              : 'External credential broker is not configured.',
+          details: [
+            'Next action: Set ANTHROPIC_BASE_URL to a broker-safe external credential endpoint.',
+          ],
+        },
+      };
+    }
+  }
   if (credentialMode !== 'onecli') {
     return { ok: true };
   }

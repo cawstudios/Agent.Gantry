@@ -330,4 +330,4 @@ Contributions should keep the core runtime small and maintainable. Bug fixes, si
 ## Documentation
 
 Project docs live in [`docs/`](docs/README.md). Product intent, architecture notes, and decisions live in-repo so planning and review can stay self-contained.
-For npm users, start with [`docs/npm-cli-onboarding.md`](docs/npm-cli-onboarding.md).
+For npm users, start with the Quick Start and first-run flow in this README.

@@ -105,13 +105,11 @@ export class OnecliAgentCredentialBroker implements AgentCredentialBroker {
       };
     }
     try {
-      await this.getInjection(
-        input || {
-          binding: {
-            profile: 'onecli',
-          },
-        },
+      const binding = input?.binding || { profile: 'onecli' as const };
+      const config = await this.client.getContainerConfig(
+        binding.agentIdentifier,
       );
+      filterTrustedOnecliEnv(config.env || {});
       return {
         status: 'pass',
         message: `Connected to OneCLI at ${this.normalizedUrl}.`,

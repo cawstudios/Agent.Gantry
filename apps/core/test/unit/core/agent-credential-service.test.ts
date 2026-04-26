@@ -72,11 +72,44 @@ describe('agent credential service', () => {
         mode: 'external',
         onecliUrl: '',
       }),
+    ).rejects.toThrow('ANTHROPIC_BASE_URL');
+  });
+
+  it('passes safe external broker env to spawned agents', async () => {
+    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'external');
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://broker.example.com');
+    vi.stubEnv('ANTHROPIC_MODEL', 'claude-test');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'raw-secret');
+    const { getAgentCredentialInjection } = await loadCredentialService();
+
+    await expect(
+      getAgentCredentialInjection({
+        mode: 'external',
+        onecliUrl: '',
+      }),
     ).resolves.toEqual({
-      env: {},
-      applied: false,
+      env: {
+        ANTHROPIC_BASE_URL: 'https://broker.example.com',
+        ANTHROPIC_MODEL: 'claude-test',
+      },
+      applied: true,
       brokerProfile: 'external',
     });
+  });
+
+  it('rejects unsafe external broker URLs before injecting agent env', async () => {
+    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'external');
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://user:pass@broker.example.com');
+    const { getAgentCredentialInjection } = await loadCredentialService();
+
+    await expect(
+      getAgentCredentialInjection({
+        mode: 'external',
+        onecliUrl: '',
+      }),
+    ).rejects.toThrow(
+      'ANTHROPIC_BASE_URL must not contain embedded credentials',
+    );
   });
 
   it('keeps broker requests agent-scoped and does not request runtime-owned secrets', async () => {
@@ -127,6 +160,18 @@ describe('agent credential service', () => {
         broker: forbiddenBroker,
       }),
     ).rejects.toThrow('forbidden raw credential env key: OPENAI_API_KEY');
+
+    const forbiddenValueBroker = makeBroker({
+      getInjection: async () => {
+        throw new Error('OneCLI returned forbidden raw credential env value');
+      },
+    });
+    await expect(
+      getAgentCredentialInjection({
+        mode: 'onecli',
+        broker: forbiddenValueBroker,
+      }),
+    ).rejects.toThrow('forbidden raw credential env value');
 
     const unreachableBroker = makeBroker({
       getInjection: async () => {

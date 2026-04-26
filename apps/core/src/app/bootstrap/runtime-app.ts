@@ -1,10 +1,11 @@
-import {
-  ASSISTANT_NAME,
-  DATA_DIR,
-  MYCLAW_CREDENTIAL_MODE,
-  ONECLI_URL,
-} from '../../config/index.js';
+import { ASSISTANT_NAME, DATA_DIR } from '../../config/index.js';
 import { resolveHostCredentialMode } from '../../config/credentials/mode.js';
+import { envConfig } from '../../config/env/index.js';
+import {
+  createAgentCredentialBroker,
+  ensureAgentCredentialBinding,
+} from '../../application/credentials/agent-credential-service.js';
+import type { AgentCredentialBroker } from '../../domain/ports/agent-credential-broker.js';
 import { encodeGroupMessageCursor } from '../../shared/message-cursor.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import { RegisteredGroup, ThinkingOverride } from '../../domain/types.js';
@@ -24,13 +25,6 @@ import type { OpsRepository } from '../../domain/repositories/ops-repo.js';
 import { makeSessionScopeKey } from '../../domain/repositories/ops-repo.js';
 import { getRuntimeOpsRepository } from '../../infrastructure/postgres/runtime-store.js';
 
-interface OneCliLike {
-  ensureAgent(input: {
-    name: string;
-    identifier: string;
-  }): Promise<{ created?: boolean }>;
-}
-
 export interface RuntimeApp {
   queue: GroupQueue;
   loadState: () => Promise<void>;
@@ -49,7 +43,7 @@ export interface RuntimeApp {
     import('../../runtime/agent-spawn.js').AvailableGroup[]
   >;
   setRegisteredGroupsForTest: (groups: Record<string, RegisteredGroup>) => void;
-  ensureOneCLIAgentsForRegisteredGroups: () => void;
+  ensureCredentialBindingsForRegisteredGroups: () => Promise<void>;
   clearSessionForChatJid: (
     chatJid: string,
     threadId?: string | null,
@@ -66,7 +60,11 @@ export interface RuntimeApp {
 }
 
 export interface RuntimeAppOptions {
-  onecli?: OneCliLike;
+  ensureCredentialBinding?: (input: {
+    groupJid: string;
+    group: RegisteredGroup;
+    agentIdentifier: string;
+  }) => Promise<{ created?: boolean } | undefined>;
   queue?: GroupQueue;
   runAgent?: GroupProcessingDeps['runAgent'];
   opsRepository?: OpsRepository;
@@ -81,8 +79,12 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   let stateSaveDirty = false;
 
   const queue = options.queue ?? new GroupQueue();
-  const credentialMode = resolveHostCredentialMode(MYCLAW_CREDENTIAL_MODE);
-  let onecli = options.onecli;
+  const credentialMode = resolveHostCredentialMode(
+    envConfig.MYCLAW_CREDENTIAL_MODE || process.env.MYCLAW_CREDENTIAL_MODE,
+  );
+  let credentialBrokerPromise:
+    | Promise<AgentCredentialBroker | undefined>
+    | undefined;
   const ops = () => options.opsRepository ?? getRuntimeOpsRepository();
   let channelRuntime: GroupProcessingDeps['channelRuntime'] = {
     hasChannel: () => false,
@@ -95,35 +97,51 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     sendProgressUpdate: async () => {},
   };
 
-  function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
+  function getCredentialBroker(): Promise<AgentCredentialBroker | undefined> {
+    credentialBrokerPromise ??= createAgentCredentialBroker({
+      mode: credentialMode,
+      env: envConfig,
+      dataDir: DATA_DIR,
+    });
+    return credentialBrokerPromise;
+  }
+
+  async function ensureCredentialBindingAsync(
+    jid: string,
+    group: RegisteredGroup,
+  ): Promise<void> {
     if (group.isMain) return;
-    if (credentialMode !== 'onecli' || !ONECLI_URL.trim()) return;
     const identifier = group.folder.toLowerCase().replace(/_/g, '-');
-    const ensure = async (): Promise<{ created?: boolean }> => {
-      if (!onecli) {
-        const { OnecliAgentCredentialBroker } =
-          await import('../../adapters/credentials/onecli/broker.js');
-        onecli = new OnecliAgentCredentialBroker({
-          onecliUrl: ONECLI_URL,
-          dataDir: DATA_DIR,
-        });
-      }
-      return onecli.ensureAgent({ name: group.name, identifier });
-    };
-    ensure().then(
-      (res) => {
-        logger.info(
-          { jid, identifier, created: res.created },
-          'OneCLI agent ensured',
-        );
-      },
-      (err) => {
-        logger.debug(
-          { jid, identifier, err: String(err) },
-          'OneCLI agent ensure skipped',
-        );
-      },
-    );
+    try {
+      const res = options.ensureCredentialBinding
+        ? await options.ensureCredentialBinding({
+            groupJid: jid,
+            group,
+            agentIdentifier: identifier,
+          })
+        : await ensureAgentCredentialBinding({
+            mode: credentialMode,
+            env: envConfig,
+            dataDir: DATA_DIR,
+            broker: await getCredentialBroker(),
+            agentIdentifier: identifier,
+            agentName: group.name,
+          });
+      if (!res) return;
+      logger.info(
+        { jid, identifier, created: res.created, credentialMode },
+        'Agent credential binding ensured',
+      );
+    } catch (err) {
+      logger.debug(
+        { jid, identifier, credentialMode, err: String(err) },
+        'Agent credential binding ensure skipped',
+      );
+    }
+  }
+
+  function ensureCredentialBinding(jid: string, group: RegisteredGroup): void {
+    void ensureCredentialBindingAsync(jid, group);
   }
 
   async function loadState(): Promise<void> {
@@ -215,7 +233,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       assistantName: ASSISTANT_NAME,
       persist: (persistJid, persistedGroup) =>
         ops().setRegisteredGroup(persistJid, persistedGroup),
-      ensureOneCLIAgent,
+      ensureCredentialBinding,
     });
   }
 
@@ -255,9 +273,9 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     registeredGroups = groups;
   }
 
-  function ensureOneCLIAgentsForRegisteredGroups(): void {
+  async function ensureCredentialBindingsForRegisteredGroups(): Promise<void> {
     for (const [jid, group] of Object.entries(registeredGroups)) {
-      ensureOneCLIAgent(jid, group);
+      await ensureCredentialBindingAsync(jid, group);
     }
   }
 
@@ -342,7 +360,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     setGroupThinkingOverride,
     getAvailableGroups,
     setRegisteredGroupsForTest,
-    ensureOneCLIAgentsForRegisteredGroups,
+    ensureCredentialBindingsForRegisteredGroups,
     clearSessionForChatJid,
     processGroupMessages: (chatJid, options) =>
       groupProcessor.processGroupMessages(chatJid, options),

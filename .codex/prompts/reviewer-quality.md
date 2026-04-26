@@ -9,6 +9,8 @@ The subagent must review only for:
 - missing tests
 - API and contract drift
 
+The subagent must also review holistic architecture beyond the literal user request. Call out omitted provider boundaries, configuration ownership, onboarding, docs, tests, or operational impacts when they make the change incomplete or fragile.
+
 Required output contract:
 - score: 0-10
 - blocking_findings

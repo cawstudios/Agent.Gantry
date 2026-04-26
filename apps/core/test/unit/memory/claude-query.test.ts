@@ -22,6 +22,7 @@ describe('runClaudeQuery', () => {
   let runtimeRoot = '';
 
   beforeEach(() => {
+    vi.resetModules();
     runtimeRoot = fs.mkdtempSync(
       path.join(os.tmpdir(), 'myclaw-claude-query-'),
     );
@@ -57,6 +58,7 @@ describe('runClaudeQuery', () => {
     }
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    vi.resetModules();
   });
 
   it('passes only broker-safe OneCLI env into SDK query env', async () => {
@@ -226,6 +228,77 @@ describe('runClaudeQuery', () => {
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
       ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001',
     });
+    expect(getContainerConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('uses runtime .env before ambient env for memory credential mode', async () => {
+    fs.writeFileSync(
+      path.join(runtimeRoot, '.env'),
+      [
+        'MYCLAW_CREDENTIAL_MODE=external',
+        'ANTHROPIC_BASE_URL=https://broker.local/anthropic',
+        'ANTHROPIC_MODEL=claude-haiku-4-5-20251001',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    vi.resetModules();
+    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'none');
+    vi.stubEnv('ANTHROPIC_BASE_URL', '');
+    queryMock.mockImplementation(() =>
+      (async function* () {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'text', text: '[{"kind":"fact"}]' }],
+          },
+        };
+      })(),
+    );
+
+    const { hasClaudeAuthConfigured, runClaudeQuery } =
+      await import('@core/memory/claude-query.js');
+
+    expect(hasClaudeAuthConfigured()).toBe(true);
+    await expect(
+      runClaudeQuery({
+        model: 'claude-haiku-4-5-20251001',
+        prompt: 'Extract facts',
+      }),
+    ).resolves.toBe('[{"kind":"fact"}]');
+    const call = queryMock.mock.calls[0]?.[0] as
+      | {
+          options?: {
+            env?: Record<string, string>;
+          };
+        }
+      | undefined;
+    expect(call?.options?.env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+      ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001',
+    });
+    expect(getContainerConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsafe external broker endpoints before memory SDK queries', async () => {
+    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'external');
+    vi.stubEnv('ONECLI_URL', '');
+    vi.stubEnv(
+      'ANTHROPIC_BASE_URL',
+      'https://user:pass@broker.local/anthropic',
+    );
+
+    const { runClaudeQuery } = await import('@core/memory/claude-query.js');
+
+    await expect(
+      runClaudeQuery({
+        model: 'claude-haiku-4-5-20251001',
+        prompt: 'Extract facts',
+      }),
+    ).rejects.toThrow(
+      'ANTHROPIC_BASE_URL must not contain embedded credentials',
+    );
+    expect(queryMock).not.toHaveBeenCalled();
     expect(getContainerConfigMock).not.toHaveBeenCalled();
   });
 });

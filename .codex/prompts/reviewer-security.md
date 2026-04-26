@@ -11,6 +11,8 @@ The subagent must review only for framework-independent security risks, includin
 - insecure defaults and misconfiguration
 - abuse paths introduced by the change
 
+The subagent must also review holistic architecture beyond the literal user request. Call out omitted provider boundaries, configuration ownership, onboarding, tests, docs, or operational impacts when they create security, trust-boundary, or abuse-case risk.
+
 Required output contract:
 - score: 0-10
 - blocking_findings

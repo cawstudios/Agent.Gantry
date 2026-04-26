@@ -18,6 +18,7 @@ Focus on framework-independent performance risks such as:
 - memory churn, leaks, or unbounded accumulation
 - concurrency bottlenecks, lock contention, or queue amplification
 - startup, build, or request-path regressions introduced by the change
+- holistic architecture beyond the literal user request, including provider boundaries, configuration ownership, onboarding, docs, tests, and operational impacts when they affect performance or operability
 
 When the repo is clearly browser-facing, also check for likely CWV-impacting issues such as render-blocking work, excessive bundle growth, or unnecessary client-side work. When it is clearly service-side, focus on latency, throughput, and resource efficiency instead.
 

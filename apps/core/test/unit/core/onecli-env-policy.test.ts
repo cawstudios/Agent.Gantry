@@ -123,4 +123,31 @@ describe('OneCLI env policy', () => {
       );
     }
   });
+
+  it('rejects secret-shaped values in allowed model env keys', () => {
+    const secretLikeValues = [
+      'sk-ant-raw-provider-token',
+      'github_pat_11AAAAAAAA0abcdefghijklmnopqrstuvwxyz',
+      'ASIAABCDEFGHIJKLMNOP',
+      'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      'Bearer abcdefghijklmnopqrstuvwxyz123456',
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature',
+      '-----BEGIN PRIVATE KEY-----',
+    ];
+    for (const key of [
+      'ANTHROPIC_MODEL',
+      'ANTHROPIC_DEFAULT_OPUS_MODEL',
+      'ANTHROPIC_DEFAULT_SONNET_MODEL',
+      'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    ]) {
+      for (const value of secretLikeValues) {
+        expect(() =>
+          filterTrustedOnecliEnv({
+            ANTHROPIC_BASE_URL: 'https://broker.example.com',
+            [key]: value,
+          }),
+        ).toThrow(`forbidden raw credential env value for key: ${key}`);
+      }
+    }
+  });
 });

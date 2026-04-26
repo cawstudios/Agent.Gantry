@@ -1,5 +1,5 @@
 import { readRuntimeStorageSettingsSnapshot } from './runtime-settings.js';
-import { envValueDynamic } from '../env/index.js';
+import { runtimeEnvValueDynamic } from '../env/index.js';
 import { validatePostgresConnectionUrl } from '../../infrastructure/postgres/url.js';
 
 export interface RuntimeStorageConfig {
@@ -22,7 +22,7 @@ export function resolveRuntimeStorageConfig(
     );
   }
   const postgresUrlEnv = settings.postgresUrlEnv || 'MYCLAW_DATABASE_URL';
-  const postgresUrl = envValueDynamic(postgresUrlEnv).trim() || null;
+  const postgresUrl = runtimeEnvValueDynamic(postgresUrlEnv).trim() || null;
   if (postgresUrl) {
     try {
       validatePostgresConnectionUrl(postgresUrl, {

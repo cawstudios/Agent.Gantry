@@ -12,7 +12,7 @@ ACTIVE_DOCS = [
     REPO_ROOT / "docs" / "MEMORY.md",
     REPO_ROOT / "docs" / "CONTINUITY.md",
     REPO_ROOT / "docs" / "SPEC.md",
-    REPO_ROOT / "docs" / "npm-cli-onboarding.md",
+    REPO_ROOT / "docs" / "README.md",
     REPO_ROOT / ".claude" / "skills" / "commands" / "SKILL.md",
     REPO_ROOT / ".claude" / "skills" / "myclaw-admin" / "SKILL.md",
 ]

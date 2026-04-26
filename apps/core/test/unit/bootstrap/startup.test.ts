@@ -15,7 +15,7 @@ function makeApp(overrides: Partial<RuntimeApp> = {}): RuntimeApp {
     setGroupThinkingOverride: vi.fn(async () => {}),
     getAvailableGroups: vi.fn(() => []),
     setRegisteredGroupsForTest: vi.fn(),
-    ensureOneCLIAgentsForRegisteredGroups: vi.fn(),
+    ensureCredentialBindingsForRegisteredGroups: vi.fn(async () => {}),
     clearSessionForChatJid: vi.fn(async () => {}),
     processGroupMessages: vi.fn(),
     getRegisteredGroups: vi.fn(() => ({})),
@@ -34,8 +34,8 @@ describe('runStartup', () => {
       loadState: vi.fn(() => {
         order.push('load-state');
       }),
-      ensureOneCLIAgentsForRegisteredGroups: vi.fn(() => {
-        order.push('ensure-onecli');
+      ensureCredentialBindingsForRegisteredGroups: vi.fn(async () => {
+        order.push('ensure-credentials');
       }),
     });
 
@@ -79,7 +79,7 @@ describe('runStartup', () => {
       'init-storage',
       'log-db-init',
       'load-state',
-      'ensure-onecli',
+      'ensure-credentials',
       'restore-remote-control',
     ]);
     expect(result.runtimeSettings).toBe(runtimeSettings);
@@ -121,6 +121,67 @@ describe('runStartup', () => {
 
     expect(order).toEqual(['layout', 'init-storage', 'restore-remote-control']);
     expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it('waits for credential bindings before restoring remote control', async () => {
+    const order: string[] = [];
+    let releaseBinding!: () => void;
+    const bindingStarted = new Promise<void>((resolve) => {
+      const app = makeApp({
+        loadState: vi.fn(async () => {
+          order.push('load-state');
+        }),
+        ensureCredentialBindingsForRegisteredGroups: vi.fn(async () => {
+          order.push('ensure-credentials-start');
+          resolve();
+          await new Promise<void>((release) => {
+            releaseBinding = release;
+          });
+          order.push('ensure-credentials-done');
+        }),
+      });
+      const startup = runStartup(app, {
+        ensureRuntimeLayoutDirectories: vi.fn(),
+        ensurePromptProfileBootstrapped: vi.fn(),
+        initializeRuntimeStorage: vi.fn(async () => ({}) as any),
+        loadRuntimeSettings: vi.fn(
+          () =>
+            ({
+              channels: {},
+              storage: {
+                postgres: {
+                  urlEnv: 'MYCLAW_DATABASE_URL',
+                  schema: 'myclaw',
+                },
+              },
+              memory: {},
+            }) as any,
+        ),
+        restoreRemoteControl: vi.fn(() => {
+          order.push('restore-remote-control');
+        }),
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+        },
+      });
+      void startup.then(() => {
+        order.push('startup-done');
+      });
+    });
+
+    await bindingStarted;
+    expect(order).toEqual(['load-state', 'ensure-credentials-start']);
+    releaseBinding();
+    await vi.waitFor(() => {
+      expect(order).toEqual([
+        'load-state',
+        'ensure-credentials-start',
+        'ensure-credentials-done',
+        'restore-remote-control',
+        'startup-done',
+      ]);
+    });
   });
 
   it('initializes Postgres storage for runtime settings', async () => {

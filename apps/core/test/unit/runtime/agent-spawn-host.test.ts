@@ -67,6 +67,17 @@ async function loadModule(config: {
     MYCLAW_CREDENTIAL_MODE: config.MYCLAW_CREDENTIAL_MODE ?? 'onecli',
     ONECLI_ALLOWED_ENV_KEYS: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL'],
   }));
+  vi.doMock('@core/config/env/index.js', () => ({
+    envConfig: {
+      ONECLI_URL: config.ONECLI_URL ?? 'http://localhost:10254',
+      MYCLAW_CREDENTIAL_MODE: config.MYCLAW_CREDENTIAL_MODE ?? 'onecli',
+    },
+    envValue: (key: string) =>
+      ({
+        ONECLI_URL: config.ONECLI_URL ?? 'http://localhost:10254',
+        MYCLAW_CREDENTIAL_MODE: config.MYCLAW_CREDENTIAL_MODE ?? 'onecli',
+      })[key] || '',
+  }));
 
   return import('@core/runtime/agent-spawn-host.js');
 }
@@ -107,7 +118,8 @@ describe('getHostRuntimeCredentialEnv', () => {
       env: {
         ANTHROPIC_BASE_URL: 'https://broker.example.com',
       },
-      onecliApplied: true,
+      brokerApplied: true,
+      brokerProfile: 'onecli',
     });
     expect(mockGetContainerConfig).toHaveBeenCalledWith('agent-x');
     expect(mockLoggerWarn).toHaveBeenCalledWith(
@@ -171,7 +183,7 @@ describe('getHostRuntimeCredentialEnv', () => {
 
     const result = await mod.getHostRuntimeCredentialEnv();
 
-    expect(result.onecliApplied).toBe(true);
+    expect(result.brokerApplied).toBe(true);
     expect(result.env).toEqual({
       ANTHROPIC_BASE_URL: 'https://broker.example.com',
       NODE_EXTRA_CA_CERTS: '/tmp/myclaw-test/data/onecli/gateway-ca.pem',

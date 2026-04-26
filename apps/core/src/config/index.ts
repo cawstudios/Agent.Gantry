@@ -5,7 +5,7 @@ import {
   CLAUDE_CODE_MODEL_PIN_ENV_KEYS,
   normalizeClaudeModelSelection,
 } from '../models/claude-model-registry.js';
-import { envConfig, envValue } from './env/index.js';
+import { envConfig, envValue, runtimeEnvValue } from './env/index.js';
 import { parseBooleanEnv } from './env/parse.js';
 import { getMemoryModelConfig } from './memory.js';
 import { getMyclawHome } from '../shared/myclaw-home.js';
@@ -69,7 +69,7 @@ export const ONECLI_URL = envValue('ONECLI_URL');
 export const ONECLI_DATABASE_URL = envValue('ONECLI_DATABASE_URL');
 export const ONECLI_SECRET_ENCRYPTION_KEY = envValue('SECRET_ENCRYPTION_KEY');
 const normModel = normalizeClaudeModelSelection;
-export const ANTHROPIC_MODEL = normModel(envValue('ANTHROPIC_MODEL'));
+export const ANTHROPIC_MODEL = normModel(runtimeEnvValue('ANTHROPIC_MODEL'));
 export const TELEGRAM_BOT_TOKEN = envValue('TELEGRAM_BOT_TOKEN');
 export const SLACK_BOT_TOKEN = envValue('SLACK_BOT_TOKEN');
 export const SLACK_APP_TOKEN = envValue('SLACK_APP_TOKEN');
@@ -90,28 +90,46 @@ export const HOST_CREDENTIAL_REQUIRED_ENV_KEYS = [
   'ANTHROPIC_BASE_URL',
 ] as const;
 export const ONECLI_ALLOWED_ENV_KEYS = [...HOST_CREDENTIAL_ENV_KEYS] as const;
-export function getHostCredentialEnv(): Record<string, string> {
+type HostCredentialSource = Partial<Record<string, string | undefined>>;
+
+function readHostCredentialValue(
+  key: (typeof HOST_CREDENTIAL_ENV_KEYS)[number],
+  source?: HostCredentialSource,
+): string {
+  return (
+    source?.[key]?.trim() ||
+    envConfig[key]?.trim() ||
+    process.env[key]?.trim() ||
+    ''
+  );
+}
+
+export function getHostCredentialEnv(
+  source?: HostCredentialSource,
+): Record<string, string> {
   const env: Record<string, string> = {};
   Object.assign(env, CLAUDE_CODE_MODEL_PIN_ENV);
   for (const key of HOST_CREDENTIAL_ENV_KEYS) {
-    const value = envValue(key);
+    const value = readHostCredentialValue(key, source);
     if (value) env[key] = value;
   }
   return env;
 }
-export function hasHostCredentialBrokerEnv(): boolean {
+export function hasHostCredentialBrokerEnv(
+  source?: HostCredentialSource,
+): boolean {
   return HOST_CREDENTIAL_REQUIRED_ENV_KEYS.some((key) =>
-    Boolean(envValue(key).trim()),
+    Boolean(readHostCredentialValue(key, source)),
   );
 }
 export function getTelegramBotToken(): string {
-  return envValue('TELEGRAM_BOT_TOKEN');
+  return runtimeEnvValue('TELEGRAM_BOT_TOKEN');
 }
 export function getSlackBotToken(): string {
-  return envValue('SLACK_BOT_TOKEN');
+  return runtimeEnvValue('SLACK_BOT_TOKEN');
 }
 export function getSlackAppToken(): string {
-  return envValue('SLACK_APP_TOKEN');
+  return runtimeEnvValue('SLACK_APP_TOKEN');
 }
 export type ClaudeAuthMode = 'broker' | 'none';
 

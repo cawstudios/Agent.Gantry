@@ -1,11 +1,10 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import {
-  getHostCredentialEnv,
   hasHostCredentialBrokerEnv,
   type ClaudeAuthMode,
 } from '../config/index.js';
-import { envValue } from '../config/env/index.js';
+import { envConfig, runtimeEnvValue } from '../config/env/index.js';
 import { resolveHostCredentialMode } from '../config/credentials/mode.js';
 import { getAgentCredentialInjection } from '../application/credentials/agent-credential-service.js';
 
@@ -34,12 +33,12 @@ export interface ClaudeAuthAvailability {
 }
 
 function readOnecliUrl(): string {
-  return envValue('ONECLI_URL').trim();
+  return runtimeEnvValue('ONECLI_URL').trim();
 }
 
 export function getClaudeAuthAvailability(): ClaudeAuthAvailability {
   const credentialMode = resolveHostCredentialMode(
-    envValue('MYCLAW_CREDENTIAL_MODE'),
+    runtimeEnvValue('MYCLAW_CREDENTIAL_MODE'),
   );
   return {
     hasOauthToken: false,
@@ -98,13 +97,15 @@ function flattenPrompt(opts: ClaudeQueryOpts): string {
 
 async function resolveOnecliMemoryEnv(): Promise<Record<string, string>> {
   const credentialMode = resolveHostCredentialMode(
-    envValue('MYCLAW_CREDENTIAL_MODE'),
+    runtimeEnvValue('MYCLAW_CREDENTIAL_MODE'),
   );
   if (credentialMode === 'external') {
-    if (!hasHostCredentialBrokerEnv()) {
-      throw new Error('External credential broker is not configured');
-    }
-    return getHostCredentialEnv();
+    const injection = await getAgentCredentialInjection({
+      mode: credentialMode,
+      agentIdentifier: 'memory',
+      env: envConfig,
+    });
+    return injection.env;
   }
   const onecliUrl = readOnecliUrl();
   if (!onecliUrl) {
@@ -113,6 +114,7 @@ async function resolveOnecliMemoryEnv(): Promise<Record<string, string>> {
   const injection = await getAgentCredentialInjection({
     mode: credentialMode,
     agentIdentifier: 'memory',
+    env: envConfig,
   });
   return injection.env;
 }

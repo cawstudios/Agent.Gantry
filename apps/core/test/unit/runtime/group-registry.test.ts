@@ -63,7 +63,7 @@ function makeGroup(overrides: Partial<RegisteredGroup> = {}): RegisteredGroup {
 describe('registerGroup', () => {
   let groups: Record<string, RegisteredGroup>;
   let persist: ReturnType<typeof vi.fn<PersistGroupFn>>;
-  let ensureOneCLIAgent: ReturnType<typeof vi.fn<PersistGroupFn>>;
+  let ensureCredentialBinding: ReturnType<typeof vi.fn<PersistGroupFn>>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -74,21 +74,21 @@ describe('registerGroup', () => {
     mockResolve.mockReset();
     groups = {};
     persist = vi.fn<PersistGroupFn>();
-    ensureOneCLIAgent = vi.fn<PersistGroupFn>();
+    ensureCredentialBinding = vi.fn<PersistGroupFn>();
     mockResolve.mockReturnValue('/resolved/test-group');
     mockFs.existsSync.mockReturnValue(false);
   });
 
-  it('registers the group and calls persist + ensureOneCLIAgent', async () => {
+  it('registers the group and calls persist + ensureCredentialBinding', async () => {
     const group = makeGroup();
     await registerGroup(groups, 'g1@g.us', group, {
       persist,
-      ensureOneCLIAgent,
+      ensureCredentialBinding,
     });
 
     expect(groups['g1@g.us']).toBe(group);
     expect(persist).toHaveBeenCalledWith('g1@g.us', group);
-    expect(ensureOneCLIAgent).toHaveBeenCalledWith('g1@g.us', group);
+    expect(ensureCredentialBinding).toHaveBeenCalledWith('g1@g.us', group);
     expect(mockFs.mkdirSync).toHaveBeenCalledWith('/resolved/test-group/logs', {
       recursive: true,
     });
@@ -106,12 +106,12 @@ describe('registerGroup', () => {
 
     await registerGroup(groups, 'bad@g.us', group, {
       persist,
-      ensureOneCLIAgent,
+      ensureCredentialBinding,
     });
 
     expect(groups).not.toHaveProperty('bad@g.us');
     expect(persist).not.toHaveBeenCalled();
-    expect(ensureOneCLIAgent).not.toHaveBeenCalled();
+    expect(ensureCredentialBinding).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ jid: 'bad@g.us', folder: '../../etc' }),
       'Rejecting group registration with invalid folder',
@@ -124,7 +124,7 @@ describe('registerGroup', () => {
 
     await registerGroup(groups, 'g1@g.us', group, {
       persist,
-      ensureOneCLIAgent,
+      ensureCredentialBinding,
     });
 
     expect(mockFs.writeFileSync).toHaveBeenCalledWith(
@@ -144,7 +144,7 @@ describe('registerGroup', () => {
     await registerGroup(groups, 'g1@g.us', group, {
       assistantName: 'Kai',
       persist,
-      ensureOneCLIAgent,
+      ensureCredentialBinding,
     });
 
     expect(mockFs.writeFileSync).toHaveBeenCalledWith(
@@ -164,7 +164,7 @@ describe('registerGroup', () => {
 
     await registerGroup(groups, 'g1@g.us', group, {
       persist,
-      ensureOneCLIAgent,
+      ensureCredentialBinding,
     });
 
     expect(mockFs.readFileSync).not.toHaveBeenCalled();

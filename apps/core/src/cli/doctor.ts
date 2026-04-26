@@ -37,6 +37,7 @@ import {
   validateOnecliDatabaseUrl,
 } from '../adapters/credentials/onecli/local/persistence.js';
 import { validateOnecliUrl } from '../adapters/credentials/onecli/policy.js';
+import { validateExternalBrokerUrl } from '../config/credentials/broker-url-policy.js';
 import { openRuntimeGroupDb } from './runtime-group-db.js';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
@@ -54,6 +55,13 @@ export interface DoctorReport {
   blockingFailures: number;
   warnings: number;
   checks: DoctorCheck[];
+}
+
+function resolveRuntimeEnvValue(
+  env: Record<string, string>,
+  key: string,
+): string {
+  return env[key]?.trim() || process.env[key]?.trim() || '';
 }
 
 export interface DoctorNetworkOptions {
@@ -310,19 +318,25 @@ export function runDoctor(
       nextAction: `Fix ${path.join(runtimeHome, 'settings.yaml')}. Details: ${settingsResult.error}`,
     });
   }
-  const onecliUrl =
-    env.ONECLI_URL?.trim() || process.env.ONECLI_URL?.trim() || '';
+  const onecliUrl = resolveRuntimeEnvValue(env, 'ONECLI_URL');
   const credentialMode = resolveHostCredentialMode(
     env.MYCLAW_CREDENTIAL_MODE || process.env.MYCLAW_CREDENTIAL_MODE,
   );
+  const externalBrokerUrl =
+    env.ANTHROPIC_BASE_URL?.trim() ||
+    process.env.ANTHROPIC_BASE_URL?.trim() ||
+    '';
+  const externalBrokerValidation = externalBrokerUrl
+    ? validateExternalBrokerUrl(externalBrokerUrl)
+    : undefined;
 
   for (const provider of providers) {
     const enabled = settings?.channels[provider.id]?.enabled ?? false;
     const configuredKeys = provider.setup.envKeys.filter((envKey) =>
-      Boolean(env[envKey]?.trim()),
+      Boolean(resolveRuntimeEnvValue(env, envKey)),
     );
     const missingKeys = provider.setup.envKeys.filter(
-      (envKey) => !env[envKey]?.trim(),
+      (envKey) => !resolveRuntimeEnvValue(env, envKey),
     );
     const envCheckId =
       provider.id === 'telegram'
@@ -388,26 +402,47 @@ export function runDoctor(
     message: `${memoryHealth.embeddingProvider} (source: ${memoryHealth.embeddingProviderSource}): ${memoryHealth.embeddingCheck.message}`,
     nextAction: memoryHealth.embeddingCheck.nextAction,
   });
+  let modelAccessStatus: DoctorStatus = 'pass';
+  let modelAccessMessage = `Model Access is managed by ${credentialMode} credential mode.`;
+  let modelAccessNextAction: string | undefined;
+  if (credentialMode === 'external') {
+    if (!externalBrokerUrl) {
+      modelAccessStatus = 'fail';
+      modelAccessMessage =
+        'External credential mode requires ANTHROPIC_BASE_URL.';
+      modelAccessNextAction =
+        'Set ANTHROPIC_BASE_URL to the external credential broker endpoint, then rerun `myclaw doctor`.';
+    } else if (!externalBrokerValidation?.ok) {
+      modelAccessStatus = 'fail';
+      modelAccessMessage =
+        externalBrokerValidation?.error || 'ANTHROPIC_BASE_URL is invalid.';
+      modelAccessNextAction =
+        'Set ANTHROPIC_BASE_URL to an HTTPS broker URL without embedded credentials, query parameters, or fragments.';
+    }
+  } else if (credentialMode === 'onecli') {
+    const onecliUrlValidation = onecliUrl
+      ? validateOnecliUrl(onecliUrl)
+      : undefined;
+    if (!onecliUrl) {
+      modelAccessStatus = 'warn';
+      modelAccessMessage =
+        'Model Access is missing. Agent execution and memory LLM extraction require brokered model access.';
+      modelAccessNextAction =
+        'Run `myclaw setup` and configure Model Access, then rerun `myclaw doctor`.';
+    } else if (!onecliUrlValidation?.ok) {
+      modelAccessStatus = 'fail';
+      modelAccessMessage =
+        onecliUrlValidation?.error || 'Model Access URL is invalid.';
+    } else {
+      modelAccessMessage = `Model Access is configured at ${onecliUrl}.`;
+    }
+  }
   add(checks, {
     id: 'claude-broker',
     title: 'Model Access',
-    status:
-      onecliUrl && !validateOnecliUrl(onecliUrl).ok
-        ? 'fail'
-        : onecliUrl || credentialMode !== 'onecli'
-          ? 'pass'
-          : 'warn',
-    message: onecliUrl
-      ? validateOnecliUrl(onecliUrl).ok
-        ? `Model Access is configured at ${onecliUrl}.`
-        : validateOnecliUrl(onecliUrl).error || 'Model Access URL is invalid.'
-      : credentialMode !== 'onecli'
-        ? `Model Access is managed by ${credentialMode} credential mode.`
-        : 'Model Access is missing. Agent execution and memory LLM extraction require brokered model access.',
-    nextAction:
-      onecliUrl || credentialMode !== 'onecli'
-        ? undefined
-        : 'Run `myclaw setup` and configure Model Access, then rerun `myclaw doctor`.',
+    status: modelAccessStatus,
+    message: modelAccessMessage,
+    nextAction: modelAccessNextAction,
   });
 
   const platform = detectPlatform();
@@ -471,7 +506,7 @@ export async function runDoctorWithNetwork(
       const settings = loadSettingsForDoctor(runtimeHome).settings;
       if (settings?.channels[telegramProvider.id]?.enabled) {
         const env = readEnvFile(envFilePath(runtimeHome));
-        const token = env.TELEGRAM_BOT_TOKEN?.trim() || '';
+        const token = resolveRuntimeEnvValue(env, 'TELEGRAM_BOT_TOKEN');
         if (token) {
           const validation = await validateTelegramBotToken(
             token,
@@ -524,22 +559,19 @@ export async function runDoctorWithNetwork(
       env.ONECLI_URL?.trim() || process.env.ONECLI_URL?.trim() || '';
     const onecliDatabaseUrlEnv =
       settings.credentialBroker.onecli.postgres.urlEnv;
-    const onecliDatabaseUrl =
-      env[onecliDatabaseUrlEnv]?.trim() ||
-      process.env[onecliDatabaseUrlEnv]?.trim() ||
-      '';
-    const onecliSecret =
-      env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim() ||
-      process.env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim() ||
-      '';
+    const onecliDatabaseUrl = resolveRuntimeEnvValue(env, onecliDatabaseUrlEnv);
+    const onecliSecret = resolveRuntimeEnvValue(
+      env,
+      ONECLI_SECRET_ENCRYPTION_KEY_ENV,
+    );
     const onecliPersistence = await inspectOnecliPersistenceReadiness({
       postgresUrl: onecliDatabaseUrl,
       schema: settings.credentialBroker.onecli.postgres.schema,
       secretEncryptionKey: onecliSecret,
-      myclawPostgresUrl:
-        env[settings.storage.postgres.urlEnv]?.trim() ||
-        process.env[settings.storage.postgres.urlEnv]?.trim() ||
-        '',
+      myclawPostgresUrl: resolveRuntimeEnvValue(
+        env,
+        settings.storage.postgres.urlEnv,
+      ),
       myclawSchema: settings.storage.postgres.schema,
     });
     report = addToReport(report, {

@@ -1,12 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
-import {
-  AGENTS_DIR,
-  MYCLAW_CREDENTIAL_MODE,
-  ONECLI_URL,
-} from '../config/index.js';
+import { AGENTS_DIR } from '../config/index.js';
 import { resolveHostCredentialMode } from '../config/credentials/mode.js';
+import { envConfig } from '../config/env/index.js';
 import { getAgentCredentialInjection } from '../application/credentials/agent-credential-service.js';
 import { RegisteredGroup } from '../domain/types.js';
 import {
@@ -25,19 +22,22 @@ export async function getHostRuntimeCredentialEnv(
   agentIdentifier?: string,
 ): Promise<{
   env: Record<string, string>;
-  onecliApplied: boolean;
+  brokerApplied: boolean;
+  brokerProfile: string;
 }> {
-  const credentialModeRaw = MYCLAW_CREDENTIAL_MODE;
+  const credentialModeRaw =
+    envConfig.MYCLAW_CREDENTIAL_MODE || process.env.MYCLAW_CREDENTIAL_MODE;
   const credentialMode = resolveHostCredentialMode(credentialModeRaw);
   const injection = await getAgentCredentialInjection({
     mode: credentialMode,
     agentIdentifier,
-    onecliUrl: ONECLI_URL,
+    env: envConfig,
   });
 
   return {
     env: injection.env,
-    onecliApplied: injection.brokerProfile === 'onecli' && injection.applied,
+    brokerApplied: injection.applied,
+    brokerProfile: injection.brokerProfile,
   };
 }
 

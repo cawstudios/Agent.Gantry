@@ -109,7 +109,8 @@ describe('host child-process runtime smoke', () => {
     vi.doMock('@core/runtime/agent-spawn-host.js', () => ({
       getHostRuntimeCredentialEnv: async () => ({
         env: {},
-        onecliApplied: false,
+        brokerApplied: false,
+        brokerProfile: 'none',
       }),
       prepareHostRuntimeContext: () => ({
         groupDir,

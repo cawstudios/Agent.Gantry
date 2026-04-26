@@ -61,7 +61,8 @@ vi.mock('fs', async () => {
 vi.mock('@core/runtime/agent-spawn-host.js', () => ({
   getHostRuntimeCredentialEnv: vi.fn().mockResolvedValue({
     env: {},
-    onecliApplied: false,
+    brokerApplied: false,
+    brokerProfile: 'none',
   }),
   prepareHostRuntimeContext: vi.fn(() => ({
     groupDir: '/tmp/myclaw-test-data/agents/test-group',

@@ -57,7 +57,7 @@ export async function runStartup(
   await resolved.initializeRuntimeStorage();
   resolved.logger.info('Database initialized');
   await app.loadState();
-  app.ensureOneCLIAgentsForRegisteredGroups();
+  await app.ensureCredentialBindingsForRegisteredGroups();
 
   resolved.restoreRemoteControl();
 

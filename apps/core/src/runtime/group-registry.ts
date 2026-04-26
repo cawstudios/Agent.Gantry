@@ -18,7 +18,7 @@ interface ChatRow {
 interface RegisterGroupOptions {
   assistantName?: string;
   persist: (jid: string, group: RegisteredGroup) => void | Promise<void>;
-  ensureOneCLIAgent: (jid: string, group: RegisteredGroup) => void;
+  ensureCredentialBinding: (jid: string, group: RegisteredGroup) => void;
 }
 
 function isPromiseLike(value: unknown): value is Promise<void> {
@@ -103,7 +103,7 @@ export async function registerGroup(
     );
   }
 
-  options.ensureOneCLIAgent(jid, group);
+  options.ensureCredentialBinding(jid, group);
 
   logger.info(
     { jid, name: group.name, folder: group.folder },

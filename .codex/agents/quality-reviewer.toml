@@ -16,6 +16,7 @@ Focus on:
 - API or schema contract drift
 - migration and backward-compatibility risk
 - missing or weak tests for the changed behavior
+- holistic architecture beyond the literal user request, including provider boundaries, configuration ownership, onboarding, docs, tests, and operational impacts
 
 Do not spend time on style-only comments unless they hide a real bug.
 

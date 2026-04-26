@@ -10,6 +10,8 @@ The subagent must review only for framework-independent performance risks, inclu
 - payload and serialization overhead
 - concurrency bottlenecks
 
+The subagent must also review holistic architecture beyond the literal user request. Call out omitted provider boundaries, configuration ownership, onboarding, docs, tests, or operational impacts when they create performance, scalability, or operability risk.
+
 Required output contract:
 - score: 0-10
 - blocking_findings

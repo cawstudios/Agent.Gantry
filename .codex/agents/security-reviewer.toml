@@ -18,6 +18,7 @@ Use an OWASP-style review lens. Focus on:
 - insecure defaults, misconfiguration, missing rate limits, unsafe debug paths
 - supply-chain or dependency trust introduced by the change
 - unsafe external integrations and missing verification steps
+- holistic architecture beyond the literal user request, including provider boundaries, configuration ownership, onboarding, docs, tests, and operational impacts when they affect security or trust boundaries
 
 Every serious finding must describe the attack path or trust-boundary failure in concrete terms.
 If a risk depends on a missing assumption, state the assumption explicitly.

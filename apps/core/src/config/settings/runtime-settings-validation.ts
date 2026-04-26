@@ -51,7 +51,7 @@ export function validateLoadedRuntimeSettings(
     details.push(
       `${onecliDatabaseUrlEnv} is required for OneCLI broker persistence.`,
     );
-  } else if (onecliDatabaseUrl) {
+  } else if (onecliDatabaseUrl && credentialMode === 'onecli') {
     try {
       validatePostgresConnectionUrl(onecliDatabaseUrl, {
         allowLocalhost: true,
@@ -68,7 +68,7 @@ export function validateLoadedRuntimeSettings(
       details.push(`${onecliDatabaseUrlEnv} is invalid: ${message}`);
     }
   }
-  if (postgresUrl && onecliDatabaseUrl) {
+  if (postgresUrl && onecliDatabaseUrl && credentialMode === 'onecli') {
     try {
       const sharedDatabase = validateSharedPostgresDatabase({
         myclawPostgresUrl: postgresUrl,
@@ -91,7 +91,7 @@ export function validateLoadedRuntimeSettings(
   const onecliSecret =
     env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim() ||
     process.env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim();
-  if (credentialMode === 'onecli' || onecliSecret) {
+  if (credentialMode === 'onecli') {
     const secretValidation = validateOnecliSecretEncryptionKey(onecliSecret);
     if (!secretValidation.ok) {
       details.push(secretValidation.message);
@@ -102,7 +102,7 @@ export function validateLoadedRuntimeSettings(
     env.ONECLI_URL?.trim() || process.env.ONECLI_URL?.trim() || '';
   if (!onecliUrl && credentialMode === 'onecli') {
     details.push('ONECLI_URL is required for OneCLI broker access.');
-  } else if (onecliUrl) {
+  } else if (onecliUrl && credentialMode === 'onecli') {
     const onecliUrlValidation = validateOnecliUrl(onecliUrl);
     if (!onecliUrlValidation.ok) {
       details.push(onecliUrlValidation.error || 'ONECLI_URL is invalid.');
@@ -123,7 +123,7 @@ export function validateLoadedRuntimeSettings(
     }
 
     for (const envKey of provider.setup.envKeys) {
-      if (!env[envKey]?.trim()) {
+      if (!env[envKey]?.trim() && !process.env[envKey]?.trim()) {
         details.push(
           `${envKey} is required when channel '${provider.id}' is enabled.`,
         );

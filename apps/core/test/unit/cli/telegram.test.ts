@@ -422,12 +422,13 @@ describe('cli telegram helpers', () => {
     vi.resetModules();
     const runtimeHome = makeRuntimeHome();
     const outro = vi.fn();
+    const text = vi.fn(async () => '');
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,
       note: vi.fn(),
       password: vi.fn(async () => 'telegram-token'),
-      text: vi.fn(async () => ''),
+      text,
       outro,
       log: {
         success: vi.fn(),
@@ -474,6 +475,12 @@ describe('cli telegram helpers', () => {
     );
     expect(outro).toHaveBeenCalledWith(
       'Telegram token saved. Next: run `myclaw channel connect telegram` to register a chat.',
+    );
+    expect(text).toHaveBeenCalledTimes(1);
+    expect(text).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Telegram chat ID (optional, e.g. -1001234567890)',
+      }),
     );
   });
 
@@ -550,13 +557,14 @@ describe('cli telegram helpers', () => {
     vi.resetModules();
     const runtimeHome = makeRuntimeHome();
     const select = vi.fn(async () => 'tg:-100123');
+    const text = vi.fn(async () => '5759865942');
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,
       note: vi.fn(),
       password: vi.fn(async () => 'telegram-token'),
       select,
-      text: vi.fn(async () => '5759865942'),
+      text,
       outro: vi.fn(),
       log: {
         success: vi.fn(),
@@ -615,6 +623,102 @@ describe('cli telegram helpers', () => {
     expect(
       settings.channels.telegram.controlAllowlist.agents.telegram_main,
     ).toEqual(['5759865942']);
+    expect(text).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Telegram sender/user ID for session admin (optional)',
+      }),
+    );
+    expect(text).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Telegram approver user IDs for permissions (required)',
+      }),
+    );
+  });
+
+  it('telegram connect stores approvers when a discovered chat has no admin sender default', async () => {
+    vi.resetModules();
+    const runtimeHome = makeRuntimeHome();
+    const select = vi.fn(async () => 'tg:-100123');
+    const text = vi
+      .fn()
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('5759865942');
+
+    vi.doMock('@clack/prompts', () => ({
+      isCancel: () => false,
+      note: vi.fn(),
+      password: vi.fn(async () => 'telegram-token'),
+      select,
+      text,
+      outro: vi.fn(),
+      log: {
+        success: vi.fn(),
+        info: vi.fn(),
+        error: vi.fn(),
+      },
+      spinner: vi.fn(() => ({
+        start: vi.fn(),
+        stop: vi.fn(),
+      })),
+    }));
+    vi.doMock('@core/cli/telegram-chat-discovery.js', () => ({
+      listTelegramRecentChats: vi.fn(async () => ({
+        ok: true,
+        message: 'Discovered 1 Telegram chat.',
+        chats: [
+          {
+            chatJid: 'tg:-100123',
+            chatTitle: 'Ops Room',
+            chatType: 'supergroup',
+          },
+        ],
+      })),
+    }));
+    vi.doMock('@core/cli/telegram.js', () => ({
+      normalizeTelegramChatJid: vi.fn((value: string) => {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        return trimmed.startsWith('tg:') ? trimmed : `tg:${trimmed}`;
+      }),
+      readTelegramFromRuntimeEnv: vi.fn(() => ({ token: '' })),
+      registerTelegramMainGroup: vi.fn(async () => ({
+        groupName: 'Ops Room',
+        folder: 'telegram_main',
+      })),
+      validateTelegramBotToken: vi.fn(async () => ({
+        ok: true,
+        message: 'ok',
+        botId: 123,
+      })),
+      verifyTelegramChatAccess: vi.fn(async () => ({
+        ok: true,
+        message: 'ok',
+        chatTitle: 'Ops Room',
+      })),
+    }));
+
+    const { runTelegramConnectCommand } =
+      await import('@core/cli/telegram-connect.js');
+    const code = await runTelegramConnectCommand(runtimeHome);
+
+    expect(code).toBe(0);
+    expect(
+      loadRuntimeSettings(runtimeHome).channels.telegram.controlAllowlist.agents
+        .telegram_main,
+    ).toEqual(['5759865942']);
+    expect(text).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        message: 'Telegram sender/user ID for session admin (optional)',
+      }),
+    );
+    expect(text).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        message: 'Telegram approver user IDs for permissions (required)',
+        defaultValue: '',
+      }),
+    );
   });
 
   it('seeds CLAUDE.md and SOUL.md when registering the main group', async () => {

@@ -11,8 +11,9 @@ Use this exact operating pattern:
    - `performance-reviewer`
    - `security-reviewer`
 2. Give each agent the same review scope: current branch diff plus any files or directories called out by the self-check.
-3. Wait for all three results.
-4. For each result, ensure it contains:
+3. In every reviewer prompt, require holistic architecture review beyond the literal user request: provider boundaries, configuration ownership, onboarding, security, tests, docs, and operational impacts. Reviewers must call out omitted implications that make the implementation architecturally incomplete.
+4. Wait for all three results.
+5. For each result, ensure it contains:
    - `score`
    - `summary`
    - `blocking_findings`
@@ -20,7 +21,7 @@ Use this exact operating pattern:
    - `residual_risks`
    - `recommendation`
    - `reviewed_scope`
-5. Record each result with:
+6. Record each result with:
 
 ```bash
 python3 .codex/scripts/record_review_from_json.py --aspect <quality|performance|security> --input <json-file>
@@ -38,4 +39,5 @@ Example parent prompt:
 
 ```text
 Review this branch against main. Spawn `quality-reviewer`, `performance-reviewer`, and `security-reviewer` in parallel. Keep all three read-only. Have each reviewer inspect the diff plus the files named in the self-check. Wait for all results. Then normalize each result into the required JSON contract and record the artifacts with `.codex/scripts/record_review_from_json.py`. Finally, summarize blockers, residual risks, and overall merge recommendation.
+Each reviewer must also check whether the implementation is holistically and architecturally correct beyond the literal user request, including provider boundaries, configuration ownership, onboarding, security, tests, docs, and operational impacts.
 ```

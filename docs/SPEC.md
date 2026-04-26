@@ -286,6 +286,7 @@ Configuration constants are in `apps/core/src/config/index.ts`:
 ```typescript
 import path from 'path';
 import { getMyclawHome } from './myclaw-home.js';
+import { runtimeEnvValue } from './env/index.js';
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
 export const POLL_INTERVAL = 2000;
@@ -295,8 +296,8 @@ const MYCLAW_HOME = getMyclawHome(process.env.MYCLAW_HOME);
 export const AGENTS_DIR = path.resolve(MYCLAW_HOME, 'agents');
 export const DATA_DIR = path.resolve(MYCLAW_HOME, 'data');
 
-// Durable runtime state is stored in Postgres, configured by settings.yaml.
-export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL;
+// Durable runtime state and model defaults prefer runtime .env over ambient env.
+export const ANTHROPIC_MODEL = runtimeEnvValue('ANTHROPIC_MODEL');
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep runtime worker alive after last result
 
@@ -341,17 +342,26 @@ Use `/model` in a group session to switch the live model (`/model`, `/model <ali
 
 ### Claude Authentication
 
-MyClaw uses OneCLI as the broker for agent and memory LLM credentials. Runtime
-`.env` stores `ONECLI_URL`, `ONECLI_DATABASE_URL`, a generated base64-encoded 32-byte
-`SECRET_ENCRYPTION_KEY`, and model selection, not raw Claude credentials.
-MyClaw and OneCLI can share one Postgres database with separate schemas and
-roles: `myclaw`, `onecli`, and `pgboss`. OneCLI owns its schema and migrations;
-MyClaw only provisions and verifies the schema boundary. `MYCLAW_DATABASE_URL`
-and `ONECLI_DATABASE_URL` must use different Postgres users. The runner receives
-broker-safe model endpoint settings from OneCLI; raw provider tokens, database
-URLs, broker-provided proxy variables, and broker-provided CA certificate
-variables are not forwarded to tools, the child runner, or the Agent SDK
-environment.
+MyClaw uses an agent credential broker boundary for agent and memory LLM
+credentials. `MYCLAW_CREDENTIAL_MODE` supports `onecli`, `external`, and `none`.
+OneCLI is the default local/personal broker adapter, but enterprise deployments
+can replace it with an external broker without changing the runtime agent-spawn
+path. Runtime-owned secrets such as `MYCLAW_DATABASE_URL`, channel tokens,
+webhook/control secrets, and OneCLI persistence secrets are read through runtime
+secret configuration, not requested from the agent credential broker.
+
+In `onecli` mode, runtime `.env` stores `ONECLI_URL`, `ONECLI_DATABASE_URL`, a
+generated base64-encoded 32-byte `SECRET_ENCRYPTION_KEY`, and model selection,
+not raw Claude credentials. MyClaw and OneCLI can share one Postgres database
+with separate schemas and roles: `myclaw`, `onecli`, and `pgboss`. OneCLI owns
+its schema and migrations; MyClaw only provisions and verifies the schema
+boundary. `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL` must use different
+Postgres users.
+
+The runner receives only broker-safe model endpoint settings from the selected
+broker. Raw provider tokens and runtime-owned database URLs are not forwarded to
+tools, the child runner, or the Agent SDK environment. Broker-provided proxy and
+CA certificate references are allowed only after adapter policy filtering.
 
 ### Changing the Assistant Name
 

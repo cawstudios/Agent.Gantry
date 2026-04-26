@@ -27,7 +27,7 @@ function makeApp(): RuntimeApp {
     setGroupThinkingOverride: vi.fn(),
     getAvailableGroups: vi.fn(() => []),
     setRegisteredGroupsForTest: vi.fn(),
-    ensureOneCLIAgentsForRegisteredGroups: vi.fn(),
+    ensureCredentialBindingsForRegisteredGroups: vi.fn(),
     clearSessionForChatJid: vi.fn(),
     processGroupMessages: vi.fn(async () => true),
     getRegisteredGroups: vi.fn(() => ({

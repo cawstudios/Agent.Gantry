@@ -39,6 +39,7 @@ Important constraints:
 - Do not reintroduce legacy branding in active docs or instructions.
 - Avoid fork/upstream framing in active guidance. Prefer neutral repo, branch, or shared-remote wording.
 - Prefer local repo docs over speculative external docs links unless the external target is verified current.
+- Always add or update the documentation as we develop or changes features as it helps developers to understand
 - When docs policy changes, update this file in the same PR.
 
 ## Development Policy
@@ -47,6 +48,7 @@ Important constraints:
 - Prefer clean cutovers over dual-path behavior (no fallback branches, shim flags, or backward-compat code by default).
 - Remove obsolete code paths in the same change when introducing a breaking replacement.
 - Do not add test-only or local-checkout branches to production code. Keep shipped behavior deterministic for the supported install/runtime path; handle local testing differences manually in local runtime files or inside test harnesses.
+- For every change or feature implementation, own the holistic architecture, not only the literal user request. If the request omits provider boundaries, configuration ownership, onboarding, security, testing, docs, or operational impacts, identify those implications, explain the needed corrections to the user, and implement the coherent architecture rather than waiting for every detail to be enumerated.
 - Every implementation task must end with a subagent review pass before marking the work complete.
 
 ## Hard Gates

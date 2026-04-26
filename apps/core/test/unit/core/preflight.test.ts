@@ -220,6 +220,120 @@ describe('runtime preflight', () => {
     expect(inspectOnecliPersistenceReadiness).not.toHaveBeenCalled();
   });
 
+  it('ignores stale invalid OneCLI vars outside onecli credential mode', async () => {
+    const runtimeHome = makeRuntimeHome();
+    fs.writeFileSync(
+      path.join(runtimeHome, '.env'),
+      [
+        'MYCLAW_CREDENTIAL_MODE=external',
+        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        'ANTHROPIC_BASE_URL=https://broker.example.com/anthropic',
+        'ONECLI_URL=http://127.attacker.com:10254',
+        'ONECLI_DATABASE_URL=not-a-postgres-url',
+        'SECRET_ENCRYPTION_KEY=short',
+        '',
+      ].join('\n'),
+    );
+    vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
+      inspectRuntimeStorageReadiness: vi.fn(async () => ({
+        status: 'pass',
+        message: 'Postgres is ready.',
+      })),
+    }));
+
+    const { validateRuntimePreflightWithStorage } =
+      await import('@core/config/preflight.js');
+    const result = await validateRuntimePreflightWithStorage(runtimeHome);
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('fails external credential mode preflight when broker endpoint is missing', async () => {
+    const runtimeHome = makeRuntimeHome();
+    fs.writeFileSync(
+      path.join(runtimeHome, '.env'),
+      [
+        'MYCLAW_CREDENTIAL_MODE=external',
+        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        '',
+      ].join('\n'),
+    );
+    vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
+      inspectRuntimeStorageReadiness: vi.fn(async () => ({
+        status: 'pass',
+        message: 'Postgres is ready.',
+      })),
+    }));
+
+    const { validateRuntimePreflightWithStorage } =
+      await import('@core/config/preflight.js');
+    const result = await validateRuntimePreflightWithStorage(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.summary).toContain('ANTHROPIC_BASE_URL');
+  });
+
+  it('fails external credential mode preflight when broker endpoint is unsafe', async () => {
+    const runtimeHome = makeRuntimeHome();
+    fs.writeFileSync(
+      path.join(runtimeHome, '.env'),
+      [
+        'MYCLAW_CREDENTIAL_MODE=external',
+        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        'ANTHROPIC_BASE_URL=https://user:pass@broker.example.com',
+        '',
+      ].join('\n'),
+    );
+    vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
+      inspectRuntimeStorageReadiness: vi.fn(async () => ({
+        status: 'pass',
+        message: 'Postgres is ready.',
+      })),
+    }));
+
+    const { validateRuntimePreflightWithStorage } =
+      await import('@core/config/preflight.js');
+    const result = await validateRuntimePreflightWithStorage(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.summary).toContain('embedded credentials');
+  });
+
+  it('allows enabled channels to read credentials from process env', async () => {
+    const runtimeHome = makeRuntimeHome();
+    fs.writeFileSync(
+      path.join(runtimeHome, '.env'),
+      [
+        'MYCLAW_CREDENTIAL_MODE=none',
+        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        '',
+      ].join('\n'),
+    );
+    const settingsPath = path.join(runtimeHome, 'settings.yaml');
+    fs.writeFileSync(
+      settingsPath,
+      fs
+        .readFileSync(settingsPath, 'utf-8')
+        .replace(
+          '  telegram:\n    enabled: false',
+          '  telegram:\n    enabled: true',
+        ),
+    );
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'process-token');
+    vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
+      inspectRuntimeStorageReadiness: vi.fn(async () => ({
+        status: 'pass',
+        message: 'Postgres is ready.',
+      })),
+    }));
+
+    const { validateRuntimePreflightWithStorage } =
+      await import('@core/config/preflight.js');
+    const result = await validateRuntimePreflightWithStorage(runtimeHome);
+
+    expect(result).toEqual({ ok: true });
+  });
+
   it('uses runtime-home credential mode before ambient process env', async () => {
     const runtimeHome = makeRuntimeHome();
     fs.appendFileSync(

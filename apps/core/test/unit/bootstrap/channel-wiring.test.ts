@@ -75,7 +75,7 @@ function makeApp(registeredGroups: Record<string, any> = {}): RuntimeApp {
     setGroupThinkingOverride: vi.fn(),
     getAvailableGroups: vi.fn(() => []),
     setRegisteredGroupsForTest: vi.fn(),
-    ensureOneCLIAgentsForRegisteredGroups: vi.fn(),
+    ensureCredentialBindingsForRegisteredGroups: vi.fn(),
     processGroupMessages: vi.fn(),
     getRegisteredGroups: vi.fn(() => registeredGroups),
     getLastTimestamp: vi.fn(() => ''),

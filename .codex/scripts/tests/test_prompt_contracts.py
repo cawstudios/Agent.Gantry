@@ -64,6 +64,22 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn('"functional-checker"', playbook)
         self.assertIn("python3 .codex/scripts/validate_work.py", playbook)
 
+    def test_reviewer_prompts_require_holistic_architecture_review(self) -> None:
+        for relative_path in [
+            "prompts/review-orchestrator.md",
+            "prompts/reviewer-quality.md",
+            "prompts/reviewer-security.md",
+            "prompts/reviewer-performance.md",
+            "agents/quality-reviewer.toml",
+            "agents/security-reviewer.toml",
+            "agents/performance-reviewer.toml",
+        ]:
+            prompt = read_text(relative_path)
+            self.assertIn("holistic architecture", prompt, relative_path)
+            self.assertIn("literal user request", prompt, relative_path)
+            self.assertIn("provider boundaries", prompt, relative_path)
+            self.assertIn("configuration ownership", prompt, relative_path)
+
     def test_pr_ready_prompt_allows_new_scope_handoff(self) -> None:
         prompt = read_text("prompts/pr-ready.md")
         self.assertIn("do not block on the current PR-ready loop", prompt)
