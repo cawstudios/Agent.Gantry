@@ -57,9 +57,8 @@ Important constraints:
 - MyClaw is early-stage: prefer deleting legacy code over compatibility shims because no users are live yet.
 - Do not add migration compatibility commands, auto-migration flows, cleanup shims, or runtime branches that exist only to support old local state.
 - Remove obsolete code paths in the same change when introducing a breaking replacement.
-- Treat cleanup as part of the implementation, not a follow-up. A replacement is not done until obsolete active repositories, schemas, runtime paths, tests, docs, exports, and factory wiring are deleted or deliberately retained with an owner, reason, and removal condition.
+- Treat cleanup as part of replacement work: remove obsolete active repositories, schemas, runtime paths, tests, docs, exports, and factory wiring in the same PR, or deliberately retain them with an owner, reason, and removal condition.
 - Before resolving PR review threads or marking cutover work complete, search for old type names, table names, imports, and runtime entrypoints affected by the change. Document any remaining matches and prove they are inactive, historical docs, or intentionally retained exceptions.
-- Do not leave stale code because the new path compiles. If an old path can still be imported, constructed, migrated, or called by supported runtime flows, either remove it in the same PR or explicitly block completion.
 - Do not add test-only or local-checkout branches to production code.
 - Classify every new config value before implementation: non-secret configuration belongs in `settings.yaml`, runtime-owned secrets belong behind `RuntimeSecretProvider`, and agent-accessed credentials belong behind `AgentCredentialBroker`.
 - Wrong-lane credential/config values must fail loudly. Raw model/provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `CLAUDE_CODE_OAUTH_TOKEN` must never be accepted from MyClaw `.env` or process env.
