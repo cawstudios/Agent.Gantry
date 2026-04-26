@@ -2,10 +2,11 @@
 
 ## What This Repo Is
 
-MyClaw is a single-process Node.js personal assistant runtime with skill-based channels.
-Messages are ingested from channels, persisted in the configured runtime store, then routed to Codex agents through the host runtime.
+MyClaw is becoming a provider-neutral and channel-neutral agent runtime platform.
+Personal Telegram/WhatsApp usage is one deployment mode; enterprise Slack, Teams, and WebUI integration is another deployment mode.
+The architecture must treat channels, LLM providers, storage, CLI, and control HTTP as replaceable adapters around stable application and domain concepts.
 
-Primary surfaces:
+Primary surfaces today:
 
 - `apps/core/src/index.ts`: package/runtime entrypoint
 - `apps/core/src/app/bootstrap/runtime-app.ts`: runtime wiring and lifecycle
@@ -20,18 +21,45 @@ Primary surfaces:
 2. [WORKFLOW.md](WORKFLOW.md)
 3. [docs/FACTORY.md](docs/FACTORY.md)
 4. [docs/QUALITY.md](docs/QUALITY.md)
+5. [docs/architecture/codebase-refactor-principles.md](docs/architecture/codebase-refactor-principles.md)
+6. [docs/architecture/current-verification-commands.md](docs/architecture/current-verification-commands.md)
 
 Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands and required artifacts.
 
 ## Runtime Modes
 
-- Host runtime is the only supported mode in this repo today.
+- Host runtime is the only supported runtime mode in this repo today.
+- The repo must work with plain Codex and with ACP/ACPX integrations; do not assume ACP is always present.
 
 Important constraints:
 
-- `/new` clears persisted session state but preserves the group model override
-- transcript archive during `/new` is best-effort and must not block reset success
-- durable memory lives under the configured memory root; do not load `~/myclaw/agents/<folder>/memory/`
+- `/new` clears persisted session state but preserves the group model override.
+- Transcript archive during `/new` is best-effort and must not block reset success.
+- Durable memory lives under the configured memory root; do not load `~/myclaw/agents/<folder>/memory/`.
+
+## Architecture Rules
+
+- Normalize channel-specific behavior into canonical app, agent, conversation, thread, message, and session concepts.
+- Do not add more provider-specific behavior to core runtime.
+- Hide LLM and model-provider behavior behind provider ports.
+- Route all risky tool execution through deterministic permission evaluation and sandbox policy.
+- Domain must not import adapters, runtime, CLI, HTTP, Postgres, Slack, Telegram, Teams, WhatsApp, Claude, Anthropic SDK, OpenAI, Gemini, or provider-specific packages.
+- Application may depend on domain and ports, not provider implementations.
+- Adapters implement ports and may depend on external systems.
+- CLI and control HTTP are adapters.
+
+## Coding Rules
+
+- Avoid wrapper-only files and broad `common`, `misc`, or `utils` buckets.
+- Keep shared utilities narrowly scoped to an owned layer or adapter, such as infrastructure logging or error boundaries.
+- Prefer small files with clear responsibility.
+- Add tests for new behavior.
+- MyClaw is early-stage: prefer deleting legacy code over compatibility shims because no users are live yet.
+- Do not add migration compatibility commands, auto-migration flows, cleanup shims, or runtime branches that exist only to support old local state.
+- Remove obsolete code paths in the same change when introducing a breaking replacement.
+- Do not add test-only or local-checkout branches to production code.
+- Classify every new config value before implementation: non-secret configuration belongs in `settings.yaml`, runtime-owned secrets belong behind `RuntimeSecretProvider`, and agent-accessed credentials belong behind `AgentCredentialBroker`.
+- Wrong-lane credential/config values must fail loudly. Raw model/provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `CLAUDE_CODE_OAUTH_TOKEN` must never be accepted from MyClaw `.env` or process env.
 
 ## Docs Rules
 
@@ -39,20 +67,23 @@ Important constraints:
 - Do not reintroduce legacy branding in active docs or instructions.
 - Avoid fork/upstream framing in active guidance. Prefer neutral repo, branch, or shared-remote wording.
 - Prefer local repo docs over speculative external docs links unless the external target is verified current.
-- Always add or update the documentation as we develop or changes features as it helps developers to understand
+- For every major architectural change, update `docs/architecture/` or `docs/decisions/`.
 - When docs policy changes, update this file in the same PR.
 
-## Development Policy
+## Verification Rules
 
-- MyClaw is early-stage: do not add legacy compatibility layers for breaking changes unless explicitly requested by the user.
-- Prefer clean cutovers over dual-path behavior (no fallback branches, shim flags, or backward-compat code by default).
-- Do not add migration compatibility commands, auto-migration flows, cleanup shims, or runtime branches that exist only to support old local state. If a breaking change requires moving local data or config, document the one-time manual cleanup steps and keep the shipped runtime on the new single path.
-- Remove obsolete code paths in the same change when introducing a breaking replacement.
-- Do not add test-only or local-checkout branches to production code. Keep shipped behavior deterministic for the supported install/runtime path; handle local testing differences manually in local runtime files or inside test harnesses.
-- For every change or feature implementation, own the holistic architecture, not only the literal user request. If the request omits provider boundaries, configuration ownership, onboarding, security, testing, docs, or operational impacts, identify those implications, explain the needed corrections to the user, and implement the coherent architecture rather than waiting for every detail to be enumerated.
-- Classify every new config value before implementation: non-secret configuration belongs in `settings.yaml`, runtime-owned secrets belong behind `RuntimeSecretProvider`, and agent-accessed credentials belong behind `AgentCredentialBroker`. Do not add new `.env` or process-env config keys unless they are runtime-owned secrets.
-- Wrong-lane credential/config values must fail loudly. Raw model/provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `CLAUDE_CODE_OAUTH_TOKEN` must never be accepted from MyClaw `.env` or process env; move them to the selected credential broker.
-- Every implementation task must end with a subagent review pass before marking the work complete.
+- Discover and document exact verification commands before changing implementation behavior.
+- Run the smallest relevant checks after each change.
+- Run full checks at the end of a phase.
+- Use [docs/architecture/current-verification-commands.md](docs/architecture/current-verification-commands.md) as the command reference.
+
+## Safety Rules
+
+- Do not read production secrets.
+- Do not run destructive filesystem or database commands.
+- Do not modify files outside this repository.
+- Do not track generated artifacts from local runs or hooks, including `__pycache__`, `*.pyc`, coverage output, validation reports, active `.factory/` run artifacts, or package tarballs.
+- Background maintenance timers must be stoppable so tests and CI can exit cleanly.
 
 ## Hard Gates
 
@@ -66,16 +97,5 @@ Before merge or release:
 If running full factory mode:
 
 1. `python3 .codex/scripts/validate_work.py`
-2. required artifacts must exist for decomposition, testing, and review
-3. `python3 .codex/scripts/pr_ready.py` must pass
-
-## Repo Hygiene
-
-- Do not track generated artifacts from local runs or hooks, including `__pycache__`, `*.pyc`, coverage output, and validation reports.
-- Do not commit active `.factory/` run artifacts or package tarballs; keep the repo snapshot free of local verification output.
-- Background maintenance timers must be stoppable so tests and CI can exit cleanly.
-- Keep docs concise, non-duplicative, and aligned with the current product behavior.
-- When changing the npm publish surface, update `package.json` publish entries and verify `npm pack --dry-run` does not ship internal scaffolding.
-- We need single cut feature with no support for legacy or backward compatibility, no runtime behavior to handle deleting legacy files, and no migration commands for old local state. Keep it clean; any one-time migration is manual and documented.
-- Always follow provider pattern for any external sources.
-- Always follow single responsibility principle applied.
+2. Required artifacts must exist for decomposition, testing, and review.
+3. `python3 .codex/scripts/pr_ready.py` must pass.
