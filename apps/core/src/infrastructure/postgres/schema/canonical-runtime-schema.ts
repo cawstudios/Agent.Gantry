@@ -6,8 +6,9 @@ import {
   pgTable,
   text,
   timestamp,
-  unique,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 import {
   agentRunsPostgres,
@@ -142,11 +143,9 @@ export const canonicalMemoryItemsPostgres = pgTable(
     }).notNull(),
   },
   (table) => ({
-    subjectKey: unique('memory_items_subject_id_kind_key_unique').on(
-      table.subjectId,
-      table.kind,
-      table.key,
-    ),
+    activeSubjectKey: uniqueIndex('memory_items_active_unique')
+      .on(table.subjectId, table.kind, table.key)
+      .where(sql`${table.status} = 'active'`),
     subjectUpdatedIdx: index('idx_memory_items_subject_updated').on(
       table.subjectId,
       table.status,

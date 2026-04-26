@@ -126,4 +126,54 @@ describe('canonical domain cutover', () => {
     expect(messageRepository).not.toContain('SELECT m.*, p.payload_json');
     expect(messageRepository).not.toContain("AND p.kind = 'text'");
   });
+
+  it('keeps memory saves safe after soft delete and concurrent first write', () => {
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/infrastructure/postgres/schema/migrations/0008_canonical_domain_schema_cutover.sql',
+      ),
+      'utf8',
+    );
+    const runtimeSchema = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/infrastructure/postgres/schema/canonical-runtime-schema.ts',
+      ),
+      'utf8',
+    );
+    const memoryService = fs.readFileSync(
+      path.resolve('apps/core/src/memory/app-memory-service.ts'),
+      'utf8',
+    );
+
+    expect(migration).not.toContain(
+      'CONSTRAINT memory_items_subject_id_kind_key_unique',
+    );
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS memory_items_active_unique',
+    );
+    expect(migration).toContain("WHERE status = 'active'");
+    expect(runtimeSchema).toContain(
+      "uniqueIndex('memory_items_active_unique')",
+    );
+    expect(runtimeSchema).toContain(".where(sql`${table.status} = 'active'`)");
+    expect(memoryService).toContain('.onConflictDoUpdate({');
+    expect(memoryService).toContain('targetWhere: sql`');
+    expect(memoryService).toContain("= 'active'");
+    expect(memoryService).toContain(
+      "if (!row) throw new Error('stale memory patch')",
+    );
+  });
+
+  it('escapes canonical session thread deletion LIKE patterns', () => {
+    const sessionRepository = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/infrastructure/postgres/repositories/canonical-session-repository.postgres.ts',
+      ),
+      'utf8',
+    );
+
+    expect(sessionRepository).toContain('function escapeLikePattern');
+    expect(sessionRepository).toContain("ESCAPE '\\\\'");
+    expect(sessionRepository).not.toContain('${groupFolder}::thread:%');
+  });
 });

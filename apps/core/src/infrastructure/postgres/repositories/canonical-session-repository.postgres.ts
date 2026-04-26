@@ -1,4 +1,4 @@
-import { and, eq, like, or, sql } from 'drizzle-orm';
+import { and, eq, or, sql } from 'drizzle-orm';
 
 import * as pgSchema from '../schema/schema.js';
 import {
@@ -7,6 +7,10 @@ import {
   json,
   PostgresCanonicalGraphRepository,
 } from './canonical-graph-repository.postgres.js';
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
 
 export class PostgresCanonicalSessionRepository {
   private readonly graph: PostgresCanonicalGraphRepository;
@@ -81,10 +85,7 @@ export class PostgresCanonicalSessionRepository {
       .where(
         or(
           eq(pgSchema.agentSessionsPostgres.userId, groupFolder),
-          like(
-            pgSchema.agentSessionsPostgres.userId,
-            `${groupFolder}::thread:%`,
-          ),
+          sql`${pgSchema.agentSessionsPostgres.userId} LIKE ${`${escapeLikePattern(groupFolder)}::thread:%`} ESCAPE '\\'`,
         ),
       );
   }

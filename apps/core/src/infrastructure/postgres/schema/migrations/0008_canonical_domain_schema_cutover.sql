@@ -292,9 +292,12 @@ CREATE TABLE IF NOT EXISTS memory_items (
   status text NOT NULL DEFAULT 'active',
   last_observed_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT memory_items_subject_id_kind_key_unique UNIQUE (subject_id, kind, key)
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS memory_items_active_unique
+  ON memory_items(subject_id, kind, key)
+  WHERE status = 'active';
 
 CREATE INDEX IF NOT EXISTS idx_memory_items_subject_updated
   ON memory_items(subject_id, status, updated_at);

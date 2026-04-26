@@ -251,23 +251,24 @@ export class AppMemoryService {
       lastObservedAt: now,
       updatedAt: now,
     };
-    if (existing) {
-      const [updated] = await this.db
-        .update(pgSchema.memoryItemsPostgres)
-        .set(base)
-        .where(eq(pgSchema.memoryItemsPostgres.id, existing.id))
-        .returning();
-      return toAppItem(updated!);
-    }
-    const [created] = await this.db
+    const [row] = await this.db
       .insert(pgSchema.memoryItemsPostgres)
       .values({
         id: `mem_${randomUUID().replace(/-/g, '')}`,
         ...base,
         createdAt: now,
       })
+      .onConflictDoUpdate({
+        target: [
+          pgSchema.memoryItemsPostgres.subjectId,
+          pgSchema.memoryItemsPostgres.kind,
+          pgSchema.memoryItemsPostgres.key,
+        ],
+        targetWhere: sql`${pgSchema.memoryItemsPostgres.status} = 'active'`,
+        set: base,
+      })
       .returning();
-    return toAppItem(created!);
+    return toAppItem(row!);
   }
 
   async list(input: AppMemorySearchInput = {}): Promise<AppMemoryItem[]> {
@@ -338,8 +339,16 @@ export class AppMemoryService {
         }),
         updatedAt: nowIso(),
       })
-      .where(eq(pgSchema.memoryItemsPostgres.id, current.id))
+      .where(
+        and(
+          eq(pgSchema.memoryItemsPostgres.id, current.id),
+          input.expectedVersion === undefined
+            ? undefined
+            : sql`(${pgSchema.memoryItemsPostgres.sourceRefJson}::jsonb->>'version')::int = ${input.expectedVersion}`,
+        ),
+      )
       .returning();
+    if (!row) throw new Error('stale memory patch');
     return toAppItem(row!);
   }
 
@@ -574,24 +583,22 @@ export class AppMemoryService {
     );
     await Promise.all(
       results.map(async (result) => {
-        const current = await this.db
-          .select()
-          .from(pgSchema.memoryItemsPostgres)
-          .where(eq(pgSchema.memoryItemsPostgres.id, result.item.id))
-          .limit(1);
-        const row = current[0];
-        if (!row) return;
-        const source = parseItemSource(row);
         await this.db
           .update(pgSchema.memoryItemsPostgres)
           .set({
-            sourceRefJson: encodeItemSource({
-              ...source,
-              retrievalCount: source.retrievalCount + 1,
-              totalScore: source.totalScore + result.score,
-              maxScore: Math.max(source.maxScore, result.score),
-            }),
-            updatedAt: row.updatedAt,
+            sourceRefJson: sql<string>`jsonb_set(
+              jsonb_set(
+                jsonb_set(
+                  ${pgSchema.memoryItemsPostgres.sourceRefJson}::jsonb,
+                  '{retrievalCount}',
+                  to_jsonb(COALESCE((${pgSchema.memoryItemsPostgres.sourceRefJson}::jsonb->>'retrievalCount')::int, 0) + 1)
+                ),
+                '{totalScore}',
+                to_jsonb(COALESCE((${pgSchema.memoryItemsPostgres.sourceRefJson}::jsonb->>'totalScore')::double precision, 0) + ${result.score})
+              ),
+              '{maxScore}',
+              to_jsonb(GREATEST(COALESCE((${pgSchema.memoryItemsPostgres.sourceRefJson}::jsonb->>'maxScore')::double precision, 0), ${result.score}))
+            )::text`,
           })
           .where(eq(pgSchema.memoryItemsPostgres.id, result.item.id));
       }),
