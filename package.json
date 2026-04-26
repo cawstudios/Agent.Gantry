@@ -57,6 +57,7 @@
     "format": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/sdk/src/**/*.ts\"",
     "format:fix": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/sdk/src/**/*.ts\"",
     "format:check": "prettier --check \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/sdk/src/**/*.ts\"",
+    "check:architecture": "python3 .codex/scripts/check_architecture.py",
     "prepare": "HUSKY=1 husky || true",
     "prepublishOnly": "npm run build",
     "lint": "eslint apps/core/src packages/contracts/src packages/sdk/src",

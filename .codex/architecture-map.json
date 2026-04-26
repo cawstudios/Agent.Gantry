@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "defaultLineBudget": 700,
+  "lineBudgets": {
+    "apps/core/src/infrastructure/postgres/schema/schema.ts": 900
+  },
+  "layers": {
+    "domain": {
+      "paths": ["apps/core/src/domain"],
+      "allowedImportLayers": ["domain", "shared", "packages/contracts"],
+      "allowedExternalImports": []
+    },
+    "application": {
+      "paths": ["apps/core/src/application"],
+      "allowedImportLayers": ["domain", "application", "shared", "packages/contracts"],
+      "allowedExternalImports": []
+    },
+    "runtime": {
+      "paths": [
+        "apps/core/src/app",
+        "apps/core/src/index.ts",
+        "apps/core/src/jobs",
+        "apps/core/src/memory",
+        "apps/core/src/messaging",
+        "apps/core/src/models",
+        "apps/core/src/platform",
+        "apps/core/src/runtime",
+        "apps/core/src/session"
+      ],
+      "allowedImportLayers": ["domain", "application", "runtime", "shared", "packages/contracts"],
+      "allowedExternalImports": ["node:", "crypto", "fs", "path", "url", "net", "cron-parser", "dayjs"]
+    },
+    "adapters": {
+      "paths": [
+        "apps/core/src/adapters",
+        "apps/core/src/channels",
+        "apps/core/src/cli",
+        "apps/core/src/control",
+        "apps/core/src/infrastructure",
+        "apps/core/src/runner"
+      ],
+      "allowedImportLayers": ["domain", "application", "adapters", "shared", "packages/contracts"],
+      "allowedExternalImports": ["*"]
+    },
+    "config": {
+      "paths": ["apps/core/src/config"],
+      "allowedImportLayers": ["config", "domain", "shared", "packages/contracts"],
+      "allowedExternalImports": ["node:", "fs", "path", "url", "net", "os", "zod"]
+    },
+    "shared": {
+      "paths": ["apps/core/src/shared"],
+      "allowedImportLayers": ["shared", "packages/contracts"],
+      "allowedExternalImports": ["node:", "crypto", "fs", "path", "url", "os"]
+    },
+    "packages/contracts": {
+      "paths": ["packages/contracts/src"],
+      "allowedImportLayers": ["packages/contracts"],
+      "allowedExternalImports": []
+    },
+    "packages/sdk": {
+      "paths": ["packages/sdk/src"],
+      "allowedImportLayers": ["packages/contracts", "packages/sdk"],
+      "allowedExternalImports": ["node:", "http", "https", "url", "crypto"]
+    }
+  },
+  "approvedProviderSpecificPaths": [
+    "apps/core/src/adapters/llm",
+    "apps/core/src/adapters/channels",
+    "apps/core/src/adapters/sandbox",
+    "apps/core/src/adapters/browser",
+    "apps/core/src/channels",
+    "apps/core/src/cli",
+    "apps/core/src/config",
+    "apps/core/src/runner/claude",
+    "apps/core/src/runner/mcp",
+    "apps/core/src/memory/claude-query.ts",
+    "apps/core/src/models/claude-model-registry.ts"
+  ],
+  "providerImportSpecifiers": [
+    "@anthropic-ai/sdk",
+    "@anthropic-ai/claude-agent-sdk",
+    "openai",
+    "@google/generative-ai",
+    "@google/genai",
+    "@slack/bolt",
+    "grammy",
+    "@grammyjs/",
+    "playwright",
+    "dockerode"
+  ],
+  "providerSpecificPatterns": {
+    "anthropic": "\\b(?:Anthropic|anthropic|Claude|claude|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)\\b",
+    "openai": "\\b(?:OpenAI|openai|OPENAI_API_KEY)\\b",
+    "gemini": "\\b(?:Gemini|gemini|GOOGLE_GENERATIVE_AI|GOOGLE_API_KEY)\\b",
+    "slack": "\\b(?:Slack|slack|SLACK_[A-Z_]+)\\b",
+    "telegram": "\\b(?:Telegram|telegram|TELEGRAM_[A-Z_]+)\\b",
+    "teams": "\\b(?:Teams|teams|Microsoft Teams)\\b",
+    "whatsapp": "\\b(?:WhatsApp|whatsapp)\\b",
+    "playwright": "\\b(?:Playwright|playwright)\\b",
+    "docker": "\\b(?:Docker|docker|docker-compose)\\b"
+  },
+  "riskyExecutionApprovedPaths": ["apps/core/src/adapters/sandbox"],
+  "browserDefaultProfilePathPatterns": [
+    "Google Chrome default profile",
+    "~[/\\\\]\\.config[/\\\\]google-chrome",
+    "~[/\\\\]Library[/\\\\]Application Support[/\\\\]Google[/\\\\]Chrome",
+    "%LOCALAPPDATA%[/\\\\]Google[/\\\\]Chrome"
+  ],
+  "oldTermPatterns": {
+    "groupFolder": "\\bgroupFolder\\b",
+    "mainGroup": "\\bmainGroup\\b",
+    "registeredGroup": "\\bregisteredGroups?\\b",
+    "claude_only": "\\b(?:claude-only|Claude-only|claude only|Claude only|only Claude|only supports Claude)\\b"
+  },
+  "emptyFolderScanRoots": ["apps/core/src", "packages"]
+}

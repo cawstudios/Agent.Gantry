@@ -31,9 +31,128 @@ def write_lines(path: Path, count: int) -> None:
 def make_base_fixture(root: Path) -> Path:
     write_text(root / "README.md", "# Fixture\n")
     write_lines(root / "apps/core/src/domain/ok.ts", 10)
+    for rel_dir in (
+        "apps/core/src/adapters",
+        "apps/core/src/channels",
+        "apps/core/src/cli",
+        "apps/core/src/control",
+        "apps/core/src/infrastructure",
+        "apps/core/src/runner",
+        "apps/core/src/application",
+        "apps/core/src/config",
+        "apps/core/src/runtime",
+        "apps/core/src/shared",
+        "packages/contracts/src",
+        "packages/sdk/src",
+    ):
+        write_text(root / rel_dir / "README.md", "Fixture purpose.\n")
+    write_json(root / ".codex/architecture-exceptions.json", [])
     write_json(
-        root / ".codex/architecture-exceptions.json",
-        {"version": 1, "exceptions": []},
+        root / ".codex/architecture-map.json",
+        {
+            "version": 1,
+            "layers": {
+                "domain": {
+                    "paths": ["apps/core/src/domain"],
+                    "allowedImportLayers": ["domain", "shared", "packages/contracts"],
+                    "allowedExternalImports": [],
+                },
+                "application": {
+                    "paths": ["apps/core/src/application"],
+                    "allowedImportLayers": [
+                        "domain",
+                        "application",
+                        "shared",
+                        "packages/contracts",
+                    ],
+                    "allowedExternalImports": [],
+                },
+                "runtime": {
+                    "paths": ["apps/core/src/runtime"],
+                    "allowedImportLayers": [
+                        "domain",
+                        "application",
+                        "runtime",
+                        "shared",
+                        "packages/contracts",
+                    ],
+                    "allowedExternalImports": ["node:", "crypto"],
+                },
+                "adapters": {
+                    "paths": [
+                        "apps/core/src/adapters",
+                        "apps/core/src/channels",
+                        "apps/core/src/cli",
+                        "apps/core/src/control",
+                        "apps/core/src/infrastructure",
+                        "apps/core/src/runner",
+                    ],
+                    "allowedImportLayers": [
+                        "domain",
+                        "application",
+                        "adapters",
+                        "shared",
+                        "packages/contracts",
+                    ],
+                    "allowedExternalImports": ["*"],
+                },
+                "config": {
+                    "paths": ["apps/core/src/config"],
+                    "allowedImportLayers": ["config", "domain", "shared", "packages/contracts"],
+                    "allowedExternalImports": ["node:"],
+                },
+                "shared": {
+                    "paths": ["apps/core/src/shared"],
+                    "allowedImportLayers": ["shared", "packages/contracts"],
+                    "allowedExternalImports": ["node:"],
+                },
+                "packages/contracts": {
+                    "paths": ["packages/contracts/src"],
+                    "allowedImportLayers": ["packages/contracts"],
+                    "allowedExternalImports": [],
+                },
+                "packages/sdk": {
+                    "paths": ["packages/sdk/src"],
+                    "allowedImportLayers": ["packages/contracts", "packages/sdk"],
+                    "allowedExternalImports": ["node:"],
+                },
+            },
+            "approvedProviderSpecificPaths": [
+                "apps/core/src/adapters/llm",
+                "apps/core/src/adapters/channels",
+                "apps/core/src/adapters/sandbox",
+                "apps/core/src/adapters/browser",
+                "apps/core/src/channels",
+                "apps/core/src/runner/claude",
+            ],
+            "providerImportSpecifiers": [
+                "@anthropic-ai/sdk",
+                "@anthropic-ai/claude-agent-sdk",
+                "openai",
+                "@google/generative-ai",
+                "@google/genai",
+                "@slack/bolt",
+                "grammy",
+                "@grammyjs/",
+                "playwright",
+                "dockerode",
+            ],
+            "providerSpecificPatterns": {
+                "anthropic": "\\b(?:Anthropic|anthropic|Claude|claude)\\b",
+                "slack": "\\b(?:Slack|slack)\\b",
+            },
+            "riskyExecutionApprovedPaths": ["apps/core/src/adapters/sandbox"],
+            "browserDefaultProfilePathPatterns": [
+                "Google Chrome default profile",
+                "~[/\\\\]\\.config[/\\\\]google-chrome",
+            ],
+            "oldTermPatterns": {
+                "groupFolder": "\\bgroupFolder\\b",
+                "registeredGroup": "\\bregisteredGroups?\\b",
+                "claude_only": "\\b(?:claude-only|Claude-only|claude only|Claude only)\\b",
+            },
+            "emptyFolderScanRoots": ["apps/core/src", "packages"],
+        },
     )
     return root
 
@@ -94,100 +213,65 @@ class CheckArchitectureTests(unittest.TestCase):
                 result.stdout,
             )
 
-    def test_valid_and_expired_exception_behavior(self) -> None:
+    def test_file_line_budget_exception_is_not_supported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))
             write_lines(root / "apps/core/src/domain/oversized.ts", 701)
             write_json(
                 root / ".codex/architecture-exceptions.json",
-                {
-                    "version": 1,
-                    "exceptions": [
-                        {
-                            "rule": "file_size_budget",
-                            "target": "apps/core/src/domain/oversized.ts",
-                            "owner": "TEST-1",
-                            "reason": "Fixture baseline",
-                            "expires_on": "2099-12-31",
-                            "max_lines": 701,
-                        }
-                    ],
-                },
-            )
-            passing = run_architecture_check(root)
-            self.assertEqual(passing.returncode, 0, msg=passing.stdout + passing.stderr)
-
-            write_json(
-                root / ".codex/architecture-exceptions.json",
-                {
-                    "version": 1,
-                    "exceptions": [
-                        {
-                            "rule": "file_size_budget",
-                            "target": "apps/core/src/domain/oversized.ts",
-                            "owner": "TEST-1",
-                            "reason": "Fixture baseline",
-                            "expires_on": "2000-01-01",
-                            "max_lines": 701,
-                        }
-                    ],
-                },
-            )
-            expired = run_architecture_check(root)
-            self.assertEqual(expired.returncode, 1)
-            self.assertIn("[Exception Hygiene]", expired.stdout)
-            self.assertIn("expired on 2000-01-01", expired.stdout)
-
-    def test_excepted_file_growth_beyond_max_lines_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = make_base_fixture(Path(tmp))
-            write_lines(root / "apps/core/src/domain/oversized.ts", 702)
-            write_json(
-                root / ".codex/architecture-exceptions.json",
-                {
-                    "version": 1,
-                    "exceptions": [
-                        {
-                            "rule": "file_size_budget",
-                            "target": "apps/core/src/domain/oversized.ts",
-                            "owner": "TEST-1",
-                            "reason": "Fixture baseline",
-                            "expires_on": "2099-12-31",
-                            "max_lines": 701,
-                        }
-                    ],
-                },
+                [
+                    {
+                        "file": "apps/core/src/domain/oversized.ts",
+                        "rule": "file_line_budget",
+                        "reason": "Fixture baseline",
+                        "removeByPhase": "test-phase",
+                        "max_lines": 701,
+                    }
+                ],
             )
             result = run_architecture_check(root)
             self.assertEqual(result.returncode, 1)
-            self.assertIn("max_lines is 701", result.stdout)
+            self.assertIn("[Exception Hygiene]", result.stdout)
+            self.assertIn("unsupported rule `file_line_budget`", result.stdout)
+            self.assertIn("[File Size Budget]", result.stdout)
 
-    def test_stale_target_specific_exception_mentions_target_limit(self) -> None:
+    def test_permanent_exception_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))
-            write_lines(
-                root / "apps/core/src/infrastructure/postgres/schema/schema.ts",
-                900,
-            )
+            write_text(root / "apps/core/src/runtime/index.ts", "export * from './ok.js';\n")
             write_json(
                 root / ".codex/architecture-exceptions.json",
-                {
-                    "version": 1,
-                    "exceptions": [
-                        {
-                            "rule": "file_size_budget",
-                            "target": "apps/core/src/infrastructure/postgres/schema/schema.ts",
-                            "owner": "TEST-1",
-                            "reason": "Fixture baseline",
-                            "expires_on": "2099-12-31",
-                            "max_lines": 901,
-                        }
-                    ],
-                },
+                [
+                    {
+                        "file": "apps/core/src/runtime/index.ts",
+                        "rule": "wrapper_only_file",
+                        "reason": "Fixture baseline",
+                        "removeByPhase": "permanent",
+                    }
+                ],
             )
             result = run_architecture_check(root)
             self.assertEqual(result.returncode, 1)
-            self.assertIn("within 900 lines", result.stdout)
+            self.assertIn("[Exception Hygiene]", result.stdout)
+            self.assertIn("removeByPhase must be time-bounded", result.stdout)
+
+    def test_supported_exception_can_cap_non_line_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(root / "apps/core/src/runtime/index.ts", "export * from './ok.js';\n")
+            write_json(
+                root / ".codex/architecture-exceptions.json",
+                [
+                    {
+                        "file": "apps/core/src/runtime/index.ts",
+                        "rule": "wrapper_only_file",
+                        "reason": "Fixture baseline",
+                        "removeByPhase": "test-phase",
+                    }
+                ],
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
     def test_forbidden_import_edge_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -199,8 +283,8 @@ class CheckArchitectureTests(unittest.TestCase):
             )
             result = run_architecture_check(root)
             self.assertEqual(result.returncode, 1)
-            self.assertIn("[Forbidden Import Edges]", result.stdout)
-            self.assertIn("apps/core/src/domain/boundary-break.ts imports apps/core/src/runtime/worker.ts", result.stdout)
+            self.assertIn("[Layer Import Rules]", result.stdout)
+            self.assertIn("domain imports runtime file apps/core/src/runtime/worker.ts", result.stdout)
 
     def test_enterprise_framework_import_in_runtime_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -330,29 +414,87 @@ class CheckArchitectureTests(unittest.TestCase):
             self.assertIn("[Active Doc References]", result.stdout)
             self.assertIn("README.md -> docs/not-real.md", result.stdout)
 
-    def test_malformed_exception_missing_owner_fails(self) -> None:
+    def test_direct_risky_execution_outside_sandbox_adapter_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))
-            write_lines(root / "apps/core/src/domain/oversized.ts", 701)
+            write_text(
+                root / "apps/core/src/runtime/run.ts",
+                "import { spawn } from 'child_process';\nspawn('echo', ['hi']);\n",
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("[Direct Risky Execution]", result.stdout)
+            self.assertIn("must go through an approved sandbox adapter", result.stdout)
+
+    def test_browser_default_profile_path_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "apps/core/src/runtime/browser.ts",
+                "export const profile = '~/Library/Application Support/Google/Chrome';\n",
+            )
             write_json(
-                root / ".codex/architecture-exceptions.json",
+                root / ".codex/architecture-map.json",
                 {
-                    "version": 1,
-                    "exceptions": [
-                        {
-                            "rule": "file_size_budget",
-                            "target": "apps/core/src/domain/oversized.ts",
-                            "reason": "Fixture baseline",
-                            "expires_on": "2099-12-31",
-                            "max_lines": 701,
-                        }
+                    **json.loads((root / ".codex/architecture-map.json").read_text()),
+                    "browserDefaultProfilePathPatterns": [
+                        "~[/\\\\]Library[/\\\\]Application Support[/\\\\]Google[/\\\\]Chrome"
                     ],
                 },
             )
             result = run_architecture_check(root)
             self.assertEqual(result.returncode, 1)
+            self.assertIn("[Browser Default Profile Paths]", result.stdout)
+
+    def test_old_architecture_term_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "apps/core/src/runtime/legacy.ts",
+                "export const groupFolder = 'legacy';\n",
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("[Old Architecture Terms]", result.stdout)
+            self.assertIn("old_term_groupFolder", result.stdout)
+
+    def test_wrapper_only_file_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "apps/core/src/runtime/index.ts",
+                "export * from './ok.js';\n",
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("[Wrapper-Only Files]", result.stdout)
+
+    def test_empty_folder_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            (root / "apps/core/src/runtime/empty").mkdir(parents=True)
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("[Empty Folders]", result.stdout)
+
+    def test_malformed_exception_missing_remove_by_phase_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(root / "apps/core/src/runtime/index.ts", "export * from './ok.js';\n")
+            write_json(
+                root / ".codex/architecture-exceptions.json",
+                [
+                    {
+                        "file": "apps/core/src/runtime/index.ts",
+                        "rule": "wrapper_only_file",
+                        "reason": "Fixture baseline",
+                    }
+                ],
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
             self.assertIn("[Exception Hygiene]", result.stdout)
-            self.assertIn("missing required fields: owner", result.stdout)
+            self.assertIn("missing required fields: removeByPhase", result.stdout)
 
 
 class VerifyContractTests(unittest.TestCase):
