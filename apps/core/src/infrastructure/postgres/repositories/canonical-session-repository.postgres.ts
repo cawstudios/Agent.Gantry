@@ -1,4 +1,4 @@
-import { and, eq, or, sql } from 'drizzle-orm';
+import { and, eq, ne, or, sql } from 'drizzle-orm';
 
 import * as pgSchema from '../schema/schema.js';
 import {
@@ -37,40 +37,60 @@ export class PostgresCanonicalSessionRepository {
     scopeKey: string;
     sessionId: string;
   }): Promise<void> {
-    const agentId = await this.graph.ensureAgent(
-      input.groupFolder,
-      input.groupFolder,
-    );
     const agentSessionId = `agent-session:${input.scopeKey}`;
-    await this.db
-      .insert(pgSchema.agentSessionsPostgres)
-      .values({
-        id: agentSessionId,
-        appId: CANONICAL_APP_ID,
-        agentId,
-        userId: input.scopeKey,
-        status: 'active',
-      })
-      .onConflictDoUpdate({
-        target: pgSchema.agentSessionsPostgres.id,
-        set: { status: 'active', updatedAt: sql`now()` },
-      });
-    await this.db
-      .insert(pgSchema.providerSessionsPostgres)
-      .values({
-        id: input.sessionId,
-        appId: CANONICAL_APP_ID,
-        agentSessionId,
-        providerRefJson: json({ kind: 'runtime_session' }),
-        status: 'active',
-      })
-      .onConflictDoUpdate({
-        target: pgSchema.providerSessionsPostgres.id,
-        set: {
+    await this.db.transaction(async (tx) => {
+      const agentId = await this.graph.ensureAgent(
+        input.groupFolder,
+        input.groupFolder,
+        tx,
+      );
+      await tx
+        .insert(pgSchema.agentSessionsPostgres)
+        .values({
+          id: agentSessionId,
+          appId: CANONICAL_APP_ID,
+          agentId,
+          userId: input.scopeKey,
+          status: 'active',
+        })
+        .onConflictDoUpdate({
+          target: pgSchema.agentSessionsPostgres.id,
+          set: { status: 'active', updatedAt: sql`now()` },
+        });
+      await tx
+        .select({ id: pgSchema.agentSessionsPostgres.id })
+        .from(pgSchema.agentSessionsPostgres)
+        .where(eq(pgSchema.agentSessionsPostgres.id, agentSessionId))
+        .for('update')
+        .limit(1);
+      await tx
+        .delete(pgSchema.providerSessionsPostgres)
+        .where(
+          and(
+            eq(
+              pgSchema.providerSessionsPostgres.agentSessionId,
+              agentSessionId,
+            ),
+            ne(pgSchema.providerSessionsPostgres.id, input.sessionId),
+          ),
+        );
+      await tx
+        .insert(pgSchema.providerSessionsPostgres)
+        .values({
+          id: input.sessionId,
+          appId: CANONICAL_APP_ID,
           agentSessionId,
-          updatedAt: sql`now()`,
-        },
-      });
+          providerRefJson: json({ kind: 'runtime_session' }),
+          status: 'active',
+        })
+        .onConflictDoUpdate({
+          target: pgSchema.providerSessionsPostgres.id,
+          set: {
+            agentSessionId,
+            updatedAt: sql`now()`,
+          },
+        });
+    });
   }
 
   async deleteScope(scopeKey: string): Promise<void> {

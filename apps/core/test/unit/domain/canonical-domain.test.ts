@@ -127,6 +127,46 @@ describe('canonical domain cutover', () => {
     expect(messageRepository).not.toContain("AND p.kind = 'text'");
   });
 
+  it('preserves canonical conversation metadata across message-first writes', () => {
+    const graphRepository = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/infrastructure/postgres/repositories/canonical-graph-repository.postgres.ts',
+      ),
+      'utf8',
+    );
+
+    expect(graphRepository).toContain('const hasKnownKind =');
+    expect(graphRepository).toContain(
+      "...(hasKnownKind ? { kind: input.isGroup ? 'group' : 'direct' } : {})",
+    );
+    expect(graphRepository).toContain(
+      '...(hasKnownKind ? { externalRefJson } : {})',
+    );
+    expect(graphRepository).toContain('...(input.name ? { title } : {})');
+  });
+
+  it('replaces prior provider session mappings for a session scope', () => {
+    const sessionRepository = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/infrastructure/postgres/repositories/canonical-session-repository.postgres.ts',
+      ),
+      'utf8',
+    );
+
+    expect(sessionRepository).toContain('await this.db.transaction');
+    expect(sessionRepository).toContain(".for('update')");
+    expect(sessionRepository).toContain(
+      '.delete(pgSchema.providerSessionsPostgres)',
+    );
+    expect(sessionRepository).toContain(
+      'pgSchema.providerSessionsPostgres.agentSessionId',
+    );
+    expect(sessionRepository).toContain('agentSessionId');
+    expect(sessionRepository).toContain(
+      'ne(pgSchema.providerSessionsPostgres.id, input.sessionId)',
+    );
+  });
+
   it('keeps memory saves safe after soft delete and concurrent first write', () => {
     const migration = fs.readFileSync(
       path.resolve(

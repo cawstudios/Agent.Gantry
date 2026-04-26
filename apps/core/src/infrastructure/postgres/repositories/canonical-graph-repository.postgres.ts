@@ -140,10 +140,11 @@ export class PostgresCanonicalGraphRepository {
     const conversationId = conversationIdForJid(jid);
     const title = input.name || jid;
     const now = input.timestamp || currentIso();
+    const hasKnownKind = input.isGroup !== undefined && input.isGroup !== null;
     const externalRefJson = json({
       jid,
       providerId,
-      isGroup: Boolean(input.isGroup),
+      ...(hasKnownKind ? { isGroup: Boolean(input.isGroup) } : {}),
     });
     await executor
       .insert(pgSchema.channelProvidersPostgres)
@@ -173,8 +174,9 @@ export class PostgresCanonicalGraphRepository {
       .onConflictDoUpdate({
         target: pgSchema.conversationsPostgres.id,
         set: {
-          title,
-          externalRefJson,
+          ...(input.name ? { title } : {}),
+          ...(hasKnownKind ? { kind: input.isGroup ? 'group' : 'direct' } : {}),
+          ...(hasKnownKind ? { externalRefJson } : {}),
           updatedAt: sql`GREATEST(${pgSchema.conversationsPostgres.updatedAt}, ${now})`,
         },
       });
