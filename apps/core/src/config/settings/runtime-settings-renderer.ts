@@ -5,6 +5,7 @@ import { quoteYamlString } from './yaml.js';
 import { createDefaultChannelSettings } from './runtime-settings-defaults.js';
 import type {
   RuntimeCredentialBrokerSettings,
+  RuntimeAgentSettings,
   RuntimeMemorySettings,
   RuntimeSettings,
   RuntimeStorageSettings,
@@ -13,6 +14,17 @@ import type {
 function quoteYamlKey(key: string): string {
   if (/^[A-Za-z0-9_-]+$/.test(key)) return key;
   return JSON.stringify(key);
+}
+
+function renderAgentSettingsYaml(
+  lines: string[],
+  agent: RuntimeAgentSettings,
+): void {
+  lines.push(
+    'agent:',
+    `  default_model: ${quoteYamlString(agent.defaultModel)}`,
+    '',
+  );
 }
 
 function renderMemorySettingsYaml(
@@ -56,10 +68,14 @@ function renderCredentialBrokerSettingsYaml(
 ): void {
   lines.push(
     'credential_broker:',
+    `  mode: ${quoteYamlString(credentialBroker.mode)}`,
     '  onecli:',
+    `    url: ${quoteYamlString(credentialBroker.onecli.url)}`,
     '    postgres:',
     `      url_env: ${quoteYamlString(credentialBroker.onecli.postgres.urlEnv)}`,
     `      schema: ${quoteYamlString(credentialBroker.onecli.postgres.schema)}`,
+    '  external:',
+    `    base_url: ${quoteYamlString(credentialBroker.external.baseUrl)}`,
     '',
   );
 }
@@ -96,6 +112,7 @@ export function renderRuntimeSettingsYaml(settings: RuntimeSettings): string {
 
   lines.push('');
   renderStorageSettingsYaml(lines, settings.storage);
+  renderAgentSettingsYaml(lines, settings.agent);
   renderCredentialBrokerSettingsYaml(lines, settings.credentialBroker);
   renderMemorySettingsYaml(lines, settings.memory);
 

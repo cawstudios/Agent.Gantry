@@ -13,7 +13,6 @@ function makeRuntimeHome(): string {
     [
       'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
       'ONECLI_DATABASE_URL=postgres://onecli_app:pass@localhost:15432/myclaw?schema=onecli',
-      'ONECLI_URL=http://localhost:10254',
       'SECRET_ENCRYPTION_KEY=123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
       '',
     ].join('\n'),
@@ -49,10 +48,14 @@ function makeRuntimeHome(): string {
       '    url_env: MYCLAW_DATABASE_URL',
       '    schema: myclaw',
       'credential_broker:',
+      '  mode: onecli',
       '  onecli:',
+      '    url: http://localhost:10254',
       '    postgres:',
       '      url_env: ONECLI_DATABASE_URL',
       '      schema: onecli',
+      '  external:',
+      '    base_url: ""',
       'memory:',
       '  enabled: true',
       '  embeddings:',
@@ -70,6 +73,24 @@ function makeRuntimeHome(): string {
     ].join('\n'),
   );
   return runtimeHome;
+}
+
+function setCredentialBrokerSettings(
+  runtimeHome: string,
+  mode: 'none' | 'onecli' | 'external',
+  externalBaseUrl = '',
+): void {
+  const settingsPath = path.join(runtimeHome, 'settings.yaml');
+  const raw = fs.readFileSync(settingsPath, 'utf-8');
+  fs.writeFileSync(
+    settingsPath,
+    raw
+      .replace('  mode: onecli', `  mode: ${mode}`)
+      .replace(
+        '  external:\n    base_url: ""',
+        `  external:\n    base_url: ${externalBaseUrl ? externalBaseUrl : '""'}`,
+      ),
+  );
 }
 
 afterEach(() => {
@@ -188,11 +209,11 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_CREDENTIAL_MODE=none',
         'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
         '',
       ].join('\n'),
     );
+    setCredentialBrokerSettings(runtimeHome, 'none');
     const inspectOnecliPersistenceReadiness = vi.fn();
     vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
       inspectRuntimeStorageReadiness: vi.fn(async () => ({
@@ -221,19 +242,93 @@ describe('runtime preflight', () => {
     expect(inspectOnecliPersistenceReadiness).not.toHaveBeenCalled();
   });
 
+  it('fails when runtime .env contains agent credentials', async () => {
+    const runtimeHome = makeRuntimeHome();
+    fs.appendFileSync(
+      path.join(runtimeHome, '.env'),
+      'ANTHROPIC_API_KEY=sk-ant\n',
+    );
+    vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
+      inspectRuntimeStorageReadiness: vi.fn(async () => ({
+        status: 'pass',
+        message: 'Postgres is ready.',
+      })),
+    }));
+
+    const { validateRuntimePreflightWithStorage } =
+      await import('@core/config/preflight.js');
+    const result = await validateRuntimePreflightWithStorage(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'ANTHROPIC_API_KEY is an agent-accessed credential',
+    );
+  });
+
+  it('fails when runtime .env contains non-secret credential config', async () => {
+    const runtimeHome = makeRuntimeHome();
+    fs.appendFileSync(
+      path.join(runtimeHome, '.env'),
+      'MYCLAW_CREDENTIAL_MODE=none\n',
+    );
+    vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
+      inspectRuntimeStorageReadiness: vi.fn(async () => ({
+        status: 'pass',
+        message: 'Postgres is ready.',
+      })),
+    }));
+
+    const { validateRuntimePreflightWithStorage } =
+      await import('@core/config/preflight.js');
+    const result = await validateRuntimePreflightWithStorage(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'MYCLAW_CREDENTIAL_MODE is non-secret configuration',
+    );
+  });
+
+  it('fails when runtime .env contains settings-owned default model', async () => {
+    const runtimeHome = makeRuntimeHome();
+    fs.appendFileSync(
+      path.join(runtimeHome, '.env'),
+      'ANTHROPIC_MODEL=sonnet\n',
+    );
+    vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
+      inspectRuntimeStorageReadiness: vi.fn(async () => ({
+        status: 'pass',
+        message: 'Postgres is ready.',
+      })),
+    }));
+
+    const { validateRuntimePreflightWithStorage } =
+      await import('@core/config/preflight.js');
+    const result = await validateRuntimePreflightWithStorage(runtimeHome);
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'ANTHROPIC_MODEL is non-secret configuration',
+    );
+    expect(result.failure?.details.join('\n')).toContain(
+      'settings.yaml agent.default_model',
+    );
+  });
+
   it('ignores stale invalid OneCLI vars outside onecli credential mode', async () => {
     const runtimeHome = makeRuntimeHome();
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_CREDENTIAL_MODE=external',
         'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-        'ANTHROPIC_BASE_URL=https://broker.example.com/anthropic',
-        'ONECLI_URL=http://127.attacker.com:10254',
         'ONECLI_DATABASE_URL=not-a-postgres-url',
         'SECRET_ENCRYPTION_KEY=short',
         '',
       ].join('\n'),
+    );
+    setCredentialBrokerSettings(
+      runtimeHome,
+      'external',
+      'https://broker.example.com/anthropic',
     );
     vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
       inspectRuntimeStorageReadiness: vi.fn(async () => ({
@@ -257,11 +352,11 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_CREDENTIAL_MODE=external',
         'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
         '',
       ].join('\n'),
     );
+    setCredentialBrokerSettings(runtimeHome, 'external');
     vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
       inspectRuntimeStorageReadiness: vi.fn(async () => ({
         status: 'pass',
@@ -274,7 +369,9 @@ describe('runtime preflight', () => {
     const result = await validateRuntimePreflightWithStorage(runtimeHome);
 
     expect(result.ok).toBe(false);
-    expect(result.failure?.summary).toContain('ANTHROPIC_BASE_URL');
+    expect(result.failure?.details.join('\n')).toContain(
+      'credential_broker.external.base_url',
+    );
   });
 
   it('fails external credential mode preflight when broker endpoint is unsafe', async () => {
@@ -282,11 +379,14 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_CREDENTIAL_MODE=external',
         'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-        'ANTHROPIC_BASE_URL=https://user:pass@broker.example.com',
         '',
       ].join('\n'),
+    );
+    setCredentialBrokerSettings(
+      runtimeHome,
+      'external',
+      'https://user:pass@broker.example.com',
     );
     vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
       inspectRuntimeStorageReadiness: vi.fn(async () => ({
@@ -300,7 +400,9 @@ describe('runtime preflight', () => {
     const result = await validateRuntimePreflightWithStorage(runtimeHome);
 
     expect(result.ok).toBe(false);
-    expect(result.failure?.summary).toContain('embedded credentials');
+    expect(result.failure?.details.join('\n')).toContain(
+      'embedded credentials',
+    );
   });
 
   it('allows external credential mode preflight without probing broker reachability', async () => {
@@ -308,11 +410,14 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_CREDENTIAL_MODE=external',
         'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-        'ANTHROPIC_BASE_URL=https://broker.example.com/anthropic',
         '',
       ].join('\n'),
+    );
+    setCredentialBrokerSettings(
+      runtimeHome,
+      'external',
+      'https://broker.example.com/anthropic',
     );
     vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
       inspectRuntimeStorageReadiness: vi.fn(async () => ({
@@ -336,11 +441,14 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_CREDENTIAL_MODE=external',
         'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-        'ANTHROPIC_BASE_URL=https://broker.example.com/anthropic',
         '',
       ].join('\n'),
+    );
+    setCredentialBrokerSettings(
+      runtimeHome,
+      'external',
+      'https://broker.example.com/anthropic',
     );
     vi.doMock('@core/infrastructure/postgres/storage-readiness.js', () => ({
       inspectRuntimeStorageReadiness: vi.fn(async () => ({
@@ -364,11 +472,11 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_CREDENTIAL_MODE=none',
         'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
         '',
       ].join('\n'),
     );
+    setCredentialBrokerSettings(runtimeHome, 'none');
     const settingsPath = path.join(runtimeHome, 'settings.yaml');
     fs.writeFileSync(
       settingsPath,
@@ -394,12 +502,8 @@ describe('runtime preflight', () => {
     expect(result).toEqual({ ok: true });
   });
 
-  it('uses runtime-home credential mode before ambient process env', async () => {
+  it('fails when process env contains settings-owned credential mode', async () => {
     const runtimeHome = makeRuntimeHome();
-    fs.appendFileSync(
-      path.join(runtimeHome, '.env'),
-      'MYCLAW_CREDENTIAL_MODE=onecli\n',
-    );
     vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'none');
     const inspectOnecliPersistenceReadiness = vi.fn(async () => ({
       status: 'pass',
@@ -428,7 +532,13 @@ describe('runtime preflight', () => {
       await import('@core/config/preflight.js');
     const result = await validateRuntimePreflightWithStorage(runtimeHome);
 
-    expect(result).toEqual({ ok: true });
-    expect(inspectOnecliPersistenceReadiness).toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'MYCLAW_CREDENTIAL_MODE is non-secret configuration',
+    );
+    expect(result.failure?.details.join('\n')).toContain(
+      'the process environment',
+    );
+    expect(inspectOnecliPersistenceReadiness).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,5 @@
-import {
-  DATA_DIR,
-  getHostCredentialEnv,
-  hasHostCredentialBrokerEnv,
-} from '../../config/index.js';
+import { DATA_DIR, getHostCredentialEnv } from '../../config/index.js';
 import type { HostCredentialMode } from '../../config/credentials/mode.js';
-import { runtimeEnvValue } from '../../config/env/index.js';
 import type {
   AgentCredentialInjection,
   CredentialBrokerProfile,
@@ -18,6 +13,7 @@ export interface AgentCredentialServiceOptions {
   mode: HostCredentialMode;
   broker?: AgentCredentialBroker;
   onecliUrl?: string;
+  externalBrokerUrl?: string;
   dataDir?: string;
   env?: Partial<Record<string, string | undefined>>;
 }
@@ -30,10 +26,7 @@ export async function createAgentCredentialBroker(
   const { OnecliAgentCredentialBroker } =
     await import('../../adapters/credentials/onecli/broker.js');
   return new OnecliAgentCredentialBroker({
-    onecliUrl:
-      options.onecliUrl ??
-      options.env?.ONECLI_URL?.trim() ??
-      runtimeEnvValue('ONECLI_URL'),
+    onecliUrl: options.onecliUrl,
     dataDir: options.dataDir ?? DATA_DIR,
   });
 }
@@ -42,21 +35,29 @@ export async function getAgentCredentialInjection(input: {
   mode: HostCredentialMode;
   agentIdentifier?: string;
   onecliUrl?: string;
+  externalBrokerUrl?: string;
   broker?: AgentCredentialBroker;
   env?: Partial<Record<string, string | undefined>>;
 }): Promise<AgentCredentialInjection> {
   if (!input.broker && input.mode === 'external') {
-    if (!hasHostCredentialBrokerEnv(input.env)) {
+    const rawBrokerUrl = input.externalBrokerUrl?.trim() || '';
+    if (!rawBrokerUrl) {
       throw new Error(
-        'External credential mode is enabled but ANTHROPIC_BASE_URL is not configured.',
+        'External credential mode is enabled but credential_broker.external.base_url is not configured.',
       );
     }
-    const env = getHostCredentialEnv(input.env);
-    const validation = validateExternalBrokerUrl(env.ANTHROPIC_BASE_URL || '');
+    const validation = validateExternalBrokerUrl(
+      rawBrokerUrl,
+      'credential_broker.external.base_url',
+    );
     if (!validation.ok || !validation.normalizedUrl) {
-      throw new Error(validation.error || 'ANTHROPIC_BASE_URL is invalid.');
+      throw new Error(
+        validation.error || 'credential_broker.external.base_url is invalid.',
+      );
     }
-    env.ANTHROPIC_BASE_URL = validation.normalizedUrl;
+    const env = getHostCredentialEnv({
+      ANTHROPIC_BASE_URL: validation.normalizedUrl,
+    });
     return {
       env,
       applied: true,
@@ -96,6 +97,7 @@ export async function getAgentCredentialInjection(input: {
     if (input.mode === 'onecli') {
       throw new Error(
         'OneCLI credential mode is enabled but the OneCLI gateway is not reachable.',
+        { cause: err },
       );
     }
     return {

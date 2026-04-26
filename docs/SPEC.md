@@ -286,7 +286,7 @@ Configuration constants are in `apps/core/src/config/index.ts`:
 ```typescript
 import path from 'path';
 import { getMyclawHome } from './myclaw-home.js';
-import { runtimeEnvValue } from './env/index.js';
+import { ensureRuntimeSettings } from './settings/runtime-settings.js';
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
 export const POLL_INTERVAL = 2000;
@@ -296,8 +296,9 @@ const MYCLAW_HOME = getMyclawHome(process.env.MYCLAW_HOME);
 export const AGENTS_DIR = path.resolve(MYCLAW_HOME, 'agents');
 export const DATA_DIR = path.resolve(MYCLAW_HOME, 'data');
 
-// Durable runtime state and model defaults prefer runtime .env over ambient env.
-export const ANTHROPIC_MODEL = runtimeEnvValue('ANTHROPIC_MODEL');
+// Default model selection is non-secret configuration in settings.yaml.
+const runtimeSettings = ensureRuntimeSettings(MYCLAW_HOME);
+export const ANTHROPIC_MODEL = runtimeSettings.agent.defaultModel;
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep runtime worker alive after last result
 
@@ -336,32 +337,40 @@ Additional mounts appear under `/workspace/extra/` in the runtime workspace.
 Model precedence is:
 
 1. `group.agentConfig.model`
-2. `ANTHROPIC_MODEL`
+2. `agent.default_model` in `settings.yaml`
 
 Use `/model` in a group session to switch the live model (`/model`, `/model <alias-or-name>`, `/model default`).
 
 ### Claude Authentication
 
 MyClaw uses an agent credential broker boundary for agent and memory LLM
-credentials. `MYCLAW_CREDENTIAL_MODE` supports `onecli`, `external`, and `none`.
+credentials. `credential_broker.mode` in `settings.yaml` supports `onecli`,
+`external`, and `none`.
 OneCLI is the default local/personal broker adapter, but enterprise deployments
 can replace it with an external broker without changing the runtime agent-spawn
 path. Runtime-owned secrets such as `MYCLAW_DATABASE_URL`, channel tokens,
 webhook/control secrets, and OneCLI persistence secrets are read through runtime
 secret configuration, not requested from the agent credential broker.
 
-In `onecli` mode, runtime `.env` stores `ONECLI_URL`, `ONECLI_DATABASE_URL`, a
-generated base64-encoded 32-byte `SECRET_ENCRYPTION_KEY`, and model selection,
-not raw Claude credentials. MyClaw and OneCLI can share one Postgres database
-with separate schemas and roles: `myclaw`, `onecli`, and `pgboss`. OneCLI owns
-its schema and migrations; MyClaw only provisions and verifies the schema
-boundary. `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL` must use different
-Postgres users.
+Runtime `.env` is for runtime-owned secrets only. In `onecli` mode it stores
+`ONECLI_DATABASE_URL` and a generated base64-encoded 32-byte
+`SECRET_ENCRYPTION_KEY`, but not the OneCLI URL, credential mode, default model,
+or raw Claude credentials. Non-secret broker and model configuration lives in
+`settings.yaml`, for example `credential_broker.onecli.url`,
+`agent.default_model`, or
+`credential_broker.external.base_url`. MyClaw and OneCLI can share one Postgres
+database with separate schemas and roles: `myclaw`, `onecli`, and `pgboss`.
+OneCLI owns its schema and migrations; MyClaw only provisions and verifies the
+schema boundary. `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL` must use
+different Postgres users.
 
 The runner receives only broker-safe model endpoint settings from the selected
 broker. Raw provider tokens and runtime-owned database URLs are not forwarded to
 tools, the child runner, or the Agent SDK environment. Broker-provided proxy and
 CA certificate references are allowed only after adapter policy filtering.
+If `.env` or process env contains raw agent credentials such as
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN`,
+doctor/preflight reports a wrong-lane configuration error.
 
 ### Changing the Assistant Name
 
@@ -509,21 +518,25 @@ Session transcript archives are operational artifacts under
 
 ### Memory Configuration Reference
 
-| Setting                                     | Default                  | Description                                              |
-| ------------------------------------------- | ------------------------ | -------------------------------------------------------- |
-| `storage.postgres.url_env`                  | `MYCLAW_DATABASE_URL`    | Env key for Postgres connection URL                      |
-| `storage.postgres.schema`                   | `myclaw`                 | Postgres schema name                                     |
-| `credential_broker.onecli.postgres.url_env` | `ONECLI_DATABASE_URL`    | Env key for the OneCLI Postgres URL with `schema=onecli` |
-| `credential_broker.onecli.postgres.schema`  | `onecli`                 | OneCLI-owned Postgres schema                             |
-| `memory.enabled`                            | `true`                   | Enables durable memory                                   |
-| `memory.embeddings.enabled`                 | `false`                  | Optional embedding toggle                                |
-| `memory.embeddings.provider`                | `disabled`               | Embedding provider (`disabled` or `openai`)              |
-| `memory.embeddings.model`                   | `text-embedding-3-large` | Embedding model                                          |
-| `MEMORY_EMBED_BATCH_SIZE`                   | `16`                     | Texts per embedding API call                             |
-| `MEMORY_EXTRACTOR_MAX_FACTS`                | `8`                      | Max candidate facts extracted per evidence batch         |
-| `MEMORY_EXTRACTOR_MIN_CONFIDENCE`           | `0.6`                    | Min confidence for extracted candidates                  |
-| `MEMORY_DREAMING_CRON`                      | `17 3 * * *`             | Dreaming maintenance schedule                            |
-| `MEMORY_MAINTENANCE_MAX_PENDING`            | `100`                    | Max pending memory maintenance items per pass            |
+| Setting                                     | Default                  | Description                                                 |
+| ------------------------------------------- | ------------------------ | ----------------------------------------------------------- |
+| `storage.postgres.url_env`                  | `MYCLAW_DATABASE_URL`    | Env key for Postgres connection URL                         |
+| `storage.postgres.schema`                   | `myclaw`                 | Postgres schema name                                        |
+| `agent.default_model`                       | empty                    | Default Claude Code model alias/name                        |
+| `credential_broker.mode`                    | `onecli`                 | Agent credential broker mode (`onecli`, `external`, `none`) |
+| `credential_broker.onecli.url`              | `http://localhost:10254` | OneCLI gateway URL                                          |
+| `credential_broker.onecli.postgres.url_env` | `ONECLI_DATABASE_URL`    | Env key for the OneCLI Postgres URL with `schema=onecli`    |
+| `credential_broker.onecli.postgres.schema`  | `onecli`                 | OneCLI-owned Postgres schema                                |
+| `credential_broker.external.base_url`       | empty                    | External broker-safe endpoint URL for `external` mode       |
+| `memory.enabled`                            | `true`                   | Enables durable memory                                      |
+| `memory.embeddings.enabled`                 | `false`                  | Optional embedding toggle                                   |
+| `memory.embeddings.provider`                | `disabled`               | Embedding provider (`disabled` or `openai`)                 |
+| `memory.embeddings.model`                   | `text-embedding-3-large` | Embedding model                                             |
+| `MEMORY_EMBED_BATCH_SIZE`                   | `16`                     | Texts per embedding API call                                |
+| `MEMORY_EXTRACTOR_MAX_FACTS`                | `8`                      | Max candidate facts extracted per evidence batch            |
+| `MEMORY_EXTRACTOR_MIN_CONFIDENCE`           | `0.6`                    | Min confidence for extracted candidates                     |
+| `MEMORY_DREAMING_CRON`                      | `17 3 * * *`             | Dreaming maintenance schedule                               |
+| `MEMORY_MAINTENANCE_MAX_PENDING`            | `100`                    | Max pending memory maintenance items per pass               |
 
 ---
 

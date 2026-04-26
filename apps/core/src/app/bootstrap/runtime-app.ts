@@ -1,5 +1,9 @@
-import { ASSISTANT_NAME, DATA_DIR } from '../../config/index.js';
-import { resolveHostCredentialMode } from '../../config/credentials/mode.js';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  MYCLAW_CREDENTIAL_MODE,
+  ONECLI_BROKER_URL,
+} from '../../config/index.js';
 import { envConfig } from '../../config/env/index.js';
 import {
   createAgentCredentialBroker,
@@ -79,9 +83,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   let stateSaveDirty = false;
 
   const queue = options.queue ?? new GroupQueue();
-  const credentialMode = resolveHostCredentialMode(
-    envConfig.MYCLAW_CREDENTIAL_MODE || process.env.MYCLAW_CREDENTIAL_MODE,
-  );
+  const credentialMode = MYCLAW_CREDENTIAL_MODE;
   let credentialBrokerPromise:
     | Promise<AgentCredentialBroker | undefined>
     | undefined;
@@ -100,6 +102,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   function getCredentialBroker(): Promise<AgentCredentialBroker | undefined> {
     credentialBrokerPromise ??= createAgentCredentialBroker({
       mode: credentialMode,
+      onecliUrl: ONECLI_BROKER_URL,
       env: envConfig,
       dataDir: DATA_DIR,
     });
@@ -121,6 +124,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
           })
         : await ensureAgentCredentialBinding({
             mode: credentialMode,
+            onecliUrl: ONECLI_BROKER_URL,
             env: envConfig,
             dataDir: DATA_DIR,
             broker: await getCredentialBroker(),

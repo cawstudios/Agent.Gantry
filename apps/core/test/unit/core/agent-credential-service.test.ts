@@ -73,7 +73,7 @@ describe('agent credential service', () => {
         mode: 'external',
         onecliUrl: '',
       }),
-    ).rejects.toThrow('ANTHROPIC_BASE_URL');
+    ).rejects.toThrow('credential_broker.external.base_url');
   });
 
   it('passes safe external broker env to spawned agents', async () => {
@@ -87,11 +87,11 @@ describe('agent credential service', () => {
       getAgentCredentialInjection({
         mode: 'external',
         onecliUrl: '',
+        externalBrokerUrl: 'https://broker.example.com',
       }),
     ).resolves.toEqual({
       env: {
         ANTHROPIC_BASE_URL: 'https://broker.example.com',
-        ANTHROPIC_MODEL: 'claude-test',
       },
       applied: true,
       brokerProfile: 'external',
@@ -107,9 +107,10 @@ describe('agent credential service', () => {
       getAgentCredentialInjection({
         mode: 'external',
         onecliUrl: '',
+        externalBrokerUrl: 'https://user:pass@broker.example.com',
       }),
     ).rejects.toThrow(
-      'ANTHROPIC_BASE_URL must not contain embedded credentials',
+      'credential_broker.external.base_url must not contain embedded credentials',
     );
   });
 

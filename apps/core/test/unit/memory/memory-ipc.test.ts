@@ -12,6 +12,7 @@ function writeMemorySettings(runtimeHome: string): void {
   fs.writeFileSync(
     settingsPath,
     [
+      'channels: {}',
       'memory:',
       '  enabled: true',
       '  embeddings:',
@@ -24,6 +25,12 @@ function writeMemorySettings(runtimeHome: string): void {
       '  postgres:',
       '    url_env: MYCLAW_DATABASE_URL',
       '    schema: myclaw',
+      'credential_broker:',
+      '  mode: onecli',
+      '  onecli:',
+      '    url: http://localhost:10254',
+      '  external:',
+      '    base_url: ""',
       '',
     ].join('\n'),
     'utf-8',

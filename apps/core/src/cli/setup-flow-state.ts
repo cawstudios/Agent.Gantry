@@ -189,7 +189,7 @@ export function restoreDraft(
     state?.data.primaryProvider ||
     (settings.channels.slack?.enabled ? 'slack' : 'telegram');
   const credentialMode = resolveHostCredentialMode(
-    state?.data.credentialMode || env.MYCLAW_CREDENTIAL_MODE,
+    state?.data.credentialMode || settings.credentialBroker.mode,
   );
   const hasConfiguredChannel = Object.values(settings.channels).some(
     (channel) => channel.enabled,
@@ -224,10 +224,10 @@ export function restoreDraft(
       'onecli',
     primaryProvider,
     credentialMode,
-    onecliUrl: env.ONECLI_URL?.trim() || '',
+    onecliUrl: settings.credentialBroker.onecli.url || '',
     selectedModel:
       normalizeClaudeModelSelection(
-        state?.data.selectedModel || env.ANTHROPIC_MODEL,
+        state?.data.selectedModel || settings.agent.defaultModel,
       ) || DEFAULT_SETUP_MODEL,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || '',
     telegramChatJid: '',
@@ -240,7 +240,8 @@ export function restoreDraft(
     slackAppToken: env.SLACK_APP_TOKEN || '',
     slackChatJid: '',
     slackDisplayName: 'Slack Main',
-    slackPermissionApproverIds: env.SLACK_PERMISSION_APPROVER_IDS || '',
+    slackPermissionApproverIds:
+      settings.channels.slack?.controlAllowlist.default.join(',') || '',
     memoryEnabled: state?.data.memoryEnabled ?? settings.memory.enabled,
     embeddingsEnabled:
       state?.data.embeddingsEnabled ?? settings.memory.embeddings.enabled,

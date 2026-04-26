@@ -82,8 +82,13 @@ storage:
     url_env: MYCLAW_DATABASE_URL
     schema: myclaw
 
+agent:
+  default_model: opus
+
 credential_broker:
+  mode: onecli
   onecli:
+    url: http://localhost:10254
     postgres:
       url_env: ONECLI_DATABASE_URL
       schema: onecli
@@ -107,7 +112,7 @@ docker compose --env-file ~/myclaw/.env up -d
 myclaw setup
 ```
 
-The Compose file hardcodes the local ports, schema names, and non-secret role names. `~/myclaw/.env` only needs local passwords, `SECRET_ENCRYPTION_KEY`, and the runtime connection URLs. MyClaw setup does not start Docker or create containers; it asks for `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL`, then defaults `ONECLI_URL` to `http://localhost:10254`.
+The Compose file hardcodes the local ports, schema names, and non-secret role names. `~/myclaw/.env` only needs local passwords, `SECRET_ENCRYPTION_KEY`, and the runtime connection URLs. MyClaw setup does not start Docker or create containers; it asks for `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL`, then writes the non-secret OneCLI gateway URL to `settings.yaml` as `credential_broker.onecli.url`.
 
 For hosted Postgres, use Neon, Supabase, or another provider that supports `vector` and `pg_trgm`, then paste two URLs during setup: one MyClaw-role URL with `sslmode=require`, and one OneCLI-role URL for the same database with `sslmode=require` and `schema=onecli`.
 
@@ -127,7 +132,7 @@ Notes:
 - `myclaw channel connect telegram` auto-discovers recent chats and can register one without manual chat ID copy/paste. The human sender from the selected discovery message is added to `control_allowlist`, so `/new`, `/model`, `/dream`, and `/memory-status` work immediately.
 - Slack uses Socket Mode with `SLACK_BOT_TOKEN` (`xoxb-...`) and `SLACK_APP_TOKEN` (`xapp-...`); create a Slack app, add a bot user/scopes, enable Socket Mode, generate the app-level token, install/reinstall the app, then invite it to the target channel or DM it once.
 - `myclaw channel connect slack` auto-discovers accessible conversations and can register one directly.
-- Slack tool permission approvals are deny-by-default until `SLACK_PERMISSION_APPROVER_IDS` is set. Guided setup asks for comma-separated Slack member IDs like `U0123456789`; these users can approve tool permissions and answer interactive prompts.
+- Slack tool permission approvals are deny-by-default until approvers are listed in `channels.slack.control_allowlist` in `settings.yaml`. Guided setup asks for comma-separated Slack member IDs like `U0123456789`; these users can approve tool permissions and answer interactive prompts.
 - Slack UX uses native Slack surfaces (threads, streaming updates, actions).
 
 ## Philosophy

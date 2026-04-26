@@ -11,6 +11,7 @@ import {
   saveRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 import { normalizeClaudeModelSelection } from '../models/claude-model-registry.js';
+import { parseSenderControlAllowlistConfig } from '../config/settings/control-allowlist.js';
 import {
   generateOnecliSecretEncryptionKey,
   ONECLI_DATABASE_URL_ENV,
@@ -77,15 +78,11 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
     TELEGRAM_BOT_TOKEN: input.telegramBotToken?.trim() || null,
     SLACK_BOT_TOKEN: input.slackBotToken?.trim() || null,
     SLACK_APP_TOKEN: input.slackAppToken?.trim() || null,
-    SLACK_PERMISSION_APPROVER_IDS:
-      input.primaryProvider === 'slack'
-        ? input.slackPermissionApproverIds?.trim() || null
-        : null,
+    SLACK_PERMISSION_APPROVER_IDS: null,
     CLAUDE_CODE_OAUTH_TOKEN: null,
     ANTHROPIC_API_KEY: null,
     ANTHROPIC_AUTH_TOKEN: null,
-    ANTHROPIC_MODEL:
-      normalizeClaudeModelSelection(input.anthropicModel) || null,
+    ANTHROPIC_MODEL: null,
     ANTHROPIC_DEFAULT_OPUS_MODEL: null,
     ANTHROPIC_DEFAULT_SONNET_MODEL: null,
     ANTHROPIC_DEFAULT_HAIKU_MODEL: null,
@@ -94,14 +91,18 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
     [ONECLI_SECRET_ENCRYPTION_KEY_ENV]: onecliDatabaseUrl
       ? onecliSecretEncryptionKey
       : null,
-    MYCLAW_CREDENTIAL_MODE: input.credentialMode,
-    ONECLI_URL: onecliUrl.length > 0 ? onecliUrl : null,
+    MYCLAW_CREDENTIAL_MODE: null,
+    ONECLI_URL: null,
     OPENAI_API_KEY: null,
   });
 
   const settings = loadRuntimeSettings(input.runtimeHome);
   settings.storage.postgres.urlEnv = 'MYCLAW_DATABASE_URL';
   settings.storage.postgres.schema = input.postgresSchema?.trim() || 'myclaw';
+  settings.agent.defaultModel =
+    normalizeClaudeModelSelection(input.anthropicModel) || '';
+  settings.credentialBroker.mode = input.credentialMode;
+  settings.credentialBroker.onecli.url = onecliUrl;
   settings.credentialBroker.onecli.postgres.urlEnv = ONECLI_DATABASE_URL_ENV;
   settings.credentialBroker.onecli.postgres.schema = onecliPostgresSchema;
   const telegramProvider = getChannelProvider('telegram');
@@ -117,6 +118,17 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
       Boolean(input.slackBotToken) &&
       Boolean(input.slackAppToken);
     settings.channels[slackProvider.id].enabled = shouldEnable;
+    if (input.primaryProvider === 'slack') {
+      const approvers = parseApproverIds(input.slackPermissionApproverIds);
+      settings.channels[slackProvider.id].controlAllowlist =
+        parseSenderControlAllowlistConfig(
+          {
+            default: approvers,
+            agents: settings.channels[slackProvider.id].controlAllowlist.agents,
+          },
+          'channels.slack.control_allowlist',
+        );
+    }
   }
   settings.memory = {
     ...settings.memory,
@@ -132,4 +144,16 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
     },
   };
   saveRuntimeSettings(input.runtimeHome, settings);
+}
+
+function parseApproverIds(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return [
+    ...new Set(
+      raw
+        .split(/[,\s]+/)
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    ),
+  ];
 }

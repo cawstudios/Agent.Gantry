@@ -5,6 +5,7 @@ import {
   envFilePath,
   ensureRuntimeLayout,
 } from '../config/settings/runtime-home.js';
+import { classifyConfigKey } from '../config/source-classification.js';
 
 function usage(): string {
   return [
@@ -21,13 +22,17 @@ function isValidEnvKey(key: string): boolean {
 }
 
 function isBlockedDirectProviderCredential(key: string): boolean {
+  const classified = classifyConfigKey(key);
   return (
-    key === 'OPENAI_API_KEY' ||
-    key === 'OPENAI_ORG_ID' ||
-    key === 'OPENAI_PROJECT' ||
-    key === 'ANTHROPIC_API_KEY' ||
-    key === 'ANTHROPIC_AUTH_TOKEN' ||
-    key === 'CLAUDE_CODE_OAUTH_TOKEN'
+    classified?.lane === 'agent-credential' ||
+    classified?.lane === 'non-secret-setting'
+  );
+}
+
+function blockedKeyMessage(key: string): string {
+  return (
+    classifyConfigKey(key)?.message ||
+    `${key} must not be configured in MyClaw .env.`
   );
 }
 
@@ -84,13 +89,11 @@ function runGet(runtimeHome: string, args: string[]): number {
     return 1;
   }
   if (!isValidEnvKey(key)) {
-    p.log.error(`Invalid key \"${key}\". Use uppercase env-style keys.`);
+    p.log.error(`Invalid key "${key}". Use uppercase env-style keys.`);
     return 1;
   }
   if (isBlockedDirectProviderCredential(key)) {
-    p.log.error(
-      `${key} must be configured through Model Access, not MyClaw .env.`,
-    );
+    p.log.error(blockedKeyMessage(key));
     return 1;
   }
 
@@ -113,13 +116,11 @@ function runSet(runtimeHome: string, args: string[]): number {
     return 1;
   }
   if (!isValidEnvKey(key)) {
-    p.log.error(`Invalid key \"${key}\". Use uppercase env-style keys.`);
+    p.log.error(`Invalid key "${key}". Use uppercase env-style keys.`);
     return 1;
   }
   if (isBlockedDirectProviderCredential(key)) {
-    p.log.error(
-      `${key} must be configured through Model Access, not MyClaw .env.`,
-    );
+    p.log.error(blockedKeyMessage(key));
     return 1;
   }
 
@@ -146,7 +147,7 @@ function runUnset(runtimeHome: string, args: string[]): number {
     return 1;
   }
   if (!isValidEnvKey(key)) {
-    p.log.error(`Invalid key \"${key}\". Use uppercase env-style keys.`);
+    p.log.error(`Invalid key "${key}". Use uppercase env-style keys.`);
     return 1;
   }
 

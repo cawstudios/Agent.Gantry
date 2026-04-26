@@ -10,6 +10,11 @@ import { runStartup } from './bootstrap/startup.js';
 import { closeRuntimeStorage } from '../infrastructure/postgres/runtime-store.js';
 import { startControlServer } from '../control/server/index.js';
 import { stopSchedulerLoop } from '../jobs/scheduler.js';
+import { MYCLAW_HOME } from '../config/index.js';
+import {
+  formatRuntimePreflightFailure,
+  validateRuntimePreflightWithStorage,
+} from '../config/preflight.js';
 
 export { escapeXml, formatMessages } from '../messaging/router.js';
 export {
@@ -17,7 +22,20 @@ export {
   _setRegisteredGroups,
 } from './bootstrap/runtime-app.js';
 
-export async function startMyClawRuntime(): Promise<void> {
+export interface StartMyClawRuntimeOptions {
+  skipPreflight?: boolean;
+}
+
+export async function startMyClawRuntime(
+  options: StartMyClawRuntimeOptions = {},
+): Promise<void> {
+  if (!options.skipPreflight) {
+    const validation = await validateRuntimePreflightWithStorage(MYCLAW_HOME);
+    if (!validation.ok && validation.failure) {
+      throw new Error(formatRuntimePreflightFailure(validation.failure));
+    }
+  }
+
   const app = getDefaultRuntimeApp();
   const channelWiring = createChannelWiring(app);
   let controlServer:

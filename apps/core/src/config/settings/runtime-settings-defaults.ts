@@ -13,6 +13,7 @@ import {
 import type {
   MemoryModelProfile,
   RuntimeCredentialBrokerSettings,
+  RuntimeAgentSettings,
   RuntimeChannelSettings,
   RuntimeMemoryLlmModels,
   RuntimeMemorySettings,
@@ -22,6 +23,7 @@ import type {
 
 export const DEFAULT_STORAGE_POSTGRES_URL_ENV = 'MYCLAW_DATABASE_URL';
 export const DEFAULT_STORAGE_POSTGRES_SCHEMA = 'myclaw';
+export const DEFAULT_ONECLI_URL = 'http://localhost:10254';
 export const DEFAULT_ONECLI_DATABASE_URL_ENV = 'ONECLI_DATABASE_URL';
 export const DEFAULT_ONECLI_POSTGRES_SCHEMA = 'onecli';
 export const DEFAULT_MEMORY_STORAGE_DIR = 'memory';
@@ -79,12 +81,20 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
       schema: DEFAULT_STORAGE_POSTGRES_SCHEMA,
     },
   };
+  const agent: RuntimeAgentSettings = {
+    defaultModel: '',
+  };
   const credentialBroker: RuntimeCredentialBrokerSettings = {
+    mode: 'onecli',
     onecli: {
+      url: DEFAULT_ONECLI_URL,
       postgres: {
         urlEnv: DEFAULT_ONECLI_DATABASE_URL_ENV,
         schema: DEFAULT_ONECLI_POSTGRES_SCHEMA,
       },
+    },
+    external: {
+      baseUrl: '',
     },
   };
   const memory: RuntimeMemorySettings = {
@@ -109,6 +119,7 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
       ]),
     ),
     storage,
+    agent,
     credentialBroker,
     memory,
   };
@@ -126,6 +137,7 @@ export type {
   SenderControlAllowlistConfig,
   RuntimeChannelSettings,
   RuntimeCredentialBrokerSettings,
+  RuntimeAgentSettings,
   RuntimeMemoryLlmModels,
   RuntimeMemorySettings,
   RuntimeSettings,

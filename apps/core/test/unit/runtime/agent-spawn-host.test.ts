@@ -67,6 +67,8 @@ async function loadModule(config: {
 
   vi.doMock('@core/config/index.js', () => ({
     ONECLI_URL: config.ONECLI_URL ?? 'http://localhost:10254',
+    ONECLI_BROKER_URL: config.ONECLI_URL ?? 'http://localhost:10254',
+    EXTERNAL_BROKER_BASE_URL: '',
     DATA_DIR: config.DATA_DIR ?? '/tmp/myclaw-test/data',
     AGENTS_DIR: config.AGENTS_DIR ?? '/tmp/myclaw-test/agents',
     MYCLAW_HOME: config.MYCLAW_HOME ?? '/tmp/myclaw-test/config',

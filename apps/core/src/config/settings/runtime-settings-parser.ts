@@ -8,6 +8,7 @@ import { parseSimpleYamlObject } from './yaml.js';
 import {
   createDefaultChannelSettings,
   DEFAULT_EMBED_MODEL,
+  DEFAULT_ONECLI_URL,
   DEFAULT_ONECLI_DATABASE_URL_ENV,
   DEFAULT_ONECLI_POSTGRES_SCHEMA,
   DEFAULT_STORAGE_POSTGRES_SCHEMA,
@@ -17,6 +18,8 @@ import {
 import type {
   EmbeddingProviderName,
   RuntimeCredentialBrokerSettings,
+  RuntimeCredentialBrokerMode,
+  RuntimeAgentSettings,
   RuntimeChannelSettings,
   RuntimeMemoryLlmModels,
   RuntimeMemorySettings,
@@ -104,15 +107,33 @@ function parsePostgresSchema(
   return value;
 }
 
+function parseCredentialBrokerMode(
+  raw: unknown,
+  fallback: RuntimeCredentialBrokerMode,
+): RuntimeCredentialBrokerMode {
+  const value = parseStringValue(raw, 'credential_broker.mode', fallback);
+  if (value === 'none' || value === 'onecli' || value === 'external') {
+    return value;
+  }
+  throw new Error(
+    'credential_broker.mode must be one of none, onecli, external',
+  );
+}
+
 function parseCredentialBrokerSettings(
   raw: unknown,
 ): RuntimeCredentialBrokerSettings {
   const defaultSettings: RuntimeCredentialBrokerSettings = {
+    mode: 'onecli',
     onecli: {
+      url: DEFAULT_ONECLI_URL,
       postgres: {
         urlEnv: DEFAULT_ONECLI_DATABASE_URL_ENV,
         schema: DEFAULT_ONECLI_POSTGRES_SCHEMA,
       },
+    },
+    external: {
+      baseUrl: '',
     },
   };
   if (raw === undefined) return defaultSettings;
@@ -121,12 +142,13 @@ function parseCredentialBrokerSettings(
   }
   const map = raw as Record<string, unknown>;
   for (const key of Object.keys(map)) {
-    if (key !== 'onecli') {
+    if (key !== 'mode' && key !== 'onecli' && key !== 'external') {
       throw new Error(
-        `credential_broker.${key} is not supported. Configure credential_broker.onecli.*.`,
+        `credential_broker.${key} is not supported. Configure credential_broker.mode, onecli.*, or external.*.`,
       );
     }
   }
+  const mode = parseCredentialBrokerMode(map.mode, defaultSettings.mode);
   const onecliRaw = map.onecli;
   if (
     onecliRaw !== undefined &&
@@ -138,9 +160,9 @@ function parseCredentialBrokerSettings(
   }
   const onecli = (onecliRaw || {}) as Record<string, unknown>;
   for (const key of Object.keys(onecli)) {
-    if (key !== 'postgres') {
+    if (key !== 'url' && key !== 'postgres') {
       throw new Error(
-        `credential_broker.onecli.${key} is not supported. Configure credential_broker.onecli.postgres.*.`,
+        `credential_broker.onecli.${key} is not supported. Configure credential_broker.onecli.url or postgres.*.`,
       );
     }
   }
@@ -161,8 +183,33 @@ function parseCredentialBrokerSettings(
       );
     }
   }
+  const externalRaw = map.external;
+  if (
+    externalRaw !== undefined &&
+    (typeof externalRaw !== 'object' ||
+      externalRaw === null ||
+      Array.isArray(externalRaw))
+  ) {
+    throw new Error('credential_broker.external must be a mapping');
+  }
+  const external = (externalRaw || {}) as Record<string, unknown>;
+  for (const key of Object.keys(external)) {
+    if (key !== 'base_url') {
+      throw new Error(
+        `credential_broker.external.${key} is not supported. Configure base_url.`,
+      );
+    }
+  }
+
   return {
+    mode,
     onecli: {
+      url:
+        onecli.url === undefined
+          ? DEFAULT_ONECLI_URL
+          : typeof onecli.url === 'string'
+            ? onecli.url.trim()
+            : parseStringValue(onecli.url, 'credential_broker.onecli.url'),
       postgres: {
         urlEnv: parseStringValue(
           postgres.url_env,
@@ -176,6 +223,42 @@ function parseCredentialBrokerSettings(
         ),
       },
     },
+    external: {
+      baseUrl:
+        external.base_url === undefined
+          ? ''
+          : typeof external.base_url === 'string'
+            ? external.base_url.trim()
+            : parseStringValue(
+                external.base_url,
+                'credential_broker.external.base_url',
+              ),
+    },
+  };
+}
+
+function parseAgentSettings(raw: unknown): RuntimeAgentSettings {
+  if (raw === undefined) {
+    return { defaultModel: '' };
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('agent must be a mapping');
+  }
+  const map = raw as Record<string, unknown>;
+  for (const key of Object.keys(map)) {
+    if (key !== 'default_model') {
+      throw new Error(
+        `agent.${key} is not supported. Configure agent.default_model.`,
+      );
+    }
+  }
+  return {
+    defaultModel:
+      map.default_model === undefined
+        ? ''
+        : typeof map.default_model === 'string'
+          ? map.default_model.trim()
+          : parseStringValue(map.default_model, 'agent.default_model'),
   };
 }
 
@@ -342,11 +425,12 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
       key !== 'version' &&
       key !== 'channels' &&
       key !== 'storage' &&
+      key !== 'agent' &&
       key !== 'credential_broker' &&
       key !== 'memory'
     ) {
       throw new Error(
-        `${key} is not supported. Supported root keys are version, channels, storage, credential_broker, and memory.`,
+        `${key} is not supported. Supported root keys are version, channels, storage, agent, credential_broker, and memory.`,
       );
     }
   }
@@ -375,6 +459,7 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
   }
 
   const storage = parseStorageSettings(root.storage);
+  const agent = parseAgentSettings(root.agent);
   const credentialBroker = parseCredentialBrokerSettings(
     root.credential_broker,
   );
@@ -383,6 +468,7 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
   return {
     channels: channelSettings,
     storage,
+    agent,
     credentialBroker,
     memory,
   };

@@ -49,6 +49,8 @@ Important constraints:
 - Remove obsolete code paths in the same change when introducing a breaking replacement.
 - Do not add test-only or local-checkout branches to production code. Keep shipped behavior deterministic for the supported install/runtime path; handle local testing differences manually in local runtime files or inside test harnesses.
 - For every change or feature implementation, own the holistic architecture, not only the literal user request. If the request omits provider boundaries, configuration ownership, onboarding, security, testing, docs, or operational impacts, identify those implications, explain the needed corrections to the user, and implement the coherent architecture rather than waiting for every detail to be enumerated.
+- Classify every new config value before implementation: non-secret configuration belongs in `settings.yaml`, runtime-owned secrets belong behind `RuntimeSecretProvider`, and agent-accessed credentials belong behind `AgentCredentialBroker`. Do not add new `.env` or process-env config keys unless they are runtime-owned secrets.
+- Wrong-lane credential/config values must fail loudly. Raw model/provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `CLAUDE_CODE_OAUTH_TOKEN` must never be accepted from MyClaw `.env` or process env; move them to the selected credential broker.
 - Every implementation task must end with a subagent review pass before marking the work complete.
 
 ## Hard Gates
