@@ -92,6 +92,13 @@
       "when": 1777029000000,
       "tag": "0012_session_resume_summaries",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777032600000,
+      "tag": "0013_channel_control_onboarding",
+      "breakpoints": true
     }
   ]
 }

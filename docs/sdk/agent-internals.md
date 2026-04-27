@@ -64,6 +64,33 @@ sequenceDiagram
 
 The SDK exposes MyClaw jobs, triggers, runs, events, and results. It does not expose raw `pg-boss` concepts. `trigger()` returns `triggerId` immediately; execution later binds a `runId`.
 
+## Channel Onboarding Flow
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant SDK
+  participant Control
+  participant Store as Postgres
+  participant Provider as Channel Provider
+
+  App->>SDK: channels.installations.create()
+  SDK->>Control: POST /v1/channel-installations
+  Control->>Store: persist non-secret config + runtimeSecretRefs
+  App->>SDK: channels.installations.discover()
+  SDK->>Control: POST /v1/channel-installations/:id/discover
+  Control->>Provider: discover conversations with runtime-owned secret
+  Control->>Store: upsert normalized conversations
+  App->>SDK: agents.bindings.enable()
+  SDK->>Control: PUT /v1/agents/:agentId/channel-bindings/:conversationId
+  Control->>Store: upsert active AgentChannelBinding
+```
+
+The control API never accepts raw Slack, Telegram, Teams, or WhatsApp tokens in
+installation payloads. Backend apps pass runtime secret references, and the host
+runtime resolves those references through `RuntimeSecretProvider`. Teams and
+WhatsApp are catalog placeholders until provider adapters exist.
+
 ## Webhook Flow
 
 ```mermaid

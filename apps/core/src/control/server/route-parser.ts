@@ -12,6 +12,22 @@ export type WebhookRoute = {
   action: 'delete' | 'test' | 'replay-dead-letter' | 'purge-dead-letter';
 };
 
+export type ChannelInstallationRoute = {
+  installationId: string;
+  action: 'get' | 'discover';
+};
+
+export type ConversationRoute = {
+  conversationId: string;
+  action: 'get' | 'threads' | 'messages';
+};
+
+export type AgentBindingRoute = {
+  agentId: string;
+  conversationId?: string;
+  action: 'list' | 'binding';
+};
+
 export function parseSessionRoute(pathname: string): SessionRoute | null {
   const baseMatch = /^\/v1\/sessions\/([^/]+)$/.exec(pathname);
   if (baseMatch) {
@@ -81,5 +97,65 @@ export function parseWebhookRoute(pathname: string): WebhookRoute | null {
   return {
     webhookId: decodeURIComponent(baseMatch[1]!),
     action: 'delete',
+  };
+}
+
+export function parseChannelInstallationRoute(
+  pathname: string,
+): ChannelInstallationRoute | null {
+  const discoverMatch = /^\/v1\/channel-installations\/([^/]+)\/discover$/.exec(
+    pathname,
+  );
+  if (discoverMatch) {
+    return {
+      installationId: decodeURIComponent(discoverMatch[1]!),
+      action: 'discover',
+    };
+  }
+  const baseMatch = /^\/v1\/channel-installations\/([^/]+)$/.exec(pathname);
+  if (!baseMatch) return null;
+  return {
+    installationId: decodeURIComponent(baseMatch[1]!),
+    action: 'get',
+  };
+}
+
+export function parseConversationRoute(
+  pathname: string,
+): ConversationRoute | null {
+  const actionMatch = /^\/v1\/conversations\/([^/]+)\/(threads|messages)$/.exec(
+    pathname,
+  );
+  if (actionMatch) {
+    return {
+      conversationId: decodeURIComponent(actionMatch[1]!),
+      action: actionMatch[2] as 'threads' | 'messages',
+    };
+  }
+  const baseMatch = /^\/v1\/conversations\/([^/]+)$/.exec(pathname);
+  if (!baseMatch) return null;
+  return {
+    conversationId: decodeURIComponent(baseMatch[1]!),
+    action: 'get',
+  };
+}
+
+export function parseAgentBindingRoute(
+  pathname: string,
+): AgentBindingRoute | null {
+  const bindingMatch =
+    /^\/v1\/agents\/([^/]+)\/channel-bindings\/([^/]+)$/.exec(pathname);
+  if (bindingMatch) {
+    return {
+      agentId: decodeURIComponent(bindingMatch[1]!),
+      conversationId: decodeURIComponent(bindingMatch[2]!),
+      action: 'binding',
+    };
+  }
+  const listMatch = /^\/v1\/agents\/([^/]+)\/channel-bindings$/.exec(pathname);
+  if (!listMatch) return null;
+  return {
+    agentId: decodeURIComponent(listMatch[1]!),
+    action: 'list',
   };
 }

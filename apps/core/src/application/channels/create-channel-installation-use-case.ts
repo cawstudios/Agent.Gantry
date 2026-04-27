@@ -12,7 +12,9 @@ export interface CreateChannelInstallationInput {
   appId: AppId;
   providerId: ChannelProviderId;
   label: string;
+  config?: Record<string, unknown>;
   runtimeSecretRefs?: string[];
+  enabled?: boolean;
 }
 
 export class CreateChannelInstallationUseCase {
@@ -31,7 +33,8 @@ export class CreateChannelInstallationUseCase {
       appId: input.appId,
       providerId: input.providerId,
       label: input.label.trim(),
-      status: 'active',
+      status: input.enabled === false ? 'disabled' : 'active',
+      config: input.config ?? {},
       runtimeSecretRefs: input.runtimeSecretRefs ?? [],
       createdAt: now,
       updatedAt: now,

@@ -50,6 +50,13 @@ export const ConversationResponseSchema = z.object({
 });
 export type ConversationResponse = z.infer<typeof ConversationResponseSchema>;
 
+export const ConversationListResponseSchema = z.object({
+  conversations: z.array(ConversationResponseSchema),
+});
+export type ConversationListResponse = z.infer<
+  typeof ConversationListResponseSchema
+>;
+
 export const ConversationThreadResponseSchema = z.object({
   id: z.string(),
   appId: z.string(),
@@ -63,4 +70,11 @@ export const ConversationThreadResponseSchema = z.object({
 });
 export type ConversationThreadResponse = z.infer<
   typeof ConversationThreadResponseSchema
+>;
+
+export const ConversationThreadListResponseSchema = z.object({
+  threads: z.array(ConversationThreadResponseSchema),
+});
+export type ConversationThreadListResponse = z.infer<
+  typeof ConversationThreadListResponseSchema
 >;

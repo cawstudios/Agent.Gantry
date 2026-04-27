@@ -95,3 +95,8 @@ export const MessageResponseSchema = z.object({
   metadata: ContractMetadataSchema.optional(),
 });
 export type MessageResponse = z.infer<typeof MessageResponseSchema>;
+
+export const MessageListResponseSchema = z.object({
+  messages: z.array(MessageResponseSchema),
+});
+export type MessageListResponse = z.infer<typeof MessageListResponseSchema>;

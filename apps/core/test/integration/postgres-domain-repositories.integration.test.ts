@@ -76,6 +76,7 @@ maybeDescribe('Postgres domain repositories', () => {
       },
       label: 'Test Slack',
       status: 'active',
+      config: { workspace: 'test' },
       runtimeSecretRefs: [],
       createdAt: now,
       updatedAt: now,
@@ -129,6 +130,39 @@ maybeDescribe('Postgres domain repositories', () => {
         externalThreadId: '1700.1',
       }),
     ).resolves.toMatchObject({ id: threadId });
+  });
+
+  it('partially updates channel installations without clobbering stored config', async () => {
+    const partialInstallationId =
+      'channel-installation:test:partial' as ChannelInstallationId;
+    await repositories.channelInstallations.saveChannelInstallation({
+      id: partialInstallationId,
+      appId,
+      providerId,
+      externalInstallationRef: {
+        kind: 'channel_installation',
+        value: 'T-PARTIAL',
+      },
+      label: 'Partial Slack',
+      status: 'active',
+      config: { workspace: 'partial', locale: 'en' },
+      runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await expect(
+      repositories.channelInstallations.updateChannelInstallation({
+        appId,
+        id: partialInstallationId,
+        patch: { label: 'Renamed Slack' },
+        updatedAt: '2026-04-27T00:00:10.000Z',
+      }),
+    ).resolves.toMatchObject({
+      label: 'Renamed Slack',
+      config: { workspace: 'partial', locale: 'en' },
+      runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+    });
   });
 
   it('inserts messages idempotently by provider redelivery key', async () => {
@@ -583,8 +617,11 @@ maybeDescribe('Postgres domain repositories', () => {
       channelInstallationId: installationId,
       conversationId,
       displayName: 'Personal Agent',
+      status: 'active',
+      triggerMode: 'always',
       requiresTrigger: false,
       isAdminBinding: false,
+      memoryScope: 'conversation',
       memorySubject: { kind: 'conversation', appId, conversationId },
       permissionPolicyIds: [DEFAULT_PERMISSION_POLICY_ID],
       createdAt: now,
@@ -599,6 +636,35 @@ maybeDescribe('Postgres domain repositories', () => {
         threadId,
       }),
     ).resolves.toBe(true);
+
+    await repositories.channelInstallations.disableAgentChannelBinding({
+      appId,
+      agentId,
+      conversationId,
+      updatedAt: '2026-04-27T00:06:00.000Z',
+    });
+
+    await expect(
+      repositories.channelInstallations.isAgentEnabledInConversation({
+        appId,
+        agentId,
+        conversationId,
+      }),
+    ).resolves.toBe(false);
+
+    await expect(
+      repositories.channelInstallations.getAgentChannelBinding({
+        appId,
+        agentId,
+        conversationId,
+      }),
+    ).resolves.toMatchObject({
+      displayName: 'Personal Agent',
+      status: 'disabled',
+      triggerMode: 'always',
+      memoryScope: 'conversation',
+      permissionPolicyIds: [DEFAULT_PERMISSION_POLICY_ID],
+    });
   });
 
   it('persists permission decisions with audit context', async () => {

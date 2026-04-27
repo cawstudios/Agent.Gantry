@@ -2,10 +2,20 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AgentResponseSchema,
+  AgentChannelBindingRequestSchema,
+  AgentChannelBindingListResponseSchema,
+  AgentChannelBindingResponseSchema,
   BROWSER_IPC_ACTIONS,
   BrowserProfileResponseSchema,
+  ChannelInstallationListResponseSchema,
+  ChannelInstallationResponseSchema,
+  ChannelProviderListResponseSchema,
   ChannelProviderResponseSchema,
   ContractMetadataSchema,
+  ConversationListResponseSchema,
+  ConversationResponseSchema,
+  ConversationThreadListResponseSchema,
+  ConversationThreadResponseSchema,
   CreateAgentRequestSchema,
   CreateJobRequestSchema,
   ExternalReferenceSchema,
@@ -15,6 +25,7 @@ import {
   MEMORY_IPC_ACTIONS,
   MemoryItemResponseSchema,
   MemorySearchRequestSchema,
+  MessageListResponseSchema,
   MessageResponseSchema,
   PageRequestSchema,
   RuntimeLimitSchema,
@@ -24,7 +35,10 @@ import {
   createPageResponseSchema,
 } from '@contracts-src/index.js';
 
-function expectInvalid(schema: { safeParse: (input: unknown) => { success: boolean } }, input: unknown) {
+function expectInvalid(
+  schema: { safeParse: (input: unknown) => { success: boolean } },
+  input: unknown,
+) {
   expect(schema.safeParse(input).success).toBe(false);
 }
 
@@ -204,11 +218,172 @@ describe('contracts package', () => {
         createdAt: iso,
       }),
     ).toMatchObject({ id: 'slack' });
+    expect(
+      ChannelProviderListResponseSchema.parse({
+        providers: [
+          {
+            id: 'teams',
+            displayName: 'Teams',
+            capabilities: ['placeholder'],
+            status: 'unavailable',
+            placeholder: true,
+            createdAt: iso,
+          },
+        ],
+      }),
+    ).toMatchObject({ providers: [{ id: 'teams' }] });
     expectInvalid(ChannelProviderResponseSchema, {
       id: 'slack',
       displayName: 'Slack',
       capabilities: ['threads'],
     });
+
+    expect(
+      ChannelInstallationResponseSchema.parse({
+        id: 'installation-1',
+        appId: 'app-1',
+        providerId: 'slack',
+        label: 'Workspace',
+        status: 'active',
+        config: { teamId: 'T123' },
+        runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+        createdAt: iso,
+        updatedAt: iso,
+      }),
+    ).toMatchObject({ providerId: 'slack' });
+    expect(
+      ChannelInstallationListResponseSchema.parse({
+        installations: [
+          {
+            id: 'installation-1',
+            appId: 'app-1',
+            providerId: 'slack',
+            label: 'Workspace',
+            status: 'active',
+            createdAt: iso,
+            updatedAt: iso,
+          },
+        ],
+      }),
+    ).toMatchObject({ installations: [{ id: 'installation-1' }] });
+    expectInvalid(ChannelInstallationResponseSchema, {
+      id: 'installation-1',
+      appId: 'app-1',
+      providerId: 'slack',
+      label: 'Workspace',
+      status: 'bad',
+      createdAt: iso,
+      updatedAt: iso,
+    });
+
+    expect(
+      AgentChannelBindingRequestSchema.parse({
+        triggerMode: 'keyword',
+        memoryScope: 'conversation',
+        permissionPolicyIds: [],
+      }),
+    ).toMatchObject({ triggerMode: 'keyword' });
+    expectInvalid(AgentChannelBindingRequestSchema, {
+      triggerMode: 'sometimes',
+    });
+    expect(
+      AgentChannelBindingResponseSchema.parse({
+        id: 'binding-1',
+        appId: 'app-1',
+        agentId: 'agent-1',
+        channelInstallationId: 'installation-1',
+        conversationId: 'conversation-1',
+        displayName: 'Engineering',
+        status: 'active',
+        triggerMode: 'always',
+        requiresTrigger: false,
+        isAdminBinding: false,
+        memoryScope: 'conversation',
+        permissionPolicyIds: [],
+        createdAt: iso,
+        updatedAt: iso,
+      }),
+    ).toMatchObject({ status: 'active', triggerMode: 'always' });
+    expect(
+      AgentChannelBindingListResponseSchema.parse({
+        bindings: [
+          {
+            id: 'binding-1',
+            appId: 'app-1',
+            agentId: 'agent-1',
+            channelInstallationId: 'installation-1',
+            conversationId: 'conversation-1',
+            displayName: 'Engineering',
+            status: 'disabled',
+            triggerMode: 'manual',
+            requiresTrigger: false,
+            isAdminBinding: false,
+            memoryScope: 'app',
+            permissionPolicyIds: ['policy-1'],
+            createdAt: iso,
+            updatedAt: iso,
+          },
+        ],
+      }),
+    ).toMatchObject({ bindings: [{ status: 'disabled' }] });
+
+    expect(
+      ConversationResponseSchema.parse({
+        id: 'conversation-1',
+        appId: 'app-1',
+        channelInstallationId: 'installation-1',
+        kind: 'channel',
+        title: 'Engineering',
+        status: 'active',
+        createdAt: iso,
+        updatedAt: iso,
+      }),
+    ).toMatchObject({ kind: 'channel' });
+    expect(
+      ConversationListResponseSchema.parse({
+        conversations: [
+          {
+            id: 'conversation-1',
+            appId: 'app-1',
+            channelInstallationId: 'installation-1',
+            kind: 'dm',
+            title: null,
+            status: 'active',
+            createdAt: iso,
+            updatedAt: iso,
+          },
+        ],
+      }),
+    ).toMatchObject({ conversations: [{ kind: 'dm' }] });
+    expect(
+      ConversationThreadResponseSchema.parse({
+        id: 'thread-1',
+        appId: 'app-1',
+        conversationId: 'conversation-1',
+        title: 'Deploy',
+        status: 'active',
+        createdAt: iso,
+        updatedAt: iso,
+      }),
+    ).toMatchObject({ id: 'thread-1' });
+    expect(
+      ConversationThreadListResponseSchema.parse({
+        threads: [
+          {
+            id: 'thread-1',
+            appId: 'app-1',
+            conversationId: 'conversation-1',
+            title: null,
+            status: 'active',
+            createdAt: iso,
+            updatedAt: iso,
+          },
+        ],
+      }),
+    ).toMatchObject({ threads: [{ id: 'thread-1' }] });
+    expect(
+      MessageListResponseSchema.parse({ messages: [message] }),
+    ).toMatchObject({ messages: [{ id: 'message-1' }] });
 
     expectInvalid(MessageResponseSchema, {
       ...message,

@@ -8,6 +8,9 @@ export type Scope =
   | 'jobs:write'
   | 'channels:read'
   | 'channels:admin'
+  | 'conversations:read'
+  | 'messages:read'
+  | 'agents:admin'
   | 'webhooks:read'
   | 'webhooks:write'
   | 'memory:read'
@@ -29,6 +32,9 @@ const ALL_SCOPES: Scope[] = [
   'jobs:write',
   'channels:read',
   'channels:admin',
+  'conversations:read',
+  'messages:read',
+  'agents:admin',
   'webhooks:read',
   'webhooks:write',
   'memory:read',

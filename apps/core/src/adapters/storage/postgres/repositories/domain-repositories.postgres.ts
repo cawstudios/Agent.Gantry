@@ -432,6 +432,17 @@ export class PostgresAgentConfigRepository implements AgentConfigRepository {
 export class PostgresChannelInstallationRepository implements ChannelInstallationRepository {
   constructor(private readonly db: CanonicalDb) {}
 
+  async listChannelInstallations(
+    appId: ChannelInstallation['appId'],
+  ): Promise<ChannelInstallation[]> {
+    const rows = await this.db
+      .select()
+      .from(pgSchema.channelInstallationsPostgres)
+      .where(eq(pgSchema.channelInstallationsPostgres.appId, appId))
+      .orderBy(asc(pgSchema.channelInstallationsPostgres.createdAt));
+    return rows.map((row) => this.installationFromRow(row));
+  }
+
   async getChannelInstallation(
     id: ChannelInstallation['id'],
   ): Promise<ChannelInstallation | null> {
@@ -442,6 +453,12 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
       .limit(1);
     const row = rows[0];
     if (!row) return null;
+    return this.installationFromRow(row);
+  }
+
+  private installationFromRow(
+    row: typeof pgSchema.channelInstallationsPostgres.$inferSelect,
+  ): ChannelInstallation {
     return {
       id: row.id,
       appId: row.appId,
@@ -452,6 +469,7 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
       ),
       label: row.label,
       status: row.status as ChannelInstallation['status'],
+      config: parseJson<Record<string, unknown>>(row.configJson, {}),
       runtimeSecretRefs: parseJsonArray(row.runtimeSecretRefsJson),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -480,6 +498,7 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
           ),
           label: installation.label,
           status: installation.status,
+          configJson: encodeJson(installation.config ?? {}),
           runtimeSecretRefsJson: encodeJson(installation.runtimeSecretRefs),
           createdAt: installation.createdAt,
           updatedAt: installation.updatedAt,
@@ -492,11 +511,75 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
             ),
             label: installation.label,
             status: installation.status,
+            configJson: encodeJson(installation.config ?? {}),
             runtimeSecretRefsJson: encodeJson(installation.runtimeSecretRefs),
             updatedAt: installation.updatedAt,
           },
         });
     });
+  }
+
+  async updateChannelInstallation(input: {
+    appId: ChannelInstallation['appId'];
+    id: ChannelInstallation['id'];
+    patch: {
+      externalInstallationRef?:
+        | ChannelInstallation['externalInstallationRef']
+        | null;
+      label?: string;
+      status?: ChannelInstallation['status'];
+      config?: ChannelInstallation['config'];
+      runtimeSecretRefs?: ChannelInstallation['runtimeSecretRefs'];
+    };
+    updatedAt: string;
+  }): Promise<ChannelInstallation | null> {
+    const set: Partial<
+      typeof pgSchema.channelInstallationsPostgres.$inferInsert
+    > = {
+      updatedAt: input.updatedAt,
+    };
+    if (input.patch.label !== undefined) set.label = input.patch.label;
+    if (input.patch.status !== undefined) set.status = input.patch.status;
+    if (input.patch.config !== undefined) {
+      set.configJson = encodeJson(input.patch.config ?? {});
+    }
+    if (input.patch.runtimeSecretRefs !== undefined) {
+      set.runtimeSecretRefsJson = encodeJson(input.patch.runtimeSecretRefs);
+    }
+    if (input.patch.externalInstallationRef !== undefined) {
+      set.externalRefJson = encodeJsonOrNull(
+        input.patch.externalInstallationRef ?? undefined,
+      );
+    }
+
+    const rows = await this.db
+      .update(pgSchema.channelInstallationsPostgres)
+      .set(set)
+      .where(
+        and(
+          eq(pgSchema.channelInstallationsPostgres.appId, input.appId),
+          eq(pgSchema.channelInstallationsPostgres.id, input.id),
+        ),
+      )
+      .returning();
+    return rows[0] ? this.installationFromRow(rows[0]) : null;
+  }
+
+  async disableChannelInstallation(input: {
+    appId: ChannelInstallation['appId'];
+    id: ChannelInstallation['id'];
+    updatedAt: string;
+  }): Promise<ChannelInstallation | null> {
+    await this.db
+      .update(pgSchema.channelInstallationsPostgres)
+      .set({ status: 'disabled', updatedAt: input.updatedAt })
+      .where(
+        and(
+          eq(pgSchema.channelInstallationsPostgres.appId, input.appId),
+          eq(pgSchema.channelInstallationsPostgres.id, input.id),
+        ),
+      );
+    return await this.getChannelInstallation(input.id);
   }
 
   async saveAgentChannelBinding(binding: AgentChannelBinding): Promise<void> {
@@ -510,9 +593,12 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
         conversationId: binding.conversationId,
         threadId: binding.threadId ?? null,
         displayName: binding.displayName,
+        status: binding.status,
+        triggerMode: binding.triggerMode,
         triggerPattern: binding.triggerPattern ?? null,
         requiresTrigger: binding.requiresTrigger,
         isAdminBinding: binding.isAdminBinding,
+        memoryScope: binding.memoryScope,
         memorySubjectJson: encodeJson(binding.memorySubject),
         workspaceSnapshotId: binding.workspaceSnapshotId ?? null,
         permissionPolicyIdsJson: encodeJson(binding.permissionPolicyIds),
@@ -523,15 +609,41 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
         target: pgSchema.agentChannelBindingsPostgres.id,
         set: {
           displayName: binding.displayName,
+          status: binding.status,
+          triggerMode: binding.triggerMode,
           triggerPattern: binding.triggerPattern ?? null,
           requiresTrigger: binding.requiresTrigger,
           isAdminBinding: binding.isAdminBinding,
+          memoryScope: binding.memoryScope,
           memorySubjectJson: encodeJson(binding.memorySubject),
           workspaceSnapshotId: binding.workspaceSnapshotId ?? null,
           permissionPolicyIdsJson: encodeJson(binding.permissionPolicyIds),
           updatedAt: binding.updatedAt,
         },
       });
+  }
+
+  async disableAgentChannelBinding(input: {
+    appId: App['id'];
+    agentId: Agent['id'];
+    conversationId: Conversation['id'];
+    threadId?: ConversationThread['id'];
+    updatedAt: string;
+  }): Promise<AgentChannelBinding | null> {
+    const b = pgSchema.agentChannelBindingsPostgres;
+    const rows = await this.db
+      .update(b)
+      .set({ status: 'disabled', updatedAt: input.updatedAt })
+      .where(
+        and(
+          eq(b.appId, input.appId),
+          eq(b.agentId, input.agentId),
+          eq(b.conversationId, input.conversationId),
+          input.threadId ? eq(b.threadId, input.threadId) : isNull(b.threadId),
+        ),
+      )
+      .returning();
+    return rows[0] ? this.bindingFromRow(rows[0]) : null;
   }
 
   async getAgentChannelBinding(input: {
@@ -571,6 +683,7 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
   }): Promise<boolean> {
     const b = await this.getAgentChannelBinding(input);
     if (!b) return false;
+    if (b.status !== 'active') return false;
     const rows = await this.db
       .select({ id: pgSchema.agentsPostgres.id })
       .from(pgSchema.agentsPostgres)
@@ -596,11 +709,19 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
 
   async listAgentChannelBindings(
     appId: App['id'],
+    agentId?: Agent['id'],
   ): Promise<AgentChannelBinding[]> {
     const rows = await this.db
       .select()
       .from(pgSchema.agentChannelBindingsPostgres)
-      .where(eq(pgSchema.agentChannelBindingsPostgres.appId, appId))
+      .where(
+        and(
+          eq(pgSchema.agentChannelBindingsPostgres.appId, appId),
+          agentId
+            ? eq(pgSchema.agentChannelBindingsPostgres.agentId, agentId)
+            : undefined,
+        ),
+      )
       .orderBy(asc(pgSchema.agentChannelBindingsPostgres.createdAt));
     return rows.map((row) => this.bindingFromRow(row));
   }
@@ -616,9 +737,16 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
       conversationId: row.conversationId,
       threadId: row.threadId ?? undefined,
       displayName: row.displayName,
+      status: (row.status ?? 'active') as AgentChannelBinding['status'],
+      triggerMode: (row.triggerMode ??
+        (row.requiresTrigger
+          ? 'keyword'
+          : 'always')) as AgentChannelBinding['triggerMode'],
       triggerPattern: row.triggerPattern ?? undefined,
       requiresTrigger: row.requiresTrigger,
       isAdminBinding: row.isAdminBinding,
+      memoryScope: (row.memoryScope ??
+        'conversation') as AgentChannelBinding['memoryScope'],
       memorySubject: parseJson<MemorySubject>(row.memorySubjectJson, {
         kind: 'conversation',
         appId: row.appId,
@@ -634,6 +762,28 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
 
 export class PostgresConversationRepository implements ConversationRepository {
   constructor(private readonly db: CanonicalDb) {}
+
+  async listConversations(input: {
+    appId: Conversation['appId'];
+    channelInstallationId?: ChannelInstallation['id'];
+  }): Promise<Conversation[]> {
+    const rows = await this.db
+      .select()
+      .from(pgSchema.conversationsPostgres)
+      .where(
+        and(
+          eq(pgSchema.conversationsPostgres.appId, input.appId),
+          input.channelInstallationId
+            ? eq(
+                pgSchema.conversationsPostgres.channelInstallationId,
+                input.channelInstallationId,
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(asc(pgSchema.conversationsPostgres.createdAt));
+    return rows.map((row) => this.conversationFromRow(row));
+  }
 
   async getConversation(id: Conversation['id']): Promise<Conversation | null> {
     const rows = await this.db
@@ -761,6 +911,19 @@ export class PostgresConversationRepository implements ConversationRepository {
           updatedAt: thread.updatedAt,
         },
       });
+  }
+
+  async listThreads(
+    conversationId: Conversation['id'],
+  ): Promise<ConversationThread[]> {
+    const rows = await this.db
+      .select()
+      .from(pgSchema.conversationThreadsPostgres)
+      .where(
+        eq(pgSchema.conversationThreadsPostgres.conversationId, conversationId),
+      )
+      .orderBy(asc(pgSchema.conversationThreadsPostgres.createdAt));
+    return rows.map((row) => this.threadFromRow(row));
   }
 
   private conversationFromRow(

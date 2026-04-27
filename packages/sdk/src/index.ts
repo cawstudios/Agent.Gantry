@@ -1,7 +1,12 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 import { URL } from 'node:url';
+import type {
+  AgentBindingInput,
+  ChannelDiscoveryInput,
+  ChannelInstallationInput,
+  ChannelInstallationPatch,
+} from './channel-types.js';
 
 export type JobKind = 'manual' | 'once' | 'recurring';
 export type ResponseMode = 'sse' | 'webhook' | 'both' | 'none';
@@ -434,6 +439,125 @@ export class MyClawClient {
       }),
   };
 
+  readonly channels = {
+    providers: {
+      list: () =>
+        this.transport.request<{ providers: unknown[] }>({
+          method: 'GET',
+          path: '/v1/channel-providers',
+        }),
+    },
+    installations: {
+      create: (input: ChannelInstallationInput) =>
+        this.transport.request<Record<string, unknown>>({
+          method: 'POST',
+          path: '/v1/channel-installations',
+          body: input,
+        }),
+      list: () =>
+        this.transport.request<{ installations: unknown[] }>({
+          method: 'GET',
+          path: '/v1/channel-installations',
+        }),
+      get: (installationId: string) =>
+        this.transport.request<Record<string, unknown>>({
+          method: 'GET',
+          path: `/v1/channel-installations/${encodeURIComponent(installationId)}`,
+        }),
+      update: (installationId: string, patch: ChannelInstallationPatch) =>
+        this.transport.request<Record<string, unknown>>({
+          method: 'PATCH',
+          path: `/v1/channel-installations/${encodeURIComponent(installationId)}`,
+          body: patch,
+        }),
+      delete: (installationId: string) =>
+        this.transport.request<{ deleted: boolean; installation?: unknown }>({
+          method: 'DELETE',
+          path: `/v1/channel-installations/${encodeURIComponent(installationId)}`,
+        }),
+      discover: (installationId: string, input: ChannelDiscoveryInput = {}) =>
+        this.transport.request<{ conversations: unknown[] }>({
+          method: 'POST',
+          path: `/v1/channel-installations/${encodeURIComponent(installationId)}/discover`,
+          body: input,
+        }),
+    },
+    conversations: {
+      list: (input: { channelInstallationId?: string } = {}) => {
+        const params = new URLSearchParams();
+        if (input.channelInstallationId) {
+          params.set('channelInstallationId', input.channelInstallationId);
+        }
+        return this.transport.request<{ conversations: unknown[] }>({
+          method: 'GET',
+          path: `/v1/conversations${params.toString() ? `?${params}` : ''}`,
+        });
+      },
+      get: (conversationId: string) =>
+        this.transport.request<Record<string, unknown>>({
+          method: 'GET',
+          path: `/v1/conversations/${encodeURIComponent(conversationId)}`,
+        }),
+      messages: (
+        conversationId: string,
+        input: { threadId?: string; after?: string; limit?: number } = {},
+      ) => {
+        const params = new URLSearchParams();
+        if (input.threadId) params.set('threadId', input.threadId);
+        if (input.after) params.set('after', input.after);
+        if (input.limit) params.set('limit', String(input.limit));
+        return this.transport.request<{ messages: unknown[] }>({
+          method: 'GET',
+          path: `/v1/conversations/${encodeURIComponent(conversationId)}/messages${params.toString() ? `?${params}` : ''}`,
+        });
+      },
+    },
+  };
+
+  readonly agents = {
+    bindings: {
+      list: (agentId: string) =>
+        this.transport.request<{ bindings: unknown[] }>({
+          method: 'GET',
+          path: `/v1/agents/${encodeURIComponent(agentId)}/channel-bindings`,
+        }),
+      enable: (
+        agentId: string,
+        conversationId: string,
+        input: AgentBindingInput = {},
+      ) =>
+        this.transport.request<Record<string, unknown>>({
+          method: 'PUT',
+          path: `/v1/agents/${encodeURIComponent(agentId)}/channel-bindings/${encodeURIComponent(conversationId)}`,
+          body: input,
+        }),
+      update: (
+        agentId: string,
+        conversationId: string,
+        patch: AgentBindingInput,
+      ) =>
+        this.transport.request<Record<string, unknown>>({
+          method: 'PATCH',
+          path: `/v1/agents/${encodeURIComponent(agentId)}/channel-bindings/${encodeURIComponent(conversationId)}`,
+          body: patch,
+        }),
+      disable: (
+        agentId: string,
+        conversationId: string,
+        input: { threadId?: string } = {},
+      ) => {
+        const params = new URLSearchParams();
+        if (input.threadId) params.set('threadId', input.threadId);
+        return this.transport.request<{ disabled: boolean; binding?: unknown }>(
+          {
+            method: 'DELETE',
+            path: `/v1/agents/${encodeURIComponent(agentId)}/channel-bindings/${encodeURIComponent(conversationId)}${params.toString() ? `?${params}` : ''}`,
+          },
+        );
+      },
+    },
+  };
+
   readonly webhooks = {
     register: (input: {
       name: string;
@@ -563,31 +687,4 @@ export function createClient(options: ClientOptions): MyClawClient {
   return new MyClawClient(options);
 }
 
-export function verifyWebhookSignature(input: {
-  secret: string;
-  timestamp: string;
-  eventId: string | number;
-  eventType: string;
-  rawBody: string;
-  signature: string;
-  toleranceMs?: number;
-  nowMs?: number;
-}): boolean {
-  const timestampMs = Number(input.timestamp);
-  const toleranceMs = input.toleranceMs ?? 5 * 60_000;
-  if (
-    !Number.isFinite(timestampMs) ||
-    (toleranceMs >= 0 &&
-      Math.abs((input.nowMs ?? Date.now()) - timestampMs) > toleranceMs)
-  ) {
-    return false;
-  }
-  const computed = createHmac('sha256', input.secret)
-    .update(
-      `${input.timestamp}.${input.eventId}.${input.eventType}.${input.rawBody}`,
-    )
-    .digest('hex');
-  const left = Buffer.from(computed);
-  const right = Buffer.from(input.signature);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
+export { verifyWebhookSignature } from './webhook-signature.js';

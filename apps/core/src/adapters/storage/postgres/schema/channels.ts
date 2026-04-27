@@ -30,6 +30,7 @@ export const channelInstallationsPostgres = pgTable(
     externalRefJson: text('external_ref_json'),
     label: text('label').notNull(),
     status: text('status').notNull().default('active'),
+    configJson: text('config_json').notNull().default('{}'),
     runtimeSecretRefsJson: text('runtime_secret_refs_json')
       .notNull()
       .default('[]'),
@@ -71,9 +72,12 @@ export const agentChannelBindingsPostgres = pgTable(
       { onDelete: 'cascade' },
     ),
     displayName: text('display_name').notNull(),
+    status: text('status').notNull().default('active'),
+    triggerMode: text('trigger_mode').notNull().default('keyword'),
     triggerPattern: text('trigger_pattern'),
     requiresTrigger: boolean('requires_trigger').notNull().default(true),
     isAdminBinding: boolean('is_admin_binding').notNull().default(false),
+    memoryScope: text('memory_scope').notNull().default('conversation'),
     memorySubjectJson: text('memory_subject_json').notNull(),
     workspaceSnapshotId: text('workspace_snapshot_id').references(
       () => workspaceSnapshotsPostgres.id,
