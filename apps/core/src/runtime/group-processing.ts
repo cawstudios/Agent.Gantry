@@ -95,7 +95,7 @@ export function createGroupProcessor(
     const sessionId =
       sessionResume?.mode === 'provider_native'
         ? sessionResume.externalSessionId
-        : deps.getSession(group.folder, sessionThreadId);
+        : undefined;
     let pendingSessionId: string | null = null;
     let pendingLatestArtifactId: string | null = null;
     const wrappedOnOutput = onOutput

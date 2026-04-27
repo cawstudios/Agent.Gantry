@@ -15,6 +15,12 @@ run. The directory contains:
 The temp directory is removed after the run unless explicit debug retention is
 enabled by the caller.
 
+The Claude Agent SDK v0.2.112 exposes `settingSources`; an empty list loads no
+filesystem settings, while `user`, `project`, and `local` opt into user
+settings, project settings, and `settings.local.json`. MyClaw uses the
+generated per-run `CLAUDE_CONFIG_DIR` as the SDK user settings root and does
+not opt into the `local` settings source for enterprise runtime.
+
 ## Durable Sources
 
 Durable state stays outside Claude runtime files:

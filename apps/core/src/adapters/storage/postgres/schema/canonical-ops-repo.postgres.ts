@@ -220,13 +220,6 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     await this.routerState.set(key, value);
   }
 
-  async getSession(
-    groupFolder: string,
-    threadId?: string | null,
-  ): Promise<string | undefined> {
-    return this.sessions.getSession(groupFolder, threadId);
-  }
-
   async setSession(
     groupFolder: string,
     sessionId: string,
@@ -347,10 +340,6 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
 
   async deleteSessionsByGroupFolder(groupFolder: string): Promise<void> {
     await this.sessions.deleteSessionsByGroupFolder(groupFolder);
-  }
-
-  async getAllSessions(): Promise<Record<string, string>> {
-    return this.sessions.getAllSessions();
   }
 
   async getRegisteredGroup(jid: string): Promise<RegisteredGroup | undefined> {

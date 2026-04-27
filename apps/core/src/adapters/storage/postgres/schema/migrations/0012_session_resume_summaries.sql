@@ -1,7 +1,6 @@
 -- Durable canonical session resume support.
 
 ALTER TABLE provider_sessions
-  ALTER COLUMN artifact_ref DROP NOT NULL,
   ADD COLUMN IF NOT EXISTS metadata_json text NOT NULL DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS agent_session_summaries (

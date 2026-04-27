@@ -30,7 +30,25 @@ describe('provider session artifact schema', () => {
     expect(schema).toContain("storageRef: text('storage_ref').notNull()");
     expect(schema).toContain("contentHash: text('content_hash').notNull()");
     expect(schema).toContain('contentText: text');
-    expect(migration).not.toContain('DROP COLUMN IF EXISTS artifact_ref');
+    expect(migration).not.toContain('artifact_ref');
+    expect(
+      fs.readFileSync(
+        path.join(
+          repoRoot,
+          'apps/core/src/adapters/storage/postgres/schema/migrations/0009_canonical_persistence_adapter_cut.sql',
+        ),
+        'utf8',
+      ),
+    ).not.toContain('artifact_ref');
+    expect(
+      fs.readFileSync(
+        path.join(
+          repoRoot,
+          'apps/core/src/adapters/storage/postgres/schema/migrations/0012_session_resume_summaries.sql',
+        ),
+        'utf8',
+      ),
+    ).not.toContain('artifact_ref');
     expect(migration).toContain(
       'CREATE TABLE IF NOT EXISTS provider_session_artifacts',
     );

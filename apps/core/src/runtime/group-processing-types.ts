@@ -43,10 +43,6 @@ export interface GroupProcessingDeps {
     ) => Promise<void>;
   };
   getGroup: (chatJid: string) => RegisteredGroup | undefined;
-  getSession: (
-    groupFolder: string,
-    threadId?: string | null,
-  ) => string | undefined;
   setSession: (
     groupFolder: string,
     sessionId: string,
@@ -57,10 +53,6 @@ export interface GroupProcessingDeps {
     },
   ) => Promise<void> | void;
   clearSession: (
-    groupFolder: string,
-    threadId?: string | null,
-  ) => Promise<void> | void;
-  clearCachedSession?: (
     groupFolder: string,
     threadId?: string | null,
   ) => Promise<void> | void;

@@ -55,15 +55,6 @@ export class CanonicalSessionOpsService {
     }
   }
 
-  async getSession(
-    groupFolder: string,
-    threadId?: string | null,
-  ): Promise<string | undefined> {
-    return this.repository.getProviderSessionId(
-      makeSessionScopeKey(groupFolder, threadId),
-    );
-  }
-
   async setSession(
     groupFolder: string,
     sessionId: string,
@@ -104,7 +95,7 @@ export class CanonicalSessionOpsService {
       threadId: input.threadId,
       scopeKey: makeSessionScopeKey(input.groupFolder, input.threadId),
     });
-    if (resume.externalSessionId) {
+    if (resume.externalSessionId && resume.latestArtifactId) {
       return { ...resume, mode: 'provider_native' };
     }
     const hydrated = await this.hydrateService?.hydrate({
@@ -143,10 +134,5 @@ export class CanonicalSessionOpsService {
 
   async deleteSessionsByGroupFolder(groupFolder: string): Promise<void> {
     await this.repository.deleteGroupFolder(groupFolder);
-  }
-
-  async getAllSessions(): Promise<Record<string, string>> {
-    const rows = await this.repository.listSessions();
-    return Object.fromEntries(rows.map((row) => [row.scopeKey, row.sessionId]));
   }
 }

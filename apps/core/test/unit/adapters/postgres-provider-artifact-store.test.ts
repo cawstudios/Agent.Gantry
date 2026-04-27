@@ -129,4 +129,56 @@ describe('PostgresProviderArtifactStore local filesystem backend', () => {
         .filter((entry) => String(entry).endsWith('.jsonl')),
     ).toHaveLength(0);
   });
+
+  it('rejects corrupt local artifact bytes by hash metadata', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-artifacts-'));
+    const { db } = fakeDb();
+    const store = new PostgresProviderArtifactStore(db, {
+      artifactRoot: root,
+      defaultStorageType: 'local-filesystem',
+    });
+    const artifact = await store.putArtifact({
+      id: 'provider-session-artifact:corrupt' as never,
+      appId: 'app:test' as never,
+      agentId: 'agent:test' as never,
+      agentSessionId: 'agent-session:test' as never,
+      providerSessionId: 'provider-session:test' as never,
+      provider: 'anthropic',
+      artifactKind: 'claude-jsonl',
+      content: '{"type":"user"}\n',
+      contentType: 'application/x-jsonlines',
+    });
+
+    fs.writeFileSync(path.join(root, artifact.storageRef), 'corrupt\n');
+
+    await expect(store.getArtifact(artifact)).rejects.toThrow(
+      /Provider artifact hash mismatch/,
+    );
+  });
+
+  it('does not return deleted artifact content', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-artifacts-'));
+    const { db } = fakeDb();
+    const store = new PostgresProviderArtifactStore(db, {
+      artifactRoot: root,
+      defaultStorageType: 'local-filesystem',
+    });
+    const artifact = await store.putArtifact({
+      id: 'provider-session-artifact:deleted' as never,
+      appId: 'app:test' as never,
+      agentId: 'agent:test' as never,
+      agentSessionId: 'agent-session:test' as never,
+      providerSessionId: 'provider-session:test' as never,
+      provider: 'anthropic',
+      artifactKind: 'claude-jsonl',
+      content: '{}\n',
+    });
+
+    await expect(
+      store.getArtifact({
+        ...artifact,
+        deletedAt: '2026-04-27T00:00:00.000Z',
+      }),
+    ).rejects.toThrow('Provider artifact not found');
+  });
 });

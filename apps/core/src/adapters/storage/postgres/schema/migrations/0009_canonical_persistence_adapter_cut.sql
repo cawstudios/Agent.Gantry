@@ -320,7 +320,6 @@ CREATE TABLE provider_sessions (
   agent_session_id text NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
   provider text NOT NULL,
   external_session_id text NOT NULL,
-  artifact_ref text NOT NULL,
   sandbox_id text REFERENCES sandbox_profiles(id),
   workspace_snapshot_id text REFERENCES workspace_snapshots(id),
   browser_profile_id text REFERENCES browser_profiles(id),

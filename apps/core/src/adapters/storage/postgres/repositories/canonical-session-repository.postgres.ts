@@ -23,25 +23,6 @@ export class PostgresCanonicalSessionRepository {
     this.graph = new PostgresCanonicalGraphRepository(db);
   }
 
-  async getProviderSessionId(scopeKey: string): Promise<string | undefined> {
-    const s = pgSchema.agentSessionsPostgres;
-    const ps = pgSchema.providerSessionsPostgres;
-    const rows = await this.db
-      .select({ id: ps.externalSessionId })
-      .from(ps)
-      .innerJoin(s, eq(s.id, ps.agentSessionId))
-      .where(
-        and(
-          eq(s.userId, scopeKey),
-          eq(ps.provider, PROVIDER),
-          eq(ps.status, 'active'),
-        ),
-      )
-      .orderBy(sql`${ps.updatedAt} DESC`)
-      .limit(1);
-    return rows[0]?.id;
-  }
-
   async getSessionResume(input: {
     groupFolder: string;
     chatJid: string;
@@ -292,24 +273,5 @@ export class PostgresCanonicalSessionRepository {
           sql`${pgSchema.agentSessionsPostgres.userId} LIKE ${`${escapeLikePattern(groupFolder)}::thread:%`} ESCAPE '\\'`,
         ),
       );
-  }
-
-  async listSessions(): Promise<
-    Array<{ scopeKey: string; sessionId: string }>
-  > {
-    const s = pgSchema.agentSessionsPostgres;
-    const ps = pgSchema.providerSessionsPostgres;
-    const rows = await this.db
-      .select({ scopeKey: s.userId, sessionId: ps.id })
-      .from(ps)
-      .innerJoin(
-        s,
-        and(eq(s.id, ps.agentSessionId), sql`${s.userId} IS NOT NULL`),
-      );
-    return rows.flatMap((row) =>
-      row.scopeKey
-        ? [{ scopeKey: row.scopeKey, sessionId: row.sessionId }]
-        : [],
-    );
   }
 }
