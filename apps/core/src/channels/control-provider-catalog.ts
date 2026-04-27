@@ -104,8 +104,7 @@ export class RuntimeSecretConversationDiscovery implements ChannelConversationDi
     const candidates = [
       ...preferred.filter((ref) => refs.includes(ref)),
       ...refs,
-      ...preferred,
-    ];
+    ].filter((ref, index, all) => all.indexOf(ref) === index);
     for (const ref of candidates) {
       const value = this.secrets.getOptionalSecret({ env: ref });
       if (value) return value;

@@ -77,6 +77,20 @@ export interface ChannelInstallationRepository {
     id: ChannelInstallationId,
   ): Promise<ChannelInstallation | null>;
   saveChannelInstallation(installation: ChannelInstallation): Promise<void>;
+  updateChannelInstallation(input: {
+    appId: AppId;
+    id: ChannelInstallationId;
+    patch: {
+      externalInstallationRef?:
+        | ChannelInstallation['externalInstallationRef']
+        | null;
+      label?: string;
+      status?: ChannelInstallation['status'];
+      config?: ChannelInstallation['config'];
+      runtimeSecretRefs?: ChannelInstallation['runtimeSecretRefs'];
+    };
+    updatedAt: string;
+  }): Promise<ChannelInstallation | null>;
   disableChannelInstallation(input: {
     appId: AppId;
     id: ChannelInstallationId;
@@ -102,7 +116,10 @@ export interface ChannelInstallationRepository {
     conversationId: ConversationId;
     threadId?: ConversationThreadId;
   }): Promise<boolean>;
-  listAgentChannelBindings(appId: AppId): Promise<AgentChannelBinding[]>;
+  listAgentChannelBindings(
+    appId: AppId,
+    agentId?: AgentId,
+  ): Promise<AgentChannelBinding[]>;
 }
 
 export interface ConversationRepository {

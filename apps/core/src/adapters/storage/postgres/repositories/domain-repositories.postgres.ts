@@ -519,6 +519,52 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
     });
   }
 
+  async updateChannelInstallation(input: {
+    appId: ChannelInstallation['appId'];
+    id: ChannelInstallation['id'];
+    patch: {
+      externalInstallationRef?:
+        | ChannelInstallation['externalInstallationRef']
+        | null;
+      label?: string;
+      status?: ChannelInstallation['status'];
+      config?: ChannelInstallation['config'];
+      runtimeSecretRefs?: ChannelInstallation['runtimeSecretRefs'];
+    };
+    updatedAt: string;
+  }): Promise<ChannelInstallation | null> {
+    const set: Partial<
+      typeof pgSchema.channelInstallationsPostgres.$inferInsert
+    > = {
+      updatedAt: input.updatedAt,
+    };
+    if (input.patch.label !== undefined) set.label = input.patch.label;
+    if (input.patch.status !== undefined) set.status = input.patch.status;
+    if (input.patch.config !== undefined) {
+      set.configJson = encodeJson(input.patch.config ?? {});
+    }
+    if (input.patch.runtimeSecretRefs !== undefined) {
+      set.runtimeSecretRefsJson = encodeJson(input.patch.runtimeSecretRefs);
+    }
+    if (input.patch.externalInstallationRef !== undefined) {
+      set.externalRefJson = encodeJsonOrNull(
+        input.patch.externalInstallationRef ?? undefined,
+      );
+    }
+
+    const rows = await this.db
+      .update(pgSchema.channelInstallationsPostgres)
+      .set(set)
+      .where(
+        and(
+          eq(pgSchema.channelInstallationsPostgres.appId, input.appId),
+          eq(pgSchema.channelInstallationsPostgres.id, input.id),
+        ),
+      )
+      .returning();
+    return rows[0] ? this.installationFromRow(rows[0]) : null;
+  }
+
   async disableChannelInstallation(input: {
     appId: ChannelInstallation['appId'];
     id: ChannelInstallation['id'];
@@ -584,15 +630,20 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
     threadId?: ConversationThread['id'];
     updatedAt: string;
   }): Promise<AgentChannelBinding | null> {
-    const existing = await this.getAgentChannelBinding(input);
-    if (!existing) return null;
-    const disabled: AgentChannelBinding = {
-      ...existing,
-      status: 'disabled',
-      updatedAt: input.updatedAt,
-    };
-    await this.saveAgentChannelBinding(disabled);
-    return disabled;
+    const b = pgSchema.agentChannelBindingsPostgres;
+    const rows = await this.db
+      .update(b)
+      .set({ status: 'disabled', updatedAt: input.updatedAt })
+      .where(
+        and(
+          eq(b.appId, input.appId),
+          eq(b.agentId, input.agentId),
+          eq(b.conversationId, input.conversationId),
+          input.threadId ? eq(b.threadId, input.threadId) : isNull(b.threadId),
+        ),
+      )
+      .returning();
+    return rows[0] ? this.bindingFromRow(rows[0]) : null;
   }
 
   async getAgentChannelBinding(input: {
@@ -658,11 +709,19 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
 
   async listAgentChannelBindings(
     appId: App['id'],
+    agentId?: Agent['id'],
   ): Promise<AgentChannelBinding[]> {
     const rows = await this.db
       .select()
       .from(pgSchema.agentChannelBindingsPostgres)
-      .where(eq(pgSchema.agentChannelBindingsPostgres.appId, appId))
+      .where(
+        and(
+          eq(pgSchema.agentChannelBindingsPostgres.appId, appId),
+          agentId
+            ? eq(pgSchema.agentChannelBindingsPostgres.agentId, agentId)
+            : undefined,
+        ),
+      )
       .orderBy(asc(pgSchema.agentChannelBindingsPostgres.createdAt));
     return rows.map((row) => this.bindingFromRow(row));
   }

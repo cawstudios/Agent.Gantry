@@ -78,6 +78,8 @@ function sendApplicationError(res: ServerResponse, error: unknown): boolean {
     case 'NOT_IMPLEMENTED':
       sendError(res, 501, 'NOT_IMPLEMENTED', error.message);
       return true;
+    default:
+      return false;
   }
 }
 

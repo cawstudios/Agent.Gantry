@@ -89,6 +89,7 @@ const domainRepositories = {
     listChannelInstallations: vi.fn(async () => []),
     getChannelInstallation: vi.fn(async () => null),
     saveChannelInstallation: vi.fn(async () => undefined),
+    updateChannelInstallation: vi.fn(async () => null),
     disableChannelInstallation: vi.fn(async () => null),
     saveAgentChannelBinding: vi.fn(async () => undefined),
     disableAgentChannelBinding: vi.fn(async () => null),
@@ -257,6 +258,9 @@ beforeEach(() => {
   );
   domainRepositories.channelInstallations.saveChannelInstallation.mockResolvedValue(
     undefined,
+  );
+  domainRepositories.channelInstallations.updateChannelInstallation.mockResolvedValue(
+    null,
   );
   domainRepositories.channelInstallations.disableChannelInstallation.mockResolvedValue(
     null,
@@ -778,6 +782,100 @@ describe('control server runtime hardening', () => {
     }
   });
 
+  it('rejects placeholder channel installation creation', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'channels-admin-token',
+        scopes: ['channels:admin'],
+        appId: 'app-one',
+      },
+    ]);
+    const handle = startControlServer({
+      app: {
+        registerGroup: vi.fn(),
+        queue: { enqueueMessageCheck: vi.fn() },
+      } as any,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/channel-installations`,
+        'channels-admin-token',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            appId: 'app-one',
+            providerId: 'teams',
+            label: 'Teams',
+          }),
+        },
+      );
+      expect(response.status).toBe(501);
+      expect(
+        domainRepositories.channelInstallations.saveChannelInstallation,
+      ).not.toHaveBeenCalled();
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('rejects discovery for disabled channel installations', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'channels-admin-token',
+        scopes: ['channels:admin'],
+        appId: 'app-one',
+      },
+    ]);
+    domainRepositories.channelInstallations.getChannelInstallation.mockResolvedValue(
+      {
+        id: 'installation-1',
+        appId: 'app-one',
+        providerId: 'slack',
+        label: 'Slack',
+        status: 'disabled',
+        config: {},
+        runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      },
+    );
+    const handle = startControlServer({
+      app: {
+        registerGroup: vi.fn(),
+        queue: { enqueueMessageCheck: vi.fn() },
+      } as any,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/channel-installations/installation-1/discover`,
+        'channels-admin-token',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ limit: 10 }),
+        },
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: 'CONFLICT' },
+      });
+      expect(
+        domainRepositories.conversations.getConversationByExternalRef,
+      ).not.toHaveBeenCalled();
+    } finally {
+      await handle.close();
+    }
+  });
+
   it('returns contract-valid channel onboarding responses', async () => {
     const port = await reservePort();
     process.env.MYCLAW_CONTROL_PORT = String(port);
@@ -811,6 +909,11 @@ describe('control server runtime hardening', () => {
       ...installation,
       status: 'disabled',
       updatedAt: '2026-04-27T00:00:01.000Z',
+    };
+    const updatedInstallation = {
+      ...installation,
+      label: 'App workspace',
+      updatedAt: '2026-04-27T00:00:02.000Z',
     };
     const conversation = {
       id: 'conversation-1',
@@ -872,6 +975,9 @@ describe('control server runtime hardening', () => {
     );
     domainRepositories.channelInstallations.getChannelInstallation.mockResolvedValue(
       installation,
+    );
+    domainRepositories.channelInstallations.updateChannelInstallation.mockResolvedValue(
+      updatedInstallation,
     );
     domainRepositories.channelInstallations.disableChannelInstallation.mockResolvedValue(
       disabledInstallation,
@@ -1265,6 +1371,84 @@ describe('control server runtime hardening', () => {
           conversationId: 'conversation-1',
         }),
       );
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('rejects invalid or missing agent channel binding updates', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'agents-admin-token',
+        scopes: ['agents:admin'],
+        appId: 'app-one',
+      },
+    ]);
+    domainRepositories.conversations.getConversation.mockResolvedValue({
+      id: 'conversation-1',
+      appId: 'app-one',
+      channelInstallationId: 'installation-1',
+      kind: 'channel',
+      title: 'engineering',
+      status: 'active',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    });
+    domainRepositories.channelInstallations.getChannelInstallation.mockResolvedValue(
+      {
+        id: 'installation-1',
+        appId: 'app-one',
+        providerId: 'slack',
+        label: 'Slack',
+        status: 'active',
+        config: {},
+        runtimeSecretRefs: [],
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      },
+    );
+    const handle = startControlServer({
+      app: {
+        registerGroup: vi.fn(),
+        queue: { enqueueMessageCheck: vi.fn() },
+      } as any,
+    });
+
+    try {
+      const missingPatch = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/agents/agent-1/channel-bindings/conversation-1`,
+        'agents-admin-token',
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ displayName: 'Engineering Bot' }),
+        },
+      );
+      expect(missingPatch.status).toBe(404);
+
+      const missingDelete = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/agents/agent-1/channel-bindings/conversation-1`,
+        'agents-admin-token',
+        { method: 'DELETE' },
+      );
+      expect(missingDelete.status).toBe(404);
+
+      const missingUserSubject = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/agents/agent-1/channel-bindings/conversation-1`,
+        'agents-admin-token',
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ memoryScope: 'user' }),
+        },
+      );
+      expect(missingUserSubject.status).toBe(400);
+      expect(
+        domainRepositories.channelInstallations.saveAgentChannelBinding,
+      ).not.toHaveBeenCalled();
     } finally {
       await handle.close();
     }

@@ -132,6 +132,39 @@ maybeDescribe('Postgres domain repositories', () => {
     ).resolves.toMatchObject({ id: threadId });
   });
 
+  it('partially updates channel installations without clobbering stored config', async () => {
+    const partialInstallationId =
+      'channel-installation:test:partial' as ChannelInstallationId;
+    await repositories.channelInstallations.saveChannelInstallation({
+      id: partialInstallationId,
+      appId,
+      providerId,
+      externalInstallationRef: {
+        kind: 'channel_installation',
+        value: 'T-PARTIAL',
+      },
+      label: 'Partial Slack',
+      status: 'active',
+      config: { workspace: 'partial', locale: 'en' },
+      runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await expect(
+      repositories.channelInstallations.updateChannelInstallation({
+        appId,
+        id: partialInstallationId,
+        patch: { label: 'Renamed Slack' },
+        updatedAt: '2026-04-27T00:00:10.000Z',
+      }),
+    ).resolves.toMatchObject({
+      label: 'Renamed Slack',
+      config: { workspace: 'partial', locale: 'en' },
+      runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+    });
+  });
+
   it('inserts messages idempotently by provider redelivery key', async () => {
     await repositories.messages.saveMessage({
       id: 'message:test:first' as MessageId,
@@ -626,9 +659,11 @@ maybeDescribe('Postgres domain repositories', () => {
         conversationId,
       }),
     ).resolves.toMatchObject({
+      displayName: 'Personal Agent',
       status: 'disabled',
       triggerMode: 'always',
       memoryScope: 'conversation',
+      permissionPolicyIds: [DEFAULT_PERMISSION_POLICY_ID],
     });
   });
 

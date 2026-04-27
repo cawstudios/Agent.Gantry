@@ -235,18 +235,18 @@ export class ChannelInstallationControlService {
     assertNoRawSecrets(input.patch.config, 'config');
     assertNoRawSecrets(input.patch.externalInstallationRef, 'externalRef');
     const existing = await this.get(input);
-    const status =
-      input.patch.enabled !== undefined
-        ? input.patch.enabled
-          ? 'active'
-          : 'disabled'
-        : (normalizeInstallationStatus(input.patch.status) ?? existing.status);
-    const updated: ChannelInstallation = {
-      ...existing,
+    const normalizedStatus = normalizeInstallationStatus(input.patch.status);
+    const patch: Parameters<
+      ChannelInstallationRepository['updateChannelInstallation']
+    >[0]['patch'] = {
       ...(input.patch.label !== undefined
         ? { label: input.patch.label.trim() }
         : {}),
-      status,
+      ...(input.patch.enabled !== undefined
+        ? { status: input.patch.enabled ? 'active' : 'disabled' }
+        : normalizedStatus !== undefined
+          ? { status: normalizedStatus }
+          : {}),
       ...(input.patch.config !== undefined
         ? { config: input.patch.config }
         : {}),
@@ -259,9 +259,16 @@ export class ChannelInstallationControlService {
       ...(input.patch.runtimeSecretRefs !== undefined
         ? { runtimeSecretRefs: input.patch.runtimeSecretRefs }
         : {}),
-      updatedAt: this.deps.clock.now(),
     };
-    await this.deps.installations.saveChannelInstallation(updated);
+    const updated = await this.deps.installations.updateChannelInstallation({
+      appId: input.appId,
+      id: existing.id,
+      patch,
+      updatedAt: this.deps.clock.now(),
+    });
+    if (!updated) {
+      throw new ApplicationError('NOT_FOUND', 'Channel installation not found');
+    }
     return updated;
   }
 
@@ -379,10 +386,10 @@ export class AgentChannelBindingControlService {
         'API key cannot access this agent',
       );
     }
-    const bindings = await this.deps.installations.listAgentChannelBindings(
+    return await this.deps.installations.listAgentChannelBindings(
       input.appId,
+      input.agentId,
     );
-    return bindings.filter((binding) => binding.agentId === input.agentId);
   }
 
   async enable(input: {
