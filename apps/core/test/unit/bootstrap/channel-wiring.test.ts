@@ -371,6 +371,53 @@ describe('createChannelWiring', () => {
     expect(outbound.sendMessage).toHaveBeenCalledWith('tg:123', '*done*');
   });
 
+  it('records outbound final messages as pending and then sent', async () => {
+    const app = makeApp();
+    const storeMessage = vi.fn(async () => {});
+    const outbound = makeChannel({
+      ownsJid: vi.fn((jid: string) => jid === 'sl:C123'),
+      sendMessage: vi.fn(async () => ({ externalMessageId: '171.123' })),
+    });
+
+    const wiring = createChannelWiring(app, {
+      channelProviders: [
+        makeProvider(
+          'slack',
+          vi.fn(() => outbound),
+        ),
+      ],
+      opsRepository: { storeMessage } as any,
+    });
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: false, slack: true }),
+    );
+
+    await wiring.sendMessage('sl:C123', 'done', {
+      messageOptions: { threadId: '1700.1' },
+    });
+
+    expect(storeMessage).toHaveBeenCalledTimes(2);
+    expect(storeMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        chat_jid: 'sl:C123',
+        content: 'done',
+        thread_id: '1700.1',
+        delivery_status: 'pending',
+        is_bot_message: true,
+      }),
+    );
+    expect(storeMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        chat_jid: 'sl:C123',
+        external_message_id: '171.123',
+        delivery_status: 'sent',
+        delivered_at: expect.any(String),
+      }),
+    );
+  });
+
   it('streams group chunks with internal tags removed but without markdown conversion', async () => {
     const app = makeApp();
     const outbound = makeChannel({
