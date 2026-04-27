@@ -155,6 +155,34 @@ describe('durable session resume use cases', () => {
     ).resolves.toMatchObject({ mode: 'db_replay' });
   });
 
+  it('falls back to DB replay when the provider session has no artifact', async () => {
+    const repos = makeRepos();
+    const session = makeSession();
+    await repos.sessionRepo.saveAgentSession(session);
+    await repos.providerRepo.saveProviderSession({
+      id: 'provider-session:test' as never,
+      appId: session.appId,
+      agentSessionId: session.id,
+      provider: 'anthropic',
+      externalSessionId: 'claude-session-1',
+      providerRef: {
+        kind: 'provider_session',
+        value: 'anthropic:claude-session-1',
+      },
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const useCase = new ResumeSessionUseCase(
+      repos.sessionRepo,
+      repos.providerRepo,
+    );
+    await expect(
+      useCase.execute({ sessionId: session.id, provider: 'anthropic' }),
+    ).resolves.toMatchObject({ mode: 'db_replay' });
+  });
+
   it('hydrates from latest summary plus recent messages', async () => {
     const repos = makeRepos();
     const session = makeSession();

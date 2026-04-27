@@ -40,9 +40,10 @@ artifact id.
 
 ## Claude Resume Flow
 
-Before Claude native resume, the Claude runtime materializer loads the latest
-`claude-jsonl` artifact for the active provider session, verifies hash and size,
-and materializes it into a temporary `CLAUDE_CONFIG_DIR`.
+Before Claude native resume, MyClaw requires an active provider session with a
+latest artifact id. The Claude runtime materializer then loads the latest
+`claude-jsonl` artifact for that provider session, verifies hash and size, and
+materializes it into a temporary `CLAUDE_CONFIG_DIR`.
 
 After the run, MyClaw captures updated Claude JSONL and session index files from
 that temporary directory, stores them through `ProviderArtifactStore`, updates
@@ -53,10 +54,11 @@ The same temp directory also contains generated `settings.json` and
 materialized `skills/`. Those files are generated compatibility inputs for
 Claude and are not provider artifacts.
 
-If no artifact exists, MyClaw uses DB replay hydration from canonical messages,
-summaries, runs, and memory. If the artifact is corrupt, native provider resume
-metadata is expired and DB replay is used. If the artifact store itself is not
-available, the run fails loudly.
+If no artifact exists, MyClaw does not pass a stale Claude session id to the
+SDK; it uses DB replay hydration from canonical messages, runs, and memory. If
+the artifact is corrupt, native provider resume metadata is expired and DB
+replay is used. If the artifact store itself is not available for a
+provider-native resume, the run fails loudly.
 
 ## Local Filesystem Backend
 

@@ -11,7 +11,6 @@ import type { SchedulerSendMessage } from './delivery.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
-  getSessions?: () => Record<string, string>;
   queue: GroupQueue;
   onProcess: (
     groupJid: string,

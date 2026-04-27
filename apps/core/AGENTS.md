@@ -14,3 +14,4 @@
 - When path-sensitive code changes, update the matching tests in `apps/core/src/**/*.test.ts` in the same change.
 - Host runner sync code must work with npm workspace hoisting and installed package layouts; do not assume `packages/agent-runner/node_modules` exists.
 - Files under `apps/core/src/app/bootstrap/` own composition and wiring only; runtime behavior must live in `runtime/`, `jobs/`, `session/`, `platform/`, `messaging/`, `memory/`, or infrastructure modules.
+- Keep the architecture simple, do not over complicate

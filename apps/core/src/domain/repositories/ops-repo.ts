@@ -112,10 +112,6 @@ export interface OpsRepository {
   ): Promise<JobEvent[]>;
   getRouterState(key: string): Promise<string | undefined>;
   setRouterState(key: string, value: string): Promise<void>;
-  getSession(
-    groupFolder: string,
-    threadId?: string | null,
-  ): Promise<string | undefined>;
   getSessionResume?(input: {
     groupFolder: string;
     chatJid: string;
@@ -159,7 +155,6 @@ export interface OpsRepository {
   }): Promise<void>;
   deleteSession(groupFolder: string, threadId?: string | null): Promise<void>;
   deleteSessionsByGroupFolder(groupFolder: string): Promise<void>;
-  getAllSessions(): Promise<Record<string, string>>;
   getRegisteredGroup(jid: string): Promise<RegisteredGroup | undefined>;
   setRegisteredGroup(jid: string, group: RegisteredGroup): Promise<void>;
   deleteRegisteredGroup(jid: string): Promise<void>;

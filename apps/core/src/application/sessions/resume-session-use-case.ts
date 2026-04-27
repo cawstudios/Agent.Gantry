@@ -24,7 +24,8 @@ export class ResumeSessionUseCase {
     if (
       providerSession &&
       providerSession.status === 'active' &&
-      providerSession.provider === input.provider
+      providerSession.provider === input.provider &&
+      providerSession.latestArtifactId
     ) {
       return { mode: 'provider_native' as const, session, providerSession };
     }

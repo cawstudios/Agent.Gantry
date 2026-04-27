@@ -62,7 +62,6 @@ export async function expireStaleRuntimeSession(input: {
     agentSessionId: input.agentSessionId,
     externalSessionId: input.sessionId,
   });
-  await input.deps.clearCachedSession?.(input.group.folder, input.threadId);
 }
 
 export async function archiveCurrentRuntimeSession(input: {
@@ -73,15 +72,17 @@ export async function archiveCurrentRuntimeSession(input: {
   threadId: string | null;
   cause?: SessionArchiveCause;
 }): Promise<void> {
-  const sessionId = input.deps.getSession(input.group.folder, input.threadId);
-  if (!sessionId) return;
   const providerArtifactStore = input.deps.getProviderArtifactStore?.();
   const resume = await input.ops.getSessionResume?.({
     groupFolder: input.group.folder,
     chatJid: input.chatJid,
     threadId: input.threadId,
   });
-  if (providerArtifactStore && resume?.providerSessionId) {
+  if (
+    providerArtifactStore &&
+    resume?.providerSessionId &&
+    resume.externalSessionId
+  ) {
     await archiveProviderSessionTranscript({
       providerArtifactStore,
       appId: resume.appId,
@@ -89,14 +90,14 @@ export async function archiveCurrentRuntimeSession(input: {
       agentSessionId: resume.agentSessionId,
       providerSessionId: resume.providerSessionId,
       provider: resume.provider,
-      sessionId,
+      sessionId: resume.externalSessionId,
       assistantName: ASSISTANT_NAME,
       cause: input.cause ?? 'new-session',
     });
     return;
   }
   logger.info(
-    { group: input.group.name, sessionId },
+    { group: input.group.name, providerSessionId: resume?.providerSessionId },
     'Skipped session archive because no provider artifact is available',
   );
 }
@@ -132,8 +133,14 @@ export function buildProviderArtifactRunOptions(input: {
             agentId: input.sessionResume.agentId,
             agentSessionId: input.sessionResume.agentSessionId,
             provider: input.sessionResume.provider,
-            providerSessionId: input.sessionResume.providerSessionId,
-            latestArtifactId: input.sessionResume.latestArtifactId,
+            providerSessionId:
+              input.sessionResume.mode === 'provider_native'
+                ? input.sessionResume.providerSessionId
+                : undefined,
+            latestArtifactId:
+              input.sessionResume.mode === 'provider_native'
+                ? input.sessionResume.latestArtifactId
+                : undefined,
           },
         }
       : {};

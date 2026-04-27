@@ -22,7 +22,6 @@ import {
   setGroupThinkingOverride as setGroupThinkingOverrideEntry,
 } from '../../runtime/group-registry.js';
 import type { OpsRepository } from '../../domain/repositories/ops-repo.js';
-import { makeSessionScopeKey } from '../../domain/repositories/ops-repo.js';
 import {
   getRuntimeOpsRepository,
   getRuntimeProviderArtifactStore,
@@ -76,7 +75,6 @@ export interface RuntimeAppOptions {
 
 export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   let lastTimestamp = '';
-  let sessions: Record<string, string> = {};
   let registeredGroups: Record<string, RegisteredGroup> = {};
   let lastAgentTimestamp: Record<string, string> = {};
   let stateSaveInFlight: Promise<void> | undefined;
@@ -168,17 +166,12 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
 
   async function loadState(): Promise<void> {
     const repository = ops();
-    const [
-      loadedLastTimestamp,
-      agentTs,
-      loadedSessions,
-      loadedRegisteredGroups,
-    ] = await Promise.all([
-      repository.getRouterState('last_timestamp'),
-      repository.getRouterState('last_agent_timestamp'),
-      repository.getAllSessions(),
-      repository.getAllRegisteredGroups(),
-    ]);
+    const [loadedLastTimestamp, agentTs, loadedRegisteredGroups] =
+      await Promise.all([
+        repository.getRouterState('last_timestamp'),
+        repository.getRouterState('last_agent_timestamp'),
+        repository.getAllRegisteredGroups(),
+      ]);
     lastTimestamp = loadedLastTimestamp || '';
     try {
       lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
@@ -186,7 +179,6 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       logger.warn('Corrupted last_agent_timestamp in DB, resetting');
       lastAgentTimestamp = {};
     }
-    sessions = loadedSessions;
     registeredGroups = loadedRegisteredGroups;
     logger.info(
       { groupCount: Object.keys(registeredGroups).length },
@@ -308,7 +300,6 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     const group = registeredGroups[chatJid];
     if (!group) return;
     await ops().deleteSession(group.folder, threadId);
-    delete sessions[makeSessionScopeKey(group.folder, threadId)];
   }
 
   const groupProcessor = createGroupProcessor({
@@ -327,18 +318,11 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
         channelRuntime.sendProgressUpdate(chatJid, text, options),
     },
     getGroup: (chatJid) => registeredGroups[chatJid],
-    getSession: (groupFolder, threadId) =>
-      sessions[makeSessionScopeKey(groupFolder, threadId)],
     setSession: async (groupFolder, sessionId, threadId, metadata) => {
       await ops().setSession(groupFolder, sessionId, threadId, metadata);
-      sessions[makeSessionScopeKey(groupFolder, threadId)] = sessionId;
     },
     clearSession: async (groupFolder, threadId) => {
       await ops().deleteSession(groupFolder, threadId);
-      delete sessions[makeSessionScopeKey(groupFolder, threadId)];
-    },
-    clearCachedSession: (groupFolder, threadId) => {
-      delete sessions[makeSessionScopeKey(groupFolder, threadId)];
     },
     getCursor: getOrRecoverCursor,
     setCursor: (chatJid, timestamp) => {
