@@ -84,10 +84,10 @@ vi.mock('@core/runtime/agent-spawn.js', () => ({
   writeGroupsSnapshot: (...args: unknown[]) => mockWriteGroupsSnapshot(...args),
 }));
 
-const mockArchiveSessionTranscript = vi.fn();
+const mockArchiveProviderSessionTranscript = vi.fn();
 vi.mock('@core/session/session-transcript-archive.js', () => ({
-  archiveSessionTranscript: (...args: unknown[]) =>
-    mockArchiveSessionTranscript(...args),
+  archiveProviderSessionTranscript: (...args: unknown[]) =>
+    mockArchiveProviderSessionTranscript(...args),
 }));
 
 const mockHandleSessionCommand = vi.fn();
@@ -779,13 +779,7 @@ describe('createGroupProcessor', () => {
 
       expect(deps.clearSession).not.toHaveBeenCalled();
       expect(deps.clearCachedSession).toHaveBeenCalledWith('test-group', null);
-      expect(mockArchiveSessionTranscript).toHaveBeenCalledWith(
-        expect.objectContaining({
-          groupFolder: 'test-group',
-          sessionId: 'old-session-id',
-          cause: 'stale-session',
-        }),
-      );
+      expect(mockArchiveProviderSessionTranscript).not.toHaveBeenCalled();
     });
 
     it('clears only cached session on ENOENT .jsonl error pattern', async () => {
@@ -876,7 +870,7 @@ describe('createGroupProcessor', () => {
 
       expect(deps.clearSession).not.toHaveBeenCalled();
       expect(deps.clearCachedSession).not.toHaveBeenCalled();
-      expect(mockArchiveSessionTranscript).not.toHaveBeenCalled();
+      expect(mockArchiveProviderSessionTranscript).not.toHaveBeenCalled();
     });
 
     it('does NOT clear session when there is no existing session', async () => {
@@ -914,15 +908,20 @@ describe('createGroupProcessor', () => {
       const group = makeGroup({ isMain: true });
       const messages = [makeMessage()];
       const { deps } = setupHappyPath({ group, messages });
+      (deps as any).getProviderArtifactStore = vi.fn().mockReturnValue({});
       const getSessionResume = vi
         .fn()
         .mockResolvedValueOnce({
+          appId: 'app:test',
+          agentId: 'agent:test',
           agentSessionId: 'agent-session:1',
           providerSessionId: 'provider-session:1',
           externalSessionId: 'expired-native-session',
           mode: 'provider_native',
         })
         .mockResolvedValueOnce({
+          appId: 'app:test',
+          agentId: 'agent:test',
           agentSessionId: 'agent-session:1',
           mode: 'db_replay',
           hydratedContextBlock: '<db replay context>',
@@ -1001,6 +1000,7 @@ describe('createGroupProcessor', () => {
         'test-group',
         'new-sess-123',
         null,
+        { chatJid: 'group1@g.us' },
       );
     });
 
@@ -1033,6 +1033,7 @@ describe('createGroupProcessor', () => {
         'test-group',
         'streamed-sess',
         null,
+        { chatJid: 'group1@g.us' },
       );
     });
   });
@@ -1790,12 +1791,26 @@ describe('createGroupProcessor', () => {
       (deps.getSession as ReturnType<typeof vi.fn>).mockReturnValue(
         'sess-to-archive',
       );
+      const providerArtifactStore = {};
+      (deps as any).getProviderArtifactStore = vi
+        .fn()
+        .mockReturnValue(providerArtifactStore);
+      (deps.opsRepository as any).getSessionResume = vi.fn().mockResolvedValue({
+        appId: 'app:test',
+        agentId: 'agent:test',
+        agentSessionId: 'agent-session:test',
+        providerSessionId: 'provider-session:test',
+      });
 
       await archiveCurrentSession();
 
-      expect(mockArchiveSessionTranscript).toHaveBeenCalledWith(
+      expect(mockArchiveProviderSessionTranscript).toHaveBeenCalledWith(
         expect.objectContaining({
-          groupFolder: 'grp-folder',
+          providerArtifactStore,
+          appId: 'app:test',
+          agentId: 'agent:test',
+          agentSessionId: 'agent-session:test',
+          providerSessionId: 'provider-session:test',
           sessionId: 'sess-to-archive',
           assistantName: 'Andy',
           cause: 'new-session',
@@ -1811,7 +1826,7 @@ describe('createGroupProcessor', () => {
 
       await archiveCurrentSession();
 
-      expect(mockArchiveSessionTranscript).not.toHaveBeenCalled();
+      expect(mockArchiveProviderSessionTranscript).not.toHaveBeenCalled();
     });
 
     it('clearCurrentSession clears session and deletes from DB', async () => {

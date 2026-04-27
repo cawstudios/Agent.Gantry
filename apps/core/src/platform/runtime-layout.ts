@@ -1,8 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 
-import { ensureRuntimeClaudeFiles } from './claude-runtime-files.js';
-
 export interface RuntimeLayoutPaths {
   runtimeHome: string;
   storeDir: string;
@@ -39,5 +37,4 @@ export function ensureRuntimeLayoutDirectories(runtimeHome: string): void {
       // Best effort: some filesystems do not support POSIX modes.
     }
   }
-  ensureRuntimeClaudeFiles(paths.runtimeHome);
 }

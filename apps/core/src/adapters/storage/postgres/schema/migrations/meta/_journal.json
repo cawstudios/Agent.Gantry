@@ -99,6 +99,13 @@
       "when": 1777032600000,
       "tag": "0013_channel_control_onboarding",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777036200000,
+      "tag": "0014_provider_session_artifacts",
+      "breakpoints": true
     }
   ]
 }

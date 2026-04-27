@@ -254,6 +254,103 @@ class SelfImprovementHarnessTests(unittest.TestCase):
             payload["warnings"],
         )
 
+    def test_completion_check_warns_for_direct_durable_provider_jsonl_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, capture_output=True, text=True, check=True)
+            target = root / "apps" / "core" / "src" / "runtime" / "bad.ts"
+            target.parent.mkdir(parents=True)
+            target.write_text(
+                "const p = path.join(DATA_DIR, 'sessions', group, '.claude', 'projects', `${id}.jsonl`);\n"
+            )
+            script = root / ".codex" / "scripts" / "check_task_completion.py"
+            script.parent.mkdir(parents=True)
+            script.write_text(CHECK_SCRIPT.read_text())
+
+            result = run_script(
+                [
+                    str(script),
+                    "--no-architecture",
+                    "--json",
+                    "--changed-file",
+                    "apps/core/src/runtime/bad.ts",
+                ],
+                cwd=root,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertTrue(
+                any(
+                    warning.startswith("Direct durable Claude/provider JSONL paths changed")
+                    for warning in payload["warnings"]
+                )
+            )
+
+    def test_completion_check_warns_for_durable_claude_settings_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, capture_output=True, text=True, check=True)
+            target = root / "apps" / "core" / "src" / "runtime" / "bad.ts"
+            target.parent.mkdir(parents=True)
+            target.write_text(
+                "const p = path.join(MYCLAW_HOME, '.claude', 'settings.json');\n"
+            )
+            script = root / ".codex" / "scripts" / "check_task_completion.py"
+            script.parent.mkdir(parents=True)
+            script.write_text(CHECK_SCRIPT.read_text())
+
+            result = run_script(
+                [
+                    str(script),
+                    "--no-architecture",
+                    "--json",
+                    "--changed-file",
+                    "apps/core/src/runtime/bad.ts",
+                ],
+                cwd=root,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertTrue(
+                any(
+                    warning.startswith("Direct durable Claude settings/skills paths changed")
+                    for warning in payload["warnings"]
+                )
+            )
+
+    def test_completion_check_warns_for_unowned_claude_config_dir_setters(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, capture_output=True, text=True, check=True)
+            target = root / "apps" / "core" / "src" / "runtime" / "bad.ts"
+            target.parent.mkdir(parents=True)
+            target.write_text("const env = { CLAUDE_CONFIG_DIR: '/tmp/shared' };\n")
+            script = root / ".codex" / "scripts" / "check_task_completion.py"
+            script.parent.mkdir(parents=True)
+            script.write_text(CHECK_SCRIPT.read_text())
+
+            result = run_script(
+                [
+                    str(script),
+                    "--no-architecture",
+                    "--json",
+                    "--changed-file",
+                    "apps/core/src/runtime/bad.ts",
+                ],
+                cwd=root,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertTrue(
+                any(
+                    warning.startswith("CLAUDE_CONFIG_DIR ownership changed")
+                    for warning in payload["warnings"]
+                )
+            )
+
     def test_completion_check_runs_architecture_check_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

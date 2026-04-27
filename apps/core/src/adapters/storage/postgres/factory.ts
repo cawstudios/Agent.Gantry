@@ -7,12 +7,15 @@ import {
   type PostgresDomainRepositoryBundle,
 } from './repositories/domain-repositories.postgres.js';
 import {
+  ARTIFACTS_DIR,
   STORAGE_POSTGRES_SCHEMA,
   STORAGE_POSTGRES_URL,
   STORAGE_POSTGRES_URL_ENV,
   getRuntimeSettingsForConfig,
 } from '../../../config/index.js';
+import { PostgresProviderArtifactStore } from '../../artifacts/postgres/postgres-provider-artifact-store.js';
 import type { OpsRepository } from '../../../domain/repositories/ops-repo.js';
+import type { ProviderArtifactStore } from '../../../domain/ports/provider-artifact-store.js';
 import { PostgresCanonicalOpsRepository } from './schema/canonical-ops-repo.postgres.js';
 import { PostgresControlPlaneRepository } from './schema/control-plane-repo.postgres.js';
 import type { PostgresStorageService } from './storage-service.js';
@@ -22,6 +25,7 @@ export interface StorageRuntime {
   ops: OpsRepository;
   control: PostgresControlPlaneRepository;
   repositories: PostgresDomainRepositoryBundle;
+  providerArtifacts: ProviderArtifactStore;
 }
 
 export function resolveStorageConfigFromRuntime(): ResolvedStorageConfig {
@@ -44,10 +48,15 @@ export function createStorageRuntime(
   );
   const control = new PostgresControlPlaneRepository(service.pool);
   const repositories = createPostgresDomainRepositories(service.db);
+  const providerArtifacts = new PostgresProviderArtifactStore(service.db, {
+    artifactRoot: ARTIFACTS_DIR,
+    defaultStorageType: 'local-filesystem',
+  });
   return {
     service,
     ops,
     control,
     repositories,
+    providerArtifacts,
   };
 }

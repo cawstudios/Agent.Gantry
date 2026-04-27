@@ -8,6 +8,7 @@ import type {
 import type { JobId } from '../jobs/jobs.js';
 import type { BrandedId, ExternalRef } from '../../shared/ids/branded-id.js';
 import type { IsoTimestamp } from '../../shared/time/primitives.js';
+import type { ProviderSessionArtifactId } from './provider-session-artifact.js';
 
 export type AgentSessionId = BrandedId<'AgentSessionId'>;
 export type ProviderSessionId = BrandedId<'ProviderSessionId'>;
@@ -34,7 +35,7 @@ export interface ProviderSession {
   agentSessionId: AgentSessionId;
   provider: string;
   externalSessionId: string;
-  artifactRef?: string;
+  latestArtifactId?: ProviderSessionArtifactId;
   providerRef: ExternalRef<'provider_session'>;
   metadata?: Record<string, unknown>;
   status: 'active' | 'expired' | 'reset';

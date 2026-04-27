@@ -405,7 +405,7 @@ describe('agent-spawn timeout behavior', () => {
     }
   });
 
-  it('points Claude SDK settings at the runtime config directory', async () => {
+  it('points Claude SDK session files at a temporary config directory', async () => {
     const resultPromise = spawnAgent(testGroup, testInput, () => {});
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
@@ -416,7 +416,8 @@ describe('agent-spawn timeout behavior', () => {
       string,
       string
     >;
-    expect(env.CLAUDE_CONFIG_DIR).toBe('/tmp/myclaw-config/.claude');
+    expect(env.CLAUDE_CONFIG_DIR).toContain('myclaw-claude-config-');
+    expect(env.CLAUDE_CONFIG_DIR).not.toBe('/tmp/myclaw-config/.claude');
   });
 
   it('continues without custom system prompt when compileSystemPrompt throws (line 70)', async () => {

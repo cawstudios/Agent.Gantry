@@ -21,8 +21,6 @@ import {
 import {
   ensureGroupIpcLayout,
   getHostAgentRunnerDistDir,
-  ensureSharedSessionSettings,
-  syncGroupSkills,
 } from './agent-spawn-layout.js';
 import { HostRuntimeContext } from './agent-spawn-types.js';
 
@@ -90,9 +88,6 @@ export function prepareHostRuntimeContext(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  // Shared .claude/ under runtime home for skills, settings, plugins.
-  ensureSharedSessionSettings();
-  syncGroupSkills();
   const runnerDistDir = getHostAgentRunnerDistDir();
 
   const groupIpcDir = resolveGroupIpcPath(group.folder);

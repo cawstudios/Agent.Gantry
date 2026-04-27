@@ -259,8 +259,7 @@ export async function runMemoryHookCommand(
     const sessionId = resolveSessionId(payload, env);
     const transcriptPath = resolveTranscriptPath(
       payload,
-      runtimeHome,
-      groupFolder,
+      env.CLAUDE_CONFIG_DIR,
       sessionId,
     );
     if (!transcriptPath) {

@@ -10,6 +10,7 @@ import type {
 import type { OpsRepository } from '../domain/repositories/ops-repo.js';
 import type { AvailableGroup, spawnAgent } from './agent-spawn.js';
 import type { AgentCredentialBroker } from '../domain/ports/agent-credential-broker.js';
+import type { ProviderArtifactStore } from '../domain/ports/provider-artifact-store.js';
 
 export interface GroupProcessor {
   processGroupMessages: (
@@ -52,7 +53,7 @@ export interface GroupProcessingDeps {
     threadId?: string | null,
     metadata?: {
       chatJid?: string;
-      artifactRef?: string | null;
+      latestArtifactId?: string | null;
     },
   ) => Promise<void> | void;
   clearSession: (
@@ -91,6 +92,7 @@ export interface GroupProcessingDeps {
   };
   runAgent?: typeof spawnAgent;
   getCredentialBroker?: () => Promise<AgentCredentialBroker | undefined>;
+  getProviderArtifactStore?: () => ProviderArtifactStore | undefined;
   opsRepository?: OpsRepository;
   getOpsRepository?: () => OpsRepository;
 }

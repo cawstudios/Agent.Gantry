@@ -119,7 +119,7 @@ describe('durable session resume use cases', () => {
       agentSessionId: session.id,
       provider: 'anthropic',
       externalSessionId: 'claude-session-1',
-      artifactRef: '/tmp/claude-session-1.jsonl',
+      latestArtifactId: 'provider-session-artifact:test' as never,
       providerRef: {
         kind: 'provider_session',
         value: 'anthropic:claude-session-1',

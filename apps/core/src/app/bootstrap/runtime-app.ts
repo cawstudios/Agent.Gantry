@@ -23,7 +23,10 @@ import {
 } from '../../runtime/group-registry.js';
 import type { OpsRepository } from '../../domain/repositories/ops-repo.js';
 import { makeSessionScopeKey } from '../../domain/repositories/ops-repo.js';
-import { getRuntimeOpsRepository } from '../../adapters/storage/postgres/runtime-store.js';
+import {
+  getRuntimeOpsRepository,
+  getRuntimeProviderArtifactStore,
+} from '../../adapters/storage/postgres/runtime-store.js';
 
 export interface RuntimeApp {
   queue: GroupQueue;
@@ -67,6 +70,7 @@ export interface RuntimeAppOptions {
   }) => Promise<{ created?: boolean } | undefined>;
   queue?: GroupQueue;
   runAgent?: GroupProcessingDeps['runAgent'];
+  providerArtifactStore?: GroupProcessingDeps['getProviderArtifactStore'];
   opsRepository?: OpsRepository;
 }
 
@@ -370,6 +374,8 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     },
     runAgent: options.runAgent,
     getCredentialBroker,
+    getProviderArtifactStore:
+      options.providerArtifactStore ?? getRuntimeProviderArtifactStore,
   });
 
   return {

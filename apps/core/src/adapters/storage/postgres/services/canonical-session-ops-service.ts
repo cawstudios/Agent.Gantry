@@ -68,7 +68,10 @@ export class CanonicalSessionOpsService {
     groupFolder: string,
     sessionId: string,
     threadId?: string | null,
-    metadata: { chatJid?: string; artifactRef?: string | null } = {},
+    metadata: {
+      chatJid?: string;
+      latestArtifactId?: string | null;
+    } = {},
   ): Promise<void> {
     await this.repository.setProviderSession({
       groupFolder,
@@ -76,7 +79,7 @@ export class CanonicalSessionOpsService {
       scopeKey: makeSessionScopeKey(groupFolder, threadId),
       chatJid: metadata.chatJid,
       threadId,
-      artifactRef: metadata.artifactRef,
+      latestArtifactId: metadata.latestArtifactId,
     });
   }
 
@@ -85,10 +88,14 @@ export class CanonicalSessionOpsService {
     chatJid: string;
     threadId?: string | null;
   }): Promise<{
+    appId: string;
+    agentId: string;
     agentSessionId: string;
     mode: 'provider_native' | 'db_replay';
+    provider?: string;
     providerSessionId?: string;
     externalSessionId?: string;
+    latestArtifactId?: string;
     hydratedContextBlock?: string;
   }> {
     const resume = await this.repository.getSessionResume({

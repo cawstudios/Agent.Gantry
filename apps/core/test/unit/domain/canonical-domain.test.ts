@@ -158,7 +158,7 @@ describe('canonical Postgres persistence cut', () => {
     expect(schema).toContain(
       "externalSessionId: text('external_session_id').notNull()",
     );
-    expect(schema).toContain("artifactRef: text('artifact_ref')");
+    expect(schema).toContain("latestArtifactId: text('latest_artifact_id')");
     expect(schema).toContain("metadataJson: text('metadata_json')");
     expect(schema).toContain('agentSessionSummariesPostgres');
     expect(repository).toContain('latestProviderSessionId: input.sessionId');

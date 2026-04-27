@@ -13,10 +13,8 @@ import {
 import { logger } from '../infrastructure/logging/logger.js';
 import {
   MessageSendOptions,
-  NewMessage,
   ProgressUpdateOptions,
   RegisteredGroup,
-  StreamingChunkOptions,
 } from '../domain/types.js';
 import {
   formatMessages,
@@ -29,11 +27,12 @@ import {
   loadSenderAllowlist,
 } from '../platform/sender-allowlist.js';
 import { AgentOutput, spawnAgent } from './agent-spawn.js';
-import { archiveSessionTranscript } from '../session/session-transcript-archive.js';
 import { handleSessionCommand } from '../session/session-commands.js';
 import { createInjectedMemoryContextBlock } from './memory-context.js';
-import type { GroupProcessingDeps } from './group-processing-types.js';
-import type { GroupProcessor } from './group-processing-types.js';
+import type {
+  GroupProcessingDeps,
+  GroupProcessor,
+} from './group-processing-types.js';
 import {
   getGroupMemoryStatus,
   saveGroupProcedureMemory,
@@ -41,6 +40,8 @@ import {
 import { runDreamingForGroup } from './memory-dreaming-runner.js';
 import { sendWithPartialDeliveryGuard } from './partial-delivery.js';
 import {
+  archiveCurrentRuntimeSession,
+  buildProviderArtifactRunOptions,
   completeFailedRuntimeSessionRun,
   completeSuccessfulRuntimeSessionRun,
   expireStaleRuntimeSession,
@@ -57,10 +58,6 @@ const NO_OUTPUT_WARNING_INTERVAL_MS = 180_000;
 const NO_VISIBLE_OUTPUT_FALLBACK_MESSAGE =
   'I finished that run but did not generate a user-visible reply. Please send your message again.';
 let streamingGenerationCounter = 0;
-function nextStreamingGeneration(): number {
-  streamingGenerationCounter += 1;
-  return streamingGenerationCounter;
-}
 
 export function createGroupProcessor(
   deps: GroupProcessingDeps,
@@ -73,7 +70,6 @@ export function createGroupProcessor(
     }
     return repository;
   };
-
   async function runAgent(
     group: RegisteredGroup,
     prompt: string,
@@ -100,22 +96,19 @@ export function createGroupProcessor(
       sessionResume?.mode === 'provider_native'
         ? sessionResume.externalSessionId
         : deps.getSession(group.folder, sessionThreadId);
-
     let pendingSessionId: string | null = null;
-    let pendingArtifactRef: string | null = null;
-
+    let pendingLatestArtifactId: string | null = null;
     const wrappedOnOutput = onOutput
       ? async (output: AgentOutput) => {
           if (output.status !== 'error' && output.newSessionId) {
             pendingSessionId = output.newSessionId;
           }
-          if (output.status !== 'error' && output.providerArtifactRef) {
-            pendingArtifactRef = output.providerArtifactRef;
+          if (output.status !== 'error' && output.providerArtifactId) {
+            pendingLatestArtifactId = output.providerArtifactId;
           }
           await onOutput(output);
         }
       : undefined;
-
     const context = await createInjectedMemoryContextBlock({
       groupFolder: group.folder,
       chatJid,
@@ -138,6 +131,13 @@ export function createGroupProcessor(
       : undefined;
     try {
       const credentialBroker = await deps.getCredentialBroker?.();
+      const providerArtifactStore = deps.getProviderArtifactStore?.();
+      const runOptions = buildProviderArtifactRunOptions({
+        timeoutMs: options?.timeoutMs,
+        credentialBroker,
+        providerArtifactStore,
+        sessionResume,
+      });
       const invokeAgent = (input: {
         sessionId?: string;
         memoryContextBlock?: string;
@@ -165,12 +165,7 @@ export function createGroupProcessor(
               options?.memoryContext?.threadId,
             ),
           wrappedOnOutput,
-          options?.timeoutMs || credentialBroker
-            ? {
-                ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
-                ...(credentialBroker ? { credentialBroker } : {}),
-              }
-            : undefined,
+          runOptions,
         );
       let output = await invokeAgent({
         sessionId,
@@ -191,13 +186,17 @@ export function createGroupProcessor(
             ops: ops(),
             sessionId: staleSessionId,
             providerSessionId: sessionResume?.providerSessionId,
+            provider: sessionResume?.provider,
             agentSessionId: sessionResume?.agentSessionId,
+            appId: sessionResume?.appId,
+            agentId: sessionResume?.agentId,
+            providerArtifactStore,
             threadId: sessionThreadId,
             error: output.error,
           });
           if (sessionResume?.mode === 'provider_native') {
             pendingSessionId = null;
-            pendingArtifactRef = null;
+            pendingLatestArtifactId = null;
             const replayResume = await ops().getSessionResume?.({
               groupFolder: group.folder,
               chatJid,
@@ -233,8 +232,8 @@ export function createGroupProcessor(
         group,
         sessionId: output.newSessionId,
         pendingSessionId,
-        artifactRef: output.providerArtifactRef,
-        pendingArtifactRef,
+        latestArtifactId: output.providerArtifactId,
+        pendingLatestArtifactId,
         threadId: sessionThreadId,
         chatJid,
         agentSessionId: sessionResume?.agentSessionId,
@@ -288,7 +287,7 @@ export function createGroupProcessor(
       latestMessage.thread_id,
     );
     const resolveThreadId = (threadId?: string) => threadId ?? activeThreadId;
-    const streamGeneration = nextStreamingGeneration();
+    const streamGeneration = (streamingGenerationCounter += 1);
     const buildMessageOptions = (threadId?: string) => {
       const resolved = resolveThreadId(threadId);
       return resolved ? { threadId: resolved } : undefined;
@@ -360,12 +359,12 @@ export function createGroupProcessor(
         setGroupThinkingOverride: async (value) =>
           deps.setGroupThinkingOverride(chatJid, value),
         archiveCurrentSession: async (cause = 'new-session') => {
-          const sessionId = deps.getSession(group.folder, activeThreadId);
-          if (!sessionId) return;
-          archiveSessionTranscript({
-            groupFolder: group.folder,
-            sessionId,
-            assistantName: ASSISTANT_NAME,
+          await archiveCurrentRuntimeSession({
+            deps,
+            ops: ops(),
+            group,
+            chatJid,
+            threadId: activeThreadId ?? null,
             cause,
           });
         },

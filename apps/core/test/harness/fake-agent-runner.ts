@@ -14,7 +14,6 @@ export interface FakeAgentInvocation {
 interface FakeAgentRunResult {
   resultText?: string;
   newSessionId?: string;
-  providerArtifactRef?: string;
   failWithError?: string;
   outputBeforeFailureText?: string;
 }
@@ -22,7 +21,6 @@ interface FakeAgentRunResult {
 export interface FakeAgentRunnerOptions {
   resultText?: string;
   newSessionId?: string;
-  providerArtifactRef?: string;
   failWithError?: string;
   blockUntilReleased?: boolean;
   outputBeforeFailureText?: string;
@@ -99,7 +97,6 @@ export function createFakeAgentRunner(options: FakeAgentRunnerOptions = {}) {
       status: 'success',
       result: runOptions.resultText ?? 'fake-agent-result',
       newSessionId: runOptions.newSessionId,
-      providerArtifactRef: runOptions.providerArtifactRef,
       error: null,
     } as const;
     if (onOutput) await onOutput(output);

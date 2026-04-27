@@ -56,7 +56,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 │  │  Volume mounts:                                                │    │
 │  │    • agents/{name}/ → /workspace/group                         │    │
 │  │    • agents/shared/ → /workspace/shared/ (non-main only)       │    │
-│  │    • data/sessions/{group}/.claude/ → /home/node/.claude/      │    │
+│  │    • temp CLAUDE_CONFIG_DIR for settings, skills, artifacts     │    │
 │  │    • Additional dirs → /workspace/extra/*                      │    │
 │  │                                                                │    │
 │  │  Tools (all groups):                                           │    │
@@ -197,14 +197,14 @@ Providers are registered via `apps/core/src/channels/register-builtins.ts`:
 
 ### Adding a New Channel
 
-To add a new channel, contribute a skill to `.claude/skills/add-<name>/` that:
+To add a new channel, contribute a bundled or registered skill that:
 
 1. Adds a `apps/core/src/channels/<name>.ts` file implementing the `ChannelAdapter` contract
 2. Exposes a `ChannelProvider` entry with `id`, prefixes, setup metadata, and `create`
 3. Returns `null` from `create` if credentials are missing
 4. Registers the provider via `register-builtins.ts` (or equivalent provider registration module)
 
-Channel-extension skills can follow this pattern when they are added to the bundled or user-installed skill set. The default npm package only ships the core command-discovery and administration skills.
+Channel-extension skills can follow this pattern when they are added to the bundled package assets or registered skill catalog. Runtime-home Claude skill folders are not the source of truth for runtime materialization.
 
 ---
 
@@ -263,8 +263,7 @@ myclaw/
 │       └── logs/                  # Task execution logs
 │
 ├── data/                          # Application state (gitignored)
-│   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
-│   ├── session-archives/          # Best-effort transcript archives from /new and compaction
+│   ├── artifacts/                 # Provider artifact backend for single-node deployments
 │   ├── env/env                    # Copy of .env for runtime loading
 │   └── ipc/                       # Runtime IPC (messages/, tasks/)
 │
@@ -513,8 +512,9 @@ MyClaw memory uses Postgres tables in the configured runtime schema.
 - Vector search: `pgvector` when embeddings are enabled
 - Lexical search: Postgres full-text search
 
-Session transcript archives are operational artifacts under
-`<runtime home>/data/session-archives`; they are not the memory store.
+Provider continuation and transcript export artifacts are stored through
+`ProviderArtifactStore`; they are not the memory store or canonical message
+history.
 
 ### Memory Configuration Reference
 
@@ -549,7 +549,8 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 1. Each group has a session ID stored in the runtime database (`sessions` table, keyed by `group_folder`)
 2. Session ID is passed to Claude Agent SDK's `resume` option
 3. Claude continues the conversation with full context
-4. Session transcripts are stored as JSONL files in `data/sessions/{group}/.claude/`
+4. Claude JSONL is captured through `ProviderArtifactStore` as provider
+   continuation state; canonical messages remain in Postgres.
 
 ---
 
@@ -867,10 +868,10 @@ Inbound channel and SDK messages could contain malicious instructions attempting
 
 ### Credential Storage
 
-| Credential      | Storage Location               | Notes                                                |
-| --------------- | ------------------------------ | ---------------------------------------------------- |
-| Claude CLI Auth | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/  |
-| Channel secrets | Runtime environment or OneCLI  | Loaded by provider setup and never exposed to agents |
+| Credential      | Storage Location              | Notes                                                |
+| --------------- | ----------------------------- | ---------------------------------------------------- |
+| Claude CLI Auth | Runtime credential adapter    | Shared config is copied into per-run temp dirs       |
+| Channel secrets | Runtime environment or OneCLI | Loaded by provider setup and never exposed to agents |
 
 ### File Permissions
 
@@ -886,14 +887,13 @@ chmod 700 ~/myclaw/agents ~/myclaw/data
 
 ### Common Issues
 
-| Issue                                    | Cause                             | Solution                                                                    |
-| ---------------------------------------- | --------------------------------- | --------------------------------------------------------------------------- |
-| No response to messages                  | Service not running               | Run `myclaw status` and check the service line                              |
-| Startup fails at runtime preflight       | Host runtime prerequisites failed | Run `npm run build` and re-check runtime diagnostics                        |
-| "Claude Code process exited with code 1" | Session mount path wrong          | Ensure mount is to `/home/node/.claude/` not `/root/.claude/`               |
-| Session not continuing                   | Session state not persisted       | Run `myclaw status` and verify Postgres runtime storage readiness           |
-| Session not continuing                   | Session path mismatch             | Ensure per-group session paths exist under `data/sessions/{group}/.claude/` |
-| "No groups registered"                   | Haven't added groups              | Register a channel group with the current channel setup flow                |
+| Issue                              | Cause                             | Solution                                                           |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------------------------ |
+| No response to messages            | Service not running               | Run `myclaw status` and check the service line                     |
+| Startup fails at runtime preflight | Host runtime prerequisites failed | Run `npm run build` and re-check runtime diagnostics               |
+| Session not continuing             | Session state not persisted       | Run `myclaw status` and verify Postgres runtime storage readiness  |
+| Session not continuing             | Provider artifact unavailable     | Verify `ProviderArtifactStore` health and latest artifact metadata |
+| "No groups registered"             | Haven't added groups              | Register a channel group with the current channel setup flow       |
 
 ### Log Location
 

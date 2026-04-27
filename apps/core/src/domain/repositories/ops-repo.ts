@@ -121,10 +121,14 @@ export interface OpsRepository {
     chatJid: string;
     threadId?: string | null;
   }): Promise<{
+    appId: string;
+    agentId: string;
     agentSessionId: string;
     mode: 'provider_native' | 'db_replay';
+    provider?: string;
     providerSessionId?: string;
     externalSessionId?: string;
+    latestArtifactId?: string;
     hydratedContextBlock?: string;
   }>;
   setSession(
@@ -133,7 +137,7 @@ export interface OpsRepository {
     threadId?: string | null,
     metadata?: {
       chatJid?: string;
-      artifactRef?: string | null;
+      latestArtifactId?: string | null;
     },
   ): Promise<void>;
   expireProviderSession?(input: {

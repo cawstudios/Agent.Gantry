@@ -3,6 +3,7 @@ import { and, eq, ne, or, sql } from 'drizzle-orm';
 import * as pgSchema from '../schema/schema.js';
 import {
   CANONICAL_APP_ID,
+  agentIdForFolder,
   type CanonicalDb,
   json,
   PostgresCanonicalGraphRepository,
@@ -47,16 +48,22 @@ export class PostgresCanonicalSessionRepository {
     threadId?: string | null;
     scopeKey: string;
   }): Promise<{
+    appId: string;
+    agentId: string;
     agentSessionId: string;
+    provider?: string;
     providerSessionId?: string;
     externalSessionId?: string;
+    latestArtifactId?: string;
   }> {
     const agentSessionId = await this.ensureAgentSession(input);
     const ps = pgSchema.providerSessionsPostgres;
     const rows = await this.db
       .select({
         providerSessionId: ps.id,
+        provider: ps.provider,
         externalSessionId: ps.externalSessionId,
+        latestArtifactId: ps.latestArtifactId,
       })
       .from(ps)
       .where(
@@ -69,9 +76,13 @@ export class PostgresCanonicalSessionRepository {
       .orderBy(sql`${ps.updatedAt} DESC`, sql`${ps.id} DESC`)
       .limit(1);
     return {
+      appId: CANONICAL_APP_ID,
+      agentId: agentIdForFolder(input.groupFolder),
       agentSessionId,
+      provider: rows[0]?.provider ?? PROVIDER,
       providerSessionId: rows[0]?.providerSessionId,
       externalSessionId: rows[0]?.externalSessionId,
+      latestArtifactId: rows[0]?.latestArtifactId ?? undefined,
     };
   }
 
@@ -127,7 +138,7 @@ export class PostgresCanonicalSessionRepository {
     sessionId: string;
     chatJid?: string;
     threadId?: string | null;
-    artifactRef?: string | null;
+    latestArtifactId?: string | null;
   }): Promise<void> {
     const agentSessionId = `agent-session:${input.scopeKey}`;
     await this.db.transaction(async (tx) => {
@@ -184,13 +195,13 @@ export class PostgresCanonicalSessionRepository {
           agentSessionId,
           provider: PROVIDER,
           externalSessionId: input.sessionId,
-          artifactRef: input.artifactRef ?? null,
+          latestArtifactId: input.latestArtifactId ?? null,
           providerRefJson: json({
             kind: 'provider_session',
             value: `${PROVIDER}:${input.sessionId}`,
             provider: PROVIDER,
             externalSessionId: input.sessionId,
-            artifactRef: input.artifactRef ?? null,
+            latestArtifactId: input.latestArtifactId ?? null,
           }),
           metadataJson: json({
             chatJid: input.chatJid ?? null,
@@ -204,13 +215,13 @@ export class PostgresCanonicalSessionRepository {
             agentSessionId,
             provider: PROVIDER,
             externalSessionId: input.sessionId,
-            artifactRef: input.artifactRef ?? null,
+            latestArtifactId: input.latestArtifactId ?? null,
             providerRefJson: json({
               kind: 'provider_session',
               value: `${PROVIDER}:${input.sessionId}`,
               provider: PROVIDER,
               externalSessionId: input.sessionId,
-              artifactRef: input.artifactRef ?? null,
+              latestArtifactId: input.latestArtifactId ?? null,
             }),
             metadataJson: json({
               chatJid: input.chatJid ?? null,

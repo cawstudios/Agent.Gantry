@@ -110,11 +110,23 @@ export async function handleSessionRoutes(
       await repositories.providerSessions.getLatestProviderSession({
         agentSessionId: session.id,
       });
+    const visibleProviderSession = providerSession
+      ? {
+          id: providerSession.id,
+          appId: providerSession.appId,
+          agentSessionId: providerSession.agentSessionId,
+          provider: providerSession.provider,
+          externalSessionId: providerSession.externalSessionId,
+          providerRef: providerSession.providerRef,
+          status: providerSession.status,
+          metadata: providerSession.metadata,
+          createdAt: providerSession.createdAt,
+          updatedAt: providerSession.updatedAt,
+        }
+      : null;
     sendJson(res, 200, {
       session,
-      providerSession: providerSession
-        ? { ...providerSession, artifactRef: undefined }
-        : null,
+      providerSession: visibleProviderSession,
     });
     return true;
   }

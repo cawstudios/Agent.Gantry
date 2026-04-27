@@ -26,13 +26,13 @@ myclaw status
 ## Session Transcript Branching
 
 ```bash
-# Check per-group debug logs
-ls -la data/sessions/<group>/.claude/debug/
+# Check provider artifact metadata in Postgres, then restore the artifact
+# through ProviderArtifactStore into a temp run directory before inspection.
 
-# Check parentUuid branching in transcript
+# Check parentUuid branching in an exported/restored provider artifact
 python3 -c "
 import json
-lines = open('data/sessions/<group>/.claude/projects/-workspace-group/<session>.jsonl').read().strip().split('\n')
+lines = open('/tmp/myclaw-restored-provider-artifact/<session>.jsonl').read().strip().split('\n')
 for i, line in enumerate(lines):
   try:
     d = json.loads(line)

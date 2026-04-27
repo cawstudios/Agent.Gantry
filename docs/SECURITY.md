@@ -45,11 +45,12 @@ private_key, .secret
 
 ### 3. Session Isolation
 
-Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
+Each group has isolated provider session artifacts behind `ProviderArtifactStore`:
 
 - groups cannot read other groups' conversation history
-- session data includes prior messages and file reads
-- cross-group data leakage is blocked by path separation and authorization checks
+- Claude JSONL is provider continuation state, not canonical history
+- cross-group data leakage is blocked by artifact ownership, path validation,
+  and authorization checks
 
 ### 4. IPC Authorization
 

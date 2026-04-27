@@ -57,17 +57,9 @@ function createRuntimeHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-memory-hook-test-'));
 }
 
-function createTranscript(
-  runtimeHome: string,
-  groupFolder: string,
-  sessionId: string,
-): string {
+function createTranscript(claudeConfigDir: string, sessionId: string): string {
   const transcriptPath = path.join(
-    runtimeHome,
-    'data',
-    'sessions',
-    groupFolder,
-    '.claude',
+    claudeConfigDir,
     'projects',
     '-workspace-group',
     `${sessionId}.jsonl`,
@@ -152,20 +144,24 @@ describe('memory-hook command', () => {
     }
   });
 
-  it('extracts on precompact with fallback transcript discovery', async () => {
+  it('extracts on precompact with temp transcript path', async () => {
     const runtimeHome = createRuntimeHome();
+    const claudeConfigDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-claude-config-test-'),
+    );
     const service = createServiceMock();
     const sessionId = 'session-1';
-    const transcriptPath = createTranscript(runtimeHome, 'team', sessionId);
+    const transcriptPath = createTranscript(claudeConfigDir, sessionId);
     const env: NodeJS.ProcessEnv = {
       MYCLAW_GROUP_FOLDER: 'team',
       MYCLAW_HOME: runtimeHome,
+      CLAUDE_CONFIG_DIR: claudeConfigDir,
     };
 
     const code = await runMemoryHookCommand(
       ['extract', '--trigger=precompact'],
       env,
-      async () => ({ session_id: sessionId }),
+      async () => ({ session_id: sessionId, transcript_path: transcriptPath }),
       async () => service,
     );
 
@@ -188,12 +184,16 @@ describe('memory-hook command', () => {
 
   it('extracts on session-end with explicit transcript path', async () => {
     const runtimeHome = createRuntimeHome();
+    const claudeConfigDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-claude-config-test-'),
+    );
     const service = createServiceMock();
     const sessionId = 'session-2';
-    const transcriptPath = createTranscript(runtimeHome, 'team', sessionId);
+    const transcriptPath = createTranscript(claudeConfigDir, sessionId);
     const env: NodeJS.ProcessEnv = {
       MYCLAW_GROUP_FOLDER: 'team',
       MYCLAW_HOME: runtimeHome,
+      CLAUDE_CONFIG_DIR: claudeConfigDir,
     };
 
     const code = await runMemoryHookCommand(
@@ -221,6 +221,38 @@ describe('memory-hook command', () => {
         groupFolder: 'team',
       }),
     });
+  });
+
+  it('falls back to scanning the temp Claude projects directory for transcript paths', async () => {
+    const runtimeHome = createRuntimeHome();
+    const claudeConfigDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-claude-config-test-'),
+    );
+    const service = createServiceMock();
+    const sessionId = 'session-scan';
+    const transcriptPath = createTranscript(claudeConfigDir, sessionId);
+    const env: NodeJS.ProcessEnv = {
+      MYCLAW_GROUP_FOLDER: 'team',
+      MYCLAW_HOME: runtimeHome,
+      CLAUDE_CONFIG_DIR: claudeConfigDir,
+    };
+
+    const code = await runMemoryHookCommand(
+      ['extract', '--trigger=precompact'],
+      env,
+      async () => ({ session_id: sessionId }),
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(service.recordEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceId: sessionId,
+        metadata: expect.objectContaining({
+          transcriptPath: fs.realpathSync(transcriptPath),
+        }),
+      }),
+    );
   });
 
   it('logs warning and skips extract when transcript is missing', async () => {

@@ -5,6 +5,7 @@
 MyClaw runtime persistence, memory persistence, jobs, control events, and SDK callbacks need one production storage model. Public settings and docs must present Postgres as the runtime substrate.
 
 We need a single cut to:
+
 - keep runtime storage configuration under `storage.postgres.*`
 - keep memory behavior settings under `memory.*`
 - remove storage provider/profile branching and transition paths
@@ -35,8 +36,9 @@ We need a single cut to:
 - Runtime requires Postgres through `MYCLAW_DATABASE_URL`.
 - Health/diagnostics report Postgres capabilities explicitly.
 - Local Dockerized Postgres is documented for development.
-- Memory state lives in Postgres. Session transcript archives live under
-  runtime `data/session-archives` as operational artifacts.
+- Memory state lives in Postgres. Provider continuation files and transcript
+  exports live behind `ProviderArtifactStore`; local filesystem artifact storage
+  is supported only through that adapter boundary.
 
 ## Rollback Or Migration Notes
 

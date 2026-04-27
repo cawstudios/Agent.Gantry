@@ -10,8 +10,6 @@ const mockExistsSync = vi.fn();
 const mockLoggerWarn = vi.fn();
 const mockLoggerInfo = vi.fn();
 const mockEnsureGroupIpcLayout = vi.fn();
-const mockEnsureSharedSessionSettings = vi.fn();
-const mockSyncGroupSkills = vi.fn();
 const mockGetHostAgentRunnerDistDir = vi.fn(
   () => '/tmp/myclaw-test/dist/runner',
 );
@@ -59,9 +57,6 @@ async function loadModule(config: {
   vi.doMock('@core/runtime/agent-spawn-layout.js', () => ({
     ensureGroupIpcLayout: (...args: unknown[]) =>
       mockEnsureGroupIpcLayout(...args),
-    ensureSharedSessionSettings: (...args: unknown[]) =>
-      mockEnsureSharedSessionSettings(...args),
-    syncGroupSkills: (...args: unknown[]) => mockSyncGroupSkills(...args),
     getHostAgentRunnerDistDir: () => mockGetHostAgentRunnerDistDir(),
   }));
 
@@ -252,7 +247,7 @@ describe('prepareHostRuntimeContext', () => {
     added_at: '2025-01-01T00:00:00Z',
   };
 
-  it('creates group dir, calls layout functions, and returns context', async () => {
+  it('creates group dir, prepares IPC layout, and returns context without shared Claude files', async () => {
     const mod = await loadModule({});
 
     const ctx = mod.prepareHostRuntimeContext(fakeGroup);
@@ -264,8 +259,6 @@ describe('prepareHostRuntimeContext', () => {
       '/tmp/myclaw-test/agents/test-group',
       { recursive: true },
     );
-    expect(mockEnsureSharedSessionSettings).toHaveBeenCalled();
-    expect(mockSyncGroupSkills).toHaveBeenCalled();
     expect(mockGetHostAgentRunnerDistDir).toHaveBeenCalled();
     expect(mockEnsureGroupIpcLayout).toHaveBeenCalledWith(
       '/tmp/myclaw-test/data/ipc/test-group',

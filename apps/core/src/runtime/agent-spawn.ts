@@ -5,7 +5,6 @@ import fs from 'fs';
 import path from 'path';
 
 import {
-  MYCLAW_HOME,
   DATA_DIR,
   PERMISSION_APPROVAL_TIMEOUT_MS,
   TIMEZONE,
@@ -19,7 +18,12 @@ import {
   getHostRuntimeCredentialEnv,
   prepareHostRuntimeContext,
 } from './agent-spawn-host.js';
+import {
+  captureClaudeArtifacts,
+  materializeClaudeRuntime,
+} from '../adapters/llm/anthropic-claude-agent/claude-config-materializer.js';
 import { ensureGroupIpcLayout } from './agent-spawn-layout.js';
+import { resolvePackageRootFromSourceDir } from '../platform/package-root.js';
 import {
   DEFAULT_BROWSER_PROFILE_NAME,
   listActiveBrowserSessions,
@@ -132,6 +136,31 @@ export async function spawnAgent(
         'Host runtime is missing required runner files. Reinstall MyClaw from npm and restart.',
     };
   }
+  let claudeRuntimeMaterialization: Awaited<
+    ReturnType<typeof materializeClaudeRuntime>
+  >;
+  try {
+    const packageRoot = resolvePackageRootFromSourceDir(
+      path.dirname(hostRunnerPath),
+    );
+    claudeRuntimeMaterialization = await materializeClaudeRuntime({
+      groupDir,
+      cliEntryPoint: path.join(packageRoot, 'dist', 'cli', 'index.js'),
+      packageRoot,
+      sessionId: input.sessionId,
+      settings: {
+        model: normalizeClaudeModelSelection(input.model || modelConfig.model),
+      },
+      providerArtifactStore: options?.providerArtifactStore,
+      artifactContext: options?.providerArtifactContext,
+    });
+  } catch (err) {
+    return {
+      status: 'error',
+      result: null,
+      error: `Claude runtime materialization failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 
   const command = process.execPath;
   const args = [hostRunnerPath];
@@ -143,6 +172,7 @@ export async function spawnAgent(
     TZ: TIMEZONE,
     MYCLAW_WORKSPACE_GROUP_DIR: hostRuntime.groupDir,
     MYCLAW_WORKSPACE_GLOBAL_DIR: hostRuntime.globalDir || '',
+    MYCLAW_GROUP_FOLDER: group.folder,
     MYCLAW_WORKSPACE_EXTRA_DIR: path.join(
       DATA_DIR,
       'sessions',
@@ -155,7 +185,7 @@ export async function spawnAgent(
     MYCLAW_IPC_RESPONSE_VERIFY_KEY: ipcAuth.responseVerifyKey,
     MYCLAW_THREAD_ID: input.threadId || '',
     MYCLAW_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
-    CLAUDE_CONFIG_DIR: path.join(MYCLAW_HOME, '.claude'),
+    CLAUDE_CONFIG_DIR: claudeRuntimeMaterialization.claudeConfigDir,
   };
   // Job-level model overrides group-level model.
   const effectiveModel = normalizeClaudeModelSelection(
@@ -210,19 +240,40 @@ export async function spawnAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
-  return executeRunnerProcess({
-    group,
-    input: runnerInput,
-    command,
-    args,
-    env,
-    onProcess,
-    onOutput,
-    options,
-    runnerLabel: 'Host agent',
-    processName,
-    startTime,
-    logsDir,
-    runtimeDetails,
-  });
+  try {
+    const output = await executeRunnerProcess({
+      group,
+      input: runnerInput,
+      command,
+      args,
+      env,
+      onProcess,
+      onOutput,
+      options,
+      runnerLabel: 'Host agent',
+      processName,
+      startTime,
+      logsDir,
+      runtimeDetails,
+    });
+    if (output.status === 'success') {
+      const sessionId = output.newSessionId || input.sessionId;
+      const providerSessionId =
+        options?.providerArtifactContext?.providerSessionId || sessionId;
+      const captured = await captureClaudeArtifacts({
+        providerArtifactStore: options?.providerArtifactStore,
+        artifactContext: options?.providerArtifactContext,
+        providerSessionId,
+        sessionId,
+        projectDir: claudeRuntimeMaterialization.projectDir,
+      });
+      return {
+        ...output,
+        providerArtifactId: captured.latestArtifactId,
+      };
+    }
+    return output;
+  } finally {
+    claudeRuntimeMaterialization.cleanup();
+  }
 }

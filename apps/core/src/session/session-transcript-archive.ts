@@ -1,13 +1,5 @@
-import fs from 'fs';
-import path from 'path';
-
-import { DATA_DIR } from '../config/index.js';
+import type { ProviderArtifactStore } from '../domain/ports/provider-artifact-store.js';
 import { logger } from '../infrastructure/logging/logger.js';
-import { getClaudeProjectDirName } from '../shared/myclaw-home.js';
-import {
-  isValidGroupFolder,
-  resolveGroupFolderPath,
-} from '../platform/group-folder.js';
 
 export type SessionArchiveCause =
   | 'new-session'
@@ -15,15 +7,6 @@ export type SessionArchiveCause =
   | 'auto-compact'
   | 'stale-session'
   | 'abandoned-session';
-
-interface SessionEntry {
-  sessionId?: string;
-  summary?: string;
-}
-
-interface SessionsIndex {
-  entries?: SessionEntry[];
-}
 
 interface ParsedMessage {
   role: 'user' | 'assistant';
@@ -43,21 +26,18 @@ function isSafeSessionId(sessionId: string): boolean {
   return true;
 }
 
-export interface ArchiveSessionTranscriptInput {
-  groupFolder: string;
+export interface ArchiveProviderSessionTranscriptInput {
+  providerArtifactStore: ProviderArtifactStore;
+  appId: string;
+  agentId: string;
+  agentSessionId: string;
+  providerSessionId: string;
+  provider?: string;
   sessionId: string;
   assistantName?: string;
   cause?: SessionArchiveCause;
   errorSummary?: string;
   writePlaceholderOnMissing?: boolean;
-}
-
-function sanitizeFilename(summary: string): string {
-  return summary
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50);
 }
 
 function generateTimestampName(now: Date): string {
@@ -70,101 +50,6 @@ function generateTimestampName(now: Date): string {
     String(now.getSeconds()).padStart(2, '0'),
   ];
   return `conversation-${parts[0]}${parts[1]}${parts[2]}-${parts[3]}${parts[4]}${parts[5]}`;
-}
-
-function formatDateParts(date: Date): {
-  year: string;
-  month: string;
-  day: string;
-} {
-  const [year, month, day] = date.toISOString().slice(0, 10).split('-');
-  return { year: year!, month: month!, day: day! };
-}
-
-function sanitizeSegment(input: string, fallback: string): string {
-  const normalized = input
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return normalized || fallback;
-}
-
-function ensureWithinBase(baseDir: string, resolvedPath: string): void {
-  const relative = path.relative(baseDir, resolvedPath);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`Path escapes session archive root: ${resolvedPath}`);
-  }
-}
-
-function writeFileAtomic(filePath: string, content: string): void {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmpPath = path.join(
-    dir,
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
-  );
-  fs.writeFileSync(tmpPath, content, { mode: 0o600 });
-  fs.renameSync(tmpPath, filePath);
-}
-
-function writeSessionArchive(input: {
-  groupFolder: string;
-  sessionId: string;
-  cause: SessionArchiveCause;
-  title: string;
-  markdown: string;
-  timestamp: Date;
-  slug: string;
-}): string {
-  const archiveRoot = path.resolve(DATA_DIR, 'session-archives');
-  const { year, month, day } = formatDateParts(input.timestamp);
-  const dayDir = path.resolve(archiveRoot, year, month, day);
-  ensureWithinBase(archiveRoot, dayDir);
-  fs.mkdirSync(dayDir, { recursive: true });
-
-  const hhmmss = input.timestamp.toISOString().slice(11, 19).replace(/:/g, '');
-  const fileName = `${hhmmss}-${sanitizeSegment(input.cause, 'session')}-${sanitizeSegment(input.slug || input.title || input.sessionId, 'session')}.md`;
-  const filePath = path.resolve(dayDir, fileName);
-  ensureWithinBase(archiveRoot, filePath);
-  const content = [
-    '---',
-    `session_id: ${input.sessionId}`,
-    `group_folder: ${input.groupFolder}`,
-    `cause: ${input.cause}`,
-    `archived_at: ${input.timestamp.toISOString()}`,
-    '---',
-    '',
-    input.markdown.trim(),
-    '',
-  ].join('\n');
-  writeFileAtomic(filePath, content);
-  return filePath;
-}
-
-function getSessionSummary(
-  sessionId: string,
-  transcriptPath: string,
-): string | null {
-  const projectDir = path.dirname(transcriptPath);
-  const indexPath = path.join(projectDir, 'sessions-index.json');
-
-  if (!fs.existsSync(indexPath)) return null;
-
-  try {
-    const index = JSON.parse(
-      fs.readFileSync(indexPath, 'utf-8'),
-    ) as SessionsIndex;
-    const entry = index.entries?.find((item) => item.sessionId === sessionId);
-    return entry?.summary?.trim() || null;
-  } catch (err) {
-    logger.warn(
-      { sessionId, indexPath, err },
-      'Failed to parse sessions index while archiving transcript',
-    );
-    return null;
-  }
 }
 
 function extractUserText(content: unknown): string {
@@ -289,130 +174,80 @@ function formatPlaceholderMarkdown(input: {
   return lines.join('\n');
 }
 
-function findTranscriptByFileName(
-  projectsDir: string,
-  sessionId: string,
-): string | null {
-  const targetFile = `${sessionId}.jsonl`;
-  const stack = [projectsDir];
-
-  while (stack.length > 0) {
-    const dir = stack.pop();
-    if (!dir) break;
-
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch (err) {
-      logger.warn(
-        { projectsDir, dir, err },
-        'Failed while scanning project transcript directories',
-      );
-      return null;
-    }
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-        continue;
-      }
-      if (entry.isFile() && entry.name === targetFile) {
-        return fullPath;
-      }
-    }
-  }
-
-  return null;
+function artifactContentToString(content: Uint8Array | string): string {
+  return typeof content === 'string'
+    ? content
+    : Buffer.from(content).toString('utf-8');
 }
 
-function findTranscriptPath(
-  groupFolder: string,
-  sessionId: string,
-): string | null {
-  if (!isValidGroupFolder(groupFolder) || !isSafeSessionId(sessionId)) {
-    return null;
-  }
-  const projectsDir = path.join(
-    DATA_DIR,
-    'sessions',
-    groupFolder,
-    '.claude',
-    'projects',
-  );
-  const expectedPath = path.join(
-    projectsDir,
-    getClaudeProjectDirName(resolveGroupFolderPath(groupFolder)),
-    `${sessionId}.jsonl`,
-  );
-
-  if (fs.existsSync(expectedPath)) return expectedPath;
-  if (!fs.existsSync(projectsDir)) return null;
-
-  return findTranscriptByFileName(projectsDir, sessionId);
-}
-
-export function archiveSessionTranscript(
-  input: ArchiveSessionTranscriptInput,
-): string | null {
+export async function archiveProviderSessionTranscript(
+  input: ArchiveProviderSessionTranscriptInput,
+): Promise<string | null> {
   const {
-    groupFolder,
+    providerArtifactStore,
+    appId,
+    agentId,
+    agentSessionId,
+    providerSessionId,
+    provider = 'anthropic',
     sessionId,
     assistantName,
     cause = 'new-session',
     errorSummary,
     writePlaceholderOnMissing = false,
   } = input;
-  if (!isValidGroupFolder(groupFolder) || !isSafeSessionId(sessionId)) {
+  if (!isSafeSessionId(sessionId)) {
     logger.warn(
-      {
-        groupFolder,
-        sessionId,
-      },
-      'Skipped session transcript archive due to invalid identifiers',
+      { sessionId },
+      'Skipped provider transcript archive due to invalid session id',
     );
     return null;
   }
 
   try {
-    const transcriptPath = findTranscriptPath(groupFolder, sessionId);
-    if (!transcriptPath) {
+    const artifact = await providerArtifactStore.getLatestArtifact({
+      providerSessionId: providerSessionId as never,
+      provider,
+      artifactKind: 'claude-jsonl',
+    });
+    const now = new Date();
+    if (!artifact) {
       logger.info(
-        { groupFolder, sessionId },
-        'No transcript found while archiving session',
+        { providerSessionId, sessionId },
+        'No provider artifact found while archiving session',
       );
       if (!writePlaceholderOnMissing) return null;
-      const now = new Date();
       const markdown = formatPlaceholderMarkdown({
         title: `Session ${sessionId}`,
         now,
         cause,
         errorSummary,
       });
-      return writeSessionArchive({
-        groupFolder,
-        sessionId,
-        cause,
-        title: `Session ${sessionId}`,
-        slug: sessionId,
-        markdown,
-        timestamp: now,
+      const exported = await providerArtifactStore.putArtifact({
+        appId: appId as never,
+        agentId: agentId as never,
+        agentSessionId: agentSessionId as never,
+        providerSessionId: providerSessionId as never,
+        provider,
+        artifactKind: 'transcript-export',
+        content: markdown,
+        contentType: 'text/markdown',
+        metadata: {
+          externalSessionId: sessionId,
+          cause,
+          sourceArtifactId: null,
+        },
       });
+      return exported.id;
     }
 
-    const content = fs.readFileSync(transcriptPath, 'utf-8');
+    const content = artifactContentToString(
+      await providerArtifactStore.getArtifact(artifact),
+    );
     const messages = parseTranscript(content);
-    const summary = getSessionSummary(sessionId, transcriptPath);
-    const now = new Date();
-    const safeName = summary
-      ? sanitizeFilename(summary)
-      : generateTimestampName(now);
-    const title = summary || 'Conversation';
+    const title = 'Conversation';
+    const safeName = generateTimestampName(now);
     if (messages.length === 0) {
-      logger.info(
-        { groupFolder, sessionId, transcriptPath },
-        'Transcript had no user/assistant text to archive',
-      );
       if (!writePlaceholderOnMissing) return null;
       const markdown = formatPlaceholderMarkdown({
         title,
@@ -420,42 +255,52 @@ export function archiveSessionTranscript(
         cause,
         errorSummary,
       });
-      return writeSessionArchive({
-        groupFolder,
-        sessionId,
-        cause,
-        title,
-        slug: safeName,
-        markdown,
-        timestamp: now,
+      const exported = await providerArtifactStore.putArtifact({
+        appId: appId as never,
+        agentId: agentId as never,
+        agentSessionId: agentSessionId as never,
+        providerSessionId: providerSessionId as never,
+        provider,
+        artifactKind: 'transcript-export',
+        content: markdown,
+        contentType: 'text/markdown',
+        metadata: {
+          externalSessionId: sessionId,
+          cause,
+          sourceArtifactId: artifact.id,
+          slug: safeName,
+        },
       });
+      return exported.id;
     }
 
     const markdown = formatTranscriptMarkdown(
       messages,
-      summary,
+      title,
       assistantName,
       now,
     );
-    const filePath = writeSessionArchive({
-      groupFolder,
-      sessionId,
-      cause,
-      title,
-      slug: safeName,
-      markdown,
-      timestamp: now,
+    const exported = await providerArtifactStore.putArtifact({
+      appId: appId as never,
+      agentId: agentId as never,
+      agentSessionId: agentSessionId as never,
+      providerSessionId: providerSessionId as never,
+      provider,
+      artifactKind: 'transcript-export',
+      content: markdown,
+      contentType: 'text/markdown',
+      metadata: {
+        externalSessionId: sessionId,
+        cause,
+        sourceArtifactId: artifact.id,
+        slug: safeName,
+      },
     });
-    logger.info(
-      { groupFolder, sessionId, filePath },
-      'Archived session transcript',
-    );
-
-    return filePath;
+    return exported.id;
   } catch (err) {
     logger.error(
-      { groupFolder, sessionId, err },
-      'Failed to archive session transcript',
+      { providerSessionId, sessionId, err },
+      'Failed to archive provider session transcript',
     );
     return null;
   }

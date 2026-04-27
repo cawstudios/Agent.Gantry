@@ -19,7 +19,7 @@ Single Node.js process with skill-based channel provider system. Built-in provid
 | `apps/core/src/infrastructure/pgboss/scheduler-engine.ts` | Postgres-backed pg-boss queue adapter                      |
 | `apps/core/src/infrastructure/postgres/schema/`                | Postgres schema, migrations, and repositories              |
 | `~/myclaw/agents/{name}/CLAUDE.md`               | Runtime per-agent prompt guidance                          |
-| `~/myclaw/.claude/skills/`                       | Custom skills (single source of truth, managed externally) |
+| Provider artifact store                          | Claude provider continuation and transcript export bytes   |
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
@@ -32,7 +32,7 @@ Four types of skills exist in MyClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) for
 - **Feature skills** — merge a `skill/*` branch to add capabilities (e.g. `/add-telegram`, `/add-slack`)
 - **Utility skills** — ship code files alongside SKILL.md (e.g. `/claw`)
 - **Operational skills** — instruction-only workflows, always on `main` (e.g. `/setup`, `/debug`)
-- **Custom skills** — managed under `~/myclaw/.claude/skills/` as the single source of truth
+- **Custom skills** — registered through the skill registry/artifact source; runtime-home Claude skill folders are not runtime truth
 
 | Skill            | When to Use                                                     |
 | ---------------- | --------------------------------------------------------------- |

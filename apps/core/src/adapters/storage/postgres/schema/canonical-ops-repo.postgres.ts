@@ -231,7 +231,10 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     groupFolder: string,
     sessionId: string,
     threadId?: string | null,
-    metadata: { chatJid?: string; artifactRef?: string | null } = {},
+    metadata: {
+      chatJid?: string;
+      latestArtifactId?: string | null;
+    } = {},
   ): Promise<void> {
     await this.sessions.setSession(groupFolder, sessionId, threadId, metadata);
   }
@@ -241,10 +244,14 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     chatJid: string;
     threadId?: string | null;
   }): Promise<{
+    appId: string;
+    agentId: string;
     agentSessionId: string;
     mode: 'provider_native' | 'db_replay';
+    provider?: string;
     providerSessionId?: string;
     externalSessionId?: string;
+    latestArtifactId?: string;
     hydratedContextBlock?: string;
   }> {
     return this.sessions.getSessionResume(input);

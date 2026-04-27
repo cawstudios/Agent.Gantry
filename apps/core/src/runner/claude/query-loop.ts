@@ -3,8 +3,6 @@ import {
   type EffortLevel,
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
-import fs from 'node:fs';
-import path from 'node:path';
 import { composeAgentCapabilities } from '../agent-capabilities.js';
 import { denyMemoryBoundaryToolUse } from '../memory-boundary.js';
 import { MessageStream } from './message-stream.js';
@@ -36,7 +34,6 @@ export async function runQuery(
   enableIpcFollowups = true,
 ): Promise<{
   newSessionId?: string;
-  providerArtifactRef?: string;
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
 }> {
@@ -68,7 +65,6 @@ export async function runQuery(
   }
 
   let newSessionId: string | undefined;
-  let providerArtifactRef: string | undefined;
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
@@ -171,7 +167,6 @@ export async function runQuery(
 
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
-      providerArtifactRef = findClaudeSessionArtifact(newSessionId);
       log(`Session initialized: ${newSessionId}`);
     }
 
@@ -204,7 +199,6 @@ export async function runQuery(
             status: 'success',
             result: delta.text,
             newSessionId,
-            providerArtifactRef,
           });
         }
       }
@@ -224,7 +218,6 @@ export async function runQuery(
         result:
           textResult && !sawPartialTextSinceLastResult ? textResult : null,
         newSessionId,
-        providerArtifactRef,
       });
       sawPartialTextSinceLastResult = false;
     }
@@ -236,40 +229,9 @@ export async function runQuery(
   );
   return {
     newSessionId,
-    providerArtifactRef,
     lastAssistantUuid,
     closedDuringQuery,
   };
-}
-
-function findClaudeSessionArtifact(
-  sessionId: string | undefined,
-): string | undefined {
-  if (!sessionId) return undefined;
-  const configDir = process.env.CLAUDE_CONFIG_DIR;
-  if (!configDir) return undefined;
-  const projectsDir = path.join(configDir, 'projects');
-  if (!fs.existsSync(projectsDir)) return undefined;
-  const target = `${sessionId}.jsonl`;
-  const stack = [projectsDir];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const entryPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(entryPath);
-      } else if (entry.isFile() && entry.name === target) {
-        return entryPath;
-      }
-    }
-  }
-  return undefined;
 }
 
 function logUsage(message: unknown): void {

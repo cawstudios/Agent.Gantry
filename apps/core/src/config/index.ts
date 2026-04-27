@@ -71,6 +71,7 @@ export function getRuntimeSettingsForConfig(): RuntimeSettings {
 export const STORE_DIR = path.resolve(RUNTIME_ROOT, 'store');
 export const AGENTS_DIR = path.resolve(RUNTIME_ROOT, 'agents');
 export const DATA_DIR = path.resolve(RUNTIME_ROOT, 'data');
+export const ARTIFACTS_DIR = path.resolve(RUNTIME_ROOT, 'artifacts');
 
 const runtimeStorageConfig = resolveRuntimeStorageConfig(
   MYCLAW_HOME,

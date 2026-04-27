@@ -120,7 +120,7 @@ MyClaw stores live memory in Postgres.
 
 - Runtime database: `MYCLAW_DATABASE_URL`
 - Runtime schema: `storage.postgres.schema` (default `myclaw`)
-- Session transcript archives: `<runtime home>/data/session-archives`
+- Provider continuation and transcript export artifacts: `ProviderArtifactStore`
 
 ## Embeddings Are Optional
 

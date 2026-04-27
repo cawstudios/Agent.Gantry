@@ -153,7 +153,118 @@ def collect_warnings(changed: list[str]) -> list[str]:
     if channel_changed and not has_matching_test(changed, ("message", "persistence", "channel", "wiring")):
         warnings.append("Channel adapter files changed without message persistence or channel wiring tests.")
 
+    durable_jsonl_writes = find_direct_durable_provider_artifact_paths(changed)
+    if durable_jsonl_writes:
+        warnings.append(
+            "Direct durable Claude/provider JSONL paths changed outside provider artifact adapters/materializers: "
+            + ", ".join(durable_jsonl_writes)
+        )
+
+    durable_claude_config = find_direct_durable_claude_config_paths(changed)
+    if durable_claude_config:
+        warnings.append(
+            "Direct durable Claude settings/skills paths changed outside Claude materializers: "
+            + ", ".join(durable_claude_config)
+        )
+
+    claude_config_dir_setters = find_unowned_claude_config_dir_setters(changed)
+    if claude_config_dir_setters:
+        warnings.append(
+            "CLAUDE_CONFIG_DIR ownership changed outside Claude materializer/runtime provider: "
+            + ", ".join(claude_config_dir_setters)
+        )
+
     return warnings
+
+
+def find_direct_durable_provider_artifact_paths(changed: list[str]) -> list[str]:
+    allowed_prefixes = (
+        "apps/core/src/adapters/artifacts/",
+        "apps/core/src/adapters/llm/anthropic-claude-agent/",
+    )
+    flagged: list[str] = []
+    root = repo_root()
+    for path in changed:
+        if not path.startswith("apps/core/src/"):
+            continue
+        if is_test_file(path) or is_doc_file(path) or starts_with_any(path, allowed_prefixes):
+            continue
+        file_path = root / path
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        compact = " ".join(text.split())
+        if (
+            ".jsonl" in compact
+            and (
+                "DATA_DIR" in compact
+                or "MYCLAW_HOME" in compact
+                or "data' , 'sessions" in compact
+                or "data\", \"sessions" in compact
+            )
+            and ".claude" in compact
+        ):
+            flagged.append(path)
+    return flagged
+
+
+def find_direct_durable_claude_config_paths(changed: list[str]) -> list[str]:
+    allowed_prefixes = (
+        "apps/core/src/adapters/llm/anthropic-claude-agent/",
+    )
+    flagged: list[str] = []
+    root = repo_root()
+    for path in changed:
+        if not path.startswith("apps/core/src/"):
+            continue
+        if is_test_file(path) or is_doc_file(path) or starts_with_any(path, allowed_prefixes):
+            continue
+        file_path = root / path
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        compact = " ".join(text.split())
+        if (
+            ".claude" in compact
+            and (
+                "MYCLAW_HOME" in compact
+                or "settings.json" in compact
+                or "settings.local.json" in compact
+                or "skills" in compact
+            )
+        ) or "settings.local.json" in compact:
+            flagged.append(path)
+    return flagged
+
+
+def find_unowned_claude_config_dir_setters(changed: list[str]) -> list[str]:
+    allowed = {
+        "apps/core/src/runtime/agent-spawn.ts",
+        "apps/core/src/runner/claude/runtime-env.ts",
+    }
+    allowed_prefixes = (
+        "apps/core/src/adapters/llm/anthropic-claude-agent/",
+    )
+    flagged: list[str] = []
+    root = repo_root()
+    for path in changed:
+        if not path.startswith("apps/core/src/"):
+            continue
+        if is_test_file(path) or is_doc_file(path) or path in allowed or starts_with_any(path, allowed_prefixes):
+            continue
+        file_path = root / path
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "CLAUDE_CONFIG_DIR" in text and (
+            "process.env.CLAUDE_CONFIG_DIR =" in text
+            or "CLAUDE_CONFIG_DIR:" in text
+        ):
+            flagged.append(path)
+    return flagged
 
 
 def main() -> int:

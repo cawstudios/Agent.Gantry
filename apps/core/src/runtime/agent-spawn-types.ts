@@ -2,6 +2,10 @@ import { ChildProcess } from 'child_process';
 
 import { RegisteredGroup, ThinkingOverride } from '../domain/types.js';
 import type { AgentCredentialBroker } from '../domain/ports/agent-credential-broker.js';
+import type {
+  ProviderArtifactStore,
+  ProviderSessionArtifactContext,
+} from '../domain/ports/provider-artifact-store.js';
 
 export interface AgentInput {
   prompt: string;
@@ -23,13 +27,15 @@ export interface AgentOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
-  providerArtifactRef?: string;
+  providerArtifactId?: string;
   error?: string;
 }
 
 export interface RunAgentOptions {
   timeoutMs?: number;
   credentialBroker?: AgentCredentialBroker;
+  providerArtifactStore?: ProviderArtifactStore;
+  providerArtifactContext?: ProviderSessionArtifactContext;
 }
 
 export interface HostRuntimeContext {

@@ -64,7 +64,7 @@ export const providerSessionsPostgres = pgTable(
       .references(() => agentSessionsPostgres.id, { onDelete: 'cascade' }),
     provider: text('provider').notNull(),
     externalSessionId: text('external_session_id').notNull(),
-    artifactRef: text('artifact_ref'),
+    latestArtifactId: text('latest_artifact_id'),
     sandboxId: text('sandbox_id').references(() => sandboxProfilesPostgres.id),
     workspaceSnapshotId: text('workspace_snapshot_id').references(
       () => workspaceSnapshotsPostgres.id,
@@ -86,6 +86,49 @@ export const providerSessionsPostgres = pgTable(
     providerExternalIdx: index('idx_provider_sessions_external').on(
       table.provider,
       table.externalSessionId,
+    ),
+  }),
+);
+
+export const providerSessionArtifactsPostgres = pgTable(
+  'provider_session_artifacts',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id')
+      .notNull()
+      .references(() => appsPostgres.id, { onDelete: 'cascade' }),
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agentsPostgres.id, { onDelete: 'cascade' }),
+    agentSessionId: text('agent_session_id')
+      .notNull()
+      .references(() => agentSessionsPostgres.id, { onDelete: 'cascade' }),
+    providerSessionId: text('provider_session_id').notNull(),
+    provider: text('provider').notNull(),
+    artifactKind: text('artifact_kind').notNull(),
+    storageType: text('storage_type').notNull(),
+    storageRef: text('storage_ref').notNull(),
+    contentHash: text('content_hash').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    contentText: text('content_text'),
+    metadataJson: text('metadata_json').notNull().default('{}'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true, mode: 'string' }),
+  },
+  (table) => ({
+    latestIdx: index('idx_provider_session_artifacts_latest').on(
+      table.providerSessionId,
+      table.artifactKind,
+      table.createdAt,
+      table.id,
+    ),
+    sessionIdx: index('idx_provider_session_artifacts_session').on(
+      table.agentSessionId,
+      table.provider,
+      table.artifactKind,
+      table.createdAt,
     ),
   }),
 );

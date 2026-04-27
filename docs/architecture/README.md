@@ -10,6 +10,12 @@ For MyClaw, canonical architecture references are:
 - `docs/architecture/runtime-components.md`
 - `docs/architecture/agent-runtime.md`
 - `docs/architecture/credential-management.md`
+- `docs/architecture/claude-runtime-materialization.md`
+- `docs/architecture/provider-session-artifacts.md`
+- `docs/architecture/durable-state-boundary.md`
+- `docs/architecture/local-files-policy.md`
+- `docs/architecture/local-state-inventory.md`
+- `docs/architecture/session-resume.md`
 - `docs/MEMORY.md`
 - `docs/REQUIREMENTS.md`
 - `docs/SPEC.md`
