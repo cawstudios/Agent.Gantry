@@ -6,11 +6,14 @@ import {
   type CanonicalDb,
   json,
   PostgresCanonicalGraphRepository,
+  threadIdFor,
 } from './canonical-graph-repository.postgres.js';
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }
+
+const CLAUDE_PROVIDER = 'claude';
 
 export class PostgresCanonicalSessionRepository {
   private readonly graph: PostgresCanonicalGraphRepository;
@@ -23,7 +26,7 @@ export class PostgresCanonicalSessionRepository {
     const s = pgSchema.agentSessionsPostgres;
     const ps = pgSchema.providerSessionsPostgres;
     const rows = await this.db
-      .select({ id: ps.id })
+      .select({ id: ps.externalSessionId })
       .from(ps)
       .innerJoin(s, eq(s.id, ps.agentSessionId))
       .where(eq(s.userId, scopeKey))
@@ -32,10 +35,89 @@ export class PostgresCanonicalSessionRepository {
     return rows[0]?.id;
   }
 
+  async getSessionResume(input: {
+    groupFolder: string;
+    chatJid: string;
+    threadId?: string | null;
+    scopeKey: string;
+  }): Promise<{
+    agentSessionId: string;
+    providerSessionId?: string;
+    externalSessionId?: string;
+  }> {
+    const agentSessionId = await this.ensureAgentSession(input);
+    const ps = pgSchema.providerSessionsPostgres;
+    const rows = await this.db
+      .select({
+        providerSessionId: ps.id,
+        externalSessionId: ps.externalSessionId,
+      })
+      .from(ps)
+      .where(
+        and(eq(ps.agentSessionId, agentSessionId), eq(ps.status, 'active')),
+      )
+      .orderBy(sql`${ps.updatedAt} DESC`, sql`${ps.id} DESC`)
+      .limit(1);
+    return {
+      agentSessionId,
+      providerSessionId: rows[0]?.providerSessionId,
+      externalSessionId: rows[0]?.externalSessionId,
+    };
+  }
+
+  private async ensureAgentSession(input: {
+    groupFolder: string;
+    chatJid: string;
+    threadId?: string | null;
+    scopeKey: string;
+  }): Promise<string> {
+    const agentSessionId = `agent-session:${input.scopeKey}`;
+    await this.db.transaction(async (tx) => {
+      const agentId = await this.graph.ensureAgent(
+        input.groupFolder,
+        input.groupFolder,
+        tx,
+      );
+      const conversationId = await this.graph.ensureConversation(
+        input.chatJid,
+        {},
+        tx,
+      );
+      const canonicalThreadId = threadIdFor(input.chatJid, input.threadId);
+      if (canonicalThreadId) {
+        await this.graph.ensureThread(input.chatJid, input.threadId, tx);
+      }
+      await tx
+        .insert(pgSchema.agentSessionsPostgres)
+        .values({
+          id: agentSessionId,
+          appId: CANONICAL_APP_ID,
+          agentId,
+          conversationId,
+          threadId: canonicalThreadId,
+          userId: input.scopeKey,
+          status: 'active',
+        })
+        .onConflictDoUpdate({
+          target: pgSchema.agentSessionsPostgres.id,
+          set: {
+            conversationId,
+            threadId: canonicalThreadId,
+            status: 'active',
+            updatedAt: sql`now()`,
+          },
+        });
+    });
+    return agentSessionId;
+  }
+
   async setProviderSession(input: {
     groupFolder: string;
     scopeKey: string;
     sessionId: string;
+    chatJid?: string;
+    threadId?: string | null;
+    artifactRef?: string | null;
   }): Promise<void> {
     const agentSessionId = `agent-session:${input.scopeKey}`;
     await this.db.transaction(async (tx) => {
@@ -44,12 +126,21 @@ export class PostgresCanonicalSessionRepository {
         input.groupFolder,
         tx,
       );
+      const conversationId = input.chatJid
+        ? await this.graph.ensureConversation(input.chatJid, {}, tx)
+        : null;
+      const canonicalThreadId =
+        input.chatJid && input.threadId
+          ? await this.graph.ensureThread(input.chatJid, input.threadId, tx)
+          : null;
       await tx
         .insert(pgSchema.agentSessionsPostgres)
         .values({
           id: agentSessionId,
           appId: CANONICAL_APP_ID,
           agentId,
+          conversationId,
+          threadId: canonicalThreadId,
           userId: input.scopeKey,
           status: 'active',
         })
@@ -81,13 +172,19 @@ export class PostgresCanonicalSessionRepository {
           id: input.sessionId,
           appId: CANONICAL_APP_ID,
           agentSessionId,
-          provider: 'anthropic',
+          provider: CLAUDE_PROVIDER,
           externalSessionId: input.sessionId,
-          artifactRef: input.sessionId,
+          artifactRef: input.artifactRef ?? input.sessionId,
           providerRefJson: json({
-            kind: 'runtime_session',
-            provider: 'anthropic',
+            kind: 'provider_session',
+            value: `${CLAUDE_PROVIDER}:${input.sessionId}`,
+            provider: CLAUDE_PROVIDER,
             externalSessionId: input.sessionId,
+            artifactRef: input.artifactRef ?? null,
+          }),
+          metadataJson: json({
+            chatJid: input.chatJid ?? null,
+            threadId: input.threadId ?? null,
           }),
           status: 'active',
         })
@@ -95,9 +192,20 @@ export class PostgresCanonicalSessionRepository {
           target: pgSchema.providerSessionsPostgres.id,
           set: {
             agentSessionId,
-            provider: 'anthropic',
+            provider: CLAUDE_PROVIDER,
             externalSessionId: input.sessionId,
-            artifactRef: input.sessionId,
+            artifactRef: input.artifactRef ?? input.sessionId,
+            providerRefJson: json({
+              kind: 'provider_session',
+              value: `${CLAUDE_PROVIDER}:${input.sessionId}`,
+              provider: CLAUDE_PROVIDER,
+              externalSessionId: input.sessionId,
+              artifactRef: input.artifactRef ?? null,
+            }),
+            metadataJson: json({
+              chatJid: input.chatJid ?? null,
+              threadId: input.threadId ?? null,
+            }),
             updatedAt: sql`now()`,
           },
         });
@@ -109,6 +217,15 @@ export class PostgresCanonicalSessionRepository {
         })
         .where(eq(pgSchema.agentSessionsPostgres.id, agentSessionId));
     });
+  }
+
+  async expireProviderSession(sessionId: string): Promise<void> {
+    await this.db
+      .update(pgSchema.providerSessionsPostgres)
+      .set({ status: 'expired', updatedAt: sql`now()` })
+      .where(
+        eq(pgSchema.providerSessionsPostgres.externalSessionId, sessionId),
+      );
   }
 
   async deleteScope(scopeKey: string): Promise<void> {

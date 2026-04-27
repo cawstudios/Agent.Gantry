@@ -33,6 +33,7 @@ import type { MessageId } from '@core/domain/messages/messages.js';
 import type { PermissionDecisionId } from '@core/domain/permissions/permissions.js';
 import type {
   AgentSessionId,
+  AgentSessionSummaryId,
   ProviderSessionId,
 } from '@core/domain/sessions/sessions.js';
 
@@ -331,7 +332,11 @@ maybeDescribe('Postgres domain repositories', () => {
       id: 'provider-session:test:older' as ProviderSessionId,
       appId,
       agentSessionId: sessionId,
+      provider: 'anthropic',
+      externalSessionId: 'older',
+      artifactRef: '/tmp/older.jsonl',
       providerRef: { kind: 'provider_session', value: 'anthropic:older' },
+      metadata: { runtime: 'test' },
       status: 'active',
       createdAt: '2026-04-27T00:02:00.000Z',
       updatedAt: '2026-04-27T00:02:00.000Z',
@@ -340,7 +345,11 @@ maybeDescribe('Postgres domain repositories', () => {
       id: 'provider-session:test:newer' as ProviderSessionId,
       appId,
       agentSessionId: sessionId,
+      provider: 'anthropic',
+      externalSessionId: 'newer',
+      artifactRef: '/tmp/newer.jsonl',
       providerRef: { kind: 'provider_session', value: 'anthropic:newer' },
+      metadata: { runtime: 'test' },
       status: 'active',
       createdAt: '2026-04-27T00:03:00.000Z',
       updatedAt: '2026-04-27T00:03:00.000Z',
@@ -353,7 +362,35 @@ maybeDescribe('Postgres domain repositories', () => {
       }),
     ).resolves.toMatchObject({
       id: 'provider-session:test:newer',
+      provider: 'anthropic',
+      externalSessionId: 'newer',
+      artifactRef: '/tmp/newer.jsonl',
       providerRef: { kind: 'provider_session', value: 'anthropic:newer' },
+      metadata: { runtime: 'test' },
+    });
+
+    await repositories.agentSessionSummaries.saveAgentSessionSummary({
+      id: 'agent-session-summary:test:1' as AgentSessionSummaryId,
+      appId,
+      agentSessionId: sessionId,
+      summary: 'Prior work was summarized.',
+      source: 'extractive',
+      fromMessageId: 'message:test:first',
+      toMessageId: 'message:test:thread:first',
+      fromRunId: 'agent-run:test:old',
+      toRunId: 'agent-run:test:new',
+      messageCount: 2,
+      runCount: 1,
+      createdAt: '2026-04-27T00:04:00.000Z',
+    });
+    await expect(
+      repositories.agentSessionSummaries.getLatestAgentSessionSummary(
+        sessionId,
+      ),
+    ).resolves.toMatchObject({
+      summary: 'Prior work was summarized.',
+      source: 'extractive',
+      toMessageId: 'message:test:thread:first',
     });
   });
 
@@ -411,7 +448,7 @@ maybeDescribe('Postgres domain repositories', () => {
         status: 'active',
         createdAt: now,
         updatedAt: now,
-      }),
+      } as never),
     ).rejects.toThrow('Provider session ref must be prefixed');
   });
 
