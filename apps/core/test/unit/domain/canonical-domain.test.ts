@@ -31,6 +31,21 @@ describe('canonical Postgres persistence cut', () => {
     ).toBe(false);
   });
 
+  it('keeps application services behind repository ports', () => {
+    const root = path.resolve('apps/core/src/application');
+    const files = fs
+      .readdirSync(root, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.ts'));
+
+    for (const file of files) {
+      const filePath = path.join(file.parentPath, file.name);
+      const source = fs.readFileSync(filePath, 'utf8');
+      expect(source).not.toMatch(
+        /from ['"].*adapters\/storage\/postgres\/schema/,
+      );
+    }
+  });
+
   it('splits active schema by canonical responsibility', () => {
     for (const file of [
       'apps',
@@ -96,6 +111,31 @@ describe('canonical Postgres persistence cut', () => {
     expect(schema).toContain("externalMessageId: text('external_message_id')");
     expect(migration).toContain('idx_messages_external_redelivery_unique');
     expect(migration).toContain('WHERE external_message_id IS NOT NULL');
+  });
+
+  it('records repository contract indexes and permission audit context', () => {
+    const migration = fs.readFileSync(
+      path.join(
+        adapterRoot,
+        'schema/migrations/0010_repository_contract_indexes.sql',
+      ),
+      'utf8',
+    );
+    const permissionsSchema = fs.readFileSync(
+      path.join(adapterRoot, 'schema/permissions.ts'),
+      'utf8',
+    );
+
+    expect(migration).toContain('actor_context_json');
+    expect(migration).toContain('action_preview');
+    expect(migration).toContain("COALESCE(thread_id, '')");
+    expect(migration).toContain('idx_agent_sessions_deterministic_key');
+    expect(permissionsSchema).toContain(
+      "actorContextJson: text('actor_context_json')",
+    );
+    expect(permissionsSchema).toContain(
+      "actionPreview: text('action_preview')",
+    );
   });
 
   it('keeps sessions provider-neutral and provider resume metadata explicit', () => {

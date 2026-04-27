@@ -44,6 +44,8 @@ export interface PermissionDecision {
   toolId?: ToolId;
   effect: PermissionEffect;
   reason: string;
+  actorContext?: Record<string, unknown>;
+  actionPreview?: string;
   approverRef?: string;
   expiresAt?: IsoTimestamp;
   createdAt: IsoTimestamp;

@@ -3,6 +3,10 @@ import {
   type ResolvedStorageConfig,
 } from './storage-service.js';
 import {
+  createPostgresDomainRepositories,
+  type PostgresDomainRepositoryBundle,
+} from './repositories/domain-repositories.postgres.js';
+import {
   STORAGE_POSTGRES_SCHEMA,
   STORAGE_POSTGRES_URL,
   STORAGE_POSTGRES_URL_ENV,
@@ -16,6 +20,7 @@ export interface StorageRuntime {
   service: PostgresStorageService;
   ops: OpsRepository;
   control: PostgresControlPlaneRepository;
+  repositories: PostgresDomainRepositoryBundle;
 }
 
 export function resolveStorageConfigFromRuntime(): ResolvedStorageConfig {
@@ -35,9 +40,11 @@ export function createStorageRuntime(
     service.db,
   );
   const control = new PostgresControlPlaneRepository(service.pool);
+  const repositories = createPostgresDomainRepositories(service.db);
   return {
     service,
     ops,
     control,
+    repositories,
   };
 }

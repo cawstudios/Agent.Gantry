@@ -58,5 +58,6 @@ export function _setRuntimeOpsRepositoryForTest(ops: OpsRepository): void {
     } as StorageRuntime['service'],
     ops,
     control: {} as StorageRuntime['control'],
+    repositories: {} as StorageRuntime['repositories'],
   };
 }

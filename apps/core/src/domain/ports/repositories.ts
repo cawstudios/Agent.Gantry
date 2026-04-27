@@ -10,12 +10,15 @@ import type {
   AgentChannelBinding,
   ChannelInstallation,
   ChannelInstallationId,
+  ChannelProviderId,
 } from '../channel/channel.js';
 import type {
   Conversation,
   ConversationId,
   ConversationThread,
   ConversationThreadId,
+  ExternalConversationId,
+  UserId,
 } from '../conversation/conversation.js';
 import type { AgentRun, AgentRunEvent, AgentRunId } from '../events/events.js';
 import type { Job, JobId, JobTrigger } from '../jobs/jobs.js';
@@ -72,12 +75,36 @@ export interface ChannelInstallationRepository {
   ): Promise<ChannelInstallation | null>;
   saveChannelInstallation(installation: ChannelInstallation): Promise<void>;
   saveAgentChannelBinding(binding: AgentChannelBinding): Promise<void>;
+  getAgentChannelBinding(input: {
+    appId: AppId;
+    agentId: AgentId;
+    conversationId: ConversationId;
+    threadId?: ConversationThreadId;
+  }): Promise<AgentChannelBinding | null>;
+  isAgentEnabledInConversation(input: {
+    appId: AppId;
+    agentId: AgentId;
+    conversationId: ConversationId;
+    threadId?: ConversationThreadId;
+  }): Promise<boolean>;
   listAgentChannelBindings(appId: AppId): Promise<AgentChannelBinding[]>;
 }
 
 export interface ConversationRepository {
   getConversation(id: ConversationId): Promise<Conversation | null>;
+  getConversationByExternalRef(input: {
+    appId: AppId;
+    providerId: ChannelProviderId;
+    channelInstallationId: ChannelInstallationId;
+    externalConversationId: ExternalConversationId | string;
+  }): Promise<Conversation | null>;
   getThread(id: ConversationThreadId): Promise<ConversationThread | null>;
+  getThreadByExternalRef(input: {
+    appId: AppId;
+    providerId: ChannelProviderId;
+    conversationId: ConversationId;
+    externalThreadId: string;
+  }): Promise<ConversationThread | null>;
   saveConversation(conversation: Conversation): Promise<void>;
   saveThread(thread: ConversationThread): Promise<void>;
 }
@@ -95,11 +122,22 @@ export interface MessageRepository {
 
 export interface AgentSessionRepository {
   getAgentSession(id: AgentSessionId): Promise<AgentSession | null>;
+  getAgentSessionByKey(input: {
+    appId: AppId;
+    agentId: AgentId;
+    conversationId: ConversationId;
+    threadId?: ConversationThreadId;
+    userId?: UserId;
+  }): Promise<AgentSession | null>;
   saveAgentSession(session: AgentSession): Promise<void>;
 }
 
 export interface ProviderSessionRepository {
   getProviderSession(id: ProviderSessionId): Promise<ProviderSession | null>;
+  getLatestProviderSession(input: {
+    agentSessionId: AgentSessionId;
+    provider?: string;
+  }): Promise<ProviderSession | null>;
   saveProviderSession(session: ProviderSession): Promise<void>;
 }
 

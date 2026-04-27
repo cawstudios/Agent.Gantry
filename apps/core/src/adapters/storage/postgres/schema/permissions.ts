@@ -50,6 +50,8 @@ export const permissionDecisionsPostgres = pgTable('permission_decisions', {
   toolId: text('tool_id').references(() => toolCatalogPostgres.id),
   effect: text('effect').notNull(),
   reason: text('reason').notNull(),
+  actorContextJson: text('actor_context_json'),
+  actionPreview: text('action_preview'),
   approverRef: text('approver_ref'),
   expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
