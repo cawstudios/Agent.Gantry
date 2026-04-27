@@ -133,8 +133,14 @@ export function buildProviderArtifactRunOptions(input: {
             agentId: input.sessionResume.agentId,
             agentSessionId: input.sessionResume.agentSessionId,
             provider: input.sessionResume.provider,
-            providerSessionId: input.sessionResume.providerSessionId,
-            latestArtifactId: input.sessionResume.latestArtifactId,
+            providerSessionId:
+              input.sessionResume.mode === 'provider_native'
+                ? input.sessionResume.providerSessionId
+                : undefined,
+            latestArtifactId:
+              input.sessionResume.mode === 'provider_native'
+                ? input.sessionResume.latestArtifactId
+                : undefined,
           },
         }
       : {};

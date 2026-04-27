@@ -1024,6 +1024,10 @@ describe('createGroupProcessor', () => {
     it('does not pass cached session id when provider artifact metadata is missing', async () => {
       const group = makeGroup({ isMain: true });
       const { deps } = setupHappyPath({ group });
+      const providerArtifactStore = {};
+      (deps as any).getProviderArtifactStore = vi
+        .fn()
+        .mockReturnValue(providerArtifactStore);
       (deps.opsRepository as any).getSessionResume = vi.fn().mockResolvedValue({
         appId: 'app:test',
         agentId: 'agent:test',
@@ -1040,6 +1044,16 @@ describe('createGroupProcessor', () => {
       expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
         sessionId: undefined,
         memoryContextBlock: expect.stringContaining('<db replay context>'),
+      });
+      expect(mockSpawnAgent.mock.calls[0][4]).toMatchObject({
+        providerArtifactStore,
+        providerArtifactContext: {
+          appId: 'app:test',
+          agentId: 'agent:test',
+          agentSessionId: 'agent-session:1',
+          providerSessionId: undefined,
+          latestArtifactId: undefined,
+        },
       });
     });
 

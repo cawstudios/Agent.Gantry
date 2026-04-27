@@ -104,6 +104,9 @@ export class CanonicalSessionOpsService {
     return {
       ...resume,
       mode: 'db_replay',
+      providerSessionId: undefined,
+      externalSessionId: undefined,
+      latestArtifactId: undefined,
       hydratedContextBlock: hydrated?.block,
     };
   }
