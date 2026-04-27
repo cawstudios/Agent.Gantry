@@ -1,14 +1,20 @@
 import { sql, type SQL } from 'drizzle-orm';
 
-import * as pgSchema from '../infrastructure/postgres/schema/schema.js';
+import * as pgSchema from '../adapters/storage/postgres/schema/schema.js';
 import type {
   MemoryBoundaryContext,
   MemorySubjectType,
   NormalizedMemorySubject,
 } from './memory-types.js';
 
-const DEFAULT_APP_ID = 'personal';
-const DEFAULT_AGENT_ID = 'main';
+export const DEFAULT_MEMORY_APP_ID = 'default';
+export const DEFAULT_MEMORY_AGENT_ID = 'agent:personal';
+
+export function memoryAgentIdForGroupFolder(groupFolder: string): string {
+  return groupFolder.startsWith('agent:')
+    ? groupFolder
+    : `agent:${groupFolder}`;
+}
 const DEFAULT_GROUP_ID = 'default';
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
 
@@ -29,8 +35,8 @@ export function normalizeSubject(
     visibility?: MemorySubjectType;
   },
 ): NormalizedMemorySubject {
-  const appId = normalizeId(input.appId, DEFAULT_APP_ID);
-  const agentId = normalizeId(input.agentId, DEFAULT_AGENT_ID);
+  const appId = normalizeId(input.appId, DEFAULT_MEMORY_APP_ID);
+  const agentId = normalizeId(input.agentId, DEFAULT_MEMORY_AGENT_ID);
   const userId = input.userId?.trim() || undefined;
   const groupId = input.groupId?.trim() || undefined;
   const channelId = input.channelId?.trim() || undefined;
