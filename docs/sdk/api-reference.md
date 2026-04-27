@@ -88,6 +88,95 @@ Read-only run event history is available over the control API:
 GET /v1/runs/:runId/events
 ```
 
+## Channels
+
+Channel installation APIs are app-bound by the API key. Channel credentials are
+stored as `runtimeSecretRefs`; raw tokens and secrets are rejected by the
+control API.
+
+```ts
+client.channels.providers.list()
+
+client.channels.installations.create({
+  appId,
+  providerId, // app | telegram | slack
+  label,
+  config?,
+  externalRef?,
+  runtimeSecretRefs?,
+  enabled?,
+})
+
+client.channels.installations.list()
+client.channels.installations.get(installationId)
+client.channels.installations.update(installationId, {
+  label?,
+  status?,
+  config?,
+  externalRef?,
+  runtimeSecretRefs?,
+  enabled?,
+})
+client.channels.installations.delete(installationId)
+client.channels.installations.discover(installationId, {
+  query?,
+  limit?,
+  includeArchived?,
+})
+
+client.channels.conversations.list({ channelInstallationId? })
+client.channels.conversations.get(conversationId)
+client.channels.conversations.messages(conversationId, {
+  threadId?,
+  after?,
+  limit?,
+})
+```
+
+Control API scopes:
+
+```http
+GET    /v1/channel-providers                       channels:read
+POST   /v1/channel-installations                   channels:admin
+GET    /v1/channel-installations                   channels:read
+GET    /v1/channel-installations/:id               channels:read
+PATCH  /v1/channel-installations/:id               channels:admin
+DELETE /v1/channel-installations/:id               channels:admin
+POST   /v1/channel-installations/:id/discover      channels:admin
+
+GET    /v1/conversations                           conversations:read
+GET    /v1/conversations/:id                       conversations:read
+GET    /v1/conversations/:id/threads               conversations:read
+GET    /v1/conversations/:id/messages              messages:read
+```
+
+`teams` and `whatsapp` are returned as unavailable placeholders until their
+adapters are implemented.
+
+## Agent Channel Bindings
+
+```ts
+client.agents.bindings.list(agentId)
+client.agents.bindings.enable(agentId, conversationId, {
+  channelInstallationId?,
+  threadId?,
+  displayName?,
+  triggerMode?, // always | mention | keyword | manual | webhook
+  triggerPattern?,
+  requiresTrigger?,
+  isAdminBinding?,
+  memoryScope?, // user | conversation | thread | agent | app
+  memorySubject?,
+  workspaceSnapshotId?,
+  permissionPolicyIds?,
+})
+client.agents.bindings.update(agentId, conversationId, patch)
+client.agents.bindings.disable(agentId, conversationId, { threadId? })
+```
+
+Binding writes require `agents:admin`. `disable()` marks the binding disabled;
+it does not delete the row.
+
 ## Memory
 
 Memory APIs are app-bound by the API key. Pass stable `appId`, `agentId`,

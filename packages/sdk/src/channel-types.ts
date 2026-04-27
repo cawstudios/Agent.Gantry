@@ -1,0 +1,43 @@
+export type ChannelInstallationInput = {
+  appId: string;
+  providerId: string;
+  label: string;
+  config?: Record<string, unknown>;
+  externalRef?: Record<string, unknown>;
+  runtimeSecretRefs?: string[];
+  enabled?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type ChannelInstallationPatch = {
+  label?: string;
+  status?: 'active' | 'inactive' | 'disabled' | 'archived';
+  config?: Record<string, unknown>;
+  externalRef?: Record<string, unknown> | null;
+  runtimeSecretRefs?: string[];
+  enabled?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type ChannelDiscoveryInput = {
+  query?: string;
+  limit?: number;
+  includeArchived?: boolean;
+  providerMetadata?: Record<string, unknown>;
+};
+
+export type AgentBindingInput = {
+  channelInstallationId?: string;
+  threadId?: string;
+  displayName?: string;
+  triggerMode?: 'always' | 'mention' | 'keyword' | 'manual' | 'webhook';
+  triggerPattern?: string | null;
+  requiresTrigger?: boolean;
+  isAdminBinding?: boolean;
+  memoryScope?: 'user' | 'conversation' | 'thread' | 'agent' | 'app';
+  memorySubject?: Record<string, unknown>;
+  workspaceSnapshotId?: string | null;
+  permissionPolicyIds?: string[];
+  status?: 'active' | 'disabled';
+  metadata?: Record<string, unknown>;
+};

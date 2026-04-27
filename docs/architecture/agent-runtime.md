@@ -71,3 +71,17 @@ The `app` channel keeps app-originated conversations on the same runtime path as
 - same output delivery behavior
 
 That avoids a second agent-output path with different behavior.
+
+## Channel Onboarding Control Surface
+
+The control API exposes channel onboarding through application-layer services:
+
+- channel provider catalog and installation records
+- provider discovery into canonical `Conversation` records
+- `AgentChannelBinding` enable/update/disable for a conversation
+- conversation, thread, and message reads for Web UI and SDK clients
+
+Installation payloads store non-secret provider config and runtime secret
+references only. Raw channel tokens stay behind `RuntimeSecretProvider`.
+Disabling a binding marks it `disabled` so UI and CLI clients can re-enable it
+without losing the binding policy, trigger, memory, or permission settings.

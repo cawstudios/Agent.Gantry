@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AgentResponseSchema,
+  AgentChannelBindingRequestSchema,
+  AgentChannelBindingResponseSchema,
   BROWSER_IPC_ACTIONS,
   BrowserProfileResponseSchema,
+  ChannelInstallationResponseSchema,
   ChannelProviderResponseSchema,
   ContractMetadataSchema,
   CreateAgentRequestSchema,
@@ -24,7 +27,10 @@ import {
   createPageResponseSchema,
 } from '@contracts-src/index.js';
 
-function expectInvalid(schema: { safeParse: (input: unknown) => { success: boolean } }, input: unknown) {
+function expectInvalid(
+  schema: { safeParse: (input: unknown) => { success: boolean } },
+  input: unknown,
+) {
   expect(schema.safeParse(input).success).toBe(false);
 }
 
@@ -209,6 +215,58 @@ describe('contracts package', () => {
       displayName: 'Slack',
       capabilities: ['threads'],
     });
+
+    expect(
+      ChannelInstallationResponseSchema.parse({
+        id: 'installation-1',
+        appId: 'app-1',
+        providerId: 'slack',
+        label: 'Workspace',
+        status: 'active',
+        config: { teamId: 'T123' },
+        runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+        createdAt: iso,
+        updatedAt: iso,
+      }),
+    ).toMatchObject({ providerId: 'slack' });
+    expectInvalid(ChannelInstallationResponseSchema, {
+      id: 'installation-1',
+      appId: 'app-1',
+      providerId: 'slack',
+      label: 'Workspace',
+      status: 'bad',
+      createdAt: iso,
+      updatedAt: iso,
+    });
+
+    expect(
+      AgentChannelBindingRequestSchema.parse({
+        triggerMode: 'keyword',
+        memoryScope: 'conversation',
+        permissionPolicyIds: [],
+      }),
+    ).toMatchObject({ triggerMode: 'keyword' });
+    expectInvalid(AgentChannelBindingRequestSchema, {
+      triggerMode: 'sometimes',
+    });
+    expect(
+      AgentChannelBindingResponseSchema.parse({
+        id: 'binding-1',
+        appId: 'app-1',
+        agentId: 'agent-1',
+        channelInstallationId: 'installation-1',
+        conversationId: 'conversation-1',
+        displayName: 'Engineering',
+        status: 'active',
+        triggerMode: 'always',
+        requiresTrigger: false,
+        isAdminBinding: false,
+        memoryScope: 'conversation',
+        permissionPolicyIds: [],
+        createdAt: iso,
+        updatedAt: iso,
+      }),
+    ).toMatchObject({ status: 'active', triggerMode: 'always' });
 
     expectInvalid(MessageResponseSchema, {
       ...message,

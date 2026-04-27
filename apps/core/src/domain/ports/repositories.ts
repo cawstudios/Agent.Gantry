@@ -72,11 +72,24 @@ export interface AgentConfigRepository {
 }
 
 export interface ChannelInstallationRepository {
+  listChannelInstallations(appId: AppId): Promise<ChannelInstallation[]>;
   getChannelInstallation(
     id: ChannelInstallationId,
   ): Promise<ChannelInstallation | null>;
   saveChannelInstallation(installation: ChannelInstallation): Promise<void>;
+  disableChannelInstallation(input: {
+    appId: AppId;
+    id: ChannelInstallationId;
+    updatedAt: string;
+  }): Promise<ChannelInstallation | null>;
   saveAgentChannelBinding(binding: AgentChannelBinding): Promise<void>;
+  disableAgentChannelBinding(input: {
+    appId: AppId;
+    agentId: AgentId;
+    conversationId: ConversationId;
+    threadId?: ConversationThreadId;
+    updatedAt: string;
+  }): Promise<AgentChannelBinding | null>;
   getAgentChannelBinding(input: {
     appId: AppId;
     agentId: AgentId;
@@ -93,6 +106,10 @@ export interface ChannelInstallationRepository {
 }
 
 export interface ConversationRepository {
+  listConversations(input: {
+    appId: AppId;
+    channelInstallationId?: ChannelInstallationId;
+  }): Promise<Conversation[]>;
   getConversation(id: ConversationId): Promise<Conversation | null>;
   getConversationByExternalRef(input: {
     appId: AppId;
@@ -109,6 +126,7 @@ export interface ConversationRepository {
   }): Promise<ConversationThread | null>;
   saveConversation(conversation: Conversation): Promise<void>;
   saveThread(thread: ConversationThread): Promise<void>;
+  listThreads(conversationId: ConversationId): Promise<ConversationThread[]>;
 }
 
 export interface MessageRepository {

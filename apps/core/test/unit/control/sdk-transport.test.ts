@@ -93,4 +93,83 @@ describe('@myclaw/sdk transport', () => {
       }),
     ).resolves.toEqual({ sessionId: 'session-1' });
   });
+
+  it('builds channel onboarding and binding requests', async () => {
+    const seen: Array<{ method?: string; url?: string; body: unknown }> = [];
+    const port = await listen((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        seen.push({
+          method: req.method,
+          url: req.url,
+          body: raw ? JSON.parse(raw) : null,
+        });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, conversations: [], bindings: [] }));
+      });
+    });
+    const client = new MyClawClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    await client.channels.providers.list();
+    await client.channels.installations.create({
+      appId: 'app-one',
+      providerId: 'slack',
+      label: 'Slack',
+      runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+    });
+    await client.channels.installations.discover('installation/1', {
+      limit: 10,
+    });
+    await client.channels.conversations.messages('conversation/1', {
+      threadId: 'thread/1',
+      limit: 5,
+    });
+    await client.agents.bindings.enable('agent/1', 'conversation/1', {
+      triggerMode: 'mention',
+      memoryScope: 'conversation',
+    });
+    await client.agents.bindings.disable('agent/1', 'conversation/1');
+
+    expect(seen).toEqual([
+      { method: 'GET', url: '/v1/channel-providers', body: null },
+      {
+        method: 'POST',
+        url: '/v1/channel-installations',
+        body: {
+          appId: 'app-one',
+          providerId: 'slack',
+          label: 'Slack',
+          runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+        },
+      },
+      {
+        method: 'POST',
+        url: '/v1/channel-installations/installation%2F1/discover',
+        body: { limit: 10 },
+      },
+      {
+        method: 'GET',
+        url: '/v1/conversations/conversation%2F1/messages?threadId=thread%2F1&limit=5',
+        body: null,
+      },
+      {
+        method: 'PUT',
+        url: '/v1/agents/agent%2F1/channel-bindings/conversation%2F1',
+        body: {
+          triggerMode: 'mention',
+          memoryScope: 'conversation',
+        },
+      },
+      {
+        method: 'DELETE',
+        url: '/v1/agents/agent%2F1/channel-bindings/conversation%2F1',
+        body: null,
+      },
+    ]);
+  });
 });

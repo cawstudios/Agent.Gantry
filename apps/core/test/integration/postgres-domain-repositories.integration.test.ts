@@ -76,6 +76,7 @@ maybeDescribe('Postgres domain repositories', () => {
       },
       label: 'Test Slack',
       status: 'active',
+      config: { workspace: 'test' },
       runtimeSecretRefs: [],
       createdAt: now,
       updatedAt: now,
@@ -583,8 +584,11 @@ maybeDescribe('Postgres domain repositories', () => {
       channelInstallationId: installationId,
       conversationId,
       displayName: 'Personal Agent',
+      status: 'active',
+      triggerMode: 'always',
       requiresTrigger: false,
       isAdminBinding: false,
+      memoryScope: 'conversation',
       memorySubject: { kind: 'conversation', appId, conversationId },
       permissionPolicyIds: [DEFAULT_PERMISSION_POLICY_ID],
       createdAt: now,
@@ -599,6 +603,33 @@ maybeDescribe('Postgres domain repositories', () => {
         threadId,
       }),
     ).resolves.toBe(true);
+
+    await repositories.channelInstallations.disableAgentChannelBinding({
+      appId,
+      agentId,
+      conversationId,
+      updatedAt: '2026-04-27T00:06:00.000Z',
+    });
+
+    await expect(
+      repositories.channelInstallations.isAgentEnabledInConversation({
+        appId,
+        agentId,
+        conversationId,
+      }),
+    ).resolves.toBe(false);
+
+    await expect(
+      repositories.channelInstallations.getAgentChannelBinding({
+        appId,
+        agentId,
+        conversationId,
+      }),
+    ).resolves.toMatchObject({
+      status: 'disabled',
+      triggerMode: 'always',
+      memoryScope: 'conversation',
+    });
   });
 
   it('persists permission decisions with audit context', async () => {

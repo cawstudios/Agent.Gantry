@@ -13,6 +13,7 @@ import type {
 } from './handler-context.js';
 import { sendError } from './http.js';
 import { createRateLimiter } from './rate-limit.js';
+import { handleChannelControlRoutes } from './routes/channels.js';
 import { handleJobRoutes } from './routes/jobs.js';
 import { handleMemoryRoutes } from './routes/memory.js';
 import { handleRunRoutes } from './routes/runs.js';
@@ -55,6 +56,8 @@ function createControlRequestHandler(ctx: ControlRouteContext) {
     try {
       if (await handleSystemRoutes(req, res, ctx, pathname)) return;
       if (await handleSessionRoutes(req, res, ctx, url, pathname)) return;
+      if (await handleChannelControlRoutes(req, res, ctx, url, pathname))
+        return;
       if (await handleMemoryRoutes(req, res, ctx, url, pathname)) return;
       if (await handleJobRoutes(req, res, ctx, url, pathname)) return;
       if (await handleRunRoutes(req, res, ctx, url, pathname)) return;
