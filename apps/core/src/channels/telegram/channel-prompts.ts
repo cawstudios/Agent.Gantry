@@ -193,8 +193,15 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
     chatId: string,
     userId: string,
     sourceGroup: string,
-    _decisionPolicy?: PermissionApprovalRequest['decisionPolicy'],
+    decisionPolicy?: PermissionApprovalRequest['decisionPolicy'],
   ): Promise<boolean> {
+    if (decisionPolicy && decisionPolicy !== 'same_channel') {
+      logger.warn(
+        { chatId, userId, sourceGroup, decisionPolicy },
+        'Permission decision denied: unsupported Telegram decision policy',
+      );
+      return false;
+    }
     const allowlist =
       this.opts.runtimeSettings?.().channels.telegram?.controlAllowlist;
     const allowedIds =

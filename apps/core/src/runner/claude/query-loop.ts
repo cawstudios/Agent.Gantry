@@ -86,6 +86,7 @@ export async function runQuery(
     ipcResponseVerifyKey: process.env.MYCLAW_IPC_RESPONSE_VERIFY_KEY,
     externalMcpServers: readExternalMcpServers(),
     externalMcpAllowedTools: readExternalMcpAllowedTools(),
+    externalMcpAlwaysAllowedTools: readExternalMcpAlwaysAllowedTools(),
   });
 
   for await (const message of query({
@@ -297,6 +298,14 @@ function validateExternalMcpServers(
 
 function readExternalMcpAllowedTools(): readonly string[] {
   const raw = process.env.MYCLAW_MCP_ALLOWED_TOOLS_JSON?.trim();
+  if (!raw) return [];
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function readExternalMcpAlwaysAllowedTools(): readonly string[] {
+  const raw = process.env.MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON?.trim();
   if (!raw) return [];
   const parsed = JSON.parse(raw) as unknown;
   if (!Array.isArray(parsed)) return [];

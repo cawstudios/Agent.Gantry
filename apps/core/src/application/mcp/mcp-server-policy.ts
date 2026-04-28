@@ -10,7 +10,7 @@ import {
 } from '../../domain/network/public-address-policy.js';
 import { ApplicationError } from '../common/application-error.js';
 
-const DEFAULT_REMOTE_DNS_CACHE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_REMOTE_DNS_CACHE_TTL_MS = 1_000;
 
 export const STDIO_TEMPLATE_COMMANDS: Record<
   string,
@@ -109,6 +109,7 @@ export async function assertRemoteMcpDestinationPublic(
   if (cache) {
     const cached = cache.get(hostname);
     if (cached && cached.expiresAtMs > nowMs) return;
+    if (cached) cache.delete(hostname);
     const pending = cache.getPending(hostname);
     if (pending) return pending;
   }
@@ -166,6 +167,10 @@ export class RemoteMcpDnsValidationCache {
 
   set(hostname: string, entry: { expiresAtMs: number }): void {
     this.cache.set(hostname, entry);
+  }
+
+  delete(hostname: string): void {
+    this.cache.delete(hostname);
   }
 
   getPending(hostname: string): Promise<void> | undefined {

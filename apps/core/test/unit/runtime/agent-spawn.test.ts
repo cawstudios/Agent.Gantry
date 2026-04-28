@@ -172,6 +172,10 @@ class SpawnMcpRepository implements McpServerRepository {
 
   async saveServer() {}
 
+  async transitionServerStatus() {
+    return null;
+  }
+
   async getVersion() {
     return null;
   }
@@ -556,6 +560,9 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.MYCLAW_MCP_SERVERS_JSON).toBeUndefined();
     expect(env.MYCLAW_MCP_CONFIG_FILE).toMatch(/mcp-.*\.json$/);
     expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toContain(
+      'mcp__github__search_repositories',
+    );
+    expect(env.MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON).toContain(
       'mcp__github__search_repositories',
     );
     expect(repository.auditEvents).toEqual([]);

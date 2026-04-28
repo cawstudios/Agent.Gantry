@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm';
 
 import type { McpServerRepository } from '../../../../domain/ports/repositories.js';
 import type {
@@ -65,16 +65,22 @@ export class PostgresMcpServerRepository implements McpServerRepository {
   async listServers(input: {
     appId: McpServerDefinition['appId'];
     statuses?: McpServerDefinition['status'][];
+    limit?: number;
+    cursor?: string;
   }): Promise<McpServerDefinition[]> {
     const filters = [eq(pgSchema.mcpServersPostgres.appId, input.appId)];
     if (input.statuses?.length) {
       filters.push(inArray(pgSchema.mcpServersPostgres.status, input.statuses));
     }
+    if (input.cursor) {
+      filters.push(lt(pgSchema.mcpServersPostgres.updatedAt, input.cursor));
+    }
     const rows = await this.db
       .select()
       .from(pgSchema.mcpServersPostgres)
       .where(and(...filters))
-      .orderBy(desc(pgSchema.mcpServersPostgres.updatedAt));
+      .orderBy(desc(pgSchema.mcpServersPostgres.updatedAt))
+      .limit(normalizeLimit(input.limit));
     return rows.map((row) => this.mapServer(row));
   }
 
@@ -121,6 +127,41 @@ export class PostgresMcpServerRepository implements McpServerRepository {
           updatedAt: definition.updatedAt,
         },
       });
+  }
+
+  async transitionServerStatus(input: {
+    appId: McpServerDefinition['appId'];
+    serverId: McpServerId;
+    expectedStatus: McpServerDefinition['status'];
+    next: McpServerDefinition;
+  }): Promise<McpServerDefinition | null> {
+    const [row] = await this.db
+      .update(pgSchema.mcpServersPostgres)
+      .set({
+        displayName: input.next.displayName ?? null,
+        description: input.next.description ?? null,
+        status: input.next.status,
+        riskClass: input.next.riskClass,
+        requestedBy: input.next.requestedBy ?? null,
+        requestedReason: input.next.requestedReason ?? null,
+        latestApprovedVersionId: input.next.latestApprovedVersionId ?? null,
+        approvedBy: input.next.approvedBy ?? null,
+        approvedAt: input.next.approvedAt ?? null,
+        rejectedBy: input.next.rejectedBy ?? null,
+        rejectedAt: input.next.rejectedAt ?? null,
+        disabledBy: input.next.disabledBy ?? null,
+        disabledAt: input.next.disabledAt ?? null,
+        updatedAt: input.next.updatedAt,
+      })
+      .where(
+        and(
+          eq(pgSchema.mcpServersPostgres.id, input.serverId),
+          eq(pgSchema.mcpServersPostgres.appId, input.appId),
+          eq(pgSchema.mcpServersPostgres.status, input.expectedStatus),
+        ),
+      )
+      .returning();
+    return row ? this.mapServer(row) : null;
   }
 
   async getVersion(id: McpServerVersionId): Promise<McpServerVersion | null> {
@@ -225,17 +266,24 @@ export class PostgresMcpServerRepository implements McpServerRepository {
   async listAgentBindings(input: {
     appId: AgentMcpServerBinding['appId'];
     agentId: AgentMcpServerBinding['agentId'];
+    limit?: number;
+    cursor?: string;
   }): Promise<AgentMcpServerBinding[]> {
+    const filters = [
+      eq(pgSchema.agentMcpServerBindingsPostgres.appId, input.appId),
+      eq(pgSchema.agentMcpServerBindingsPostgres.agentId, input.agentId),
+    ];
+    if (input.cursor) {
+      filters.push(
+        lt(pgSchema.agentMcpServerBindingsPostgres.createdAt, input.cursor),
+      );
+    }
     const rows = await this.db
       .select()
       .from(pgSchema.agentMcpServerBindingsPostgres)
-      .where(
-        and(
-          eq(pgSchema.agentMcpServerBindingsPostgres.appId, input.appId),
-          eq(pgSchema.agentMcpServerBindingsPostgres.agentId, input.agentId),
-        ),
-      )
-      .orderBy(asc(pgSchema.agentMcpServerBindingsPostgres.createdAt));
+      .where(and(...filters))
+      .orderBy(desc(pgSchema.agentMcpServerBindingsPostgres.createdAt))
+      .limit(normalizeLimit(input.limit));
     return rows.map((row) => this.mapBinding(row));
   }
 
@@ -299,6 +347,8 @@ export class PostgresMcpServerRepository implements McpServerRepository {
   async listAuditEvents(input: {
     appId: McpServerAuditEvent['appId'];
     serverId?: McpServerId;
+    limit?: number;
+    cursor?: string;
   }): Promise<McpServerAuditEvent[]> {
     const filters = [
       eq(pgSchema.mcpServerAuditEventsPostgres.appId, input.appId),
@@ -308,11 +358,17 @@ export class PostgresMcpServerRepository implements McpServerRepository {
         eq(pgSchema.mcpServerAuditEventsPostgres.serverId, input.serverId),
       );
     }
+    if (input.cursor) {
+      filters.push(
+        lt(pgSchema.mcpServerAuditEventsPostgres.createdAt, input.cursor),
+      );
+    }
     const rows = await this.db
       .select()
       .from(pgSchema.mcpServerAuditEventsPostgres)
       .where(and(...filters))
-      .orderBy(desc(pgSchema.mcpServerAuditEventsPostgres.createdAt));
+      .orderBy(desc(pgSchema.mcpServerAuditEventsPostgres.createdAt))
+      .limit(normalizeLimit(input.limit));
     return rows.map((row) => this.mapAuditEvent(row));
   }
 
@@ -408,4 +464,9 @@ export class PostgresMcpServerRepository implements McpServerRepository {
       createdAt: row.createdAt,
     };
   }
+}
+
+function normalizeLimit(limit: number | undefined): number {
+  if (!Number.isFinite(limit) || !limit) return 100;
+  return Math.max(1, Math.min(500, Math.trunc(limit)));
 }

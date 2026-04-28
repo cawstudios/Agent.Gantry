@@ -167,10 +167,17 @@ const requestMcpServerHandler: TaskHandler = async (context) => {
     reject('Missing required fields: name and reason.', 'invalid_request');
     return;
   }
-  const requestedTargetJid = toTrimmedString(
-    data.targetJid || data.chatJid || data.jid,
-    { maxLen: 512 },
-  );
+  const requestedTargetJid = toTrimmedString(data.chatJid, { maxLen: 512 });
+  const targetOverride = toTrimmedString(data.targetJid || data.jid, {
+    maxLen: 512,
+  });
+  if (targetOverride && targetOverride !== requestedTargetJid) {
+    reject(
+      'MCP server requests must use the originating chat as the approval target.',
+      'forbidden',
+    );
+    return;
+  }
   if (!requestedTargetJid || !sourceGroupJids.includes(requestedTargetJid)) {
     reject(
       'MCP server requests must include the originating chat for this agent.',
@@ -212,7 +219,9 @@ const requestMcpServerHandler: TaskHandler = async (context) => {
   );
   try {
     const config = { transport, url: origin };
-    const created = await service.createDraft({
+    const created = await createOrReuseAgentMcpDraft({
+      service,
+      repository: storage.repositories.mcpServers,
       appId: DEFAULT_MEMORY_APP_ID as never,
       name,
       createdBy: `agent:${sourceGroup}`,
@@ -220,7 +229,11 @@ const requestMcpServerHandler: TaskHandler = async (context) => {
       requestedReason: reason,
       transportConfig: config as never,
       allowedToolPatterns: requestedToolPatterns,
-      credentialRefs: credentialRefsForRequestedMcp(transport, credentialNeeds),
+      credentialRefs: credentialRefsForRequestedMcp(
+        name,
+        transport,
+        credentialNeeds,
+      ),
       riskClass: 'medium',
     });
     startMcpPermissionReview({
@@ -256,21 +269,69 @@ export const adminTaskHandlers: Record<string, TaskHandler> = {
 };
 
 function credentialRefsForRequestedMcp(
+  serverName: string,
   transport: string,
   credentialNeeds: string[],
 ) {
   if (transport === 'http' || transport === 'sse') {
     return credentialNeeds.map((ref, index) => ({
-      name: ref,
+      name: brokerRefNameForAgentRequestedMcp(serverName, ref),
       target: 'header' as const,
-      key: credentialNeeds.length === 1 && index === 0 ? 'Authorization' : ref,
+      key:
+        credentialNeeds.length === 1 && index === 0
+          ? 'Authorization'
+          : headerNameForCredentialNeed(ref),
     }));
   }
   return credentialNeeds.map((ref) => ({
-    name: ref,
+    name: brokerRefNameForAgentRequestedMcp(serverName, ref),
     target: 'env' as const,
-    key: ref,
+    key: headerNameForCredentialNeed(ref),
   }));
+}
+
+function brokerRefNameForAgentRequestedMcp(
+  serverName: string,
+  credentialNeed: string,
+): string {
+  const server = serverName.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+  const need = credentialNeed
+    .replace(/_REF$/i, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_');
+  return `MCP_${server}_${need}_REF`;
+}
+
+function headerNameForCredentialNeed(credentialNeed: string): string {
+  return credentialNeed
+    .replace(/_REF$/i, '')
+    .replace(/[^A-Za-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+async function createOrReuseAgentMcpDraft(
+  input: Parameters<McpServerService['createDraft']>[0] & {
+    service: McpServerService;
+    repository: ReturnType<
+      typeof getRuntimeStorage
+    >['repositories']['mcpServers'];
+  },
+) {
+  const existing = await input.repository.getServerByName({
+    appId: input.appId,
+    name: input.name,
+  });
+  if (
+    existing?.status === 'draft' &&
+    existing.createdSource === 'agent_request'
+  ) {
+    const [version] = await input.repository.listVersions(existing.id);
+    if (version) {
+      return { definition: existing, version };
+    }
+  }
+  return input.service.createDraft(input);
 }
 
 function startMcpPermissionReview(input: {

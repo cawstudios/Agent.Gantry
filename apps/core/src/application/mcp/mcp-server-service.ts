@@ -24,29 +24,17 @@ import type { PermissionPolicyId } from '../../domain/permissions/permissions.js
 import { ApplicationError } from '../common/application-error.js';
 import {
   RemoteMcpDnsValidationCache,
-  STDIO_TEMPLATE_COMMANDS,
   assertRemoteMcpDestinationPublic,
   validateCredentialRefs,
   validateTransportConfig,
 } from './mcp-server-policy.js';
 import type { HostnameLookup } from '../../domain/network/public-address-policy.js';
+import {
+  materializeMcpRecord,
+  type MaterializedMcpCapability,
+} from './mcp-server-materialization.js';
 
-export type SdkMcpServerConfig =
-  | {
-      type?: 'stdio';
-      command: string;
-      args?: string[];
-      env?: Record<string, string>;
-    }
-  | { type: 'http'; url: string; headers?: Record<string, string> }
-  | { type: 'sse'; url: string; headers?: Record<string, string> };
-
-export interface MaterializedMcpCapability {
-  name: string;
-  config: SdkMcpServerConfig;
-  autoApproveToolNames: string[];
-  required: boolean;
-}
+export type { MaterializedMcpCapability } from './mcp-server-materialization.js';
 
 export class McpServerService {
   constructor(
@@ -81,6 +69,10 @@ export class McpServerService {
     });
     assertNoRawSecretsInMcpConfig(input.transportConfig);
     validateCredentialRefs(input.credentialRefs ?? []);
+    validateToolPatternPolicy({
+      allowedToolPatterns: input.allowedToolPatterns ?? [],
+      autoApproveToolPatterns: input.autoApproveToolPatterns ?? [],
+    });
 
     const existing = await this.mcpServers.getServerByName({
       appId: input.appId,
@@ -136,6 +128,8 @@ export class McpServerService {
   async listServers(input: {
     appId: AppId;
     statuses?: McpServerDefinition['status'][];
+    limit?: number;
+    cursor?: string;
   }): Promise<McpServerDefinition[]> {
     return this.mcpServers.listServers(input);
   }
@@ -179,8 +173,19 @@ export class McpServerService {
       reviewedBy: input.approvedBy,
       reviewedAt: now,
     };
+    const transitioned = await this.mcpServers.transitionServerStatus({
+      appId: input.appId,
+      serverId: server.id,
+      expectedStatus: 'draft',
+      next: approved,
+    });
+    if (!transitioned) {
+      throw new ApplicationError(
+        'CONFLICT',
+        `MCP server draft changed before approval completed: ${server.id}`,
+      );
+    }
     await this.mcpServers.saveVersion(reviewedVersion);
-    await this.mcpServers.saveServer(approved);
     await this.audit({
       appId: input.appId,
       serverId: server.id,
@@ -188,7 +193,7 @@ export class McpServerService {
       eventType: 'approve',
       actorId: input.approvedBy,
     });
-    return approved;
+    return transitioned;
   }
 
   async rejectDraft(input: {
@@ -212,7 +217,18 @@ export class McpServerService {
       rejectedAt: now,
       updatedAt: now,
     };
-    await this.mcpServers.saveServer(rejected);
+    const transitioned = await this.mcpServers.transitionServerStatus({
+      appId: input.appId,
+      serverId: server.id,
+      expectedStatus: 'draft',
+      next: rejected,
+    });
+    if (!transitioned) {
+      throw new ApplicationError(
+        'CONFLICT',
+        `MCP server draft changed before rejection completed: ${server.id}`,
+      );
+    }
     await this.audit({
       appId: input.appId,
       serverId: server.id,
@@ -220,7 +236,7 @@ export class McpServerService {
       actorId: input.rejectedBy,
       reason: input.reason,
     });
-    return rejected;
+    return transitioned;
   }
 
   async disableServer(input: {
@@ -230,6 +246,12 @@ export class McpServerService {
     reason?: string;
   }): Promise<McpServerDefinition> {
     const server = await this.requireServer(input.appId, input.serverId);
+    if (!isMcpServerApproved(server)) {
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        `Only approved MCP servers can be disabled: ${server.id}`,
+      );
+    }
     const now = new Date().toISOString();
     const disabled: McpServerDefinition = {
       ...server,
@@ -238,7 +260,18 @@ export class McpServerService {
       disabledAt: now,
       updatedAt: now,
     };
-    await this.mcpServers.saveServer(disabled);
+    const transitioned = await this.mcpServers.transitionServerStatus({
+      appId: input.appId,
+      serverId: server.id,
+      expectedStatus: 'approved',
+      next: disabled,
+    });
+    if (!transitioned) {
+      throw new ApplicationError(
+        'CONFLICT',
+        `MCP server changed before disable completed: ${server.id}`,
+      );
+    }
     await this.audit({
       appId: input.appId,
       serverId: server.id,
@@ -246,7 +279,7 @@ export class McpServerService {
       actorId: input.disabledBy,
       reason: input.reason,
     });
-    return disabled;
+    return transitioned;
   }
 
   async testServer(input: {
@@ -323,6 +356,20 @@ export class McpServerService {
         `MCP server version not found: ${versionId}`,
       );
     }
+    const existingBinding = (
+      await this.mcpServers.listAgentBindings({
+        appId: input.appId,
+        agentId: input.agentId,
+        limit: 500,
+      })
+    ).find((binding) => binding.serverId === input.serverId);
+    const latestServer = await this.requireServer(input.appId, input.serverId);
+    if (!isMcpServerApproved(latestServer)) {
+      throw new ApplicationError(
+        'CONFLICT',
+        `MCP server changed before binding completed: ${input.serverId}`,
+      );
+    }
     const now = new Date().toISOString();
     const binding: AgentMcpServerBinding = {
       id: `agent-mcp-binding:${input.agentId}:${input.serverId}` as AgentMcpServerBinding['id'],
@@ -332,8 +379,9 @@ export class McpServerService {
       versionId,
       status: 'active',
       required: input.required ?? false,
-      permissionPolicyIds: input.permissionPolicyIds ?? [],
-      createdAt: now,
+      permissionPolicyIds:
+        input.permissionPolicyIds ?? existingBinding?.permissionPolicyIds ?? [],
+      createdAt: existingBinding?.createdAt ?? now,
       updatedAt: now,
     };
     await this.mcpServers.saveAgentBinding(binding);
@@ -344,6 +392,11 @@ export class McpServerService {
       versionId,
       bindingId: binding.id,
       eventType: 'bind',
+      metadata: {
+        permissionPolicyIds: binding.permissionPolicyIds,
+        preservedPermissionPolicies:
+          !input.permissionPolicyIds && Boolean(existingBinding),
+      },
     });
     return binding;
   }
@@ -374,6 +427,8 @@ export class McpServerService {
   async listAgentBindings(input: {
     appId: AppId;
     agentId: AgentId;
+    limit?: number;
+    cursor?: string;
   }): Promise<AgentMcpServerBinding[]> {
     await this.assertAgentInApp(input.appId, input.agentId);
     return this.mcpServers.listAgentBindings(input);
@@ -386,21 +441,49 @@ export class McpServerService {
   }): Promise<MaterializedMcpCapability[]> {
     const records =
       await this.mcpServers.listMaterializedServersForAgent(input);
-    const capabilities = await Promise.all(
-      records.map(async (record) => {
-        validateTransportConfig(record.version.config, {
-          sandboxProfileId: record.version.sandboxProfileId,
-        });
-        await assertRemoteMcpDestinationPublic(
-          record.version.config,
-          this.options.lookupHostname,
-          { cache: this.options.dnsValidationCache },
-        );
-        assertNoRawSecretsInMcpConfig(record.version.config);
-        validateCredentialRefs(record.version.credentialRefs);
-        return materializeRecord(record, input.credentialEnv ?? {});
-      }),
+    const settled = await Promise.allSettled(
+      records.map((record) =>
+        this.materializeOne(record, input.credentialEnv ?? {}),
+      ),
     );
+    const capabilities: MaterializedMcpCapability[] = [];
+    for (let index = 0; index < settled.length; index += 1) {
+      const result = settled[index]!;
+      const record = records[index]!;
+      if (result.status === 'fulfilled') {
+        capabilities.push(result.value);
+        continue;
+      }
+      const reason =
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+      await this.audit({
+        appId: input.appId,
+        agentId: input.agentId,
+        serverId: record.definition.id,
+        versionId: record.version.id,
+        bindingId: record.binding.id,
+        eventType: 'startup_failure',
+        reason,
+        metadata: {
+          name: record.definition.name,
+          required: record.binding.required,
+        },
+      });
+      if (
+        result.reason instanceof ApplicationError &&
+        /Missing broker credential/.test(result.reason.message)
+      ) {
+        throw result.reason;
+      }
+      if (record.binding.required) {
+        throw new ApplicationError(
+          'INVALID_REQUEST',
+          `Required MCP server failed to materialize: ${record.definition.name}: ${reason}`,
+        );
+      }
+    }
     if (this.options.auditMaterialization ?? true) {
       const recordsByName = new Map(
         records.map((record) => [record.definition.name, record]),
@@ -419,6 +502,18 @@ export class McpServerService {
       }
     }
     return capabilities;
+  }
+
+  private async materializeOne(
+    record: MaterializedMcpServer,
+    credentialEnv: Record<string, string>,
+  ): Promise<MaterializedMcpCapability> {
+    await assertRemoteMcpDestinationPublic(
+      record.version.config,
+      this.options.lookupHostname,
+      { cache: this.options.dnsValidationCache },
+    );
+    return materializeMcpRecord(record, credentialEnv);
   }
 
   async requireServer(
@@ -506,69 +601,42 @@ function hashMcpConfig(value: unknown): string {
   return `fnv1a32:${hash.toString(16).padStart(8, '0')}`;
 }
 
-function materializeRecord(
-  record: MaterializedMcpServer,
-  credentialEnv: Record<string, string>,
-): MaterializedMcpCapability {
-  const config = record.version.config;
-  const credentialValues = resolveCredentialValues(
-    record.version.credentialRefs,
-    credentialEnv,
-  );
-  const autoApproveToolNames = record.version.autoApproveToolPatterns.map(
-    (tool) => `mcp__${record.definition.name}__${tool}`,
-  );
-  if (config.transport === 'http' || config.transport === 'sse') {
-    const headers = {
-      ...(config.headers ?? {}),
-      ...credentialValues.headers,
-    };
-    return {
-      name: record.definition.name,
-      config: {
-        type: config.transport,
-        url: config.url!,
-        ...(Object.keys(headers).length > 0 ? { headers } : {}),
-      },
-      autoApproveToolNames,
-      required: record.binding.required,
-    };
-  }
+const MCP_TOOL_PATTERN = /^[A-Za-z0-9_.-]+(?:\*)?$/;
 
-  const template = STDIO_TEMPLATE_COMMANDS[config.templateId ?? ''];
-  const env = {
-    ...(config.env ?? {}),
-    ...credentialValues.env,
-  };
-  return {
-    name: record.definition.name,
-    config: {
-      type: 'stdio',
-      command: template.command,
-      args: [...template.args, ...(config.args ?? [])],
-      ...(Object.keys(env).length > 0 ? { env } : {}),
-    },
-    autoApproveToolNames,
-    required: record.binding.required,
-  };
-}
-
-function resolveCredentialValues(
-  refs: McpCredentialRef[],
-  credentialEnv: Record<string, string>,
-): { env: Record<string, string>; headers: Record<string, string> } {
-  const env: Record<string, string> = {};
-  const headers: Record<string, string> = {};
-  for (const ref of refs) {
-    const value = credentialEnv[ref.name];
-    if (!value) {
+function validateToolPatternPolicy(input: {
+  allowedToolPatterns: string[];
+  autoApproveToolPatterns: string[];
+}): void {
+  const allowed = new Set(input.allowedToolPatterns);
+  for (const pattern of [
+    ...input.allowedToolPatterns,
+    ...input.autoApproveToolPatterns,
+  ]) {
+    if (!MCP_TOOL_PATTERN.test(pattern)) {
       throw new ApplicationError(
         'INVALID_REQUEST',
-        `Missing broker credential for MCP credential ref: ${ref.name}`,
+        `Invalid MCP tool pattern: ${pattern}`,
       );
     }
-    if (ref.target === 'env') env[ref.key] = value;
-    else headers[ref.key] = value;
   }
-  return { env, headers };
+  if (allowed.size === 0) return;
+  for (const pattern of input.autoApproveToolPatterns) {
+    if (
+      ![...allowed].some((allowedPattern) =>
+        toolPatternCovers(allowedPattern, pattern),
+      )
+    ) {
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        `Auto-approved MCP tool must also be listed in allowedToolPatterns: ${pattern}`,
+      );
+    }
+  }
+}
+
+function toolPatternCovers(allowedPattern: string, candidate: string): boolean {
+  if (allowedPattern === candidate) return true;
+  return allowedPattern.endsWith('*')
+    ? candidate.startsWith(allowedPattern.slice(0, -1))
+    : false;
 }

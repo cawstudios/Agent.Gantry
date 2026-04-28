@@ -54,14 +54,14 @@ client.mcpServers.drafts.create({
   allowedToolPatterns?,
   autoApproveToolPatterns?,
 })
-client.mcpServers.drafts.list()
+client.mcpServers.drafts.list({ limit?, cursor? })
 client.mcpServers.drafts.approve(serverId, { approvedBy? })
 client.mcpServers.drafts.reject(serverId, { rejectedBy?, reason? })
-client.mcpServers.list({ status? })
+client.mcpServers.list({ status?, limit?, cursor? })
 client.mcpServers.test(serverId, { testedBy? })
 client.mcpServers.disable(serverId, { disabledBy?, reason? })
 
-client.agents.mcpServers.list(agentId)
+client.agents.mcpServers.list(agentId, { limit?, cursor? })
 client.agents.mcpServers.enable(agentId, serverId, { required?, permissionPolicyIds? })
 client.agents.mcpServers.update(agentId, serverId, { required?, permissionPolicyIds? })
 client.agents.mcpServers.disable(agentId, serverId)
@@ -71,12 +71,18 @@ MCP definitions store credential reference names only. Broker-injected values
 are projected into a private per-run config file with `0600` permissions and
 deleted by the runner after startup; they are not saved in Claude config,
 provider artifacts, or Postgres rows.
+`allowedToolPatterns` is the enforced SDK allowlist for third-party MCP tool
+names. `autoApproveToolPatterns` is session auto-allow scope and must be a
+subset of `allowedToolPatterns` when an explicit allowlist is present.
+Agent-requested MCP credential needs are labels, not raw broker ref selectors;
+the host projects them into a server-scoped `MCP_<SERVER>_<NEED>_REF` reference
+before any approved next-run materialization.
 Remote MCP URLs must use HTTPS and cannot target local, private, link-local, or
 metadata hosts. MyClaw resolves remote MCP hostnames during approval, testing,
 and each materialization pass and rejects any A/AAAA record in private,
 loopback, link-local, multicast, unspecified, documentation, or metadata ranges.
-Runtime materialization uses a bounded in-process validation cache so repeated
-runs do not repeat DNS validation for the same host until the cache expires.
+Runtime materialization uses a short in-process validation cache for same-batch
+coalescing only; it must not be treated as durable DNS trust.
 Stdio-template MCP servers require an approved sandbox profile and are not
 available from agent-requested or CLI draft creation in this version. MCP server
 bindings are agent-wide in this version. Chat approvals are sent only to the
@@ -270,13 +276,13 @@ approved skills are represented by Anthropic provider refs.
 
 ```http
 POST   /v1/mcp-servers/drafts                    mcp:admin
-GET    /v1/mcp-servers/drafts                    mcp:read
-GET    /v1/mcp-servers                           mcp:read
+GET    /v1/mcp-servers/drafts?limit=&cursor=     mcp:read
+GET    /v1/mcp-servers?status=&limit=&cursor=    mcp:read
 POST   /v1/mcp-servers/drafts/:id/approve        mcp:admin
 POST   /v1/mcp-servers/drafts/:id/reject         mcp:admin
 POST   /v1/mcp-servers/:id/test                  mcp:admin
 POST   /v1/mcp-servers/:id/disable               mcp:admin
-GET    /v1/agents/:agentId/mcp-servers           mcp:read
+GET    /v1/agents/:agentId/mcp-servers?limit=&cursor= mcp:read
 PUT    /v1/agents/:agentId/mcp-servers/:id       mcp:admin + agents:admin
 PATCH  /v1/agents/:agentId/mcp-servers/:id       mcp:admin + agents:admin
 DELETE /v1/agents/:agentId/mcp-servers/:id       mcp:admin + agents:admin

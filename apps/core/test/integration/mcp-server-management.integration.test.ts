@@ -41,16 +41,39 @@ class InMemoryMcpServerRepository implements McpServerRepository {
   async listServers(input: {
     appId: AppId;
     statuses?: McpServerDefinition['status'][];
+    limit?: number;
+    cursor?: string;
   }) {
-    return [...this.servers.values()].filter(
-      (server) =>
-        server.appId === input.appId &&
-        (!input.statuses || input.statuses.includes(server.status)),
-    );
+    return [...this.servers.values()]
+      .filter(
+        (server) =>
+          server.appId === input.appId &&
+          (!input.statuses || input.statuses.includes(server.status)) &&
+          (!input.cursor || server.updatedAt < input.cursor),
+      )
+      .slice(0, input.limit ?? 100);
   }
 
   async saveServer(definition: McpServerDefinition) {
     this.servers.set(definition.id, definition);
+  }
+
+  async transitionServerStatus(input: {
+    appId: AppId;
+    serverId: McpServerId;
+    expectedStatus: McpServerDefinition['status'];
+    next: McpServerDefinition;
+  }) {
+    const current = this.servers.get(input.serverId);
+    if (
+      !current ||
+      current.appId !== input.appId ||
+      current.status !== input.expectedStatus
+    ) {
+      return null;
+    }
+    this.servers.set(input.serverId, input.next);
+    return input.next;
   }
 
   async getVersion(id: McpServerVersionId) {
@@ -92,11 +115,20 @@ class InMemoryMcpServerRepository implements McpServerRepository {
     return disabled;
   }
 
-  async listAgentBindings(input: { appId: AppId; agentId: AgentId }) {
-    return [...this.bindings.values()].filter(
-      (binding) =>
-        binding.appId === input.appId && binding.agentId === input.agentId,
-    );
+  async listAgentBindings(input: {
+    appId: AppId;
+    agentId: AgentId;
+    limit?: number;
+    cursor?: string;
+  }) {
+    return [...this.bindings.values()]
+      .filter(
+        (binding) =>
+          binding.appId === input.appId &&
+          binding.agentId === input.agentId &&
+          (!input.cursor || binding.createdAt < input.cursor),
+      )
+      .slice(0, input.limit ?? 100);
   }
 
   async listMaterializedServersForAgent(input: {
@@ -122,12 +154,20 @@ class InMemoryMcpServerRepository implements McpServerRepository {
     this.auditEvents.push(event);
   }
 
-  async listAuditEvents(input: { appId: AppId; serverId?: McpServerId }) {
-    return this.auditEvents.filter(
-      (event) =>
-        event.appId === input.appId &&
-        (!input.serverId || event.serverId === input.serverId),
-    );
+  async listAuditEvents(input: {
+    appId: AppId;
+    serverId?: McpServerId;
+    limit?: number;
+    cursor?: string;
+  }) {
+    return this.auditEvents
+      .filter(
+        (event) =>
+          event.appId === input.appId &&
+          (!input.serverId || event.serverId === input.serverId) &&
+          (!input.cursor || event.createdAt < input.cursor),
+      )
+      .slice(0, input.limit ?? 100);
   }
 }
 
@@ -279,6 +319,7 @@ describe('MCP server management integration flow', () => {
             url: 'https://93.184.216.34/github',
             headers: { Authorization: 'broker-safe-token' },
           },
+          allowedToolNames: ['mcp__github__search_repositories'],
           autoApproveToolNames: ['mcp__github__search_repositories'],
           required: true,
         },
@@ -351,6 +392,194 @@ describe('MCP server management integration flow', () => {
         credentialEnv: {},
       }),
     ).rejects.toThrow(/Missing broker credential/);
+  });
+
+  it('enforces stored MCP allowed tool patterns and validates auto-approval scope', async () => {
+    const { McpServerService } =
+      await import('@core/application/mcp/mcp-server-service.js');
+    const service = new McpServerService(state.mcpServers);
+
+    await expect(
+      service.createDraft({
+        appId: 'app-one' as never,
+        name: 'bad_tool_scope',
+        transportConfig: {
+          transport: 'http',
+          url: 'https://93.184.216.34/bad-tool-scope',
+        },
+        allowedToolPatterns: ['read_issue'],
+        autoApproveToolPatterns: ['write_issue'],
+      }),
+    ).rejects.toThrow(/also be listed in allowedToolPatterns/);
+
+    const draft = await service.createDraft({
+      appId: 'app-one' as never,
+      name: 'tool_scope',
+      transportConfig: {
+        transport: 'http',
+        url: 'https://93.184.216.34/tool-scope',
+      },
+      allowedToolPatterns: ['read_issue'],
+      autoApproveToolPatterns: ['read_issue'],
+    });
+    await service.approveDraft({
+      appId: 'app-one' as never,
+      serverId: draft.definition.id,
+    });
+    await service.bindToAgent({
+      appId: 'app-one' as never,
+      agentId: 'agent:one' as never,
+      serverId: draft.definition.id,
+    });
+
+    await expect(
+      service.materializeForAgent({
+        appId: 'app-one' as never,
+        agentId: 'agent:one' as never,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        name: 'tool_scope',
+        allowedToolNames: ['mcp__tool_scope__read_issue'],
+        autoApproveToolNames: ['mcp__tool_scope__read_issue'],
+      }),
+    ]);
+  });
+
+  it('preserves existing binding policies when same-channel rebind omits policies', async () => {
+    const { McpServerService } =
+      await import('@core/application/mcp/mcp-server-service.js');
+    const service = new McpServerService(state.mcpServers);
+    const draft = await service.createDraft({
+      appId: 'app-one' as never,
+      name: 'policy_preserve',
+      transportConfig: {
+        transport: 'http',
+        url: 'https://93.184.216.34/policy-preserve',
+      },
+    });
+    await service.approveDraft({
+      appId: 'app-one' as never,
+      serverId: draft.definition.id,
+    });
+    await service.bindToAgent({
+      appId: 'app-one' as never,
+      agentId: 'agent:one' as never,
+      serverId: draft.definition.id,
+      permissionPolicyIds: ['policy:admin-reviewed'] as never,
+    });
+    await service.unbindFromAgent({
+      appId: 'app-one' as never,
+      agentId: 'agent:one' as never,
+      serverId: draft.definition.id,
+    });
+
+    const rebound = await service.bindToAgent({
+      appId: 'app-one' as never,
+      agentId: 'agent:one' as never,
+      serverId: draft.definition.id,
+    });
+
+    expect(rebound.permissionPolicyIds).toEqual(['policy:admin-reviewed']);
+  });
+
+  it('does not disable draft or rejected MCP servers through the disable path', async () => {
+    const { McpServerService } =
+      await import('@core/application/mcp/mcp-server-service.js');
+    const service = new McpServerService(state.mcpServers);
+    const draft = await service.createDraft({
+      appId: 'app-one' as never,
+      name: 'disable_draft',
+      transportConfig: {
+        transport: 'http',
+        url: 'https://93.184.216.34/disable-draft',
+      },
+    });
+
+    await expect(
+      service.disableServer({
+        appId: 'app-one' as never,
+        serverId: draft.definition.id,
+      }),
+    ).rejects.toThrow(/Only approved/);
+
+    await service.rejectDraft({
+      appId: 'app-one' as never,
+      serverId: draft.definition.id,
+      reason: 'not needed',
+    });
+    await expect(
+      service.disableServer({
+        appId: 'app-one' as never,
+        serverId: draft.definition.id,
+      }),
+    ).rejects.toThrow(/Only approved/);
+  });
+
+  it('skips optional MCP DNS materialization failures and audits them', async () => {
+    const { McpServerService } =
+      await import('@core/application/mcp/mcp-server-service.js');
+    const lookupHostname = vi
+      .fn()
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+      .mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }])
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }]);
+    const service = new McpServerService(state.mcpServers, undefined, {
+      lookupHostname,
+    });
+    const optionalDraft = await service.createDraft({
+      appId: 'app-one' as never,
+      name: 'optional_bad_dns',
+      transportConfig: {
+        transport: 'http',
+        url: 'https://mcp.optional.example/optional',
+      },
+    });
+    const validDraft = await service.createDraft({
+      appId: 'app-one' as never,
+      name: 'valid_dns',
+      transportConfig: {
+        transport: 'http',
+        url: 'https://mcp.valid.example/valid',
+      },
+    });
+    await service.approveDraft({
+      appId: 'app-one' as never,
+      serverId: optionalDraft.definition.id,
+    });
+    await service.approveDraft({
+      appId: 'app-one' as never,
+      serverId: validDraft.definition.id,
+    });
+    await service.bindToAgent({
+      appId: 'app-one' as never,
+      agentId: 'agent:one' as never,
+      serverId: optionalDraft.definition.id,
+      required: false,
+    });
+    await service.bindToAgent({
+      appId: 'app-one' as never,
+      agentId: 'agent:one' as never,
+      serverId: validDraft.definition.id,
+      required: false,
+    });
+
+    await expect(
+      service.materializeForAgent({
+        appId: 'app-one' as never,
+        agentId: 'agent:one' as never,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        name: 'valid_dns',
+      }),
+    ]);
+    expect(
+      state.mcpServers.auditEvents.filter(
+        (event) => event.eventType === 'startup_failure',
+      ),
+    ).toHaveLength(1);
   });
 
   it('tests approved stdio template MCP servers with the stored sandbox profile', async () => {
@@ -473,6 +702,7 @@ describe('MCP server management integration flow', () => {
         type: 'request_mcp_server',
         taskId: 'request-mcp-test',
         targetJid: 'chat-1',
+        chatJid: 'chat-1',
         payload: {
           name: 'github',
           transport: 'http',
@@ -542,6 +772,7 @@ describe('MCP server management integration flow', () => {
         type: 'request_mcp_server',
         taskId: 'request-mcp-reject-test',
         targetJid: 'chat-1',
+        chatJid: 'chat-1',
         payload: {
           name: 'linear',
           transport: 'sse',
@@ -578,6 +809,7 @@ describe('MCP server management integration flow', () => {
         type: 'request_mcp_server',
         taskId: 'request-mcp-approve-test',
         targetJid: 'chat-1',
+        chatJid: 'chat-1',
         payload: {
           name: 'github',
           transport: 'http',
@@ -618,7 +850,7 @@ describe('MCP server management integration flow', () => {
       new McpServerService(state.mcpServers).materializeForAgent({
         appId: 'default' as never,
         agentId: 'agent:one' as never,
-        credentialEnv: { GITHUB_TOKEN_REF: 'broker-safe-token' },
+        credentialEnv: { MCP_GITHUB_GITHUB_TOKEN_REF: 'broker-safe-token' },
       }),
     ).resolves.toEqual([
       expect.objectContaining({
@@ -672,6 +904,7 @@ describe('MCP server management integration flow', () => {
         type: 'request_mcp_server',
         taskId: 'request-mcp-origin-test',
         targetJid: 'chat-origin',
+        chatJid: 'chat-origin',
         authThreadId: 'thread-origin',
         payload: {
           name: 'jira',
@@ -712,6 +945,62 @@ describe('MCP server management integration flow', () => {
     );
   });
 
+  it('rejects agent-requested MCP approval target overrides', async () => {
+    const { processTaskIpc } = await import('@core/jobs/ipc-handler.js');
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: true,
+      decidedBy: 'Approver',
+    }));
+    const deps = {
+      registeredGroups: () => ({
+        'chat-origin': {
+          name: 'Agent One Origin',
+          folder: 'agent:one',
+          jid: 'chat-origin',
+        } as any,
+        'chat-admin-dm': {
+          name: 'Agent One Admin DM',
+          folder: 'agent:one',
+          jid: 'chat-admin-dm',
+        } as any,
+      }),
+      syncGroups: vi.fn(async () => undefined),
+      getAvailableGroups: vi.fn(async () => []),
+      writeGroupsSnapshot: vi.fn(async () => undefined),
+      sendMessage: vi.fn(async () => undefined),
+      requestPermissionApproval,
+      requestUserAnswer: vi.fn(),
+      onSchedulerChanged: vi.fn(),
+      registerGroup: vi.fn(),
+    };
+
+    await processTaskIpc(
+      {
+        type: 'request_mcp_server',
+        taskId: 'request-mcp-forum-shopping-test',
+        chatJid: 'chat-origin',
+        targetJid: 'chat-admin-dm',
+        payload: {
+          name: 'forum-shop',
+          transport: 'http',
+          origin: 'https://93.184.216.34/forum-shop',
+          reason: 'Try routing to another bound chat.',
+        },
+      },
+      'agent:one',
+      false,
+      deps as any,
+    );
+
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    await expect(
+      state.mcpServers.listServers({
+        appId: 'default' as never,
+        statuses: ['draft', 'approved', 'rejected'],
+      }),
+    ).resolves.toHaveLength(0);
+  });
+
   it('rejects agent-requested MCP approval when the originating chat is absent or unbound', async () => {
     const { processTaskIpc } = await import('@core/jobs/ipc-handler.js');
     const sendMessage = vi.fn(async () => undefined);
@@ -742,6 +1031,7 @@ describe('MCP server management integration flow', () => {
         type: 'request_mcp_server',
         taskId: 'request-mcp-unbound-chat-test',
         targetJid: 'chat-other',
+        chatJid: 'chat-other',
         payload: {
           name: 'bad-origin',
           transport: 'http',
@@ -812,6 +1102,7 @@ describe('MCP server management integration flow', () => {
       appId: 'app-one' as never,
       agentId: 'agent:one' as never,
       serverId: rebindingDraft.definition.id,
+      required: true,
     });
     await expect(
       service.materializeForAgent({

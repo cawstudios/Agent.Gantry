@@ -90,11 +90,22 @@ export async function handleMcpServerRoutes(
   if (pathname === '/v1/mcp-servers/drafts' && req.method === 'GET') {
     const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:read']);
     if (!auth) return true;
-    const servers = await service().listServers({
-      appId: auth.appId as AppId,
-      statuses: ['draft'],
-    });
-    sendJson(res, 200, { drafts: servers.map(serverToResponse) });
+    try {
+      const page = parsePage(url);
+      const servers = await service().listServers({
+        appId: auth.appId as AppId,
+        statuses: ['draft'],
+        limit: page.limit + 1,
+        cursor: page.cursor,
+      });
+      sendJson(
+        res,
+        200,
+        pageResponse('drafts', servers, page.limit, serverToResponse),
+      );
+    } catch (error) {
+      sendRouteError(res, error, 'MCP server draft lookup failed');
+    }
     return true;
   }
 
@@ -109,11 +120,22 @@ export async function handleMcpServerRoutes(
       status === 'disabled'
         ? [status as McpServerStatus]
         : undefined;
-    const servers = await service().listServers({
-      appId: auth.appId as AppId,
-      statuses,
-    });
-    sendJson(res, 200, { servers: servers.map(serverToResponse) });
+    try {
+      const page = parsePage(url);
+      const servers = await service().listServers({
+        appId: auth.appId as AppId,
+        statuses,
+        limit: page.limit + 1,
+        cursor: page.cursor,
+      });
+      sendJson(
+        res,
+        200,
+        pageResponse('servers', servers, page.limit, serverToResponse),
+      );
+    } catch (error) {
+      sendRouteError(res, error, 'MCP server lookup failed');
+    }
     return true;
   }
 
@@ -331,11 +353,18 @@ export async function handleMcpServerRoutes(
     const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:read']);
     if (!auth) return true;
     try {
+      const page = parsePage(url);
       const bindings = await service().listAgentBindings({
         appId: auth.appId as AppId,
         agentId: decodeURIComponent(agentMcpsMatch[1]) as AgentId,
+        limit: page.limit + 1,
+        cursor: page.cursor,
       });
-      sendJson(res, 200, { bindings: bindings.map(bindingToResponse) });
+      sendJson(
+        res,
+        200,
+        pageResponse('bindings', bindings, page.limit, bindingToResponse),
+      );
     } catch (error) {
       sendRouteError(res, error, 'Agent MCP server lookup failed');
     }
@@ -349,6 +378,44 @@ function readOptionalString(input: unknown, key: string): string | undefined {
   if (!input || typeof input !== 'object') return undefined;
   const value = (input as Record<string, unknown>)[key];
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function parsePage(url: URL): { limit: number; cursor?: string } {
+  const rawLimit = Number.parseInt(url.searchParams.get('limit') || '100', 10);
+  if (!Number.isFinite(rawLimit) || rawLimit < 1) {
+    throw new ApplicationError(
+      'INVALID_REQUEST',
+      'limit must be a positive integer',
+    );
+  }
+  return {
+    limit: Math.min(rawLimit, 500),
+    cursor: url.searchParams.get('cursor') || undefined,
+  };
+}
+
+function pageResponse<T>(
+  key: string,
+  rows: T[],
+  limit: number,
+  project: (row: T) => Record<string, unknown>,
+): Record<string, unknown> {
+  const pageRows = rows.slice(0, limit);
+  const lastRow = rows.length > limit ? pageRows.at(-1) : undefined;
+  return {
+    [key]: pageRows.map(project),
+    nextCursor: cursorForRow(lastRow),
+  };
+}
+
+function cursorForRow(row: unknown): string | undefined {
+  if (!row || typeof row !== 'object') return undefined;
+  const record = row as { updatedAt?: unknown; createdAt?: unknown };
+  return typeof record.updatedAt === 'string'
+    ? record.updatedAt
+    : typeof record.createdAt === 'string'
+      ? record.createdAt
+      : undefined;
 }
 
 function sendRouteError(

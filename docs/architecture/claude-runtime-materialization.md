@@ -96,17 +96,19 @@ Same-channel MCP prompts are only a delivery surface. The deciding user must
 still be in the configured channel control allowlist for that agent. Normal chat
 participants cannot grant persistent capabilities. The runner includes the
 origin chat JID/thread in IPC, and the host rejects the draft before review if
-that chat is not registered to the requesting agent folder.
+that chat is not registered to the requesting agent folder or if the request
+tries to route approval to another bound chat.
 
 Remote third-party MCP servers must use HTTPS and cannot target loopback,
 private, link-local, local, or cloud metadata hosts. MyClaw also resolves
 remote MCP hostnames during approval, test, and materialization; every returned
 A/AAAA address must be publicly routable so DNS rebinding cannot turn an
 approved endpoint into runtime-local or metadata access. Runtime materialization
-uses an in-process TTL cache so the run startup path does not repeat DNS
-validation for the same host until the cache expires. Stdio-template MCP servers
-require an explicit sandbox profile and are control API/SDK-only in v1; agent
-requests and CLI draft creation only advertise HTTP/SSE.
+uses a short in-process TTL cache for same-batch coalescing only; the cache is
+not durable trust and must not extend the DNS rebinding window across runs.
+Stdio-template MCP servers require an explicit sandbox profile and are control
+API/SDK-only in v1; agent requests and CLI draft creation only advertise
+HTTP/SSE.
 
 MCP credentials are reference names resolved through `AgentCredentialBroker`.
 Raw tokens, API keys, OAuth values, runtime secrets, and database URLs must not
@@ -115,6 +117,13 @@ materialization resolves only broker-scoped credential reference names, not
 arbitrary host environment keys. Resolved MCP credentials are handed to the
 runner through a private per-run config file with `0600` permissions, and the
 runner deletes that file after reading it.
+
+`allowedToolPatterns` is the enforced SDK allowlist for tools exposed by a
+third-party MCP server. `autoApproveToolPatterns` is narrower session-only
+auto-allow scope and must be inside the allowed set when an explicit allowlist
+exists. Agent-requested credential needs are labels; the host maps them to
+server-scoped refs like `MCP_GITHUB_TOKEN_REF` rather than letting the agent pick
+arbitrary broker environment keys.
 
 ## Provider Artifacts
 

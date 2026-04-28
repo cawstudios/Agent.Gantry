@@ -338,7 +338,10 @@ describe('Slack channel', () => {
     );
     await actionHandler?.({
       ack: vi.fn().mockResolvedValue(undefined),
-      body: { user: { id: 'U_ANY', name: 'Any User' } },
+      body: {
+        channel: { id: 'C1234567890' },
+        user: { id: 'U_ANY', name: 'Any User' },
+      },
       action: {
         value: JSON.stringify({
           requestId: 'perm-no-approver',

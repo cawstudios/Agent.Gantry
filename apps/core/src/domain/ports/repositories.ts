@@ -278,8 +278,16 @@ export interface McpServerRepository {
   listServers(input: {
     appId: AppId;
     statuses?: McpServerDefinition['status'][];
+    limit?: number;
+    cursor?: string;
   }): Promise<McpServerDefinition[]>;
   saveServer(definition: McpServerDefinition): Promise<void>;
+  transitionServerStatus(input: {
+    appId: AppId;
+    serverId: McpServerId;
+    expectedStatus: McpServerDefinition['status'];
+    next: McpServerDefinition;
+  }): Promise<McpServerDefinition | null>;
   getVersion(id: McpServerVersionId): Promise<McpServerVersion | null>;
   listVersions(serverId: McpServerId): Promise<McpServerVersion[]>;
   saveVersion(version: McpServerVersion): Promise<void>;
@@ -293,6 +301,8 @@ export interface McpServerRepository {
   listAgentBindings(input: {
     appId: AppId;
     agentId: AgentId;
+    limit?: number;
+    cursor?: string;
   }): Promise<AgentMcpServerBinding[]>;
   listMaterializedServersForAgent(input: {
     appId: AppId;
@@ -302,6 +312,8 @@ export interface McpServerRepository {
   listAuditEvents(input: {
     appId: AppId;
     serverId?: McpServerId;
+    limit?: number;
+    cursor?: string;
   }): Promise<McpServerAuditEvent[]>;
 }
 

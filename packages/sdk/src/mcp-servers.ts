@@ -27,6 +27,19 @@ type CreateMcpServerDraftInput = {
   requestedReason?: string;
 };
 
+type PageInput = {
+  limit?: number;
+  cursor?: string;
+};
+
+function pageQuery(input: PageInput = {}): string {
+  const params = new URLSearchParams();
+  if (input.limit !== undefined) params.set('limit', String(input.limit));
+  if (input.cursor) params.set('cursor', input.cursor);
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
 export function createMcpServersClient(transport: TransportLike) {
   return {
     drafts: {
@@ -36,10 +49,10 @@ export function createMcpServersClient(transport: TransportLike) {
           path: '/v1/mcp-servers/drafts',
           body: input,
         }),
-      list: () =>
+      list: (input: PageInput = {}) =>
         transport.request<{ drafts: unknown[] }>({
           method: 'GET',
-          path: '/v1/mcp-servers/drafts',
+          path: `/v1/mcp-servers/drafts${pageQuery(input)}`,
         }),
       approve: (
         serverId: string,
@@ -60,9 +73,11 @@ export function createMcpServersClient(transport: TransportLike) {
           body: input,
         }),
     },
-    list: (input: { status?: string } = {}) => {
+    list: (input: { status?: string } & PageInput = {}) => {
       const params = new URLSearchParams();
       if (input.status) params.set('status', input.status);
+      if (input.limit !== undefined) params.set('limit', String(input.limit));
+      if (input.cursor) params.set('cursor', input.cursor);
       return transport.request<{ servers: unknown[] }>({
         method: 'GET',
         path: `/v1/mcp-servers${params.toString() ? `?${params}` : ''}`,
@@ -91,10 +106,10 @@ export function createMcpServersClient(transport: TransportLike) {
 
 export function createAgentMcpServersClient(transport: TransportLike) {
   return {
-    list: (agentId: string) =>
+    list: (agentId: string, input: PageInput = {}) =>
       transport.request<{ bindings: unknown[] }>({
         method: 'GET',
-        path: `/v1/agents/${encodeURIComponent(agentId)}/mcp-servers`,
+        path: `/v1/agents/${encodeURIComponent(agentId)}/mcp-servers${pageQuery(input)}`,
       }),
     enable: (
       agentId: string,

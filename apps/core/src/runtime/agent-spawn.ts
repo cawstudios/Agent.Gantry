@@ -238,6 +238,11 @@ export async function spawnAgent(
           MYCLAW_MCP_CONFIG_FILE: mcpConfigPath,
           MYCLAW_MCP_ALLOWED_TOOLS_JSON: JSON.stringify(
             mcpCapabilities.flatMap(
+              (capability) => capability.allowedToolNames,
+            ),
+          ),
+          MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON: JSON.stringify(
+            mcpCapabilities.flatMap(
               (capability) => capability.autoApproveToolNames,
             ),
           ),

@@ -89,6 +89,7 @@ describe.runIf(hasPostgresIntegrationDatabase)(
             url: 'https://93.184.216.34/linear',
             headers: { Authorization: 'broker-safe-linear-token' },
           },
+          allowedToolNames: ['mcp__linear__search_issues'],
           autoApproveToolNames: ['mcp__linear__search_issues'],
           required: false,
         },
@@ -113,6 +114,47 @@ describe.runIf(hasPostgresIntegrationDatabase)(
           expect.objectContaining({ eventType: 'materialize' }),
         ]),
       );
+    });
+
+    it('applies paginated MCP listings and conditional lifecycle transitions', async () => {
+      const service = new McpServerService(
+        runtime.repositories.mcpServers,
+        runtime.repositories.agents,
+      );
+      const first = await service.createDraft({
+        appId: 'app-one' as never,
+        name: 'first_page',
+        transportConfig: {
+          transport: 'http',
+          url: 'https://93.184.216.34/first',
+        },
+      });
+      await service.createDraft({
+        appId: 'app-one' as never,
+        name: 'second_page',
+        transportConfig: {
+          transport: 'http',
+          url: 'https://93.184.216.34/second',
+        },
+      });
+
+      const firstPage = await service.listServers({
+        appId: 'app-one' as never,
+        statuses: ['draft'],
+        limit: 1,
+      });
+      expect(firstPage).toHaveLength(1);
+      await service.rejectDraft({
+        appId: 'app-one' as never,
+        serverId: first.definition.id,
+        reason: 'not needed',
+      });
+      await expect(
+        service.approveDraft({
+          appId: 'app-one' as never,
+          serverId: first.definition.id,
+        }),
+      ).rejects.toThrow(/Only draft/);
     });
   },
 );

@@ -18,6 +18,8 @@
 - Control HTTP route changes must have route-level coverage for encoded ids, app ownership checks, and pre-mutation authorization.
 - MCP server changes must keep third-party servers behind approved Postgres definitions and agent bindings. Do not load `.mcp.json`, Claude user/project settings, raw stdio commands, or raw credential env as product truth.
 - Third-party MCP materialization must fail closed for non-HTTPS/private/local URLs, remote hosts that resolve to private/link-local/loopback/multicast/metadata ranges, unsandboxed stdio templates, and non-broker credential refs.
+- Treat MCP `allowedToolPatterns` as an enforced allowlist, not metadata. Auto-approved MCP tools must remain a subset of the allowed tools, and same-channel rebinds must preserve any existing admin permission policies unless an admin explicitly replaces them.
+- Agent-requested MCP credential needs are labels only. Never let the agent select arbitrary broker env keys; map them into server-scoped refs before approval and materialization.
 - Resolved third-party MCP credentials must not be serialized into long-lived process env; use a private per-run handoff and keep SDK tool env sanitized.
 - Host runner sync code must work with npm workspace hoisting and installed package layouts; do not assume `packages/agent-runner/node_modules` exists.
 - Files under `apps/core/src/app/bootstrap/` own composition and wiring only; runtime behavior must live in `runtime/`, `jobs/`, `session/`, `platform/`, `messaging/`, `memory/`, or infrastructure modules.

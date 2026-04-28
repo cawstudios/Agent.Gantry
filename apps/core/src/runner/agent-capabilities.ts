@@ -9,6 +9,7 @@ export interface AgentCapabilityContext {
   ipcResponseVerifyKey?: string;
   externalMcpServers?: Record<string, McpServerConfig>;
   externalMcpAllowedTools?: readonly string[];
+  externalMcpAlwaysAllowedTools?: readonly string[];
 }
 
 export type McpServerConfig =
@@ -111,6 +112,7 @@ const configuredMcpProvider: AgentCapabilityProvider = {
   id: 'configured-mcp',
   provide: (ctx) => ({
     allowedTools: ctx.externalMcpAllowedTools ?? [],
+    alwaysAllowedTools: ctx.externalMcpAlwaysAllowedTools ?? [],
     mcpServers: ctx.externalMcpServers ?? {},
   }),
 };
