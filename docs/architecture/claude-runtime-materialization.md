@@ -69,6 +69,13 @@ Postgres. Drafts survive restart but are not materialized or attached to hosted
 agents until approved. Rejected or disabled skills are retained for history and
 not used at runtime.
 
+The Claude Agent SDK `PreToolUse` hook blocks direct agent edits to skill
+capability files such as `SKILL.md`, runtime-home `.claude/skills`, and
+agent-local `skills/` folders. Agents must use
+`mcp__myclaw__request_skill_draft`, and admins/users can use the zip draft
+upload API, so the change is reviewed and persisted outside temporary Claude
+config.
+
 Local approval makes the artifact eligible for per-agent binding and per-run
 materialization. Hosted approval uploads the stored files through Anthropic's
 native beta skill APIs behind the Anthropic adapter, then stores only opaque
@@ -91,6 +98,12 @@ provider artifacts, or allowed tools.
 Agents can request an MCP server through the built-in MyClaw MCP tool, but that
 request only creates a pending draft for admin review. It never approves,
 binds, or activates the server in the current run.
+
+The same SDK `PreToolUse` hook blocks direct agent edits to MCP capability
+configuration such as `.mcp.json`, `mcpServers` settings, permission settings,
+and `claude mcp add*` shell commands. Agent-created MCP capabilities must go
+through `mcp__myclaw__request_mcp_server`, same-channel review, binding, and
+next-run materialization.
 
 Same-channel MCP prompts are only a delivery surface. The deciding user must
 still be in the configured channel control allowlist for that agent. Normal chat

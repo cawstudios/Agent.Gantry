@@ -255,6 +255,34 @@ describe('Claude Agent SDK boundary integration', () => {
     expect(call?.options.env).toEqual({
       CLAUDE_CONFIG_DIR: path.join(env.root, 'claude-config'),
     });
+    expect(call?.options.hooks?.PreToolUse).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          timeout: 5,
+          hooks: expect.arrayContaining([expect.any(Function)]),
+        }),
+      ]),
+    );
+    const preToolUseHook = call?.options.hooks?.PreToolUse?.[0]?.hooks?.[0];
+    expect(typeof preToolUseHook).toBe('function');
+    const hookDecision = await preToolUseHook({
+      hook_event_name: 'PreToolUse',
+      session_id: 'session-1',
+      transcript_path: '/tmp/transcript.jsonl',
+      cwd: '/tmp/work',
+      tool_name: 'Write',
+      tool_input: {
+        file_path: '/tmp/myclaw/agents/kai_tg_1/skills/linkedin/SKILL.md',
+        content: '# LinkedIn\n',
+      },
+      tool_use_id: 'toolu_1',
+    });
+    expect(hookDecision).toEqual(
+      expect.objectContaining({
+        continue: false,
+        decision: 'block',
+      }),
+    );
     expect(call?.streamMessages[0]).toEqual([
       {
         type: 'text',
