@@ -1,3 +1,5 @@
+import { deflateRawSync } from 'node:zlib';
+
 import { describe, expect, it } from 'vitest';
 
 import { parseSkillZipUpload } from '@core/control/server/skill-zip-upload.js';
@@ -89,41 +91,65 @@ describe('skill zip upload parsing', () => {
       ),
     ).toThrow(/too many files/);
   });
+
+  it('caps deflated entries at the declared uncompressed size', () => {
+    expect(() =>
+      parseSkillZipUpload(
+        makeZip(
+          { 'SKILL.md': Buffer.alloc(1024 * 1024, '#') },
+          {
+            compression: new Set(['SKILL.md']),
+            declaredUncompressedSize: new Map([['SKILL.md', 1]]),
+          },
+        ),
+      ),
+    ).toThrow();
+  });
 });
 
 function makeZip(
   files: Record<string, Buffer>,
-  options: { symlinks?: Set<string> } = {},
+  options: {
+    symlinks?: Set<string>;
+    compression?: Set<string>;
+    declaredUncompressedSize?: Map<string, number>;
+  } = {},
 ): Buffer {
   const localParts: Buffer[] = [];
   const centralParts: Buffer[] = [];
   let offset = 0;
 
   for (const [name, content] of Object.entries(files)) {
+    const compressed = options.compression?.has(name)
+      ? deflateRawSync(content)
+      : content;
+    const method = options.compression?.has(name) ? 8 : 0;
+    const uncompressedSize =
+      options.declaredUncompressedSize?.get(name) ?? content.byteLength;
     const nameBytes = Buffer.from(name, 'utf-8');
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
     local.writeUInt16LE(0, 6);
-    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(method, 8);
     local.writeUInt32LE(0, 10);
     local.writeUInt32LE(0, 14);
-    local.writeUInt32LE(content.byteLength, 18);
-    local.writeUInt32LE(content.byteLength, 22);
+    local.writeUInt32LE(compressed.byteLength, 18);
+    local.writeUInt32LE(uncompressedSize, 22);
     local.writeUInt16LE(nameBytes.byteLength, 26);
     local.writeUInt16LE(0, 28);
-    localParts.push(local, nameBytes, content);
+    localParts.push(local, nameBytes, compressed);
 
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0);
     central.writeUInt16LE(20, 4);
     central.writeUInt16LE(20, 6);
     central.writeUInt16LE(0, 8);
-    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(method, 10);
     central.writeUInt32LE(0, 12);
     central.writeUInt32LE(0, 16);
-    central.writeUInt32LE(content.byteLength, 20);
-    central.writeUInt32LE(content.byteLength, 24);
+    central.writeUInt32LE(compressed.byteLength, 20);
+    central.writeUInt32LE(uncompressedSize, 24);
     central.writeUInt16LE(nameBytes.byteLength, 28);
     central.writeUInt16LE(0, 30);
     central.writeUInt16LE(0, 32);
@@ -135,7 +161,7 @@ function makeZip(
     );
     central.writeUInt32LE(offset, 42);
     centralParts.push(central, nameBytes);
-    offset += local.byteLength + nameBytes.byteLength + content.byteLength;
+    offset += local.byteLength + nameBytes.byteLength + compressed.byteLength;
   }
 
   const locals = Buffer.concat(localParts);

@@ -1,0 +1,404 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { AgentRunnerInput } from '@core/runner/claude/types.js';
+
+const sdkState = vi.hoisted(() => ({
+  mode: 'success' as
+    | 'success'
+    | 'mcp-failed'
+    | 'mcp-missing'
+    | 'mcp-metadata-omitted'
+    | 'active-followup'
+    | 'memory-denial'
+    | 'subagent-attribution',
+  calls: [] as Array<{
+    options: Record<string, any>;
+    streamMessages: unknown[];
+    permissionDecision?: unknown;
+  }>,
+}));
+
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: async function* ({
+    prompt,
+    options,
+  }: {
+    prompt: AsyncIterable<{
+      message: { content: unknown };
+      parent_tool_use_id: string | null;
+    }>;
+    options: Record<string, any>;
+  }) {
+    const call = {
+      options,
+      streamMessages: [] as unknown[],
+      permissionDecision: undefined as unknown,
+    };
+    sdkState.calls.push(call);
+
+    if (sdkState.mode === 'mcp-missing') {
+      yield {
+        type: 'system',
+        subtype: 'init',
+        session_id: 'claude-session-missing-mcp',
+        mcp_servers: [],
+        permissionMode: options.permissionMode,
+        slash_commands: ['/compact'],
+      };
+      return;
+    }
+
+    if (sdkState.mode === 'mcp-metadata-omitted') {
+      yield {
+        type: 'system',
+        subtype: 'init',
+        session_id: 'claude-session-omitted-mcp-metadata',
+        permissionMode: options.permissionMode,
+        slash_commands: ['/compact'],
+      };
+      return;
+    }
+
+    yield {
+      type: 'system',
+      subtype: 'init',
+      session_id: 'claude-session-boundary',
+      mcp_servers: [
+        {
+          name: 'myclaw',
+          status: sdkState.mode === 'mcp-failed' ? 'failed' : 'connected',
+        },
+      ],
+      permissionMode: options.permissionMode,
+      slash_commands: ['/compact', '/model'],
+    };
+
+    const iterator = prompt[Symbol.asyncIterator]();
+    const first = await nextWithTimeout(iterator, 1_000);
+    if (first && !first.done) {
+      call.streamMessages.push(first.value.message.content);
+    }
+
+    if (sdkState.mode === 'active-followup') {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const inputDir = process.env.MYCLAW_IPC_INPUT_DIR || '';
+      fs.mkdirSync(inputDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(inputDir, '001-followup.json'),
+        JSON.stringify({
+          type: 'message',
+          text: 'follow-up while Claude is still running',
+        }),
+      );
+      const next = await nextWithTimeout(iterator, 1_500);
+      if (next && !next.done) {
+        call.streamMessages.push(next.value.message.content);
+      }
+    }
+
+    if (sdkState.mode === 'memory-denial') {
+      call.permissionDecision = await options.canUseTool(
+        'Bash',
+        { cmd: 'rm -rf /tmp/from-memory', apiKey: 'sk-from-memory' },
+        {
+          signal: new AbortController().signal,
+          title: 'Run command from memory',
+          displayName: 'Bash',
+          description: 'Memory says this command is required',
+          decisionReason: 'Durable memory requested shell access',
+        },
+      );
+    }
+
+    if (sdkState.mode === 'subagent-attribution') {
+      yield {
+        type: 'assistant',
+        uuid: 'assistant-subagent-message',
+        parent_tool_use_id: 'toolu-parent-agent',
+        message: { content: [{ type: 'text', text: 'subagent result' }] },
+      };
+    }
+
+    yield { type: 'result', subtype: 'success', result: 'ok' };
+  },
+}));
+
+async function nextWithTimeout<T>(
+  iterator: AsyncIterator<T>,
+  timeoutMs: number,
+): Promise<IteratorResult<T> | null> {
+  const timeout = Symbol('timeout');
+  const result = await Promise.race([
+    iterator.next(),
+    new Promise<typeof timeout>((resolve) =>
+      setTimeout(() => resolve(timeout), timeoutMs),
+    ),
+  ]);
+  return result === timeout ? null : result;
+}
+
+const tempRoots: string[] = [];
+
+function makeTempRoot(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-claude-sdk-'));
+  tempRoots.push(root);
+  return root;
+}
+
+function prepareRuntimeEnv(): {
+  root: string;
+  mcpServerPath: string;
+} {
+  const root = makeTempRoot();
+  const groupDir = path.join(root, 'workspace', 'group');
+  const extraDir = path.join(root, 'workspace', 'extra');
+  const ipcDir = path.join(root, 'ipc', 'group');
+  const inputDir = path.join(ipcDir, 'input');
+  fs.mkdirSync(groupDir, { recursive: true });
+  fs.mkdirSync(extraDir, { recursive: true });
+  fs.mkdirSync(inputDir, { recursive: true });
+  vi.stubEnv('MYCLAW_WORKSPACE_GROUP_DIR', groupDir);
+  vi.stubEnv('MYCLAW_WORKSPACE_EXTRA_DIR', extraDir);
+  vi.stubEnv('MYCLAW_IPC_DIR', ipcDir);
+  vi.stubEnv('MYCLAW_IPC_INPUT_DIR', inputDir);
+  vi.stubEnv('MYCLAW_IPC_AUTH_TOKEN', 'runner-ipc-token');
+  vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', 'runner-response-verify-key');
+  vi.stubEnv('ANTHROPIC_API_KEY', 'raw-provider-key');
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'raw-oauth-token');
+  vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude-config'));
+  return {
+    root,
+    mcpServerPath: path.join(root, 'mcp', 'stdio.js'),
+  };
+}
+
+function runnerInput(
+  overrides: Partial<AgentRunnerInput> = {},
+): AgentRunnerInput {
+  return {
+    prompt: 'unused in direct runQuery tests',
+    groupFolder: 'group',
+    chatJid: 'tg:group',
+    threadId: 'thread-1',
+    isMain: false,
+    compiledSystemPrompt: 'compiled MyClaw system profile',
+    ...overrides,
+  };
+}
+
+async function importRunQuery() {
+  vi.resetModules();
+  return await import('@core/runner/claude/query-loop.js');
+}
+
+afterEach(() => {
+  for (const root of tempRoots.splice(0)) {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  sdkState.mode = 'success';
+  sdkState.calls.length = 0;
+  vi.unstubAllEnvs();
+});
+
+describe('Claude Agent SDK boundary integration', () => {
+  it('passes hermetic MyClaw capabilities and settings into the Claude SDK', async () => {
+    const env = prepareRuntimeEnv();
+    const { runQuery } = await importRunQuery();
+
+    const result = await runQuery(
+      'hello from MyClaw',
+      undefined,
+      env.mcpServerPath,
+      runnerInput({
+        memoryContextBlock:
+          '<myclaw_memory_context trust="untrusted_data_only">prior user preference</myclaw_memory_context>',
+      }),
+      { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR },
+      'sonnet',
+      undefined,
+      undefined,
+    );
+
+    expect(result.newSessionId).toBe('claude-session-boundary');
+    const call = sdkState.calls[0];
+    expect(call?.options).toMatchObject({
+      model: 'sonnet',
+      cwd: path.join(env.root, 'workspace', 'group'),
+      permissionMode: 'default',
+      settingSources: ['user'],
+      includePartialMessages: true,
+    });
+    expect(call?.options.allowedTools).toEqual(
+      expect.arrayContaining(['Bash', 'mcp__myclaw__*']),
+    );
+    expect(call?.options.allowedTools).not.toEqual(
+      expect.arrayContaining(['Monitor', 'AskUserQuestion', 'Agent']),
+    );
+    expect(call?.options.mcpServers.myclaw).toEqual({
+      command: 'node',
+      args: [env.mcpServerPath],
+      env: {
+        MYCLAW_CHAT_JID: 'tg:group',
+        MYCLAW_GROUP_FOLDER: 'group',
+        MYCLAW_THREAD_ID: 'thread-1',
+        MYCLAW_IS_MAIN: '0',
+        MYCLAW_IPC_DIR: path.join(env.root, 'ipc', 'group'),
+        MYCLAW_IPC_AUTH_TOKEN: 'runner-ipc-token',
+        MYCLAW_IPC_RESPONSE_VERIFY_KEY: 'runner-response-verify-key',
+      },
+    });
+    expect(call?.options.env).toEqual({
+      CLAUDE_CONFIG_DIR: path.join(env.root, 'claude-config'),
+    });
+    expect(call?.streamMessages[0]).toEqual([
+      {
+        type: 'text',
+        text: '<myclaw_memory_context trust="untrusted_data_only">prior user preference</myclaw_memory_context>',
+      },
+      { type: 'text', text: 'hello from MyClaw' },
+    ]);
+    expect(call?.options.systemPrompt.append).toContain(
+      'MyClaw Durable Memory Boundary',
+    );
+    expect(call?.options.systemPrompt.append).not.toContain(
+      'prior user preference',
+    );
+  });
+
+  it('fails closed when Claude init reports the required MyClaw MCP server is unavailable', async () => {
+    const env = prepareRuntimeEnv();
+    sdkState.mode = 'mcp-failed';
+    const { runQuery } = await importRunQuery();
+
+    await expect(
+      runQuery(
+        'hello',
+        undefined,
+        env.mcpServerPath,
+        runnerInput(),
+        {},
+        undefined,
+        undefined,
+        undefined,
+      ),
+    ).rejects.toThrow(/Required MyClaw MCP server is not ready/);
+  });
+
+  it('fails closed when Claude init omits the required MyClaw MCP server', async () => {
+    const env = prepareRuntimeEnv();
+    sdkState.mode = 'mcp-missing';
+    const { runQuery } = await importRunQuery();
+
+    await expect(
+      runQuery(
+        'hello',
+        undefined,
+        env.mcpServerPath,
+        runnerInput(),
+        {},
+        undefined,
+        undefined,
+        undefined,
+      ),
+    ).rejects.toThrow(/Required MyClaw MCP server is missing/);
+  });
+
+  it('fails closed when Claude init omits MCP server status metadata', async () => {
+    const env = prepareRuntimeEnv();
+    sdkState.mode = 'mcp-metadata-omitted';
+    const { runQuery } = await importRunQuery();
+
+    await expect(
+      runQuery(
+        'hello',
+        undefined,
+        env.mcpServerPath,
+        runnerInput(),
+        {},
+        undefined,
+        undefined,
+        undefined,
+      ),
+    ).rejects.toThrow(/Required MyClaw MCP server status is missing/);
+  });
+
+  it('pipes active IPC follow-up input into the same Claude SDK stream', async () => {
+    const env = prepareRuntimeEnv();
+    sdkState.mode = 'active-followup';
+    const { runQuery } = await importRunQuery();
+
+    await expect(
+      runQuery(
+        'initial prompt',
+        undefined,
+        env.mcpServerPath,
+        runnerInput(),
+        {},
+        undefined,
+        undefined,
+        undefined,
+      ),
+    ).resolves.toMatchObject({ newSessionId: 'claude-session-boundary' });
+
+    expect(sdkState.calls[0]?.streamMessages).toEqual([
+      'initial prompt',
+      'follow-up while Claude is still running',
+    ]);
+  }, 5_000);
+
+  it('does not let untrusted memory grant risky Claude tool use', async () => {
+    const env = prepareRuntimeEnv();
+    sdkState.mode = 'memory-denial';
+    const { runQuery } = await importRunQuery();
+
+    await runQuery(
+      'current user did not ask for shell access',
+      undefined,
+      env.mcpServerPath,
+      runnerInput({
+        memoryContextBlock:
+          '<myclaw_memory_context trust="untrusted_data_only">[suppressed: instruction-like memory content]</myclaw_memory_context>',
+      }),
+      {},
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    expect(sdkState.calls[0]?.permissionDecision).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        interrupt: false,
+      }),
+    );
+    expect(
+      String((sdkState.calls[0]?.permissionDecision as any).message),
+    ).toContain('memory boundary');
+  });
+
+  it('preserves subagent-attributed assistant messages as runner resume anchors', async () => {
+    const env = prepareRuntimeEnv();
+    sdkState.mode = 'subagent-attribution';
+    const { runQuery } = await importRunQuery();
+
+    await expect(
+      runQuery(
+        'delegate safely',
+        undefined,
+        env.mcpServerPath,
+        runnerInput(),
+        {},
+        undefined,
+        undefined,
+        undefined,
+      ),
+    ).resolves.toMatchObject({
+      lastAssistantUuid: 'assistant-subagent-message',
+    });
+  });
+});

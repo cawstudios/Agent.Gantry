@@ -1,0 +1,411 @@
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+
+import type { McpServerRepository } from '../../../../domain/ports/repositories.js';
+import type {
+  AgentMcpServerBinding,
+  MaterializedMcpServer,
+  McpServerAuditEvent,
+  McpServerDefinition,
+  McpServerId,
+  McpServerVersion,
+  McpServerVersionId,
+} from '../../../../domain/mcp/mcp-servers.js';
+import type { CanonicalDb } from './canonical-graph-repository.postgres.js';
+import * as pgSchema from '../schema/schema.js';
+
+function encodeJson(value: unknown): string {
+  return JSON.stringify(value ?? null);
+}
+
+function parseJsonArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  const parsed = JSON.parse(value);
+  return Array.isArray(parsed) ? parsed.map(String) : [];
+}
+
+function parseJsonRecord(
+  value: string | null | undefined,
+): Record<string, unknown> {
+  if (!value) return {};
+  const parsed = JSON.parse(value);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : {};
+}
+
+export class PostgresMcpServerRepository implements McpServerRepository {
+  constructor(private readonly db: CanonicalDb) {}
+
+  async getServer(id: McpServerId): Promise<McpServerDefinition | null> {
+    const [row] = await this.db
+      .select()
+      .from(pgSchema.mcpServersPostgres)
+      .where(eq(pgSchema.mcpServersPostgres.id, id))
+      .limit(1);
+    return row ? this.mapServer(row) : null;
+  }
+
+  async getServerByName(input: {
+    appId: McpServerDefinition['appId'];
+    name: string;
+  }): Promise<McpServerDefinition | null> {
+    const [row] = await this.db
+      .select()
+      .from(pgSchema.mcpServersPostgres)
+      .where(
+        and(
+          eq(pgSchema.mcpServersPostgres.appId, input.appId),
+          eq(pgSchema.mcpServersPostgres.name, input.name),
+        ),
+      )
+      .limit(1);
+    return row ? this.mapServer(row) : null;
+  }
+
+  async listServers(input: {
+    appId: McpServerDefinition['appId'];
+    statuses?: McpServerDefinition['status'][];
+  }): Promise<McpServerDefinition[]> {
+    const filters = [eq(pgSchema.mcpServersPostgres.appId, input.appId)];
+    if (input.statuses?.length) {
+      filters.push(inArray(pgSchema.mcpServersPostgres.status, input.statuses));
+    }
+    const rows = await this.db
+      .select()
+      .from(pgSchema.mcpServersPostgres)
+      .where(and(...filters))
+      .orderBy(desc(pgSchema.mcpServersPostgres.updatedAt));
+    return rows.map((row) => this.mapServer(row));
+  }
+
+  async saveServer(definition: McpServerDefinition): Promise<void> {
+    await this.db
+      .insert(pgSchema.mcpServersPostgres)
+      .values({
+        id: definition.id,
+        appId: definition.appId,
+        name: definition.name,
+        displayName: definition.displayName ?? null,
+        description: definition.description ?? null,
+        status: definition.status,
+        createdSource: definition.createdSource,
+        riskClass: definition.riskClass,
+        requestedBy: definition.requestedBy ?? null,
+        requestedReason: definition.requestedReason ?? null,
+        latestApprovedVersionId: definition.latestApprovedVersionId ?? null,
+        approvedBy: definition.approvedBy ?? null,
+        approvedAt: definition.approvedAt ?? null,
+        rejectedBy: definition.rejectedBy ?? null,
+        rejectedAt: definition.rejectedAt ?? null,
+        disabledBy: definition.disabledBy ?? null,
+        disabledAt: definition.disabledAt ?? null,
+        createdAt: definition.createdAt,
+        updatedAt: definition.updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: pgSchema.mcpServersPostgres.id,
+        set: {
+          displayName: definition.displayName ?? null,
+          description: definition.description ?? null,
+          status: definition.status,
+          riskClass: definition.riskClass,
+          requestedBy: definition.requestedBy ?? null,
+          requestedReason: definition.requestedReason ?? null,
+          latestApprovedVersionId: definition.latestApprovedVersionId ?? null,
+          approvedBy: definition.approvedBy ?? null,
+          approvedAt: definition.approvedAt ?? null,
+          rejectedBy: definition.rejectedBy ?? null,
+          rejectedAt: definition.rejectedAt ?? null,
+          disabledBy: definition.disabledBy ?? null,
+          disabledAt: definition.disabledAt ?? null,
+          updatedAt: definition.updatedAt,
+        },
+      });
+  }
+
+  async getVersion(id: McpServerVersionId): Promise<McpServerVersion | null> {
+    const [row] = await this.db
+      .select()
+      .from(pgSchema.mcpServerVersionsPostgres)
+      .where(eq(pgSchema.mcpServerVersionsPostgres.id, id))
+      .limit(1);
+    return row ? this.mapVersion(row) : null;
+  }
+
+  async listVersions(serverId: McpServerId): Promise<McpServerVersion[]> {
+    const rows = await this.db
+      .select()
+      .from(pgSchema.mcpServerVersionsPostgres)
+      .where(eq(pgSchema.mcpServerVersionsPostgres.serverId, serverId))
+      .orderBy(desc(pgSchema.mcpServerVersionsPostgres.version));
+    return rows.map((row) => this.mapVersion(row));
+  }
+
+  async saveVersion(version: McpServerVersion): Promise<void> {
+    await this.db
+      .insert(pgSchema.mcpServerVersionsPostgres)
+      .values({
+        id: version.id,
+        appId: version.appId,
+        serverId: version.serverId,
+        version: version.version,
+        transport: version.transport,
+        configJson: encodeJson(version.config),
+        allowedToolPatternsJson: encodeJson(version.allowedToolPatterns),
+        autoApproveToolPatternsJson: encodeJson(
+          version.autoApproveToolPatterns,
+        ),
+        credentialRefsJson: encodeJson(version.credentialRefs),
+        sandboxProfileId: version.sandboxProfileId ?? null,
+        configHash: version.configHash,
+        reviewedBy: version.reviewedBy ?? null,
+        reviewedAt: version.reviewedAt ?? null,
+        createdAt: version.createdAt,
+      })
+      .onConflictDoUpdate({
+        target: pgSchema.mcpServerVersionsPostgres.id,
+        set: {
+          reviewedBy: version.reviewedBy ?? null,
+          reviewedAt: version.reviewedAt ?? null,
+        },
+      });
+  }
+
+  async saveAgentBinding(binding: AgentMcpServerBinding): Promise<void> {
+    await this.db
+      .insert(pgSchema.agentMcpServerBindingsPostgres)
+      .values({
+        id: binding.id,
+        appId: binding.appId,
+        agentId: binding.agentId,
+        serverId: binding.serverId,
+        versionId: binding.versionId,
+        status: binding.status,
+        required: binding.required,
+        permissionPolicyIdsJson: encodeJson(binding.permissionPolicyIds),
+        conversationId: binding.conversationId ?? null,
+        threadId: binding.threadId ?? null,
+        createdAt: binding.createdAt,
+        updatedAt: binding.updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: pgSchema.agentMcpServerBindingsPostgres.id,
+        set: {
+          versionId: binding.versionId,
+          status: binding.status,
+          required: binding.required,
+          permissionPolicyIdsJson: encodeJson(binding.permissionPolicyIds),
+          conversationId: binding.conversationId ?? null,
+          threadId: binding.threadId ?? null,
+          updatedAt: binding.updatedAt,
+        },
+      });
+  }
+
+  async disableAgentBinding(input: {
+    appId: AgentMcpServerBinding['appId'];
+    agentId: AgentMcpServerBinding['agentId'];
+    serverId: AgentMcpServerBinding['serverId'];
+    updatedAt: string;
+  }): Promise<AgentMcpServerBinding | null> {
+    const [row] = await this.db
+      .update(pgSchema.agentMcpServerBindingsPostgres)
+      .set({ status: 'disabled', updatedAt: input.updatedAt })
+      .where(
+        and(
+          eq(pgSchema.agentMcpServerBindingsPostgres.appId, input.appId),
+          eq(pgSchema.agentMcpServerBindingsPostgres.agentId, input.agentId),
+          eq(pgSchema.agentMcpServerBindingsPostgres.serverId, input.serverId),
+        ),
+      )
+      .returning();
+    return row ? this.mapBinding(row) : null;
+  }
+
+  async listAgentBindings(input: {
+    appId: AgentMcpServerBinding['appId'];
+    agentId: AgentMcpServerBinding['agentId'];
+  }): Promise<AgentMcpServerBinding[]> {
+    const rows = await this.db
+      .select()
+      .from(pgSchema.agentMcpServerBindingsPostgres)
+      .where(
+        and(
+          eq(pgSchema.agentMcpServerBindingsPostgres.appId, input.appId),
+          eq(pgSchema.agentMcpServerBindingsPostgres.agentId, input.agentId),
+        ),
+      )
+      .orderBy(asc(pgSchema.agentMcpServerBindingsPostgres.createdAt));
+    return rows.map((row) => this.mapBinding(row));
+  }
+
+  async listMaterializedServersForAgent(input: {
+    appId: AgentMcpServerBinding['appId'];
+    agentId: AgentMcpServerBinding['agentId'];
+  }): Promise<MaterializedMcpServer[]> {
+    const rows = await this.db
+      .select({
+        binding: pgSchema.agentMcpServerBindingsPostgres,
+        definition: pgSchema.mcpServersPostgres,
+        version: pgSchema.mcpServerVersionsPostgres,
+      })
+      .from(pgSchema.agentMcpServerBindingsPostgres)
+      .innerJoin(
+        pgSchema.mcpServersPostgres,
+        eq(
+          pgSchema.agentMcpServerBindingsPostgres.serverId,
+          pgSchema.mcpServersPostgres.id,
+        ),
+      )
+      .innerJoin(
+        pgSchema.mcpServerVersionsPostgres,
+        eq(
+          pgSchema.agentMcpServerBindingsPostgres.versionId,
+          pgSchema.mcpServerVersionsPostgres.id,
+        ),
+      )
+      .where(
+        and(
+          eq(pgSchema.agentMcpServerBindingsPostgres.appId, input.appId),
+          eq(pgSchema.agentMcpServerBindingsPostgres.agentId, input.agentId),
+          eq(pgSchema.agentMcpServerBindingsPostgres.status, 'active'),
+          eq(pgSchema.mcpServersPostgres.status, 'approved'),
+        ),
+      )
+      .orderBy(asc(pgSchema.mcpServersPostgres.name));
+    return rows.map((row) => ({
+      binding: this.mapBinding(row.binding),
+      definition: this.mapServer(row.definition),
+      version: this.mapVersion(row.version),
+    }));
+  }
+
+  async appendAuditEvent(event: McpServerAuditEvent): Promise<void> {
+    await this.db.insert(pgSchema.mcpServerAuditEventsPostgres).values({
+      id: event.id,
+      appId: event.appId,
+      agentId: event.agentId ?? null,
+      serverId: event.serverId ?? null,
+      versionId: event.versionId ?? null,
+      bindingId: event.bindingId ?? null,
+      eventType: event.eventType,
+      actorId: event.actorId ?? null,
+      reason: event.reason ?? null,
+      metadataJson: encodeJson(event.metadata),
+      createdAt: event.createdAt,
+    });
+  }
+
+  async listAuditEvents(input: {
+    appId: McpServerAuditEvent['appId'];
+    serverId?: McpServerId;
+  }): Promise<McpServerAuditEvent[]> {
+    const filters = [
+      eq(pgSchema.mcpServerAuditEventsPostgres.appId, input.appId),
+    ];
+    if (input.serverId) {
+      filters.push(
+        eq(pgSchema.mcpServerAuditEventsPostgres.serverId, input.serverId),
+      );
+    }
+    const rows = await this.db
+      .select()
+      .from(pgSchema.mcpServerAuditEventsPostgres)
+      .where(and(...filters))
+      .orderBy(desc(pgSchema.mcpServerAuditEventsPostgres.createdAt));
+    return rows.map((row) => this.mapAuditEvent(row));
+  }
+
+  private mapServer(
+    row: typeof pgSchema.mcpServersPostgres.$inferSelect,
+  ): McpServerDefinition {
+    return {
+      id: row.id as McpServerDefinition['id'],
+      appId: row.appId as McpServerDefinition['appId'],
+      name: row.name,
+      displayName: row.displayName ?? undefined,
+      description: row.description ?? undefined,
+      status: row.status as McpServerDefinition['status'],
+      createdSource: row.createdSource as McpServerDefinition['createdSource'],
+      riskClass: row.riskClass as McpServerDefinition['riskClass'],
+      requestedBy: row.requestedBy ?? undefined,
+      requestedReason: row.requestedReason ?? undefined,
+      latestApprovedVersionId: row.latestApprovedVersionId as
+        | McpServerVersionId
+        | undefined,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      approvedBy: row.approvedBy ?? undefined,
+      approvedAt: row.approvedAt ?? undefined,
+      rejectedBy: row.rejectedBy ?? undefined,
+      rejectedAt: row.rejectedAt ?? undefined,
+      disabledBy: row.disabledBy ?? undefined,
+      disabledAt: row.disabledAt ?? undefined,
+    };
+  }
+
+  private mapVersion(
+    row: typeof pgSchema.mcpServerVersionsPostgres.$inferSelect,
+  ): McpServerVersion {
+    return {
+      id: row.id as McpServerVersion['id'],
+      appId: row.appId as McpServerVersion['appId'],
+      serverId: row.serverId as McpServerVersion['serverId'],
+      version: row.version,
+      transport: row.transport as McpServerVersion['transport'],
+      config: parseJsonRecord(
+        row.configJson,
+      ) as unknown as McpServerVersion['config'],
+      allowedToolPatterns: parseJsonArray(row.allowedToolPatternsJson),
+      autoApproveToolPatterns: parseJsonArray(row.autoApproveToolPatternsJson),
+      credentialRefs: JSON.parse(
+        row.credentialRefsJson || '[]',
+      ) as McpServerVersion['credentialRefs'],
+      sandboxProfileId: row.sandboxProfileId ?? undefined,
+      configHash: row.configHash,
+      reviewedBy: row.reviewedBy ?? undefined,
+      reviewedAt: row.reviewedAt ?? undefined,
+      createdAt: row.createdAt,
+    };
+  }
+
+  private mapBinding(
+    row: typeof pgSchema.agentMcpServerBindingsPostgres.$inferSelect,
+  ): AgentMcpServerBinding {
+    return {
+      id: row.id as AgentMcpServerBinding['id'],
+      appId: row.appId as AgentMcpServerBinding['appId'],
+      agentId: row.agentId as AgentMcpServerBinding['agentId'],
+      serverId: row.serverId as AgentMcpServerBinding['serverId'],
+      versionId: row.versionId as AgentMcpServerBinding['versionId'],
+      status: row.status as AgentMcpServerBinding['status'],
+      required: row.required,
+      permissionPolicyIds: parseJsonArray(
+        row.permissionPolicyIdsJson,
+      ) as AgentMcpServerBinding['permissionPolicyIds'],
+      conversationId:
+        row.conversationId as AgentMcpServerBinding['conversationId'],
+      threadId: row.threadId as AgentMcpServerBinding['threadId'],
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private mapAuditEvent(
+    row: typeof pgSchema.mcpServerAuditEventsPostgres.$inferSelect,
+  ): McpServerAuditEvent {
+    return {
+      id: row.id as McpServerAuditEvent['id'],
+      appId: row.appId as McpServerAuditEvent['appId'],
+      agentId: row.agentId as McpServerAuditEvent['agentId'],
+      serverId: row.serverId as McpServerAuditEvent['serverId'],
+      versionId: row.versionId as McpServerAuditEvent['versionId'],
+      bindingId: row.bindingId as McpServerAuditEvent['bindingId'],
+      eventType: row.eventType as McpServerAuditEvent['eventType'],
+      actorId: row.actorId ?? undefined,
+      reason: row.reason ?? undefined,
+      metadata: parseJsonRecord(row.metadataJson),
+      createdAt: row.createdAt,
+    };
+  }
+}

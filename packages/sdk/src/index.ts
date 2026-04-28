@@ -8,6 +8,7 @@ import type {
   ChannelInstallationPatch,
 } from './channel-types.js';
 import { createAgentSkillsClient, createSkillDraftsClient } from './skills.js';
+import * as mcpServerClients from './mcp-servers.js';
 export type JobKind = 'manual' | 'once' | 'recurring';
 export type ResponseMode = 'sse' | 'webhook' | 'both' | 'none';
 export type MemorySubjectType = 'user' | 'group' | 'channel' | 'common';
@@ -274,6 +275,8 @@ class Transport {
 
 export class MyClawClient {
   private readonly transport: Transport;
+  private readonly request = <T>(options: RequestOptions) =>
+    this.transport.request<T>(options);
 
   constructor(options: ClientOptions) {
     this.transport = new Transport(options);
@@ -439,8 +442,10 @@ export class MyClawClient {
       }),
   };
 
-  readonly skillDrafts = createSkillDraftsClient({
-    request: (options) => this.transport.request(options),
+  readonly skillDrafts = createSkillDraftsClient({ request: this.request });
+
+  readonly mcpServers = mcpServerClients.createMcpServersClient({
+    request: this.request,
   });
 
   readonly channels = {
@@ -519,8 +524,9 @@ export class MyClawClient {
   };
 
   readonly agents = {
-    skills: createAgentSkillsClient({
-      request: (options) => this.transport.request(options),
+    skills: createAgentSkillsClient({ request: this.request }),
+    mcpServers: mcpServerClients.createAgentMcpServersClient({
+      request: this.request,
     }),
     bindings: {
       list: (agentId: string) =>
@@ -689,6 +695,6 @@ export class MyClawClient {
     },
   };
 }
-export const createClient = (options: ClientOptions): MyClawClient =>
+export const createClient = (options: ClientOptions) =>
   new MyClawClient(options);
 export { verifyWebhookSignature } from './webhook-signature.js';

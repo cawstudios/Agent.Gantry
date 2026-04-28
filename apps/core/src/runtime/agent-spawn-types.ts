@@ -8,6 +8,9 @@ import type {
 } from '../domain/ports/provider-artifact-store.js';
 import type { SkillArtifactStore } from '../domain/ports/skill-artifact-store.js';
 import type { SkillCatalogRepository } from '../domain/ports/repositories.js';
+import type { McpServerRepository } from '../domain/ports/repositories.js';
+import type { HostnameLookup } from '../domain/network/public-address-policy.js';
+import type { RemoteMcpDnsValidationCache } from '../application/mcp/mcp-server-policy.js';
 
 export interface AgentInput {
   prompt: string;
@@ -44,6 +47,13 @@ export interface RunAgentOptions {
     appId: string;
     agentId: string;
   };
+  mcpServerRepository?: McpServerRepository;
+  mcpContext?: {
+    appId: string;
+    agentId: string;
+  };
+  mcpHostnameLookup?: HostnameLookup;
+  mcpDnsValidationCache?: RemoteMcpDnsValidationCache;
 }
 
 export interface HostRuntimeContext {

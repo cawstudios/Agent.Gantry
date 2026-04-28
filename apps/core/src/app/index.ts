@@ -15,6 +15,8 @@ import {
   formatRuntimePreflightFailure,
   validateRuntimePreflightWithStorage,
 } from '../config/preflight.js';
+import type { HostnameLookup } from '../domain/network/public-address-policy.js';
+import { defaultHostnameLookup } from '../infrastructure/network/hostname-lookup.js';
 
 export { escapeXml, formatMessages } from '../messaging/router.js';
 export {
@@ -24,11 +26,13 @@ export {
 
 export interface StartMyClawRuntimeOptions {
   skipPreflight?: boolean;
+  mcpHostnameLookup?: HostnameLookup;
 }
 
 export async function startMyClawRuntime(
   options: StartMyClawRuntimeOptions = {},
 ): Promise<void> {
+  const mcpHostnameLookup = options.mcpHostnameLookup ?? defaultHostnameLookup;
   if (!options.skipPreflight) {
     const validation = await validateRuntimePreflightWithStorage(MYCLAW_HOME);
     if (!validation.ok && validation.failure) {
@@ -36,7 +40,9 @@ export async function startMyClawRuntime(
     }
   }
 
-  const app = getDefaultRuntimeApp();
+  const app = getDefaultRuntimeApp({
+    mcpHostnameLookup: () => mcpHostnameLookup,
+  });
   const channelWiring = createChannelWiring(app);
   let controlServer:
     | {
@@ -77,10 +83,13 @@ export async function startMyClawRuntime(
     );
   }
 
-  await startRuntimeServices({
-    app,
-    channelWiring,
-  });
+  await startRuntimeServices(
+    {
+      app,
+      channelWiring,
+    },
+    { mcpHostnameLookup },
+  );
   controlServer = startControlServer({ app });
 }
 

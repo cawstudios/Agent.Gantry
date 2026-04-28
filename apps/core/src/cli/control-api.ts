@@ -1,0 +1,161 @@
+import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
+import path from 'node:path';
+
+export async function controlApiRequest(
+  runtimeHome: string,
+  input: {
+    method: string;
+    path: string;
+    body?: unknown;
+    contentType?: string;
+    missingKeyMessage?: string;
+  },
+): Promise<unknown> {
+  const env = readRuntimeControlEnv(runtimeHome);
+  const apiKey = controlApiKey(env);
+  if (!apiKey) {
+    throw new Error(
+      input.missingKeyMessage || 'MYCLAW_CONTROL_API_KEY is required.',
+    );
+  }
+  const body = requestBody(input.body);
+  const baseUrl = controlBaseUrl(env);
+  const url = new URL(input.path, baseUrl);
+  const mod = url.protocol === 'https:' ? https : http;
+  const socketPath = controlSocketPath(runtimeHome, env);
+  return new Promise((resolve, reject) => {
+    const req = mod.request(
+      {
+        protocol: url.protocol,
+        hostname: socketPath ? undefined : url.hostname,
+        port: socketPath ? undefined : url.port,
+        path: `${url.pathname}${url.search}`,
+        socketPath,
+        method: input.method,
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          accept: 'application/json',
+          ...(body
+            ? {
+                'content-type': input.contentType || 'application/json',
+                'content-length': String(body.byteLength),
+              }
+            : {}),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on('end', () => {
+          const parsed = parseJson(Buffer.concat(chunks).toString('utf-8'));
+          if ((res.statusCode || 500) >= 400) {
+            reject(new Error(errorMessage(parsed)));
+            return;
+          }
+          resolve(parsed);
+        });
+      },
+    );
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+function requestBody(body: unknown): Buffer | undefined {
+  if (body === undefined) return undefined;
+  if (Buffer.isBuffer(body)) return body;
+  if (body instanceof Uint8Array) return Buffer.from(body);
+  return Buffer.from(JSON.stringify(body));
+}
+
+function readRuntimeControlEnv(runtimeHome: string): Record<string, string> {
+  return {
+    ...readEnvFile(path.join(runtimeHome, '.env')),
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    ),
+  };
+}
+
+function readEnvFile(filePath: string): Record<string, string> {
+  try {
+    const env: Record<string, string> = {};
+    for (const rawLine of fs.readFileSync(filePath, 'utf-8').split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eqIdx = line.indexOf('=');
+      if (eqIdx <= 0) continue;
+      const key = line.slice(0, eqIdx).trim();
+      let value = line.slice(eqIdx + 1).trim();
+      if (
+        value.length >= 2 &&
+        ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'")))
+      ) {
+        value = value.slice(1, -1);
+      }
+      env[key] = value;
+    }
+    return env;
+  } catch {
+    return {};
+  }
+}
+
+function controlApiKey(env: Record<string, string>): string {
+  const single = env.MYCLAW_CONTROL_API_KEY?.trim();
+  if (single) return single;
+  const rawJson = env.MYCLAW_CONTROL_API_KEYS_JSON?.trim();
+  if (!rawJson) return '';
+  try {
+    const parsed = JSON.parse(rawJson) as Array<{ token?: string }>;
+    return parsed.find((entry) => entry.token?.trim())?.token?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+function controlBaseUrl(env: Record<string, string>): string {
+  if (env.MYCLAW_CONTROL_BASE_URL?.trim()) {
+    return env.MYCLAW_CONTROL_BASE_URL.trim();
+  }
+  const port = Number(env.MYCLAW_CONTROL_PORT || 0);
+  return port > 0 ? `http://127.0.0.1:${port}` : 'http://127.0.0.1';
+}
+
+function controlSocketPath(
+  runtimeHome: string,
+  env: Record<string, string>,
+): string | undefined {
+  if (env.MYCLAW_CONTROL_BASE_URL?.trim()) return undefined;
+  if (Number(env.MYCLAW_CONTROL_PORT || 0) > 0) return undefined;
+  return (
+    env.MYCLAW_CONTROL_SOCKET_PATH?.trim() ||
+    path.join(runtimeHome, 'run', 'control.sock')
+  );
+}
+
+function parseJson(raw: string): unknown {
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('MyClaw returned a non-JSON response');
+  }
+}
+
+function errorMessage(input: unknown): string {
+  if (isRecord(input) && isRecord(input.error)) {
+    return String(input.error.message || 'MyClaw request failed');
+  }
+  return 'MyClaw request failed';
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return !!input && typeof input === 'object';
+}

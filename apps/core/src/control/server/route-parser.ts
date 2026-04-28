@@ -37,11 +37,16 @@ export function parseSessionRoute(pathname: string): SessionRoute | null {
     pathname,
   );
   const runsMatch = /^\/v1\/sessions\/([^/]+)\/runs$/.exec(pathname);
-  const selected = match ?? runsMatch;
-  if (!selected) return null;
+  if (runsMatch) {
+    return {
+      sessionId: decodeURIComponent(runsMatch[1]!),
+      action: 'runs',
+    };
+  }
+  if (!match) return null;
   return {
-    sessionId: decodeURIComponent(selected[1]!),
-    action: selected[2] as SessionRoute['action'],
+    sessionId: decodeURIComponent(match[1]!),
+    action: match[2] as SessionRoute['action'],
   };
 }
 

@@ -3,7 +3,13 @@ import type { NewMessage, RegisteredGroup } from '../domain/types.js';
 import type { OpsRepository } from '../domain/repositories/ops-repo.js';
 import type { ProviderArtifactStore } from '../domain/ports/provider-artifact-store.js';
 import type { SkillArtifactStore } from '../domain/ports/skill-artifact-store.js';
-import type { SkillCatalogRepository } from '../domain/ports/repositories.js';
+import type {
+  McpServerRepository,
+  SkillCatalogRepository,
+} from '../domain/ports/repositories.js';
+import type { HostnameLookup } from '../domain/network/public-address-policy.js';
+import type { RemoteMcpDnsValidationCache } from '../application/mcp/mcp-server-policy.js';
+import { assertSafeProviderSessionId } from '../domain/sessions/provider-session-id.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import {
   archiveProviderSessionTranscript,
@@ -110,6 +116,9 @@ export function buildProviderArtifactRunOptions(input: {
   providerArtifactStore?: ProviderArtifactStore;
   skillRepository?: SkillCatalogRepository;
   skillArtifactStore?: SkillArtifactStore;
+  mcpServerRepository?: McpServerRepository;
+  mcpHostnameLookup?: HostnameLookup;
+  mcpDnsValidationCache?: RemoteMcpDnsValidationCache;
   skillContext?: {
     appId: string;
     agentId: string;
@@ -168,6 +177,15 @@ export function buildProviderArtifactRunOptions(input: {
           skillContext: resolvedSkillContext,
         }
       : {};
+  const mcpOptions =
+    input.mcpServerRepository && resolvedSkillContext
+      ? {
+          mcpServerRepository: input.mcpServerRepository,
+          mcpContext: resolvedSkillContext,
+          mcpHostnameLookup: input.mcpHostnameLookup,
+          mcpDnsValidationCache: input.mcpDnsValidationCache,
+        }
+      : {};
   const options: RunAgentOptions = {
     ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
     ...(input.credentialBroker
@@ -175,6 +193,7 @@ export function buildProviderArtifactRunOptions(input: {
       : {}),
     ...artifactOptions,
     ...skillOptions,
+    ...mcpOptions,
   };
   return Object.keys(options).length > 0 ? options : undefined;
 }
@@ -200,6 +219,7 @@ export async function persistRuntimeProviderSession(input: {
   chatJid: string;
   latestArtifactId?: string | null;
 }): Promise<void> {
+  assertSafeProviderSessionId(input.sessionId);
   if (input.latestArtifactId) {
     await input.deps.setSession(
       input.group.folder,

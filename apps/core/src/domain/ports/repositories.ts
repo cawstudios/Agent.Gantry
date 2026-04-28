@@ -29,6 +29,15 @@ import type {
 } from '../memory/memory.js';
 import type { Message, MessageId } from '../messages/messages.js';
 import type {
+  AgentMcpServerBinding,
+  MaterializedMcpServer,
+  McpServerAuditEvent,
+  McpServerDefinition,
+  McpServerId,
+  McpServerVersion,
+  McpServerVersionId,
+} from '../mcp/mcp-servers.js';
+import type {
   PermissionDecision,
   PermissionDecisionId,
   PermissionPolicy,
@@ -258,6 +267,42 @@ export interface SkillCatalogRepository {
     appId: AppId;
     agentId: AgentId;
   }): Promise<SkillCatalogItem[]>;
+}
+
+export interface McpServerRepository {
+  getServer(id: McpServerId): Promise<McpServerDefinition | null>;
+  getServerByName(input: {
+    appId: AppId;
+    name: string;
+  }): Promise<McpServerDefinition | null>;
+  listServers(input: {
+    appId: AppId;
+    statuses?: McpServerDefinition['status'][];
+  }): Promise<McpServerDefinition[]>;
+  saveServer(definition: McpServerDefinition): Promise<void>;
+  getVersion(id: McpServerVersionId): Promise<McpServerVersion | null>;
+  listVersions(serverId: McpServerId): Promise<McpServerVersion[]>;
+  saveVersion(version: McpServerVersion): Promise<void>;
+  saveAgentBinding(binding: AgentMcpServerBinding): Promise<void>;
+  disableAgentBinding(input: {
+    appId: AppId;
+    agentId: AgentId;
+    serverId: McpServerId;
+    updatedAt: string;
+  }): Promise<AgentMcpServerBinding | null>;
+  listAgentBindings(input: {
+    appId: AppId;
+    agentId: AgentId;
+  }): Promise<AgentMcpServerBinding[]>;
+  listMaterializedServersForAgent(input: {
+    appId: AppId;
+    agentId: AgentId;
+  }): Promise<MaterializedMcpServer[]>;
+  appendAuditEvent(event: McpServerAuditEvent): Promise<void>;
+  listAuditEvents(input: {
+    appId: AppId;
+    serverId?: McpServerId;
+  }): Promise<McpServerAuditEvent[]>;
 }
 
 export interface PermissionRepository {

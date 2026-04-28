@@ -38,6 +38,8 @@ export interface ProviderArtifactListInput {
 }
 
 export interface ProviderArtifactLatestInput {
+  appId?: AppId;
+  agentId?: AgentId;
   agentSessionId?: AgentSessionId;
   providerSessionId?: ProviderSessionId;
   provider?: string;

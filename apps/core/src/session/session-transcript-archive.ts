@@ -1,4 +1,5 @@
 import type { ProviderArtifactStore } from '../domain/ports/provider-artifact-store.js';
+import { isSafeProviderSessionId } from '../domain/sessions/provider-session-id.js';
 import { logger } from '../infrastructure/logging/logger.js';
 
 export type SessionArchiveCause =
@@ -18,12 +19,6 @@ interface TranscriptEntry {
   message?: {
     content?: unknown;
   };
-}
-
-function isSafeSessionId(sessionId: string): boolean {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(sessionId)) return false;
-  if (sessionId.includes('..')) return false;
-  return true;
 }
 
 export interface ArchiveProviderSessionTranscriptInput {
@@ -196,7 +191,7 @@ export async function archiveProviderSessionTranscript(
     errorSummary,
     writePlaceholderOnMissing = false,
   } = input;
-  if (!isSafeSessionId(sessionId)) {
+  if (!isSafeProviderSessionId(sessionId)) {
     logger.warn(
       { sessionId },
       'Skipped provider transcript archive due to invalid session id',
@@ -206,6 +201,9 @@ export async function archiveProviderSessionTranscript(
 
   try {
     const artifact = await providerArtifactStore.getLatestArtifact({
+      appId: appId as never,
+      agentId: agentId as never,
+      agentSessionId: agentSessionId as never,
       providerSessionId: providerSessionId as never,
       provider,
       artifactKind: 'claude-jsonl',

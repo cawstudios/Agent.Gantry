@@ -61,4 +61,32 @@ describe('agent capability composition', () => {
     expect(profile.allowedTools).toContain('mcp__myclaw__*');
     expect(profile.alwaysAllowedTools).toContain('CustomTool');
   });
+
+  it('merges approved external MCP servers without overriding the built-in server', () => {
+    const profile = composeAgentCapabilities({
+      mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      chatJid: 'tg:team',
+      groupFolder: 'telegram_team',
+      isMain: true,
+      externalMcpServers: {
+        github: {
+          type: 'http',
+          url: 'https://mcp.example.test/github',
+          headers: { Authorization: 'broker-safe-token' },
+        },
+      },
+      externalMcpAllowedTools: ['mcp__github__search_repositories'],
+    });
+
+    expect(profile.mcpServers.myclaw).toMatchObject({
+      command: 'node',
+    });
+    expect(profile.mcpServers.github).toEqual({
+      type: 'http',
+      url: 'https://mcp.example.test/github',
+      headers: { Authorization: 'broker-safe-token' },
+    });
+    expect(profile.allowedTools).toContain('mcp__myclaw__*');
+    expect(profile.allowedTools).toContain('mcp__github__search_repositories');
+  });
 });

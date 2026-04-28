@@ -16,6 +16,7 @@ npm run lint
 npm run format:check
 npm run test:unit
 npm run test:integration
+npm run test:integration:postgres
 npm run test:e2e
 ```
 
@@ -33,6 +34,20 @@ npm run build
 ```
 
 `npm test` runs the contracts build, unit tests, and integration tests. `npm run build` cleans generated build output, builds contracts and SDK packages, runs `tsc`, and copies Postgres migrations into `dist/`.
+
+`npm run test:integration` is credential-free and skips Postgres-backed suites when `MYCLAW_TEST_DATABASE_URL` is unset. DB-backed changes must also run:
+
+```bash
+MYCLAW_TEST_DATABASE_URL=postgres://user:pass@localhost:5432/myclaw_test npm run test:integration:postgres
+```
+
+`npm run test:integration:postgres` fails loudly when `MYCLAW_TEST_DATABASE_URL` is missing or not a Postgres URL, so a green default test run cannot be mistaken for database-backed evidence.
+
+Architecture exceptions in `.codex/architecture-exceptions.json` are ratchets
+for existing boundary debt. Each exception must stay time-bounded and include a
+maximum count so `python3 .codex/scripts/check_architecture.py` still fails
+when a branch adds new layer, provider, risky-execution, old-term, or
+wrapper-only debt.
 
 ## Factory And Release Gates
 

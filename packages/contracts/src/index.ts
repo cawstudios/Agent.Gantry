@@ -7,6 +7,7 @@ export * from './errors/index.js';
 export * from './jobs/index.js';
 export * from './memory/index.js';
 export * from './messages/index.js';
+export * from './mcp-servers/index.js';
 export * from './pagination/index.js';
 export * from './permissions/index.js';
 export * from './runs/index.js';

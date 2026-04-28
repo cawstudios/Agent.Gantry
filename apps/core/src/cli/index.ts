@@ -55,6 +55,7 @@ function usage(): string {
     '  myclaw channel list',
     '  myclaw channel doctor',
     '  myclaw skill draft upload <skill.zip> [--agent <agentId>] [--created-by <id>]',
+    '  myclaw mcp draft|list|approve|reject|test|disable|bind|unbind|agent',
     '',
     'Options:',
     '  --runtime-home <path>   Override runtime home (default: ~/myclaw)',
@@ -430,6 +431,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === 'skill') {
     const { runSkillCommand } = await import('./skills.js');
     return runSkillCommand(runtimeHome, rest);
+  }
+
+  if (command === 'mcp') {
+    const { runMcpCommand } = await import('./mcp.js');
+    return runMcpCommand(runtimeHome, rest);
   }
 
   if (command === 'start') {

@@ -206,7 +206,11 @@ function readEntryContent(zip: Buffer, entry: ZipEntry): Buffer {
   }
   const compressed = zip.subarray(dataStart, dataEnd);
   const content =
-    entry.method === 0 ? Buffer.from(compressed) : inflateRawSync(compressed);
+    entry.method === 0
+      ? Buffer.from(compressed)
+      : inflateRawSync(compressed, {
+          maxOutputLength: entry.uncompressedSize,
+        });
   if (content.byteLength !== entry.uncompressedSize) {
     throw new Error(`Invalid skill zip size metadata: ${entry.path}`);
   }

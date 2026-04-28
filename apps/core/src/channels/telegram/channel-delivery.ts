@@ -351,6 +351,7 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
         }, timeoutMs);
         this.pendingPermissionPrompts.set(request.requestId, {
           sourceGroup: request.sourceGroup,
+          decisionPolicy: request.decisionPolicy,
           chatId,
           messageId: sent.message_id,
           timer,

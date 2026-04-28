@@ -36,7 +36,7 @@ function createFakeStore(seed?: {
     content: string;
     metadata?: Record<string, unknown>;
   }>;
-  latestQueries: Array<{ provider?: string }>;
+  latestQueries: Parameters<ProviderArtifactStore['getLatestArtifact']>;
 } {
   const puts: Array<{
     artifactKind: string;
@@ -44,7 +44,8 @@ function createFakeStore(seed?: {
     content: string;
     metadata?: Record<string, unknown>;
   }> = [];
-  const latestQueries: Array<{ provider?: string }> = [];
+  const latestQueries: Parameters<ProviderArtifactStore['getLatestArtifact']> =
+    [];
   return {
     puts,
     latestQueries,
@@ -77,7 +78,7 @@ function createFakeStore(seed?: {
     },
     getArtifact: async () => seed?.content ?? '',
     getLatestArtifact: async (input) => {
-      latestQueries.push({ provider: input.provider });
+      latestQueries.push(input);
       return seed?.artifact;
     },
     listArtifacts: async () => (seed?.artifact ? [seed.artifact] : []),
@@ -169,10 +170,58 @@ describe('Claude config materializer', () => {
         'utf-8',
       ),
     ).toContain('"type":"user"');
-    expect(store.latestQueries[0]?.provider).toBe('anthropic');
+    expect(store.latestQueries[0]).toMatchObject({
+      appId: 'default',
+      agentId: 'agent:test',
+      agentSessionId: 'agent-session:test',
+      providerSessionId: 'provider-session:test',
+      provider: 'anthropic',
+    });
 
     materialization.cleanup();
     expect(fs.existsSync(materialization.baseTempDir)).toBe(false);
+  });
+
+  it('rejects unsafe provider session ids before restoring or capturing files', async () => {
+    const artifact = {
+      id: 'artifact:jsonl' as never,
+      appId: 'default' as never,
+      agentId: 'agent:test' as never,
+      agentSessionId: 'agent-session:test' as never,
+      providerSessionId: 'provider-session:test' as never,
+      provider: 'anthropic',
+      artifactKind: 'claude-jsonl',
+      storageType: 'local-filesystem',
+      storageRef: 'artifact.jsonl',
+      contentHash: 'sha256:test',
+      sizeBytes: 2,
+      createdAt: '2026-04-27T00:00:00.000Z',
+      metadata: {},
+    } satisfies ProviderSessionArtifact;
+    const store = createFakeStore({ artifact, content: '{"type":"user"}\n' });
+
+    await expect(
+      materializeClaudeRuntime({
+        baseTempDir: path.join(tempRoot, 'run'),
+        groupDir: path.join(tempRoot, 'agents', 'test'),
+        cliEntryPoint: path.join(tempRoot, 'dist', 'cli', 'index.js'),
+        packageRoot: tempRoot,
+        sessionId: '../escape',
+        skillSource: { listSkills: async () => [] },
+        providerArtifactStore: store,
+        artifactContext: { ...context, provider: 'anthropic' },
+      }),
+    ).rejects.toThrow(/Invalid provider session id/);
+
+    await expect(
+      captureClaudeArtifacts({
+        providerArtifactStore: store,
+        artifactContext: { ...context, provider: 'anthropic' },
+        providerSessionId: 'provider-session:test',
+        sessionId: 'bad/session',
+        projectDir: tempRoot,
+      }),
+    ).rejects.toThrow(/Invalid provider session id/);
   });
 
   it('materializes approved artifact skills and skips invalid artifact paths', async () => {

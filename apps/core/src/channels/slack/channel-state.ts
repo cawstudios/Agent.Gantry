@@ -48,6 +48,7 @@ export interface ActiveProgressState {
 export interface PendingPermissionPrompt {
   channelId: string;
   sourceGroup: string;
+  decisionPolicy?: PermissionApprovalRequest['decisionPolicy'];
   messageTs: string;
   timer: ReturnType<typeof setTimeout>;
   resolve: (decision: PermissionApprovalDecision) => void;

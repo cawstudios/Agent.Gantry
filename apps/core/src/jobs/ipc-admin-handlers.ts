@@ -1,9 +1,15 @@
 import { MYCLAW_HOME } from '../config/index.js';
+import { getRuntimeStorage } from '../adapters/storage/postgres/runtime-store.js';
+import { McpServerService } from '../application/mcp/mcp-server-service.js';
 import { nowIso } from '../infrastructure/time/datetime.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import { validateRuntimePreflightWithStorage } from '../config/preflight.js';
 import { TaskHandler } from './ipc-types.js';
+import {
+  DEFAULT_MEMORY_APP_ID,
+  memoryAgentIdForGroupFolder,
+} from '../memory/app-memory-boundaries.js';
 import {
   createTaskResponder,
   restartServiceForRuntimeHome,
@@ -145,8 +151,214 @@ const serviceRestartHandler: TaskHandler = async (context) => {
   }
 };
 
+const requestMcpServerHandler: TaskHandler = async (context) => {
+  const { data, deps, sourceGroup, sourceGroupJids } = context;
+  const { accept, reject } = createTaskResponder(
+    sourceGroup,
+    data.taskId,
+    data.authThreadId,
+  );
+  const payload = data.payload || {};
+  const name = toTrimmedString(payload.name, { maxLen: 80 });
+  const transport = toTrimmedString(payload.transport, { maxLen: 32 });
+  const origin = toTrimmedString(payload.origin, { maxLen: 2048 });
+  const reason = toTrimmedString(payload.reason, { maxLen: 2000 });
+  if (!name || !reason) {
+    reject('Missing required fields: name and reason.', 'invalid_request');
+    return;
+  }
+  const requestedTargetJid = toTrimmedString(
+    data.targetJid || data.chatJid || data.jid,
+    { maxLen: 512 },
+  );
+  if (!requestedTargetJid || !sourceGroupJids.includes(requestedTargetJid)) {
+    reject(
+      'MCP server requests must include the originating chat for this agent.',
+      'forbidden',
+    );
+    return;
+  }
+  if (
+    typeof deps.requestPermissionApproval !== 'function' ||
+    typeof deps.sendMessage !== 'function'
+  ) {
+    reject(
+      'MCP server requests require a configured approval surface.',
+      'preflight_failed',
+    );
+    return;
+  }
+  if (transport !== 'http' && transport !== 'sse') {
+    reject('transport must be http or sse.', 'invalid_request');
+    return;
+  }
+  const requestedToolPatterns = Array.isArray(payload.requestedToolPatterns)
+    ? payload.requestedToolPatterns.filter(
+        (item): item is string => typeof item === 'string',
+      )
+    : [];
+  const credentialNeeds = Array.isArray(payload.credentialNeeds)
+    ? payload.credentialNeeds.filter(
+        (item): item is string => typeof item === 'string',
+      )
+    : [];
+  const storage = getRuntimeStorage();
+  const service = new McpServerService(
+    storage.repositories.mcpServers,
+    undefined,
+    {
+      lookupHostname: deps.mcpHostnameLookup,
+    },
+  );
+  try {
+    const config = { transport, url: origin };
+    const created = await service.createDraft({
+      appId: DEFAULT_MEMORY_APP_ID as never,
+      name,
+      createdBy: `agent:${sourceGroup}`,
+      createdSource: 'agent_request',
+      requestedReason: reason,
+      transportConfig: config as never,
+      allowedToolPatterns: requestedToolPatterns,
+      credentialRefs: credentialRefsForRequestedMcp(transport, credentialNeeds),
+      riskClass: 'medium',
+    });
+    startMcpPermissionReview({
+      deps,
+      service,
+      sourceGroup,
+      targetJid: requestedTargetJid,
+      threadId: data.authThreadId,
+      server: created.definition,
+      transport,
+      origin: origin || '',
+      requestedToolPatterns,
+      credentialNeeds,
+      reason,
+    });
+    accept(
+      `MCP server request ${created.definition.id} sent to this chat for approval. It will not be available until approved and will activate on the next agent run.`,
+      'mcp_request_recorded',
+    );
+  } catch (err) {
+    reject(
+      err instanceof Error ? err.message : 'MCP server request failed.',
+      'invalid_request',
+    );
+  }
+};
+
 export const adminTaskHandlers: Record<string, TaskHandler> = {
   refresh_groups: refreshGroupsHandler,
   register_agent: registerAgentHandler,
   service_restart: serviceRestartHandler,
+  request_mcp_server: requestMcpServerHandler,
 };
+
+function credentialRefsForRequestedMcp(
+  transport: string,
+  credentialNeeds: string[],
+) {
+  if (transport === 'http' || transport === 'sse') {
+    return credentialNeeds.map((ref, index) => ({
+      name: ref,
+      target: 'header' as const,
+      key: credentialNeeds.length === 1 && index === 0 ? 'Authorization' : ref,
+    }));
+  }
+  return credentialNeeds.map((ref) => ({
+    name: ref,
+    target: 'env' as const,
+    key: ref,
+  }));
+}
+
+function startMcpPermissionReview(input: {
+  deps: Parameters<TaskHandler>[0]['deps'];
+  service: McpServerService;
+  sourceGroup: string;
+  targetJid: string;
+  threadId?: string;
+  server: { id: string; name: string };
+  transport: string;
+  origin: string;
+  requestedToolPatterns: string[];
+  credentialNeeds: string[];
+  reason: string;
+}): void {
+  void completeMcpPermissionReview(input).catch((err) => {
+    logger.error(
+      { err, serverId: input.server.id, sourceGroup: input.sourceGroup },
+      'MCP permission review failed',
+    );
+  });
+}
+
+async function completeMcpPermissionReview(
+  input: Parameters<typeof startMcpPermissionReview>[0],
+): Promise<void> {
+  const decision = await input.deps.requestPermissionApproval({
+    requestId: `mcp-${globalThis.crypto.randomUUID()}`,
+    sourceGroup: input.sourceGroup,
+    targetJid: input.targetJid,
+    threadId: input.threadId,
+    decisionPolicy: 'same_channel',
+    toolName: 'request_mcp_server',
+    displayName: `MCP server: ${input.server.name}`,
+    title: 'Approve MCP server for this agent',
+    description:
+      'Only configured approvers can decide this request. Approving installs this MCP server as an agent capability for future runs only.',
+    decisionReason: input.reason,
+    toolInput: {
+      serverId: input.server.id,
+      name: input.server.name,
+      transport: input.transport,
+      origin: input.origin,
+      requestedToolPatterns: input.requestedToolPatterns,
+      credentialNeeds: input.credentialNeeds,
+      activation: 'next_agent_run',
+    },
+  });
+
+  if (!decision.approved) {
+    await rejectMcpDraftFromPermission(input, decision.reason);
+    return;
+  }
+  if (!decision.decidedBy) {
+    await rejectMcpDraftFromPermission(input, 'missing approving principal');
+    return;
+  }
+
+  await input.service.approveDraft({
+    appId: DEFAULT_MEMORY_APP_ID as never,
+    serverId: input.server.id as never,
+    approvedBy: decision.decidedBy,
+  });
+  await input.service.bindToAgent({
+    appId: DEFAULT_MEMORY_APP_ID as never,
+    agentId: memoryAgentIdForGroupFolder(input.sourceGroup) as never,
+    serverId: input.server.id as never,
+  });
+  await input.deps.sendMessage(
+    input.targetJid,
+    `Approved MCP server ${input.server.name}. It will be available on the next agent run.`,
+    input.threadId ? { threadId: input.threadId } : undefined,
+  );
+}
+
+async function rejectMcpDraftFromPermission(
+  input: Parameters<typeof startMcpPermissionReview>[0],
+  reason?: string,
+): Promise<void> {
+  await input.service.rejectDraft({
+    appId: DEFAULT_MEMORY_APP_ID as never,
+    serverId: input.server.id as never,
+    rejectedBy: 'permission_review',
+    reason,
+  });
+  await input.deps.sendMessage(
+    input.targetJid,
+    `Rejected MCP server ${input.server.name}: ${reason || 'not approved'}.`,
+    input.threadId ? { threadId: input.threadId } : undefined,
+  );
+}

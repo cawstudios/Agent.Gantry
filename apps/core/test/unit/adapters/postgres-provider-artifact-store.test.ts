@@ -6,14 +6,31 @@ import { describe, expect, it } from 'vitest';
 
 import { PostgresProviderArtifactStore } from '@core/adapters/artifacts/postgres/postgres-provider-artifact-store.js';
 
-function fakeDb(options: { failTransaction?: boolean } = {}) {
+function fakeDb(
+  options: {
+    failTransaction?: boolean;
+    providerSession?: {
+      appId: string;
+      agentSessionId: string;
+      provider: string;
+    } | null;
+  } = {},
+) {
   const rows: unknown[] = [];
+  const providerSession = options.providerSession ?? {
+    appId: 'app:test',
+    agentSessionId: 'agent-session:test',
+    provider: 'anthropic',
+  };
   const tx = {
     select: () => ({
       from: () => ({
         where: () => ({
           for: () => ({
-            limit: async () => [{ id: 'provider-session:test' }],
+            limit: async () =>
+              providerSession
+                ? [{ id: 'provider-session:test', ...providerSession }]
+                : [],
           }),
         }),
       }),
@@ -122,6 +139,40 @@ describe('PostgresProviderArtifactStore local filesystem backend', () => {
         content: '{"type":"user"}\n',
       }),
     ).rejects.toThrow('metadata insert failed');
+
+    expect(
+      fs
+        .readdirSync(root, { recursive: true })
+        .filter((entry) => String(entry).endsWith('.jsonl')),
+    ).toHaveLength(0);
+  });
+
+  it('rejects artifact writes when provider session ownership does not match', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-artifacts-'));
+    const { db } = fakeDb({
+      providerSession: {
+        appId: 'app:other',
+        agentSessionId: 'agent-session:other',
+        provider: 'anthropic',
+      },
+    });
+    const store = new PostgresProviderArtifactStore(db, {
+      artifactRoot: root,
+      defaultStorageType: 'local-filesystem',
+    });
+
+    await expect(
+      store.putArtifact({
+        id: 'provider-session-artifact:poisoned' as never,
+        appId: 'app:test' as never,
+        agentId: 'agent:test' as never,
+        agentSessionId: 'agent-session:test' as never,
+        providerSessionId: 'provider-session:test' as never,
+        provider: 'anthropic',
+        artifactKind: 'claude-jsonl',
+        content: '{"type":"user"}\n',
+      }),
+    ).rejects.toThrow(/does not match provider session/);
 
     expect(
       fs

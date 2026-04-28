@@ -7,6 +7,7 @@ import type {
   ProviderArtifactStore,
   ProviderSessionArtifactContext,
 } from '../../../domain/ports/provider-artifact-store.js';
+import { assertSafeProviderSessionId } from '../../../domain/sessions/provider-session-id.js';
 import type { ProviderSessionArtifact } from '../../../domain/sessions/provider-session-artifact.js';
 import { getClaudeProjectDirName } from '../../../shared/myclaw-home.js';
 import type {
@@ -124,6 +125,7 @@ async function restoreClaudeProviderArtifact(input: {
 }): Promise<void> {
   const latest = await resolveLatestClaudeArtifact(input);
   if (!latest || !input.providerArtifactStore || !input.sessionId) return;
+  assertSafeProviderSessionId(input.sessionId);
   const restored = await input.providerArtifactStore.getArtifact(latest);
   fs.writeFileSync(
     path.join(input.projectDir, `${input.sessionId}.jsonl`),
@@ -146,12 +148,17 @@ async function resolveLatestClaudeArtifact(input: {
   }
   if (input.artifactContext.providerSessionId) {
     return input.providerArtifactStore.getLatestArtifact({
+      appId: input.artifactContext.appId as never,
+      agentId: input.artifactContext.agentId as never,
+      agentSessionId: input.artifactContext.agentSessionId as never,
       providerSessionId: input.artifactContext.providerSessionId as never,
       provider: input.artifactContext.provider ?? 'anthropic',
       artifactKind: 'claude-jsonl',
     });
   }
   return input.providerArtifactStore.getLatestArtifact({
+    appId: input.artifactContext.appId as never,
+    agentId: input.artifactContext.agentId as never,
     agentSessionId: input.artifactContext.agentSessionId as never,
     provider: input.artifactContext.provider ?? 'anthropic',
     artifactKind: 'claude-jsonl',
@@ -174,6 +181,8 @@ export async function captureClaudeArtifacts(input: {
     return {};
   }
 
+  assertSafeProviderSessionId(input.sessionId);
+  assertSafeProviderSessionId(input.providerSessionId);
   const transcriptPath = path.join(
     input.projectDir,
     `${input.sessionId}.jsonl`,

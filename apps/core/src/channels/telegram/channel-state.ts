@@ -40,6 +40,7 @@ export abstract class TelegramChannelState implements ChannelAdapter {
     string,
     {
       sourceGroup: string;
+      decisionPolicy?: PermissionApprovalRequest['decisionPolicy'];
       chatId: string;
       messageId: number;
       timer: ReturnType<typeof setTimeout>;

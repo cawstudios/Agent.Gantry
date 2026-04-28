@@ -1,0 +1,393 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
+import {
+  ApproveMcpServerDraftRequestSchema,
+  CreateMcpServerDraftRequestSchema,
+  DisableMcpServerRequestSchema,
+  RejectMcpServerDraftRequestSchema,
+  UpdateAgentMcpServerBindingRequestSchema,
+} from '@myclaw/contracts';
+
+import { McpServerService } from '../../../application/mcp/mcp-server-service.js';
+import { getRuntimeStorage } from '../../../adapters/storage/postgres/runtime-store.js';
+import { defaultHostnameLookup } from '../../../infrastructure/network/hostname-lookup.js';
+import type { AgentId } from '../../../domain/agent/agent.js';
+import type { AppId } from '../../../domain/app/app.js';
+import type {
+  AgentMcpServerBinding,
+  McpServerDefinition,
+  McpServerId,
+  McpServerStatus,
+  McpServerVersion,
+} from '../../../domain/mcp/mcp-servers.js';
+import { ApplicationError } from '../../../application/common/application-error.js';
+import {
+  authorizeControlRequest,
+  type ControlRouteContext,
+} from '../handler-context.js';
+import { readJson, sendError, sendJson } from '../http.js';
+
+function service(): McpServerService {
+  const storage = getRuntimeStorage();
+  return new McpServerService(
+    storage.repositories.mcpServers,
+    storage.repositories.agents,
+    { lookupHostname: defaultHostnameLookup },
+  );
+}
+
+export async function handleMcpServerRoutes(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: ControlRouteContext,
+  url: URL,
+  pathname: string,
+): Promise<boolean> {
+  if (pathname === '/v1/mcp-servers/drafts' && req.method === 'POST') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:admin']);
+    if (!auth) return true;
+    const parsed = CreateMcpServerDraftRequestSchema.safeParse(
+      await readJson(req),
+    );
+    if (!parsed.success) {
+      sendError(res, 400, 'INVALID_REQUEST', 'Invalid MCP server draft');
+      return true;
+    }
+    if (parsed.data.appId && parsed.data.appId !== auth.appId) {
+      sendError(
+        res,
+        403,
+        'FORBIDDEN',
+        'API key cannot create MCP servers for this app',
+      );
+      return true;
+    }
+    try {
+      const created = await service().createDraft({
+        appId: auth.appId as AppId,
+        name: parsed.data.name,
+        displayName: parsed.data.displayName,
+        description: parsed.data.description,
+        createdBy: parsed.data.createdBy,
+        requestedReason: parsed.data.requestedReason,
+        transportConfig: parsed.data.config,
+        allowedToolPatterns: parsed.data.allowedToolPatterns,
+        autoApproveToolPatterns: parsed.data.autoApproveToolPatterns,
+        credentialRefs: parsed.data.credentialRefs,
+        sandboxProfileId: parsed.data.sandboxProfileId,
+        riskClass: parsed.data.riskClass,
+      });
+      sendJson(res, 201, {
+        server: serverToResponse(created.definition),
+        version: versionToResponse(created.version),
+      });
+    } catch (error) {
+      sendRouteError(res, error, 'MCP server draft creation failed');
+    }
+    return true;
+  }
+
+  if (pathname === '/v1/mcp-servers/drafts' && req.method === 'GET') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:read']);
+    if (!auth) return true;
+    const servers = await service().listServers({
+      appId: auth.appId as AppId,
+      statuses: ['draft'],
+    });
+    sendJson(res, 200, { drafts: servers.map(serverToResponse) });
+    return true;
+  }
+
+  if (pathname === '/v1/mcp-servers' && req.method === 'GET') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:read']);
+    if (!auth) return true;
+    const status = url.searchParams.get('status');
+    const statuses: McpServerStatus[] | undefined =
+      status === 'draft' ||
+      status === 'approved' ||
+      status === 'rejected' ||
+      status === 'disabled'
+        ? [status as McpServerStatus]
+        : undefined;
+    const servers = await service().listServers({
+      appId: auth.appId as AppId,
+      statuses,
+    });
+    sendJson(res, 200, { servers: servers.map(serverToResponse) });
+    return true;
+  }
+
+  const approveMatch = pathname.match(
+    /^\/v1\/mcp-servers\/drafts\/([^/]+)\/approve$/,
+  );
+  if (approveMatch && req.method === 'POST') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:admin']);
+    if (!auth) return true;
+    const parsed = ApproveMcpServerDraftRequestSchema.safeParse(
+      await readJson(req),
+    );
+    if (!parsed.success) {
+      sendError(res, 400, 'INVALID_REQUEST', 'Invalid MCP server approval');
+      return true;
+    }
+    if (parsed.data.appId && parsed.data.appId !== auth.appId) {
+      sendError(
+        res,
+        403,
+        'FORBIDDEN',
+        'API key cannot approve MCP servers for this app',
+      );
+      return true;
+    }
+    try {
+      const server = await service().approveDraft({
+        appId: auth.appId as AppId,
+        serverId: decodeURIComponent(approveMatch[1]) as McpServerId,
+        approvedBy: parsed.data.approvedBy,
+      });
+      sendJson(res, 200, { server: serverToResponse(server) });
+    } catch (error) {
+      sendRouteError(res, error, 'MCP server approval failed');
+    }
+    return true;
+  }
+
+  const rejectMatch = pathname.match(
+    /^\/v1\/mcp-servers\/drafts\/([^/]+)\/reject$/,
+  );
+  if (rejectMatch && req.method === 'POST') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:admin']);
+    if (!auth) return true;
+    const parsed = RejectMcpServerDraftRequestSchema.safeParse(
+      await readJson(req),
+    );
+    if (!parsed.success) {
+      sendError(res, 400, 'INVALID_REQUEST', 'Invalid MCP server rejection');
+      return true;
+    }
+    if (parsed.data.appId && parsed.data.appId !== auth.appId) {
+      sendError(
+        res,
+        403,
+        'FORBIDDEN',
+        'API key cannot reject MCP servers for this app',
+      );
+      return true;
+    }
+    try {
+      const server = await service().rejectDraft({
+        appId: auth.appId as AppId,
+        serverId: decodeURIComponent(rejectMatch[1]) as McpServerId,
+        rejectedBy: parsed.data.rejectedBy,
+        reason: parsed.data.reason,
+      });
+      sendJson(res, 200, { server: serverToResponse(server) });
+    } catch (error) {
+      sendRouteError(res, error, 'MCP server rejection failed');
+    }
+    return true;
+  }
+
+  const disableMatch = pathname.match(/^\/v1\/mcp-servers\/([^/]+)\/disable$/);
+  if (disableMatch && req.method === 'POST') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:admin']);
+    if (!auth) return true;
+    const parsed = DisableMcpServerRequestSchema.safeParse(await readJson(req));
+    if (!parsed.success) {
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'Invalid MCP server disable request',
+      );
+      return true;
+    }
+    if (parsed.data.appId && parsed.data.appId !== auth.appId) {
+      sendError(
+        res,
+        403,
+        'FORBIDDEN',
+        'API key cannot disable MCP servers for this app',
+      );
+      return true;
+    }
+    try {
+      const server = await service().disableServer({
+        appId: auth.appId as AppId,
+        serverId: decodeURIComponent(disableMatch[1]) as McpServerId,
+        disabledBy: parsed.data.disabledBy,
+        reason: parsed.data.reason,
+      });
+      sendJson(res, 200, { server: serverToResponse(server) });
+    } catch (error) {
+      sendRouteError(res, error, 'MCP server disable failed');
+    }
+    return true;
+  }
+
+  const testMatch = pathname.match(/^\/v1\/mcp-servers\/([^/]+)\/test$/);
+  if (testMatch && req.method === 'POST') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:admin']);
+    if (!auth) return true;
+    const body = await readJson(req);
+    const appId = readOptionalString(body, 'appId');
+    const testedBy = readOptionalString(body, 'testedBy');
+    if (appId && appId !== auth.appId) {
+      sendError(
+        res,
+        403,
+        'FORBIDDEN',
+        'API key cannot test MCP servers for this app',
+      );
+      return true;
+    }
+    try {
+      const result = await service().testServer({
+        appId: auth.appId as AppId,
+        serverId: decodeURIComponent(testMatch[1]) as McpServerId,
+        testedBy,
+      });
+      sendJson(res, 200, {
+        ok: result.ok,
+        message: result.message,
+        server: serverToResponse(result.server),
+      });
+    } catch (error) {
+      sendRouteError(res, error, 'MCP server test failed');
+    }
+    return true;
+  }
+
+  const agentMcpMatch = pathname.match(
+    /^\/v1\/agents\/([^/]+)\/mcp-servers\/([^/]+)$/,
+  );
+  if (agentMcpMatch && (req.method === 'PUT' || req.method === 'PATCH')) {
+    const auth = authorizeControlRequest(req, res, ctx.keys, [
+      'mcp:admin',
+      'agents:admin',
+    ]);
+    if (!auth) return true;
+    const parsed = UpdateAgentMcpServerBindingRequestSchema.safeParse(
+      await readJson(req),
+    );
+    if (!parsed.success) {
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'Invalid agent MCP server binding',
+      );
+      return true;
+    }
+    if (parsed.data.appId && parsed.data.appId !== auth.appId) {
+      sendError(
+        res,
+        403,
+        'FORBIDDEN',
+        'API key cannot bind MCP servers for this app',
+      );
+      return true;
+    }
+    try {
+      const binding = await service().bindToAgent({
+        appId: auth.appId as AppId,
+        agentId: decodeURIComponent(agentMcpMatch[1]) as AgentId,
+        serverId: decodeURIComponent(agentMcpMatch[2]) as McpServerId,
+        versionId: parsed.data.versionId as never,
+        required: parsed.data.required,
+        permissionPolicyIds: parsed.data.permissionPolicyIds as never,
+      });
+      sendJson(res, 200, { binding: bindingToResponse(binding) });
+    } catch (error) {
+      sendRouteError(res, error, 'MCP server binding failed');
+    }
+    return true;
+  }
+
+  if (agentMcpMatch && req.method === 'DELETE') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, [
+      'mcp:admin',
+      'agents:admin',
+    ]);
+    if (!auth) return true;
+    try {
+      const binding = await service().unbindFromAgent({
+        appId: auth.appId as AppId,
+        agentId: decodeURIComponent(agentMcpMatch[1]) as AgentId,
+        serverId: decodeURIComponent(agentMcpMatch[2]) as McpServerId,
+      });
+      sendJson(res, 200, {
+        disabled: Boolean(binding),
+        binding: binding ? bindingToResponse(binding) : null,
+      });
+    } catch (error) {
+      sendRouteError(res, error, 'MCP server unbinding failed');
+    }
+    return true;
+  }
+
+  const agentMcpsMatch = pathname.match(/^\/v1\/agents\/([^/]+)\/mcp-servers$/);
+  if (agentMcpsMatch && req.method === 'GET') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['mcp:read']);
+    if (!auth) return true;
+    try {
+      const bindings = await service().listAgentBindings({
+        appId: auth.appId as AppId,
+        agentId: decodeURIComponent(agentMcpsMatch[1]) as AgentId,
+      });
+      sendJson(res, 200, { bindings: bindings.map(bindingToResponse) });
+    } catch (error) {
+      sendRouteError(res, error, 'Agent MCP server lookup failed');
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function readOptionalString(input: unknown, key: string): string | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function sendRouteError(
+  res: ServerResponse,
+  error: unknown,
+  fallback: string,
+): void {
+  if (error instanceof ApplicationError) {
+    const status =
+      error.code === 'NOT_FOUND'
+        ? 404
+        : error.code === 'FORBIDDEN'
+          ? 403
+          : error.code === 'CONFLICT'
+            ? 409
+            : 400;
+    sendError(res, status, error.code, error.message);
+    return;
+  }
+  sendError(
+    res,
+    400,
+    'INVALID_REQUEST',
+    error instanceof Error ? error.message : fallback,
+  );
+}
+
+function serverToResponse(
+  server: McpServerDefinition,
+): Record<string, unknown> {
+  return { ...server };
+}
+
+function versionToResponse(version: McpServerVersion): Record<string, unknown> {
+  return { ...version };
+}
+
+function bindingToResponse(
+  binding: AgentMcpServerBinding,
+): Record<string, unknown> {
+  return { ...binding };
+}

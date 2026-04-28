@@ -12,7 +12,12 @@ import type { AvailableGroup, spawnAgent } from './agent-spawn.js';
 import type { AgentCredentialBroker } from '../domain/ports/agent-credential-broker.js';
 import type { ProviderArtifactStore } from '../domain/ports/provider-artifact-store.js';
 import type { SkillArtifactStore } from '../domain/ports/skill-artifact-store.js';
-import type { SkillCatalogRepository } from '../domain/ports/repositories.js';
+import type {
+  McpServerRepository,
+  SkillCatalogRepository,
+} from '../domain/ports/repositories.js';
+import type { HostnameLookup } from '../domain/network/public-address-policy.js';
+import type { RemoteMcpDnsValidationCache } from '../application/mcp/mcp-server-policy.js';
 
 export interface GroupProcessor {
   processGroupMessages: (
@@ -88,6 +93,9 @@ export interface GroupProcessingDeps {
   getCredentialBroker?: () => Promise<AgentCredentialBroker | undefined>;
   getProviderArtifactStore?: () => ProviderArtifactStore | undefined;
   getSkillRepository?: () => SkillCatalogRepository | undefined;
+  getMcpServerRepository?: () => McpServerRepository | undefined;
+  getMcpHostnameLookup?: () => HostnameLookup | undefined;
+  getMcpDnsValidationCache?: () => RemoteMcpDnsValidationCache | undefined;
   getSkillArtifactStore?: () => SkillArtifactStore | undefined;
   opsRepository?: OpsRepository;
   getOpsRepository?: () => OpsRepository;

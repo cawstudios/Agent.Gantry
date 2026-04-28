@@ -206,7 +206,7 @@ cd myclaw
 npm install
 npm run build
 # local testing entrypoint (equivalent CLI flow)
-node index.js
+node dist/cli/index.js
 ```
 
 ## Testing

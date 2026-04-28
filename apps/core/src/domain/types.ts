@@ -157,7 +157,9 @@ export interface JobEvent {
 export interface PermissionApprovalRequest {
   requestId: string;
   sourceGroup: string;
+  targetJid?: string;
   threadId?: string;
+  decisionPolicy?: 'control_allowlist' | 'same_channel';
   toolName: string;
   title?: string;
   displayName?: string;

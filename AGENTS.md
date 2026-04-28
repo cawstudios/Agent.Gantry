@@ -62,6 +62,8 @@ Important constraints:
 - Do not add test-only or local-checkout branches to production code.
 - Classify every new config value before implementation: non-secret configuration belongs in `settings.yaml`, runtime-owned secrets belong behind `RuntimeSecretProvider`, and agent-accessed credentials belong behind `AgentCredentialBroker`.
 - Wrong-lane credential/config values must fail loudly. Raw model/provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `CLAUDE_CODE_OAUTH_TOKEN` must never be accepted from MyClaw `.env` or process env.
+- Agent-requested third-party MCP servers use the existing permission approval surface in the same channel/thread where the request originated until real admin RBAC exists. The runner must include the trusted originating chat JID/thread in IPC, the host must verify that chat is registered to the requesting agent folder, and same-channel prompts still require configured control approvers. Same-channel approval may only decide that channel's own pending draft, must bind only to the requesting agent, and must not activate until the next agent run.
+- Treat third-party MCP servers as approved agent capabilities. Durable MCP truth belongs in Postgres definitions, versions, bindings, credential refs, and audit events; Claude SDK `mcpServers` is only a per-run adapter projection. Agents may request MCP access, but admin approval and binding are required before materialization.
 
 ## Docs Rules
 
@@ -77,6 +79,7 @@ Important constraints:
 - Discover and document exact verification commands before changing implementation behavior.
 - Run the smallest relevant checks after each change.
 - Run full checks at the end of a phase.
+- Architecture exceptions must be time-bounded ratchets with max counts; never relax the checker globally to hide new debt.
 - For replacement or cutover work, include a cleanup verification step that searches for stale active references and records the result before final response or PR handoff.
 - Use [docs/architecture/current-verification-commands.md](docs/architecture/current-verification-commands.md) as the command reference.
 

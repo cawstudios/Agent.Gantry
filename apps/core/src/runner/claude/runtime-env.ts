@@ -77,6 +77,9 @@ export function buildSdkEnv(): Record<string, string | undefined> {
   ]);
   delete sdkEnv.MYCLAW_IPC_AUTH_TOKEN;
   delete sdkEnv.MYCLAW_IPC_RESPONSE_VERIFY_KEY;
+  delete sdkEnv.MYCLAW_MCP_CONFIG_FILE;
+  delete sdkEnv.MYCLAW_MCP_SERVERS_JSON;
+  delete sdkEnv.MYCLAW_MCP_ALLOWED_TOOLS_JSON;
   return sdkEnv;
 }
 

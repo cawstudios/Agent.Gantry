@@ -133,7 +133,11 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
     }
   }
 
-  protected canDecidePermission(userId: string, sourceGroup: string): boolean {
+  protected canDecidePermission(
+    userId: string,
+    sourceGroup: string,
+    _decisionPolicy?: PermissionApprovalRequest['decisionPolicy'],
+  ): boolean {
     const allowedIds = getSlackPermissionApproverIds(sourceGroup);
     if (allowedIds.size === 0) return false;
     return allowedIds.has(userId);
@@ -322,7 +326,13 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
       const pending = this.pendingPermissionPrompts.get(payload.requestId);
       if (!pending) return;
 
-      if (!this.canDecidePermission(userId, pending.sourceGroup)) {
+      if (
+        !this.canDecidePermission(
+          userId,
+          pending.sourceGroup,
+          pending.decisionPolicy,
+        )
+      ) {
         try {
           await this.app?.client.chat.postEphemeral({
             channel: pending.channelId,

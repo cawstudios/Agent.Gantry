@@ -52,6 +52,7 @@ vi.mock('fs', async () => {
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
+      chmodSync: vi.fn(),
       copyFileSync: vi.fn(),
     },
   };
@@ -127,6 +128,16 @@ import fs from 'fs';
 import type { RegisteredGroup } from '@core/domain/types.js';
 import { getPromptProfileService } from '@core/runtime/prompt-profile.js';
 import { logger } from '@core/infrastructure/logging/logger.js';
+import type {
+  AgentMcpServerBinding,
+  MaterializedMcpServer,
+  McpServerAuditEvent,
+  McpServerDefinition,
+  McpServerId,
+  McpServerVersion,
+  McpServerVersionId,
+} from '@core/domain/mcp/mcp-servers.js';
+import type { McpServerRepository } from '@core/domain/ports/repositories.js';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -141,6 +152,100 @@ const testInput = {
   chatJid: 'test@g.us',
   isMain: false,
 };
+
+class SpawnMcpRepository implements McpServerRepository {
+  auditEvents: McpServerAuditEvent[] = [];
+
+  constructor(private readonly records: MaterializedMcpServer[]) {}
+
+  async getServer() {
+    return null;
+  }
+
+  async getServerByName() {
+    return null;
+  }
+
+  async listServers() {
+    return [];
+  }
+
+  async saveServer() {}
+
+  async getVersion() {
+    return null;
+  }
+
+  async listVersions() {
+    return [];
+  }
+
+  async saveVersion() {}
+
+  async saveAgentBinding() {}
+
+  async disableAgentBinding() {
+    return null;
+  }
+
+  async listAgentBindings() {
+    return [];
+  }
+
+  async listMaterializedServersForAgent() {
+    return this.records;
+  }
+
+  async appendAuditEvent(event: McpServerAuditEvent) {
+    this.auditEvents.push(event);
+  }
+
+  async listAuditEvents() {
+    return this.auditEvents;
+  }
+}
+
+function mcpRecord(): MaterializedMcpServer {
+  const definition: McpServerDefinition = {
+    id: 'mcp:github' as McpServerId,
+    appId: 'app-one' as never,
+    name: 'github',
+    status: 'approved',
+    createdSource: 'admin',
+    riskClass: 'medium',
+    latestApprovedVersionId: 'mcp-version:github' as McpServerVersionId,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  };
+  const version: McpServerVersion = {
+    id: 'mcp-version:github' as McpServerVersionId,
+    appId: 'app-one' as never,
+    serverId: definition.id,
+    version: 1,
+    transport: 'http',
+    config: { transport: 'http', url: 'https://mcp.example.com/github' },
+    allowedToolPatterns: ['search_repositories'],
+    autoApproveToolPatterns: ['search_repositories'],
+    credentialRefs: [
+      { name: 'GITHUB_TOKEN_REF', target: 'header', key: 'Authorization' },
+    ],
+    configHash: 'hash',
+    createdAt: new Date(0).toISOString(),
+  };
+  const binding: AgentMcpServerBinding = {
+    id: 'agent-mcp-binding:one' as never,
+    appId: 'app-one' as never,
+    agentId: 'agent-one' as never,
+    serverId: definition.id,
+    versionId: version.id,
+    status: 'active',
+    required: false,
+    permissionPolicyIds: [],
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  };
+  return { definition, version, binding };
+}
 
 function emitOutputMarker(
   proc: ReturnType<typeof createFakeProcess>,
@@ -403,6 +508,57 @@ describe('agent-spawn timeout behavior', () => {
         process.env.OPENAI_API_KEY = originalKey;
       }
     }
+  });
+
+  it('hands resolved MCP config to the runner through a private file, not raw env JSON', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const { getHostRuntimeCredentialEnv } =
+      await import('@core/runtime/agent-spawn-host.js');
+    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
+      env: { GITHUB_TOKEN_REF: 'broker-token' },
+      brokerApplied: true,
+      brokerProfile: 'test',
+    });
+    const repository = new SpawnMcpRepository([mcpRecord()]);
+    const lookupHostname = vi.fn(async () => [
+      { address: '93.184.216.34', family: 4 as const },
+    ]);
+    const resultPromise = spawnAgent(
+      testGroup,
+      testInput,
+      () => {},
+      undefined,
+      {
+        mcpServerRepository: repository,
+        mcpContext: { appId: 'app-one', agentId: 'agent-one' },
+        mcpHostnameLookup: lookupHostname,
+        credentialBroker: {
+          getCredentialInjection: vi.fn(async () => ({
+            env: { GITHUB_TOKEN_REF: 'broker-token' },
+            metadata: {
+              brokerApplied: true,
+              brokerProfile: 'test',
+            },
+          })),
+        } as any,
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.MYCLAW_MCP_SERVERS_JSON).toBeUndefined();
+    expect(env.MYCLAW_MCP_CONFIG_FILE).toMatch(/mcp-.*\.json$/);
+    expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toContain(
+      'mcp__github__search_repositories',
+    );
+    expect(repository.auditEvents).toEqual([]);
   });
 
   it('points Claude SDK session files at a temporary config directory', async () => {

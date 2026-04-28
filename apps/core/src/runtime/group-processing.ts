@@ -57,10 +57,7 @@ const NO_OUTPUT_WARNING_INTERVAL_MS = 180_000;
 const NO_VISIBLE_OUTPUT_FALLBACK_MESSAGE =
   'I finished that run but did not generate a user-visible reply. Please send your message again.';
 let streamingGenerationCounter = 0;
-
-export function createGroupProcessor(
-  deps: GroupProcessingDeps,
-): GroupProcessor {
+export function createGroupProcessor(deps: GroupProcessingDeps) {
   const runAgentImpl = deps.runAgent ?? spawnAgent;
   const ops = () => {
     const repository = deps.opsRepository ?? deps.getOpsRepository?.();
@@ -137,6 +134,9 @@ export function createGroupProcessor(
         providerArtifactStore,
         skillRepository: deps.getSkillRepository?.(),
         skillArtifactStore: deps.getSkillArtifactStore?.(),
+        mcpServerRepository: deps.getMcpServerRepository?.(),
+        mcpHostnameLookup: deps.getMcpHostnameLookup?.(),
+        mcpDnsValidationCache: deps.getMcpDnsValidationCache?.(),
         sessionResume,
       });
       const invokeAgent = (input: {

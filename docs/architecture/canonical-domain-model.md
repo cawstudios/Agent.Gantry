@@ -201,6 +201,13 @@ requires an approved skill and an agent skill binding. Agent-created
 skills begin as durable draft artifacts with a content hash and storage ref;
 drafts are not runtime inputs until approved.
 
+`McpServerDefinition` describes a third-party MCP capability before it is
+available to an agent. It stores app ownership, reviewed transport shape, risk
+classification, credential reference names, status, and audit metadata.
+`McpServerVersion` is immutable review output. `AgentMcpServerBinding` attaches
+an approved version to an agent. Provider sessions and Claude config files do
+not own MCP state; they only receive a per-run adapter projection.
+
 `PermissionPolicy` groups deterministic rules. It is attached explicitly to an
 app, agent, binding, tool catalog item, job, or sandbox profile.
 

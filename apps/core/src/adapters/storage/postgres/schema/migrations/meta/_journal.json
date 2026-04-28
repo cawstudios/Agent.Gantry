@@ -113,6 +113,13 @@
       "when": 1777039800000,
       "tag": "0015_skill_draft_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1777043400000,
+      "tag": "0016_mcp_server_capabilities",
+      "breakpoints": true
     }
   ]
 }

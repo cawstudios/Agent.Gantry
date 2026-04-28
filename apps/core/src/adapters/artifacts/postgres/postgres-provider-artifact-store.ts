@@ -12,6 +12,7 @@ import type {
   ProviderSessionArtifactKind,
   ProviderSessionArtifactStorageType,
 } from '../../../domain/sessions/provider-session-artifact.js';
+import { assertSafeProviderSessionId } from '../../../domain/sessions/provider-session-id.js';
 import * as pgSchema from '../../storage/postgres/schema/schema.js';
 import type { CanonicalDb } from '../../storage/postgres/repositories/canonical-graph-repository.postgres.js';
 
@@ -133,6 +134,7 @@ export class PostgresProviderArtifactStore implements ProviderArtifactStore {
     createdAt?: string;
     metadata?: Record<string, unknown>;
   }): Promise<ProviderSessionArtifact> {
+    assertSafeProviderSessionId(input.providerSessionId);
     const content = bytesFor(input.content);
     const id =
       input.id ??
@@ -177,14 +179,30 @@ export class PostgresProviderArtifactStore implements ProviderArtifactStore {
       storageType === 'postgres' ? content.toString('utf-8') : null;
     try {
       await this.db.transaction(async (tx) => {
-        await tx
-          .select({ id: pgSchema.providerSessionsPostgres.id })
+        const providerSessions = await tx
+          .select({
+            id: pgSchema.providerSessionsPostgres.id,
+            appId: pgSchema.providerSessionsPostgres.appId,
+            agentSessionId: pgSchema.providerSessionsPostgres.agentSessionId,
+            provider: pgSchema.providerSessionsPostgres.provider,
+          })
           .from(pgSchema.providerSessionsPostgres)
           .where(
             eq(pgSchema.providerSessionsPostgres.id, input.providerSessionId),
           )
           .for('update')
           .limit(1);
+        const providerSession = providerSessions[0];
+        if (
+          !providerSession ||
+          providerSession.appId !== input.appId ||
+          providerSession.agentSessionId !== input.agentSessionId ||
+          providerSession.provider !== input.provider
+        ) {
+          throw new Error(
+            `Provider artifact context does not match provider session ${input.providerSessionId}`,
+          );
+        }
         await tx.insert(pgSchema.providerSessionArtifactsPostgres).values({
           id,
           appId: input.appId,
@@ -269,6 +287,8 @@ export class PostgresProviderArtifactStore implements ProviderArtifactStore {
   }
 
   async getLatestArtifact(input: {
+    appId?: ProviderSessionArtifact['appId'];
+    agentId?: ProviderSessionArtifact['agentId'];
     agentSessionId?: ProviderSessionArtifact['agentSessionId'];
     providerSessionId?: ProviderSessionArtifact['providerSessionId'];
     provider?: string;

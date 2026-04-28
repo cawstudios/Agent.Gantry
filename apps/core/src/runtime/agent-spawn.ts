@@ -1,6 +1,7 @@
 /**
  * Agent runner for MyClaw — host-only execution.
  */
+import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -18,6 +19,10 @@ import {
   getHostRuntimeCredentialEnv,
   prepareHostRuntimeContext,
 } from './agent-spawn-host.js';
+import {
+  McpServerService,
+  type MaterializedMcpCapability,
+} from '../application/mcp/mcp-server-service.js';
 import {
   captureClaudeArtifacts,
   materializeClaudeRuntime,
@@ -84,10 +89,7 @@ function pickSafeHostEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 export async function spawnAgent(
   group: RegisteredGroup,
   input: AgentInput,
-  onProcess: (
-    proc: import('child_process').ChildProcess,
-    containerName: string,
-  ) => void,
+  onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: AgentOutput) => Promise<void>,
   options?: RunAgentOptions,
 ): Promise<AgentOutput> {
@@ -128,6 +130,24 @@ export async function spawnAgent(
     agentIdentifier,
     options?.credentialBroker,
   );
+  const mcpCapabilities =
+    options?.mcpServerRepository &&
+    options.mcpContext?.appId &&
+    options.mcpContext.agentId
+      ? await new McpServerService(options.mcpServerRepository, undefined, {
+          lookupHostname: options.mcpHostnameLookup,
+          dnsValidationCache: options.mcpDnsValidationCache,
+          auditMaterialization: false,
+        }).materializeForAgent({
+          appId: options.mcpContext.appId as never,
+          agentId: options.mcpContext.agentId as never,
+          credentialEnv: hostCredentials.env,
+        })
+      : [];
+  const mcpConfigPath =
+    mcpCapabilities.length > 0
+      ? writeRunnerMcpConfigFile(hostRuntime.groupIpcDir, mcpCapabilities)
+      : undefined;
   const hostRunnerPath = path.join(
     hostRuntime.runnerDistDir,
     'claude',
@@ -213,6 +233,16 @@ export async function spawnAgent(
     MYCLAW_THREAD_ID: input.threadId || '',
     MYCLAW_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
     CLAUDE_CONFIG_DIR: claudeRuntimeMaterialization.claudeConfigDir,
+    ...(mcpConfigPath
+      ? {
+          MYCLAW_MCP_CONFIG_FILE: mcpConfigPath,
+          MYCLAW_MCP_ALLOWED_TOOLS_JSON: JSON.stringify(
+            mcpCapabilities.flatMap(
+              (capability) => capability.autoApproveToolNames,
+            ),
+          ),
+        }
+      : {}),
   };
   // Job-level model overrides group-level model.
   const effectiveModel = normalizeClaudeModelSelection(
@@ -238,6 +268,7 @@ export async function spawnAgent(
     `ipcInput=${ipcInputDir}`,
     `broker=${hostCredentials.brokerProfile}`,
     `brokerApplied=${hostCredentials.brokerApplied}`,
+    `mcpServers=${mcpCapabilities.map((capability) => capability.name).join(',') || '(none)'}`,
     `runner=${hostRunnerPath}`,
   ];
 
@@ -303,4 +334,25 @@ export async function spawnAgent(
   } finally {
     claudeRuntimeMaterialization.cleanup();
   }
+}
+
+function writeRunnerMcpConfigFile(
+  groupIpcDir: string,
+  capabilities: MaterializedMcpCapability[],
+): string {
+  const configPath = path.join(
+    groupIpcDir,
+    `mcp-${globalThis.crypto.randomUUID()}.json`,
+  );
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify(
+      Object.fromEntries(
+        capabilities.map((capability) => [capability.name, capability.config]),
+      ),
+    ),
+    { encoding: 'utf-8', mode: 0o600 },
+  );
+  return configPath;
 }

@@ -1956,6 +1956,7 @@ describe('TelegramChannel', () => {
         {
           requestId: 'perm-settings',
           sourceGroup: 'unlisted_source',
+          decisionPolicy: 'same_channel',
           toolName: 'Write',
         },
       );

@@ -395,6 +395,7 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
         this.pendingPermissionPrompts.set(request.requestId, {
           channelId: parsed.channelId,
           sourceGroup: request.sourceGroup,
+          decisionPolicy: request.decisionPolicy,
           messageTs,
           timer,
           resolve,

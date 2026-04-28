@@ -16,6 +16,7 @@ import { createRateLimiter } from './rate-limit.js';
 import { handleChannelControlRoutes } from './routes/channels.js';
 import { handleJobRoutes } from './routes/jobs.js';
 import { handleMemoryRoutes } from './routes/memory.js';
+import { handleMcpServerRoutes } from './routes/mcp-servers.js';
 import { handleRunRoutes } from './routes/runs.js';
 import { handleSessionRoutes } from './routes/sessions.js';
 import { handleSkillRoutes } from './routes/skills.js';
@@ -63,6 +64,7 @@ function createControlRequestHandler(ctx: ControlRouteContext) {
       if (await handleJobRoutes(req, res, ctx, url, pathname)) return;
       if (await handleRunRoutes(req, res, ctx, url, pathname)) return;
       if (await handleSkillRoutes(req, res, ctx, url, pathname)) return;
+      if (await handleMcpServerRoutes(req, res, ctx, url, pathname)) return;
       if (await handleWebhookRoutes(req, res, ctx, pathname)) return;
 
       sendError(res, 404, 'NOT_FOUND', 'Route not found');

@@ -3,7 +3,11 @@ import {
   type EffortLevel,
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
-import { composeAgentCapabilities } from '../agent-capabilities.js';
+import fs from 'node:fs';
+import {
+  composeAgentCapabilities,
+  type McpServerConfig,
+} from '../agent-capabilities.js';
 import { denyMemoryBoundaryToolUse } from '../memory-boundary.js';
 import { MessageStream } from './message-stream.js';
 import { drainIpcInput, shouldClose } from './ipc-input.js';
@@ -80,6 +84,8 @@ export async function runQuery(
     ipcDir: process.env.MYCLAW_IPC_DIR,
     ipcAuthToken: process.env.MYCLAW_IPC_AUTH_TOKEN,
     ipcResponseVerifyKey: process.env.MYCLAW_IPC_RESPONSE_VERIFY_KEY,
+    externalMcpServers: readExternalMcpServers(),
+    externalMcpAllowedTools: readExternalMcpAllowedTools(),
   });
 
   for await (const message of query({
@@ -167,6 +173,7 @@ export async function runQuery(
 
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
+      assertRequiredMcpServerReady(message);
       log(`Session initialized: ${newSessionId}`);
     }
 
@@ -232,6 +239,68 @@ export async function runQuery(
     lastAssistantUuid,
     closedDuringQuery,
   };
+}
+
+function assertRequiredMcpServerReady(message: unknown): void {
+  const initMessage = message as {
+    mcp_servers?: Array<{ name?: unknown; status?: unknown }>;
+  };
+  if (!Array.isArray(initMessage.mcp_servers)) {
+    throw new Error(
+      'Required MyClaw MCP server status is missing from Claude init',
+    );
+  }
+
+  const myclawServer = initMessage.mcp_servers.find(
+    (server) => server.name === 'myclaw',
+  );
+  if (!myclawServer) {
+    throw new Error('Required MyClaw MCP server is missing from Claude init');
+  }
+
+  const status = String(myclawServer.status ?? '').toLowerCase();
+  if (status !== 'connected') {
+    throw new Error(`Required MyClaw MCP server is not ready: ${status}`);
+  }
+}
+
+function readExternalMcpServers(): Record<string, McpServerConfig> {
+  const configPath = process.env.MYCLAW_MCP_CONFIG_FILE?.trim();
+  if (configPath) {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<
+      string,
+      McpServerConfig
+    >;
+    fs.rmSync(configPath, { force: true });
+    return validateExternalMcpServers(parsed);
+  }
+  const raw = process.env.MYCLAW_MCP_SERVERS_JSON?.trim();
+  if (!raw) return {};
+  const parsed = JSON.parse(raw) as Record<string, McpServerConfig>;
+  return validateExternalMcpServers(parsed);
+}
+
+function validateExternalMcpServers(
+  parsed: Record<string, McpServerConfig>,
+): Record<string, McpServerConfig> {
+  const servers: Record<string, McpServerConfig> = {};
+  for (const [name, config] of Object.entries(parsed)) {
+    if (name === 'myclaw') {
+      throw new Error(
+        'Configured MCP servers cannot override the built-in myclaw server',
+      );
+    }
+    servers[name] = config;
+  }
+  return servers;
+}
+
+function readExternalMcpAllowedTools(): readonly string[] {
+  const raw = process.env.MYCLAW_MCP_ALLOWED_TOOLS_JSON?.trim();
+  if (!raw) return [];
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry): entry is string => typeof entry === 'string');
 }
 
 function logUsage(message: unknown): void {

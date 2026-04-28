@@ -59,6 +59,7 @@ import type {
   JobRepository,
   MemoryRepository,
   MessageRepository,
+  McpServerRepository,
   PermissionRepository,
   ProviderSessionRepository,
   SandboxRepository,
@@ -80,6 +81,7 @@ import {
   PostgresAgentSessionSummaryRepository,
   PostgresProviderSessionRepository,
 } from './session-repositories.postgres.js';
+import { PostgresMcpServerRepository } from './mcp-server-repository.postgres.js';
 import { PostgresSkillCatalogRepository } from './skill-repository.postgres.js';
 
 export interface PostgresDomainRepositoryBundle {
@@ -97,6 +99,7 @@ export interface PostgresDomainRepositoryBundle {
   jobs: JobRepository;
   tools: ToolCatalogRepository;
   skills: SkillCatalogRepository;
+  mcpServers: McpServerRepository;
   permissions: PermissionRepository;
   sandboxes: SandboxRepository;
   browserProfiles: BrowserProfileRepository;
@@ -2015,6 +2018,7 @@ export function createPostgresDomainRepositories(
     jobs: new PostgresJobRepository(db),
     tools: new PostgresToolCatalogRepository(db),
     skills: new PostgresSkillCatalogRepository(db),
+    mcpServers: new PostgresMcpServerRepository(db),
     permissions: new PostgresPermissionRepository(db),
     sandboxes: new PostgresSandboxRepository(db),
     browserProfiles: new PostgresBrowserProfileRepository(db),

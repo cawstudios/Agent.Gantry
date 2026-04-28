@@ -25,6 +25,7 @@ interface RunnerRecord {
     permissionRequest?: Record<string, unknown>;
     permissionDecision?: Record<string, unknown>;
     sdkEnv?: Record<string, string>;
+    mcpServers?: Record<string, unknown>;
   }>;
 }
 
@@ -189,13 +190,19 @@ export async function* query({ prompt, options }) {
   const call = {
     promptKind: typeof prompt === 'string' ? 'string' : 'stream',
     sdkEnv: options?.env,
+    mcpServers: options?.mcpServers,
     systemPromptAppend: options?.systemPrompt?.append,
     closeExistsAtQueryStart: fs.existsSync(
       path.join(process.env.MYCLAW_IPC_INPUT_DIR, '_close'),
     ),
   };
 
-  yield { type: 'system', subtype: 'init', session_id: 'runner-session-1' };
+  yield {
+    type: 'system',
+    subtype: 'init',
+    session_id: 'runner-session-1',
+    mcp_servers: [{ name: 'myclaw', status: 'connected' }],
+  };
 
   if (process.env.TEST_MEMORY_GUARD_DENIAL) {
     call.permissionDecision = await options.canUseTool(
@@ -408,6 +415,46 @@ describe('agent-runner IPC lifecycle', () => {
       expect(sdkEnv.NODE_EXTRA_CA_CERTS).toBe('/tmp/onecli-ca.pem');
       expect(sdkEnv.MYCLAW_IPC_AUTH_TOKEN).toBeUndefined();
       expect(sdkEnv.MYCLAW_IPC_RESPONSE_VERIFY_KEY).toBeUndefined();
+      expect(sdkEnv.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
+      expect(sdkEnv.MYCLAW_MCP_SERVERS_JSON).toBeUndefined();
+      expect(sdkEnv.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'loads external MCP config from a private file and removes the handoff file',
+    async () => {
+      const fixture = createRunnerFixture();
+      const mcpConfigPath = path.join(fixture.root, 'mcp-config.json');
+      fs.writeFileSync(
+        mcpConfigPath,
+        JSON.stringify({
+          github: {
+            type: 'http',
+            url: 'https://93.184.216.34/github',
+            headers: { Authorization: 'broker-token' },
+          },
+        }),
+      );
+
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_EXIT_AFTER_QUERY: '1',
+        MYCLAW_MCP_CONFIG_FILE: mcpConfigPath,
+        MYCLAW_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
+          'mcp__github__search_repositories',
+        ]),
+      });
+
+      expect(result.exitCode).toBe(0);
+      const call = readRecord(fixture.recordPath).calls[0];
+      expect(call?.mcpServers.github).toEqual({
+        type: 'http',
+        url: 'https://93.184.216.34/github',
+        headers: { Authorization: 'broker-token' },
+      });
+      expect(call?.sdkEnv.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
+      expect(fs.existsSync(mcpConfigPath)).toBe(false);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );

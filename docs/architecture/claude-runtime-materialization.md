@@ -31,6 +31,9 @@ Durable state stays outside Claude runtime files:
 - `SkillArtifactStore` owns approved or draft local skill source bytes by
   storage ref; Postgres stores metadata, status, hash, bindings, and provider
   refs.
+- Postgres owns MCP server definitions, reviewed versions, agent bindings,
+  credential reference names, and audit events. Claude SDK `mcpServers` is a
+  per-run projection, not durable truth.
 - Package or configured local skill folders provide file-based Claude skills.
 - Hosted Anthropic managed skills are referenced by provider skill ids and are
   resolved through the Anthropic SDK adapter, not through local files.
@@ -71,6 +74,47 @@ materialization. Hosted approval uploads the stored files through Anthropic's
 native beta skill APIs behind the Anthropic adapter, then stores only opaque
 provider refs such as Anthropic skill id and version. MyClaw does not recreate
 hosted skill versioning or add a second skill permission prompt.
+
+## MCP Servers
+
+The built-in `myclaw` MCP server is internal runtime wiring. It is always
+included by the runner, cannot be disabled by admin catalog records, and must be
+reported as connected by Claude init before a run is trusted.
+
+Third-party MCP servers are managed like approved agent capabilities. Admins
+create or approve a Postgres MCP definition and immutable reviewed version, then
+bind that version to an agent. Only approved, enabled bindings are projected
+into Agent SDK `mcpServers` for the next run. Pending, rejected, disabled,
+cross-app, or unbound MCP definitions are not rendered into Claude settings,
+provider artifacts, or allowed tools.
+
+Agents can request an MCP server through the built-in MyClaw MCP tool, but that
+request only creates a pending draft for admin review. It never approves,
+binds, or activates the server in the current run.
+
+Same-channel MCP prompts are only a delivery surface. The deciding user must
+still be in the configured channel control allowlist for that agent. Normal chat
+participants cannot grant persistent capabilities. The runner includes the
+origin chat JID/thread in IPC, and the host rejects the draft before review if
+that chat is not registered to the requesting agent folder.
+
+Remote third-party MCP servers must use HTTPS and cannot target loopback,
+private, link-local, local, or cloud metadata hosts. MyClaw also resolves
+remote MCP hostnames during approval, test, and materialization; every returned
+A/AAAA address must be publicly routable so DNS rebinding cannot turn an
+approved endpoint into runtime-local or metadata access. Runtime materialization
+uses an in-process TTL cache so the run startup path does not repeat DNS
+validation for the same host until the cache expires. Stdio-template MCP servers
+require an explicit sandbox profile and are control API/SDK-only in v1; agent
+requests and CLI draft creation only advertise HTTP/SSE.
+
+MCP credentials are reference names resolved through `AgentCredentialBroker`.
+Raw tokens, API keys, OAuth values, runtime secrets, and database URLs must not
+be stored in MCP definitions or inherited by third-party MCP processes. Runtime
+materialization resolves only broker-scoped credential reference names, not
+arbitrary host environment keys. Resolved MCP credentials are handed to the
+runner through a private per-run config file with `0600` permissions, and the
+runner deletes that file after reading it.
 
 ## Provider Artifacts
 

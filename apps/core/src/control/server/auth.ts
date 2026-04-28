@@ -13,6 +13,8 @@ export type Scope =
   | 'agents:admin'
   | 'skills:read'
   | 'skills:admin'
+  | 'mcp:read'
+  | 'mcp:admin'
   | 'webhooks:read'
   | 'webhooks:write'
   | 'memory:read'
@@ -39,6 +41,8 @@ const ALL_SCOPES: Scope[] = [
   'agents:admin',
   'skills:read',
   'skills:admin',
+  'mcp:read',
+  'mcp:admin',
   'webhooks:read',
   'webhooks:write',
   'memory:read',

@@ -319,6 +319,31 @@ export function createChannelWiring(
   async function requestPermissionApproval(
     request: PermissionApprovalRequest,
   ): Promise<PermissionApprovalDecision> {
+    if (request.targetJid) {
+      const channel = findBoundChannel(request.targetJid);
+      const approvalSurface = channel
+        ? asPermissionApprovalSurface(channel)
+        : undefined;
+      if (!approvalSurface) {
+        return {
+          approved: false,
+          reason: 'Target channel does not support permission approvals',
+        };
+      }
+      try {
+        return await approvalSurface.requestPermissionApproval(
+          request.targetJid,
+          request,
+        );
+      } catch (err) {
+        resolved.logger.error(
+          { err, targetJid: request.targetJid, requestId: request.requestId },
+          'Target channel permission approval flow failed',
+        );
+        return { approved: false, reason: 'Permission approval flow failed' };
+      }
+    }
+
     const mainEntries = Object.entries(app.getRegisteredGroups()).filter(
       ([, group]) => group.isMain === true,
     );

@@ -193,6 +193,7 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
     chatId: string,
     userId: string,
     sourceGroup: string,
+    _decisionPolicy?: PermissionApprovalRequest['decisionPolicy'],
   ): Promise<boolean> {
     const allowlist =
       this.opts.runtimeSettings?.().channels.telegram?.controlAllowlist;

@@ -1,10 +1,78 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { nowIso, nowMs } from '../../../infrastructure/time/datetime.js';
-import { isMain, TASKS_DIR } from '../context.js';
+import { chatJid, isMain, TASKS_DIR, threadId } from '../context.js';
 import { waitForTaskResponse, writeIpcFile } from '../ipc.js';
 
 export function registerServiceTools(server: McpServer): void {
+  server.tool(
+    'request_mcp_server',
+    'Request a third-party MCP server capability for admin review. This creates a pending request only; it never approves, binds, or activates the server.',
+    {
+      name: z
+        .string()
+        .describe('Short MCP server name, such as github or linear'),
+      transport: z.enum(['http', 'sse']).describe('Requested MCP transport'),
+      origin: z.string().optional().describe('Server URL'),
+      requestedToolPatterns: z
+        .array(z.string())
+        .optional()
+        .describe('Expected MCP tool names, without the mcp__server__ prefix'),
+      credentialNeeds: z
+        .array(z.string())
+        .optional()
+        .describe('Credential reference names the admin should review'),
+      reason: z.string().describe('Why this capability is needed'),
+      docsUrl: z.string().optional().describe('Optional documentation URL'),
+    },
+    async (args) => {
+      const taskId = `request-mcp-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
+      writeIpcFile(TASKS_DIR, {
+        type: 'request_mcp_server',
+        taskId,
+        targetJid: chatJid,
+        chatJid,
+        authThreadId: threadId,
+        payload: {
+          name: args.name,
+          transport: args.transport,
+          origin: args.origin,
+          requestedToolPatterns: args.requestedToolPatterns ?? [],
+          credentialNeeds: args.credentialNeeds ?? [],
+          reason: args.reason,
+          docsUrl: args.docsUrl,
+        },
+        timestamp: nowIso(),
+      });
+
+      const response = await waitForTaskResponse(taskId, 15_000);
+      if (!response?.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                response?.error ||
+                'MCP server request was not recorded by the host.',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.message ||
+              'MCP server request sent to this chat for approval. It will not be available until approved.',
+          },
+        ],
+      };
+    },
+  );
+
   server.tool(
     'service_restart',
     'Restart the MyClaw service with config validation. Main agent only. If validation fails, returns actionable errors so you can correct settings and retry.',

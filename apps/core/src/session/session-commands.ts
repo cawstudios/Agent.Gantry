@@ -264,14 +264,7 @@ export async function handleSessionCommand(opts: {
   timezone: string;
   deps: SessionCommandDeps;
 }): Promise<{ handled: false } | { handled: true; success: boolean }> {
-  const {
-    missedMessages,
-    isMainGroup,
-    groupName,
-    triggerPattern,
-    timezone,
-    deps,
-  } = opts;
+  const { missedMessages, groupName, triggerPattern, timezone, deps } = opts;
 
   const cmdMsg = missedMessages.find(
     (m) => extractSessionCommand(m.content, triggerPattern) !== null,

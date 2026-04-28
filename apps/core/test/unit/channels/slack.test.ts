@@ -315,7 +315,7 @@ describe('Slack channel', () => {
     );
   });
 
-  it('denies Slack permission decisions when no approver IDs are configured', async () => {
+  it('denies same-channel Slack permission decisions when no approver IDs are configured', async () => {
     const channel = new SlackChannel(
       'xoxb-token',
       'xapp-token',
@@ -328,6 +328,7 @@ describe('Slack channel', () => {
       {
         requestId: 'perm-no-approver',
         sourceGroup: 'slack_main',
+        decisionPolicy: 'same_channel',
         toolName: 'Bash',
       },
     );

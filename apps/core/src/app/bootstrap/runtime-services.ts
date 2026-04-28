@@ -5,6 +5,7 @@ import {
 } from '../../shared/message-cursor.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import type { NewMessage } from '../../domain/types.js';
+import type { HostnameLookup } from '../../domain/network/public-address-policy.js';
 import {
   writeJobEventsSnapshot,
   writeJobRunsSnapshot,
@@ -38,6 +39,7 @@ interface RuntimeServicesDeps {
   recoverPendingMessages: typeof recoverPendingMessages;
   startMessagePollingLoop: typeof startMessagePollingLoop;
   logger: Pick<typeof logger, 'info' | 'warn' | 'fatal'>;
+  mcpHostnameLookup?: HostnameLookup;
   exit: (code: number) => never;
 }
 
@@ -222,6 +224,7 @@ export async function startRuntimeServices(
     opsRepository: resolved.opsRepository,
     requestPermissionApproval: channelWiring.requestPermissionApproval,
     requestUserAnswer: channelWiring.requestUserAnswer,
+    mcpHostnameLookup: resolved.mcpHostnameLookup,
   });
 
   syncSchedulerState();

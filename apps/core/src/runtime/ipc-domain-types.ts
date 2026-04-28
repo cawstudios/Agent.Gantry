@@ -7,6 +7,7 @@ import {
   UserQuestionResponse,
 } from '../domain/types.js';
 import type { OpsRepository } from '../domain/repositories/ops-repo.js';
+import type { HostnameLookup } from '../domain/network/public-address-policy.js';
 
 export interface IpcDeps {
   sendMessage: (
@@ -31,6 +32,7 @@ export interface IpcDeps {
   requestUserAnswer: (
     request: UserQuestionRequest,
   ) => Promise<UserQuestionResponse>;
+  mcpHostnameLookup?: HostnameLookup;
   opsRepository: OpsRepository;
 }
 

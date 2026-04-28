@@ -221,6 +221,7 @@ export abstract class TelegramChannelConnect extends TelegramChannelPrompts {
         pending.chatId,
         userId,
         pending.sourceGroup,
+        pending.decisionPolicy,
       );
       if (!authorized) {
         await ctx.answerCallbackQuery({

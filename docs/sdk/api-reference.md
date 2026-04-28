@@ -38,6 +38,52 @@ materialized into per-run `CLAUDE_CONFIG_DIR/skills`. Skill name and
 description are parsed from `SKILL.md`; upload requests only carry context such
 as the proposing agent or creator.
 
+## MCP Servers
+
+MCP servers are managed as reviewed agent capabilities. The SDK creates drafts,
+admins approve or reject them, and approved versions can be bound to agents.
+Agent-requested MCP servers remain drafts until an admin approves and binds
+them.
+
+```ts
+client.mcpServers.drafts.create({
+  name,
+  transport, // http | sse; stdio_template is control API/SDK only
+  config,
+  credentialRefs?,
+  allowedToolPatterns?,
+  autoApproveToolPatterns?,
+})
+client.mcpServers.drafts.list()
+client.mcpServers.drafts.approve(serverId, { approvedBy? })
+client.mcpServers.drafts.reject(serverId, { rejectedBy?, reason? })
+client.mcpServers.list({ status? })
+client.mcpServers.test(serverId, { testedBy? })
+client.mcpServers.disable(serverId, { disabledBy?, reason? })
+
+client.agents.mcpServers.list(agentId)
+client.agents.mcpServers.enable(agentId, serverId, { required?, permissionPolicyIds? })
+client.agents.mcpServers.update(agentId, serverId, { required?, permissionPolicyIds? })
+client.agents.mcpServers.disable(agentId, serverId)
+```
+
+MCP definitions store credential reference names only. Broker-injected values
+are projected into a private per-run config file with `0600` permissions and
+deleted by the runner after startup; they are not saved in Claude config,
+provider artifacts, or Postgres rows.
+Remote MCP URLs must use HTTPS and cannot target local, private, link-local, or
+metadata hosts. MyClaw resolves remote MCP hostnames during approval, testing,
+and each materialization pass and rejects any A/AAAA record in private,
+loopback, link-local, multicast, unspecified, documentation, or metadata ranges.
+Runtime materialization uses a bounded in-process validation cache so repeated
+runs do not repeat DNS validation for the same host until the cache expires.
+Stdio-template MCP servers require an approved sandbox profile and are not
+available from agent-requested or CLI draft creation in this version. MCP server
+bindings are agent-wide in this version. Chat approvals are sent only to the
+trusted originating chat/thread registered for the requesting agent. Conversation
+or thread scoping is not accepted until the runtime materialization path
+supports it end to end.
+
 ## Sessions
 
 ```ts
@@ -219,6 +265,27 @@ DELETE /v1/agents/:agentId/skills/:skillId       skills:admin
 An enabled binding only affects runtime when the skill is approved.
 Local approved skills are unpacked into the per-run Claude config; hosted
 approved skills are represented by Anthropic provider refs.
+
+## Agent MCP Server Bindings
+
+```http
+POST   /v1/mcp-servers/drafts                    mcp:admin
+GET    /v1/mcp-servers/drafts                    mcp:read
+GET    /v1/mcp-servers                           mcp:read
+POST   /v1/mcp-servers/drafts/:id/approve        mcp:admin
+POST   /v1/mcp-servers/drafts/:id/reject         mcp:admin
+POST   /v1/mcp-servers/:id/test                  mcp:admin
+POST   /v1/mcp-servers/:id/disable               mcp:admin
+GET    /v1/agents/:agentId/mcp-servers           mcp:read
+PUT    /v1/agents/:agentId/mcp-servers/:id       mcp:admin + agents:admin
+PATCH  /v1/agents/:agentId/mcp-servers/:id       mcp:admin + agents:admin
+DELETE /v1/agents/:agentId/mcp-servers/:id       mcp:admin + agents:admin
+```
+
+An enabled MCP binding affects runtime only when the server definition is
+approved. The built-in `myclaw` MCP server is internal and is not managed by
+these routes. Conversation or thread scoped MCP bindings are not part of this
+API version.
 
 ## Memory
 

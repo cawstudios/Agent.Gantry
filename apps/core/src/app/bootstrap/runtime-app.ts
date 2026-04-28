@@ -11,6 +11,7 @@ import type { AgentCredentialBroker } from '../../domain/ports/agent-credential-
 import { encodeGroupMessageCursor } from '../../shared/message-cursor.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import { RegisteredGroup, ThinkingOverride } from '../../domain/types.js';
+import { RemoteMcpDnsValidationCache } from '../../application/mcp/mcp-server-policy.js';
 import { createGroupProcessor } from '../../runtime/group-processing.js';
 import type { GroupProcessingDeps } from '../../runtime/group-processing-types.js';
 import { listAvailableGroups } from '../../runtime/group-registry.js';
@@ -73,6 +74,7 @@ export interface RuntimeAppOptions {
   runAgent?: GroupProcessingDeps['runAgent'];
   providerArtifactStore?: GroupProcessingDeps['getProviderArtifactStore'];
   skillArtifactStore?: GroupProcessingDeps['getSkillArtifactStore'];
+  mcpHostnameLookup?: GroupProcessingDeps['getMcpHostnameLookup'];
   opsRepository?: OpsRepository;
 }
 
@@ -84,6 +86,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   let stateSaveDirty = false;
 
   const queue = options.queue ?? new GroupQueue();
+  const mcpDnsValidationCache = new RemoteMcpDnsValidationCache();
   let credentialBrokerPromise:
     | Promise<AgentCredentialBroker | undefined>
     | undefined;
@@ -364,6 +367,9 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     getProviderArtifactStore:
       options.providerArtifactStore ?? getRuntimeProviderArtifactStore,
     getSkillRepository: () => getRuntimeStorage().repositories.skills,
+    getMcpServerRepository: () => getRuntimeStorage().repositories.mcpServers,
+    getMcpHostnameLookup: options.mcpHostnameLookup,
+    getMcpDnsValidationCache: () => mcpDnsValidationCache,
     getSkillArtifactStore:
       options.skillArtifactStore ?? getRuntimeSkillArtifactStore,
   });
@@ -398,9 +404,11 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
 
 let defaultRuntimeApp: RuntimeApp | null = null;
 
-export function getDefaultRuntimeApp(): RuntimeApp {
+export function getDefaultRuntimeApp(
+  options: RuntimeAppOptions = {},
+): RuntimeApp {
   if (!defaultRuntimeApp) {
-    defaultRuntimeApp = createRuntimeApp();
+    defaultRuntimeApp = createRuntimeApp(options);
   }
   return defaultRuntimeApp;
 }

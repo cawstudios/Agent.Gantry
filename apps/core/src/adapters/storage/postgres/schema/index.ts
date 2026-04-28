@@ -7,6 +7,7 @@ export * from './events.js';
 export * from './jobs.js';
 export * from './memory.js';
 export * from './messages.js';
+export * from './mcp-servers.js';
 export * from './permissions.js';
 export * from './runs.js';
 export * from './sandbox.js';

@@ -9,6 +9,7 @@ import {
   PostgresCanonicalGraphRepository,
   threadIdFor,
 } from './canonical-graph-repository.postgres.js';
+import { assertSafeProviderSessionId } from '../../../../domain/sessions/provider-session-id.js';
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
@@ -121,6 +122,7 @@ export class PostgresCanonicalSessionRepository {
     threadId?: string | null;
     latestArtifactId?: string | null;
   }): Promise<void> {
+    assertSafeProviderSessionId(input.sessionId);
     const agentSessionId = `agent-session:${input.scopeKey}`;
     await this.db.transaction(async (tx) => {
       const agentId = await this.graph.ensureAgent(
@@ -157,6 +159,28 @@ export class PostgresCanonicalSessionRepository {
         // Serialize provider-session replacement for this agent session.
         .for('update')
         .limit(1);
+      const existingProviderSession = await tx
+        .select({
+          id: pgSchema.providerSessionsPostgres.id,
+          appId: pgSchema.providerSessionsPostgres.appId,
+          agentSessionId: pgSchema.providerSessionsPostgres.agentSessionId,
+          provider: pgSchema.providerSessionsPostgres.provider,
+        })
+        .from(pgSchema.providerSessionsPostgres)
+        .where(eq(pgSchema.providerSessionsPostgres.id, input.sessionId))
+        .for('update')
+        .limit(1);
+      const existing = existingProviderSession[0];
+      if (
+        existing &&
+        (existing.appId !== CANONICAL_APP_ID ||
+          existing.agentSessionId !== agentSessionId ||
+          existing.provider !== PROVIDER)
+      ) {
+        throw new Error(
+          `Provider session id is already owned by another session: ${input.sessionId}`,
+        );
+      }
       await tx
         .delete(pgSchema.providerSessionsPostgres)
         .where(
