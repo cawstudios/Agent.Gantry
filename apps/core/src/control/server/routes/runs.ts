@@ -10,6 +10,7 @@ import {
 } from '../handler-context.js';
 import { sendError, sendJson } from '../http.js';
 import { parseRunEventsRoute, parseRunRoute } from '../route-parser.js';
+import { projectRuntimeEventToRunEvent } from '../run-event-projection.js';
 
 export async function handleRunRoutes(
   req: IncomingMessage,
@@ -60,14 +61,9 @@ export async function handleRunRoutes(
       limit: 100,
     });
     sendJson(res, 200, {
-      events: events.map((event) => ({
-        id: String(event.eventId),
-        appId: event.appId,
-        runId: event.runId,
-        type: event.eventType,
-        payload: event.payload,
-        createdAt: event.createdAt,
-      })),
+      events: events.map((event) =>
+        projectRuntimeEventToRunEvent(event, run.run_id),
+      ),
     });
     return true;
   }

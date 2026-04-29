@@ -397,23 +397,20 @@ export async function handleSessionRoutes(
       appId: session.appId as never,
       sessionId: session.sessionId as never,
       afterEventId: afterEventId > 0 ? (afterEventId as never) : undefined,
-      eventTypes: [
-        RUNTIME_EVENT_TYPES.SESSION_MESSAGE_OUTBOUND,
-        RUNTIME_EVENT_TYPES.SESSION_MESSAGE_STREAMING,
-      ],
       limit: 100,
     });
     try {
       while (Date.now() - startedAt < timeoutMs) {
         const remaining = timeoutMs - (Date.now() - startedAt);
         const events = await subscription.next({ timeoutMs: remaining });
-        const visible = events[0];
+        const visible = events.find(isVisibleWaitEvent);
         if (visible) {
           sendJson(res, 200, {
             eventId: visible.eventId,
             eventType: visible.eventType,
             payload: visible.payload,
             createdAt: visible.createdAt,
+            afterEventId: events[events.length - 1]?.eventId ?? visible.eventId,
           });
           return true;
         }
@@ -438,6 +435,13 @@ function writeSseEvent(res: ServerResponse, event: RuntimeEvent): void {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isVisibleWaitEvent(event: RuntimeEvent): boolean {
+  return (
+    event.eventType === RUNTIME_EVENT_TYPES.SESSION_MESSAGE_OUTBOUND ||
+    event.eventType === RUNTIME_EVENT_TYPES.SESSION_MESSAGE_STREAMING
+  );
 }
 
 function parseListLimit(raw: string | null): number {

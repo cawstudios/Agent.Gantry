@@ -5,6 +5,7 @@ import type {
   RuntimeEventPublishInput,
 } from '../../domain/events/events.js';
 import type { RuntimeEventRepository } from '../../domain/ports/repositories.js';
+import { runtimeEventMatchesFilter } from '../../domain/events/runtime-event-filter.js';
 
 export interface RuntimeEventNotifier {
   notify(event: RuntimeEvent): Promise<void>;
@@ -29,10 +30,16 @@ export class RuntimeEventExchange {
 
   async publish(input: RuntimeEventPublishInput): Promise<RuntimeEvent> {
     const event = await this.repository.appendRuntimeEvent(input);
-    for (const projection of this.projections) {
-      await projection.project(event);
+    let projectionError: unknown;
+    try {
+      for (const projection of this.projections) {
+        await projection.project(event);
+      }
+    } catch (error) {
+      projectionError = error;
     }
     await this.notifier.notify(event);
+    if (projectionError) throw projectionError;
     return event;
   }
 
@@ -50,47 +57,6 @@ export class RuntimeEventExchange {
 }
 
 const MAX_SUBSCRIPTION_WAKE_WAIT_MS = 1_000;
-
-export function runtimeEventMatchesFilter(
-  event: RuntimeEvent,
-  filter: RuntimeEventFilter,
-): boolean {
-  if (event.appId !== filter.appId) return false;
-  if (
-    filter.afterEventId !== undefined &&
-    event.eventId <= filter.afterEventId
-  ) {
-    return false;
-  }
-  if (filter.sessionId !== undefined && event.sessionId !== filter.sessionId) {
-    return false;
-  }
-  if (filter.runId !== undefined && event.runId !== filter.runId) {
-    return false;
-  }
-  if (filter.jobId !== undefined && event.jobId !== filter.jobId) {
-    return false;
-  }
-  if (filter.triggerId !== undefined && event.triggerId !== filter.triggerId) {
-    return false;
-  }
-  if (
-    filter.conversationId !== undefined &&
-    event.conversationId !== filter.conversationId
-  ) {
-    return false;
-  }
-  if (filter.threadId !== undefined && event.threadId !== filter.threadId) {
-    return false;
-  }
-  if (
-    filter.eventTypes?.length &&
-    !filter.eventTypes.includes(event.eventType)
-  ) {
-    return false;
-  }
-  return true;
-}
 
 class DurableRuntimeEventSubscription implements RuntimeEventSubscription {
   private closed = false;

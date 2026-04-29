@@ -381,14 +381,11 @@ export class PostgresControlPlaneRepository {
     );
     return claimed.map((delivery) => {
       const event = events.get(delivery.eventId) ?? null;
-      const eventRow = eventRows.rows.find(
-        (row) => Number(row.event_id) === delivery.eventId,
-      );
       return {
         ...delivery,
         webhook: webhooks.get(delivery.webhookId) ?? null,
         event,
-        sessionAppId: eventRow ? String(eventRow.app_id) : null,
+        eventAppId: event ? event.appId : null,
       };
     });
   }

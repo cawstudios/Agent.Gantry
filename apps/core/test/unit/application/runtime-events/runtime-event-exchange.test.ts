@@ -63,6 +63,16 @@ class MemoryRuntimeEventRepository implements RuntimeEventRepository {
       )
       .filter(
         (event) =>
+          filter.triggerId === undefined ||
+          event.triggerId === filter.triggerId,
+      )
+      .filter(
+        (event) =>
+          filter.conversationId === undefined ||
+          event.conversationId === filter.conversationId,
+      )
+      .filter(
+        (event) =>
           filter.threadId === undefined || event.threadId === filter.threadId,
       )
       .filter(
@@ -139,7 +149,44 @@ describe('RuntimeEventExchange', () => {
     second.close();
   });
 
-  it('isolates filters by app, session, run, job, thread, and event type', async () => {
+  it('notifies subscribers even when projection fails', async () => {
+    const repository = new MemoryRuntimeEventRepository();
+    const notifier = new InMemoryRuntimeEventNotifier();
+    const exchange = new RuntimeEventExchange(repository, notifier, [
+      {
+        project: async () => {
+          throw new Error('projection failed');
+        },
+      },
+    ]);
+
+    await expect(
+      exchange.publish({
+        appId: 'app:test' as never,
+        eventType: RUNTIME_EVENT_TYPES.JOB_COMPLETED,
+        actor: 'runtime',
+        payload: { ok: true },
+      }),
+    ).rejects.toThrow('projection failed');
+
+    expect(repository.events).toHaveLength(1);
+    expect(notifier.notifiedEvents).toEqual(repository.events);
+  });
+
+  it('returns no events after a subscription is closed', async () => {
+    const repository = new MemoryRuntimeEventRepository();
+    const exchange = new RuntimeEventExchange(
+      repository,
+      new InMemoryRuntimeEventNotifier(),
+    );
+    const subscription = exchange.subscribe({ appId: 'app:test' as never });
+
+    subscription.close();
+
+    await expect(subscription.next({ timeoutMs: 0 })).resolves.toEqual([]);
+  });
+
+  it('isolates filters by app, session, run, job, trigger, conversation, thread, and event type', async () => {
     const repository = new MemoryRuntimeEventRepository();
     const exchange = new RuntimeEventExchange(
       repository,
@@ -150,6 +197,8 @@ describe('RuntimeEventExchange', () => {
       sessionId: 'session:1' as never,
       runId: 'run:1' as never,
       jobId: 'job:1' as never,
+      triggerId: 'trigger:1',
+      conversationId: 'conversation:1' as never,
       threadId: 'thread:1' as never,
       eventType: RUNTIME_EVENT_TYPES.JOB_COMPLETED,
       actor: 'runtime',
@@ -160,6 +209,8 @@ describe('RuntimeEventExchange', () => {
       sessionId: 'session:2' as never,
       runId: 'run:2' as never,
       jobId: 'job:2' as never,
+      triggerId: 'trigger:2',
+      conversationId: 'conversation:2' as never,
       threadId: 'thread:2' as never,
       eventType: RUNTIME_EVENT_TYPES.JOB_FAILED,
       actor: 'runtime',
@@ -182,6 +233,8 @@ describe('RuntimeEventExchange', () => {
         sessionId: 'session:1' as never,
         runId: 'run:1' as never,
         jobId: 'job:1' as never,
+        triggerId: 'trigger:1',
+        conversationId: 'conversation:1' as never,
         threadId: 'thread:1' as never,
         eventTypes: [RUNTIME_EVENT_TYPES.JOB_COMPLETED],
       }),

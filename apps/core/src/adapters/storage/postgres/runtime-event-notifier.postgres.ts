@@ -5,12 +5,13 @@ import type {
   RuntimeEvent,
   RuntimeEventFilter,
 } from '../../../domain/events/events.js';
+import { runtimeEventMatchesFilter } from '../../../domain/events/runtime-event-filter.js';
 import { logger } from '../../../infrastructure/logging/logger.js';
 
 const RUNTIME_EVENTS_CHANNEL = 'myclaw_runtime_events';
 const LISTEN_RECONNECT_DELAY_MS = 1_000;
 
-interface RuntimeEventWakeup {
+export interface RuntimeEventWakeup {
   eventId: RuntimeEvent['eventId'];
   appId: RuntimeEvent['appId'];
   sessionId?: RuntimeEvent['sessionId'];
@@ -36,7 +37,9 @@ function wakeupFromEvent(event: RuntimeEvent): RuntimeEventWakeup {
   };
 }
 
-function parseWakeup(payload: string | undefined): RuntimeEventWakeup | null {
+export function parseRuntimeEventWakeup(
+  payload: string | undefined,
+): RuntimeEventWakeup | null {
   if (!payload) return null;
   try {
     const parsed = JSON.parse(payload) as Partial<RuntimeEventWakeup>;
@@ -51,43 +54,6 @@ function parseWakeup(payload: string | undefined): RuntimeEventWakeup | null {
   } catch {
     return null;
   }
-}
-
-function wakeupMatchesFilter(
-  wakeup: RuntimeEventWakeup,
-  filter: RuntimeEventFilter,
-): boolean {
-  if (wakeup.appId !== filter.appId) return false;
-  if (
-    filter.afterEventId !== undefined &&
-    wakeup.eventId <= filter.afterEventId
-  ) {
-    return false;
-  }
-  if (filter.sessionId !== undefined && wakeup.sessionId !== filter.sessionId) {
-    return false;
-  }
-  if (filter.runId !== undefined && wakeup.runId !== filter.runId) return false;
-  if (filter.jobId !== undefined && wakeup.jobId !== filter.jobId) return false;
-  if (filter.triggerId !== undefined && wakeup.triggerId !== filter.triggerId) {
-    return false;
-  }
-  if (
-    filter.conversationId !== undefined &&
-    wakeup.conversationId !== filter.conversationId
-  ) {
-    return false;
-  }
-  if (filter.threadId !== undefined && wakeup.threadId !== filter.threadId) {
-    return false;
-  }
-  if (
-    filter.eventTypes?.length &&
-    !filter.eventTypes.includes(wakeup.eventType)
-  ) {
-    return false;
-  }
-  return true;
 }
 
 export class PostgresRuntimeEventNotifier implements RuntimeEventNotifier {
@@ -158,9 +124,9 @@ export class PostgresRuntimeEventNotifier implements RuntimeEventNotifier {
       this.client = client;
       client.on('notification', (message) => {
         if (message.channel !== RUNTIME_EVENTS_CHANNEL) return;
-        const wakeup = parseWakeup(message.payload);
+        const wakeup = parseRuntimeEventWakeup(message.payload);
         for (const [listener, filter] of [...this.listeners]) {
-          if (wakeup && filter && !wakeupMatchesFilter(wakeup, filter)) {
+          if (wakeup && filter && !runtimeEventMatchesFilter(wakeup, filter)) {
             continue;
           }
           listener();

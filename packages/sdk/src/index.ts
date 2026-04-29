@@ -357,6 +357,7 @@ export class MyClawClient {
         eventType: string;
         payload: unknown;
         createdAt: string;
+        afterEventId?: number;
       }>({
         method: 'GET',
         path: `/v1/sessions/${encodeURIComponent(sessionId)}/wait?afterEventId=${input.afterEventId || 0}&timeoutMs=${input.timeoutMs || 60_000}`,
@@ -443,7 +444,6 @@ export class MyClawClient {
   };
 
   readonly skillDrafts = createSkillDraftsClient({ request: this.request });
-
   readonly mcpServers = mcpServerClients.createMcpServersClient({
     request: this.request,
   });
