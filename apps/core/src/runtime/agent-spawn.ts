@@ -38,11 +38,12 @@ import { resolvePackageRootFromSourceDir } from '../platform/package-root.js';
 import {
   DEFAULT_BROWSER_PROFILE_NAME,
   listActiveBrowserSessions,
-} from './browser-manager.js';
+} from './browser-capability.js';
 import { createIpcAuthEnvelope } from './ipc-auth.js';
 import { getContinuationInputDir } from './continuation-input.js';
 import { getPromptProfileService } from './prompt-profile.js';
 import { executeRunnerProcess } from './agent-spawn-process.js';
+import { applyLoopbackNoProxyEnv } from '../shared/no-proxy.js';
 import {
   AgentInput,
   AgentOutput,
@@ -73,6 +74,8 @@ const SAFE_HOST_ENV_KEYS = [
   'COLORTERM',
   'NO_COLOR',
   'FORCE_COLOR',
+  'NO_PROXY',
+  'no_proxy',
 ] as const;
 
 function pickSafeHostEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -89,7 +92,7 @@ function pickSafeHostEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 export async function spawnAgent(
   group: RegisteredGroup,
   input: AgentInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onProcess: (proc: ChildProcess, runHandle: string) => void,
   onOutput?: (output: AgentOutput) => Promise<void>,
   options?: RunAgentOptions,
 ): Promise<AgentOutput> {
@@ -249,6 +252,7 @@ export async function spawnAgent(
         }
       : {}),
   };
+  applyLoopbackNoProxyEnv(env);
   // Job-level model overrides group-level model.
   const effectiveModel = normalizeClaudeModelSelection(
     input.model || modelConfig.model,

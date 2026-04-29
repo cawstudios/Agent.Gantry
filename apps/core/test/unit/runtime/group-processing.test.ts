@@ -1509,10 +1509,10 @@ describe('createGroupProcessor', () => {
         async (
           _group: RegisteredGroup,
           _input: unknown,
-          onProc: (proc: ChildProcess, containerName: string) => void,
+          onProc: (proc: ChildProcess, runHandle: string) => void,
           onOutput?: (output: AgentOutput) => Promise<void>,
         ) => {
-          onProc(mockProc, 'test-container');
+          onProc(mockProc, 'test-run');
           if (onOutput) {
             await onOutput({ status: 'success', result: 'ok' });
           }
@@ -1532,7 +1532,7 @@ describe('createGroupProcessor', () => {
       expect(deps.queue.registerProcess).toHaveBeenCalledWith(
         'group1@g.us::thread:thread-a',
         mockProc,
-        'test-container',
+        'test-run',
         'test-group',
         'group1@g.us',
         'thread-a',
@@ -1644,10 +1644,10 @@ describe('createGroupProcessor', () => {
         async (
           _group: RegisteredGroup,
           _input: unknown,
-          onProc: (proc: ChildProcess, containerName: string) => void,
+          onProc: (proc: ChildProcess, runHandle: string) => void,
           onOutput?: (output: AgentOutput) => Promise<void>,
         ) => {
-          onProc(mockProc, 'test-container');
+          onProc(mockProc, 'test-run');
           if (onOutput) {
             await onOutput({ status: 'success', result: 'ok' });
           }
@@ -1661,7 +1661,7 @@ describe('createGroupProcessor', () => {
       expect(deps.queue.registerProcess).toHaveBeenCalledWith(
         'group1@g.us',
         mockProc,
-        'test-container',
+        'test-run',
         'test-group',
         undefined,
         undefined,

@@ -1,6 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { validateBrowserCdpResponse } from '../browser-cdp-health.js';
 import { formatBrowserToolResponse } from '../formatting.js';
 import { requestBrowserAction } from '../ipc.js';
 
@@ -44,9 +43,7 @@ export function registerBrowserTools(server: McpServer): void {
       keep_alive_ms: z.number().optional(),
     },
     async (args) => {
-      const response = await validateBrowserCdpResponse(
-        await requestBrowserAction('browser_launch', args),
-      );
+      const response = await requestBrowserAction('browser_launch', args);
       if (!response.ok) {
         return {
           content: [
@@ -100,9 +97,7 @@ export function registerBrowserTools(server: McpServer): void {
       profile_name: z.string().optional().default('myclaw'),
     },
     async (args) => {
-      const response = await validateBrowserCdpResponse(
-        await requestBrowserAction('browser_status', args),
-      );
+      const response = await requestBrowserAction('browser_status', args);
       if (!response.ok) {
         return {
           content: [

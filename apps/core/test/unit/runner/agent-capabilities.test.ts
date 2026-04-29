@@ -36,6 +36,8 @@ describe('agent capability composition', () => {
         MYCLAW_IPC_DIR: '/tmp/ipc/team',
         MYCLAW_IPC_AUTH_TOKEN: 'token',
         MYCLAW_IPC_RESPONSE_VERIFY_KEY: 'verify-key',
+        NO_PROXY: '127.0.0.1,localhost,::1',
+        no_proxy: '127.0.0.1,localhost,::1',
       },
     });
   });

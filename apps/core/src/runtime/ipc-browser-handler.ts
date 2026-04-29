@@ -12,9 +12,9 @@ import {
   DEFAULT_BROWSER_PROFILE_NAME,
   closeBrowser,
   getBrowserStatus,
+  listBrowserProfiles,
   launchBrowser,
-} from './browser-manager.js';
-import { createProfile } from './browser-profiles.js';
+} from './browser-capability.js';
 import { IpcDomainContext } from './ipc-domain-types.js';
 
 interface BrowserRequest {
@@ -74,18 +74,7 @@ function getProfileNameFromPayload(payload: Record<string, unknown>): string {
 
 const browserActionHandlers: Record<BrowserIpcAction, BrowserActionHandler> = {
   browser_profile_list: async () => {
-    const profile = createProfile(DEFAULT_BROWSER_PROFILE_NAME);
-    const profiles = [
-      {
-        name: profile.name,
-        created_at: profile.metadata.created_at,
-        last_used: profile.metadata.last_used,
-        cdp_port: profile.metadata.cdp_port,
-        auth_markers: profile.metadata.auth_markers || [],
-        has_state: fs.existsSync(profile.statePath),
-      },
-    ];
-    return { ok: true, data: { profiles } };
+    return { ok: true, data: { profiles: await listBrowserProfiles() } };
   },
   browser_launch: async (request) => {
     const profileName = getProfileNameFromPayload(request.payload);

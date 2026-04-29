@@ -28,6 +28,7 @@ interface BrowserSession {
   lastUsedAt: number;
   keepAliveMs: number;
   keepAliveTimer: NodeJS.Timeout | null;
+  headless: boolean;
 }
 
 export interface LaunchBrowserOptions {
@@ -38,11 +39,28 @@ export interface LaunchBrowserOptions {
 }
 
 export interface BrowserSessionStatus {
+  profile: string;
   profileName: string;
   running: boolean;
+  cdpReady: boolean;
+  cdpUrl?: string;
   port?: number;
+  pid?: number;
   targetId?: string;
   lastUsedAt?: string;
+  headless?: boolean;
+  error?: string;
+}
+
+export interface BrowserProfileStatus {
+  name: string;
+  created_at: string;
+  last_used?: string;
+  cdp_port?: number;
+  auth_markers: string[];
+  has_state: boolean;
+  running: boolean;
+  cdpReady: boolean;
 }
 
 const sessions = new Map<string, BrowserSession>();
@@ -222,6 +240,34 @@ function touchSession(session: BrowserSession): void {
   }, session.keepAliveMs);
 }
 
+function toStoppedStatus(
+  profileName: string,
+  error?: string,
+): BrowserSessionStatus {
+  return {
+    profile: profileName,
+    profileName,
+    running: false,
+    cdpReady: false,
+    ...(error ? { error } : {}),
+  };
+}
+
+function toRunningStatus(session: BrowserSession): BrowserSessionStatus {
+  return {
+    profile: session.profileName,
+    profileName: session.profileName,
+    running: true,
+    cdpReady: true,
+    cdpUrl: `http://127.0.0.1:${session.port}`,
+    port: session.port,
+    pid: session.pid,
+    targetId: session.targetId,
+    lastUsedAt: new Date(session.lastUsedAt).toISOString(),
+    headless: session.headless,
+  };
+}
+
 export async function launchBrowser(
   opts: LaunchBrowserOptions = {},
 ): Promise<BrowserSessionStatus> {
@@ -229,13 +275,7 @@ export async function launchBrowser(
   const existing = sessions.get(profileName);
   if (existing && (await isSessionHealthy(existing))) {
     touchSession(existing);
-    return {
-      profileName,
-      running: true,
-      port: existing.port,
-      targetId: existing.targetId,
-      lastUsedAt: new Date(existing.lastUsedAt).toISOString(),
-    };
+    return toRunningStatus(existing);
   }
 
   if (existing) {
@@ -283,6 +323,7 @@ export async function launchBrowser(
         opts.keepAliveMs || DEFAULT_BROWSER_KEEPALIVE_MS,
       ),
       keepAliveTimer: null,
+      headless: opts.headless !== false,
     };
 
     sessions.set(profileName, session);
@@ -290,13 +331,7 @@ export async function launchBrowser(
 
     logger.info({ profileName, port }, 'Launched browser profile session');
 
-    return {
-      profileName,
-      running: true,
-      port,
-      targetId,
-      lastUsedAt: new Date(session.lastUsedAt).toISOString(),
-    };
+    return toRunningStatus(session);
   } catch (err) {
     if (chromeProcess?.pid) {
       try {
@@ -315,18 +350,12 @@ export async function getBrowserStatus(
 ): Promise<BrowserSessionStatus> {
   const normalized = resolveProfileName(profileName);
   const session = sessions.get(normalized);
-  if (!session) return { profileName: normalized, running: false };
+  if (!session) return toStoppedStatus(normalized);
   if (!(await isSessionHealthy(session))) {
     await closeUnhealthySession(normalized, session);
-    return { profileName: normalized, running: false };
+    return toStoppedStatus(normalized);
   }
-  return {
-    profileName: normalized,
-    running: true,
-    port: session.port,
-    targetId: session.targetId,
-    lastUsedAt: new Date(session.lastUsedAt).toISOString(),
-  };
+  return toRunningStatus(session);
 }
 
 export async function closeBrowser(
@@ -378,15 +407,26 @@ export async function listActiveBrowserSessions(): Promise<
       await closeUnhealthySession(session.profileName, session);
       continue;
     }
-    statuses.push({
-      profileName: session.profileName,
-      running: true,
-      port: session.port,
-      targetId: session.targetId,
-      lastUsedAt: new Date(session.lastUsedAt).toISOString(),
-    });
+    statuses.push(toRunningStatus(session));
   }
   return statuses;
+}
+
+export async function listBrowserProfiles(): Promise<BrowserProfileStatus[]> {
+  const profile = createProfile(DEFAULT_BROWSER_PROFILE_NAME);
+  const status = await getBrowserStatus(profile.name);
+  return [
+    {
+      name: profile.name,
+      created_at: profile.metadata.created_at,
+      last_used: profile.metadata.last_used,
+      cdp_port: profile.metadata.cdp_port,
+      auth_markers: profile.metadata.auth_markers || [],
+      has_state: fs.existsSync(profile.statePath),
+      running: status.running,
+      cdpReady: status.cdpReady,
+    },
+  ];
 }
 
 export async function ensureBrowserProfileExists(

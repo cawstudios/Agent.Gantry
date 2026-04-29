@@ -1,73 +1,72 @@
-import http from 'http';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { validateBrowserCdpResponse } from '@core/runner/mcp/browser-cdp-health.js';
+const requestBrowserAction = vi.hoisted(() => vi.fn());
 
-describe('runner browser MCP tools', () => {
-  it('leaves non-running browser status responses unchanged', async () => {
-    const response = {
+vi.mock('@core/runner/mcp/ipc.js', () => ({
+  requestBrowserAction,
+}));
+
+vi.mock('@core/runner/mcp/formatting.js', () => ({
+  formatBrowserToolResponse: (response: unknown) => JSON.stringify(response),
+}));
+
+import { registerBrowserTools } from '@core/runner/mcp/tools/browser.js';
+
+class TestMcpServer {
+  readonly tools = new Map<string, (args: unknown) => Promise<unknown>>();
+
+  tool(
+    name: string,
+    _description: string,
+    _schema: unknown,
+    handler: (args: unknown) => Promise<unknown>,
+  ) {
+    this.tools.set(name, handler);
+  }
+}
+
+describe('runner browser MCP lifecycle tools', () => {
+  it('delegates browser status to signed IPC without direct CDP probing', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    requestBrowserAction.mockResolvedValueOnce({
       ok: true,
-      data: { profileName: 'myclaw', running: false },
-    };
-
-    await expect(validateBrowserCdpResponse(response)).resolves.toBe(response);
-  });
-
-  it('accepts running browser responses with reachable CDP HTTP', async () => {
-    const server = http.createServer((req, res) => {
-      if (req.url === '/json/version') {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end('{}');
-        return;
-      }
-      res.writeHead(404);
-      res.end();
+      data: {
+        profile: 'myclaw',
+        profileName: 'myclaw',
+        running: true,
+        cdpReady: true,
+        port: 4567,
+      },
     });
-    await new Promise<void>((resolve) =>
-      server.listen(0, '127.0.0.1', resolve),
-    );
-    try {
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        throw new Error('Expected test HTTP server address');
-      }
-      const response = {
-        ok: true,
-        data: { profileName: 'myclaw', running: true, port: address.port },
-      };
+    const server = new TestMcpServer();
+    registerBrowserTools(server as never);
 
-      await expect(validateBrowserCdpResponse(response)).resolves.toBe(
-        response,
-      );
-    } finally {
-      await new Promise<void>((resolve, reject) => {
-        server.close((err) => (err ? reject(err) : resolve()));
-      });
-    }
-  });
-
-  it('fails closed when a running browser response points at stale CDP HTTP', async () => {
-    const server = http.createServer();
-    await new Promise<void>((resolve) =>
-      server.listen(0, '127.0.0.1', resolve),
-    );
-    const address = server.address();
-    if (!address || typeof address === 'string') {
-      throw new Error('Expected test HTTP server address');
-    }
-    const port = address.port;
-    await new Promise<void>((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
+    const result = await server.tools.get('browser_status')?.({
+      profile_name: 'myclaw',
     });
 
-    await expect(
-      validateBrowserCdpResponse({
-        ok: true,
-        data: { profileName: 'myclaw', running: true, port },
-      }),
-    ).resolves.toEqual({
-      ok: false,
-      error: `Browser CDP endpoint 127.0.0.1:${port} is not reachable; the browser session is stale. Retry browser_launch.`,
+    expect(requestBrowserAction).toHaveBeenCalledWith('browser_status', {
+      profile_name: 'myclaw',
     });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            ok: true,
+            data: {
+              profile: 'myclaw',
+              profileName: 'myclaw',
+              running: true,
+              cdpReady: true,
+              port: 4567,
+            },
+          }),
+        },
+      ],
+    });
+    vi.unstubAllGlobals();
   });
 });

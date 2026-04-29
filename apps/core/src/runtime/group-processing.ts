@@ -157,11 +157,11 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             thinking: group.agentConfig?.thinking,
             memoryContextBlock: input.memoryContextBlock,
           },
-          (proc, containerName) =>
+          (proc, runHandle) =>
             deps.queue.registerProcess(
               queueJid,
               proc,
-              containerName,
+              runHandle,
               group.folder,
               queueJid === chatJid ? undefined : chatJid,
               options?.memoryContext?.threadId,

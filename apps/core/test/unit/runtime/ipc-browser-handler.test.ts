@@ -4,11 +4,23 @@ import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@core/runtime/browser-manager.js', () => ({
+vi.mock('@core/runtime/browser-capability.js', () => ({
   DEFAULT_BROWSER_PROFILE_NAME: 'default',
   launchBrowser: vi.fn(async () => ({ ok: true, status: 'launched' })),
   closeBrowser: vi.fn(async () => ({ ok: true, closed: true })),
   getBrowserStatus: vi.fn(() => ({ running: true })),
+  listBrowserProfiles: vi.fn(async () => [
+    {
+      name: 'default',
+      created_at: '2024-01-01T00:00:00.000Z',
+      last_used: '2024-01-01T00:00:00.000Z',
+      cdp_port: 9222,
+      auth_markers: [],
+      has_state: true,
+      running: false,
+      cdpReady: false,
+    },
+  ]),
 }));
 
 vi.mock('@core/runtime/browser-profiles.js', () => ({
@@ -33,7 +45,7 @@ import {
 import {
   getBrowserStatus,
   launchBrowser,
-} from '@core/runtime/browser-manager.js';
+} from '@core/runtime/browser-capability.js';
 import { verifyIpcResponseAuthPayload } from '@core/infrastructure/ipc/response-signing.js';
 
 describe('ipc-browser-handler', () => {

@@ -5,6 +5,7 @@ import { PassThrough } from 'stream';
 // Sentinel markers must match runtime agent output framing.
 const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
+const mockListActiveBrowserSessions = vi.hoisted(() => vi.fn(async () => []));
 
 // Mock config
 vi.mock('@core/config/index.js', () => ({
@@ -90,6 +91,11 @@ vi.mock('@core/platform/group-folder.js', () => ({
   resolveGroupFolderPath: vi.fn(
     (folder: string) => `/tmp/myclaw-test-data/agents/${folder}`,
   ),
+}));
+
+vi.mock('@core/runtime/browser-capability.js', () => ({
+  DEFAULT_BROWSER_PROFILE_NAME: 'myclaw',
+  listActiveBrowserSessions: () => mockListActiveBrowserSessions(),
 }));
 
 // Create a controllable fake ChildProcess
@@ -266,6 +272,8 @@ describe('agent-spawn timeout behavior', () => {
     vi.mocked(spawn).mockClear();
     vi.mocked(getEffectiveModelConfig).mockClear();
     mockEnsureGroupIpcLayout.mockClear();
+    mockListActiveBrowserSessions.mockReset();
+    mockListActiveBrowserSessions.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -624,6 +632,37 @@ describe('agent-spawn timeout behavior', () => {
     >;
     expect(env.CLAUDE_CONFIG_DIR).toContain('myclaw-claude-config-');
     expect(env.CLAUDE_CONFIG_DIR).not.toBe('/tmp/myclaw-config/.claude');
+  });
+
+  it('passes healthy browser CDP endpoint and loopback no-proxy to the host runner env', async () => {
+    mockListActiveBrowserSessions.mockResolvedValueOnce([
+      {
+        profile: 'myclaw',
+        profileName: 'myclaw',
+        running: true,
+        cdpReady: true,
+        cdpUrl: 'http://127.0.0.1:4567',
+        port: 4567,
+      },
+    ]);
+
+    const resultPromise = spawnAgent(testGroup, testInput, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.PLAYWRIGHT_MCP_CDP_ENDPOINT).toBe('http://127.0.0.1:4567');
+    expect(env.NO_PROXY.split(',')).toEqual(
+      expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
+    );
+    expect(env.no_proxy.split(',')).toEqual(
+      expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
+    );
   });
 
   it('continues without custom system prompt when compileSystemPrompt throws (line 70)', async () => {

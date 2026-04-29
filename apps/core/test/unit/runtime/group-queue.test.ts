@@ -35,7 +35,7 @@ describe('GroupQueue', () => {
 
   // --- Single group at a time ---
 
-  it('only runs one container per group at a time', async () => {
+  it('only runs one run per group at a time', async () => {
     let concurrentCount = 0;
     let maxConcurrent = 0;
 
@@ -299,18 +299,13 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register a process so closeStdin has a groupFolder
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
 
     // Enqueue a task while agent run is active but NOT idle
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
 
-    // _close should NOT have been written (container is working, not idle)
+    // _close should NOT have been written (run is working, not idle)
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     const closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
@@ -339,12 +334,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register process and mark idle
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
     queue.notifyIdle('group1@g.us');
 
     // Clear previous writes, then enqueue a task
@@ -364,7 +354,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  it('does not pipe follow-up messages into an idle-waiting container', async () => {
+  it('does not pipe follow-up messages into an idle-waiting run', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
 
@@ -378,14 +368,9 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
 
-    // Container becomes idle
+    // Run becomes idle
     queue.notifyIdle('group1@g.us');
 
     // A new user message should not be piped into an idle agent run.
@@ -428,12 +413,7 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
     queue.notifyIdle('group1@g.us');
 
     const result = queue.sendMessage('group1@g.us', 'hello');
@@ -457,12 +437,7 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
     queue.notifyIdle('group1@g.us');
 
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
@@ -494,15 +469,10 @@ describe('GroupQueue', () => {
       });
     });
 
-    // Start a task (sets isTaskContainer = true)
+    // Start a task (sets isTaskRun = true)
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
     await vi.advanceTimersByTimeAsync(10);
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
 
     // sendMessage should return false — user messages must not go to task agent runs
     const result = queue.sendMessage('group1@g.us', 'hello');
@@ -640,14 +610,9 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    // Register a process with containerName (like a real container)
+    // Register a process with a host run handle
     const mockProcess = { killed: false } as any;
-    queue.registerProcess(
-      'group1@g.us',
-      mockProcess,
-      'container-active',
-      'team',
-    );
+    queue.registerProcess('group1@g.us', mockProcess, 'run-active', 'team');
 
     // Shutdown should complete without killing the process
     await queue.shutdown(0);
@@ -752,12 +717,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register process and enqueue a task (no idle yet — no preemption)
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
 
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     writeFileSync.mockClear();
@@ -1019,12 +979,7 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
 
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     const renameSync = vi.mocked(fs.default.renameSync);
@@ -1059,7 +1014,7 @@ describe('GroupQueue', () => {
     queue.registerProcess(
       'group1@g.us::thread:thread-a',
       {} as any,
-      'container-1',
+      'run-1',
       'test-group',
       'group1@g.us',
       'thread-a',
@@ -1095,12 +1050,7 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
 
     vi.spyOn(Date, 'now').mockReturnValue(1_776_438_800_000);
     vi.spyOn(Math, 'random').mockReturnValueOnce(0.9).mockReturnValueOnce(0.1);
@@ -1134,12 +1084,7 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+    queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
 
     const mkdirSync = vi.mocked(fs.default.mkdirSync);
     mkdirSync.mockImplementationOnce(() => {
@@ -1295,7 +1240,7 @@ describe('GroupQueue', () => {
     queue.registerProcess(
       schedulerQueueJid,
       mockProcess,
-      'container-scheduler-1',
+      'run-scheduler-1',
       'main',
       ['group1@g.us', 'group2@g.us'],
     );
@@ -1322,7 +1267,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     const mockProcess = { pid: 4242, killed: false, kill: vi.fn() } as any;
-    queue.registerProcess('group1@g.us', mockProcess, 'container-1', 'team');
+    queue.registerProcess('group1@g.us', mockProcess, 'run-1', 'team');
 
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
     expect(queue.stopGroup('group1@g.us')).toBe(true);
@@ -1346,7 +1291,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     const mockProcess = { pid: 5252, killed: false, kill: vi.fn() } as any;
-    queue.registerProcess('group1@g.us', mockProcess, 'container-1', 'team');
+    queue.registerProcess('group1@g.us', mockProcess, 'run-1', 'team');
 
     const killSpy = vi
       .spyOn(process, 'kill')

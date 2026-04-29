@@ -20,7 +20,7 @@ vi.mock('@core/runtime/browser-profiles.js', () => ({
   acquireProfileLock: vi.fn(async () => ({ release: mocks.release })),
   createProfile: vi.fn(() => ({
     name: 'myclaw',
-    userDataDir: '/tmp/myclaw-browser-manager-test',
+    userDataDir: '/tmp/myclaw-browser-capability-test',
     metadata: {},
   })),
   getProfile: vi.fn(() => null),
@@ -41,7 +41,7 @@ function cdpResponse(body: unknown): Response {
   } as Response;
 }
 
-describe('browser-manager', () => {
+describe('browser-capability', () => {
   let killSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -54,14 +54,14 @@ describe('browser-manager', () => {
   });
 
   afterEach(async () => {
-    const manager = await import('@core/runtime/browser-manager.js');
+    const manager = await import('@core/runtime/browser-capability.js');
     await manager.closeAllBrowsers();
     killSpy.mockRestore();
     vi.unstubAllGlobals();
   });
 
   it('reports running only when the CDP HTTP endpoint is healthy', async () => {
-    const manager = await import('@core/runtime/browser-manager.js');
+    const manager = await import('@core/runtime/browser-capability.js');
     mocks.fetch
       .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
       .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]))
@@ -70,13 +70,18 @@ describe('browser-manager', () => {
     await manager.launchBrowser({ cdpPort: 4567 });
     const status = await manager.getBrowserStatus();
 
-    expect(status).toEqual({ profileName: 'myclaw', running: false });
+    expect(status).toEqual({
+      profile: 'myclaw',
+      profileName: 'myclaw',
+      running: false,
+      cdpReady: false,
+    });
     expect(killSpy).toHaveBeenCalledWith(5000);
     expect(mocks.release).toHaveBeenCalledTimes(1);
   });
 
   it('relaunches instead of reusing a process with an unhealthy CDP endpoint', async () => {
-    const manager = await import('@core/runtime/browser-manager.js');
+    const manager = await import('@core/runtime/browser-capability.js');
     mocks.fetch
       .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
       .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]))

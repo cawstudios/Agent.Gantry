@@ -376,11 +376,11 @@ export async function runJob(
             script: currentJob.script || undefined,
             memoryContextBlock: injectedMemoryContext?.block,
           },
-          (proc, containerName) =>
+          (proc, runHandle) =>
             deps.onProcess(
               queueJid,
               proc,
-              containerName,
+              runHandle,
               execution.group.folder,
               execution.stopAliasJids,
             ),
