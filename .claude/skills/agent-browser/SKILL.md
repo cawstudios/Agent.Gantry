@@ -57,8 +57,8 @@ All via this skill's bundled `browser_cdp.py` helper:
 ```bash
 SKILL=<materialized-agent-browser-skill-dir>
 python3 $SKILL/browser_cdp.py status                         # port + tab count
-python3 $SKILL/browser_cdp.py tabs                           # list open tabs
-python3 $SKILL/browser_cdp.py goto https://linkedin.com/...  # navigate + print title/url
+python3 $SKILL/browser_cdp.py tabs                           # list page tabs
+python3 $SKILL/browser_cdp.py goto https://linkedin.com/...  # navigate + print title/url; exits non-zero on Chrome error pages
 python3 $SKILL/browser_cdp.py text                           # innerText of body
 python3 $SKILL/browser_cdp.py screenshot page.png            # PNG of viewport
 ```

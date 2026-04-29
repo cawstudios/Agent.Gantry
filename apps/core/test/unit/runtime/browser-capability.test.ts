@@ -1,3 +1,5 @@
+import fs from 'fs';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
@@ -16,12 +18,23 @@ vi.mock('child_process', () => ({
   spawn: mocks.spawn,
 }));
 
+vi.mock('@core/runtime/browser-config.js', () => ({
+  CHROME_PATH: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  DEFAULT_BROWSER_KEEPALIVE_MS: 60_000,
+  DEFAULT_CHROME_ARGS: ['--no-first-run'],
+}));
+
 vi.mock('@core/runtime/browser-profiles.js', () => ({
   acquireProfileLock: vi.fn(async () => ({ release: mocks.release })),
   createProfile: vi.fn(() => ({
     name: 'myclaw',
     userDataDir: '/tmp/myclaw-browser-capability-test',
-    metadata: {},
+    statePath: '/tmp/myclaw-browser-capability-test/state.json',
+    metadata: {
+      created_at: '2026-04-29T00:00:00.000Z',
+      last_used: '2026-04-29T00:00:00.000Z',
+      auth_markers: [],
+    },
   })),
   getProfile: vi.fn(() => null),
   updateProfileMetadata: vi.fn(),
@@ -43,6 +56,8 @@ function cdpResponse(body: unknown): Response {
 
 describe('browser-capability', () => {
   let killSpy: ReturnType<typeof vi.spyOn>;
+  let existsSyncSpy: ReturnType<typeof vi.spyOn>;
+  let statSyncSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.resetModules();
@@ -51,12 +66,25 @@ describe('browser-capability', () => {
     mocks.fetch.mockReset();
     vi.stubGlobal('fetch', mocks.fetch);
     killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    existsSyncSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    statSyncSpy = vi.spyOn(fs, 'statSync').mockImplementation((filePath) => {
+      const value = String(filePath);
+      if (value.endsWith('/Default/Cookies')) {
+        return { isFile: () => true, size: 1024 } as fs.Stats;
+      }
+      if (value.endsWith('/Default/Login Data')) {
+        return { isFile: () => true, size: 2048 } as fs.Stats;
+      }
+      throw new Error('missing');
+    });
   });
 
   afterEach(async () => {
     const manager = await import('@core/runtime/browser-capability.js');
     await manager.closeAllBrowsers();
     killSpy.mockRestore();
+    existsSyncSpy.mockRestore();
+    statSyncSpy.mockRestore();
     vi.unstubAllGlobals();
   });
 
@@ -100,5 +128,22 @@ describe('browser-capability', () => {
       port: 4568,
       targetId: 'target-2',
     });
+  });
+
+  it('reports persistent state when Chrome cookie or login stores exist', async () => {
+    const manager = await import('@core/runtime/browser-capability.js');
+
+    await expect(manager.listBrowserProfiles()).resolves.toEqual([
+      {
+        name: 'myclaw',
+        created_at: '2026-04-29T00:00:00.000Z',
+        last_used: '2026-04-29T00:00:00.000Z',
+        cdp_port: undefined,
+        auth_markers: ['cookies', 'login-data'],
+        has_state: true,
+        running: false,
+        cdpReady: false,
+      },
+    ]);
   });
 });

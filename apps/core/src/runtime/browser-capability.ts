@@ -1,6 +1,7 @@
 import fs from 'fs';
 import { ChildProcess, spawn } from 'child_process';
 import net from 'net';
+import path from 'path';
 
 import { logger } from '../infrastructure/logging/logger.js';
 import {
@@ -268,6 +269,50 @@ function toRunningStatus(session: BrowserSession): BrowserSessionStatus {
   };
 }
 
+function hasPersistentBrowserState(profile: {
+  statePath: string;
+  userDataDir: string;
+}): boolean {
+  if (fs.existsSync(profile.statePath)) return true;
+  for (const relativePath of [
+    path.join('Default', 'Cookies'),
+    path.join('Default', 'Login Data'),
+    'Local State',
+  ]) {
+    try {
+      const fullPath = path.join(profile.userDataDir, relativePath);
+      const stat = fs.statSync(fullPath);
+      if (stat.isFile() && stat.size > 0) return true;
+    } catch {
+      // ignore missing or unreadable Chrome state files
+    }
+  }
+  return false;
+}
+
+function inferAuthMarkers(profile: { userDataDir: string }): string[] {
+  const markers = new Set<string>();
+  for (const relativePath of [
+    path.join('Default', 'Cookies'),
+    path.join('Default', 'Login Data'),
+  ]) {
+    try {
+      const fullPath = path.join(profile.userDataDir, relativePath);
+      const stat = fs.statSync(fullPath);
+      if (stat.isFile() && stat.size > 0) {
+        markers.add(
+          relativePath === path.join('Default', 'Cookies')
+            ? 'cookies'
+            : 'login-data',
+        );
+      }
+    } catch {
+      // ignore missing or unreadable Chrome state files
+    }
+  }
+  return [...markers].sort();
+}
+
 export async function launchBrowser(
   opts: LaunchBrowserOptions = {},
 ): Promise<BrowserSessionStatus> {
@@ -415,14 +460,18 @@ export async function listActiveBrowserSessions(): Promise<
 export async function listBrowserProfiles(): Promise<BrowserProfileStatus[]> {
   const profile = createProfile(DEFAULT_BROWSER_PROFILE_NAME);
   const status = await getBrowserStatus(profile.name);
+  const authMarkers = new Set([
+    ...(profile.metadata.auth_markers || []),
+    ...inferAuthMarkers(profile),
+  ]);
   return [
     {
       name: profile.name,
       created_at: profile.metadata.created_at,
       last_used: profile.metadata.last_used,
       cdp_port: profile.metadata.cdp_port,
-      auth_markers: profile.metadata.auth_markers || [],
-      has_state: fs.existsSync(profile.statePath),
+      auth_markers: [...authMarkers].sort(),
+      has_state: hasPersistentBrowserState(profile),
       running: status.running,
       cdpReady: status.cdpReady,
     },

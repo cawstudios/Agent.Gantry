@@ -41,6 +41,11 @@ def get_page_ws(port):
     return pages[0]["webSocketDebuggerUrl"], pages[0]
 
 
+def get_page_targets(port):
+    tabs = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list").read())
+    return [t for t in tabs if t.get("type") == "page"]
+
+
 async def cdp(ws_url, calls):
     """Send a sequence of CDP calls, return list of results."""
     results = []
@@ -61,20 +66,24 @@ async def cdp(ws_url, calls):
 
 def cmd_status(port):
     ver = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version").read())
-    tabs = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list").read())
-    print(json.dumps({"port": port, "browser": ver.get("Browser"), "tabs": len(tabs)}, indent=2))
+    pages = get_page_targets(port)
+    print(json.dumps({"port": port, "browser": ver.get("Browser"), "tabs": len(pages)}, indent=2))
 
 
 def cmd_tabs(port):
-    tabs = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list").read())
-    for t in tabs:
+    pages = get_page_targets(port)
+    for t in pages:
         print(f"{t.get('type'):10} {t.get('title','')[:50]:50} {t.get('url','')[:80]}")
+
+
+def page_value(result):
+    return result.get("result", {}).get("result", {}).get("value") or {}
 
 
 def cmd_goto(port, url, wait=3):
     ws_url, _ = get_page_ws(port)
     async def run():
-        await cdp(ws_url, [
+        nav = await cdp(ws_url, [
             ("Page.enable", None),
             ("Page.navigate", {"url": url}),
         ])
@@ -83,7 +92,20 @@ def cmd_goto(port, url, wait=3):
             "expression": "({title: document.title, url: location.href})",
             "returnByValue": True,
         })])
-        print(json.dumps(r[0].get("result", {}).get("result", {}).get("value"), indent=2))
+        value = page_value(r[0])
+        navigate_result = nav[-1].get("result", {}) if nav else {}
+        error_text = navigate_result.get("errorText")
+        current_url = value.get("url") if isinstance(value, dict) else ""
+        if error_text or str(current_url).startswith("chrome-error://"):
+            payload = {
+                **(value if isinstance(value, dict) else {}),
+                "ok": False,
+                "error": error_text or "Chrome error page loaded",
+                "requestedUrl": url,
+            }
+            print(json.dumps(payload, indent=2))
+            sys.exit(1)
+        print(json.dumps({"ok": True, **value}, indent=2))
     asyncio.run(run())
 
 
@@ -130,7 +152,8 @@ def main():
     elif args.cmd == "text":
         cmd_text(port)
     elif args.cmd == "screenshot":
-        cmd_screenshot(port, args.arg or "screenshot.png")
+        if not args.arg: ap.error("screenshot needs output path")
+        cmd_screenshot(port, args.arg)
 
 
 if __name__ == "__main__":
