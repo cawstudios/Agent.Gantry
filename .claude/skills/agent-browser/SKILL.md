@@ -33,6 +33,7 @@ Single shared Chrome, single persistent profile, driven over CDP. Same window / 
 - Launch returns a CDP port. That port is the same for the lifetime of the session — reconnect any time.
 - Cookies, localStorage, and auth state persist on disk between launches.
 - MyClaw MCP only manages lifecycle (launch / status / close). Actual page driving goes through `browser_cdp.py` (bundled in this skill), which speaks CDP directly.
+- `browser_cdp.py` bypasses HTTP/HTTPS proxy env for loopback CDP calls. If you use raw `curl` or another helper against `127.0.0.1:<port>`, unset `http_proxy`/`https_proxy` or set `NO_PROXY=127.0.0.1,localhost,::1` first; sandbox proxies can break local CDP.
 
 ## Launch sequence
 
@@ -64,6 +65,12 @@ python3 $SKILL/browser_cdp.py screenshot page.png            # PNG of viewport
 ```
 
 Pass the port explicitly with `--port N` or set `MYCLAW_CDP_PORT`. The helper does not scan local ports and does not expose arbitrary JavaScript eval in the npm package.
+
+Sandboxed agents should prefer `browser_cdp.py` over raw `curl` for CDP checks because it installs a no-proxy urllib opener for `127.0.0.1`. For raw shell tools, use:
+
+```bash
+NO_PROXY=127.0.0.1,localhost,::1 no_proxy=127.0.0.1,localhost,::1 curl http://127.0.0.1:<port>/json/version
+```
 
 ## Logging into a site once (LinkedIn, X, etc.)
 

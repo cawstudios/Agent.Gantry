@@ -23,6 +23,23 @@ try:
 except ImportError:
     print("ERROR: pip install websockets", file=sys.stderr); sys.exit(1)
 
+LOOPBACK_NO_PROXY = "127.0.0.1,localhost,::1"
+HTTP_TIMEOUT = 10
+
+
+def ensure_loopback_no_proxy():
+    for key in ("NO_PROXY", "no_proxy"):
+        current = os.environ.get(key, "")
+        parts = [p.strip() for p in current.split(",") if p.strip()]
+        for item in LOOPBACK_NO_PROXY.split(","):
+            if item not in parts:
+                parts.append(item)
+        os.environ[key] = ",".join(parts)
+
+
+ensure_loopback_no_proxy()
+NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 def find_port(explicit=None):
     if explicit:
@@ -33,8 +50,14 @@ def find_port(explicit=None):
     raise RuntimeError("No CDP port configured. Launch browser via mcp__myclaw__browser_launch and pass --port N or set MYCLAW_CDP_PORT.")
 
 
+def cdp_json(port, path):
+    url = f"http://127.0.0.1:{port}{path}"
+    with NO_PROXY_OPENER.open(url, timeout=HTTP_TIMEOUT) as response:
+        return json.loads(response.read())
+
+
 def get_page_ws(port):
-    tabs = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list").read())
+    tabs = cdp_json(port, "/json/list")
     pages = [t for t in tabs if t.get("type") == "page"]
     if not pages:
         raise RuntimeError("No page targets. Open a tab first.")
@@ -60,13 +83,13 @@ async def cdp(ws_url, calls):
 
 
 def cmd_status(port):
-    ver = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version").read())
-    tabs = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list").read())
+    ver = cdp_json(port, "/json/version")
+    tabs = cdp_json(port, "/json/list")
     print(json.dumps({"port": port, "browser": ver.get("Browser"), "tabs": len(tabs)}, indent=2))
 
 
 def cmd_tabs(port):
-    tabs = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list").read())
+    tabs = cdp_json(port, "/json/list")
     for t in tabs:
         print(f"{t.get('type'):10} {t.get('title','')[:50]:50} {t.get('url','')[:80]}")
 
