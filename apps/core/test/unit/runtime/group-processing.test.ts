@@ -40,6 +40,7 @@ const mockBuildBrief = vi.fn();
 vi.mock('@core/memory/app-memory-service.js', () => ({
   AppMemoryService: {
     getInstance: () => ({
+      isEnabled: () => true,
       triggerDreaming: (...args: unknown[]) => mockRunDreamingSweep(...args),
       list: (...args: unknown[]) => mockGetMemoryStatus(...args),
       dreamingStatus: vi.fn(async () => []),
@@ -1016,6 +1017,55 @@ describe('createGroupProcessor', () => {
     });
   });
 
+  describe('query-scoped memory context', () => {
+    it('uses the formatted current message batch as the memory retrieval query', async () => {
+      const { deps } = setupHappyPath();
+      mockBuildBrief.mockResolvedValueOnce([
+        {
+          item: {
+            subjectType: 'group',
+            subjectId: 'test-group',
+            key: 'style',
+            value: 'Use concise updates.',
+          },
+        },
+      ]);
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(mockBuildBrief).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appId: 'default',
+          agentId: 'agent:test-group',
+          groupId: 'test-group',
+          channelId: 'group1@g.us',
+          query: 'formatted prompt',
+          limit: 8,
+        }),
+      );
+      expect(mockSpawnAgent.mock.calls[0][1]).toEqual(
+        expect.objectContaining({
+          memoryContextBlock: expect.stringContaining('Use concise updates.'),
+        }),
+      );
+    });
+
+    it('does not pass an injected memory block when query retrieval has no matches', async () => {
+      const { deps } = setupHappyPath();
+      mockBuildBrief.mockResolvedValueOnce([]);
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(mockSpawnAgent.mock.calls[0][1]).toEqual(
+        expect.objectContaining({
+          memoryContextBlock: undefined,
+        }),
+      );
+    });
+  });
+
   // =======================================================================
   // newSessionId propagation
   // =======================================================================
@@ -1459,10 +1509,10 @@ describe('createGroupProcessor', () => {
         async (
           _group: RegisteredGroup,
           _input: unknown,
-          onProc: (proc: ChildProcess, containerName: string) => void,
+          onProc: (proc: ChildProcess, runHandle: string) => void,
           onOutput?: (output: AgentOutput) => Promise<void>,
         ) => {
-          onProc(mockProc, 'test-container');
+          onProc(mockProc, 'test-run');
           if (onOutput) {
             await onOutput({ status: 'success', result: 'ok' });
           }
@@ -1482,7 +1532,7 @@ describe('createGroupProcessor', () => {
       expect(deps.queue.registerProcess).toHaveBeenCalledWith(
         'group1@g.us::thread:thread-a',
         mockProc,
-        'test-container',
+        'test-run',
         'test-group',
         'group1@g.us',
         'thread-a',
@@ -1594,10 +1644,10 @@ describe('createGroupProcessor', () => {
         async (
           _group: RegisteredGroup,
           _input: unknown,
-          onProc: (proc: ChildProcess, containerName: string) => void,
+          onProc: (proc: ChildProcess, runHandle: string) => void,
           onOutput?: (output: AgentOutput) => Promise<void>,
         ) => {
-          onProc(mockProc, 'test-container');
+          onProc(mockProc, 'test-run');
           if (onOutput) {
             await onOutput({ status: 'success', result: 'ok' });
           }
@@ -1611,7 +1661,7 @@ describe('createGroupProcessor', () => {
       expect(deps.queue.registerProcess).toHaveBeenCalledWith(
         'group1@g.us',
         mockProc,
-        'test-container',
+        'test-run',
         'test-group',
         undefined,
         undefined,

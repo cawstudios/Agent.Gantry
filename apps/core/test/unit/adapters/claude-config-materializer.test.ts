@@ -12,6 +12,7 @@ import {
 } from '@core/adapters/llm/anthropic-claude-agent/claude-config-materializer.js';
 import {
   ArtifactClaudeSkillSource,
+  RuntimeInstalledAgentBrowserSkillSource,
   materializeClaudeSkills,
   type SkillSource,
 } from '@core/adapters/llm/anthropic-claude-agent/claude-skill-materializer.js';
@@ -266,6 +267,28 @@ describe('Claude config materializer', () => {
     ).toBe('context');
     expect(fs.existsSync(path.join(skillsDir, 'draft'))).toBe(false);
     expect(fs.existsSync(path.join(skillsDir, 'invalid'))).toBe(false);
+  });
+
+  it('materializes the runtime-installed agent-browser skill into the temp skills dir', async () => {
+    const skillsDir = path.join(tempRoot, 'skills');
+    const materialized = await materializeClaudeSkills({
+      skillsDir,
+      skillSource: new RuntimeInstalledAgentBrowserSkillSource(),
+    });
+
+    expect(materialized).toHaveLength(1);
+    expect(materialized[0]).toMatchObject({
+      id: 'agent-browser',
+      sourceType: 'runtime',
+      enabled: true,
+    });
+    const skillText = fs.readFileSync(
+      path.join(skillsDir, 'agent-browser', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(skillText).toContain('PLAYWRIGHT_MCP_CDP_ENDPOINT');
+    expect(skillText).toContain('Do not install browser skills');
+    expect(fs.existsSync(path.join(tempRoot, '.claude', 'skills'))).toBe(false);
   });
 
   it('uses artifact ids for uploaded skill directories to avoid bundled name collisions', async () => {

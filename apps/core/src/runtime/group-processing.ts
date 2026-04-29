@@ -109,6 +109,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       groupFolder: group.folder,
       chatJid,
       source: options?.memoryContext?.source || 'message',
+      query: prompt,
       userId: options?.memoryContext?.userId,
       threadId: options?.memoryContext?.threadId,
     });
@@ -156,11 +157,11 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             thinking: group.agentConfig?.thinking,
             memoryContextBlock: input.memoryContextBlock,
           },
-          (proc, containerName) =>
+          (proc, runHandle) =>
             deps.queue.registerProcess(
               queueJid,
               proc,
-              containerName,
+              runHandle,
               group.folder,
               queueJid === chatJid ? undefined : chatJid,
               options?.memoryContext?.threadId,
@@ -172,7 +173,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         sessionId,
         memoryContextBlock,
       });
-
       if (output.status === 'error') {
         const staleSessionId = sessionId || '';
         if (

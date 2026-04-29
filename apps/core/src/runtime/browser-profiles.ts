@@ -245,6 +245,29 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isPidRunning(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readLockHolderPid(lockPath: string): number | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(lockPath, 'utf-8')) as Record<
+      string,
+      unknown
+    > | null;
+    const pid = parsed && typeof parsed.pid === 'number' ? parsed.pid : NaN;
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function acquireProfileLock(
   name: string,
   timeoutMs = 5000,
@@ -290,7 +313,11 @@ export async function acquireProfileLock(
 
       try {
         const stat = fs.statSync(lockPath);
-        if (Date.now() - stat.mtimeMs > PROFILE_LOCK_STALE_MS) {
+        const holderPid = readLockHolderPid(lockPath);
+        if (
+          (holderPid !== undefined && !isPidRunning(holderPid)) ||
+          Date.now() - stat.mtimeMs > PROFILE_LOCK_STALE_MS
+        ) {
           fs.rmSync(lockPath, { force: true });
           continue;
         }

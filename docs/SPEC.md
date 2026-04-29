@@ -63,7 +63,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 │  │    • Bash (host-executed runtime scope)                        │    │
 │  │    • Read, Write, Edit, Glob, Grep (file operations)           │    │
 │  │    • WebSearch, WebFetch (internet access)                     │    │
-│  │    • agent-browser (browser automation)                        │    │
+│  │    • Runtime-installed browser action skills/tools             │    │
 │  │    • mcp__myclaw__* (scheduler tools via IPC)                │    │
 │  │                                                                │    │
 │  └──────────────────────────────────────────────────────────────┘    │
@@ -73,14 +73,18 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 
 ### Technology Stack
 
-| Component          | Technology                                                        | Purpose                                                        |
-| ------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------- |
-| Channel System     | Provider registry (`apps/core/src/channels/provider-registry.ts`) | Channels are looked up by provider id and JID prefix           |
-| Message Storage    | Postgres with Drizzle                                             | Store messages, jobs, events, memory, and runtime state        |
-| Runtime Execution  | Host process execution                                            | Agent execution with runtime-home scoped paths                 |
-| Agent              | @anthropic-ai/claude-agent-sdk                                    | Run Claude with tools and MCP servers                          |
-| Browser Automation | agent-browser + Chromium                                          | Web interaction and screenshots with explicit CDP port handoff |
-| Runtime            | Node.js 25+                                                       | Host process for routing and pg-boss job execution             |
+| Component          | Technology                                                        | Purpose                                                      |
+| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------ |
+| Channel System     | Provider registry (`apps/core/src/channels/provider-registry.ts`) | Channels are looked up by provider id and JID prefix         |
+| Message Storage    | Postgres with Drizzle                                             | Store messages, jobs, events, memory, and runtime state      |
+| Runtime Execution  | Host process execution                                            | Agent execution with runtime-home scoped paths               |
+| Agent              | @anthropic-ai/claude-agent-sdk                                    | Run Claude with tools and MCP servers                        |
+| Browser Capability | MyClaw browser broker + runtime-installed action tooling          | Persistent browser lifecycle, profile state, and CDP handoff |
+| Runtime            | Node.js 25+                                                       | Host process for routing and pg-boss job execution           |
+
+Browser lifecycle, runtime skill materialization, persistent profile behavior,
+and action MCP handoff are documented in
+[docs/architecture/browser-capability.md](docs/architecture/browser-capability.md).
 
 ---
 
@@ -287,7 +291,6 @@ import path from 'path';
 import { getMyclawHome } from './myclaw-home.js';
 import { ensureRuntimeSettings } from './settings/runtime-settings.js';
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
 export const POLL_INTERVAL = 2000;
 
 // Paths are absolute and resolve from the configured runtime home.
@@ -295,13 +298,15 @@ const MYCLAW_HOME = getMyclawHome(process.env.MYCLAW_HOME);
 export const AGENTS_DIR = path.resolve(MYCLAW_HOME, 'agents');
 export const DATA_DIR = path.resolve(MYCLAW_HOME, 'data');
 
-// Default model selection is non-secret configuration in settings.yaml.
+// Main identity and default model selection are non-secret settings.yaml values.
+export const getConfiguredAgentName = () =>
+  ensureRuntimeSettings(MYCLAW_HOME).agent.name;
 export const getConfiguredDefaultModel = () =>
   ensureRuntimeSettings(MYCLAW_HOME).agent.defaultModel;
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep runtime worker alive after last result
 
-export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
+export const DEFAULT_TRIGGER = `@${getConfiguredAgentName()}`;
 ```
 
 **Note:** Paths must be absolute for runtime path validation and scoped mounts.
@@ -314,7 +319,7 @@ Groups can have additional directories exposed to the agent workspace through th
 setRegisteredGroup('telegram:dev-team', {
   name: 'Dev Team',
   folder: 'telegram_dev-team',
-  trigger: '@Andy',
+  trigger: DEFAULT_TRIGGER,
   added_at: new Date().toISOString(),
   agentConfig: {
     model: 'opus',
@@ -373,10 +378,10 @@ doctor/preflight reports a wrong-lane configuration error.
 
 ### Changing the Assistant Name
 
-Set the `ASSISTANT_NAME` environment variable:
+Set `agent.name` in `settings.yaml` or use `myclaw agent name`:
 
 ```bash
-ASSISTANT_NAME=Bot npm start
+myclaw agent name "Main Agent"
 ```
 
 Or edit the default in `apps/core/src/config/index.ts`. This changes:
@@ -397,7 +402,8 @@ Files with `{{PLACEHOLDER}}` values need to be configured:
 
 ## Memory System
 
-MyClaw separates static prompt profile files from structured memory and runtime continuity context.
+MyClaw separates static prompt profile files from structured memory,
+query-retrieved memory context, and runtime continuity state.
 
 ### Prompt Profile Layer
 
@@ -409,19 +415,23 @@ Prompt profile files are static guidance, not memory dumps:
 | **Soul**           | `agents/{group}/SOUL.md`   | Agent personality, voice, and boundaries                        |
 | **Group context**  | `agents/{group}/CLAUDE.md` | Stable group-specific guidance                                  |
 
-Dynamic facts, current task state, open loops, and raw transcripts must not be written into these files. Durable facts go through structured memory. Current task state belongs to continuity context.
+Dynamic facts, current task state, open loops, and raw transcripts must not be written into these files. Durable facts go through structured memory. Current task state belongs to explicit continuity/current-state tracking.
 
-### Continuity Context
+### Query-Retrieved Memory Context
 
-Continuity is the runtime context that helps the agent resume current work:
+Memory context is retrieved from the current message or scheduled job prompt:
 
-- current relevant memory
-- prior decisions
-- user/group preferences
-- recent work context
-- open loops when commitment tracking is enabled
+- matching durable memories
+- matching prior decisions
+- matching user/group preferences
+- matching facts and constraints
+- matching procedures or references
 
-Before an agent run, the host builds a memory/continuity context block and passes it to the agent runner. The agent runner appends it to the prompt so the model can use remembered context without treating prompt profile files as mutable memory.
+Before an agent run, the host builds a query-scoped memory context block only
+when retrieval finds matching memory. The agent runner appends it to the prompt
+as untrusted evidence. If no memory matches, no block is injected; the agent can
+call `memory_search` when the user asks to continue or when more context is
+needed.
 
 See [CONTINUITY.md](CONTINUITY.md) for the continuity model.
 
@@ -542,7 +552,9 @@ history.
 
 ## Session Management
 
-Sessions enable conversation continuity - Claude remembers what you talked about.
+Sessions enable provider-native conversation continuity. `/new` clears this
+provider conversation state for the chat/thread while preserving durable memory,
+skills, MCP bindings, model choices, and agent configuration.
 
 ### How Sessions Work
 
@@ -584,7 +596,7 @@ Sessions enable conversation continuity - Claude remembers what you talked about
    ├── Fetch all messages since last agent interaction
    ├── Format with timestamp and sender name
    ├── Add job/session context when present
-   └── Build prompt with memory and continuity context
+   └── Build prompt and query-retrieved memory context when matching memory exists
    │
    ▼
 8. Agent spawn starts the child runner:
@@ -595,7 +607,7 @@ Sessions enable conversation continuity - Claude remembers what you talked about
    │
    ▼
 9. Child runner invokes Claude Agent SDK:
-   ├── Uses injected prompt profile and memory/continuity context
+   ├── Uses injected prompt profile and query-retrieved memory context
    ├── Uses MessageStream for safe follow-up input
    └── Requests host permission for policy-gated tools
    │
@@ -611,11 +623,12 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 
 ### Trigger Word Matching
 
-Messages must start with the trigger pattern (default: `@Andy`):
+Messages must start with the trigger pattern. The default trigger is derived
+from `agent.name` in `settings.yaml`:
 
-- `@Andy what's the weather?` → ✅ Triggers Claude
-- `@andy help me` → ✅ Triggers (case insensitive)
-- `Hey @Andy` → ❌ Ignored (trigger not at start)
+- `@Main Agent what's the weather?` → ✅ Triggers Claude
+- `@main agent help me` → ✅ Triggers (case insensitive)
+- `Hey @Main Agent` → ❌ Ignored (trigger not at start)
 - `What's up?` → ❌ Ignored (no trigger)
 
 ### Conversation Catch-Up
@@ -625,7 +638,7 @@ When a triggered message arrives, the agent receives all messages since its last
 ```
 [Jan 31 2:32 PM] John: hey everyone, should we do pizza tonight?
 [Jan 31 2:33 PM] Sarah: sounds good to me
-[Jan 31 2:35 PM] John: @Andy what toppings do you recommend?
+[Jan 31 2:35 PM] John: @Main Agent what toppings do you recommend?
 ```
 
 This allows the agent to understand the conversation context even if it wasn't mentioned in every message.
@@ -636,18 +649,18 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 ### Commands Available in Any Group
 
-| Command                | Example                     | Effect         |
-| ---------------------- | --------------------------- | -------------- |
-| `@Assistant [message]` | `@Andy what's the weather?` | Talk to Claude |
+| Command                | Example                           | Effect         |
+| ---------------------- | --------------------------------- | -------------- |
+| `@Assistant [message]` | `@Main Agent what's the weather?` | Talk to Claude |
 
 ### Commands Available in Main Channel Only
 
-| Command                          | Example                             | Effect                 |
-| -------------------------------- | ----------------------------------- | ---------------------- |
-| `@Assistant add group "Name"`    | `@Andy add group "Family Chat"`     | Register a new group   |
-| `@Assistant remove group "Name"` | `@Andy remove group "Work Team"`    | Unregister a group     |
-| `@Assistant list groups`         | `@Andy list groups`                 | Show registered groups |
-| `@Assistant remember [fact]`     | `@Andy remember I prefer dark mode` | Add to global memory   |
+| Command                          | Example                                   | Effect                 |
+| -------------------------------- | ----------------------------------------- | ---------------------- |
+| `@Assistant add group "Name"`    | `@Main Agent add group "Family Chat"`     | Register a new group   |
+| `@Assistant remove group "Name"` | `@Main Agent remove group "Work Team"`    | Unregister a group     |
+| `@Assistant list groups`         | `@Main Agent list groups`                 | Show registered groups |
+| `@Assistant remember [fact]`     | `@Main Agent remember I prefer dark mode` | Add to global memory   |
 
 ---
 
@@ -673,7 +686,7 @@ MyClaw has a built-in scheduler that runs jobs as full agents in their group's c
 ### Creating a Job
 
 ```
-User: @Andy remind me every Monday at 9am to review the weekly metrics
+User: @Main Agent remind me every Monday at 9am to review the weekly metrics
 
 Claude: [calls mcp__myclaw__scheduler_upsert_job]
         {
@@ -690,7 +703,7 @@ Claude: Done! I'll remind you every Monday at 9am.
 ### One-Time Jobs
 
 ```
-User: @Andy at 5pm today, send me a summary of today's emails
+User: @Main Agent at 5pm today, send me a summary of today's emails
 
 Claude: [calls mcp__myclaw__scheduler_upsert_job]
         {
@@ -706,15 +719,15 @@ Claude: [calls mcp__myclaw__scheduler_upsert_job]
 
 From any group:
 
-- `@Andy list my scheduled jobs` - View jobs for this group
-- `@Andy pause job [id]` - Pause a job
-- `@Andy resume job [id]` - Resume a paused job
-- `@Andy delete job [id]` - Delete a job
+- `@Main Agent list my scheduled jobs` - View jobs for this group
+- `@Main Agent pause job [id]` - Pause a job
+- `@Main Agent resume job [id]` - Resume a paused job
+- `@Main Agent delete job [id]` - Delete a job
 
 From main channel:
 
-- `@Andy list all jobs` - View jobs from all groups
-- `@Andy schedule job for "Family Chat": [prompt]` - Schedule for another group
+- `@Main Agent list all jobs` - View jobs from all groups
+- `@Main Agent schedule job for "Family Chat": [prompt]` - Schedule for another group
 
 ---
 

@@ -348,7 +348,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       registerProcess: (
         groupJid,
         proc,
-        containerName,
+        runHandle,
         groupFolder,
         stopAliasJids,
         threadId,
@@ -356,7 +356,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
         queue.registerProcess(
           groupJid,
           proc,
-          containerName,
+          runHandle,
           groupFolder,
           stopAliasJids,
           threadId,

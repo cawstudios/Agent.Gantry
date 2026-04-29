@@ -24,7 +24,9 @@ export const agentRunsPostgres = pgTable('agent_runs', {
   configVersionId: text('config_version_id')
     .notNull()
     .references(() => agentConfigVersionsPostgres.id),
-  sessionId: text('session_id').references(() => agentSessionsPostgres.id),
+  sessionId: text('session_id').references(() => agentSessionsPostgres.id, {
+    onDelete: 'set null',
+  }),
   conversationId: text('conversation_id').references(
     () => conversationsPostgres.id,
   ),

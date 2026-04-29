@@ -337,7 +337,7 @@ CREATE TABLE agent_runs (
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
   agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
   config_version_id text NOT NULL REFERENCES agent_config_versions(id),
-  session_id text REFERENCES agent_sessions(id),
+  session_id text REFERENCES agent_sessions(id) ON DELETE SET NULL,
   conversation_id text REFERENCES channel_conversations(id),
   thread_id text REFERENCES conversation_threads(id),
   message_id text REFERENCES messages(id),

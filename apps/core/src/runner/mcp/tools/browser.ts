@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { formatBrowserToolResponse } from '../formatting.js';
 import { requestBrowserAction } from '../ipc.js';
 
+function formatBrowserFailure(action: string, error?: string): string {
+  return `Browser ${action} failed: ${error || 'unknown error'}`;
+}
+
 export function registerBrowserTools(server: McpServer): void {
   server.tool(
     'browser_profile_list',
@@ -15,7 +19,7 @@ export function registerBrowserTools(server: McpServer): void {
           content: [
             {
               type: 'text' as const,
-              text: `Browser profile list failed: ${response.error || 'unknown error'}`,
+              text: formatBrowserFailure('profile list', response.error),
             },
           ],
           isError: true,
@@ -31,11 +35,10 @@ export function registerBrowserTools(server: McpServer): void {
 
   server.tool(
     'browser_launch',
-    'Launch or reuse the shared Chrome browser session (profile: myclaw).',
+    'Launch, recover, or reuse the shared Chrome browser session (profile: myclaw). Optional keep_alive_ms extends the explicit hold.',
     {
       profile_name: z.string().optional().default('myclaw'),
       headless: z.boolean().optional(),
-      cdp_port: z.number().optional(),
       keep_alive_ms: z.number().optional(),
     },
     async (args) => {
@@ -45,7 +48,7 @@ export function registerBrowserTools(server: McpServer): void {
           content: [
             {
               type: 'text' as const,
-              text: `Browser launch failed: ${response.error || 'unknown error'}`,
+              text: formatBrowserFailure('launch', response.error),
             },
           ],
           isError: true,
@@ -72,7 +75,7 @@ export function registerBrowserTools(server: McpServer): void {
           content: [
             {
               type: 'text' as const,
-              text: `Browser close failed: ${response.error || 'unknown error'}`,
+              text: formatBrowserFailure('close', response.error),
             },
           ],
           isError: true,
@@ -99,7 +102,7 @@ export function registerBrowserTools(server: McpServer): void {
           content: [
             {
               type: 'text' as const,
-              text: `Browser status failed: ${response.error || 'unknown error'}`,
+              text: formatBrowserFailure('status', response.error),
             },
           ],
           isError: true,

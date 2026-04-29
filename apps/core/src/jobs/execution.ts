@@ -346,6 +346,7 @@ export async function runJob(
         groupFolder: execution.group.folder,
         chatJid: execution.executionJid,
         source: 'scheduler',
+        query: currentJob.prompt,
         threadId: currentJob.thread_id || undefined,
       });
       const flushStreamingEvent = (force = false): void => {
@@ -375,11 +376,11 @@ export async function runJob(
             script: currentJob.script || undefined,
             memoryContextBlock: injectedMemoryContext?.block,
           },
-          (proc, containerName) =>
+          (proc, runHandle) =>
             deps.onProcess(
               queueJid,
               proc,
-              containerName,
+              runHandle,
               execution.group.folder,
               execution.stopAliasJids,
             ),

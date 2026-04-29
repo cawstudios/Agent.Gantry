@@ -15,7 +15,7 @@ export interface SchedulerDependencies {
   onProcess: (
     groupJid: string,
     proc: ChildProcess,
-    containerName: string,
+    runHandle: string,
     groupFolder: string,
     stopAliasJids?: string[],
   ) => void;
