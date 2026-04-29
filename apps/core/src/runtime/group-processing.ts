@@ -23,6 +23,7 @@ import {
   formatMessages,
   formatOutboundForChannel,
 } from '../messaging/router.js';
+import { collectCompactBoundaryMemory } from '../jobs/compact-memory.js';
 import {
   isSenderControlAllowed,
   isTriggerAllowed,
@@ -95,25 +96,13 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             turnContext?.agentSessionId &&
             collectSessionMemory
           ) {
-            try {
-              const result = await collectSessionMemory({
-                agentSessionId: turnContext.agentSessionId,
-                trigger: 'precompact',
-              });
-              logger.info(
-                {
-                  group: group.name,
-                  agentSessionId: turnContext.agentSessionId,
-                  saved: result?.saved ?? 0,
-                },
-                'Collected durable memory at SDK compact boundary',
-              );
-            } catch (err) {
-              logger.warn(
-                { group: group.name, err },
-                'Failed to collect durable memory at SDK compact boundary',
-              );
-            }
+            await collectCompactBoundaryMemory({
+              compactBoundary: output.compactBoundary,
+              agentSessionId: turnContext.agentSessionId,
+              collectMemory: collectSessionMemory,
+              logger,
+              context: { group: group.name },
+            });
           }
           await onOutput(output);
         }

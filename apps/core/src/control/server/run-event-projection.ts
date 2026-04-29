@@ -26,10 +26,16 @@ export function projectRuntimeEventToRunEvent(
   event: RuntimeEvent,
   fallbackRunId?: string,
 ): PublicRunEvent {
+  const runId = event.runId ?? fallbackRunId;
+  if (!runId) {
+    throw new Error(
+      `Runtime event ${event.eventId} cannot be projected to a run event without runId`,
+    );
+  }
   return {
     id: String(event.eventId),
     appId: event.appId,
-    runId: event.runId ?? fallbackRunId ?? '',
+    runId,
     type: publicRunEventTypeFor(event.eventType),
     payload: event.payload,
     createdAt: event.createdAt,

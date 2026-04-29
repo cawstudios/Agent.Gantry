@@ -429,8 +429,12 @@ export async function handleSessionRoutes(
 
 function writeSseEvent(res: ServerResponse, event: RuntimeEvent): void {
   res.write(`id: ${event.eventId}\n`);
-  res.write(`event: ${event.eventType}\n`);
+  res.write(`event: ${sanitizeSseEventType(event.eventType)}\n`);
   res.write(`data: ${JSON.stringify(event.payload)}\n\n`);
+}
+
+function sanitizeSseEventType(eventType: string): string {
+  return /^[a-z0-9._-]+$/.test(eventType) ? eventType : 'runtime_event';
 }
 
 function delay(ms: number): Promise<void> {

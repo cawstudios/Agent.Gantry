@@ -9,6 +9,10 @@ import type {
 } from '../../domain/sessions/sessions.js';
 import { ApplicationError } from '../common/application-error.js';
 
+const MEMORY_CONTEXT_TRUNCATION_LADDER = [4000, 2000, 1000, 500, 250, 120];
+const MYCLAW_CONTEXT_OPENING_PATTERN = /<\s*\/?\s*myclaw[_a-z0-9-]*/gi;
+const FULLWIDTH_CONTEXT_OPENING_PATTERN = /＜\s*\/?\s*myclaw[_a-z0-9-]*/gi;
+
 export interface HydrateAgentContextOptions {
   memoryItemLimit?: number;
   maxChars?: number;
@@ -115,7 +119,9 @@ function sanitizeContextPayload(
   if (typeof value === 'string') {
     const safe = value
       .replaceAll('</myclaw_memory_context>', '<\\/myclaw_memory_context>')
-      .replaceAll('<myclaw_memory_context', '<myclaw_memory_context_escaped');
+      .replace(MYCLAW_CONTEXT_OPENING_PATTERN, '[escaped-myclaw-context-tag')
+      .replace(FULLWIDTH_CONTEXT_OPENING_PATTERN, '[escaped-myclaw-context-tag')
+      .replace(/\btrust\s*=/gi, 'trust_escaped=');
     if (safe.length <= maxStringChars) return safe;
     return `${safe.slice(0, Math.max(0, maxStringChars - 38)).trimEnd()} [field truncated]`;
   }
@@ -134,7 +140,7 @@ function sanitizeContextPayload(
 }
 
 function serializeBoundedPayload(payload: unknown, maxChars: number): string {
-  for (const maxStringChars of [4000, 2000, 1000, 500, 250, 120]) {
+  for (const maxStringChars of MEMORY_CONTEXT_TRUNCATION_LADDER) {
     const json = JSON.stringify(
       sanitizeContextPayload(payload, maxStringChars),
       null,

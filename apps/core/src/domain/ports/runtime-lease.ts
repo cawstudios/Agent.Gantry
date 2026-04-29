@@ -1,4 +1,5 @@
 export interface RuntimeLease {
+  onLost?: (handler: (err: Error) => void) => void;
   release: () => Promise<void>;
 }
 

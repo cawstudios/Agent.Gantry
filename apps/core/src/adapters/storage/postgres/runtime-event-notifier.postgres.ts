@@ -10,6 +10,7 @@ import { logger } from '../../../infrastructure/logging/logger.js';
 
 const RUNTIME_EVENTS_CHANNEL = 'myclaw_runtime_events';
 const LISTEN_RECONNECT_DELAY_MS = 1_000;
+const PG_NOTIFY_PAYLOAD_SAFE_BYTES = 7_500;
 
 export interface RuntimeEventWakeup {
   eventId: RuntimeEvent['eventId'];
@@ -69,10 +70,26 @@ export class PostgresRuntimeEventNotifier implements RuntimeEventNotifier {
   constructor(private readonly pool: Pool) {}
 
   async notify(event: RuntimeEvent): Promise<void> {
-    await this.pool.query('SELECT pg_notify($1, $2)', [
-      RUNTIME_EVENTS_CHANNEL,
-      JSON.stringify(wakeupFromEvent(event)),
-    ]);
+    const fullPayload = JSON.stringify(wakeupFromEvent(event));
+    const payload =
+      Buffer.byteLength(fullPayload, 'utf8') <= PG_NOTIFY_PAYLOAD_SAFE_BYTES
+        ? fullPayload
+        : JSON.stringify({
+            eventId: event.eventId,
+            appId: event.appId,
+            eventType: event.eventType,
+          });
+    try {
+      await this.pool.query('SELECT pg_notify($1, $2)', [
+        RUNTIME_EVENTS_CHANNEL,
+        payload,
+      ]);
+    } catch (err) {
+      logger.warn(
+        { err, eventId: event.eventId, appId: event.appId },
+        'Failed to publish runtime event wakeup; subscribers recover by cursor polling',
+      );
+    }
   }
 
   subscribe(listener: () => void, filter?: RuntimeEventFilter): () => void {

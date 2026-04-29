@@ -30,6 +30,8 @@ import { AsyncTaskQueue } from '../../app/bootstrap/async-task-queue.js';
 import { writeTelegramFetchResponseToFile } from '../telegram-file-download.js';
 
 import { TelegramChannelState } from './channel-state.js';
+
+const TELEGRAM_POLL_LEASE_HASH_CHARS = 24;
 import {
   PendingUserQuestionState,
   TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES,
@@ -336,7 +338,11 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
 
   private async startPollingWithLease(): Promise<void> {
     if (!this.bot || this.isStopping || this.pollingLease) return;
-    const leaseKey = `telegram:poll:${createHash('sha256').update(this.botToken).digest('hex').slice(0, 24)}`;
+    if (!this.botToken.trim()) {
+      logger.error('Telegram polling cannot start without a bot token');
+      return;
+    }
+    const leaseKey = `telegram:poll:${createHash('sha256').update(this.botToken).digest('hex').slice(0, TELEGRAM_POLL_LEASE_HASH_CHARS)}`;
     const lease = await this.opts.runtimeLease?.tryAcquire(leaseKey);
     if (!lease && this.opts.runtimeLease) {
       logger.warn(
@@ -347,6 +353,16 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
       return;
     }
     this.pollingLease = lease ?? null;
+    lease?.onLost?.((err) => {
+      if (this.pollingLease !== lease) return;
+      this.pollingLease = null;
+      if (this.isStopping) return;
+      logger.warn(
+        { err, leaseKey },
+        'Telegram polling lease connection was lost; scheduling retry',
+      );
+      this.schedulePollingRetry();
+    });
 
     Promise.resolve(
       this.bot.start({

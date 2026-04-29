@@ -149,7 +149,7 @@ describe('RuntimeEventExchange', () => {
     second.close();
   });
 
-  it('notifies subscribers even when projection fails', async () => {
+  it('does not notify subscribers when projection fails', async () => {
     const repository = new MemoryRuntimeEventRepository();
     const notifier = new InMemoryRuntimeEventNotifier();
     const exchange = new RuntimeEventExchange(repository, notifier, [
@@ -170,7 +170,7 @@ describe('RuntimeEventExchange', () => {
     ).rejects.toThrow('projection failed');
 
     expect(repository.events).toHaveLength(1);
-    expect(notifier.notifiedEvents).toEqual(repository.events);
+    expect(notifier.notifiedEvents).toEqual([]);
   });
 
   it('returns no events after a subscription is closed', async () => {

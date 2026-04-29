@@ -36,14 +36,6 @@ export function buildChromeLaunchArgs(input: ChromeLaunchArgsInput): string[] {
   ];
 }
 
-export const DEFAULT_CHROME_IGNORE_ARGS = ['--enable-automation'] as const;
-
-export const DEFAULT_VIEWPORT = {
-  width: 1280,
-  height: 800,
-} as const;
-
-export const DEFAULT_CDP_PORT = 9222;
 export const DEFAULT_BROWSER_KEEPALIVE_MS = 5 * 60 * 1000;
 
 export const CHROME_PATH = configuredChromePath;

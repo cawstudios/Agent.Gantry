@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  collectJobCompactBoundaryMemory,
+  collectCompactBoundaryMemory,
   collectJobCompletionMemory,
 } from '@core/jobs/compact-memory.js';
 
-describe('collectJobCompactBoundaryMemory', () => {
+describe('collectCompactBoundaryMemory', () => {
   it('collects durable memory when a scheduled run reaches an SDK compact boundary', async () => {
     const collectMemory = vi.fn().mockResolvedValue({ saved: 2 });
     const logger = { info: vi.fn(), warn: vi.fn() };
 
-    await collectJobCompactBoundaryMemory({
+    await collectCompactBoundaryMemory({
       compactBoundary: true,
       agentSessionId: 'agent-session:job',
       collectMemory,
@@ -37,18 +37,18 @@ describe('collectJobCompactBoundaryMemory', () => {
     const collectMemory = vi.fn().mockResolvedValue({ saved: 1 });
     const logger = { info: vi.fn(), warn: vi.fn() };
 
-    await collectJobCompactBoundaryMemory({
+    await collectCompactBoundaryMemory({
       compactBoundary: false,
       agentSessionId: 'agent-session:job',
       collectMemory,
       logger,
     });
-    await collectJobCompactBoundaryMemory({
+    await collectCompactBoundaryMemory({
       compactBoundary: true,
       collectMemory,
       logger,
     });
-    await collectJobCompactBoundaryMemory({
+    await collectCompactBoundaryMemory({
       compactBoundary: true,
       agentSessionId: 'agent-session:job',
       logger,

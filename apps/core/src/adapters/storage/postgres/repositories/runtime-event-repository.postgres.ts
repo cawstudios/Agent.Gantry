@@ -8,12 +8,17 @@ import type {
 import type { RuntimeEventRepository } from '../../../../domain/ports/repositories.js';
 import * as pgSchema from '../schema/schema.js';
 import type { CanonicalDb } from './canonical-graph-repository.postgres.js';
+import { logger } from '../../../../infrastructure/logging/logger.js';
 
 function encodeJson(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-function parseJson<T>(value: unknown, fallback: T): T {
+function parseJson<T>(
+  value: unknown,
+  fallback: T,
+  context?: { eventId?: number },
+): T {
   if (typeof value !== 'string' || value.length === 0) return fallback;
   try {
     return JSON.parse(value) as T;
@@ -21,6 +26,14 @@ function parseJson<T>(value: unknown, fallback: T): T {
     if (!(err instanceof SyntaxError)) {
       throw err;
     }
+    logger.warn(
+      {
+        err,
+        eventId: context?.eventId,
+        payloadPreview: value.slice(0, 200),
+      },
+      'Failed to parse runtime event payload JSON',
+    );
     return fallback;
   }
 }
@@ -137,7 +150,7 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
       correlationId: row.correlationId ?? undefined,
       responseMode: row.responseMode as RuntimeEvent['responseMode'],
       webhookId: row.webhookId ?? undefined,
-      payload: parseJson(row.payloadJson, null),
+      payload: parseJson(row.payloadJson, null, { eventId: row.eventId }),
       createdAt: row.createdAt,
     };
   }

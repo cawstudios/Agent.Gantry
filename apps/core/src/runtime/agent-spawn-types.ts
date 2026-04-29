@@ -28,7 +28,6 @@ export interface AgentOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
-  providerArtifactId?: string;
   compactBoundary?: boolean;
   interactionBoundary?: 'user_interaction';
   error?: string;

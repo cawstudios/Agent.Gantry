@@ -3,6 +3,18 @@ import { z } from 'zod';
 import { formatBrowserToolResponse } from '../formatting.js';
 import { requestBrowserAction } from '../ipc.js';
 
+function formatBrowserFailure(action: string, error: string | undefined) {
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: `Browser ${action} failed: ${error || 'unknown error'}`,
+      },
+    ],
+    isError: true,
+  };
+}
+
 export function registerBrowserTools(server: McpServer): void {
   server.tool(
     'browser_profile_list',
@@ -11,15 +23,7 @@ export function registerBrowserTools(server: McpServer): void {
     async () => {
       const response = await requestBrowserAction('browser_profile_list', {});
       if (!response.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Browser profile list failed: ${response.error || 'unknown error'}`,
-            },
-          ],
-          isError: true,
-        };
+        return formatBrowserFailure('profile list', response.error);
       }
       return {
         content: [
@@ -41,15 +45,7 @@ export function registerBrowserTools(server: McpServer): void {
     async (args) => {
       const response = await requestBrowserAction('browser_launch', args);
       if (!response.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Browser launch failed: ${response.error || 'unknown error'}`,
-            },
-          ],
-          isError: true,
-        };
+        return formatBrowserFailure('launch', response.error);
       }
       return {
         content: [
@@ -68,15 +64,7 @@ export function registerBrowserTools(server: McpServer): void {
     async (args) => {
       const response = await requestBrowserAction('browser_close', args);
       if (!response.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Browser close failed: ${response.error || 'unknown error'}`,
-            },
-          ],
-          isError: true,
-        };
+        return formatBrowserFailure('close', response.error);
       }
       return {
         content: [
@@ -95,15 +83,7 @@ export function registerBrowserTools(server: McpServer): void {
     async (args) => {
       const response = await requestBrowserAction('browser_status', args);
       if (!response.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Browser status failed: ${response.error || 'unknown error'}`,
-            },
-          ],
-          isError: true,
-        };
+        return formatBrowserFailure('status', response.error);
       }
 
       return {

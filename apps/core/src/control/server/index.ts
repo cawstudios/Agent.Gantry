@@ -19,6 +19,7 @@ import { handleMemoryRoutes } from './routes/memory.js';
 import { handleMcpServerRoutes } from './routes/mcp-servers.js';
 import { handleRunRoutes } from './routes/runs.js';
 import { handleSessionRoutes } from './routes/sessions.js';
+import { handleSettingsRoutes } from './routes/settings.js';
 import { handleSkillRoutes } from './routes/skills.js';
 import { handleSystemRoutes } from './routes/system.js';
 import { handleWebhookRoutes } from './routes/webhooks.js';
@@ -57,6 +58,7 @@ function createControlRequestHandler(ctx: ControlRouteContext) {
 
     try {
       if (await handleSystemRoutes(req, res, ctx, pathname)) return;
+      if (await handleSettingsRoutes(req, res, pathname)) return;
       if (await handleSessionRoutes(req, res, ctx, url, pathname)) return;
       if (await handleChannelControlRoutes(req, res, ctx, url, pathname))
         return;

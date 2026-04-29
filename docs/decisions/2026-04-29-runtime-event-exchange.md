@@ -78,12 +78,24 @@ durable audit truth remains in their own records.
 ## Consequences
 
 This is a clean-cut refactor. There will be no compatibility views, dual writes,
-automatic migration flows, or fallback readers for old local state.
+automatic migration flows, or fallback readers for old local state. Migration
+0018 is schema-only and fail-loud: it refuses to run if old runtime event,
+control HTTP event, agent run event, or webhook delivery tables contain rows.
+Operators must export or explicitly clear those rows before applying the cut.
 
 Storage, control routes, app channel, jobs, run APIs, SDK projections, and
 webhook delivery must converge on the exchange in the same implementation
 program. Partial cutovers are not acceptable because they reintroduce split
 event truth.
+
+Rolling deploys across the Runtime Event Exchange cut are not supported. Stop
+old runtimes before applying the migration, then start only the upgraded runtime
+after the schema cut succeeds.
+
+Retention will be implemented at the Runtime Event Exchange seam rather than in
+projection-specific tables. Until partitioning lands, installations must run an
+operator-owned retention job for `runtime_events.created_at` that matches their
+audit SLA.
 
 The cleanup gate must search active source, active schema, route code,
 repositories, use cases, tests, and docs for stale event names. Remaining old

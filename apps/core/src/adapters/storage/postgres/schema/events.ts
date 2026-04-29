@@ -23,7 +23,7 @@ export const runtimeEventsPostgres = pgTable(
       onDelete: 'set null',
     }),
     runId: text('run_id').references(() => agentRunsPostgres.id, {
-      onDelete: 'set null',
+      onDelete: 'cascade',
     }),
     jobId: text('job_id'),
     triggerId: text('trigger_id'),
@@ -54,29 +54,35 @@ export const runtimeEventsPostgres = pgTable(
       table.eventId,
     ),
     sessionCursorIdx: index('idx_runtime_events_session_cursor').on(
+      table.appId,
       table.sessionId,
       table.eventId,
     ),
     runCursorIdx: index('idx_runtime_events_run_cursor').on(
+      table.appId,
       table.runId,
       table.eventId,
     ),
     jobCursorIdx: index('idx_runtime_events_job_cursor').on(
+      table.appId,
       table.jobId,
       table.eventId,
     ),
     triggerCursorIdx: index('idx_runtime_events_trigger_cursor').on(
+      table.appId,
       table.triggerId,
       table.eventId,
     ),
     conversationThreadCursorIdx: index(
       'idx_runtime_events_conversation_thread_cursor',
-    ).on(table.conversationId, table.threadId, table.eventId),
+    ).on(table.appId, table.conversationId, table.threadId, table.eventId),
     eventTypeCursorIdx: index('idx_runtime_events_type_cursor').on(
+      table.appId,
       table.eventType,
       table.eventId,
     ),
     webhookProjectionIdx: index('idx_runtime_events_webhook_projection').on(
+      table.appId,
       table.webhookId,
       table.responseMode,
       table.eventId,

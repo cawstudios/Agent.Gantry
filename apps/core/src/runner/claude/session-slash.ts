@@ -7,11 +7,11 @@ import { buildSystemPrompt } from './system-prompt.js';
 import { log } from './logging.js';
 import { writeOutput } from './output.js';
 import { WORKSPACE_GROUP_DIR } from './runtime-env.js';
-import type { SessionSlashCommand, SessionSlashKind } from './types.js';
+import type { SessionSlashCommand } from './types.js';
 
 interface SessionSlashRunOptions {
   command: string;
-  kind: SessionSlashKind;
+  kind: 'model';
   sdkEnv: Record<string, string | undefined>;
   assistantName?: string;
   configuredModel?: string;
@@ -127,13 +127,7 @@ export async function runSessionSlashCommand(
   );
 
   if (!opts.silent) {
-    if (!resultEmitted && !hadError) {
-      writeOutput({
-        status: 'success',
-        result: null,
-        newSessionId: slashSessionId,
-      });
-    } else if (!hadError) {
+    if (!hadError) {
       writeOutput({
         status: 'success',
         result: null,

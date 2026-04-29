@@ -30,16 +30,10 @@ export class RuntimeEventExchange {
 
   async publish(input: RuntimeEventPublishInput): Promise<RuntimeEvent> {
     const event = await this.repository.appendRuntimeEvent(input);
-    let projectionError: unknown;
-    try {
-      for (const projection of this.projections) {
-        await projection.project(event);
-      }
-    } catch (error) {
-      projectionError = error;
+    for (const projection of this.projections) {
+      await projection.project(event);
     }
     await this.notifier.notify(event);
-    if (projectionError) throw projectionError;
     return event;
   }
 
@@ -56,7 +50,7 @@ export class RuntimeEventExchange {
   }
 }
 
-const MAX_SUBSCRIPTION_WAKE_WAIT_MS = 1_000;
+const MAX_SUBSCRIPTION_WAKE_WAIT_MS = 15_000;
 
 class DurableRuntimeEventSubscription implements RuntimeEventSubscription {
   private closed = false;

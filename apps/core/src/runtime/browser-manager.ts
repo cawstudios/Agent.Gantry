@@ -17,6 +17,11 @@ import {
 } from './browser-profiles.js';
 
 export const DEFAULT_BROWSER_PROFILE_NAME = 'myclaw';
+const CHROME_PORT_WAIT_TIMEOUT_MS = 10_000;
+const CHROME_PORT_POLL_MS = 500;
+const BROWSER_KEEPALIVE_MIN_MS = 10_000;
+const BROWSER_METADATA_WRITE_DEBOUNCE_MS = 2_000;
+const CHROME_TERMINATE_TIMEOUT_MS = 5_000;
 
 interface BrowserSession {
   profileName: string;
@@ -28,6 +33,7 @@ interface BrowserSession {
   lastUsedAt: number;
   keepAliveMs: number;
   keepAliveTimer: NodeJS.Timeout | null;
+  metadataTimer: NodeJS.Timeout | null;
 }
 
 export interface LaunchBrowserOptions {
@@ -114,20 +120,49 @@ async function waitForPort(port: number, timeoutMs: number): Promise<void> {
     });
 
     if (ok) return;
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, CHROME_PORT_POLL_MS));
   }
 
   throw new Error(`Chrome did not start on port ${port} within ${timeoutMs}ms`);
 }
 
 function isChromeAlive(session: BrowserSession): boolean {
-  if (!session.pid || session.pid <= 0) return false;
+  return isPidAlive(session.pid);
+}
+
+function isPidAlive(pid: number | undefined): boolean {
+  if (!pid || pid <= 0) return false;
   try {
-    process.kill(session.pid, 0);
+    process.kill(pid, 0);
     return true;
   } catch {
     return false;
   }
+}
+
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!isPidAlive(pid)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+async function terminateChromePid(pid: number | undefined): Promise<void> {
+  if (!pid || pid <= 0 || !isPidAlive(pid)) return;
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    return;
+  }
+  await waitForPidExit(pid, CHROME_TERMINATE_TIMEOUT_MS);
+  if (!isPidAlive(pid)) return;
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // ignore
+  }
+  await waitForPidExit(pid, 1_000);
 }
 
 async function cdpJsonRequest(
@@ -178,10 +213,7 @@ async function ensureTarget(port: number): Promise<string | undefined> {
 
 function touchSession(session: BrowserSession): void {
   session.lastUsedAt = Date.now();
-  updateProfileMetadata(session.profileName, {
-    last_used: new Date(session.lastUsedAt).toISOString(),
-    cdp_port: session.port,
-  });
+  scheduleProfileMetadataUpdate(session);
 
   if (session.keepAliveTimer) clearTimeout(session.keepAliveTimer);
   session.keepAliveTimer = setTimeout(() => {
@@ -192,6 +224,23 @@ function touchSession(session: BrowserSession): void {
       );
     });
   }, session.keepAliveMs);
+}
+
+function scheduleProfileMetadataUpdate(session: BrowserSession): void {
+  if (session.metadataTimer) return;
+  session.metadataTimer = setTimeout(() => {
+    session.metadataTimer = null;
+    writeProfileMetadataForSession(session);
+  }, BROWSER_METADATA_WRITE_DEBOUNCE_MS);
+  session.metadataTimer.unref?.();
+}
+
+function writeProfileMetadataForSession(session: BrowserSession): void {
+  updateProfileMetadata(session.profileName, {
+    last_used: new Date(session.lastUsedAt).toISOString(),
+    cdp_port: session.port,
+    chrome_pid: session.pid,
+  });
 }
 
 export async function launchBrowser(
@@ -219,14 +268,16 @@ export async function launchBrowser(
     if (existing) {
       sessions.delete(profileName);
       if (existing.keepAliveTimer) clearTimeout(existing.keepAliveTimer);
-      try {
-        process.kill(existing.pid);
-      } catch {
-        // ignore stale process cleanup failures
-      }
+      if (existing.metadataTimer) clearTimeout(existing.metadataTimer);
+      await terminateChromePid(existing.pid);
       existing.lock.release();
     }
 
+    const lockedProfile = getProfile(profileName) ?? profile;
+    const recordedPid = lockedProfile.metadata.chrome_pid;
+    if (recordedPid) {
+      await terminateChromePid(recordedPid);
+    }
     cleanupChromeSingletonArtifacts(profile.userDataDir);
     const port = opts.cdpPort ?? (await getFreePort());
     const chromeFlags = buildChromeLaunchArgs({
@@ -236,17 +287,16 @@ export async function launchBrowser(
     });
 
     chromeProcess = spawn(findChrome(), chromeFlags, {
-      detached: true,
+      detached: false,
       stdio: 'ignore',
     });
-    chromeProcess.unref();
 
     const pid = chromeProcess.pid;
     if (!pid || pid <= 0) {
       throw new Error('Failed to launch Chrome process');
     }
 
-    await waitForPort(port, 10_000);
+    await waitForPort(port, CHROME_PORT_WAIT_TIMEOUT_MS);
     const targetId = await ensureTarget(port);
 
     const session: BrowserSession = {
@@ -258,13 +308,16 @@ export async function launchBrowser(
       lock,
       lastUsedAt: Date.now(),
       keepAliveMs: Math.max(
-        10_000,
+        BROWSER_KEEPALIVE_MIN_MS,
         opts.keepAliveMs || DEFAULT_BROWSER_KEEPALIVE_MS,
       ),
       keepAliveTimer: null,
+      metadataTimer: null,
     };
 
     sessions.set(profileName, session);
+    session.lastUsedAt = Date.now();
+    writeProfileMetadataForSession(session);
     touchSession(session);
 
     logger.info({ profileName, port }, 'Launched browser profile session');
@@ -278,11 +331,7 @@ export async function launchBrowser(
     };
   } catch (err) {
     if (chromeProcess?.pid) {
-      try {
-        process.kill(chromeProcess.pid);
-      } catch {
-        // ignore
-      }
+      await terminateChromePid(chromeProcess.pid);
     }
     lock.release();
     throw err;
@@ -315,18 +364,19 @@ export async function closeBrowser(
     clearTimeout(session.keepAliveTimer);
     session.keepAliveTimer = null;
   }
-
-  try {
-    process.kill(session.pid);
-  } catch {
-    // ignore
+  if (session.metadataTimer) {
+    clearTimeout(session.metadataTimer);
+    session.metadataTimer = null;
   }
+
+  await terminateChromePid(session.pid);
 
   session.lock.release();
   sessions.delete(normalized);
   updateProfileMetadata(normalized, {
     last_used: new Date().toISOString(),
     cdp_port: undefined,
+    chrome_pid: undefined,
   });
 
   return { closed: true };

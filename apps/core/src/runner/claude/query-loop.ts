@@ -9,6 +9,7 @@ import {
   type McpServerConfig,
 } from '../agent-capabilities.js';
 import { denyMemoryBoundaryToolUse } from '../memory-boundary.js';
+import { denyProtectedCapabilityToolUse } from './protected-capability-guard.js';
 import { MessageStream } from './message-stream.js';
 import {
   drainInteractionBoundaries,
@@ -126,6 +127,22 @@ export async function runQuery(
       env: sdkEnv,
       permissionMode: capabilities.permissionMode,
       canUseTool: async (toolName, input, permissionOpts) => {
+        const protectedCapabilityDenial = denyProtectedCapabilityToolUse(
+          toolName,
+          input,
+          permissionOpts,
+        );
+        if (protectedCapabilityDenial) {
+          log(
+            `Permission denied by protected capability guard: ${protectedCapabilityDenial}`,
+          );
+          return {
+            behavior: 'deny' as const,
+            message: protectedCapabilityDenial,
+            interrupt: false,
+          };
+        }
+
         if (capabilities.alwaysAllowedTools.includes(toolName)) {
           return { behavior: 'allow' as const, updatedInput: input };
         }

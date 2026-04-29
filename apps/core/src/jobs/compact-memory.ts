@@ -5,7 +5,7 @@ type JobMemoryLogger = {
   warn: (obj: Record<string, unknown>, msg: string) => void;
 };
 
-export async function collectJobCompactBoundaryMemory(input: {
+export async function collectCompactBoundaryMemory(input: {
   compactBoundary?: boolean;
   agentSessionId?: string;
   collectMemory?: SessionMemoryCollector;

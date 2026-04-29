@@ -60,10 +60,31 @@ export async function tryAcquireRuntimeAdvisoryLease(
       released = true;
       return undefined;
     }
+    const lostHandlers = new Set<(err: Error) => void>();
+    const notifyLost = (err: Error) => {
+      if (released) return;
+      released = true;
+      for (const handler of [...lostHandlers]) handler(err);
+      client.removeListener('error', notifyLost);
+      client.removeListener('end', notifyEnd);
+      try {
+        client.release(err);
+      } catch {}
+    };
+    const notifyEnd = () => {
+      notifyLost(new Error(`Runtime advisory lease connection ended: ${key}`));
+    };
+    client.once('error', notifyLost);
+    client.once('end', notifyEnd);
     return {
+      onLost: (handler) => {
+        lostHandlers.add(handler);
+      },
       release: async () => {
         if (released) return;
         released = true;
+        client.removeListener('error', notifyLost);
+        client.removeListener('end', notifyEnd);
         try {
           await client.query(
             'SELECT pg_advisory_unlock(hashtextextended($1, 0))',

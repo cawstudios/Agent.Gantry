@@ -29,7 +29,7 @@ import {
   completeSuccessfulRuntimeSessionRun,
 } from '../runtime/session-resume-runtime.js';
 import {
-  collectJobCompactBoundaryMemory,
+  collectCompactBoundaryMemory,
   collectJobCompletionMemory,
 } from './compact-memory.js';
 import { notifyLinkedSessions } from './delivery.js';
@@ -412,7 +412,7 @@ export async function runJob(
               execution.stopAliasJids,
             ),
           async (streamedOutput: AgentOutput) => {
-            await collectJobCompactBoundaryMemory({
+            await collectCompactBoundaryMemory({
               compactBoundary: streamedOutput.compactBoundary,
               agentSessionId: turnContext?.agentSessionId,
               collectMemory: deps.collectSessionMemory,

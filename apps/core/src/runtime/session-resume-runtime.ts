@@ -144,12 +144,6 @@ export async function completeFailedRuntimeSessionRun(input: {
   });
 }
 
-export function joinRuntimeContextBlocks(
-  ...blocks: Array<string | null | undefined>
-): string | undefined {
-  return blocks.filter(Boolean).join('\n\n') || undefined;
-}
-
 export function resolveMemoryUserId(
   messages: NewMessage[],
 ): string | undefined {

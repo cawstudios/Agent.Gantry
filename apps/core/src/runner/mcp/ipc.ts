@@ -55,7 +55,7 @@ export function hasValidIpcResponseSignature(
   raw: Record<string, unknown>,
   payload: Record<string, unknown>,
 ): boolean {
-  if (!IPC_AUTH_TOKEN || !IPC_RESPONSE_VERIFY_KEY) return false;
+  if (!IPC_RESPONSE_VERIFY_KEY) return false;
   const signature =
     typeof raw.signature === 'string' ? raw.signature.trim() : '';
   return verifyIpcResponsePayload(IPC_RESPONSE_VERIFY_KEY, payload, signature);

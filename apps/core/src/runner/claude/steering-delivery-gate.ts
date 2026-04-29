@@ -1,3 +1,9 @@
+/**
+ * Buffers user steering while Claude may be between assistant tool_use and
+ * matching tool_result messages. Callers mark a turn boundary only after the
+ * SDK has emitted a completed result/boundary; buffered steering is then
+ * delivered as one synchronous batch before the next assistant cycle starts.
+ */
 export class SteeringDeliveryGate {
   private atTurnBoundary = false;
   private closed = false;
@@ -20,7 +26,10 @@ export class SteeringDeliveryGate {
     this.atTurnBoundary = true;
     if (this.bufferedMessages.length === 0) return 0;
     const messages = this.bufferedMessages.splice(0);
-    this.deliverBatch(messages);
+    for (const text of messages) {
+      this.deliver(text);
+    }
+    this.atTurnBoundary = false;
     return messages.length;
   }
 

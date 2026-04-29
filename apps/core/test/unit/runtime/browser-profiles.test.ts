@@ -112,4 +112,39 @@ describe('browser-profiles', () => {
     const second = await mod.acquireProfileLock('lock-test', 1000);
     second.release();
   });
+
+  it('does not steal a stale-mtime lock while the recorded pid is alive', async () => {
+    const root = makeTmpRoot(roots);
+    vi.doMock('@core/config/index.js', () => ({
+      DATA_DIR: root,
+    }));
+
+    const mod = await import('@core/runtime/browser-profiles.js');
+    mod.createProfile('live-lock');
+    const lock = await mod.acquireProfileLock('live-lock', 1000);
+    const old = new Date(Date.now() - 20 * 60 * 1000);
+    fs.utimesSync(lock.lockPath, old, old);
+
+    await expect(mod.acquireProfileLock('live-lock', 250)).rejects.toThrow(
+      /Timed out acquiring profile lock/,
+    );
+    lock.release();
+  });
+
+  it('only releases the lock file owned by the same token', async () => {
+    const root = makeTmpRoot(roots);
+    vi.doMock('@core/config/index.js', () => ({
+      DATA_DIR: root,
+    }));
+
+    const mod = await import('@core/runtime/browser-profiles.js');
+    mod.createProfile('token-lock');
+    const first = await mod.acquireProfileLock('token-lock', 1000);
+    fs.rmSync(first.lockPath, { force: true });
+    const second = await mod.acquireProfileLock('token-lock', 1000);
+
+    first.release();
+    expect(fs.existsSync(second.lockPath)).toBe(true);
+    second.release();
+  });
 });
