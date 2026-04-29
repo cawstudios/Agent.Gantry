@@ -23,7 +23,9 @@ describe('runner browser MCP tools', () => {
       res.writeHead(404);
       res.end();
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
     try {
       const address = server.address();
       if (!address || typeof address === 'string') {
@@ -34,7 +36,9 @@ describe('runner browser MCP tools', () => {
         data: { profileName: 'myclaw', running: true, port: address.port },
       };
 
-      await expect(validateBrowserCdpResponse(response)).resolves.toBe(response);
+      await expect(validateBrowserCdpResponse(response)).resolves.toBe(
+        response,
+      );
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
@@ -44,7 +48,9 @@ describe('runner browser MCP tools', () => {
 
   it('fails closed when a running browser response points at stale CDP HTTP', async () => {
     const server = http.createServer();
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
     const address = server.address();
     if (!address || typeof address === 'string') {
       throw new Error('Expected test HTTP server address');
