@@ -82,6 +82,10 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 | Browser Capability | MyClaw browser broker + runtime-installed action tooling          | Persistent browser lifecycle, profile state, and CDP handoff |
 | Runtime            | Node.js 25+                                                       | Host process for routing and pg-boss job execution           |
 
+Browser lifecycle, runtime skill materialization, persistent profile behavior,
+and action MCP handoff are documented in
+[docs/architecture/browser-capability.md](docs/architecture/browser-capability.md).
+
 ---
 
 ## Architecture: Channel System

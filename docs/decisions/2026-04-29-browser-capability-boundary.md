@@ -20,6 +20,9 @@ capability is responsible for profile metadata, launch, close, status, CDP
 health checks, stale-session recovery, active-session reuse, and shutdown
 cleanup.
 
+The end-to-end runtime flow is documented in
+[browser-capability.md](../architecture/browser-capability.md).
+
 MyClaw MCP exposes only lifecycle tools:
 
 - `browser_profile_list`

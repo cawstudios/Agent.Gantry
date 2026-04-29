@@ -158,6 +158,10 @@ host runtime owns the local browser process, profile metadata, CDP endpoint,
 health checks, stale-session cleanup, and shutdown cleanup. The child runner
 accesses this through signed MyClaw MCP IPC only.
 
+See [browser-capability.md](./browser-capability.md) for the complete
+first-use, materialization, lifecycle, action-tooling, persistence, and
+permission flow.
+
 The lifecycle MCP surface is intentionally small:
 
 - `browser_profile_list`
