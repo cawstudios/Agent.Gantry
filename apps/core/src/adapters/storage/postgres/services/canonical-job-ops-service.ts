@@ -1,11 +1,14 @@
-import { randomUUID } from 'node:crypto';
-
 import type {
   Job,
   JobEvent,
   JobRun,
 } from '../../../../domain/repositories/domain-types.js';
-import type { JobUpsertInput } from '../../../../domain/repositories/ops-repo.js';
+import type {
+  JobEventListFilters,
+  JobListFilters,
+  JobRunListFilters,
+  JobUpsertInput,
+} from '../../../../domain/repositories/ops-repo.js';
 import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
 import {
   CANONICAL_APP_ID,
@@ -87,6 +90,11 @@ export class CanonicalJobOpsService {
 
   async getAllJobs(): Promise<Job[]> {
     const rows = await this.repository.listJobs();
+    return rows.map((row) => this.rowToJob(row));
+  }
+
+  async listJobs(filters?: JobListFilters): Promise<Job[]> {
+    const rows = await this.repository.listJobs(filters);
     return rows.map((row) => this.rowToJob(row));
   }
 
@@ -191,8 +199,13 @@ export class CanonicalJobOpsService {
     return row ? this.mapRun(row) : undefined;
   }
 
-  async listJobRuns(jobId?: string, limit = 50): Promise<JobRun[]> {
-    const rows = await this.repository.listRuns(jobId, limit);
+  async listJobRuns(
+    jobId?: string,
+    limit = 50,
+    filters?: JobRunListFilters,
+  ): Promise<JobRun[]> {
+    if (!jobId && filters?.jobIds?.length === 0) return [];
+    const rows = await this.repository.listRuns(jobId, limit, filters);
     return rows.map((row) => this.mapRun(row));
   }
 
@@ -201,47 +214,30 @@ export class CanonicalJobOpsService {
     return rows.map((row) => this.mapRun(row));
   }
 
-  async addJobEvent(event: Omit<JobEvent, 'id'>): Promise<void> {
-    const runId = event.run_id || `run:${event.job_id}`;
-    await this.repository.insertRun({
-      run_id: runId,
-      job_id: event.job_id,
-      scheduled_for: event.created_at,
-      started_at: event.created_at,
-      ended_at: null,
-      status: 'running',
-      result_summary: null,
-      error_summary: null,
-      retry_count: 0,
-      notified_at: null,
-    });
-    await this.repository.insertEvent({
-      id: randomUUID(),
-      runId,
-      type: event.event_type,
-      payloadJson: json(event),
-      createdAt: event.created_at,
-    });
-  }
-
   async listRecentJobEvents(
     limit = 200,
-    filters?: { job_id?: string; run_id?: string; event_type?: string },
+    filters?: JobEventListFilters,
   ): Promise<JobEvent[]> {
+    if (!filters?.job_id && filters?.job_ids?.length === 0) return [];
     const appId = await this.resolveEventQueryAppId(filters);
     const rows = await this.repository.listEvents(limit, {
       appId,
       jobId: filters?.job_id,
+      jobIds: filters?.job_ids,
       runId: filters?.run_id,
       eventType: filters?.event_type,
+      sinceId: filters?.since_id,
+      since: filters?.since,
     });
     return rows.map((row, index) => this.mapEvent(row, index, filters?.job_id));
   }
 
   private async resolveEventQueryAppId(filters?: {
+    app_id?: string;
     job_id?: string;
     run_id?: string;
   }): Promise<string> {
+    if (filters?.app_id) return filters.app_id;
     if (filters?.run_id) {
       const eventAppId = await this.repository.findRuntimeEventAppIdForRun(
         filters.run_id,

@@ -10,6 +10,9 @@ import type {
   RegisteredGroup,
 } from '../../../../domain/repositories/domain-types.js';
 import type {
+  JobEventListFilters,
+  JobListFilters,
+  JobRunListFilters,
   JobUpsertInput,
   OpsRepository,
 } from '../../../../domain/repositories/ops-repo.js';
@@ -66,7 +69,7 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     );
     this.sessions = new CanonicalSessionOpsService(
       new PostgresCanonicalSessionRepository(this.db),
-      createPostgresDomainRepositories(this.db),
+      createPostgresDomainRepositories(this.db, this.pool),
       this.options.sessions,
     );
     this.bindings = new CanonicalBindingOpsService(
@@ -147,6 +150,10 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     return this.jobs.getAllJobs();
   }
 
+  async listJobs(filters?: JobListFilters): Promise<Job[]> {
+    return this.jobs.listJobs(filters);
+  }
+
   async getRecentJobRuns(limit = 200): Promise<JobRun[]> {
     return this.jobs.getRecentJobRuns(limit);
   }
@@ -200,21 +207,21 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     return this.jobs.getJobRunById(runId);
   }
 
-  async listJobRuns(jobId?: string, limit = 50): Promise<JobRun[]> {
-    return this.jobs.listJobRuns(jobId, limit);
+  async listJobRuns(
+    jobId?: string,
+    limit = 50,
+    filters?: JobRunListFilters,
+  ): Promise<JobRun[]> {
+    return this.jobs.listJobRuns(jobId, limit, filters);
   }
 
   async listDeadLetterRuns(limit = 50): Promise<JobRun[]> {
     return this.jobs.listDeadLetterRuns(limit);
   }
 
-  async addJobEvent(event: Omit<JobEvent, 'id'>): Promise<void> {
-    await this.jobs.addJobEvent(event);
-  }
-
   async listRecentJobEvents(
     limit = 200,
-    filters?: { job_id?: string; run_id?: string; event_type?: string },
+    filters?: JobEventListFilters,
   ): Promise<JobEvent[]> {
     return this.jobs.listRecentJobEvents(limit, filters);
   }
@@ -265,7 +272,7 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     agentSessionId: string;
     cause: 'message' | 'job' | 'control' | 'manual';
   }): Promise<string | undefined> {
-    const repositories = createPostgresDomainRepositories(this.db);
+    const repositories = createPostgresDomainRepositories(this.db, this.pool);
     const session = await repositories.agentSessions.getAgentSession(
       input.agentSessionId as never,
     );
@@ -306,7 +313,7 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     resultSummary?: string | null;
     errorSummary?: string | null;
   }): Promise<void> {
-    const repositories = createPostgresDomainRepositories(this.db);
+    const repositories = createPostgresDomainRepositories(this.db, this.pool);
     const run = await repositories.agentRuns.getAgentRun(input.runId as never);
     if (!run) return;
     const now = new Date().toISOString();

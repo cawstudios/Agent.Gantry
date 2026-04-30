@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { and, asc, eq, gt, inArray, type SQL } from 'drizzle-orm';
 
 import type {
@@ -6,9 +8,14 @@ import type {
   RuntimeEventPublishInput,
 } from '../../../../domain/events/events.js';
 import type { RuntimeEventRepository } from '../../../../domain/ports/repositories.js';
-import * as pgSchema from '../schema/schema.js';
-import type { CanonicalDb } from './canonical-graph-repository.postgres.js';
 import { logger } from '../../../../infrastructure/logging/logger.js';
+import * as pgSchema from '../schema/schema.js';
+import type {
+  CanonicalDb,
+  CanonicalExecutor,
+} from './canonical-graph-repository.postgres.js';
+
+type RuntimeEventRow = typeof pgSchema.runtimeEventsPostgres.$inferSelect;
 
 function encodeJson(value: unknown): string {
   return JSON.stringify(value ?? null);
@@ -48,7 +55,18 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
   async appendRuntimeEvent(
     input: RuntimeEventPublishInput,
   ): Promise<RuntimeEvent> {
-    const rows = await this.db
+    return this.db.transaction(async (tx) => {
+      const event = await this.insertRuntimeEvent(tx, input);
+      await this.enqueueWebhookDeliveryIfNeeded(tx, event);
+      return event;
+    });
+  }
+
+  private async insertRuntimeEvent(
+    db: CanonicalExecutor,
+    input: RuntimeEventPublishInput,
+  ): Promise<RuntimeEvent> {
+    const rows = await db
       .insert(pgSchema.runtimeEventsPostgres)
       .values({
         appId: input.appId,
@@ -69,6 +87,50 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
       })
       .returning();
     return this.eventFromRow(rows[0]!);
+  }
+
+  private async enqueueWebhookDeliveryIfNeeded(
+    db: CanonicalExecutor,
+    event: RuntimeEvent,
+  ): Promise<void> {
+    if (
+      !event.webhookId ||
+      (event.responseMode !== 'webhook' && event.responseMode !== 'both')
+    ) {
+      return;
+    }
+
+    const webhook = await db
+      .select({ webhookId: pgSchema.controlHttpWebhooksPostgres.webhookId })
+      .from(pgSchema.controlHttpWebhooksPostgres)
+      .where(
+        and(
+          eq(pgSchema.controlHttpWebhooksPostgres.webhookId, event.webhookId),
+          eq(pgSchema.controlHttpWebhooksPostgres.appId, event.appId),
+        ),
+      )
+      .limit(1);
+    if (!webhook[0]) return;
+
+    const now = currentIso();
+    await db
+      .insert(pgSchema.controlHttpWebhookDeliveriesPostgres)
+      .values({
+        deliveryId: randomUUID(),
+        webhookId: event.webhookId,
+        eventId: event.eventId,
+        status: 'pending',
+        attemptCount: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing({
+        target: [
+          pgSchema.controlHttpWebhookDeliveriesPostgres.webhookId,
+          pgSchema.controlHttpWebhookDeliveriesPostgres.eventId,
+        ],
+      });
   }
 
   async listRuntimeEvents(filter: RuntimeEventFilter): Promise<RuntimeEvent[]> {
@@ -124,9 +186,12 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
     return rows.map((row) => this.eventFromRow(row));
   }
 
-  private eventFromRow(
-    row: typeof pgSchema.runtimeEventsPostgres.$inferSelect,
-  ): RuntimeEvent {
+  private eventFromRow(row: RuntimeEventRow): RuntimeEvent {
+    const rawCreatedAt = row.createdAt as unknown;
+    const createdAt =
+      rawCreatedAt instanceof Date
+        ? rawCreatedAt.toISOString()
+        : String(rawCreatedAt);
     return {
       eventId: row.eventId as RuntimeEvent['eventId'],
       appId: row.appId as RuntimeEvent['appId'],
@@ -151,7 +216,7 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
       responseMode: row.responseMode as RuntimeEvent['responseMode'],
       webhookId: row.webhookId ?? undefined,
       payload: parseJson(row.payloadJson, null, { eventId: row.eventId }),
-      createdAt: row.createdAt,
+      createdAt,
     };
   }
 }

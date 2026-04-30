@@ -38,6 +38,27 @@ export interface JobUpsertInput {
   pause_reason?: string | null;
 }
 
+export interface JobListFilters {
+  appId?: string;
+  statuses?: string[];
+  groupScope?: string;
+  threadId?: string | null;
+}
+
+export interface JobRunListFilters {
+  jobIds?: string[];
+}
+
+export interface JobEventListFilters {
+  app_id?: string;
+  job_id?: string;
+  job_ids?: string[];
+  run_id?: string;
+  event_type?: string;
+  since_id?: number;
+  since?: string;
+}
+
 export function makeSessionScopeKey(
   groupFolder: string,
   threadId?: string | null,
@@ -80,6 +101,7 @@ export interface OpsRepository {
   upsertJob(job: JobUpsertInput): Promise<{ created: boolean }>;
   getJobById(id: string): Promise<Job | undefined>;
   getAllJobs(): Promise<Job[]>;
+  listJobs(filters?: JobListFilters): Promise<Job[]>;
   getRecentJobRuns(limit?: number): Promise<JobRun[]>;
   updateJob(id: string, updates: Partial<Job>): Promise<void>;
   deleteJob(id: string): Promise<void>;
@@ -103,12 +125,15 @@ export interface OpsRepository {
   ): Promise<void>;
   markJobRunNotified(runId: string): Promise<void>;
   getJobRunById(runId: string): Promise<JobRun | undefined>;
-  listJobRuns(jobId?: string, limit?: number): Promise<JobRun[]>;
+  listJobRuns(
+    jobId?: string,
+    limit?: number,
+    filters?: JobRunListFilters,
+  ): Promise<JobRun[]>;
   listDeadLetterRuns(limit?: number): Promise<JobRun[]>;
-  addJobEvent(event: Omit<JobEvent, 'id'>): Promise<void>;
   listRecentJobEvents(
     limit?: number,
-    filters?: { job_id?: string; run_id?: string; event_type?: string },
+    filters?: JobEventListFilters,
   ): Promise<JobEvent[]>;
   getRouterState(key: string): Promise<string | undefined>;
   setRouterState(key: string, value: string): Promise<void>;

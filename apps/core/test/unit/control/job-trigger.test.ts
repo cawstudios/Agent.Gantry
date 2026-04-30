@@ -16,6 +16,23 @@ const schedulerMocks = vi.hoisted(() => ({
 vi.mock('@core/jobs/scheduler.js', () => ({
   enqueueJobTrigger: schedulerMocks.enqueueJobTrigger,
   isSchedulerReady: schedulerMocks.isSchedulerReady,
+  runtimeJobSchedulePlanner: {
+    createManualJobId: () => 'job-test',
+    createJobId: () => 'job-test',
+    planAppSchedule: () => ({
+      scheduleType: 'manual',
+      scheduleValue: 'manual',
+      nextRun: null,
+    }),
+    planInitial: () => ({ nextRun: '2026-04-24T01:00:00.000Z' }),
+    planResume: ({ job, clock }) =>
+      job.next_run ??
+      (job.schedule_type === 'manual'
+        ? null
+        : job.schedule_type === 'once'
+          ? job.schedule_value
+          : clock.now()),
+  },
   requestSchedulerSync: schedulerMocks.requestSchedulerSync,
 }));
 
@@ -38,10 +55,25 @@ const controlRepo = {
     conversationId: 'conv-1',
     chatJid,
     groupFolder: 'app-folder',
+    workspaceKey: 'app-folder',
     title: null,
     defaultResponseMode: 'sse',
     defaultWebhookId: null,
   })),
+  getAppSessionsByChatJids: vi.fn(async (chatJids: string[]) =>
+    chatJids.map((chatJid) => ({
+      sessionId: 'session-1',
+      appId: 'app-one',
+      conversationId: 'conv-1',
+      chatJid,
+      groupFolder: 'app-folder',
+      workspaceKey: 'app-folder',
+      title: null,
+      defaultResponseMode: 'sse',
+      defaultWebhookId: null,
+    })),
+  ),
+  getTriggerById: vi.fn(),
   markTriggerCompleted: vi.fn(async () => undefined),
 };
 const runtimeEvents = {
@@ -50,6 +82,7 @@ const runtimeEvents = {
 
 const opsRepo = {
   getJobById: vi.fn(),
+  getJobRunById: vi.fn(),
   updateJob: vi.fn(async () => undefined),
 };
 
@@ -64,6 +97,46 @@ import { startControlServer } from '@core/control/server/index.js';
 beforeEach(() => {
   schedulerMocks.isSchedulerReady.mockReturnValue(true);
   schedulerMocks.enqueueJobTrigger.mockResolvedValue(undefined);
+  controlRepo.getAppSessionByChatJid.mockImplementation(async (chatJid) => ({
+    sessionId: 'session-1',
+    appId: 'app-one',
+    conversationId: 'conv-1',
+    chatJid,
+    groupFolder: 'app-folder',
+    workspaceKey: 'app-folder',
+    title: null,
+    defaultResponseMode: 'sse',
+    defaultWebhookId: null,
+  }));
+  controlRepo.getAppSessionsByChatJids.mockImplementation(async (chatJids) =>
+    chatJids.map((chatJid) => ({
+      sessionId: 'session-1',
+      appId: 'app-one',
+      conversationId: 'conv-1',
+      chatJid,
+      groupFolder: 'app-folder',
+      workspaceKey: 'app-folder',
+      title: null,
+      defaultResponseMode: 'sse',
+      defaultWebhookId: null,
+    })),
+  );
+  controlRepo.createJobTrigger.mockResolvedValue({
+    triggerId: 'trigger-1',
+    jobId: 'job-1',
+    runId: null,
+    requestedAt: '2026-04-24T00:00:00.000Z',
+    requestedBy: 'sdk',
+    status: 'pending',
+    createdAt: '2026-04-24T00:00:00.000Z',
+    updatedAt: '2026-04-24T00:00:00.000Z',
+  });
+  controlRepo.getTriggerById.mockResolvedValue(undefined);
+  controlRepo.markTriggerCompleted.mockResolvedValue(undefined);
+  runtimeEvents.publish.mockResolvedValue({ eventId: 1 });
+  opsRepo.getJobById.mockReset();
+  opsRepo.getJobRunById.mockReset();
+  opsRepo.updateJob.mockResolvedValue(undefined);
 });
 
 async function reservePort(): Promise<number> {
@@ -156,6 +229,39 @@ describe('control job trigger', () => {
       current = { ...current, ...updates };
     });
   }
+
+  it('maps GET job application access errors to HTTP errors', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-jobs',
+        scopes: ['jobs:read'],
+        appId: 'app-one',
+      },
+    ]);
+    opsRepo.getJobById.mockResolvedValue(
+      makeJob({ linked_sessions: ['app:app-two:conv-1'] }),
+    );
+    const handle = startControlServer({
+      app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/jobs/job-1`,
+        'token-jobs',
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: 'FORBIDDEN' },
+      });
+    } finally {
+      await handle.close();
+    }
+  });
 
   it('updates jobs through the application use case', async () => {
     const port = await reservePort();
@@ -369,6 +475,9 @@ describe('control job trigger', () => {
       );
 
       expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: 'SCHEDULER_NOT_READY' },
+      });
       expect(controlRepo.createJobTrigger).not.toHaveBeenCalled();
       expect(schedulerMocks.enqueueJobTrigger).not.toHaveBeenCalled();
     } finally {
@@ -407,6 +516,9 @@ describe('control job trigger', () => {
       );
 
       expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: 'SCHEDULER_NOT_READY' },
+      });
       expect(controlRepo.createJobTrigger).toHaveBeenCalledTimes(1);
       expect(controlRepo.markTriggerCompleted).toHaveBeenCalledWith(
         'trigger-1',
@@ -453,6 +565,160 @@ describe('control job trigger', () => {
         'job-1',
         'trigger-1',
       );
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('preserves trigger rate-limit wire code', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-jobs',
+        scopes: ['jobs:write'],
+        appId: 'app-one',
+      },
+    ]);
+    opsRepo.getJobById.mockResolvedValue(makeJob());
+    const handle = startControlServer({
+      app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
+    });
+
+    try {
+      let response: Response = null as unknown as Response;
+      for (let i = 0; i < 21; i += 1) {
+        response = await requestWithRetry(
+          `http://127.0.0.1:${port}/v1/jobs/job-1/trigger`,
+          'token-jobs',
+          { method: 'POST' },
+        );
+      }
+
+      expect(response?.status).toBe(429);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: 'RATE_LIMITED' },
+      });
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('preserves missing trigger wire code', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-jobs',
+        scopes: ['jobs:read'],
+        appId: 'app-one',
+      },
+    ]);
+    const handle = startControlServer({
+      app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/triggers/missing/wait`,
+        'token-jobs',
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: 'TRIGGER_NOT_FOUND' },
+      });
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('preserves trigger wait timeout wire code', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-jobs',
+        scopes: ['jobs:read'],
+        appId: 'app-one',
+      },
+    ]);
+    controlRepo.getTriggerById.mockResolvedValue({
+      triggerId: 'trigger-1',
+      jobId: 'job-1',
+      runId: null,
+      status: 'pending',
+    });
+    opsRepo.getJobById.mockResolvedValue(makeJob());
+    const handle = startControlServer({
+      app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/triggers/trigger-1/wait?timeoutMs=1`,
+        'token-jobs',
+      );
+
+      expect(response.status).toBe(408);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: 'WAIT_TIMEOUT' },
+      });
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('returns after a successful trigger wait response', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-jobs',
+        scopes: ['jobs:read'],
+        appId: 'app-one',
+      },
+    ]);
+    controlRepo.getTriggerById.mockResolvedValue({
+      triggerId: 'trigger-1',
+      jobId: 'job-1',
+      runId: 'run-1',
+      status: 'completed',
+    });
+    opsRepo.getJobById.mockResolvedValue(makeJob());
+    opsRepo.getJobRunById.mockResolvedValue({
+      run_id: 'run-1',
+      job_id: 'job-1',
+      scheduled_for: '2026-04-24T00:00:00.000Z',
+      started_at: '2026-04-24T00:00:00.000Z',
+      ended_at: '2026-04-24T00:00:01.000Z',
+      status: 'completed',
+      result_summary: 'done',
+      error_summary: null,
+      retry_count: 0,
+      notified_at: null,
+    });
+    const handle = startControlServer({
+      app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/triggers/trigger-1/wait?timeoutMs=1000`,
+        'token-jobs',
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        triggerId: 'trigger-1',
+        runId: 'run-1',
+        status: 'completed',
+        resultSummary: 'done',
+      });
     } finally {
       await handle.close();
     }

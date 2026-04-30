@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PauseJobUseCase } from '@core/application/jobs/pause-job-use-case.js';
-import { UpdateJobUseCase } from '@core/application/jobs/update-job-use-case.js';
+import { JobManagementService } from '@core/application/jobs/job-management-service.js';
 import { jobBelongsToApp } from '@core/application/jobs/job-access.js';
+import {
+  assertSchedulerJobAccess,
+  canAccessSchedulerJob,
+  resolveLinkedSessions,
+  validateSchedulerUpdate,
+} from '@core/application/jobs/job-management-access.js';
 import type { OpsRepository } from '@core/domain/repositories/ops-repo.js';
-import type { Job } from '@core/domain/types.js';
+import type { Job, JobEvent, JobRun } from '@core/domain/types.js';
+import { runtimeJobSchedulePlanner } from '@core/jobs/job-schedule-planner.js';
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
@@ -52,6 +58,15 @@ function makeOps(
   };
 }
 
+function expectThrowsCode(fn: () => unknown, code: string): void {
+  try {
+    fn();
+    throw new Error('Expected function to throw');
+  } catch (error) {
+    expect(error).toMatchObject({ code });
+  }
+}
+
 describe('job application use cases', () => {
   it('parses app-owned job session bindings without accepting malformed IDs', () => {
     expect(jobBelongsToApp(makeJob(), 'app-one')).toBe(true);
@@ -72,13 +87,14 @@ describe('job application use cases', () => {
   it('updates mutable job fields and requests scheduler sync', async () => {
     const ops = makeOps(makeJob());
     const scheduler = { requestSchedulerSync: vi.fn() };
-    const useCase = new UpdateJobUseCase({
+    const service = new JobManagementService({
       ops: ops as OpsRepository,
       scheduler,
+      schedulePlanner: runtimeJobSchedulePlanner,
       clock: { now: () => '2026-04-24T01:00:00.000Z' },
     });
 
-    const result = await useCase.execute({
+    const result = await service.updateJob({
       appId: 'app-one',
       jobId: 'job-1',
       patch: {
@@ -122,13 +138,14 @@ describe('job application use cases', () => {
       }),
     );
     const scheduler = { requestSchedulerSync: vi.fn() };
-    const useCase = new UpdateJobUseCase({
+    const service = new JobManagementService({
       ops: ops as OpsRepository,
       scheduler,
+      schedulePlanner: runtimeJobSchedulePlanner,
       clock: { now: () => '2026-04-24T01:00:00.000Z' },
     });
 
-    await useCase.execute({
+    await service.updateJob({
       appId: 'app-one',
       jobId: 'job-1',
       patch: { status: 'active' },
@@ -145,14 +162,15 @@ describe('job application use cases', () => {
   it('rejects empty mutable strings and no-ops empty patches', async () => {
     const ops = makeOps(makeJob());
     const scheduler = { requestSchedulerSync: vi.fn() };
-    const useCase = new UpdateJobUseCase({
+    const service = new JobManagementService({
       ops: ops as OpsRepository,
       scheduler,
+      schedulePlanner: runtimeJobSchedulePlanner,
       clock: { now: () => '2026-04-24T01:00:00.000Z' },
     });
 
     await expect(
-      useCase.execute({
+      service.updateJob({
         appId: 'app-one',
         jobId: 'job-1',
         patch: { name: '   ' },
@@ -160,7 +178,7 @@ describe('job application use cases', () => {
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
 
     await expect(
-      useCase.execute({
+      service.updateJob({
         appId: 'app-one',
         jobId: 'job-1',
         patch: {},
@@ -168,25 +186,6 @@ describe('job application use cases', () => {
     ).resolves.toMatchObject({ job: { id: 'job-1' } });
     expect(ops.updateJob).not.toHaveBeenCalled();
     expect(scheduler.requestSchedulerSync).not.toHaveBeenCalled();
-  });
-
-  it('rejects ambiguous resume plus patch updates', async () => {
-    const ops = makeOps(makeJob({ status: 'paused' }));
-    const useCase = new UpdateJobUseCase({
-      ops: ops as OpsRepository,
-      scheduler: { requestSchedulerSync: vi.fn() },
-      clock: { now: () => '2026-04-24T01:00:00.000Z' },
-    });
-
-    await expect(
-      useCase.execute({
-        appId: 'app-one',
-        jobId: 'job-1',
-        resume: true,
-        patch: { status: 'paused' },
-      }),
-    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
-    expect(ops.updateJob).not.toHaveBeenCalled();
   });
 
   it('computes resume next_run in the application layer', async () => {
@@ -199,16 +198,16 @@ describe('job application use cases', () => {
       }),
     );
     const scheduler = { requestSchedulerSync: vi.fn() };
-    const useCase = new UpdateJobUseCase({
+    const service = new JobManagementService({
       ops: ops as OpsRepository,
       scheduler,
+      schedulePlanner: runtimeJobSchedulePlanner,
       clock: { now: () => '2026-04-24T01:00:00.000Z' },
     });
 
-    await useCase.execute({
+    await service.resumeJob({
       appId: 'app-one',
       jobId: 'job-1',
-      resume: true,
     });
 
     expect(ops.updateJob).toHaveBeenCalledWith('job-1', {
@@ -218,16 +217,84 @@ describe('job application use cases', () => {
     });
   });
 
-  it('pauses jobs without route-owned mutation logic', async () => {
-    const ops = makeOps(makeJob());
-    const scheduler = { requestSchedulerSync: vi.fn() };
-    const useCase = new PauseJobUseCase({
+  it('uses resume-now semantics for invalid schedules unless dead-letter is requested', async () => {
+    const ops = makeOps(
+      makeJob({
+        schedule_type: 'interval',
+        schedule_value: '0',
+        status: 'paused',
+        next_run: null,
+      }),
+    );
+    const service = new JobManagementService({
       ops: ops as OpsRepository,
-      scheduler,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      clock: { now: () => '2026-04-24T01:00:00.000Z' },
+    });
+
+    await service.resumeJob({
+      appId: 'app-one',
+      jobId: 'job-1',
+    });
+
+    expect(ops.updateJob).toHaveBeenCalledWith('job-1', {
+      status: 'active',
+      pause_reason: null,
+      next_run: '2026-04-24T01:00:00.000Z',
+    });
+  });
+
+  it('dead-letters invalid schedules for scheduler-controlled resume', async () => {
+    const ops = makeOps(
+      makeJob({
+        schedule_type: 'interval',
+        schedule_value: '0',
+        status: 'paused',
+        next_run: null,
+      }),
+    );
+    const service = new JobManagementService({
+      ops: ops as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      clock: { now: () => '2026-04-24T01:00:00.000Z' },
     });
 
     await expect(
-      useCase.execute({ appId: 'app-one', jobId: 'job-1', reason: '' }),
+      service.resumeJob({
+        appId: 'app-one',
+        jobId: 'job-1',
+        invalidSchedulePolicy: 'dead_letter',
+      }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_SCHEDULE',
+      details: [
+        'Cannot resume with invalid schedule configuration (interval:0).',
+        'Job has been moved to dead_lettered state.',
+      ],
+    });
+
+    expect(ops.updateJob).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({
+        status: 'dead_lettered',
+        next_run: null,
+      }),
+    );
+  });
+
+  it('pauses jobs without route-owned mutation logic', async () => {
+    const ops = makeOps(makeJob());
+    const scheduler = { requestSchedulerSync: vi.fn() };
+    const service = new JobManagementService({
+      ops: ops as OpsRepository,
+      scheduler,
+      schedulePlanner: runtimeJobSchedulePlanner,
+    });
+
+    await expect(
+      service.pauseJob({ appId: 'app-one', jobId: 'job-1', reason: '' }),
     ).resolves.toEqual({ paused: true });
     expect(ops.updateJob).toHaveBeenCalledWith('job-1', {
       status: 'paused',
@@ -239,14 +306,407 @@ describe('job application use cases', () => {
 
   it('rejects cross-app job access', async () => {
     const ops = makeOps(makeJob());
-    const useCase = new PauseJobUseCase({
+    const service = new JobManagementService({
       ops: ops as OpsRepository,
       scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
     });
 
     await expect(
-      useCase.execute({ appId: 'other-app', jobId: 'job-1' }),
+      service.pauseJob({ appId: 'other-app', jobId: 'job-1' }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(ops.updateJob).not.toHaveBeenCalled();
+  });
+
+  it('enforces scheduler access by source group, thread, and linked sessions', () => {
+    const access = {
+      sourceGroup: 'team',
+      isMain: false,
+      conversationBindings: {
+        'tg:team': { folder: 'team' },
+        'tg:other': { folder: 'other' },
+      },
+      sourceGroupJids: ['tg:team'],
+      authThreadId: 'thread-1',
+    };
+
+    expect(
+      canAccessSchedulerJob(
+        makeJob({
+          group_scope: 'team',
+          linked_sessions: ['tg:team'],
+          thread_id: 'thread-1',
+        }),
+        access,
+      ),
+    ).toBe(true);
+    expect(
+      canAccessSchedulerJob(
+        makeJob({
+          group_scope: 'other',
+          linked_sessions: ['tg:team'],
+          thread_id: 'thread-1',
+        }),
+        access,
+      ),
+    ).toBe(false);
+    expect(
+      canAccessSchedulerJob(
+        makeJob({
+          group_scope: 'team',
+          linked_sessions: ['tg:other'],
+          thread_id: 'thread-1',
+        }),
+        access,
+      ),
+    ).toBe(false);
+    expect(
+      canAccessSchedulerJob(
+        makeJob({
+          group_scope: 'team',
+          linked_sessions: ['tg:team'],
+          thread_id: 'other-thread',
+        }),
+        access,
+      ),
+    ).toBe(false);
+    expectThrowsCode(
+      () =>
+        assertSchedulerJobAccess(
+          makeJob({
+            group_scope: 'other',
+            linked_sessions: ['tg:team'],
+            thread_id: 'thread-1',
+          }),
+          access,
+        ),
+      'FORBIDDEN',
+    );
+  });
+
+  it('validates scheduler linked sessions and thread mutations', () => {
+    const access = {
+      sourceGroup: 'team',
+      isMain: false,
+      conversationBindings: {
+        'tg:team': { folder: 'team' },
+        'tg:other': { folder: 'other' },
+      },
+      sourceGroupJids: ['tg:team'],
+      authThreadId: 'thread-1',
+    };
+
+    expect(resolveLinkedSessions({}, access)).toEqual(['tg:team']);
+    expectThrowsCode(
+      () => resolveLinkedSessions({ linkedSessions: ['tg:other'] }, access),
+      'FORBIDDEN',
+    );
+    expectThrowsCode(
+      () =>
+        validateSchedulerUpdate(
+          makeJob({ group_scope: 'team', thread_id: 'thread-1' }),
+          { thread_id: 'thread-2' },
+          access,
+        ),
+      'FORBIDDEN',
+    );
+  });
+
+  it('maps IPC scheduler schedule validation to invalid_schedule', async () => {
+    const ops = {
+      getJobById: vi.fn(),
+      upsertJob: vi.fn(),
+    };
+    const service = new JobManagementService({
+      ops: ops as unknown as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+    });
+
+    await expect(
+      service.upsertJobFromIpc({
+        access: {
+          sourceGroup: 'team',
+          isMain: true,
+          conversationBindings: {},
+          sourceGroupJids: ['tg:team'],
+        },
+        name: 'Bad schedule',
+        prompt: 'Run',
+        scheduleType: 'interval',
+        scheduleValue: '0',
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_SCHEDULE' });
+    expect(ops.upsertJob).not.toHaveBeenCalled();
+  });
+
+  it('rate-limits trigger requests before creating trigger rows', async () => {
+    const control = {
+      getAppSessionByChatJid: vi.fn(async () => ({
+        sessionId: 'session-1',
+        appId: 'app-one',
+        chatJid: 'app:app-one:conv-1',
+        workspaceKey: 'team',
+        defaultResponseMode: 'sse',
+        defaultWebhookId: null,
+      })),
+      createJobTrigger: vi.fn(),
+    };
+    const service = new JobManagementService({
+      ops: makeOps(makeJob()) as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      control: control as never,
+      runtimeEvents: { publish: vi.fn() },
+      triggerQueue: {
+        isReady: () => true,
+        enqueue: vi.fn(),
+      },
+    });
+
+    await expect(
+      service.triggerJob({
+        appId: 'app-one',
+        jobId: 'job-1',
+        consumeRateLimit: () => false,
+        perAppLimit: 1,
+        perJobLimit: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    expect(control.createJobTrigger).not.toHaveBeenCalled();
+  });
+
+  it('resolves trigger sessions with the batch control lookup when available', async () => {
+    const control = {
+      getAppSessionByChatJid: vi.fn(),
+      getAppSessionsByChatJids: vi.fn(async () => [
+        {
+          sessionId: 'session-1',
+          appId: 'app-one',
+          chatJid: 'app:app-one:conv-1',
+          workspaceKey: 'team',
+          defaultResponseMode: 'webhook',
+          defaultWebhookId: 'webhook-1',
+        },
+      ]),
+      createJobTrigger: vi.fn(async () => ({
+        triggerId: 'trigger-1',
+        jobId: 'job-1',
+        runId: null,
+        status: 'pending',
+      })),
+      markTriggerCompleted: vi.fn(),
+    };
+    const triggerQueue = {
+      isReady: () => true,
+      enqueue: vi.fn(),
+    };
+    const service = new JobManagementService({
+      ops: makeOps(
+        makeJob({
+          linked_sessions: ['telegram:chat', 'app:app-one:conv-1'],
+        }),
+      ) as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      control: control as never,
+      runtimeEvents: { publish: vi.fn() },
+      triggerQueue,
+    });
+
+    await service.triggerJob({
+      appId: 'app-one',
+      jobId: 'job-1',
+      perAppLimit: 1,
+      perJobLimit: 1,
+    });
+
+    expect(control.getAppSessionsByChatJids).toHaveBeenCalledWith([
+      'app:app-one:conv-1',
+    ]);
+    expect(control.getAppSessionByChatJid).not.toHaveBeenCalled();
+    expect(triggerQueue.enqueue).toHaveBeenCalledWith('job-1', 'trigger-1');
+  });
+
+  it('auto-resumes paused jobs with invalid schedules when triggered externally', async () => {
+    const control = {
+      getAppSessionByChatJid: vi.fn(async () => ({
+        sessionId: 'session-1',
+        appId: 'app-one',
+        chatJid: 'app:app-one:conv-1',
+        workspaceKey: 'team',
+        defaultResponseMode: 'sse',
+        defaultWebhookId: null,
+      })),
+      createJobTrigger: vi.fn(async () => ({
+        triggerId: 'trigger-1',
+        jobId: 'job-1',
+        runId: null,
+        status: 'pending',
+      })),
+      markTriggerCompleted: vi.fn(),
+    };
+    const ops = makeOps(
+      makeJob({
+        status: 'paused',
+        schedule_type: 'interval',
+        schedule_value: '0',
+      }),
+    );
+    const service = new JobManagementService({
+      ops: ops as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      control: control as never,
+      runtimeEvents: { publish: vi.fn() },
+      triggerQueue: {
+        isReady: () => true,
+        enqueue: vi.fn(),
+      },
+    });
+
+    await expect(
+      service.triggerJob({
+        appId: 'app-one',
+        jobId: 'job-1',
+        perAppLimit: 1,
+        perJobLimit: 1,
+      }),
+    ).resolves.toEqual({ triggerId: 'trigger-1' });
+    expect(control.markTriggerCompleted).not.toHaveBeenCalled();
+    expect(ops.updateJob).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({
+        status: 'active',
+        pause_reason: null,
+        next_run: expect.any(String),
+      }),
+    );
+  });
+
+  it('does not scan all jobs for scoped run and event reads', async () => {
+    const run: JobRun = {
+      run_id: 'run-1',
+      job_id: 'job-1',
+      scheduled_for: '2026-04-24T00:00:00.000Z',
+      started_at: '2026-04-24T00:00:00.000Z',
+      ended_at: null,
+      status: 'running',
+      result_summary: null,
+      error_summary: null,
+      retry_count: 0,
+      notified_at: null,
+    };
+    const event: JobEvent = {
+      id: 1,
+      job_id: 'job-1',
+      run_id: 'run-1',
+      event_type: 'job.run.started',
+      payload: '{}',
+      created_at: '2026-04-24T00:00:00.000Z',
+    };
+    const ops = {
+      getJobById: vi.fn(async () => makeJob()),
+      getAllJobs: vi.fn(async () => []),
+      listJobs: vi.fn(async () => []),
+      listJobRuns: vi.fn(async () => [run]),
+      listRecentJobEvents: vi.fn(async () => [event]),
+    };
+    const service = new JobManagementService({
+      ops: ops as unknown as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+    });
+
+    await expect(
+      service.listJobRuns({ appId: 'app-one', jobId: 'job-1' }),
+    ).resolves.toEqual({ runs: [run] });
+    await expect(
+      service.listJobEvents({
+        appId: 'app-one',
+        jobId: 'job-1',
+        sinceId: 123,
+        since: '2026-04-24T00:00:00.000Z',
+      }),
+    ).resolves.toEqual({ events: [event] });
+    expect(ops.getAllJobs).not.toHaveBeenCalled();
+    expect(ops.listRecentJobEvents).toHaveBeenCalledWith(200, {
+      app_id: undefined,
+      job_id: 'job-1',
+      job_ids: undefined,
+      run_id: undefined,
+      event_type: undefined,
+      since_id: 123,
+      since: '2026-04-24T00:00:00.000Z',
+    });
+  });
+
+  it('waits for trigger completion through runtime event wakeups', async () => {
+    const subscription = {
+      next: vi.fn(async () => [{ eventId: 1 }]),
+      close: vi.fn(),
+    };
+    const control = {
+      getTriggerById: vi
+        .fn()
+        .mockResolvedValueOnce({
+          triggerId: 'trigger-1',
+          jobId: 'job-1',
+          runId: null,
+          status: 'pending',
+        })
+        .mockResolvedValueOnce({
+          triggerId: 'trigger-1',
+          jobId: 'job-1',
+          runId: null,
+          status: 'pending',
+        })
+        .mockResolvedValue({
+          triggerId: 'trigger-1',
+          jobId: 'job-1',
+          runId: 'run-1',
+          status: 'completed',
+        }),
+    };
+    const ops = {
+      getJobById: vi.fn(async () => makeJob()),
+      getJobRunById: vi.fn(async () => ({
+        run_id: 'run-1',
+        job_id: 'job-1',
+        scheduled_for: '2026-04-24T00:00:00.000Z',
+        started_at: '2026-04-24T00:00:00.000Z',
+        ended_at: '2026-04-24T00:00:01.000Z',
+        status: 'completed',
+        result_summary: 'done',
+        error_summary: null,
+        retry_count: 0,
+        notified_at: null,
+      })),
+    };
+    const service = new JobManagementService({
+      ops: ops as unknown as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      control: control as never,
+      runtimeEvents: {
+        publish: vi.fn(),
+        subscribe: vi.fn(() => subscription),
+      },
+    });
+
+    await expect(
+      service.waitForTrigger({
+        appId: 'app-one',
+        triggerId: 'trigger-1',
+        timeoutMs: 10_000,
+      }),
+    ).resolves.toMatchObject({
+      triggerId: 'trigger-1',
+      runId: 'run-1',
+      status: 'completed',
+      resultSummary: 'done',
+    });
+    expect(subscription.next).toHaveBeenCalled();
+    expect(subscription.close).toHaveBeenCalled();
   });
 });

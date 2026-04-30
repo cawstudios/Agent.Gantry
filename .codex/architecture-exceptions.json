@@ -91,7 +91,7 @@
     "maxOccurrences": 1
   },
   {
-    "file": "apps/core/src/adapters/storage/postgres/schema/control-plane-repo.postgres.ts",
+    "file": "apps/core/src/adapters/storage/postgres/repositories/control-plane-repository.postgres.ts",
     "rule": "old_term_groupFolder",
     "reason": "Baseline groupFolder terminology debt pending canonical conversation/workspace rename; capped so new occurrences fail.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
@@ -686,13 +686,6 @@
     "maxViolations": 1
   },
   {
-    "file": "apps/core/src/control/server/routes/jobs.ts",
-    "rule": "old_term_groupFolder",
-    "reason": "Baseline groupFolder terminology debt pending canonical conversation/workspace rename; capped so new occurrences fail.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxOccurrences": 1
-  },
-  {
     "file": "apps/core/src/control/server/routes/memory.ts",
     "rule": "forbidden_import_by_layer",
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
@@ -896,18 +889,18 @@
     "maxViolations": 1
   },
   {
+    "file": "apps/core/src/jobs/ipc-scheduler-query-handlers.ts",
+    "rule": "old_term_registeredGroup",
+    "reason": "Explicit remaining TaskContext field usage pending canonical conversation binding rename; capped so grep-driven cleanup still sees the debt.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxOccurrences": 1
+  },
+  {
     "file": "apps/core/src/jobs/ipc-shared.ts",
     "rule": "forbidden_import_by_layer",
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
     "maxViolations": 5
-  },
-  {
-    "file": "apps/core/src/jobs/ipc-shared.ts",
-    "rule": "old_term_registeredGroup",
-    "reason": "Baseline RegisteredGroup terminology debt pending canonical conversation binding rename; capped so new occurrences fail.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxOccurrences": 4
   },
   {
     "file": "apps/core/src/jobs/ipc-types.ts",

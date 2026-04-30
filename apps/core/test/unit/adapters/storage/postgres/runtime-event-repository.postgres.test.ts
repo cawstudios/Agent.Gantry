@@ -1,0 +1,152 @@
+import { describe, expect, it } from 'vitest';
+
+import { PostgresRuntimeEventRepository } from '@core/adapters/storage/postgres/repositories/runtime-event-repository.postgres.js';
+import * as pgSchema from '@core/adapters/storage/postgres/schema/schema.js';
+import { RUNTIME_EVENT_TYPES } from '@core/domain/events/runtime-event-types.js';
+
+class FakeDrizzleDb {
+  readonly operations: string[] = [];
+  failDeliveryInsert = false;
+
+  async transaction<T>(fn: (tx: this) => Promise<T>): Promise<T> {
+    this.operations.push('transaction:begin');
+    try {
+      const result = await fn(this);
+      this.operations.push('transaction:commit');
+      return result;
+    } catch (err) {
+      this.operations.push('transaction:rollback');
+      throw err;
+    }
+  }
+
+  insert(table: unknown) {
+    const db = this;
+    return {
+      values(value: Record<string, unknown>) {
+        if (table === pgSchema.runtimeEventsPostgres) {
+          db.operations.push('insert:runtime_events');
+          return {
+            async returning() {
+              return [
+                {
+                  eventId: 42,
+                  appId: value.appId,
+                  agentId: null,
+                  sessionId: value.sessionId,
+                  runId: null,
+                  jobId: null,
+                  triggerId: null,
+                  conversationId: null,
+                  threadId: null,
+                  eventType: value.eventType,
+                  actor: value.actor,
+                  correlationId: null,
+                  responseMode: value.responseMode,
+                  webhookId: value.webhookId,
+                  payloadJson: value.payloadJson,
+                  createdAt: value.createdAt,
+                },
+              ];
+            },
+          };
+        }
+        if (table === pgSchema.controlHttpWebhookDeliveriesPostgres) {
+          db.operations.push('insert:webhook_delivery');
+          return {
+            onConflictDoNothing() {
+              if (db.failDeliveryInsert) {
+                throw new Error('delivery insert failed');
+              }
+              return Promise.resolve();
+            },
+          };
+        }
+        throw new Error('Unexpected insert table');
+      },
+    };
+  }
+
+  select() {
+    const db = this;
+    return {
+      from(table: unknown) {
+        if (table !== pgSchema.controlHttpWebhooksPostgres) {
+          throw new Error('Unexpected select table');
+        }
+        db.operations.push('select:webhook');
+        return {
+          where() {
+            return {
+              async limit() {
+                return [{ webhookId: 'webhook:test' }];
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+}
+
+function createRepository(db: FakeDrizzleDb) {
+  return new PostgresRuntimeEventRepository(db as never);
+}
+
+describe('PostgresRuntimeEventRepository', () => {
+  it('commits the runtime event and webhook delivery in one transaction', async () => {
+    const db = new FakeDrizzleDb();
+    const repository = createRepository(db);
+
+    await expect(
+      repository.appendRuntimeEvent({
+        appId: 'app:test' as never,
+        sessionId: 'session:test' as never,
+        eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_OUTBOUND,
+        actor: 'agent',
+        responseMode: 'webhook',
+        webhookId: 'webhook:test',
+        payload: { text: 'done' },
+        createdAt: '2026-04-30T00:00:00.000Z' as never,
+      }),
+    ).resolves.toMatchObject({
+      eventId: 42,
+      appId: 'app:test',
+      webhookId: 'webhook:test',
+      payload: { text: 'done' },
+    });
+
+    expect(db.operations).toEqual([
+      'transaction:begin',
+      'insert:runtime_events',
+      'select:webhook',
+      'insert:webhook_delivery',
+      'transaction:commit',
+    ]);
+  });
+
+  it('rolls back the runtime event when webhook delivery enqueue fails', async () => {
+    const db = new FakeDrizzleDb();
+    db.failDeliveryInsert = true;
+    const repository = createRepository(db);
+
+    await expect(
+      repository.appendRuntimeEvent({
+        appId: 'app:test' as never,
+        eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_OUTBOUND,
+        actor: 'agent',
+        responseMode: 'both',
+        webhookId: 'webhook:test',
+        payload: { text: 'done' },
+      }),
+    ).rejects.toThrow('delivery insert failed');
+
+    expect(db.operations).toEqual([
+      'transaction:begin',
+      'insert:runtime_events',
+      'select:webhook',
+      'insert:webhook_delivery',
+      'transaction:rollback',
+    ]);
+  });
+});
