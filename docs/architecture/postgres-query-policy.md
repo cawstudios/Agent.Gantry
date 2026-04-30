@@ -15,6 +15,12 @@ not model as durable application data access:
 - narrow Drizzle `sql` fragments for JSON casts, expression predicates,
   counters, `CASE`, `GREATEST`, and index expressions
 
-Concurrency-sensitive claim paths may stay as explicit raw SQL while they are
-covered by focused tests and called out in cleanup verification. New raw CRUD
-queries should explain why Drizzle is not the better owner.
+Concurrency-sensitive claim paths should still use Drizzle transactions and row
+locks when the query builder can express the operation. New raw CRUD queries
+should explain why Drizzle is not the better owner and must be added to the
+raw-SQL allowlist test deliberately.
+
+Runtime event append and webhook delivery enqueue are one transaction by design:
+an event that asks for webhook delivery should not become visible without its
+retryable delivery row. Non-webhook subscribers still observe committed events
+through the runtime event exchange after that transaction succeeds.

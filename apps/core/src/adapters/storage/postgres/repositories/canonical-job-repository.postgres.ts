@@ -1,6 +1,11 @@
-import { and, desc, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 
 import type { JobRun } from '../../../../domain/repositories/domain-types.js';
+import type {
+  JobEventListFilters,
+  JobListFilters,
+  JobRunListFilters,
+} from '../../../../domain/repositories/ops-repo.js';
 import { RUNTIME_EVENT_TYPES } from '../../../../domain/events/runtime-event-types.js';
 import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
@@ -109,14 +114,36 @@ export class PostgresCanonicalJobRepository {
     return rows[0];
   }
 
-  async listJobs(): Promise<CanonicalJobRecord[]> {
-    return this.db
+  async listJobs(filters?: JobListFilters): Promise<CanonicalJobRecord[]> {
+    const query = this.db
       .select()
       .from(pgSchema.canonicalJobsPostgres)
-      .orderBy(
-        desc(pgSchema.canonicalJobsPostgres.updatedAt),
-        desc(pgSchema.canonicalJobsPostgres.createdAt),
-      );
+      .$dynamic();
+    const clauses = [
+      filters?.appId
+        ? sql`exists (
+            select 1
+            from jsonb_array_elements_text(coalesce(${pgSchema.canonicalJobsPostgres.targetJson}::jsonb -> 'linkedSessions', '[]'::jsonb)) as linked_session(value)
+            where linked_session.value like ${`app:${filters.appId}:%`}
+          )`
+        : undefined,
+      filters?.statuses?.length
+        ? inArray(pgSchema.canonicalJobsPostgres.status, filters.statuses)
+        : undefined,
+      filters?.groupScope
+        ? sql`${pgSchema.canonicalJobsPostgres.targetJson}::jsonb ->> 'groupScope' = ${filters.groupScope}`
+        : undefined,
+      filters && 'threadId' in filters
+        ? filters.threadId
+          ? sql`${pgSchema.canonicalJobsPostgres.targetJson}::jsonb ->> 'threadId' = ${filters.threadId}`
+          : sql`coalesce(${pgSchema.canonicalJobsPostgres.targetJson}::jsonb ->> 'threadId', '') = ''`
+        : undefined,
+    ].filter(Boolean);
+    const filtered = clauses.length > 0 ? query.where(and(...clauses)) : query;
+    return filtered.orderBy(
+      desc(pgSchema.canonicalJobsPostgres.updatedAt),
+      desc(pgSchema.canonicalJobsPostgres.createdAt),
+    );
   }
 
   async upsertJob(record: JobRecordInput): Promise<void> {
@@ -289,11 +316,19 @@ export class PostgresCanonicalJobRepository {
     return rows[0];
   }
 
-  async listRuns(jobId?: string, limit = 50): Promise<CanonicalRunRecord[]> {
+  async listRuns(
+    jobId?: string,
+    limit = 50,
+    filters?: JobRunListFilters,
+  ): Promise<CanonicalRunRecord[]> {
     const query = this.db.select().from(pgSchema.agentRunsPostgres).$dynamic();
-    const filtered = jobId
-      ? query.where(eq(pgSchema.agentRunsPostgres.jobId, jobId))
-      : query;
+    const clauses = [
+      jobId ? eq(pgSchema.agentRunsPostgres.jobId, jobId) : undefined,
+      !jobId && filters?.jobIds?.length
+        ? inArray(pgSchema.agentRunsPostgres.jobId, filters.jobIds)
+        : undefined,
+    ].filter(Boolean);
+    const filtered = clauses.length > 0 ? query.where(and(...clauses)) : query;
     return filtered
       .orderBy(
         sql`${pgSchema.agentRunsPostgres.startedAt} DESC NULLS LAST`,
@@ -350,8 +385,11 @@ export class PostgresCanonicalJobRepository {
     filters?: {
       appId?: string;
       jobId?: string;
+      jobIds?: string[];
       runId?: string;
       eventType?: string;
+      sinceId?: number;
+      since?: string;
     },
   ): Promise<CanonicalJobEventRecord[]> {
     const query = this.db
@@ -369,6 +407,9 @@ export class PostgresCanonicalJobRepository {
       filters?.jobId
         ? eq(pgSchema.runtimeEventsPostgres.jobId, filters.jobId)
         : undefined,
+      !filters?.jobId && filters?.jobIds?.length
+        ? inArray(pgSchema.runtimeEventsPostgres.jobId, filters.jobIds)
+        : undefined,
       filters?.eventType
         ? eq(
             pgSchema.runtimeEventsPostgres.eventType,
@@ -378,6 +419,12 @@ export class PostgresCanonicalJobRepository {
             pgSchema.runtimeEventsPostgres.eventType,
             CANONICAL_JOB_EVENT_TYPES,
           ),
+      filters?.sinceId !== undefined
+        ? gt(pgSchema.runtimeEventsPostgres.eventId, filters.sinceId)
+        : undefined,
+      filters?.since
+        ? gt(pgSchema.runtimeEventsPostgres.createdAt, filters.since)
+        : undefined,
     ].filter(Boolean);
     const filtered = clauses.length > 0 ? query.where(and(...clauses)) : query;
     const rows = await filtered

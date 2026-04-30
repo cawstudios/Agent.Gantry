@@ -60,6 +60,19 @@ const controlRepo = {
     defaultResponseMode: 'sse',
     defaultWebhookId: null,
   })),
+  getAppSessionsByChatJids: vi.fn(async (chatJids: string[]) =>
+    chatJids.map((chatJid) => ({
+      sessionId: 'session-1',
+      appId: 'app-one',
+      conversationId: 'conv-1',
+      chatJid,
+      groupFolder: 'app-folder',
+      workspaceKey: 'app-folder',
+      title: null,
+      defaultResponseMode: 'sse',
+      defaultWebhookId: null,
+    })),
+  ),
   getTriggerById: vi.fn(),
   markTriggerCompleted: vi.fn(async () => undefined),
 };
@@ -95,6 +108,19 @@ beforeEach(() => {
     defaultResponseMode: 'sse',
     defaultWebhookId: null,
   }));
+  controlRepo.getAppSessionsByChatJids.mockImplementation(async (chatJids) =>
+    chatJids.map((chatJid) => ({
+      sessionId: 'session-1',
+      appId: 'app-one',
+      conversationId: 'conv-1',
+      chatJid,
+      groupFolder: 'app-folder',
+      workspaceKey: 'app-folder',
+      title: null,
+      defaultResponseMode: 'sse',
+      defaultWebhookId: null,
+    })),
+  );
   controlRepo.createJobTrigger.mockResolvedValue({
     triggerId: 'trigger-1',
     jobId: 'job-1',
@@ -203,6 +229,39 @@ describe('control job trigger', () => {
       current = { ...current, ...updates };
     });
   }
+
+  it('maps GET job application access errors to HTTP errors', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-jobs',
+        scopes: ['jobs:read'],
+        appId: 'app-one',
+      },
+    ]);
+    opsRepo.getJobById.mockResolvedValue(
+      makeJob({ linked_sessions: ['app:app-two:conv-1'] }),
+    );
+    const handle = startControlServer({
+      app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/jobs/job-1`,
+        'token-jobs',
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: 'FORBIDDEN' },
+      });
+    } finally {
+      await handle.close();
+    }
+  });
 
   it('updates jobs through the application use case', async () => {
     const port = await reservePort();

@@ -95,6 +95,12 @@ function adaptJobControl(
       const session = await control.getAppSessionByChatJid(chatJid);
       return adaptAppSession(session);
     },
+    async getAppSessionsByChatJids(chatJids) {
+      const sessions = await control.getAppSessionsByChatJids(chatJids);
+      return sessions
+        .map((session) => adaptAppSession(session))
+        .filter((session): session is AppSessionRecord => Boolean(session));
+    },
     createJobTrigger: (input) => control.createJobTrigger(input),
     markTriggerCompleted: (triggerId, status) =>
       control.markTriggerCompleted(triggerId, status),
@@ -173,15 +179,19 @@ export async function handleJobRoutes(
   if (jobRoute && req.method === 'GET' && jobRoute.action === 'get') {
     const auth = authorizeControlRequest(req, res, ctx.keys, ['jobs:read']);
     if (!auth) return true;
-    const { job } = await createJobManagementService().getJob({
-      appId: auth.appId,
-      jobId: jobRoute.jobId,
-    });
-    if (!job) {
-      sendError(res, 404, 'JOB_NOT_FOUND', 'Job not found');
-      return true;
+    try {
+      const { job } = await createJobManagementService().getJob({
+        appId: auth.appId,
+        jobId: jobRoute.jobId,
+      });
+      if (!job) {
+        sendError(res, 404, 'JOB_NOT_FOUND', 'Job not found');
+        return true;
+      }
+      sendJson(res, 200, mapManualJobToStored(job));
+    } catch (error) {
+      if (!sendApplicationError(res, error)) throw error;
     }
-    sendJson(res, 200, mapManualJobToStored(job));
     return true;
   }
   if (jobRoute && req.method === 'DELETE' && jobRoute.action === 'get') {

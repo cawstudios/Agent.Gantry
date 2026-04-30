@@ -10,6 +10,9 @@ import type {
   RegisteredGroup,
 } from '../../../../domain/repositories/domain-types.js';
 import type {
+  JobEventListFilters,
+  JobListFilters,
+  JobRunListFilters,
   JobUpsertInput,
   OpsRepository,
 } from '../../../../domain/repositories/ops-repo.js';
@@ -147,6 +150,10 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     return this.jobs.getAllJobs();
   }
 
+  async listJobs(filters?: JobListFilters): Promise<Job[]> {
+    return this.jobs.listJobs(filters);
+  }
+
   async getRecentJobRuns(limit = 200): Promise<JobRun[]> {
     return this.jobs.getRecentJobRuns(limit);
   }
@@ -200,8 +207,12 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
     return this.jobs.getJobRunById(runId);
   }
 
-  async listJobRuns(jobId?: string, limit = 50): Promise<JobRun[]> {
-    return this.jobs.listJobRuns(jobId, limit);
+  async listJobRuns(
+    jobId?: string,
+    limit = 50,
+    filters?: JobRunListFilters,
+  ): Promise<JobRun[]> {
+    return this.jobs.listJobRuns(jobId, limit, filters);
   }
 
   async listDeadLetterRuns(limit = 50): Promise<JobRun[]> {
@@ -210,7 +221,7 @@ export class PostgresCanonicalOpsRepository implements OpsRepository {
 
   async listRecentJobEvents(
     limit = 200,
-    filters?: { job_id?: string; run_id?: string; event_type?: string },
+    filters?: JobEventListFilters,
   ): Promise<JobEvent[]> {
     return this.jobs.listRecentJobEvents(limit, filters);
   }

@@ -68,6 +68,15 @@ maybeDescribe('PostgresControlPlaneRepository', () => {
     await expect(
       runtime.control.getAppSessionByChatJid('app:control-repo'),
     ).resolves.toMatchObject({ sessionId: session.sessionId });
+    await expect(
+      runtime.control.getAppSessionsByChatJids([
+        'app:control-repo',
+        'app:missing',
+        'app:control-repo',
+      ]),
+    ).resolves.toEqual([
+      expect.objectContaining({ sessionId: session.sessionId }),
+    ]);
 
     await expect(
       runtime.control.upsertAppResponseRoute({

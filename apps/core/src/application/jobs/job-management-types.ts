@@ -5,7 +5,10 @@ import type {
   JobRun,
   JobScheduleType,
 } from '../../domain/types.js';
-import type { RuntimeEventPublishInput } from '../../domain/events/events.js';
+import type {
+  RuntimeEventFilter,
+  RuntimeEventPublishInput,
+} from '../../domain/events/events.js';
 import type {
   JobUpsertInput,
   OpsRepository,
@@ -36,6 +39,9 @@ export interface JobControlPort {
   getAppSessionByChatJid(
     chatJid: string,
   ): Promise<AppSessionRecord | undefined>;
+  getAppSessionsByChatJids?(
+    chatJids: readonly string[],
+  ): Promise<AppSessionRecord[]>;
   createJobTrigger(input: {
     jobId: string;
     requestedBy?: string;
@@ -49,6 +55,10 @@ export interface JobControlPort {
 
 export interface RuntimeEventPublisherPort {
   publish(input: RuntimeEventPublishInput): Promise<unknown>;
+  subscribe?(filter: RuntimeEventFilter): {
+    next(options?: { timeoutMs?: number }): Promise<unknown[]>;
+    close(): void;
+  };
 }
 
 export interface JobTriggerQueuePort {

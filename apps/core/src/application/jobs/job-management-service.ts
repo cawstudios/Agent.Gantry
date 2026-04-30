@@ -34,6 +34,7 @@ import type {
 const DEFAULT_RUN_LIMIT = 50;
 const DEFAULT_EVENT_LIMIT = 200;
 const DEFAULT_DEAD_LETTER_LIMIT = 50;
+const TRIGGER_POLL_INTERVAL_MS = 2_000;
 
 export class JobManagementService {
   constructor(private readonly deps: JobManagementServiceDeps) {}
@@ -125,6 +126,12 @@ export class JobManagementService {
         'scheduler_upsert_job requires name and prompt.',
       );
     }
+    if (input.scheduleType === undefined || input.scheduleType === null) {
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        'scheduler_upsert_job requires scheduleType.',
+      );
+    }
     const scheduleType = normalizeScheduleType(input.scheduleType);
     if (scheduleType === 'manual') {
       throw new ApplicationError(
@@ -208,16 +215,22 @@ export class JobManagementService {
     statuses?: string[];
     groupScope?: string;
   }): Promise<{ jobs: Job[] }> {
-    const jobs = await this.deps.ops.getAllJobs();
+    const queryGroupScope = input.access
+      ? input.access.isMain
+        ? input.groupScope
+        : input.access.sourceGroup
+      : input.groupScope;
+    const jobs = await this.deps.ops.listJobs({
+      appId: input.appId,
+      statuses: input.statuses,
+      groupScope: queryGroupScope,
+      threadId: input.access
+        ? (normalizeOptional(input.access.authThreadId) ?? null)
+        : undefined,
+    });
     return {
       jobs: jobs.filter((job) => {
-        if (input.appId && !jobBelongsToApp(job, input.appId)) return false;
         if (input.access && !canAccessSchedulerJob(job, input.access))
-          return false;
-        if (input.statuses?.length && !input.statuses.includes(job.status)) {
-          return false;
-        }
-        if (input.groupScope && job.group_scope !== input.groupScope)
           return false;
         return true;
       }),
@@ -292,25 +305,35 @@ export class JobManagementService {
     jobId: string;
     appId?: string;
     access?: SchedulerJobAccess;
+    invalidSchedulePolicy?: 'resume_now' | 'dead_letter';
   }): Promise<{ resumed: true; job: Job }> {
     const job = await this.requireJob(input.jobId);
     this.assertAccess(job, input);
-    const nextRun = this.deps.schedulePlanner.planResume({
+    let nextRun = this.deps.schedulePlanner.planResume({
       job,
       clock: this.clock(),
     });
     if (nextRun === undefined) {
-      const pauseReason = `Cannot resume with invalid schedule configuration (${job.schedule_type}:${job.schedule_value}).`;
-      await this.deps.ops.updateJob(job.id, {
-        status: 'dead_lettered',
-        pause_reason: pauseReason,
-        next_run: null,
-      });
-      this.deps.scheduler.requestSchedulerSync(job.id);
-      throw new ApplicationError(
-        'INVALID_SCHEDULE',
-        'Cannot resume scheduler job due to invalid schedule.',
-      );
+      if (input.invalidSchedulePolicy === 'dead_letter') {
+        const pauseReason = `Cannot resume with invalid schedule configuration (${job.schedule_type}:${job.schedule_value}).`;
+        await this.deps.ops.updateJob(job.id, {
+          status: 'dead_lettered',
+          pause_reason: pauseReason,
+          next_run: null,
+        });
+        this.deps.scheduler.requestSchedulerSync(job.id);
+        throw new ApplicationError(
+          'INVALID_SCHEDULE',
+          'Cannot resume scheduler job due to invalid schedule.',
+          {
+            details: [
+              pauseReason,
+              'Job has been moved to dead_lettered state.',
+            ],
+          },
+        );
+      }
+      nextRun = this.clock().now();
     }
     const updates: Partial<Job> = {
       status: 'active',
@@ -370,7 +393,11 @@ export class JobManagementService {
     });
     if (job.status === 'paused' || job.status === 'dead_lettered') {
       try {
-        await this.resumeJob({ appId: input.appId, jobId: job.id });
+        await this.resumeJob({
+          appId: input.appId,
+          jobId: job.id,
+          invalidSchedulePolicy: 'resume_now',
+        });
       } catch (err) {
         await control.markTriggerCompleted(trigger.triggerId, 'failed');
         throw err;
@@ -423,28 +450,59 @@ export class JobManagementService {
     const job = await this.requireJob(initialTrigger.jobId);
     assertJobBelongsToApp(job, input.appId);
     const startedAt = Date.now();
-    while (Date.now() - startedAt < input.timeoutMs) {
-      const trigger = await control.getTriggerById(input.triggerId);
-      if (!trigger)
-        throw new ApplicationError('TRIGGER_NOT_FOUND', 'Trigger not found');
-      if (trigger.runId) {
-        const run = await this.deps.ops.getJobRunById(trigger.runId);
-        if (run && run.status !== 'running') {
-          return {
-            triggerId: trigger.triggerId,
-            runId: run.run_id,
-            status: run.status,
-            resultSummary: run.result_summary,
-            errorSummary: run.error_summary,
-          };
+    const subscription = this.deps.runtimeEvents?.subscribe?.({
+      appId: input.appId as never,
+      triggerId: input.triggerId,
+    });
+    try {
+      while (Date.now() - startedAt < input.timeoutMs) {
+        const completed = await this.getCompletedTriggerRun(input.triggerId);
+        if (completed) return completed;
+        const remaining = input.timeoutMs - (Date.now() - startedAt);
+        if (remaining <= 0) break;
+        if (subscription) {
+          await subscription.next({
+            timeoutMs: Math.min(remaining, TRIGGER_POLL_INTERVAL_MS),
+          });
+        } else {
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.min(remaining, TRIGGER_POLL_INTERVAL_MS)),
+          );
         }
       }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    } finally {
+      subscription?.close();
     }
     throw new ApplicationError(
       'WAIT_TIMEOUT',
       'Timed out waiting for trigger completion',
     );
+  }
+
+  private async getCompletedTriggerRun(triggerId: string): Promise<{
+    triggerId: string;
+    runId: string;
+    status: string;
+    resultSummary: string | null;
+    errorSummary: string | null;
+  } | null> {
+    const control = this.requireControl();
+    const trigger = await control.getTriggerById(triggerId);
+    if (!trigger)
+      throw new ApplicationError('TRIGGER_NOT_FOUND', 'Trigger not found');
+    if (trigger.runId) {
+      const run = await this.deps.ops.getJobRunById(trigger.runId);
+      if (run && run.status !== 'running') {
+        return {
+          triggerId: trigger.triggerId,
+          runId: run.run_id,
+          status: run.status,
+          resultSummary: run.result_summary,
+          errorSummary: run.error_summary,
+        };
+      }
+    }
+    return null;
   }
 
   async listJobRuns(input: {
@@ -463,11 +521,12 @@ export class JobManagementService {
     const runs = await this.deps.ops.listJobRuns(
       input.jobId,
       resolveLimit(input.limit, DEFAULT_RUN_LIMIT),
+      input.jobId
+        ? undefined
+        : { jobIds: await this.visibleJobIdsArray(input) },
     );
     if (input.jobId) return { runs };
-    if (!input.appId && !input.access) return { runs };
-    const visible = await this.filterRunsByVisibleJobs(runs, input);
-    return { runs: visible };
+    return { runs };
   }
 
   async listJobEvents(input: {
@@ -487,31 +546,22 @@ export class JobManagementService {
         access: input.access,
       });
     }
+    const visibleJobIds = input.jobId
+      ? undefined
+      : await this.visibleJobIdsArray(input);
     const events = await this.deps.ops.listRecentJobEvents(
       resolveLimit(input.limit, DEFAULT_EVENT_LIMIT),
       {
+        app_id: input.jobId || visibleJobIds ? undefined : input.appId,
         job_id: input.jobId,
+        job_ids: visibleJobIds,
         run_id: input.runId,
         event_type: input.eventType,
+        since_id: input.sinceId,
+        since: input.since,
       },
     );
-    const sinceFiltered =
-      input.sinceId === undefined
-        ? events
-        : events.filter((event) => event.id > input.sinceId!);
-    const sinceTimestamp = input.since ? Date.parse(input.since) : NaN;
-    const timeFiltered = Number.isNaN(sinceTimestamp)
-      ? sinceFiltered
-      : sinceFiltered.filter((event) => {
-          const created = Date.parse(event.created_at);
-          return !Number.isFinite(created) || created > sinceTimestamp;
-        });
-    if (!input.appId && !input.access) return { events: timeFiltered };
-    if (input.jobId) return { events: timeFiltered };
-    const visibleJobs = await this.visibleJobIds(input);
-    return {
-      events: timeFiltered.filter((event) => visibleJobs.has(event.job_id)),
-    };
+    return { events };
   }
 
   async listDeadLetterRuns(input: {
@@ -580,9 +630,14 @@ export class JobManagementService {
     appId: string,
   ): Promise<AppSessionRecord | undefined> {
     const control = this.requireControl();
-    for (const chatJid of Array.isArray(job.linked_sessions)
-      ? job.linked_sessions
-      : []) {
+    const appChatJids = (
+      Array.isArray(job.linked_sessions) ? job.linked_sessions : []
+    ).filter((chatJid) => chatJid.startsWith(`app:${appId}:`));
+    if (control.getAppSessionsByChatJids) {
+      const sessions = await control.getAppSessionsByChatJids(appChatJids);
+      return sessions.find((session) => session.appId === appId);
+    }
+    for (const chatJid of appChatJids) {
       if (!chatJid.startsWith(`app:${appId}:`)) continue;
       const session = await control.getAppSessionByChatJid(chatJid);
       if (session?.appId === appId) return session;
@@ -590,19 +645,20 @@ export class JobManagementService {
     return undefined;
   }
 
-  private async visibleJobIds(input: {
+  private async visibleJobIdsArray(input: {
     appId?: string;
     access?: SchedulerJobAccess;
-  }): Promise<Set<string>> {
+  }): Promise<string[] | undefined> {
+    if (!input.appId && !input.access) return undefined;
     const { jobs } = await this.listJobs(input);
-    return new Set(jobs.map((job) => job.id));
+    return jobs.map((job) => job.id);
   }
 
   private async filterRunsByVisibleJobs(
     runs: JobRun[],
     input: { appId?: string; access?: SchedulerJobAccess },
   ): Promise<JobRun[]> {
-    const visibleJobs = await this.visibleJobIds(input);
+    const visibleJobs = new Set(await this.visibleJobIdsArray(input));
     return runs.filter((run) => visibleJobs.has(run.job_id));
   }
 }

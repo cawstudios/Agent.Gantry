@@ -1,4 +1,5 @@
 import { JobManagementService } from '../application/jobs/job-management-service.js';
+import type { JobScheduleType } from '../domain/types.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { TaskHandler, TaskContext } from './ipc-types.js';
 import { invalidateSystemJobRegistrationSignature } from './system-registration-cache.js';
@@ -12,6 +13,12 @@ function makeJobService(context: TaskContext): JobManagementService {
     scheduler: { requestSchedulerSync: context.deps.onSchedulerChanged },
     schedulePlanner: runtimeJobSchedulePlanner,
   });
+}
+
+function scheduleType(raw: unknown): JobScheduleType | undefined {
+  return raw === 'cron' || raw === 'interval' || raw === 'once'
+    ? raw
+    : undefined;
 }
 
 const schedulerUpsertJobHandler: TaskHandler = async (context) => {
@@ -35,6 +42,20 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
     return;
   }
 
+  if (
+    data.scheduleType === undefined ||
+    data.scheduleType === null ||
+    data.scheduleType === ''
+  ) {
+    reject('scheduler_upsert_job requires scheduleType.', 'invalid_request');
+    return;
+  }
+  const normalizedScheduleType = scheduleType(data.scheduleType);
+  if (!normalizedScheduleType) {
+    reject('Unsupported schedule type.', 'invalid_schedule');
+    return;
+  }
+
   try {
     const result = await makeJobService(context).upsertJobFromIpc({
       access: {
@@ -48,7 +69,7 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
       name: data.name || '',
       prompt: data.prompt || '',
       model: data.model || null,
-      scheduleType: data.scheduleType,
+      scheduleType: normalizedScheduleType,
       scheduleValue: data.scheduleValue || '',
       linkedSessions: data.linkedSessions,
       deliverTo: data.deliverTo,

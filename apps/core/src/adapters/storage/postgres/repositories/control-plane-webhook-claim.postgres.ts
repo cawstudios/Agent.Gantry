@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, inArray, sql } from 'drizzle-orm';
 
 import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
 import type {
@@ -27,7 +27,9 @@ export async function claimDueWebhookDeliveriesWithDrizzleLock(
     const now = currentIso();
     const leaseUntil = new Date(Date.now() + 15_000).toISOString();
     const candidates = await tx
-      .select()
+      .select({
+        deliveryId: pgSchema.controlHttpWebhookDeliveriesPostgres.deliveryId,
+      })
       .from(pgSchema.controlHttpWebhookDeliveriesPostgres)
       .where(
         and(
@@ -44,28 +46,26 @@ export async function claimDueWebhookDeliveriesWithDrizzleLock(
       )
       .limit(limit)
       .for('update', { skipLocked: true });
-
-    const claimed: WebhookDeliveryRecord[] = [];
-    for (const candidate of candidates) {
-      const rows = await tx
-        .update(pgSchema.controlHttpWebhookDeliveriesPostgres)
-        .set({
-          status: 'delivering',
-          attemptCount: sql`${pgSchema.controlHttpWebhookDeliveriesPostgres.attemptCount} + 1`,
-          nextAttemptAt: leaseUntil,
-          lastAttemptAt: now,
-          updatedAt: now,
-          lastError: null,
-        })
-        .where(
-          eq(
-            pgSchema.controlHttpWebhookDeliveriesPostgres.deliveryId,
-            candidate.deliveryId,
-          ),
-        )
-        .returning();
-      if (rows[0]) claimed.push(mapDelivery(rows[0] as CanonicalControlRow));
-    }
+    const deliveryIds = candidates.map((candidate) => candidate.deliveryId);
+    if (deliveryIds.length === 0) return [];
+    const rows = await tx
+      .update(pgSchema.controlHttpWebhookDeliveriesPostgres)
+      .set({
+        status: 'delivering',
+        attemptCount: sql`${pgSchema.controlHttpWebhookDeliveriesPostgres.attemptCount} + 1`,
+        nextAttemptAt: leaseUntil,
+        lastAttemptAt: now,
+        updatedAt: now,
+        lastError: null,
+      })
+      .where(
+        inArray(
+          pgSchema.controlHttpWebhookDeliveriesPostgres.deliveryId,
+          deliveryIds,
+        ),
+      )
+      .returning();
+    const claimed = rows.map((row) => mapDelivery(row as CanonicalControlRow));
     return hydrateClaimedDeliveries(tx, claimed);
   });
 }

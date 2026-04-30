@@ -6,11 +6,13 @@ export function mapApplicationError(
 ): {
   message: string;
   code: string;
+  details?: string[];
 } {
   if (error instanceof ApplicationError) {
     return {
       message: error.message,
       code: ipcCodeForApplicationError(error.code),
+      details: error.details,
     };
   }
   return {

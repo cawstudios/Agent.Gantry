@@ -1,3 +1,4 @@
+import { ApplicationError } from '../application/common/application-error.js';
 import { JobManagementService } from '../application/jobs/job-management-service.js';
 import type { JobExecutionMode, JobScheduleType } from '../domain/types.js';
 import { logger } from '../infrastructure/logging/logger.js';
@@ -33,6 +34,30 @@ function scheduleType(raw: unknown): JobScheduleType | undefined {
   return raw === 'cron' || raw === 'interval' || raw === 'once'
     ? raw
     : undefined;
+}
+
+async function resumeDeadLetterDetails(
+  context: TaskContext,
+  jobId: string,
+  err: unknown,
+): Promise<string[] | undefined> {
+  if (!(err instanceof ApplicationError) || err.code !== 'INVALID_SCHEDULE') {
+    return undefined;
+  }
+  try {
+    const job = await context.deps.opsRepository.getJobById(jobId);
+    if (job?.status !== 'dead_lettered') return undefined;
+    const pauseReason =
+      typeof job?.pause_reason === 'string' ? job.pause_reason.trim() : '';
+    if (!pauseReason) return undefined;
+    return [pauseReason, 'Job has been moved to dead_lettered state.'];
+  } catch (lookupErr) {
+    logger.warn(
+      { err: lookupErr, sourceGroup: context.sourceGroup, jobId },
+      'Failed to read dead-lettered job details after scheduler_resume_job failure',
+    );
+    return undefined;
+  }
 }
 
 const schedulerUpdateJobHandler: TaskHandler = async (context) => {
@@ -199,16 +224,18 @@ const schedulerResumeJobHandler: TaskHandler = async (context) => {
     await makeJobService(context).resumeJob({
       jobId,
       access: accessFromContext(context),
+      invalidSchedulePolicy: 'dead_letter',
     });
     invalidateSystemJobRegistrationSignature(context.deps.opsRepository);
     accept(`Scheduler job resumed (${jobId}).`);
   } catch (err) {
     const mapped = mapApplicationError(err, 'Failed to mutate scheduler job.');
+    const details = await resumeDeadLetterDetails(context, jobId, err);
     logger.error(
       { err, sourceGroup, jobId },
       'scheduler_resume_job failed unexpectedly',
     );
-    reject(mapped.message, mapped.code);
+    reject(mapped.message, mapped.code, details);
   }
 };
 

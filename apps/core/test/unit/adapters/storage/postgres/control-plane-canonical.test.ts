@@ -37,4 +37,23 @@ describe('control-plane canonical mappers', () => {
       }).workspaceKey,
     ).toBe('fallback-folder');
   });
+
+  it('falls back to camelCase external conversation id for Drizzle rows', () => {
+    expect(
+      mapSession({
+        sessionId: 'session-3',
+        appId: 'app-one',
+        externalConversationId: 'conv-3',
+        agentId: 'agent:fallback-folder',
+        externalRefJson: '{}',
+        defaultResponseMode: 'sse',
+        defaultWebhookId: null,
+        createdAt: '2026-04-24T00:00:00.000Z',
+        updatedAt: '2026-04-24T00:00:00.000Z',
+      }),
+    ).toMatchObject({
+      chatJid: 'conv-3',
+      conversationId: 'conv-3',
+    });
+  });
 });

@@ -149,6 +149,25 @@ export class PostgresControlPlaneRepository {
     return rows[0] ? mapSession(rows[0] as CanonicalControlRow) : undefined;
   }
 
+  async getAppSessionsByChatJids(
+    chatJids: readonly string[],
+  ): Promise<AppSessionRecord[]> {
+    const uniqueChatJids = Array.from(
+      new Set(chatJids.map((chatJid) => chatJid.trim()).filter(Boolean)),
+    );
+    if (uniqueChatJids.length === 0) return [];
+    const rows = await this.db
+      .select()
+      .from(pgSchema.controlHttpSessionsPostgres)
+      .where(
+        inArray(
+          sql`${pgSchema.controlHttpSessionsPostgres.externalRefJson}::jsonb->>'chatJid'`,
+          uniqueChatJids,
+        ),
+      );
+    return rows.map((row) => mapSession(row as CanonicalControlRow));
+  }
+
   async upsertAppResponseRoute(input: {
     sessionId: string;
     threadId?: string | null;
