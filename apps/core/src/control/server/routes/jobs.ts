@@ -302,15 +302,16 @@ export async function handleJobRoutes(
         timeoutMs: Math.max(0, timeoutMs - (Date.now() - startedAt)),
       });
       sendJson(res, 200, result);
+      return true;
     } catch (error) {
-      if (!sendApplicationError(res, error)) throw error;
+      if (sendApplicationError(res, error)) return true;
+      throw error;
     } finally {
       ctx.state.activeTriggerWaits = Math.max(
         0,
         ctx.state.activeTriggerWaits - 1,
       );
     }
-    return true;
   }
 
   return false;
