@@ -128,6 +128,20 @@ function makeGroup(overrides: Partial<RegisteredGroup> = {}): RegisteredGroup {
 
 type TestChannelRuntime = GroupProcessingDeps['channelRuntime'];
 
+function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (value?: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value?: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function makeChannel(
   overrides: Partial<TestChannelRuntime> = {},
 ): TestChannelRuntime {
@@ -556,6 +570,57 @@ describe('createGroupProcessor', () => {
 
       expect(deps.queue.notifyIdle).toHaveBeenCalledWith('group1@g.us');
       expect(deps.queue.closeStdin).not.toHaveBeenCalled();
+    });
+
+    it('drains unawaited output callbacks before clearing typing and marking idle', async () => {
+      const sendStarted = deferred();
+      const sendReleased = deferred();
+      const channel = makeChannel({
+        sendMessage: vi.fn(async () => {
+          sendStarted.resolve();
+          await sendReleased.promise;
+        }),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = channel;
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: RegisteredGroup,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          void onOutput?.({ status: 'success', result: 'late reply' });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      const processing = processGroupMessages('group1@g.us');
+      await sendStarted.promise;
+
+      expect(
+        (channel.setTyping as ReturnType<typeof vi.fn>).mock.calls,
+      ).not.toContainEqual(['group1@g.us', false]);
+      expect(deps.queue.notifyIdle).not.toHaveBeenCalled();
+
+      sendReleased.resolve();
+      await processing;
+
+      expect(channel.sendMessage).toHaveBeenCalledWith(
+        'group1@g.us',
+        'late reply',
+      );
+      expect(deps.queue.notifyIdle).toHaveBeenCalledWith('group1@g.us');
+      const sendOrder = (channel.sendMessage as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0];
+      const typingFalseOrder = (
+        channel.setTyping as ReturnType<typeof vi.fn>
+      ).mock.invocationCallOrder.at(-1);
+      expect(sendOrder).toBeLessThan(typingFalseOrder ?? 0);
+      expect(
+        (channel.setTyping as ReturnType<typeof vi.fn>).mock.calls.at(-1),
+      ).toEqual(['group1@g.us', false]);
     });
 
     it('does not write scheduler snapshots on the message hot path', async () => {

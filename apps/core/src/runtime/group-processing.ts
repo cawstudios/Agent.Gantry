@@ -20,6 +20,12 @@ import {
   RegisteredGroup,
 } from '../domain/types.js';
 import {
+  createSerializedAgentOutputCallbacks,
+  isAgentTurnCompleteMarker,
+} from './agent-output-callbacks.js';
+import { sendFinalProgressUpdate } from './progress-updates.js';
+import { createStreamingOutputState } from './streaming-output-state.js';
+import {
   formatMessages,
   formatOutboundForChannel,
 } from '../messaging/router.js';
@@ -471,104 +477,112 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let collectedOutput = '';
     let streamedOutputDelivered = false;
     let sawRawOutput = false;
+    let pendingIdleBoundary = false;
+    let outputCallbackError: unknown;
     const supportsStreamingChunks =
       deps.channelRuntime.supportsStreaming(chatJid);
-    let streamFinalized = false;
-    let streamHasContent = false;
-    const finalizeStreamingOutput = async (
-      reason:
-        | 'success-marker'
-        | 'error-marker'
-        | 'turn-complete'
-        | 'interaction-boundary',
-    ) => {
-      if (!supportsStreamingChunks || streamFinalized) return;
-      if (!streamHasContent) return;
-      streamFinalized = true;
-      try {
-        await deps.channelRuntime.sendStreamingChunk(
-          chatJid,
-          '',
-          await buildStreamingOptions({ done: true }),
-        );
-      } catch (err) {
-        logger.warn(
-          { err, group: group.name, reason },
-          'Failed to finalize streaming output',
-        );
-      }
-    };
+    const streamingOutput = createStreamingOutputState({
+      enabled: supportsStreamingChunks,
+      finalizeChunk: async (reason) => {
+        try {
+          await deps.channelRuntime.sendStreamingChunk(
+            chatJid,
+            '',
+            await buildStreamingOptions({ done: true }),
+          );
+        } catch (err) {
+          logger.warn(
+            { err, group: group.name, reason },
+            'Failed to finalize streaming output',
+          );
+        }
+      },
+    });
+    const finalizeStreamingOutput = streamingOutput.finalize;
     const startNextStreamingMessage = () => {
       streamGeneration = streamingGenerationCounter += 1;
-      streamFinalized = false;
-      streamHasContent = false;
+      streamingOutput.startNext();
+    };
+    const notifyTurnIdle = () => {
+      deps.queue.notifyIdle(queueJid);
+      pendingIdleBoundary = false;
     };
     let output: 'success' | 'error' = 'error';
+    const handleAgentOutput = async (result: AgentOutput) => {
+      lastAgentProgressAt = Date.now();
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        sawRawOutput = true;
+        pendingIdleBoundary = true;
+        const text = formatOutboundForChannel(raw);
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        if (text) {
+          let delivered = false;
+          if (supportsStreamingChunks) {
+            streamingOutput.markContent();
+            delivered = await deps.channelRuntime.sendStreamingChunk(
+              chatJid,
+              raw,
+              await buildStreamingOptions({}),
+            );
+            if (delivered) streamedOutputDelivered = true;
+          } else {
+            const messageOptions = await buildMessageOptions();
+            delivered = await sendWithPartialDeliveryGuard(
+              () => sendMessageToChannel(text, messageOptions),
+              { group: group.name },
+            );
+          }
+          if (delivered) outputSentToUser = true;
+          collectedOutput += `${text}\n`;
+        }
+        resetIdleTimer();
+      }
+
+      if (result.interactionBoundary) {
+        pendingIdleBoundary = true;
+        await finalizeStreamingOutput('interaction-boundary');
+        startNextStreamingMessage();
+        resetIdleTimer();
+      }
+
+      if (isAgentTurnCompleteMarker(result)) {
+        await finalizeStreamingOutput('success-marker');
+        notifyTurnIdle();
+        startNextStreamingMessage();
+        resetIdleTimer();
+      }
+
+      if (result.status === 'error') {
+        hadError = true;
+        await finalizeStreamingOutput('error-marker');
+      }
+    };
+    const outputCallbacks = createSerializedAgentOutputCallbacks({
+      handle: handleAgentOutput,
+      onError: (err) => {
+        outputCallbackError ??= err;
+      },
+    });
+    const waitForAgentOutputCallbacks = async () => {
+      await outputCallbacks.wait();
+      if (!outputCallbackError) return;
+      hadError = true;
+      logger.error(
+        { group: group.name, err: outputCallbackError },
+        'Agent output callback failed',
+      );
+    };
     try {
       output = await runAgent(
         group,
         prompt,
         chatJid,
         queueJid,
-        async (result) => {
-          lastAgentProgressAt = Date.now();
-          if (result.result) {
-            const raw =
-              typeof result.result === 'string'
-                ? result.result
-                : JSON.stringify(result.result);
-            sawRawOutput = true;
-            const text = formatOutboundForChannel(raw);
-            logger.info(
-              { group: group.name },
-              `Agent output: ${raw.length} chars`,
-            );
-            if (text) {
-              let delivered = false;
-              if (supportsStreamingChunks) {
-                streamHasContent = true;
-                delivered = await deps.channelRuntime.sendStreamingChunk(
-                  chatJid,
-                  raw,
-                  await buildStreamingOptions({}),
-                );
-                if (delivered) streamedOutputDelivered = true;
-              } else {
-                const messageOptions = await buildMessageOptions();
-                delivered = await sendWithPartialDeliveryGuard(
-                  () => sendMessageToChannel(text, messageOptions),
-                  { group: group.name },
-                );
-              }
-              if (delivered) outputSentToUser = true;
-              collectedOutput += `${text}\n`;
-            }
-            resetIdleTimer();
-          }
-
-          if (result.interactionBoundary) {
-            await finalizeStreamingOutput('interaction-boundary');
-            startNextStreamingMessage();
-            resetIdleTimer();
-          }
-
-          const isTurnCompleteMarker =
-            result.status === 'success' &&
-            !result.result &&
-            !result.compactBoundary &&
-            !result.interactionBoundary;
-          if (isTurnCompleteMarker) {
-            await finalizeStreamingOutput('success-marker');
-            deps.queue.notifyIdle(queueJid);
-            startNextStreamingMessage();
-            resetIdleTimer();
-          }
-
-          if (result.status === 'error') {
-            hadError = true;
-            await finalizeStreamingOutput('error-marker');
-          }
-        },
+        outputCallbacks.enqueue,
         {
           memoryContext: {
             source: 'message',
@@ -578,27 +592,20 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         },
       );
     } finally {
+      await waitForAgentOutputCallbacks();
       await finalizeStreamingOutput('turn-complete');
+      if (output === 'success' && pendingIdleBoundary) {
+        notifyTurnIdle();
+      }
       if (typingHeartbeatTimer) clearInterval(typingHeartbeatTimer);
       if (progressTimer) clearInterval(progressTimer);
-      const elapsed = formatElapsed(Date.now() - startedAt);
-      if (supportsProgress) {
-        const finalStatus =
-          output === 'error' || hadError
-            ? `Failed after ${elapsed}.`
-            : `Done in ${elapsed}.`;
-        try {
-          const finalProgressOptions = await buildStreamingOptions({
-            done: true,
-          });
-          await sendProgressToChannel(finalStatus, finalProgressOptions);
-        } catch (err) {
-          logger.debug(
-            { err, group: group.name },
-            'Failed to send final progress update',
-          );
-        }
-      }
+      await sendFinalProgressUpdate({
+        enabled: supportsProgress,
+        failed: output === 'error' || hadError,
+        elapsed: formatElapsed(Date.now() - startedAt),
+        options: await buildStreamingOptions({ done: true }),
+        send: sendProgressToChannel,
+      });
       await deps.channelRuntime.setTyping(chatJid, false);
       if (idleTimer) clearTimeout(idleTimer);
     }
