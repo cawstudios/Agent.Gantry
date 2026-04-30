@@ -340,6 +340,10 @@ const requestSkillDraftHandler: TaskHandler = async (context) => {
       skillMarkdownPreview: parsed.skillMarkdownPreview,
       totalSizeBytes: parsed.totalSizeBytes,
       reason,
+      requestToolName:
+        data.type === 'request_skill_proposal'
+          ? 'request_skill_proposal'
+          : 'request_skill_draft',
     });
     accept(
       `Skill draft ${draft.id} sent to this chat for approval. It will not be available until approved and will activate on the next agent run.`,
@@ -358,6 +362,7 @@ export const adminTaskHandlers: Record<string, TaskHandler> = {
   register_agent: registerAgentHandler,
   service_restart: serviceRestartHandler,
   request_skill_draft: requestSkillDraftHandler,
+  request_skill_proposal: requestSkillDraftHandler,
   request_mcp_server: requestMcpServerHandler,
 };
 
@@ -542,6 +547,7 @@ function startSkillPermissionReview(input: {
   };
   totalSizeBytes: number;
   reason: string;
+  requestToolName: 'request_skill_draft' | 'request_skill_proposal';
 }): void {
   void completeSkillPermissionReview(input).catch((err) => {
     logger.error(
@@ -560,7 +566,7 @@ async function completeSkillPermissionReview(
     targetJid: input.targetJid,
     threadId: input.threadId,
     decisionPolicy: 'same_channel',
-    toolName: 'request_skill_draft',
+    toolName: input.requestToolName,
     displayName: `Skill: ${input.skill.name}`,
     title: 'Approve skill for this agent',
     description:

@@ -347,7 +347,7 @@ describe('skill registry integration flow', () => {
     }
   });
 
-  it('routes agent-created skill drafts through same-channel approval before binding', async () => {
+  it('routes agent-created skill proposals through same-channel approval before binding', async () => {
     const { processTaskIpc } = await import('@core/jobs/ipc-handler.js');
     const sendMessage = vi.fn(async () => undefined);
     const requestPermissionApproval = vi.fn(async () => ({
@@ -375,7 +375,7 @@ describe('skill registry integration flow', () => {
 
     await processTaskIpc(
       {
-        type: 'request_skill_draft',
+        type: 'request_skill_proposal',
         taskId: 'request-skill-approve-test',
         targetJid: 'chat-origin',
         chatJid: 'chat-origin',
@@ -408,7 +408,7 @@ describe('skill registry integration flow', () => {
           targetJid: 'chat-origin',
           threadId: 'thread-origin',
           decisionPolicy: 'same_channel',
-          toolName: 'request_skill_draft',
+          toolName: 'request_skill_proposal',
         }),
       );
     });

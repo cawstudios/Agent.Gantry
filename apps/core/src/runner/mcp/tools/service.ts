@@ -5,68 +5,15 @@ import { chatJid, isMain, TASKS_DIR, threadId } from '../context.js';
 import { waitForTaskResponse, writeIpcFile } from '../ipc.js';
 
 export function registerServiceTools(server: McpServer): void {
-  server.tool(
+  registerSkillProposalTool(
+    server,
     'request_skill_draft',
     'Submit a proposed Claude skill for same-channel admin review. This creates a draft only; it never approves, binds, or activates the skill.',
-    {
-      files: z
-        .array(
-          z.object({
-            path: z
-              .string()
-              .describe('Skill package-relative path, such as SKILL.md'),
-            content: z.string().describe('UTF-8 file content'),
-            contentType: z.string().optional().describe('Optional MIME type'),
-          }),
-        )
-        .min(1)
-        .max(50)
-        .describe(
-          'Skill files. Must include SKILL.md with name and description frontmatter.',
-        ),
-      reason: z.string().describe('Why this skill is needed'),
-    },
-    async (args) => {
-      const taskId = `request-skill-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
-      writeIpcFile(TASKS_DIR, {
-        type: 'request_skill_draft',
-        taskId,
-        targetJid: chatJid,
-        chatJid,
-        authThreadId: threadId,
-        payload: {
-          files: args.files,
-          reason: args.reason,
-        },
-        timestamp: nowIso(),
-      });
-
-      const response = await waitForTaskResponse(taskId, 15_000);
-      if (!response?.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text:
-                response?.error ||
-                'Skill draft request was not recorded by the host.',
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text:
-              response.message ||
-              'Skill draft sent to this chat for approval. It will not be available until approved.',
-          },
-        ],
-      };
-    },
+  );
+  registerSkillProposalTool(
+    server,
+    'request_skill_proposal',
+    'Submit an agent-created or modified skill bundle for same-channel admin review. This creates a proposal only; it never approves, binds, or activates the skill.',
   );
 
   server.tool(
@@ -280,6 +227,78 @@ Use available_groups.json to find the JID for a group. The folder name must be c
             text:
               response.message ||
               `Agent "${args.name}" registered. It will start receiving messages immediately.`,
+          },
+        ],
+      };
+    },
+  );
+}
+
+function registerSkillProposalTool(
+  server: McpServer,
+  toolName: 'request_skill_draft' | 'request_skill_proposal',
+  description: string,
+): void {
+  const requestLabel =
+    toolName === 'request_skill_proposal' ? 'Skill proposal' : 'Skill draft';
+  server.tool(
+    toolName,
+    description,
+    {
+      files: z
+        .array(
+          z.object({
+            path: z
+              .string()
+              .describe('Skill package-relative path, such as SKILL.md'),
+            content: z.string().describe('UTF-8 file content'),
+            contentType: z.string().optional().describe('Optional MIME type'),
+          }),
+        )
+        .min(1)
+        .max(50)
+        .describe(
+          'Skill files. Must include SKILL.md with name and description frontmatter.',
+        ),
+      reason: z.string().describe('Why this skill is needed'),
+    },
+    async (args) => {
+      const taskId = `request-skill-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
+      writeIpcFile(TASKS_DIR, {
+        type: toolName,
+        taskId,
+        targetJid: chatJid,
+        chatJid,
+        authThreadId: threadId,
+        payload: {
+          files: args.files,
+          reason: args.reason,
+        },
+        timestamp: nowIso(),
+      });
+
+      const response = await waitForTaskResponse(taskId, 15_000);
+      if (!response?.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                response?.error ||
+                `${requestLabel} request was not recorded by the host.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.message ||
+              `${requestLabel} sent to this chat for approval. It will not be available until approved.`,
           },
         ],
       };

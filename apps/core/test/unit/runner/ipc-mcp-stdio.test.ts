@@ -463,6 +463,50 @@ describe('agent-runner MCP stdio tools', () => {
     });
   });
 
+  it('submits skill proposals through the documented request tool name', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(fixture, 'request_skill_proposal', {
+      files: [
+        {
+          path: 'SKILL.md',
+          content: [
+            '---',
+            'name: Proposal Skill',
+            'description: Proposed skill bundle',
+            '---',
+            '# Proposal Skill',
+          ].join('\n'),
+        },
+      ],
+      reason: 'Review a proposed workflow.',
+    });
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const taskFiles = fs.readdirSync(path.join(fixture.ipcDir, 'tasks'));
+    expect(taskFiles).toHaveLength(1);
+    const task = JSON.parse(
+      fs.readFileSync(
+        path.join(fixture.ipcDir, 'tasks', taskFiles[0]),
+        'utf-8',
+      ),
+    );
+    expect(task).toMatchObject({
+      type: 'request_skill_proposal',
+      targetJid: 'tg:team',
+      chatJid: 'tg:team',
+      payload: {
+        reason: 'Review a proposed workflow.',
+        files: [
+          expect.objectContaining({
+            path: 'SKILL.md',
+            content: expect.stringContaining('Proposal Skill'),
+          }),
+        ],
+      },
+    });
+  });
+
   it('rejects unsigned task responses from the host boundary', async () => {
     const fixture = createMcpFixture();
 
