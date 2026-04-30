@@ -410,7 +410,7 @@ export async function handleSessionRoutes(
             eventType: visible.eventType,
             payload: visible.payload,
             createdAt: visible.createdAt,
-            afterEventId: events[events.length - 1]?.eventId ?? visible.eventId,
+            afterEventId: visible.eventId,
           });
           return true;
         }

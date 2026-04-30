@@ -36,6 +36,7 @@ const botRef = vi.hoisted(() => ({ current: null as any }));
 vi.mock('grammy', () => ({
   Bot: class MockBot {
     token: string;
+    pollingRunning = false;
     commandHandlers = new Map<string, Handler>();
     filterHandlers = new Map<string, Handler[]>();
     errorHandler: Handler | null = null;
@@ -83,10 +84,18 @@ vi.mock('grammy', () => ({
     use(_middleware: Handler) {}
 
     start(opts: { onStart: (botInfo: any) => void }) {
+      if (this.pollingRunning) return;
+      this.pollingRunning = true;
       opts.onStart({ username: 'andy_ai_bot', id: 12345 });
     }
 
-    stop() {}
+    stop() {
+      this.pollingRunning = false;
+    }
+
+    isRunning() {
+      return this.pollingRunning;
+    }
   },
 }));
 
@@ -1272,6 +1281,7 @@ describe('TelegramChannel', () => {
         const channel = new TelegramChannel('test-token', opts);
         await channel.connect();
 
+        currentBot().pollingRunning = false;
         currentBot().start = vi.fn().mockRejectedValue(new Error('poll crash'));
         const startPollingSpy = vi.spyOn(channel as any, 'startPolling');
 
@@ -1286,6 +1296,51 @@ describe('TelegramChannel', () => {
         // Execute the scheduled retry callback to cover timer callback path.
         vi.runOnlyPendingTimers();
         expect(startPollingSpy).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('retains a newly acquired lease when the poller is already running', async () => {
+      vi.useFakeTimers();
+      try {
+        const lostHandlers: Array<(err: Error) => void> = [];
+        const releases = [vi.fn().mockResolvedValue(undefined), vi.fn()];
+        releases[1]!.mockResolvedValue(undefined);
+        const leases = releases.map((release) => ({
+          release,
+          onLost: vi.fn((handler: (err: Error) => void) => {
+            lostHandlers.push(handler);
+          }),
+        }));
+        const runtimeLease = {
+          tryAcquire: vi
+            .fn()
+            .mockResolvedValueOnce(leases[0])
+            .mockResolvedValueOnce(leases[1]),
+        };
+        const channel = new TelegramChannel(
+          'test-token',
+          createTestOpts({ runtimeLease }),
+        );
+
+        await channel.connect();
+        await vi.waitFor(() =>
+          expect(runtimeLease.tryAcquire).toHaveBeenCalledTimes(1),
+        );
+        const startSpy = vi.spyOn(currentBot(), 'start');
+
+        lostHandlers[0]!(new Error('lease connection lost'));
+        vi.runOnlyPendingTimers();
+        await vi.waitFor(() =>
+          expect(runtimeLease.tryAcquire).toHaveBeenCalledTimes(2),
+        );
+
+        expect(startSpy).not.toHaveBeenCalled();
+        expect(releases[1]).not.toHaveBeenCalled();
+        expect(logger.warn).not.toHaveBeenCalledWith(
+          'Telegram polling stopped unexpectedly',
+        );
       } finally {
         vi.useRealTimers();
       }

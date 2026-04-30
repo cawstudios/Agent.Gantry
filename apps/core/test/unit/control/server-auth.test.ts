@@ -2226,7 +2226,7 @@ describe('control server runtime hardening', () => {
         eventId: 11,
         eventType: 'session.message.outbound',
         payload: { text: 'done' },
-        afterEventId: 12,
+        afterEventId: 11,
       });
       expect(runtimeEvents.subscribe).toHaveBeenCalledWith(
         expect.not.objectContaining({ eventTypes: expect.anything() }),

@@ -364,6 +364,14 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
       this.schedulePollingRetry();
     });
 
+    if (this.isTelegramBotRunning()) {
+      logger.info(
+        { leaseKey },
+        'Telegram poller already running; retaining polling lease',
+      );
+      return;
+    }
+
     Promise.resolve(
       this.bot.start({
         onStart: (botInfo) => {
@@ -382,6 +390,13 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
       }),
     )
       .then(() => {
+        if (this.isTelegramBotRunning()) {
+          logger.info(
+            { leaseKey },
+            'Telegram poller remains active after duplicate start; retaining polling lease',
+          );
+          return;
+        }
         void this.releasePollingLease();
         if (this.isStopping) return;
         logger.warn('Telegram polling stopped unexpectedly');
@@ -399,6 +414,10 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
     const lease = this.pollingLease;
     this.pollingLease = null;
     await lease?.release();
+  }
+
+  private isTelegramBotRunning(): boolean {
+    return this.bot?.isRunning?.() ?? false;
   }
 
   /**
