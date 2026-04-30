@@ -262,7 +262,7 @@ export async function spawnAgent(
     return {
       status: 'error',
       result: null,
-      error: `Browser startup failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: `Browser wiring failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
   const mcpConfigPath =

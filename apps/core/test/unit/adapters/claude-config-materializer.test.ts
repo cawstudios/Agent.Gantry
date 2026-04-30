@@ -140,7 +140,9 @@ describe('Claude config materializer', () => {
       path.join(skillsDir, 'agent-browser', 'SKILL.md'),
       'utf-8',
     );
-    expect(skillText).toContain('PLAYWRIGHT_MCP_CDP_ENDPOINT');
+    expect(skillText).toContain(
+      'MyClaw attaches them only when the shared browser is already running at agent startup.',
+    );
     expect(skillText).toContain('Do not install browser skills');
     expect(fs.existsSync(path.join(tempRoot, '.claude', 'skills'))).toBe(false);
   });

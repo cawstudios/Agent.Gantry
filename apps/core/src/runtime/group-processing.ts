@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import {
   ASSISTANT_NAME,
   getDefaultModelConfig,
@@ -15,7 +13,6 @@ import {
 import { logger } from '../infrastructure/logging/logger.js';
 import {
   MessageSendOptions,
-  NewMessage,
   ProgressUpdateOptions,
   RegisteredGroup,
 } from '../domain/types.js';
@@ -28,6 +25,7 @@ import {
   buildReplaceOnlyProgressOptions,
   sendFinalProgressUpdate,
 } from './progress-updates.js';
+import { finalizeGroupAgentUserVisibleOutput } from './group-output-finalization.js';
 import { createStreamingOutputState } from './streaming-output-state.js';
 import {
   formatMessages,
@@ -61,8 +59,6 @@ import { formatElapsed } from './time-format.js';
 const TYPING_HEARTBEAT_INTERVAL_MS = 4_000;
 const ELAPSED_PROGRESS_INTERVAL_MS = 60_000;
 const NO_OUTPUT_WARNING_INTERVAL_MS = 180_000;
-const NO_VISIBLE_OUTPUT_FALLBACK_MESSAGE =
-  'I finished that run but did not generate a user-visible reply. Please send your message again.';
 let streamingGenerationCounter = 0;
 export function createGroupProcessor(deps: GroupProcessingDeps) {
   const runAgentImpl = deps.runAgent ?? spawnAgent;
@@ -655,70 +651,19 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       return false;
     }
 
-    if (streamedOutputDelivered) {
-      const transcriptText = collectedOutput.trim();
-      if (transcriptText) {
-        const transcriptMessage: NewMessage = {
-          id: `streamed-outbound:${randomUUID()}`,
-          chat_jid: chatJid,
-          sender: 'myclaw',
-          sender_name: 'MyClaw',
-          content: transcriptText,
-          timestamp: new Date().toISOString(),
-          is_from_me: true,
-          is_bot_message: true,
-          thread_id: activeThreadId,
-          delivery_status: 'sent',
-          delivered_at: new Date().toISOString(),
-        };
-        await ops()
-          .storeMessage(transcriptMessage)
-          .catch((err: unknown) =>
-            logger.warn(
-              { err, group: group.name },
-              'Failed to persist streamed assistant transcript',
-            ),
-          );
-      }
-    }
-
-    if (!outputSentToUser) {
-      const fallbackText = collectedOutput.trim();
-      if (fallbackText) {
-        try {
-          const messageOptions = await buildMessageOptions();
-          await sendMessageToChannel(fallbackText, messageOptions);
-          outputSentToUser = true;
-          logger.warn(
-            { group: group.name, fallbackChars: fallbackText.length },
-            'Streamed output was not confirmed as delivered; sent fallback message',
-          );
-        } catch (err) {
-          logger.warn(
-            { err, group: group.name },
-            'Failed to send fallback message after streaming run',
-          );
-        }
-      } else if (sawRawOutput) {
-        try {
-          const messageOptions = await buildMessageOptions();
-          await sendMessageToChannel(
-            NO_VISIBLE_OUTPUT_FALLBACK_MESSAGE,
-            messageOptions,
-          );
-          outputSentToUser = true;
-          logger.warn(
-            { group: group.name },
-            'Agent produced only non-displayable output; sent explicit fallback notice',
-          );
-        } catch (err) {
-          logger.warn(
-            { err, group: group.name },
-            'Failed to send no-visible-output fallback notice after streaming run',
-          );
-        }
-      }
-    }
+    outputSentToUser = await finalizeGroupAgentUserVisibleOutput({
+      streamedOutputDelivered,
+      collectedOutput,
+      chatJid,
+      activeThreadId,
+      outputSentToUser,
+      sawRawOutput,
+      groupName: group.name,
+      warn: (metadata, message) => logger.warn(metadata, message),
+      storeMessage: (message) => ops().storeMessage(message),
+      buildMessageOptions,
+      sendMessageToChannel,
+    });
 
     return true;
   }
