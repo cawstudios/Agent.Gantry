@@ -34,6 +34,30 @@ client.settings.update({
 `PATCH /v1/settings` persists to `settings.yaml`, returns changed field paths,
 and reports `restartRequired`; it does not restart the runtime.
 
+## Capability Requests
+
+Agents and SDK clients must use MyClaw request surfaces for capability changes.
+Do not edit generated Claude config, `.mcp.json`, `.claude/skills`, settings, or
+permission files directly.
+
+Agent-facing tools:
+
+- `send_message`: progress updates or direct channel messages while the agent is still running.
+- `ask_user_question`: structured choices with options, single-select, multi-select, preview/details, and channel-native buttons.
+- `request_skill_install`: provider skill install requests such as `clawhub:<slug>@<version>`.
+- `request_skill_proposal`: agent-created or modified skill file bundles for review.
+- `request_skill_dependency_install`: dependency requests for npm, brew, go, uv, or downloads required by a skill.
+- `request_mcp_server`: third-party MCP server requests with transport, origin, tool patterns, credential needs, and reason.
+- `request_tool_enable`: SDK or host tool requests such as `Bash`, `Write`, `Edit`, browser tools, scheduler tools, memory tools, and service tools.
+- `request_channel_tool_enable`: channel capability requests such as Teams proactive messaging, Slack file access, or Telegram file download behavior.
+- `service_restart`: main/admin agent restart after approved changes that require host restart.
+- `register_agent`: main/admin agent binding of a channel conversation to an agent.
+
+Every persistent capability change follows request, validation, review, approve
+or deny, durable audit, new config version, and next-run activation. Same-channel
+review binds the request to the originating chat or thread; it does not bypass
+the configured control allowlist.
+
 ## Skills
 
 MyClaw exposes the reviewable lifecycle for agent-created skill drafts. The SDK

@@ -55,6 +55,7 @@ Channels:
 ```bash
 myclaw channel connect telegram
 myclaw channel connect slack
+myclaw channel connect teams
 myclaw channel list
 myclaw channel doctor
 ```
@@ -124,6 +125,32 @@ Runtime Claude settings and skills are generated into a temporary per-run
 `CLAUDE_CONFIG_DIR`. Runtime-home `.claude/skills` is not the skill source of
 truth. Do not install separate global Claude hooks for MyClaw memory. Generated
 runtime settings do not install memory hooks.
+
+Capability changes are never direct edits. Agents must not run dependency
+install commands, edit `.claude/skills`, edit `.mcp.json`, edit `settings.yaml`,
+edit Claude permission settings, or mutate generated capability config. Every
+capability change goes through request, review, approval or denial, durable
+audit, a new config version, and next-run activation.
+
+Use these MyClaw tools for capability work:
+
+| Tool | Use |
+| --- | --- |
+| `send_message` | Progress updates or direct channel messages while the agent is still running. |
+| `ask_user_question` | Structured choices only; supports content, options, single-select, multi-select, preview/details, and channel-native buttons. |
+| `request_skill_install` | Provider-backed skill installs such as `clawhub:<slug>@<version>`. |
+| `request_skill_proposal` | Agent-created or modified skill file bundles for review. |
+| `request_skill_dependency_install` | npm, brew, go, uv, or download dependencies required by a skill; never run those commands directly. |
+| `request_mcp_server` | Third-party MCP server requests with transport, origin, tool patterns, credentials, and reason. |
+| `request_tool_enable` | SDK tools or host tools such as `Bash`, `Write`, `Edit`, browser tools, scheduler tools, memory tools, or service tools. |
+| `request_channel_tool_enable` | Channel-specific tools or channel capabilities such as Teams proactive messaging, Slack file access, or Telegram file download behavior. |
+| `service_restart` | Main/admin agent only, after approved config or capability changes when host restart is needed. |
+| `register_agent` | Main/admin agent only, for binding a new channel conversation to an agent. |
+
+Same-channel review is a delivery and origin constraint, not a shortcut around
+authorization. The host verifies that the origin chat belongs to the requesting
+agent, the deciding user is in the control allowlist, the approval decides only
+that pending request, and activation happens on the next run.
 
 Global options:
 
@@ -333,6 +360,15 @@ Messaging and interaction:
 
 - `mcp__myclaw__send_message`
 - `mcp__myclaw__ask_user_question`
+
+Capability requests:
+
+- `mcp__myclaw__request_skill_install`
+- `mcp__myclaw__request_skill_proposal`
+- `mcp__myclaw__request_skill_dependency_install`
+- `mcp__myclaw__request_mcp_server`
+- `mcp__myclaw__request_tool_enable`
+- `mcp__myclaw__request_channel_tool_enable`
 
 Service and agents:
 

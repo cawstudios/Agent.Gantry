@@ -70,7 +70,7 @@ describe('protected capability SDK hook', () => {
     );
   });
 
-  it('allows normal file edits and the approved MCP draft request tool', () => {
+  it('allows normal file edits and approved capability request tools', () => {
     expect(
       evaluateProtectedCapabilityToolUse('Edit', {
         file_path: '/tmp/work/README.md',
@@ -87,9 +87,19 @@ describe('protected capability SDK hook', () => {
     ).toBeNull();
 
     expect(
-      evaluateProtectedCapabilityToolUse('mcp__myclaw__request_skill_draft', {
-        files: [{ path: 'SKILL.md', content: '# Skill' }],
-        reason: 'Reuse workflow',
+      evaluateProtectedCapabilityToolUse(
+        'mcp__myclaw__request_skill_proposal',
+        {
+          files: [{ path: 'SKILL.md', content: '# Skill' }],
+          reason: 'Reuse workflow',
+        },
+      ),
+    ).toBeNull();
+
+    expect(
+      evaluateProtectedCapabilityToolUse('mcp__myclaw__request_tool_enable', {
+        toolName: 'Bash',
+        reason: 'Run project tests',
       }),
     ).toBeNull();
   });
