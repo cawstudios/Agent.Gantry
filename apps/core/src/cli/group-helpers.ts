@@ -5,6 +5,7 @@ import type { RegisteredGroup } from '../domain/types.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import { channelFromGroupJid, getChannelIds } from './channel-utils.js';
 import {
+  addControlSenderForAgent,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
@@ -50,6 +51,33 @@ export function pruneAgentSenderPolicyOverride(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+function inferTelegramPrivateChatApprover(chatJid: string): string | undefined {
+  const privateChatId = /^tg:(\d+)$/.exec(chatJid)?.[1];
+  return privateChatId || undefined;
+}
+
+export async function seedTelegramControlApproverForAgent(input: {
+  runtimeHome: string;
+  db: RuntimeGroupDb;
+  chatJid: string;
+  agentFolder: string;
+}): Promise<string | undefined> {
+  if (!input.chatJid.startsWith('tg:')) return undefined;
+
+  const approver = inferTelegramPrivateChatApprover(input.chatJid);
+  if (!approver) return undefined;
+
+  const settings = loadRuntimeSettings(input.runtimeHome);
+  const added = addControlSenderForAgent(
+    settings,
+    'telegram',
+    input.agentFolder,
+    approver,
+  );
+  if (added) saveRuntimeSettings(input.runtimeHome, settings);
+  return approver;
 }
 
 export function normalizeGroupAddSelector(raw: string): string | null {

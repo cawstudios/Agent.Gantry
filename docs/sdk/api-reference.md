@@ -70,9 +70,18 @@ client.skillDrafts.upload({
   createdBy?,
   zip, // Uint8Array containing application/zip bytes
 })
+client.skillProviders.search({ provider: 'clawhub', query?, limit? })
+client.skillProviders.import({
+  ref: 'clawhub:<slug>@<version>',
+  agentId?,
+  requestedBy?,
+})
 client.skillDrafts.list({ agentId? })
 client.skillDrafts.approve(skillId, { approvedBy?, target? }) // local | hosted
 client.skillDrafts.reject(skillId, { rejectedBy? })
+
+client.skills.files.list(skillId)
+client.skills.files.get(skillId, path)
 
 client.agents.skills.list(agentId)
 client.agents.skills.enable(agentId, skillId)
@@ -80,10 +89,14 @@ client.agents.skills.disable(agentId, skillId)
 ```
 
 Drafts are durable across restart because metadata lives in Postgres and file
-bytes live in artifact storage. Draft, rejected, and disabled skills are not
-materialized into per-run `CLAUDE_CONFIG_DIR/skills`. Skill name and
-description are parsed from `SKILL.md`; upload requests only carry context such
-as the proposing agent or creator.
+bytes live as readable skill folders (`skills/<skill-slug>/...` or
+`skill-drafts/<request-id>/<skill-slug>/...`) in the selected file/object
+backend. The database stores metadata, source, hashes, provider refs, bindings,
+and audit only. Draft, rejected, and disabled skills are not materialized into
+per-run `CLAUDE_CONFIG_DIR/skills`. Skill name and description are parsed from
+`SKILL.md`; upload requests only carry context such as the proposing agent or
+creator. Provider imports, including ClawHub, still create reviewable drafts;
+provider verification improves review context but does not bypass approval.
 
 ## MCP Servers
 
@@ -339,8 +352,10 @@ GET    /v1/conversations/:id/threads               conversations:read
 GET    /v1/conversations/:id/messages              messages:read
 ```
 
-`teams` and `whatsapp` are returned as unavailable placeholders until their
-adapters are implemented.
+`teams` is a first-class built-in channel provider with Microsoft Teams app auth
+through `RuntimeSecretProvider`, `teams:` conversation ids, `teams_` agent
+folders, and Adaptive Card approval flows. `whatsapp` is still returned as an
+unavailable placeholder until its adapter is implemented.
 
 ## Agent Channel Bindings
 
@@ -373,6 +388,10 @@ POST   /v1/skills/drafts/upload                  skills:admin
 GET    /v1/skills/drafts                         skills:read
 POST   /v1/skills/drafts/:id/approve             skills:admin
 POST   /v1/skills/drafts/:id/reject              skills:admin
+GET    /v1/skills/:skillId/files                 skills:read
+GET    /v1/skills/:skillId/files/:path           skills:read
+GET    /v1/skill-providers/clawhub/search        skills:read
+POST   /v1/skill-providers/clawhub/import        skills:admin
 GET    /v1/agents/:agentId/skills                skills:read
 PUT    /v1/agents/:agentId/skills/:skillId       skills:admin
 DELETE /v1/agents/:agentId/skills/:skillId       skills:admin

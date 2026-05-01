@@ -134,11 +134,12 @@ For hosted Postgres, use Neon, Supabase, or another provider that supports `vect
 
 ### Channel Setup
 
-MyClaw supports multiple channels. You can connect Telegram and/or Slack:
+MyClaw supports multiple channels. You can connect Telegram, Slack, or Teams:
 
 ```bash
 myclaw channel connect telegram
 myclaw channel connect slack
+myclaw channel connect teams
 ```
 
 Notes:

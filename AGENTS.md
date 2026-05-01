@@ -37,6 +37,7 @@ Important constraints:
 - `/new` clears persisted session state but preserves the group model override.
 - Transcript archive during `/new` is best-effort and must not block reset success.
 - Durable memory lives under the configured memory root; do not load `~/myclaw/agents/<folder>/memory/`.
+- Live channel turns must persist the provider SDK session ID as soon as the runner streams it. Do not wait for runner shutdown; launchd restarts can kill an active run before final completion.
 
 ## Architecture Rules
 

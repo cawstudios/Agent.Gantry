@@ -102,5 +102,33 @@ describe('protected capability SDK hook', () => {
         reason: 'Run project tests',
       }),
     ).toBeNull();
+
+    expect(
+      evaluateProtectedCapabilityToolUse('mcp__myclaw__request_skill_install', {
+        spec: 'clawhub:some-skill@1.0.0',
+        reason: 'Install approved shared skill',
+      }),
+    ).toBeNull();
+
+    expect(
+      evaluateProtectedCapabilityToolUse(
+        'mcp__myclaw__request_skill_dependency_install',
+        {
+          packages: ['tsx'],
+          ecosystem: 'npm',
+          reason: 'Install skill dependency',
+        },
+      ),
+    ).toBeNull();
+
+    expect(
+      evaluateProtectedCapabilityToolUse(
+        'mcp__myclaw__request_channel_tool_enable',
+        {
+          channelTool: 'slack_file_access',
+          reason: 'Allow file download support',
+        },
+      ),
+    ).toBeNull();
   });
 });

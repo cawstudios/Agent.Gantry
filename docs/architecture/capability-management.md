@@ -12,6 +12,11 @@ permission settings, edit MyClaw settings, or change generated runtime config.
 When a user asks for a new skill, MCP server, dependency, SDK tool, host tool,
 or channel capability, the agent calls the matching MyClaw request tool.
 
+The model is intentionally typed. Skills, MCP servers, SDK tools, host tools,
+browser tools, channel tools, and channel bindings have separate schemas and
+validation rules. They share lifecycle, policy, audit, and config-version
+activation, but they are not collapsed into one untyped blob.
+
 ## Tool Matrix
 
 | Tool | Use | Never use for |
@@ -26,6 +31,19 @@ or channel capability, the agent calls the matching MyClaw request tool.
 | `request_channel_tool_enable` | Channel-specific capabilities such as Teams proactive messaging, Slack file access, or Telegram file download behavior. | Treating a channel SDK permission as already approved. |
 | `service_restart` | Main/admin agent restart after approved config or capability changes that require host restart. | Restarting to activate unapproved changes. |
 | `register_agent` | Main/admin agent binding of a new channel conversation to an agent. | Letting a normal agent bind arbitrary chats. |
+
+## Capability Types
+
+| Type | Durable truth | Runtime projection |
+| --- | --- | --- |
+| Skill | Skill catalog row, readable files, provider ref, hash, binding. | Per-run Claude `skills/<slug>/...` folder and `Skill` tool exposure. |
+| Skill dependency | Dependency spec, approval decision, execution result, audit. | Optional per-skill tools directory or approved host package; never direct agent shell. |
+| Third-party MCP | Definition, reviewed version, credential refs, allowed tool patterns, binding. | SDK `mcpServers` plus exact allowed MCP tool names. |
+| SDK tool | Tool catalog entry, risk, permission policy, sandbox profile, binding. | Exact SDK tool name in `allowedTools` and `canUseTool` policy gate. |
+| Host tool | Built-in MyClaw MCP tool entry, risk, binding, audit behavior. | Exact `mcp__myclaw__<tool>` name. |
+| Browser tool | Browser lifecycle/action capability and sandbox policy. | Browser lifecycle MCP tools and optional action MCP server on next run. |
+| Channel tool | Provider capability enum, scopes, affected conversations, binding. | Provider adapter enables only the named Slack/Telegram/Teams/Web capability. |
+| Channel binding | Agent-to-conversation/thread binding and control policy. | Message routing, trigger handling, and same-channel approval target. |
 
 ## Durable Model
 
@@ -47,6 +65,11 @@ audit only. Skill files remain readable for review. ClawHub is the default
 provider-backed skill source. Provider verification improves review context but
 never bypasses approval.
 
+Local storage uses the same readable layout as object storage. Object storage
+keys must remain human-readable and API-readable; hashes are metadata, not path
+names. A local skill can be inspected with normal filesystem tools, and the API
+can list/read individual files under `skills:read`.
+
 Claude settings, `CLAUDE_CONFIG_DIR`, MCP handoff files, and provider artifacts
 are per-run projections. They are compatibility inputs for a provider adapter,
 not durable MyClaw truth.
@@ -60,10 +83,56 @@ not durable MyClaw truth.
    from configured admin/control policy.
 4. Decide: approval or denial is recorded with actor, reason, and audit summary.
 5. Bind: approval creates or updates the agent binding and a new config version.
-6. Materialize: only approved enabled bindings project into the next agent run.
-7. Execute: tool use still passes permission and sandbox evaluation.
-8. Disable: disabled capabilities stop future materialization without deleting
+6. Same-session handoff: approved skill proposals are returned to the running
+   agent as reviewed skill files; approved MCP servers are reachable through the
+   MyClaw `mcp_list_tools` / `mcp_call_tool` proxy.
+7. Materialize: only approved enabled skill bindings project into future agent
+   runs as native skills. Third-party MCP bindings remain behind the MyClaw MCP
+   proxy in every run.
+8. Execute: tool use still passes permission and sandbox evaluation.
+9. Disable: disabled capabilities stop future materialization without deleting
    history.
+
+## Provider Skill Install
+
+Provider-backed skill install is package retrieval, not dependency execution.
+For ClawHub:
+
+1. Agent calls `request_skill_install` with `clawhub:<slug>@<version>` or an
+   equivalent structured provider ref.
+2. Host resolves provider detail, publisher, verification tier, latest version,
+   source/provenance metadata, file list, integrity, and compatibility.
+3. Host downloads the zip, validates archive safety, requires exactly one skill
+   root with `SKILL.md`, computes a content hash, and stages readable draft
+   files under `skill-drafts/<request-id>/<slug>/`.
+4. Channel UX shows the skill summary, files, hashes, provider metadata,
+   declared dependencies, risk, and activation timing.
+5. Approval installs to `skills/<slug>/...`, records audit, binds the skill,
+   returns reviewed files to the running agent, and materializes it for future
+   runs.
+
+If the skill declares npm, brew, go, uv, or download dependencies, those are
+separate dependency requests. The skill approval does not run them.
+
+## Dependency Install Policy
+
+Dependency installs are high-risk host actions. The agent must call
+`request_skill_dependency_install`; it must not run `npm install`, `brew
+install`, `go install`, `uv tool install`, curl, tar, unzip, or equivalent shell
+commands directly.
+
+The host validates dependency specs before review:
+
+- Node package specs must be registry package names or scoped package names,
+  must not start with `-`, must not use `file:`, `git:`, `http:`, `https:`, or
+  shell syntax, and execute as argv with `--ignore-scripts`.
+- Default Node installs are local to a per-skill tools directory when possible,
+  not global host mutation.
+- `brew`, `go`, `uv`, and download installers require explicit admin policy
+  before execution.
+- Downloads use SSRF protection, content size limits, archive traversal checks,
+  and extraction only inside the per-skill tools directory.
+- stdout/stderr are audited with secret redaction.
 
 ## Runtime Projection
 
@@ -80,9 +149,31 @@ Browser lifecycle tools manage the persistent browser profile. Browser action
 tools are a separate runtime-installed capability and attach only on a later run
 when a healthy browser is already running at startup.
 
+SDK built-in tools are denied by default unless the profile explicitly grants
+them. `Bash`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `Config` are
+not default capabilities. If approved, they still pass through `canUseTool`,
+`PreToolUse`, sandbox policy, and audit.
+
+The built-in MyClaw MCP server is projected with exact tool names. Wildcards
+such as `mcp__myclaw__*` are not durable authorization. Request tools are safe
+to expose because they create drafts or reviews only. Approved skill proposals
+and MCP servers are the exception to "future only": the host returns reviewed
+skill files to the running agent, and approved third-party MCP servers are
+callable through the approved MyClaw MCP proxy tools in both current and future
+runs. Direct third-party `mcp__server__tool` names are not exposed.
+
 ## Cleanup Rules
 
 Replacement work must remove stale active references to direct shell installs,
 global Claude folders, direct `.mcp.json` mutation, group-tied skill state, and
 base64 artifact transport. Historical migration references may remain only when
 they are clearly historical and not active guidance.
+
+Before calling a cutover complete, run targeted searches for:
+
+- `mcp__myclaw__*`
+- obsolete skill draft request tools outside historical notes
+- `.claude/skills` as runtime truth
+- `.mcp.json` mutation instructions
+- base64 skill artifact serialization
+- direct dependency-install guidance in active docs
