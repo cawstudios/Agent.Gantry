@@ -15,16 +15,32 @@ MyClaw must present one runtime truth across runtime code, CLI, diagnostics, set
    - `memory.embeddings.provider` (`disabled`, built-in provider ids, or registered provider ids)
    - `memory.embeddings.model`
    - `memory.dreaming.enabled`
-5. `settings.yaml` runtime behavior schema is `channels.*`, `storage.*`, `agent.*`, `credential_broker.*`, and `memory.*`; `agent.name` is the user-visible main-agent identity while `main_agent` remains the stable internal folder key.
+5. `settings.yaml` runtime behavior schema is `channels.*`, `storage.*`, `agent.*`, `credential_broker.*`, `memory.*`, `desired_state.*`, and `agents.*`; `agent.name` is the user-visible main-agent identity while `main_agent` remains the stable internal folder key.
 6. `credential_broker.onecli.postgres.*` declares the OneCLI persistence contract. It stores only the env key and schema name; the URL and encryption key stay in `.env`.
 7. Runtime memory injection is query-scoped: the current message or scheduled
    job prompt drives retrieval, and no memory block is injected when nothing
    matches. Provider/session continuity remains separate from durable memory and
    memory tooling; commitment/inbox/digest controls are separate future work.
+8. Local desired-state configuration uses `agents.<agentId>` for agent display,
+   channel/chat bindings, DM access/admins, and selected capability ids. It
+   references approved catalog ids only; skill source bytes, MCP definitions,
+   artifacts, messages, jobs history, browser profiles, memory records, and raw
+   provider secrets stay out of `settings.yaml`.
+9. Phase 1 desired-state reconciliation is additive/update-only. DB-only
+   agents or bindings are reported as drift but are not removed. Phase 2 enables
+   destructive reconciliation only when `desired_state.authoritative: true`.
 
 ## Consequences
 
 - CLI mutation commands update `settings.yaml`.
+- Agent-requested local configuration changes use reviewed MyClaw admin tools.
+  Only the main/admin agent can use `settings_desired_state` to inspect and
+  `request_settings_update` to ask the host to validate and write a replacement
+  file after approval. Settings updates carry the revision returned by
+  `settings_desired_state`; stale revisions are rejected, and writes are atomic.
+- Runtime watches `settings.yaml`; valid safe changes reconcile live, while
+  storage, credential broker, and channel topology changes are reported as
+  restart-required.
 - `myclaw status` and `myclaw doctor` report memory/storage/embeddings/dreaming state from `settings.yaml`.
 - Unsupported runtime and memory env keys are surfaced as warnings in doctor/config surfaces.
 - Direct YAML edits remain first-class with strict validation and actionable path-level errors.

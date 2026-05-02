@@ -113,6 +113,11 @@ export interface AgentRepository {
     mcpBindings: AgentMcpServerBinding[];
     updatedAt: string;
   }): Promise<void>;
+  disableAgent(input: {
+    appId: AppId;
+    agentId: AgentId;
+    updatedAt: string;
+  }): Promise<Agent | null>;
   findAgentsByDmAccess(input: {
     appId: AppId;
     providerId: string;

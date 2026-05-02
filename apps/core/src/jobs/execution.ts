@@ -101,7 +101,7 @@ export async function runJob(
   const jobModelUseKind = modelUseKindForJobSchedule(currentJob.schedule_type);
   const resolvedModel = resolveJobModel(
     currentJob,
-    getEffectiveModelConfig(undefined, jobModelUseKind),
+    getEffectiveModelConfig(undefined, jobModelUseKind, execution.group.folder),
   );
 
   const claimed = await deps.opsRepository.claimDueJobRunStart({

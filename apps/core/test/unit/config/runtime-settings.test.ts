@@ -65,4 +65,90 @@ describe('runtime settings', () => {
       'agent.one_time_job_default_model is invalid: Unknown model "sonet". Did you mean "sonnet"?',
     );
   });
+
+  it('renders and parses local desired-state agents', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.desiredState.authoritative = true;
+    settings.agents.main_agent = {
+      name: 'Main Agent',
+      folder: 'main_agent',
+      model: 'sonnet',
+      oneTimeJobDefaultModel: 'haiku',
+      recurringJobDefaultModel: 'opus',
+      bindings: {
+        primary: {
+          jid: 'tg:100',
+          provider: 'telegram',
+          name: 'Main DM',
+          trigger: '@kai',
+          addedAt: '2026-05-02T00:00:00.000Z',
+          requiresTrigger: false,
+          isMain: true,
+        },
+      },
+      dmAccess: [
+        {
+          provider: 'telegram',
+          userIds: ['42'],
+          adminUserId: '42',
+        },
+      ],
+      capabilities: {
+        toolIds: ['tool:read'],
+        skillIds: ['skill:admin'],
+        mcpServerIds: ['mcp:github'],
+      },
+    };
+
+    const parsed = parseRuntimeSettings(renderRuntimeSettingsYaml(settings));
+
+    expect(parsed.desiredState.authoritative).toBe(true);
+    expect(parsed.agents.main_agent).toEqual(settings.agents.main_agent);
+  });
+
+  it('rejects duplicate desired-state channel bindings', () => {
+    const yaml = renderRuntimeSettingsYaml(
+      createDefaultRuntimeSettings(),
+    ).replace(
+      'agents: {}\n',
+      `agents:
+  one:
+    name: One
+    bindings:
+      primary:
+        jid: tg:100
+        trigger: '@one'
+        added_at: 2026-05-02T00:00:00.000Z
+  two:
+    name: Two
+    bindings:
+      primary:
+        jid: tg:100
+        trigger: '@two'
+        added_at: 2026-05-02T00:00:00.000Z
+`,
+    );
+
+    expect(() => parseRuntimeSettings(yaml)).toThrow(
+      'agents.two.bindings contains duplicate jid tg:100; already configured by agents.one',
+    );
+  });
+
+  it('rejects raw model ids in desired-state agent defaults', () => {
+    const yaml = renderRuntimeSettingsYaml(
+      createDefaultRuntimeSettings(),
+    ).replace(
+      'agents: {}\n',
+      `agents:
+  main_agent:
+    name: Main
+    model: claude-opus-4-7
+    bindings: {}
+`,
+    );
+
+    expect(() => parseRuntimeSettings(yaml)).toThrow(
+      'agents.main_agent.model is invalid: Provider model ID "claude-opus-4-7" is not accepted here.',
+    );
+  });
 });

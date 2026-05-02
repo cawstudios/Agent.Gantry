@@ -163,6 +163,41 @@ maybeDescribe('Postgres domain repositories', () => {
     });
   });
 
+  it('disables omitted agent capability bindings during replacement', async () => {
+    const updatedAt = '2026-05-02T00:00:00.000Z';
+
+    await repositories.agents.replaceAgentCapabilityBindings({
+      appId,
+      agentId,
+      toolBindings: [
+        {
+          id: `agent-tool-binding:${agentId}:tool:Read` as never,
+          appId,
+          agentId,
+          toolId: 'tool:Read' as never,
+          status: 'active',
+          createdAt: updatedAt,
+          updatedAt,
+        },
+      ],
+      skillBindings: [],
+      mcpBindings: [],
+      updatedAt,
+    });
+
+    const bindings = await repositories.tools.listAgentToolBindings({
+      appId,
+      agentId,
+    });
+
+    expect(
+      bindings.find((binding) => binding.toolId === 'tool:Read')?.status,
+    ).toBe('active');
+    expect(
+      bindings.find((binding) => binding.toolId === 'tool:Agent')?.status,
+    ).toBe('disabled');
+  });
+
   it('inserts messages idempotently by provider redelivery key', async () => {
     await repositories.messages.saveMessage({
       id: 'message:test:first' as MessageId,

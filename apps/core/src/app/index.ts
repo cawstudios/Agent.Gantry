@@ -7,10 +7,14 @@ import { getDefaultRuntimeApp } from './bootstrap/runtime-app.js';
 import { startRuntimeServices } from './bootstrap/runtime-services.js';
 import { installShutdownHandlers } from './bootstrap/shutdown.js';
 import { runStartup } from './bootstrap/startup.js';
-import { closeRuntimeStorage } from '../adapters/storage/postgres/runtime-store.js';
+import {
+  closeRuntimeStorage,
+  getRuntimeStorage,
+} from '../adapters/storage/postgres/runtime-store.js';
 import { startControlServer } from '../control/server/index.js';
 import { stopSchedulerLoop } from '../jobs/scheduler.js';
 import { MYCLAW_HOME } from '../config/index.js';
+import { startSettingsReloadWatcher } from '../runtime/settings-reload-watcher.js';
 import {
   formatRuntimePreflightFailure,
   validateRuntimePreflightWithStorage,
@@ -64,6 +68,13 @@ export async function startMyClawRuntime(
   });
 
   const { runtimeSettings } = await runStartup(app);
+  const storage = getRuntimeStorage();
+  const settingsWatcher = startSettingsReloadWatcher({
+    runtimeHome: MYCLAW_HOME,
+    app,
+    ops: storage.ops,
+    repositories: storage.repositories,
+  });
 
   installShutdownHandlers({
     queue: app.queue,
@@ -73,6 +84,7 @@ export async function startMyClawRuntime(
     },
     closeStorage: closeRuntimeStorage,
     closeScheduler: stopSchedulerLoop,
+    closeSettingsWatcher: settingsWatcher.close,
   });
 
   await channelWiring.connectEnabledChannels(runtimeSettings);

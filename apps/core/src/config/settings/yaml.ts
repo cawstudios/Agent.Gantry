@@ -143,6 +143,12 @@ export function parseSimpleYamlObject(raw: string): Record<string, unknown> {
 }
 
 export function quoteYamlString(value: string): string {
-  if (/^[A-Za-z0-9_./-]+$/.test(value)) return value;
+  if (
+    /^[A-Za-z0-9_./-]+$/.test(value) &&
+    !/^(true|false|null)$/i.test(value) &&
+    !/^-?[0-9]+$/.test(value)
+  ) {
+    return value;
+  }
   return JSON.stringify(value);
 }

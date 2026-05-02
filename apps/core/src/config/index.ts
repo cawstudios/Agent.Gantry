@@ -100,12 +100,14 @@ export const ASSISTANT_NAME = getConfiguredAgentName();
 export function getPublicRuntimeSettings() {
   const settings = getRuntimeSettingsForConfig();
   return {
+    desiredState: settings.desiredState,
     agent: {
       name: settings.agent.name,
       defaultModel: settings.agent.defaultModel,
       oneTimeJobDefaultModel: settings.agent.oneTimeJobDefaultModel,
       recurringJobDefaultModel: settings.agent.recurringJobDefaultModel,
     },
+    agents: settings.agents,
     memory: {
       enabled: settings.memory.enabled,
       dreaming: {
@@ -357,6 +359,9 @@ export function getMemoryModelRuntimeConfig(): ReturnType<
 }
 
 export type DefaultModelSource =
+  | 'settings.yaml agents.<agent>.model'
+  | 'settings.yaml agents.<agent>.one_time_job_default_model'
+  | 'settings.yaml agents.<agent>.recurring_job_default_model'
   | 'settings.yaml agent.default_model'
   | 'system default';
 export type EffectiveModelSource =
@@ -368,7 +373,10 @@ export type EffectiveModelSource =
 
 export type ModelUseKind = 'interactive' | 'oneTimeJob' | 'recurringJob';
 
-export function getDefaultModelConfig(kind: ModelUseKind = 'interactive'):
+export function getDefaultModelConfig(
+  kind: ModelUseKind = 'interactive',
+  agentFolder?: string,
+):
   | {
       model?: string;
       source: DefaultModelSource;
@@ -376,11 +384,25 @@ export function getDefaultModelConfig(kind: ModelUseKind = 'interactive'):
   | {
       model?: string;
       source:
+        | 'settings.yaml agents.<agent>.one_time_job_default_model'
+        | 'settings.yaml agents.<agent>.recurring_job_default_model'
         | 'settings.yaml agent.one_time_job_default_model'
         | 'settings.yaml agent.recurring_job_default_model';
     } {
   const settings = getRuntimeSettingsForConfig();
+  const configuredAgent = agentFolder
+    ? settings.agents[agentFolder]
+    : undefined;
   if (kind === 'oneTimeJob') {
+    const oneTimeAgentModel = normModel(
+      configuredAgent?.oneTimeJobDefaultModel,
+    );
+    if (oneTimeAgentModel) {
+      return {
+        model: oneTimeAgentModel,
+        source: 'settings.yaml agents.<agent>.one_time_job_default_model',
+      };
+    }
     const oneTimeModel = normModel(settings.agent.oneTimeJobDefaultModel);
     if (oneTimeModel) {
       return {
@@ -390,6 +412,15 @@ export function getDefaultModelConfig(kind: ModelUseKind = 'interactive'):
     }
   }
   if (kind === 'recurringJob') {
+    const recurringAgentModel = normModel(
+      configuredAgent?.recurringJobDefaultModel,
+    );
+    if (recurringAgentModel) {
+      return {
+        model: recurringAgentModel,
+        source: 'settings.yaml agents.<agent>.recurring_job_default_model',
+      };
+    }
     const recurringModel = normModel(settings.agent.recurringJobDefaultModel);
     if (recurringModel) {
       return {
@@ -397,6 +428,13 @@ export function getDefaultModelConfig(kind: ModelUseKind = 'interactive'):
         source: 'settings.yaml agent.recurring_job_default_model',
       };
     }
+  }
+  const configuredAgentModel = normModel(configuredAgent?.model);
+  if (configuredAgentModel) {
+    return {
+      model: configuredAgentModel,
+      source: 'settings.yaml agents.<agent>.model',
+    };
   }
   const configuredModel = normModel(settings.agent.defaultModel) || '';
   if (configuredModel) {
@@ -411,6 +449,7 @@ export function getDefaultModelConfig(kind: ModelUseKind = 'interactive'):
 export function getEffectiveModelConfig(
   groupModel?: string,
   kind: ModelUseKind = 'interactive',
+  agentFolder?: string,
 ): {
   model?: string;
   source: EffectiveModelSource;
@@ -422,7 +461,7 @@ export function getEffectiveModelConfig(
       source: 'group.agentConfig.model',
     };
   }
-  return getDefaultModelConfig(kind);
+  return getDefaultModelConfig(kind, agentFolder);
 }
 
 export const MAX_MESSAGES_PER_PROMPT = Math.max(

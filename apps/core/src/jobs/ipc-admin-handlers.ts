@@ -1,24 +1,23 @@
-import { MYCLAW_HOME } from '../config/index.js';
-import { getRuntimeStorage } from '../adapters/storage/postgres/runtime-store.js';
 import { McpServerService } from '../application/mcp/mcp-server-service.js';
 import { McpToolProxy } from '../application/mcp/mcp-tool-proxy.js';
 import { SkillDraftService } from '../application/skills/skill-draft-service.js';
+import { getRuntimeStorage } from '../adapters/storage/postgres/runtime-store.js';
 import { nowIso } from '../infrastructure/time/datetime.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
-import { validateRuntimePreflightWithStorage } from '../config/preflight.js';
 import { TaskHandler } from './ipc-types.js';
 import {
   DEFAULT_MEMORY_APP_ID,
   memoryAgentIdForGroupFolder,
 } from '../memory/app-memory-boundaries.js';
-import {
-  createTaskResponder,
-  restartServiceForRuntimeHome,
-  toTrimmedString,
-} from './ipc-shared.js';
+import { createTaskResponder, toTrimmedString } from './ipc-shared.js';
 import { parseSkillDraftAssets } from './skill-draft-ipc.js';
 import { getHostRuntimeCredentialEnv } from '../runtime/agent-spawn-host.js';
+import {
+  requestSettingsUpdateHandler,
+  serviceRestartHandler,
+  settingsDesiredStateHandler,
+} from './ipc-runtime-admin-handlers.js';
 
 const refreshGroupsHandler: TaskHandler = async (context) => {
   const { data, sourceGroup, isMain, deps, registeredGroups } = context;
@@ -95,64 +94,6 @@ const registerAgentHandler: TaskHandler = async (context) => {
     'Missing required fields: jid, name, folder, trigger.',
     'invalid_request',
   );
-};
-
-const serviceRestartHandler: TaskHandler = async (context) => {
-  const { data, sourceGroup, isMain } = context;
-  const taskId = toTrimmedString(data.taskId, { maxLen: 128 });
-  const { accept, reject } = createTaskResponder(
-    sourceGroup,
-    taskId,
-    data.authThreadId,
-  );
-  if (!isMain) {
-    logger.warn(
-      { sourceGroup },
-      'Unauthorized service_restart attempt blocked',
-    );
-    reject('Only the main agent can restart the service.', 'forbidden');
-    return;
-  }
-
-  try {
-    const validation = await validateRuntimePreflightWithStorage(MYCLAW_HOME);
-    if (!validation.ok) {
-      reject(
-        validation.failure?.summary ||
-          'Runtime configuration validation failed.',
-        'preflight_failed',
-        validation.failure?.details || [],
-      );
-      return;
-    }
-
-    accept('Service restart accepted. Restarting now.');
-
-    setTimeout(() => {
-      const restartOutcome = restartServiceForRuntimeHome(MYCLAW_HOME);
-      if (!restartOutcome.ok) {
-        logger.error(
-          { sourceGroup, taskId, error: restartOutcome.message },
-          'Service restart failed after acknowledgment',
-        );
-        return;
-      }
-      logger.info(
-        { sourceGroup, taskId, message: restartOutcome.message },
-        'Service restart completed',
-      );
-    }, 0);
-  } catch (err) {
-    const message =
-      err instanceof Error
-        ? err.message
-        : 'Service restart failed with an unexpected error.';
-    logger.error(
-      { sourceGroup, taskId, err },
-      'Error while handling service_restart IPC task',
-    );
-    reject(message, 'internal_error');
-  }
 };
 
 const requestMcpServerHandler: TaskHandler = async (context) => {
@@ -436,7 +377,7 @@ const requestOnlyCapabilityHandler: TaskHandler = async (context) => {
 };
 
 // prettier-ignore
-export const adminTaskHandlers: Record<string, TaskHandler> = { refresh_groups: refreshGroupsHandler, register_agent: registerAgentHandler, service_restart: serviceRestartHandler, request_skill_install: requestOnlyCapabilityHandler, request_skill_dependency_install: requestOnlyCapabilityHandler, request_tool_enable: requestOnlyCapabilityHandler, request_channel_tool_enable: requestOnlyCapabilityHandler, request_skill_proposal: requestSkillDraftHandler, request_mcp_server: requestMcpServerHandler, mcp_list_tools: mcpListToolsHandler, mcp_call_tool: mcpCallToolHandler };
+export const adminTaskHandlers: Record<string, TaskHandler> = { refresh_groups: refreshGroupsHandler, register_agent: registerAgentHandler, service_restart: serviceRestartHandler, settings_desired_state: settingsDesiredStateHandler, request_settings_update: requestSettingsUpdateHandler, request_skill_install: requestOnlyCapabilityHandler, request_skill_dependency_install: requestOnlyCapabilityHandler, request_tool_enable: requestOnlyCapabilityHandler, request_channel_tool_enable: requestOnlyCapabilityHandler, request_skill_proposal: requestSkillDraftHandler, request_mcp_server: requestMcpServerHandler, mcp_list_tools: mcpListToolsHandler, mcp_call_tool: mcpCallToolHandler };
 
 // prettier-ignore
 function validateSameChannelApprovalTarget(input: { data: Parameters<TaskHandler>[0]['data']; sourceGroupJids: string[]; requestKind: string; reject: (error: string, code?: string, details?: string[]) => void }): string | null {

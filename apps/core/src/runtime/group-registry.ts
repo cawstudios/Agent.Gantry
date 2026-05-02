@@ -4,7 +4,10 @@ import path from 'path';
 import { ASSISTANT_NAME as DEFAULT_ASSISTANT_NAME } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { RegisteredGroup, ThinkingOverride } from '../domain/types.js';
-import { resolveModelAlias } from '../shared/model-catalog.js';
+import {
+  resolveModelAlias,
+  resolveModelSelection,
+} from '../shared/model-catalog.js';
 import { resolveGroupFolderPath } from '../platform/group-folder.js';
 import { AvailableGroup } from './agent-spawn.js';
 
@@ -65,6 +68,7 @@ function defaultAgentClaudeMarkdown(
     '- Never expose secrets unless explicitly requested.',
     '- Use send_message for progress updates and ask_user_question for structured choices.',
     '- Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.',
+    '- Main/admin agents may use settings_desired_state before local configuration changes and request_settings_update for reviewed settings.yaml changes; do not edit settings directly.',
     '- Main/admin agents may use service_restart after approved changes and register_agent for channel binding.',
     '- Never run dependency installs or edit .claude/skills, .mcp.json, settings, or generated capability config directly.',
     '',
@@ -124,6 +128,13 @@ export function setGroupModelOverride(
   const existingGroup = registeredGroups[chatJid];
   if (!existingGroup) return;
 
+  const trimmedModel = typeof model === 'string' ? model.trim() : '';
+  if (trimmedModel) {
+    const resolved = resolveModelSelection(trimmedModel);
+    if (!resolved.ok) {
+      throw new Error(resolved.message);
+    }
+  }
   const normalizedModel = resolveModelAlias(model);
   const prevModel = existingGroup.agentConfig?.model;
   if (prevModel === normalizedModel) return;

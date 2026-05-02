@@ -277,10 +277,6 @@ describe('@myclaw/sdk transport', () => {
     });
 
     await client.settings.get();
-    await client.settings.update({
-      agent: { name: 'Main Agent', defaultModel: 'sonnet' },
-      memory: { enabled: true, dreaming: { enabled: false } },
-    });
     await client.channels.providers.list();
     await client.channels.installations.create({
       appId: 'app-one',
@@ -340,14 +336,6 @@ describe('@myclaw/sdk transport', () => {
 
     expect(seen).toEqual([
       { method: 'GET', url: '/v1/settings', body: null },
-      {
-        method: 'PATCH',
-        url: '/v1/settings',
-        body: {
-          agent: { name: 'Main Agent', defaultModel: 'sonnet' },
-          memory: { enabled: true, dreaming: { enabled: false } },
-        },
-      },
       { method: 'GET', url: '/v1/channel-providers', body: null },
       {
         method: 'POST',

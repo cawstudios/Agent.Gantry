@@ -99,8 +99,8 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
     invalidateSystemJobRegistrationSignature(context.deps.opsRepository);
     const defaultModel =
       normalizedScheduleType === 'once'
-        ? getDefaultModelConfig('oneTimeJob')
-        : getDefaultModelConfig('recurringJob');
+        ? getDefaultModelConfig('oneTimeJob', sourceGroup)
+        : getDefaultModelConfig('recurringJob', sourceGroup);
     const selectedModel = result.modelAlias || defaultModel.model;
     const catalogModel = selectedModel
       ? resolveModelSelection(selectedModel)

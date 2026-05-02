@@ -124,12 +124,16 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
     },
   };
   return {
+    desiredState: {
+      authoritative: false,
+    },
     channels: Object.fromEntries(
       listChannelProviders().map((provider) => [
         provider.id,
         createDefaultChannelSettings(false),
       ]),
     ),
+    agents: {},
     storage,
     agent,
     credentialBroker,

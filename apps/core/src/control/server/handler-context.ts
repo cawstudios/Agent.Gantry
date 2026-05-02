@@ -1,10 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import type {
-  RuntimeSettingsResponse,
-  UpdateRuntimeSettingsRequest,
-  UpdateRuntimeSettingsResponse,
-} from '@myclaw/contracts';
+import type { RuntimeSettingsResponse } from '@myclaw/contracts';
 import type { RuntimeApp } from '../../app/bootstrap/runtime-app.js';
 import { authenticate, type ApiKeyRecord, type Scope } from './auth.js';
 import { sendError } from './http.js';
@@ -32,11 +28,9 @@ export type ControlRouteContext = {
   state: ControlServerState;
   triggerRateLimiter: RateLimiter;
   getRuntimeSettings: () => RuntimeSettingsResponse['settings'];
-  updateRuntimeSettings: (
-    patch: UpdateRuntimeSettingsRequest,
-  ) => UpdateRuntimeSettingsResponse;
   getDefaultModelConfig: (
     kind?: 'interactive' | 'oneTimeJob' | 'recurringJob',
+    agentFolder?: string,
   ) => ControlDefaultModelConfig;
 };
 

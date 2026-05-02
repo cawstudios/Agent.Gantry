@@ -18,6 +18,7 @@ export interface InstallShutdownHandlersOptions {
   closeStorage?: () => Promise<void>;
   closeControlServer?: () => Promise<void>;
   closeScheduler?: () => Promise<void>;
+  closeSettingsWatcher?: () => void;
 }
 
 function makeDefaultDeps(): ShutdownDeps {
@@ -65,6 +66,7 @@ export function installShutdownHandlers(
         );
       }
     }
+    options.closeSettingsWatcher?.();
     if (options.closeStorage) {
       try {
         await options.closeStorage();

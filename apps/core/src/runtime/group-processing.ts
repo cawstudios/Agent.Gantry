@@ -356,10 +356,11 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
           });
         },
         formatMessages,
-        getDefaultModel: () => getDefaultModelConfig().model,
+        getDefaultModel: () =>
+          getDefaultModelConfig('interactive', group.folder).model,
         getJobModelDefaults: () => ({
-          oneTime: getDefaultModelConfig('oneTimeJob').model,
-          recurring: getDefaultModelConfig('recurringJob').model,
+          oneTime: getDefaultModelConfig('oneTimeJob', group.folder).model,
+          recurring: getDefaultModelConfig('recurringJob', group.folder).model,
         }),
         getGroupModelOverride: () => group.agentConfig?.model,
         setGroupModelOverride: async (value) =>

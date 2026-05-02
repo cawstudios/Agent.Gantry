@@ -422,6 +422,7 @@ describe('agent-spawn timeout behavior', () => {
     expect(vi.mocked(getEffectiveModelConfig)).toHaveBeenCalledWith(
       'opus',
       'interactive',
+      'test-group',
     );
     const spawnCalls = vi.mocked(spawn).mock.calls;
     expect(spawnCalls.length).toBeGreaterThan(0);
@@ -486,6 +487,7 @@ describe('agent-spawn timeout behavior', () => {
     expect(vi.mocked(getEffectiveModelConfig)).toHaveBeenCalledWith(
       undefined,
       'oneTimeJob',
+      'test-group',
     );
   });
 

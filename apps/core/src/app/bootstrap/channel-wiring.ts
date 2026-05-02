@@ -130,12 +130,15 @@ export function createChannelWiring(
       findBoundChannel,
       persistenceQueue,
       appId: resolved.appId,
-      dmAccess: new AgentDmAccessAdministrationService({
-        agents: getRuntimeStorage().repositories.agents,
-        channelInstallations:
-          getRuntimeStorage().repositories.channelInstallations,
-        conversations: getRuntimeStorage().repositories.conversations,
-      }),
+      dmAccess: {
+        resolveDmAgent: (input) =>
+          new AgentDmAccessAdministrationService({
+            agents: getRuntimeStorage().repositories.agents,
+            channelInstallations:
+              getRuntimeStorage().repositories.channelInstallations,
+            conversations: getRuntimeStorage().repositories.conversations,
+          }).resolveDmAgent(input),
+      },
       saveDmAgentChannelBinding,
     }),
     registeredGroups: () => app.getRegisteredGroups(),

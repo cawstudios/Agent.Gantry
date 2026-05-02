@@ -6,6 +6,10 @@ import { parseSenderControlAllowlistConfig } from './control-allowlist.js';
 import { parseSenderAllowlistConfig } from './sender-allowlist.js';
 import { parseSimpleYamlObject } from './yaml.js';
 import {
+  parseConfiguredAgents,
+  parseDesiredStateSettings,
+} from './runtime-settings-agents-parser.js';
+import {
   createDefaultChannelSettings,
   DEFAULT_AGENT_NAME,
   DEFAULT_AGENT_SESSION_MAX_MEMORY_CONTEXT_CHARS,
@@ -501,18 +505,21 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
     }
     if (
       key !== 'version' &&
+      key !== 'desired_state' &&
       key !== 'channels' &&
+      key !== 'agents' &&
       key !== 'storage' &&
       key !== 'agent' &&
       key !== 'credential_broker' &&
       key !== 'memory'
     ) {
       throw new Error(
-        `${key} is not supported. Supported root keys are version, channels, storage, agent, credential_broker, and memory.`,
+        `${key} is not supported. Supported root keys are version, desired_state, channels, agents, storage, agent, credential_broker, and memory.`,
       );
     }
   }
 
+  const desiredState = parseDesiredStateSettings(root.desired_state);
   const channels = root.channels;
   if (
     typeof channels !== 'object' ||
@@ -537,6 +544,7 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
   }
 
   const storage = parseStorageSettings(root.storage);
+  const agents = parseConfiguredAgents(root.agents);
   const agent = parseAgentSettings(root.agent);
   const credentialBroker = parseCredentialBrokerSettings(
     root.credential_broker,
@@ -544,7 +552,9 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
   const memory = parseMemorySettings(root.memory);
 
   return {
+    desiredState,
     channels: channelSettings,
+    agents,
     storage,
     agent,
     credentialBroker,

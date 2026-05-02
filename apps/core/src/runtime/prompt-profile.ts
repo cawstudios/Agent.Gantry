@@ -34,7 +34,7 @@ const RUNTIME_RULES_BLOCK = [
   '- Follow MyClaw safety and execution constraints exactly.',
   '- Keep static profile behavior separate from query-retrieved memory context.',
   '- Treat group boundaries as strict isolation boundaries unless explicitly overridden by host policy.',
-  '- Use MyClaw request tools for capability changes; never install dependencies or edit skills, MCP, settings, or permission config directly.',
+  '- Use MyClaw request tools for capability and settings changes; never install dependencies or edit skills, MCP, settings, or permission config directly.',
 ].join('\n');
 
 const DEFAULT_SHARED_TEMPLATE = `# Shared Agent Profile
@@ -77,6 +77,7 @@ const DEFAULT_SHARED_TEMPLATE = `# Shared Agent Profile
 - If memory is missing, stale, or uncertain, say so directly.
 - Use send_message for progress updates and ask_user_question for structured choices.
 - Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.
+- Main/admin agents may use settings_desired_state before local configuration changes and request_settings_update for reviewed settings.yaml changes; do not edit settings.yaml directly.
 - Main/admin agents may use service_restart after approved capability or config changes and register_agent for channel binding.
 - Never run npm, brew, go, uv, curl, or download install commands directly for skills or tools.
 - Never edit ${GENERATED_PROVIDER_CONFIG_DIR}/skills, .mcp.json, settings.yaml, generated Claude config, or permission files directly.

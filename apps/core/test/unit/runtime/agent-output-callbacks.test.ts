@@ -4,7 +4,7 @@ import { isAgentTurnCompleteMarker } from '@core/runtime/agent-output-callbacks.
 import type { AgentOutput } from '@core/runtime/agent-spawn-types.js';
 
 describe('agent output callbacks', () => {
-  it('does not treat usage-only events as turn completion markers', () => {
+  it('treats final empty success events as turn completion markers even with usage', () => {
     const usageOnly = {
       status: 'success',
       result: null,
@@ -20,7 +20,7 @@ describe('agent output callbacks', () => {
       },
     } satisfies AgentOutput;
 
-    expect(isAgentTurnCompleteMarker(usageOnly)).toBe(false);
+    expect(isAgentTurnCompleteMarker(usageOnly)).toBe(true);
     expect(isAgentTurnCompleteMarker({ status: 'success', result: null })).toBe(
       true,
     );

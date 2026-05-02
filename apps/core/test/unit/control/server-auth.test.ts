@@ -762,74 +762,27 @@ describe('control server runtime hardening', () => {
         scopes: ['sessions:read', 'agents:admin'],
         appId: 'app-one',
       },
+      {
+        kid: 'read',
+        token: 'read-key',
+        scopes: ['sessions:read'],
+        appId: 'app-one',
+      },
     ]);
 
     const handle = startControlServer({
       app: {
         registerGroup: vi.fn(),
         queue: { enqueueMessageCheck: vi.fn() },
-        getRuntimeSettings: () => {
-          const settings = loadRuntimeSettings(runtimeHome);
-          return {
-            agent: {
-              name: settings.agent.name,
-              defaultModel: settings.agent.defaultModel,
-              oneTimeJobDefaultModel: settings.agent.oneTimeJobDefaultModel,
-              recurringJobDefaultModel: settings.agent.recurringJobDefaultModel,
-            },
-            memory: {
-              enabled: settings.memory.enabled,
-              dreaming: { enabled: settings.memory.dreaming.enabled },
-            },
-          };
-        },
-        updateRuntimeSettings: (patch: any) => {
-          const settings = loadRuntimeSettings(runtimeHome);
-          const changed: string[] = [];
-          if (patch.agent?.name) {
-            settings.agent.name = patch.agent.name;
-            changed.push('agent.name');
-          }
-          if (patch.agent?.defaultModel !== undefined) {
-            settings.agent.defaultModel = patch.agent.defaultModel;
-            changed.push('agent.defaultModel');
-          }
-          if (patch.agent?.oneTimeJobDefaultModel !== undefined) {
-            settings.agent.oneTimeJobDefaultModel =
-              patch.agent.oneTimeJobDefaultModel;
-            changed.push('agent.oneTimeJobDefaultModel');
-          }
-          if (patch.agent?.recurringJobDefaultModel !== undefined) {
-            settings.agent.recurringJobDefaultModel =
-              patch.agent.recurringJobDefaultModel;
-            changed.push('agent.recurringJobDefaultModel');
-          }
-          if (patch.memory?.dreaming?.enabled !== undefined) {
-            settings.memory.dreaming.enabled = patch.memory.dreaming.enabled;
-            changed.push('memory.dreaming.enabled');
-          }
-          saveRuntimeSettings(runtimeHome, settings);
-          return {
-            settings: {
-              agent: {
-                name: settings.agent.name,
-                defaultModel: settings.agent.defaultModel,
-                oneTimeJobDefaultModel: settings.agent.oneTimeJobDefaultModel,
-                recurringJobDefaultModel:
-                  settings.agent.recurringJobDefaultModel,
-              },
-              memory: {
-                enabled: settings.memory.enabled,
-                dreaming: { enabled: settings.memory.dreaming.enabled },
-              },
-            },
-            changed,
-            restartRequired: changed.length > 0,
-          };
-        },
       } as any,
     });
     try {
+      const readOnlyResponse = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/settings`,
+        'read-key',
+      );
+      expect(readOnlyResponse.status).toBe(401);
+
       const getResponse = await requestWithRetry(
         `http://127.0.0.1:${port}/v1/settings`,
         'admin-key',
@@ -854,26 +807,19 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(patchResponse.status).toBe(200);
+      expect(patchResponse.status).toBe(409);
       await expect(patchResponse.json()).resolves.toMatchObject({
-        settings: {
-          agent: { name: 'Kai', defaultModel: 'sonnet' },
-          memory: { enabled: true, dreaming: { enabled: true } },
+        error: {
+          code: 'SETTINGS_READ_ONLY',
         },
-        changed: [
-          'agent.name',
-          'agent.defaultModel',
-          'memory.dreaming.enabled',
-        ],
-        restartRequired: true,
       });
 
       const raw = fs.readFileSync(
         path.join(runtimeHome, 'settings.yaml'),
         'utf-8',
       );
-      expect(raw).toContain('name: Kai');
-      expect(raw).toContain('default_model: sonnet');
+      expect(raw).toContain('name: "Main Agent"');
+      expect(raw).toContain('default_model: ""');
 
       const unsupportedResponse = await requestWithRetry(
         `http://127.0.0.1:${port}/v1/settings`,
@@ -947,7 +893,6 @@ describe('control server runtime hardening', () => {
         registerGroup: vi.fn(),
         queue: { enqueueMessageCheck: vi.fn() },
         getRuntimeSettings: vi.fn(),
-        updateRuntimeSettings: vi.fn(),
       } as any,
     });
     try {
@@ -962,7 +907,12 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: 'SETTINGS_READ_ONLY',
+        },
+      });
     } finally {
       await handle.close();
     }
@@ -1000,10 +950,10 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(409);
       await expect(response.json()).resolves.toMatchObject({
         error: {
-          code: 'INVALID_REQUEST',
+          code: 'SETTINGS_READ_ONLY',
         },
       });
     } finally {

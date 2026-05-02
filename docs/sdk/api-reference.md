@@ -31,26 +31,16 @@ the launchd plist; keep the plist limited to `MYCLAW_HOME`, `HOME`, and `PATH`.
 
 ## Settings
 
-The typed settings API exposes only allowlisted non-secret runtime settings. It
-does not expose raw `settings.yaml`, channel tokens, database URLs, or arbitrary
-nested patches.
+The typed settings API is diagnostic/read-only for local personal mode. It
+exposes the public non-secret desired-state view but does not accept runtime
+configuration mutations. Use CLI commands, direct `settings.yaml` edits, or
+approved MyClaw admin tools for settings changes.
 
 ```ts
-client.settings.get()
-client.settings.update({
-  agent?: {
-    name?,
-    defaultModel?,
-  },
-  memory?: {
-    enabled?,
-    dreaming?: { enabled? },
-  },
-})
+client.settings.get();
 ```
 
-`PATCH /v1/settings` persists to `settings.yaml`, returns changed field paths,
-and reports `restartRequired`; it does not restart the runtime.
+`PATCH /v1/settings` returns `409 SETTINGS_READ_ONLY`.
 
 ## Capability Requests
 
@@ -402,8 +392,7 @@ client.channels.conversations.messages(conversationId, {
 Control API scopes:
 
 ```http
-GET    /v1/settings                                sessions:read
-PATCH  /v1/settings                                agents:admin
+GET    /v1/settings                                agents:admin
 GET    /v1/models                                  sessions:read
 
 GET    /v1/agents                                  agents:admin

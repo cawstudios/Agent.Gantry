@@ -1,26 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { UpdateRuntimeSettingsRequestSchema } from '@myclaw/contracts';
-
 import {
   authorizeControlRequest,
   type ControlRouteContext,
 } from '../handler-context.js';
-import { readJson, sendError, sendJson } from '../http.js';
-
-function parseUpdate(patch: unknown) {
-  const parsed = UpdateRuntimeSettingsRequestSchema.safeParse(patch);
-  if (!parsed.success) {
-    const message = parsed.error.issues
-      .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`)
-      .join('; ');
-    throw Object.assign(new Error(message || 'Invalid settings update'), {
-      statusCode: 400,
-      code: 'INVALID_REQUEST',
-    });
-  }
-  return parsed.data;
-}
+import { sendError, sendJson } from '../http.js';
 
 export async function handleSettingsRoutes(
   req: IncomingMessage,
@@ -31,7 +15,7 @@ export async function handleSettingsRoutes(
   if (pathname !== '/v1/settings') return false;
 
   if (req.method === 'GET') {
-    if (!authorizeControlRequest(req, res, ctx.keys, ['sessions:read'])) {
+    if (!authorizeControlRequest(req, res, ctx.keys, ['agents:admin'])) {
       return true;
     }
     sendJson(res, 200, { settings: ctx.getRuntimeSettings() });
@@ -42,31 +26,12 @@ export async function handleSettingsRoutes(
     if (!authorizeControlRequest(req, res, ctx.keys, ['agents:admin'])) {
       return true;
     }
-    try {
-      sendJson(
-        res,
-        200,
-        ctx.updateRuntimeSettings(parseUpdate(await readJson(req))),
-      );
-    } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'statusCode' in error &&
-        typeof error.statusCode === 'number'
-      ) {
-        sendError(
-          res,
-          error.statusCode,
-          'code' in error && typeof error.code === 'string'
-            ? error.code
-            : 'INVALID_REQUEST',
-          error instanceof Error ? error.message : 'Invalid settings update',
-        );
-        return true;
-      }
-      throw error;
-    }
+    sendError(
+      res,
+      409,
+      'SETTINGS_READ_ONLY',
+      'settings.yaml is the local desired-state source. Use CLI commands, direct file edits, or approved MyClaw admin tools for settings changes.',
+    );
     return true;
   }
 

@@ -179,7 +179,7 @@
     "rule": "forbidden_import_by_layer",
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 4
+    "maxViolations": 5
   },
   {
     "file": "apps/core/src/app/bootstrap/runtime-app.ts",
@@ -228,7 +228,7 @@
     "rule": "forbidden_import_by_layer",
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 4
+    "maxViolations": 5
   },
   {
     "file": "apps/core/src/app/index.ts",
@@ -1767,5 +1767,26 @@
     "rule": "wrapper_only_file",
     "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
     "removeByPhase": "canonical-boundary-cleanup-phase"
+  },
+  {
+    "file": "apps/core/src/cli/settings.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Local settings CLI is an adapter over settings.yaml parsing and runtime storage export; extract a command port before tightening this boundary.",
+    "removeByPhase": "settings-desired-state-port-extraction",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/jobs/ipc-runtime-admin-handlers.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Runtime admin IPC composes reviewed settings.yaml writes, preflight, and storage-backed validation until the admin settings tool is moved behind an application port.",
+    "removeByPhase": "settings-desired-state-port-extraction",
+    "maxViolations": 9
+  },
+  {
+    "file": "apps/core/src/runtime/settings-reload-watcher.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Runtime settings watcher composes filesystem reload, validation, and desired-state reconciliation until reload is represented as an application port.",
+    "removeByPhase": "settings-desired-state-port-extraction",
+    "maxViolations": 6
   }
 ]

@@ -1,4 +1,6 @@
 import fs from 'fs';
+import { createHash } from 'node:crypto';
+import path from 'path';
 
 import { isValidGroupFolder } from '../../platform/group-folder-rules.js';
 import { addControlSenderForAgent as addControlSenderToChannel } from './control-allowlist.js';
@@ -54,11 +56,41 @@ export function saveRuntimeSettings(
   runtimeHome: string,
   settings: RuntimeSettings,
 ): void {
-  fs.writeFileSync(
+  writeSettingsYamlAtomic(
     settingsFilePath(runtimeHome),
     renderRuntimeSettingsYaml(settings),
-    'utf-8',
   );
+}
+
+function writeSettingsYamlAtomic(filePath: string, content: string): void {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const tmpPath = path.join(
+    dir,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tmpPath, content, { mode: 0o600 });
+    fs.renameSync(tmpPath, filePath);
+  } finally {
+    if (fs.existsSync(tmpPath)) {
+      fs.rmSync(tmpPath, { force: true });
+    }
+  }
+}
+
+export function readRuntimeSettingsYaml(runtimeHome: string): string {
+  const filePath = settingsFilePath(runtimeHome);
+  if (!fs.existsSync(filePath)) {
+    return renderRuntimeSettingsYaml(createDefaultRuntimeSettings());
+  }
+  return fs.readFileSync(filePath, 'utf-8');
+}
+
+export function getRuntimeSettingsRevision(runtimeHome: string): string {
+  return `sha256:${createHash('sha256')
+    .update(readRuntimeSettingsYaml(runtimeHome))
+    .digest('hex')}`;
 }
 
 export function addControlSenderForAgent(

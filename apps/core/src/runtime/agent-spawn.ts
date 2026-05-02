@@ -104,6 +104,7 @@ export async function spawnAgent(
     input.isScheduledJob
       ? input.jobModelUseKind || 'recurringJob'
       : 'interactive',
+    group.folder,
   );
   const requestedModel = input.model || modelConfig.model;
   const resolvedModel = requestedModel

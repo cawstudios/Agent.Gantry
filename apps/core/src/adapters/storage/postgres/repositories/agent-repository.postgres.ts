@@ -146,6 +146,71 @@ export class PostgresAgentRepository implements AgentRepository {
     updatedAt: string;
   }): Promise<void> {
     await this.db.transaction(async (tx) => {
+      const [existingToolBindings, existingSkillBindings, existingMcpBindings] =
+        await Promise.all([
+          tx
+            .select()
+            .from(pgSchema.agentToolBindingsPostgres)
+            .where(
+              and(
+                eq(pgSchema.agentToolBindingsPostgres.appId, input.appId),
+                eq(pgSchema.agentToolBindingsPostgres.agentId, input.agentId),
+              ),
+            ),
+          tx
+            .select()
+            .from(pgSchema.agentSkillBindingsPostgres)
+            .where(
+              and(
+                eq(pgSchema.agentSkillBindingsPostgres.appId, input.appId),
+                eq(pgSchema.agentSkillBindingsPostgres.agentId, input.agentId),
+              ),
+            ),
+          tx
+            .select()
+            .from(pgSchema.agentMcpServerBindingsPostgres)
+            .where(
+              and(
+                eq(pgSchema.agentMcpServerBindingsPostgres.appId, input.appId),
+                eq(
+                  pgSchema.agentMcpServerBindingsPostgres.agentId,
+                  input.agentId,
+                ),
+              ),
+            ),
+        ]);
+      const nextToolIds = new Set(
+        input.toolBindings.map((binding) => String(binding.id)),
+      );
+      const nextSkillIds = new Set(
+        input.skillBindings.map((binding) => String(binding.id)),
+      );
+      const nextMcpIds = new Set(
+        input.mcpBindings.map((binding) => String(binding.id)),
+      );
+
+      for (const binding of existingToolBindings) {
+        if (nextToolIds.has(String(binding.id))) continue;
+        await tx
+          .update(pgSchema.agentToolBindingsPostgres)
+          .set({ status: 'disabled', updatedAt: input.updatedAt })
+          .where(eq(pgSchema.agentToolBindingsPostgres.id, binding.id));
+      }
+      for (const binding of existingSkillBindings) {
+        if (nextSkillIds.has(String(binding.id))) continue;
+        await tx
+          .update(pgSchema.agentSkillBindingsPostgres)
+          .set({ status: 'disabled', updatedAt: input.updatedAt })
+          .where(eq(pgSchema.agentSkillBindingsPostgres.id, binding.id));
+      }
+      for (const binding of existingMcpBindings) {
+        if (nextMcpIds.has(String(binding.id))) continue;
+        await tx
+          .update(pgSchema.agentMcpServerBindingsPostgres)
+          .set({ status: 'disabled', updatedAt: input.updatedAt })
+          .where(eq(pgSchema.agentMcpServerBindingsPostgres.id, binding.id));
+      }
+
       for (const binding of input.toolBindings) {
         await tx
           .insert(pgSchema.agentToolBindingsPostgres)
@@ -225,6 +290,24 @@ export class PostgresAgentRepository implements AgentRepository {
           });
       }
     });
+  }
+
+  async disableAgent(input: {
+    appId: Agent['appId'];
+    agentId: Agent['id'];
+    updatedAt: string;
+  }): Promise<Agent | null> {
+    const rows = await this.db
+      .update(pgSchema.agentsPostgres)
+      .set({ status: 'disabled', updatedAt: input.updatedAt })
+      .where(
+        and(
+          eq(pgSchema.agentsPostgres.appId, input.appId),
+          eq(pgSchema.agentsPostgres.id, input.agentId),
+        ),
+      )
+      .returning();
+    return (rows[0] as Agent | undefined) ?? null;
   }
 
   async findAgentsByDmAccess(input: {

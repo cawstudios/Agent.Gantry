@@ -9,6 +9,7 @@ import { ensureRuntimeLayoutDirectories } from '../../platform/runtime-layout.js
 import { ensurePromptProfileBootstrapped } from '../../runtime/prompt-profile.js';
 import { restoreRemoteControl } from '../../runtime/remote-control.js';
 import { initializeRuntimeStorage } from '../../adapters/storage/postgres/runtime-store.js';
+import { SettingsDesiredStateService } from '../../config/settings/desired-state-service.js';
 import { RuntimeApp } from './runtime-app.js';
 
 interface StartupDeps {
@@ -61,8 +62,38 @@ export async function runStartup(
   }
 
   const runtimeSettings = resolved.loadRuntimeSettings(MYCLAW_HOME);
-  await resolved.initializeRuntimeStorage();
+  const storage = await resolved.initializeRuntimeStorage();
   resolved.logger.info('Database initialized');
+  if (
+    runtimeSettings.desiredState &&
+    runtimeSettings.agents &&
+    process.env.MYCLAW_SKIP_RECONCILE_ON_STARTUP !== '1'
+  ) {
+    const desiredState = new SettingsDesiredStateService({
+      ops: storage.ops,
+      repositories: storage.repositories,
+    });
+    const reconcile = await desiredState.reconcile(runtimeSettings);
+    if (reconcile.invalidReferences.length > 0) {
+      throw new Error(
+        `settings desired state contains invalid references:\n${reconcile.invalidReferences.join('\n')}`,
+      );
+    }
+    if (reconcile.applied.length > 0 || reconcile.skipped.length > 0) {
+      resolved.logger.info(
+        {
+          applied: reconcile.applied,
+          skipped: reconcile.skipped,
+          authoritative: runtimeSettings.desiredState.authoritative,
+        },
+        'Settings desired state reconciled',
+      );
+    }
+  } else if (process.env.MYCLAW_SKIP_RECONCILE_ON_STARTUP === '1') {
+    resolved.logger.warn(
+      'Skipping settings desired-state startup reconcile because MYCLAW_SKIP_RECONCILE_ON_STARTUP=1',
+    );
+  }
   await app.loadState();
   await ensureFreshRuntimeHasMainAgent(
     app,

@@ -2,17 +2,12 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
-import type {
-  UpdateRuntimeSettingsRequest,
-  UpdateRuntimeSettingsResponse,
-} from '@myclaw/contracts';
 import type { RuntimeApp } from '../../app/bootstrap/runtime-app.js';
 import {
   MYCLAW_HOME,
   getControlEnvValue,
   getDefaultModelConfig,
   getPublicRuntimeSettings,
-  updatePublicRuntimeSettings,
 } from '../../config/index.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import { getRuntimeControlRepository } from '../../adapters/storage/postgres/runtime-store.js';
@@ -117,12 +112,6 @@ function createControlRequestHandler(ctx: ControlRouteContext) {
   };
 }
 
-function updateRuntimeSettings(
-  patch: UpdateRuntimeSettingsRequest,
-): UpdateRuntimeSettingsResponse {
-  return updatePublicRuntimeSettings(patch);
-}
-
 export function startControlServer(input: {
   app: RuntimeApp;
 }): ControlServerHandle {
@@ -152,7 +141,6 @@ export function startControlServer(input: {
     state,
     triggerRateLimiter: createRateLimiter(),
     getRuntimeSettings: () => getPublicRuntimeSettings(),
-    updateRuntimeSettings,
     getDefaultModelConfig,
   };
 

@@ -19,11 +19,7 @@ import type {
   SseEvent,
 } from './types.js';
 import { createIngressesClient } from './ingresses.js';
-export type {
-  RuntimeSettingsResponse,
-  UpdateRuntimeSettingsRequest,
-  UpdateRuntimeSettingsResponse,
-} from './settings.js';
+export type { RuntimeSettingsResponse } from './settings.js';
 import * as mcpServerClients from './mcp-servers.js';
 import type {
   CreateJobInput,
