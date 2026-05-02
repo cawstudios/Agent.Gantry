@@ -39,14 +39,15 @@ import {
 import { ChannelAdapter } from '../../channels/channel-provider.js';
 import { EnvRuntimeSecretProvider } from '../../adapters/credentials/env-runtime-secret-provider.js';
 import { RuntimeApp } from './runtime-app.js';
-import { ChannelAdministrationService } from '../../application/channels/channel-administration-service.js';
+import { ConversationAdministrationService } from '../../application/provider-conversations/conversation-administration-service.js';
+import { RuntimeSecretChannelMembershipValidator } from '../../channels/channel-membership-validation.js';
 import { AgentDmAccessAdministrationService } from '../../application/agents/agent-dm-access-administration-service.js';
 import type { Agent, AgentId } from '../../domain/agent/agent.js';
 import type { AppId } from '../../domain/app/app.js';
 import type {
-  AgentChannelBinding,
-  ChannelInstallationId,
-} from '../../domain/channel/channel.js';
+  AgentConversationBinding,
+  ProviderConnectionId,
+} from '../../domain/provider/provider.js';
 import type { ConversationId } from '../../domain/conversation/conversation.js';
 import type { MemorySubject } from '../../domain/memory/memory.js';
 import {
@@ -93,7 +94,7 @@ export function createChannelWiring(
 ): ChannelWiring {
   const resolved: ChannelWiringDeps = {
     appId: 'default' as AppId,
-    channelProviders: listChannelProviders(),
+    providerIds: listChannelProviders(),
     loadSenderAllowlist,
     loadSenderControlAllowlist,
     shouldDropMessage,
@@ -134,12 +135,12 @@ export function createChannelWiring(
         resolveDmAgent: (input) =>
           new AgentDmAccessAdministrationService({
             agents: getRuntimeStorage().repositories.agents,
-            channelInstallations:
-              getRuntimeStorage().repositories.channelInstallations,
+            providerConnections:
+              getRuntimeStorage().repositories.providerConnections,
             conversations: getRuntimeStorage().repositories.conversations,
           }).resolveDmAgent(input),
       },
-      saveDmAgentChannelBinding,
+      saveDmAgentConversationBinding,
     }),
     registeredGroups: () => app.getRegisteredGroups(),
     runtimeSettings: () => currentRuntimeSettings,
@@ -147,11 +148,11 @@ export function createChannelWiring(
       tryAcquire: tryAcquireRuntimeAdvisoryLease,
     },
     runtimeSecrets: resolved.runtimeSecrets,
-    isControlApproverAllowed: authorizeChannelControlApprover,
+    isControlApproverAllowed: authorizeConversationApprover,
   };
   let currentRuntimeSettings: RuntimeSettings;
 
-  async function saveDmAgentChannelBinding(input: {
+  async function saveDmAgentConversationBinding(input: {
     agent: Agent;
     chatJid: string;
     providerId: string;
@@ -159,13 +160,13 @@ export function createChannelWiring(
     const repositories = getRuntimeStorage().repositories;
     const now = new Date().toISOString();
     const conversationId = `conversation:${input.chatJid}` as ConversationId;
-    const channelInstallationId =
-      `channel-installation:default:${input.providerId}` as ChannelInstallationId;
-    await repositories.channelInstallations.saveAgentChannelBinding({
-      id: `agent-dm-binding:${safeIdPart(input.agent.id)}:${safeIdPart(input.chatJid)}` as AgentChannelBinding['id'],
+    const providerConnectionId =
+      `channel-providerConnection:default:${input.providerId}` as ProviderConnectionId;
+    await repositories.providerConnections.saveAgentConversationBinding({
+      id: `agent-dm-binding:${safeIdPart(input.agent.id)}:${safeIdPart(input.chatJid)}` as AgentConversationBinding['id'],
       appId: resolved.appId,
       agentId: input.agent.id as AgentId,
-      channelInstallationId,
+      providerConnectionId,
       conversationId,
       displayName: `${input.agent.name} DM`,
       status: 'active',
@@ -199,7 +200,7 @@ export function createChannelWiring(
     runtimeSettings: RuntimeSettings,
   ): Promise<void> {
     currentRuntimeSettings = runtimeSettings;
-    for (const provider of resolved.channelProviders) {
+    for (const provider of resolved.providerIds) {
       if (!provider.isEnabled(runtimeSettings)) {
         resolved.logger.info(
           { channel: provider.id },
@@ -269,7 +270,7 @@ export function createChannelWiring(
     const baseMessage = {
       id: messageId,
       chat_jid: jid,
-      channel_provider: provider,
+      provider: provider,
       sender: 'myclaw',
       sender_name: 'MyClaw',
       content: formatted,
@@ -444,7 +445,7 @@ export function createChannelWiring(
     };
   }
 
-  async function authorizeChannelControlApprover(input: {
+  async function authorizeConversationApprover(input: {
     providerId: string;
     channelJid: string;
     userId: string;
@@ -458,7 +459,7 @@ export function createChannelWiring(
       const repositories = getRuntimeStorage().repositories;
       const dmApprover = await new AgentDmAccessAdministrationService({
         agents: repositories.agents,
-        channelInstallations: repositories.channelInstallations,
+        providerConnections: repositories.providerConnections,
         conversations: repositories.conversations,
       }).isDmApproverAllowed({
         appId: resolved.appId,
@@ -468,27 +469,21 @@ export function createChannelWiring(
       });
       if (dmApprover !== null) return dmApprover;
 
-      const service = new ChannelAdministrationService({
-        channelInstallations: repositories.channelInstallations,
-        conversations: repositories.conversations,
+      const service = new ConversationAdministrationService(
+        {
+          providerConnections: repositories.providerConnections,
+          conversations: repositories.conversations,
+        },
+        new RuntimeSecretChannelMembershipValidator(
+          new EnvRuntimeSecretProvider(),
+        ),
+      );
+      return await service.isControlApproverAllowed({
+        appId: resolved.appId,
+        providerId: input.providerId as never,
+        channelJid: input.channelJid,
+        userId: input.userId,
       });
-      return await service
-        .isControlApproverAllowed({
-          appId: resolved.appId,
-          providerId: input.providerId as never,
-          channelJid: input.channelJid,
-          userId: input.userId,
-        })
-        .then((allowed) => {
-          if (allowed) return true;
-          const legacyAllowlist = resolved.loadSenderControlAllowlist();
-          return resolved.isSenderControlAllowed(
-            input.channelJid,
-            input.userId,
-            legacyAllowlist,
-            input.sourceGroup,
-          );
-        });
     } catch (err) {
       resolved.logger.warn(
         { err, providerId: input.providerId, sourceGroup: input.sourceGroup },

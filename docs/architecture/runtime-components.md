@@ -194,7 +194,7 @@ The control server owns:
 - job CRUD, trigger, pause, resume, and wait APIs
 - run lookup APIs
 - webhook registration, test, replay, purge, and delivery status
-- channel administration helpers such as Slack validation and sync
+- provider/conversation administration helpers such as Slack validation and sync
 
 The SDK is not a browser API. Backend apps use it from NestJS, Next.js route handlers, workers, CLIs, or other server processes. See [SDK API reference](../sdk/api-reference.md) for request shapes.
 

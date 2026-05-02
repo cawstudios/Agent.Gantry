@@ -7,11 +7,11 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  AgentChannelBindingListResponseSchema,
-  AgentChannelBindingResponseSchema,
-  ChannelInstallationListResponseSchema,
-  ChannelInstallationResponseSchema,
-  ChannelProviderListResponseSchema,
+  AgentConversationBindingListResponseSchema,
+  AgentConversationBindingResponseSchema,
+  ProviderConnectionListResponseSchema,
+  ProviderConnectionResponseSchema,
+  ProviderListResponseSchema,
   ConversationListResponseSchema,
   ConversationResponseSchema,
   ConversationThreadListResponseSchema,
@@ -233,18 +233,18 @@ const domainRepositories = {
     findAgentsByDmAccess: vi.fn(async () => []),
     replaceAgentCapabilityBindings: vi.fn(async () => undefined),
   },
-  channelInstallations: {
-    listChannelInstallations: vi.fn(async () => []),
-    getChannelInstallation: vi.fn(async () => null),
-    saveChannelInstallation: vi.fn(async () => undefined),
-    updateChannelInstallation: vi.fn(async () => null),
-    disableChannelInstallation: vi.fn(async () => null),
-    saveAgentChannelBinding: vi.fn(async () => undefined),
-    disableAgentChannelBinding: vi.fn(async () => null),
-    getAgentChannelBinding: vi.fn(async () => null),
+  providerConnections: {
+    listProviderConnections: vi.fn(async () => []),
+    getProviderConnection: vi.fn(async () => null),
+    saveProviderConnection: vi.fn(async () => undefined),
+    updateProviderConnection: vi.fn(async () => null),
+    disableProviderConnection: vi.fn(async () => null),
+    saveAgentConversationBinding: vi.fn(async () => undefined),
+    disableAgentConversationBinding: vi.fn(async () => null),
+    getAgentConversationBinding: vi.fn(async () => null),
     isAgentEnabledInConversation: vi.fn(async () => false),
-    listAgentChannelBindings: vi.fn(async () => []),
-    listAgentChannelBindingsByConversation: vi.fn(async () => []),
+    listAgentConversationBindings: vi.fn(async () => []),
+    listAgentConversationBindingsByConversation: vi.fn(async () => []),
   },
   conversations: {
     listConversations: vi.fn(async () => []),
@@ -257,8 +257,8 @@ const domainRepositories = {
     saveThread: vi.fn(async () => undefined),
     listThreads: vi.fn(async () => []),
     listParticipantExternalUserIds: vi.fn(async () => []),
-    listChannelControlApprovers: vi.fn(async () => []),
-    replaceChannelControlApprovers: vi.fn(async () => []),
+    listConversationApprovers: vi.fn(async () => []),
+    replaceConversationApprovers: vi.fn(async () => []),
   },
   messages: {
     listMessages: vi.fn(async () => []),
@@ -511,37 +511,37 @@ beforeEach(() => {
   domainRepositories.agents.replaceAgentCapabilityBindings.mockResolvedValue(
     undefined,
   );
-  domainRepositories.channelInstallations.listChannelInstallations.mockResolvedValue(
+  domainRepositories.providerConnections.listProviderConnections.mockResolvedValue(
     [],
   );
-  domainRepositories.channelInstallations.getChannelInstallation.mockResolvedValue(
+  domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
     null,
   );
-  domainRepositories.channelInstallations.saveChannelInstallation.mockResolvedValue(
+  domainRepositories.providerConnections.saveProviderConnection.mockResolvedValue(
     undefined,
   );
-  domainRepositories.channelInstallations.updateChannelInstallation.mockResolvedValue(
+  domainRepositories.providerConnections.updateProviderConnection.mockResolvedValue(
     null,
   );
-  domainRepositories.channelInstallations.disableChannelInstallation.mockResolvedValue(
+  domainRepositories.providerConnections.disableProviderConnection.mockResolvedValue(
     null,
   );
-  domainRepositories.channelInstallations.saveAgentChannelBinding.mockResolvedValue(
+  domainRepositories.providerConnections.saveAgentConversationBinding.mockResolvedValue(
     undefined,
   );
-  domainRepositories.channelInstallations.disableAgentChannelBinding.mockResolvedValue(
+  domainRepositories.providerConnections.disableAgentConversationBinding.mockResolvedValue(
     null,
   );
-  domainRepositories.channelInstallations.getAgentChannelBinding.mockResolvedValue(
+  domainRepositories.providerConnections.getAgentConversationBinding.mockResolvedValue(
     null,
   );
-  domainRepositories.channelInstallations.isAgentEnabledInConversation.mockResolvedValue(
+  domainRepositories.providerConnections.isAgentEnabledInConversation.mockResolvedValue(
     false,
   );
-  domainRepositories.channelInstallations.listAgentChannelBindings.mockResolvedValue(
+  domainRepositories.providerConnections.listAgentConversationBindings.mockResolvedValue(
     [],
   );
-  domainRepositories.channelInstallations.listAgentChannelBindingsByConversation.mockResolvedValue(
+  domainRepositories.providerConnections.listAgentConversationBindingsByConversation.mockResolvedValue(
     [],
   );
   domainRepositories.conversations.listConversations.mockResolvedValue([]);
@@ -561,10 +561,10 @@ beforeEach(() => {
   domainRepositories.conversations.listParticipantExternalUserIds.mockResolvedValue(
     [],
   );
-  domainRepositories.conversations.listChannelControlApprovers.mockResolvedValue(
+  domainRepositories.conversations.listConversationApprovers.mockResolvedValue(
     [],
   );
-  domainRepositories.conversations.replaceChannelControlApprovers.mockResolvedValue(
+  domainRepositories.conversations.replaceConversationApprovers.mockResolvedValue(
     [],
   );
   domainRepositories.messages.listMessages.mockResolvedValue([]);
@@ -1494,7 +1494,7 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects channel routes when the token lacks channel scopes', async () => {
+  it('rejects provider routes when the token lacks provider scopes', async () => {
     const port = await reservePort();
     process.env.MYCLAW_CONTROL_PORT = String(port);
     process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
@@ -1514,7 +1514,7 @@ describe('control server runtime hardening', () => {
 
     try {
       const response = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/channel-providers`,
+        `http://127.0.0.1:${port}/v1/providers`,
         'sessions-only-token',
       );
       expect(response.status).toBe(401);
@@ -1523,14 +1523,14 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects raw channel secrets in installation config', async () => {
+  it('rejects raw channel secrets in providerConnection config', async () => {
     const port = await reservePort();
     process.env.MYCLAW_CONTROL_PORT = String(port);
     process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
-        token: 'channels-admin-token',
-        scopes: ['channels:admin'],
+        token: 'providers-admin-token',
+        scopes: ['providers:admin'],
         appId: 'app-one',
       },
     ]);
@@ -1543,8 +1543,8 @@ describe('control server runtime hardening', () => {
 
     try {
       const response = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/channel-installations`,
-        'channels-admin-token',
+        `http://127.0.0.1:${port}/v1/provider-connections`,
+        'providers-admin-token',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1558,21 +1558,21 @@ describe('control server runtime hardening', () => {
       );
       expect(response.status).toBe(400);
       expect(
-        domainRepositories.channelInstallations.saveChannelInstallation,
+        domainRepositories.providerConnections.saveProviderConnection,
       ).not.toHaveBeenCalled();
     } finally {
       await handle.close();
     }
   });
 
-  it('rejects placeholder channel installation creation', async () => {
+  it('rejects placeholder provider connection creation', async () => {
     const port = await reservePort();
     process.env.MYCLAW_CONTROL_PORT = String(port);
     process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
-        token: 'channels-admin-token',
-        scopes: ['channels:admin'],
+        token: 'providers-admin-token',
+        scopes: ['providers:admin'],
         appId: 'app-one',
       },
     ]);
@@ -1585,8 +1585,8 @@ describe('control server runtime hardening', () => {
 
     try {
       const response = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/channel-installations`,
-        'channels-admin-token',
+        `http://127.0.0.1:${port}/v1/provider-connections`,
+        'providers-admin-token',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1599,27 +1599,27 @@ describe('control server runtime hardening', () => {
       );
       expect(response.status).toBe(501);
       expect(
-        domainRepositories.channelInstallations.saveChannelInstallation,
+        domainRepositories.providerConnections.saveProviderConnection,
       ).not.toHaveBeenCalled();
     } finally {
       await handle.close();
     }
   });
 
-  it('rejects discovery for disabled channel installations', async () => {
+  it('rejects discovery for disabled provider connections', async () => {
     const port = await reservePort();
     process.env.MYCLAW_CONTROL_PORT = String(port);
     process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
-        token: 'channels-admin-token',
-        scopes: ['channels:admin'],
+        token: 'providers-admin-token',
+        scopes: ['providers:admin'],
         appId: 'app-one',
       },
     ]);
-    domainRepositories.channelInstallations.getChannelInstallation.mockResolvedValue(
+    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
       {
-        id: 'installation-1',
+        id: 'providerConnection-1',
         appId: 'app-one',
         providerId: 'slack',
         label: 'Slack',
@@ -1639,8 +1639,8 @@ describe('control server runtime hardening', () => {
 
     try {
       const response = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/channel-installations/installation-1/discover`,
-        'channels-admin-token',
+        `http://127.0.0.1:${port}/v1/provider-connections/providerConnection-1/discover-conversations`,
+        'providers-admin-token',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1665,10 +1665,10 @@ describe('control server runtime hardening', () => {
     process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
-        token: 'channel-all-token',
+        token: 'provider-all-token',
         scopes: [
-          'channels:read',
-          'channels:admin',
+          'providers:read',
+          'providers:admin',
           'conversations:read',
           'messages:read',
           'agents:admin',
@@ -1677,8 +1677,8 @@ describe('control server runtime hardening', () => {
       },
     ]);
     const iso = new Date(0).toISOString();
-    const installation = {
-      id: 'installation-1',
+    const providerConnection = {
+      id: 'providerConnection-1',
       appId: 'app-one',
       providerId: 'app',
       label: 'App',
@@ -1689,19 +1689,19 @@ describe('control server runtime hardening', () => {
       updatedAt: iso,
     };
     const disabledInstallation = {
-      ...installation,
+      ...providerConnection,
       status: 'disabled',
       updatedAt: '2026-04-27T00:00:01.000Z',
     };
     const updatedInstallation = {
-      ...installation,
+      ...providerConnection,
       label: 'App workspace',
       updatedAt: '2026-04-27T00:00:02.000Z',
     };
     const conversation = {
       id: 'conversation-1',
       appId: 'app-one',
-      channelInstallationId: 'installation-1',
+      providerConnectionId: 'providerConnection-1',
       externalRef: { kind: 'conversation', value: 'app-conv-1' },
       kind: 'channel',
       title: 'engineering',
@@ -1735,7 +1735,7 @@ describe('control server runtime hardening', () => {
       id: 'binding-1',
       appId: 'app-one',
       agentId: 'agent-1',
-      channelInstallationId: 'installation-1',
+      providerConnectionId: 'providerConnection-1',
       conversationId: 'conversation-1',
       displayName: 'engineering',
       status: 'disabled',
@@ -1753,16 +1753,16 @@ describe('control server runtime hardening', () => {
       updatedAt: iso,
     };
 
-    domainRepositories.channelInstallations.listChannelInstallations.mockResolvedValue(
-      [installation],
+    domainRepositories.providerConnections.listProviderConnections.mockResolvedValue(
+      [providerConnection],
     );
-    domainRepositories.channelInstallations.getChannelInstallation.mockResolvedValue(
-      installation,
+    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
+      providerConnection,
     );
-    domainRepositories.channelInstallations.updateChannelInstallation.mockResolvedValue(
+    domainRepositories.providerConnections.updateProviderConnection.mockResolvedValue(
       updatedInstallation,
     );
-    domainRepositories.channelInstallations.disableChannelInstallation.mockResolvedValue(
+    domainRepositories.providerConnections.disableProviderConnection.mockResolvedValue(
       disabledInstallation,
     );
     domainRepositories.conversations.listConversations.mockResolvedValue([
@@ -1774,13 +1774,13 @@ describe('control server runtime hardening', () => {
     domainRepositories.conversations.getThread.mockResolvedValue(thread);
     domainRepositories.conversations.listThreads.mockResolvedValue([thread]);
     domainRepositories.messages.listMessages.mockResolvedValue([message]);
-    domainRepositories.channelInstallations.listAgentChannelBindings.mockResolvedValue(
+    domainRepositories.providerConnections.listAgentConversationBindings.mockResolvedValue(
       [disabledBinding],
     );
-    domainRepositories.channelInstallations.getAgentChannelBinding.mockResolvedValue(
+    domainRepositories.providerConnections.getAgentConversationBinding.mockResolvedValue(
       disabledBinding,
     );
-    domainRepositories.channelInstallations.disableAgentChannelBinding.mockResolvedValue(
+    domainRepositories.providerConnections.disableAgentConversationBinding.mockResolvedValue(
       disabledBinding,
     );
 
@@ -1798,7 +1798,7 @@ describe('control server runtime hardening', () => {
     ) {
       const response = await requestWithRetry(
         `http://127.0.0.1:${port}${path}`,
-        'channel-all-token',
+        'provider-all-token',
         init,
       );
       expect(response.status).toBe(expectedStatus);
@@ -1807,17 +1807,17 @@ describe('control server runtime hardening', () => {
 
     try {
       expect(
-        ChannelProviderListResponseSchema.parse(
-          await jsonFor('/v1/channel-providers'),
+        ProviderListResponseSchema.parse(
+          await jsonFor('/v1/providers'),
         ).providers.map((provider) => provider.id),
       ).toEqual(expect.arrayContaining(['app', 'teams', 'whatsapp']));
 
-      ChannelInstallationListResponseSchema.parse(
-        await jsonFor('/v1/channel-installations'),
+      ProviderConnectionListResponseSchema.parse(
+        await jsonFor('/v1/provider-connections'),
       );
-      ChannelInstallationResponseSchema.parse(
+      ProviderConnectionResponseSchema.parse(
         await jsonFor(
-          '/v1/channel-installations',
+          '/v1/provider-connections',
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -1831,35 +1831,40 @@ describe('control server runtime hardening', () => {
           201,
         ),
       );
-      ChannelInstallationResponseSchema.parse(
-        await jsonFor('/v1/channel-installations/installation-1'),
+      ProviderConnectionResponseSchema.parse(
+        await jsonFor('/v1/provider-connections/providerConnection-1'),
       );
-      ChannelInstallationResponseSchema.parse(
-        await jsonFor('/v1/channel-installations/installation-1', {
+      ProviderConnectionResponseSchema.parse(
+        await jsonFor('/v1/provider-connections/providerConnection-1', {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ label: 'App workspace' }),
         }),
       );
       expect(
-        ChannelInstallationResponseSchema.parse(
+        ProviderConnectionResponseSchema.parse(
           (
-            await jsonFor('/v1/channel-installations/installation-1', {
+            await jsonFor('/v1/provider-connections/providerConnection-1', {
               method: 'DELETE',
             })
-          ).installation,
+          ).providerConnection,
         ).status,
       ).toBe('disabled');
       ConversationListResponseSchema.parse(
-        await jsonFor('/v1/channel-installations/installation-1/discover', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ limit: 10 }),
-        }),
+        await jsonFor(
+          '/v1/provider-connections/providerConnection-1/discover-conversations',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ limit: 10 }),
+          },
+        ),
       );
 
       ConversationListResponseSchema.parse(
-        await jsonFor('/v1/conversations?channelInstallationId=installation-1'),
+        await jsonFor(
+          '/v1/conversations?providerConnectionId=providerConnection-1',
+        ),
       );
       ConversationResponseSchema.parse(
         await jsonFor('/v1/conversations/conversation-1'),
@@ -1879,35 +1884,41 @@ describe('control server runtime hardening', () => {
         limit: 10,
       });
 
-      AgentChannelBindingListResponseSchema.parse(
-        await jsonFor('/v1/agents/agent-1/channel-bindings'),
+      AgentConversationBindingListResponseSchema.parse(
+        await jsonFor('/v1/agents/agent-1/conversation-bindings'),
       );
       expect(
-        AgentChannelBindingResponseSchema.parse(
-          await jsonFor('/v1/agents/agent-1/channel-bindings/conversation-1', {
-            method: 'PUT',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              triggerMode: 'mention',
-              memoryScope: 'conversation',
-            }),
-          }),
+        AgentConversationBindingResponseSchema.parse(
+          await jsonFor(
+            '/v1/agents/agent-1/conversation-bindings/conversation-1',
+            {
+              method: 'PUT',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                triggerMode: 'mention',
+                memoryScope: 'conversation',
+              }),
+            },
+          ),
         ).status,
       ).toBe('active');
       expect(
-        AgentChannelBindingResponseSchema.parse(
-          await jsonFor('/v1/agents/agent-1/channel-bindings/conversation-1', {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ displayName: 'Engineering Bot' }),
-          }),
+        AgentConversationBindingResponseSchema.parse(
+          await jsonFor(
+            '/v1/agents/agent-1/conversation-bindings/conversation-1',
+            {
+              method: 'PATCH',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ displayName: 'Engineering Bot' }),
+            },
+          ),
         ).status,
       ).toBe('disabled');
       expect(
-        AgentChannelBindingResponseSchema.parse(
+        AgentConversationBindingResponseSchema.parse(
           (
             await jsonFor(
-              '/v1/agents/agent-1/channel-bindings/conversation-1',
+              '/v1/agents/agent-1/conversation-bindings/conversation-1',
               {
                 method: 'DELETE',
               },
@@ -2061,20 +2072,20 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('manages channel control allowlist without channel-owned DM access', async () => {
+  it('manages conversation approvers without conversation-owned DM access', async () => {
     const port = await reservePort();
     process.env.MYCLAW_CONTROL_PORT = String(port);
     process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
-        token: 'channels-admin-token',
-        scopes: ['channels:read', 'channels:admin'],
+        token: 'providers-admin-token',
+        scopes: ['conversations:read', 'conversations:admin'],
         appId: 'app-one',
       },
     ]);
     const iso = new Date(0).toISOString();
-    const installation = {
-      id: 'installation-1',
+    const providerConnection = {
+      id: 'providerConnection-1',
       appId: 'app-one',
       providerId: 'app',
       label: 'App',
@@ -2087,7 +2098,7 @@ describe('control server runtime hardening', () => {
     const conversation = {
       id: 'conversation-1',
       appId: 'app-one',
-      channelInstallationId: 'installation-1',
+      providerConnectionId: 'providerConnection-1',
       externalRef: { kind: 'conversation', value: 'app-conv-1' },
       kind: 'channel',
       title: 'engineering',
@@ -2095,8 +2106,8 @@ describe('control server runtime hardening', () => {
       createdAt: iso,
       updatedAt: iso,
     };
-    domainRepositories.channelInstallations.getChannelInstallation.mockResolvedValue(
-      installation,
+    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
+      providerConnection,
     );
     domainRepositories.conversations.getConversation.mockResolvedValue(
       conversation,
@@ -2104,7 +2115,7 @@ describe('control server runtime hardening', () => {
     domainRepositories.conversations.listParticipantExternalUserIds.mockResolvedValue(
       ['user-2'],
     );
-    domainRepositories.conversations.listChannelControlApprovers.mockResolvedValueOnce(
+    domainRepositories.conversations.listConversationApprovers.mockResolvedValueOnce(
       [
         {
           id: 'approver-1',
@@ -2116,7 +2127,7 @@ describe('control server runtime hardening', () => {
         },
       ],
     );
-    domainRepositories.conversations.replaceChannelControlApprovers.mockResolvedValue(
+    domainRepositories.conversations.replaceConversationApprovers.mockResolvedValue(
       [
         {
           id: 'approver-2',
@@ -2137,17 +2148,17 @@ describe('control server runtime hardening', () => {
 
     try {
       const adminResponse = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/channels/conversation-1/admin`,
-        'channels-admin-token',
+        `http://127.0.0.1:${port}/v1/conversations/conversation-1/approvers`,
+        'providers-admin-token',
       );
       expect(adminResponse.status).toBe(200);
       expect(await adminResponse.json()).toMatchObject({
-        controlAllowlist: { userIds: ['user-1'] },
+        approvers: { userIds: ['user-1'] },
       });
 
       const updateResponse = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/channels/conversation-1/control-allowlist`,
-        'channels-admin-token',
+        `http://127.0.0.1:${port}/v1/conversations/conversation-1/approvers`,
+        'providers-admin-token',
         {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
@@ -2156,15 +2167,15 @@ describe('control server runtime hardening', () => {
       );
       expect(updateResponse.status).toBe(200);
       expect(await updateResponse.json()).toEqual({
-        controlAllowlist: { userIds: ['user-2'] },
+        approvers: { userIds: ['user-2'] },
       });
       expect(
-        domainRepositories.conversations.replaceChannelControlApprovers,
+        domainRepositories.conversations.replaceConversationApprovers,
       ).toHaveBeenCalledWith(
         expect.objectContaining({ externalUserIds: ['user-2'] }),
       );
       expect(
-        domainRepositories.channelInstallations.updateChannelInstallation,
+        domainRepositories.providerConnections.updateProviderConnection,
       ).not.toHaveBeenCalled();
     } finally {
       await handle.close();
@@ -2173,9 +2184,9 @@ describe('control server runtime hardening', () => {
 
   it.each([
     {
-      name: 'channels:admin',
-      path: '/v1/channel-installations',
-      tokenScopes: ['channels:read'],
+      name: 'providers:admin',
+      path: '/v1/provider-connections',
+      tokenScopes: ['providers:read'],
       init: {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -2189,7 +2200,7 @@ describe('control server runtime hardening', () => {
     {
       name: 'conversations:read',
       path: '/v1/conversations',
-      tokenScopes: ['channels:read'],
+      tokenScopes: ['providers:read'],
     },
     {
       name: 'messages:read',
@@ -2197,14 +2208,14 @@ describe('control server runtime hardening', () => {
       tokenScopes: ['conversations:read'],
     },
     {
-      name: 'channels:read for binding list',
-      path: '/v1/agents/agent-1/channel-bindings',
+      name: 'conversations:read for binding list',
+      path: '/v1/agents/agent-1/conversation-bindings',
       tokenScopes: ['agents:admin'],
     },
     {
       name: 'agents:admin',
-      path: '/v1/agents/agent-1/channel-bindings/conversation-1',
-      tokenScopes: ['channels:read'],
+      path: '/v1/agents/agent-1/conversation-bindings/conversation-1',
+      tokenScopes: ['providers:read'],
       init: {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -2212,9 +2223,9 @@ describe('control server runtime hardening', () => {
       },
     },
     {
-      name: 'channels:admin for channel control allowlist',
-      path: '/v1/channels/conversation-1/control-allowlist',
-      tokenScopes: ['channels:read'],
+      name: 'conversations:admin for conversation approvers',
+      path: '/v1/conversations/conversation-1/approvers',
+      tokenScopes: ['conversations:read'],
       init: {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -2268,7 +2279,7 @@ describe('control server runtime hardening', () => {
     domainRepositories.conversations.getConversation.mockResolvedValue({
       id: 'conversation-1',
       appId: 'app-one',
-      channelInstallationId: 'installation-1',
+      providerConnectionId: 'providerConnection-1',
       kind: 'channel',
       title: 'engineering',
       status: 'active',
@@ -2311,7 +2322,7 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('enables and disables an agent channel binding through repository state', async () => {
+  it('enables and disables an agent conversation binding through repository state', async () => {
     const port = await reservePort();
     process.env.MYCLAW_CONTROL_PORT = String(port);
     process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
@@ -2325,16 +2336,16 @@ describe('control server runtime hardening', () => {
     domainRepositories.conversations.getConversation.mockResolvedValue({
       id: 'conversation-1',
       appId: 'app-one',
-      channelInstallationId: 'installation-1',
+      providerConnectionId: 'providerConnection-1',
       kind: 'channel',
       title: 'engineering',
       status: 'active',
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
     });
-    domainRepositories.channelInstallations.getChannelInstallation.mockResolvedValue(
+    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
       {
-        id: 'installation-1',
+        id: 'providerConnection-1',
         appId: 'app-one',
         providerId: 'slack',
         label: 'Slack',
@@ -2345,12 +2356,12 @@ describe('control server runtime hardening', () => {
         updatedAt: new Date(0).toISOString(),
       },
     );
-    domainRepositories.channelInstallations.disableAgentChannelBinding.mockResolvedValue(
+    domainRepositories.providerConnections.disableAgentConversationBinding.mockResolvedValue(
       {
         id: 'binding-1',
         appId: 'app-one',
         agentId: 'agent-1',
-        channelInstallationId: 'installation-1',
+        providerConnectionId: 'providerConnection-1',
         conversationId: 'conversation-1',
         displayName: 'engineering',
         status: 'disabled',
@@ -2377,7 +2388,7 @@ describe('control server runtime hardening', () => {
 
     try {
       const enableResponse = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/channel-bindings/conversation-1`,
+        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
         'agents-admin-token',
         {
           method: 'PUT',
@@ -2390,7 +2401,7 @@ describe('control server runtime hardening', () => {
       );
       expect(enableResponse.status).toBe(200);
       expect(
-        domainRepositories.channelInstallations.saveAgentChannelBinding,
+        domainRepositories.providerConnections.saveAgentConversationBinding,
       ).toHaveBeenCalledWith(
         expect.objectContaining({
           agentId: 'agent-1',
@@ -2402,13 +2413,13 @@ describe('control server runtime hardening', () => {
       );
 
       const disableResponse = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/channel-bindings/conversation-1`,
+        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
         'agents-admin-token',
         { method: 'DELETE' },
       );
       expect(disableResponse.status).toBe(200);
       expect(
-        domainRepositories.channelInstallations.disableAgentChannelBinding,
+        domainRepositories.providerConnections.disableAgentConversationBinding,
       ).toHaveBeenCalledWith(
         expect.objectContaining({
           agentId: 'agent-1',
@@ -2420,7 +2431,7 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects invalid or missing agent channel binding updates', async () => {
+  it('rejects invalid or missing agent conversation binding updates', async () => {
     const port = await reservePort();
     process.env.MYCLAW_CONTROL_PORT = String(port);
     process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
@@ -2434,16 +2445,16 @@ describe('control server runtime hardening', () => {
     domainRepositories.conversations.getConversation.mockResolvedValue({
       id: 'conversation-1',
       appId: 'app-one',
-      channelInstallationId: 'installation-1',
+      providerConnectionId: 'providerConnection-1',
       kind: 'channel',
       title: 'engineering',
       status: 'active',
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
     });
-    domainRepositories.channelInstallations.getChannelInstallation.mockResolvedValue(
+    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
       {
-        id: 'installation-1',
+        id: 'providerConnection-1',
         appId: 'app-one',
         providerId: 'slack',
         label: 'Slack',
@@ -2463,7 +2474,7 @@ describe('control server runtime hardening', () => {
 
     try {
       const missingPatch = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/channel-bindings/conversation-1`,
+        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
         'agents-admin-token',
         {
           method: 'PATCH',
@@ -2474,14 +2485,14 @@ describe('control server runtime hardening', () => {
       expect(missingPatch.status).toBe(404);
 
       const missingDelete = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/channel-bindings/conversation-1`,
+        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
         'agents-admin-token',
         { method: 'DELETE' },
       );
       expect(missingDelete.status).toBe(404);
 
       const missingUserSubject = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/channel-bindings/conversation-1`,
+        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
         'agents-admin-token',
         {
           method: 'PUT',
@@ -2491,7 +2502,7 @@ describe('control server runtime hardening', () => {
       );
       expect(missingUserSubject.status).toBe(400);
       expect(
-        domainRepositories.channelInstallations.saveAgentChannelBinding,
+        domainRepositories.providerConnections.saveAgentConversationBinding,
       ).not.toHaveBeenCalled();
     } finally {
       await handle.close();

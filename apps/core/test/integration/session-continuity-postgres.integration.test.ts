@@ -66,7 +66,7 @@ maybeDescribe('Postgres memory continuity', () => {
     });
   });
 
-  it('uses active channel binding agent identity for turn context', async () => {
+  it('uses active conversation binding agent identity for turn context', async () => {
     const chatJid = 'tg:bound-skill-agent';
 
     await runtime.ops.setRegisteredGroup(chatJid, {

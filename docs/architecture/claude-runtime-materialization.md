@@ -121,15 +121,16 @@ binds, or activates the server in the current run.
 The same SDK `PreToolUse` hook blocks direct agent edits to MCP capability
 configuration such as `.mcp.json`, `mcpServers` settings, permission settings,
 and `claude mcp add*` shell commands. Agent-created MCP capabilities must go
-through `mcp__myclaw__request_mcp_server`, same-channel review, binding, and
-next-run materialization.
+through `mcp__myclaw__request_mcp_server`, same-conversation review, binding,
+and next-run materialization.
 
-Same-channel MCP prompts are only a delivery surface. The deciding user must
-still be in the Channel control allowlist for the origin Channel. Normal chat
+Same-conversation MCP prompts are only a delivery surface. The deciding user
+must still be listed as a conversation approver for the origin conversation and
+must be a current member when they click approve or reject. Normal chat
 participants cannot grant persistent capabilities. The runner includes the
-origin chat JID/thread in IPC, and the host rejects the draft before review if
-that chat is not registered to the requesting agent folder or if the request
-tries to route approval to another bound chat.
+origin conversation/thread in IPC, and the host rejects the draft before review
+if that conversation is not registered to the requesting agent folder or if the
+request tries to route approval to another bound conversation.
 
 Remote third-party MCP servers must use HTTPS and cannot target loopback,
 private, link-local, local, or cloud metadata hosts. MyClaw also resolves

@@ -8,7 +8,7 @@ import {
 } from './conversations.js';
 import { workspaceSnapshotsPostgres } from './sandbox.js';
 
-export const channelProvidersPostgres = pgTable('channel_providers', {
+export const providersPostgres = pgTable('providers', {
   id: text('id').primaryKey(),
   displayName: text('display_name').notNull(),
   capabilityFlagsJson: text('capability_flags_json').notNull().default('[]'),
@@ -17,8 +17,8 @@ export const channelProvidersPostgres = pgTable('channel_providers', {
     .defaultNow(),
 });
 
-export const channelInstallationsPostgres = pgTable(
-  'channel_installations',
+export const providerConnectionsPostgres = pgTable(
+  'provider_connections',
   {
     id: text('id').primaryKey(),
     appId: text('app_id')
@@ -26,7 +26,7 @@ export const channelInstallationsPostgres = pgTable(
       .references(() => appsPostgres.id, { onDelete: 'cascade' }),
     providerId: text('provider_id')
       .notNull()
-      .references(() => channelProvidersPostgres.id),
+      .references(() => providersPostgres.id),
     externalRefJson: text('external_ref_json'),
     label: text('label').notNull(),
     status: text('status').notNull().default('active'),
@@ -42,15 +42,15 @@ export const channelInstallationsPostgres = pgTable(
       .defaultNow(),
   },
   (table) => ({
-    providerIdx: index('idx_channel_installations_provider').on(
+    providerIdx: index('idx_provider_connections_provider').on(
       table.appId,
       table.providerId,
     ),
   }),
 );
 
-export const agentChannelBindingsPostgres = pgTable(
-  'agent_channel_bindings',
+export const agentConversationBindingsPostgres = pgTable(
+  'agent_conversation_bindings',
   {
     id: text('id').primaryKey(),
     appId: text('app_id')
@@ -59,9 +59,9 @@ export const agentChannelBindingsPostgres = pgTable(
     agentId: text('agent_id')
       .notNull()
       .references(() => agentsPostgres.id, { onDelete: 'cascade' }),
-    channelInstallationId: text('channel_installation_id')
+    providerConnectionId: text('provider_connection_id')
       .notNull()
-      .references(() => channelInstallationsPostgres.id, {
+      .references(() => providerConnectionsPostgres.id, {
         onDelete: 'cascade',
       }),
     conversationId: text('conversation_id')
@@ -93,7 +93,7 @@ export const agentChannelBindingsPostgres = pgTable(
       .defaultNow(),
   },
   (table) => ({
-    conversationIdx: index('idx_agent_channel_bindings_conversation').on(
+    conversationIdx: index('idx_agent_conversation_bindings_conversation').on(
       table.conversationId,
       table.threadId,
     ),

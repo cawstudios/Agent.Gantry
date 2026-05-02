@@ -203,7 +203,7 @@ describe('SettingsDesiredStateService', () => {
     );
   });
 
-  it('exports colliding channel bindings without overwriting one another', async () => {
+  it('exports colliding conversation bindings without overwriting one another', async () => {
     const settings = createDefaultRuntimeSettings();
     const service = new SettingsDesiredStateService({
       ops: makeOps({
@@ -289,11 +289,11 @@ describe('SettingsDesiredStateService', () => {
     const before = createDefaultRuntimeSettings();
     const after = createDefaultRuntimeSettings();
     after.agent.defaultModel = 'sonnet';
-    after.channels.telegram.enabled = !before.channels.telegram.enabled;
+    after.providers.telegram.enabled = !before.providers.telegram.enabled;
 
     expect(classifySettingsChanges(before, after)).toEqual({
       liveApplied: ['agent_defaults'],
-      restartRequired: ['channels'],
+      restartRequired: ['providers'],
     });
   });
 

@@ -7,9 +7,10 @@ export type Scope =
   | 'sessions:write'
   | 'jobs:read'
   | 'jobs:write'
-  | 'channels:read'
-  | 'channels:admin'
+  | 'providers:read'
+  | 'providers:admin'
   | 'conversations:read'
+  | 'conversations:admin'
   | 'messages:read'
   | 'agents:admin'
   | 'skills:read'
@@ -36,9 +37,10 @@ const ALL_SCOPES: Scope[] = [
   'sessions:write',
   'jobs:read',
   'jobs:write',
-  'channels:read',
-  'channels:admin',
+  'providers:read',
+  'providers:admin',
   'conversations:read',
+  'conversations:admin',
   'messages:read',
   'agents:admin',
   'skills:read',

@@ -7,8 +7,8 @@ ALTER TABLE permission_decisions
 DROP INDEX IF EXISTS idx_messages_external_redelivery_unique;
 CREATE UNIQUE INDEX idx_messages_external_redelivery_unique
   ON messages(
-    channel_provider,
-    channel_installation_id,
+    provider,
+    provider_connection_id,
     conversation_id,
     COALESCE(thread_id, ''),
     external_message_id

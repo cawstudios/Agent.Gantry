@@ -1,5 +1,5 @@
-import { getChannelIds, parseRuntimeChannel } from './channel-utils.js';
-import type { RuntimeChannel } from '../config/settings/runtime-settings.js';
+import { getProviderIds, parseRuntimeProvider } from './provider-utils.js';
+import type { RuntimeProviderId } from './provider-utils.js';
 import type { ChatAllowlistEntry } from '../config/settings/sender-allowlist.js';
 
 export interface GroupAddOptions {
@@ -32,13 +32,13 @@ export interface GroupPolicyOptions {
 }
 
 export interface GroupPolicyDefaultOptions {
-  channel?: RuntimeChannel;
+  channel?: RuntimeProviderId;
   allow?: '*' | string[];
   mode?: ChatAllowlistEntry['mode'];
 }
 
 export interface GroupPolicyShowOptions {
-  channel?: RuntimeChannel;
+  channel?: RuntimeProviderId;
 }
 
 function parseBooleanFlag(raw: string): boolean | null {
@@ -361,10 +361,10 @@ export function parseGroupPolicyDefaultArgs(
     const arg = args[i];
     if (arg === '--channel') {
       const raw = args[i + 1] || '';
-      const channel = parseRuntimeChannel(raw);
+      const channel = parseRuntimeProvider(raw);
       if (!channel) {
         return {
-          error: `Invalid --channel. Use one of: ${getChannelIds().join(', ')}.`,
+          error: `Invalid --channel. Use one of: ${getProviderIds().join(', ')}.`,
         };
       }
       options.channel = channel;
@@ -372,10 +372,10 @@ export function parseGroupPolicyDefaultArgs(
       continue;
     }
     if (arg.startsWith('--channel=')) {
-      const channel = parseRuntimeChannel(arg.slice('--channel='.length));
+      const channel = parseRuntimeProvider(arg.slice('--channel='.length));
       if (!channel) {
         return {
-          error: `Invalid --channel. Use one of: ${getChannelIds().join(', ')}.`,
+          error: `Invalid --channel. Use one of: ${getProviderIds().join(', ')}.`,
         };
       }
       options.channel = channel;
@@ -433,7 +433,7 @@ export function parseGroupPolicyDefaultArgs(
 
   if (!options.channel) {
     return {
-      error: `Missing --channel. Use one of: ${getChannelIds().join(', ')}.`,
+      error: `Missing --channel. Use one of: ${getProviderIds().join(', ')}.`,
     };
   }
   if (options.allow === undefined) {
@@ -452,10 +452,10 @@ export function parseGroupPolicyShowArgs(
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === '--channel') {
-      const channel = parseRuntimeChannel(args[i + 1] || '');
+      const channel = parseRuntimeProvider(args[i + 1] || '');
       if (!channel) {
         return {
-          error: `Invalid --channel. Use one of: ${getChannelIds().join(', ')}.`,
+          error: `Invalid --channel. Use one of: ${getProviderIds().join(', ')}.`,
         };
       }
       options.channel = channel;
@@ -463,10 +463,10 @@ export function parseGroupPolicyShowArgs(
       continue;
     }
     if (arg.startsWith('--channel=')) {
-      const channel = parseRuntimeChannel(arg.slice('--channel='.length));
+      const channel = parseRuntimeProvider(arg.slice('--channel='.length));
       if (!channel) {
         return {
-          error: `Invalid --channel. Use one of: ${getChannelIds().join(', ')}.`,
+          error: `Invalid --channel. Use one of: ${getProviderIds().join(', ')}.`,
         };
       }
       options.channel = channel;

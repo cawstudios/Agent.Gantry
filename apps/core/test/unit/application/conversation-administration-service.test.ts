@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  ChannelAdministrationService,
+  ConversationAdministrationService,
   type ChannelMembershipValidator,
-} from '@core/application/channels/channel-administration-service.js';
+} from '@core/application/provider-conversations/conversation-administration-service.js';
 
 const iso = '2026-05-01T00:00:00.000Z';
 
@@ -13,8 +13,8 @@ function makeService(options?: {
   providerId?: string;
   conversationKind?: 'group' | 'channel' | 'direct';
 }) {
-  const installation = {
-    id: 'installation-1',
+  const providerConnection = {
+    id: 'providerConnection-1',
     appId: 'default',
     providerId: options?.providerId ?? 'telegram',
     label: 'Telegram',
@@ -27,7 +27,7 @@ function makeService(options?: {
   const conversation = {
     id: 'channel-1',
     appId: 'default',
-    channelInstallationId: 'installation-1',
+    providerConnectionId: 'providerConnection-1',
     externalRef: { kind: 'conversation', value: 'tg:-100123' },
     kind: options?.conversationKind ?? 'group',
     title: 'Team',
@@ -37,10 +37,10 @@ function makeService(options?: {
   };
   const storedApprovers: string[] = [];
   const repositories = {
-    channelInstallations: {
-      getChannelInstallation: vi.fn(async () => installation),
-      updateChannelInstallation: vi.fn(async (input: any) => ({
-        ...installation,
+    providerConnections: {
+      getProviderConnection: vi.fn(async () => providerConnection),
+      updateProviderConnection: vi.fn(async (input: any) => ({
+        ...providerConnection,
         config: input.patch.config,
       })),
     },
@@ -54,7 +54,7 @@ function makeService(options?: {
       listParticipantExternalUserIds: vi.fn(
         async () => options?.participantUserIds ?? [],
       ),
-      listChannelControlApprovers: vi.fn(async () =>
+      listConversationApprovers: vi.fn(async () =>
         storedApprovers.map((externalUserId) => ({
           id: `approver:${externalUserId}`,
           appId: 'default',
@@ -64,7 +64,7 @@ function makeService(options?: {
           updatedAt: iso,
         })),
       ),
-      replaceChannelControlApprovers: vi.fn(async (input: any) => {
+      replaceConversationApprovers: vi.fn(async (input: any) => {
         storedApprovers.splice(
           0,
           storedApprovers.length,
@@ -95,13 +95,16 @@ function makeService(options?: {
         }
       : undefined;
   return {
-    service: new ChannelAdministrationService(repositories as never, validator),
+    service: new ConversationAdministrationService(
+      repositories as never,
+      validator,
+    ),
     repositories,
   };
 }
 
-describe('ChannelAdministrationService', () => {
-  it('replaces channel control allowlist deterministically', async () => {
+describe('ConversationAdministrationService', () => {
+  it('replaces conversation approvers deterministically', async () => {
     const { service, repositories } = makeService({
       validUserIds: ['123', '456'],
     });
@@ -115,7 +118,7 @@ describe('ChannelAdministrationService', () => {
 
     expect(result).toEqual({ userIds: ['123', '456'] });
     expect(
-      repositories.conversations.replaceChannelControlApprovers,
+      repositories.conversations.replaceConversationApprovers,
     ).toHaveBeenCalledWith(
       expect.objectContaining({ externalUserIds: ['123', '456'] }),
     );
@@ -133,7 +136,7 @@ describe('ChannelAdministrationService', () => {
       }),
     ).rejects.toThrow(/Control approvers must be members/);
     expect(
-      repositories.conversations.replaceChannelControlApprovers,
+      repositories.conversations.replaceConversationApprovers,
     ).not.toHaveBeenCalled();
   });
 
@@ -173,7 +176,7 @@ describe('ChannelAdministrationService', () => {
       repositories.conversations.listParticipantExternalUserIds,
     ).toHaveBeenCalledWith('channel-1');
     expect(
-      repositories.conversations.replaceChannelControlApprovers,
+      repositories.conversations.replaceConversationApprovers,
     ).not.toHaveBeenCalled();
   });
 
@@ -193,7 +196,7 @@ describe('ChannelAdministrationService', () => {
       }),
     ).rejects.toThrow(/direct/i);
     expect(
-      repositories.conversations.replaceChannelControlApprovers,
+      repositories.conversations.replaceConversationApprovers,
     ).not.toHaveBeenCalled();
   });
 });

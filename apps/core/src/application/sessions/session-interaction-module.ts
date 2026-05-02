@@ -243,7 +243,7 @@ export class SessionInteractionModule {
     const message: NewMessage = {
       id: messageId,
       chat_jid: session.chatJid,
-      channel_provider: 'app',
+      provider: 'app',
       sender: input.senderId ?? 'sdk',
       sender_name: input.senderName ?? 'SDK',
       content: text,

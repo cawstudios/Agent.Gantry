@@ -93,7 +93,7 @@ old runtimes before applying the migration, then start only the upgraded runtime
 after the schema cut succeeds.
 
 Retention will be implemented at the Runtime Event Exchange seam rather than in
-projection-specific tables. Until partitioning lands, installations must run an
+projection-specific tables. Until partitioning lands, providerConnections must run an
 operator-owned retention job for `runtime_events.created_at` that matches their
 audit SLA.
 

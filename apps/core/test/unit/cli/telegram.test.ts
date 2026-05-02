@@ -470,11 +470,11 @@ describe('cli telegram helpers', () => {
     expect(readEnvFile(envFilePath(runtimeHome)).TELEGRAM_BOT_TOKEN).toBe(
       'telegram-token',
     );
-    expect(loadRuntimeSettings(runtimeHome).channels.telegram.enabled).toBe(
+    expect(loadRuntimeSettings(runtimeHome).providers.telegram.enabled).toBe(
       true,
     );
     expect(outro).toHaveBeenCalledWith(
-      'Telegram token saved. Next: run `myclaw channel connect telegram` to register a chat.',
+      'Telegram token saved. Next: run `myclaw provider connect telegram` to register a conversation.',
     );
     expect(text).toHaveBeenCalledTimes(1);
     expect(text).toHaveBeenCalledWith(
@@ -618,11 +618,12 @@ describe('cli telegram helpers', () => {
 
     expect(code).toBe(0);
     const settings = loadRuntimeSettings(runtimeHome);
-    expect(settings.channels.telegram.enabled).toBe(true);
-    expect(settings.channels.telegram.senderAllowlist.default.allow).toBe('*');
-    expect(
-      settings.channels.telegram.controlAllowlist.agents.main_agent,
-    ).toEqual(['5759865942']);
+    expect(settings.providers.telegram.enabled).toBe(true);
+    const conversation = Object.values(settings.conversations).find(
+      (entry) => entry.providerConnection === 'telegram_default',
+    );
+    expect(conversation?.senderPolicy.allow).toBe('*');
+    expect(conversation?.controlApprovers).toEqual(['5759865942']);
     expect(text).toHaveBeenCalledWith(
       expect.objectContaining({
         message: 'Telegram sender/user ID for session admin (optional)',
@@ -702,10 +703,10 @@ describe('cli telegram helpers', () => {
     const code = await runTelegramConnectCommand(runtimeHome);
 
     expect(code).toBe(0);
-    expect(
-      loadRuntimeSettings(runtimeHome).channels.telegram.controlAllowlist.agents
-        .main_agent,
-    ).toEqual(['5759865942']);
+    const conversation = Object.values(
+      loadRuntimeSettings(runtimeHome).conversations,
+    ).find((entry) => entry.providerConnection === 'telegram_default');
+    expect(conversation?.controlApprovers).toEqual(['5759865942']);
     expect(text).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -745,7 +746,7 @@ describe('cli telegram helpers', () => {
       'Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.',
     );
     expect(claude).toContain(
-      'Main/admin agents may use service_restart after approved changes and register_agent for channel binding.',
+      'Main/admin agents may use service_restart after approved changes and register_agent for conversation binding.',
     );
     expect(soul).toContain('# Soul - Who You Are');
     expect(soul).toContain('- **Name:** Kai Telegram');

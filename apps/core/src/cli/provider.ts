@@ -1,11 +1,11 @@
 import * as p from '@clack/prompts';
 
-import { ChannelAdministrationService } from '../application/channels/channel-administration-service.js';
+import { ConversationAdministrationService } from '../application/provider-conversations/conversation-administration-service.js';
 import { ApplicationError } from '../application/common/application-error.js';
 import { EnvRuntimeSecretProvider } from '../adapters/credentials/env-runtime-secret-provider.js';
 import { RuntimeSecretChannelMembershipValidator } from '../channels/channel-membership-validation.js';
 import {
-  getChannelProvider,
+  getProvider,
   listConnectableChannelProviders,
 } from '../channels/provider-registry.js';
 import { readEnvFile } from '../config/env/file.js';
@@ -16,20 +16,20 @@ import type { DoctorReport } from './doctor.js';
 function usage(): string {
   return [
     'Usage:',
-    '  myclaw channel connect <telegram|slack|teams>',
-    '  myclaw channel list',
-    '  myclaw channel info <channelId>',
-    '  myclaw channel control-allowlist <channelId> [--allow <userId,userId>]',
-    '  myclaw channel doctor',
+    '  myclaw provider connect <telegram|slack|teams>',
+    '  myclaw provider list',
+    '  myclaw provider doctor',
+    '  myclaw conversation info <conversationId>',
+    '  myclaw conversation approvers <conversationId> [--allow <userId,userId>]',
   ].join('\n');
 }
 
-function formatChannelList(runtimeHome: string): string {
+function formatProviderList(runtimeHome: string): string {
   const settings = ensureRuntimeSettings(runtimeHome);
   const env = readEnvFile(envFilePath(runtimeHome));
-  const lines = ['Channels', ''];
+  const lines = ['Providers', ''];
   for (const provider of listConnectableChannelProviders()) {
-    const enabled = settings.channels[provider.id]?.enabled ?? false;
+    const enabled = settings.providers?.[provider.id]?.enabled ?? false;
     const missing = provider.setup.envKeys.filter(
       (envKey) => !env[envKey]?.trim(),
     );
@@ -42,7 +42,7 @@ function formatChannelList(runtimeHome: string): string {
   return lines.join('\n');
 }
 
-function scopeChannelDoctorReport(report: DoctorReport): DoctorReport {
+function scopeProviderDoctorReport(report: DoctorReport): DoctorReport {
   const channelChecks = report.checks.filter((check) =>
     [
       'runtime-settings',
@@ -65,14 +65,14 @@ function scopeChannelDoctorReport(report: DoctorReport): DoctorReport {
   };
 }
 
-export async function runChannelCommand(
+export async function runProviderCommand(
   importMetaUrl: string,
   runtimeHome: string,
   args: string[],
 ): Promise<number> {
   const [command, providerId] = args;
   if (!command || command === 'list') {
-    p.note(formatChannelList(runtimeHome), 'Channel Status');
+    p.note(formatProviderList(runtimeHome), 'Provider Status');
     return 0;
   }
 
@@ -81,9 +81,9 @@ export async function runChannelCommand(
       p.log.error(usage());
       return 1;
     }
-    const provider = getChannelProvider(providerId);
+    const provider = getProvider(providerId);
     if (!provider) {
-      p.log.error(`Unknown channel: ${providerId}`);
+      p.log.error(`Unknown provider: ${providerId}`);
       return 1;
     }
     const { runProviderConnectCommand } = await import('./provider-connect.js');
@@ -94,8 +94,8 @@ export async function runChannelCommand(
     const { formatDoctorReport, runDoctorWithNetwork } =
       await import('./doctor.js');
     const report = await runDoctorWithNetwork(importMetaUrl, runtimeHome);
-    const scoped = scopeChannelDoctorReport(report);
-    p.note(formatDoctorReport(scoped), 'Channel Doctor');
+    const scoped = scopeProviderDoctorReport(report);
+    p.note(formatDoctorReport(scoped), 'Provider Doctor');
     return scoped.ok ? 0 : 1;
   }
 
@@ -105,15 +105,15 @@ export async function runChannelCommand(
       return 1;
     }
     try {
-      p.note(await formatChannelInfo(providerId), 'Channel Info');
+      p.note(await formatConversationInfo(providerId), 'Conversation Info');
       return 0;
     } catch (error) {
-      p.log.error(formatChannelAdminError(error));
+      p.log.error(formatConversationAdminError(error));
       return 1;
     }
   }
 
-  if (command === 'control-allowlist') {
+  if (command === 'control-allowlist' || command === 'approvers') {
     if (!providerId) {
       p.log.error(usage());
       return 1;
@@ -121,7 +121,7 @@ export async function runChannelCommand(
     const allowIndex = args.indexOf('--allow');
     const allowValue = allowIndex >= 0 ? args[allowIndex + 1] || '' : '';
     try {
-      const service = await channelAdministrationService();
+      const service = await conversationAdministrationService();
       if (allowIndex >= 0) {
         const controlAllowlist = await service.replaceControlAllowlist({
           appId: 'default' as never,
@@ -131,7 +131,7 @@ export async function runChannelCommand(
         });
         p.note(
           formatUserList(controlAllowlist.userIds),
-          'Channel Control Allowlist',
+          'Conversation Approvers',
         );
         return 0;
       }
@@ -141,11 +141,11 @@ export async function runChannelCommand(
       });
       p.note(
         formatUserList(summary.controlAllowlist.userIds),
-        'Channel Control Allowlist',
+        'Conversation Approvers',
       );
       return 0;
     } catch (error) {
-      p.log.error(formatChannelAdminError(error));
+      p.log.error(formatConversationAdminError(error));
       return 1;
     }
   }
@@ -154,42 +154,67 @@ export async function runChannelCommand(
   return 1;
 }
 
-async function formatChannelInfo(channelId: string): Promise<string> {
+export async function runConversationCommand(
+  runtimeHome: string,
+  args: string[],
+): Promise<number> {
+  const [command, conversationId] = args;
+  if (command === 'info' && conversationId) {
+    try {
+      p.note(await formatConversationInfo(conversationId), 'Conversation Info');
+      return 0;
+    } catch (error) {
+      p.log.error(formatConversationAdminError(error));
+      return 1;
+    }
+  }
+  if (command === 'approvers' && conversationId) {
+    return runProviderCommand('', runtimeHome, [
+      'approvers',
+      conversationId,
+      ...args.slice(2),
+    ]);
+  }
+  p.log.error(usage());
+  return 1;
+}
+
+async function formatConversationInfo(conversationId: string): Promise<string> {
   const repositories = await runtimeRepositories();
-  const channel = await repositories.conversations.getConversation(
-    channelId as never,
+  const conversation = await repositories.conversations.getConversation(
+    conversationId as never,
   );
-  if (!channel || channel.appId !== 'default') {
-    throw new ApplicationError('NOT_FOUND', 'Channel not found');
+  if (!conversation || conversation.appId !== 'default') {
+    throw new ApplicationError('NOT_FOUND', 'Conversation not found');
   }
   const [bindings, sessions, summary] = await Promise.all([
-    repositories.channelInstallations.listAgentChannelBindings(
+    repositories.providerConnections.listAgentConversationBindings(
       'default' as never,
     ),
-    repositories.conversations.listThreads(channel.id),
-    (await channelAdministrationService()).getAdminSummary({
+    repositories.conversations.listThreads(conversation.id),
+    (await conversationAdministrationService()).getAdminSummary({
       appId: 'default' as never,
-      conversationId: channel.id,
+      conversationId: conversation.id,
     }),
   ]);
-  const channelBindings = bindings.filter(
-    (binding) => binding.conversationId === channel.id,
+  const conversationBindings = bindings.filter(
+    (binding) => binding.conversationId === conversation.id,
   );
   return [
-    `Channel: ${channel.title || channel.id}`,
-    `ID: ${channel.id}`,
-    `Status: ${channel.status}`,
-    `Agents: ${channelBindings.map((binding) => binding.agentId).join(', ') || 'none'}`,
+    `Conversation: ${conversation.title || conversation.id}`,
+    `ID: ${conversation.id}`,
+    `Status: ${conversation.status}`,
+    `Agents: ${conversationBindings.map((binding) => binding.agentId).join(', ') || 'none'}`,
     `Sessions: ${sessions.length}`,
-    `Control allowlist: ${formatUserList(summary.controlAllowlist.userIds)}`,
+    `Conversation approvers: ${formatUserList(summary.controlAllowlist.userIds)}`,
   ].join('\n');
 }
 
-async function channelAdministrationService(): Promise<ChannelAdministrationService> {
+async function conversationAdministrationService(): Promise<ConversationAdministrationService> {
   const repositories = await runtimeRepositories();
-  return new ChannelAdministrationService(
+  return new ConversationAdministrationService(
     {
-      channelInstallations: repositories.channelInstallations,
+      providerConnections: repositories.providerConnections,
       conversations: repositories.conversations,
     },
     new RuntimeSecretChannelMembershipValidator(new EnvRuntimeSecretProvider()),
@@ -213,7 +238,7 @@ function formatUserList(userIds: string[]): string {
   return userIds.length > 0 ? userIds.join(', ') : 'none';
 }
 
-function formatChannelAdminError(error: unknown): string {
+function formatConversationAdminError(error: unknown): string {
   if (error instanceof ApplicationError) return error.message;
   return error instanceof Error ? error.message : String(error);
 }

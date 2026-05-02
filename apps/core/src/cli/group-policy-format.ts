@@ -1,7 +1,4 @@
-import type {
-  RuntimeChannel,
-  RuntimeSettings,
-} from '../config/settings/runtime-settings.js';
+import type { RuntimeSettings } from '../config/settings/runtime-settings.js';
 
 function renderAllow(allow: '*' | string[]): string {
   if (allow === '*') return '*';
@@ -9,21 +6,28 @@ function renderAllow(allow: '*' | string[]): string {
 }
 
 export function printPolicyChannel(
-  channel: RuntimeChannel,
+  providerId: string,
   settings: RuntimeSettings,
 ): void {
-  const channelSettings = settings.channels[channel];
-  const policy = channelSettings.senderAllowlist;
+  const provider = settings.providers[providerId];
+  const entries = Object.entries(settings.bindings)
+    .map(([, binding]) => {
+      const conversation = settings.conversations[binding.conversation];
+      if (!conversation) return null;
+      const connection =
+        settings.providerConnections[conversation.providerConnection];
+      if (connection?.provider !== providerId) return null;
+      return [binding.agent, conversation.senderPolicy] as const;
+    })
+    .filter((entry): entry is readonly [string, NonNullable<typeof entry>[1]] =>
+      Boolean(entry),
+    )
+    .sort(([a], [b]) => a.localeCompare(b));
   const lines = [
-    `${channel}:`,
-    `  enabled: ${channelSettings.enabled ? 'yes' : 'no'}`,
-    `  default: allow=${renderAllow(policy.default.allow)} mode=${policy.default.mode}`,
-    `  log_denied: ${policy.logDenied ? 'true' : 'false'}`,
+    `${providerId}:`,
+    `  enabled: ${provider?.enabled ? 'yes' : 'no'}`,
     '  agents:',
   ];
-  const entries = Object.entries(policy.agents).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
   if (entries.length === 0) {
     lines.push('    (none)');
   } else {

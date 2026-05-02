@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import '../channels/register-builtins.js';
 import {
-  getChannelProvider,
+  getProvider,
   listConnectableChannelProviders,
 } from '../channels/provider-registry.js';
 import { readEnvFile } from '../config/env/file.js';
@@ -200,7 +200,7 @@ export function runDoctor(
   const settings = settingsResult.settings;
   const providers = listConnectableChannelProviders();
   const enabledProviders = settings
-    ? providers.filter((provider) => settings.channels[provider.id]?.enabled)
+    ? providers.filter((provider) => settings.providers[provider.id]?.enabled)
     : [];
   if (settings) {
     if (enabledProviders.length > 0) {
@@ -216,8 +216,8 @@ export function runDoctor(
         title: 'Runtime Settings',
         status: 'fail',
         message:
-          'Runtime settings are valid, but no channels are enabled in settings.yaml.',
-        nextAction: `Run ${providers.map((provider) => `\`myclaw channel connect ${provider.id}\``).join(' or ')} to enable a channel.`,
+          'Runtime settings are valid, but no providers are enabled in settings.yaml.',
+        nextAction: `Run ${providers.map((provider) => `\`myclaw provider connect ${provider.id}\``).join(' or ')} to enable a provider.`,
       });
     }
     const postgresUrlEnv = settings.storage.postgres.urlEnv;
@@ -356,7 +356,7 @@ export function runDoctor(
     : undefined;
 
   for (const provider of providers) {
-    const enabled = settings?.channels[provider.id]?.enabled ?? false;
+    const enabled = settings?.providers[provider.id]?.enabled ?? false;
     const configuredKeys = provider.setup.envKeys.filter((envKey) =>
       Boolean(resolveRuntimeEnvValue(env, envKey)),
     );
@@ -407,7 +407,7 @@ export function runDoctor(
             : provider.id === 'slack' && partialConfigured
               ? 'Slack token setup is incomplete (both bot and app tokens are required).'
               : `${provider.label} credentials are missing in ${envPath}.`,
-        nextAction: `Run \`myclaw channel connect ${provider.id}\` to configure ${provider.label}.`,
+        nextAction: `Run \`myclaw provider connect ${provider.id}\` to configure ${provider.label}.`,
       });
     }
   }
@@ -527,10 +527,10 @@ export async function runDoctorWithNetwork(
   let report = runDoctor(importMetaUrl, runtimeHome);
   const validateTelegramToken = options.validateTelegramToken !== false;
   if (validateTelegramToken) {
-    const telegramProvider = getChannelProvider('telegram');
+    const telegramProvider = getProvider('telegram');
     if (telegramProvider) {
       const settings = loadSettingsForDoctor(runtimeHome).settings;
-      if (settings?.channels[telegramProvider.id]?.enabled) {
+      if (settings?.providers[telegramProvider.id]?.enabled) {
         const env = readEnvFile(envFilePath(runtimeHome));
         const token = resolveRuntimeEnvValue(env, 'TELEGRAM_BOT_TOKEN');
         if (token) {
@@ -657,7 +657,7 @@ export function hasRuntimeConfig(runtimeHome: string): boolean {
   try {
     const settings = ensureRuntimeSettings(runtimeHome);
     return listConnectableChannelProviders().some(
-      (provider) => settings.channels[provider.id]?.enabled,
+      (provider) => settings.providers[provider.id]?.enabled,
     );
   } catch {
     return false;
@@ -677,7 +677,7 @@ export async function hasProcessableGroupForConfiguredChannel(
   const env = readEnvFile(envFilePath(runtimeHome));
 
   for (const provider of listConnectableChannelProviders()) {
-    if (!settings.channels[provider.id]?.enabled) continue;
+    if (!settings.providers[provider.id]?.enabled) continue;
     const hasRequiredCredentials = provider.setup.envKeys.every((envKey) =>
       Boolean(resolveRuntimeEnvValue(env, envKey)),
     );

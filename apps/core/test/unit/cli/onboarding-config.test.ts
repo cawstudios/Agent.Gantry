@@ -111,7 +111,7 @@ describe('onboarding config persistence', () => {
     expect(settings.agent.defaultModel).toBe('sonnet');
   });
 
-  it('writes Slack approvers to settings instead of .env', () => {
+  it('keeps Slack approvers out of .env until a conversation is selected', () => {
     const runtimeHome = makeRuntimeHome();
 
     persistOnboardingConfig({
@@ -126,10 +126,8 @@ describe('onboarding config persistence', () => {
     const env = readEnvFile(envFilePath(runtimeHome));
     expect(env.SLACK_PERMISSION_APPROVER_IDS).toBeUndefined();
     const settings = loadRuntimeSettingsFromPath(settingsFilePath(runtimeHome));
-    expect(settings.channels.slack.controlAllowlist.default).toEqual([
-      'U123',
-      'U456',
-    ]);
+    expect(settings.providers.slack.enabled).toBe(true);
+    expect(settings.conversations).toEqual({});
   });
 
   it('requires OneCLI database URL when MyClaw database URL is configured', () => {

@@ -1,20 +1,20 @@
-# MyClaw Channel Providers
+# MyClaw Channel Provider Adapters
 
-## Add A Channel In 5 Minutes
+## Add A Provider Adapter In 5 Minutes
 
-Create a provider file under `apps/core/src/channels/<name>.ts` and export a `ChannelProvider`:
+Create a provider file under `apps/core/src/channels/<name>.ts` and export a `Provider`:
 
 ```ts
-import type { ChannelProvider } from './provider-registry.js';
+import type { Provider } from './provider-registry.js';
 
-export const exampleProvider: ChannelProvider = {
+export const exampleProvider: Provider = {
   id: 'example',
   label: 'Example',
   jidPrefix: 'ex:',
   folderPrefix: 'example_',
   isGroupJid: (jid) => jid.startsWith('ex:g:'),
   formatting: 'markdown-native',
-  isEnabled: (settings) => settings.channels.example?.enabled ?? false,
+  isEnabled: (settings) => settings.providers?.example?.enabled ?? false,
   create: () => null,
   setup: {
     envKeys: [],
@@ -24,11 +24,11 @@ export const exampleProvider: ChannelProvider = {
 };
 ```
 
-Register it in `apps/core/src/channels/register-builtins.ts` with `registerChannelProvider(exampleProvider)`.
+Register it in `apps/core/src/channels/register-builtins.ts` with `registerProvider(exampleProvider)`.
 
 ## Capability Ports
 
-Channels can implement these optional ports based on what the transport supports:
+Provider adapters can implement these optional ports based on what the transport supports:
 
 - `StreamingSink`
 - `TypingSink`
@@ -43,11 +43,11 @@ All ports are structural and opt-in. Implement only what your channel supports.
 
 A provider `id` becomes:
 
-- `settings.yaml` key under `channels.<id>`
-- runtime enablement selector (`settings.channels[id].enabled`)
-- sender allowlist key (`settings.channels[id].sender_allowlist`)
-- legacy sender-control allowlist key (`settings.channels[id].control_allowlist`);
-  new permission approvers are Channel control allowlist rows in Postgres
+- `settings.yaml` key under `providers.<id>`
+- provider connection records under `provider_connections.*`
+- conversation records under `conversations.*`
+- binding records under `bindings.*`
+- conversation approvers on `conversations.<id>.control_approvers`
 
 A provider `jidPrefix` is used for:
 

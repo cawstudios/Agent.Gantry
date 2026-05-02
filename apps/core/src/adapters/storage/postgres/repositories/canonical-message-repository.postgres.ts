@@ -42,13 +42,12 @@ export class PostgresCanonicalMessageRepository {
 
   async saveMessage(msg: NewMessage): Promise<void> {
     await this.db.transaction(async (tx) => {
-      const channelProvider =
-        msg.channel_provider ?? providerIdForJid(msg.chat_jid);
+      const providerId = msg.provider ?? providerIdForJid(msg.chat_jid);
       const conversationId = await this.graph.ensureConversation(
         msg.chat_jid,
         {
           timestamp: msg.timestamp,
-          channel: channelProvider,
+          channel: providerId,
         },
         tx,
       );
@@ -56,11 +55,11 @@ export class PostgresCanonicalMessageRepository {
         msg.chat_jid,
         msg.thread_id,
         tx,
-        { channel: channelProvider },
+        { channel: providerId },
       );
-      const channelInstallationId =
+      const providerConnectionId =
         (await this.graph.getConversationInstallationId(conversationId, tx)) ??
-        `channel-installation:${CANONICAL_APP_ID}:${channelProvider}`;
+        `channel-providerConnection:${CANONICAL_APP_ID}:${providerId}`;
       const canonicalMessageId = messageIdFor(msg.chat_jid, msg.id);
       const direction =
         msg.is_from_me || msg.is_bot_message ? 'outbound' : 'inbound';
@@ -71,8 +70,8 @@ export class PostgresCanonicalMessageRepository {
         await this.graph.ensureParticipant(
           {
             conversationId,
-            providerId: channelProvider,
-            channelInstallationId,
+            providerId: providerId,
+            providerConnectionId,
             externalUserId: msg.sender,
             displayName: msg.sender_name,
             timestamp: msg.timestamp,
@@ -85,8 +84,8 @@ export class PostgresCanonicalMessageRepository {
         .values({
           id: canonicalMessageId,
           appId: CANONICAL_APP_ID,
-          channelProvider,
-          channelInstallationId,
+          providerId,
+          providerConnectionId,
           conversationId,
           threadId: canonicalThreadId,
           externalMessageId,

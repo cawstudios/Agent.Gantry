@@ -1,13 +1,13 @@
 import type { AgentId } from '../../domain/agent/agent.js';
 import type { AppId } from '../../domain/app/app.js';
 import type {
-  AgentChannelBinding,
-  AgentChannelBindingMemoryScope,
-  AgentChannelBindingTriggerMode,
-  ChannelInstallation,
-  ChannelInstallationId,
-  ChannelProviderId,
-} from '../../domain/channel/channel.js';
+  AgentConversationBinding,
+  AgentConversationBindingMemoryScope,
+  AgentConversationBindingTriggerMode,
+  ProviderConnection,
+  ProviderConnectionId,
+  ProviderId,
+} from '../../domain/provider/provider.js';
 import type {
   ConversationId,
   ConversationThreadId,
@@ -16,7 +16,7 @@ import type {
 import type { MemorySubject } from '../../domain/memory/memory.js';
 import type {
   AgentRepository,
-  ChannelInstallationRepository,
+  ProviderConnectionRepository,
   ConversationRepository,
 } from '../../domain/ports/repositories.js';
 import type { PermissionPolicyId } from '../../domain/permissions/permissions.js';
@@ -25,30 +25,30 @@ import type { BrandedId, ExternalRef } from '../../shared/ids/branded-id.js';
 import type { Clock } from '../common/clock.js';
 import { ApplicationError } from '../common/application-error.js';
 import type { IdGenerator } from '../common/id-generator.js';
-import type { ChannelProviderCatalogPort } from './channel-provider-ports.js';
+import type { ProviderCatalogPort } from './provider-catalog-ports.js';
 
-export interface ChannelInstallationPatch {
+export interface ProviderConnectionPatch {
   label?: string;
-  status?: ChannelInstallation['status'] | 'inactive' | 'archived';
+  status?: ProviderConnection['status'] | 'inactive' | 'archived';
   enabled?: boolean;
   config?: Record<string, unknown>;
-  externalInstallationRef?: ExternalRef<'channel_installation'> | null;
+  externalInstallationRef?: ExternalRef<'provider_connection'> | null;
   runtimeSecretRefs?: string[];
 }
 
 export interface AgentBindingPatch {
-  channelInstallationId?: ChannelInstallationId;
+  providerConnectionId?: ProviderConnectionId;
   threadId?: ConversationThreadId;
   displayName?: string;
-  triggerMode?: AgentChannelBindingTriggerMode;
+  triggerMode?: AgentConversationBindingTriggerMode;
   triggerPattern?: string | null;
   requiresTrigger?: boolean;
   isAdminBinding?: boolean;
-  memoryScope?: AgentChannelBindingMemoryScope;
+  memoryScope?: AgentConversationBindingMemoryScope;
   memorySubject?: MemorySubject;
   workspaceSnapshotId?: WorkspaceSnapshotId | null;
   permissionPolicyIds?: PermissionPolicyId[];
-  status?: AgentChannelBinding['status'];
+  status?: AgentConversationBinding['status'];
 }
 
 export interface DiscoveredConversation {
@@ -59,9 +59,9 @@ export interface DiscoveredConversation {
   externalRef?: ExternalRef<'conversation'>;
 }
 
-export interface ChannelConversationDiscoveryPort {
+export interface ProviderConversationDiscoveryPort {
   discover(input: {
-    installation: ChannelInstallation;
+    providerConnection: ProviderConnection;
     query?: string;
     includeArchived?: boolean;
     limit?: number;
@@ -94,29 +94,29 @@ function assertNoRawSecrets(value: unknown, path: string): void {
   }
 }
 
-function normalizeInstallationStatus(
-  status: ChannelInstallationPatch['status'] | undefined,
-): ChannelInstallation['status'] | undefined {
+function normalizeProviderConnectionStatus(
+  status: ProviderConnectionPatch['status'] | undefined,
+): ProviderConnection['status'] | undefined {
   if (!status) return undefined;
   if (status === 'active' || status === 'disabled') return status;
   if (status === 'inactive' || status === 'archived') return 'disabled';
   return undefined;
 }
 
-function assertOwnedInstallation(
-  installation: ChannelInstallation,
+function assertOwnedProviderConnection(
+  providerConnection: ProviderConnection,
   appId: AppId,
 ): void {
-  if (installation.appId !== appId) {
+  if (providerConnection.appId !== appId) {
     throw new ApplicationError(
       'FORBIDDEN',
-      'API key cannot access this channel installation',
+      'API key cannot access this provider connection',
     );
   }
 }
 
 function triggerModeToRequiresTrigger(
-  mode: AgentChannelBindingTriggerMode,
+  mode: AgentConversationBindingTriggerMode,
 ): boolean {
   return mode === 'mention' || mode === 'keyword';
 }
@@ -126,7 +126,7 @@ function memorySubjectForScope(input: {
   agentId: AgentId;
   conversationId: ConversationId;
   threadId?: ConversationThreadId;
-  memoryScope: AgentChannelBindingMemoryScope;
+  memoryScope: AgentConversationBindingMemoryScope;
   memorySubject?: MemorySubject;
 }): MemorySubject {
   if (input.memorySubject) return input.memorySubject;
@@ -163,43 +163,44 @@ function memorySubjectForScope(input: {
   }
 }
 
-export class ChannelInstallationControlService {
+export class ProviderConnectionControlService {
   constructor(
     private readonly deps: {
-      installations: ChannelInstallationRepository;
-      providers: ChannelProviderCatalogPort;
+      providerConnections: ProviderConnectionRepository;
+      providers: ProviderCatalogPort;
       ids: IdGenerator;
       clock: Clock;
     },
   ) {}
 
-  async list(appId: AppId): Promise<ChannelInstallation[]> {
-    return await this.deps.installations.listChannelInstallations(appId);
+  async list(appId: AppId): Promise<ProviderConnection[]> {
+    return await this.deps.providerConnections.listProviderConnections(appId);
   }
 
   async get(input: {
     appId: AppId;
-    installationId: ChannelInstallationId;
-  }): Promise<ChannelInstallation> {
-    const installation = await this.deps.installations.getChannelInstallation(
-      input.installationId,
-    );
-    if (!installation) {
-      throw new ApplicationError('NOT_FOUND', 'Channel installation not found');
+    providerConnectionId: ProviderConnectionId;
+  }): Promise<ProviderConnection> {
+    const providerConnection =
+      await this.deps.providerConnections.getProviderConnection(
+        input.providerConnectionId,
+      );
+    if (!providerConnection) {
+      throw new ApplicationError('NOT_FOUND', 'provider connection not found');
     }
-    assertOwnedInstallation(installation, input.appId);
-    return installation;
+    assertOwnedProviderConnection(providerConnection, input.appId);
+    return providerConnection;
   }
 
   async create(input: {
     appId: AppId;
-    providerId: ChannelProviderId;
+    providerId: ProviderId;
     label: string;
     config?: Record<string, unknown>;
-    externalInstallationRef?: ExternalRef<'channel_installation'>;
+    externalInstallationRef?: ExternalRef<'provider_connection'>;
     runtimeSecretRefs?: string[];
     enabled?: boolean;
-  }): Promise<ChannelInstallation> {
+  }): Promise<ProviderConnection> {
     assertNoRawSecrets(input.config, 'config');
     assertNoRawSecrets(input.externalInstallationRef, 'externalRef');
     const providers = await this.deps.providers.listProviders();
@@ -207,12 +208,12 @@ export class ChannelInstallationControlService {
     if (!provider || provider.capabilityFlags.includes('placeholder')) {
       throw new ApplicationError(
         'NOT_IMPLEMENTED',
-        `Channel provider ${input.providerId} is not implemented`,
+        `Provider ${input.providerId} is not implemented`,
       );
     }
     const now = this.deps.clock.now();
-    const installation: ChannelInstallation = {
-      id: this.deps.ids.generate() as ChannelInstallationId,
+    const providerConnection: ProviderConnection = {
+      id: this.deps.ids.generate() as ProviderConnectionId,
       appId: input.appId,
       providerId: input.providerId,
       externalInstallationRef: input.externalInstallationRef,
@@ -223,21 +224,25 @@ export class ChannelInstallationControlService {
       createdAt: now,
       updatedAt: now,
     };
-    await this.deps.installations.saveChannelInstallation(installation);
-    return installation;
+    await this.deps.providerConnections.saveProviderConnection(
+      providerConnection,
+    );
+    return providerConnection;
   }
 
   async update(input: {
     appId: AppId;
-    installationId: ChannelInstallationId;
-    patch: ChannelInstallationPatch;
-  }): Promise<ChannelInstallation> {
+    providerConnectionId: ProviderConnectionId;
+    patch: ProviderConnectionPatch;
+  }): Promise<ProviderConnection> {
     assertNoRawSecrets(input.patch.config, 'config');
     assertNoRawSecrets(input.patch.externalInstallationRef, 'externalRef');
     const existing = await this.get(input);
-    const normalizedStatus = normalizeInstallationStatus(input.patch.status);
+    const normalizedStatus = normalizeProviderConnectionStatus(
+      input.patch.status,
+    );
     const patch: Parameters<
-      ChannelInstallationRepository['updateChannelInstallation']
+      ProviderConnectionRepository['updateProviderConnection']
     >[0]['patch'] = {
       ...(input.patch.label !== undefined
         ? { label: input.patch.label.trim() }
@@ -260,41 +265,43 @@ export class ChannelInstallationControlService {
         ? { runtimeSecretRefs: input.patch.runtimeSecretRefs }
         : {}),
     };
-    const updated = await this.deps.installations.updateChannelInstallation({
-      appId: input.appId,
-      id: existing.id,
-      patch,
-      updatedAt: this.deps.clock.now(),
-    });
+    const updated =
+      await this.deps.providerConnections.updateProviderConnection({
+        appId: input.appId,
+        id: existing.id,
+        patch,
+        updatedAt: this.deps.clock.now(),
+      });
     if (!updated) {
-      throw new ApplicationError('NOT_FOUND', 'Channel installation not found');
+      throw new ApplicationError('NOT_FOUND', 'provider connection not found');
     }
     return updated;
   }
 
   async disable(input: {
     appId: AppId;
-    installationId: ChannelInstallationId;
-  }): Promise<ChannelInstallation> {
+    providerConnectionId: ProviderConnectionId;
+  }): Promise<ProviderConnection> {
     const existing = await this.get(input);
-    const disabled = await this.deps.installations.disableChannelInstallation({
-      appId: input.appId,
-      id: existing.id,
-      updatedAt: this.deps.clock.now(),
-    });
+    const disabled =
+      await this.deps.providerConnections.disableProviderConnection({
+        appId: input.appId,
+        id: existing.id,
+        updatedAt: this.deps.clock.now(),
+      });
     if (!disabled) {
-      throw new ApplicationError('NOT_FOUND', 'Channel installation not found');
+      throw new ApplicationError('NOT_FOUND', 'provider connection not found');
     }
     return disabled;
   }
 }
 
-export class DiscoverChannelConversationsService {
+export class DiscoverProviderConversationsService {
   constructor(
     private readonly deps: {
-      installations: ChannelInstallationRepository;
+      providerConnections: ProviderConnectionRepository;
       conversations: ConversationRepository;
-      discovery: ChannelConversationDiscoveryPort;
+      discovery: ProviderConversationDiscoveryPort;
       ids: IdGenerator;
       clock: Clock;
     },
@@ -302,27 +309,25 @@ export class DiscoverChannelConversationsService {
 
   async execute(input: {
     appId: AppId;
-    installationId: ChannelInstallationId;
+    providerConnectionId: ProviderConnectionId;
     query?: string;
     includeArchived?: boolean;
     limit?: number;
     providerMetadata?: Record<string, unknown>;
   }) {
-    const installation = await this.deps.installations.getChannelInstallation(
-      input.installationId,
-    );
-    if (!installation) {
-      throw new ApplicationError('NOT_FOUND', 'Channel installation not found');
-    }
-    assertOwnedInstallation(installation, input.appId);
-    if (installation.status !== 'active') {
-      throw new ApplicationError(
-        'CONFLICT',
-        'Channel installation is disabled',
+    const providerConnection =
+      await this.deps.providerConnections.getProviderConnection(
+        input.providerConnectionId,
       );
+    if (!providerConnection) {
+      throw new ApplicationError('NOT_FOUND', 'provider connection not found');
+    }
+    assertOwnedProviderConnection(providerConnection, input.appId);
+    if (providerConnection.status !== 'active') {
+      throw new ApplicationError('CONFLICT', 'provider connection is disabled');
     }
     const discovered = await this.deps.discovery.discover({
-      installation,
+      providerConnection,
       query: input.query,
       includeArchived: input.includeArchived,
       limit: input.limit,
@@ -334,16 +339,16 @@ export class DiscoverChannelConversationsService {
       const existing =
         await this.deps.conversations.getConversationByExternalRef({
           appId: input.appId,
-          providerId: installation.providerId,
-          channelInstallationId: installation.id,
+          providerId: providerConnection.providerId,
+          providerConnectionId: providerConnection.id,
           externalConversationId: item.externalId,
         });
       const conversation = {
         id:
           existing?.id ??
-          (`conversation:${installation.id}:${item.externalId}` as ConversationId),
+          (`conversation:${providerConnection.id}:${item.externalId}` as ConversationId),
         appId: input.appId,
-        channelInstallationId: installation.id,
+        providerConnectionId: providerConnection.id,
         externalRef:
           item.externalRef ??
           ({
@@ -363,11 +368,11 @@ export class DiscoverChannelConversationsService {
   }
 }
 
-export class AgentChannelBindingControlService {
+export class AgentConversationBindingControlService {
   constructor(
     private readonly deps: {
       agents: AgentRepository;
-      installations: ChannelInstallationRepository;
+      providerConnections: ProviderConnectionRepository;
       conversations: ConversationRepository;
       ids: IdGenerator;
       clock: Clock;
@@ -377,7 +382,7 @@ export class AgentChannelBindingControlService {
   async list(input: {
     appId: AppId;
     agentId: AgentId;
-  }): Promise<AgentChannelBinding[]> {
+  }): Promise<AgentConversationBinding[]> {
     const agent = await this.deps.agents.getAgent(input.agentId);
     if (!agent) throw new ApplicationError('NOT_FOUND', 'Agent not found');
     if (agent.appId !== input.appId) {
@@ -386,7 +391,7 @@ export class AgentChannelBindingControlService {
         'API key cannot access this agent',
       );
     }
-    return await this.deps.installations.listAgentChannelBindings(
+    return await this.deps.providerConnections.listAgentConversationBindings(
       input.appId,
       input.agentId,
     );
@@ -397,7 +402,7 @@ export class AgentChannelBindingControlService {
     agentId: AgentId;
     conversationId: ConversationId;
     patch: AgentBindingPatch;
-  }): Promise<AgentChannelBinding> {
+  }): Promise<AgentConversationBinding> {
     return await this.upsert({ ...input, requireExisting: false });
   }
 
@@ -406,7 +411,7 @@ export class AgentChannelBindingControlService {
     agentId: AgentId;
     conversationId: ConversationId;
     patch: AgentBindingPatch;
-  }): Promise<AgentChannelBinding> {
+  }): Promise<AgentConversationBinding> {
     return await this.upsert({ ...input, requireExisting: true });
   }
 
@@ -415,19 +420,20 @@ export class AgentChannelBindingControlService {
     agentId: AgentId;
     conversationId: ConversationId;
     threadId?: ConversationThreadId;
-  }): Promise<AgentChannelBinding> {
+  }): Promise<AgentConversationBinding> {
     await this.assertAgent(input.appId, input.agentId);
-    const disabled = await this.deps.installations.disableAgentChannelBinding({
-      appId: input.appId,
-      agentId: input.agentId,
-      conversationId: input.conversationId,
-      threadId: input.threadId,
-      updatedAt: this.deps.clock.now(),
-    });
+    const disabled =
+      await this.deps.providerConnections.disableAgentConversationBinding({
+        appId: input.appId,
+        agentId: input.agentId,
+        conversationId: input.conversationId,
+        threadId: input.threadId,
+        updatedAt: this.deps.clock.now(),
+      });
     if (!disabled) {
       throw new ApplicationError(
         'NOT_FOUND',
-        'Agent channel binding not found',
+        'Agent conversation binding not found',
       );
     }
     return disabled;
@@ -439,7 +445,7 @@ export class AgentChannelBindingControlService {
     conversationId: ConversationId;
     patch: AgentBindingPatch;
     requireExisting: boolean;
-  }): Promise<AgentChannelBinding> {
+  }): Promise<AgentConversationBinding> {
     await this.assertAgent(input.appId, input.agentId);
     const conversation = await this.deps.conversations.getConversation(
       input.conversationId,
@@ -463,24 +469,30 @@ export class AgentChannelBindingControlService {
         );
       }
     }
-    const installationId =
-      input.patch.channelInstallationId ?? conversation.channelInstallationId;
-    const installation =
-      await this.deps.installations.getChannelInstallation(installationId);
-    if (!installation) {
-      throw new ApplicationError('NOT_FOUND', 'Channel installation not found');
+    const providerConnectionId =
+      input.patch.providerConnectionId ??
+      conversation.providerConnectionId ??
+      (conversation as { providerConnectionId?: ProviderConnectionId })
+        .providerConnectionId;
+    const providerConnection =
+      await this.deps.providerConnections.getProviderConnection(
+        providerConnectionId,
+      );
+    if (!providerConnection) {
+      throw new ApplicationError('NOT_FOUND', 'provider connection not found');
     }
-    assertOwnedInstallation(installation, input.appId);
-    const existing = await this.deps.installations.getAgentChannelBinding({
-      appId: input.appId,
-      agentId: input.agentId,
-      conversationId: input.conversationId,
-      threadId,
-    });
+    assertOwnedProviderConnection(providerConnection, input.appId);
+    const existing =
+      await this.deps.providerConnections.getAgentConversationBinding({
+        appId: input.appId,
+        agentId: input.agentId,
+        conversationId: input.conversationId,
+        threadId,
+      });
     if (input.requireExisting && !existing) {
       throw new ApplicationError(
         'NOT_FOUND',
-        'Agent channel binding not found',
+        'Agent conversation binding not found',
       );
     }
     const triggerMode =
@@ -489,13 +501,13 @@ export class AgentChannelBindingControlService {
     const memoryScope =
       input.patch.memoryScope ?? existing?.memoryScope ?? 'conversation';
     const now = this.deps.clock.now();
-    const binding: AgentChannelBinding = {
+    const binding: AgentConversationBinding = {
       id:
         existing?.id ??
-        (this.deps.ids.generate() as BrandedId<'AgentChannelBindingId'>),
+        (this.deps.ids.generate() as BrandedId<'AgentConversationBindingId'>),
       appId: input.appId,
       agentId: input.agentId,
-      channelInstallationId: installation.id,
+      providerConnectionId: providerConnection.id,
       conversationId: conversation.id,
       ...(threadId
         ? { threadId }
@@ -542,7 +554,7 @@ export class AgentChannelBindingControlService {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
-    await this.deps.installations.saveAgentChannelBinding(binding);
+    await this.deps.providerConnections.saveAgentConversationBinding(binding);
     return binding;
   }
 

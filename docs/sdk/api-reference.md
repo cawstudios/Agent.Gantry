@@ -62,22 +62,28 @@ PUT    /v1/agents/:agentId/capabilities
 
 GET    /v1/capability-catalog
 
-GET    /v1/channels
-POST   /v1/channels
-GET    /v1/channels/:channelId
-PATCH  /v1/channels/:channelId
-GET    /v1/channels/:channelId/admin
-PUT    /v1/channels/:channelId/agents
-POST   /v1/channels/:channelId/sessions
-PUT    /v1/channels/:channelId/control-allowlist
+GET    /v1/providers
+GET    /v1/provider-connections
+POST   /v1/provider-connections
+GET    /v1/provider-connections/:providerConnectionId
+PATCH  /v1/provider-connections/:providerConnectionId
+POST   /v1/provider-connections/:providerConnectionId/discover-conversations
+GET    /v1/conversations
+GET    /v1/conversations/:conversationId
+GET    /v1/conversations/:conversationId/approvers
+PUT    /v1/conversations/:conversationId/approvers
+GET    /v1/agents/:agentId/conversation-bindings
+PUT    /v1/agents/:agentId/conversation-bindings/:conversationId
+PATCH  /v1/agents/:agentId/conversation-bindings/:conversationId
+DELETE /v1/agents/:agentId/conversation-bindings/:conversationId
 ```
 
 Agents own exactly `selectedToolIds`, `selectedSkillIds`, and
 `selectedMcpServerIds`, plus provider-neutral DM access and one optional DM
-approval admin per provider. Channels own bound agents, sessions, and control
+approval admin per provider. Conversations own bound agents, sessions, and control
 approvers. DM access, DM admins, and control approvers are separate; DM admins
 approve only direct/private DM permission prompts for that agent/provider, while
-control approvers must be members of the Channel. There is no channel-scoped
+control approvers must be members of the Conversation. There is no conversation-scoped
 tool selection field, and Browser is one normal catalog tool.
 Agent-requested changes use MyClaw MCP request tools, not public API request
 approval endpoints.
@@ -96,9 +102,9 @@ Agent-facing tools:
 - `register_agent`: main/admin agent binding of a channel conversation to an agent.
 
 Every persistent capability change follows request, validation, review, approve
-or deny, durable audit, new config version, and next-run activation. Same-channel
+or deny, durable audit, new config version, and next-run activation. Same-conversation
 review binds the request to the originating chat or thread; it does not bypass
-the configured control allowlist.
+the configured conversation approvers.
 
 ## Skills
 
@@ -343,17 +349,17 @@ Read-only run event history is available over the control API:
 GET /v1/runs/:runId/events
 ```
 
-## Channels
+## Providers And Conversations
 
-Channel APIs are app-bound by the API key. Channel credentials are stored as
+Provider and conversation APIs are app-bound by the API key. Provider credentials are stored as
 `runtimeSecretRefs`; raw tokens and secrets are rejected by the control API.
-Use `Channel` for Slack channels, Teams channels, and Telegram groups. Slack
-and Teams threads plus Telegram forum topics are sessions under a channel.
+Use `Conversation` for Slack channels/DMs, Teams channels/chats, and Telegram groups/DMs. Slack
+and Teams threads plus Telegram forum topics inherit approvers from the parent conversation.
 
 ```ts
-client.channels.providers.list()
+client.providers.list()
 
-client.channels.installations.create({
+client.providerConnections.create({
   appId,
   providerId, // app | telegram | slack
   label,
@@ -363,9 +369,9 @@ client.channels.installations.create({
   enabled?,
 })
 
-client.channels.installations.list()
-client.channels.installations.get(installationId)
-client.channels.installations.update(installationId, {
+client.providerConnections.list()
+client.providerConnections.get(providerConnectionId)
+client.providerConnections.update(providerConnectionId, {
   label?,
   status?,
   config?,
@@ -373,16 +379,18 @@ client.channels.installations.update(installationId, {
   runtimeSecretRefs?,
   enabled?,
 })
-client.channels.installations.delete(installationId)
-client.channels.installations.discover(installationId, {
+client.providerConnections.delete(providerConnectionId)
+client.providerConnections.discoverConversations(providerConnectionId, {
   query?,
   limit?,
   includeArchived?,
 })
 
-client.channels.conversations.list({ channelInstallationId? })
-client.channels.conversations.get(conversationId)
-client.channels.conversations.messages(conversationId, {
+client.conversations.list({ providerConnectionId? })
+client.conversations.get(conversationId)
+client.conversations.getApprovers(conversationId)
+client.conversations.setApprovers(conversationId, userIds)
+client.conversations.messages(conversationId, {
   threadId?,
   after?,
   limit?,
@@ -406,27 +414,25 @@ PUT    /v1/agents/:id/capabilities                 agents:admin
 
 GET    /v1/capability-catalog                      agents:admin
 
-GET    /v1/channel-providers                       channels:read
-POST   /v1/channel-installations                   channels:admin
-GET    /v1/channel-installations                   channels:read
-GET    /v1/channel-installations/:id               channels:read
-PATCH  /v1/channel-installations/:id               channels:admin
-DELETE /v1/channel-installations/:id               channels:admin
-POST   /v1/channel-installations/:id/discover      channels:admin
+GET    /v1/providers                               providers:read
+POST   /v1/provider-connections                    providers:admin
+GET    /v1/provider-connections                    providers:read
+GET    /v1/provider-connections/:id                providers:read
+PATCH  /v1/provider-connections/:id                providers:admin
+DELETE /v1/provider-connections/:id                providers:admin
+POST   /v1/provider-connections/:id/discover-conversations providers:admin
 
 GET    /v1/conversations                           conversations:read
 GET    /v1/conversations/:id                       conversations:read
+GET    /v1/conversations/:id/approvers             conversations:read
+PUT    /v1/conversations/:id/approvers             conversations:admin
 GET    /v1/conversations/:id/threads               conversations:read
 GET    /v1/conversations/:id/messages              messages:read
 
-GET    /v1/channels                                channels:read
-POST   /v1/channels                                channels:admin
-GET    /v1/channels/:id                            channels:read
-PATCH  /v1/channels/:id                            channels:admin
-GET    /v1/channels/:id/admin                      channels:read
-PUT    /v1/channels/:id/agents                     agents:admin
-POST   /v1/channels/:id/sessions                   sessions:write
-PUT    /v1/channels/:id/control-allowlist          channels:admin
+GET    /v1/agents/:id/conversation-bindings        conversations:read
+PUT    /v1/agents/:id/conversation-bindings/:conversationId agents:admin
+PATCH  /v1/agents/:id/conversation-bindings/:conversationId agents:admin
+DELETE /v1/agents/:id/conversation-bindings/:conversationId agents:admin
 ```
 
 `GET /v1/agents/:id/admin` returns Agent admin state, including
@@ -436,17 +442,16 @@ with
 `adminUserId` is optional and names the single provider-specific user allowed
 to approve permission prompts for that agent's direct/private DM sessions.
 
-`GET /v1/channels/:id/admin` returns Channel admin state, including
-`controlAllowlist`. `PUT /v1/channels/:id/control-allowlist` replaces the
-Channel approver list with `{ "userIds": ["..."] }` and fails with
-`INVALID_CONTROL_ALLOWLIST` when any user cannot be verified as a member of the
-Channel. Slack, Telegram, Teams, and App/Web channels use the same API shape;
-Teams validation uses Microsoft Graph membership for chat or team-channel
-members. Agent DM access remains independent and may include non-members; those
-users are not approvers unless they are also set as the agent's provider DM
-admin.
+`GET /v1/conversations/:id/approvers` returns the Conversation approver list.
+`PUT /v1/conversations/:id/approvers` replaces it with
+`{ "userIds": ["..."] }` and fails when any user cannot be verified as a
+member of the Conversation. Slack, Telegram, Teams, and App/Web conversations
+use the same API shape; Teams validation uses Microsoft Graph membership for
+chat or team-channel members. Agent DM access remains independent and may
+include non-members; those users are not conversation approvers unless they are
+also listed on the conversation.
 
-`teams` is a built-in channel provider for setup and discovery with Microsoft
+`teams` is a built-in provider for setup and discovery with Microsoft
 Teams app auth through `RuntimeSecretProvider`, Microsoft Graph channel
 discovery, `teams:` conversation ids, and `teams_` agent folders. Runtime send
 and receive still depend on a concrete `TeamsSdkClient` adapter; this checkout
@@ -454,12 +459,12 @@ includes tested normalization and Adaptive Card approval scaffolding. `whatsapp`
 is still returned as an unavailable placeholder until its adapter is
 implemented.
 
-## Agent Channel Bindings
+## Agent Conversation Bindings
 
 ```ts
-client.agents.bindings.list(agentId)
-client.agents.bindings.enable(agentId, conversationId, {
-  channelInstallationId?,
+client.agents.conversationBindings.list(agentId)
+client.agents.conversationBindings.enable(agentId, conversationId, {
+  providerConnectionId?,
   threadId?,
   displayName?,
   triggerMode?, // always | mention | keyword | manual | webhook

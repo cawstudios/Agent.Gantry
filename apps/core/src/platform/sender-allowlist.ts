@@ -22,6 +22,19 @@ export type RuntimeSenderControlAllowlistConfig = Record<
   SenderControlAllowlistConfig
 >;
 
+interface AllowlistDesiredState {
+  providerConnections: Record<string, { provider: string }>;
+  conversations: Record<
+    string,
+    {
+      providerConnection: string;
+      senderPolicy: ChatAllowlistEntry;
+      controlApprovers: string[];
+    }
+  >;
+  bindings: Record<string, { agent: string; conversation: string }>;
+}
+
 const DEFAULT_CHANNEL_CONFIG: SenderAllowlistConfig = {
   default: { allow: '*', mode: 'trigger' },
   agents: {},
@@ -68,6 +81,29 @@ function createDefaultControlConfig(): RuntimeSenderControlAllowlistConfig {
   return cfg;
 }
 
+function deriveAllowlistsFromSettings(settings: AllowlistDesiredState): {
+  sender: RuntimeSenderAllowlistConfig;
+  control: RuntimeSenderControlAllowlistConfig;
+} {
+  const sender = createDefaultConfig();
+  const control = createDefaultControlConfig();
+
+  for (const binding of Object.values(settings.bindings)) {
+    const conversation = settings.conversations[binding.conversation];
+    if (!conversation) continue;
+    const connection =
+      settings.providerConnections[conversation.providerConnection];
+    if (!connection) continue;
+    const providerId = connection.provider;
+    sender[providerId] ??= cloneDefaultChannelConfig();
+    control[providerId] ??= cloneDefaultControlChannelConfig();
+    sender[providerId].agents[binding.agent] = conversation.senderPolicy;
+    control[providerId].agents[binding.agent] = conversation.controlApprovers;
+  }
+
+  return { sender, control };
+}
+
 function getChannelConfig(
   chatJid: string,
   cfg: RuntimeSenderAllowlistConfig,
@@ -93,13 +129,7 @@ export function loadSenderAllowlist(
 
   try {
     const settings = loadRuntimeSettingsFromPath(filePath);
-    const cfg = createDefaultConfig();
-    for (const [channelId, channelSettings] of Object.entries(
-      settings.channels,
-    )) {
-      cfg[channelId] = channelSettings.senderAllowlist;
-    }
-    return cfg;
+    return deriveAllowlistsFromSettings(settings).sender;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException)?.code;
     if (code === 'ENOENT') return createDefaultConfig();
@@ -121,13 +151,7 @@ export function loadSenderControlAllowlist(
 
   try {
     const settings = loadRuntimeSettingsFromPath(filePath);
-    const cfg = createDefaultControlConfig();
-    for (const [channelId, channelSettings] of Object.entries(
-      settings.channels,
-    )) {
-      cfg[channelId] = channelSettings.controlAllowlist;
-    }
-    return cfg;
+    return deriveAllowlistsFromSettings(settings).control;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException)?.code;
     if (code === 'ENOENT') return createDefaultControlConfig();

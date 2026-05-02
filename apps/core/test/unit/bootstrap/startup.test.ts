@@ -49,7 +49,7 @@ describe('runStartup', () => {
     });
 
     const runtimeSettings = {
-      channels: {},
+      providers: {},
       storage: {
         postgres: { urlEnv: 'MYCLAW_DATABASE_URL', schema: 'myclaw' },
       },
@@ -112,7 +112,7 @@ describe('runStartup', () => {
       loadRuntimeSettings: vi.fn(
         () =>
           ({
-            channels: {},
+            providers: {},
             storage: {
               postgres: { urlEnv: 'MYCLAW_DATABASE_URL', schema: 'myclaw' },
             },
@@ -148,7 +148,7 @@ describe('runStartup', () => {
       loadRuntimeSettings: vi.fn(
         () =>
           ({
-            channels: {},
+            providers: {},
             agent: { name: 'Main Agent' },
             storage: {
               postgres: { urlEnv: 'MYCLAW_DATABASE_URL', schema: 'myclaw' },
@@ -188,13 +188,35 @@ describe('runStartup', () => {
       loadRuntimeSettings: vi.fn(
         () =>
           ({
-            channels: {
-              telegram: {
-                enabled: true,
-                controlAllowlist: {
-                  default: [],
-                  agents: { main_agent: ['5759865942'] },
-                },
+            providers: {
+              telegram: { enabled: true },
+            },
+            providerConnections: {
+              telegram_default: {
+                provider: 'telegram',
+                label: 'Telegram',
+                runtimeSecretRefs: {},
+              },
+            },
+            conversations: {
+              main_telegram: {
+                providerConnection: 'telegram_default',
+                externalId: '123',
+                kind: 'group',
+                displayName: 'Main',
+                senderPolicy: { allow: '*', mode: 'trigger' },
+                controlApprovers: ['5759865942'],
+              },
+            },
+            bindings: {
+              main_telegram: {
+                agent: 'main_agent',
+                conversation: 'main_telegram',
+                trigger: '@agent',
+                addedAt: '2026-01-01T00:00:00.000Z',
+                requiresTrigger: true,
+                isMain: true,
+                memoryScope: 'conversation',
               },
             },
             agent: { name: 'Ravi Agent' },
@@ -244,7 +266,7 @@ describe('runStartup', () => {
         loadRuntimeSettings: vi.fn(
           () =>
             ({
-              channels: {},
+              providers: {},
               storage: {
                 postgres: {
                   urlEnv: 'MYCLAW_DATABASE_URL',
@@ -303,7 +325,7 @@ describe('runStartup', () => {
         loadRuntimeSettings: vi.fn(
           () =>
             ({
-              channels: {},
+              providers: {},
               storage: {
                 postgres: {
                   urlEnv: 'MYCLAW_DATABASE_URL',
@@ -348,7 +370,7 @@ describe('runStartup', () => {
       loadRuntimeSettings: vi.fn(
         () =>
           ({
-            channels: {},
+            providers: {},
             storage: { provider: 'postgres' },
             memory: {},
           }) as any,

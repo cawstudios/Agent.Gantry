@@ -69,7 +69,7 @@ function defaultAgentClaudeMarkdown(
     '- Use send_message for progress updates and ask_user_question for structured choices.',
     '- Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.',
     '- Main/admin agents may use settings_desired_state before local configuration changes and request_settings_update for reviewed settings.yaml changes; do not edit settings directly.',
-    '- Main/admin agents may use service_restart after approved changes and register_agent for channel binding.',
+    '- Main/admin agents may use service_restart after approved changes and register_agent for conversation binding.',
     '- Never run dependency installs or edit .claude/skills, .mcp.json, settings, or generated capability config directly.',
     '',
   ].join('\n');

@@ -327,7 +327,7 @@ export class TeamsChannel implements ChannelAdapter {
     const normalized: NewMessage = {
       id: message.id || `teams:${message.conversationId}:${timestamp}`,
       chat_jid: jid,
-      channel_provider: 'teams',
+      provider: 'teams',
       sender,
       sender_name: senderName,
       content,

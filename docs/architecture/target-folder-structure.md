@@ -61,7 +61,7 @@ Layer rules:
 Owns provider-free and channel-free product concepts:
 
 - app, agent, config version, model profile
-- channel installation and binding abstractions without provider SDK types
+- provider connection and binding abstractions without provider SDK types
 - conversation, thread, user, message, message part, attachment metadata
 - session, provider session reference, run, run event
 - memory subject, job

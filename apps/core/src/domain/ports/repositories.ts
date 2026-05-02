@@ -9,12 +9,12 @@ import type {
 import type { App, AppId } from '../app/app.js';
 import type { BrowserProfile, BrowserProfileId } from '../browser/browser.js';
 import type {
-  AgentChannelBinding,
-  ChannelControlApprover,
-  ChannelInstallation,
-  ChannelInstallationId,
-  ChannelProviderId,
-} from '../channel/channel.js';
+  AgentConversationBinding,
+  ConversationApprover,
+  ProviderConnection,
+  ProviderConnectionId,
+  ProviderId,
+} from '../provider/provider.js';
 import type {
   Conversation,
   ConversationId,
@@ -142,71 +142,73 @@ export interface AgentConfigRepository {
   saveConfigVersion(version: AgentConfigVersion): Promise<void>;
 }
 
-export interface ChannelInstallationRepository {
-  listChannelInstallations(appId: AppId): Promise<ChannelInstallation[]>;
-  getChannelInstallation(
-    id: ChannelInstallationId,
-  ): Promise<ChannelInstallation | null>;
-  saveChannelInstallation(installation: ChannelInstallation): Promise<void>;
-  updateChannelInstallation(input: {
+export interface ProviderConnectionRepository {
+  listProviderConnections(appId: AppId): Promise<ProviderConnection[]>;
+  getProviderConnection(
+    id: ProviderConnectionId,
+  ): Promise<ProviderConnection | null>;
+  saveProviderConnection(providerConnection: ProviderConnection): Promise<void>;
+  updateProviderConnection(input: {
     appId: AppId;
-    id: ChannelInstallationId;
+    id: ProviderConnectionId;
     patch: {
       externalInstallationRef?:
-        | ChannelInstallation['externalInstallationRef']
+        | ProviderConnection['externalInstallationRef']
         | null;
       label?: string;
-      status?: ChannelInstallation['status'];
-      config?: ChannelInstallation['config'];
-      runtimeSecretRefs?: ChannelInstallation['runtimeSecretRefs'];
+      status?: ProviderConnection['status'];
+      config?: ProviderConnection['config'];
+      runtimeSecretRefs?: ProviderConnection['runtimeSecretRefs'];
     };
     updatedAt: string;
-  }): Promise<ChannelInstallation | null>;
-  disableChannelInstallation(input: {
+  }): Promise<ProviderConnection | null>;
+  disableProviderConnection(input: {
     appId: AppId;
-    id: ChannelInstallationId;
+    id: ProviderConnectionId;
     updatedAt: string;
-  }): Promise<ChannelInstallation | null>;
-  saveAgentChannelBinding(binding: AgentChannelBinding): Promise<void>;
-  disableAgentChannelBinding(input: {
+  }): Promise<ProviderConnection | null>;
+  saveAgentConversationBinding(
+    binding: AgentConversationBinding,
+  ): Promise<void>;
+  disableAgentConversationBinding(input: {
     appId: AppId;
     agentId: AgentId;
     conversationId: ConversationId;
     threadId?: ConversationThreadId;
     updatedAt: string;
-  }): Promise<AgentChannelBinding | null>;
-  getAgentChannelBinding(input: {
+  }): Promise<AgentConversationBinding | null>;
+  getAgentConversationBinding(input: {
     appId: AppId;
     agentId: AgentId;
     conversationId: ConversationId;
     threadId?: ConversationThreadId;
-  }): Promise<AgentChannelBinding | null>;
+  }): Promise<AgentConversationBinding | null>;
   isAgentEnabledInConversation(input: {
     appId: AppId;
     agentId: AgentId;
     conversationId: ConversationId;
     threadId?: ConversationThreadId;
   }): Promise<boolean>;
-  listAgentChannelBindings(
+  listAgentConversationBindings(
     appId: AppId,
     agentId?: AgentId,
-  ): Promise<AgentChannelBinding[]>;
-  listAgentChannelBindingsByConversation(input: {
+  ): Promise<AgentConversationBinding[]>;
+  listAgentConversationBindingsByConversation(input: {
     appId: AppId;
     conversationId: ConversationId;
-  }): Promise<AgentChannelBinding[]>;
+  }): Promise<AgentConversationBinding[]>;
 }
 
 export interface ConversationRepository {
   listConversations(input: {
     appId: AppId;
-    channelInstallationId?: ChannelInstallationId;
+    providerConnectionId?: ProviderConnectionId;
   }): Promise<Conversation[]>;
   getConversation(id: ConversationId): Promise<Conversation | null>;
   getConversationByExternalRef(input: {
     appId: AppId;
-    providerId: ChannelProviderId;
-    channelInstallationId: ChannelInstallationId;
+    providerId: ProviderId;
+    providerConnectionId: ProviderConnectionId;
     externalConversationId: ExternalConversationId | string;
   }): Promise<Conversation | null>;
   findConversationByExternalValue(input: {
@@ -216,7 +218,7 @@ export interface ConversationRepository {
   getThread(id: ConversationThreadId): Promise<ConversationThread | null>;
   getThreadByExternalRef(input: {
     appId: AppId;
-    providerId: ChannelProviderId;
+    providerId: ProviderId;
     conversationId: ConversationId;
     externalThreadId: string;
   }): Promise<ConversationThread | null>;
@@ -226,15 +228,15 @@ export interface ConversationRepository {
   listParticipantExternalUserIds(
     conversationId: ConversationId,
   ): Promise<string[]>;
-  listChannelControlApprovers(
+  listConversationApprovers(
     conversationId: ConversationId,
-  ): Promise<ChannelControlApprover[]>;
-  replaceChannelControlApprovers(input: {
+  ): Promise<ConversationApprover[]>;
+  replaceConversationApprovers(input: {
     appId: AppId;
     conversationId: ConversationId;
     externalUserIds: string[];
     updatedAt: string;
-  }): Promise<ChannelControlApprover[]>;
+  }): Promise<ConversationApprover[]>;
 }
 
 export interface MessageRepository {

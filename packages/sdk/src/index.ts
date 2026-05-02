@@ -2,11 +2,11 @@ import http from 'node:http';
 import https from 'node:https';
 import { URL } from 'node:url';
 import type {
-  AgentBindingInput,
-  ChannelDiscoveryInput,
-  ChannelInstallationInput,
-  ChannelInstallationPatch,
-} from './channel-types.js';
+  AgentConversationBindingInput,
+  ConversationDiscoveryInput,
+  ProviderConnectionInput,
+  ProviderConnectionPatch,
+} from './provider-types.js';
 import { createAgentSkillsClient, createSkillDraftsClient } from './skills.js';
 import { createSettingsClient } from './settings.js';
 import type {
@@ -412,78 +412,92 @@ export class MyClawClient {
     request: this.request,
   });
 
-  readonly channels = {
-    providers: {
-      list: () =>
-        this.transport.request<{ providers: unknown[] }>({
-          method: 'GET',
-          path: '/v1/channel-providers',
-        }),
+  readonly providers = {
+    list: () =>
+      this.transport.request<{ providers: unknown[] }>({
+        method: 'GET',
+        path: '/v1/providers',
+      }),
+  };
+
+  readonly providerConnections = {
+    create: (input: ProviderConnectionInput) =>
+      this.transport.request<Record<string, unknown>>({
+        method: 'POST',
+        path: '/v1/provider-connections',
+        body: input,
+      }),
+    list: () =>
+      this.transport.request<{ providerConnections: unknown[] }>({
+        method: 'GET',
+        path: '/v1/provider-connections',
+      }),
+    get: (installationId: string) =>
+      this.transport.request<Record<string, unknown>>({
+        method: 'GET',
+        path: `/v1/provider-connections/${encodeURIComponent(installationId)}`,
+      }),
+    update: (installationId: string, patch: ProviderConnectionPatch) =>
+      this.transport.request<Record<string, unknown>>({
+        method: 'PATCH',
+        path: `/v1/provider-connections/${encodeURIComponent(installationId)}`,
+        body: patch,
+      }),
+    delete: (installationId: string) =>
+      this.transport.request<{ deleted: boolean; installation?: unknown }>({
+        method: 'DELETE',
+        path: `/v1/provider-connections/${encodeURIComponent(installationId)}`,
+      }),
+    discoverConversations: (
+      installationId: string,
+      input: ConversationDiscoveryInput = {},
+    ) =>
+      this.transport.request<{ conversations: unknown[] }>({
+        method: 'POST',
+        path: `/v1/provider-connections/${encodeURIComponent(installationId)}/discover-conversations`,
+        body: input,
+      }),
+  };
+
+  readonly conversations = {
+    list: (input: { providerConnectionId?: string } = {}) => {
+      const params = new URLSearchParams();
+      if (input.providerConnectionId) {
+        params.set('providerConnectionId', input.providerConnectionId);
+      }
+      return this.transport.request<{ conversations: unknown[] }>({
+        method: 'GET',
+        path: `/v1/conversations${params.toString() ? `?${params}` : ''}`,
+      });
     },
-    installations: {
-      create: (input: ChannelInstallationInput) =>
-        this.transport.request<Record<string, unknown>>({
-          method: 'POST',
-          path: '/v1/channel-installations',
-          body: input,
-        }),
-      list: () =>
-        this.transport.request<{ installations: unknown[] }>({
-          method: 'GET',
-          path: '/v1/channel-installations',
-        }),
-      get: (installationId: string) =>
-        this.transport.request<Record<string, unknown>>({
-          method: 'GET',
-          path: `/v1/channel-installations/${encodeURIComponent(installationId)}`,
-        }),
-      update: (installationId: string, patch: ChannelInstallationPatch) =>
-        this.transport.request<Record<string, unknown>>({
-          method: 'PATCH',
-          path: `/v1/channel-installations/${encodeURIComponent(installationId)}`,
-          body: patch,
-        }),
-      delete: (installationId: string) =>
-        this.transport.request<{ deleted: boolean; installation?: unknown }>({
-          method: 'DELETE',
-          path: `/v1/channel-installations/${encodeURIComponent(installationId)}`,
-        }),
-      discover: (installationId: string, input: ChannelDiscoveryInput = {}) =>
-        this.transport.request<{ conversations: unknown[] }>({
-          method: 'POST',
-          path: `/v1/channel-installations/${encodeURIComponent(installationId)}/discover`,
-          body: input,
-        }),
-    },
-    conversations: {
-      list: (input: { channelInstallationId?: string } = {}) => {
-        const params = new URLSearchParams();
-        if (input.channelInstallationId) {
-          params.set('channelInstallationId', input.channelInstallationId);
-        }
-        return this.transport.request<{ conversations: unknown[] }>({
-          method: 'GET',
-          path: `/v1/conversations${params.toString() ? `?${params}` : ''}`,
-        });
-      },
-      get: (conversationId: string) =>
-        this.transport.request<Record<string, unknown>>({
-          method: 'GET',
-          path: `/v1/conversations/${encodeURIComponent(conversationId)}`,
-        }),
-      messages: (
-        conversationId: string,
-        input: { threadId?: string; after?: string; limit?: number } = {},
-      ) => {
-        const params = new URLSearchParams();
-        if (input.threadId) params.set('threadId', input.threadId);
-        if (input.after) params.set('after', input.after);
-        if (input.limit) params.set('limit', String(input.limit));
-        return this.transport.request<{ messages: unknown[] }>({
-          method: 'GET',
-          path: `/v1/conversations/${encodeURIComponent(conversationId)}/messages${params.toString() ? `?${params}` : ''}`,
-        });
-      },
+    get: (conversationId: string) =>
+      this.transport.request<Record<string, unknown>>({
+        method: 'GET',
+        path: `/v1/conversations/${encodeURIComponent(conversationId)}`,
+      }),
+    getApprovers: (conversationId: string) =>
+      this.transport.request<{ approvers: { userIds: string[] } }>({
+        method: 'GET',
+        path: `/v1/conversations/${encodeURIComponent(conversationId)}/approvers`,
+      }),
+    setApprovers: (conversationId: string, userIds: string[]) =>
+      this.transport.request<{ approvers: { userIds: string[] } }>({
+        method: 'PUT',
+        path: `/v1/conversations/${encodeURIComponent(conversationId)}/approvers`,
+        body: { userIds },
+      }),
+    messages: (
+      conversationId: string,
+      input: { threadId?: string; after?: string; limit?: number } = {},
+    ) => {
+      const params = new URLSearchParams();
+      if (input.threadId) params.set('threadId', input.threadId);
+      if (input.after) params.set('after', input.after);
+      if (input.limit) params.set('limit', String(input.limit));
+      return this.transport.request<{ messages: unknown[] }>({
+        method: 'GET',
+        path: `/v1/conversations/${encodeURIComponent(conversationId)}/messages${params.toString() ? `?${params}` : ''}`,
+      });
     },
   };
 
@@ -492,30 +506,30 @@ export class MyClawClient {
     mcpServers: mcpServerClients.createAgentMcpServersClient({
       request: this.request,
     }),
-    bindings: {
+    conversationBindings: {
       list: (agentId: string) =>
         this.transport.request<{ bindings: unknown[] }>({
           method: 'GET',
-          path: `/v1/agents/${encodeURIComponent(agentId)}/channel-bindings`,
+          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-bindings`,
         }),
       enable: (
         agentId: string,
         conversationId: string,
-        input: AgentBindingInput = {},
+        input: AgentConversationBindingInput = {},
       ) =>
         this.transport.request<Record<string, unknown>>({
           method: 'PUT',
-          path: `/v1/agents/${encodeURIComponent(agentId)}/channel-bindings/${encodeURIComponent(conversationId)}`,
+          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-bindings/${encodeURIComponent(conversationId)}`,
           body: input,
         }),
       update: (
         agentId: string,
         conversationId: string,
-        patch: AgentBindingInput,
+        patch: AgentConversationBindingInput,
       ) =>
         this.transport.request<Record<string, unknown>>({
           method: 'PATCH',
-          path: `/v1/agents/${encodeURIComponent(agentId)}/channel-bindings/${encodeURIComponent(conversationId)}`,
+          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-bindings/${encodeURIComponent(conversationId)}`,
           body: patch,
         }),
       disable: (
@@ -528,7 +542,7 @@ export class MyClawClient {
         return this.transport.request<{ disabled: boolean; binding?: unknown }>(
           {
             method: 'DELETE',
-            path: `/v1/agents/${encodeURIComponent(agentId)}/channel-bindings/${encodeURIComponent(conversationId)}${params.toString() ? `?${params}` : ''}`,
+            path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-bindings/${encodeURIComponent(conversationId)}${params.toString() ? `?${params}` : ''}`,
           },
         );
       },

@@ -18,7 +18,7 @@ afterEach(() => {
   vi.doUnmock('@core/infrastructure/service/manager.js');
   vi.doUnmock('@core/config/settings/runtime-settings.js');
   vi.doUnmock('@core/adapters/storage/postgres/storage-service.js');
-  vi.doUnmock('@core/cli/channel.js');
+  vi.doUnmock('@core/cli/provider.js');
   vi.doUnmock('@core/cli/local.js');
   vi.doUnmock('@clack/prompts');
   for (const runtimeHome of runtimeHomes.splice(0)) {
@@ -111,7 +111,7 @@ describe('CLI local routing', () => {
 
   it('routes top-level channel commands to the channel command family', async () => {
     const runtimeHome = makeRuntimeHome();
-    const runChannelCommand = vi.fn(async () => 0);
+    const runProviderCommand = vi.fn(async () => 0);
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,
       note: vi.fn(),
@@ -149,19 +149,21 @@ describe('CLI local routing', () => {
         postgresSchema: 'myclaw',
       })),
     }));
-    vi.doMock('@core/cli/channel.js', () => ({ runChannelCommand }));
+    vi.doMock('@core/cli/provider.js', () => ({
+      runProviderCommand: runProviderCommand,
+    }));
 
     const { main } = await import('@core/cli/index.js');
     const code = await main([
       '--runtime-home',
       runtimeHome,
-      'channel',
+      'provider',
       'connect',
       'telegram',
     ]);
 
     expect(code).toBe(0);
-    expect(runChannelCommand).toHaveBeenCalledWith(
+    expect(runProviderCommand).toHaveBeenCalledWith(
       expect.any(String),
       runtimeHome,
       ['connect', 'telegram'],

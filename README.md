@@ -57,11 +57,12 @@ myclaw local setup|start|stop|status|logs|doctor
 myclaw model list
 myclaw model set-default chat|one-time|recurring <alias>
 myclaw model doctor
-myclaw channel connect telegram
-myclaw channel connect slack
-myclaw channel connect teams
-myclaw channel list
-myclaw channel doctor
+myclaw provider connect telegram
+myclaw provider connect slack
+myclaw provider connect teams
+myclaw provider list
+myclaw provider doctor
+myclaw conversation approvers <conversation-id> [--allow <userId,userId>]
 myclaw agent list
 myclaw agent add <jid|chat-id> [--name <name>] [--main]
 myclaw service install|start|stop|restart
@@ -76,8 +77,8 @@ Defaults in v1:
 - memory: on
 - embeddings: off by default; external embedding providers require brokered Model Access and are not configured through MyClaw `.env`
 - dreaming: on in guided setup; disable with `myclaw memory dreaming off`
-- sender allowlist: `channels.<provider>.sender_allowlist` in `settings.yaml`
-- session/admin allowlist: `channels.<provider>.control_allowlist` in `settings.yaml`
+- provider connections, conversations, bindings, and conversation approvers live under `providers`, `provider_connections`, `conversations`, and `bindings` in `settings.yaml`
+- conversation approvers approve group/channel actions only when listed on that conversation and currently a member; agent DM admins are only for private/direct agent administration
 
 Runtime home is a single-cut contract. MyClaw reads `~/myclaw` by default unless `--runtime-home` or `MYCLAW_HOME` is set.
 
@@ -132,29 +133,29 @@ remove them from `.env` before starting the runtime.
 MyClaw intentionally does not expose a destructive database-reset command in
 the runtime CLI. If you need to start over during development, stop MyClaw,
 reset your local Postgres outside the agent-facing CLI, then run
-`myclaw channel connect telegram` or `myclaw channel connect slack` to
+`myclaw provider connect telegram` or `myclaw provider connect slack` to
 re-register chats.
 
 For hosted Postgres, use Neon, Supabase, or another provider that supports `vector` and `pg_trgm`, then paste two URLs during setup: one MyClaw-role URL with `sslmode=require`, and one OneCLI-role URL for the same database with `sslmode=require` and `schema=onecli`.
 
-### Channel Setup
+### Provider And Conversation Setup
 
-MyClaw supports multiple channels. You can connect Telegram, Slack, or Teams:
+MyClaw supports multiple providers. You can connect Telegram, Slack, or Teams and then bind an agent into a conversation:
 
 ```bash
-myclaw channel connect telegram
-myclaw channel connect slack
-myclaw channel connect teams
+myclaw provider connect telegram
+myclaw provider connect slack
+myclaw provider connect teams
 ```
 
 Notes:
 
 - Telegram uses `TELEGRAM_BOT_TOKEN`; create it in Telegram by chatting with `@BotFather` and sending `/newbot`.
 - For Telegram groups, add the bot to the group and send a message before discovery; if MyClaw must see every group message, make the bot an admin or disable Group Privacy in BotFather with `/setprivacy`.
-- `myclaw channel connect telegram` auto-discovers recent chats and can register one without manual chat ID copy/paste. The human sender from the selected discovery message is added to `control_allowlist`, so `/new`, `/model`, `/dream`, and `/memory-status` work immediately.
+- `myclaw provider connect telegram` auto-discovers recent chats and can register one without manual chat ID copy/paste. The human sender from the selected discovery message is added as a conversation approver, so `/new`, `/model`, `/dream`, and `/memory-status` work immediately.
 - Slack uses Socket Mode with `SLACK_BOT_TOKEN` (`xoxb-...`) and `SLACK_APP_TOKEN` (`xapp-...`); create a Slack app, add a bot user/scopes, enable Socket Mode, generate the app-level token, install/reinstall the app, then invite it to the target channel or DM it once.
-- `myclaw channel connect slack` auto-discovers accessible conversations and can register one directly.
-- Slack tool permission approvals are deny-by-default until approvers are listed in `channels.slack.control_allowlist` in `settings.yaml`. Guided setup asks for comma-separated Slack member IDs like `U0123456789`; these users can approve tool permissions and answer interactive prompts.
+- `myclaw provider connect slack` auto-discovers accessible conversations and can register one directly.
+- Slack tool permission approvals are deny-by-default until approvers are listed on the target conversation in `settings.yaml`. Guided setup asks for comma-separated Slack member IDs like `U0123456789`; these users must be members of that conversation to approve tool permissions and answer interactive prompts.
 - Slack UX uses native Slack surfaces (threads, streaming updates, actions).
 - Teams setup uses Microsoft Teams app auth through `RuntimeSecretProvider`
   (`TEAMS_CLIENT_ID`, `TEAMS_CLIENT_SECRET`, `TEAMS_TENANT_ID`), discovers
@@ -202,7 +203,7 @@ provider-backed skill source, but provider verification never bypasses approval.
 - Scheduled jobs
 - Web access and browser automation
 - Host runtime execution
-- Skill-driven extensions and channel installation
+- Skill-driven extensions and provider connection
 
 ## Memory And Continuity
 
@@ -347,7 +348,7 @@ Use these as standalone chat messages:
 - `/models` lists the curated model catalog with aliases, provider label, context window, cache support, and default badges.
 - `/model <value>` switches the group model override through the catalog. Friendly aliases are case/punctuation-insensitive; raw provider model IDs are rejected.
 - `/status` shows the current model source, context window, max output, current/cumulative input/output/cache tokens, cache hit state, and estimated cost when reported.
-- Session commands require `is_from_me` or explicit `control_allowlist` membership. `sender_allowlist: "*"` allows interaction; it does not grant admin/session-command rights.
+- Session commands require `is_from_me` or explicit conversation approver membership. `sender_policy.allow: "*"` allows interaction; it does not grant admin/session-command rights.
 
 ## Model Policy
 

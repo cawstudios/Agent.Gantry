@@ -2,31 +2,33 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
-  AgentChannelBindingRequestSchema,
-  CreateChannelInstallationRequestSchema,
-  DiscoverChannelInstallationRequestSchema,
-  UpdateChannelInstallationRequestSchema,
+  AgentConversationBindingRequestSchema,
+  CreateProviderConnectionRequestSchema,
+  DiscoverProviderConnectionRequestSchema,
+  UpdateProviderConnectionRequestSchema,
 } from '@myclaw/contracts';
 
 import { EnvRuntimeSecretProvider } from '../../../adapters/credentials/env-runtime-secret-provider.js';
+import { RuntimeSecretChannelMembershipValidator } from '../../../channels/channel-membership-validation.js';
 import {
   BuiltInControlChannelProviderCatalog,
   RuntimeSecretConversationDiscovery,
 } from '../../../channels/control-provider-catalog.js';
+import { ConversationAdministrationService } from '../../../application/provider-conversations/conversation-administration-service.js';
 import {
-  AgentChannelBindingControlService,
-  ChannelInstallationControlService,
-  DiscoverChannelConversationsService,
-} from '../../../application/channels/channel-control-use-cases.js';
-import { ListChannelProvidersUseCase } from '../../../application/channels/list-channel-providers-use-case.js';
+  AgentConversationBindingControlService,
+  ProviderConnectionControlService,
+  DiscoverProviderConversationsService,
+} from '../../../application/provider-conversations/provider-conversation-control-use-cases.js';
+import { ListProvidersUseCase } from '../../../application/provider-conversations/list-providers-use-case.js';
 import { ApplicationError } from '../../../application/common/application-error.js';
 import { ConversationControlService } from '../../../application/conversations/conversation-control-use-cases.js';
 import type { AgentId } from '../../../domain/agent/agent.js';
 import type { AppId } from '../../../domain/app/app.js';
 import type {
-  ChannelInstallationId,
-  ChannelProviderId,
-} from '../../../domain/channel/channel.js';
+  ProviderConnectionId,
+  ProviderId,
+} from '../../../domain/provider/provider.js';
 import type {
   ConversationId,
   ConversationThreadId,
@@ -40,7 +42,7 @@ import {
 import { readJson, sendError, sendJson } from '../http.js';
 import {
   parseAgentBindingRoute,
-  parseChannelInstallationRoute,
+  parseProviderConnectionRoute,
   parseConversationRoute,
 } from '../route-parser.js';
 import {
@@ -48,13 +50,12 @@ import {
   bindingToResponse,
   conversationToResponse,
   externalRefFromContract,
-  installationToResponse,
+  providerConnectionToResponse,
   messageToResponse,
   parseLimit,
   providerToResponse,
   threadToResponse,
-} from './channel-mappers.js';
-import { handleChannelAdminFacadeRoutes } from './channel-admin-facade.js';
+} from './provider-conversation-mappers.js';
 
 const providers = new BuiltInControlChannelProviderCatalog();
 
@@ -89,14 +90,14 @@ function services() {
   const ids = { generate: randomUUID };
   const clock = { now: nowIso };
   return {
-    installations: new ChannelInstallationControlService({
-      installations: repositories.channelInstallations,
+    providerConnections: new ProviderConnectionControlService({
+      providerConnections: repositories.providerConnections,
       providers,
       ids,
       clock,
     }),
-    discovery: new DiscoverChannelConversationsService({
-      installations: repositories.channelInstallations,
+    discovery: new DiscoverProviderConversationsService({
+      providerConnections: repositories.providerConnections,
       conversations: repositories.conversations,
       discovery: new RuntimeSecretConversationDiscovery(
         new EnvRuntimeSecretProvider(),
@@ -108,9 +109,9 @@ function services() {
       conversations: repositories.conversations,
       messages: repositories.messages,
     }),
-    bindings: new AgentChannelBindingControlService({
+    bindings: new AgentConversationBindingControlService({
       agents: repositories.agents,
-      installations: repositories.channelInstallations,
+      providerConnections: repositories.providerConnections,
       conversations: repositories.conversations,
       ids,
       clock,
@@ -123,52 +124,54 @@ function parseBindingPatch(
   conversationId: ConversationId,
   raw: unknown,
 ) {
-  const parsed = AgentChannelBindingRequestSchema.safeParse(raw);
+  const parsed = AgentConversationBindingRequestSchema.safeParse(raw);
   if (!parsed.success) return null;
   return bindingPatchFromParsed(appId, conversationId, parsed.data);
 }
 
-export async function handleChannelControlRoutes(
+export async function handleProviderConversationRoutes(
   req: IncomingMessage,
   res: ServerResponse,
   ctx: ControlRouteContext,
   url: URL,
   pathname: string,
 ): Promise<boolean> {
-  if (await handleChannelAdminFacadeRoutes(req, res, ctx, url, pathname)) {
-    return true;
-  }
-
-  if (pathname === '/v1/channel-providers' && req.method === 'GET') {
-    const auth = authorizeControlRequest(req, res, ctx.keys, ['channels:read']);
+  if (pathname === '/v1/providers' && req.method === 'GET') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, [
+      'providers:read',
+    ]);
     if (!auth) return true;
-    const result = await new ListChannelProvidersUseCase(providers).execute();
+    const result = await new ListProvidersUseCase(providers).execute();
     sendJson(res, 200, {
       providers: result.providers.map(providerToResponse),
     });
     return true;
   }
 
-  if (pathname === '/v1/channel-installations' && req.method === 'GET') {
-    const auth = authorizeControlRequest(req, res, ctx.keys, ['channels:read']);
+  if (pathname === '/v1/provider-connections' && req.method === 'GET') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, [
+      'providers:read',
+    ]);
     if (!auth) return true;
-    const result = await services().installations.list(auth.appId as AppId);
+    const result = await services().providerConnections.list(
+      auth.appId as AppId,
+    );
     sendJson(res, 200, {
-      installations: result.map(installationToResponse),
+      providerConnections: result.map(providerConnectionToResponse),
     });
     return true;
   }
 
-  if (pathname === '/v1/channel-installations' && req.method === 'POST') {
+  if (pathname === '/v1/provider-connections' && req.method === 'POST') {
     const auth = authorizeControlRequest(req, res, ctx.keys, [
-      'channels:admin',
+      'providers:admin',
     ]);
     if (!auth) return true;
-    const parsed = CreateChannelInstallationRequestSchema.safeParse(
+    const parsed = CreateProviderConnectionRequestSchema.safeParse(
       await readJson(req),
     );
     if (!parsed.success) {
-      sendError(res, 400, 'INVALID_REQUEST', 'Invalid channel installation');
+      sendError(res, 400, 'INVALID_REQUEST', 'Invalid provider connection');
       return true;
     }
     if (parsed.data.appId !== auth.appId) {
@@ -176,53 +179,55 @@ export async function handleChannelControlRoutes(
         res,
         403,
         'FORBIDDEN',
-        'API key cannot create channel installations for this app',
+        'API key cannot create provider connections for this app',
       );
       return true;
     }
     try {
-      const installation = await services().installations.create({
+      const providerConnection = await services().providerConnections.create({
         appId: auth.appId as AppId,
-        providerId: parsed.data.providerId as ChannelProviderId,
+        providerId: parsed.data.providerId as ProviderId,
         label: parsed.data.label,
         config: parsed.data.config,
         externalInstallationRef: externalRefFromContract(
           parsed.data.externalRef,
-          'channel_installation',
+          'provider_connection',
         ),
         runtimeSecretRefs: parsed.data.runtimeSecretRefs,
         enabled: parsed.data.enabled,
       });
-      sendJson(res, 201, installationToResponse(installation));
+      sendJson(res, 201, providerConnectionToResponse(providerConnection));
     } catch (error) {
       if (!sendApplicationError(res, error)) throw error;
     }
     return true;
   }
 
-  const installationRoute = parseChannelInstallationRoute(pathname);
-  if (installationRoute?.action === 'get' && req.method === 'GET') {
-    const auth = authorizeControlRequest(req, res, ctx.keys, ['channels:read']);
-    if (!auth) return true;
-    try {
-      const installation = await services().installations.get({
-        appId: auth.appId as AppId,
-        installationId:
-          installationRoute.installationId as ChannelInstallationId,
-      });
-      sendJson(res, 200, installationToResponse(installation));
-    } catch (error) {
-      if (!sendApplicationError(res, error)) throw error;
-    }
-    return true;
-  }
-
-  if (installationRoute?.action === 'get' && req.method === 'PATCH') {
+  const providerConnectionRoute = parseProviderConnectionRoute(pathname);
+  if (providerConnectionRoute?.action === 'get' && req.method === 'GET') {
     const auth = authorizeControlRequest(req, res, ctx.keys, [
-      'channels:admin',
+      'providers:read',
     ]);
     if (!auth) return true;
-    const parsed = UpdateChannelInstallationRequestSchema.safeParse(
+    try {
+      const providerConnection = await services().providerConnections.get({
+        appId: auth.appId as AppId,
+        providerConnectionId:
+          providerConnectionRoute.providerConnectionId as ProviderConnectionId,
+      });
+      sendJson(res, 200, providerConnectionToResponse(providerConnection));
+    } catch (error) {
+      if (!sendApplicationError(res, error)) throw error;
+    }
+    return true;
+  }
+
+  if (providerConnectionRoute?.action === 'get' && req.method === 'PATCH') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, [
+      'providers:admin',
+    ]);
+    if (!auth) return true;
+    const parsed = UpdateProviderConnectionRequestSchema.safeParse(
       await readJson(req),
     );
     if (!parsed.success) {
@@ -230,15 +235,15 @@ export async function handleChannelControlRoutes(
         res,
         400,
         'INVALID_REQUEST',
-        'Invalid channel installation patch',
+        'Invalid provider connection patch',
       );
       return true;
     }
     try {
-      const installation = await services().installations.update({
+      const providerConnection = await services().providerConnections.update({
         appId: auth.appId as AppId,
-        installationId:
-          installationRoute.installationId as ChannelInstallationId,
+        providerConnectionId:
+          providerConnectionRoute.providerConnectionId as ProviderConnectionId,
         patch: {
           label: parsed.data.label,
           status: parsed.data.status,
@@ -249,32 +254,32 @@ export async function handleChannelControlRoutes(
               ? null
               : externalRefFromContract(
                   parsed.data.externalRef,
-                  'channel_installation',
+                  'provider_connection',
                 ),
           runtimeSecretRefs: parsed.data.runtimeSecretRefs,
         },
       });
-      sendJson(res, 200, installationToResponse(installation));
+      sendJson(res, 200, providerConnectionToResponse(providerConnection));
     } catch (error) {
       if (!sendApplicationError(res, error)) throw error;
     }
     return true;
   }
 
-  if (installationRoute?.action === 'get' && req.method === 'DELETE') {
+  if (providerConnectionRoute?.action === 'get' && req.method === 'DELETE') {
     const auth = authorizeControlRequest(req, res, ctx.keys, [
-      'channels:admin',
+      'providers:admin',
     ]);
     if (!auth) return true;
     try {
-      const installation = await services().installations.disable({
+      const providerConnection = await services().providerConnections.disable({
         appId: auth.appId as AppId,
-        installationId:
-          installationRoute.installationId as ChannelInstallationId,
+        providerConnectionId:
+          providerConnectionRoute.providerConnectionId as ProviderConnectionId,
       });
       sendJson(res, 200, {
         deleted: true,
-        installation: installationToResponse(installation),
+        providerConnection: providerConnectionToResponse(providerConnection),
       });
     } catch (error) {
       if (!sendApplicationError(res, error)) throw error;
@@ -282,12 +287,12 @@ export async function handleChannelControlRoutes(
     return true;
   }
 
-  if (installationRoute?.action === 'discover' && req.method === 'POST') {
+  if (providerConnectionRoute?.action === 'discover' && req.method === 'POST') {
     const auth = authorizeControlRequest(req, res, ctx.keys, [
-      'channels:admin',
+      'providers:admin',
     ]);
     if (!auth) return true;
-    const parsed = DiscoverChannelInstallationRequestSchema.safeParse(
+    const parsed = DiscoverProviderConnectionRequestSchema.safeParse(
       await readJson(req),
     );
     if (!parsed.success) {
@@ -297,8 +302,8 @@ export async function handleChannelControlRoutes(
     try {
       const conversations = await services().discovery.execute({
         appId: auth.appId as AppId,
-        installationId:
-          installationRoute.installationId as ChannelInstallationId,
+        providerConnectionId:
+          providerConnectionRoute.providerConnectionId as ProviderConnectionId,
         query: parsed.data.query,
         limit: parsed.data.limit,
         includeArchived: parsed.data.includeArchived,
@@ -320,10 +325,10 @@ export async function handleChannelControlRoutes(
     if (!auth) return true;
     const conversations = await services().conversations.list({
       appId: auth.appId as AppId,
-      channelInstallationId:
+      providerConnectionId:
         (url.searchParams.get(
-          'channelInstallationId',
-        ) as ChannelInstallationId | null) ?? undefined,
+          'providerConnectionId',
+        ) as ProviderConnectionId | null) ?? undefined,
     });
     sendJson(res, 200, {
       conversations: conversations.map(conversationToResponse),
@@ -343,6 +348,69 @@ export async function handleChannelControlRoutes(
         conversationId: conversationRoute.conversationId as ConversationId,
       });
       sendJson(res, 200, conversationToResponse(conversation));
+    } catch (error) {
+      if (!sendApplicationError(res, error)) throw error;
+    }
+    return true;
+  }
+
+  const approversMatch = /^\/v1\/conversations\/([^/]+)\/approvers$/.exec(
+    pathname,
+  );
+  if (approversMatch && req.method === 'GET') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, [
+      'conversations:read',
+    ]);
+    if (!auth) return true;
+    try {
+      const summary = await new ConversationAdministrationService({
+        providerConnections:
+          getRuntimeStorage().repositories.providerConnections,
+        conversations: getRuntimeStorage().repositories.conversations,
+      }).getAdminSummary({
+        appId: auth.appId as AppId,
+        conversationId: decodeURIComponent(
+          approversMatch[1]!,
+        ) as ConversationId,
+      });
+      sendJson(res, 200, { approvers: summary.controlAllowlist });
+    } catch (error) {
+      if (!sendApplicationError(res, error)) throw error;
+    }
+    return true;
+  }
+
+  if (approversMatch && req.method === 'PUT') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, [
+      'conversations:admin',
+    ]);
+    if (!auth) return true;
+    const body = (await readJson(req)) as { userIds?: unknown };
+    if (!Array.isArray(body.userIds)) {
+      sendError(res, 400, 'INVALID_REQUEST', 'userIds must be an array');
+      return true;
+    }
+    try {
+      const result = await new ConversationAdministrationService(
+        {
+          providerConnections:
+            getRuntimeStorage().repositories.providerConnections,
+          conversations: getRuntimeStorage().repositories.conversations,
+        },
+        new RuntimeSecretChannelMembershipValidator(
+          new EnvRuntimeSecretProvider(),
+        ),
+      ).replaceControlAllowlist({
+        appId: auth.appId as AppId,
+        conversationId: decodeURIComponent(
+          approversMatch[1]!,
+        ) as ConversationId,
+        userIds: body.userIds.filter(
+          (id): id is string => typeof id === 'string',
+        ),
+        updatedAt: nowIso(),
+      });
+      sendJson(res, 200, { approvers: result });
     } catch (error) {
       if (!sendApplicationError(res, error)) throw error;
     }
@@ -388,7 +456,9 @@ export async function handleChannelControlRoutes(
 
   const bindingRoute = parseAgentBindingRoute(pathname);
   if (bindingRoute?.action === 'list' && req.method === 'GET') {
-    const auth = authorizeControlRequest(req, res, ctx.keys, ['channels:read']);
+    const auth = authorizeControlRequest(req, res, ctx.keys, [
+      'conversations:read',
+    ]);
     if (!auth) return true;
     try {
       const bindings = await services().bindings.list({
@@ -411,7 +481,12 @@ export async function handleChannelControlRoutes(
       await readJson(req),
     );
     if (!patch) {
-      sendError(res, 400, 'INVALID_REQUEST', 'Invalid channel binding request');
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'Invalid conversation binding request',
+      );
       return true;
     }
     try {
@@ -437,7 +512,12 @@ export async function handleChannelControlRoutes(
       await readJson(req),
     );
     if (!patch) {
-      sendError(res, 400, 'INVALID_REQUEST', 'Invalid channel binding patch');
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'Invalid conversation binding patch',
+      );
       return true;
     }
     try {

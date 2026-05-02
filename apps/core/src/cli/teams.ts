@@ -18,6 +18,7 @@ import {
   ensureRuntimeLayout,
 } from '../config/settings/runtime-home.js';
 import {
+  ensureConfiguredConversationBinding,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
@@ -32,6 +33,18 @@ type TeamsChannelChoice =
   | { type: 'selected'; channel: TeamsDiscoveredChannel }
   | { type: 'skip' }
   | { type: 'cancel' };
+
+function parseTeamsApproverIds(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return [
+    ...new Set(
+      raw
+        .split(/[,\s]+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
 
 function defaultTeamsClaudeMarkdown(): string {
   return [
@@ -55,7 +68,7 @@ function defaultTeamsClaudeMarkdown(): string {
     'Capability rules:',
     '- Use send_message for progress updates and ask_user_question for structured choices.',
     '- Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.',
-    '- Main/admin agents may use service_restart after approved changes and register_agent for channel binding.',
+    '- Main/admin agents may use service_restart after approved changes and register_agent for conversation binding.',
     '- Never run dependency installs or edit .claude/skills, .mcp.json, settings, or generated capability config directly.',
     '',
   ].join('\n');
@@ -309,6 +322,24 @@ export async function runTeamsConnectCommand(
     return 1;
   }
 
+  let registeredFolder = '';
+  let registeredGroupName = '';
+  let registeredChatJid = '';
+  let registeredChatTitle = '';
+  const approverInput =
+    channelChoice.type === 'selected'
+      ? await promptForValue({
+          message:
+            'Teams conversation approver user IDs (comma-separated, must be members of this conversation)',
+          defaultValue: '',
+        })
+      : '';
+  if (channelChoice.type === 'selected' && approverInput === null) {
+    p.outro('Teams connect cancelled.');
+    return 1;
+  }
+  const approverIds = parseTeamsApproverIds(approverInput || '');
+
   if (channelChoice.type === 'selected') {
     const verified = await discoveryClient.verifyChannel({
       credentials,
@@ -325,8 +356,12 @@ export async function runTeamsConnectCommand(
       chatJid: verified.chatJid,
       displayName: loadRuntimeSettings(runtimeHome).agent.name,
     });
+    registeredFolder = registered.folder;
+    registeredGroupName = registered.groupName;
+    registeredChatJid = verified.chatJid;
+    registeredChatTitle = verified.chatTitle || verified.chatJid;
     p.log.success(
-      `Registered ${registered.groupName} for Teams channel ${verified.chatTitle || verified.chatJid} in folder ${registered.folder}.`,
+      `Registered ${registered.groupName} for Teams conversation ${registeredChatTitle} in folder ${registered.folder}.`,
     );
   }
 
@@ -336,16 +371,27 @@ export async function runTeamsConnectCommand(
     TEAMS_TENANT_ID: credentials.tenantId,
   });
   const settings = loadRuntimeSettings(runtimeHome);
-  if (settings.channels.teams) {
-    settings.channels.teams.enabled = true;
+  settings.providers.teams.enabled = true;
+  if (registeredFolder) {
+    ensureConfiguredConversationBinding(settings, {
+      agentId: registeredFolder,
+      agentName: registeredGroupName || settings.agent.name,
+      agentFolder: registeredFolder,
+      jid: registeredChatJid,
+      displayName: registeredChatTitle || registeredGroupName,
+      trigger: `@${registeredGroupName || settings.agent.name}`,
+      requiresTrigger: false,
+      isMain: true,
+      approverIds,
+    });
   }
   saveRuntimeSettings(runtimeHome, settings);
 
   if (channelChoice.type === 'selected') {
-    p.outro('Teams channel is configured and ready.');
+    p.outro('Teams conversation is configured and ready.');
   } else {
     p.outro(
-      'Teams credentials saved. Next: run `myclaw channel connect teams` to register a channel.',
+      'Teams credentials saved. Next: run `myclaw provider connect teams` to register a conversation.',
     );
   }
   return 0;

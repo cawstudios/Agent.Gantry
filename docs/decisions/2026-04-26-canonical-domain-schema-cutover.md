@@ -3,7 +3,7 @@
 ## Context
 
 MyClaw is replacing the legacy runtime identity shape with the canonical app,
-agent, channel installation, conversation, thread, message, session, run,
+agent, provider connection, conversation, thread, message, session, run,
 memory, job, permission, sandbox, workspace, and browser model.
 
 Legacy runtime persistence used provider-facing conversation keys, group
@@ -19,7 +19,7 @@ and Postgres persistence. The cutover is intentionally breaking:
 - new domain types are pure TypeScript under `apps/core/src/domain/**`;
 - new shared primitives live under `apps/core/src/shared/**`;
 - runtime storage is represented by canonical tables for apps, agents,
-  channel installations, conversations, messages, sessions, runs, memory, jobs,
+  provider connections, conversations, messages, sessions, runs, memory, jobs,
   permissions, tools, skills, sandboxes, workspace snapshots, and browser
   profiles;
 - migration `0008_canonical_domain_schema_cutover.sql` removes legacy-owned

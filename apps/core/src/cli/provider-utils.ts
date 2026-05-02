@@ -3,13 +3,13 @@ import {
   listConnectableChannelProviders,
   providerForJid,
 } from '../channels/provider-registry.js';
-import { RuntimeChannel } from '../config/settings/runtime-settings.js';
+export type RuntimeProviderId = string;
 
-export function getChannelIds(): RuntimeChannel[] {
+export function getProviderIds(): RuntimeProviderId[] {
   return listConnectableChannelProviders().map((provider) => provider.id);
 }
 
-export function parseRuntimeChannel(raw: string): RuntimeChannel | null {
+export function parseRuntimeProvider(raw: string): RuntimeProviderId | null {
   const normalized = raw.trim().toLowerCase();
   if (!normalized) return null;
   if (
@@ -28,6 +28,6 @@ export function parseRuntimeChannel(raw: string): RuntimeChannel | null {
   return null;
 }
 
-export function channelFromGroupJid(jid: string): RuntimeChannel | null {
+export function providerFromGroupJid(jid: string): RuntimeProviderId | null {
   return providerForJid(jid)?.id ?? null;
 }

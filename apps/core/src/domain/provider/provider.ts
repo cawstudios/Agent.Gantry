@@ -11,22 +11,22 @@ import type { WorkspaceSnapshotId } from '../sandbox/sandbox.js';
 import type { BrandedId, ExternalRef } from '../../shared/ids/branded-id.js';
 import type { IsoTimestamp } from '../../shared/time/primitives.js';
 
-export type ChannelProviderId = BrandedId<'ChannelProviderId'>;
-export type ChannelInstallationId = BrandedId<'ChannelInstallationId'>;
-export type ChannelControlApproverId = BrandedId<'ChannelControlApproverId'>;
+export type ProviderId = BrandedId<'ProviderId'>;
+export type ProviderConnectionId = BrandedId<'ProviderConnectionId'>;
+export type ConversationApproverId = BrandedId<'ConversationApproverId'>;
 
-export interface ChannelProvider {
-  id: ChannelProviderId;
+export interface Provider {
+  id: ProviderId;
   displayName: string;
   capabilityFlags: string[];
   createdAt: IsoTimestamp;
 }
 
-export interface ChannelInstallation {
-  id: ChannelInstallationId;
+export interface ProviderConnection {
+  id: ProviderConnectionId;
   appId: AppId;
-  providerId: ChannelProviderId;
-  externalInstallationRef?: ExternalRef<'channel_installation'>;
+  providerId: ProviderId;
+  externalInstallationRef?: ExternalRef<'provider_connection'>;
   label: string;
   status: 'active' | 'disabled';
   config: Record<string, unknown>;
@@ -35,8 +35,8 @@ export interface ChannelInstallation {
   updatedAt: IsoTimestamp;
 }
 
-export interface ChannelControlApprover {
-  id: ChannelControlApproverId;
+export interface ConversationApprover {
+  id: ConversationApproverId;
   appId: AppId;
   conversationId: ConversationId;
   externalUserId: string;
@@ -44,35 +44,35 @@ export interface ChannelControlApprover {
   updatedAt: IsoTimestamp;
 }
 
-export type AgentChannelBindingStatus = 'active' | 'disabled';
-export type AgentChannelBindingTriggerMode =
+export type AgentConversationBindingStatus = 'active' | 'disabled';
+export type AgentConversationBindingTriggerMode =
   | 'always'
   | 'mention'
   | 'keyword'
   | 'manual'
   | 'webhook';
-export type AgentChannelBindingMemoryScope =
+export type AgentConversationBindingMemoryScope =
   | 'user'
   | 'conversation'
   | 'thread'
   | 'agent'
   | 'app';
 
-export interface AgentChannelBinding {
-  id: BrandedId<'AgentChannelBindingId'>;
+export interface AgentConversationBinding {
+  id: BrandedId<'AgentConversationBindingId'>;
   appId: AppId;
   agentId: AgentId;
-  channelInstallationId: ChannelInstallationId;
+  providerConnectionId: ProviderConnectionId;
   conversationId: ConversationId;
   threadId?: ConversationThreadId;
   externalConversationId?: ExternalConversationId;
   displayName: string;
-  status: AgentChannelBindingStatus;
-  triggerMode: AgentChannelBindingTriggerMode;
+  status: AgentConversationBindingStatus;
+  triggerMode: AgentConversationBindingTriggerMode;
   triggerPattern?: string;
   requiresTrigger: boolean;
   isAdminBinding: boolean;
-  memoryScope: AgentChannelBindingMemoryScope;
+  memoryScope: AgentConversationBindingMemoryScope;
   memorySubject: MemorySubject;
   workspaceSnapshotId?: WorkspaceSnapshotId;
   permissionPolicyIds: PermissionPolicyId[];

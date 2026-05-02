@@ -141,7 +141,7 @@ export class PostgresCanonicalGraphRepository {
   ): Promise<string> {
     await this.ensureApp(executor);
     const providerId = input.channel || providerIdForJid(jid);
-    const installationId = `channel-installation:${CANONICAL_APP_ID}:${providerId}`;
+    const providerConnectionId = `channel-providerConnection:${CANONICAL_APP_ID}:${providerId}`;
     const conversationId = conversationIdForJid(jid);
     const title = input.name || jid;
     const now = input.timestamp || currentIso();
@@ -156,13 +156,13 @@ export class PostgresCanonicalGraphRepository {
       ...(hasKnownKind ? { isGroup: Boolean(input.isGroup) } : {}),
     });
     await executor
-      .insert(pgSchema.channelProvidersPostgres)
+      .insert(pgSchema.providersPostgres)
       .values({ id: providerId, displayName: providerId })
       .onConflictDoNothing();
     await executor
-      .insert(pgSchema.channelInstallationsPostgres)
+      .insert(pgSchema.providerConnectionsPostgres)
       .values({
-        id: installationId,
+        id: providerConnectionId,
         appId: CANONICAL_APP_ID,
         providerId,
         label: providerId,
@@ -173,7 +173,7 @@ export class PostgresCanonicalGraphRepository {
       .values({
         id: conversationId,
         appId: CANONICAL_APP_ID,
-        channelInstallationId: installationId,
+        providerConnectionId: providerConnectionId,
         externalRefJson,
         kind: input.isGroup ? 'group' : 'direct',
         title,
@@ -227,7 +227,7 @@ export class PostgresCanonicalGraphRepository {
     input: {
       conversationId: string;
       providerId: string;
-      channelInstallationId: string;
+      providerConnectionId: string;
       externalUserId: string;
       displayName?: string | null;
       timestamp?: string | null;
@@ -239,7 +239,7 @@ export class PostgresCanonicalGraphRepository {
     const safeProvider = input.providerId.replace(/[^a-zA-Z0-9._:-]/g, '_');
     const safeUser = externalUserId.replace(/[^a-zA-Z0-9._:-]/g, '_');
     const userId = `user:${CANONICAL_APP_ID}:${safeProvider}:${safeUser}`;
-    const aliasId = `user-alias:${CANONICAL_APP_ID}:${safeProvider}:${input.channelInstallationId}:${safeUser}`;
+    const aliasId = `user-alias:${CANONICAL_APP_ID}:${safeProvider}:${input.providerConnectionId}:${safeUser}`;
     const participantId = `participant:${input.conversationId}:${safeUser}`;
     const now = input.timestamp || currentIso();
     const displayName = input.displayName
@@ -270,7 +270,7 @@ export class PostgresCanonicalGraphRepository {
         appId: CANONICAL_APP_ID,
         userId,
         provider: input.providerId,
-        channelInstallationId: input.channelInstallationId,
+        providerConnectionId: input.providerConnectionId,
         externalUserId,
         displayName: input.displayName ?? externalUserId,
         createdAt: now,
@@ -311,7 +311,7 @@ export class PostgresCanonicalGraphRepository {
 
   async listChats(): Promise<ChatInfo[]> {
     const c = pgSchema.conversationsPostgres;
-    const ci = pgSchema.channelInstallationsPostgres;
+    const ci = pgSchema.providerConnectionsPostgres;
     const rows = await this.db
       .select({
         id: c.id,
@@ -323,7 +323,7 @@ export class PostgresCanonicalGraphRepository {
         providerId: ci.providerId,
       })
       .from(c)
-      .innerJoin(ci, eq(ci.id, c.channelInstallationId))
+      .innerJoin(ci, eq(ci.id, c.providerConnectionId))
       .orderBy(sql`${c.updatedAt} DESC`);
     return rows.map((row) => {
       const ref = parseJson<{ jid?: string }>(row.externalRefJson, {});
@@ -343,13 +343,13 @@ export class PostgresCanonicalGraphRepository {
   ): Promise<string | undefined> {
     const rows = await executor
       .select({
-        channelInstallationId:
-          pgSchema.conversationsPostgres.channelInstallationId,
+        providerConnectionId:
+          pgSchema.conversationsPostgres.providerConnectionId,
       })
       .from(pgSchema.conversationsPostgres)
       .where(eq(pgSchema.conversationsPostgres.id, conversationId))
       .limit(1);
-    return rows[0]?.channelInstallationId;
+    return rows[0]?.providerConnectionId;
   }
 
   async listConversationIds(): Promise<string[]> {

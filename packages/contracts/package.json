@@ -24,11 +24,6 @@
       "import": "./dist/browser/index.js",
       "default": "./dist/browser/index.js"
     },
-    "./channels": {
-      "types": "./dist/channels/index.d.ts",
-      "import": "./dist/channels/index.js",
-      "default": "./dist/channels/index.js"
-    },
     "./conversations": {
       "types": "./dist/conversations/index.d.ts",
       "import": "./dist/conversations/index.js",
@@ -73,6 +68,11 @@
       "types": "./dist/permissions/index.d.ts",
       "import": "./dist/permissions/index.js",
       "default": "./dist/permissions/index.js"
+    },
+    "./providers": {
+      "types": "./dist/providers/index.d.ts",
+      "import": "./dist/providers/index.js",
+      "default": "./dist/providers/index.js"
     },
     "./runs": {
       "types": "./dist/runs/index.d.ts",

@@ -34,9 +34,9 @@ App
   Agent
     AgentConfigVersion
     LlmProfile
-    AgentChannelBinding
-      ChannelInstallation
-        ChannelProvider
+    AgentConversationBinding
+      ProviderConnection
+        Provider
         Conversation
           ConversationThread
           Message
@@ -61,16 +61,16 @@ Core rules:
 
 - `App`, `Agent`, `Conversation`, `ConversationThread`, `Message`,
   `AgentSession`, and `AgentRun` are product concepts.
-- `ChannelProvider`, `ChannelInstallation`, and `AgentChannelBinding` adapt
+- `Provider`, `ProviderConnection`, and `AgentConversationBinding` adapt
   external networks into those product concepts.
 - `LlmProfile` and `ProviderSession` adapt model providers into the product
   session and run model.
 - Claude and Anthropic SDKs are one LLM provider adapter. They are not the
   runtime architecture.
 - Personal usage seeds a local `App`, default `Agent`, local settings, memory
-  roots, and one or more channel installations.
+  roots, and one or more provider connections.
 - Enterprise usage integrates through Web UI, control API, SDK, and channel
-  installations. Enterprise applications must not import runtime internals.
+  providerConnections. Enterprise applications must not import runtime internals.
 - Permissions are deterministic runtime decisions, not provider callback
   behavior. Tool execution must go through `PermissionPolicy`,
   `PermissionRule`, `PermissionDecision`, `SandboxProfile`, and `SandboxLease`.
@@ -119,7 +119,7 @@ Replace or delete:
 Replacement direction:
 
 - Group folders become workspace and storage projections of
-  `AgentChannelBinding`, not the identity of an agent, app, or conversation.
+  `AgentConversationBinding`, not the identity of an agent, app, or conversation.
 - Main group privileges become `PermissionPolicy` and admin binding behavior.
 - Claude session ids and other provider resume tokens become `ProviderSession`
   records attached to canonical `AgentSession` records.
@@ -137,10 +137,10 @@ Replacement direction:
   providers use different resume semantics and some deployments may not expose a
   provider session at all.
 - Treat enterprise as a separate product architecture: rejected because personal
-  and enterprise modes should differ by seeding, installation, policy, and UI,
+  and enterprise modes should differ by seeding, providerConnection, policy, and UI,
   not by runtime domain.
 - Keep privileged main-group behavior as the administrative model: rejected
-  because enterprise administration needs explicit user, role, channel binding,
+  because enterprise administration needs explicit user, role, conversation binding,
   and policy decisions.
 
 ## Consequences

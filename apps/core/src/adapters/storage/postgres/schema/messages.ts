@@ -10,7 +10,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { appsPostgres } from './apps.js';
-import { channelInstallationsPostgres } from './channels.js';
+import { providerConnectionsPostgres } from './providers.js';
 import {
   conversationsPostgres,
   conversationThreadsPostgres,
@@ -23,10 +23,10 @@ export const messagesPostgres = pgTable(
     appId: text('app_id')
       .notNull()
       .references(() => appsPostgres.id, { onDelete: 'cascade' }),
-    channelProvider: text('channel_provider').notNull(),
-    channelInstallationId: text('channel_installation_id')
+    providerId: text('provider').notNull(),
+    providerConnectionId: text('provider_connection_id')
       .notNull()
-      .references(() => channelInstallationsPostgres.id, {
+      .references(() => providerConnectionsPostgres.id, {
         onDelete: 'cascade',
       }),
     conversationId: text('conversation_id')
@@ -66,8 +66,8 @@ export const messagesPostgres = pgTable(
     ),
     redeliveryUnique: uniqueIndex('idx_messages_external_redelivery_unique')
       .on(
-        table.channelProvider,
-        table.channelInstallationId,
+        table.providerId,
+        table.providerConnectionId,
         table.conversationId,
         table.threadId,
         table.externalMessageId,

@@ -68,8 +68,8 @@ myclaw status
 # Review runtime settings
 cat ~/myclaw/settings.yaml
 
-# Inspect canonical channel bindings
-psql "$MYCLAW_DATABASE_URL" -c "SELECT display_name, conversation_id, trigger_pattern FROM myclaw.agent_channel_bindings;"
+# Inspect canonical conversation bindings
+psql "$MYCLAW_DATABASE_URL" -c "SELECT display_name, conversation_id, trigger_pattern FROM myclaw.agent_conversation_bindings;"
 ```
 
 ## Channel Auth Issues

@@ -125,20 +125,35 @@ function createTestOpts(
       },
     })),
     runtimeSettings: vi.fn(() => ({
-      channels: {
-        telegram: {
-          enabled: true,
-          senderAllowlist: {
-            default: { allow: '*', mode: 'trigger' },
-            agents: {},
-            logDenied: true,
-          },
-          controlAllowlist: {
-            default: [],
-            agents: {
-              whatsapp_main: ['12345', '222', '333', '444'],
-            },
-          },
+      providers: {
+        telegram: { enabled: true },
+      },
+      providerConnections: {
+        telegram_default: {
+          provider: 'telegram',
+          label: 'Telegram',
+          runtimeSecretRefs: {},
+        },
+      },
+      conversations: {
+        whatsapp_main_conversation: {
+          providerConnection: 'telegram_default',
+          externalId: '100200300',
+          kind: 'group',
+          displayName: 'Test Group',
+          senderPolicy: { allow: '*', mode: 'trigger' },
+          controlApprovers: ['12345', '222', '333', '444'],
+        },
+      },
+      bindings: {
+        whatsapp_main_binding: {
+          agent: 'whatsapp_main',
+          conversation: 'whatsapp_main_conversation',
+          trigger: '@Andy',
+          addedAt: '2024-01-01T00:00:00.000Z',
+          requiresTrigger: true,
+          isMain: false,
+          memoryScope: 'conversation',
         },
       },
       storage: {
@@ -433,7 +448,7 @@ describe('TelegramChannel', () => {
         'tg:999999',
         expect.objectContaining({
           chat_jid: 'tg:999999',
-          channel_provider: 'telegram',
+          provider: 'telegram',
           sender: '99001',
           content: 'Unknown private chat',
         }),
@@ -1187,7 +1202,7 @@ describe('TelegramChannel', () => {
         'tg:999999',
         expect.objectContaining({
           chat_jid: 'tg:999999',
-          channel_provider: 'telegram',
+          provider: 'telegram',
           sender: '99001',
           content: '[Photo]',
         }),
@@ -1196,7 +1211,7 @@ describe('TelegramChannel', () => {
         'tg:999999',
         expect.objectContaining({
           chat_jid: 'tg:999999',
-          channel_provider: 'telegram',
+          provider: 'telegram',
           content: '[Photo]',
         }),
       );
@@ -2458,7 +2473,7 @@ describe('TelegramChannel', () => {
       );
     });
 
-    it('authorizes permission callbacks through channel control allowlist hook', async () => {
+    it('authorizes permission callbacks through conversation approver hook', async () => {
       const isControlApproverAllowed = vi.fn(async () => true);
       const opts = createTestOpts({ isControlApproverAllowed });
       const channel = new TelegramChannel('test-token', opts);

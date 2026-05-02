@@ -1,15 +1,17 @@
-import type { AgentChannelBinding } from '../../domain/channel/channel.js';
-import type { ChannelInstallationRepository } from '../../domain/ports/repositories.js';
+import type { AgentConversationBinding } from '../../domain/provider/provider.js';
+import type { ProviderConnectionRepository } from '../../domain/ports/repositories.js';
 
 export class EnableAgentInConversationUseCase {
   constructor(
     private readonly deps: {
-      installations: ChannelInstallationRepository;
+      providerConnections: ProviderConnectionRepository;
     },
   ) {}
 
-  async execute(input: { binding: AgentChannelBinding }) {
-    await this.deps.installations.saveAgentChannelBinding(input.binding);
+  async execute(input: { binding: AgentConversationBinding }) {
+    await this.deps.providerConnections.saveAgentConversationBinding(
+      input.binding,
+    );
     return { binding: input.binding };
   }
 }

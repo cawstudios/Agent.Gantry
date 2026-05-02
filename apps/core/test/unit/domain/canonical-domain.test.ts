@@ -50,7 +50,7 @@ describe('canonical Postgres persistence cut', () => {
     for (const file of [
       'apps',
       'agents',
-      'channels',
+      'providers',
       'conversations',
       'messages',
       'sessions',
@@ -104,9 +104,9 @@ describe('canonical Postgres persistence cut', () => {
     );
 
     expect(schema).toContain("'messages'");
-    expect(schema).toContain("channelProvider: text('channel_provider')");
+    expect(schema).toContain("providerId: text('provider')");
     expect(schema).toContain(
-      "channelInstallationId: text('channel_installation_id')",
+      "providerConnectionId: text('provider_connection_id')",
     );
     expect(schema).toContain("externalMessageId: text('external_message_id')");
     expect(migration).toContain('idx_messages_external_redelivery_unique');

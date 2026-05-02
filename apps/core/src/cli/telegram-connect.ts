@@ -1,6 +1,5 @@
 import * as p from '@clack/prompts';
 import '../channels/register-builtins.js';
-import { getChannelProvider } from '../channels/provider-registry.js';
 import { upsertEnvFile } from '../config/env/file.js';
 import {
   envFilePath,
@@ -8,7 +7,7 @@ import {
 } from '../config/settings/runtime-home.js';
 import { listTelegramRecentChats } from './telegram-chat-discovery.js';
 import {
-  addControlSenderForAgent,
+  ensureConfiguredConversationBinding,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
@@ -237,6 +236,7 @@ export async function runTelegramConnectCommand(
     approverInput = promptedApprovers;
   }
   let registeredFolder = '';
+  let registeredGroupName = '';
 
   if (normalizedChatJid) {
     const access = await verifyTelegramChatAccess({
@@ -257,6 +257,7 @@ export async function runTelegramConnectCommand(
       displayName: loadRuntimeSettings(runtimeHome).agent.name,
     });
     registeredFolder = registered.folder;
+    registeredGroupName = registered.groupName;
 
     p.log.success(
       `Registered ${registered.groupName} for Telegram chat ${normalizedChatJid} in folder ${registered.folder}.`,
@@ -267,36 +268,39 @@ export async function runTelegramConnectCommand(
     TELEGRAM_BOT_TOKEN: tokenInput,
   });
   const settings = loadRuntimeSettings(runtimeHome);
-  const provider = getChannelProvider('telegram');
-  if (provider && settings.channels[provider.id]) {
-    settings.channels[provider.id].enabled = true;
-    if (registeredFolder && (adminSenderId || approverInput)) {
-      for (const senderId of parseTelegramApproverIds(
-        approverInput || adminSenderId || '',
-      )) {
-        addControlSenderForAgent(
-          settings,
-          provider.id,
-          registeredFolder,
-          senderId,
-        );
-      }
+  settings.providers.telegram.enabled = true;
+  if (registeredFolder) {
+    const approverIds = parseTelegramApproverIds(
+      approverInput || adminSenderId || '',
+    );
+    ensureConfiguredConversationBinding(settings, {
+      agentId: registeredFolder,
+      agentName: registeredGroupName || settings.agent.name,
+      agentFolder: registeredFolder,
+      jid: normalizedChatJid,
+      displayName: registeredGroupName || settings.agent.name,
+      trigger: `@${registeredGroupName || settings.agent.name}`,
+      requiresTrigger: false,
+      isMain: true,
+      approverIds,
+    });
+    if (approverIds.length > 0) {
       p.log.success(
-        `Enabled session/admin commands and permission approvals for Telegram sender(s) ${parseTelegramApproverIds(approverInput || adminSenderId || '').join(', ')}.`,
+        `Enabled session/admin commands and permission approvals for Telegram sender(s) ${approverIds.join(', ')}.`,
       );
-    } else if (registeredFolder) {
+    } else {
       p.log.info(
-        'No Telegram session/admin sender was configured. Run `myclaw channel connect telegram` again and enter your own Telegram user ID if you want chat commands.',
+        'No Telegram conversation approver was configured. Run `myclaw provider connect telegram` again and enter your own Telegram user ID if you want chat commands.',
       );
     }
   }
   saveRuntimeSettings(runtimeHome, settings);
 
   if (normalizedChatJid) {
-    p.outro('Telegram channel is configured and ready.');
+    p.outro('Telegram conversation is configured and ready.');
   } else {
     p.outro(
-      'Telegram token saved. Next: run `myclaw channel connect telegram` to register a chat.',
+      'Telegram token saved. Next: run `myclaw provider connect telegram` to register a conversation.',
     );
   }
 

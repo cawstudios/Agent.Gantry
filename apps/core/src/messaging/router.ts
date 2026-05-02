@@ -1,7 +1,7 @@
 import { ChannelOwnershipPort, NewMessage } from '../domain/types.js';
 import { formatLocalTime } from '../shared/timezone.js';
 import '../channels/register-builtins.js';
-import { getChannelProvider } from '../channels/provider-registry.js';
+import { getProvider } from '../channels/provider-registry.js';
 import { parseTextStyles } from '../text-styles.js';
 
 export function escapeXml(s: string): string {
@@ -50,7 +50,7 @@ export function formatOutboundForChannel(
   if (!text || !channelId) {
     return text;
   }
-  const provider = getChannelProvider(channelId);
+  const provider = getProvider(channelId);
   if (!provider || provider.formatting === 'none') {
     return text;
   }

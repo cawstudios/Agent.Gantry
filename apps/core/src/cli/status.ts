@@ -92,7 +92,7 @@ export async function collectRuntimeStatus(
     return {
       id: provider.id,
       label: provider.label,
-      enabled: settings.channels[provider.id]?.enabled ?? false,
+      enabled: settings.providers[provider.id]?.enabled ?? false,
       configuredEnvKeys,
       missingEnvKeys,
       groups: countRegisteredGroupsByPrefix(
@@ -203,10 +203,10 @@ export function formatRuntimeStatus(summary: RuntimeStatusSummary): string {
   );
   if (!hasReadyChannel) {
     const connectCommands = summary.channels.map(
-      (channel) => `myclaw channel connect ${channel.id}`,
+      (channel) => `myclaw provider connect ${channel.id}`,
     );
     nextActions.push(
-      `Run ${connectCommands.map((cmd) => `\`${cmd}\``).join(' or ')} to finish channel setup.`,
+      `Run ${connectCommands.map((cmd) => `\`${cmd}\``).join(' or ')} to finish provider/conversation setup.`,
     );
   }
   if (!summary.doctor.ok) {

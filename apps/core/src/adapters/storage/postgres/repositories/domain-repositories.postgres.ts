@@ -20,11 +20,11 @@ import type {
 import type { App } from '../../../../domain/app/app.js';
 import type { BrowserProfile } from '../../../../domain/browser/browser.js';
 import type {
-  AgentChannelBinding,
-  ChannelControlApprover,
-  ChannelInstallation,
-  ChannelProviderId,
-} from '../../../../domain/channel/channel.js';
+  AgentConversationBinding,
+  ConversationApprover,
+  ProviderConnection,
+  ProviderId,
+} from '../../../../domain/provider/provider.js';
 import type {
   Conversation,
   ConversationThread,
@@ -53,7 +53,7 @@ import type {
   AgentSessionSummaryRepository,
   AppRepository,
   BrowserProfileRepository,
-  ChannelInstallationRepository,
+  ProviderConnectionRepository,
   ConversationRepository,
   JobRepository,
   MemoryRepository,
@@ -90,7 +90,7 @@ export interface PostgresDomainRepositoryBundle {
   apps: AppRepository;
   agents: AgentRepository;
   agentConfigs: AgentConfigRepository;
-  channelInstallations: ChannelInstallationRepository;
+  providerConnections: ProviderConnectionRepository;
   conversations: ConversationRepository;
   messages: MessageRepository;
   agentSessions: AgentSessionRepository;
@@ -405,112 +405,116 @@ export class PostgresAgentConfigRepository implements AgentConfigRepository {
   }
 }
 
-export class PostgresChannelInstallationRepository implements ChannelInstallationRepository {
+export class PostgresProviderConnectionRepository implements ProviderConnectionRepository {
   constructor(private readonly db: CanonicalDb) {}
 
-  async listChannelInstallations(
-    appId: ChannelInstallation['appId'],
-  ): Promise<ChannelInstallation[]> {
+  async listProviderConnections(
+    appId: ProviderConnection['appId'],
+  ): Promise<ProviderConnection[]> {
     const rows = await this.db
       .select()
-      .from(pgSchema.channelInstallationsPostgres)
-      .where(eq(pgSchema.channelInstallationsPostgres.appId, appId))
-      .orderBy(asc(pgSchema.channelInstallationsPostgres.createdAt));
-    return rows.map((row) => this.installationFromRow(row));
+      .from(pgSchema.providerConnectionsPostgres)
+      .where(eq(pgSchema.providerConnectionsPostgres.appId, appId))
+      .orderBy(asc(pgSchema.providerConnectionsPostgres.createdAt));
+    return rows.map((row) => this.providerConnectionFromRow(row));
   }
 
-  async getChannelInstallation(
-    id: ChannelInstallation['id'],
-  ): Promise<ChannelInstallation | null> {
+  async getProviderConnection(
+    id: ProviderConnection['id'],
+  ): Promise<ProviderConnection | null> {
     const rows = await this.db
       .select()
-      .from(pgSchema.channelInstallationsPostgres)
-      .where(eq(pgSchema.channelInstallationsPostgres.id, id))
+      .from(pgSchema.providerConnectionsPostgres)
+      .where(eq(pgSchema.providerConnectionsPostgres.id, id))
       .limit(1);
     const row = rows[0];
     if (!row) return null;
-    return this.installationFromRow(row);
+    return this.providerConnectionFromRow(row);
   }
 
-  private installationFromRow(
-    row: typeof pgSchema.channelInstallationsPostgres.$inferSelect,
-  ): ChannelInstallation {
+  private providerConnectionFromRow(
+    row: typeof pgSchema.providerConnectionsPostgres.$inferSelect,
+  ): ProviderConnection {
     return {
       id: row.id,
       appId: row.appId,
-      providerId: row.providerId as ChannelProviderId,
+      providerId: row.providerId as ProviderId,
       externalInstallationRef: externalRef(
         row.externalRefJson,
-        'channel_installation',
+        'provider_connection',
       ),
       label: row.label,
-      status: row.status as ChannelInstallation['status'],
+      status: row.status as ProviderConnection['status'],
       config: parseJson<Record<string, unknown>>(row.configJson, {}),
       runtimeSecretRefs: parseJsonArray(row.runtimeSecretRefsJson),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-    } as unknown as ChannelInstallation;
+    } as unknown as ProviderConnection;
   }
 
-  async saveChannelInstallation(
-    installation: ChannelInstallation,
+  async saveProviderConnection(
+    providerConnection: ProviderConnection,
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx
-        .insert(pgSchema.channelProvidersPostgres)
+        .insert(pgSchema.providersPostgres)
         .values({
-          id: installation.providerId,
-          displayName: installation.providerId,
+          id: providerConnection.providerId,
+          displayName: providerConnection.providerId,
         })
         .onConflictDoNothing();
       await tx
-        .insert(pgSchema.channelInstallationsPostgres)
+        .insert(pgSchema.providerConnectionsPostgres)
         .values({
-          id: installation.id,
-          appId: installation.appId,
-          providerId: installation.providerId,
+          id: providerConnection.id,
+          appId: providerConnection.appId,
+          providerId: providerConnection.providerId,
           externalRefJson: encodeJsonOrNull(
-            installation.externalInstallationRef,
+            providerConnection.externalInstallationRef,
           ),
-          label: installation.label,
-          status: installation.status,
-          configJson: encodeJson(installation.config ?? {}),
-          runtimeSecretRefsJson: encodeJson(installation.runtimeSecretRefs),
-          createdAt: installation.createdAt,
-          updatedAt: installation.updatedAt,
+          label: providerConnection.label,
+          status: providerConnection.status,
+          configJson: encodeJson(providerConnection.config ?? {}),
+          runtimeSecretRefsJson: encodeJson(
+            providerConnection.runtimeSecretRefs,
+          ),
+          createdAt: providerConnection.createdAt,
+          updatedAt: providerConnection.updatedAt,
         })
         .onConflictDoUpdate({
-          target: pgSchema.channelInstallationsPostgres.id,
+          target: pgSchema.providerConnectionsPostgres.id,
           set: {
             externalRefJson: encodeJsonOrNull(
-              installation.externalInstallationRef,
+              providerConnection.externalInstallationRef,
             ),
-            label: installation.label,
-            status: installation.status,
-            configJson: encodeJson(installation.config ?? {}),
-            runtimeSecretRefsJson: encodeJson(installation.runtimeSecretRefs),
-            updatedAt: installation.updatedAt,
+            label: providerConnection.label,
+            status: providerConnection.status,
+            configJson: encodeJson(providerConnection.config ?? {}),
+            runtimeSecretRefsJson: encodeJson(
+              providerConnection.runtimeSecretRefs,
+            ),
+            updatedAt: providerConnection.updatedAt,
           },
         });
     });
   }
 
-  async updateChannelInstallation(input: {
-    appId: ChannelInstallation['appId'];
-    id: ChannelInstallation['id'];
+  async updateProviderConnection(input: {
+    appId: ProviderConnection['appId'];
+    id: ProviderConnection['id'];
     patch: {
       externalInstallationRef?:
-        | ChannelInstallation['externalInstallationRef']
+        | ProviderConnection['externalInstallationRef']
         | null;
       label?: string;
-      status?: ChannelInstallation['status'];
-      config?: ChannelInstallation['config'];
-      runtimeSecretRefs?: ChannelInstallation['runtimeSecretRefs'];
+      status?: ProviderConnection['status'];
+      config?: ProviderConnection['config'];
+      runtimeSecretRefs?: ProviderConnection['runtimeSecretRefs'];
     };
     updatedAt: string;
-  }): Promise<ChannelInstallation | null> {
+  }): Promise<ProviderConnection | null> {
     const set: Partial<
-      typeof pgSchema.channelInstallationsPostgres.$inferInsert
+      typeof pgSchema.providerConnectionsPostgres.$inferInsert
     > = {
       updatedAt: input.updatedAt,
     };
@@ -529,43 +533,45 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
     }
 
     const rows = await this.db
-      .update(pgSchema.channelInstallationsPostgres)
+      .update(pgSchema.providerConnectionsPostgres)
       .set(set)
       .where(
         and(
-          eq(pgSchema.channelInstallationsPostgres.appId, input.appId),
-          eq(pgSchema.channelInstallationsPostgres.id, input.id),
+          eq(pgSchema.providerConnectionsPostgres.appId, input.appId),
+          eq(pgSchema.providerConnectionsPostgres.id, input.id),
         ),
       )
       .returning();
-    return rows[0] ? this.installationFromRow(rows[0]) : null;
+    return rows[0] ? this.providerConnectionFromRow(rows[0]) : null;
   }
 
-  async disableChannelInstallation(input: {
-    appId: ChannelInstallation['appId'];
-    id: ChannelInstallation['id'];
+  async disableProviderConnection(input: {
+    appId: ProviderConnection['appId'];
+    id: ProviderConnection['id'];
     updatedAt: string;
-  }): Promise<ChannelInstallation | null> {
+  }): Promise<ProviderConnection | null> {
     await this.db
-      .update(pgSchema.channelInstallationsPostgres)
+      .update(pgSchema.providerConnectionsPostgres)
       .set({ status: 'disabled', updatedAt: input.updatedAt })
       .where(
         and(
-          eq(pgSchema.channelInstallationsPostgres.appId, input.appId),
-          eq(pgSchema.channelInstallationsPostgres.id, input.id),
+          eq(pgSchema.providerConnectionsPostgres.appId, input.appId),
+          eq(pgSchema.providerConnectionsPostgres.id, input.id),
         ),
       );
-    return await this.getChannelInstallation(input.id);
+    return await this.getProviderConnection(input.id);
   }
 
-  async saveAgentChannelBinding(binding: AgentChannelBinding): Promise<void> {
+  async saveAgentConversationBinding(
+    binding: AgentConversationBinding,
+  ): Promise<void> {
     await this.db
-      .insert(pgSchema.agentChannelBindingsPostgres)
+      .insert(pgSchema.agentConversationBindingsPostgres)
       .values({
         id: binding.id,
         appId: binding.appId,
         agentId: binding.agentId,
-        channelInstallationId: binding.channelInstallationId,
+        providerConnectionId: binding.providerConnectionId,
         conversationId: binding.conversationId,
         threadId: binding.threadId ?? null,
         displayName: binding.displayName,
@@ -582,7 +588,7 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
         updatedAt: binding.updatedAt,
       })
       .onConflictDoUpdate({
-        target: pgSchema.agentChannelBindingsPostgres.id,
+        target: pgSchema.agentConversationBindingsPostgres.id,
         set: {
           displayName: binding.displayName,
           status: binding.status,
@@ -599,14 +605,14 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
       });
   }
 
-  async disableAgentChannelBinding(input: {
+  async disableAgentConversationBinding(input: {
     appId: App['id'];
     agentId: Agent['id'];
     conversationId: Conversation['id'];
     threadId?: ConversationThread['id'];
     updatedAt: string;
-  }): Promise<AgentChannelBinding | null> {
-    const b = pgSchema.agentChannelBindingsPostgres;
+  }): Promise<AgentConversationBinding | null> {
+    const b = pgSchema.agentConversationBindingsPostgres;
     const rows = await this.db
       .update(b)
       .set({ status: 'disabled', updatedAt: input.updatedAt })
@@ -622,13 +628,13 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
     return rows[0] ? this.bindingFromRow(rows[0]) : null;
   }
 
-  async getAgentChannelBinding(input: {
+  async getAgentConversationBinding(input: {
     appId: App['id'];
     agentId: Agent['id'];
     conversationId: Conversation['id'];
     threadId?: ConversationThread['id'];
-  }): Promise<AgentChannelBinding | null> {
-    const b = pgSchema.agentChannelBindingsPostgres;
+  }): Promise<AgentConversationBinding | null> {
+    const b = pgSchema.agentConversationBindingsPostgres;
     const threadPredicate = input.threadId
       ? or(eq(b.threadId, input.threadId), isNull(b.threadId))
       : isNull(b.threadId);
@@ -657,15 +663,15 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
     conversationId: Conversation['id'];
     threadId?: ConversationThread['id'];
   }): Promise<boolean> {
-    const b = await this.getAgentChannelBinding(input);
+    const b = await this.getAgentConversationBinding(input);
     if (!b) return false;
     if (b.status !== 'active') return false;
     const rows = await this.db
       .select({ id: pgSchema.agentsPostgres.id })
       .from(pgSchema.agentsPostgres)
       .innerJoin(
-        pgSchema.channelInstallationsPostgres,
-        eq(pgSchema.channelInstallationsPostgres.id, b.channelInstallationId),
+        pgSchema.providerConnectionsPostgres,
+        eq(pgSchema.providerConnectionsPostgres.id, b.providerConnectionId),
       )
       .innerJoin(
         pgSchema.conversationsPostgres,
@@ -675,7 +681,7 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
         and(
           eq(pgSchema.agentsPostgres.id, b.agentId),
           eq(pgSchema.agentsPostgres.status, 'active'),
-          eq(pgSchema.channelInstallationsPostgres.status, 'active'),
+          eq(pgSchema.providerConnectionsPostgres.status, 'active'),
           eq(pgSchema.conversationsPostgres.status, 'active'),
         ),
       )
@@ -683,66 +689,66 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
     return rows.length > 0;
   }
 
-  async listAgentChannelBindings(
+  async listAgentConversationBindings(
     appId: App['id'],
     agentId?: Agent['id'],
-  ): Promise<AgentChannelBinding[]> {
+  ): Promise<AgentConversationBinding[]> {
     const rows = await this.db
       .select()
-      .from(pgSchema.agentChannelBindingsPostgres)
+      .from(pgSchema.agentConversationBindingsPostgres)
       .where(
         and(
-          eq(pgSchema.agentChannelBindingsPostgres.appId, appId),
+          eq(pgSchema.agentConversationBindingsPostgres.appId, appId),
           agentId
-            ? eq(pgSchema.agentChannelBindingsPostgres.agentId, agentId)
+            ? eq(pgSchema.agentConversationBindingsPostgres.agentId, agentId)
             : undefined,
         ),
       )
-      .orderBy(asc(pgSchema.agentChannelBindingsPostgres.createdAt));
+      .orderBy(asc(pgSchema.agentConversationBindingsPostgres.createdAt));
     return rows.map((row) => this.bindingFromRow(row));
   }
 
-  async listAgentChannelBindingsByConversation(input: {
+  async listAgentConversationBindingsByConversation(input: {
     appId: App['id'];
     conversationId: Conversation['id'];
-  }): Promise<AgentChannelBinding[]> {
+  }): Promise<AgentConversationBinding[]> {
     const rows = await this.db
       .select()
-      .from(pgSchema.agentChannelBindingsPostgres)
+      .from(pgSchema.agentConversationBindingsPostgres)
       .where(
         and(
-          eq(pgSchema.agentChannelBindingsPostgres.appId, input.appId),
+          eq(pgSchema.agentConversationBindingsPostgres.appId, input.appId),
           eq(
-            pgSchema.agentChannelBindingsPostgres.conversationId,
+            pgSchema.agentConversationBindingsPostgres.conversationId,
             input.conversationId,
           ),
         ),
       )
-      .orderBy(asc(pgSchema.agentChannelBindingsPostgres.createdAt));
+      .orderBy(asc(pgSchema.agentConversationBindingsPostgres.createdAt));
     return rows.map((row) => this.bindingFromRow(row));
   }
 
   private bindingFromRow(
-    row: typeof pgSchema.agentChannelBindingsPostgres.$inferSelect,
-  ): AgentChannelBinding {
+    row: typeof pgSchema.agentConversationBindingsPostgres.$inferSelect,
+  ): AgentConversationBinding {
     return {
       id: row.id,
       appId: row.appId,
       agentId: row.agentId,
-      channelInstallationId: row.channelInstallationId,
+      providerConnectionId: row.providerConnectionId,
       conversationId: row.conversationId,
       threadId: row.threadId ?? undefined,
       displayName: row.displayName,
-      status: (row.status ?? 'active') as AgentChannelBinding['status'],
+      status: (row.status ?? 'active') as AgentConversationBinding['status'],
       triggerMode: (row.triggerMode ??
         (row.requiresTrigger
           ? 'keyword'
-          : 'always')) as AgentChannelBinding['triggerMode'],
+          : 'always')) as AgentConversationBinding['triggerMode'],
       triggerPattern: row.triggerPattern ?? undefined,
       requiresTrigger: row.requiresTrigger,
       isAdminBinding: row.isAdminBinding,
       memoryScope: (row.memoryScope ??
-        'conversation') as AgentChannelBinding['memoryScope'],
+        'conversation') as AgentConversationBinding['memoryScope'],
       memorySubject: parseJson<MemorySubject>(row.memorySubjectJson, {
         kind: 'conversation',
         appId: row.appId,
@@ -752,7 +758,7 @@ export class PostgresChannelInstallationRepository implements ChannelInstallatio
       permissionPolicyIds: parseJsonArray(row.permissionPolicyIdsJson),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-    } as AgentChannelBinding;
+    } as AgentConversationBinding;
   }
 }
 
@@ -761,7 +767,7 @@ export class PostgresConversationRepository implements ConversationRepository {
 
   async listConversations(input: {
     appId: Conversation['appId'];
-    channelInstallationId?: ChannelInstallation['id'];
+    providerConnectionId?: ProviderConnection['id'];
   }): Promise<Conversation[]> {
     const rows = await this.db
       .select()
@@ -769,10 +775,10 @@ export class PostgresConversationRepository implements ConversationRepository {
       .where(
         and(
           eq(pgSchema.conversationsPostgres.appId, input.appId),
-          input.channelInstallationId
+          input.providerConnectionId
             ? eq(
-                pgSchema.conversationsPostgres.channelInstallationId,
-                input.channelInstallationId,
+                pgSchema.conversationsPostgres.providerConnectionId,
+                input.providerConnectionId,
               )
             : undefined,
         ),
@@ -792,21 +798,21 @@ export class PostgresConversationRepository implements ConversationRepository {
 
   async getConversationByExternalRef(input: {
     appId: App['id'];
-    providerId: ChannelProviderId;
-    channelInstallationId: ChannelInstallation['id'];
+    providerId: ProviderId;
+    providerConnectionId: ProviderConnection['id'];
     externalConversationId: string;
   }): Promise<Conversation | null> {
     const c = pgSchema.conversationsPostgres;
-    const ci = pgSchema.channelInstallationsPostgres;
+    const ci = pgSchema.providerConnectionsPostgres;
     const rows = await this.db
       .select({ conversation: c })
       .from(c)
-      .innerJoin(ci, eq(ci.id, c.channelInstallationId))
+      .innerJoin(ci, eq(ci.id, c.providerConnectionId))
       .where(
         and(
           eq(c.appId, input.appId),
           eq(ci.providerId, input.providerId),
-          eq(c.channelInstallationId, input.channelInstallationId),
+          eq(c.providerConnectionId, input.providerConnectionId),
           jsonTextEquals(
             c.externalRefJson,
             ['value', 'jid', 'externalConversationId'],
@@ -853,18 +859,18 @@ export class PostgresConversationRepository implements ConversationRepository {
 
   async getThreadByExternalRef(input: {
     appId: App['id'];
-    providerId: ChannelProviderId;
+    providerId: ProviderId;
     conversationId: Conversation['id'];
     externalThreadId: string;
   }): Promise<ConversationThread | null> {
     const t = pgSchema.conversationThreadsPostgres;
     const c = pgSchema.conversationsPostgres;
-    const ci = pgSchema.channelInstallationsPostgres;
+    const ci = pgSchema.providerConnectionsPostgres;
     const rows = await this.db
       .select({ thread: t })
       .from(t)
       .innerJoin(c, eq(c.id, t.conversationId))
-      .innerJoin(ci, eq(ci.id, c.channelInstallationId))
+      .innerJoin(ci, eq(ci.id, c.providerConnectionId))
       .where(
         and(
           eq(t.appId, input.appId),
@@ -887,7 +893,7 @@ export class PostgresConversationRepository implements ConversationRepository {
       .values({
         id: conversation.id,
         appId: conversation.appId,
-        channelInstallationId: conversation.channelInstallationId,
+        providerConnectionId: conversation.providerConnectionId,
         externalRefJson: encodeJsonOrNull(conversation.externalRef),
         kind: conversation.kind,
         title: conversation.title ?? null,
@@ -968,19 +974,19 @@ export class PostgresConversationRepository implements ConversationRepository {
       .filter((id) => id.length > 0);
   }
 
-  async listChannelControlApprovers(
+  async listConversationApprovers(
     conversationId: Conversation['id'],
-  ): Promise<ChannelControlApprover[]> {
+  ): Promise<ConversationApprover[]> {
     const rows = await this.db
       .select()
-      .from(pgSchema.channelControlApproversPostgres)
+      .from(pgSchema.conversationApproversPostgres)
       .where(
         eq(
-          pgSchema.channelControlApproversPostgres.conversationId,
+          pgSchema.conversationApproversPostgres.conversationId,
           conversationId,
         ),
       )
-      .orderBy(asc(pgSchema.channelControlApproversPostgres.externalUserId));
+      .orderBy(asc(pgSchema.conversationApproversPostgres.externalUserId));
     return rows.map((row) => ({
       id: row.id,
       appId: row.appId,
@@ -988,29 +994,29 @@ export class PostgresConversationRepository implements ConversationRepository {
       externalUserId: row.externalUserId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-    })) as ChannelControlApprover[];
+    })) as ConversationApprover[];
   }
 
-  async replaceChannelControlApprovers(input: {
+  async replaceConversationApprovers(input: {
     appId: App['id'];
     conversationId: Conversation['id'];
     externalUserIds: string[];
     updatedAt: string;
-  }): Promise<ChannelControlApprover[]> {
+  }): Promise<ConversationApprover[]> {
     await this.db.transaction(async (tx) => {
       await tx
-        .delete(pgSchema.channelControlApproversPostgres)
+        .delete(pgSchema.conversationApproversPostgres)
         .where(
           and(
-            eq(pgSchema.channelControlApproversPostgres.appId, input.appId),
+            eq(pgSchema.conversationApproversPostgres.appId, input.appId),
             eq(
-              pgSchema.channelControlApproversPostgres.conversationId,
+              pgSchema.conversationApproversPostgres.conversationId,
               input.conversationId,
             ),
           ),
         );
       if (input.externalUserIds.length === 0) return;
-      await tx.insert(pgSchema.channelControlApproversPostgres).values(
+      await tx.insert(pgSchema.conversationApproversPostgres).values(
         input.externalUserIds.map((externalUserId) => ({
           id: channelControlApproverId(input.conversationId, externalUserId),
           appId: input.appId,
@@ -1021,7 +1027,7 @@ export class PostgresConversationRepository implements ConversationRepository {
         })),
       );
     });
-    return this.listChannelControlApprovers(input.conversationId);
+    return this.listConversationApprovers(input.conversationId);
   }
 
   private conversationFromRow(
@@ -1030,7 +1036,7 @@ export class PostgresConversationRepository implements ConversationRepository {
     return {
       id: row.id,
       appId: row.appId,
-      channelInstallationId: row.channelInstallationId,
+      providerConnectionId: row.providerConnectionId,
       externalRef: externalRef(row.externalRefJson, 'conversation'),
       kind: row.kind as Conversation['kind'],
       title: row.title ?? undefined,
@@ -1091,14 +1097,14 @@ export class PostgresMessageRepository implements MessageRepository {
   private async writeMessage(message: Message): Promise<void> {
     await this.db.transaction(async (tx) => {
       const c = pgSchema.conversationsPostgres;
-      const ci = pgSchema.channelInstallationsPostgres;
+      const ci = pgSchema.providerConnectionsPostgres;
       const channelRows = await tx
         .select({
-          channelInstallationId: c.channelInstallationId,
+          providerConnectionId: c.providerConnectionId,
           providerId: ci.providerId,
         })
         .from(c)
-        .innerJoin(ci, eq(ci.id, c.channelInstallationId))
+        .innerJoin(ci, eq(ci.id, c.providerConnectionId))
         .where(eq(c.id, message.conversationId))
         .limit(1);
       const channel = channelRows[0];
@@ -1116,10 +1122,10 @@ export class PostgresMessageRepository implements MessageRepository {
           .from(pgSchema.messagesPostgres)
           .where(
             and(
-              eq(pgSchema.messagesPostgres.channelProvider, channel.providerId),
+              eq(pgSchema.messagesPostgres.providerId, channel.providerId),
               eq(
-                pgSchema.messagesPostgres.channelInstallationId,
-                channel.channelInstallationId,
+                pgSchema.messagesPostgres.providerConnectionId,
+                channel.providerConnectionId,
               ),
               eq(
                 pgSchema.messagesPostgres.conversationId,
@@ -1143,8 +1149,8 @@ export class PostgresMessageRepository implements MessageRepository {
         .values({
           id: targetMessageId,
           appId: message.appId,
-          channelProvider: channel.providerId,
-          channelInstallationId: channel.channelInstallationId,
+          providerId: channel.providerId,
+          providerConnectionId: channel.providerConnectionId,
           conversationId: message.conversationId,
           threadId: message.threadId ?? null,
           externalMessageId,
@@ -2012,7 +2018,7 @@ export function createPostgresDomainRepositories(
     apps: new PostgresAppRepository(db),
     agents: new PostgresAgentRepository(db),
     agentConfigs: new PostgresAgentConfigRepository(db),
-    channelInstallations: new PostgresChannelInstallationRepository(db),
+    providerConnections: new PostgresProviderConnectionRepository(db),
     conversations: new PostgresConversationRepository(db),
     messages: new PostgresMessageRepository(db),
     agentSessions: new PostgresAgentSessionRepository(db),

@@ -127,9 +127,35 @@ function createOpts(
     onChatMetadata: vi.fn(),
     registeredGroups: vi.fn(() => ({})),
     runtimeSettings: vi.fn(() => ({
-      channels: {
-        slack: {
-          controlAllowlist,
+      providers: {
+        slack: { enabled: true },
+      },
+      providerConnections: {
+        slack_default: {
+          provider: 'slack',
+          label: 'Slack',
+          runtimeSecretRefs: {},
+        },
+      },
+      conversations: {
+        slack_test_conversation: {
+          providerConnection: 'slack_default',
+          externalId: 'C123',
+          kind: 'channel',
+          displayName: 'test',
+          senderPolicy: { allow: '*', mode: 'trigger' },
+          controlApprovers: controlAllowlist.default,
+        },
+      },
+      bindings: {
+        slack_test_binding: {
+          agent: 'slack_main',
+          conversation: 'slack_test_conversation',
+          trigger: '@bot',
+          addedAt: '2024-01-01T00:00:00.000Z',
+          requiresTrigger: true,
+          isMain: false,
+          memoryScope: 'conversation',
         },
       },
     })),
@@ -233,7 +259,7 @@ describe('Slack channel', () => {
       'sl:D123',
       expect.objectContaining({
         chat_jid: 'sl:D123',
-        channel_provider: 'slack',
+        provider: 'slack',
         sender: 'U123',
         content: 'hello',
       }),
@@ -494,7 +520,7 @@ describe('Slack channel', () => {
     );
   });
 
-  it('authorizes Slack permission decisions through channel control allowlist hook', async () => {
+  it('authorizes Slack permission decisions through conversation approver hook', async () => {
     const isControlApproverAllowed = vi.fn(async () => true);
     const channel = new SlackChannel('xoxb-token', 'xapp-token', {
       ...createOpts({ default: [], agents: {} }),

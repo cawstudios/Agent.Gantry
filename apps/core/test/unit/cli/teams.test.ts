@@ -336,7 +336,7 @@ describe('cli teams helpers', () => {
         TEAMS_TENANT_ID: 'tenant-id',
       }),
     );
-    expect(loadRuntimeSettings(runtimeHome).channels.teams.enabled).toBe(true);
+    expect(loadRuntimeSettings(runtimeHome).providers.teams.enabled).toBe(true);
     expect(groupsStore.get('teams:19:general@thread.tacv2')).toEqual(
       expect.objectContaining({
         folder: 'main_agent',
@@ -344,7 +344,7 @@ describe('cli teams helpers', () => {
       }),
     );
     expect(outro).toHaveBeenCalledWith(
-      'Teams channel is configured and ready.',
+      'Teams conversation is configured and ready.',
     );
   });
 
@@ -386,7 +386,9 @@ describe('cli teams helpers', () => {
     expect(
       readEnvFile(envFilePath(runtimeHome)).TEAMS_CLIENT_ID,
     ).toBeUndefined();
-    expect(loadRuntimeSettings(runtimeHome).channels.teams.enabled).toBe(false);
+    expect(loadRuntimeSettings(runtimeHome).providers.teams.enabled).toBe(
+      false,
+    );
     expect(outro).toHaveBeenCalledWith('Teams connect cancelled.');
   });
 });

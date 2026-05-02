@@ -36,7 +36,7 @@ describe('runProviderConnectCommand', () => {
 
     expect(code).toBe(1);
     expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Unknown channel provider: app'),
+      expect.stringContaining('Unknown provider: app'),
     );
   });
 

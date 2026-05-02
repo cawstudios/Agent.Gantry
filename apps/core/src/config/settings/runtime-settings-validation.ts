@@ -1,4 +1,4 @@
-import { getChannelProvider } from '../../channels/provider-registry.js';
+import { getProvider } from '../../channels/provider-registry.js';
 import {
   ONECLI_SECRET_ENCRYPTION_KEY_ENV,
   validateSharedPostgresDatabase,
@@ -6,7 +6,6 @@ import {
   validateOnecliSecretEncryptionKey,
 } from '../../adapters/credentials/onecli/local/persistence.js';
 import { validatePostgresConnectionUrl } from '../../adapters/storage/postgres/url.js';
-import { isValidGroupFolder } from '../../platform/group-folder-rules.js';
 import { readEnvFile } from '../env/file.js';
 import { validateOnecliUrl } from '../../adapters/credentials/onecli/policy.js';
 import { validateExternalBrokerUrl } from '../credentials/broker-url-policy.js';
@@ -175,15 +174,15 @@ export function validateLoadedRuntimeSettings(
     }
   }
 
-  const enabledChannelIds = Object.entries(settings.channels)
-    .filter(([, channel]) => channel.enabled)
-    .map(([channelId]) => channelId);
+  const enabledProviderIds = Object.entries(settings.providers)
+    .filter(([, provider]) => provider.enabled)
+    .map(([providerId]) => providerId);
 
-  for (const channelId of enabledChannelIds) {
-    const provider = getChannelProvider(channelId);
+  for (const providerId of enabledProviderIds) {
+    const provider = getProvider(providerId);
     if (!provider) {
       details.push(
-        `channels.${channelId}.enabled is true but no provider is registered for '${channelId}'.`,
+        `providers.${providerId}.enabled is true but no provider is registered for '${providerId}'.`,
       );
       continue;
     }
@@ -191,18 +190,40 @@ export function validateLoadedRuntimeSettings(
     for (const envKey of provider.setup.envKeys) {
       if (!env[envKey]?.trim() && !process.env[envKey]?.trim()) {
         details.push(
-          `${envKey} is required when channel '${provider.id}' is enabled.`,
+          `${envKey} is required when provider '${provider.id}' is enabled.`,
         );
       }
     }
+  }
 
-    const channelSettings = settings.channels[provider.id];
-    for (const folder of Object.keys(channelSettings.senderAllowlist.agents)) {
-      if (!isValidGroupFolder(folder)) {
-        details.push(
-          `channels.${provider.id}.sender_allowlist.agents.${folder} is not a valid agent folder name.`,
-        );
-      }
+  for (const [connectionId, connection] of Object.entries(
+    settings.providerConnections,
+  )) {
+    if (!settings.providers[connection.provider]) {
+      details.push(
+        `provider_connections.${connectionId}.provider references unknown provider ${connection.provider}.`,
+      );
+    }
+  }
+
+  for (const [conversationId, conversation] of Object.entries(
+    settings.conversations,
+  )) {
+    const connection =
+      settings.providerConnections[conversation.providerConnection];
+    if (!connection) {
+      details.push(
+        `conversations.${conversationId}.provider_connection references unknown provider connection ${conversation.providerConnection}.`,
+      );
+    }
+    if (
+      conversation.kind !== 'dm' &&
+      conversation.kind !== 'direct' &&
+      conversation.controlApprovers.length === 0
+    ) {
+      details.push(
+        `conversations.${conversationId}.control_approvers must include at least one conversation approver.`,
+      );
     }
   }
 

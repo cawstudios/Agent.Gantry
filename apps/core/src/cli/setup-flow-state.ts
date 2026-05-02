@@ -192,14 +192,14 @@ export function restoreDraft(
   const settings = loadExistingRuntimeSettings(runtimeHome);
   const primaryProvider =
     state?.data.primaryProvider ||
-    (settings.channels.slack?.enabled ? 'slack' : 'telegram');
+    (settings.providers.slack?.enabled ? 'slack' : 'telegram');
   const credentialMode = resolveHostCredentialMode(
     state?.data.credentialMode || settings.credentialBroker.mode,
   );
-  const hasConfiguredChannel = Object.values(settings.channels).some(
-    (channel) => channel.enabled,
+  const hasConfiguredProvider = Object.values(settings.providers).some(
+    (provider) => provider.enabled,
   );
-  const defaultDreamingEnabled = hasConfiguredChannel
+  const defaultDreamingEnabled = hasConfiguredProvider
     ? settings.memory.dreaming.enabled
     : true;
   const postgresUrlEnv =
@@ -246,8 +246,10 @@ export function restoreDraft(
     slackAppToken: env.SLACK_APP_TOKEN || '',
     slackChatJid: '',
     slackDisplayName: settings.agent.name || MAIN_AGENT_NAME,
-    slackPermissionApproverIds:
-      settings.channels.slack?.controlAllowlist.default.join(',') || '',
+    slackPermissionApproverIds: firstConversationApprovers(
+      settings,
+      'slack',
+    ).join(','),
     memoryEnabled: state?.data.memoryEnabled ?? settings.memory.enabled,
     embeddingsEnabled:
       state?.data.embeddingsEnabled ?? settings.memory.embeddings.enabled,
@@ -258,4 +260,18 @@ export function restoreDraft(
   };
   if (state) updateDraftFromState(draft, state);
   return draft;
+}
+
+function firstConversationApprovers(
+  settings: ReturnType<typeof loadExistingRuntimeSettings>,
+  providerId: string,
+): string[] {
+  for (const conversation of Object.values(settings.conversations)) {
+    const connection =
+      settings.providerConnections[conversation.providerConnection];
+    if (connection?.provider === providerId) {
+      return conversation.controlApprovers;
+    }
+  }
+  return [];
 }

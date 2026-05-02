@@ -215,12 +215,16 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
         decisionPolicy,
       });
     }
-    const allowlist =
-      this.opts.runtimeSettings?.().channels.telegram?.controlAllowlist;
-    const allowedIds =
-      allowlist?.agents[sourceGroup] !== undefined
-        ? allowlist.agents[sourceGroup]
-        : allowlist?.default || [];
+    const settings = this.opts.runtimeSettings?.();
+    const binding = settings
+      ? Object.values(settings.bindings || {}).find(
+          (entry) => entry.agent === sourceGroup,
+        )
+      : undefined;
+    const conversation = binding
+      ? settings?.conversations[binding.conversation]
+      : undefined;
+    const allowedIds = conversation?.controlApprovers || [];
 
     if (allowedIds.length === 0) {
       logger.warn(

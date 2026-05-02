@@ -33,7 +33,7 @@ export async function ensureControlGraph(
   const appId = input.appId;
   const agentId = agentIdForFolder(input.agentFolder);
   const configId = `config:${agentId}:1`;
-  const installationId = controlInstallationId(appId);
+  const providerConnectionId = controlInstallationId(appId);
   const conversationId = controlConversationId(
     appId,
     input.externalConversationId,
@@ -102,7 +102,7 @@ export async function ensureControlGraph(
     })
     .where(eq(pgSchema.agentsPostgres.id, agentId));
   await db
-    .insert(pgSchema.channelProvidersPostgres)
+    .insert(pgSchema.providersPostgres)
     .values({
       id: CONTROL_PROVIDER_ID,
       displayName: 'Control HTTP',
@@ -111,9 +111,9 @@ export async function ensureControlGraph(
     })
     .onConflictDoNothing();
   await db
-    .insert(pgSchema.channelInstallationsPostgres)
+    .insert(pgSchema.providerConnectionsPostgres)
     .values({
-      id: installationId,
+      id: providerConnectionId,
       appId,
       providerId: CONTROL_PROVIDER_ID,
       externalRefJson: JSON.stringify({ adapter: 'control-http', appId }),
@@ -124,7 +124,7 @@ export async function ensureControlGraph(
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: pgSchema.channelInstallationsPostgres.id,
+      target: pgSchema.providerConnectionsPostgres.id,
       set: { updatedAt: now },
     });
   await db
@@ -132,7 +132,7 @@ export async function ensureControlGraph(
     .values({
       id: conversationId,
       appId,
-      channelInstallationId: installationId,
+      providerConnectionId: providerConnectionId,
       externalRefJson: JSON.stringify({
         externalConversationId: input.externalConversationId,
         externalConversationRef: input.externalConversationRef,

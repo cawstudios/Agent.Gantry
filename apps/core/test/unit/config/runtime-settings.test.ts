@@ -75,17 +75,7 @@ describe('runtime settings', () => {
       model: 'sonnet',
       oneTimeJobDefaultModel: 'haiku',
       recurringJobDefaultModel: 'opus',
-      bindings: {
-        primary: {
-          jid: 'tg:100',
-          provider: 'telegram',
-          name: 'Main DM',
-          trigger: '@kai',
-          addedAt: '2026-05-02T00:00:00.000Z',
-          requiresTrigger: false,
-          isMain: true,
-        },
-      },
+      bindings: {},
       dmAccess: [
         {
           provider: 'telegram',
@@ -99,14 +89,46 @@ describe('runtime settings', () => {
         mcpServerIds: ['mcp:github'],
       },
     };
+    settings.providers.telegram.enabled = true;
+    settings.providers.telegram.defaultConnection = 'telegram_default';
+    settings.providerConnections.telegram_default = {
+      provider: 'telegram',
+      label: 'Telegram Default',
+      runtimeSecretRefs: { bot_token: 'TELEGRAM_BOT_TOKEN' },
+    };
+    settings.conversations.main_dm = {
+      providerConnection: 'telegram_default',
+      externalId: '100',
+      kind: 'dm',
+      displayName: 'Main DM',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: ['42'],
+    };
+    settings.bindings.primary = {
+      agent: 'main_agent',
+      conversation: 'main_dm',
+      trigger: '@kai',
+      addedAt: '2026-05-02T00:00:00.000Z',
+      requiresTrigger: false,
+      isMain: true,
+      memoryScope: 'conversation',
+    };
 
     const parsed = parseRuntimeSettings(renderRuntimeSettingsYaml(settings));
 
     expect(parsed.desiredState.authoritative).toBe(true);
-    expect(parsed.agents.main_agent).toEqual(settings.agents.main_agent);
+    expect(parsed.agents.main_agent.bindings.primary).toMatchObject({
+      jid: 'tg:100',
+      provider: 'telegram',
+      name: 'Main DM',
+      trigger: '@kai',
+      requiresTrigger: false,
+      isMain: true,
+    });
+    expect(parsed.bindings.primary).toEqual(settings.bindings.primary);
   });
 
-  it('rejects duplicate desired-state channel bindings', () => {
+  it('rejects duplicate desired-state conversation bindings', () => {
     const yaml = renderRuntimeSettingsYaml(
       createDefaultRuntimeSettings(),
     ).replace(

@@ -13,7 +13,7 @@ When a user asks for a new skill, MCP server, dependency, SDK tool, host tool,
 or channel capability, the agent calls the matching MyClaw request tool.
 
 The model is intentionally typed. Skills, MCP servers, SDK tools, host tools,
-browser tools, channel tools, and channel bindings have separate schemas and
+browser tools, provider-native channel tools, and conversation bindings have separate schemas and
 validation rules. They share lifecycle, policy, audit, and config-version
 activation, but they are not collapsed into one untyped blob.
 
@@ -26,7 +26,7 @@ The deterministic ownership rule is:
   optional DM approval admin per provider.
 - Channels own bound agents, default/routing metadata, sessions, and control
   approver allowlists.
-- Agent DM access is separate from channel membership and channel control
+- Agent DM access is separate from conversation membership and conversation approvers
   approvers. It can name provider user ids from Slack, Teams, Telegram, Web,
   or local surfaces. DM access does not grant approval rights by itself.
 - Agent DM admins are separate from DM access users. A provider-specific DM

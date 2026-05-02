@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  getChannelProvider,
+  getProvider,
   providerForJid,
 } from '@core/channels/provider-registry.js';
 import '@core/channels/register-builtins.js';
@@ -49,7 +49,7 @@ function makeOpts(): ChannelOpts {
 
 describe('Teams built-in provider', () => {
   it('registers Teams provider metadata and ownership prefix', () => {
-    const provider = getChannelProvider('teams');
+    const provider = getProvider('teams');
 
     expect(provider).toEqual(
       expect.objectContaining({
@@ -185,7 +185,7 @@ describe('TeamsChannel adapter scaffold', () => {
       expect.objectContaining({
         id: 'activity-1',
         chat_jid: 'teams:19:abc@thread.v2',
-        channel_provider: 'teams',
+        provider: 'teams',
         sender: 'user-1',
         sender_name: 'Ravi',
         content: 'hello from Teams',
@@ -210,7 +210,7 @@ describe('TeamsChannel adapter scaffold', () => {
     expect(sdkClient.stop).toHaveBeenCalled();
   });
 
-  it('sends Teams approval cards and accepts Action.Execute decisions from channel control approvers', async () => {
+  it('sends Teams approval cards and accepts Action.Execute decisions from conversation approvers', async () => {
     let startInput: Parameters<TeamsSdkClient['start']>[0] | undefined =
       undefined;
     const isControlApproverAllowed = vi.fn(async () => true);

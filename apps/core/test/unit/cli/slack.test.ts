@@ -444,7 +444,9 @@ describe('cli slack helpers', () => {
     const env = readEnvFile(envFilePath(runtimeHome));
     expect(env.SLACK_BOT_TOKEN).toBeUndefined();
     expect(env.SLACK_APP_TOKEN).toBeUndefined();
-    expect(loadRuntimeSettings(runtimeHome).channels.slack.enabled).toBe(false);
+    expect(loadRuntimeSettings(runtimeHome).providers.slack.enabled).toBe(
+      false,
+    );
     expect(outro).toHaveBeenCalledWith('Slack connect cancelled.');
   });
 
@@ -472,7 +474,7 @@ describe('cli slack helpers', () => {
       'Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.',
     );
     expect(claude).toContain(
-      'Main/admin agents may use service_restart after approved changes and register_agent for channel binding.',
+      'Main/admin agents may use service_restart after approved changes and register_agent for conversation binding.',
     );
     expect(soul).toContain('# Soul - Who You Are');
     expect(soul).toContain('- **Name:** Kai Slack');

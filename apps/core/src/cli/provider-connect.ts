@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
 import '../channels/register-builtins.js';
 import {
-  getChannelProvider,
+  getProvider,
   listConnectableChannelProviders,
 } from '../channels/provider-registry.js';
 
@@ -9,12 +9,12 @@ export async function runProviderConnectCommand(
   runtimeHome: string,
   providerId: string,
 ): Promise<number> {
-  const provider = getChannelProvider(providerId);
+  const provider = getProvider(providerId);
   const isConnectable = listConnectableChannelProviders().some(
     (entry) => entry.id === providerId,
   );
   if (!provider || !isConnectable) {
-    p.log.error(`Unknown channel provider: ${providerId}`);
+    p.log.error(`Unknown provider: ${providerId}`);
     return 1;
   }
 

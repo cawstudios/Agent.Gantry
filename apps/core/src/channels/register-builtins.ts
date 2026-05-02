@@ -1,8 +1,8 @@
 import { ChannelOpts } from './channel-provider.js';
 import {
-  ChannelProvider,
+  Provider,
   ChannelProviderSetupContext,
-  registerChannelProvider,
+  registerProvider,
 } from './provider-registry.js';
 
 async function createTelegramBuiltInChannel(
@@ -64,15 +64,15 @@ async function runTeamsSetup(runtimeHome: string): Promise<number> {
 }
 
 function isChannelEnabled(
-  settings: ChannelProvider['isEnabled'] extends (settings: infer T) => boolean
+  settings: Provider['isEnabled'] extends (settings: infer T) => boolean
     ? T
     : never,
   providerId: string,
 ): boolean {
-  return settings.channels[providerId]?.enabled ?? false;
+  return settings.providers?.[providerId]?.enabled ?? false;
 }
 
-const telegramProvider: ChannelProvider = {
+const telegramProvider: Provider = {
   id: 'telegram',
   label: 'Telegram',
   jidPrefix: 'tg:',
@@ -88,7 +88,7 @@ const telegramProvider: ChannelProvider = {
   },
 };
 
-const slackProvider: ChannelProvider = {
+const slackProvider: Provider = {
   id: 'slack',
   label: 'Slack',
   jidPrefix: 'sl:',
@@ -104,7 +104,7 @@ const slackProvider: ChannelProvider = {
   },
 };
 
-const teamsProvider: ChannelProvider = {
+const teamsProvider: Provider = {
   id: 'teams',
   label: 'Teams',
   jidPrefix: 'teams:',
@@ -120,7 +120,7 @@ const teamsProvider: ChannelProvider = {
   },
 };
 
-const appProvider: ChannelProvider = {
+const appProvider: Provider = {
   id: 'app',
   label: 'App',
   internal: true,
@@ -137,7 +137,7 @@ const appProvider: ChannelProvider = {
   },
 };
 
-registerChannelProvider(appProvider);
-registerChannelProvider(slackProvider);
-registerChannelProvider(teamsProvider);
-registerChannelProvider(telegramProvider);
+registerProvider(appProvider);
+registerProvider(slackProvider);
+registerProvider(teamsProvider);
+registerProvider(telegramProvider);

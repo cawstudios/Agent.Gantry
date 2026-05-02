@@ -1,21 +1,21 @@
 import type { AppId } from '../../domain/app/app.js';
 import type {
-  ChannelInstallation,
-  ChannelProviderId,
-} from '../../domain/channel/channel.js';
+  ProviderConnection,
+  ProviderId,
+} from '../../domain/provider/provider.js';
 import type {
   Conversation,
   ConversationId,
 } from '../../domain/conversation/conversation.js';
 import type {
-  ChannelInstallationRepository,
+  ProviderConnectionRepository,
   ConversationRepository,
 } from '../../domain/ports/repositories.js';
 import { ApplicationError } from '../common/application-error.js';
 
 export interface ChannelMembershipValidationInput {
-  providerId: ChannelProviderId;
-  installation: ChannelInstallation;
+  providerId: ProviderId;
+  providerConnection: ProviderConnection;
   conversation: Conversation;
   userIds: string[];
 }
@@ -36,10 +36,10 @@ export interface ChannelAdminSummary {
   controlAllowlist: { userIds: string[] };
 }
 
-export class ChannelAdministrationService {
+export class ConversationAdministrationService {
   constructor(
     private readonly repositories: {
-      channelInstallations: ChannelInstallationRepository;
+      providerConnections: ProviderConnectionRepository;
       conversations: ConversationRepository;
     },
     private readonly membershipValidator?: ChannelMembershipValidator,
@@ -49,9 +49,10 @@ export class ChannelAdministrationService {
     appId: AppId;
     conversationId: ConversationId;
   }): Promise<ChannelAdminSummary> {
-    const { installation, conversation } = await this.requireChannel(input);
+    const { providerConnection, conversation } =
+      await this.requireChannel(input);
     const approvers =
-      await this.repositories.conversations.listChannelControlApprovers(
+      await this.repositories.conversations.listConversationApprovers(
         conversation.id,
       );
     return {
@@ -67,11 +68,12 @@ export class ChannelAdministrationService {
     userIds: string[];
     updatedAt: string;
   }): Promise<{ userIds: string[] }> {
-    const { conversation, installation } = await this.requireChannel(input);
+    const { conversation, providerConnection } =
+      await this.requireChannel(input);
     if (conversation.kind === 'direct') {
       throw new ApplicationError(
         'INVALID_REQUEST',
-        'Channel control allowlist is not supported for direct conversations',
+        'Conversation approvers are not supported for direct conversations; use the agent DM admin for direct/private prompts',
       );
     }
     const userIds = normalizeUserIds(input.userIds);
@@ -84,8 +86,8 @@ export class ChannelAdministrationService {
     }
     if (userIds.length > 0) {
       const validation = await this.validateMembership({
-        providerId: installation.providerId,
-        installation,
+        providerId: providerConnection.providerId,
+        providerConnection,
         conversation,
         userIds,
       });
@@ -103,7 +105,7 @@ export class ChannelAdministrationService {
       }
     }
     const rows =
-      await this.repositories.conversations.replaceChannelControlApprovers({
+      await this.repositories.conversations.replaceConversationApprovers({
         appId: input.appId,
         conversationId: conversation.id,
         externalUserIds: userIds,
@@ -114,7 +116,7 @@ export class ChannelAdministrationService {
 
   async isControlApproverAllowed(input: {
     appId: AppId;
-    providerId: ChannelProviderId;
+    providerId: ProviderId;
     channelJid: string;
     userId: string;
   }): Promise<boolean> {
@@ -122,11 +124,26 @@ export class ChannelAdministrationService {
     if (!userId) return false;
     const conversation = await this.findConversationForJid(input);
     if (!conversation) return false;
+    if (conversation.kind === 'direct') return false;
     const approvers =
-      await this.repositories.conversations.listChannelControlApprovers(
+      await this.repositories.conversations.listConversationApprovers(
         conversation.id,
       );
-    return approvers.some((approver) => approver.externalUserId === userId);
+    if (!approvers.some((approver) => approver.externalUserId === userId)) {
+      return false;
+    }
+    const providerConnection =
+      await this.repositories.providerConnections.getProviderConnection(
+        conversation.providerConnectionId,
+      );
+    if (!providerConnection) return false;
+    const validation = await this.validateMembership({
+      providerId: providerConnection.providerId,
+      providerConnection,
+      conversation,
+      userIds: [userId],
+    });
+    return validation.validUserIds.includes(userId);
   }
 
   private async requireChannel(input: {
@@ -134,7 +151,7 @@ export class ChannelAdministrationService {
     conversationId: ConversationId;
   }): Promise<{
     conversation: Conversation;
-    installation: ChannelInstallation;
+    providerConnection: ProviderConnection;
   }> {
     const conversation = await this.repositories.conversations.getConversation(
       input.conversationId,
@@ -142,14 +159,14 @@ export class ChannelAdministrationService {
     if (!conversation || conversation.appId !== input.appId) {
       throw new ApplicationError('NOT_FOUND', 'Channel not found');
     }
-    const installation =
-      await this.repositories.channelInstallations.getChannelInstallation(
-        conversation.channelInstallationId,
+    const providerConnection =
+      await this.repositories.providerConnections.getProviderConnection(
+        conversation.providerConnectionId,
       );
-    if (!installation || installation.appId !== input.appId) {
-      throw new ApplicationError('NOT_FOUND', 'Channel installation not found');
+    if (!providerConnection || providerConnection.appId !== input.appId) {
+      throw new ApplicationError('NOT_FOUND', 'provider connection not found');
     }
-    return { conversation, installation };
+    return { conversation, providerConnection };
   }
 
   private async validateMembership(
@@ -189,7 +206,7 @@ export class ChannelAdministrationService {
 
   private async findConversationForJid(input: {
     appId: AppId;
-    providerId: ChannelProviderId;
+    providerId: ProviderId;
     channelJid: string;
   }): Promise<Conversation | null> {
     const direct = await this.repositories.conversations.getConversation(

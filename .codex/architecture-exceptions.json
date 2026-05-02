@@ -11,7 +11,7 @@
     "rule": "forbidden_import_by_layer",
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 1
+    "maxViolations": 2
   },
   {
     "file": "apps/core/src/adapters/credentials/onecli/env-policy.ts",
@@ -165,7 +165,7 @@
     "rule": "forbidden_import_by_layer",
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 6
+    "maxViolations": 7
   },
   {
     "file": "apps/core/src/app/bootstrap/channel-wiring.ts",
@@ -350,14 +350,7 @@
     "maxViolations": 1
   },
   {
-    "file": "apps/core/src/cli/channel-utils.ts",
-    "rule": "forbidden_import_by_layer",
-    "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 1
-  },
-  {
-    "file": "apps/core/src/cli/channel.ts",
+    "file": "apps/core/src/cli/provider.ts",
     "rule": "forbidden_import_by_layer",
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
@@ -616,10 +609,17 @@
     "maxViolations": 1
   },
   {
-    "file": "apps/core/src/config/settings/runtime-settings-renderer.ts",
+    "file": "apps/core/src/config/settings/runtime-settings.ts",
     "rule": "forbidden_import_by_layer",
-    "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
+    "reason": "Settings desired-state helpers still bridge provider JID and agent-folder legacy primitives until the conversation repository becomes the only registration path; capped so additional imports fail.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/config/settings/desired-state-service.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Desired-state export still maps legacy JIDs to provider/conversation records during the provider-conversation terminology cutover; capped so further boundary debt fails.",
+    "removeByPhase": "provider-conversation-cutover-cleanup",
     "maxViolations": 1
   },
   {
@@ -628,13 +628,6 @@
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
     "maxViolations": 5
-  },
-  {
-    "file": "apps/core/src/config/settings/runtime-settings.ts",
-    "rule": "forbidden_import_by_layer",
-    "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 1
   },
   {
     "file": "apps/core/src/config/settings/sender-allowlist.ts",

@@ -75,8 +75,8 @@ export type ListMessagesRequest = z.infer<typeof ListMessagesRequestSchema>;
 export const MessageResponseSchema = z.object({
   id: z.string(),
   appId: z.string(),
-  channelProvider: z.string().optional(),
-  channelInstallationId: z.string().optional(),
+  providerId: z.string().optional(),
+  providerConnectionId: z.string().optional(),
   conversationId: z.string(),
   threadId: z.string().nullable().optional(),
   externalMessageId: z.string().nullable().optional(),

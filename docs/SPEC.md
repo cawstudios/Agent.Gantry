@@ -132,12 +132,15 @@ graph LR
     style New stroke-dasharray: 5 5,stroke-width:2px
 ```
 
-### Channel Registry
+### Provider Adapter Registry
 
-The channel system is built on a provider registry in `apps/core/src/channels/provider-registry.ts`. The abbreviated shape below shows the contract; use the source file for helper type definitions and exact imports.
+The chat provider system is built on a provider registry in
+`apps/core/src/channels/provider-registry.ts`. The abbreviated shape below
+shows the current internal contract; use the source file for helper type
+definitions and exact imports.
 
 ```typescript
-export interface ChannelProvider {
+export interface Provider {
   id: string;
   label: string;
   jidPrefix: string;
@@ -149,17 +152,21 @@ export interface ChannelProvider {
   setup: ChannelProviderSetup;
 }
 
-export function registerChannelProvider(provider: ChannelProvider): void;
-export function listChannelProviders(): readonly ChannelProvider[];
-export function getChannelProvider(id: string): ChannelProvider | undefined;
-export function providerForJid(jid: string): ChannelProvider | undefined;
+export function registerProvider(provider: Provider): void;
+export function listChannelProviders(): readonly Provider[];
+export function getProvider(id: string): Provider | undefined;
+export function providerForJid(jid: string): Provider | undefined;
 ```
 
 Each provider receives `ChannelOpts` through its `create` function and returns either a `ChannelAdapter` instance or `null` if the provider's credentials are not configured.
 
-### Channel Interface
+### Provider Adapter Interface
 
-Every channel implements the `ChannelAdapter` contract from `apps/core/src/channels/channel-provider.ts`. It combines required lifecycle, ownership, and message-sink ports with optional streaming, typing, progress, group discovery, interaction, and plan-review ports from `apps/core/src/domain/types.ts`:
+Every provider adapter implements the `ChannelAdapter` contract from
+`apps/core/src/channels/channel-provider.ts`. It combines required lifecycle,
+ownership, and message-sink ports with optional streaming, typing, progress,
+group discovery, interaction, and plan-review ports from
+`apps/core/src/domain/types.ts`:
 
 ```typescript
 export type ChannelAdapter = ChannelLifecyclePort &
@@ -180,7 +187,7 @@ export type ChannelAdapter = ChannelLifecyclePort &
 
 Providers are registered via `apps/core/src/channels/register-builtins.ts`:
 
-1. Built-in providers (`app`, `slack`, and `telegram`) call `registerChannelProvider(provider)`.
+1. Built-in providers (`app`, `slack`, and `telegram`) call `registerProvider(provider)`.
 2. Startup wiring iterates `listChannelProviders()`, creates enabled providers, and connects returned channel instances.
 3. Routing uses `providerForJid(jid)` to determine ownership and formatting behavior.
 
@@ -188,23 +195,25 @@ Providers are registered via `apps/core/src/channels/register-builtins.ts`:
 
 | File                                            | Purpose                                                 |
 | ----------------------------------------------- | ------------------------------------------------------- |
-| `apps/core/src/channels/provider-registry.ts`   | Channel provider registry                               |
+| `apps/core/src/channels/provider-registry.ts`   | Provider adapter registry                               |
 | `apps/core/src/channels/register-builtins.ts`   | Built-in provider registration                          |
 | `apps/core/src/channels/channel-provider.ts`    | `ChannelAdapter`, `ChannelOpts`, and provider factory   |
-| `apps/core/src/domain/types.ts`                 | Channel ports, message types, and group metadata        |
-| `apps/core/src/index.ts`                        | Orchestrator — instantiates channels, runs message loop |
-| `apps/core/src/app/bootstrap/channel-wiring.ts` | Owns channel output, streaming, progress, and approvals |
+| `apps/core/src/domain/types.ts`                 | Provider ports, message types, and group metadata       |
+| `apps/core/src/index.ts`                        | Orchestrator — instantiates providers, runs message loop |
+| `apps/core/src/app/bootstrap/channel-wiring.ts` | Owns provider output, streaming, progress, and approvals |
 
-### Adding a New Channel
+### Adding a New Provider Adapter
 
-To add a new channel, contribute a bundled or registered skill that:
+To add a new provider adapter, contribute a bundled or registered skill that:
 
 1. Adds a `apps/core/src/channels/<name>.ts` file implementing the `ChannelAdapter` contract
-2. Exposes a `ChannelProvider` entry with `id`, prefixes, setup metadata, and `create`
+2. Exposes a `Provider` entry with `id`, prefixes, setup metadata, and `create`
 3. Returns `null` from `create` if credentials are missing
 4. Registers the provider via `register-builtins.ts` (or equivalent provider registration module)
 
-Channel-extension skills can follow this pattern when they are added to the bundled package assets or registered skill catalog. Runtime-home Claude skill folders are not the source of truth for runtime materialization.
+Provider-extension skills can follow this pattern when they are added to the
+bundled package assets or registered skill catalog. Runtime-home Claude skill
+folders are not the source of truth for runtime materialization.
 
 ---
 
@@ -228,7 +237,7 @@ myclaw/
 │       ├── src/
 │       │   ├── index.ts           # Package/runtime entrypoint
 │       │   ├── app/               # Process bootstrap, lifecycle, runtime composition
-│       │   ├── channels/          # Channel provider registry and channel implementations
+│       │   ├── channels/          # Provider registry and channel implementations
 │       │   ├── config/            # Env, settings, credentials, redaction
 │       │   ├── control/           # HTTP/SSE SDK control server
 │       │   ├── domain/            # Pure domain types and repository contracts

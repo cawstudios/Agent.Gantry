@@ -2,7 +2,7 @@ import type {
   ChannelMembershipValidationInput,
   ChannelMembershipValidationResult,
   ChannelMembershipValidator,
-} from '../application/channels/channel-administration-service.js';
+} from '../application/provider-conversations/conversation-administration-service.js';
 import type { RuntimeSecretProvider } from '../domain/ports/runtime-secret-provider.js';
 
 const TOKEN_BOUND_HTTP_GUIDANCE = 'Verify channel credentials and retry.';
@@ -27,9 +27,10 @@ export class RuntimeSecretChannelMembershipValidator implements ChannelMembershi
   private async validateTelegram(
     input: ChannelMembershipValidationInput,
   ): Promise<ChannelMembershipValidationResult> {
-    const token = this.resolveSecret(input.installation.runtimeSecretRefs, [
-      'TELEGRAM_BOT_TOKEN',
-    ]);
+    const token = this.resolveSecret(
+      input.providerConnection.runtimeSecretRefs,
+      ['TELEGRAM_BOT_TOKEN'],
+    );
     if (!token) {
       return {
         validUserIds: [],
@@ -73,9 +74,10 @@ export class RuntimeSecretChannelMembershipValidator implements ChannelMembershi
   private async validateSlack(
     input: ChannelMembershipValidationInput,
   ): Promise<ChannelMembershipValidationResult> {
-    const botToken = this.resolveSecret(input.installation.runtimeSecretRefs, [
-      'SLACK_BOT_TOKEN',
-    ]);
+    const botToken = this.resolveSecret(
+      input.providerConnection.runtimeSecretRefs,
+      ['SLACK_BOT_TOKEN'],
+    );
     if (!botToken) {
       return {
         validUserIds: [],
@@ -130,16 +132,18 @@ export class RuntimeSecretChannelMembershipValidator implements ChannelMembershi
   private async validateTeams(
     input: ChannelMembershipValidationInput,
   ): Promise<ChannelMembershipValidationResult> {
-    const clientId = this.resolveSecret(input.installation.runtimeSecretRefs, [
-      'TEAMS_CLIENT_ID',
-    ]);
+    const clientId = this.resolveSecret(
+      input.providerConnection.runtimeSecretRefs,
+      ['TEAMS_CLIENT_ID'],
+    );
     const clientSecret = this.resolveSecret(
-      input.installation.runtimeSecretRefs,
+      input.providerConnection.runtimeSecretRefs,
       ['TEAMS_CLIENT_SECRET'],
     );
-    const tenantId = this.resolveSecret(input.installation.runtimeSecretRefs, [
-      'TEAMS_TENANT_ID',
-    ]);
+    const tenantId = this.resolveSecret(
+      input.providerConnection.runtimeSecretRefs,
+      ['TEAMS_TENANT_ID'],
+    );
     if (!clientId || !clientSecret || !tenantId) {
       return {
         validUserIds: [],
@@ -263,8 +267,9 @@ function externalConversationValue(
 
 function teamsMembersEndpoint(input: ChannelMembershipValidationInput): string {
   const config =
-    input.installation.config && typeof input.installation.config === 'object'
-      ? (input.installation.config as Record<string, unknown>)
+    input.providerConnection.config &&
+    typeof input.providerConnection.config === 'object'
+      ? (input.providerConnection.config as Record<string, unknown>)
       : {};
   const teamId = stringConfigValue(config, 'teamId');
   const channelId = stringConfigValue(config, 'channelId');

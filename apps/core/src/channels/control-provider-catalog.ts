@@ -1,9 +1,9 @@
 import type {
-  ChannelConversationDiscoveryPort,
+  ProviderConversationDiscoveryPort,
   DiscoveredConversation,
-} from '../application/channels/channel-control-use-cases.js';
-import type { ChannelProviderCatalogPort } from '../application/channels/channel-provider-ports.js';
-import type { ChannelProvider } from '../domain/channel/channel.js';
+} from '../application/provider-conversations/provider-conversation-control-use-cases.js';
+import type { ProviderCatalogPort } from '../application/provider-conversations/provider-catalog-ports.js';
+import type { Provider } from '../domain/provider/provider.js';
 import type { RuntimeSecretProvider } from '../domain/ports/runtime-secret-provider.js';
 import type { IsoTimestamp } from '../shared/time/primitives.js';
 import { listSlackRecentChats } from '../cli/slack-chat-discovery.js';
@@ -18,8 +18,8 @@ import { ApplicationError } from '../application/common/application-error.js';
 
 const createdAt = '2026-04-27T00:00:00.000Z' as IsoTimestamp;
 
-export class BuiltInControlChannelProviderCatalog implements ChannelProviderCatalogPort {
-  listProviders(): ChannelProvider[] {
+export class BuiltInControlChannelProviderCatalog implements ProviderCatalogPort {
+  listProviders(): Provider[] {
     const builtIns = listChannelProviders().map((provider) => ({
       id: provider.id,
       displayName: provider.label,
@@ -27,7 +27,7 @@ export class BuiltInControlChannelProviderCatalog implements ChannelProviderCata
         ? ['internal', 'discover']
         : ['install', 'discover'],
       createdAt,
-    })) as ChannelProvider[];
+    })) as Provider[];
     const existingIds = new Set<string>(
       builtIns.map((provider) => String(provider.id)),
     );
@@ -38,27 +38,28 @@ export class BuiltInControlChannelProviderCatalog implements ChannelProviderCata
         displayName: id === 'teams' ? 'Teams' : 'WhatsApp',
         capabilityFlags: ['placeholder'],
         createdAt,
-      } as ChannelProvider);
+      } as Provider);
     }
     return builtIns;
   }
 }
 
-export class RuntimeSecretConversationDiscovery implements ChannelConversationDiscoveryPort {
+export class RuntimeSecretConversationDiscovery implements ProviderConversationDiscoveryPort {
   constructor(
     private readonly secrets: RuntimeSecretProvider,
     private readonly teamsDiscoveryClient: TeamsSetupDiscoveryClient = new GraphTeamsSetupDiscoveryClient(),
   ) {}
 
   async discover(
-    input: Parameters<ChannelConversationDiscoveryPort['discover']>[0],
+    input: Parameters<ProviderConversationDiscoveryPort['discover']>[0],
   ) {
-    const providerId = String(input.installation.providerId);
+    const providerId = String(input.providerConnection.providerId);
     if (providerId === 'app') return [];
     if (providerId === 'telegram') {
-      const token = this.resolveSecret(input.installation.runtimeSecretRefs, [
-        'TELEGRAM_BOT_TOKEN',
-      ]);
+      const token = this.resolveSecret(
+        input.providerConnection.runtimeSecretRefs,
+        ['TELEGRAM_BOT_TOKEN'],
+      );
       const result = await listTelegramRecentChats({
         token,
         limit: input.limit,
@@ -82,7 +83,7 @@ export class RuntimeSecretConversationDiscovery implements ChannelConversationDi
     }
     if (providerId === 'slack') {
       const botToken = this.resolveSecret(
-        input.installation.runtimeSecretRefs,
+        input.providerConnection.runtimeSecretRefs,
         ['SLACK_BOT_TOKEN'],
       );
       const result = await listSlackRecentChats({
@@ -105,15 +106,15 @@ export class RuntimeSecretConversationDiscovery implements ChannelConversationDi
       const result = await this.teamsDiscoveryClient.listChannels({
         credentials: {
           clientId: this.resolveExactSecret(
-            input.installation.runtimeSecretRefs,
+            input.providerConnection.runtimeSecretRefs,
             'TEAMS_CLIENT_ID',
           ),
           clientSecret: this.resolveExactSecret(
-            input.installation.runtimeSecretRefs,
+            input.providerConnection.runtimeSecretRefs,
             'TEAMS_CLIENT_SECRET',
           ),
           tenantId: this.resolveExactSecret(
-            input.installation.runtimeSecretRefs,
+            input.providerConnection.runtimeSecretRefs,
             'TEAMS_TENANT_ID',
           ),
         },
@@ -148,7 +149,7 @@ export class RuntimeSecretConversationDiscovery implements ChannelConversationDi
     }
     throw new ApplicationError(
       'INVALID_REQUEST',
-      'Channel installation does not reference a configured runtime secret',
+      'provider connection does not reference a configured runtime secret',
     );
   }
 
@@ -156,14 +157,14 @@ export class RuntimeSecretConversationDiscovery implements ChannelConversationDi
     if (!refs.includes(ref)) {
       throw new ApplicationError(
         'INVALID_REQUEST',
-        `Channel installation does not reference ${ref}`,
+        `provider connection does not reference ${ref}`,
       );
     }
     const value = this.secrets.getOptionalSecret({ env: ref });
     if (value) return value;
     throw new ApplicationError(
       'INVALID_REQUEST',
-      `Channel installation references ${ref}, but it is not configured`,
+      `provider connection references ${ref}, but it is not configured`,
     );
   }
 }

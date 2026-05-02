@@ -55,7 +55,7 @@ CREATE TABLE runtime_events (
   run_id text REFERENCES agent_runs(id) ON DELETE CASCADE,
   job_id text,
   trigger_id text,
-  conversation_id text REFERENCES channel_conversations(id) ON DELETE SET NULL,
+  conversation_id text REFERENCES conversations(id) ON DELETE SET NULL,
   thread_id text REFERENCES conversation_threads(id) ON DELETE SET NULL,
   event_type text NOT NULL,
   actor text NOT NULL,

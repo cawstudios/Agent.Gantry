@@ -4,7 +4,7 @@ import {
   BuiltInControlChannelProviderCatalog,
   RuntimeSecretConversationDiscovery,
 } from '@core/channels/control-provider-catalog.js';
-import type { ChannelInstallation } from '@core/domain/channel/channel.js';
+import type { ProviderConnection } from '@core/domain/provider/provider.js';
 import type { RuntimeSecretProvider } from '@core/domain/ports/runtime-secret-provider.js';
 
 const mocks = vi.hoisted(() => ({
@@ -40,9 +40,9 @@ vi.mock('@core/cli/slack-chat-discovery.js', () => ({
   listSlackRecentChats: vi.fn(async () => ({ ok: true, chats: [] })),
 }));
 
-function installation(runtimeSecretRefs: string[]): ChannelInstallation {
+function providerConnection(runtimeSecretRefs: string[]): ProviderConnection {
   return {
-    id: 'installation-1',
+    id: 'providerConnection-1',
     appId: 'app-one',
     providerId: 'telegram',
     label: 'Telegram',
@@ -51,7 +51,7 @@ function installation(runtimeSecretRefs: string[]): ChannelInstallation {
     runtimeSecretRefs,
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
-  } as ChannelInstallation;
+  } as ProviderConnection;
 }
 
 function secrets(values: Record<string, string>): RuntimeSecretProvider {
@@ -87,7 +87,10 @@ describe('RuntimeSecretConversationDiscovery', () => {
     );
 
     await expect(
-      discovery.discover({ installation: installation([]), limit: 10 }),
+      discovery.discover({
+        providerConnection: providerConnection([]),
+        limit: 10,
+      }),
     ).rejects.toMatchObject({
       code: 'INVALID_REQUEST',
     });
@@ -101,7 +104,7 @@ describe('RuntimeSecretConversationDiscovery', () => {
 
     await expect(
       discovery.discover({
-        installation: installation(['TELEGRAM_BOT_TOKEN']),
+        providerConnection: providerConnection(['TELEGRAM_BOT_TOKEN']),
         limit: 10,
       }),
     ).resolves.toEqual([
@@ -126,18 +129,18 @@ describe('RuntimeSecretConversationDiscovery', () => {
       teamsDiscoveryClient(),
     );
     const teamsInstallation = {
-      ...installation([
+      ...providerConnection([
         'TEAMS_CLIENT_ID',
         'TEAMS_CLIENT_SECRET',
         'TEAMS_TENANT_ID',
       ]),
       providerId: 'teams' as never,
       label: 'Teams',
-    } as ChannelInstallation;
+    } as ProviderConnection;
 
     await expect(
       discovery.discover({
-        installation: teamsInstallation,
+        providerConnection: teamsInstallation,
         limit: 10,
       }),
     ).resolves.toEqual([
@@ -171,19 +174,19 @@ describe('RuntimeSecretConversationDiscovery', () => {
       teamsDiscoveryClient(),
     );
     const teamsInstallation = {
-      ...installation(['TEAMS_CLIENT_ID', 'TEAMS_TENANT_ID']),
+      ...providerConnection(['TEAMS_CLIENT_ID', 'TEAMS_TENANT_ID']),
       providerId: 'teams' as never,
       label: 'Teams',
-    } as ChannelInstallation;
+    } as ProviderConnection;
 
     await expect(
       discovery.discover({
-        installation: teamsInstallation,
+        providerConnection: teamsInstallation,
         limit: 10,
       }),
     ).rejects.toMatchObject({
       code: 'INVALID_REQUEST',
-      message: 'Channel installation does not reference TEAMS_CLIENT_SECRET',
+      message: 'provider connection does not reference TEAMS_CLIENT_SECRET',
     });
     expect(mocks.listTeamsChannels).not.toHaveBeenCalled();
   });

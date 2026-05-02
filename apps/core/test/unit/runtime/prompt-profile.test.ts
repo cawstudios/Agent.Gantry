@@ -51,7 +51,7 @@ describe('PromptProfileService', () => {
     const configDir = path.join(root, 'config');
     const agentsDir = path.join(root, 'agents');
 
-    writeFile(path.join(configDir, 'settings.yaml'), 'channels: {}\n');
+    writeFile(path.join(configDir, 'settings.yaml'), 'providers: {}\n');
 
     const service = new PromptProfileService({ agentsDir });
     service.ensureSeedFiles();
@@ -84,7 +84,7 @@ describe('PromptProfileService', () => {
     expect(fs.existsSync(path.join(configDir, 'SOUL.md'))).toBe(false);
     expect(
       fs.readFileSync(path.join(configDir, 'settings.yaml'), 'utf-8'),
-    ).toBe('channels: {}\n');
+    ).toBe('providers: {}\n');
   });
 
   it('does not overwrite existing shared CLAUDE.md', () => {

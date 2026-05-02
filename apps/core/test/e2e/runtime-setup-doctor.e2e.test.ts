@@ -15,7 +15,18 @@ function makeFixture() {
   const fixture = createRuntimeHomeFixture({
     prefix: 'myclaw-cli-lifecycle-',
     mutateSettings(settings) {
-      settings.channels.slack.enabled = true;
+      settings.providers.slack = {
+        enabled: true,
+        defaultConnection: 'slack_default',
+      };
+      settings.providerConnections.slack_default = {
+        provider: 'slack',
+        label: 'Test Slack Workspace',
+        runtimeSecretRefs: {
+          app_token: 'SLACK_APP_TOKEN',
+          bot_token: 'SLACK_BOT_TOKEN',
+        },
+      };
       settings.credentialBroker.mode = 'external';
       settings.credentialBroker.external.baseUrl =
         'https://broker.example.com/anthropic';

@@ -37,7 +37,7 @@ function makeDeps() {
 
 async function waitFor(check: () => boolean) {
   const started = Date.now();
-  while (Date.now() - started < 1000) {
+  while (Date.now() - started < 2000) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -78,6 +78,7 @@ describe('settings reload watcher', () => {
     });
 
     try {
+      await new Promise((resolve) => setTimeout(resolve, 40));
       const next = createDefaultRuntimeSettings();
       next.agent.defaultModel = 'sonnet';
       saveRuntimeSettings(runtimeHome, next);

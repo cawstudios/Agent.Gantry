@@ -13,9 +13,9 @@ App
   Agent
     AgentConfigVersion
     LlmProfile
-    AgentChannelBinding
-      ChannelInstallation
-        ChannelProvider
+    AgentConversationBinding
+      ProviderConnection
+        Provider
         Conversation
           ConversationThread
           Message
@@ -43,7 +43,7 @@ Identity rules:
 - Domain identity uses MyClaw ids, not provider ids.
 - Provider ids are stored as external references on adapter-owned records.
 - Domain records are scoped by `appId` unless explicitly global.
-- Channel-specific payloads must be normalized before they reach application
+- Provider-specific payloads must be normalized before they reach application
   use cases.
 - Model-provider session tokens are attached to `ProviderSession`, not used as
   the only source of runtime continuity.
@@ -52,15 +52,15 @@ Identity rules:
 
 | Concept               | Owner                    | Meaning                                                                                                                                                                            |
 | --------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `App`                 | Domain                   | A runtime namespace for agents, users, memory, policies, channels, jobs, and SDK/API access.                                                                                       |
-| `Agent`               | Domain                   | A configured agent inside an app. It owns prompt profile lineage, model profile selection, tools, skills, memory visibility, and channel bindings.                                 |
+| `App`                 | Domain                   | A runtime namespace for agents, users, memory, policies, conversations, jobs, and SDK/API access.                                                                                  |
+| `Agent`               | Domain                   | A configured agent inside an app. It owns prompt profile lineage, model profile selection, tools, skills, memory visibility, and conversation bindings.                            |
 | `AgentConfigVersion`  | Domain                   | An immutable version of agent behavior: prompt profile, model selection, tool/skill catalog references, workspace defaults, permission policy references, and runtime limits.      |
 | `LlmProfile`          | Domain                   | Provider-neutral model intent such as purpose, model alias, budget, thinking mode, embedding usage, and credential-broker reference. Concrete SDK names live in provider adapters. |
-| `ChannelProvider`     | Adapter catalog          | A channel adapter type such as Telegram, WhatsApp, Slack, Teams, or Web UI. It describes capabilities and normalization rules.                                                     |
-| `ChannelInstallation` | Application plus adapter | An installed provider for an app, including workspace/team/bot/account identity, runtime-owned secrets, webhook/socket config, and enablement state.                               |
+| `Provider`            | Adapter catalog          | A chat adapter type such as Telegram, WhatsApp, Slack, Teams, or Web UI. It describes capabilities and normalization rules.                                                        |
+| `ProviderConnection`  | Application plus adapter | An installed provider connection for an app, including workspace/team/bot/account identity, runtime-owned secrets, webhook/socket config, and enablement state.                    |
 | `Conversation`        | Domain                   | A provider-neutral communication container. It can be a DM, group, channel, chat, SDK conversation, or Web UI chat.                                                                |
 | `ConversationThread`  | Domain                   | A sub-conversation within a conversation, such as Slack `thread_ts`, Telegram forum topic, Teams reply chain, or a Web UI branch.                                                  |
-| `AgentChannelBinding` | Domain                   | The relationship that says an agent is present in a conversation or thread with trigger, routing, permissions, memory scope, and workspace projection.                             |
+| `AgentConversationBinding` | Domain              | The relationship that says an agent is present in a conversation or thread with trigger, routing, permissions, memory scope, and workspace projection.                             |
 | `User`                | Domain                   | A human or service actor known to an app. Provider-specific user ids are aliases.                                                                                                  |
 | `Message`             | Domain                   | A normalized inbound, outbound, system, or tool-visible communication event within a conversation or thread.                                                                       |
 | `MessagePart`         | Domain                   | A typed part of a message, such as text, markdown, image, file reference, tool result, form response, or structured data.                                                          |
@@ -102,16 +102,16 @@ resolve to Claude, OpenAI, Gemini, a local model, or a future provider through
 an adapter. The domain must not import provider SDKs or provider model
 registries.
 
-### Channels, Conversations, And Bindings
+### Providers, Conversations, And Bindings
 
-`ChannelProvider` describes adapter capabilities. Examples include Telegram,
-WhatsApp, Slack, Teams, and Web UI. It is catalog metadata, not an installed
-runtime account.
+`Provider` describes adapter capabilities. Examples include Telegram, WhatsApp,
+Slack, Teams, and Web UI. It is catalog metadata, not an installed runtime
+account.
 
-`ChannelInstallation` is an app's installed provider instance. For Slack it may
-represent a workspace app installation. For Telegram it may represent a bot
-token. For Teams it may represent a tenant/app installation. For Web UI it may
-represent the app-owned web channel. Secrets belong behind
+`ProviderConnection` is an app's installed provider instance. For Slack it may
+represent a workspace app providerConnection. For Telegram it may represent a bot
+token. For Teams it may represent a tenant/app providerConnection. For Web UI it may
+represent the app-owned web surface. Secrets belong behind
 `RuntimeSecretProvider`.
 
 `Conversation` is the canonical message container. Provider ids such as
@@ -122,14 +122,16 @@ conversation id are external aliases on a conversation.
 topic, branch, or thread boundary. Thread ids are external aliases under the
 conversation.
 
-`AgentChannelBinding` connects one agent to one conversation or thread. It owns
-trigger behavior, routing, allowlists, admin capabilities, memory subject
-selection, default workspace projection, and permission policy selection. A
-group folder is only one possible workspace projection of this binding.
+`AgentConversationBinding` connects one agent to one conversation or thread. It
+owns trigger behavior, routing, sender policy, memory subject selection,
+default workspace projection, and permission policy selection. A group folder
+is only one possible workspace projection of this binding. Conversation
+approvers belong to the conversation, while DM admins belong to an agent's
+private/direct conversation policy.
 
 ### Users And Messages
 
-`User` is a canonical actor in an app. Channel providers contribute aliases,
+`User` is a canonical actor in an app. Providers contribute aliases,
 display names, and membership facts. A message sender should map to a `User`
 when the provider exposes a stable user identity. Service actors and app
 backends can also be users.
@@ -185,7 +187,7 @@ session messages, existing job triggers, or constrained one-time job templates.
 
 `MemorySubject` is the visibility boundary for durable memory. Valid subject
 shapes include app-wide common memory, agent memory, user memory, group/team
-memory, conversation memory, and thread memory. Channel provider names do not
+memory, conversation memory, and thread memory. Provider names do not
 change the meaning of the boundary.
 
 `Job` belongs to an app and runs through the same agent/session/run path as a
@@ -238,7 +240,7 @@ content hashes when available. It makes runs reproducible and auditable.
 stores profile metadata, browser state references, auth markers, and usage
 policy. Browser profile use still requires permission and sandbox checks.
 
-## Channel Mapping
+## Provider Conversation Mapping
 
 | Provider concept                           | Canonical mapping                                                                                                                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -257,12 +259,12 @@ policy. Browser profile use still requires permission and sandbox checks.
 Mapping rules:
 
 - A provider conversation id is never the only MyClaw identity. Store it as an
-  alias under `ChannelInstallation`.
+  alias under `ProviderConnection`.
 - Threads are optional. A provider without threads maps all messages directly
   to `Conversation`.
 - Web UI must choose one mapping during implementation and document it in the
   Web UI adapter contract.
-- Channel adapters must preserve enough provider metadata to reply correctly,
+- Provider adapters must preserve enough provider metadata to reply correctly,
   but application behavior should use canonical ids.
 
 ## Current Implementation Mapping
@@ -271,11 +273,11 @@ These mappings describe current code so future refactors know what to replace:
 
 | Current implementation             | Canonical target                                                                            |
 | ---------------------------------- | ------------------------------------------------------------------------------------------- |
-| Registered group                   | `AgentChannelBinding` plus `Conversation` and optional `ConversationThread`                 |
+| Registered group                   | `AgentConversationBinding` plus `Conversation` and optional `ConversationThread`            |
 | Group JID/chat JID                 | Provider alias for `Conversation`                                                           |
-| Group folder                       | Workspace projection for `AgentChannelBinding` and `WorkspaceSnapshot`                      |
-| Main group                         | Admin `AgentChannelBinding` governed by `PermissionPolicy`                                  |
-| Sender allowlist/control allowlist | `PermissionPolicy` and `PermissionRule` inputs                                              |
+| Group folder                       | Workspace projection for `AgentConversationBinding` and `WorkspaceSnapshot`                 |
+| Main group                         | Seeded DM admin or conversation approver policy                                             |
+| Legacy sender/control lists        | Sender policy and conversation approver inputs                                              |
 | Claude session id                  | `ProviderSession` attached to `AgentSession`                                                |
 | Group queue key                    | Queue key derived from canonical app, agent, conversation, thread, session, and run context |
 | Host runner process                | Runtime execution adapter governed by `SandboxProfile` and `SandboxLease`                   |

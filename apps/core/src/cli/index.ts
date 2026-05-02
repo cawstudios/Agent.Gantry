@@ -51,9 +51,8 @@ function usage(): string {
     '  myclaw restart',
     '  myclaw logs',
     '  myclaw local setup|start|stop|status|logs|doctor',
-    '  myclaw channel connect <telegram|slack|teams>',
-    '  myclaw channel list|info|control-allowlist',
-    '  myclaw channel doctor',
+    '  myclaw provider list|connect|doctor',
+    '  myclaw conversation info|approvers',
     '  myclaw agent list|info|add|remove|trigger|dm-access|policy',
     '  myclaw model list|set-default|doctor',
     '  myclaw settings export-current|drift',
@@ -417,9 +416,19 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return runLocalCommand(runtimeHome, rest);
   }
 
+  if (command === 'provider') {
+    const { runProviderCommand } = await import('./provider.js');
+    return runProviderCommand(import.meta.url, runtimeHome, rest);
+  }
+
+  if (command === 'conversation') {
+    const { runConversationCommand } = await import('./provider.js');
+    return runConversationCommand(runtimeHome, rest);
+  }
+
   if (command === 'channel') {
-    const { runChannelCommand } = await import('./channel.js');
-    return runChannelCommand(import.meta.url, runtimeHome, rest);
+    p.log.error('Use `myclaw provider` or `myclaw conversation`.');
+    return 1;
   }
 
   if (command === 'memory') {

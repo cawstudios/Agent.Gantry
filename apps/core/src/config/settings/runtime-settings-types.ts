@@ -3,12 +3,33 @@ import type {
   RuntimeStorageSettingsSnapshot,
 } from './memory-snapshot.js';
 
-export type RuntimeChannel = string;
-
-export interface RuntimeChannelSettings {
+export interface RuntimeProviderSettings {
   enabled: boolean;
-  senderAllowlist: import('./sender-allowlist.js').SenderAllowlistConfig;
-  controlAllowlist: import('./control-allowlist.js').SenderControlAllowlistConfig;
+  defaultConnection?: string;
+}
+
+export interface RuntimeProviderConnectionSettings {
+  provider: string;
+  label: string;
+  runtimeSecretRefs: Record<string, string>;
+}
+
+export type RuntimeConversationKind =
+  | 'dm'
+  | 'direct'
+  | 'group'
+  | 'channel'
+  | 'chat'
+  | 'service'
+  | 'web';
+
+export interface RuntimeConfiguredConversation {
+  providerConnection: string;
+  externalId: string;
+  kind: RuntimeConversationKind;
+  displayName: string;
+  senderPolicy: import('./sender-allowlist.js').ChatAllowlistEntry;
+  controlApprovers: string[];
 }
 
 export type EmbeddingProviderName = string;
@@ -71,6 +92,17 @@ export interface RuntimeConfiguredAgentBinding {
   model?: string;
 }
 
+export interface RuntimeConfiguredBinding {
+  agent: string;
+  conversation: string;
+  trigger: string;
+  addedAt: string;
+  requiresTrigger: boolean;
+  isMain: boolean;
+  memoryScope: 'conversation' | 'thread' | 'user' | 'agent';
+  model?: string;
+}
+
 export interface RuntimeConfiguredAgentCapabilities {
   toolIds: string[];
   skillIds: string[];
@@ -112,7 +144,10 @@ export type { RuntimeMemorySettingsSnapshot, RuntimeStorageSettingsSnapshot };
 
 export interface RuntimeSettings {
   desiredState: RuntimeDesiredStateSettings;
-  channels: Record<string, RuntimeChannelSettings>;
+  providers: Record<string, RuntimeProviderSettings>;
+  providerConnections: Record<string, RuntimeProviderConnectionSettings>;
+  conversations: Record<string, RuntimeConfiguredConversation>;
+  bindings: Record<string, RuntimeConfiguredBinding>;
   agents: Record<string, RuntimeConfiguredAgent>;
   storage: RuntimeStorageSettings;
   agent: RuntimeAgentSettings;

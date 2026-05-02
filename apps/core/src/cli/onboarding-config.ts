@@ -1,7 +1,6 @@
 import { readEnvFile, upsertEnvFile } from '../config/env/file.js';
 import type { HostCredentialMode } from '../config/credentials/mode.js';
 import '../channels/register-builtins.js';
-import { getChannelProvider } from '../channels/provider-registry.js';
 import {
   envFilePath,
   ensureRuntimeLayout,
@@ -14,7 +13,6 @@ import {
   findModelByRunnerModel,
   resolveModelAlias,
 } from '../shared/model-catalog.js';
-import { parseSenderControlAllowlistConfig } from '../config/settings/control-allowlist.js';
 import {
   generateOnecliSecretEncryptionKey,
   ONECLI_DATABASE_URL_ENV,
@@ -111,31 +109,12 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
   settings.credentialBroker.onecli.url = onecliUrl;
   settings.credentialBroker.onecli.postgres.urlEnv = ONECLI_DATABASE_URL_ENV;
   settings.credentialBroker.onecli.postgres.schema = onecliPostgresSchema;
-  const telegramProvider = getChannelProvider('telegram');
-  if (telegramProvider && settings.channels[telegramProvider.id]) {
-    const shouldEnable =
-      input.primaryProvider === 'telegram' && Boolean(input.telegramBotToken);
-    settings.channels[telegramProvider.id].enabled = shouldEnable;
-  }
-  const slackProvider = getChannelProvider('slack');
-  if (slackProvider && settings.channels[slackProvider.id]) {
-    const shouldEnable =
-      input.primaryProvider === 'slack' &&
-      Boolean(input.slackBotToken) &&
-      Boolean(input.slackAppToken);
-    settings.channels[slackProvider.id].enabled = shouldEnable;
-    if (input.primaryProvider === 'slack') {
-      const approvers = parseApproverIds(input.slackPermissionApproverIds);
-      settings.channels[slackProvider.id].controlAllowlist =
-        parseSenderControlAllowlistConfig(
-          {
-            default: approvers,
-            agents: settings.channels[slackProvider.id].controlAllowlist.agents,
-          },
-          'channels.slack.control_allowlist',
-        );
-    }
-  }
+  settings.providers.telegram.enabled =
+    input.primaryProvider === 'telegram' && Boolean(input.telegramBotToken);
+  settings.providers.slack.enabled =
+    input.primaryProvider === 'slack' &&
+    Boolean(input.slackBotToken) &&
+    Boolean(input.slackAppToken);
   settings.memory = {
     ...settings.memory,
     enabled: input.memoryEnabled,
@@ -150,18 +129,6 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
     },
   };
   saveRuntimeSettings(input.runtimeHome, settings);
-}
-
-function parseApproverIds(raw: string | undefined): string[] {
-  if (!raw?.trim()) return [];
-  return [
-    ...new Set(
-      raw
-        .split(/[,\s]+/)
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0),
-    ),
-  ];
 }
 
 function normalizeOnboardingModel(value: string | undefined): string {

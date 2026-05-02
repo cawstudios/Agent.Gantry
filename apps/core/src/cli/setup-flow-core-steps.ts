@@ -330,7 +330,7 @@ export async function runPrerequisitesStep(): Promise<FlowAction> {
 
 export async function runChannelStep(draft: SetupDraft): Promise<FlowAction> {
   const value = await p.select({
-    message: 'Choose your first channel provider',
+    message: 'Choose your first provider',
     options: [
       {
         value: 'telegram',

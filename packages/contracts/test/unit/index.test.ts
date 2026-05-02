@@ -6,15 +6,15 @@ import type {
 
 import {
   AgentResponseSchema,
-  AgentChannelBindingRequestSchema,
-  AgentChannelBindingListResponseSchema,
-  AgentChannelBindingResponseSchema,
+  AgentConversationBindingRequestSchema,
+  AgentConversationBindingListResponseSchema,
+  AgentConversationBindingResponseSchema,
   BROWSER_IPC_ACTIONS,
   BrowserProfileResponseSchema,
-  ChannelInstallationListResponseSchema,
-  ChannelInstallationResponseSchema,
-  ChannelProviderListResponseSchema,
-  ChannelProviderResponseSchema,
+  ProviderConnectionListResponseSchema,
+  ProviderConnectionResponseSchema,
+  ProviderListResponseSchema,
+  ProviderResponseSchema,
   ContractMetadataSchema,
   ConversationListResponseSchema,
   ConversationResponseSchema,
@@ -269,7 +269,7 @@ describe('contracts package', () => {
     });
 
     expect(
-      ChannelProviderResponseSchema.parse({
+      ProviderResponseSchema.parse({
         id: 'slack',
         displayName: 'Slack',
         capabilities: ['threads'],
@@ -278,7 +278,7 @@ describe('contracts package', () => {
       }),
     ).toMatchObject({ id: 'slack' });
     expect(
-      ChannelProviderListResponseSchema.parse({
+      ProviderListResponseSchema.parse({
         providers: [
           {
             id: 'teams',
@@ -291,14 +291,14 @@ describe('contracts package', () => {
         ],
       }),
     ).toMatchObject({ providers: [{ id: 'teams' }] });
-    expectInvalid(ChannelProviderResponseSchema, {
+    expectInvalid(ProviderResponseSchema, {
       id: 'slack',
       displayName: 'Slack',
       capabilities: ['threads'],
     });
 
     expect(
-      ChannelInstallationResponseSchema.parse({
+      ProviderConnectionResponseSchema.parse({
         id: 'installation-1',
         appId: 'app-1',
         providerId: 'slack',
@@ -311,8 +311,8 @@ describe('contracts package', () => {
       }),
     ).toMatchObject({ providerId: 'slack' });
     expect(
-      ChannelInstallationListResponseSchema.parse({
-        installations: [
+      ProviderConnectionListResponseSchema.parse({
+        providerConnections: [
           {
             id: 'installation-1',
             appId: 'app-1',
@@ -324,8 +324,8 @@ describe('contracts package', () => {
           },
         ],
       }),
-    ).toMatchObject({ installations: [{ id: 'installation-1' }] });
-    expectInvalid(ChannelInstallationResponseSchema, {
+    ).toMatchObject({ providerConnections: [{ id: 'installation-1' }] });
+    expectInvalid(ProviderConnectionResponseSchema, {
       id: 'installation-1',
       appId: 'app-1',
       providerId: 'slack',
@@ -336,21 +336,21 @@ describe('contracts package', () => {
     });
 
     expect(
-      AgentChannelBindingRequestSchema.parse({
+      AgentConversationBindingRequestSchema.parse({
         triggerMode: 'keyword',
         memoryScope: 'conversation',
         permissionPolicyIds: [],
       }),
     ).toMatchObject({ triggerMode: 'keyword' });
-    expectInvalid(AgentChannelBindingRequestSchema, {
+    expectInvalid(AgentConversationBindingRequestSchema, {
       triggerMode: 'sometimes',
     });
     expect(
-      AgentChannelBindingResponseSchema.parse({
+      AgentConversationBindingResponseSchema.parse({
         id: 'binding-1',
         appId: 'app-1',
         agentId: 'agent-1',
-        channelInstallationId: 'installation-1',
+        providerConnectionId: 'installation-1',
         conversationId: 'conversation-1',
         displayName: 'Engineering',
         status: 'active',
@@ -364,13 +364,13 @@ describe('contracts package', () => {
       }),
     ).toMatchObject({ status: 'active', triggerMode: 'always' });
     expect(
-      AgentChannelBindingListResponseSchema.parse({
+      AgentConversationBindingListResponseSchema.parse({
         bindings: [
           {
             id: 'binding-1',
             appId: 'app-1',
             agentId: 'agent-1',
-            channelInstallationId: 'installation-1',
+            providerConnectionId: 'installation-1',
             conversationId: 'conversation-1',
             displayName: 'Engineering',
             status: 'disabled',
@@ -390,7 +390,7 @@ describe('contracts package', () => {
       ConversationResponseSchema.parse({
         id: 'conversation-1',
         appId: 'app-1',
-        channelInstallationId: 'installation-1',
+        providerConnectionId: 'installation-1',
         kind: 'channel',
         title: 'Engineering',
         status: 'active',
@@ -404,7 +404,7 @@ describe('contracts package', () => {
           {
             id: 'conversation-1',
             appId: 'app-1',
-            channelInstallationId: 'installation-1',
+            providerConnectionId: 'installation-1',
             kind: 'dm',
             title: null,
             status: 'active',

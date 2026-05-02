@@ -12,7 +12,7 @@ function writeMemorySettings(runtimeHome: string): void {
   fs.writeFileSync(
     settingsPath,
     [
-      'channels: {}',
+      'providers: {}',
       'memory:',
       '  enabled: true',
       '  embeddings:',

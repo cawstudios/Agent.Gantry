@@ -1,14 +1,14 @@
-import { listChannelProviders } from '../../channels/provider-registry.js';
-import { renderControlAllowlistYaml } from './control-allowlist.js';
-import { renderSenderAllowlistYaml } from './sender-allowlist.js';
 import { quoteYamlString } from './yaml.js';
-import { createDefaultChannelSettings } from './runtime-settings-defaults.js';
 import type {
   RuntimeCredentialBrokerSettings,
   RuntimeAgentSettings,
   RuntimeConfiguredAgent,
+  RuntimeConfiguredBinding,
+  RuntimeConfiguredConversation,
   RuntimeDesiredStateSettings,
   RuntimeMemorySettings,
+  RuntimeProviderConnectionSettings,
+  RuntimeProviderSettings,
   RuntimeSettings,
   RuntimeStorageSettings,
 } from './runtime-settings-types.js';
@@ -109,35 +109,6 @@ function renderConfiguredAgentsYaml(
         `    recurring_job_default_model: ${quoteYamlString(agent.recurringJobDefaultModel)}`,
       );
     }
-    const bindingEntries = Object.entries(agent.bindings).sort(([a], [b]) =>
-      a.localeCompare(b),
-    );
-    if (bindingEntries.length === 0) {
-      lines.push('    bindings: {}');
-    } else {
-      lines.push('    bindings:');
-      for (const [bindingId, binding] of bindingEntries) {
-        lines.push(
-          `      ${quoteYamlKey(bindingId)}:`,
-          `        jid: ${quoteYamlString(binding.jid)}`,
-        );
-        if (binding.provider) {
-          lines.push(`        provider: ${quoteYamlString(binding.provider)}`);
-        }
-        if (binding.name) {
-          lines.push(`        name: ${quoteYamlString(binding.name)}`);
-        }
-        lines.push(
-          `        trigger: ${quoteYamlString(binding.trigger)}`,
-          `        added_at: ${quoteYamlString(binding.addedAt)}`,
-          `        requires_trigger: ${binding.requiresTrigger ? 'true' : 'false'}`,
-          `        main: ${binding.isMain ? 'true' : 'false'}`,
-        );
-        if (binding.model) {
-          lines.push(`        model: ${quoteYamlString(binding.model)}`);
-        }
-      }
-    }
     if (agent.dmAccess.length === 0) {
       lines.push('    dm_access: {}');
     } else {
@@ -164,6 +135,123 @@ function renderConfiguredAgentsYaml(
   lines.push('');
 }
 
+function renderProvidersYaml(
+  lines: string[],
+  providers: Record<string, RuntimeProviderSettings>,
+): void {
+  const entries = Object.entries(providers).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  if (entries.length === 0) {
+    lines.push('providers: {}', '');
+    return;
+  }
+  lines.push('providers:');
+  for (const [providerId, provider] of entries) {
+    lines.push(
+      `  ${quoteYamlKey(providerId)}:`,
+      `    enabled: ${provider.enabled ? 'true' : 'false'}`,
+    );
+    if (provider.defaultConnection) {
+      lines.push(
+        `    default_connection: ${quoteYamlString(provider.defaultConnection)}`,
+      );
+    }
+  }
+  lines.push('');
+}
+
+function renderProviderConnectionsYaml(
+  lines: string[],
+  connections: Record<string, RuntimeProviderConnectionSettings>,
+): void {
+  const entries = Object.entries(connections).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  if (entries.length === 0) {
+    lines.push('provider_connections: {}', '');
+    return;
+  }
+  lines.push('provider_connections:');
+  for (const [connectionId, connection] of entries) {
+    lines.push(
+      `  ${quoteYamlKey(connectionId)}:`,
+      `    provider: ${quoteYamlString(connection.provider)}`,
+      `    label: ${quoteYamlString(connection.label)}`,
+    );
+    const refs = Object.entries(connection.runtimeSecretRefs).sort(([a], [b]) =>
+      a.localeCompare(b),
+    );
+    if (refs.length === 0) {
+      lines.push('    runtime_secret_refs: {}');
+    } else {
+      lines.push('    runtime_secret_refs:');
+      for (const [key, value] of refs) {
+        lines.push(`      ${quoteYamlKey(key)}: ${quoteYamlString(value)}`);
+      }
+    }
+  }
+  lines.push('');
+}
+
+function renderConversationsYaml(
+  lines: string[],
+  conversations: Record<string, RuntimeConfiguredConversation>,
+): void {
+  const entries = Object.entries(conversations).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  if (entries.length === 0) {
+    lines.push('conversations: {}', '');
+    return;
+  }
+  lines.push('conversations:');
+  for (const [conversationId, conversation] of entries) {
+    lines.push(
+      `  ${quoteYamlKey(conversationId)}:`,
+      `    provider_connection: ${quoteYamlString(conversation.providerConnection)}`,
+      `    external_id: ${quoteYamlString(conversation.externalId)}`,
+      `    kind: ${quoteYamlString(conversation.kind)}`,
+      `    display_name: ${quoteYamlString(conversation.displayName)}`,
+      '    sender_policy:',
+      `      allow: ${conversation.senderPolicy.allow === '*' ? '"*"' : JSON.stringify(conversation.senderPolicy.allow)}`,
+      `      mode: ${conversation.senderPolicy.mode}`,
+      `    control_approvers: ${JSON.stringify(conversation.controlApprovers)}`,
+    );
+  }
+  lines.push('');
+}
+
+function renderBindingsYaml(
+  lines: string[],
+  bindings: Record<string, RuntimeConfiguredBinding>,
+): void {
+  const entries = Object.entries(bindings).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  if (entries.length === 0) {
+    lines.push('bindings: {}', '');
+    return;
+  }
+  lines.push('bindings:');
+  for (const [bindingId, binding] of entries) {
+    lines.push(
+      `  ${quoteYamlKey(bindingId)}:`,
+      `    agent: ${quoteYamlString(binding.agent)}`,
+      `    conversation: ${quoteYamlString(binding.conversation)}`,
+      `    trigger: ${quoteYamlString(binding.trigger)}`,
+      `    added_at: ${quoteYamlString(binding.addedAt)}`,
+      `    requires_trigger: ${binding.requiresTrigger ? 'true' : 'false'}`,
+      `    main: ${binding.isMain ? 'true' : 'false'}`,
+      `    memory_scope: ${quoteYamlString(binding.memoryScope)}`,
+    );
+    if (binding.model) {
+      lines.push(`    model: ${quoteYamlString(binding.model)}`);
+    }
+  }
+  lines.push('');
+}
+
 function renderCredentialBrokerSettingsYaml(
   lines: string[],
   credentialBroker: RuntimeCredentialBrokerSettings,
@@ -185,37 +273,11 @@ function renderCredentialBrokerSettingsYaml(
 export function renderRuntimeSettingsYaml(settings: RuntimeSettings): string {
   const lines: string[] = [];
   renderDesiredStateYaml(lines, settings.desiredState);
-  lines.push('channels:');
-  const providerIds = listChannelProviders().map((provider) => provider.id);
-  const extraIds = Object.keys(settings.channels)
-    .filter((id) => !providerIds.includes(id))
-    .sort((a, b) => a.localeCompare(b));
-
-  for (const channelId of [...providerIds, ...extraIds]) {
-    const channelSettings =
-      settings.channels[channelId] || createDefaultChannelSettings(false);
-    lines.push(
-      `  ${quoteYamlKey(channelId)}:`,
-      `    enabled: ${channelSettings.enabled ? 'true' : 'false'}`,
-      '    sender_allowlist:',
-    );
-    renderSenderAllowlistYaml(
-      lines,
-      '      ',
-      quoteYamlKey,
-      channelSettings.senderAllowlist,
-    );
-    lines.push('    control_allowlist:');
-    renderControlAllowlistYaml(
-      lines,
-      '      ',
-      quoteYamlKey,
-      channelSettings.controlAllowlist,
-    );
-  }
-
-  lines.push('');
+  renderProvidersYaml(lines, settings.providers);
+  renderProviderConnectionsYaml(lines, settings.providerConnections);
   renderConfiguredAgentsYaml(lines, settings.agents);
+  renderConversationsYaml(lines, settings.conversations);
+  renderBindingsYaml(lines, settings.bindings);
   renderStorageSettingsYaml(lines, settings.storage);
   renderAgentSettingsYaml(lines, settings.agent);
   renderCredentialBrokerSettingsYaml(lines, settings.credentialBroker);

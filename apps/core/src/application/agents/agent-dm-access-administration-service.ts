@@ -3,7 +3,7 @@ import type { Agent, AgentId } from '../../domain/agent/agent.js';
 import type { AppId } from '../../domain/app/app.js';
 import type {
   AgentRepository,
-  ChannelInstallationRepository,
+  ProviderConnectionRepository,
   ConversationRepository,
 } from '../../domain/ports/repositories.js';
 import type { ConversationId } from '../../domain/conversation/conversation.js';
@@ -31,7 +31,7 @@ export class AgentDmAccessAdministrationService {
   constructor(
     private readonly repositories: {
       agents: AgentRepository;
-      channelInstallations?: ChannelInstallationRepository;
+      providerConnections?: ProviderConnectionRepository;
       conversations?: ConversationRepository;
     },
     private readonly clock: { now(): string } = {
@@ -101,7 +101,7 @@ export class AgentDmAccessAdministrationService {
     userId: string;
   }): Promise<boolean | null> {
     if (
-      !this.repositories.channelInstallations ||
+      !this.repositories.providerConnections ||
       !this.repositories.conversations
     ) {
       return null;
@@ -113,7 +113,7 @@ export class AgentDmAccessAdministrationService {
     if (conversation.kind !== 'direct') return null;
 
     const bindings =
-      await this.repositories.channelInstallations.listAgentChannelBindings(
+      await this.repositories.providerConnections.listAgentConversationBindings(
         input.appId,
       );
     const activeBindings = bindings.filter(

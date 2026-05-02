@@ -5,15 +5,24 @@ import type { AppId } from '../../domain/app/app.js';
 import type { AgentMcpServerBinding } from '../../domain/mcp/mcp-servers.js';
 import type {
   AgentRepository,
+  ConversationRepository,
   McpServerRepository,
   SkillCatalogRepository,
   ToolCatalogRepository,
 } from '../../domain/ports/repositories.js';
+import {
+  getProvider,
+  providerForJid,
+} from '../../channels/provider-registry.js';
 import type { AgentSkillBinding } from '../../domain/skills/skills.js';
 import type { AgentToolBinding } from '../../domain/tools/tools.js';
 import type {
   RuntimeConfiguredAgent,
   RuntimeConfiguredAgentCapabilities,
+  RuntimeConfiguredBinding,
+  RuntimeConfiguredConversation,
+  RuntimeProviderConnectionSettings,
+  RuntimeProviderSettings,
   RuntimeSettings,
 } from './runtime-settings-types.js';
 
@@ -35,6 +44,7 @@ export interface SettingsDesiredStateOps {
 
 export interface SettingsDesiredStateRepositories {
   agents: AgentRepository;
+  conversations?: ConversationRepository;
   tools: ToolCatalogRepository;
   skills: SkillCatalogRepository;
   mcpServers: McpServerRepository;
@@ -77,6 +87,21 @@ export class SettingsDesiredStateService {
     const groups = await this.deps.ops.getAllRegisteredGroups();
     const agents: Record<string, RuntimeConfiguredAgent> = {
       ...settings.agents,
+    };
+    const providers: Record<string, RuntimeProviderSettings> = {
+      ...settings.providers,
+    };
+    const providerConnections: Record<
+      string,
+      RuntimeProviderConnectionSettings
+    > = {
+      ...settings.providerConnections,
+    };
+    const conversations: Record<string, RuntimeConfiguredConversation> = {
+      ...settings.conversations,
+    };
+    const bindings: Record<string, RuntimeConfiguredBinding> = {
+      ...settings.bindings,
     };
 
     const exportedGroups = await Promise.all(
@@ -135,6 +160,45 @@ export class SettingsDesiredStateService {
       } = exported;
       const folder = group.folder;
       const existing = agents[folder];
+      const provider = providerForJid(jid);
+      const providerId = provider?.id ?? 'app';
+      const connectionId =
+        providers[providerId]?.defaultConnection ?? `${providerId}_default`;
+      providers[providerId] = {
+        enabled: true,
+        defaultConnection: connectionId,
+      };
+      providerConnections[connectionId] ??= {
+        provider: providerId,
+        label: provider?.label ?? providerId,
+        runtimeSecretRefs: defaultRuntimeSecretRefs(providerId),
+      };
+      const conversationId = stableSettingsId(
+        `${folder}_${providerId}`,
+        conversations,
+      );
+      conversations[conversationId] ??= {
+        providerConnection: connectionId,
+        externalId: stripProviderPrefix(jid),
+        kind: provider?.isGroupJid(jid) ? 'group' : 'dm',
+        displayName: group.name,
+        senderPolicy: { allow: '*', mode: 'trigger' },
+        controlApprovers: [],
+      };
+      const desiredBindingId = stableSettingsId(
+        `${folder}_${conversationId}`,
+        bindings,
+      );
+      bindings[desiredBindingId] ??= {
+        agent: folder,
+        conversation: conversationId,
+        trigger: group.trigger,
+        addedAt: group.added_at,
+        requiresTrigger: group.requiresTrigger !== false,
+        isMain: group.isMain === true,
+        memoryScope: 'conversation',
+        model: group.agentConfig?.model,
+      };
       const bindingId = stableBindingId(jid, existing?.bindings ?? {});
       agents[folder] = {
         name: existing?.name ?? group.name,
@@ -173,6 +237,10 @@ export class SettingsDesiredStateService {
 
     return {
       ...settings,
+      providers,
+      providerConnections,
+      conversations,
+      bindings,
       agents,
     };
   }
@@ -276,6 +344,37 @@ export class SettingsDesiredStateService {
         applied.push(`capabilities:${folder}`);
       } else {
         skipped.push(`capabilities:${folder}:not-authoritative-empty`);
+      }
+    }
+
+    if (this.deps.repositories.conversations) {
+      for (const [conversationKey, conversation] of Object.entries(
+        settings.conversations,
+      )) {
+        const jid = jidForConfiguredConversation(
+          conversation,
+          settings.providerConnections,
+        );
+        const storedConversation =
+          await this.deps.repositories.conversations.findConversationByExternalValue(
+            {
+              appId: this.appId,
+              externalConversationId: stripProviderPrefix(jid),
+            },
+          );
+        if (!storedConversation) {
+          skipped.push(`conversation_approvers:${conversationKey}:not-found`);
+          continue;
+        }
+        await this.deps.repositories.conversations.replaceConversationApprovers(
+          {
+            appId: this.appId,
+            conversationId: storedConversation.id,
+            externalUserIds: conversation.controlApprovers,
+            updatedAt: this.clock.now(),
+          },
+        );
+        applied.push(`conversation_approvers:${conversationKey}`);
       }
     }
 
@@ -516,15 +615,19 @@ export function classifySettingsChanges(
   if (!jsonEqual(before.credentialBroker, after.credentialBroker)) {
     restartRequired.push('credential_broker');
   }
-  const channelTopologyChanged = !jsonEqual(
-    channelTopology(before),
-    channelTopology(after),
+  const providerTopologyChanged = !jsonEqual(
+    providerTopology(before),
+    providerTopology(after),
   );
-  if (channelTopologyChanged) {
-    restartRequired.push('channels');
+  if (providerTopologyChanged) {
+    restartRequired.push('providers');
   }
-  if (!channelTopologyChanged && !jsonEqual(before.channels, after.channels)) {
-    liveApplied.push('channel_allowlists');
+  if (
+    !providerTopologyChanged &&
+    (!jsonEqual(before.conversations, after.conversations) ||
+      !jsonEqual(before.bindings, after.bindings))
+  ) {
+    liveApplied.push('conversation_policies');
   }
   if (!jsonEqual(before.agent, after.agent)) {
     liveApplied.push('agent_defaults');
@@ -615,11 +718,68 @@ function stableBindingId(
   return `${base}_${hash}`.slice(0, 96);
 }
 
-function channelTopology(settings: RuntimeSettings): Record<string, unknown> {
+function stableSettingsId(
+  seed: string,
+  existing: Record<string, unknown>,
+): string {
+  const base =
+    seed
+      .replace(/[^A-Za-z0-9_-]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 80) || 'item';
+  if (!Object.hasOwn(existing, base)) return base;
+  const hash = createHash('sha256').update(seed).digest('hex').slice(0, 12);
+  return `${base}_${hash}`.slice(0, 96);
+}
+
+function stripProviderPrefix(jid: string): string {
+  const provider = providerForJid(jid);
+  if (provider && jid.startsWith(provider.jidPrefix)) {
+    return jid.slice(provider.jidPrefix.length);
+  }
+  const idx = jid.indexOf(':');
+  return idx > 0 ? jid.slice(idx + 1) : jid;
+}
+
+function jidForConfiguredConversation(
+  conversation: RuntimeConfiguredConversation,
+  providerConnections: Record<string, RuntimeProviderConnectionSettings>,
+): string {
+  const connection = providerConnections[conversation.providerConnection];
+  const provider = connection ? getProvider(connection.provider) : undefined;
+  if (!provider) return conversation.externalId;
+  return conversation.externalId.startsWith(provider.jidPrefix)
+    ? conversation.externalId
+    : `${provider.jidPrefix}${conversation.externalId}`;
+}
+
+function defaultRuntimeSecretRefs(providerId: string): Record<string, string> {
+  if (providerId === 'telegram') return { bot_token: 'TELEGRAM_BOT_TOKEN' };
+  if (providerId === 'slack') {
+    return {
+      bot_token: 'SLACK_BOT_TOKEN',
+      app_token: 'SLACK_APP_TOKEN',
+    };
+  }
+  if (providerId === 'teams') {
+    return {
+      client_id: 'TEAMS_CLIENT_ID',
+      client_secret: 'TEAMS_CLIENT_SECRET',
+      tenant_id: 'TEAMS_TENANT_ID',
+    };
+  }
+  return {};
+}
+
+function providerTopology(settings: RuntimeSettings): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(settings.channels).map(([channelId, channel]) => [
-      channelId,
-      { enabled: channel.enabled },
+    Object.entries(settings.providers).map(([providerId, provider]) => [
+      providerId,
+      {
+        enabled: provider.enabled,
+        defaultConnection: provider.defaultConnection,
+      },
     ]),
   );
 }

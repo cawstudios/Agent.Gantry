@@ -33,11 +33,11 @@ DROP TABLE IF EXISTS messages CASCADE;
 DROP TABLE IF EXISTS canonical_messages CASCADE;
 DROP TABLE IF EXISTS conversation_participants CASCADE;
 DROP TABLE IF EXISTS conversation_threads CASCADE;
-DROP TABLE IF EXISTS channel_conversations CASCADE;
 DROP TABLE IF EXISTS conversations CASCADE;
-DROP TABLE IF EXISTS agent_channel_bindings CASCADE;
-DROP TABLE IF EXISTS channel_installations CASCADE;
-DROP TABLE IF EXISTS channel_providers CASCADE;
+DROP TABLE IF EXISTS conversations CASCADE;
+DROP TABLE IF EXISTS agent_conversation_bindings CASCADE;
+DROP TABLE IF EXISTS provider_connections CASCADE;
+DROP TABLE IF EXISTS providers CASCADE;
 DROP TABLE IF EXISTS memory_items CASCADE;
 DROP TABLE IF EXISTS memory_subjects CASCADE;
 DROP TABLE IF EXISTS agent_config_versions CASCADE;
@@ -72,17 +72,17 @@ CREATE TABLE users (
 CREATE UNIQUE INDEX idx_users_app_display_name
   ON users(app_id, display_name);
 
-CREATE TABLE channel_providers (
+CREATE TABLE providers (
   id text PRIMARY KEY,
   display_name text NOT NULL,
   capability_flags_json text NOT NULL DEFAULT '[]',
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE channel_installations (
+CREATE TABLE provider_connections (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-  provider_id text NOT NULL REFERENCES channel_providers(id),
+  provider_id text NOT NULL REFERENCES providers(id),
   external_ref_json text,
   label text NOT NULL,
   status text NOT NULL DEFAULT 'active',
@@ -91,15 +91,15 @@ CREATE TABLE channel_installations (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_channel_installations_provider
-  ON channel_installations(app_id, provider_id);
+CREATE INDEX idx_provider_connections_provider
+  ON provider_connections(app_id, provider_id);
 
 CREATE TABLE user_aliases (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   provider text NOT NULL,
-  channel_installation_id text,
+  provider_connection_id text,
   external_user_id text NOT NULL,
   display_name text,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -107,7 +107,7 @@ CREATE TABLE user_aliases (
 );
 
 CREATE UNIQUE INDEX idx_user_aliases_provider_external
-  ON user_aliases(app_id, provider, channel_installation_id, external_user_id);
+  ON user_aliases(app_id, provider, provider_connection_id, external_user_id);
 
 CREATE TABLE sandbox_profiles (
   id text PRIMARY KEY,
@@ -173,10 +173,10 @@ CREATE TABLE agent_config_versions (
   CONSTRAINT agent_config_versions_agent_id_version_unique UNIQUE (agent_id, version)
 );
 
-CREATE TABLE channel_conversations (
+CREATE TABLE conversations (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-  channel_installation_id text NOT NULL,
+  provider_connection_id text NOT NULL,
   external_ref_json text,
   kind text NOT NULL,
   title text,
@@ -185,13 +185,13 @@ CREATE TABLE channel_conversations (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_channel_conversations_installation
-  ON channel_conversations(channel_installation_id);
+CREATE INDEX idx_conversations_providerConnection
+  ON conversations(provider_connection_id);
 
 CREATE TABLE conversation_threads (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-  conversation_id text NOT NULL REFERENCES channel_conversations(id) ON DELETE CASCADE,
+  conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   external_ref_json text,
   title text,
   status text NOT NULL DEFAULT 'active',
@@ -205,7 +205,7 @@ CREATE INDEX idx_conversation_threads_conversation
 CREATE TABLE conversation_participants (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-  conversation_id text NOT NULL REFERENCES channel_conversations(id) ON DELETE CASCADE,
+  conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   user_id text REFERENCES users(id) ON DELETE CASCADE,
   external_user_id text,
   role text NOT NULL DEFAULT 'member',
@@ -217,12 +217,12 @@ CREATE TABLE conversation_participants (
 CREATE INDEX idx_conversation_participants_conversation
   ON conversation_participants(conversation_id, user_id);
 
-CREATE TABLE agent_channel_bindings (
+CREATE TABLE agent_conversation_bindings (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
   agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  channel_installation_id text NOT NULL REFERENCES channel_installations(id) ON DELETE CASCADE,
-  conversation_id text NOT NULL REFERENCES channel_conversations(id) ON DELETE CASCADE,
+  provider_connection_id text NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+  conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   thread_id text REFERENCES conversation_threads(id) ON DELETE CASCADE,
   display_name text NOT NULL,
   trigger_pattern text,
@@ -235,15 +235,15 @@ CREATE TABLE agent_channel_bindings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_agent_channel_bindings_conversation
-  ON agent_channel_bindings(conversation_id, thread_id);
+CREATE INDEX idx_agent_conversation_bindings_conversation
+  ON agent_conversation_bindings(conversation_id, thread_id);
 
 CREATE TABLE messages (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-  channel_provider text NOT NULL,
-  channel_installation_id text NOT NULL REFERENCES channel_installations(id) ON DELETE CASCADE,
-  conversation_id text NOT NULL REFERENCES channel_conversations(id) ON DELETE CASCADE,
+  provider text NOT NULL,
+  provider_connection_id text NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+  conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   thread_id text REFERENCES conversation_threads(id) ON DELETE CASCADE,
   external_message_id text,
   external_ref_json text,
@@ -259,7 +259,7 @@ CREATE INDEX idx_messages_conversation_cursor
   ON messages(conversation_id, thread_id, created_at, id);
 
 CREATE UNIQUE INDEX idx_messages_external_redelivery_unique
-  ON messages(channel_provider, channel_installation_id, conversation_id, thread_id, external_message_id)
+  ON messages(provider, provider_connection_id, conversation_id, thread_id, external_message_id)
   WHERE external_message_id IS NOT NULL;
 
 CREATE TABLE message_parts (
@@ -299,7 +299,7 @@ CREATE TABLE agent_sessions (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
   agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  conversation_id text REFERENCES channel_conversations(id),
+  conversation_id text REFERENCES conversations(id),
   thread_id text REFERENCES conversation_threads(id),
   job_id text,
   user_id text,
@@ -338,7 +338,7 @@ CREATE TABLE agent_runs (
   agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
   config_version_id text NOT NULL REFERENCES agent_config_versions(id),
   session_id text REFERENCES agent_sessions(id) ON DELETE SET NULL,
-  conversation_id text REFERENCES channel_conversations(id),
+  conversation_id text REFERENCES conversations(id),
   thread_id text REFERENCES conversation_threads(id),
   message_id text REFERENCES messages(id),
   job_id text,
@@ -371,7 +371,7 @@ CREATE TABLE jobs (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
   agent_id text REFERENCES agents(id) ON DELETE SET NULL,
-  conversation_id text REFERENCES channel_conversations(id),
+  conversation_id text REFERENCES conversations(id),
   thread_id text REFERENCES conversation_threads(id),
   created_by_actor_id text NOT NULL,
   created_by_source text NOT NULL,
@@ -586,7 +586,7 @@ CREATE TABLE control_http_sessions (
   session_id text PRIMARY KEY REFERENCES agent_sessions(id) ON DELETE CASCADE,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
   external_conversation_id text NOT NULL,
-  conversation_id text NOT NULL REFERENCES channel_conversations(id) ON DELETE CASCADE,
+  conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
   default_response_mode text NOT NULL DEFAULT 'sse',
   default_webhook_id text,

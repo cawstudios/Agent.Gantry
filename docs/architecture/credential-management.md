@@ -86,8 +86,7 @@ enterprise credential broker, never in MyClaw `.env` or process env.
 | `agent.default_model`                          | `settings.yaml`                        |
 | `agent.one_time_job_default_model`             | `settings.yaml`                        |
 | `agent.recurring_job_default_model`            | `settings.yaml`                        |
-| Legacy `channels.*.control_allowlist` sender-control config | `settings.yaml`                        |
-| Channel permission approvers                   | Postgres Channel control allowlist      |
+| Conversation approvers                         | `settings.yaml` and Postgres conversation approver rows |
 | `storage.postgres.url_env`                     | `settings.yaml`                        |
 | `MYCLAW_DATABASE_URL`                          | `RuntimeSecretProvider` / local `.env` |
 | `TELEGRAM_BOT_TOKEN`                           | `RuntimeSecretProvider` / local `.env` |

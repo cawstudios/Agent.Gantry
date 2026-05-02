@@ -21,14 +21,14 @@ import type {
   handleRemoteControlCommand,
 } from '../../runtime/remote-control-command.js';
 import type { OpsRepository } from '../../domain/repositories/ops-repo.js';
-import type { ChannelProvider } from '../../channels/provider-registry.js';
+import type { Provider } from '../../channels/provider-registry.js';
 import type { logger } from '../../infrastructure/logging/logger.js';
 import type { RuntimeSecretProvider } from '../../domain/ports/runtime-secret-provider.js';
 import type { AppId } from '../../domain/app/app.js';
 
 export interface ChannelWiringDeps {
   appId: AppId;
-  channelProviders: readonly ChannelProvider[];
+  providerIds: readonly Provider[];
   opsRepository?: OpsRepository;
   loadSenderAllowlist: typeof loadSenderAllowlist;
   loadSenderControlAllowlist: typeof loadSenderControlAllowlist;

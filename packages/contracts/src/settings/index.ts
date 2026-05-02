@@ -42,6 +42,58 @@ export const RuntimeSettingsConfiguredAgentSchema = z
   })
   .strict();
 
+export const RuntimeSettingsProviderSchema = z
+  .object({
+    enabled: z.boolean(),
+    defaultConnection: z.string().optional(),
+  })
+  .strict();
+
+export const RuntimeSettingsProviderConnectionSchema = z
+  .object({
+    provider: z.string().trim().min(1),
+    label: z.string(),
+    runtimeSecretRefs: z.record(z.string(), z.string()),
+  })
+  .strict();
+
+export const RuntimeSettingsConversationSchema = z
+  .object({
+    providerConnection: z.string().trim().min(1),
+    externalId: z.string().trim().min(1),
+    kind: z.enum([
+      'dm',
+      'direct',
+      'group',
+      'channel',
+      'chat',
+      'service',
+      'web',
+    ]),
+    displayName: z.string(),
+    senderPolicy: z
+      .object({
+        allow: z.union([z.literal('*'), z.array(z.string().trim().min(1))]),
+        mode: z.enum(['trigger', 'drop']),
+      })
+      .strict(),
+    controlApprovers: z.array(z.string().trim().min(1)),
+  })
+  .strict();
+
+export const RuntimeSettingsBindingSchema = z
+  .object({
+    agent: z.string().trim().min(1),
+    conversation: z.string().trim().min(1),
+    trigger: z.string().trim().min(1),
+    addedAt: z.string().trim().min(1),
+    requiresTrigger: z.boolean(),
+    isMain: z.boolean(),
+    memoryScope: z.enum(['conversation', 'thread', 'user', 'agent']),
+    model: z.string().optional(),
+  })
+  .strict();
+
 export const RuntimeSettingsPublicSchema = z
   .object({
     desiredState: z
@@ -58,6 +110,13 @@ export const RuntimeSettingsPublicSchema = z
       })
       .strict(),
     agents: z.record(z.string(), RuntimeSettingsConfiguredAgentSchema),
+    providers: z.record(z.string(), RuntimeSettingsProviderSchema),
+    providerConnections: z.record(
+      z.string(),
+      RuntimeSettingsProviderConnectionSchema,
+    ),
+    conversations: z.record(z.string(), RuntimeSettingsConversationSchema),
+    bindings: z.record(z.string(), RuntimeSettingsBindingSchema),
     memory: z
       .object({
         enabled: z.boolean(),

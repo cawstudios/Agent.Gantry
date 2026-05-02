@@ -9,13 +9,13 @@ import {
 import { appsPostgres, usersPostgres } from './apps.js';
 
 export const conversationsPostgres = pgTable(
-  'channel_conversations',
+  'conversations',
   {
     id: text('id').primaryKey(),
     appId: text('app_id')
       .notNull()
       .references(() => appsPostgres.id, { onDelete: 'cascade' }),
-    channelInstallationId: text('channel_installation_id').notNull(),
+    providerConnectionId: text('provider_connection_id').notNull(),
     externalRefJson: text('external_ref_json'),
     kind: text('kind').notNull(),
     title: text('title'),
@@ -28,8 +28,8 @@ export const conversationsPostgres = pgTable(
       .defaultNow(),
   },
   (table) => ({
-    installationIdx: index('idx_channel_conversations_installation').on(
-      table.channelInstallationId,
+    providerConnectionIdx: index('idx_conversations_providerConnection').on(
+      table.providerConnectionId,
     ),
   }),
 );
@@ -92,8 +92,8 @@ export const conversationParticipantsPostgres = pgTable(
   }),
 );
 
-export const channelControlApproversPostgres = pgTable(
-  'channel_control_approvers',
+export const conversationApproversPostgres = pgTable(
+  'conversation_approvers',
   {
     id: text('id').primaryKey(),
     appId: text('app_id')
@@ -111,10 +111,10 @@ export const channelControlApproversPostgres = pgTable(
       .defaultNow(),
   },
   (table) => ({
-    conversationIdx: index('idx_channel_control_approvers_conversation').on(
+    conversationIdx: index('idx_conversation_approvers_conversation').on(
       table.conversationId,
     ),
-    userIdx: uniqueIndex('uniq_channel_control_approvers_user').on(
+    userIdx: uniqueIndex('uniq_conversation_approvers_user').on(
       table.appId,
       table.conversationId,
       table.externalUserId,

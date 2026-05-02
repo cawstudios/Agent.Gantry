@@ -27,7 +27,7 @@ interface ChannelPersistenceHandlerDeps {
       | { status: 'ambiguous'; agents: Agent[] }
     >;
   };
-  saveDmAgentChannelBinding?: (input: {
+  saveDmAgentConversationBinding?: (input: {
     agent: Agent;
     chatJid: string;
     providerId: string;
@@ -69,7 +69,7 @@ export function createChannelPersistenceHandlers({
   persistenceQueue,
   appId,
   dmAccess,
-  saveDmAgentChannelBinding,
+  saveDmAgentConversationBinding,
 }: ChannelPersistenceHandlerDeps) {
   const chatIsGroup = new Map<string, boolean>();
 
@@ -88,7 +88,7 @@ export function createChannelPersistenceHandlers({
     const providerId = providerIdForMessage(chatJid, msg);
     const externalUserId = msg.sender.trim();
     if (!providerId || !externalUserId) return false;
-    if (!dmAccess || !saveDmAgentChannelBinding) return false;
+    if (!dmAccess || !saveDmAgentConversationBinding) return false;
 
     const resolution = await dmAccess.resolveDmAgent({
       appId,
@@ -131,7 +131,7 @@ export function createChannelPersistenceHandlers({
         'Refreshing direct conversation registration from agent DM access',
       );
     }
-    await saveDmAgentChannelBinding({
+    await saveDmAgentConversationBinding({
       agent: resolution.agent,
       chatJid,
       providerId,
@@ -254,7 +254,7 @@ export function createChannelPersistenceHandlers({
 }
 
 function providerIdForMessage(chatJid: string, msg: NewMessage): string {
-  if (msg.channel_provider?.trim()) return msg.channel_provider.trim();
+  if (msg.provider?.trim()) return msg.provider.trim();
   const idx = chatJid.indexOf(':');
   return idx > 0 ? chatJid.slice(0, idx) : 'app';
 }

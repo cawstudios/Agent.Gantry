@@ -1,4 +1,4 @@
-export type ChannelInstallationInput = {
+export type ProviderConnectionInput = {
   appId: string;
   providerId: string;
   label: string;
@@ -9,7 +9,7 @@ export type ChannelInstallationInput = {
   metadata?: Record<string, unknown>;
 };
 
-export type ChannelInstallationPatch = {
+export type ProviderConnectionPatch = {
   label?: string;
   status?: 'active' | 'inactive' | 'disabled' | 'archived';
   config?: Record<string, unknown>;
@@ -19,15 +19,15 @@ export type ChannelInstallationPatch = {
   metadata?: Record<string, unknown>;
 };
 
-export type ChannelDiscoveryInput = {
+export type ConversationDiscoveryInput = {
   query?: string;
   limit?: number;
   includeArchived?: boolean;
   providerMetadata?: Record<string, unknown>;
 };
 
-export type AgentBindingInput = {
-  channelInstallationId?: string;
+export type AgentConversationBindingInput = {
+  providerConnectionId?: string;
   threadId?: string;
   displayName?: string;
   triggerMode?: 'always' | 'mention' | 'keyword' | 'manual' | 'webhook';

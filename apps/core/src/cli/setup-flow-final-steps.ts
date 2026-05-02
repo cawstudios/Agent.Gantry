@@ -7,7 +7,7 @@ import {
 } from '../config/preflight.js';
 import { ensureRuntimeWritable } from '../config/settings/runtime-home.js';
 import {
-  addControlSenderForAgent,
+  ensureConfiguredConversationBinding,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
@@ -29,7 +29,7 @@ import { chooseProgressAction } from './setup-flow-prompts.js';
 import type { ServiceChoice, SetupDraft } from './setup-flow-state.js';
 import { verifyFirstAgentModelAccess } from './setup-credentials.js';
 
-function parseTelegramApproverIds(raw: string): string[] {
+function parseApproverIds(raw: string): string[] {
   return [
     ...new Set(
       raw
@@ -293,6 +293,19 @@ export async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
         chatJid: draft.slackChatJid,
         displayName: draft.agentName,
       });
+      const settings = loadRuntimeSettings(draft.runtimeHome);
+      ensureConfiguredConversationBinding(settings, {
+        agentId: result.folder,
+        agentName: result.groupName,
+        agentFolder: result.folder,
+        jid: draft.slackChatJid,
+        displayName: result.groupName,
+        trigger: `@${result.groupName}`,
+        requiresTrigger: false,
+        isMain: true,
+        approverIds: parseApproverIds(draft.slackPermissionApproverIds),
+      });
+      saveRuntimeSettings(draft.runtimeHome, settings);
       spinner.stop(`Registered ${result.groupName} (${result.folder})`);
     } else {
       const result = await registerTelegramMainGroup({
@@ -300,21 +313,22 @@ export async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
         chatJid: draft.telegramChatJid,
         displayName: draft.agentName,
       });
-      const approverIds = parseTelegramApproverIds(
+      const approverIds = parseApproverIds(
         draft.telegramPermissionApproverIds || draft.telegramAdminSenderId,
       );
-      if (approverIds.length > 0) {
-        const settings = loadRuntimeSettings(draft.runtimeHome);
-        for (const approverId of approverIds) {
-          addControlSenderForAgent(
-            settings,
-            'telegram',
-            result.folder,
-            approverId,
-          );
-        }
-        saveRuntimeSettings(draft.runtimeHome, settings);
-      }
+      const settings = loadRuntimeSettings(draft.runtimeHome);
+      ensureConfiguredConversationBinding(settings, {
+        agentId: result.folder,
+        agentName: result.groupName,
+        agentFolder: result.folder,
+        jid: draft.telegramChatJid,
+        displayName: result.groupName,
+        trigger: `@${result.groupName}`,
+        requiresTrigger: false,
+        isMain: true,
+        approverIds,
+      });
+      saveRuntimeSettings(draft.runtimeHome, settings);
       spinner.stop(`Registered ${result.groupName} (${result.folder})`);
     }
   } catch (err) {
@@ -439,10 +453,10 @@ export async function runVerifyStep(
   }
   if (!hasProcessableGroup) {
     const connectCommands = listConnectableChannelProviders().map(
-      (provider) => `\`myclaw channel connect ${provider.id}\``,
+      (provider) => `\`myclaw provider connect ${provider.id}\``,
     );
     p.log.warn(
-      `Setup is not complete yet. Next action: ensure one enabled channel has credentials and a registered group (${connectCommands.join(' or ')}).`,
+      `Setup is not complete yet. Next action: ensure one enabled provider has credentials and a registered conversation (${connectCommands.join(' or ')}).`,
     );
     return {
       type: 'goto',

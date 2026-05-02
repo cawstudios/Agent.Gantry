@@ -444,14 +444,14 @@ describe('skill registry integration flow', () => {
       'request_channel_tool_enable',
       {
         channelTool: 'slack_file_access',
-        channelProvider: 'slack',
+        providerId: 'slack',
         requiredScopes: ['files:read'],
         affectedConversations: ['C123'],
         reason: 'Read files shared in the active channel.',
       },
       {
         channelTool: 'slack_file_access',
-        channelProvider: 'slack',
+        providerId: 'slack',
         requiredScopes: ['files:read'],
         affectedConversations: ['C123'],
         effect: 'review_only_no_channel_permission_change',
@@ -570,7 +570,7 @@ describe('skill registry integration flow', () => {
         targetJid: 'chat-admin-dm',
         payload: {
           channelTool: 'slack_file_access',
-          channelProvider: 'slack',
+          providerId: 'slack',
           reason: 'Try routing review to another bound chat.',
         },
       },

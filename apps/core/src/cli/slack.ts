@@ -3,7 +3,6 @@ import path from 'path';
 
 import * as p from '@clack/prompts';
 import '../channels/register-builtins.js';
-import { getChannelProvider } from '../channels/provider-registry.js';
 
 import { readEnvFile, upsertEnvFile } from '../config/env/file.js';
 import {
@@ -23,6 +22,7 @@ import {
   normalizeMainAgentName,
 } from './main-agent.js';
 import {
+  ensureConfiguredConversationBinding,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
@@ -35,6 +35,18 @@ export interface SlackTokenValidation {
   userId?: string;
   message: string;
   nextAction?: string;
+}
+
+function parseSlackApproverIds(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return [
+    ...new Set(
+      raw
+        .split(/[,\s]+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 export interface SlackAppTokenValidation {
@@ -62,7 +74,7 @@ function defaultGroupClaudeMarkdown(): string {
     'Rules:',
     '- Answer directly unless the user asks for detail.\n- Be explicit when an action failed and what to do next.\n- Avoid exposing secrets, tokens, or local machine paths unless requested.\n- When the user says "continue", call memory_search before guessing.',
     '',
-    'Capability rules:\n- Use send_message for progress updates and ask_user_question for structured choices.\n- Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.\n- Main/admin agents may use service_restart after approved changes and register_agent for channel binding.\n- Never run dependency installs or edit .claude/skills, .mcp.json, settings, or generated capability config directly.',
+    'Capability rules:\n- Use send_message for progress updates and ask_user_question for structured choices.\n- Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.\n- Main/admin agents may use service_restart after approved changes and register_agent for conversation binding.\n- Never run dependency installs or edit .claude/skills, .mcp.json, settings, or generated capability config directly.',
     '',
   ].join('\n');
 }
@@ -523,6 +535,20 @@ export async function runSlackConnectCommand(
   }
   const normalizedChatJid =
     chatChoice.type === 'selected' ? chatChoice.chatJid : '';
+  const approverInput = normalizedChatJid
+    ? await promptForValue({
+        message:
+          'Slack conversation approver user IDs (comma-separated, must be members of this conversation)',
+        defaultValue: '',
+      })
+    : '';
+  if (normalizedChatJid && approverInput === null) {
+    p.outro('Slack connect cancelled.');
+    return 1;
+  }
+  const approverIds = parseSlackApproverIds(approverInput || '');
+  let registeredFolder = '';
+  let registeredGroupName = '';
 
   if (normalizedChatJid) {
     const access = await verifySlackChatAccess({
@@ -541,6 +567,8 @@ export async function runSlackConnectCommand(
       chatJid: normalizedChatJid,
       displayName: loadRuntimeSettings(runtimeHome).agent.name,
     });
+    registeredFolder = registered.folder;
+    registeredGroupName = registered.groupName;
 
     p.log.success(
       `Registered ${registered.groupName} for Slack conversation ${normalizedChatJid} in folder ${registered.folder}.`,
@@ -552,17 +580,27 @@ export async function runSlackConnectCommand(
     SLACK_APP_TOKEN: appTokenInput,
   });
   const settings = loadRuntimeSettings(runtimeHome);
-  const provider = getChannelProvider('slack');
-  if (provider && settings.channels[provider.id]) {
-    settings.channels[provider.id].enabled = true;
+  settings.providers.slack.enabled = true;
+  if (registeredFolder) {
+    ensureConfiguredConversationBinding(settings, {
+      agentId: registeredFolder,
+      agentName: registeredGroupName || settings.agent.name,
+      agentFolder: registeredFolder,
+      jid: normalizedChatJid,
+      displayName: registeredGroupName || settings.agent.name,
+      trigger: `@${registeredGroupName || settings.agent.name}`,
+      requiresTrigger: false,
+      isMain: true,
+      approverIds,
+    });
   }
   saveRuntimeSettings(runtimeHome, settings);
 
   if (normalizedChatJid) {
-    p.outro('Slack channel is configured and ready.');
+    p.outro('Slack conversation is configured and ready.');
   } else {
     p.outro(
-      'Slack tokens saved. Next: run `myclaw channel connect slack` to register a channel.',
+      'Slack tokens saved. Next: run `myclaw provider connect slack` to register a conversation.',
     );
   }
 

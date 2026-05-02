@@ -19,13 +19,13 @@ const runtimeStoreMock = vi.hoisted(() => ({
       findAgentsByDmAccess: vi.fn(async () => []),
       listAgentDmApprovers: vi.fn(async () => []),
     },
-    channelInstallations: {
-      saveAgentChannelBinding: vi.fn(async () => undefined),
-      listAgentChannelBindings: vi.fn(async () => []),
+    providerConnections: {
+      saveAgentConversationBinding: vi.fn(async () => undefined),
+      listAgentConversationBindings: vi.fn(async () => []),
     },
     conversations: {
       getConversation: vi.fn(async () => null),
-      listChannelControlApprovers: vi.fn(async () => []),
+      listConversationApprovers: vi.fn(async () => []),
     },
   },
 }));
@@ -38,7 +38,7 @@ vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => ({
 
 import { RuntimeSettings } from '@core/config/settings/runtime-settings.js';
 import { ChannelAdapter } from '@core/channels/channel-provider.js';
-import { ChannelProvider } from '@core/channels/provider-registry.js';
+import { Provider } from '@core/channels/provider-registry.js';
 import { AsyncTaskQueue } from '@core/app/bootstrap/async-task-queue.js';
 import { createChannelPersistenceHandlers } from '@core/app/bootstrap/channel-persistence-handlers.js';
 import { createChannelWiring } from '@core/app/bootstrap/channel-wiring.js';
@@ -54,9 +54,9 @@ function makeRuntimeSettings(enabled: {
     logDenied: true,
   };
   return {
-    channels: {
-      telegram: { enabled: enabled.telegram, senderAllowlist: allowlist },
-      slack: { enabled: enabled.slack, senderAllowlist: allowlist },
+    providers: {
+      telegram: { enabled: enabled.telegram },
+      slack: { enabled: enabled.slack },
     },
     memory: {
       enabled: true,
@@ -129,11 +129,11 @@ function dmAccessTestDeps() {
         return { status: 'ambiguous' as const, agents };
       },
     },
-    saveDmAgentChannelBinding: async (input: any) => {
-      await runtimeStoreMock.repositories.channelInstallations.saveAgentChannelBinding(
+    saveDmAgentConversationBinding: async (input: any) => {
+      await runtimeStoreMock.repositories.providerConnections.saveAgentConversationBinding(
         {
           agentId: input.agent.id,
-          channelInstallationId: `channel-installation:default:${input.providerId}`,
+          providerConnectionId: `channel-providerConnection:default:${input.providerId}`,
           conversationId: `conversation:${input.chatJid}`,
           triggerMode: 'always',
         },
@@ -143,9 +143,9 @@ function dmAccessTestDeps() {
 }
 
 function makeProvider(
-  id: ChannelProvider['id'],
-  create: ChannelProvider['create'],
-): ChannelProvider {
+  id: Provider['id'],
+  create: Provider['create'],
+): Provider {
   return {
     id,
     label: id,
@@ -156,8 +156,8 @@ function makeProvider(
     formatting: id === 'telegram' ? 'telegram-html' : 'mrkdwn',
     isEnabled: (settings: RuntimeSettings) =>
       id === 'telegram'
-        ? settings.channels.telegram.enabled
-        : settings.channels.slack.enabled,
+        ? settings.providers.telegram.enabled
+        : settings.providers.slack.enabled,
     create,
     setup: {
       envKeys: [],
@@ -173,7 +173,7 @@ describe('createChannelWiring', () => {
     const info = vi.fn();
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'telegram',
           vi.fn(() => makeChannel()),
@@ -204,7 +204,7 @@ describe('createChannelWiring', () => {
     const warn = vi.fn();
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'telegram',
           vi.fn(() => null),
@@ -234,7 +234,7 @@ describe('createChannelWiring', () => {
     let onMessage: ((chatJid: string, msg: any) => Promise<void>) | undefined;
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider('telegram', (opts: any) => {
           onMessage = opts.onMessage;
           return makeChannel();
@@ -274,7 +274,7 @@ describe('createChannelWiring', () => {
     let onMessage: ((chatJid: string, msg: any) => Promise<void>) | undefined;
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider('telegram', (opts: any) => {
           onMessage = opts.onMessage;
           return makeChannel();
@@ -310,7 +310,7 @@ describe('createChannelWiring', () => {
     let onMessage: ((chatJid: string, msg: any) => Promise<void>) | undefined;
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider('telegram', (opts: any) => {
           onMessage = opts.onMessage;
           return makeChannel();
@@ -358,7 +358,7 @@ describe('createChannelWiring', () => {
     const handlers = createChannelPersistenceHandlers({
       app,
       resolved: {
-        channelProviders: [],
+        providerIds: [],
         loadSenderAllowlist: vi.fn(() => ({}) as any),
         loadSenderControlAllowlist: vi.fn(() => ({}) as any),
         shouldDropMessage: vi.fn(() => false),
@@ -413,7 +413,7 @@ describe('createChannelWiring', () => {
     });
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'telegram',
           vi.fn(() => outbound),
@@ -437,7 +437,7 @@ describe('createChannelWiring', () => {
     });
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'slack',
           vi.fn(() => outbound),
@@ -492,7 +492,7 @@ describe('createChannelWiring', () => {
     });
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'slack',
           vi.fn(() => outbound),
@@ -536,7 +536,7 @@ describe('createChannelWiring', () => {
     });
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'telegram',
           vi.fn(() => outbound),
@@ -566,7 +566,7 @@ describe('createChannelWiring', () => {
     });
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'telegram',
           vi.fn(() => outbound),
@@ -600,7 +600,7 @@ describe('createChannelWiring', () => {
     });
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'telegram',
           vi.fn(() => outbound),
@@ -636,7 +636,7 @@ describe('createChannelWiring', () => {
       requestPermissionApproval: vi.fn(async () => ({ approved: true })),
     });
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'telegram',
           vi.fn(() => approvalChannel),
@@ -687,7 +687,7 @@ describe('createChannelWiring', () => {
         kind: 'direct',
       },
     );
-    runtimeStoreMock.repositories.channelInstallations.listAgentChannelBindings.mockResolvedValue(
+    runtimeStoreMock.repositories.providerConnections.listAgentConversationBindings.mockResolvedValue(
       [
         {
           agentId: 'agent:one',
@@ -711,7 +711,7 @@ describe('createChannelWiring', () => {
     );
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider('slack', (opts: any) => {
           isControlApproverAllowed = opts.isControlApproverAllowed;
           return makeChannel({
@@ -743,7 +743,7 @@ describe('createChannelWiring', () => {
     ).resolves.toBe(false);
   });
 
-  it('falls back to settings control approvers for legacy setup allowlists', async () => {
+  it('does not use legacy settings control allowlists for conversation approvals', async () => {
     const app = makeApp({
       'sl:C123': { name: 'Team', folder: 'team' },
     });
@@ -763,13 +763,13 @@ describe('createChannelWiring', () => {
         kind: 'channel',
       },
     );
-    runtimeStoreMock.repositories.conversations.listChannelControlApprovers.mockResolvedValue(
+    runtimeStoreMock.repositories.conversations.listConversationApprovers.mockResolvedValue(
       [],
     );
     const legacyControlAllowed = vi.fn(() => true);
 
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider('slack', (opts: any) => {
           isControlApproverAllowed = opts.isControlApproverAllowed;
           return makeChannel({
@@ -792,13 +792,8 @@ describe('createChannelWiring', () => {
         userId: 'UADMIN',
         sourceGroup: 'team',
       }),
-    ).resolves.toBe(true);
-    expect(legacyControlAllowed).toHaveBeenCalledWith(
-      'sl:C123',
-      'UADMIN',
-      {},
-      'team',
-    );
+    ).resolves.toBe(false);
+    expect(legacyControlAllowed).not.toHaveBeenCalled();
   });
 
   it('routes targeted user questions to the originating channel', async () => {
@@ -817,7 +812,7 @@ describe('createChannelWiring', () => {
       requestUserAnswer,
     });
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'telegram',
           vi.fn(() => questionChannel),
@@ -862,7 +857,7 @@ describe('createChannelWiring', () => {
       }),
     });
     const wiring = createChannelWiring(app, {
-      channelProviders: [
+      providerIds: [
         makeProvider(
           'telegram',
           vi.fn(() => questionChannel),
@@ -910,7 +905,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     const handlers = createChannelPersistenceHandlers({
       app,
       resolved: {
-        channelProviders: [],
+        providerIds: [],
         loadSenderAllowlist: vi.fn(() => ({}) as any),
         loadSenderControlAllowlist: vi.fn(() => ({}) as any),
         shouldDropMessage: vi.fn(() => false),
@@ -943,7 +938,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     const msg = {
       id: 'm1',
       chat_jid: 'sl:D123',
-      channel_provider: 'slack',
+      provider: 'slack',
       sender: 'U123',
       sender_name: 'User',
       content: 'hello',
@@ -959,12 +954,12 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
       }),
     );
     expect(
-      runtimeStoreMock.repositories.channelInstallations
-        .saveAgentChannelBinding,
+      runtimeStoreMock.repositories.providerConnections
+        .saveAgentConversationBinding,
     ).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: 'agent:one',
-        channelInstallationId: 'channel-installation:default:slack',
+        providerConnectionId: 'channel-providerConnection:default:slack',
         conversationId: 'conversation:sl:D123',
         triggerMode: 'always',
       }),
@@ -992,7 +987,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     const handlers = createChannelPersistenceHandlers({
       app,
       resolved: {
-        channelProviders: [],
+        providerIds: [],
         loadSenderAllowlist: vi.fn(() => ({}) as any),
         loadSenderControlAllowlist: vi.fn(() => ({}) as any),
         shouldDropMessage: vi.fn(() => false),
@@ -1032,7 +1027,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     await handlers.onMessage('sl:D1', {
       id: 'm1',
       chat_jid: 'sl:D1',
-      channel_provider: 'slack',
+      provider: 'slack',
       sender: 'U1',
       sender_name: 'A',
       content: 'hello',
@@ -1041,7 +1036,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     await handlers.onMessage('sl:D2', {
       id: 'm2',
       chat_jid: 'sl:D2',
-      channel_provider: 'slack',
+      provider: 'slack',
       sender: 'U2',
       sender_name: 'B',
       content: 'hello',
@@ -1075,7 +1070,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     const handlers = createChannelPersistenceHandlers({
       app,
       resolved: {
-        channelProviders: [],
+        providerIds: [],
         loadSenderAllowlist: vi.fn(() => ({}) as any),
         loadSenderControlAllowlist: vi.fn(() => ({}) as any),
         shouldDropMessage: vi.fn(() => false),
@@ -1101,7 +1096,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     await handlers.onMessage('sl:D123', {
       id: 'm-revoked',
       chat_jid: 'sl:D123',
-      channel_provider: 'slack',
+      provider: 'slack',
       sender: 'U123',
       sender_name: 'User',
       content: 'still here',
@@ -1119,7 +1114,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     const handlers = createChannelPersistenceHandlers({
       app,
       resolved: {
-        channelProviders: [],
+        providerIds: [],
         loadSenderAllowlist: vi.fn(() => ({}) as any),
         loadSenderControlAllowlist: vi.fn(() => ({}) as any),
         shouldDropMessage: vi.fn(() => false),
@@ -1152,7 +1147,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     await handlers.onMessage('sl:C123', {
       id: 'm2',
       chat_jid: 'sl:C123',
-      channel_provider: 'slack',
+      provider: 'slack',
       sender: 'U123',
       sender_name: 'User',
       content: 'hello',
@@ -1169,7 +1164,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
   it('drops unregistered direct conversations when DM access is ambiguous', async () => {
     const app = makeApp({});
     const storeMessage = vi.fn(async () => undefined);
-    runtimeStoreMock.repositories.channelInstallations.saveAgentChannelBinding.mockClear();
+    runtimeStoreMock.repositories.providerConnections.saveAgentConversationBinding.mockClear();
     runtimeStoreMock.repositories.agents.findAgentsByDmAccess.mockResolvedValueOnce(
       [
         {
@@ -1194,7 +1189,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     const handlers = createChannelPersistenceHandlers({
       app,
       resolved: {
-        channelProviders: [],
+        providerIds: [],
         loadSenderAllowlist: vi.fn(() => ({}) as any),
         loadSenderControlAllowlist: vi.fn(() => ({}) as any),
         shouldDropMessage: vi.fn(() => false),
@@ -1227,7 +1222,7 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     await handlers.onMessage('sl:D999', {
       id: 'm3',
       chat_jid: 'sl:D999',
-      channel_provider: 'slack',
+      provider: 'slack',
       sender: 'U999',
       sender_name: 'User',
       content: 'hello',
@@ -1244,8 +1239,8 @@ describe('createChannelPersistenceHandlers agent DM access', () => {
     );
     expect(app.registerGroup).not.toHaveBeenCalled();
     expect(
-      runtimeStoreMock.repositories.channelInstallations
-        .saveAgentChannelBinding,
+      runtimeStoreMock.repositories.providerConnections
+        .saveAgentConversationBinding,
     ).not.toHaveBeenCalled();
     expect(storeMessage).not.toHaveBeenCalled();
   });

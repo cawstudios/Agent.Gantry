@@ -108,6 +108,10 @@ export function getPublicRuntimeSettings() {
       recurringJobDefaultModel: settings.agent.recurringJobDefaultModel,
     },
     agents: settings.agents,
+    providers: settings.providers,
+    providerConnections: settings.providerConnections,
+    conversations: settings.conversations,
+    bindings: settings.bindings,
     memory: {
       enabled: settings.memory.enabled,
       dreaming: {
@@ -236,24 +240,28 @@ export const PERMISSION_APPROVAL_TIMEOUT_MS = Math.max(
     10,
   ) || 300_000,
 );
-function collectChannelControlAllowlist(
-  channelId: string,
+function collectConversationApproverAllowlist(
+  providerId: string,
   sourceGroup?: string,
 ): Set<string> {
   const runtimeSettings = getRuntimeSettingsForConfig();
-  const controlAllowlist =
-    runtimeSettings.channels?.[channelId]?.controlAllowlist;
-  if (!controlAllowlist) return new Set<string>();
-  const scoped =
-    sourceGroup && controlAllowlist.agents[sourceGroup] !== undefined
-      ? controlAllowlist.agents[sourceGroup]
-      : controlAllowlist.default;
-  return new Set(scoped.filter((entry) => entry.trim().length > 0));
+  const approvers = Object.values(runtimeSettings.bindings)
+    .filter((binding) => !sourceGroup || binding.agent === sourceGroup)
+    .flatMap((binding) => {
+      const conversation = runtimeSettings.conversations[binding.conversation];
+      if (!conversation) return [];
+      const connection =
+        runtimeSettings.providerConnections[conversation.providerConnection];
+      return connection?.provider === providerId
+        ? conversation.controlApprovers
+        : [];
+    });
+  return new Set(approvers.filter((entry) => entry.trim().length > 0));
 }
 export function getSlackPermissionApproverIds(
   sourceGroup?: string,
 ): Set<string> {
-  return collectChannelControlAllowlist('slack', sourceGroup);
+  return collectConversationApproverAllowlist('slack', sourceGroup);
 }
 export const AGENT_TIMEOUT = parseInt(
   process.env.AGENT_TIMEOUT || '1800000',

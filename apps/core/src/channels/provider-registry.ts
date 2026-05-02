@@ -13,7 +13,7 @@ export interface ChannelProviderSetup {
 }
 
 export interface ChannelProviderSettingsLike {
-  channels: Record<string, { enabled: boolean }>;
+  providers?: Record<string, { enabled: boolean }>;
 }
 
 export type ChannelFormattingDialect =
@@ -22,7 +22,7 @@ export type ChannelFormattingDialect =
   | 'mrkdwn'
   | 'telegram-html';
 
-export interface ChannelProvider {
+export interface Provider {
   id: string;
   label: string;
   internal?: boolean;
@@ -35,8 +35,8 @@ export interface ChannelProvider {
   setup: ChannelProviderSetup;
 }
 
-const registry = new Map<string, ChannelProvider>();
-let providersByJidPrefix: ChannelProvider[] = [];
+const registry = new Map<string, Provider>();
+let providersByJidPrefix: Provider[] = [];
 
 function rebuildProviderPrefixCache(): void {
   providersByJidPrefix = [...registry.values()].sort(
@@ -44,23 +44,19 @@ function rebuildProviderPrefixCache(): void {
   );
 }
 
-export function registerChannelProvider(provider: ChannelProvider): void {
+export function registerProvider(provider: Provider): void {
   if (!provider.id.trim()) {
-    throw new Error('Channel provider id must be non-empty');
+    throw new Error('Provider id must be non-empty');
   }
   if (!provider.jidPrefix.trim()) {
-    throw new Error(
-      `Channel provider "${provider.id}" jidPrefix must be non-empty`,
-    );
+    throw new Error(`Provider "${provider.id}" jidPrefix must be non-empty`);
   }
   if (!provider.folderPrefix.trim()) {
-    throw new Error(
-      `Channel provider "${provider.id}" folderPrefix must be non-empty`,
-    );
+    throw new Error(`Provider "${provider.id}" folderPrefix must be non-empty`);
   }
 
   if (registry.has(provider.id)) {
-    throw new Error(`Duplicate channel provider id: ${provider.id}`);
+    throw new Error(`Duplicate provider id: ${provider.id}`);
   }
 
   for (const existing of registry.values()) {
@@ -69,7 +65,7 @@ export function registerChannelProvider(provider: ChannelProvider): void {
       existing.jidPrefix.startsWith(provider.jidPrefix)
     ) {
       throw new Error(
-        `Channel provider jidPrefix overlap: "${provider.id}" (${provider.jidPrefix}) conflicts with "${existing.id}" (${existing.jidPrefix})`,
+        `Provider jidPrefix overlap: "${provider.id}" (${provider.jidPrefix}) conflicts with "${existing.id}" (${existing.jidPrefix})`,
       );
     }
   }
@@ -78,21 +74,21 @@ export function registerChannelProvider(provider: ChannelProvider): void {
   rebuildProviderPrefixCache();
 }
 
-export function getChannelProvider(id: string): ChannelProvider | undefined {
+export function getProvider(id: string): Provider | undefined {
   return registry.get(id);
 }
 
-export function listChannelProviders(): readonly ChannelProvider[] {
+export function listChannelProviders(): readonly Provider[] {
   return Array.from(registry.values());
 }
 
-export function listConnectableChannelProviders(): readonly ChannelProvider[] {
+export function listConnectableChannelProviders(): readonly Provider[] {
   return listChannelProviders().filter(
     (provider) => provider.internal !== true,
   );
 }
 
-export function providerForJid(jid: string): ChannelProvider | undefined {
+export function providerForJid(jid: string): Provider | undefined {
   for (const provider of providersByJidPrefix) {
     if (jid.startsWith(provider.jidPrefix)) {
       return provider;

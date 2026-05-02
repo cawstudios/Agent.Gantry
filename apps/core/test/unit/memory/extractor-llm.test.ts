@@ -38,7 +38,7 @@ function writeCredentialSettings(mode: 'none' | 'onecli' | 'external'): void {
   fs.writeFileSync(
     path.join(runtimeRoot, 'settings.yaml'),
     [
-      'channels: {}',
+      'providers: {}',
       'storage:',
       '  postgres:',
       '    url_env: MYCLAW_DATABASE_URL',

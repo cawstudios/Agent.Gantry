@@ -21,7 +21,7 @@ import { sendError } from './http.js';
 import { createRateLimiter } from './rate-limit.js';
 import { handleAgentRoutes } from './routes/agents.js';
 import { handleCapabilityCatalogRoutes } from './routes/capability-catalog.js';
-import { handleChannelControlRoutes } from './routes/channels.js';
+import { handleProviderConversationRoutes } from './routes/provider-conversation-routes.js';
 import { handleExternalIngressRoutes } from './routes/external-ingress.js';
 import { handleJobRoutes } from './routes/jobs.js';
 import { handleMemoryRoutes } from './routes/memory.js';
@@ -71,7 +71,7 @@ function createControlRequestHandler(ctx: ControlRouteContext) {
       if (await handleAgentRoutes(req, res, ctx, pathname)) return;
       if (await handleCapabilityCatalogRoutes(req, res, ctx, pathname)) return;
       if (await handleSessionRoutes(req, res, ctx, url, pathname)) return;
-      if (await handleChannelControlRoutes(req, res, ctx, url, pathname))
+      if (await handleProviderConversationRoutes(req, res, ctx, url, pathname))
         return;
       if (await handleMemoryRoutes(req, res, ctx, url, pathname)) return;
       if (await handleModelRoutes(req, res, ctx, pathname)) return;

@@ -18,9 +18,9 @@ import {
 import type { AgentId } from '@core/domain/agent/agent.js';
 import type { AppId } from '@core/domain/app/app.js';
 import type {
-  ChannelInstallationId,
-  ChannelProviderId,
-} from '@core/domain/channel/channel.js';
+  ProviderConnectionId,
+  ProviderId,
+} from '@core/domain/provider/provider.js';
 import type {
   ConversationId,
   ConversationThreadId,
@@ -42,9 +42,9 @@ const maybeDescribe = process.env.MYCLAW_TEST_DATABASE_URL
 
 const appId = DEFAULT_APP_ID as AppId;
 const agentId = DEFAULT_AGENT_ID as AgentId;
-const providerId = 'slack' as ChannelProviderId;
-const installationId =
-  'channel-installation:test:slack' as ChannelInstallationId;
+const providerId = 'slack' as ProviderId;
+const providerConnectionId =
+  'channel-providerConnection:test:slack' as ProviderConnectionId;
 const conversationId = 'conversation:test:slack:C123' as ConversationId;
 const threadId = 'thread:test:slack:C123:1700.1' as ConversationThreadId;
 const userId = 'user:test:U123' as UserId;
@@ -64,12 +64,12 @@ maybeDescribe('Postgres domain repositories', () => {
     await service.migrate();
     repositories = createPostgresDomainRepositories(service.db, service.pool);
 
-    await repositories.channelInstallations.saveChannelInstallation({
-      id: installationId,
+    await repositories.providerConnections.saveProviderConnection({
+      id: providerConnectionId,
       appId,
       providerId,
       externalInstallationRef: {
-        kind: 'channel_installation',
+        kind: 'provider_connection',
         value: 'T123',
       },
       label: 'Test Slack',
@@ -82,7 +82,7 @@ maybeDescribe('Postgres domain repositories', () => {
     await repositories.conversations.saveConversation({
       id: conversationId,
       appId,
-      channelInstallationId: installationId,
+      providerConnectionId: providerConnectionId,
       externalRef: { kind: 'conversation', value: 'C123' },
       kind: 'channel',
       title: 'engineering',
@@ -115,7 +115,7 @@ maybeDescribe('Postgres domain repositories', () => {
       repositories.conversations.getConversationByExternalRef({
         appId,
         providerId,
-        channelInstallationId: installationId,
+        providerConnectionId: providerConnectionId,
         externalConversationId: 'C123',
       }),
     ).resolves.toMatchObject({ id: conversationId });
@@ -130,15 +130,15 @@ maybeDescribe('Postgres domain repositories', () => {
     ).resolves.toMatchObject({ id: threadId });
   });
 
-  it('partially updates channel installations without clobbering stored config', async () => {
+  it('partially updates provider connections without clobbering stored config', async () => {
     const partialInstallationId =
-      'channel-installation:test:partial' as ChannelInstallationId;
-    await repositories.channelInstallations.saveChannelInstallation({
+      'channel-providerConnection:test:partial' as ProviderConnectionId;
+    await repositories.providerConnections.saveProviderConnection({
       id: partialInstallationId,
       appId,
       providerId,
       externalInstallationRef: {
-        kind: 'channel_installation',
+        kind: 'provider_connection',
         value: 'T-PARTIAL',
       },
       label: 'Partial Slack',
@@ -150,7 +150,7 @@ maybeDescribe('Postgres domain repositories', () => {
     });
 
     await expect(
-      repositories.channelInstallations.updateChannelInstallation({
+      repositories.providerConnections.updateProviderConnection({
         appId,
         id: partialInstallationId,
         patch: { label: 'Renamed Slack' },
@@ -642,12 +642,12 @@ maybeDescribe('Postgres domain repositories', () => {
     ]);
   });
 
-  it('answers agent-channel binding enablement for conversations and threads', async () => {
-    await repositories.channelInstallations.saveAgentChannelBinding({
+  it('answers agent conversation binding enablement for conversations and threads', async () => {
+    await repositories.providerConnections.saveAgentConversationBinding({
       id: 'agent-channel-binding:test:conversation',
       appId,
       agentId,
-      channelInstallationId: installationId,
+      providerConnectionId: providerConnectionId,
       conversationId,
       displayName: 'Personal Agent',
       status: 'active',
@@ -662,7 +662,7 @@ maybeDescribe('Postgres domain repositories', () => {
     });
 
     await expect(
-      repositories.channelInstallations.isAgentEnabledInConversation({
+      repositories.providerConnections.isAgentEnabledInConversation({
         appId,
         agentId,
         conversationId,
@@ -670,7 +670,7 @@ maybeDescribe('Postgres domain repositories', () => {
       }),
     ).resolves.toBe(true);
 
-    await repositories.channelInstallations.disableAgentChannelBinding({
+    await repositories.providerConnections.disableAgentConversationBinding({
       appId,
       agentId,
       conversationId,
@@ -678,7 +678,7 @@ maybeDescribe('Postgres domain repositories', () => {
     });
 
     await expect(
-      repositories.channelInstallations.isAgentEnabledInConversation({
+      repositories.providerConnections.isAgentEnabledInConversation({
         appId,
         agentId,
         conversationId,
@@ -686,7 +686,7 @@ maybeDescribe('Postgres domain repositories', () => {
     ).resolves.toBe(false);
 
     await expect(
-      repositories.channelInstallations.getAgentChannelBinding({
+      repositories.providerConnections.getAgentConversationBinding({
         appId,
         agentId,
         conversationId,

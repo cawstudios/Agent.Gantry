@@ -66,17 +66,17 @@ CREATE TABLE IF NOT EXISTS agent_config_versions (
   CONSTRAINT agent_config_versions_agent_id_version_unique UNIQUE (agent_id, version)
 );
 
-CREATE TABLE IF NOT EXISTS channel_providers (
+CREATE TABLE IF NOT EXISTS providers (
   id text PRIMARY KEY,
   display_name text NOT NULL,
   capability_flags_json text NOT NULL DEFAULT '[]',
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS channel_installations (
+CREATE TABLE IF NOT EXISTS provider_connections (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-  provider_id text NOT NULL REFERENCES channel_providers(id),
+  provider_id text NOT NULL REFERENCES providers(id),
   external_ref_json text,
   label text NOT NULL,
   status text NOT NULL DEFAULT 'active',
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS channel_installations (
 CREATE TABLE IF NOT EXISTS conversations (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-  channel_installation_id text NOT NULL REFERENCES channel_installations(id) ON DELETE CASCADE,
+  provider_connection_id text NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
   external_ref_json text,
   kind text NOT NULL,
   title text,
@@ -97,8 +97,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_conversations_installation
-  ON conversations(channel_installation_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_providerConnection
+  ON conversations(provider_connection_id);
 
 CREATE TABLE IF NOT EXISTS conversation_threads (
   id text PRIMARY KEY,
@@ -114,11 +114,11 @@ CREATE TABLE IF NOT EXISTS conversation_threads (
 CREATE INDEX IF NOT EXISTS idx_conversation_threads_conversation
   ON conversation_threads(conversation_id);
 
-CREATE TABLE IF NOT EXISTS agent_channel_bindings (
+CREATE TABLE IF NOT EXISTS agent_conversation_bindings (
   id text PRIMARY KEY,
   app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
   agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  channel_installation_id text NOT NULL REFERENCES channel_installations(id) ON DELETE CASCADE,
+  provider_connection_id text NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
   conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   thread_id text REFERENCES conversation_threads(id) ON DELETE CASCADE,
   display_name text NOT NULL,
@@ -132,8 +132,8 @@ CREATE TABLE IF NOT EXISTS agent_channel_bindings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_channel_bindings_conversation
-  ON agent_channel_bindings(conversation_id, thread_id);
+CREATE INDEX IF NOT EXISTS idx_agent_conversation_bindings_conversation
+  ON agent_conversation_bindings(conversation_id, thread_id);
 
 CREATE TABLE IF NOT EXISTS canonical_messages (
   id text PRIMARY KEY,

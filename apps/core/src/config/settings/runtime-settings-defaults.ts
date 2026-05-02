@@ -3,19 +3,12 @@ import '../../channels/register-builtins.js';
 import { DEFAULT_AGENT_NAME } from '../../shared/default-agent.js';
 import { listChannelProviders } from '../../channels/provider-registry.js';
 import { MEMORY_MODEL_DEFAULT_ALIASES } from '../../shared/model-catalog.js';
-import {
-  createDefaultControlAllowlist,
-  type SenderControlAllowlistConfig,
-} from './control-allowlist.js';
-import {
-  createDefaultSenderAllowlist,
-  type SenderAllowlistConfig,
-} from './sender-allowlist.js';
+import { type SenderControlAllowlistConfig } from './control-allowlist.js';
+import { type SenderAllowlistConfig } from './sender-allowlist.js';
 import type {
   MemoryModelProfile,
   RuntimeCredentialBrokerSettings,
   RuntimeAgentSettings,
-  RuntimeChannelSettings,
   RuntimeMemoryLlmModels,
   RuntimeMemorySettings,
   RuntimeSettings,
@@ -69,16 +62,6 @@ export function getMemoryModelProfileDefaults(
   };
 }
 
-export function createDefaultChannelSettings(
-  enabled: boolean,
-): RuntimeChannelSettings {
-  return {
-    enabled,
-    senderAllowlist: createDefaultSenderAllowlist(),
-    controlAllowlist: createDefaultControlAllowlist(),
-  };
-}
-
 export function createDefaultRuntimeSettings(): RuntimeSettings {
   const storage: RuntimeStorageSettings = {
     postgres: {
@@ -127,12 +110,15 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
     desiredState: {
       authoritative: false,
     },
-    channels: Object.fromEntries(
+    providers: Object.fromEntries(
       listChannelProviders().map((provider) => [
         provider.id,
-        createDefaultChannelSettings(false),
+        { enabled: false, defaultConnection: undefined },
       ]),
     ),
+    providerConnections: {},
+    conversations: {},
+    bindings: {},
     agents: {},
     storage,
     agent,
@@ -151,7 +137,6 @@ export function applyMemoryModelProfile(
 export type {
   SenderAllowlistConfig,
   SenderControlAllowlistConfig,
-  RuntimeChannelSettings,
   RuntimeCredentialBrokerSettings,
   RuntimeAgentSettings,
   RuntimeMemoryLlmModels,

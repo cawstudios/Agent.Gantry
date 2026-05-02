@@ -1,49 +1,50 @@
-# Channel Interactions
+# Conversation Interactions
 
-MyClaw renders one channel-neutral interaction model across Slack, Telegram,
-Teams, Web, API sessions, and agent-initiated requests. Channel adapters own
+MyClaw renders one conversation-neutral interaction model across Slack,
+Telegram, Teams, Web, API sessions, and agent-initiated requests. Provider adapters own
 presentation. Application policy owns authorization.
 
-Agents must not choose channel-specific payloads directly. They choose the
-right MyClaw tool, the host builds an `InteractionDescriptor`, and the channel
+Agents must not choose provider-specific payloads directly. They choose the
+right MyClaw tool, the host builds an `InteractionDescriptor`, and the provider
 adapter renders it using the provider's native controls.
 
-## Channel Administration Model
+## Conversation Administration Model
 
-Use `Channel` as the public admin term for Slack channels, Teams channels, and
-Telegram groups. Provider-specific identifiers remain metadata on the channel
-record. Slack and Teams threads, plus Telegram forum topics, are `Session`
-records under a Channel.
+Use `Conversation` as the public admin term for Slack channels/DMs, Teams
+channels/chats, Telegram groups/DMs, and App/Web conversations. A `Provider`
+is Slack, Teams, Telegram, or App/Web. A `Provider Connection` is one installed
+workspace, bot, tenant, or app connection. Slack and Teams threads, plus
+Telegram forum topics, are `Session` records under a Conversation.
 
-Channels can bind multiple agents. Routing priority is deterministic:
+Conversations can bind multiple agents. Routing priority is deterministic:
 
 1. explicit mention or command
 2. session default agent
-3. channel default agent
+3. conversation default agent
 4. picker when the route is ambiguous
 
 Agent DM access is a provider-neutral allowlist. It is displayed and managed on
-the Agent admin surface, separately from Channel membership and Channel control
+the Agent admin surface, separately from Conversation membership and Conversation
 approvers. DM access can include external Slack, Teams, Telegram, Web, or local
-users who are not members of any configured Channel. Each agent can set one DM
+users who are not members of any configured Conversation. Each agent can set one DM
 approval admin per provider; that admin can approve permission prompts only for
 direct/private DM sessions bound to that agent on the same provider. DM access
 users are not approvers unless they are also configured as the provider's DM
 admin.
 
-Control approvers are a second Channel-owned allowlist. They decide permission
-prompts for all agents bound to the Channel, must be verified members of that
-Channel before save, and never grant agent capabilities by themselves. Slack,
-Telegram, Teams, and App/Web channels must expose the same admin behavior:
-same-channel origin check, Channel control allowlist check, and separate Agent
-DM access. Runtime approval callbacks first detect direct/private DM sessions
-and check the bound agent's DM admin; group/channel callbacks check the Channel
-control allowlist after same-channel origin checks and before accepting a
-decision.
+Conversation approvers are a Conversation-owned allowlist. They decide
+permission prompts for all agents bound to the Conversation, must be verified
+members of that Conversation before save and again when approving, and never
+grant agent capabilities by themselves. Slack, Telegram, Teams, and App/Web
+conversations must expose the same admin behavior: same-conversation origin
+check, Conversation approver check, and separate Agent DM access. Runtime
+approval callbacks first detect direct/private DM sessions and check the bound
+agent's DM admin; group/channel callbacks check Conversation approvers after
+same-conversation origin checks and before accepting a decision.
 
-Channel setup should prefer provider discovery and validation. Pasted Slack,
+Conversation setup should prefer provider discovery and validation. Pasted Slack,
 Teams, or Telegram IDs are accepted as a fallback only after MyClaw verifies
-the bot can see the channel and post or, for Telegram, that the bot is a member
+the bot can see the conversation and post or, for Telegram, that the bot is a member
 and forum topics are available when topic sessions are requested.
 
 ## InteractionDescriptor
@@ -73,7 +74,7 @@ Descriptors are data, not policy. They can display `send_message`,
 `request_tool_enable`, `request_channel_tool_enable`,
 `settings_desired_state`, `request_settings_update`, `service_restart`, and
 `register_agent` requests, but approval authority stays with the configured
-control/admin rules.
+conversation/DM admin rules.
 
 ## Tool Selection Rules
 
@@ -159,7 +160,7 @@ Teams details:
   dependencies, and audit actions.
 - Validate Teams control approvers through Microsoft Graph conversation
   membership: `/chats/{chat-id}/members` for chat-style conversation ids, and
-  `/teams/{team-id}/channels/{channel-id}/members` when the channel installation
+  `/teams/{team-id}/channels/{channel-id}/members` when the provider connection
   config includes `teamId` and `channelId`.
 - Include tenant id, conversation id, reply chain/thread id, request id, and
   nonce in the server-side interaction record, not as trusted card state.
@@ -185,7 +186,7 @@ rendering contracts; they must not bypass `request_skill_install`,
 
 Channel-specific tools are approved capabilities. Examples include Teams
 proactive messaging, Slack file access, and Telegram file download behavior.
-Agents request them with `request_channel_tool_enable`. A channel provider flag
+Agents request them with `request_channel_tool_enable`. A provider flag
 describes whether the adapter can render or execute an interaction; it is not
 an authorization grant.
 

@@ -50,8 +50,8 @@ function mockProviders() {
     },
   };
   vi.doMock('@core/channels/provider-registry.js', () => ({
-    registerChannelProvider: vi.fn(),
-    getChannelProvider: vi.fn((id: string) =>
+    registerProvider: vi.fn(),
+    getProvider: vi.fn((id: string) =>
       id === 'telegram' ? provider : undefined,
     ),
     listConnectableChannelProviders: vi.fn(() => [provider]),
@@ -65,7 +65,7 @@ describe('channel CLI command', () => {
     mockProviders();
     vi.doMock('@core/config/settings/runtime-settings.js', () => ({
       ensureRuntimeSettings: vi.fn(() => ({
-        channels: { telegram: { enabled: true } },
+        providers: { telegram: { enabled: true } },
       })),
     }));
     vi.doMock('@core/config/env/file.js', () => ({
@@ -75,15 +75,15 @@ describe('channel CLI command', () => {
       envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
     }));
 
-    const { runChannelCommand } = await import('@core/cli/channel.js');
-    const code = await runChannelCommand(import.meta.url, '/tmp/myclaw', [
+    const { runProviderCommand } = await import('@core/cli/provider.js');
+    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
       'list',
     ]);
 
     expect(code).toBe(0);
     expect(note).toHaveBeenCalledWith(
       expect.stringContaining('Telegram: enabled | credentials: configured'),
-      'Channel Status',
+      'Provider Status',
     );
   });
 
@@ -102,8 +102,8 @@ describe('channel CLI command', () => {
       envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
     }));
 
-    const { runChannelCommand } = await import('@core/cli/channel.js');
-    const code = await runChannelCommand(import.meta.url, '/tmp/myclaw', [
+    const { runProviderCommand } = await import('@core/cli/provider.js');
+    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
       'connect',
       'telegram',
     ]);
@@ -126,8 +126,8 @@ describe('channel CLI command', () => {
       envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
     }));
 
-    const { runChannelCommand } = await import('@core/cli/channel.js');
-    const code = await runChannelCommand(import.meta.url, '/tmp/myclaw', [
+    const { runProviderCommand } = await import('@core/cli/provider.js');
+    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
       'connect',
     ]);
 
@@ -146,14 +146,14 @@ describe('channel CLI command', () => {
       envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
     }));
 
-    const { runChannelCommand } = await import('@core/cli/channel.js');
-    const code = await runChannelCommand(import.meta.url, '/tmp/myclaw', [
+    const { runProviderCommand } = await import('@core/cli/provider.js');
+    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
       'connect',
     ]);
 
     expect(code).toBe(1);
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining('myclaw channel connect <telegram|slack|teams>'),
+      expect.stringContaining('myclaw provider connect <telegram|slack|teams>'),
     );
   });
 
@@ -168,14 +168,14 @@ describe('channel CLI command', () => {
       envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
     }));
 
-    const { runChannelCommand } = await import('@core/cli/channel.js');
-    const code = await runChannelCommand(import.meta.url, '/tmp/myclaw', [
+    const { runProviderCommand } = await import('@core/cli/provider.js');
+    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
       'connect',
       'unknown',
     ]);
 
     expect(code).toBe(1);
-    expect(error).toHaveBeenCalledWith('Unknown channel: unknown');
+    expect(error).toHaveBeenCalledWith('Unknown provider: unknown');
   });
 
   it('fails unknown channel subcommands', async () => {
@@ -189,8 +189,8 @@ describe('channel CLI command', () => {
       envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
     }));
 
-    const { runChannelCommand } = await import('@core/cli/channel.js');
-    const code = await runChannelCommand(import.meta.url, '/tmp/myclaw', [
+    const { runProviderCommand } = await import('@core/cli/provider.js');
+    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
       'bogus',
     ]);
 
@@ -233,23 +233,23 @@ describe('channel CLI command', () => {
       envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
     }));
 
-    const { runChannelCommand } = await import('@core/cli/channel.js');
-    const code = await runChannelCommand(import.meta.url, '/tmp/myclaw', [
+    const { runProviderCommand } = await import('@core/cli/provider.js');
+    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
       'doctor',
     ]);
 
     expect(code).toBe(0);
-    expect(note).toHaveBeenCalledWith('channel ok', 'Channel Doctor');
+    expect(note).toHaveBeenCalledWith('channel ok', 'Provider Doctor');
   });
 
-  it('shows and replaces channel control allowlist through local services', async () => {
+  it('shows and replaces conversation approvers through local services', async () => {
     const { note } = mockClack();
     mockProviders();
     const iso = new Date(0).toISOString();
     const conversation = {
       id: 'conversation-1',
       appId: 'default',
-      channelInstallationId: 'installation-1',
+      providerConnectionId: 'providerConnection-1',
       externalRef: { kind: 'conversation', value: 'app-conv-1' },
       kind: 'channel',
       title: 'Engineering',
@@ -257,8 +257,8 @@ describe('channel CLI command', () => {
       createdAt: iso,
       updatedAt: iso,
     };
-    const installation = {
-      id: 'installation-1',
+    const providerConnection = {
+      id: 'providerConnection-1',
       appId: 'default',
       providerId: 'app',
       label: 'App',
@@ -268,7 +268,7 @@ describe('channel CLI command', () => {
       createdAt: iso,
       updatedAt: iso,
     };
-    const replaceChannelControlApprovers = vi.fn(async (input: any) =>
+    const replaceConversationApprovers = vi.fn(async (input: any) =>
       input.externalUserIds.map((externalUserId: string) => ({
         id: `approver:${externalUserId}`,
         appId: 'default',
@@ -281,15 +281,15 @@ describe('channel CLI command', () => {
     vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
       getRuntimeStorage: () => ({
         repositories: {
-          channelInstallations: {
-            getChannelInstallation: vi.fn(async () => installation),
-            listAgentChannelBindings: vi.fn(async () => []),
-            updateChannelInstallation: vi.fn(),
+          providerConnections: {
+            getProviderConnection: vi.fn(async () => providerConnection),
+            listAgentConversationBindings: vi.fn(async () => []),
+            updateProviderConnection: vi.fn(),
           },
           conversations: {
             getConversation: vi.fn(async () => conversation),
             listThreads: vi.fn(async () => []),
-            listChannelControlApprovers: vi.fn(async () => [
+            listConversationApprovers: vi.fn(async () => [
               {
                 id: 'approver:123',
                 appId: 'default',
@@ -299,7 +299,7 @@ describe('channel CLI command', () => {
                 updatedAt: iso,
               },
             ]),
-            replaceChannelControlApprovers,
+            replaceConversationApprovers,
             listParticipantExternalUserIds: vi.fn(async () => ['123', '456']),
           },
         },
@@ -313,12 +313,12 @@ describe('channel CLI command', () => {
       envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
     }));
 
-    const { runChannelCommand } = await import('@core/cli/channel.js');
-    const showCode = await runChannelCommand(import.meta.url, '/tmp/myclaw', [
+    const { runProviderCommand } = await import('@core/cli/provider.js');
+    const showCode = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
       'control-allowlist',
       'conversation-1',
     ]);
-    const setCode = await runChannelCommand(import.meta.url, '/tmp/myclaw', [
+    const setCode = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
       'control-allowlist',
       'conversation-1',
       '--allow',
@@ -327,8 +327,8 @@ describe('channel CLI command', () => {
 
     expect(showCode).toBe(0);
     expect(setCode).toBe(0);
-    expect(note).toHaveBeenCalledWith('123', 'Channel Control Allowlist');
-    expect(replaceChannelControlApprovers).toHaveBeenCalledWith(
+    expect(note).toHaveBeenCalledWith('123', 'Conversation Approvers');
+    expect(replaceConversationApprovers).toHaveBeenCalledWith(
       expect.objectContaining({ externalUserIds: ['123', '456'] }),
     );
   });

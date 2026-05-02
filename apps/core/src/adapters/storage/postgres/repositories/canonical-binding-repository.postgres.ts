@@ -42,17 +42,17 @@ export class PostgresCanonicalBindingRepository {
         group.name,
         tx,
       );
-      const channelInstallationId =
+      const providerConnectionId =
         await this.graph.getConversationInstallationId(conversationId, tx);
-      if (!channelInstallationId) return;
+      if (!providerConnectionId) return;
       const now = group.added_at || currentIso();
       await tx
-        .insert(pgSchema.agentChannelBindingsPostgres)
+        .insert(pgSchema.agentConversationBindingsPostgres)
         .values({
           id: `binding:${jid}`,
           appId: CANONICAL_APP_ID,
           agentId,
-          channelInstallationId,
+          providerConnectionId,
           conversationId,
           displayName: group.name,
           status: 'active',
@@ -67,7 +67,7 @@ export class PostgresCanonicalBindingRepository {
           updatedAt: now,
         })
         .onConflictDoUpdate({
-          target: pgSchema.agentChannelBindingsPostgres.id,
+          target: pgSchema.agentConversationBindingsPostgres.id,
           set: {
             displayName: group.name,
             status: 'active',
@@ -85,23 +85,28 @@ export class PostgresCanonicalBindingRepository {
 
   async deleteRegisteredGroup(jid: string): Promise<void> {
     await this.db
-      .delete(pgSchema.agentChannelBindingsPostgres)
-      .where(eq(pgSchema.agentChannelBindingsPostgres.id, `binding:${jid}`));
+      .delete(pgSchema.agentConversationBindingsPostgres)
+      .where(
+        eq(pgSchema.agentConversationBindingsPostgres.id, `binding:${jid}`),
+      );
   }
 
   async listRegisteredGroups(): Promise<CanonicalBindingRecord[]> {
     return this.db
       .select({
         memorySubjectJson:
-          pgSchema.agentChannelBindingsPostgres.memorySubjectJson,
-        displayName: pgSchema.agentChannelBindingsPostgres.displayName,
-        triggerPattern: pgSchema.agentChannelBindingsPostgres.triggerPattern,
-        requiresTrigger: pgSchema.agentChannelBindingsPostgres.requiresTrigger,
-        isAdminBinding: pgSchema.agentChannelBindingsPostgres.isAdminBinding,
-        createdAt: pgSchema.agentChannelBindingsPostgres.createdAt,
+          pgSchema.agentConversationBindingsPostgres.memorySubjectJson,
+        displayName: pgSchema.agentConversationBindingsPostgres.displayName,
+        triggerPattern:
+          pgSchema.agentConversationBindingsPostgres.triggerPattern,
+        requiresTrigger:
+          pgSchema.agentConversationBindingsPostgres.requiresTrigger,
+        isAdminBinding:
+          pgSchema.agentConversationBindingsPostgres.isAdminBinding,
+        createdAt: pgSchema.agentConversationBindingsPostgres.createdAt,
       })
-      .from(pgSchema.agentChannelBindingsPostgres)
-      .orderBy(asc(pgSchema.agentChannelBindingsPostgres.createdAt));
+      .from(pgSchema.agentConversationBindingsPostgres)
+      .orderBy(asc(pgSchema.agentConversationBindingsPostgres.createdAt));
   }
 }
 

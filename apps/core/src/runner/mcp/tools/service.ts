@@ -19,13 +19,13 @@ export function registerServiceTools(server: McpServer): void {
   registerSkillProposalTool(
     server,
     'request_skill_proposal',
-    'Submit an agent-created or modified skill bundle for same-channel admin review. This creates a proposal only; it never approves, binds, or activates the skill.',
+    'Submit an agent-created or modified skill bundle for same-conversation admin review. This creates a proposal only; it never approves, binds, or activates the skill.',
   );
   registerSettingsTools(server);
 
   server.tool(
     'request_skill_install',
-    'Request a provider-backed skill install for same-channel admin review. This records a review request only; it never installs, binds, or activates the skill directly.',
+    'Request a provider-backed skill install for same-conversation admin review. This records a review request only; it never installs, binds, or activates the skill directly.',
     {
       spec: z
         .string()
@@ -117,7 +117,7 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'request_tool_enable',
-    'Request SDK, host, browser, scheduler, memory, or service tools for same-channel admin review. This records a review request only; it never changes permissions directly.',
+    'Request SDK, host, browser, scheduler, memory, or service tools for same-conversation admin review. This records a review request only; it never changes permissions directly.',
     {
       toolName: z
         .string()
@@ -161,17 +161,15 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'request_channel_tool_enable',
-    'Request a channel-specific capability for same-channel admin review. This records a review request only; it never changes channel permissions directly.',
+    'Request a provider-native channel capability for same-conversation admin review. This records a review request only; it never changes conversation permissions directly.',
     {
       channelTool: z
         .string()
         .describe('Channel capability name, such as slack_file_access'),
-      channelProvider: z
+      providerId: z
         .string()
         .optional()
-        .describe(
-          'Optional channel provider such as slack, telegram, or teams',
-        ),
+        .describe('Optional provider such as slack, telegram, or teams'),
       requiredScopes: z
         .array(z.string())
         .optional()
@@ -188,7 +186,7 @@ export function registerServiceTools(server: McpServer): void {
         'Channel tool enable',
         {
           channelTool: args.channelTool,
-          channelProvider: args.channelProvider,
+          providerId: args.providerId,
           requiredScopes: args.requiredScopes ?? [],
           affectedConversations: args.affectedConversations ?? [],
           reason: args.reason,

@@ -573,14 +573,14 @@ describe('agent-runner MCP stdio tools', { timeout: 10_000 }, () => {
       'request_channel_tool_enable',
       {
         channelTool: 'slack_file_access',
-        channelProvider: 'slack',
+        providerId: 'slack',
         requiredScopes: ['files:read'],
         affectedConversations: ['C123'],
         reason: 'Read files shared in the active channel.',
       },
       {
         channelTool: 'slack_file_access',
-        channelProvider: 'slack',
+        providerId: 'slack',
         requiredScopes: ['files:read'],
         affectedConversations: ['C123'],
         reason: 'Read files shared in the active channel.',

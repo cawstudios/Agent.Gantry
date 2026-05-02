@@ -232,8 +232,8 @@ describe('AgentDmAccessAdministrationService', () => {
       entries: [{ providerId: 'slack', externalUserId: 'UADMIN' }],
       updatedAt: iso,
     });
-    const channelInstallations = {
-      listAgentChannelBindings: vi.fn(async () => [
+    const providerConnections = {
+      listAgentConversationBindings: vi.fn(async () => [
         {
           agentId: 'agent:one',
           conversationId: 'conversation:sl:D123',
@@ -252,7 +252,7 @@ describe('AgentDmAccessAdministrationService', () => {
     const service = new AgentDmAccessAdministrationService(
       {
         agents: repository as never,
-        channelInstallations: channelInstallations as never,
+        providerConnections: providerConnections as never,
         conversations: conversations as never,
       },
       { now: () => iso },
@@ -295,8 +295,8 @@ describe('AgentDmAccessAdministrationService', () => {
     const service = new AgentDmAccessAdministrationService(
       {
         agents: repository as never,
-        channelInstallations: {
-          listAgentChannelBindings: vi.fn(async () => [
+        providerConnections: {
+          listAgentConversationBindings: vi.fn(async () => [
             {
               agentId: 'agent:one',
               conversationId: 'conversation:sl:D123',

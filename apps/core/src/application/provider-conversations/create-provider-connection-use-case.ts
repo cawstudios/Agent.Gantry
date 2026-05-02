@@ -1,35 +1,35 @@
 import type { AppId } from '../../domain/app/app.js';
 import type {
-  ChannelInstallation,
-  ChannelInstallationId,
-  ChannelProviderId,
-} from '../../domain/channel/channel.js';
-import type { ChannelInstallationRepository } from '../../domain/ports/repositories.js';
+  ProviderConnection,
+  ProviderConnectionId,
+  ProviderId,
+} from '../../domain/provider/provider.js';
+import type { ProviderConnectionRepository } from '../../domain/ports/repositories.js';
 import type { Clock } from '../common/clock.js';
 import type { IdGenerator } from '../common/id-generator.js';
 
-export interface CreateChannelInstallationInput {
+export interface CreateProviderConnectionInput {
   appId: AppId;
-  providerId: ChannelProviderId;
+  providerId: ProviderId;
   label: string;
   config?: Record<string, unknown>;
   runtimeSecretRefs?: string[];
   enabled?: boolean;
 }
 
-export class CreateChannelInstallationUseCase {
+export class CreateProviderConnectionUseCase {
   constructor(
     private readonly deps: {
-      installations: ChannelInstallationRepository;
+      providerConnections: ProviderConnectionRepository;
       ids: IdGenerator;
       clock: Clock;
     },
   ) {}
 
-  async execute(input: CreateChannelInstallationInput) {
+  async execute(input: CreateProviderConnectionInput) {
     const now = this.deps.clock.now();
-    const installation: ChannelInstallation = {
-      id: this.deps.ids.generate() as ChannelInstallationId,
+    const providerConnection: ProviderConnection = {
+      id: this.deps.ids.generate() as ProviderConnectionId,
       appId: input.appId,
       providerId: input.providerId,
       label: input.label.trim(),
@@ -39,7 +39,9 @@ export class CreateChannelInstallationUseCase {
       createdAt: now,
       updatedAt: now,
     };
-    await this.deps.installations.saveChannelInstallation(installation);
-    return { installation };
+    await this.deps.providerConnections.saveProviderConnection(
+      providerConnection,
+    );
+    return { providerConnection };
   }
 }

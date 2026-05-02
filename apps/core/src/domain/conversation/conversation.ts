@@ -1,5 +1,5 @@
 import type { AppId } from '../app/app.js';
-import type { ChannelInstallationId } from '../channel/channel.js';
+import type { ProviderConnectionId } from '../provider/provider.js';
 import type { BrandedId, ExternalRef } from '../../shared/ids/branded-id.js';
 import type { IsoTimestamp } from '../../shared/time/primitives.js';
 
@@ -11,7 +11,7 @@ export type UserId = BrandedId<'UserId'>;
 export interface Conversation {
   id: ConversationId;
   appId: AppId;
-  channelInstallationId: ChannelInstallationId;
+  providerConnectionId: ProviderConnectionId;
   externalRef?: ExternalRef<'conversation'>;
   kind: 'direct' | 'group' | 'channel' | 'service' | 'web';
   title?: string;

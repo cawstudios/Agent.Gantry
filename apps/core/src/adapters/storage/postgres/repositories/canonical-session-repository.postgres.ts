@@ -133,17 +133,23 @@ export class PostgresCanonicalSessionRepository {
   ): Promise<string> {
     if (input.threadId) {
       const [threadBinding] = await executor
-        .select({ agentId: pgSchema.agentChannelBindingsPostgres.agentId })
-        .from(pgSchema.agentChannelBindingsPostgres)
+        .select({ agentId: pgSchema.agentConversationBindingsPostgres.agentId })
+        .from(pgSchema.agentConversationBindingsPostgres)
         .where(
           and(
-            eq(pgSchema.agentChannelBindingsPostgres.appId, CANONICAL_APP_ID),
             eq(
-              pgSchema.agentChannelBindingsPostgres.conversationId,
+              pgSchema.agentConversationBindingsPostgres.appId,
+              CANONICAL_APP_ID,
+            ),
+            eq(
+              pgSchema.agentConversationBindingsPostgres.conversationId,
               input.conversationId,
             ),
-            eq(pgSchema.agentChannelBindingsPostgres.threadId, input.threadId),
-            eq(pgSchema.agentChannelBindingsPostgres.status, 'active'),
+            eq(
+              pgSchema.agentConversationBindingsPostgres.threadId,
+              input.threadId,
+            ),
+            eq(pgSchema.agentConversationBindingsPostgres.status, 'active'),
           ),
         )
         .limit(1);
@@ -151,17 +157,20 @@ export class PostgresCanonicalSessionRepository {
     }
 
     const [conversationBinding] = await executor
-      .select({ agentId: pgSchema.agentChannelBindingsPostgres.agentId })
-      .from(pgSchema.agentChannelBindingsPostgres)
+      .select({ agentId: pgSchema.agentConversationBindingsPostgres.agentId })
+      .from(pgSchema.agentConversationBindingsPostgres)
       .where(
         and(
-          eq(pgSchema.agentChannelBindingsPostgres.appId, CANONICAL_APP_ID),
           eq(
-            pgSchema.agentChannelBindingsPostgres.conversationId,
+            pgSchema.agentConversationBindingsPostgres.appId,
+            CANONICAL_APP_ID,
+          ),
+          eq(
+            pgSchema.agentConversationBindingsPostgres.conversationId,
             input.conversationId,
           ),
-          isNull(pgSchema.agentChannelBindingsPostgres.threadId),
-          eq(pgSchema.agentChannelBindingsPostgres.status, 'active'),
+          isNull(pgSchema.agentConversationBindingsPostgres.threadId),
+          eq(pgSchema.agentConversationBindingsPostgres.status, 'active'),
         ),
       )
       .limit(1);

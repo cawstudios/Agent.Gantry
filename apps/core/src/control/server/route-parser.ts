@@ -12,8 +12,8 @@ export type WebhookRoute = {
   action: 'delete' | 'test' | 'replay-dead-letter' | 'purge-dead-letter';
 };
 
-export type ChannelInstallationRoute = {
-  installationId: string;
+export type ProviderConnectionRoute = {
+  providerConnectionId: string;
   action: 'get' | 'discover';
 };
 
@@ -105,22 +105,23 @@ export function parseWebhookRoute(pathname: string): WebhookRoute | null {
   };
 }
 
-export function parseChannelInstallationRoute(
+export function parseProviderConnectionRoute(
   pathname: string,
-): ChannelInstallationRoute | null {
-  const discoverMatch = /^\/v1\/channel-installations\/([^/]+)\/discover$/.exec(
-    pathname,
-  );
+): ProviderConnectionRoute | null {
+  const discoverMatch =
+    /^\/v1\/provider-connections\/([^/]+)\/discover-conversations$/.exec(
+      pathname,
+    );
   if (discoverMatch) {
     return {
-      installationId: decodeURIComponent(discoverMatch[1]!),
+      providerConnectionId: decodeURIComponent(discoverMatch[1]!),
       action: 'discover',
     };
   }
-  const baseMatch = /^\/v1\/channel-installations\/([^/]+)$/.exec(pathname);
+  const baseMatch = /^\/v1\/provider-connections\/([^/]+)$/.exec(pathname);
   if (!baseMatch) return null;
   return {
-    installationId: decodeURIComponent(baseMatch[1]!),
+    providerConnectionId: decodeURIComponent(baseMatch[1]!),
     action: 'get',
   };
 }
@@ -149,7 +150,7 @@ export function parseAgentBindingRoute(
   pathname: string,
 ): AgentBindingRoute | null {
   const bindingMatch =
-    /^\/v1\/agents\/([^/]+)\/channel-bindings\/([^/]+)$/.exec(pathname);
+    /^\/v1\/agents\/([^/]+)\/conversation-bindings\/([^/]+)$/.exec(pathname);
   if (bindingMatch) {
     return {
       agentId: decodeURIComponent(bindingMatch[1]!),
@@ -157,7 +158,9 @@ export function parseAgentBindingRoute(
       action: 'binding',
     };
   }
-  const listMatch = /^\/v1\/agents\/([^/]+)\/channel-bindings$/.exec(pathname);
+  const listMatch = /^\/v1\/agents\/([^/]+)\/conversation-bindings$/.exec(
+    pathname,
+  );
   if (!listMatch) return null;
   return {
     agentId: decodeURIComponent(listMatch[1]!),

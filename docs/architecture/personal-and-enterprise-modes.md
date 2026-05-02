@@ -1,7 +1,7 @@
 # Personal And Enterprise Modes
 
 MyClaw has one canonical runtime model with multiple deployment modes. Personal
-usage and enterprise usage differ by seeding, installation, policy, user
+usage and enterprise usage differ by seeding, providerConnection, policy, user
 surfaces, and operations. They must not become separate product architectures.
 
 ## Shared Runtime Model
@@ -11,8 +11,8 @@ Both modes use:
 - `App` as the namespace
 - `Agent` and `AgentConfigVersion` for behavior
 - `LlmProfile` for provider-neutral model selection
-- `ChannelProvider`, `ChannelInstallation`, and `AgentChannelBinding` for
-  channel presence
+- `Provider`, `ProviderConnection`, and `AgentConversationBinding` for provider
+  presence
 - `Conversation` and `ConversationThread` for communication
 - `User`, `Message`, `MessagePart`, and `MessageAttachment` for normalized
   events
@@ -25,7 +25,8 @@ Both modes use:
 - `SandboxProfile`, `SandboxLease`, `WorkspaceSnapshot`, and `BrowserProfile`
   for tool, workspace, browser, and host execution boundaries
 
-Channel and model providers adapt into this model. They do not define it.
+Channel/chat providers and model providers adapt into this model. They do not
+define it.
 
 ## Personal Mode
 
@@ -38,10 +39,10 @@ Seeded defaults:
 - local `settings.yaml`
 - local runtime secret source
 - local memory root and Postgres schema
-- one or more `ChannelInstallation` records for Telegram, WhatsApp, Slack, or
-  another personal channel
-- `AgentChannelBinding` records for the conversations where the user wants the
-  agent present
+- one or more `ProviderConnection` records for Telegram, WhatsApp, Slack, or
+  another personal provider
+- `AgentConversationBinding` records for the conversations where the user wants
+  the agent present
 - local default `LlmProfile`, typically backed by OneCLI or another credential
   broker
 - conservative default `PermissionPolicy`
@@ -53,7 +54,8 @@ storage, not domain identity.
 
 Personal administration should be represented as policy:
 
-- A private DM or trusted chat can be seeded as an admin binding.
+- A private DM can seed a DM admin, and a trusted group/channel can seed
+  conversation approvers.
 - Admin ability comes from `PermissionPolicy` and `PermissionRule`, not from a
   hard-coded main group concept.
 - `/new` and related session commands operate on canonical `AgentSession`
@@ -72,22 +74,22 @@ surfaces:
 - Web UI for users, administrators, and operators
 - control API for backend integrations and administration
 - server-side SDK for application developers
-- channel installations for Slack, Teams, Web UI, and other providers
+- provider connections for Slack, Teams, Web UI, and other providers
 - explicit users, roles, app scopes, and policy-managed admin actions
 - enterprise credential brokers or secret managers behind the same ports
 - deployment-specific sandbox providers
 - audit, event, and webhook integrations based on `RuntimeEvent` projections
 
 Enterprise applications should integrate through the SDK, control API, Web UI,
-and channel installations. They must not import runtime internals from
+and provider connections. They must not import runtime internals from
 `apps/core/src/**`.
 
-Enterprise channel examples:
+Enterprise conversation examples:
 
-- Slack workspace installation creates a `ChannelInstallation`.
+- Slack workspace providerConnection creates a `ProviderConnection`.
 - A Slack channel creates or maps to a `Conversation`.
 - A Slack thread maps to `ConversationThread`.
-- A Teams tenant/app installation creates a `ChannelInstallation`.
+- A Teams tenant/app providerConnection creates a `ProviderConnection`.
 - A Teams personal chat or channel chat maps to `Conversation`.
 - A Teams reply chain maps to `ConversationThread`.
 - A Web UI can model each chat as a `Conversation`, or model a visible chat as
@@ -100,7 +102,7 @@ Web UI, control API, and SDK are adapters over application use cases.
 
 They may:
 
-- create apps, agents, configs, and channel installations
+- create apps, agents, configs, and provider connections
 - bind agents to conversations and threads
 - send messages
 - stream run events
@@ -163,8 +165,8 @@ application layers should not know provider SDK types.
 | ------------- | ----------------------------------------------------- | -------------------------------------------------------------- |
 | App           | Seeded local app                                      | Explicit app per deployment, team, product, or tenant boundary |
 | Agent         | Default local agent plus optional custom agents       | Managed agents with versioned configs                          |
-| Channel setup | CLI-guided local channel installations                | Web UI/control API/SDK-managed installations                   |
-| Admin surface | Seeded trusted binding and local CLI                  | Web UI, control API, SDK, channel admin bindings               |
+| Conversation setup | CLI-guided local provider connections and bindings | Web UI/control API/SDK-managed provider connections and bindings |
+| Admin surface | Seeded DM admin/conversation approvers and local CLI  | Web UI, control API, SDK, conversation approver bindings        |
 | Credentials   | Local runtime secrets plus brokered agent credentials | Runtime secret provider and enterprise credential broker       |
 | Permissions   | Conservative defaults with local approvals            | Explicit policies, roles, audit, and approval flows            |
 | Workspace     | Local folders and snapshots                           | Managed workspace projections and snapshots                    |
@@ -177,9 +179,9 @@ Future code movement should keep personal setup as a convenience layer:
 
 - Seed default records through application services.
 - Store local folders as workspace projections.
-- Convert group registration flows into channel installation plus binding
+- Convert group registration flows into provider connection plus binding
   flows.
-- Convert main group behavior into explicit admin policy.
+- Convert main group behavior into explicit conversation approver policy.
 - Convert Claude session storage into provider sessions attached to agent
   sessions.
 - Route CLI and control HTTP through application use cases.

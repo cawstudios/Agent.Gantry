@@ -3,7 +3,7 @@ import path from 'path';
 
 import type { RegisteredGroup } from '../domain/types.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
-import { channelFromGroupJid, getChannelIds } from './channel-utils.js';
+import { providerFromGroupJid, getProviderIds } from './provider-utils.js';
 import {
   addControlSenderForAgent,
   loadRuntimeSettings,
@@ -14,7 +14,7 @@ import { RuntimeGroupDb, openRuntimeGroupDb } from './runtime-group-db.js';
 import { normalizeTelegramChatJid } from './telegram.js';
 
 export function usage(): string {
-  const channels = getChannelIds().join('|');
+  const channels = getProviderIds().join('|');
   return [
     'Agent commands:',
     '  myclaw agent list',
@@ -37,13 +37,23 @@ export function pruneAgentSenderPolicyOverride(
   jid: string,
   folder: string,
 ): { pruned: boolean; error?: string } {
-  const channel = channelFromGroupJid(jid);
+  const channel = providerFromGroupJid(jid);
   if (!channel) return { pruned: false };
   try {
     const settings = loadRuntimeSettings(runtimeHome);
-    const policy = settings.channels[channel].senderAllowlist;
-    if (!policy.agents[folder]) return { pruned: false };
-    delete policy.agents[folder];
+    let pruned = false;
+    for (const [bindingId, binding] of Object.entries(settings.bindings)) {
+      if (binding.agent !== folder) continue;
+      const conversation = settings.conversations[binding.conversation];
+      if (!conversation) continue;
+      const connection =
+        settings.providerConnections[conversation.providerConnection];
+      if (connection?.provider !== channel) continue;
+      delete settings.bindings[bindingId];
+      delete settings.agents[folder]?.bindings[bindingId];
+      pruned = true;
+    }
+    if (!pruned) return { pruned: false };
     saveRuntimeSettings(runtimeHome, settings);
     return { pruned: true };
   } catch (err) {
@@ -125,7 +135,7 @@ function createDefaultGroupClaudeMarkdown(agentName: string): string {
     '',
     'Rules:\n- Answer directly unless the user asks for detail.\n- Be explicit when an action failed and what to do next.\n- Never expose secrets or local paths unless explicitly requested.\n- When the user says "continue", call memory_search before guessing.',
     '',
-    'Capability rules:\n- Use send_message for progress updates and ask_user_question for structured choices.\n- Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.\n- Main/admin agents may use service_restart after approved changes and register_agent for channel binding.\n- Never run dependency installs or edit .claude/skills, .mcp.json, settings, or generated capability config directly.',
+    'Capability rules:\n- Use send_message for progress updates and ask_user_question for structured choices.\n- Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, request_tool_enable, or request_channel_tool_enable for capability changes.\n- Main/admin agents may use service_restart after approved changes and register_agent for conversation binding.\n- Never run dependency installs or edit .claude/skills, .mcp.json, settings, or generated capability config directly.',
     '',
   ].join('\n');
 }

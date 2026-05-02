@@ -327,7 +327,7 @@ export abstract class TelegramChannelConnect extends TelegramChannelPrompts {
       await this.opts.onMessage(chatJid, {
         id: msgId,
         chat_jid: chatJid,
-        channel_provider: 'telegram',
+        provider: 'telegram',
         sender,
         sender_name: senderName,
         content,
@@ -370,7 +370,7 @@ export abstract class TelegramChannelConnect extends TelegramChannelPrompts {
         await this.opts.ensureMessageRoute?.(chatJid, {
           id: ctx.message.message_id.toString(),
           chat_jid: chatJid,
-          channel_provider: 'telegram',
+          provider: 'telegram',
           sender: ctx.from?.id?.toString() || '',
           sender_name:
             ctx.from?.first_name ||
@@ -411,7 +411,7 @@ export abstract class TelegramChannelConnect extends TelegramChannelPrompts {
         await this.opts.onMessage(chatJid, {
           id: msgId,
           chat_jid: chatJid,
-          channel_provider: 'telegram',
+          provider: 'telegram',
           sender: ctx.from?.id?.toString() || '',
           sender_name: senderName,
           content,

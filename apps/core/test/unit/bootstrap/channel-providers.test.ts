@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { RuntimeSettings } from '@core/config/settings/runtime-settings.js';
 import '@core/channels/register-builtins.js';
 import {
-  getChannelProvider,
+  getProvider,
   listChannelProviders,
   providerForJid,
-  registerChannelProvider,
+  registerProvider,
 } from '@core/channels/provider-registry.js';
 
 function makeRuntimeSettings(enabled: {
@@ -15,25 +15,17 @@ function makeRuntimeSettings(enabled: {
   teams?: boolean;
   [key: string]: boolean;
 }): RuntimeSettings {
-  const allowlist = {
-    default: { allow: '*', mode: 'trigger' as const },
-    agents: {},
-    logDenied: true,
-  };
   return {
-    channels: {
-      telegram: { enabled: enabled.telegram, senderAllowlist: allowlist },
-      slack: { enabled: enabled.slack, senderAllowlist: allowlist },
-      teams: { enabled: enabled.teams ?? false, senderAllowlist: allowlist },
+    providers: {
+      telegram: { enabled: enabled.telegram },
+      slack: { enabled: enabled.slack },
+      teams: { enabled: enabled.teams ?? false },
       ...Object.fromEntries(
         Object.entries(enabled)
           .filter(
             ([key]) => key !== 'telegram' && key !== 'slack' && key !== 'teams',
           )
-          .map(([key, value]) => [
-            key,
-            { enabled: value, senderAllowlist: allowlist },
-          ]),
+          .map(([key, value]) => [key, { enabled: value }]),
       ),
     },
     memory: {
@@ -68,10 +60,10 @@ describe('listChannelProviders', () => {
   });
 
   it('resolves enablement from runtime settings', () => {
-    const slackProvider = getChannelProvider('slack')!;
-    const teamsProvider = getChannelProvider('teams')!;
-    const telegramProvider = getChannelProvider('telegram')!;
-    const appProvider = getChannelProvider('app')!;
+    const slackProvider = getProvider('slack')!;
+    const teamsProvider = getProvider('teams')!;
+    const telegramProvider = getProvider('telegram')!;
+    const appProvider = getProvider('app')!;
 
     expect(
       slackProvider.isEnabled(
@@ -112,27 +104,27 @@ describe('listChannelProviders', () => {
 
   it('throws on duplicate provider ids', () => {
     expect(() =>
-      registerChannelProvider({
+      registerProvider({
         ...listChannelProviders()[0],
       }),
-    ).toThrow(/Duplicate channel provider id/);
+    ).toThrow(/Duplicate provider id/);
   });
 
   it('rejects empty provider identity fields', () => {
     const base = listChannelProviders()[0]!;
 
-    expect(() => registerChannelProvider({ ...base, id: '   ' })).toThrow(
+    expect(() => registerProvider({ ...base, id: '   ' })).toThrow(
       /must be non-empty/,
     );
     expect(() =>
-      registerChannelProvider({
+      registerProvider({
         ...base,
         id: 'x-empty-prefix',
         jidPrefix: ' ',
       }),
     ).toThrow(/jidPrefix must be non-empty/);
     expect(() =>
-      registerChannelProvider({
+      registerProvider({
         ...base,
         id: 'x-empty-folder',
         jidPrefix: 'x:',
@@ -144,7 +136,7 @@ describe('listChannelProviders', () => {
   it('rejects overlapping jid prefixes', () => {
     const base = listChannelProviders()[0]!;
     expect(() =>
-      registerChannelProvider({
+      registerProvider({
         ...base,
         id: 'slack-overlap',
         jidPrefix: 'sl',
@@ -154,9 +146,9 @@ describe('listChannelProviders', () => {
   });
 
   it('resolves providers by channel id and jid prefix', () => {
-    expect(getChannelProvider('telegram')?.id).toBe('telegram');
-    expect(getChannelProvider('slack')?.id).toBe('slack');
-    expect(getChannelProvider('teams')?.id).toBe('teams');
+    expect(getProvider('telegram')?.id).toBe('telegram');
+    expect(getProvider('slack')?.id).toBe('slack');
+    expect(getProvider('teams')?.id).toBe('teams');
     expect(providerForJid('tg:-100123')?.id).toBe('telegram');
     expect(providerForJid('sl:C123456')?.id).toBe('slack');
     expect(providerForJid('teams:19:abc@thread.v2')?.id).toBe('teams');
@@ -165,15 +157,15 @@ describe('listChannelProviders', () => {
 
   it('supports a third provider in registry and settings checks', () => {
     const id = `test-provider-${Date.now()}`;
-    registerChannelProvider({
+    registerProvider({
       ...listChannelProviders()[0]!,
       id,
       jidPrefix: `tp${Date.now()}:`,
       folderPrefix: `tp_${Date.now()}_`,
-      isEnabled: (settings) => settings.channels[id]?.enabled === true,
+      isEnabled: (settings) => settings.providers[id]?.enabled === true,
     });
 
-    const provider = getChannelProvider(id);
+    const provider = getProvider(id);
     expect(provider).toBeDefined();
     expect(
       provider?.isEnabled(

@@ -50,8 +50,8 @@ describe('RuntimeSecretChannelMembershipValidator', () => {
 
     const result = await validator.validateControlApprovers({
       providerId: 'teams' as never,
-      installation: {
-        id: 'installation-1',
+      providerConnection: {
+        id: 'providerConnection-1',
         appId: 'default' as never,
         providerId: 'teams' as never,
         label: 'Teams',
@@ -68,7 +68,7 @@ describe('RuntimeSecretChannelMembershipValidator', () => {
       conversation: {
         id: 'conversation-1' as never,
         appId: 'default' as never,
-        channelInstallationId: 'installation-1' as never,
+        providerConnectionId: 'providerConnection-1' as never,
         externalRef: { kind: 'conversation', value: 'teams:19:abc@thread.v2' },
         kind: 'channel',
         title: 'Engineering',
@@ -137,8 +137,8 @@ describe('RuntimeSecretChannelMembershipValidator', () => {
 
     const result = await validator.validateControlApprovers({
       providerId: 'teams' as never,
-      installation: {
-        id: 'installation-2',
+      providerConnection: {
+        id: 'providerConnection-2',
         appId: 'default' as never,
         providerId: 'teams' as never,
         label: 'Teams',
@@ -158,7 +158,7 @@ describe('RuntimeSecretChannelMembershipValidator', () => {
       conversation: {
         id: 'conversation-2' as never,
         appId: 'default' as never,
-        channelInstallationId: 'installation-2' as never,
+        providerConnectionId: 'providerConnection-2' as never,
         externalRef: { kind: 'conversation', value: 'teams:19:def@thread.v2' },
         kind: 'channel',
         title: 'Design',

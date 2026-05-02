@@ -1,10 +1,10 @@
 import type { AppId } from '../../../domain/app/app.js';
 import type {
-  AgentChannelBinding,
-  ChannelInstallation,
-  ChannelInstallationId,
-  ChannelProvider,
-} from '../../../domain/channel/channel.js';
+  AgentConversationBinding,
+  ProviderConnection,
+  ProviderConnectionId,
+  Provider,
+} from '../../../domain/provider/provider.js';
 import type {
   Conversation,
   ConversationId,
@@ -22,7 +22,7 @@ import type { WorkspaceSnapshotId } from '../../../domain/sandbox/sandbox.js';
 import type { AgentId } from '../../../domain/agent/agent.js';
 import type { ExternalRef } from '../../../shared/ids/branded-id.js';
 import { ApplicationError } from '../../../application/common/application-error.js';
-import type { AgentBindingPatch } from '../../../application/channels/channel-control-use-cases.js';
+import type { AgentBindingPatch } from '../../../application/provider-conversations/provider-conversation-control-use-cases.js';
 
 export function parseLimit(raw: string | null): number | undefined {
   if (!raw) return undefined;
@@ -97,12 +97,12 @@ export function memorySubjectFromContract(
     default:
       throw new ApplicationError(
         'INVALID_REQUEST',
-        'Unsupported memorySubject type for channel binding',
+        'Unsupported memorySubject type for conversation binding',
       );
   }
 }
 
-export function providerToResponse(provider: ChannelProvider) {
+export function providerToResponse(provider: Provider) {
   const placeholder = provider.capabilityFlags.includes('placeholder');
   return {
     id: provider.id,
@@ -114,18 +114,22 @@ export function providerToResponse(provider: ChannelProvider) {
   };
 }
 
-export function installationToResponse(installation: ChannelInstallation) {
+export function providerConnectionToResponse(
+  providerConnection: ProviderConnection,
+) {
   return {
-    id: installation.id,
-    appId: installation.appId,
-    providerId: installation.providerId,
-    label: installation.label,
-    status: installation.status,
-    config: installation.config,
-    externalRef: externalRefToContract(installation.externalInstallationRef),
-    runtimeSecretRefs: installation.runtimeSecretRefs,
-    createdAt: installation.createdAt,
-    updatedAt: installation.updatedAt,
+    id: providerConnection.id,
+    appId: providerConnection.appId,
+    providerId: providerConnection.providerId,
+    label: providerConnection.label,
+    status: providerConnection.status,
+    config: providerConnection.config,
+    externalRef: externalRefToContract(
+      providerConnection.externalInstallationRef,
+    ),
+    runtimeSecretRefs: providerConnection.runtimeSecretRefs,
+    createdAt: providerConnection.createdAt,
+    updatedAt: providerConnection.updatedAt,
   };
 }
 
@@ -140,10 +144,13 @@ function conversationStatusToContract(status: Conversation['status']) {
 }
 
 export function conversationToResponse(conversation: Conversation) {
+  const providerConnectionId =
+    conversation.providerConnectionId ??
+    (conversation as { providerConnectionId?: string }).providerConnectionId;
   return {
     id: conversation.id,
     appId: conversation.appId,
-    channelInstallationId: conversation.channelInstallationId,
+    providerConnectionId,
     externalRef: externalRefToContract(conversation.externalRef),
     kind: conversationKindToContract(conversation.kind),
     title: conversation.title ?? null,
@@ -225,12 +232,15 @@ export function messageToResponse(message: Message) {
   };
 }
 
-export function bindingToResponse(binding: AgentChannelBinding) {
+export function bindingToResponse(binding: AgentConversationBinding) {
+  const providerConnectionId =
+    binding.providerConnectionId ??
+    (binding as { providerConnectionId?: string }).providerConnectionId;
   return {
     id: binding.id,
     appId: binding.appId,
     agentId: binding.agentId,
-    channelInstallationId: binding.channelInstallationId,
+    providerConnectionId,
     conversationId: binding.conversationId,
     threadId: binding.threadId ?? null,
     displayName: binding.displayName,
@@ -252,7 +262,7 @@ export function bindingPatchFromParsed(
   appId: AppId,
   conversationId: ConversationId,
   data: {
-    channelInstallationId?: string;
+    providerConnectionId?: string;
     threadId?: string;
     displayName?: string;
     triggerMode?: AgentBindingPatch['triggerMode'];
@@ -267,10 +277,10 @@ export function bindingPatchFromParsed(
   },
 ): AgentBindingPatch {
   return {
-    ...(data.channelInstallationId
+    ...(data.providerConnectionId
       ? {
-          channelInstallationId:
-            data.channelInstallationId as ChannelInstallationId,
+          providerConnectionId:
+            data.providerConnectionId as ProviderConnectionId,
         }
       : {}),
     ...(data.threadId

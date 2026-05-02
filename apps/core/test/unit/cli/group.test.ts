@@ -53,29 +53,11 @@ function createRuntimeHome(): string {
   fs.writeFileSync(
     settingsFilePath(home),
     [
-      'channels:',
+      'providers:',
       '  telegram:',
       '    enabled: false',
-      '    sender_allowlist:',
-      '      default:',
-      '        allow: "*"',
-      '        mode: trigger',
-      '      agents: {}',
-      '      log_denied: true',
-      '    control_allowlist:',
-      '      default: []',
-      '      agents: {}',
       '  slack:',
       '    enabled: false',
-      '    sender_allowlist:',
-      '      default:',
-      '        allow: "*"',
-      '        mode: trigger',
-      '      agents: {}',
-      '      log_denied: true',
-      '    control_allowlist:',
-      '      default: []',
-      '      agents: {}',
       'storage:',
       '  postgres:',
       '    url_env: MYCLAW_DATABASE_URL',
@@ -343,7 +325,7 @@ describe('group CLI commands', () => {
     expect(await runAgentCommand(runtimeHome, ['list'])).toBe(0);
 
     expect(info).toHaveBeenCalledWith(
-      expect.stringContaining('myclaw channel connect telegram'),
+      expect.stringContaining('myclaw provider connect telegram'),
     );
   });
 
@@ -568,9 +550,10 @@ describe('group CLI commands', () => {
       const settings = loadRuntimeSettingsFromPath(
         settingsFilePath(runtimeHome),
       );
-      expect(
-        settings.channels.telegram.controlAllowlist.agents.kai_tg_100123,
-      ).toBeUndefined();
+      const conversation = Object.values(settings.conversations).find(
+        (entry) => entry.externalId === '-100123',
+      );
+      expect(conversation?.controlApprovers).toEqual([]);
     } finally {
       vi.doUnmock('@core/cli/telegram.js');
       vi.resetModules();
@@ -704,9 +687,10 @@ describe('group CLI commands', () => {
     const settings = parseRuntimeSettings(
       fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8'),
     );
-    expect(
-      settings.channels.slack.senderAllowlist.agents.slack_policy_group,
-    ).toEqual({
+    const conversation = Object.values(settings.conversations).find(
+      (candidate) => candidate.externalId === jid.replace(/^sl:/, ''),
+    );
+    expect(conversation?.senderPolicy).toEqual({
       allow: ['U123', 'U456'],
       mode: 'drop',
     });
@@ -718,11 +702,29 @@ describe('group CLI commands', () => {
     const updated = parseRuntimeSettings(
       fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8'),
     );
-    expect(updated.channels.slack.senderAllowlist.agents).toEqual({});
+    const updatedConversation = Object.values(updated.conversations).find(
+      (candidate) => candidate.externalId === jid.replace(/^sl:/, ''),
+    );
+    expect(updatedConversation?.senderPolicy).toEqual({
+      allow: '*',
+      mode: 'trigger',
+    });
   });
 
-  it('updates default channel sender policy', async () => {
+  it('updates sender policy for configured provider conversations', async () => {
     const { runAgentCommand } = await import('@core/cli/group.js');
+    const jid = `sl:default-policy-${Date.now().toString(36)}`;
+
+    expect(
+      await runAgentCommand(runtimeHome, [
+        'add',
+        jid,
+        '--name',
+        'Default Policy',
+        '--folder',
+        'slack_default_policy',
+      ]),
+    ).toBe(0);
 
     expect(
       await runAgentCommand(runtimeHome, [
@@ -739,7 +741,10 @@ describe('group CLI commands', () => {
     const settings = parseRuntimeSettings(
       fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8'),
     );
-    expect(settings.channels.slack.senderAllowlist.default).toEqual({
+    const conversation = Object.values(settings.conversations).find(
+      (candidate) => candidate.externalId === jid.replace(/^sl:/, ''),
+    );
+    expect(conversation?.senderPolicy).toEqual({
       allow: ['U333'],
       mode: 'drop',
     });
@@ -778,8 +783,6 @@ describe('group CLI commands', () => {
     const settings = parseRuntimeSettings(
       fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8'),
     );
-    expect(
-      settings.channels.slack.senderAllowlist.agents.slack_remove_policy,
-    ).toBeUndefined();
+    expect(settings.bindings.slack_remove_policy).toBeUndefined();
   });
 });

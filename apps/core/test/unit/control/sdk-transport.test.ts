@@ -277,46 +277,61 @@ describe('@myclaw/sdk transport', () => {
     });
 
     await client.settings.get();
-    await client.channels.providers.list();
-    await client.channels.installations.create({
+    await client.providers.list();
+    await client.providerConnections.create({
       appId: 'app-one',
       providerId: 'slack',
       label: 'Slack',
       runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
     });
-    await client.channels.installations.list();
-    await client.channels.installations.get('installation/1');
-    await client.channels.installations.update('installation/1', {
+    await client.providerConnections.list();
+    await client.providerConnections.get('providerConnection/1');
+    await client.providerConnections.update('providerConnection/1', {
       label: 'Slack workspace',
       enabled: false,
       runtimeSecretRefs: ['SLACK_BOT_TOKEN_V2'],
     });
-    await client.channels.installations.delete('installation/1');
-    await client.channels.installations.discover('installation/1', {
-      limit: 10,
+    await client.providerConnections.delete('providerConnection/1');
+    await client.providerConnections.discoverConversations(
+      'providerConnection/1',
+      {
+        limit: 10,
+      },
+    );
+    await client.conversations.list({
+      providerConnectionId: 'providerConnection/1',
     });
-    await client.channels.conversations.list({
-      channelInstallationId: 'installation/1',
-    });
-    await client.channels.conversations.get('conversation/1');
-    await client.channels.conversations.messages('conversation/1', {
+    await client.conversations.get('conversation/1');
+    await client.conversations.messages('conversation/1', {
       threadId: 'thread/1',
       after: 'message/0',
       limit: 5,
     });
-    await client.agents.bindings.list('agent/1');
-    await client.agents.bindings.enable('agent/1', 'conversation/1', {
-      triggerMode: 'mention',
-      memoryScope: 'conversation',
-    });
-    await client.agents.bindings.update('agent/1', 'conversation/1', {
-      triggerMode: 'keyword',
-      triggerPattern: 'deploy',
-      permissionPolicyIds: ['policy/1'],
-    });
-    await client.agents.bindings.disable('agent/1', 'conversation/1', {
-      threadId: 'thread/1',
-    });
+    await client.agents.conversationBindings.list('agent/1');
+    await client.agents.conversationBindings.enable(
+      'agent/1',
+      'conversation/1',
+      {
+        triggerMode: 'mention',
+        memoryScope: 'conversation',
+      },
+    );
+    await client.agents.conversationBindings.update(
+      'agent/1',
+      'conversation/1',
+      {
+        triggerMode: 'keyword',
+        triggerPattern: 'deploy',
+        permissionPolicyIds: ['policy/1'],
+      },
+    );
+    await client.agents.conversationBindings.disable(
+      'agent/1',
+      'conversation/1',
+      {
+        threadId: 'thread/1',
+      },
+    );
     await client.skillDrafts.upload({
       agentId: 'agent/1',
       createdBy: 'admin',
@@ -336,10 +351,10 @@ describe('@myclaw/sdk transport', () => {
 
     expect(seen).toEqual([
       { method: 'GET', url: '/v1/settings', body: null },
-      { method: 'GET', url: '/v1/channel-providers', body: null },
+      { method: 'GET', url: '/v1/providers', body: null },
       {
         method: 'POST',
-        url: '/v1/channel-installations',
+        url: '/v1/provider-connections',
         body: {
           appId: 'app-one',
           providerId: 'slack',
@@ -347,15 +362,15 @@ describe('@myclaw/sdk transport', () => {
           runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
         },
       },
-      { method: 'GET', url: '/v1/channel-installations', body: null },
+      { method: 'GET', url: '/v1/provider-connections', body: null },
       {
         method: 'GET',
-        url: '/v1/channel-installations/installation%2F1',
+        url: '/v1/provider-connections/providerConnection%2F1',
         body: null,
       },
       {
         method: 'PATCH',
-        url: '/v1/channel-installations/installation%2F1',
+        url: '/v1/provider-connections/providerConnection%2F1',
         body: {
           label: 'Slack workspace',
           enabled: false,
@@ -364,17 +379,17 @@ describe('@myclaw/sdk transport', () => {
       },
       {
         method: 'DELETE',
-        url: '/v1/channel-installations/installation%2F1',
+        url: '/v1/provider-connections/providerConnection%2F1',
         body: null,
       },
       {
         method: 'POST',
-        url: '/v1/channel-installations/installation%2F1/discover',
+        url: '/v1/provider-connections/providerConnection%2F1/discover-conversations',
         body: { limit: 10 },
       },
       {
         method: 'GET',
-        url: '/v1/conversations?channelInstallationId=installation%2F1',
+        url: '/v1/conversations?providerConnectionId=providerConnection%2F1',
         body: null,
       },
       {
@@ -389,12 +404,12 @@ describe('@myclaw/sdk transport', () => {
       },
       {
         method: 'GET',
-        url: '/v1/agents/agent%2F1/channel-bindings',
+        url: '/v1/agents/agent%2F1/conversation-bindings',
         body: null,
       },
       {
         method: 'PUT',
-        url: '/v1/agents/agent%2F1/channel-bindings/conversation%2F1',
+        url: '/v1/agents/agent%2F1/conversation-bindings/conversation%2F1',
         body: {
           triggerMode: 'mention',
           memoryScope: 'conversation',
@@ -402,7 +417,7 @@ describe('@myclaw/sdk transport', () => {
       },
       {
         method: 'PATCH',
-        url: '/v1/agents/agent%2F1/channel-bindings/conversation%2F1',
+        url: '/v1/agents/agent%2F1/conversation-bindings/conversation%2F1',
         body: {
           triggerMode: 'keyword',
           triggerPattern: 'deploy',
@@ -411,7 +426,7 @@ describe('@myclaw/sdk transport', () => {
       },
       {
         method: 'DELETE',
-        url: '/v1/agents/agent%2F1/channel-bindings/conversation%2F1?threadId=thread%2F1',
+        url: '/v1/agents/agent%2F1/conversation-bindings/conversation%2F1?threadId=thread%2F1',
         body: null,
       },
       {

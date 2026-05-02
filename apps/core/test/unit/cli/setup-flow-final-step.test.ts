@@ -143,7 +143,7 @@ async function loadVerifyStep(modelAccessResult: {
     hasProcessableGroupForConfiguredChannel: vi.fn(async () => true),
   }));
   vi.doMock('@core/channels/provider-registry.js', () => ({
-    registerChannelProvider: vi.fn(),
+    registerProvider: vi.fn(),
     listConnectableChannelProviders: vi.fn(() => [
       { id: 'telegram' },
       { id: 'slack' },
@@ -238,9 +238,10 @@ describe('setup group step', () => {
     const { loadRuntimeSettings } =
       await import('@core/config/settings/runtime-settings.js');
     const settings = loadRuntimeSettings(runtimeHome);
-    expect(
-      settings.channels.telegram.controlAllowlist.agents.main_agent,
-    ).toEqual(['123', '456']);
+    const conversation = Object.values(settings.conversations).find(
+      (entry) => entry.providerConnection === 'telegram_default',
+    );
+    expect(conversation?.controlApprovers).toEqual(['123', '456']);
   });
 });
 

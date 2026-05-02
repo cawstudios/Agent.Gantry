@@ -4,10 +4,11 @@ import path from 'path';
 import * as p from '@clack/prompts';
 
 import type { RegisteredGroup } from '../domain/types.js';
-import { channelFromGroupJid, getChannelIds } from './channel-utils.js';
+import { providerFromGroupJid, getProviderIds } from './provider-utils.js';
 import { readEnvFile } from '../config/env/file.js';
 import { envFilePath } from '../config/settings/runtime-home.js';
 import {
+  ensureConfiguredConversationBinding,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
@@ -46,6 +47,37 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function findConversationIdForAgent(
+  settings: ReturnType<typeof loadRuntimeSettings>,
+  agentId: string,
+  providerId: string,
+): string | null {
+  for (const binding of Object.values(settings.bindings)) {
+    if (binding.agent !== agentId) continue;
+    const conversation = settings.conversations[binding.conversation];
+    if (!conversation) continue;
+    const connection =
+      settings.providerConnections[conversation.providerConnection];
+    if (connection?.provider === providerId) {
+      return binding.conversation;
+    }
+  }
+  return null;
+}
+
+function conversationIdsForProvider(
+  settings: ReturnType<typeof loadRuntimeSettings>,
+  providerId: string,
+): string[] {
+  return Object.entries(settings.conversations)
+    .filter(([, conversation]) => {
+      const connection =
+        settings.providerConnections[conversation.providerConnection];
+      return connection?.provider === providerId;
+    })
+    .map(([conversationId]) => conversationId);
+}
+
 async function runList(runtimeHome: string): Promise<number> {
   let db: RuntimeGroupDb | null = null;
   try {
@@ -68,8 +100,8 @@ async function runList(runtimeHome: string): Promise<number> {
 
     if (groups.length === 0) {
       p.log.warn('No agents are registered in this runtime home.');
-      const connectCommands = getChannelIds().map(
-        (channel) => `\`myclaw channel connect ${channel}\``,
+      const connectCommands = getProviderIds().map(
+        (channel) => `\`myclaw provider connect ${channel}\``,
       );
       p.log.info(
         `Next action: run \`myclaw agent add <chat-id>\` or ${connectCommands.join(' / ')}.`,
@@ -279,6 +311,22 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
         }
       }
       await db.setRegisteredGroup(normalized, record);
+      try {
+        ensureConfiguredConversationBinding(settings, {
+          agentId: agentFolder,
+          agentName: displayName,
+          agentFolder,
+          jid: normalized,
+          displayName,
+          trigger: record.trigger,
+          requiresTrigger: record.requiresTrigger !== false,
+          isMain: record.isMain === true,
+        });
+        saveRuntimeSettings(runtimeHome, settings);
+      } catch {
+        // Generic local JIDs are still allowed for file-backed agents; only
+        // known provider JIDs participate in conversation desired state.
+      }
       try {
         const seededApprover = await seedTelegramControlApproverForAgent({
           runtimeHome,
@@ -561,30 +609,49 @@ async function runPolicy(runtimeHome: string, args: string[]): Promise<number> {
     }
 
     const found = resolved.found;
-    const channel = channelFromGroupJid(found.jid);
+    const channel = providerFromGroupJid(found.jid);
     if (!channel) {
       p.log.error(
-        `Agent ${found.group.name} (${found.jid}) does not map to a registered channel provider.`,
+        `Agent ${found.group.name} (${found.jid}) does not map to a registered provider.`,
       );
       return 1;
     }
 
     const settings = loadRuntimeSettings(runtimeHome);
-    const policy = settings.channels[channel].senderAllowlist;
+    const ensured = ensureConfiguredConversationBinding(settings, {
+      agentId: found.group.folder,
+      agentName: found.group.name,
+      agentFolder: found.group.folder,
+      jid: found.jid,
+      displayName: found.group.name,
+      trigger: found.group.trigger,
+      requiresTrigger: found.group.requiresTrigger !== false,
+      isMain: found.group.isMain === true,
+    });
+    const conversation =
+      settings.conversations[
+        findConversationIdForAgent(settings, found.group.folder, channel) ||
+          ensured.conversationId
+      ];
+    if (!conversation) {
+      p.log.error(
+        `Agent ${found.group.name} (${found.jid}) does not have a configured conversation.`,
+      );
+      return 1;
+    }
 
     if (parsed.clear) {
-      delete policy.agents[found.group.folder];
+      conversation.senderPolicy = { allow: '*', mode: 'trigger' };
       saveRuntimeSettings(runtimeHome, settings);
       p.log.success(
-        `Cleared sender policy override for ${found.group.name} (${found.group.folder}) in ${channel}.`,
+        `Cleared sender policy for ${found.group.name} (${found.group.folder}) in ${channel}.`,
       );
       return 0;
     }
 
-    const existing = policy.agents[found.group.folder];
-    policy.agents[found.group.folder] = {
+    conversation.senderPolicy = {
       allow: parsed.allow!,
-      mode: parsed.mode ?? existing?.mode ?? policy.default.mode,
+      mode: parsed.mode ?? conversation.senderPolicy.mode,
     };
     saveRuntimeSettings(runtimeHome, settings);
     p.log.success(
@@ -617,13 +684,25 @@ async function runPolicyDefault(
       p.log.error('Missing required policy-default arguments.');
       return 1;
     }
-    const policy = settings.channels[channel].senderAllowlist;
-    policy.default = {
-      allow,
-      mode: parsed.mode ?? policy.default.mode,
-    };
+    const conversationIds = conversationIdsForProvider(settings, channel);
+    if (conversationIds.length === 0) {
+      p.log.error(
+        `No configured ${channel} conversations found. Add or connect a conversation before setting its sender policy.`,
+      );
+      return 1;
+    }
+    for (const conversationId of conversationIds) {
+      const conversation = settings.conversations[conversationId];
+      if (!conversation) continue;
+      conversation.senderPolicy = {
+        allow,
+        mode: parsed.mode ?? conversation.senderPolicy.mode,
+      };
+    }
     saveRuntimeSettings(runtimeHome, settings);
-    p.log.success(`Updated default sender policy for ${channel} channel.`);
+    p.log.success(
+      `Updated sender policy for ${conversationIds.length} ${channel} conversation${conversationIds.length === 1 ? '' : 's'}.`,
+    );
     return 0;
   } catch (err) {
     p.log.error(`Could not update default sender policy: ${errorMessage(err)}`);
@@ -647,7 +726,7 @@ async function runPolicyShow(
       printPolicyChannel(parsed.channel, settings);
       return 0;
     }
-    const channels = getChannelIds();
+    const channels = getProviderIds();
     for (let i = 0; i < channels.length; i += 1) {
       printPolicyChannel(channels[i]!, settings);
       if (i < channels.length - 1) {
