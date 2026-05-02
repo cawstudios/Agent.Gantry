@@ -30,6 +30,16 @@ const mocks = vi.hoisted(() => ({
       },
     ],
   })),
+  listSlackRecentChats: vi.fn(async () => ({
+    ok: true,
+    chats: [
+      {
+        chatJid: 'sl:C123',
+        chatTitle: 'Engineering',
+        chatType: 'channel',
+      },
+    ],
+  })),
 }));
 
 vi.mock('@core/cli/telegram-chat-discovery.js', () => ({
@@ -37,7 +47,7 @@ vi.mock('@core/cli/telegram-chat-discovery.js', () => ({
 }));
 
 vi.mock('@core/cli/slack-chat-discovery.js', () => ({
-  listSlackRecentChats: vi.fn(async () => ({ ok: true, chats: [] })),
+  listSlackRecentChats: mocks.listSlackRecentChats,
 }));
 
 function providerConnection(runtimeSecretRefs: string[]): ProviderConnection {
@@ -79,6 +89,7 @@ describe('RuntimeSecretConversationDiscovery', () => {
   beforeEach(() => {
     mocks.listTelegramRecentChats.mockClear();
     mocks.listTeamsChannels.mockClear();
+    mocks.listSlackRecentChats.mockClear();
   });
 
   it('does not fall back to preferred host env names when refs are empty', async () => {
@@ -160,6 +171,35 @@ describe('RuntimeSecretConversationDiscovery', () => {
         clientSecret: 'client-secret',
         tenantId: 'tenant-id',
       },
+      limit: 10,
+    });
+  });
+
+  it('normalizes Slack provider-native channels into conversations', async () => {
+    const discovery = new RuntimeSecretConversationDiscovery(
+      secrets({ SLACK_BOT_TOKEN: 'xoxb-token' }),
+    );
+    const slackConnection = {
+      ...providerConnection(['SLACK_BOT_TOKEN']),
+      providerId: 'slack' as never,
+      label: 'Slack',
+    } as ProviderConnection;
+
+    await expect(
+      discovery.discover({
+        providerConnection: slackConnection,
+        limit: 10,
+      }),
+    ).resolves.toEqual([
+      {
+        externalId: 'sl:C123',
+        title: 'Engineering',
+        kind: 'channel',
+        externalRef: { kind: 'conversation', value: 'sl:C123' },
+      },
+    ]);
+    expect(mocks.listSlackRecentChats).toHaveBeenCalledWith({
+      botToken: 'xoxb-token',
       limit: 10,
     });
   });
