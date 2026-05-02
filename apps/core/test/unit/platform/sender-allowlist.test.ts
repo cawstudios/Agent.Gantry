@@ -162,6 +162,85 @@ function writeSettings(
   return p;
 }
 
+function writeSameAgentMultiConversationSettings(): string {
+  const p = settingsPath();
+  fs.writeFileSync(
+    p,
+    [
+      'version: 3',
+      'providers:',
+      '  telegram:',
+      '    enabled: true',
+      '    default_connection: telegram_default',
+      'provider_connections:',
+      '  telegram_default:',
+      '    provider: telegram',
+      '    label: Telegram',
+      '    runtime_secret_refs: {}',
+      'conversations:',
+      '  first_conversation:',
+      '    provider_connection: telegram_default',
+      '    external_id: "1"',
+      '    kind: group',
+      '    display_name: First',
+      '    sender_policy:',
+      '      allow: ["alice"]',
+      '      mode: trigger',
+      '    control_approvers: ["admin-one"]',
+      '  second_conversation:',
+      '    provider_connection: telegram_default',
+      '    external_id: "2"',
+      '    kind: group',
+      '    display_name: Second',
+      '    sender_policy:',
+      '      allow: ["bob"]',
+      '      mode: trigger',
+      '    control_approvers: ["admin-two"]',
+      'agents:',
+      '  main_agent:',
+      '    name: Main Agent',
+      '    bindings: {}',
+      '    dm_access: {}',
+      '    capabilities:',
+      '      tool_ids: []',
+      '      skill_ids: []',
+      '      mcp_server_ids: []',
+      'bindings:',
+      '  first_binding:',
+      '    agent: main_agent',
+      '    conversation: first_conversation',
+      '    trigger: "@agent"',
+      '    added_at: "2026-01-01T00:00:00.000Z"',
+      '    requires_trigger: true',
+      '    main: false',
+      '    memory_scope: conversation',
+      '  second_binding:',
+      '    agent: main_agent',
+      '    conversation: second_conversation',
+      '    trigger: "@agent"',
+      '    added_at: "2026-01-01T00:00:00.000Z"',
+      '    requires_trigger: true',
+      '    main: false',
+      '    memory_scope: conversation',
+      'storage:',
+      '  postgres:',
+      '    url_env: MYCLAW_DATABASE_URL',
+      '    schema: myclaw',
+      'memory:',
+      '  enabled: true',
+      '  embeddings:',
+      '    enabled: false',
+      '    provider: disabled',
+      '    model: text-embedding-3-large',
+      '  dreaming:',
+      '    enabled: false',
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
+  return p;
+}
+
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'allowlist-test-'));
   if (!getProvider('test-provider')) {
@@ -211,8 +290,21 @@ describe('loadSenderAllowlist', () => {
     const cfg = loadSenderAllowlist(p);
     expect(cfg.telegram.default.allow).toBe('*');
     expect(cfg.telegram.logDenied).toBe(true);
-    expect(cfg.telegram.agents.telegram_kai.mode).toBe('trigger');
-    expect(cfg.slack.agents.slack_ops.allow).toEqual(['U999']);
+    expect(cfg.telegram.conversations?.['tg:1']?.telegram_kai.mode).toBe(
+      'trigger',
+    );
+    expect(cfg.slack.conversations?.['sl:C1']?.slack_ops.allow).toEqual([
+      'U999',
+    ]);
+  });
+
+  it('keeps settings-derived sender policies scoped by conversation', () => {
+    const cfg = loadSenderAllowlist(writeSameAgentMultiConversationSettings());
+
+    expect(isSenderAllowed('tg:1', 'alice', cfg, 'main_agent')).toBe(true);
+    expect(isSenderAllowed('tg:1', 'bob', cfg, 'main_agent')).toBe(false);
+    expect(isSenderAllowed('tg:2', 'bob', cfg, 'main_agent')).toBe(true);
+    expect(isSenderAllowed('tg:2', 'alice', cfg, 'main_agent')).toBe(false);
   });
 
   it('returns allow-all on invalid YAML', () => {
@@ -346,6 +438,25 @@ describe('sender control allowlist', () => {
     expect(
       isSenderControlAllowed('tg:1', 'bob', controlCfg, 'telegram_kai'),
     ).toBe(false);
+  });
+
+  it('keeps settings-derived control approvers scoped by conversation', () => {
+    const cfg = loadSenderControlAllowlist(
+      writeSameAgentMultiConversationSettings(),
+    );
+
+    expect(isSenderControlAllowed('tg:1', 'admin-one', cfg, 'main_agent')).toBe(
+      true,
+    );
+    expect(isSenderControlAllowed('tg:1', 'admin-two', cfg, 'main_agent')).toBe(
+      false,
+    );
+    expect(isSenderControlAllowed('tg:2', 'admin-two', cfg, 'main_agent')).toBe(
+      true,
+    );
+    expect(isSenderControlAllowed('tg:2', 'admin-one', cfg, 'main_agent')).toBe(
+      false,
+    );
   });
 });
 

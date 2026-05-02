@@ -11,17 +11,25 @@ import type {
 } from '../config/settings/sender-allowlist.js';
 import { settingsFilePath } from '../config/settings/runtime-home.js';
 import {
+  getProvider,
   listChannelProviders,
   providerForJid,
 } from '../channels/provider-registry.js';
 
+export type RuntimeSenderProviderAllowlistConfig = SenderAllowlistConfig & {
+  conversations?: Record<string, Record<string, ChatAllowlistEntry>>;
+};
 export type RuntimeSenderAllowlistConfig = Record<
   string,
-  SenderAllowlistConfig
+  RuntimeSenderProviderAllowlistConfig
 >;
+export type RuntimeSenderControlProviderAllowlistConfig =
+  SenderControlAllowlistConfig & {
+    conversations?: Record<string, Record<string, string[]>>;
+  };
 export type RuntimeSenderControlAllowlistConfig = Record<
   string,
-  SenderControlAllowlistConfig
+  RuntimeSenderControlProviderAllowlistConfig
 >;
 
 interface AllowlistDesiredState {
@@ -30,6 +38,7 @@ interface AllowlistDesiredState {
     string,
     {
       providerConnection: string;
+      externalId: string;
       senderPolicy: ChatAllowlistEntry;
       controlApprovers: string[];
     }
@@ -70,10 +79,11 @@ const DEFAULT_ENTRY: ChatAllowlistEntry = {
   mode: 'drop',
 };
 
-function cloneDefaultChannelConfig(): SenderAllowlistConfig {
+function cloneDefaultChannelConfig(): RuntimeSenderProviderAllowlistConfig {
   return {
     default: { ...DEFAULT_CHANNEL_CONFIG.default },
     agents: {},
+    conversations: {},
     logDenied: DEFAULT_CHANNEL_CONFIG.logDenied,
   };
 }
@@ -86,10 +96,11 @@ function createDefaultConfig(): RuntimeSenderAllowlistConfig {
   return cfg;
 }
 
-function cloneDefaultControlChannelConfig(): SenderControlAllowlistConfig {
+function cloneDefaultControlChannelConfig(): RuntimeSenderControlProviderAllowlistConfig {
   return {
     default: [...DEFAULT_CONTROL_CHANNEL_CONFIG.default],
     agents: {},
+    conversations: {},
   };
 }
 
@@ -114,7 +125,14 @@ function deriveSenderAllowlistFromSettings(
     if (!connection) continue;
     const providerId = connection.provider;
     sender[providerId] ??= cloneDefaultChannelConfig();
-    sender[providerId].agents[binding.agent] = conversation.senderPolicy;
+    const conversationJid = jidForSettingsConversation(
+      providerId,
+      conversation.externalId,
+    );
+    sender[providerId].conversations ??= {};
+    sender[providerId].conversations[conversationJid] ??= {};
+    sender[providerId].conversations[conversationJid][binding.agent] =
+      conversation.senderPolicy;
   }
 
   return sender;
@@ -133,7 +151,14 @@ function deriveControlAllowlistFromSettings(
     if (!connection) continue;
     const providerId = connection.provider;
     control[providerId] ??= cloneDefaultControlChannelConfig();
-    control[providerId].agents[binding.agent] = conversation.controlApprovers;
+    const conversationJid = jidForSettingsConversation(
+      providerId,
+      conversation.externalId,
+    );
+    control[providerId].conversations ??= {};
+    control[providerId].conversations[conversationJid] ??= {};
+    control[providerId].conversations[conversationJid][binding.agent] =
+      conversation.controlApprovers;
   }
 
   return control;
@@ -168,7 +193,7 @@ function cachedSettings(filePath: string): {
 function getChannelConfig(
   chatJid: string,
   cfg: RuntimeSenderAllowlistConfig,
-): SenderAllowlistConfig | undefined {
+): RuntimeSenderProviderAllowlistConfig | undefined {
   const channelId = providerForJid(chatJid)?.id;
   if (!channelId) return undefined;
   return cfg[channelId];
@@ -177,10 +202,21 @@ function getChannelConfig(
 function getControlChannelConfig(
   chatJid: string,
   cfg: RuntimeSenderControlAllowlistConfig,
-): SenderControlAllowlistConfig | undefined {
+): RuntimeSenderControlProviderAllowlistConfig | undefined {
   const channelId = providerForJid(chatJid)?.id;
   if (!channelId) return undefined;
   return cfg[channelId];
+}
+
+function jidForSettingsConversation(
+  providerId: string,
+  externalId: string,
+): string {
+  const provider = getProvider(providerId);
+  if (!provider) return externalId;
+  return externalId.startsWith(provider.jidPrefix)
+    ? externalId
+    : `${provider.jidPrefix}${externalId}`;
 }
 
 export function loadSenderAllowlist(
@@ -237,6 +273,8 @@ function getEntry(
   const channelCfg = getChannelConfig(chatJid, cfg);
   if (!channelCfg) return DEFAULT_ENTRY;
   if (groupFolder) {
+    const byConversation = channelCfg.conversations?.[chatJid]?.[groupFolder];
+    if (byConversation) return byConversation;
     const byAgent = channelCfg.agents[groupFolder];
     if (byAgent) return byAgent;
   }
@@ -251,6 +289,8 @@ function getControlSenders(
   const channelCfg = getControlChannelConfig(chatJid, cfg);
   if (!channelCfg) return [];
   if (groupFolder) {
+    const byConversation = channelCfg.conversations?.[chatJid]?.[groupFolder];
+    if (byConversation) return byConversation;
     const byAgent = channelCfg.agents[groupFolder];
     if (byAgent) return byAgent;
   }
