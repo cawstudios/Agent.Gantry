@@ -1,6 +1,6 @@
 name = "automated-tester"
 description = "Test-focused agent that adds or updates automated tests, runs scoped commands, and reports remaining coverage gaps."
-model = "gpt-5.3-codex"
+model = "gpt-5.5"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 nickname_candidates = ["JUnit", "PyTest", "Mocha"]
