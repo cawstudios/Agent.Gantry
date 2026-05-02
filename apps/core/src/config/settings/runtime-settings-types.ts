@@ -14,14 +14,7 @@ export interface RuntimeProviderConnectionSettings {
   runtimeSecretRefs: Record<string, string>;
 }
 
-export type RuntimeConversationKind =
-  | 'dm'
-  | 'direct'
-  | 'group'
-  | 'channel'
-  | 'chat'
-  | 'service'
-  | 'web';
+export type RuntimeConversationKind = 'dm' | 'channel';
 
 export interface RuntimeConfiguredConversation {
   providerConnection: string;

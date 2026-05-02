@@ -378,6 +378,7 @@ export async function runTeamsConnectCommand(
       agentName: registeredGroupName || settings.agent.name,
       agentFolder: registeredFolder,
       jid: registeredChatJid,
+      conversationKind: 'channel',
       displayName: registeredChatTitle || registeredGroupName,
       trigger: `@${registeredGroupName || settings.agent.name}`,
       requiresTrigger: false,

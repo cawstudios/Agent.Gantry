@@ -219,7 +219,7 @@ describe('SettingsDesiredStateService', () => {
     settings.conversations.kai = {
       providerConnection: 'telegram_default',
       externalId: '-100123',
-      kind: 'group',
+      kind: 'channel',
       displayName: 'Kai',
       senderPolicy: { allow: '*', mode: 'trigger' },
       controlApprovers: ['5759865942'],
@@ -338,7 +338,7 @@ describe('SettingsDesiredStateService', () => {
       administration.isControlApproverAllowed({
         appId: 'default' as never,
         providerId: 'telegram' as never,
-        channelJid: 'telegram:-100123',
+        conversationJid: 'telegram:-100123',
         userId: '5759865942',
       }),
     ).resolves.toBe(true);

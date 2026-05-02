@@ -11,6 +11,8 @@ import {
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
+import type { RuntimeConfiguredConversation } from '../config/settings/runtime-settings-types.js';
+import { telegramConversationKindForChat } from './conversation-kind.js';
 import {
   normalizeTelegramChatJid,
   readTelegramFromRuntimeEnv,
@@ -24,6 +26,7 @@ type TelegramChatChoice =
   | {
       type: 'selected';
       chatJid: string;
+      conversationKind: RuntimeConfiguredConversation['kind'];
       adminSenderId?: string;
     }
   | { type: 'skip' }
@@ -76,8 +79,21 @@ async function promptManualTelegramChatId(
   const adminSenderId = await promptManualTelegramAdminSenderId();
   if (adminSenderId === null) return { type: 'cancel' };
   return adminSenderId
-    ? { type: 'selected', chatJid: normalized, adminSenderId }
-    : { type: 'selected', chatJid: normalized };
+    ? {
+        type: 'selected',
+        chatJid: normalized,
+        conversationKind: telegramConversationKindForChat({
+          chatJid: normalized,
+        }),
+        adminSenderId,
+      }
+    : {
+        type: 'selected',
+        chatJid: normalized,
+        conversationKind: telegramConversationKindForChat({
+          chatJid: normalized,
+        }),
+      };
 }
 
 async function promptManualTelegramAdminSenderId(): Promise<string | null> {
@@ -182,8 +198,23 @@ async function chooseChatFromDiscovery(
     discoveredSender || (await promptManualTelegramAdminSenderId());
   if (adminSenderId === null) return { type: 'cancel' };
   return adminSenderId
-    ? { type: 'selected', chatJid: normalized, adminSenderId }
-    : { type: 'selected', chatJid: normalized };
+    ? {
+        type: 'selected',
+        chatJid: normalized,
+        conversationKind: telegramConversationKindForChat({
+          chatJid: normalized,
+          providerChatType: selectedChat?.chatType,
+        }),
+        adminSenderId,
+      }
+    : {
+        type: 'selected',
+        chatJid: normalized,
+        conversationKind: telegramConversationKindForChat({
+          chatJid: normalized,
+          providerChatType: selectedChat?.chatType,
+        }),
+      };
 }
 
 export async function runTelegramConnectCommand(
@@ -222,6 +253,8 @@ export async function runTelegramConnectCommand(
   }
   const normalizedChatJid =
     chatChoice.type === 'selected' ? chatChoice.chatJid : '';
+  const conversationKind =
+    chatChoice.type === 'selected' ? chatChoice.conversationKind : undefined;
   const adminSenderId =
     chatChoice.type === 'selected' ? chatChoice.adminSenderId : undefined;
   let approverInput = '';
@@ -278,6 +311,7 @@ export async function runTelegramConnectCommand(
       agentName: registeredGroupName || settings.agent.name,
       agentFolder: registeredFolder,
       jid: normalizedChatJid,
+      conversationKind,
       displayName: registeredGroupName || settings.agent.name,
       trigger: `@${registeredGroupName || settings.agent.name}`,
       requiresTrigger: false,

@@ -1,6 +1,7 @@
 import fs from 'fs';
 
 import type { HostCredentialMode } from '../config/credentials/mode.js';
+import type { RuntimeConfiguredConversation } from '../config/settings/runtime-settings-types.js';
 import { onboardingStatePath } from '../config/settings/runtime-home.js';
 
 export type OnboardingStep =
@@ -31,10 +32,12 @@ export interface OnboardingData {
   serviceChoice?: 'skip' | 'install' | 'install_start';
   telegramBotUsername?: string;
   telegramChatJid?: string;
+  telegramConversationKind?: RuntimeConfiguredConversation['kind'];
   telegramAdminSenderId?: string;
   telegramAdminSenderName?: string;
   telegramPermissionApproverIds?: string;
   slackChatJid?: string;
+  slackConversationKind?: RuntimeConfiguredConversation['kind'];
   slackPermissionApproverIds?: string;
   memoryEnabled?: boolean;
   embeddingsEnabled?: boolean;

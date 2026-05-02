@@ -79,6 +79,7 @@ export interface EnsureConfiguredConversationBindingInput {
   agentName: string;
   agentFolder: string;
   jid: string;
+  conversationKind?: RuntimeSettings['conversations'][string]['kind'];
   displayName: string;
   trigger: string;
   requiresTrigger: boolean;
@@ -240,7 +241,9 @@ export function ensureConfiguredConversationBinding(
   settings.conversations[conversationId] = {
     providerConnection: providerConnectionId,
     externalId,
-    kind: provider.isGroupJid(input.jid) ? 'group' : 'dm',
+    kind:
+      input.conversationKind ??
+      (provider.isGroupJid(input.jid) ? 'channel' : 'dm'),
     displayName: input.displayName.trim() || input.jid,
     senderPolicy: existingConversation?.senderPolicy || {
       allow: '*',

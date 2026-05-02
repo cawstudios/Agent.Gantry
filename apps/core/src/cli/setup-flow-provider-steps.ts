@@ -25,6 +25,10 @@ import {
   validateSlackPermissionApproverIdsInput,
 } from './setup-slack-approvers.js';
 import type { SetupDraft } from './setup-flow-state.js';
+import {
+  slackConversationKindForChat,
+  telegramConversationKindForChat,
+} from './conversation-kind.js';
 
 async function promptTelegramAdminSenderIdForManualChat(
   draft: SetupDraft,
@@ -240,6 +244,10 @@ export async function runTelegramStep(draft: SetupDraft): Promise<FlowAction> {
       const selectedChat = discovered.chats.find(
         (chat) => chat.chatJid === normalizedJid,
       );
+      draft.telegramConversationKind = telegramConversationKindForChat({
+        chatJid: normalizedJid,
+        providerChatType: selectedChat?.chatType,
+      });
       if (selectedChat?.chatType === 'private') {
         draft.telegramAdminSenderId =
           /^tg:(\d+)$/.exec(selectedChat.chatJid)?.[1] || '';
@@ -296,6 +304,9 @@ export async function runTelegramStep(draft: SetupDraft): Promise<FlowAction> {
       continue;
     }
     draft.telegramChatJid = normalizedJid;
+    draft.telegramConversationKind =
+      draft.telegramConversationKind ||
+      telegramConversationKindForChat({ chatJid: normalizedJid });
 
     const chatCheckSpinner = p.spinner();
     chatCheckSpinner.start('Verifying Telegram chat access...');
@@ -560,6 +571,13 @@ export async function runSlackStep(draft: SetupDraft): Promise<FlowAction> {
       if (selected === 'resume') return { type: 'resume' };
       if (selected === 'cancel') return { type: 'cancel' };
       normalizedJid = normalizeSlackChatJid(String(selected)) || '';
+      const selectedChat = discovered.chats.find(
+        (chat) => chat.chatJid === normalizedJid,
+      );
+      draft.slackConversationKind = slackConversationKindForChat({
+        chatJid: normalizedJid,
+        providerChatType: selectedChat?.chatType,
+      });
     } else {
       discoverySpinner.stop('No accessible Slack conversation found.');
       if (discovered.nextAction) p.log.info(discovered.nextAction);
@@ -600,6 +618,9 @@ export async function runSlackStep(draft: SetupDraft): Promise<FlowAction> {
       continue;
     }
     draft.slackChatJid = normalizedJid;
+    draft.slackConversationKind =
+      draft.slackConversationKind ||
+      slackConversationKindForChat({ chatJid: normalizedJid });
 
     const access = await verifySlackChatAccess({
       botToken,

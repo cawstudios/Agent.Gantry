@@ -1,5 +1,7 @@
 import * as p from '@clack/prompts';
 
+import type { RuntimeConfiguredConversation } from '../config/settings/runtime-settings-types.js';
+import { slackConversationKindForChat } from './conversation-kind.js';
 import { listSlackRecentChats } from './slack-chat-discovery.js';
 
 function normalizeSlackChatJid(raw: string): string | null {
@@ -15,7 +17,11 @@ function normalizeSlackChatJid(raw: string): string | null {
 }
 
 export type SlackChatChoice =
-  | { type: 'selected'; chatJid: string }
+  | {
+      type: 'selected';
+      chatJid: string;
+      conversationKind: RuntimeConfiguredConversation['kind'];
+    }
   | { type: 'skip' }
   | { type: 'cancel' };
 
@@ -37,7 +43,13 @@ async function promptManualSlackChatId(
   if (p.isCancel(input)) return { type: 'cancel' };
   const normalized = normalizeSlackChatJid(String(input || '').trim());
   return normalized
-    ? { type: 'selected', chatJid: normalized }
+    ? {
+        type: 'selected',
+        chatJid: normalized,
+        conversationKind: slackConversationKindForChat({
+          chatJid: normalized,
+        }),
+      }
     : { type: 'skip' };
 }
 
@@ -78,7 +90,17 @@ export async function chooseSlackChatForConnect(
   if (selected === 'manual') return promptManualSlackChatId(defaultChatJid);
   if (selected === 'skip') return { type: 'skip' };
   const normalized = normalizeSlackChatJid(String(selected || '').trim());
+  const selectedChat = discovery.chats.find(
+    (chat) => chat.chatJid === normalized,
+  );
   return normalized
-    ? { type: 'selected', chatJid: normalized }
+    ? {
+        type: 'selected',
+        chatJid: normalized,
+        conversationKind: slackConversationKindForChat({
+          chatJid: normalized,
+          providerChatType: selectedChat?.chatType,
+        }),
+      }
     : { type: 'skip' };
 }

@@ -218,7 +218,6 @@ export function validateLoadedRuntimeSettings(
     }
     if (
       conversation.kind !== 'dm' &&
-      conversation.kind !== 'direct' &&
       conversation.controlApprovers.length === 0
     ) {
       details.push(

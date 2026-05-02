@@ -195,7 +195,7 @@ export class SettingsDesiredStateService {
       conversations[conversationId] ??= {
         providerConnection: connectionId,
         externalId: stripProviderPrefix(jid),
-        kind: provider?.isGroupJid(jid) ? 'group' : 'dm',
+        kind: provider?.isGroupJid(jid) ? 'channel' : 'dm',
         displayName: group.name,
         senderPolicy: { allow: '*', mode: 'trigger' },
         controlApprovers: [],
@@ -480,7 +480,10 @@ export class SettingsDesiredStateService {
         kind: 'conversation',
         value: externalConversationId,
       },
-      kind: configuredConversationKind(input.conversation.kind),
+      kind: configuredConversationKind(
+        input.conversation.kind,
+        connectionSettings.provider,
+      ),
       title: input.conversation.displayName,
       status: 'active',
       createdAt: input.now,

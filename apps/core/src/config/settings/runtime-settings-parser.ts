@@ -214,20 +214,10 @@ function parseSenderPolicy(
 
 function parseConversationKind(raw: unknown, pathPrefix: string) {
   const value = parseStringValue(raw, pathPrefix);
-  if (
-    value === 'dm' ||
-    value === 'direct' ||
-    value === 'group' ||
-    value === 'channel' ||
-    value === 'chat' ||
-    value === 'service' ||
-    value === 'web'
-  ) {
+  if (value === 'dm' || value === 'channel') {
     return value;
   }
-  throw new Error(
-    `${pathPrefix} must be one of dm, direct, group, channel, chat, service, web`,
-  );
+  throw new Error(`${pathPrefix} must be one of dm, channel`);
 }
 
 function parseConversations(

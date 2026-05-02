@@ -535,6 +535,8 @@ export async function runSlackConnectCommand(
   }
   const normalizedChatJid =
     chatChoice.type === 'selected' ? chatChoice.chatJid : '';
+  const conversationKind =
+    chatChoice.type === 'selected' ? chatChoice.conversationKind : undefined;
   const approverInput = normalizedChatJid
     ? await promptForValue({
         message:
@@ -587,6 +589,7 @@ export async function runSlackConnectCommand(
       agentName: registeredGroupName || settings.agent.name,
       agentFolder: registeredFolder,
       jid: normalizedChatJid,
+      conversationKind,
       displayName: registeredGroupName || settings.agent.name,
       trigger: `@${registeredGroupName || settings.agent.name}`,
       requiresTrigger: false,

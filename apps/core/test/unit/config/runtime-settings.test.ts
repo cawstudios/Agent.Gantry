@@ -207,4 +207,34 @@ describe('runtime settings', () => {
     ).toEqual(['abc-def', 'abc:def']);
     expect(Object.keys(settings.bindings)).toHaveLength(2);
   });
+
+  it('uses explicit provider conversation kinds from CLI onboarding', () => {
+    const settings = createDefaultRuntimeSettings();
+
+    const slack = ensureConfiguredConversationBinding(settings, {
+      agentId: 'main_agent',
+      agentName: 'Main',
+      agentFolder: 'main_agent',
+      jid: 'sl:D12345678',
+      conversationKind: 'dm',
+      displayName: 'Ravi DM',
+      trigger: '@main',
+      requiresTrigger: false,
+      isMain: true,
+    });
+    const teams = ensureConfiguredConversationBinding(settings, {
+      agentId: 'teams_agent',
+      agentName: 'Teams',
+      agentFolder: 'teams_agent',
+      jid: 'teams:19:abc@thread.tacv2',
+      conversationKind: 'channel',
+      displayName: 'Engineering',
+      trigger: '@teams',
+      requiresTrigger: false,
+      isMain: false,
+    });
+
+    expect(settings.conversations[slack.conversationId]?.kind).toBe('dm');
+    expect(settings.conversations[teams.conversationId]?.kind).toBe('channel');
+  });
 });

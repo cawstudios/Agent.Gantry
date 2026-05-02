@@ -80,9 +80,10 @@ export function jidForConfiguredConversation(
 
 export function configuredConversationKind(
   kind: RuntimeConfiguredConversation['kind'],
+  providerId?: string,
 ): Conversation['kind'] {
   if (kind === 'dm') return 'direct';
-  if (kind === 'chat') return 'group';
+  if (providerId === 'telegram') return 'group';
   return kind;
 }
 

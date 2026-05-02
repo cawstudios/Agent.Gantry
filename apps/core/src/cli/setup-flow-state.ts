@@ -18,6 +18,7 @@ import {
 import { writeOnboardingState } from './onboarding-state.js';
 import type { OnboardingState, OnboardingStep } from './onboarding-state.js';
 import { MAIN_AGENT_NAME } from './main-agent.js';
+import type { RuntimeConfiguredConversation } from '../config/settings/runtime-settings-types.js';
 
 export const FULL_SEQUENCE: OnboardingStep[] = [
   'welcome',
@@ -55,6 +56,7 @@ export interface SetupDraft {
   selectedModel: string;
   telegramBotToken: string;
   telegramChatJid: string;
+  telegramConversationKind: RuntimeConfiguredConversation['kind'] | '';
   telegramDisplayName: string;
   telegramAdminSenderId: string;
   telegramAdminSenderName: string;
@@ -63,6 +65,7 @@ export interface SetupDraft {
   slackBotToken: string;
   slackAppToken: string;
   slackChatJid: string;
+  slackConversationKind: RuntimeConfiguredConversation['kind'] | '';
   slackDisplayName: string;
   slackPermissionApproverIds: string;
   memoryEnabled: boolean;
@@ -114,11 +117,13 @@ export function updateStateData(
     serviceChoice: draft.serviceChoice,
     telegramBotUsername: draft.telegramBotUsername || undefined,
     telegramChatJid: draft.telegramChatJid || undefined,
+    telegramConversationKind: draft.telegramConversationKind || undefined,
     telegramAdminSenderId: draft.telegramAdminSenderId || undefined,
     telegramAdminSenderName: draft.telegramAdminSenderName || undefined,
     telegramPermissionApproverIds:
       draft.telegramPermissionApproverIds || undefined,
     slackChatJid: draft.slackChatJid || undefined,
+    slackConversationKind: draft.slackConversationKind || undefined,
     slackPermissionApproverIds: draft.slackPermissionApproverIds || undefined,
     credentialMode: draft.credentialMode,
     onecliUrl: draft.onecliUrl || undefined,
@@ -142,6 +147,8 @@ export function updateDraftFromState(
   draft.telegramBotUsername =
     state.data.telegramBotUsername || draft.telegramBotUsername;
   draft.telegramChatJid = state.data.telegramChatJid || draft.telegramChatJid;
+  draft.telegramConversationKind =
+    state.data.telegramConversationKind || draft.telegramConversationKind;
   draft.telegramAdminSenderId =
     state.data.telegramAdminSenderId || draft.telegramAdminSenderId;
   draft.telegramAdminSenderName =
@@ -150,6 +157,8 @@ export function updateDraftFromState(
     state.data.telegramPermissionApproverIds ||
     draft.telegramPermissionApproverIds;
   draft.slackChatJid = state.data.slackChatJid || draft.slackChatJid;
+  draft.slackConversationKind =
+    state.data.slackConversationKind || draft.slackConversationKind;
   draft.slackPermissionApproverIds =
     state.data.slackPermissionApproverIds || draft.slackPermissionApproverIds;
   draft.credentialMode = resolveHostCredentialMode(
@@ -237,6 +246,7 @@ export function restoreDraft(
       ) || DEFAULT_SETUP_MODEL_ALIAS,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || '',
     telegramChatJid: '',
+    telegramConversationKind: '',
     telegramDisplayName: settings.agent.name || MAIN_AGENT_NAME,
     telegramAdminSenderId: '',
     telegramAdminSenderName: '',
@@ -245,6 +255,7 @@ export function restoreDraft(
     slackBotToken: env.SLACK_BOT_TOKEN || '',
     slackAppToken: env.SLACK_APP_TOKEN || '',
     slackChatJid: '',
+    slackConversationKind: '',
     slackDisplayName: settings.agent.name || MAIN_AGENT_NAME,
     slackPermissionApproverIds: firstConversationApprovers(
       settings,
