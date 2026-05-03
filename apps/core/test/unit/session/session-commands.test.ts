@@ -1387,6 +1387,24 @@ describe('handleSessionCommand', () => {
         groupFolder: 'test',
         selectionSource: 'session override',
         modelAlias: 'sonnet',
+        contextUsage: {
+          totalTokens: 150,
+          maxTokens: 200_000,
+          percentage: 0.075,
+          model: 'sonnet',
+          categories: [
+            { name: 'messages', tokens: 90, percentage: 0.045 },
+            { name: 'tools', tokens: 40, percentage: 0.02 },
+            { name: 'system prompt', tokens: 20, percentage: 0.01 },
+          ],
+          apiUsage: {
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_creation_input_tokens: 10,
+            cache_read_input_tokens: 40,
+          },
+          at: '2026-05-01T00:00:00.000Z',
+        },
         lastUsage: {
           model: 'sonnet',
           provider: 'anthropic',
@@ -1428,6 +1446,9 @@ describe('handleSessionCommand', () => {
       .calls[0][0] as string;
     expect(sentMsg).toContain('Model status');
     expect(sentMsg).toContain('Sonnet 4.6');
+    expect(sentMsg).toContain('Context: 150 / 200k tokens (0.1% used)');
+    expect(sentMsg).toContain('Top context: messages 90');
+    expect(sentMsg).toContain('Cache hit: current 27%, session 21%');
     expect(sentMsg).toContain('cache read 40');
     expect(sentMsg).toContain('cache write 10');
     expect(sentMsg).toContain('estimated cost $0.0020');

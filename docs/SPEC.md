@@ -355,7 +355,7 @@ Job model precedence is:
 3. `agent.default_model`
 4. system default `opus`
 
-Use `/model` in a group session to switch the live model (`/model`, `/model <alias>`, `/model default`). Use `/models` to list supported aliases and `/status` to inspect the current model, context window, token usage, cache read/write tokens, cache state, and cost when the provider reports it.
+Use `/model` in a group session to switch the live model (`/model`, `/model <alias>`, `/model default`). Use `/models` to list supported aliases and `/status` to inspect the current model, context window usage percentage, cache hit percentage, token usage, cache read/write tokens, cache state, top context contributors when available, and cost when the provider reports it.
 
 ### Claude Authentication
 

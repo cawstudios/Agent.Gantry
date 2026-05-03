@@ -156,6 +156,65 @@ function formatUsageLine(
   );
 }
 
+function inputSideTokens(usage: NormalizedModelUsage | undefined): number {
+  if (!usage) return 0;
+  return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+}
+
+function formatPercent(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'unknown';
+  if (value >= 10) return `${value.toFixed(0)}%`;
+  return `${value.toFixed(1)}%`;
+}
+
+function cacheHitPercent(
+  usage: NormalizedModelUsage | undefined,
+): number | undefined {
+  const denominator = inputSideTokens(usage);
+  if (!usage || denominator <= 0) return undefined;
+  return (usage.cacheReadTokens / denominator) * 100;
+}
+
+function formatContextLine(
+  snapshot: RuntimeModelStatusSnapshot | undefined,
+  contextWindowTokens: number | undefined,
+): string {
+  if (snapshot?.contextUsage) {
+    const context = snapshot.contextUsage;
+    return `Context: ${formatTokenCount(context.totalTokens)} / ${formatTokenCount(context.maxTokens)} tokens (${formatPercent(context.percentage)} used)`;
+  }
+  const inputTokens = inputSideTokens(snapshot?.lastUsage);
+  if (inputTokens > 0 && contextWindowTokens) {
+    const pct = (inputTokens / contextWindowTokens) * 100;
+    return `Context: about ${formatTokenCount(inputTokens)} / ${formatTokenCount(contextWindowTokens)} tokens (${formatPercent(pct)} used)`;
+  }
+  if (contextWindowTokens) {
+    return `Context window: ${formatTokenCount(contextWindowTokens)} tokens`;
+  }
+  return 'Context: unknown';
+}
+
+function formatContextContributors(
+  snapshot: RuntimeModelStatusSnapshot | undefined,
+): string | undefined {
+  const categories = snapshot?.contextUsage?.categories;
+  if (!categories || categories.length === 0) return undefined;
+  const top = [...categories]
+    .filter((category) => category.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens)
+    .slice(0, 4)
+    .map(
+      (category) =>
+        `${category.name} ${formatTokenCount(category.tokens)}${
+          typeof category.percentage === 'number'
+            ? ` (${formatPercent(category.percentage)})`
+            : ''
+        }`,
+    )
+    .join(', ');
+  return top ? `Top context: ${top}` : undefined;
+}
+
 export function formatModelStatus(
   snapshot: RuntimeModelStatusSnapshot | undefined,
   fallback: {
@@ -177,7 +236,7 @@ export function formatModelStatus(
   ];
   if (entry) {
     lines.push(
-      `Context window: ${formatTokenCount(entry.contextWindowTokens)} tokens`,
+      formatContextLine(snapshot, entry.contextWindowTokens),
       `Max output: ${formatTokenCount(entry.maxOutputTokens)} tokens`,
       `Cache: ${entry.cacheMode}`,
     );
@@ -188,6 +247,11 @@ export function formatModelStatus(
       'Cache: unknown',
     );
   }
+  const contributors = formatContextContributors(snapshot);
+  if (contributors) lines.push(contributors);
+  lines.push(
+    `Cache hit: current ${formatPercent(cacheHitPercent(snapshot?.lastUsage))}, session ${formatPercent(cacheHitPercent(snapshot?.cumulativeUsage))}`,
+  );
   lines.push(formatUsageLine('Current turn tokens', snapshot?.lastUsage));
   lines.push(formatUsageLine('Session tokens', snapshot?.cumulativeUsage));
   return lines.join('\n');

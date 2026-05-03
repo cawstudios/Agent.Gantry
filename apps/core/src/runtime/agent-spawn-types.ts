@@ -7,7 +7,10 @@ import type { SkillCatalogRepository } from '../domain/ports/repositories.js';
 import type { McpServerRepository } from '../domain/ports/repositories.js';
 import type { HostnameLookup } from '../domain/network/public-address-policy.js';
 import type { RemoteMcpDnsValidationCache } from '../application/mcp/mcp-server-policy.js';
-import type { NormalizedModelUsage } from '../shared/model-catalog.js';
+import type {
+  NormalizedModelUsage,
+  RuntimeContextUsageSnapshot,
+} from '../shared/model-catalog.js';
 import type { AgentPersona } from '../shared/agent-persona.js';
 
 export interface AgentInput {
@@ -40,6 +43,7 @@ export interface AgentOutput {
   interactionBoundary?: 'user_interaction';
   usage?: NormalizedModelUsage;
   usageEventId?: string;
+  contextUsage?: RuntimeContextUsageSnapshot;
   error?: string;
 }
 

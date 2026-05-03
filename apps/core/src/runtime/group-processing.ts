@@ -38,6 +38,7 @@ import {
 } from '../platform/sender-allowlist.js';
 import { AgentOutput, spawnAgent } from './agent-spawn.js';
 import { handleSessionCommand } from '../session/session-commands.js';
+import { defaultModelStatusSelection } from '../session/session-model-status.js';
 import type { GroupProcessingDeps } from './group-processing-types.js';
 import { getGroupMemoryStatus } from './group-memory-commands.js';
 import { runDreamingForGroup } from './memory-dreaming-runner.js';
@@ -96,6 +97,10 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
   ): Promise<'success' | 'error'> {
     const isMain = group.isMain === true;
     const sessionThreadId = options?.memoryContext?.threadId ?? null;
+    const modelStatus = createRuntimeModelStatusAccess(
+      group.folder,
+      sessionThreadId,
+    );
     let streamedResult = '';
     let latestProviderSessionId: string | undefined;
     const persistedProviderSessionIds = new Set<string>();
@@ -135,6 +140,18 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
                 defaultRuntimeModel ??= getDefaultModelConfig().model;
                 return defaultRuntimeModel;
               },
+            });
+          }
+          if (output.contextUsage) {
+            modelStatus.updateSelection({
+              ...defaultModelStatusSelection(
+                group.agentConfig?.model ??
+                  (defaultRuntimeModel ??= getDefaultModelConfig().model),
+              ),
+              selectionSource: group.agentConfig?.model
+                ? 'session override'
+                : 'chat default',
+              contextUsage: output.contextUsage,
             });
           }
           if (output.status !== 'error' && output.newSessionId) {

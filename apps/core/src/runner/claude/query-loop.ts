@@ -29,12 +29,14 @@ import {
 } from './runtime-env.js';
 import {
   buildRunnerSystemPrompt,
+  includeGitInstructionsForPersona,
   readMemoryContextBlock,
 } from './system-prompt.js';
 import type { AgentRunnerInput } from './types.js';
 import {
   findModelByRunnerModel,
   normalizeModelUsage,
+  type RuntimeContextUsageSnapshot,
 } from '../../shared/model-catalog.js';
 import { validateAgentToolInput } from './agent-model-selection.js';
 import { usageEventIdForMessage } from './query-usage-event-id.js';
@@ -130,7 +132,7 @@ export async function runQuery(
     externalMcpAlwaysAllowedTools: readExternalMcpAlwaysAllowedTools(),
   });
 
-  for await (const message of query({
+  const sdkQuery = query({
     prompt: stream,
     options: {
       model: configuredModel,
@@ -144,6 +146,11 @@ export async function runQuery(
           ? agentInput.sessionId
           : undefined,
       systemPrompt,
+      settings: {
+        includeGitInstructions: includeGitInstructionsForPersona(
+          agentInput.persona,
+        ),
+      },
       allowedTools: [...capabilities.allowedTools],
       env: sdkEnv,
       permissionMode: capabilities.permissionMode,
@@ -256,7 +263,9 @@ export async function runQuery(
       mcpServers: capabilities.mcpServers,
       includePartialMessages: true,
     },
-  })) {
+  });
+
+  for await (const message of sdkQuery) {
     messageCount++;
     const msgType =
       message.type === 'system'
@@ -333,11 +342,13 @@ export async function runQuery(
         message,
         fallbackModel: configuredModel,
       });
+      const contextUsage = await readContextUsage(sdkQuery);
       writeOutput({
         status: 'success',
         result:
           textResult && !sawPartialTextSinceLastResult ? textResult : null,
         newSessionId,
+        ...(contextUsage ? { contextUsage } : {}),
         ...(usage
           ? {
               usage,
@@ -419,6 +430,45 @@ function validateExternalMcpServers(
     servers[name] = config;
   }
   return servers;
+}
+
+async function readContextUsage(queryHandle: unknown) {
+  const candidate = queryHandle as {
+    getContextUsage?: () => Promise<{
+      totalTokens: number;
+      maxTokens: number;
+      percentage: number;
+      model?: string;
+      categories?: Array<{
+        name: string;
+        tokens: number;
+        percentage?: number;
+      }>;
+      apiUsage?: RuntimeContextUsageSnapshot['apiUsage'];
+    }>;
+  };
+  if (typeof candidate.getContextUsage !== 'function') return undefined;
+  try {
+    const usage = await candidate.getContextUsage();
+    return {
+      totalTokens: usage.totalTokens,
+      maxTokens: usage.maxTokens,
+      percentage: usage.percentage,
+      model: usage.model,
+      categories: (usage.categories ?? []).map((category) => ({
+        name: category.name,
+        tokens: category.tokens,
+        percentage: category.percentage,
+      })),
+      apiUsage: usage.apiUsage,
+      at: new Date().toISOString(),
+    } satisfies RuntimeContextUsageSnapshot;
+  } catch (err) {
+    log(
+      `Context usage unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return undefined;
+  }
 }
 
 function readExternalMcpAllowedTools(): readonly string[] {

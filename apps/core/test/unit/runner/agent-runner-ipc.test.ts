@@ -26,6 +26,7 @@ interface RunnerRecord {
     permissionDecision?: Record<string, unknown>;
     sdkEnv?: Record<string, string>;
     mcpServers?: Record<string, unknown>;
+    settings?: Record<string, unknown>;
     persistSession?: boolean;
     resume?: unknown;
     resumeSessionAt?: unknown;
@@ -200,6 +201,7 @@ export async function* query({ prompt, options }) {
     promptKind: typeof prompt === 'string' ? 'string' : 'stream',
     sdkEnv: options?.env,
     mcpServers: options?.mcpServers,
+    settings: options?.settings,
     persistSession: options?.persistSession,
     resume: options?.resume,
     resumeSessionAt: options?.resumeSessionAt,
@@ -521,6 +523,38 @@ describe('agent-runner IPC lifecycle', () => {
       const sdkEnv = readRecord(fixture.recordPath).calls[0]?.sdkEnv || {};
       expect(sdkEnv.ANTHROPIC_API_KEY).toBe('placeholder');
       expect(sdkEnv.CLAUDE_CODE_OAUTH_TOKEN).toBe('placeholder');
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'keeps Claude Code git instructions only for developer persona',
+    async () => {
+      const developerFixture = createRunnerFixture();
+      const developerResult = await runRunner(developerFixture, baseInput(), {
+        TEST_EXIT_AFTER_QUERY: '1',
+      });
+
+      expect(developerResult.exitCode).toBe(0);
+      expect(
+        readRecord(developerFixture.recordPath).calls[0]?.settings
+          ?.includeGitInstructions,
+      ).toBe(true);
+
+      const assistantFixture = createRunnerFixture();
+      const assistantResult = await runRunner(
+        assistantFixture,
+        baseInput({ persona: 'personal_assistant' }),
+        {
+          TEST_EXIT_AFTER_QUERY: '1',
+        },
+      );
+
+      expect(assistantResult.exitCode).toBe(0);
+      expect(
+        readRecord(assistantFixture.recordPath).calls[0]?.settings
+          ?.includeGitInstructions,
+      ).toBe(false);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );

@@ -361,7 +361,7 @@ Use these as standalone chat messages:
 - `/new` resets the current provider conversation and archives the previous transcript. It preserves durable memory, approved skills, MCP bindings, model choices, and agent configuration; the next user message starts fresh and drives memory retrieval.
 - `/models` lists the curated model catalog with aliases, provider label, context window, cache support, and default badges.
 - `/model <value>` switches the group model override through the catalog. Friendly aliases are case/punctuation-insensitive; raw provider model IDs are rejected.
-- `/status` shows the current model source, context window, max output, current/cumulative input/output/cache tokens, cache hit state, and estimated cost when reported.
+- `/status` shows the current model source, context window usage percentage, cache hit percentage, top context contributors when the SDK reports them, current/cumulative input/output/cache tokens, and estimated cost when reported.
 - Session commands require `is_from_me` or explicit conversation approver membership. `sender_policy.allow: "*"` allows interaction; it does not grant admin/session-command rights.
 
 ## Model Policy
