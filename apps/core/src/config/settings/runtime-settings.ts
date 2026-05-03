@@ -240,7 +240,7 @@ export function ensureConfiguredConversationBinding(
   settings.conversations[conversationId] = {
     providerConnection: providerConnectionId,
     externalId,
-    kind: provider.isGroupJid(input.jid) ? 'group' : 'dm',
+    kind: provider.isGroupJid(input.jid) ? 'channel' : 'dm',
     displayName: input.displayName.trim() || input.jid,
     senderPolicy: existingConversation?.senderPolicy || {
       allow: '*',

@@ -818,8 +818,8 @@ describe('control server runtime hardening', () => {
         path.join(runtimeHome, 'settings.yaml'),
         'utf-8',
       );
-      expect(raw).toContain('name: "Main Agent"');
-      expect(raw).toContain('default_model: ""');
+      expect(raw).toContain('defaults:');
+      expect(raw).toContain('model: opus');
 
       const unsupportedResponse = await requestWithRetry(
         `http://127.0.0.1:${port}/v1/settings`,

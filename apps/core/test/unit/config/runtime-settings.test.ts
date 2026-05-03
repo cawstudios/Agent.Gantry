@@ -28,8 +28,8 @@ describe('runtime settings', () => {
     settings.agent.recurringJobDefaultModel = 'opus-4.6';
 
     const yaml = renderRuntimeSettingsYaml(settings);
-    expect(yaml).toContain('one_time_job_default_model: kimi');
-    expect(yaml).toContain('recurring_job_default_model: opus-4.6');
+    expect(yaml).toContain('one_time_model: kimi');
+    expect(yaml).toContain('recurring_model: opus-4.6');
 
     const parsed = parseRuntimeSettings(yaml);
     expect(parsed.agent.defaultModel).toBe('sonnet');
@@ -40,11 +40,11 @@ describe('runtime settings', () => {
   it('rejects unsupported agent settings keys', () => {
     const settings = createDefaultRuntimeSettings();
     const yaml = renderRuntimeSettingsYaml(settings).replace(
-      '  default_model:',
-      '  raw_env: true\n  default_model:',
+      '  model:',
+      '  raw_env: true\n  model:',
     );
     expect(() => parseRuntimeSettings(yaml)).toThrow(
-      'agent.raw_env is not supported',
+      'defaults.raw_env is not supported',
     );
   });
 
@@ -118,7 +118,7 @@ describe('runtime settings', () => {
     const parsed = parseRuntimeSettings(renderRuntimeSettingsYaml(settings));
 
     expect(parsed.desiredState.authoritative).toBe(true);
-    expect(parsed.agents.main_agent.bindings.primary).toMatchObject({
+    expect(parsed.agents.main_agent.bindings.main_dm).toMatchObject({
       jid: 'tg:100',
       provider: 'telegram',
       name: 'Main DM',
@@ -126,15 +126,21 @@ describe('runtime settings', () => {
       requiresTrigger: false,
       isMain: true,
     });
-    expect(parsed.bindings.primary).toEqual(settings.bindings.primary);
+    expect(parsed.bindings.main_dm).toMatchObject({
+      agent: 'main_agent',
+      conversation: 'main_dm',
+      trigger: '@kai',
+      requiresTrigger: false,
+      isMain: true,
+      memoryScope: 'conversation',
+    });
   });
 
   it('rejects duplicate desired-state conversation bindings', () => {
-    const yaml = renderRuntimeSettingsYaml(
-      createDefaultRuntimeSettings(),
-    ).replace(
-      'agents: {}\n',
-      `agents:
+    const yaml = `defaults:
+  model: opus
+
+agents:
   one:
     name: One
     bindings:
@@ -149,8 +155,7 @@ describe('runtime settings', () => {
         jid: tg:100
         trigger: '@two'
         added_at: 2026-05-02T00:00:00.000Z
-`,
-    );
+`;
 
     expect(() => parseRuntimeSettings(yaml)).toThrow(
       'agents.two.bindings contains duplicate jid tg:100; already configured by agents.one',
@@ -158,17 +163,14 @@ describe('runtime settings', () => {
   });
 
   it('rejects raw model ids in desired-state agent defaults', () => {
-    const yaml = renderRuntimeSettingsYaml(
-      createDefaultRuntimeSettings(),
-    ).replace(
-      'agents: {}\n',
-      `agents:
+    const yaml = `defaults:
+  model: opus
+
+agents:
   main_agent:
     name: Main
     model: claude-opus-4-7
-    bindings: {}
-`,
-    );
+`;
 
     expect(() => parseRuntimeSettings(yaml)).toThrow(
       'agents.main_agent.model is invalid: Provider model ID "claude-opus-4-7" is not accepted here.',
@@ -206,5 +208,28 @@ describe('runtime settings', () => {
       ),
     ).toEqual(['abc-def', 'abc:def']);
     expect(Object.keys(settings.bindings)).toHaveLength(2);
+  });
+
+  it('does not render opaque skill UUIDs into human settings', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agents.kai = {
+      name: 'Kai',
+      folder: 'kai',
+      bindings: {},
+      dmAccess: [],
+      capabilities: {
+        toolIds: [],
+        skillIds: [
+          'skill:3014949c-a616-4b2c-80e7-0bc61bb31e85',
+          'company-handbook',
+        ],
+        mcpServerIds: [],
+      },
+    };
+
+    const yaml = renderRuntimeSettingsYaml(settings);
+
+    expect(yaml).not.toContain('skill:3014949c-a616-4b2c-80e7-0bc61bb31e85');
+    expect(yaml).toContain('company-handbook');
   });
 });

@@ -5,6 +5,7 @@ import {
 import { resolveModelSelection } from '../../shared/model-catalog.js';
 import { parseSenderAllowlistConfig } from './sender-allowlist.js';
 import { parseSimpleYamlObject } from './yaml.js';
+import { normalizeCompactRuntimeSettingsRoot } from './runtime-settings-compact.js';
 import {
   parseConfiguredAgents,
   parseDesiredStateSettings,
@@ -701,6 +702,14 @@ function parseAgentSettings(raw: unknown): RuntimeAgentSettings {
 }
 
 function parseStorageSettings(raw: unknown): RuntimeStorageSettings {
+  if (raw === undefined) {
+    return {
+      postgres: {
+        urlEnv: DEFAULT_STORAGE_POSTGRES_URL_ENV,
+        schema: DEFAULT_STORAGE_POSTGRES_SCHEMA,
+      },
+    };
+  }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error('storage must be a mapping');
   }
@@ -768,6 +777,22 @@ function parseMemoryLlmModels(
 }
 
 function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
+  if (raw === undefined) {
+    return {
+      enabled: true,
+      embeddings: {
+        enabled: false,
+        provider: 'disabled',
+        model: DEFAULT_EMBED_MODEL,
+      },
+      dreaming: {
+        enabled: false,
+      },
+      llm: {
+        models: getMemoryModelProfileDefaults('balanced'),
+      },
+    };
+  }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error('memory must be a mapping');
   }
@@ -895,7 +920,9 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
     throw new Error('root must be a mapping');
   }
 
-  const root = parsed as Record<string, unknown>;
+  const root = normalizeCompactRuntimeSettingsRoot(
+    parsed as Record<string, unknown>,
+  );
   for (const key of Object.keys(root)) {
     if (key === 'features') {
       throw new Error(
@@ -906,7 +933,7 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
       throw new Error('runtime settings are not supported.');
     }
     if (
-      key !== 'version' &&
+      key !== 'defaults' &&
       key !== 'desired_state' &&
       key !== 'providers' &&
       key !== 'provider_connections' &&
@@ -919,7 +946,7 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
       key !== 'memory'
     ) {
       throw new Error(
-        `${key} is not supported. Supported root keys are version, desired_state, providers, provider_connections, conversations, bindings, agents, storage, agent, credential_broker, and memory.`,
+        `${key} is not supported. Supported root keys are defaults, desired_state, providers, provider_connections, conversations, bindings, agents, storage, credential_broker, and memory.`,
       );
     }
   }

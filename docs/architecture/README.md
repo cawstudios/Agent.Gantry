@@ -16,6 +16,7 @@ For MyClaw, canonical architecture references are:
 - `docs/architecture/local-files-policy.md`
 - `docs/architecture/local-state-inventory.md`
 - `docs/architecture/session-resume.md`
+- `docs/architecture/compact-human-settings-yaml.md`
 - `docs/MEMORY.md`
 - `docs/REQUIREMENTS.md`
 - `docs/SPEC.md`
