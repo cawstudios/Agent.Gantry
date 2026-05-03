@@ -73,6 +73,7 @@ describe('runtime settings', () => {
     settings.agents.main_agent = {
       name: 'Main Agent',
       folder: 'main_agent',
+      persona: 'personal_assistant',
       model: 'sonnet',
       oneTimeJobDefaultModel: 'haiku',
       recurringJobDefaultModel: 'opus',
@@ -118,6 +119,10 @@ describe('runtime settings', () => {
     const parsed = parseRuntimeSettings(renderRuntimeSettingsYaml(settings));
 
     expect(parsed.desiredState.authoritative).toBe(true);
+    expect(parsed.agents.main_agent.persona).toBe('personal_assistant');
+    expect(renderRuntimeSettingsYaml(parsed)).toContain(
+      '    persona: personal_assistant',
+    );
     expect(parsed.agents.main_agent.bindings.main_dm).toMatchObject({
       jid: 'tg:100',
       provider: 'telegram',
@@ -134,6 +139,117 @@ describe('runtime settings', () => {
       isMain: true,
       memoryScope: 'conversation',
     });
+  });
+
+  it('keeps multi-binding conversations explicit without duplicating bindings', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.providers.telegram.enabled = true;
+    settings.providers.telegram.defaultConnection = 'telegram_default';
+    settings.providerConnections.telegram_default = {
+      provider: 'telegram',
+      label: 'Telegram Default',
+      runtimeSecretRefs: { bot_token: 'TELEGRAM_BOT_TOKEN' },
+    };
+    settings.agents.main_agent = {
+      name: 'Main Agent',
+      folder: 'main_agent',
+      bindings: {},
+      dmAccess: [],
+      capabilities: { toolIds: [], skillIds: [], mcpServerIds: [] },
+    };
+    settings.agents.helper = {
+      name: 'Helper',
+      folder: 'helper',
+      bindings: {},
+      dmAccess: [],
+      capabilities: { toolIds: [], skillIds: [], mcpServerIds: [] },
+    };
+    settings.conversations.team = {
+      providerConnection: 'telegram_default',
+      externalId: '-100',
+      kind: 'channel',
+      displayName: 'Team',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: ['575'],
+    };
+    settings.conversations.solo = {
+      providerConnection: 'telegram_default',
+      externalId: '575',
+      kind: 'dm',
+      displayName: 'Solo',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: ['575'],
+    };
+    settings.bindings.main_team = {
+      agent: 'main_agent',
+      conversation: 'team',
+      trigger: '@main',
+      addedAt: '2026-05-02T00:00:00.000Z',
+      requiresTrigger: false,
+      isMain: true,
+      memoryScope: 'conversation',
+    };
+    settings.bindings.helper_team = {
+      agent: 'helper',
+      conversation: 'team',
+      trigger: '@helper',
+      addedAt: '2026-05-03T00:00:00.000Z',
+      requiresTrigger: true,
+      isMain: false,
+      memoryScope: 'conversation',
+    };
+    settings.bindings.main_solo = {
+      agent: 'main_agent',
+      conversation: 'solo',
+      trigger: '@main',
+      addedAt: '2026-05-04T00:00:00.000Z',
+      requiresTrigger: false,
+      isMain: true,
+      memoryScope: 'conversation',
+    };
+
+    const yaml = renderRuntimeSettingsYaml(settings);
+    const parsed = parseRuntimeSettings(yaml);
+
+    expect(
+      Object.values(parsed.bindings).filter(
+        (binding) => binding.conversation === 'team',
+      ),
+    ).toHaveLength(2);
+    expect(
+      Object.values(parsed.bindings).filter(
+        (binding) => binding.conversation === 'solo',
+      ),
+    ).toHaveLength(1);
+    expect(parsed.bindings.solo?.addedAt).toBe('2026-05-04T00:00:00.000Z');
+  });
+
+  it('renders non-default provider connection ids without rerouting', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.providers.telegram.enabled = true;
+    settings.providers.telegram.defaultConnection = 'telegram_default';
+    settings.providerConnections.telegram_default = {
+      provider: 'telegram',
+      label: 'Telegram Default',
+      runtimeSecretRefs: { bot_token: 'TELEGRAM_BOT_TOKEN' },
+    };
+    settings.providerConnections.telegram_work = {
+      provider: 'telegram',
+      label: 'Telegram Work',
+      runtimeSecretRefs: { bot_token: 'TELEGRAM_WORK_BOT_TOKEN' },
+    };
+    settings.conversations.work = {
+      providerConnection: 'telegram_work',
+      externalId: '-200',
+      kind: 'channel',
+      displayName: 'Work',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: [],
+    };
+
+    const parsed = parseRuntimeSettings(renderRuntimeSettingsYaml(settings));
+
+    expect(parsed.conversations.work?.providerConnection).toBe('telegram_work');
   });
 
   it('rejects duplicate desired-state conversation bindings', () => {
@@ -208,6 +324,34 @@ agents:
       ),
     ).toEqual(['abc-def', 'abc:def']);
     expect(Object.keys(settings.bindings)).toHaveLength(2);
+  });
+
+  it('maps compact DM conversation approvers to agent DM admins', () => {
+    const parsed = parseRuntimeSettings(`providers:
+  telegram:
+    enabled: true
+    bot_token_env: TELEGRAM_BOT_TOKEN
+
+agents:
+  main_agent:
+    name: Main
+
+conversations:
+  main_dm:
+    provider: telegram
+    id: "5759865942"
+    type: dm
+    approvers: ["5759865942"]
+    agent: main_agent
+`);
+
+    expect(parsed.agents.main_agent.dmAccess).toEqual([
+      {
+        provider: 'telegram',
+        userIds: ['5759865942'],
+        adminUserId: '5759865942',
+      },
+    ]);
   });
 
   it('does not render opaque skill UUIDs into human settings', () => {

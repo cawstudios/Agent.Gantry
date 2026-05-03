@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type { AgentId } from '../../domain/agent/agent.js';
 import type { AppId } from '../../domain/app/app.js';
+import type { AgentPersona } from '../../shared/agent-persona.js';
 import type { AgentMcpServerBinding } from '../../domain/mcp/mcp-servers.js';
 import type {
   AgentRepository,
@@ -22,6 +23,7 @@ import type {
 } from '../../domain/provider/provider.js';
 import type { AgentSkillBinding } from '../../domain/skills/skills.js';
 import type { AgentToolBinding } from '../../domain/tools/tools.js';
+import { replaceDesiredStateCapabilities } from './desired-state-capability-reconcile.js';
 import {
   configuredConversationKind,
   defaultRuntimeSecretRefs,
@@ -47,7 +49,8 @@ interface StoredAgentBinding {
   added_at: string;
   requiresTrigger?: boolean;
   isMain?: boolean;
-  agentConfig?: { model?: string };
+  conversationKind?: 'dm' | 'channel';
+  agentConfig?: { model?: string; persona?: AgentPersona };
 }
 
 export interface SettingsDesiredStateOps {
@@ -218,6 +221,7 @@ export class SettingsDesiredStateService {
       agents[folder] = {
         name: existing?.name ?? group.name,
         folder,
+        persona: existing?.persona ?? group.agentConfig?.persona ?? 'developer',
         model: existing?.model ?? group.agentConfig?.model,
         oneTimeJobDefaultModel: existing?.oneTimeJobDefaultModel,
         recurringJobDefaultModel: existing?.recurringJobDefaultModel,
@@ -311,6 +315,13 @@ export class SettingsDesiredStateService {
       applied.push(`agent:${folder}`);
 
       for (const binding of Object.values(agent.bindings)) {
+        const conversation = Object.values(settings.conversations).find(
+          (candidate) =>
+            jidForConfiguredConversation(
+              candidate,
+              settings.providerConnections,
+            ) === binding.jid,
+        );
         configuredJids.add(binding.jid);
         await this.deps.ops.setRegisteredGroup(binding.jid, {
           name: binding.name ?? agent.name,
@@ -319,7 +330,14 @@ export class SettingsDesiredStateService {
           added_at: binding.addedAt,
           requiresTrigger: binding.requiresTrigger,
           isMain: binding.isMain,
-          agentConfig: binding.model ? { model: binding.model } : undefined,
+          conversationKind:
+            conversation?.kind === 'dm' || conversation?.kind === 'direct'
+              ? 'dm'
+              : 'channel',
+          agentConfig:
+            binding.model || agent.persona
+              ? { model: binding.model, persona: agent.persona }
+              : undefined,
         });
         applied.push(`binding:${binding.jid}`);
       }
@@ -561,61 +579,13 @@ export class SettingsDesiredStateService {
     capabilities: RuntimeConfiguredAgentCapabilities,
     now: string,
   ): Promise<void> {
-    const mcpServersById = await this.getApprovedMcpServersById(
-      capabilities.mcpServerIds,
-    );
-    await this.deps.repositories.agents.replaceAgentCapabilityBindings({
+    await replaceDesiredStateCapabilities({
       appId: this.appId,
       agentId,
-      toolBindings: capabilities.toolIds.map((toolId) => ({
-        id: `agent-tool-binding:${agentId}:${toolId}` as never,
-        appId: this.appId,
-        agentId,
-        toolId: toolId as never,
-        status: 'active' as const,
-        createdAt: now,
-        updatedAt: now,
-      })),
-      skillBindings: capabilities.skillIds.map((skillId) => ({
-        id: `agent-skill-binding:${agentId}:${skillId}` as never,
-        appId: this.appId,
-        agentId,
-        skillId: skillId as never,
-        status: 'active' as const,
-        createdAt: now,
-        updatedAt: now,
-      })),
-      mcpBindings: capabilities.mcpServerIds.map((serverId) => {
-        const server = mcpServersById.get(serverId);
-        return {
-          id: `agent-mcp-binding:${agentId}:${serverId}` as never,
-          appId: this.appId,
-          agentId,
-          serverId: serverId as never,
-          versionId: server!.latestApprovedVersionId! as never,
-          status: 'active' as const,
-          required: false,
-          permissionPolicyIds: [],
-          createdAt: now,
-          updatedAt: now,
-        };
-      }),
-      updatedAt: now,
+      capabilities,
+      repositories: this.deps.repositories,
+      now,
     });
-  }
-
-  private async getApprovedMcpServersById(
-    serverIds: readonly string[],
-  ): Promise<Map<string, { latestApprovedVersionId?: string }>> {
-    const servers = await this.loadMcpServersById([...new Set(serverIds)]);
-    return new Map(
-      [...servers.entries()]
-        .filter(([, server]) => server)
-        .map(([serverId, server]) => [
-          serverId,
-          { latestApprovedVersionId: server!.latestApprovedVersionId },
-        ]),
-    );
   }
 
   private async loadToolsById(

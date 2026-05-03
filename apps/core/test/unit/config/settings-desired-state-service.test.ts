@@ -207,6 +207,53 @@ describe('SettingsDesiredStateService', () => {
     );
   });
 
+  it('preserves hidden opaque skill bindings when reconciling visible settings', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.desiredState.authoritative = true;
+    settings.agents.main_agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      bindings: {},
+      dmAccess: [],
+      capabilities: {
+        toolIds: [],
+        skillIds: ['skill:admin'],
+        mcpServerIds: [],
+      },
+    };
+    const repositories = makeRepositories();
+    repositories.skills.listAgentSkillBindings = vi.fn(async () => [
+      {
+        id: 'agent-skill-binding:agent:main_agent:skill:3014949c-a616-4b2c-80e7-0bc61bb31e85',
+        appId: 'default',
+        agentId: 'agent:main_agent',
+        skillId: 'skill:3014949c-a616-4b2c-80e7-0bc61bb31e85',
+        status: 'active',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-01T00:00:00.000Z',
+      },
+    ]);
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+    });
+
+    await service.reconcile(settings);
+
+    expect(
+      repositories.agents.replaceAgentCapabilityBindings,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillBindings: expect.arrayContaining([
+          expect.objectContaining({ skillId: 'skill:admin' }),
+          expect.objectContaining({
+            skillId: 'skill:3014949c-a616-4b2c-80e7-0bc61bb31e85',
+          }),
+        ]),
+      }),
+    );
+  });
+
   it('creates desired conversations before applying approvers without duplicating them', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.providers.telegram.enabled = true;

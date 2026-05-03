@@ -7,10 +7,15 @@ import {
 
 import {
   PermissionApprovalRequest,
+  PermissionApprovalUpdate,
   UserQuestionRequest,
 } from '../domain/types.js';
 import { isPlainObject, toTrimmedString } from '../shared/object.js';
-import { validateIpcAuthRequest } from './ipc-auth-validation.js';
+import {
+  validateBrowserIpcAuthRequest,
+  validateIpcAuthRequest,
+  validateMemoryIpcAuthRequest,
+} from './ipc-auth-validation.js';
 
 const MEMORY_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const PERMISSION_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
@@ -30,13 +35,18 @@ export interface ParsedMemoryIpcRequest {
   requestId: string;
   action: MemoryIpcAction;
   payload: Record<string, unknown>;
-  context?: { threadId?: string };
+  context?: {
+    threadId?: string;
+    userId?: string;
+    defaultScope?: 'user' | 'group';
+  };
 }
 
 export interface ParsedBrowserIpcRequest {
   requestId: string;
   action: BrowserIpcAction;
   payload: Record<string, unknown>;
+  chatJid: string;
   threadId?: string;
 }
 
@@ -114,11 +124,11 @@ export function parseMemoryIpcRequest(
   sourceGroup: string,
 ): ParsedMemoryIpcRequest {
   if (!isPlainObject(raw)) throw new Error('Invalid memory IPC payload');
-  const { authThreadId: threadId } = validateIpcAuthRequest(
-    raw,
-    sourceGroup,
-    'memory IPC',
-  );
+  const {
+    authThreadId: threadId,
+    userId,
+    defaultScope,
+  } = validateMemoryIpcAuthRequest(raw, sourceGroup, 'memory IPC');
   const requestId = toTrimmedString(raw.requestId, { maxLen: 128 });
   const action = toTrimmedString(raw.action, { maxLen: 64 });
   if (!requestId || !action) {
@@ -138,7 +148,15 @@ export function parseMemoryIpcRequest(
     requestId,
     action: action as MemoryIpcAction,
     payload,
-    ...(threadId ? { context: { threadId } } : {}),
+    ...(threadId || userId || defaultScope
+      ? {
+          context: {
+            ...(threadId ? { threadId } : {}),
+            ...(userId ? { userId } : {}),
+            ...(defaultScope ? { defaultScope } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -163,19 +181,29 @@ export function parsePermissionIpcRequest(
   const description = toTrimmedString(raw.description, { maxLen: 4000 });
   const decisionReason = toTrimmedString(raw.decisionReason, { maxLen: 2000 });
   const blockedPath = toTrimmedString(raw.blockedPath, { maxLen: 2048 });
+  const toolUseID = toTrimmedString(raw.toolUseID, { maxLen: 200 });
+  const agentID = toTrimmedString(raw.agentID, { maxLen: 200 });
+  const subagentType = toTrimmedString(raw.subagentType, { maxLen: 200 });
   const toolInput = sanitizeToolInput(raw.toolInput);
+  const suggestions = Array.isArray(raw.suggestions)
+    ? (sanitizeToolInputValue(raw.suggestions, 0) as PermissionApprovalUpdate[])
+    : undefined;
 
   return {
     requestId,
     sourceGroup,
     ...(threadId ? { threadId } : {}),
     toolName,
+    ...(toolUseID ? { toolUseID } : {}),
+    ...(agentID ? { agentID } : {}),
+    ...(subagentType ? { subagentType } : {}),
     ...(title ? { title } : {}),
     ...(displayName ? { displayName } : {}),
     ...(description ? { description } : {}),
     ...(decisionReason ? { decisionReason } : {}),
     ...(blockedPath ? { blockedPath } : {}),
     ...(toolInput ? { toolInput } : {}),
+    ...(suggestions ? { suggestions } : {}),
   };
 }
 
@@ -266,7 +294,7 @@ export function parseBrowserIpcRequest(
   sourceGroup: string,
 ): ParsedBrowserIpcRequest {
   if (!isPlainObject(raw)) throw new Error('Invalid browser IPC payload');
-  const { authThreadId: threadId } = validateIpcAuthRequest(
+  const { authThreadId: threadId, chatJid } = validateBrowserIpcAuthRequest(
     raw,
     sourceGroup,
     'browser IPC',
@@ -290,6 +318,7 @@ export function parseBrowserIpcRequest(
     requestId,
     action: action as BrowserIpcAction,
     payload,
+    chatJid,
     ...(threadId ? { threadId } : {}),
   };
 }

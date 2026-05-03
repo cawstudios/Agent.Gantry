@@ -6,44 +6,22 @@ import { nowMs } from '../infrastructure/time/datetime.js';
 import { isPlainObject, toTrimmedString } from '../shared/object.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import { logger } from '../infrastructure/logging/logger.js';
-import {
-  processMemoryRequest,
-  writeMemoryResponse,
-} from '../memory/memory-ipc.js';
-import {
-  computeIpcAuthToken,
-  getIpcResponseSigningPrivateKey,
-} from './ipc-auth.js';
-import {
-  processBrowserIpcRequest,
-  writeBrowserIpcResponse,
-} from './ipc-browser-handler.js';
+// prettier-ignore
+import { processMemoryRequest, writeMemoryResponse } from '../memory/memory-ipc.js';
+// prettier-ignore
+import { computeIpcAuthToken, getIpcResponseSigningPrivateKey } from './ipc-auth.js';
+// prettier-ignore
+import { processBrowserIpcRequest, writeBrowserIpcResponse } from './ipc-browser-handler.js';
+import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
 import type { IpcDeps } from './ipc-domain-types.js';
 import { writeTaskIpcResponse } from '../jobs/ipc-shared.js';
-import {
-  processPermissionIpcRequest,
-  processUserQuestionIpcRequest,
-  writePermissionIpcResponse,
-  writeUserQuestionIpcResponse,
-} from './ipc-interaction-handler.js';
+// prettier-ignore
+import { processPermissionIpcRequest, processUserQuestionIpcRequest, writePermissionIpcResponse, writeUserQuestionIpcResponse } from './ipc-interaction-handler.js';
 import { processTaskIpc } from '../jobs/ipc-handler.js';
-import {
-  acquireIpcRootLock,
-  archiveIpcErrorFile,
-  claimIpcFile,
-  ensureGroupIpcLayout,
-  hasCompleteTrustedGroupIpcLayout,
-  isTrustedDirectory,
-  readIpcRootLockDetails,
-  recoverStaleIpcRootLock,
-} from './ipc-filesystem.js';
-import {
-  parseBrowserIpcRequest,
-  parseIpcMessage,
-  parseMemoryIpcRequest,
-  parsePermissionIpcRequest,
-  parseUserQuestionIpcRequest,
-} from './ipc-parsing.js';
+// prettier-ignore
+import { acquireIpcRootLock, archiveIpcErrorFile, claimIpcFile, ensureGroupIpcLayout, hasCompleteTrustedGroupIpcLayout, isTrustedDirectory, readIpcRootLockDetails, recoverStaleIpcRootLock } from './ipc-filesystem.js';
+// prettier-ignore
+import { parseBrowserIpcRequest, parseIpcMessage, parseMemoryIpcRequest, parsePermissionIpcRequest, parseUserQuestionIpcRequest } from './ipc-parsing.js';
 import { parseTaskIpcData } from './ipc-task-parsing.js';
 import { clearConsumedIpcRequestIds } from './ipc-auth-validation.js';
 import type { RegisteredGroup as RuntimeGroupRecord } from '../domain/types.js';
@@ -243,7 +221,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
   const processIpcFiles = async () => {
     if (!ipcWatcherRunning) return;
     const groupRegistry = deps.registeredGroups();
-    const groupFolders = resolveIpcFoldersFromGroups(groupRegistry).filter(
+    const ipcFolders = resolveIpcFoldersFromGroups(groupRegistry).filter(
       (folder) => {
         if (isTrustedRegisteredIpcFolder(ipcBaseDir, folder)) return true;
         initializedLayoutFolders.delete(folder);
@@ -255,7 +233,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       },
     );
 
-    for (const folder of groupFolders) {
+    for (const folder of ipcFolders) {
       if (
         initializedLayoutFolders.has(folder) &&
         hasCompleteTrustedGroupIpcLayout(ipcBaseDir, folder)
@@ -289,8 +267,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
         folderTargetJid.set(group.folder, jid);
     }
 
-    for (const sourceGroup of groupFolders) {
+    for (const sourceGroup of ipcFolders) {
       const isMain = folderIsMain.get(sourceGroup) === true;
+      const browserProfileName = resolveConversationBrowserProfile({
+        workspaceKey: sourceGroup,
+        conversationId: folderTargetJid.get(sourceGroup),
+      });
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
       const memoryRequestsDir = path.join(
@@ -520,9 +502,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const request = parseBrowserIpcRequest(rawRequest, sourceGroup);
               requestId = request.requestId;
               authThreadId = request.threadId;
+              const browserProfileName = resolveConversationBrowserProfile({
+                workspaceKey: sourceGroup,
+                conversationId: request.chatJid,
+              });
               const response = await processBrowserIpcRequest(request, {
                 sourceGroup,
                 isMain,
+                browserProfileName,
               });
               writeBrowserIpcResponse(
                 ipcBaseDir,

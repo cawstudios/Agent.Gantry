@@ -114,9 +114,16 @@ export async function runQuery(
     chatJid: agentInput.chatJid,
     groupFolder: agentInput.groupFolder,
     threadId: agentInput.threadId,
+    memoryUserId: agentInput.memoryUserId,
+    memoryDefaultScope: agentInput.memoryDefaultScope,
+    persona: agentInput.persona,
+    browserProfileName: agentInput.browserProfileName,
     isMain: agentInput.isMain,
+    configuredAllowedTools: agentInput.allowedTools,
     ipcDir: process.env.MYCLAW_IPC_DIR,
     ipcAuthToken: process.env.MYCLAW_IPC_AUTH_TOKEN,
+    browserIpcAuthToken: process.env.MYCLAW_BROWSER_IPC_AUTH_TOKEN,
+    memoryIpcAuthToken: process.env.MYCLAW_MEMORY_IPC_AUTH_TOKEN,
     ipcResponseVerifyKey: process.env.MYCLAW_IPC_RESPONSE_VERIFY_KEY,
     externalMcpServers: readExternalMcpServers(),
     externalMcpAllowedTools: readExternalMcpAllowedTools(),
@@ -214,13 +221,28 @@ export async function runQuery(
           decisionReason: permissionOpts.decisionReason,
           blockedPath: permissionOpts.blockedPath,
           toolInput: input,
+          toolUseID: permissionOpts.toolUseID,
+          agentID: permissionOpts.agentID,
+          suggestions: permissionOpts.suggestions,
           threadId: agentInput.threadId,
         });
         if (decision.approved) {
           log(
             `Permission approved for tool ${toolName} by ${decision.decidedBy || 'unknown'}`,
           );
-          return { behavior: 'allow' as const, updatedInput: input };
+          return {
+            behavior: 'allow' as const,
+            updatedInput: input,
+            ...(decision.updatedPermissions
+              ? { updatedPermissions: decision.updatedPermissions as never }
+              : {}),
+            ...(decision.decisionClassification
+              ? {
+                  decisionClassification:
+                    decision.decisionClassification as never,
+                }
+              : {}),
+          };
         }
         const reason = decision.reason || 'Denied by operator';
         log(`Permission denied for tool ${toolName}: ${reason}`);

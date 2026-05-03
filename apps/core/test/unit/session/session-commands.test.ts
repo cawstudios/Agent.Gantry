@@ -1374,6 +1374,15 @@ describe('handleSessionCommand', () => {
   it('shows /status with model and cache token accounting', async () => {
     const deps = makeDeps({
       getGroupModelOverride: vi.fn().mockReturnValue('sonnet'),
+      getBrowserStatus: vi.fn().mockResolvedValue({
+        profileName: 'c-test-abc123abc123',
+        profileLabel: 'Test conversation browser',
+        running: true,
+        cdpReady: true,
+        hasState: true,
+        authMarkers: ['github.com'],
+        headless: false,
+      }),
       getModelStatus: vi.fn().mockReturnValue({
         groupFolder: 'test',
         selectionSource: 'session override',
@@ -1422,6 +1431,10 @@ describe('handleSessionCommand', () => {
     expect(sentMsg).toContain('cache read 40');
     expect(sentMsg).toContain('cache write 10');
     expect(sentMsg).toContain('estimated cost $0.0020');
+    expect(sentMsg).toContain('Browser status');
+    expect(sentMsg).toContain('Test conversation browser');
+    expect(sentMsg).toContain('running and ready');
+    expect(sentMsg).toContain('github.com');
   });
 
   it('accepts versioned aliases and stores the recommended alias', async () => {

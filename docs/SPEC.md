@@ -478,9 +478,10 @@ Agents interact with memory via MCP tools over IPC:
 | ----------------- | ---------------------------------------------------------------------------------- |
 | `memory_save`     | Save a durable fact, decision, preference, correction, constraint, or context item |
 | `memory_search`   | Search scoped memory statements and source snippets                                |
-| `memory_patch`    | Update an existing item (optimistic concurrency via version)                       |
 | `procedure_save`  | Save a reusable multi-step procedure                                               |
-| `procedure_patch` | Update an existing procedure                                                       |
+
+Patch tools exist in the host protocol for reviewed/admin flows, but they are
+not part of the default agent capability bundle.
 
 #### Memory Boundaries
 

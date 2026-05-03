@@ -177,16 +177,18 @@ generated Claude config directly. They use MyClaw request tools instead:
 - `request_skill_proposal`
 - `request_skill_dependency_install`
 - `request_mcp_server`
-- `request_tool_enable`
-- `request_channel_tool_enable`
+- `request_permission`
 - `service_restart`
 - `register_agent`
 
-Capability changes are request, review, approval or denial, durable audit, new
-config version, and next-run activation. Skill source is stored as readable
-skill folders with `SKILL.md` plus supporting files; Postgres stores metadata,
-source, hash, provider refs, binding, and audit records. ClawHub is the default
-provider-backed skill source, but provider verification never bypasses approval.
+Capability changes are request, review, approval or cancellation, durable audit,
+new config version, and next-run activation. Tool and channel capability
+permission prompts use `request_permission` and present three decisions: `Allow
+once`, `Always allow <granular rule>`, or `Cancel`. Skill source is stored as
+readable skill folders with `SKILL.md` plus supporting files; Postgres stores
+metadata, source, hash, provider refs, binding, and audit records. ClawHub is
+the default provider-backed skill source, but provider verification never
+bypasses approval.
 
 ## Philosophy
 
@@ -224,9 +226,9 @@ separate and is retrieved only when it matches the current query:
 - query-relevant prior decisions
 - user/group preferences that match the current request
 - open loops once commitment tracking is enabled
-- dream lifecycle status (enabled/schedule/last run outcome)
+- dream status (enabled/schedule/last run outcome)
 
-Embeddings are off by default. Memory search and context injection still work without embeddings; embeddings only improve ranking when enabled.
+Embeddings are off by default. Memory search and context injection work without embeddings today through lexical search and keyword fallback. Configuring embeddings prepares provider access, but vector retrieval is not active until the runtime indexing/query path is enabled.
 
 Host runtime injects a memory-only block when a fresh chat runner or scheduled
 job starts. Follow-up chat messages continue through the same live Claude SDK
@@ -238,6 +240,7 @@ treating memory records as instructions or tool-use authority.
 Memory boundaries:
 
 - `appId` and `agentId` are mandatory for every memory record.
+- Direct/private agent conversations default to user memory. Channel conversations, including Slack channels, Teams channels/chats, Telegram groups, and Telegram topics, default to conversation memory.
 - `user`, `group`, and `channel` subjects isolate application, team, and channel context.
 - `common` is app-wide shared memory and is write-restricted to admin/service flows.
 - `threadId` narrows recall without crossing app, agent, user, group, or channel boundaries.

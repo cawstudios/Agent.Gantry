@@ -163,6 +163,9 @@ function renderConfiguredAgentsYaml(
       `  ${quoteYamlKey(folder)}:`,
       `    name: ${quoteYamlString(agent.name)}`,
     );
+    if (agent.persona && agent.persona !== 'developer') {
+      lines.push(`    persona: ${quoteYamlString(agent.persona)}`);
+    }
     if (agent.model) {
       lines.push(`    model: ${quoteYamlString(agent.model)}`);
     }
@@ -269,8 +272,9 @@ function renderProviderConnectionsYaml(
 function renderConversationsYaml(
   lines: string[],
   conversations: Record<string, RuntimeConfiguredConversation>,
+  providers: Record<string, RuntimeProviderSettings>,
   providerConnections: Record<string, RuntimeProviderConnectionSettings>,
-  bindings: Record<string, RuntimeConfiguredBinding>,
+  bindingsByConversation: Map<string, RuntimeConfiguredBinding[]>,
 ): void {
   const entries = Object.entries(conversations).sort(([a], [b]) =>
     a.localeCompare(b),
@@ -281,13 +285,16 @@ function renderConversationsYaml(
   lines.push('conversations:');
   for (const [conversationId, conversation] of entries) {
     const connection = providerConnections[conversation.providerConnection];
-    const conversationBindings = Object.values(bindings).filter(
-      (candidate) => candidate.conversation === conversationId,
-    );
+    const conversationBindings =
+      bindingsByConversation.get(conversationId) || [];
     const binding =
       conversationBindings.length === 1 ? conversationBindings[0] : undefined;
     lines.push(`  ${quoteYamlKey(conversationId)}:`);
-    if (connection) {
+    if (
+      connection &&
+      providers[connection.provider]?.defaultConnection ===
+        conversation.providerConnection
+    ) {
       lines.push(`    provider: ${quoteYamlString(connection.provider)}`);
     } else {
       lines.push(
@@ -318,6 +325,7 @@ function renderConversationsYaml(
       lines.push(
         `    agent: ${quoteYamlString(binding.agent)}`,
         `    trigger: ${quoteYamlString(binding.trigger)}`,
+        `    added_at: ${quoteYamlString(binding.addedAt)}`,
       );
       if (binding.requiresTrigger !== true) {
         lines.push(
@@ -366,6 +374,21 @@ function renderBindingsYaml(
     }
   }
   lines.push('');
+}
+
+function bindingsByConversation(
+  bindings: Record<string, RuntimeConfiguredBinding>,
+): Map<string, RuntimeConfiguredBinding[]> {
+  const grouped = new Map<string, RuntimeConfiguredBinding[]>();
+  for (const binding of Object.values(bindings)) {
+    const existing = grouped.get(binding.conversation);
+    if (existing) {
+      existing.push(binding);
+    } else {
+      grouped.set(binding.conversation, [binding]);
+    }
+  }
+  return grouped;
 }
 
 function renderCredentialBrokerSettingsYaml(
@@ -475,23 +498,21 @@ export function renderRuntimeSettingsYaml(settings: RuntimeSettings): string {
   );
   renderProviderConnectionsYaml(lines, extraConnections);
   renderConfiguredAgentsYaml(lines, settings.agents);
+  const groupedBindings = bindingsByConversation(settings.bindings);
   renderConversationsYaml(
     lines,
     settings.conversations,
+    settings.providers,
     settings.providerConnections,
-    settings.bindings,
+    groupedBindings,
   );
-  if (
-    Object.keys(settings.bindings).some((bindingId) => {
-      const binding = settings.bindings[bindingId];
-      return (
-        Object.values(settings.bindings).filter(
-          (candidate) => candidate.conversation === binding.conversation,
-        ).length > 1
-      );
-    })
-  ) {
-    renderBindingsYaml(lines, settings.bindings);
+  const verboseBindings = Object.fromEntries(
+    Object.entries(settings.bindings).filter(([, binding]) => {
+      return (groupedBindings.get(binding.conversation)?.length || 0) > 1;
+    }),
+  );
+  if (Object.keys(verboseBindings).length > 0) {
+    renderBindingsYaml(lines, verboseBindings);
   }
   if (!isDefaultStorage(settings.storage)) {
     renderStorageSettingsYaml(lines, settings.storage);

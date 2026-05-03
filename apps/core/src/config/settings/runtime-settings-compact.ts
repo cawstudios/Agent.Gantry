@@ -217,10 +217,60 @@ function normalizeCompactConversations(
         memory_scope: conversationRaw.memory_scope,
         model: conversationRaw.model,
       };
+      const kind = conversationRaw.type ?? conversationRaw.kind;
+      const approvers =
+        conversationRaw.approvers ?? conversationRaw.control_approvers;
+      if (
+        (kind === 'dm' || kind === 'direct') &&
+        providerId &&
+        typeof conversationRaw.agent === 'string' &&
+        Array.isArray(approvers)
+      ) {
+        mergeCompactDmApproversIntoAgent(
+          normalized,
+          conversationRaw.agent,
+          providerId,
+          approvers,
+        );
+      }
     }
   }
   normalized.conversations = conversations;
   normalized.bindings = bindings;
+}
+
+function mergeCompactDmApproversIntoAgent(
+  normalized: Record<string, unknown>,
+  agentId: string,
+  providerId: string,
+  approvers: unknown[],
+): void {
+  const agents = isRecord(normalized.agents)
+    ? (normalized.agents as Record<string, unknown>)
+    : undefined;
+  const agent = agents?.[agentId];
+  if (!isRecord(agent)) return;
+  const userIds = approvers.filter(
+    (entry): entry is string =>
+      typeof entry === 'string' && entry.trim() !== '',
+  );
+  if (userIds.length === 0) return;
+
+  const dmAccess = isRecord(agent.dm_access) ? { ...agent.dm_access } : {};
+  const providerAccess = isRecord(dmAccess[providerId])
+    ? { ...(dmAccess[providerId] as Record<string, unknown>) }
+    : {};
+  const existingAllow = Array.isArray(providerAccess.allow)
+    ? providerAccess.allow.filter(
+        (entry): entry is string => typeof entry === 'string',
+      )
+    : [];
+  providerAccess.allow = [...new Set([...existingAllow, ...userIds])];
+  if (providerAccess.admin === undefined) {
+    providerAccess.admin = userIds[0];
+  }
+  dmAccess[providerId] = providerAccess;
+  agent.dm_access = dmAccess;
 }
 
 export function normalizeCompactRuntimeSettingsRoot(

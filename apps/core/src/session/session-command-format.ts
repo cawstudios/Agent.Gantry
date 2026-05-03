@@ -9,16 +9,62 @@ import {
 } from '../shared/model-catalog.js';
 import type { RuntimeModelStatusSnapshot } from '../runtime/model-status-store.js';
 
-interface MemoryStatusSnapshotLike {
+export interface MemoryStatusSnapshot {
   items_by_kind: Record<string, number>;
   items_by_scope: Record<string, number>;
   top10_most_used: Array<{ key: string; retrieval_count: number }>;
   top10_stalest: Array<{ key: string; updated_at: string }>;
   last_dream_run?: { at?: string; summary?: string };
   disk_kb?: Record<string, number>;
+  retrieval?: {
+    searchMode?: 'lexical_keyword';
+    embeddings?: 'disabled' | 'configured';
+    vectorSearch?: 'inactive' | 'active';
+  };
 }
 
-export function formatMemoryStatus(status: MemoryStatusSnapshotLike): string {
+export interface BrowserStatusSnapshot {
+  profileName: string;
+  profileLabel: string;
+  running: boolean;
+  cdpReady: boolean;
+  hasState?: boolean;
+  authMarkers?: string[];
+  headless?: boolean;
+  error?: string;
+}
+
+export function formatBrowserStatus(status: BrowserStatusSnapshot): string {
+  const state = status.running
+    ? status.cdpReady
+      ? 'running and ready'
+      : 'running, not ready yet'
+    : 'stopped';
+  const profileData =
+    status.hasState === undefined
+      ? 'unknown'
+      : status.hasState
+        ? 'saved'
+        : 'empty';
+  const authMarkers =
+    status.authMarkers && status.authMarkers.length > 0
+      ? status.authMarkers.join(', ')
+      : 'none detected';
+  const lines = [
+    'Browser status',
+    `Using ${status.profileLabel}.`,
+    `State: ${state}`,
+    `Profile data: ${profileData}`,
+    `Signed-in sites: ${authMarkers}`,
+  ];
+  if (typeof status.headless === 'boolean') {
+    lines.push(`Mode: ${status.headless ? 'headless' : 'visible browser'}`);
+  }
+  if (status.error) lines.push(`Error: ${status.error}`);
+  return lines.join('\n');
+}
+
+export function formatMemoryStatus(status: MemoryStatusSnapshot): string {
   const kinds = Object.entries(status.items_by_kind || {})
     .map(([kind, count]) => `${kind}:${count}`)
     .join(', ');
@@ -39,10 +85,18 @@ export function formatMemoryStatus(status: MemoryStatusSnapshotLike): string {
         .map(([k, v]) => `${k}:${v}kb`)
         .join(', ')
     : 'n/a';
+  const retrieval = status.retrieval;
+  const searchMode =
+    retrieval?.searchMode === 'lexical_keyword'
+      ? 'lexical + keyword'
+      : 'lexical + keyword';
   return [
     'Memory status',
     `kinds: ${kinds || 'none'}`,
     `scopes: ${scopes || 'none'}`,
+    `retrieval: ${searchMode}`,
+    `embeddings: ${retrieval?.embeddings || 'unknown'}`,
+    `vector_search: ${retrieval?.vectorSearch || 'inactive'}`,
     `top_used: ${used || 'none'}`,
     `stale: ${stalest || 'none'}`,
     `last_dream: ${dream}`,

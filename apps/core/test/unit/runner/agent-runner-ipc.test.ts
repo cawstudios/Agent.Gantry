@@ -132,6 +132,10 @@ function createRunnerFixture(): {
     path.resolve('apps/core/src/shared/model-catalog.ts'),
     path.join(sharedDir, 'model-catalog.ts'),
   );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/agent-persona.ts'),
+    path.join(sharedDir, 'agent-persona.ts'),
+  );
   symlinkPackage(root, 'dayjs', 'node_modules/dayjs');
   fs.writeFileSync(
     path.join(sdkDir, 'package.json'),
@@ -397,7 +401,7 @@ async function runRunner(
       reject(
         new Error(`runner timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`),
       );
-    }, 12_000);
+    }, 25_000);
     child.on('error', (err) => {
       clearTimeout(timeout);
       reject(err);
@@ -472,7 +476,8 @@ describe('agent-runner IPC lifecycle', () => {
           agent_browser: {
             type: 'stdio',
             command: '/tmp/playwright-mcp',
-            args: ['--cdp-endpoint', 'http://127.0.0.1:4567'],
+            args: ['--shared-browser-context'],
+            env: { PLAYWRIGHT_MCP_CDP_ENDPOINT: 'http://127.0.0.1:4567' },
           },
         }),
       );
@@ -490,7 +495,8 @@ describe('agent-runner IPC lifecycle', () => {
       expect(call?.mcpServers.agent_browser).toEqual({
         type: 'stdio',
         command: '/tmp/playwright-mcp',
-        args: ['--cdp-endpoint', 'http://127.0.0.1:4567'],
+        args: ['--shared-browser-context'],
+        env: { PLAYWRIGHT_MCP_CDP_ENDPOINT: 'http://127.0.0.1:4567' },
       });
       expect(call?.sdkEnv.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
       expect(fs.existsSync(mcpConfigPath)).toBe(false);

@@ -33,22 +33,16 @@ import {
 } from '../messaging/router.js';
 import { collectCompactBoundaryMemory } from '../jobs/compact-memory.js';
 import {
-  isSenderControlAllowed,
   isTriggerAllowed,
-  loadSenderControlAllowlist,
   loadSenderAllowlist,
 } from '../platform/sender-allowlist.js';
 import { AgentOutput, spawnAgent } from './agent-spawn.js';
 import { handleSessionCommand } from '../session/session-commands.js';
 import type { GroupProcessingDeps } from './group-processing-types.js';
-import {
-  getGroupMemoryStatus,
-  saveGroupProcedureMemory,
-} from './group-memory-commands.js';
+import { getGroupMemoryStatus } from './group-memory-commands.js';
 import { runDreamingForGroup } from './memory-dreaming-runner.js';
 import { sendWithPartialDeliveryGuard } from './partial-delivery.js';
 import {
-  archiveCurrentRuntimeSession,
   buildApprovedSkillContextBlock,
   buildRuntimeRunOptions,
   completeFailedRuntimeSessionRun,
@@ -59,10 +53,22 @@ import { firstThreadQueueId, parseThreadQueueKey } from './thread-queue-key.js';
 import { formatElapsed } from './time-format.js';
 import { createRuntimeModelStatusAccess } from './model-status-store.js';
 import { recordRuntimeModelUsage } from './model-status-output.js';
+import {
+  memoryScopeForConversationKind,
+  resolveTurnAllowedTools,
+} from './group-run-context.js';
+import { getGroupBrowserStatus } from './group-browser-status.js';
+import {
+  createAdvanceCursorHandler,
+  createArchiveCurrentSessionHandler,
+  createSaveProcedureHandler,
+  createSenderCommandPolicy,
+} from './group-session-command-state.js';
 const TYPING_HEARTBEAT_INTERVAL_MS = 4_000;
 const ELAPSED_PROGRESS_INTERVAL_MS = 60_000;
 const NO_OUTPUT_WARNING_INTERVAL_MS = 180_000;
 let streamingGenerationCounter = 0;
+
 export function createGroupProcessor(deps: GroupProcessingDeps) {
   const runAgentImpl = deps.runAgent ?? spawnAgent;
   const collectSessionMemory = deps.collectSessionMemory;
@@ -114,6 +120,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       persistedProviderSessionIds.add(providerSessionId);
     };
     let defaultRuntimeModel: string | undefined;
+    const defaultMemoryScope = memoryScopeForConversationKind(
+      group.conversationKind,
+    );
     const wrappedOnOutput = onOutput
       ? async (output: AgentOutput) => {
           if (output.usage) {
@@ -144,6 +153,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
               compactBoundary: output.compactBoundary,
               agentSessionId: turnContext.agentSessionId,
               collectMemory: collectSessionMemory,
+              defaultScope: defaultMemoryScope,
               logger,
               context: { group: group.name },
             });
@@ -156,6 +166,10 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       skillArtifactStore: deps.getSkillArtifactStore?.(),
       turnContext,
     });
+    const configuredAllowedTools = await resolveTurnAllowedTools(
+      deps,
+      turnContext,
+    );
     const memoryContextBlock = [
       turnContext?.memoryContextBlock,
       approvedSkillContextBlock,
@@ -191,6 +205,10 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             groupFolder: group.folder,
             chatJid,
             threadId: options?.memoryContext?.threadId,
+            memoryUserId: options?.memoryContext?.userId,
+            memoryDefaultScope: defaultMemoryScope,
+            persona: group.agentConfig?.persona,
+            allowedTools: configuredAllowedTools,
             ...(turnContext?.externalSessionId
               ? { sessionId: turnContext.externalSessionId }
               : {}),
@@ -318,11 +336,20 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         ? deps.channelRuntime.sendProgressUpdate(chatJid, text, options)
         : deps.channelRuntime.sendProgressUpdate(chatJid, text);
     const memoryUserId = resolveMemoryUserId(missedMessages);
+    const defaultMemoryScope = memoryScopeForConversationKind(
+      group.conversationKind,
+    );
 
     const modelStatus = createRuntimeModelStatusAccess(
       group.folder,
       activeThreadId,
     );
+    const senderCommandPolicy = createSenderCommandPolicy({
+      chatJid,
+      group,
+      isMainGroup,
+      triggerPattern: getTriggerPattern(group.trigger),
+    });
     const cmdResult = await handleSessionCommand({
       missedMessages,
       isMainGroup,
@@ -343,18 +370,16 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             },
           }),
         closeStdin: () => deps.queue.closeStdin(queueJid),
-        advanceCursor: (message) => {
-          deps.setCursor(
-            queueJid,
-            encodeGroupMessageCursor(toGroupMessageCursor(message)),
-          );
-          void Promise.resolve(deps.saveState()).catch((err: unknown) => {
+        advanceCursor: createAdvanceCursorHandler({
+          queueJid,
+          setCursor: deps.setCursor,
+          saveState: deps.saveState,
+          warn: (err) =>
             logger.warn(
               { group: group.name, err },
               'Failed to persist session command cursor',
-            );
-          });
-        },
+            ),
+        }),
         formatMessages,
         getDefaultModel: () =>
           getDefaultModelConfig('interactive', group.folder).model,
@@ -366,62 +391,30 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         setGroupModelOverride: async (value) =>
           deps.setGroupModelOverride(chatJid, value),
         getModelStatus: modelStatus.getStatus,
+        getBrowserStatus: () => getGroupBrowserStatus({ group, chatJid }),
         updateModelStatusSelection: modelStatus.updateSelection,
         getGroupThinkingOverride: () => group.agentConfig?.thinking,
         setGroupThinkingOverride: async (value) =>
           deps.setGroupThinkingOverride(chatJid, value),
-        archiveCurrentSession: async (cause = 'new-session') => {
-          await archiveCurrentRuntimeSession({
-            ops: ops(),
-            group,
-            chatJid,
-            threadId: activeThreadId ?? null,
-            cause,
-            ...(collectSessionMemory
-              ? { collectMemory: collectSessionMemory }
-              : {}),
-          });
-        },
+        archiveCurrentSession: createArchiveCurrentSessionHandler({
+          ops,
+          group,
+          chatJid,
+          threadId: activeThreadId ?? null,
+          defaultScope: defaultMemoryScope,
+          collectMemory: collectSessionMemory,
+        }),
         clearCurrentSession: () =>
           deps.clearSession(group.folder, activeThreadId),
         stopCurrentRun: () => deps.queue.stopGroup?.(queueJid) ?? false,
         runMemoryDreaming: () => runDreamingForGroup(group.folder),
         getMemoryStatus: async () => getGroupMemoryStatus(group.folder),
-        saveProcedure: async ({ title, body }) =>
-          saveGroupProcedureMemory({
-            groupFolder: group.folder,
-            threadId: activeThreadId,
-            isAdminWrite: isMainGroup,
-            title,
-            body,
-          }),
-        isSenderControlAllowlisted: (msg) => {
-          const allowlistCfg = loadSenderControlAllowlist();
-          return isSenderControlAllowed(
-            chatJid,
-            msg.sender,
-            allowlistCfg,
-            group.folder,
-          );
-        },
-        canSenderInteract: (msg) => {
-          const hasTrigger = getTriggerPattern(group.trigger).test(
-            msg.content.trim(),
-          );
-          const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
-          return (
-            isMainGroup ||
-            !reqTrigger ||
-            (hasTrigger &&
-              (msg.is_from_me ||
-                isTriggerAllowed(
-                  chatJid,
-                  msg.sender,
-                  loadSenderAllowlist(),
-                  group.folder,
-                )))
-          );
-        },
+        saveProcedure: createSaveProcedureHandler({
+          folder: group.folder,
+          threadId: activeThreadId,
+          isAdminWrite: isMainGroup,
+        }),
+        ...senderCommandPolicy,
       },
     });
     if (cmdResult.handled) return cmdResult.success;
