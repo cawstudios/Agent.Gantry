@@ -18,7 +18,10 @@ import {
 } from '../../jobs/scheduler.js';
 import { makeThreadQueueKey } from '../../runtime/thread-queue-key.js';
 import type { OpsRepository } from '../../domain/repositories/ops-repo.js';
-import { getRuntimeOpsRepository } from '../../adapters/storage/postgres/runtime-store.js';
+import {
+  getRuntimeOpsRepository,
+  getRuntimeStorage,
+} from '../../adapters/storage/postgres/runtime-store.js';
 import type { SessionMemoryCollector } from '../../domain/ports/session-memory-collector.js';
 import { ChannelWiring } from './channel-wiring.js';
 import { RuntimeApp } from './runtime-app.js';
@@ -174,6 +177,7 @@ export async function startRuntimeServices(
     requestPermissionApproval: channelWiring.requestPermissionApproval,
     requestUserAnswer: channelWiring.requestUserAnswer,
     mcpHostnameLookup: resolved.mcpHostnameLookup,
+    getToolRepository: () => getRuntimeStorage().repositories.tools,
   });
 
   syncGroupSnapshots();

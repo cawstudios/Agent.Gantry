@@ -158,6 +158,7 @@ export interface JobEvent {
 // --- Channel capability ports ---
 export interface PermissionApprovalRequest {
   requestId: string;
+  responseNonce?: string;
   sourceGroup: string;
   targetJid?: string;
   approvalContextJid?: string;
