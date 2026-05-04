@@ -104,6 +104,8 @@ Important constraints:
 - Discover and document exact verification commands before changing implementation behavior.
 - Run the smallest relevant checks after each change.
 - Run full checks at the end of a phase.
+- For holistic e2e bug hunts, run `npm run bug-hunt:e2e`; it starts Docker Postgres when available, keeps LLM/channel providers mocked through the harness, and writes the evidence report to `~/.spec`.
+- Deterministic user-flow e2e tests must isolate `MYCLAW_HOME`, mock Clack/provider/service/network boundaries, and must not read real Anthropic, OpenAI, Slack, Teams, Telegram, OneCLI, or browser credentials.
 - Before validating `~/myclaw`, build/restart from this checkout, confirm `myclaw status`, and treat older generated logs/state as stale.
 - Archive stale generated state under `~/myclaw/cleanup-archive/<timestamp>/`; keep secrets, settings, Postgres, OneCLI data, artifacts, and active agent folders unless reset is requested.
 - Architecture exceptions must be time-bounded ratchets with max counts; never relax the checker globally to hide new debt.

@@ -18,6 +18,7 @@ npm run test:unit
 npm run test:integration
 npm run test:integration:postgres
 npm run test:e2e
+npm run bug-hunt:e2e
 ```
 
 Durable session resume changes should additionally run the focused unit checks:
@@ -42,6 +43,8 @@ MYCLAW_TEST_DATABASE_URL=postgres://user:pass@localhost:5432/myclaw_test npm run
 ```
 
 `npm run test:integration:postgres` fails loudly when `MYCLAW_TEST_DATABASE_URL` is missing or not a Postgres URL, so a green default test run cannot be mistaken for database-backed evidence.
+
+`npm run bug-hunt:e2e` runs the deterministic e2e bug-hunt harness. It starts Docker Postgres when available, keeps LLM and channel providers mocked through the test harness, and writes its issue report under `~/.spec`.
 
 Architecture exceptions in `.codex/architecture-exceptions.json` are ratchets
 for existing boundary debt. Each exception must stay time-bounded and include a
