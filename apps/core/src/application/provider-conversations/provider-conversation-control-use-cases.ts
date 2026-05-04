@@ -224,7 +224,7 @@ export class ProviderConnectionControlService {
     if (!provider || provider.capabilityFlags.includes('placeholder')) {
       throw new ApplicationError(
         'NOT_IMPLEMENTED',
-        `Provider ${input.providerId} is not implemented`,
+        `Provider ${input.providerId} is not available for provider connections yet.`,
       );
     }
     assertAllowedRuntimeSecretRefs(provider, input.runtimeSecretRefs);

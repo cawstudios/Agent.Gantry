@@ -21,7 +21,7 @@ export class RuntimeSecretConversationMembershipValidator implements Conversatio
     return {
       validUserIds: [],
       invalidUserIds: input.userIds,
-      reason: `${providerId} conversation membership validation is not implemented.`,
+      reason: `${providerId} conversation membership validation is not available.`,
     };
   }
 

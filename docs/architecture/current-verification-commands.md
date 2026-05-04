@@ -44,7 +44,7 @@ MYCLAW_TEST_DATABASE_URL=postgres://user:pass@localhost:5432/myclaw_test npm run
 
 `npm run test:integration:postgres` fails loudly when `MYCLAW_TEST_DATABASE_URL` is missing or not a Postgres URL, so a green default test run cannot be mistaken for database-backed evidence.
 
-`npm run bug-hunt:e2e` runs the deterministic e2e bug-hunt harness. It starts Docker Postgres when available, keeps LLM and channel providers mocked through the test harness, and writes its issue report under `~/.spec`.
+`npm run bug-hunt:e2e` runs the deterministic e2e bug-hunt harness. It starts Docker Postgres when available, keeps LLM and channel providers mocked through the test harness, and writes open findings under `~/.spec`. Static risk inventory is opt-in; set `MYCLAW_BUG_HUNT_STATIC_RISK=1` or `MYCLAW_BUG_HUNT_MIN_FINDINGS=<n>` only for detector-validation runs that intentionally require known risks.
 
 Architecture exceptions in `.codex/architecture-exceptions.json` are ratchets
 for existing boundary debt. Each exception must stay time-bounded and include a

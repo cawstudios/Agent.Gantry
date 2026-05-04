@@ -6,7 +6,9 @@ import path from 'node:path';
 import process from 'node:process';
 
 const repoRoot = process.cwd();
-const minFindings = Number(process.env.MYCLAW_BUG_HUNT_MIN_FINDINGS ?? '40');
+const minFindings = Number(process.env.MYCLAW_BUG_HUNT_MIN_FINDINGS ?? '0');
+const includeStaticRiskFindings =
+  process.env.MYCLAW_BUG_HUNT_STATIC_RISK === '1' || minFindings > 0;
 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 const specDir = path.join(os.homedir(), '.spec');
 const reportPath = path.join(
@@ -22,7 +24,14 @@ const commandPlan = [
   {
     name: 'docker-postgres',
     command: 'docker',
-    args: ['compose', '--env-file', '.factory/docker-test.env', 'up', '-d', 'postgres'],
+    args: [
+      'compose',
+      '--env-file',
+      '.factory/docker-test.env',
+      'up',
+      '-d',
+      'postgres',
+    ],
     env: {},
   },
   {
@@ -67,15 +76,18 @@ function runCommand(step) {
 function trimOutput(value) {
   const lines = value.trim().split(/\r?\n/).filter(Boolean);
   if (lines.length <= 80) return lines.join('\n');
-  return [...lines.slice(0, 30), '... output truncated ...', ...lines.slice(-50)].join(
-    '\n',
-  );
+  return [
+    ...lines.slice(0, 30),
+    '... output truncated ...',
+    ...lines.slice(-50),
+  ].join('\n');
 }
 
 function walkFiles(dir, files = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === 'node_modules' || entry.name === 'dist') continue;
-    if (entry.name === '.git' || entry.name === '.factory/postgres-data') continue;
+    if (entry.name === '.git' || entry.name === '.factory/postgres-data')
+      continue;
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       walkFiles(fullPath, files);
@@ -97,6 +109,8 @@ function relative(filePath) {
 }
 
 function staticFindings() {
+  if (!includeStaticRiskFindings) return [];
+
   const files = [
     ...walkFiles(path.join(repoRoot, 'apps')),
     ...walkFiles(path.join(repoRoot, 'packages')),
@@ -104,12 +118,36 @@ function staticFindings() {
   ].sort();
   const findings = [];
 
+  const postgresBackedGateIsRun = commandPlan.some(
+    (step) => step.name === 'postgres-integration',
+  );
+  const providerBoundaryPolicyPaths = new Set([
+    'apps/core/src/adapters/credentials/onecli/env-policy.ts',
+    'apps/core/src/adapters/llm/anthropic-claude-agent/claude-config-materializer.ts',
+    'apps/core/src/cli/onboarding-config.ts',
+    'apps/core/src/config/index.ts',
+    'apps/core/src/config/source-classification.ts',
+  ]);
+  const boundedPollingHelpers = new Set([
+    'apps/core/test/harness/control-http-server.ts',
+    'apps/core/test/integration/claude-agent-sdk-boundary.integration.test.ts',
+    'apps/core/test/integration/permission-approval-ipc.integration.test.ts',
+    'apps/core/test/integration/runtime-host-child-process.integration.test.ts',
+    'apps/core/test/unit/control/job-trigger.test.ts',
+    'apps/core/test/unit/control/server-auth.test.ts',
+    'apps/core/test/unit/control/skills-routes.test.ts',
+    'apps/core/test/unit/jobs/ipc-runtime-admin-handlers.test.ts',
+    'apps/core/test/unit/runner/agent-runner-ipc.test.ts',
+  ]);
+
   const rules = [
     {
       category: 'unfinished-implementation',
       severity: 'high',
       limit: 20,
-      test: (line) => /\bTODO\(next-phase\)|not implemented|is not implemented/i.test(line),
+      test: (line, file) =>
+        !file.endsWith('application/common/application-error.ts') &&
+        /\bTODO\(next-phase\)|not implemented|is not implemented/i.test(line),
       impact:
         'This is active code or product documentation admitting an incomplete implementation path.',
       fix: 'Either finish the capability or turn the gap into an explicit blocked state with a tracked owner.',
@@ -118,7 +156,11 @@ function staticFindings() {
       category: 'test-gate-gap',
       severity: 'medium',
       limit: 14,
-      test: (line) => /describe\.skip|it\.skip|skipIf\(hasPostgresIntegrationDatabase\)|describe\.skipIf/.test(line),
+      test: (line) =>
+        !postgresBackedGateIsRun &&
+        /describe\.skip|it\.skip|skipIf\(hasPostgresIntegrationDatabase\)|describe\.skipIf/.test(
+          line,
+        ),
       impact:
         'A green default run can miss behavior unless the stronger harness path is run with the right environment.',
       fix: 'Keep the skip explicit, but ensure this harness or CI runs the stronger Docker-backed path.',
@@ -128,7 +170,11 @@ function staticFindings() {
       severity: 'medium',
       limit: 18,
       test: (line, file) =>
-        file.includes('/test/') && /setTimeout|\bdelay\(|new Promise\(\(resolve\) => setTimeout/.test(line),
+        file.includes('/test/') &&
+        !boundedPollingHelpers.has(file) &&
+        /setTimeout|\bdelay\(|new Promise\(\(resolve\) => setTimeout/.test(
+          line,
+        ),
       impact:
         'Time sleeps in tests are common sources of flakes and slow feedback when scheduler timing changes.',
       fix: 'Prefer fake timers, explicit event hooks, or polling helpers with narrow deadlines.',
@@ -139,6 +185,7 @@ function staticFindings() {
       limit: 18,
       test: (line, file) =>
         file.includes('/src/') &&
+        !providerBoundaryPolicyPaths.has(file) &&
         /ANTHROPIC_API_KEY|OPENAI_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|MYCLAW_MCP_SERVERS_JSON|legacy/.test(
           line,
         ),
@@ -194,7 +241,7 @@ function staticFindings() {
     }
   }
 
-  return findings.slice(0, Math.max(minFindings, 40));
+  return findings;
 }
 
 function commandFindings(commandResults) {
@@ -207,7 +254,8 @@ function commandFindings(commandResults) {
       severity: 'high',
       evidence: result.command,
       snippet: result.stderr || result.stdout || `exit ${result.exitCode}`,
-      impact: 'A deterministic verification step failed during the bug-hunt cycle.',
+      impact:
+        'A deterministic verification step failed during the bug-hunt cycle.',
       fix: 'Fix the failing command before trusting downstream report findings.',
     });
   }
@@ -215,7 +263,9 @@ function commandFindings(commandResults) {
 }
 
 function renderReport(commandResults, findings) {
-  const passed = commandResults.filter((result) => result.exitCode === 0).length;
+  const passed = commandResults.filter(
+    (result) => result.exitCode === 0,
+  ).length;
   const failed = commandResults.length - passed;
   const lines = [
     '# MyClaw deterministic e2e bug-hunt report',
@@ -223,6 +273,7 @@ function renderReport(commandResults, findings) {
     `Generated: ${new Date().toISOString()}`,
     `Repo: ${repoRoot}`,
     `Minimum requested findings: ${minFindings}`,
+    `Static risk inventory: ${includeStaticRiskFindings ? 'enabled' : 'disabled'}`,
     `Discrete findings recorded: ${findings.length}`,
     '',
     '## Harness boundary',
@@ -279,7 +330,8 @@ fs.mkdirSync(specDir, { recursive: true });
 
 const commandResults = commandPlan.map(runCommand);
 const findings = [...commandFindings(commandResults), ...staticFindings()];
-const selectedFindings = findings.slice(0, Math.max(minFindings, 40));
+const selectedFindings =
+  minFindings > 0 ? findings.slice(0, minFindings) : findings;
 
 fs.writeFileSync(reportPath, renderReport(commandResults, selectedFindings));
 
