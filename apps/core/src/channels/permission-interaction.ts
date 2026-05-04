@@ -191,7 +191,7 @@ export function formatPermissionReceiptText(
   }
   if (decision.mode === 'allow_persistent_rule') {
     const rule = request ? firstPersistentRule(request) : undefined;
-    return `Allowed for this session: ${rule || action}\nBy: ${actor}\nRequest ID: ${requestId}`;
+    return `Allowed persistent rule: ${rule || action}\nBy: ${actor}\nRequest ID: ${requestId}`;
   }
   return `Allowed once: ${action}\nBy: ${actor}\nRequest ID: ${requestId}`;
 }
@@ -243,11 +243,16 @@ function formatPermissionBoundaryLines(
   }
   return [
     'What this changes: Allow once applies only to this tool call.',
-    `Always allow applies this rule for the running agent session: ${rule}`,
+    `Always allow applies this rule to matching future tool calls: ${rule}`,
     'What this does not allow: unrelated tools, secrets, settings edits, or broader access outside the rule.',
   ];
 }
 
 function isBroadPermissionRule(rule: string): boolean {
-  return /^[A-Za-z][A-Za-z0-9]*(?:\(\s*\*\s*\))?$/.test(rule.trim());
+  const trimmed = rule.trim();
+  const match = /^([A-Za-z][A-Za-z0-9_]*)(?:\((.*)\))?$/.exec(trimmed);
+  if (!match) return false;
+  const content = match[2]?.trim();
+  if (content === undefined) return true;
+  return /(^|[/\\])\*\*($|[/\\])|^\*$|^\.\*$|^\/?\*\*$/.test(content);
 }

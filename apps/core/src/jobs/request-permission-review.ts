@@ -1,6 +1,9 @@
 import { createHash } from 'crypto';
 
-import type { PermissionApprovalUpdate } from '../domain/types.js';
+import type {
+  PermissionApprovalDecision,
+  PermissionApprovalUpdate,
+} from '../domain/types.js';
 import type { AgentToolBinding } from '../domain/tools/tools.js';
 import {
   DEFAULT_MEMORY_APP_ID,
@@ -46,15 +49,18 @@ export async function persistRequestPermissionRules(input: {
   }
   const allowedRules = permissionUpdateAllowedToolRules(input.updates);
   if (allowedRules.length === 0) return [];
+  if (allowedRules.length !== 1) {
+    throw new Error('Persistent permission approval must contain one rule');
+  }
   const appId = DEFAULT_MEMORY_APP_ID as never;
   const agentId = memoryAgentIdForGroupFolder(input.sourceGroup) as never;
   const timestamp = new Date().toISOString();
   for (const allowedRule of allowedRules) {
-    const toolId = `tool:${allowedRule}` as never;
+    const toolId = persistentPermissionToolId(allowedRule);
     await repository.saveTool({
       id: toolId,
       appId,
-      name: toolId,
+      name: allowedRule,
       kind: 'host',
       provider: 'myclaw',
       displayName: allowedRule,
@@ -81,6 +87,17 @@ export async function persistRequestPermissionRules(input: {
   return allowedRules;
 }
 
+export function isPermanentPermissionDecision(
+  decision: PermissionApprovalDecision,
+): boolean {
+  return (
+    decision.approved === true &&
+    decision.mode === 'allow_persistent_rule' &&
+    decision.decisionClassification === 'user_permanent' &&
+    (decision.updatedPermissions?.length ?? 0) > 0
+  );
+}
+
 export function requestPermissionReviewSuggestions(
   toolInput: Record<string, unknown>,
 ): PermissionApprovalUpdate[] | undefined {
@@ -94,7 +111,8 @@ export function requestPermissionReviewSuggestions(
       : [toolInput.toolName],
   );
   if (toolNames.length !== 1) return undefined;
-  const ruleContent = toTrimmedString(toolInput.rule, { maxLen: 2048 });
+  const ruleContent = strictRuleContent(toolInput.rule);
+  if (ruleContent === null) return undefined;
   return [
     {
       type: 'addRules',
@@ -124,11 +142,25 @@ function permissionUpdateAllowedToolRules(
     for (const rule of update.rules || []) {
       const toolName = toTrimmedString(rule.toolName, { maxLen: 120 });
       if (!toolName) continue;
-      const ruleContent = toTrimmedString(rule.ruleContent, { maxLen: 2048 });
+      const ruleContent = strictRuleContent(rule.ruleContent);
+      if (ruleContent === null) continue;
       out.add(ruleContent ? `${toolName}(${ruleContent})` : toolName);
     }
   }
   return [...out];
+}
+
+function persistentPermissionToolId(allowedRule: string) {
+  const digest = createHash('sha256').update(allowedRule).digest('hex');
+  return `tool:permission-rule:${digest}` as never;
+}
+
+function strictRuleContent(value: unknown): string | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length <= 2048 ? trimmed : null;
 }
 
 function persistentPermissionBindingId(

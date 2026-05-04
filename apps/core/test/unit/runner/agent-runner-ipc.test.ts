@@ -257,6 +257,7 @@ export async function* query({ prompt, options }) {
     fs.mkdirSync(responseDir, { recursive: true });
     const responsePayload = {
       requestId: request.requestId,
+      responseNonce: request.responseNonce,
       approved: process.env.TEST_PERMISSION_DECISION === 'approve',
       ...(process.env.TEST_PERMISSION_MODE
         ? { mode: process.env.TEST_PERMISSION_MODE }
@@ -963,7 +964,7 @@ describe('agent-runner IPC lifecycle', () => {
           rules: [
             {
               toolName: 'Bash',
-              ruleContent: 'npm test',
+              ruleContent: call.permissionRequest.blockedPath,
             },
           ],
         },
@@ -980,7 +981,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'synthesizes persistent permission suggestions for arbitrary tool names',
+    'synthesizes persistent permission suggestions from host blockedPath, not agent input',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1004,7 +1005,7 @@ describe('agent-runner IPC lifecycle', () => {
               rules: [
                 {
                   toolName: 'mcp__internal__deploy_preview',
-                  ruleContent: 'environment:staging',
+                  ruleContent: call.permissionRequest.blockedPath,
                 },
               ],
             },
@@ -1084,6 +1085,7 @@ describe('agent-runner IPC lifecycle', () => {
 
       const result = await runRunner(fixture, baseInput(), {
         TEST_PERMISSION_DECISION: 'deny',
+        TEST_PERMISSION_CLASSIFICATION: 'user_reject',
         TEST_EXIT_AFTER_QUERY: '1',
       });
 
@@ -1094,6 +1096,7 @@ describe('agent-runner IPC lifecycle', () => {
           behavior: 'deny',
           message: 'Permission denied: deny',
           interrupt: false,
+          decisionClassification: 'user_reject',
         }),
       );
     },

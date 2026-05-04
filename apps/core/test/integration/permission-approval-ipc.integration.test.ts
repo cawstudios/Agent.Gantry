@@ -137,6 +137,7 @@ describe('permission approval IPC boundary', () => {
 
     expect(parsedRequest).toMatchObject({
       requestId: pendingRequest.requestId,
+      responseNonce: expect.any(String),
       sourceGroup: groupFolder,
       threadId,
       toolName: 'browser_open',
@@ -170,6 +171,7 @@ describe('permission approval IPC boundary', () => {
       groupFolder,
       {
         requestId: pendingRequest.requestId,
+        responseNonce: parsedRequest.responseNonce,
         approved: true,
         mode: 'allow_once',
         decidedBy: 'admin:lead',
@@ -229,6 +231,7 @@ describe('permission approval IPC boundary', () => {
       JSON.stringify(
         {
           requestId: pendingRequest.requestId,
+          responseNonce: pendingRequest.raw.responseNonce,
           approved: true,
           decidedBy: 'admin:lead',
         },

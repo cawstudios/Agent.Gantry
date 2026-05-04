@@ -233,7 +233,7 @@ export async function runQuery(
           suggestions:
             (permissionOpts.suggestions?.length ?? 0) > 0
               ? permissionOpts.suggestions
-              : synthesizePermissionSuggestions(toolName, input, {
+              : synthesizePermissionSuggestions(toolName, {
                   blockedPath: permissionOpts.blockedPath,
                 }),
           threadId: agentInput.threadId,
@@ -262,6 +262,12 @@ export async function runQuery(
           behavior: 'deny' as const,
           message: `Permission denied: ${reason}`,
           interrupt: false,
+          ...(decision.decisionClassification
+            ? {
+                decisionClassification:
+                  decision.decisionClassification as never,
+              }
+            : {}),
         };
       },
       settingSources: ['user'],
@@ -385,12 +391,12 @@ export async function runQuery(
 
 function synthesizePermissionSuggestions(
   toolName: string,
-  input: Record<string, unknown>,
   options: { blockedPath?: string },
 ): unknown[] | undefined {
   const normalizedToolName = toolName.trim();
   if (!normalizedToolName) return undefined;
-  const ruleContent = inferPermissionRuleContent(input, options);
+  const ruleContent = inferPermissionRuleContent(options);
+  if (!ruleContent) return undefined;
   return [
     {
       type: 'addRules',
@@ -406,59 +412,18 @@ function synthesizePermissionSuggestions(
   ];
 }
 
-function inferPermissionRuleContent(
-  input: Record<string, unknown>,
-  options: { blockedPath?: string },
-): string | undefined {
-  const scope =
-    firstTrimmedInputValue(input, [
-      'scope',
-      'rule',
-      'ruleContent',
-      'command',
-      'cmd',
-      'file_path',
-      'path',
-      'notebook_path',
-      'url',
-      'domain',
-      'subagent_type',
-      'agentType',
-      'operation',
-      'resource',
-      'target',
-      'name',
-    ]) || trimmed(options.blockedPath);
+function inferPermissionRuleContent(options: {
+  blockedPath?: string;
+}): string | undefined {
+  const scope = trimmed(options.blockedPath);
   if (!scope) return undefined;
-  if (looksLikeHttpUrl(scope)) {
-    try {
-      return `domain:${new URL(scope).hostname}`;
-    } catch {
-      return scope;
-    }
-  }
   return scope;
-}
-
-function firstTrimmedInputValue(
-  input: Record<string, unknown>,
-  keys: string[],
-): string | undefined {
-  for (const key of keys) {
-    const value = trimmed(input[key]);
-    if (value) return value;
-  }
-  return undefined;
 }
 
 function trimmed(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const out = value.trim();
   return out || undefined;
-}
-
-function looksLikeHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value);
 }
 
 function assertRequiredMcpServerReady(message: unknown): void {

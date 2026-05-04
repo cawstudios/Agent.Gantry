@@ -172,6 +172,7 @@ describe('skill registry integration flow', () => {
       mode?: string;
       decidedBy?: string;
       reason?: string;
+      decisionClassification?: string;
       updatedPermissions?: unknown[];
     };
     groups?: Record<string, any>;
@@ -624,6 +625,7 @@ describe('skill registry integration flow', () => {
         mode: 'allow_persistent_rule',
         decidedBy: 'Approver',
         reason: 'persistent rule allowed',
+        decisionClassification: 'user_permanent',
         updatedPermissions: [
           {
             type: 'addRules',
@@ -663,9 +665,9 @@ describe('skill registry integration flow', () => {
     await vi.waitFor(() => {
       expect(toolRepository.saveTool).toHaveBeenCalledWith(
         expect.objectContaining({
-          id: 'tool:mcp__internal__deploy_preview(environment:staging)',
+          id: expect.stringMatching(/^tool:permission-rule:/),
           appId: 'default',
-          name: 'tool:mcp__internal__deploy_preview(environment:staging)',
+          name: 'mcp__internal__deploy_preview(environment:staging)',
           displayName: 'mcp__internal__deploy_preview(environment:staging)',
           adapterRef: 'permission/request_permission',
           status: 'active',
@@ -676,7 +678,7 @@ describe('skill registry integration flow', () => {
       expect.objectContaining({
         appId: 'default',
         agentId: 'agent:one',
-        toolId: 'tool:mcp__internal__deploy_preview(environment:staging)',
+        toolId: expect.stringMatching(/^tool:permission-rule:/),
         status: 'active',
       }),
     );
@@ -688,6 +690,50 @@ describe('skill registry integration flow', () => {
         ),
         { threadId: 'thread-origin' },
       );
+    });
+  });
+
+  it('does not persist request_permission updatedPermissions without a permanent decision', async () => {
+    const { processTaskIpc } = await import('@core/jobs/ipc-handler.js');
+    const { deps, toolRepository } = createCapabilityReviewDeps({
+      decision: {
+        approved: true,
+        mode: 'allow_once',
+        decidedBy: 'Approver',
+        reason: 'allowed once',
+        decisionClassification: 'user_temporary',
+        updatedPermissions: [
+          {
+            type: 'addRules',
+            behavior: 'allow',
+            destination: 'session',
+            rules: [{ toolName: 'Bash' }],
+          },
+        ],
+      },
+    });
+
+    await processTaskIpc(
+      {
+        type: 'request_permission',
+        taskId: 'request-permission-allow-once-no-persist-test',
+        targetJid: 'chat-origin',
+        chatJid: 'chat-origin',
+        authThreadId: 'thread-origin',
+        payload: {
+          permissionKind: 'tool',
+          toolName: 'Bash',
+          reason: 'Run one command.',
+        },
+      },
+      'agent:one',
+      false,
+      deps as any,
+    );
+
+    await vi.waitFor(() => {
+      expect(toolRepository.saveTool).not.toHaveBeenCalled();
+      expect(toolRepository.saveAgentToolBinding).not.toHaveBeenCalled();
     });
   });
 

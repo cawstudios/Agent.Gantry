@@ -14,6 +14,7 @@ import { createTaskResponder, toTrimmedString } from './ipc-shared.js';
 import { parseSkillDraftAssets } from './skill-draft-ipc.js';
 import { getHostRuntimeCredentialEnv } from '../runtime/agent-spawn-host.js';
 import {
+  isPermanentPermissionDecision,
   persistRequestPermissionRules,
   requestPermissionDescription,
   requestPermissionQueuedMessage,
@@ -516,11 +517,11 @@ function startRequestOnlyCapabilityReview(input: { deps: Parameters<TaskHandler>
       });
       const reason = decision.approved ? 'missing approving principal' : decision.reason || 'not approved';
       let persistedRules: string[] = [];
-      if (decision.approved && decision.updatedPermissions?.length && input.review.toolName === 'request_permission') {
+      if (input.review.toolName === 'request_permission' && isPermanentPermissionDecision(decision)) {
         persistedRules = await persistRequestPermissionRules({
           deps: input.deps,
           sourceGroup: input.sourceGroup,
-          updates: decision.updatedPermissions,
+          updates: decision.updatedPermissions ?? [],
         });
       }
       message = decision.approved && decision.decidedBy
