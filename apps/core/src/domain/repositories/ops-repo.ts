@@ -36,6 +36,7 @@ export interface JobUpsertInput {
   lease_run_id?: string | null;
   lease_expires_at?: string | null;
   pause_reason?: string | null;
+  capability_policy?: Job['capability_policy'];
 }
 
 export interface JobListFilters {
@@ -43,6 +44,11 @@ export interface JobListFilters {
   statuses?: string[];
   groupScope?: string;
   threadId?: string | null;
+  agentId?: string;
+  kind?: 'manual' | 'once' | 'recurring';
+  conversationJid?: string;
+  allowedConversationJids?: string[];
+  limit?: number;
 }
 
 export interface JobRunListFilters {

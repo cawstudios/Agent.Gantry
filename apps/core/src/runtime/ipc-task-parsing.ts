@@ -152,6 +152,7 @@ export function parseTaskIpcData(
   });
   const jobId = toTrimmedString(raw.jobId, { maxLen: 128 });
   const linkedSessions = toOptionalStringArray(raw.linkedSessions, 200, 255);
+  const allowedTools = toOptionalStringArray(raw.allowedTools, 200, 255);
   const deliverToArray = toOptionalStringArray(raw.deliverTo, 200, 255);
   const deliverToSingle = toTrimmedString(raw.deliverTo, { maxLen: 255 });
   const deliverTo =
@@ -212,6 +213,7 @@ export function parseTaskIpcData(
   if (script !== undefined) parsed.script = script;
   if (jobId) parsed.jobId = jobId;
   if (linkedSessions !== undefined) parsed.linkedSessions = linkedSessions;
+  if (allowedTools !== undefined) parsed.allowedTools = allowedTools;
   if (deliverTo !== undefined) parsed.deliverTo = deliverTo;
   if (groupScope) parsed.groupScope = groupScope;
   if (threadBinding.authThreadId) {

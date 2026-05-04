@@ -1,4 +1,8 @@
 import { JobManagementService } from '../application/jobs/job-management-service.js';
+import {
+  buildJobListVisibilityMetadata,
+  buildJobVisibilityMetadata,
+} from '../application/jobs/job-visibility-metadata.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { TaskContext, TaskHandler } from './ipc-types.js';
 import { mapApplicationError } from './ipc-application-error.js';
@@ -10,6 +14,7 @@ function makeJobService(context: TaskContext): JobManagementService {
     ops: context.deps.opsRepository,
     scheduler: { requestSchedulerSync: context.deps.onSchedulerChanged },
     schedulePlanner: runtimeJobSchedulePlanner,
+    toolRepository: context.deps.getToolRepository?.(),
   });
 }
 
@@ -36,13 +41,27 @@ const schedulerGetJobHandler: TaskHandler = async (context) => {
     return;
   }
   try {
-    const result = await makeJobService(context).getJob({
+    const service = makeJobService(context);
+    const result = await service.getJob({
       jobId,
       access: accessFromContext(context),
     });
+    const data = result.job
+      ? {
+          job: {
+            ...result.job,
+            visibility: await buildJobVisibilityMetadata({
+              job: result.job,
+              ops: context.deps.opsRepository,
+              toolRepository: context.deps.getToolRepository?.(),
+              isMain: context.isMain,
+            }),
+          },
+        }
+      : result;
     acceptData(
       result.job ? `Loaded scheduler job (${jobId}).` : 'Job not found.',
-      result,
+      data,
     );
   } catch (err) {
     const mapped = mapApplicationError(err, 'Failed to query scheduler jobs.');
@@ -59,13 +78,34 @@ const schedulerListJobsHandler: TaskHandler = async (context) => {
     data.authThreadId,
   );
   try {
-    const result = await makeJobService(context).listJobs({
+    const service = makeJobService(context);
+    const result = await service.listJobs({
       access: accessFromContext(context),
       statuses: Array.isArray(data.statuses) ? data.statuses : undefined,
       groupScope:
         toTrimmedString(data.groupScope, { maxLen: 128 }) || undefined,
+      kind:
+        data.kind === 'manual' ||
+        data.kind === 'once' ||
+        data.kind === 'recurring'
+          ? data.kind
+          : undefined,
+      conversationJid:
+        toTrimmedString(data.conversationJid, { maxLen: 256 }) || undefined,
+      limit: data.limit,
     });
-    acceptData(`Listed ${result.jobs.length} scheduler job(s).`, result);
+    const metadata = await buildJobListVisibilityMetadata({
+      jobs: result.jobs,
+      toolRepository: context.deps.getToolRepository?.(),
+      isMain: context.isMain,
+    });
+    acceptData(`Listed ${result.jobs.length} scheduler job(s).`, {
+      jobs: result.jobs.map(({ prompt: _prompt, ...job }) => ({
+        ...job,
+        prompt_preview: metadata.get(job.id)?.promptPreview,
+        visibility: metadata.get(job.id),
+      })),
+    });
   } catch (err) {
     const mapped = mapApplicationError(err, 'Failed to query scheduler jobs.');
     logger.error({ err, sourceGroup }, 'scheduler_list_jobs failed');

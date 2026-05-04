@@ -59,6 +59,7 @@ import {
   resolveTurnAllowedTools,
 } from './group-run-context.js';
 import { getGroupBrowserStatus } from './group-browser-status.js';
+import { handleFailure, waitOutput } from './group-processing-flow.js';
 import {
   createAdvanceCursorHandler,
   createArchiveCurrentSessionHandler,
@@ -675,15 +676,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         outputCallbackError ??= err;
       },
     });
-    const waitForAgentOutputCallbacks = async () => {
-      await outputCallbacks.wait();
-      if (!outputCallbackError) return;
-      hadError = true;
-      logger.error(
-        { group: group.name, err: outputCallbackError },
-        'Agent output callback failed',
-      );
-    };
     try {
       output = await runAgent(
         group,
@@ -700,7 +692,13 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         },
       );
     } finally {
-      await waitForAgentOutputCallbacks();
+      hadError = await waitOutput({
+        wait: outputCallbacks.wait,
+        getError: () => outputCallbackError,
+        hadError,
+        groupName: group.name,
+        logger,
+      });
       await finalizeStreamingOutput('turn-complete');
       if (output === 'success' && pendingIdleBoundary) {
         notifyTurnIdle();
@@ -713,20 +711,14 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     }
 
     if (output === 'error' || hadError) {
-      if (outputSentToUser) {
-        logger.warn(
-          { group: group.name },
-          'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
-        );
-        return true;
-      }
-      deps.setCursor(queueJid, previousCursor);
-      await deps.saveState();
-      logger.warn(
-        { group: group.name },
-        'Agent error, rolled back message cursor for retry',
-      );
-      return false;
+      return handleFailure({
+        outputSentToUser,
+        groupName: group.name,
+        queueJid,
+        previousCursor,
+        deps,
+        logger,
+      });
     }
 
     outputSentToUser = await finalizeGroupAgentUserVisibleOutput({

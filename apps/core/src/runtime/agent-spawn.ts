@@ -343,6 +343,21 @@ export async function spawnAgent(
       ...allMcpCapabilities,
       ...browserProjection.mcpCapabilities,
     ];
+    if (
+      input.isScheduledJob &&
+      jobAllowsBrowserActions(input.allowedTools) &&
+      !allMcpCapabilities.some(
+        (capability) => capability.name === BROWSER_ACTION_MCP_SERVER_NAME,
+      )
+    ) {
+      claudeRuntimeMaterialization.cleanup();
+      return {
+        status: 'error',
+        result: null,
+        error:
+          'Browser tools are on the autonomous job allowlist, but the conversation browser is unavailable. Launch the browser for this agent conversation before running the job.',
+      };
+    }
   } catch (err) {
     claudeRuntimeMaterialization.cleanup();
     return {
@@ -425,6 +440,16 @@ export async function spawnAgent(
     cleanupRunnerMcpConfigFile(mcpConfigPath);
     claudeRuntimeMaterialization.cleanup();
   }
+}
+
+function jobAllowsBrowserActions(
+  allowedTools: readonly string[] | undefined,
+): boolean {
+  return (allowedTools ?? []).some(
+    (tool) =>
+      tool === `mcp__${BROWSER_ACTION_MCP_SERVER_NAME}__*` ||
+      tool.startsWith(`mcp__${BROWSER_ACTION_MCP_SERVER_NAME}__`),
+  );
 }
 
 function isOpenRouterBaseUrl(value?: string): boolean {

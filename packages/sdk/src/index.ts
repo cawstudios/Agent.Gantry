@@ -21,11 +21,13 @@ import type {
 import { createIngressesClient } from './ingresses.js';
 export type { RuntimeSettingsResponse } from './settings.js';
 import * as mcpServerClients from './mcp-servers.js';
+import { jobListQuery } from './job-list-query.js';
 import type {
   CreateJobInput,
   CreateJobResponse,
   JobRecord,
   JobTriggerWaitResult,
+  ListJobsInput,
   ModelRecord,
   UpdateJobInput,
 } from './job-model-types.js';
@@ -37,6 +39,7 @@ export type {
   JobRecord,
   JobStatus,
   JobTriggerWaitResult,
+  ListJobsInput,
   ModelRecord,
   UpdateJobInput,
 } from './job-model-types.js';
@@ -343,10 +346,10 @@ export class MyClawClient {
         path: '/v1/jobs',
         body: input,
       }),
-    list: () =>
+    list: (input?: ListJobsInput) =>
       this.transport.request<{ jobs: JobRecord[] }>({
         method: 'GET',
-        path: '/v1/jobs',
+        path: `/v1/jobs${jobListQuery(input)}`,
       }),
     get: (jobId: string) =>
       this.transport.request<JobRecord>({
@@ -678,6 +681,7 @@ export class MyClawClient {
 }
 export const createClient = (options: ClientOptions) =>
   new MyClawClient(options);
+
 export {
   buildIngressSignaturePayload,
   signIngressRequest,

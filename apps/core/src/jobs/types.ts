@@ -9,6 +9,7 @@ import type { GroupQueue } from '../runtime/group-queue.js';
 import type { spawnAgent } from '../runtime/agent-spawn.js';
 import type { SchedulerSendMessage } from './delivery.js';
 import type { SessionMemoryCollector } from '../domain/ports/session-memory-collector.js';
+import type { ToolCatalogRepository } from '../domain/ports/repositories.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -31,6 +32,7 @@ export interface SchedulerDependencies {
   runAgent?: typeof spawnAgent;
   collectSessionMemory?: SessionMemoryCollector;
   opsRepository: OpsRepository;
+  getToolRepository?: () => ToolCatalogRepository | undefined;
 }
 
 export type JobTurnContext = Awaited<

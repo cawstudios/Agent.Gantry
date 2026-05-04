@@ -1038,7 +1038,11 @@ describe('control job trigger', () => {
       },
     ]);
     opsRepo.listJobs.mockResolvedValue([
-      makeJob({ id: 'visible', linked_sessions: ['app:app-one:conv-1'] }),
+      makeJob({
+        id: 'visible',
+        linked_sessions: ['app:app-one:conv-1'],
+        capability_policy: { allowed_tools: ['Read'] },
+      }),
       makeJob({
         id: 'mixed',
         linked_sessions: ['app:app-one:conv-1', 'app:app-two:conv-2'],
@@ -1055,9 +1059,62 @@ describe('control job trigger', () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
-        jobs: [expect.objectContaining({ jobId: 'visible' })],
+      const body = await response.json();
+      expect(body).toMatchObject({
+        jobs: [
+          expect.objectContaining({
+            jobId: 'visible',
+            promptPreview: 'Run',
+            inheritedToolCount: 0,
+            jobExtraToolCount: 1,
+            effectiveAllowedToolCount: 1,
+          }),
+        ],
       });
+      expect(body.jobs[0]).not.toHaveProperty('prompt');
+      expect(body.jobs[0]).not.toHaveProperty('fullPrompt');
+      expect(body.jobs[0]).not.toHaveProperty('inheritedTools');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('returns full job visibility metadata on detail', async () => {
+    const port = await reservePort();
+    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-jobs',
+        scopes: ['jobs:read'],
+        appId: 'app-one',
+      },
+    ]);
+    opsRepo.getJobById.mockResolvedValue(
+      makeJob({ capability_policy: { allowed_tools: ['Read'] } }),
+    );
+    const handle = startControlServer({
+      app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/jobs/job-1`,
+        'token-jobs',
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body).toMatchObject({
+        jobId: 'job-1',
+        prompt: 'Run',
+        fullPrompt: 'Run',
+        inheritedTools: [],
+        jobExtraTools: ['Read'],
+        effectiveAllowedTools: ['Read'],
+        recentRunErrors: [],
+      });
+      expect(body).not.toHaveProperty('inheritedToolCount');
     } finally {
       await handle.close();
     }

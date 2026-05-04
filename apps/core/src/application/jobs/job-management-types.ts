@@ -13,6 +13,7 @@ import type {
   JobUpsertInput,
   OpsRepository,
 } from '../../domain/repositories/ops-repo.js';
+import type { ToolCatalogRepository } from '../../domain/ports/repositories.js';
 import type { Clock } from '../common/clock.js';
 import type { SchedulerCoordinationPort } from './scheduler-coordination-port.js';
 
@@ -98,9 +99,70 @@ export interface JobManagementServiceDeps {
   scheduler: SchedulerCoordinationPort;
   schedulePlanner: JobSchedulePlanner;
   clock?: Clock;
+  toolRepository?: ToolCatalogRepository;
+  approveJobExtraTools?: (input: JobExtraToolApprovalRequest) => Promise<{
+    approved: boolean;
+    reason?: string;
+  }>;
   control?: JobControlPort;
   runtimeEvents?: RuntimeEventPublisherPort;
   triggerQueue?: JobTriggerQueuePort;
+}
+
+export interface JobExtraToolApprovalRequest {
+  jobId: string;
+  jobName: string;
+  target: {
+    appId: string;
+    agentId: string;
+    groupScope: string;
+  };
+  inheritedTools: string[];
+  requestedJobExtraTools: string[];
+  extrasBeyondInherited: string[];
+  existingJobExtraTools: string[];
+  operation: 'create' | 'update';
+}
+
+export interface CreateManagedJobInput {
+  appId: string;
+  name: string;
+  prompt: string;
+  sessionId: string;
+  kind?: JobKind;
+  runAt?: string;
+  schedule?: { type?: unknown; value?: unknown };
+  executionMode?: unknown;
+  threadId?: unknown;
+  modelAlias?: unknown;
+  modelProfileId?: unknown;
+  allowedTools?: unknown;
+  dryRun?: unknown;
+}
+
+export interface UpsertJobFromIpcInput {
+  access: SchedulerJobAccess;
+  jobId?: string;
+  name: string;
+  prompt: string;
+  modelAlias?: string | null;
+  modelProfileId?: string | null;
+  scheduleType: unknown;
+  scheduleValue: string;
+  linkedSessions?: string[];
+  deliverTo?: string[];
+  threadId?: string;
+  silent?: boolean;
+  cleanupAfterMs?: number;
+  timeoutMs?: number;
+  maxRetries?: number;
+  retryBackoffMs?: number;
+  maxConsecutiveFailures?: number;
+  executionMode?: unknown;
+  serialize?: unknown;
+  groupScope?: string;
+  createdBy?: 'agent' | 'human';
+  allowedTools?: unknown;
 }
 
 export interface ConversationBinding {
@@ -132,6 +194,7 @@ export type JobUpdatePatch = Partial<{
   maxConsecutiveFailures: number;
   executionMode: JobExecutionMode;
   status: Extract<Job['status'], 'active' | 'paused'>;
+  allowedTools: string[];
 }>;
 
 export interface JobListInput {
@@ -139,6 +202,9 @@ export interface JobListInput {
   access?: SchedulerJobAccess;
   statuses?: string[];
   groupScope?: string;
+  agentId?: string;
+  kind?: JobKind;
+  conversationJid?: string;
 }
 
 export interface JobLookupInput {

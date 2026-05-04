@@ -79,6 +79,9 @@ export function buildJobUpdates(
   if (patch.maxConsecutiveFailures !== undefined) {
     updates.max_consecutive_failures = patch.maxConsecutiveFailures;
   }
+  if (patch.allowedTools !== undefined) {
+    updates.capability_policy = { allowed_tools: patch.allowedTools };
+  }
   if (patch.scheduleType !== undefined)
     updates.schedule_type = patch.scheduleType;
   if (patch.scheduleValue !== undefined)

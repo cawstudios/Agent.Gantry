@@ -27,7 +27,10 @@ export interface TaskIpcData {
   maxConsecutiveFailures?: number;
   executionMode?: string;
   serialize?: boolean;
+  allowedTools?: string[];
   statuses?: string[];
+  kind?: 'manual' | 'once' | 'recurring';
+  conversationJid?: string;
   runId?: string;
   eventType?: string;
   sinceId?: number;

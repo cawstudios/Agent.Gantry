@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { Job, RegisteredGroup } from '../../domain/types.js';
+import type { JobVisibilityMetadata } from '../../application/jobs/job-visibility-metadata.js';
 import type { getRuntimeControlRepository } from '../../adapters/storage/postgres/runtime-store.js';
 import { nowIso as runtimeNowIso } from '../../infrastructure/time/datetime.js';
 import { resolveAppScopeAppId as applicationResolveAppScopeAppId } from '../../application/app-scope/resolve-app-scope.js';
@@ -120,13 +121,20 @@ export async function resolveOwnedWebhookId(
   return webhook.webhookId;
 }
 
-export function mapManualJobToStored(job: Job): Record<string, unknown> {
+export function mapManualJobToStored(
+  job: Job,
+  metadata?: JobVisibilityMetadata,
+  options: { detail?: boolean } = { detail: true },
+): Record<string, unknown> {
   const isManual = job.schedule_type === 'manual';
   const resolvedModel = resolveModelSelection(job.model);
+  const detail = options.detail !== false;
   return {
     jobId: job.id,
     name: job.name,
-    prompt: job.prompt,
+    ...(detail ? { prompt: job.prompt } : {}),
+    promptPreview: metadata?.promptPreview ?? previewPrompt(job.prompt),
+    ...(detail ? { fullPrompt: metadata?.fullPrompt ?? job.prompt } : {}),
     kind: isManual
       ? 'manual'
       : job.schedule_type === 'once'
@@ -160,5 +168,48 @@ export function mapManualJobToStored(job: Job): Record<string, unknown> {
     threadId: job.thread_id,
     groupScope: job.group_scope,
     sessionId: job.session_id,
+    target: metadata?.target ?? {
+      appId: resolveJobRuntimeAppId(job),
+      agentId: job.group_scope.startsWith('agent:')
+        ? job.group_scope
+        : `agent:${job.group_scope}`,
+      groupScope: job.group_scope,
+      conversationJids: job.linked_sessions,
+      threadId: job.thread_id,
+    },
+    notificationTarget: metadata?.notificationTarget ?? {
+      linkedSessions: job.linked_sessions,
+      threadId: job.thread_id,
+      silent: job.silent,
+    },
+    ...(detail
+      ? {
+          inheritedTools: metadata?.inheritedTools ?? [],
+          jobExtraTools:
+            metadata?.jobExtraTools ??
+            job.capability_policy?.allowed_tools ??
+            [],
+          effectiveAllowedTools:
+            metadata?.effectiveAllowedTools ??
+            job.capability_policy?.allowed_tools ??
+            [],
+          recentRunErrors: metadata?.recentRunErrors ?? [],
+        }
+      : {
+          inheritedToolCount: metadata?.inheritedToolCount ?? 0,
+          jobExtraToolCount:
+            metadata?.jobExtraToolCount ??
+            job.capability_policy?.allowed_tools?.length ??
+            0,
+          effectiveAllowedToolCount:
+            metadata?.effectiveAllowedToolCount ??
+            job.capability_policy?.allowed_tools?.length ??
+            0,
+        }),
   };
+}
+
+function previewPrompt(prompt: string): string {
+  const compact = prompt.replace(/\s+/g, ' ').trim();
+  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
 }

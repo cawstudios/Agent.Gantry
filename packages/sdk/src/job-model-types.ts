@@ -12,7 +12,9 @@ export type JobStatus =
 export interface JobRecord {
   jobId: string;
   name: string;
-  prompt: string;
+  prompt?: string;
+  promptPreview?: string;
+  fullPrompt?: string;
   kind: JobKind;
   status: JobStatus;
   schedule:
@@ -29,6 +31,30 @@ export interface JobRecord {
   threadId: string | null;
   groupScope: string;
   sessionId: string | null;
+  target?: {
+    appId: string;
+    agentId: string;
+    groupScope: string;
+    conversationJids: string[];
+    threadId: string | null;
+  };
+  inheritedTools?: string[];
+  jobExtraTools?: string[];
+  effectiveAllowedTools?: string[];
+  inheritedToolCount?: number;
+  jobExtraToolCount?: number;
+  effectiveAllowedToolCount?: number;
+  recentRunErrors?: Array<{
+    runId: string;
+    status: string;
+    errorSummary: string;
+    endedAt: string | null;
+  }>;
+  notificationTarget?: {
+    linkedSessions: string[];
+    threadId: string | null;
+    silent: boolean;
+  };
 }
 
 export interface ModelRecord {
@@ -58,6 +84,7 @@ export interface CreateJobInput {
   threadId?: string;
   modelAlias?: string;
   modelProfileId?: string;
+  allowedTools?: string[];
   dryRun?: boolean;
 }
 
@@ -69,6 +96,16 @@ export interface UpdateJobInput {
   status?: 'active' | 'paused';
   modelAlias?: string | null;
   modelProfileId?: string | null;
+  allowedTools?: string[];
+}
+
+export interface ListJobsInput {
+  agentId?: string;
+  groupScope?: string;
+  conversationJid?: string;
+  kind?: JobKind;
+  status?: JobStatus | JobStatus[];
+  limit?: number;
 }
 
 export interface CreateJobResponse {

@@ -19,6 +19,11 @@ import {
   resolveSchedulerThreadArg,
 } from '../scheduler-utils.js';
 import { formatModelCatalog } from '../../../shared/model-catalog.js';
+import { chatJid, threadId } from '../context.js';
+import {
+  schedulerJobSummary,
+  schedulerJobsSummary,
+} from './scheduler-formatters.js';
 
 async function requestSchedulerData(
   type: string,
@@ -99,6 +104,7 @@ export function registerSchedulerTools(server: McpServer): void {
       max_consecutive_failures: z.number().optional(),
       execution_mode: z.enum(['parallel', 'serialized']).optional(),
       serialize: z.boolean().optional(),
+      allowed_tools: z.array(z.string()).optional(),
     },
     async (args) => {
       if (args.schedule_type === 'cron') {
@@ -173,6 +179,10 @@ export function registerSchedulerTools(server: McpServer): void {
           args.serialize,
         ),
         serialize: args.serialize,
+        allowedTools: args.allowed_tools,
+        targetJid: chatJid,
+        chatJid,
+        authThreadId: threadId,
         createdBy: 'agent',
         timestamp: nowIso(),
       };
@@ -213,7 +223,6 @@ export function registerSchedulerTools(server: McpServer): void {
       };
     },
   );
-
   server.tool(
     'scheduler_get_job',
     'Get one scheduler job by ID from the host scheduler.',
@@ -229,7 +238,7 @@ export function registerSchedulerTools(server: McpServer): void {
         content: [
           {
             type: 'text' as const,
-            text: job ? JSON.stringify(job, null, 2) : 'Job not found.',
+            text: job ? schedulerJobSummary(job) : 'Job not found.',
           },
         ],
       };
@@ -242,11 +251,17 @@ export function registerSchedulerTools(server: McpServer): void {
     {
       statuses: z.array(z.string()).optional(),
       group_scope: z.string().optional(),
+      kind: z.enum(['manual', 'once', 'recurring']).optional(),
+      conversation_jid: z.string().optional(),
+      limit: z.number().optional(),
     },
     async (args) => {
       const response = await requestSchedulerData('scheduler_list_jobs', {
         statuses: args.statuses,
         groupScope: args.group_scope,
+        kind: args.kind,
+        conversationJid: args.conversation_jid,
+        limit: args.limit,
       });
       const error = taskError(response, 'Scheduler list jobs failed.');
       if (error) return error;
@@ -254,7 +269,7 @@ export function registerSchedulerTools(server: McpServer): void {
       const result = Array.isArray(jobs) ? jobs : [];
       return {
         content: [
-          { type: 'text' as const, text: JSON.stringify(result, null, 2) },
+          { type: 'text' as const, text: schedulerJobsSummary(result) },
         ],
       };
     },
@@ -283,6 +298,7 @@ export function registerSchedulerTools(server: McpServer): void {
       max_consecutive_failures: z.number().optional(),
       execution_mode: z.enum(['parallel', 'serialized']).optional(),
       serialize: z.boolean().optional(),
+      allowed_tools: z.array(z.string()).optional(),
     },
     async (args) => {
       const executionMode =
@@ -321,6 +337,10 @@ export function registerSchedulerTools(server: McpServer): void {
         maxConsecutiveFailures: args.max_consecutive_failures,
         executionMode,
         serialize: args.serialize,
+        allowedTools: args.allowed_tools,
+        targetJid: chatJid,
+        chatJid,
+        authThreadId: threadId,
         timestamp: nowIso(),
       });
       const response = await waitForTaskResponse(taskId, 20_000);

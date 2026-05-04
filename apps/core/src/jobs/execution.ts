@@ -8,6 +8,7 @@ import {
   getRuntimeEventExchange,
 } from '../adapters/storage/postgres/runtime-store.js';
 import { resolveJobRuntimeAppId } from '../application/jobs/job-access.js';
+import { agentIdForJobGroupScope } from '../application/jobs/job-tool-policy.js';
 import {
   RUNTIME_EVENT_TYPES,
   type RuntimeEventType,
@@ -27,14 +28,16 @@ import {
   collectCompactBoundaryMemory,
   collectJobCompletionMemory,
 } from './compact-memory.js';
-import { notifyLinkedSessions } from './delivery.js';
 import { normalizeCleanupAfterMs } from './cleanup.js';
 import {
   resolveExecutionContext,
   resolveExecutionMemoryContext,
 } from './execution-context.js';
 import { computeNextJobRun } from './schedule-math.js';
-import { formatRunStatusMessage } from './status-formatting.js';
+import {
+  logMemoryDreamJobFailure,
+  notifySchedulerRunFailure,
+} from './execution-notifications.js';
 import { handleSystemJob, MEMORY_DREAM_SYSTEM_PROMPT } from './system-jobs.js';
 import {
   buildJobStreamingOptions,
@@ -49,6 +52,7 @@ import {
   resolveJobModel,
   type NormalizedModelUsage,
 } from './model-resolution.js';
+import { resolveExecutionAllowedTools } from './execution-tool-policy.js';
 import {
   resolveAppSessionForJob,
   resolveAppSessionForTrigger,
@@ -375,6 +379,15 @@ export async function runJob(
           chatJid: execution.executionJid,
           threadId: currentJob.thread_id ?? null,
         });
+        const effectiveAllowedTools = await resolveExecutionAllowedTools({
+          job: currentJob,
+          appId: turnContext?.appId ?? runtimeAppId,
+          agentId:
+            turnContext?.agentId ??
+            agentIdForJobGroupScope(execution.group.folder),
+          isMain,
+          toolRepository: deps.getToolRepository?.(),
+        });
         agentRunId = turnContext?.agentSessionId
           ? await deps.opsRepository.createSessionAgentRun?.({
               agentSessionId: turnContext.agentSessionId,
@@ -398,6 +411,7 @@ export async function runJob(
             assistantName: ASSISTANT_NAME,
             script: currentJob.script || undefined,
             memoryContextBlock: turnContext?.memoryContextBlock,
+            allowedTools: effectiveAllowedTools,
           },
           (proc, runHandle) =>
             deps.onProcess(
@@ -593,47 +607,32 @@ export async function runJob(
     retry_count: retryCount,
     pause_reason: pauseReason,
   });
+  if (error?.includes('tool not on autonomous job allowlist'))
+    await emitJobEvent(RUNTIME_EVENT_TYPES.JOB_TOOL_DENIED, {
+      error_summary: error.slice(0, 500),
+    });
 
   const summary = error
     ? error.slice(0, 240)
     : resultSummary
       ? resultSummary.slice(0, 4000)
       : 'Completed';
-  if (error && currentJob.prompt === MEMORY_DREAM_SYSTEM_PROMPT) {
-    logger.error(
-      {
-        jobId: currentJob.id,
-        groupScope: currentJob.group_scope,
-        runId,
-        error,
-      },
-      'Memory dreaming system job failed',
-    );
-  }
-  let notified = false;
-  if (error && !currentJob.silent) {
-    const delivered = await deliverMessage(
-      `⚠️ Scheduled task failed: ${summary}`,
-    );
-    notified = notified || delivered;
-  }
-  if (runStatus !== 'completed' && !currentJob.silent) {
-    const message = formatRunStatusMessage({
-      job: currentJob,
-      runId,
-      runStatus,
-      summary,
-      nextRun,
-      retryCount,
-      pauseReason,
-    });
-    const delivered = await notifyLinkedSessions(
-      currentJob,
-      message,
-      deps.sendMessage,
-    );
-    notified = notified || delivered;
-  }
+  logMemoryDreamJobFailure({ job: currentJob, runId, error, logger });
+  const notified =
+    runStatus === 'completed'
+      ? false
+      : await notifySchedulerRunFailure({
+          job: currentJob,
+          runId,
+          runStatus,
+          summary,
+          nextRun,
+          retryCount,
+          pauseReason,
+          sendMessage: deps.sendMessage,
+          deliverMessage,
+          error,
+        });
   if (notified) {
     await deps.opsRepository.markJobRunNotified(runId);
   }

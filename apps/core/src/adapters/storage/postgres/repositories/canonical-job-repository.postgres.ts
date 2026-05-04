@@ -88,6 +88,7 @@ const CANONICAL_JOB_EVENT_TYPES = [
   RUNTIME_EVENT_TYPES.JOB_RUN_STARTED,
   RUNTIME_EVENT_TYPES.JOB_STARTED,
   RUNTIME_EVENT_TYPES.JOB_STREAMING,
+  RUNTIME_EVENT_TYPES.JOB_TOOL_DENIED,
   RUNTIME_EVENT_TYPES.RUN_COMPLETED,
   RUNTIME_EVENT_TYPES.RUN_FAILED,
   RUNTIME_EVENT_TYPES.RUN_TIMEOUT,
@@ -97,6 +98,39 @@ const CANONICAL_JOB_EVENT_TYPES = [
   RUNTIME_EVENT_TYPES.JOB_RUN_COMPLETED,
   RUNTIME_EVENT_TYPES.JOB_RUN_FAILED,
 ] as const;
+
+function canonicalAgentId(agentId: string): string {
+  const trimmed = agentId.trim();
+  return trimmed.startsWith('agent:') ? trimmed : `agent:${trimmed}`;
+}
+
+function kindClause(
+  kind: NonNullable<JobListFilters['kind']>,
+  scheduleJson: unknown,
+) {
+  if (kind === 'manual') {
+    return sql`${scheduleJson}::jsonb ->> 'type' = 'manual'`;
+  }
+  if (kind === 'once') {
+    return sql`${scheduleJson}::jsonb ->> 'type' = 'once'`;
+  }
+  return sql`${scheduleJson}::jsonb ->> 'type' in ('cron', 'interval')`;
+}
+
+function linkedSessionsAllowedClause(targetJson: unknown, jids: string[]) {
+  if (jids.length === 0) {
+    return sql`jsonb_array_length(coalesce(${targetJson}::jsonb -> 'linkedSessions', '[]'::jsonb)) = 0`;
+  }
+  const allowed = sql.join(
+    jids.map((jid) => sql`${jid}`),
+    sql`, `,
+  );
+  return sql`not exists (
+    select 1
+    from jsonb_array_elements_text(coalesce(${targetJson}::jsonb -> 'linkedSessions', '[]'::jsonb)) as linked_session(value)
+    where linked_session.value not in (${allowed})
+  )`;
+}
 
 export class PostgresCanonicalJobRepository {
   private readonly graph: PostgresCanonicalGraphRepository;
@@ -138,12 +172,36 @@ export class PostgresCanonicalJobRepository {
           ? sql`${pgSchema.canonicalJobsPostgres.targetJson}::jsonb ->> 'threadId' = ${filters.threadId}`
           : sql`coalesce(${pgSchema.canonicalJobsPostgres.targetJson}::jsonb ->> 'threadId', '') = ''`
         : undefined,
+      filters?.agentId
+        ? sql`(
+            ${pgSchema.canonicalJobsPostgres.agentId} = ${canonicalAgentId(filters.agentId)}
+            or ${pgSchema.canonicalJobsPostgres.targetJson}::jsonb ->> 'groupScope' = ${filters.agentId}
+            or ${pgSchema.canonicalJobsPostgres.targetJson}::jsonb ->> 'groupScope' = ${canonicalAgentId(filters.agentId)}
+          )`
+        : undefined,
+      filters?.kind
+        ? kindClause(filters.kind, pgSchema.canonicalJobsPostgres.scheduleJson)
+        : undefined,
+      filters?.conversationJid
+        ? sql`exists (
+            select 1
+            from jsonb_array_elements_text(coalesce(${pgSchema.canonicalJobsPostgres.targetJson}::jsonb -> 'linkedSessions', '[]'::jsonb)) as linked_session(value)
+            where linked_session.value = ${filters.conversationJid}
+          )`
+        : undefined,
+      filters?.allowedConversationJids
+        ? linkedSessionsAllowedClause(
+            pgSchema.canonicalJobsPostgres.targetJson,
+            filters.allowedConversationJids,
+          )
+        : undefined,
     ].filter(Boolean);
     const filtered = clauses.length > 0 ? query.where(and(...clauses)) : query;
-    return filtered.orderBy(
+    const ordered = filtered.orderBy(
       desc(pgSchema.canonicalJobsPostgres.updatedAt),
       desc(pgSchema.canonicalJobsPostgres.createdAt),
     );
+    return filters?.limit ? ordered.limit(filters.limit) : ordered;
   }
 
   async upsertJob(record: JobRecordInput): Promise<void> {

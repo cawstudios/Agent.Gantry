@@ -1,14 +1,16 @@
 import { RUNTIME_EVENT_TYPES } from '../../domain/events/runtime-event-types.js';
 import { ApplicationError } from '../common/application-error.js';
 import type { Clock } from '../common/clock.js';
-import { assertJobBelongsToApp, jobBelongsToApp } from './job-access.js';
+import { assertJobBelongsToApp, resolveJobRuntimeAppId } from './job-access.js';
+import { isVisibleJob } from './job-list-filters.js';
 import {
   assertSchedulerJobAccess,
-  canAccessSchedulerJob,
   normalizeOptional,
   resolveLinkedSessions,
   validateSchedulerUpdate,
 } from './job-management-access.js';
+import { createManagedJob } from './job-management-create.js';
+import { requireJobExtraToolApproval } from './job-extra-tool-approval.js';
 import {
   buildJobUpdates,
   encodeTriggerRequester,
@@ -29,13 +31,21 @@ import type {
   RuntimeEventPublisherPort,
   SchedulerJobAccess,
   JobUpdatePatch,
+  CreateManagedJobInput,
+  UpsertJobFromIpcInput,
 } from './job-management-types.js';
 import {
   resolveOptionalJobModel,
   resolveRequestedJobModel,
 } from './job-model-selection.js';
+import {
+  assertJobExtraToolsAllowedForTarget,
+  normalizeJobExtraTools,
+} from './job-tool-policy.js';
 
 const DEFAULT_RUN_LIMIT = 50;
+const DEFAULT_JOB_LIST_LIMIT = 100;
+const MAX_JOB_LIST_LIMIT = 500;
 const DEFAULT_EVENT_LIMIT = 200;
 const DEFAULT_DEAD_LETTER_LIMIT = 50;
 const TRIGGER_POLL_INTERVAL_MS = 2_000;
@@ -43,100 +53,13 @@ const TRIGGER_POLL_INTERVAL_MS = 2_000;
 export class JobManagementService {
   constructor(private readonly deps: JobManagementServiceDeps) {}
 
-  async createJob(input: {
-    appId: string;
-    name: string;
-    prompt: string;
-    sessionId: string;
-    kind?: JobKind;
-    runAt?: string;
-    schedule?: { type?: unknown; value?: unknown };
-    executionMode?: unknown;
-    threadId?: unknown;
-    modelAlias?: unknown;
-    modelProfileId?: unknown;
-    dryRun?: unknown;
-  }) {
-    const control = this.requireControl();
-    const session = await control.getAppSessionById(input.sessionId);
-    if (!input.name.trim() || !input.prompt.trim() || !session) {
-      throw new ApplicationError(
-        'INVALID_REQUEST',
-        'name, prompt, and sessionId are required',
-      );
-    }
-    if (session.appId !== input.appId) {
-      throw new ApplicationError(
-        'FORBIDDEN',
-        'API key cannot access this session',
-      );
-    }
-
-    const kind = input.kind ?? 'manual';
-    const schedule = this.deps.schedulePlanner.planAppSchedule({
-      kind,
-      runAt: input.runAt,
-      schedule: input.schedule,
-    });
-    const modelAlias = resolveRequestedJobModel(
-      input.modelAlias,
-      input.modelProfileId,
-    );
-    const jobId = this.deps.schedulePlanner.createManualJobId();
-    const runtimeContext = {
-      sessionId: session.sessionId,
-      chatJid: session.chatJid,
-      groupScope: session.workspaceKey,
-      threadId: typeof input.threadId === 'string' ? input.threadId : null,
-    };
-    if (input.dryRun === true) {
-      return { jobId, created: false, modelAlias, runtimeContext };
-    }
-    const result = await this.deps.ops.upsertJob({
-      id: jobId,
-      name: input.name.trim(),
-      prompt: input.prompt.trim(),
-      model: modelAlias ?? null,
-      script: null,
-      schedule_type: schedule.scheduleType,
-      schedule_value: schedule.scheduleValue,
-      status: 'active',
-      linked_sessions: [session.chatJid],
-      session_id: null,
-      thread_id: typeof input.threadId === 'string' ? input.threadId : null,
-      group_scope: session.workspaceKey,
-      created_by: 'human',
-      next_run: schedule.nextRun,
-      execution_mode:
-        input.executionMode === 'serialized' ? 'serialized' : 'parallel',
-    });
-    this.deps.scheduler.requestSchedulerSync(jobId);
-    return { jobId, created: result.created, modelAlias, runtimeContext };
+  async createJob(input: CreateManagedJobInput) {
+    return createManagedJob(this.deps, input);
   }
 
-  async upsertJobFromIpc(input: {
-    access: SchedulerJobAccess;
-    jobId?: string;
-    name: string;
-    prompt: string;
-    modelAlias?: string | null;
-    modelProfileId?: string | null;
-    scheduleType: unknown;
-    scheduleValue: string;
-    linkedSessions?: string[];
-    deliverTo?: string[];
-    threadId?: string;
-    silent?: boolean;
-    cleanupAfterMs?: number;
-    timeoutMs?: number;
-    maxRetries?: number;
-    retryBackoffMs?: number;
-    maxConsecutiveFailures?: number;
-    executionMode?: unknown;
-    serialize?: unknown;
-    groupScope?: string;
-    createdBy?: 'agent' | 'human';
-  }): Promise<{ jobId: string; created: boolean; modelAlias?: string }> {
+  async upsertJobFromIpc(
+    input: UpsertJobFromIpcInput,
+  ): Promise<{ jobId: string; created: boolean; modelAlias?: string }> {
     const access = input.access;
     const name = input.name.trim();
     const prompt = input.prompt.trim();
@@ -201,6 +124,26 @@ export class JobManagementService {
     }
     existingJob ??= await this.deps.ops.getJobById(id);
     if (existingJob) assertSchedulerJobAccess(existingJob, access);
+    const allowedTools =
+      input.allowedTools === undefined
+        ? (existingJob?.capability_policy?.allowed_tools ?? [])
+        : normalizeJobExtraTools(input.allowedTools);
+    assertJobExtraToolsAllowedForTarget({
+      rules: allowedTools,
+      isMain: access.isMain,
+    });
+    await requireJobExtraToolApproval({
+      deps: this.deps,
+      jobId: id,
+      jobName: name,
+      appId: 'default',
+      groupScope,
+      allowedTools,
+      existingJobExtraTools:
+        existingJob?.capability_policy?.allowed_tools ?? [],
+      isMain: access.isMain,
+      operation: existingJob ? 'update' : 'create',
+    });
 
     const job: JobUpsertInput = {
       id,
@@ -227,6 +170,7 @@ export class JobManagementService {
         input.executionMode,
         input.serialize,
       ),
+      capability_policy: { allowed_tools: allowedTools },
     };
     const result = await this.deps.ops.upsertJob(job);
     this.deps.scheduler.requestSchedulerSync(id);
@@ -238,6 +182,10 @@ export class JobManagementService {
     access?: SchedulerJobAccess;
     statuses?: string[];
     groupScope?: string;
+    agentId?: string;
+    kind?: JobKind;
+    conversationJid?: string;
+    limit?: number;
   }): Promise<{ jobs: Job[] }> {
     const queryGroupScope = input.access
       ? input.access.isMain
@@ -251,14 +199,20 @@ export class JobManagementService {
       threadId: input.access
         ? (normalizeOptional(input.access.authThreadId) ?? null)
         : undefined,
+      agentId: input.agentId,
+      kind: input.kind,
+      conversationJid: input.conversationJid,
+      allowedConversationJids:
+        input.access && !input.access.isMain
+          ? input.access.sourceGroupJids
+          : undefined,
+      limit: Math.min(
+        resolveLimit(input.limit, DEFAULT_JOB_LIST_LIMIT),
+        MAX_JOB_LIST_LIMIT,
+      ),
     });
     return {
-      jobs: jobs.filter((job) => {
-        if (input.appId && !jobBelongsToApp(job, input.appId)) return false;
-        if (input.access && !canAccessSchedulerJob(job, input.access))
-          return false;
-        return true;
-      }),
+      jobs: jobs.filter((job) => isVisibleJob(job, input)),
     };
   }
 
@@ -286,9 +240,34 @@ export class JobManagementService {
     if (typeof patch.model === 'string') {
       patch.model = resolveOptionalJobModel(patch.model);
     }
+    const allowedTools =
+      patch.allowedTools === undefined
+        ? undefined
+        : normalizeJobExtraTools(patch.allowedTools);
+    if (allowedTools) {
+      assertJobExtraToolsAllowedForTarget({
+        rules: allowedTools,
+        isMain: input.access?.isMain ?? true,
+      });
+      const targetGroupScope = patch.groupScope ?? job.group_scope;
+      await requireJobExtraToolApproval({
+        deps: this.deps,
+        jobId: job.id,
+        jobName: patch.name ?? job.name,
+        appId: resolveJobRuntimeAppId(job),
+        groupScope: targetGroupScope,
+        allowedTools,
+        existingJobExtraTools: job.capability_policy?.allowed_tools ?? [],
+        isMain: input.access?.isMain ?? true,
+        operation: 'update',
+      });
+    }
     const updates = buildJobUpdates(
       job,
-      patch,
+      {
+        ...patch,
+        ...(allowedTools ? { allowedTools } : {}),
+      },
       this.deps.schedulePlanner,
       this.clock(),
     );

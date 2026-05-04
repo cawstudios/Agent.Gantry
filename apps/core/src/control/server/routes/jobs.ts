@@ -9,6 +9,11 @@ import type { ZodIssue } from 'zod';
 
 import { ApplicationError } from '../../../application/common/application-error.js';
 import { JobManagementService } from '../../../application/jobs/job-management-service.js';
+import {
+  buildJobListVisibilityMetadata,
+  buildJobVisibilityMetadata,
+} from '../../../application/jobs/job-visibility-metadata.js';
+import { getRuntimeToolRepositoryIfReady } from '../../../adapters/storage/postgres/job-tool-repository-runtime.js';
 import type {
   AppSessionRecord,
   JobControlPort,
@@ -131,6 +136,7 @@ export function createJobManagementService() {
     ops: getRuntimeOpsRepository(),
     control: adaptJobControl(control),
     runtimeEvents: getRuntimeEventExchange(),
+    toolRepository: getRuntimeToolRepositoryIfReady(),
     scheduler: { requestSchedulerSync },
     schedulePlanner: runtimeJobSchedulePlanner,
     clock: { now: nowIso },
@@ -270,6 +276,20 @@ function resolveCreateJobModel(input: {
   };
 }
 
+function parseJobKind(
+  value: string | null,
+): 'manual' | 'once' | 'recurring' | undefined {
+  return value === 'manual' || value === 'once' || value === 'recurring'
+    ? value
+    : undefined;
+}
+
+function parsePositiveInt(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
 export async function handleJobRoutes(
   req: IncomingMessage,
   res: ServerResponse,
@@ -306,6 +326,7 @@ export async function handleJobRoutes(
         modelAlias: resolvedModel.explicit
           ? resolvedModel.modelAlias
           : undefined,
+        allowedTools: body.allowedTools,
         dryRun: body.dryRun,
       });
       sendJson(res, body.dryRun === true ? 200 : 201, {
@@ -334,11 +355,24 @@ export async function handleJobRoutes(
   if (pathname === '/v1/jobs' && req.method === 'GET') {
     const auth = authorizeControlRequest(req, res, ctx.keys, ['jobs:read']);
     if (!auth) return true;
-    const { jobs: visibleJobs } = await createJobManagementService().listJobs({
+    const service = createJobManagementService();
+    const { jobs: visibleJobs } = await service.listJobs({
       appId: auth.appId,
+      statuses: url.searchParams.getAll('status'),
+      groupScope: url.searchParams.get('groupScope') || undefined,
+      agentId: url.searchParams.get('agentId') || undefined,
+      kind: parseJobKind(url.searchParams.get('kind')),
+      conversationJid: url.searchParams.get('conversationJid') || undefined,
+      limit: parsePositiveInt(url.searchParams.get('limit')),
+    });
+    const metadata = await buildJobListVisibilityMetadata({
+      jobs: visibleJobs,
+      toolRepository: getRuntimeToolRepositoryIfReady(),
     });
     sendJson(res, 200, {
-      jobs: visibleJobs.map((job) => mapManualJobToStored(job)),
+      jobs: visibleJobs.map((job) =>
+        mapManualJobToStored(job, metadata.get(job.id), { detail: false }),
+      ),
     });
     return true;
   }
@@ -348,7 +382,8 @@ export async function handleJobRoutes(
     const auth = authorizeControlRequest(req, res, ctx.keys, ['jobs:read']);
     if (!auth) return true;
     try {
-      const { job } = await createJobManagementService().getJob({
+      const service = createJobManagementService();
+      const { job } = await service.getJob({
         appId: auth.appId,
         jobId: jobRoute.jobId,
       });
@@ -356,7 +391,18 @@ export async function handleJobRoutes(
         sendError(res, 404, 'JOB_NOT_FOUND', 'Job not found');
         return true;
       }
-      sendJson(res, 200, mapManualJobToStored(job));
+      sendJson(
+        res,
+        200,
+        mapManualJobToStored(
+          job,
+          await buildJobVisibilityMetadata({
+            job,
+            ops: getRuntimeOpsRepository(),
+            toolRepository: getRuntimeToolRepositoryIfReady(),
+          }),
+        ),
+      );
     } catch (error) {
       if (!sendApplicationError(res, error)) throw error;
     }
@@ -389,7 +435,8 @@ export async function handleJobRoutes(
         body.modelAlias,
         body.modelProfileId,
       );
-      const { job: updated } = await createJobManagementService().updateJob({
+      const service = createJobManagementService();
+      const { job: updated } = await service.updateJob({
         appId: auth.appId,
         jobId: jobRoute.jobId,
         patch: {
@@ -403,12 +450,26 @@ export async function handleJobRoutes(
             ? { threadId: body.threadId }
             : {}),
           ...(requestedModel.specified ? { model: requestedModel.model } : {}),
+          ...(Array.isArray(body.allowedTools)
+            ? { allowedTools: body.allowedTools }
+            : {}),
           ...(body.status === 'active' || body.status === 'paused'
             ? { status: body.status }
             : {}),
         },
       });
-      sendJson(res, 200, mapManualJobToStored(updated));
+      sendJson(
+        res,
+        200,
+        mapManualJobToStored(
+          updated,
+          await buildJobVisibilityMetadata({
+            job: updated,
+            ops: getRuntimeOpsRepository(),
+            toolRepository: getRuntimeToolRepositoryIfReady(),
+          }),
+        ),
+      );
     } catch (error) {
       if (!sendApplicationError(res, error)) throw error;
     }

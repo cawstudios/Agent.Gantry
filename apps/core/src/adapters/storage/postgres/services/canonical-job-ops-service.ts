@@ -76,6 +76,7 @@ export class CanonicalJobOpsService {
         last_run: job.last_run,
         silent: job.silent,
         pause_reason: job.pause_reason,
+        capability_policy: job.capability_policy,
         created_at: job.created_at || now,
         updated_at: job.updated_at || now,
       }),
@@ -264,6 +265,7 @@ export class CanonicalJobOpsService {
       {},
     );
     const target = parseJson<Record<string, unknown>>(row.targetJson, {});
+    const capabilityPolicy = parseCapabilityPolicy(target.capabilityPolicy);
     return {
       id: row.id,
       name: row.name,
@@ -296,6 +298,7 @@ export class CanonicalJobOpsService {
       lease_run_id: row.leaseRunId,
       lease_expires_at: row.leaseExpiresAt,
       pause_reason: (target.pauseReason as string | null | undefined) ?? null,
+      capability_policy: capabilityPolicy,
     };
   }
 
@@ -328,6 +331,11 @@ export class CanonicalJobOpsService {
         maxConsecutiveFailures: job.max_consecutive_failures ?? 5,
         consecutiveFailures: job.consecutive_failures ?? 0,
         pauseReason: job.pause_reason ?? null,
+        capabilityPolicy: {
+          allowedTools: normalizeAllowedTools(
+            job.capability_policy?.allowed_tools,
+          ),
+        },
       }),
       silent: Boolean(job.silent),
       timeoutMs: job.timeout_ms ?? 300000,
@@ -372,4 +380,23 @@ export class CanonicalJobOpsService {
       created_at: row.createdAt,
     };
   }
+}
+
+function normalizeAllowedTools(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of input) {
+    const value = typeof item === 'string' ? item.trim() : '';
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function parseCapabilityPolicy(input: unknown): Job['capability_policy'] {
+  if (!input || typeof input !== 'object') return { allowed_tools: [] };
+  const allowedTools = (input as { allowedTools?: unknown }).allowedTools;
+  return { allowed_tools: normalizeAllowedTools(allowedTools) };
 }

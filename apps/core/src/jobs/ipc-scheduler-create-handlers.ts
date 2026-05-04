@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto';
+
 import { JobManagementService } from '../application/jobs/job-management-service.js';
+import type { JobExtraToolApprovalRequest } from '../application/jobs/job-management-types.js';
 import type { JobScheduleType } from '../domain/types.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { TaskHandler, TaskContext } from './ipc-types.js';
@@ -12,13 +15,51 @@ import {
   resolveModelSelection,
 } from '../shared/model-catalog.js';
 import { formatBrowserProfileLabel } from '../shared/browser-profile-scope.js';
+import { resolveSchedulerApprovalTarget } from './ipc-scheduler-approval-target.js';
 
 function makeJobService(context: TaskContext): JobManagementService {
   return new JobManagementService({
     ops: context.deps.opsRepository,
     scheduler: { requestSchedulerSync: context.deps.onSchedulerChanged },
     schedulePlanner: runtimeJobSchedulePlanner,
+    toolRepository: context.deps.getToolRepository?.(),
+    approveJobExtraTools: (request) =>
+      requestJobExtraToolApproval(context, request),
   });
+}
+
+async function requestJobExtraToolApproval(
+  context: TaskContext,
+  request: JobExtraToolApprovalRequest,
+): Promise<{ approved: boolean; reason?: string }> {
+  const approvalTarget = resolveSchedulerApprovalTarget(context);
+  if (!approvalTarget.ok) {
+    return { approved: false, reason: approvalTarget.reason };
+  }
+  const decision = await context.deps.requestPermissionApproval({
+    requestId: `job-tools-${randomUUID()}`,
+    sourceGroup: context.sourceGroup,
+    targetJid: approvalTarget.targetJid,
+    threadId: context.data.authThreadId,
+    decisionPolicy: 'same_channel',
+    toolName: 'scheduler_job_tools',
+    displayName: 'Autonomous job tools',
+    title: 'Approve job-scoped autonomous tools',
+    description:
+      'Approving stores these extra tool rules on this scheduler job only. Future runs still inherit the target agent tools dynamically.',
+    decisionReason: `${request.operation === 'create' ? 'Create' : 'Update'} scheduler job ${request.jobName} with job-scoped extra tools.`,
+    toolInput: {
+      jobId: request.jobId,
+      target: request.target,
+      inheritedTools: request.inheritedTools,
+      existingJobExtraTools: request.existingJobExtraTools,
+      requestedJobExtraTools: request.requestedJobExtraTools,
+      extrasBeyondInherited: request.extrasBeyondInherited,
+      persistence: 'target_json.capabilityPolicy.allowedTools',
+    },
+    decisionOptions: ['allow_once', 'cancel'],
+  });
+  return { approved: decision.approved, reason: decision.reason };
 }
 
 function scheduleType(raw: unknown): JobScheduleType | undefined {
@@ -91,6 +132,7 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
       serialize: data.serialize,
       groupScope: data.groupScope,
       createdBy: data.createdBy,
+      allowedTools: data.allowedTools,
     });
 
     logger.info(

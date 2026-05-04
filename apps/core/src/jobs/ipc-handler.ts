@@ -6,7 +6,10 @@ import { schedulerMutateTaskHandlers } from './ipc-scheduler-mutate-handlers.js'
 import { schedulerQueryTaskHandlers } from './ipc-scheduler-query-handlers.js';
 import { TaskHandler, TaskIpcData } from './ipc-types.js';
 import { writeTaskIpcResponse } from './ipc-shared.js';
-import { getRuntimeOpsRepository } from '../adapters/storage/postgres/runtime-store.js';
+import {
+  getRuntimeOpsRepository,
+  getRuntimeStorage,
+} from '../adapters/storage/postgres/runtime-store.js';
 
 const taskHandlers: Record<string, TaskHandler> = {
   ...schedulerCreateTaskHandlers,
@@ -47,6 +50,15 @@ export async function processTaskIpc(
   const resolvedDeps = {
     ...deps,
     opsRepository: deps.opsRepository ?? getRuntimeOpsRepository(),
+    getToolRepository:
+      deps.getToolRepository ??
+      (() => {
+        try {
+          return getRuntimeStorage().repositories.tools;
+        } catch {
+          return undefined;
+        }
+      }),
   };
 
   try {

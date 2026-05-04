@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { JobManagementService } from '@core/application/jobs/job-management-service.js';
 import { jobBelongsToApp } from '@core/application/jobs/job-access.js';
+import { isVisibleJob } from '@core/application/jobs/job-list-filters.js';
 import {
   assertSchedulerJobAccess,
   canAccessSchedulerJob,
@@ -467,6 +468,89 @@ describe('job application use cases', () => {
     ).not.toThrow();
   });
 
+  it('filters jobs by normalized agent id for plain and canonical group scopes', () => {
+    expect(
+      isVisibleJob(makeJob({ group_scope: 'one' }), {
+        agentId: 'agent:one',
+      }),
+    ).toBe(true);
+    expect(
+      isVisibleJob(makeJob({ group_scope: 'agent:one' }), {
+        agentId: 'agent:one',
+      }),
+    ).toBe(true);
+    expect(
+      isVisibleJob(makeJob({ group_scope: 'agent:two' }), {
+        agentId: 'agent:one',
+      }),
+    ).toBe(false);
+  });
+
+  it('pushes job list filters and bounded limits into the repository query', async () => {
+    const ops = {
+      listJobs: vi.fn(async () => [makeJob({ id: 'job-1' })]),
+    };
+    const service = new JobManagementService({
+      ops: ops as unknown as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+    });
+
+    await expect(
+      service.listJobs({
+        appId: 'app-one',
+        agentId: 'agent:one',
+        kind: 'recurring',
+        conversationJid: 'tg:team',
+        statuses: ['active'],
+        limit: 900,
+      }),
+    ).resolves.toEqual({ jobs: [] });
+
+    expect(ops.listJobs).toHaveBeenCalledWith({
+      appId: 'app-one',
+      statuses: ['active'],
+      groupScope: undefined,
+      threadId: undefined,
+      agentId: 'agent:one',
+      kind: 'recurring',
+      conversationJid: 'tg:team',
+      allowedConversationJids: undefined,
+      limit: 500,
+    });
+  });
+
+  it('pushes non-main linked-session access into the bounded repository query', async () => {
+    const ops = {
+      listJobs: vi.fn(async () => []),
+    };
+    const service = new JobManagementService({
+      ops: ops as unknown as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+    });
+
+    await service.listJobs({
+      access: {
+        sourceGroup: 'team',
+        isMain: false,
+        conversationBindings: {
+          'tg:team': { folder: 'team' },
+          'tg:other': { folder: 'other' },
+        },
+        sourceGroupJids: ['tg:team'],
+      },
+    });
+
+    expect(ops.listJobs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupScope: 'team',
+        allowedConversationJids: ['tg:team'],
+        limit: 100,
+      }),
+    );
+  });
+
   it('maps IPC scheduler schedule validation to invalid_schedule', async () => {
     const ops = {
       getJobById: vi.fn(),
@@ -796,5 +880,158 @@ describe('job application use cases', () => {
     });
     expect(subscription.next).toHaveBeenCalled();
     expect(subscription.close).toHaveBeenCalled();
+  });
+
+  it('does not request approval when job extras are already inherited by the target agent', async () => {
+    const ops = makeOps(makeJob());
+    const approveJobExtraTools = vi.fn(async () => ({ approved: true }));
+    const service = new JobManagementService({
+      ops: ops as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      toolRepository: {
+        listAgentToolBindings: vi.fn(async () => [
+          {
+            toolId: 'tool:Read',
+            status: 'active',
+          },
+        ]),
+      } as never,
+      approveJobExtraTools,
+    });
+
+    await service.updateJob({
+      appId: 'app-one',
+      jobId: 'job-1',
+      patch: { allowedTools: ['Read'] },
+    });
+
+    expect(approveJobExtraTools).not.toHaveBeenCalled();
+    expect(ops.updateJob).toHaveBeenCalledWith('job-1', {
+      capability_policy: { allowed_tools: ['Read'] },
+    });
+  });
+
+  it('does not request approval when an IPC upsert preserves already approved job extras', async () => {
+    const ops = {
+      getJobById: vi.fn(async () =>
+        makeJob({ capability_policy: { allowed_tools: ['Bash'] } }),
+      ),
+      upsertJob: vi.fn(async () => ({ created: false })),
+    };
+    const approveJobExtraTools = vi.fn(async () => ({ approved: true }));
+    const service = new JobManagementService({
+      ops: ops as unknown as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      toolRepository: {
+        listAgentToolBindings: vi.fn(async () => []),
+      } as never,
+      approveJobExtraTools,
+    });
+
+    await service.upsertJobFromIpc({
+      access: {
+        sourceGroup: 'app-folder',
+        isMain: true,
+        conversationBindings: {},
+        sourceGroupJids: ['app:app-one:conv-1'],
+      },
+      jobId: 'job-1',
+      name: 'Job',
+      prompt: 'Run',
+      scheduleType: 'interval',
+      scheduleValue: '60000',
+      groupScope: 'app-folder',
+    });
+
+    expect(approveJobExtraTools).not.toHaveBeenCalled();
+    expect(ops.upsertJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capability_policy: { allowed_tools: ['Bash'] },
+      }),
+    );
+  });
+
+  it('denies job extra tool updates before mutating the existing job', async () => {
+    const ops = makeOps(makeJob({ capability_policy: { allowed_tools: [] } }));
+    const approveJobExtraTools = vi.fn(async () => ({
+      approved: false,
+      reason: 'no',
+    }));
+    const service = new JobManagementService({
+      ops: ops as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      toolRepository: {
+        listAgentToolBindings: vi.fn(async () => [
+          {
+            toolId: 'tool:Read',
+            status: 'active',
+          },
+        ]),
+      } as never,
+      approveJobExtraTools,
+    });
+
+    await expect(
+      service.updateJob({
+        appId: 'app-one',
+        jobId: 'job-1',
+        patch: { allowedTools: ['Bash'] },
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    expect(approveJobExtraTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extrasBeyondInherited: ['Bash'],
+        existingJobExtraTools: [],
+      }),
+    );
+    expect(ops.updateJob).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when extra tools need approval but no approval port is configured', async () => {
+    const ops = makeOps(makeJob({ capability_policy: { allowed_tools: [] } }));
+    const service = new JobManagementService({
+      ops: ops as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      toolRepository: {
+        listAgentToolBindings: vi.fn(async () => []),
+      } as never,
+    });
+
+    await expect(
+      service.updateJob({
+        appId: 'app-one',
+        jobId: 'job-1',
+        patch: { allowedTools: ['Bash'] },
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    expect(ops.updateJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects broad MyClaw MCP wildcards for non-main job extras', async () => {
+    const ops = makeOps(makeJob({ capability_policy: { allowed_tools: [] } }));
+    const service = new JobManagementService({
+      ops: ops as OpsRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+    });
+
+    await expect(
+      service.updateJob({
+        access: {
+          sourceGroup: 'app-folder',
+          isMain: false,
+          conversationBindings: { 'tg:team': { folder: 'app-folder' } },
+          sourceGroupJids: ['tg:team'],
+        },
+        jobId: 'job-1',
+        patch: { allowedTools: ['mcp__myclaw__*'] },
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });

@@ -13,3 +13,4 @@
 - Prefer repo-relative paths and current commands such as `apps/core/...`, `packages/agent-runner/...`, and `ops/...` when describing the codebase.
 - When docs change operational commands, verify the command still exists in this repo before publishing it.
 - Treat `/v1/webhooks` as outbound callback delivery only. Signed inbound sidecar systems use external ingress records under `/v1/ingresses`; do not describe webhooks as ingress authority.
+- Job docs must preserve the settings/runtime boundary: job instances, prompts, schedules, leases, runs, notification targets, and job-scoped tool extras are Postgres runtime state, not `settings.yaml` desired state.

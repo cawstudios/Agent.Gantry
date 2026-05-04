@@ -126,6 +126,51 @@ describe('validateIpcAuthRequest', () => {
     });
   });
 
+  it('preserves scheduler job allowedTools creates, replaces, and clears', () => {
+    const createPayload = signedPayload({
+      requestId: 'task-allowed-tools-create',
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      type: 'scheduler_upsert_job',
+      name: 'Job',
+      prompt: 'Run',
+      scheduleType: 'interval',
+      scheduleValue: '60000',
+      allowedTools: ['Read'],
+    });
+    const replacePayload = signedPayload({
+      requestId: 'task-allowed-tools-replace',
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      type: 'scheduler_update_job',
+      jobId: 'job-1',
+      allowedTools: ['Read', 'mcp__agent_browser__*'],
+    });
+    const clearPayload = signedPayload({
+      requestId: 'task-allowed-tools-clear',
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      type: 'scheduler_update_job',
+      jobId: 'job-1',
+      allowedTools: [],
+    });
+
+    expect(parseTaskIpcData(createPayload, 'team')).toMatchObject({
+      type: 'scheduler_upsert_job',
+      allowedTools: ['Read'],
+    });
+    expect(parseTaskIpcData(replacePayload, 'team')).toMatchObject({
+      type: 'scheduler_update_job',
+      jobId: 'job-1',
+      allowedTools: ['Read', 'mcp__agent_browser__*'],
+    });
+    expect(parseTaskIpcData(clearPayload, 'team')).toMatchObject({
+      type: 'scheduler_update_job',
+      jobId: 'job-1',
+      allowedTools: [],
+    });
+  });
+
   it('requires browser IPC signatures to match the chat-scoped token', () => {
     const payload = {
       requestId: 'browser-1',

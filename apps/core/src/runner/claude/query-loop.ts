@@ -40,6 +40,7 @@ import {
 } from '../../shared/model-catalog.js';
 import { validateAgentToolInput } from './agent-model-selection.js';
 import { usageEventIdForMessage } from './query-usage-event-id.js';
+import { anyToolRuleMatches } from '../../shared/tool-rule-matcher.js';
 
 export async function runQuery(
   prompt: string,
@@ -191,10 +192,6 @@ export async function runQuery(
           };
         }
 
-        if (capabilities.alwaysAllowedTools.includes(toolName)) {
-          return { behavior: 'allow' as const, updatedInput: input };
-        }
-
         const memoryGuardDenial = denyMemoryBoundaryToolUse(
           toolName,
           input,
@@ -210,6 +207,24 @@ export async function runQuery(
             message: memoryGuardDenial,
             interrupt: false,
           };
+        }
+
+        if (agentInput.isScheduledJob) {
+          if (anyToolRuleMatches(agentInput.allowedTools ?? [], toolName)) {
+            log(`Autonomous job allowed tool ${toolName}`);
+            return { behavior: 'allow' as const, updatedInput: input };
+          }
+          const message = `tool not on autonomous job allowlist: ${toolName}`;
+          log(`Autonomous job denied tool ${toolName}`);
+          return {
+            behavior: 'deny' as const,
+            message,
+            interrupt: true,
+          };
+        }
+
+        if (capabilities.alwaysAllowedTools.includes(toolName)) {
+          return { behavior: 'allow' as const, updatedInput: input };
         }
 
         if (permissionOpts.signal.aborted) {

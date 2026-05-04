@@ -55,6 +55,7 @@ function usage(): string {
     '  myclaw conversation info|approvers',
     '  myclaw agent list|info|add|remove|trigger|dm-access|policy',
     '  myclaw browser profiles|status',
+    '  myclaw jobs list|show',
     '  myclaw model list|set-default|doctor',
     '  myclaw settings export-current|drift',
     '  myclaw service install|start|stop|restart',
@@ -446,6 +447,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === 'model') {
     const { runModelCommand } = await import('./model.js');
     return runModelCommand(runtimeHome, rest);
+  }
+
+  if (command === 'jobs') {
+    const { runJobsCommand } = await import('./jobs.js');
+    return runJobsCommand(runtimeHome, rest);
   }
 
   if (command === 'settings') {

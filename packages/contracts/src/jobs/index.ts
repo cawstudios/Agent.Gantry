@@ -72,6 +72,21 @@ export const JobTargetSchema = z.object({
 });
 export type JobTarget = z.infer<typeof JobTargetSchema>;
 
+export const JobResolvedTargetSchema = z.object({
+  appId: z.string(),
+  agentId: z.string(),
+  groupScope: z.string(),
+  conversationJids: z.array(z.string()),
+  threadId: z.string().nullable(),
+});
+
+export const JobRecentRunErrorSchema = z.object({
+  runId: z.string(),
+  status: z.string(),
+  errorSummary: z.string(),
+  endedAt: IsoDateTimeSchema.nullable(),
+});
+
 export const CreateJobRequestSchema = z
   .object({
     name: z.string().min(1),
@@ -89,6 +104,7 @@ export const CreateJobRequestSchema = z
     threadId: z.string().optional(),
     modelAlias: z.string().optional(),
     modelProfileId: z.string().optional(),
+    allowedTools: z.array(z.string()).optional(),
     dryRun: z.boolean().optional(),
   })
   .strict()
@@ -107,6 +123,7 @@ export const UpdateJobRequestSchema = z
     status: z.enum(['active', 'paused']).optional(),
     modelAlias: z.string().nullable().optional(),
     modelProfileId: z.string().nullable().optional(),
+    allowedTools: z.array(z.string()).optional(),
   })
   .strict()
   .refine(
@@ -122,7 +139,9 @@ export type UpdateJobRequest = z.infer<typeof UpdateJobRequestSchema>;
 export const JobResponseSchema = z.object({
   jobId: z.string(),
   name: z.string(),
-  prompt: z.string(),
+  prompt: z.string().optional(),
+  promptPreview: z.string().optional(),
+  fullPrompt: z.string().optional(),
   kind: z.enum(['manual', 'once', 'recurring']),
   status: JobStatusSchema,
   schedule: z
@@ -142,6 +161,21 @@ export const JobResponseSchema = z.object({
   threadId: z.string().nullable(),
   groupScope: z.string(),
   sessionId: z.string().nullable(),
+  target: JobResolvedTargetSchema.optional(),
+  inheritedTools: z.array(z.string()).optional(),
+  jobExtraTools: z.array(z.string()).optional(),
+  effectiveAllowedTools: z.array(z.string()).optional(),
+  inheritedToolCount: z.number().int().nonnegative().optional(),
+  jobExtraToolCount: z.number().int().nonnegative().optional(),
+  effectiveAllowedToolCount: z.number().int().nonnegative().optional(),
+  recentRunErrors: z.array(JobRecentRunErrorSchema).optional(),
+  notificationTarget: z
+    .object({
+      linkedSessions: z.array(z.string()),
+      threadId: z.string().nullable(),
+      silent: z.boolean(),
+    })
+    .optional(),
 });
 export type JobResponse = z.infer<typeof JobResponseSchema>;
 
