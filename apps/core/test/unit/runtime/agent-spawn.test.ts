@@ -112,6 +112,27 @@ vi.mock('@core/runtime/browser-capability.js', () => ({
   getKnownBrowserStatus: (...args: unknown[]) => mockGetBrowserStatus(...args),
 }));
 
+vi.mock('@core/adapters/browser/action-mcp.js', () => ({
+  BROWSER_ACTION_MCP_PACKAGE_NAME: '@playwright/mcp',
+  BROWSER_ACTION_MCP_SERVER_NAME: 'agent_browser',
+  createBrowserActionMcpServerConfig: (cdpEndpoint: string) => ({
+    command: process.execPath,
+    args: [
+      '/tmp/myclaw-test-playwright-mcp/cli.js',
+      '--shared-browser-context',
+    ],
+    env: {
+      PLAYWRIGHT_MCP_CDP_ENDPOINT: cdpEndpoint,
+      NO_PROXY:
+        '127.0.0.1,localhost,::1,github.com,.github.com,api.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com',
+      no_proxy:
+        '127.0.0.1,localhost,::1,github.com,.github.com,api.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com',
+    },
+  }),
+  resolveBrowserActionMcpCliPath: () =>
+    '/tmp/myclaw-test-playwright-mcp/cli.js',
+}));
+
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
@@ -293,6 +314,7 @@ describe('agent-spawn timeout behavior', () => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
     vi.mocked(spawn).mockClear();
+    vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.writeFileSync).mockClear();
     vi.mocked(getEffectiveModelConfig).mockClear();
     vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValue({
@@ -303,7 +325,7 @@ describe('agent-spawn timeout behavior', () => {
     });
     mockEnsureGroupIpcLayout.mockClear();
     mockGetBrowserStatus.mockReset();
-    mockGetBrowserStatus.mockResolvedValue({
+    mockGetBrowserStatus.mockReturnValue({
       profile: 'myclaw',
       profileName: 'myclaw',
       running: false,
@@ -619,10 +641,10 @@ describe('agent-spawn timeout behavior', () => {
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
 
-    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
-      string,
-      string
-    >;
+    expect(spawn).toHaveBeenCalled();
+    const spawnOptions = vi.mocked(spawn).mock.calls.at(-1)?.[2];
+    expect(spawnOptions).toMatchObject({ env: expect.any(Object) });
+    const env = spawnOptions?.env as Record<string, string>;
     expect(env.MYCLAW_IPC_MEMORY_CONTEXT_FILE).toBeUndefined();
     const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
     expect(runnerInput.memoryContextBlock).toBe('Runtime Continuity Envelope');
@@ -702,10 +724,10 @@ describe('agent-spawn timeout behavior', () => {
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
 
-    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
-      string,
-      string
-    >;
+    expect(spawn).toHaveBeenCalled();
+    const spawnOptions = vi.mocked(spawn).mock.calls.at(-1)?.[2];
+    expect(spawnOptions).toMatchObject({ env: expect.any(Object) });
+    const env = spawnOptions?.env as Record<string, string>;
     expect(env.HTTP_PROXY).toBeUndefined();
     expect(env.HTTPS_PROXY).toBeUndefined();
     expect(env.NODE_USE_ENV_PROXY).toBeUndefined();
@@ -771,11 +793,10 @@ describe('agent-spawn timeout behavior', () => {
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
-
-    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
-      string,
-      string
-    >;
+    expect(spawn).toHaveBeenCalled();
+    const spawnOptions = vi.mocked(spawn).mock.calls.at(-1)?.[2];
+    expect(spawnOptions).toMatchObject({ env: expect.any(Object) });
+    const env = spawnOptions?.env as Record<string, string>;
     expect(env.MYCLAW_MCP_SERVERS_JSON).toBeUndefined();
     expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
     expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
@@ -891,11 +912,10 @@ describe('agent-spawn timeout behavior', () => {
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
-
-    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
-      string,
-      string
-    >;
+    expect(spawn).toHaveBeenCalled();
+    const spawnOptions = vi.mocked(spawn).mock.calls.at(-1)?.[2];
+    expect(spawnOptions).toMatchObject({ env: expect.any(Object) });
+    const env = spawnOptions?.env as Record<string, string>;
     expect(mockGetBrowserStatus).toHaveBeenCalledWith(
       expect.stringMatching(/^c-test-group-[a-f0-9]{12}$/),
     );

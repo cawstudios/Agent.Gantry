@@ -70,7 +70,6 @@ const TYPING_HEARTBEAT_INTERVAL_MS = 4_000;
 const ELAPSED_PROGRESS_INTERVAL_MS = 60_000;
 const NO_OUTPUT_WARNING_INTERVAL_MS = 180_000;
 let streamingGenerationCounter = 0;
-
 export function createGroupProcessor(deps: GroupProcessingDeps) {
   const runAgentImpl = deps.runAgent ?? spawnAgent;
   const collectSessionMemory = deps.collectSessionMemory;
@@ -297,14 +296,11 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     const { chatJid, threadId: queueThreadId } = parseThreadQueueKey(queueJid);
     const group = deps.getGroup(chatJid);
     if (!group) return true;
-
     if (!deps.channelRuntime.hasChannel(chatJid)) {
       logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
       return true;
     }
-
     const isMainGroup = group.isMain === true;
-
     const scopedQueue = options.queued === true || queueThreadId !== undefined;
     const messageFilter = scopedQueue
       ? { threadId: queueThreadId ?? null }
@@ -315,9 +311,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       MAX_MESSAGES_PER_PROMPT,
       messageFilter,
     );
-
     if (missedMessages.length === 0) return true;
-
     const latestMessage = missedMessages[missedMessages.length - 1];
     const activeThreadId = firstThreadQueueId(
       queueThreadId,
@@ -357,7 +351,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     const defaultMemoryScope = memoryScopeForConversationKind(
       group.conversationKind,
     );
-
     const modelStatus = createRuntimeModelStatusAccess(
       group.folder,
       activeThreadId,
@@ -450,7 +443,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         return true;
       }
     }
-
     const prompt = formatMessages(missedMessages, TIMEZONE);
     const previousCursor = (await deps.getCursor(queueJid)) || '';
     deps.setCursor(
@@ -473,7 +465,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         'Failed to reset channel streaming state before processing',
       );
     }
-
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer);
@@ -485,7 +476,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         deps.queue.closeStdin(queueJid);
       }, IDLE_TIMEOUT);
     };
-
     let typingActive = false;
     const setTypingState = async (isTyping: boolean) => {
       typingActive = isTyping;

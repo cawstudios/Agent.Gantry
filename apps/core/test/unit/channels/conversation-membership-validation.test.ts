@@ -9,6 +9,52 @@ afterEach(() => {
 });
 
 describe('RuntimeSecretConversationMembershipValidator', () => {
+  it('blocks unsupported provider membership validation with availability guidance', async () => {
+    const validator = new RuntimeSecretConversationMembershipValidator({
+      getSecret(ref) {
+        const value = this.getOptionalSecret(ref);
+        if (!value) throw new Error(`missing ${ref.env}`);
+        return value;
+      },
+      getOptionalSecret() {
+        return undefined;
+      },
+    });
+
+    const result = await validator.validateControlApprovers({
+      providerId: 'whatsapp' as never,
+      providerConnection: {
+        id: 'providerConnection-unsupported',
+        appId: 'default' as never,
+        providerId: 'whatsapp' as never,
+        label: 'WhatsApp',
+        status: 'active',
+        config: {},
+        runtimeSecretRefs: [],
+        createdAt: iso,
+        updatedAt: iso,
+      },
+      conversation: {
+        id: 'conversation-unsupported' as never,
+        appId: 'default' as never,
+        providerConnectionId: 'providerConnection-unsupported' as never,
+        externalRef: { kind: 'conversation', value: 'wa:chat' },
+        kind: 'channel',
+        title: 'Unsupported',
+        status: 'active',
+        createdAt: iso,
+        updatedAt: iso,
+      },
+      userIds: ['user-one'],
+    });
+
+    expect(result).toEqual({
+      validUserIds: [],
+      invalidUserIds: ['user-one'],
+      reason: 'whatsapp conversation membership validation is not available.',
+    });
+  });
+
   it('validates Teams approvers through Microsoft Graph conversation members', async () => {
     const fetchMock = vi
       .fn()

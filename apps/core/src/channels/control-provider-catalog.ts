@@ -136,7 +136,7 @@ export class RuntimeSecretConversationDiscovery implements ProviderConversationD
     }
     throw new ApplicationError(
       'NOT_IMPLEMENTED',
-      `Conversation discovery is not implemented for ${providerId}`,
+      `Conversation discovery is not available for ${providerId}.`,
     );
   }
 

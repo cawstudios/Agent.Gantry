@@ -66,6 +66,7 @@
     "test:integration": "npm run build:contracts && vitest run -c vitest.integration.config.ts",
     "test:integration:postgres": "node .codex/scripts/require-postgres-integration-env.mjs && npm run test:integration -- apps/core/test/integration/session-continuity-postgres.integration.test.ts apps/core/test/integration/application-services-postgres.integration.test.ts apps/core/test/integration/durable-message-delivery.integration.test.ts apps/core/test/integration/jobs-runs-memory-flow.integration.test.ts apps/core/test/integration/mcp-server-postgres.integration.test.ts apps/core/test/integration/control-plane-repository.postgres.integration.test.ts",
     "test:e2e": "npm run build:contracts && vitest run -c vitest.e2e.config.ts",
+    "bug-hunt:e2e": "node .codex/scripts/deterministic-e2e-bug-hunt.mjs",
     "test:watch": "npm run build:contracts && vitest -c vitest.config.ts"
   },
   "dependencies": {

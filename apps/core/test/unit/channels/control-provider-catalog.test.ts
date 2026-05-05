@@ -230,6 +230,25 @@ describe('RuntimeSecretConversationDiscovery', () => {
     });
     expect(mocks.listTeamsChannels).not.toHaveBeenCalled();
   });
+
+  it('blocks unsupported provider discovery with availability guidance', async () => {
+    const discovery = new RuntimeSecretConversationDiscovery(secrets({}));
+    const whatsappConnection = {
+      ...providerConnection([]),
+      providerId: 'whatsapp' as never,
+      label: 'WhatsApp',
+    } as ProviderConnection;
+
+    await expect(
+      discovery.discover({
+        providerConnection: whatsappConnection,
+        limit: 10,
+      }),
+    ).rejects.toMatchObject({
+      code: 'NOT_IMPLEMENTED',
+      message: 'Conversation discovery is not available for whatsapp.',
+    });
+  });
 });
 
 describe('BuiltInControlChannelProviderCatalog', () => {
