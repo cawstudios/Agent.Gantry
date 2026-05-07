@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -106,6 +110,40 @@ describe('request permission review helpers', () => {
         status: 'active',
       }),
     );
+  });
+
+  it('writes approved persistent rules to the current run live permission file', async () => {
+    const ipcDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-live-tool-rules-'),
+    );
+    const repository = {
+      saveTool: vi.fn(async () => undefined),
+      saveAgentToolBinding: vi.fn(async () => undefined),
+    };
+
+    const persisted = await persistRequestPermissionRules({
+      deps: { getToolRepository: () => repository as never },
+      sourceAgentFolder: 'main_agent',
+      ipcDir,
+      runHandle: 'agent-run-1',
+      updates: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [{ toolName: 'Bash', ruleContent: 'npm test *' }],
+        },
+      ],
+    });
+
+    expect(persisted).toEqual(['Bash(npm test *)']);
+    expect(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(ipcDir, 'live-tool-rules', 'agent-run-1.json'),
+          'utf-8',
+        ),
+      ),
+    ).toEqual(['Bash(npm test *)']);
   });
 
   it('rejects persistent MyClaw MCP wildcard approvals', async () => {

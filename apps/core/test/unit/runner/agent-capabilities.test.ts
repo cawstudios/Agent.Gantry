@@ -37,7 +37,6 @@ const CONFIGURED_ADMIN_ALLOWED_TOOLS = [
 
 const DANGEROUS_DEFAULT_TOOLS = [
   'Bash',
-  'Browser',
   'Write',
   'Edit',
   'NotebookEdit',
@@ -52,7 +51,29 @@ const DANGEROUS_DEFAULT_TOOLS = [
   'mcp__myclaw__*',
 ] as const;
 
+const UNAVAILABLE_DEFAULT_TOOLS = [
+  'Browser',
+  'Config',
+  'AskUserQuestion',
+  'SendMessage',
+  'TaskOutput',
+  'TaskStop',
+  'EnterWorktree',
+  'ExitWorktree',
+  'mcp__myclaw__list_models',
+  'mcp__myclaw__*',
+] as const;
+
 const DEFAULT_AVAILABLE_TOOLS = [
+  'Read',
+  'Glob',
+  'Grep',
+  'Bash',
+  'Edit',
+  'Write',
+  'LS',
+  'MultiEdit',
+  'NotebookEdit',
   'Agent',
   'WebSearch',
   'WebFetch',
@@ -60,12 +81,7 @@ const DEFAULT_AVAILABLE_TOOLS = [
   'Skill',
 ] as const;
 
-const DEVELOPER_AVAILABLE_TOOLS = [
-  'Read',
-  'Glob',
-  'Grep',
-  ...DEFAULT_AVAILABLE_TOOLS,
-] as const;
+const DEVELOPER_AVAILABLE_TOOLS = [...DEFAULT_AVAILABLE_TOOLS] as const;
 
 describe('agent capability composition', () => {
   it('uses exact safe defaults and myclaw MCP server wiring', () => {
@@ -101,6 +117,8 @@ describe('agent capability composition', () => {
     );
     for (const tool of DANGEROUS_DEFAULT_TOOLS) {
       expect(profile.allowedTools).not.toContain(tool);
+    }
+    for (const tool of UNAVAILABLE_DEFAULT_TOOLS) {
       expect(profile.availableTools).not.toContain(tool);
     }
     expect(profile.permissionMode).toBe('default');
@@ -275,7 +293,7 @@ describe('agent capability composition', () => {
     expect(profile.availableTools).not.toContain('ToolName');
   });
 
-  it('allows exact selected admin tools but filters shell, repo, file-write, and wildcard rules for non-developer personas', () => {
+  it('allows exact selected admin and native tools but filters unsupported wildcard rules for non-developer personas', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'tg:sales',
@@ -309,15 +327,15 @@ describe('agent capability composition', () => {
     expect(profile.allowedTools).toContain(
       'mcp__myclaw__settings_desired_state',
     );
-    expect(profile.allowedTools).not.toContain('Bash(git status)');
-    expect(profile.allowedTools).not.toContain('Read(/repo/**)');
-    expect(profile.allowedTools).not.toContain('Glob(**/*.ts)');
-    expect(profile.allowedTools).not.toContain('Grep(todo)');
-    expect(profile.allowedTools).not.toContain('LS(/repo)');
-    expect(profile.allowedTools).not.toContain('Write(/repo/**)');
-    expect(profile.allowedTools).not.toContain('Edit(/repo/**)');
-    expect(profile.allowedTools).not.toContain('MultiEdit(/repo/**)');
-    expect(profile.allowedTools).not.toContain('NotebookEdit');
+    expect(profile.allowedTools).toContain('Bash(git status)');
+    expect(profile.allowedTools).toContain('Read(/repo/**)');
+    expect(profile.allowedTools).toContain('Glob(**/*.ts)');
+    expect(profile.allowedTools).toContain('Grep(todo)');
+    expect(profile.allowedTools).toContain('LS(/repo)');
+    expect(profile.allowedTools).toContain('Write(/repo/**)');
+    expect(profile.allowedTools).toContain('Edit(/repo/**)');
+    expect(profile.allowedTools).toContain('MultiEdit(/repo/**)');
+    expect(profile.allowedTools).toContain('NotebookEdit');
     expect(profile.allowedTools).not.toContain('mcp__myclaw__*');
     expect(profile.allowedTools).not.toContain(
       'mcp__myclaw__*(service_restart)',

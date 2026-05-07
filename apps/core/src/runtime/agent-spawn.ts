@@ -282,6 +282,7 @@ export async function spawnAgent(
     MYCLAW_WORKSPACE_GROUP_DIR: hostRuntime.groupDir,
     MYCLAW_WORKSPACE_GLOBAL_DIR: hostRuntime.globalDir || '',
     MYCLAW_GROUP_FOLDER: group.folder,
+    MYCLAW_AGENT_RUN_HANDLE: processName,
     MYCLAW_WORKSPACE_EXTRA_DIR: path.join(
       DATA_DIR,
       'sessions',

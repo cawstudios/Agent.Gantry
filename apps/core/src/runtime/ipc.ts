@@ -70,12 +70,8 @@ async function processLongRunningTaskIpc(input: {
   claimedPath: string;
 }): Promise<void> {
   try {
-    await processTaskIpc(
-      input.data,
-      input.sourceAgentFolder,
-      input.isMain,
-      input.deps,
-    );
+    // prettier-ignore
+    await processTaskIpc(input.data, input.sourceAgentFolder, input.isMain, input.deps, input.ipcBaseDir);
     fs.unlinkSync(input.claimedPath);
   } catch (err) {
     writeTaskIpcResponse(
@@ -392,7 +388,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 });
                 continue;
               }
-              await processTaskIpc(data, sourceAgentFolder, isMain, deps);
+              // prettier-ignore
+              await processTaskIpc(data, sourceAgentFolder, isMain, deps, ipcBaseDir);
               fs.unlinkSync(claimedPath);
             } catch (err) {
               const errorMessage =

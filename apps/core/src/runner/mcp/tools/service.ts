@@ -558,6 +558,7 @@ async function submitCapabilityReviewTask(
   writeIpcFile(TASKS_DIR, {
     type: toolName,
     taskId,
+    runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE || undefined,
     targetJid: chatJid,
     chatJid,
     authThreadId: threadId,

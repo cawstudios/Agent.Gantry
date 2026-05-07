@@ -25,6 +25,7 @@ export async function processTaskIpc(
   sourceAgentFolder: string,
   isMain: boolean,
   deps: IpcDeps,
+  ipcBaseDir?: string,
 ): Promise<void> {
   const conversationBindings = deps.conversationRoutes();
   const sourceAgentFolderJids = Object.entries(conversationBindings)
@@ -69,6 +70,7 @@ export async function processTaskIpc(
       data,
       sourceAgentFolder,
       isMain,
+      ipcBaseDir,
       deps: resolvedDeps,
       conversationBindings,
       sourceAgentFolderJids,

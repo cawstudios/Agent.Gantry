@@ -72,16 +72,22 @@ const SAFE_NATIVE_SDK_TOOLS = [
 ] as const;
 
 const DEVELOPER_NATIVE_SDK_TOOLS = ['Read', 'Glob', 'Grep'] as const;
-
-const CONFIGURABLE_NATIVE_SDK_TOOL_NAMES = new Set<string>([
-  ...SAFE_NATIVE_SDK_TOOLS,
-  ...DEVELOPER_NATIVE_SDK_TOOLS,
+const PERMISSION_GATED_NATIVE_SDK_TOOLS = [
   'Bash',
   'Edit',
   'Write',
   'LS',
   'MultiEdit',
   'NotebookEdit',
+] as const;
+const AVAILABLE_NATIVE_SDK_TOOLS = [
+  ...DEVELOPER_NATIVE_SDK_TOOLS,
+  ...PERMISSION_GATED_NATIVE_SDK_TOOLS,
+  ...SAFE_NATIVE_SDK_TOOLS,
+] as const;
+
+const CONFIGURABLE_NATIVE_SDK_TOOL_NAMES = new Set<string>([
+  ...AVAILABLE_NATIVE_SDK_TOOLS,
 ]);
 
 export const UNSUPPORTED_CLAUDE_CODE_BUILTIN_TOOLS = [
@@ -116,34 +122,17 @@ const DEFAULT_ALLOWED_TOOLS = [
 ] as const;
 
 const DIRECT_RUNTIME_MCP_SERVER_NAMES = new Set(['agent_browser']);
-const NON_DEVELOPER_BLOCKED_TOOL_NAMES = new Set([
-  'Bash',
-  'Read',
-  'Glob',
-  'Grep',
-  'LS',
-  'Write',
-  'Edit',
-  'MultiEdit',
-  'NotebookEdit',
-]);
-
 function sdkToolName(toolRule: string): string {
   const paren = toolRule.indexOf('(');
   return (paren === -1 ? toolRule : toolRule.slice(0, paren)).trim();
 }
 
-function configuredToolAllowedForPersona(
-  toolRule: string,
-  persona: AgentPersona,
-): boolean {
+function configuredToolAllowedForPersona(toolRule: string): boolean {
   if (isMyClawMcpWildcardRule(toolRule)) return false;
   const myclawMcpToolName = myclawMcpToolNameFromFullName(toolRule);
   if (myclawMcpToolName) return true;
   const toolName = sdkToolName(toolRule);
-  if (!CONFIGURABLE_NATIVE_SDK_TOOL_NAMES.has(toolName)) return false;
-  if (persona === 'developer') return true;
-  return !NON_DEVELOPER_BLOCKED_TOOL_NAMES.has(toolName);
+  return CONFIGURABLE_NATIVE_SDK_TOOL_NAMES.has(toolName);
 }
 
 function configuredToolAvailableSdkName(toolRule: string): string | null {
@@ -156,16 +145,12 @@ const sdkToolsProvider: AgentCapabilityProvider = {
   id: 'sdk-tools',
   provide: (ctx) => {
     const persona = resolveAgentPersona(ctx.persona);
-    const personaSdkTools =
-      persona === 'developer'
-        ? [...DEVELOPER_NATIVE_SDK_TOOLS, ...SAFE_NATIVE_SDK_TOOLS]
-        : SAFE_NATIVE_SDK_TOOLS;
     return {
       allowedTools:
         persona === 'developer'
           ? [...DEVELOPER_NATIVE_SDK_TOOLS, ...DEFAULT_ALLOWED_TOOLS]
           : DEFAULT_ALLOWED_TOOLS,
-      availableTools: personaSdkTools,
+      availableTools: AVAILABLE_NATIVE_SDK_TOOLS,
       disallowedTools: UNSUPPORTED_CLAUDE_CODE_BUILTIN_TOOLS,
     };
   },
@@ -259,9 +244,8 @@ const configuredMcpProvider: AgentCapabilityProvider = {
 const configuredToolProvider: AgentCapabilityProvider = {
   id: 'configured-tools',
   provide: (ctx) => {
-    const persona = resolveAgentPersona(ctx.persona);
     const allowedTools = (ctx.configuredAllowedTools ?? []).filter((toolRule) =>
-      configuredToolAllowedForPersona(toolRule, persona),
+      configuredToolAllowedForPersona(toolRule),
     );
     const availableTools = allowedTools
       .map(configuredToolAvailableSdkName)

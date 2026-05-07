@@ -41,6 +41,8 @@ import {
 import { validateAgentToolInput } from './agent-model-selection.js';
 import { usageEventIdForMessage } from './query-usage-event-id.js';
 import { evaluateAutonomousToolUse } from '../../shared/tool-rule-matcher.js';
+import { readLiveToolRules } from '../../shared/live-tool-rules.js';
+import { permissionUpdateAllowedToolRules } from '../../shared/permission-tool-rules.js';
 
 export async function runQuery(
   prompt: string,
@@ -132,6 +134,18 @@ export async function runQuery(
     externalMcpAllowedTools: readExternalMcpAllowedTools(),
     externalMcpAlwaysAllowedTools: readExternalMcpAlwaysAllowedTools(),
   });
+  const liveApprovedRules = new Set<string>();
+
+  function currentAllowedToolRules(): string[] {
+    return [
+      ...capabilities.allowedTools,
+      ...readLiveToolRules({
+        ipcDir: process.env.MYCLAW_IPC_DIR,
+        runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE,
+      }),
+      ...liveApprovedRules,
+    ];
+  }
 
   const sdkQuery = query({
     prompt: stream,
@@ -241,6 +255,18 @@ export async function runQuery(
           return { behavior: 'allow' as const, updatedInput: input };
         }
 
+        const currentToolPolicy = evaluateAutonomousToolUse({
+          rules: currentAllowedToolRules(),
+          toolName,
+          toolInput: input,
+        });
+        if (currentToolPolicy.allowed) {
+          log(
+            `Permission allowed for tool ${toolName} by ${currentToolPolicy.matchedRule}`,
+          );
+          return { behavior: 'allow' as const, updatedInput: input };
+        }
+
         if (permissionOpts.signal.aborted) {
           return {
             behavior: 'deny' as const,
@@ -268,6 +294,11 @@ export async function runQuery(
           threadId: agentInput.threadId,
         });
         if (decision.approved) {
+          for (const rule of permissionUpdateAllowedToolRules(
+            decision.updatedPermissions,
+          )) {
+            liveApprovedRules.add(rule);
+          }
           log(
             `Permission approved for tool ${toolName} by ${decision.decidedBy || 'unknown'}`,
           );

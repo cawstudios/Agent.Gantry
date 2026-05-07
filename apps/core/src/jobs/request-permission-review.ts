@@ -16,6 +16,8 @@ import {
   isAdminMcpToolFullName,
   isMyClawMcpWildcardRule,
 } from '../shared/admin-mcp-tools.js';
+import { appendLiveToolRules } from '../shared/live-tool-rules.js';
+import { permissionUpdateAllowedToolRules } from '../shared/permission-tool-rules.js';
 
 export interface RequestPermissionReview {
   toolName: 'request_permission';
@@ -25,11 +27,11 @@ export interface RequestPermissionReview {
 export function requestPermissionQueuedMessage(
   review: RequestPermissionReview,
 ): string {
-  return `${review.displayName} request sent to this chat for approval. Allow once records a one-shot approval; Always allow can enable the approved rule for future runs.`;
+  return `${review.displayName} request sent to this chat for approval. Allow once records a one-shot approval; Always allow can enable the approved rule for this run and future runs.`;
 }
 
 export function requestPermissionDescription(): string {
-  return 'Only configured approvers can decide this request. Allow once records a one-shot approval; Always allow applies the approved rule to future runs.';
+  return 'Only configured approvers can decide this request. Allow once records a one-shot approval; Always allow applies the approved rule to this run and future runs.';
 }
 
 export function requestPermissionReviewEffect(
@@ -45,6 +47,8 @@ export async function persistRequestPermissionRules(input: {
   deps: Pick<IpcDeps, 'getToolRepository'>;
   sourceAgentFolder: string;
   updates: PermissionApprovalUpdate[];
+  ipcDir?: string;
+  runHandle?: string;
 }): Promise<string[]> {
   const repository = input.deps.getToolRepository?.();
   if (!repository) {
@@ -113,6 +117,11 @@ export async function persistRequestPermissionRules(input: {
       updatedAt: timestamp,
     });
   }
+  appendLiveToolRules({
+    ipcDir: input.ipcDir,
+    runHandle: input.runHandle,
+    rules: allowedRules,
+  });
   return allowedRules;
 }
 
@@ -155,28 +164,6 @@ export function requestPermissionReviewSuggestions(
       ],
     },
   ];
-}
-
-function permissionUpdateAllowedToolRules(
-  updates: PermissionApprovalUpdate[],
-): string[] {
-  const out = new Set<string>();
-  for (const update of updates) {
-    if (
-      (update.type !== 'addRules' && update.type !== 'replaceRules') ||
-      update.behavior !== 'allow'
-    ) {
-      continue;
-    }
-    for (const rule of update.rules || []) {
-      const toolName = toTrimmedString(rule.toolName, { maxLen: 120 });
-      if (!toolName) continue;
-      const ruleContent = strictRuleContent(rule.ruleContent);
-      if (ruleContent === null) continue;
-      out.add(ruleContent ? `${toolName}(${ruleContent})` : toolName);
-    }
-  }
-  return [...out];
 }
 
 function persistentPermissionToolId(allowedRule: string) {

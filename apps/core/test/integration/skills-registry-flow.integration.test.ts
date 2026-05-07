@@ -686,7 +686,7 @@ describe('skill registry integration flow', () => {
       expect(sendMessage).toHaveBeenCalledWith(
         'chat-origin',
         expect.stringContaining(
-          'Persistent permission rule enabled for future runs',
+          'Persistent permission rule enabled for this run and future runs',
         ),
         { threadId: 'thread-origin' },
       );
