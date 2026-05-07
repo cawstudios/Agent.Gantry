@@ -176,6 +176,7 @@ describe('Slack channel', () => {
     if (savedMyclawHome === undefined) delete process.env.MYCLAW_HOME;
     else process.env.MYCLAW_HOME = savedMyclawHome;
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('createSlackChannel returns null when tokens are missing', () => {
@@ -293,6 +294,72 @@ describe('Slack channel', () => {
         sender_name: 'Alice',
         content: 'hello',
       }),
+    );
+  });
+
+  it('stores Slack attachments without exposing local paths in message content', async () => {
+    const opts = createOpts();
+    opts.conversationRoutes.mockReturnValue({
+      'sl:C123': { folder: 'slack_ops', name: 'Ops' },
+    });
+    const mkdirSpy = vi.spyOn(fs, 'mkdirSync').mockReturnValue(undefined);
+    vi.spyOn(fs, 'lstatSync').mockReturnValue({
+      isDirectory: () => true,
+      isSymbolicLink: () => false,
+    } as any);
+    vi.spyOn(fs, 'chmodSync').mockReturnValue(undefined);
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockReturnValue(undefined);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => null },
+        body: null,
+        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
+      }),
+    );
+    const channel = new SlackChannel('xoxb-token', 'xapp-token', opts as any);
+    await channel.connect();
+
+    const handlers = appRef.current.eventHandlers.get('message') || [];
+    await handlers[0]({
+      event: {
+        channel: 'C123',
+        ts: '1710000000.000100',
+        user: 'U123',
+        text: 'see file',
+        files: [
+          {
+            id: 'F123',
+            name: 'report.pdf',
+            mimetype: 'application/pdf',
+            url_private_download: 'https://files.slack.test/report.pdf',
+          },
+        ],
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.objectContaining({
+        content: 'see file\nAttachment: report.pdf',
+        attachments: [
+          expect.objectContaining({
+            externalId: 'F123',
+            storageRef: 'attachments/report.pdf',
+          }),
+        ],
+      }),
+    );
+    expect(opts.onMessage.mock.calls[0][1].content).not.toContain('/tmp/');
+    expect(mkdirSpy).toHaveBeenCalledWith(
+      '/tmp/test-groups/slack_ops/attachments',
+      { recursive: true, mode: 0o700 },
+    );
+    expect(writeSpy).toHaveBeenCalledWith(
+      '/tmp/test-groups/slack_ops/attachments/report.pdf',
+      expect.any(Buffer),
+      { mode: 0o600 },
     );
   });
 

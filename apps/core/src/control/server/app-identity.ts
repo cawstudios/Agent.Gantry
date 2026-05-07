@@ -7,6 +7,7 @@ import { nowIso as runtimeNowIso } from '../../infrastructure/time/datetime.js';
 import { resolveAppScopeAppId as applicationResolveAppScopeAppId } from '../../application/app-scope/resolve-app-scope.js';
 import { jobBelongsToApp as applicationJobBelongsToApp } from '../../application/jobs/job-access.js';
 import { resolveJobRuntimeAppId as applicationResolveJobRuntimeAppId } from '../../application/jobs/job-access.js';
+import type { AppSessionRecord as JobAppSessionRecord } from '../../application/jobs/job-management-types.js';
 import type { IsoTimestamp } from '../../shared/time/primitives.js';
 import { resolveModelSelection } from '../../shared/model-catalog.js';
 import type { ApiKeyRecord } from './auth.js';
@@ -83,14 +84,41 @@ export async function resolveJobAppSession(
   job: Job,
   appId: string,
 ) {
-  for (const chatJid of Array.isArray(job.linked_sessions)
-    ? job.linked_sessions
-    : []) {
-    if (!chatJid.startsWith(`app:${appId}:`)) continue;
-    const session = await control.getAppSessionByChatJid(chatJid);
-    if (session?.appId === appId) return session;
-  }
-  return undefined;
+  if (!job.session_id) return undefined;
+  const session = await control.getAppSessionById(job.session_id);
+  if (session?.appId !== appId) return undefined;
+  return {
+    sessionId: session.sessionId,
+    appId: session.appId,
+    conversationJid: session.chatJid,
+    workspaceKey: session.workspaceKey,
+    defaultResponseMode: session.defaultResponseMode,
+    defaultWebhookId: session.defaultWebhookId,
+  } satisfies JobAppSessionRecord;
+}
+
+export async function filterJobsByAppSession(
+  control: ReturnType<typeof getRuntimeControlRepository>,
+  jobs: readonly Job[],
+  appId: string,
+): Promise<Job[]> {
+  const sessionIds = Array.from(
+    new Set(
+      jobs
+        .map((job) => job.session_id?.trim())
+        .filter((sessionId): sessionId is string => Boolean(sessionId)),
+    ),
+  );
+  if (sessionIds.length === 0) return [];
+  const sessions = await control.getAppSessionsByIds(sessionIds);
+  const allowedSessionIds = new Set(
+    sessions
+      .filter((session) => session.appId === appId)
+      .map((session) => session.sessionId),
+  );
+  return jobs.filter((job) =>
+    job.session_id ? allowedSessionIds.has(job.session_id) : false,
+  );
 }
 
 export function encodeTriggerRequester(input: {

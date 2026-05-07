@@ -9,6 +9,8 @@ import {
 import type { RuntimeJobRepository } from '../domain/repositories/ops-repo.js';
 import type { HostnameLookup } from '../domain/network/public-address-policy.js';
 import type { ToolCatalogRepository } from '../domain/ports/repositories.js';
+import type { AgentCredentialBroker } from '../domain/ports/agent-credential-broker.js';
+import type { CredentialBrokerProfile } from '../domain/models/credentials.js';
 
 export interface IpcDeps {
   sendMessage: (
@@ -39,6 +41,8 @@ export interface IpcDeps {
   mcpHostnameLookup?: HostnameLookup;
   opsRepository: RuntimeJobRepository;
   getToolRepository?: () => ToolCatalogRepository | undefined;
+  getCredentialBroker?: () => Promise<AgentCredentialBroker | undefined>;
+  getCredentialBrokerProfile?: () => CredentialBrokerProfile;
 }
 
 export interface IpcDomainContext {

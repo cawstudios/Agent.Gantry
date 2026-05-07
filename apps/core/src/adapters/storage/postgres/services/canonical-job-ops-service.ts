@@ -223,6 +223,7 @@ export class CanonicalJobOpsService {
     const appId = await this.resolveEventQueryAppId(filters);
     const rows = await this.repository.listEvents(limit, {
       appId,
+      ownerAppId: filters?.owner_app_id,
       jobId: filters?.job_id,
       jobIds: filters?.job_ids,
       runId: filters?.run_id,
@@ -236,9 +237,12 @@ export class CanonicalJobOpsService {
   private async resolveEventQueryAppId(filters?: {
     app_id?: string;
     job_id?: string;
+    job_ids?: string[];
+    owner_app_id?: string;
     run_id?: string;
-  }): Promise<string> {
+  }): Promise<string | undefined> {
     if (filters?.app_id) return filters.app_id;
+    if (filters?.owner_app_id || filters?.job_ids?.length) return undefined;
     if (filters?.run_id) {
       const eventAppId = await this.repository.findRuntimeEventAppIdForRun(
         filters.run_id,

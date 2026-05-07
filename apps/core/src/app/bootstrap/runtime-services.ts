@@ -1,4 +1,7 @@
-import { DEFAULT_TRIGGER } from '../../config/index.js';
+import {
+  DEFAULT_TRIGGER,
+  getCredentialBrokerRuntimeConfig,
+} from '../../config/index.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
@@ -190,6 +193,8 @@ export async function startRuntimeServices(
     onSchedulerChanged,
     opsRepository: resolved.opsRepository,
     getToolRepository: () => getRuntimeStorage().repositories.tools,
+    getCredentialBroker: app.getCredentialBroker,
+    getCredentialBrokerProfile: () => getCredentialBrokerRuntimeConfig().mode,
     requestPermissionApproval: channelWiring.requestPermissionApproval,
     requestUserAnswer: channelWiring.requestUserAnswer,
     mcpHostnameLookup: resolved.mcpHostnameLookup,

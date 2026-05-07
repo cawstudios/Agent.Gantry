@@ -158,6 +158,12 @@ function adaptJobControl(
       const session = await control.getAppSessionById(sessionId);
       return adaptAppSession(session);
     },
+    async getAppSessionsByIds(sessionIds) {
+      const sessions = await control.getAppSessionsByIds(sessionIds);
+      return sessions
+        .map((session) => adaptAppSession(session))
+        .filter((session): session is AppSessionRecord => Boolean(session));
+    },
     async getAppSessionByChatJid(chatJid) {
       const session = await control.getAppSessionByChatJid(chatJid);
       return adaptAppSession(session);

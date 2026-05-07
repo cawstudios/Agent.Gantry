@@ -2,11 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { ApplicationError } from '../application/common/application-error.js';
 import { JobManagementService } from '../application/jobs/job-management-service.js';
-import type {
-  AppSessionRecord,
-  JobControlPort,
-  JobExtraToolApprovalRequest,
-} from '../application/jobs/job-management-types.js';
+import type { JobExtraToolApprovalRequest } from '../application/jobs/job-management-types.js';
 import type { JobExecutionMode, JobScheduleType } from '../domain/types.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { TaskContext, TaskHandler } from './ipc-types.js';
@@ -26,10 +22,12 @@ import {
   getRuntimeEventExchange,
 } from '../adapters/storage/postgres/runtime-store.js';
 import { enqueueJobTrigger, isSchedulerReady } from './scheduler.js';
+import { adaptJobControl } from './ipc-job-control.js';
 
 function makeJobService(context: TaskContext): JobManagementService {
   return new JobManagementService({
     ops: context.deps.opsRepository,
+    control: adaptJobControl(getRuntimeControlRepository()),
     scheduler: { requestSchedulerSync: context.deps.onSchedulerChanged },
     schedulePlanner: runtimeJobSchedulePlanner,
     toolRepository: context.deps.getToolRepository?.(),
@@ -51,49 +49,6 @@ function makeRunNowJobService(context: TaskContext): JobManagementService {
       enqueue: enqueueJobTrigger,
     },
   });
-}
-
-function adaptJobControl(
-  control: ReturnType<typeof getRuntimeControlRepository>,
-): JobControlPort {
-  return {
-    async getAppSessionById(sessionId) {
-      return adaptAppSession(await control.getAppSessionById(sessionId));
-    },
-    async getAppSessionByChatJid(conversationJid) {
-      return adaptAppSession(
-        await control.getAppSessionByChatJid(conversationJid),
-      );
-    },
-    async getAppSessionsByChatJids(conversationJids) {
-      const sessions = await control.getAppSessionsByChatJids(conversationJids);
-      return sessions
-        .map((session) => adaptAppSession(session))
-        .filter((session): session is AppSessionRecord => Boolean(session));
-    },
-    createJobTrigger: (input) => control.createJobTrigger(input),
-    markTriggerCompleted: (triggerId, status) =>
-      control.markTriggerCompleted(triggerId, status),
-    getTriggerById: (triggerId) => control.getTriggerById(triggerId),
-  };
-}
-
-function adaptAppSession(
-  session: Awaited<
-    ReturnType<
-      ReturnType<typeof getRuntimeControlRepository>['getAppSessionById']
-    >
-  >,
-): AppSessionRecord | undefined {
-  if (!session) return undefined;
-  return {
-    sessionId: session.sessionId,
-    appId: session.appId,
-    conversationJid: session.chatJid,
-    workspaceKey: session.workspaceKey,
-    defaultResponseMode: session.defaultResponseMode,
-    defaultWebhookId: session.defaultWebhookId,
-  };
 }
 
 async function requestJobExtraToolApproval(

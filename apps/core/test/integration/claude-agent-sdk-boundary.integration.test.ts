@@ -335,6 +335,40 @@ describe('Claude Agent SDK boundary integration', () => {
         'Agent',
       ]),
     );
+    expect(call?.options.tools).toEqual(
+      expect.arrayContaining([
+        'Read',
+        'Glob',
+        'Grep',
+        'Agent',
+        'WebSearch',
+        'WebFetch',
+        'ToolSearch',
+        'Skill',
+      ]),
+    );
+    expect(call?.options.tools).not.toEqual(
+      expect.arrayContaining([
+        'AskUserQuestion',
+        'SendMessage',
+        'TaskOutput',
+        'TaskStop',
+        'EnterWorktree',
+        'ExitWorktree',
+        'Browser',
+      ]),
+    );
+    expect(call?.options.disallowedTools).toEqual(
+      expect.arrayContaining([
+        'AskUserQuestion',
+        'SendMessage',
+        'CronCreate',
+        'TaskOutput',
+        'TaskStop',
+        'EnterWorktree',
+        'ExitWorktree',
+      ]),
+    );
     expect(call?.options.allowedTools).not.toEqual(
       expect.arrayContaining([
         'Bash',
@@ -359,6 +393,23 @@ describe('Claude Agent SDK boundary integration', () => {
         MYCLAW_MEMORY_DEFAULT_SCOPE: 'group',
         MYCLAW_BROWSER_PROFILE_NAME: '',
         MYCLAW_ADMIN_MCP_TOOLS_JSON: '[]',
+        MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify([
+          'ask_user_question',
+          'browser_launch',
+          'browser_status',
+          'capability_status',
+          'mcp_call_tool',
+          'mcp_list_tools',
+          'memory_save',
+          'memory_search',
+          'procedure_save',
+          'request_mcp_server',
+          'request_permission',
+          'request_skill_dependency_install',
+          'request_skill_install',
+          'request_skill_proposal',
+          'send_message',
+        ]),
         MYCLAW_IPC_DIR: path.join(env.root, 'ipc', 'group'),
         MYCLAW_IPC_AUTH_TOKEN: 'runner-ipc-token',
         MYCLAW_IPC_RESPONSE_VERIFY_KEY: 'runner-response-verify-key',

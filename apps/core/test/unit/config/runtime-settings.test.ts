@@ -192,6 +192,37 @@ agents:
     ).toThrow('memory.llm.models.extractorr is not supported');
   });
 
+  it('parses settings-owned memory tuning knobs', () => {
+    const parsed = parseRuntimeSettings(`memory:
+  enabled: true
+  embeddings:
+    enabled: true
+    provider: openai
+    model: text-embedding-3-small
+    daily_limit: 42
+    batch_size: 7
+  dreaming:
+    enabled: true
+    cron: "*/15 * * * *"
+  llm:
+    extractor_max_facts: 5
+    extractor_min_confidence: 0.75
+    models:
+      extractor: haiku
+      dreaming: sonnet
+      consolidation: sonnet
+  maintenance:
+    max_pending: 250
+`);
+
+    expect(parsed.memory.embeddings.dailyLimit).toBe(42);
+    expect(parsed.memory.embeddings.batchSize).toBe(7);
+    expect(parsed.memory.dreaming.cron).toBe('*/15 * * * *');
+    expect(parsed.memory.llm.extractorMaxFacts).toBe(5);
+    expect(parsed.memory.llm.extractorMinConfidence).toBe(0.75);
+    expect(parsed.memory.maintenance.maxPending).toBe(250);
+  });
+
   it('keeps explicit verbose provider connections over compact defaults', () => {
     const parsed = parseRuntimeSettings(`providers:
   telegram:

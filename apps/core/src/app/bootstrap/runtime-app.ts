@@ -73,6 +73,7 @@ export interface RuntimeApp {
     groups: Record<string, ConversationRoute>,
   ) => void;
   ensureCredentialBindingsForConversationRoutes: () => Promise<void>;
+  getCredentialBroker: () => Promise<AgentCredentialBroker | undefined>;
   clearSessionForChatJid: (
     chatJid: string,
     threadId?: string | null,
@@ -444,6 +445,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     getAvailableGroups,
     setConversationRoutesForTest,
     ensureCredentialBindingsForConversationRoutes,
+    getCredentialBroker,
     clearSessionForChatJid,
     processGroupMessages: (chatJid, options) =>
       groupProcessor.processGroupMessages(chatJid, options),

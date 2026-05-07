@@ -152,7 +152,9 @@ export async function runQuery(
           agentInput.persona,
         ),
       },
+      tools: [...capabilities.availableTools],
       allowedTools: [...capabilities.allowedTools],
+      disallowedTools: [...capabilities.disallowedTools],
       env: sdkEnv,
       permissionMode: capabilities.permissionMode,
       hooks: {

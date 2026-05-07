@@ -17,10 +17,13 @@ import {
 import { formatBrowserProfileLabel } from '../shared/browser-profile-scope.js';
 import { resolveSchedulerApprovalTarget } from './ipc-scheduler-approval-target.js';
 import { schedulerAccessFromContext } from './ipc-scheduler-access.js';
+import { getRuntimeControlRepository } from '../adapters/storage/postgres/runtime-store.js';
+import { adaptJobControl } from './ipc-job-control.js';
 
 function makeJobService(context: TaskContext): JobManagementService {
   return new JobManagementService({
     ops: context.deps.opsRepository,
+    control: adaptJobControl(getRuntimeControlRepository()),
     scheduler: { requestSchedulerSync: context.deps.onSchedulerChanged },
     schedulePlanner: runtimeJobSchedulePlanner,
     toolRepository: context.deps.getToolRepository?.(),

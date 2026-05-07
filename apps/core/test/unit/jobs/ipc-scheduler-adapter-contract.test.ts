@@ -18,6 +18,15 @@ const mocks = vi.hoisted(() => ({
     runJobNowFromMcp: vi.fn(),
   },
   jobServiceDeps: [] as unknown[],
+  runtimeControlRepository: {
+    getAppSessionById: vi.fn(),
+    getAppSessionsByIds: vi.fn(),
+    getAppSessionByChatJid: vi.fn(),
+    getAppSessionsByChatJids: vi.fn(),
+    createJobTrigger: vi.fn(),
+    markTriggerCompleted: vi.fn(),
+    getTriggerById: vi.fn(),
+  },
 }));
 
 vi.mock('@core/jobs/ipc-shared.js', async () => {
@@ -38,7 +47,7 @@ vi.mock('@core/application/jobs/job-management-service.js', () => ({
 }));
 
 vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => ({
-  getRuntimeControlRepository: vi.fn(() => ({})),
+  getRuntimeControlRepository: vi.fn(() => mocks.runtimeControlRepository),
   getRuntimeEventExchange: vi.fn(() => ({
     publish: vi.fn(),
   })),
@@ -81,6 +90,26 @@ describe('scheduler IPC adapter contracts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.jobServiceDeps.length = 0;
+    mocks.runtimeControlRepository.getAppSessionById.mockResolvedValue(
+      undefined,
+    );
+    mocks.runtimeControlRepository.getAppSessionsByIds.mockResolvedValue([]);
+    mocks.runtimeControlRepository.getAppSessionByChatJid.mockResolvedValue(
+      undefined,
+    );
+    mocks.runtimeControlRepository.getAppSessionsByChatJids.mockResolvedValue(
+      [],
+    );
+    mocks.runtimeControlRepository.createJobTrigger.mockResolvedValue({
+      triggerId: 'trigger-1',
+      jobId: 'job-1',
+      runId: null,
+      status: 'pending',
+    });
+    mocks.runtimeControlRepository.markTriggerCompleted.mockResolvedValue(
+      undefined,
+    );
+    mocks.runtimeControlRepository.getTriggerById.mockResolvedValue(undefined);
   });
 
   it('keeps missing upsert scheduleType as invalid_request', async () => {
@@ -175,6 +204,69 @@ describe('scheduler IPC adapter contracts', () => {
         access: expect.objectContaining({
           sourceAgentFolder: 'team',
           originConversationJid: 'tg:team',
+        }),
+      }),
+    );
+  });
+
+  it('injects canonical app session control for app-origin scheduler upserts', async () => {
+    mocks.runtimeControlRepository.getAppSessionByChatJid.mockResolvedValueOnce(
+      {
+        sessionId: 'sess-app-one',
+        appId: 'app-one',
+        conversationId: 'conv-1',
+        chatJid: 'app:app-one:conv-1',
+        workspaceKey: 'workspace-1',
+        title: 'App One',
+        defaultResponseMode: 'webhook',
+        defaultWebhookId: 'webhook-1',
+      },
+    );
+    mocks.jobService.upsertJobFromIpc.mockResolvedValueOnce({
+      jobId: 'job-1',
+      created: true,
+      modelAlias: null,
+    });
+    const context = makeContext({
+      type: 'scheduler_upsert_job',
+      name: 'Daily review',
+      prompt: 'Review memory',
+      scheduleType: 'once',
+      scheduleValue: '2026-05-04T00:00:00.000Z',
+      chatJid: 'app:app-one:conv-1',
+      targetJid: 'app:app-one:conv-1',
+    });
+    context.sourceAgentFolderJids = ['app:app-one:conv-1'];
+    context.conversationBindings = {
+      'app:app-one:conv-1': {
+        folder: 'team',
+        name: 'App One',
+        conversationKind: 'group',
+      },
+    };
+
+    await schedulerCreateTaskHandlers.scheduler_upsert_job(context);
+
+    const deps = mocks.jobServiceDeps.at(-1) as {
+      control?: {
+        getAppSessionByChatJid: (chatJid: string) => Promise<unknown>;
+      };
+    };
+    expect(deps.control).toBeDefined();
+    await expect(
+      deps.control?.getAppSessionByChatJid('app:app-one:conv-1'),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        sessionId: 'sess-app-one',
+        appId: 'app-one',
+        conversationJid: 'app:app-one:conv-1',
+        defaultWebhookId: 'webhook-1',
+      }),
+    );
+    expect(mocks.jobService.upsertJobFromIpc).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: expect.objectContaining({
+          originConversationJid: 'app:app-one:conv-1',
         }),
       }),
     );

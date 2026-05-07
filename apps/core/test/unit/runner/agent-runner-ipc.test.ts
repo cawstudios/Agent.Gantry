@@ -110,6 +110,10 @@ function createRunnerFixture(): {
     path.join(runnerDir, 'agent-capabilities.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/runner/myclaw-mcp-tool-surface.ts'),
+    path.join(runnerDir, 'myclaw-mcp-tool-surface.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/runner/memory-boundary.ts'),
     path.join(runnerDir, 'memory-boundary.ts'),
   );

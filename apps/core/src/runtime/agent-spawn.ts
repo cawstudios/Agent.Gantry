@@ -27,6 +27,7 @@ import type { MaterializedMcpCapability } from '../application/mcp/mcp-server-se
 import {
   applyOpenRouterSdkEnv,
   materializeClaudeRuntime,
+  projectClaudeModelCredentialEnv,
 } from '../adapters/llm/anthropic-claude-agent/claude-config-materializer.js';
 import {
   ArtifactClaudeSkillSource,
@@ -272,9 +273,9 @@ export async function spawnAgent(
   const args = [hostRunnerPath];
   const ipcInputDir = getContinuationInputDir(group.folder, input.threadId);
   const ipcAuth = createIpcAuthEnvelope(group.folder, input.threadId);
-  const modelCredentialEnv: NodeJS.ProcessEnv = {
-    ...hostCredentials.env,
-  };
+  const modelCredentialEnv = projectClaudeModelCredentialEnv(
+    hostCredentials.env,
+  );
   const env: NodeJS.ProcessEnv = {
     ...pickSafeHostEnv(process.env),
     TZ: TIMEZONE,

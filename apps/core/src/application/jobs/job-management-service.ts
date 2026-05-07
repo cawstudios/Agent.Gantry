@@ -1,7 +1,12 @@
 import { RUNTIME_EVENT_TYPES } from '../../domain/events/runtime-event-types.js';
 import { ApplicationError } from '../common/application-error.js';
 import type { Clock } from '../common/clock.js';
-import { assertJobBelongsToApp, resolveJobRuntimeAppId } from './job-access.js';
+import {
+  assertJobBelongsToApp,
+  filterJobsByCanonicalAppSession,
+  resolveJobAppSession,
+  resolveJobRuntimeAppId,
+} from './job-access.js';
 import { isVisibleJob } from './job-list-filters.js';
 import {
   assertSchedulerJobAccess,
@@ -12,23 +17,21 @@ import {
 import { createManagedJob } from './job-management-create.js';
 import { requireJobExtraToolApproval } from './job-extra-tool-approval.js';
 import {
+  appIdFromConversationJid,
   buildJobUpdates,
   encodeTriggerRequester,
   normalizeExecutionMode,
   normalizeScheduleType,
+  resolveCanonicalAppSessionForOrigin,
   resolveLimit,
 } from './job-management-helpers.js';
 import type {
   Job,
   JobEvent,
-  AppSessionRecord,
-  JobControlPort,
   JobManagementServiceDeps,
   JobRun,
-  JobTriggerQueuePort,
   JobUpsertInput,
   JobKind,
-  RuntimeEventPublisherPort,
   SchedulerJobAccess,
   SchedulerRunNowInput,
   JobUpdatePatch,
@@ -39,6 +42,11 @@ import {
   resolveOptionalJobModel,
   resolveRequestedJobModel,
 } from './job-model-selection.js';
+import {
+  requireJobControl,
+  requireRuntimeEvents,
+  requireTriggerQueue,
+} from './job-management-require.js';
 import {
   agentIdForJobGroupScope,
   assertJobExtraToolsAllowedForTarget,
@@ -53,7 +61,6 @@ const MAX_JOB_LIST_LIMIT = 500;
 const DEFAULT_EVENT_LIMIT = 200;
 const DEFAULT_DEAD_LETTER_LIMIT = 50;
 const TRIGGER_POLL_INTERVAL_MS = 2_000;
-
 export class JobManagementService {
   constructor(private readonly deps: JobManagementServiceDeps) {}
 
@@ -132,9 +139,15 @@ export class JobManagementService {
       input.allowedTools === undefined
         ? (existingJob?.capability_policy?.allowed_tools ?? [])
         : normalizeJobExtraTools(input.allowedTools);
+    const { originAppId, canonicalSession } =
+      await resolveCanonicalAppSessionForOrigin({
+        access,
+        control: this.deps.control,
+      });
+    const runtimeAppId = canonicalSession?.appId ?? originAppId ?? 'default';
     const inheritedTools = await resolveAgentToolBindings({
       repository: this.deps.toolRepository,
-      appId: 'default',
+      appId: runtimeAppId,
       agentId: agentIdForJobGroupScope(groupScope),
     });
     assertJobExtraToolsAllowedForTarget({
@@ -145,7 +158,7 @@ export class JobManagementService {
       deps: this.deps,
       jobId: id,
       jobName: name,
-      appId: 'default',
+      appId: runtimeAppId,
       groupScope,
       allowedTools,
       existingJobExtraTools:
@@ -162,7 +175,7 @@ export class JobManagementService {
       schedule_type: scheduleType,
       schedule_value: input.scheduleValue.trim(),
       linked_sessions: linkedSessions,
-      session_id: null,
+      session_id: canonicalSession?.sessionId ?? null,
       thread_id: authThreadId ?? payloadThreadId ?? null,
       group_scope: groupScope,
       created_by: input.createdBy === 'human' ? 'human' : 'agent',
@@ -202,7 +215,6 @@ export class JobManagementService {
       appId: input.appId,
       statuses: input.statuses,
       groupScope: queryGroupScope,
-      threadId: undefined,
       agentId: input.agentId,
       kind: input.kind,
       conversationJid: input.access
@@ -213,9 +225,21 @@ export class JobManagementService {
         MAX_JOB_LIST_LIMIT,
       ),
     });
-    return {
-      jobs: jobs.filter((job) => isVisibleJob(job, input)),
-    };
+    const appScopedJobs =
+      input.appId && this.deps.control
+        ? await filterJobsByCanonicalAppSession({
+            control: this.deps.control,
+            jobs,
+            appId: input.appId,
+          })
+        : jobs;
+    const visibleJobs = appScopedJobs.filter((job) =>
+      isVisibleJob(job, {
+        ...input,
+        appId: this.deps.control ? undefined : input.appId,
+      }),
+    );
+    return { jobs: visibleJobs };
   }
 
   async getJob(input: {
@@ -225,7 +249,7 @@ export class JobManagementService {
   }): Promise<{ job: Job | null }> {
     const job = await this.deps.ops.getJobById(input.jobId);
     if (!job) return { job: null };
-    if (input.appId) assertJobBelongsToApp(job, input.appId);
+    if (input.appId) await this.assertJobAppAccess(job, input.appId);
     if (input.access) assertSchedulerJobAccess(job, input.access);
     return { job };
   }
@@ -237,7 +261,7 @@ export class JobManagementService {
     patch: JobUpdatePatch;
   }): Promise<{ job: Job }> {
     const job = await this.requireJob(input.jobId);
-    this.assertAccess(job, input);
+    await this.assertAccess(job, input);
     const patch = { ...input.patch };
     if (typeof patch.model === 'string') {
       patch.model = resolveOptionalJobModel(patch.model);
@@ -292,7 +316,7 @@ export class JobManagementService {
     access?: SchedulerJobAccess;
   }): Promise<{ deleted: true }> {
     const job = await this.requireJob(input.jobId);
-    this.assertAccess(job, input);
+    await this.assertAccess(job, input);
     await this.deps.ops.deleteJob(job.id);
     this.deps.scheduler.requestSchedulerSync(job.id);
     return { deleted: true };
@@ -305,7 +329,7 @@ export class JobManagementService {
     reason?: string;
   }): Promise<{ paused: true }> {
     const job = await this.requireJob(input.jobId);
-    this.assertAccess(job, input);
+    await this.assertAccess(job, input);
     await this.deps.ops.updateJob(job.id, {
       status: 'paused',
       pause_reason: input.reason?.trim() || 'Paused by SDK',
@@ -322,7 +346,7 @@ export class JobManagementService {
     invalidSchedulePolicy?: 'resume_now' | 'dead_letter';
   }): Promise<{ resumed: true; job: Job }> {
     const job = await this.requireJob(input.jobId);
-    this.assertAccess(job, input);
+    await this.assertAccess(job, input);
     let nextRun = this.deps.schedulePlanner.planResume({
       job,
       clock: this.clock(),
@@ -366,12 +390,15 @@ export class JobManagementService {
     perAppLimit: number;
     perJobLimit: number;
   }): Promise<{ triggerId: string }> {
-    const control = this.requireControl();
-    const runtimeEvents = this.requireRuntimeEvents();
-    const triggerQueue = this.requireTriggerQueue();
+    const control = requireJobControl(this.deps);
+    const runtimeEvents = requireRuntimeEvents(this.deps);
+    const triggerQueue = requireTriggerQueue(this.deps);
     const job = await this.requireJob(input.jobId);
-    assertJobBelongsToApp(job, input.appId);
-    const appSession = await this.resolveJobAppSession(job, input.appId);
+    const appSession = await resolveJobAppSession({
+      control,
+      job,
+      appId: input.appId,
+    });
     if (!appSession) {
       throw new ApplicationError(
         'FORBIDDEN',
@@ -384,13 +411,19 @@ export class JobManagementService {
         'Scheduler is not ready to accept job triggers',
       );
     }
+    if (job.status === 'paused' || job.status === 'dead_lettered') {
+      throw new ApplicationError(
+        'CONFLICT',
+        `Cannot trigger job while status is ${job.status}; resume the job explicitly first.`,
+      );
+    }
     if (
       input.consumeRateLimit &&
-      (!input.consumeRateLimit(`app:${input.appId}`, input.perAppLimit) ||
-        !input.consumeRateLimit(
-          `app:${input.appId}:job:${job.id}`,
-          input.perJobLimit,
-        ))
+      (!input.consumeRateLimit(
+        `app:${input.appId}:job:${job.id}`,
+        input.perJobLimit,
+      ) ||
+        !input.consumeRateLimit(`app:${input.appId}`, input.perAppLimit))
     ) {
       throw new ApplicationError(
         'RATE_LIMITED',
@@ -405,18 +438,6 @@ export class JobManagementService {
         sessionId: appSession.sessionId,
       }),
     });
-    if (job.status === 'paused' || job.status === 'dead_lettered') {
-      try {
-        await this.resumeJob({
-          appId: input.appId,
-          jobId: job.id,
-          invalidSchedulePolicy: 'resume_now',
-        });
-      } catch (err) {
-        await control.markTriggerCompleted(trigger.triggerId, 'failed');
-        throw err;
-      }
-    }
     try {
       await triggerQueue.enqueue(job.id, trigger.triggerId);
     } catch (err) {
@@ -464,13 +485,13 @@ export class JobManagementService {
     resultSummary: string | null;
     errorSummary: string | null;
   }> {
-    const control = this.requireControl();
+    const control = requireJobControl(this.deps);
     const initialTrigger = await control.getTriggerById(input.triggerId);
     if (!initialTrigger) {
       throw new ApplicationError('TRIGGER_NOT_FOUND', 'Trigger not found');
     }
     const job = await this.requireJob(initialTrigger.jobId);
-    assertJobBelongsToApp(job, input.appId);
+    await this.assertJobAppAccess(job, input.appId);
     const startedAt = Date.now();
     const subscription = this.deps.runtimeEvents?.subscribe?.({
       appId: input.appId as never,
@@ -508,7 +529,7 @@ export class JobManagementService {
     resultSummary: string | null;
     errorSummary: string | null;
   } | null> {
-    const control = this.requireControl();
+    const control = requireJobControl(this.deps);
     const trigger = await control.getTriggerById(triggerId);
     if (!trigger)
       throw new ApplicationError('TRIGGER_NOT_FOUND', 'Trigger not found');
@@ -541,12 +562,17 @@ export class JobManagementService {
       });
       if (!job) return { runs: [] };
     }
+    const ownerAppId =
+      !input.jobId && input.appId && !input.access ? input.appId : undefined;
+    const visibleJobIds =
+      input.jobId || ownerAppId
+        ? undefined
+        : await this.visibleJobIdsArray(input);
+    if (visibleJobIds?.length === 0) return { runs: [] };
     const runs = await this.deps.ops.listJobRuns(
       input.jobId,
       resolveLimit(input.limit, DEFAULT_RUN_LIMIT),
-      input.jobId
-        ? undefined
-        : { jobIds: await this.visibleJobIdsArray(input) },
+      input.jobId ? undefined : { jobIds: visibleJobIds, ownerAppId },
     );
     if (input.jobId) return { runs };
     return { runs };
@@ -570,13 +596,19 @@ export class JobManagementService {
       });
       if (!job) return { events: [] };
     }
-    const visibleJobIds = input.jobId
-      ? undefined
-      : await this.visibleJobIdsArray(input);
+    const ownerAppId =
+      !input.jobId && input.appId && !input.access ? input.appId : undefined;
+    const visibleJobIds =
+      input.jobId || ownerAppId
+        ? undefined
+        : await this.visibleJobIdsArray(input);
+    if (visibleJobIds?.length === 0) return { events: [] };
     const events = await this.deps.ops.listRecentJobEvents(
       resolveLimit(input.limit, DEFAULT_EVENT_LIMIT),
       {
-        app_id: input.jobId || visibleJobIds ? undefined : input.appId,
+        app_id:
+          input.jobId || visibleJobIds || ownerAppId ? undefined : input.appId,
+        owner_app_id: ownerAppId,
         job_id: input.jobId,
         job_ids: visibleJobIds,
         run_id: input.runId,
@@ -614,70 +646,34 @@ export class JobManagementService {
   }): Promise<Job | null> {
     const job = await this.deps.ops.getJobById(input.jobId);
     if (!job) return null;
-    this.assertAccess(job, input);
+    await this.assertAccess(job, input);
     return job;
   }
 
-  private assertAccess(
+  private async assertAccess(
     job: Job,
     input: { appId?: string; access?: SchedulerJobAccess },
-  ): void {
-    if (input.appId) assertJobBelongsToApp(job, input.appId);
+  ): Promise<void> {
+    if (input.appId) await this.assertJobAppAccess(job, input.appId);
     if (input.access) assertSchedulerJobAccess(job, input.access);
+  }
+
+  private async assertJobAppAccess(job: Job, appId: string): Promise<void> {
+    if (!this.deps.control) {
+      assertJobBelongsToApp(job, appId);
+      return;
+    }
+    const appSession = await resolveJobAppSession({
+      control: this.deps.control,
+      job,
+      appId,
+    });
+    if (appSession?.appId === appId) return;
+    throw new ApplicationError('FORBIDDEN', 'API key cannot access this job');
   }
 
   private clock(): Clock {
     return this.deps.clock ?? { now: () => new Date().toISOString() };
-  }
-
-  private requireControl(): JobControlPort {
-    if (!this.deps.control) {
-      throw new ApplicationError(
-        'UNAVAILABLE',
-        'Job control repository unavailable',
-      );
-    }
-    return this.deps.control;
-  }
-
-  private requireRuntimeEvents(): RuntimeEventPublisherPort {
-    if (!this.deps.runtimeEvents) {
-      throw new ApplicationError(
-        'UNAVAILABLE',
-        'Runtime event publisher unavailable',
-      );
-    }
-    return this.deps.runtimeEvents;
-  }
-
-  private requireTriggerQueue(): JobTriggerQueuePort {
-    if (!this.deps.triggerQueue) {
-      throw new ApplicationError(
-        'UNAVAILABLE',
-        'Scheduler trigger queue unavailable',
-      );
-    }
-    return this.deps.triggerQueue;
-  }
-
-  private async resolveJobAppSession(
-    job: Job,
-    appId: string,
-  ): Promise<AppSessionRecord | undefined> {
-    const control = this.requireControl();
-    const appChatJids = (
-      Array.isArray(job.linked_sessions) ? job.linked_sessions : []
-    ).filter((conversationJid) => conversationJid.startsWith(`app:${appId}:`));
-    if (control.getAppSessionsByChatJids) {
-      const sessions = await control.getAppSessionsByChatJids(appChatJids);
-      return sessions.find((session) => session.appId === appId);
-    }
-    for (const conversationJid of appChatJids) {
-      if (!conversationJid.startsWith(`app:${appId}:`)) continue;
-      const session = await control.getAppSessionByChatJid(conversationJid);
-      if (session?.appId === appId) return session;
-    }
-    return undefined;
   }
 
   private async visibleJobIdsArray(input: {

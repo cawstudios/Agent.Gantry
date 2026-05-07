@@ -41,8 +41,10 @@ function makeJob(id: string, patch: Partial<JobUpsertInput> = {}) {
 
 maybeDescribe('PostgresControlPlaneRepository', () => {
   let runtime: PostgresIntegrationRuntime;
+  const originalSecretEncryptionKey = process.env.SECRET_ENCRYPTION_KEY;
 
   beforeAll(async () => {
+    process.env.SECRET_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
     runtime = await createPostgresIntegrationRuntime({
       schemaPrefix: 'control_repo',
     });
@@ -50,6 +52,11 @@ maybeDescribe('PostgresControlPlaneRepository', () => {
 
   afterAll(async () => {
     await runtime?.cleanup();
+    if (originalSecretEncryptionKey === undefined) {
+      delete process.env.SECRET_ENCRYPTION_KEY;
+    } else {
+      process.env.SECRET_ENCRYPTION_KEY = originalSecretEncryptionKey;
+    }
   });
 
   it('manages sessions, response routes, webhooks, deliveries, and triggers', async () => {

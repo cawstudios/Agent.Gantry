@@ -68,7 +68,7 @@ export function validateLoadedRuntimeSettings(
   }
   const postgresUrlEnv = settings.storage.postgres.urlEnv;
   const postgresUrl =
-    env[postgresUrlEnv]?.trim() || process.env[postgresUrlEnv]?.trim() || '';
+    process.env[postgresUrlEnv]?.trim() || env[postgresUrlEnv]?.trim() || '';
   if (!postgresUrl) {
     details.push(`${postgresUrlEnv} is required for runtime storage.`);
   } else {
@@ -84,8 +84,8 @@ export function validateLoadedRuntimeSettings(
 
   const onecliDatabaseUrlEnv = settings.credentialBroker.onecli.postgres.urlEnv;
   const onecliDatabaseUrl =
-    env[onecliDatabaseUrlEnv]?.trim() ||
     process.env[onecliDatabaseUrlEnv]?.trim() ||
+    env[onecliDatabaseUrlEnv]?.trim() ||
     '';
   if (!onecliDatabaseUrl && credentialMode === 'onecli') {
     details.push(
@@ -129,8 +129,8 @@ export function validateLoadedRuntimeSettings(
     }
   }
   const onecliSecret =
-    env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim() ||
-    process.env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim();
+    process.env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim() ||
+    env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim();
   if (credentialMode === 'onecli') {
     const secretValidation = validateOnecliSecretEncryptionKey(onecliSecret);
     if (!secretValidation.ok) {

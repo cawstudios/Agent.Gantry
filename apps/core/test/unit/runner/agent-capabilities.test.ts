@@ -8,7 +8,6 @@ import {
 
 const SAFE_DEFAULT_ALLOWED_TOOLS = [
   'Agent',
-  'Browser',
   'WebSearch',
   'WebFetch',
   'ToolSearch',
@@ -34,10 +33,6 @@ const DEVELOPER_ALLOWED_TOOLS = [
   'Read',
   'Glob',
   'Grep',
-  'TaskOutput',
-  'TaskStop',
-  'EnterWorktree',
-  'ExitWorktree',
   ...SAFE_DEFAULT_ALLOWED_TOOLS,
 ] as const;
 
@@ -51,12 +46,34 @@ const CONFIGURED_ADMIN_ALLOWED_TOOLS = [
 
 const DANGEROUS_DEFAULT_TOOLS = [
   'Bash',
+  'Browser',
   'Write',
   'Edit',
   'NotebookEdit',
   'Config',
+  'AskUserQuestion',
+  'SendMessage',
+  'TaskOutput',
+  'TaskStop',
+  'EnterWorktree',
+  'ExitWorktree',
   'mcp__myclaw__list_models',
   'mcp__myclaw__*',
+] as const;
+
+const DEFAULT_AVAILABLE_TOOLS = [
+  'Agent',
+  'WebSearch',
+  'WebFetch',
+  'ToolSearch',
+  'Skill',
+] as const;
+
+const DEVELOPER_AVAILABLE_TOOLS = [
+  'Read',
+  'Glob',
+  'Grep',
+  ...DEFAULT_AVAILABLE_TOOLS,
 ] as const;
 
 describe('agent capability composition', () => {
@@ -78,8 +95,22 @@ describe('agent capability composition', () => {
     });
 
     expect(profile.allowedTools).toEqual(SAFE_DEFAULT_ALLOWED_TOOLS);
+    expect(profile.availableTools).toEqual(DEFAULT_AVAILABLE_TOOLS);
+    expect(profile.disallowedTools).toEqual(
+      expect.arrayContaining([
+        'AskUserQuestion',
+        'SendMessage',
+        'CronCreate',
+        'TaskOutput',
+        'TaskStop',
+        'EnterWorktree',
+        'ExitWorktree',
+        'TodoWrite',
+      ]),
+    );
     for (const tool of DANGEROUS_DEFAULT_TOOLS) {
       expect(profile.allowedTools).not.toContain(tool);
+      expect(profile.availableTools).not.toContain(tool);
     }
     expect(profile.permissionMode).toBe('default');
     expect(profile.alwaysAllowedTools).toEqual([]);
@@ -94,6 +125,23 @@ describe('agent capability composition', () => {
         MYCLAW_MEMORY_DEFAULT_SCOPE: 'group',
         MYCLAW_BROWSER_PROFILE_NAME: 'c-team-abc123abc123',
         MYCLAW_ADMIN_MCP_TOOLS_JSON: '[]',
+        MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify([
+          'ask_user_question',
+          'browser_launch',
+          'browser_status',
+          'capability_status',
+          'mcp_call_tool',
+          'mcp_list_tools',
+          'memory_save',
+          'memory_search',
+          'procedure_save',
+          'request_mcp_server',
+          'request_permission',
+          'request_skill_dependency_install',
+          'request_skill_install',
+          'request_skill_proposal',
+          'send_message',
+        ]),
         MYCLAW_IPC_DIR: '/tmp/ipc/team',
         MYCLAW_IPC_AUTH_TOKEN: 'token',
         MYCLAW_BROWSER_IPC_AUTH_TOKEN: 'browser-token',
@@ -122,6 +170,7 @@ describe('agent capability composition', () => {
     });
 
     expect(profile.allowedTools).toEqual(CONFIGURED_ADMIN_ALLOWED_TOOLS);
+    expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).toContain(
       'mcp__myclaw__settings_desired_state',
     );
@@ -132,6 +181,29 @@ describe('agent capability composition', () => {
       JSON.stringify([
         'register_agent',
         'request_settings_update',
+        'service_restart',
+        'settings_desired_state',
+      ]),
+    );
+    expect(profile.mcpServers.myclaw?.env?.MYCLAW_MCP_TOOL_NAMES_JSON).toBe(
+      JSON.stringify([
+        'ask_user_question',
+        'browser_launch',
+        'browser_status',
+        'capability_status',
+        'mcp_call_tool',
+        'mcp_list_tools',
+        'memory_save',
+        'memory_search',
+        'procedure_save',
+        'register_agent',
+        'request_mcp_server',
+        'request_permission',
+        'request_settings_update',
+        'request_skill_dependency_install',
+        'request_skill_install',
+        'request_skill_proposal',
+        'send_message',
         'service_restart',
         'settings_desired_state',
       ]),
@@ -147,6 +219,7 @@ describe('agent capability composition', () => {
     });
 
     expect(profile.allowedTools).toEqual(DEVELOPER_ALLOWED_TOOLS);
+    expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).toContain('Agent');
     expect(profile.allowedTools).not.toContain(
       'mcp__myclaw__settings_desired_state',
@@ -167,10 +240,11 @@ describe('agent capability composition', () => {
     });
 
     expect(profile.allowedTools).toEqual(DEVELOPER_ALLOWED_TOOLS);
+    expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).toContain('Agent');
     expect(profile.allowedTools).toContain('Read');
     expect(profile.allowedTools).toContain('mcp__myclaw__memory_search');
-    expect(profile.allowedTools).toContain('Browser');
+    expect(profile.allowedTools).not.toContain('Browser');
   });
 
   it('fails unknown persona strings closed to assistant capabilities', () => {
@@ -183,10 +257,11 @@ describe('agent capability composition', () => {
     });
 
     expect(profile.allowedTools).toEqual(SAFE_DEFAULT_ALLOWED_TOOLS);
+    expect(profile.availableTools).toEqual(DEFAULT_AVAILABLE_TOOLS);
     expect(profile.allowedTools).not.toContain('Read');
     expect(profile.allowedTools).toContain('Agent');
     expect(profile.allowedTools).toContain('mcp__myclaw__memory_search');
-    expect(profile.allowedTools).toContain('Browser');
+    expect(profile.allowedTools).not.toContain('Browser');
   });
 
   it.each([
@@ -204,7 +279,8 @@ describe('agent capability composition', () => {
       isMain: false,
     });
 
-    expect(profile.allowedTools).toContain('Browser');
+    expect(profile.allowedTools).not.toContain('Browser');
+    expect(profile.availableTools).not.toContain('Browser');
     expect(profile.allowedTools).toContain('mcp__myclaw__memory_search');
     expect(profile.allowedTools).toContain('mcp__myclaw__memory_save');
     expect(profile.allowedTools).toContain('mcp__myclaw__procedure_save');
@@ -219,17 +295,19 @@ describe('agent capability composition', () => {
     expect(profile.allowedTools).not.toContain('mcp__myclaw__register_agent');
   });
 
-  it('projects configured scoped SDK tool rules into developer allowed tools', () => {
+  it('filters configured SDK tool rules to supported built-ins', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'tg:team',
       groupFolder: 'telegram_team',
       isMain: false,
-      configuredAllowedTools: ['ToolName(scope-pattern)'],
+      configuredAllowedTools: ['Bash(git status)', 'ToolName(scope-pattern)'],
     });
 
-    expect(profile.allowedTools).toContain('ToolName(scope-pattern)');
-    expect(profile.allowedTools).not.toContain('ToolName');
+    expect(profile.allowedTools).toContain('Bash(git status)');
+    expect(profile.availableTools).toContain('Bash');
+    expect(profile.allowedTools).not.toContain('ToolName(scope-pattern)');
+    expect(profile.availableTools).not.toContain('ToolName');
   });
 
   it('allows exact selected admin tools but filters shell, repo, file-write, and wildcard rules for non-developer personas', () => {
@@ -260,8 +338,8 @@ describe('agent capability composition', () => {
     });
 
     expect(profile.allowedTools).toContain('Agent');
-    expect(profile.allowedTools).toContain('Browser');
-    expect(profile.allowedTools).toContain('ToolName(scope-pattern)');
+    expect(profile.allowedTools).not.toContain('Browser');
+    expect(profile.allowedTools).not.toContain('ToolName(scope-pattern)');
     expect(profile.allowedTools).toContain('mcp__myclaw__service_restart');
     expect(profile.allowedTools).toContain(
       'mcp__myclaw__settings_desired_state',
@@ -303,6 +381,7 @@ describe('agent capability composition', () => {
     );
     expect(profile.allowedTools).toContain('CustomTool');
     expect(profile.allowedTools).toContain('mcp__myclaw__send_message');
+    expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).not.toContain('mcp__myclaw__*');
     expect(profile.alwaysAllowedTools).toContain('CustomTool');
   });
@@ -328,6 +407,7 @@ describe('agent capability composition', () => {
     });
     expect(profile.mcpServers.github).toBeUndefined();
     expect(profile.allowedTools).toEqual(DEVELOPER_ALLOWED_TOOLS);
+    expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).not.toContain(
       'mcp__github__search_repositories',
     );
@@ -358,5 +438,6 @@ describe('agent capability composition', () => {
     });
     expect(profile.allowedTools).not.toContain('mcp__myclaw__*');
     expect(profile.allowedTools).toContain('mcp__agent_browser__*');
+    expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
   });
 });

@@ -6,6 +6,8 @@ import { generateKeyPairSync } from 'crypto';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { ALL_MYCLAW_MCP_TOOL_NAMES } from '@agent-runner-src/myclaw-mcp-tool-surface.js';
+
 const tempRoots: string[] = [];
 
 afterEach(() => {
@@ -99,6 +101,14 @@ function createMcpFixture(): {
   fs.copyFileSync(
     path.resolve('apps/core/src/runner/memory-timeouts.ts'),
     path.join(runnerDir, 'memory-timeouts.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/runner/myclaw-mcp-tool-surface.ts'),
+    path.join(runnerDir, 'myclaw-mcp-tool-surface.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/private-fs.ts'),
+    path.join(sharedDir, 'private-fs.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/infrastructure/time/datetime.ts'),
@@ -313,6 +323,7 @@ async function runMcpFixture(
         MYCLAW_CHAT_JID: 'tg:team',
         MYCLAW_GROUP_FOLDER: 'team',
         MYCLAW_ADMIN_MCP_TOOLS_JSON: '[]',
+        MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify(ALL_MYCLAW_MCP_TOOL_NAMES),
         ...envOverrides,
         TEST_MCP_TOOL_NAME: toolName,
         TEST_MCP_TOOL_ARGS: JSON.stringify(args),
@@ -466,6 +477,64 @@ describe('agent-runner MCP stdio tools', { timeout: 10_000 }, () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain('tool not registered: service_restart');
+  });
+
+  it('restricts registered MCP tools to the runner-projected surface', async () => {
+    const fixture = createMcpFixture();
+    const restrictedSurface = JSON.stringify([
+      'send_message',
+      'ask_user_question',
+      'memory_search',
+      'memory_save',
+      'procedure_save',
+      'browser_launch',
+      'browser_status',
+      'request_skill_install',
+      'request_skill_proposal',
+      'request_skill_dependency_install',
+      'request_mcp_server',
+      'request_permission',
+      'capability_status',
+      'mcp_list_tools',
+      'mcp_call_tool',
+    ]);
+
+    const hiddenScheduler = await runMcpFixture(
+      fixture,
+      'scheduler_list_models',
+      {},
+      { MYCLAW_MCP_TOOL_NAMES_JSON: restrictedSurface },
+    );
+
+    expect(hiddenScheduler.exitCode).not.toBe(0);
+    expect(hiddenScheduler.stderr).toContain(
+      'tool not registered: scheduler_list_models',
+    );
+
+    const hiddenPatch = await runMcpFixture(
+      createMcpFixture(),
+      'memory_patch',
+      { id: 'memory-1', expected_version: 1, value: 'updated' },
+      { MYCLAW_MCP_TOOL_NAMES_JSON: restrictedSurface },
+    );
+    expect(hiddenPatch.exitCode).not.toBe(0);
+    expect(hiddenPatch.stderr).toContain('tool not registered: memory_patch');
+  });
+
+  it('fails closed to baseline tools when runner projection is missing', async () => {
+    const fixture = createMcpFixture();
+
+    const hiddenScheduler = await runMcpFixture(
+      fixture,
+      'scheduler_list_models',
+      {},
+      { MYCLAW_MCP_TOOL_NAMES_JSON: undefined },
+    );
+
+    expect(hiddenScheduler.exitCode).not.toBe(0);
+    expect(hiddenScheduler.stderr).toContain(
+      'tool not registered: scheduler_list_models',
+    );
   });
 
   it('defaults scheduler upsert delivery to the trusted runtime thread', async () => {

@@ -14,6 +14,7 @@ import {
   writeIpcFile,
   type TaskResponseEnvelope,
 } from '../ipc.js';
+import { makeIpcId } from '../ipc-ids.js';
 import {
   normalizeExecutionMode,
   resolveSchedulerThreadArg,
@@ -30,9 +31,7 @@ async function requestSchedulerData(
   payload: Record<string, unknown>,
   timeoutMs = 20_000,
 ): Promise<TaskResponseEnvelope | null> {
-  const taskId = `${type.replace(/_/g, '-')}-${nowMs()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
+  const taskId = makeIpcId(type.replace(/_/g, '-'));
   writeIpcFile(TASKS_DIR, {
     type,
     taskId,
@@ -153,7 +152,7 @@ export function registerSchedulerTools(server: McpServer): void {
         };
       }
 
-      const taskId = `scheduler-upsert-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
+      const taskId = makeIpcId('scheduler-upsert');
       const data = {
         type: 'scheduler_upsert_job',
         taskId,
@@ -311,7 +310,7 @@ export function registerSchedulerTools(server: McpServer): void {
           isError: true,
         };
       }
-      const taskId = `scheduler-update-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
+      const taskId = makeIpcId('scheduler-update');
       writeIpcFile(TASKS_DIR, {
         type: 'scheduler_update_job',
         taskId,
@@ -384,7 +383,7 @@ export function registerSchedulerTools(server: McpServer): void {
     'Delete a scheduler job.',
     { job_id: z.string() },
     async (args) => {
-      const taskId = `scheduler-delete-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
+      const taskId = makeIpcId('scheduler-delete');
       writeIpcFile(TASKS_DIR, {
         type: 'scheduler_delete_job',
         taskId,
@@ -436,7 +435,7 @@ export function registerSchedulerTools(server: McpServer): void {
     'Pause a scheduler job.',
     { job_id: z.string() },
     async (args) => {
-      const taskId = `scheduler-pause-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
+      const taskId = makeIpcId('scheduler-pause');
       writeIpcFile(TASKS_DIR, {
         type: 'scheduler_pause_job',
         taskId,
@@ -488,7 +487,7 @@ export function registerSchedulerTools(server: McpServer): void {
     'Resume a paused scheduler job.',
     { job_id: z.string() },
     async (args) => {
-      const taskId = `scheduler-resume-${nowMs()}-${Math.random().toString(36).slice(2, 8)}`;
+      const taskId = makeIpcId('scheduler-resume');
       writeIpcFile(TASKS_DIR, {
         type: 'scheduler_resume_job',
         taskId,

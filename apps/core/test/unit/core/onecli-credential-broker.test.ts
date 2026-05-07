@@ -156,6 +156,28 @@ describe('OnecliAgentCredentialBroker', () => {
     );
   });
 
+  it('reports unreachable OneCLI health with endpoint and recovery command', async () => {
+    getContainerConfig.mockRejectedValue(
+      new Error('connect ECONNREFUSED 127.0.0.1:10254'),
+    );
+
+    const { OnecliAgentCredentialBroker } =
+      await import('@core/adapters/credentials/onecli/broker.js');
+    const broker = new OnecliAgentCredentialBroker({
+      onecliUrl: 'http://localhost:10254',
+      dataDir: os.tmpdir(),
+    });
+
+    await expect(broker.healthCheck()).resolves.toMatchObject({
+      status: 'fail',
+      message:
+        'Could not reach OneCLI at http://localhost:10254: connect ECONNREFUSED 127.0.0.1:10254',
+      nextAction: expect.stringContaining(
+        'start it from the directory containing the shipped stack file',
+      ),
+    });
+  });
+
   it('tags OpenRouter auth tokens with broker provenance', async () => {
     getContainerConfig.mockResolvedValue({
       env: {
@@ -176,7 +198,7 @@ describe('OnecliAgentCredentialBroker', () => {
       projectsProviderTokens: true,
       supportsModelRuntimeProfile: true,
       modelRuntimeProfileIdentifier: MODEL_RUNTIME_CREDENTIAL_IDENTIFIER,
-      projectedSecretEnvKeys: ['ANTHROPIC_AUTH_TOKEN'],
+      projectedSecretEnvKeys: ['ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY'],
     });
 
     await expect(
@@ -192,6 +214,56 @@ describe('OnecliAgentCredentialBroker', () => {
         ANTHROPIC_AUTH_TOKEN: 'openrouter',
       },
     });
+  });
+
+  it('accepts OpenAI model access only with broker provenance', async () => {
+    getContainerConfig.mockResolvedValue({
+      env: {
+        MYCLAW_OPENAI_API_KEY_PROVIDER: 'native',
+        OPENAI_API_KEY: 'sk-test-brokered-openai-key',
+      },
+    });
+
+    const { OnecliAgentCredentialBroker } =
+      await import('@core/adapters/credentials/onecli/broker.js');
+    const broker = new OnecliAgentCredentialBroker({
+      onecliUrl: 'http://localhost:10254',
+      dataDir: os.tmpdir(),
+    });
+
+    await expect(
+      broker.getInjection({
+        binding: { profile: 'onecli', agentIdentifier: 'agent-a' },
+      }),
+    ).resolves.toMatchObject({
+      env: {
+        OPENAI_API_KEY: 'sk-test-brokered-openai-key',
+      },
+      credentialProviders: {
+        OPENAI_API_KEY: 'native',
+      },
+    });
+  });
+
+  it('rejects unscoped OpenAI API keys from OneCLI', async () => {
+    getContainerConfig.mockResolvedValue({
+      env: {
+        OPENAI_API_KEY: 'sk-test-unscoped-openai-key',
+      },
+    });
+
+    const { OnecliAgentCredentialBroker } =
+      await import('@core/adapters/credentials/onecli/broker.js');
+    const broker = new OnecliAgentCredentialBroker({
+      onecliUrl: 'http://localhost:10254',
+      dataDir: os.tmpdir(),
+    });
+
+    await expect(
+      broker.getInjection({
+        binding: { profile: 'onecli', agentIdentifier: 'agent-a' },
+      }),
+    ).rejects.toThrow('forbidden raw credential env key: OPENAI_API_KEY');
   });
 
   it('rejects unscoped auth tokens from OneCLI', async () => {
