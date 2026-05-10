@@ -8,38 +8,114 @@ import { formatElapsed } from './time-format.js';
 const TYPING_HEARTBEAT_INTERVAL_MS = 4_000;
 const ELAPSED_PROGRESS_INTERVAL_MS = 60_000;
 const NO_OUTPUT_WARNING_INTERVAL_MS = 180_000;
+const INITIAL_PROGRESS_DELAY_MS = 750;
 
 type GroupProgressHeartbeatLogger = {
   debug(metadata: Record<string, unknown>, message: string): void;
+  info?(metadata: Record<string, unknown>, message: string): void;
 };
 
-export async function sendInitialGroupProgress(input: {
+function logProgressLifecycle(
+  log: GroupProgressHeartbeatLogger,
+  metadata: Record<string, unknown>,
+  message: string,
+): void {
+  if (log.info) {
+    log.info(metadata, message);
+  } else {
+    log.debug(metadata, message);
+  }
+}
+
+export function startInitialGroupProgress(input: {
   supportsProgress: boolean;
   groupName: string;
   buildMessageOptions: (threadId?: string) => MessageSendOptions | undefined;
+  buildProgressOptions?: () => ProgressUpdateOptions | undefined;
   sendProgressToChannel(
     text: string,
     options?: ProgressUpdateOptions,
   ): Promise<void>;
   log: GroupProgressHeartbeatLogger;
-}): Promise<void> {
-  if (!input.supportsProgress) return;
-  try {
-    await input.sendProgressToChannel(
-      'Working on it...',
-      input.buildMessageOptions(),
+}): { cancel(): Promise<void> } {
+  if (!input.supportsProgress) {
+    logProgressLifecycle(
+      input.log,
+      { group: input.groupName, supportsProgress: false },
+      'Progress lifecycle initial skipped',
     );
-  } catch (err) {
-    input.log.debug(
-      { err, group: input.groupName },
-      'Failed to send initial progress update',
-    );
+    return { cancel: async () => undefined };
   }
+  logProgressLifecycle(
+    input.log,
+    { group: input.groupName, delayMs: INITIAL_PROGRESS_DELAY_MS },
+    'Progress lifecycle initial scheduled',
+  );
+  let cancelled = false;
+  let sendStarted: Promise<void> | undefined;
+  let resolveFinished: () => void = () => undefined;
+  const finished = new Promise<void>((resolve) => {
+    resolveFinished = resolve;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+    timer = undefined;
+    if (cancelled) {
+      logProgressLifecycle(
+        input.log,
+        { group: input.groupName },
+        'Progress lifecycle initial timer skipped after cancel',
+      );
+      resolveFinished();
+      return;
+    }
+    logProgressLifecycle(
+      input.log,
+      { group: input.groupName },
+      'Progress lifecycle initial sending',
+    );
+    sendStarted = input
+      .sendProgressToChannel(
+        'Working on it...',
+        input.buildProgressOptions?.() ?? input.buildMessageOptions(),
+      )
+      .then(() =>
+        logProgressLifecycle(
+          input.log,
+          { group: input.groupName },
+          'Progress lifecycle initial sent',
+        ),
+      )
+      .catch((err) =>
+        input.log.debug(
+          { err, group: input.groupName },
+          'Failed to send initial progress update',
+        ),
+      )
+      .finally(resolveFinished);
+  }, INITIAL_PROGRESS_DELAY_MS);
+
+  return {
+    cancel: async () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+        logProgressLifecycle(
+          input.log,
+          { group: input.groupName },
+          'Progress lifecycle initial cancelled before send',
+        );
+        resolveFinished();
+      }
+      await (sendStarted ?? finished);
+    },
+  };
 }
 
 export function createResponseProgressSenders(input: {
   supportsProgress: boolean;
   activeThreadId?: string;
+  progressGeneration?: () => number | undefined;
   buildMessageOptions: (threadId?: string) => MessageSendOptions | undefined;
   sendMessageToChannel(
     text: string,
@@ -56,7 +132,10 @@ export function createResponseProgressSenders(input: {
         ? input
             .sendProgressToChannel(
               'Waiting for your input.',
-              buildReplaceOnlyProgressOptions(input.activeThreadId),
+              buildReplaceOnlyProgressOptions(
+                input.activeThreadId,
+                input.progressGeneration?.(),
+              ),
             )
             .catch(() => undefined)
         : Promise.resolve(),
@@ -65,7 +144,10 @@ export function createResponseProgressSenders(input: {
         return input
           .sendProgressToChannel(
             'Response received. Continuing...',
-            buildReplaceOnlyProgressOptions(input.activeThreadId),
+            buildReplaceOnlyProgressOptions(
+              input.activeThreadId,
+              input.progressGeneration?.(),
+            ),
           )
           .catch(() => undefined);
       }
@@ -78,13 +160,14 @@ export function startGroupProgressHeartbeats(input: {
   supportsProgress: boolean;
   isTypingActive: () => boolean;
   getLastAgentProgressAt: () => number;
-  startedAt: number;
+  getElapsedMs: () => number;
   chatJid: string;
   groupName: string;
   channelRuntime: {
     setTyping(jid: string, isTyping: boolean): Promise<void>;
   };
   buildMessageOptions: (threadId?: string) => MessageSendOptions | undefined;
+  buildProgressOptions?: () => ProgressUpdateOptions | undefined;
   sendProgressToChannel(
     text: string,
     options?: ProgressUpdateOptions,
@@ -93,11 +176,14 @@ export function startGroupProgressHeartbeats(input: {
 }): {
   typingHeartbeatTimer: ReturnType<typeof setInterval>;
   progressTimer: ReturnType<typeof setInterval>;
+  pause(): void;
+  resume(): void;
 } {
-  let lastElapsedProgressAt = 0;
+  let lastElapsedProgressAt = Date.now();
   let lastNoOutputWarningAt = 0;
+  let paused = false;
   const typingHeartbeatTimer = setInterval(() => {
-    if (!input.isTypingActive()) return;
+    if (paused || !input.isTypingActive()) return;
     void input.channelRuntime
       .setTyping(input.chatJid, true)
       .catch((err) =>
@@ -109,12 +195,13 @@ export function startGroupProgressHeartbeats(input: {
   }, TYPING_HEARTBEAT_INTERVAL_MS);
   const progressTimer = setInterval(() => {
     void (async () => {
-      if (!input.supportsProgress || !input.isTypingActive()) return;
+      if (!input.supportsProgress || paused || !input.isTypingActive()) return;
       const now = Date.now();
-      const elapsedMs = now - input.startedAt;
+      const elapsedMs = input.getElapsedMs();
       if (now - lastElapsedProgressAt >= ELAPSED_PROGRESS_INTERVAL_MS) {
         lastElapsedProgressAt = now;
-        const progressOptions = input.buildMessageOptions();
+        const progressOptions =
+          input.buildProgressOptions?.() ?? input.buildMessageOptions();
         void input
           .sendProgressToChannel(
             `Still working (${formatElapsed(elapsedMs)})...`,
@@ -132,7 +219,8 @@ export function startGroupProgressHeartbeats(input: {
         now - lastNoOutputWarningAt >= NO_OUTPUT_WARNING_INTERVAL_MS
       ) {
         lastNoOutputWarningAt = now;
-        const progressOptions = input.buildMessageOptions();
+        const progressOptions =
+          input.buildProgressOptions?.() ?? input.buildMessageOptions();
         void input
           .sendProgressToChannel(
             `No new output yet, still running (${formatElapsed(elapsedMs)})...`,
@@ -147,5 +235,14 @@ export function startGroupProgressHeartbeats(input: {
       }
     })();
   }, 5_000);
-  return { typingHeartbeatTimer, progressTimer };
+  return {
+    typingHeartbeatTimer,
+    progressTimer,
+    pause: () => {
+      paused = true;
+    },
+    resume: () => {
+      paused = false;
+    },
+  };
 }

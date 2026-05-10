@@ -322,13 +322,10 @@ function classifyToolKind(toolName: string): ToolExecutionKind {
   if (toolName === 'Config') return 'config';
   if (FILE_MUTATION_TOOLS.has(toolName) || READ_TOOLS.has(toolName))
     return 'file';
-  if (toolName.startsWith('mcp__')) return 'mcp';
-  if (
-    toolName.startsWith('browser_') ||
-    toolName.startsWith('mcp__agent_browser__')
-  ) {
+  if (toolName.startsWith('mcp__myclaw__browser_')) {
     return 'browser';
   }
+  if (toolName.startsWith('mcp__')) return 'mcp';
   return toolName ? 'sdk' : 'unknown';
 }
 

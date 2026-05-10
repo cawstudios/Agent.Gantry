@@ -48,6 +48,10 @@ describe('browser Chrome launch args', () => {
     expect(DEFAULT_CHROME_ARGS).toContain(
       '--remote-debugging-address=127.0.0.1',
     );
+    expect(DEFAULT_CHROME_ARGS).toContain('--disable-features=OmniboxPopup');
+    expect(DEFAULT_CHROME_ARGS).not.toContain(
+      '--disable-blink-features=AutomationControlled',
+    );
     expect(DEFAULT_CHROME_ARGS).not.toContain('--no-sandbox');
     expect(DEFAULT_CHROME_ARGS).not.toContain('--disable-setuid-sandbox');
   });

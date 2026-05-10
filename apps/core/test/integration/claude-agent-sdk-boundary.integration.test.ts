@@ -404,6 +404,8 @@ describe('Claude Agent SDK boundary integration', () => {
         MYCLAW_BROWSER_PROFILE_NAME: '',
         MYCLAW_ADMIN_MCP_TOOLS_JSON: '[]',
         MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON: '[]',
+        MYCLAW_SELECTED_SKILLS_JSON: '[]',
+        MYCLAW_SELECTED_MCP_SERVERS_JSON: '[]',
         MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify(
           selectedMyClawMcpToolNames([]),
         ),

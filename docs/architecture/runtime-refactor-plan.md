@@ -113,11 +113,13 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 **Goal:** establish the baseline so progress is measurable.
 
 **Scope:**
+
 - Run `python3 .codex/scripts/check_refactor_line_delta.py --baseline` and record per-directory line counts in `docs/architecture/refactor-baseline.md`.
 - Verify every code anchor in §8 is current. Update if stale. Fail the phase if more than 20% are stale — that means the codebase has shifted enough to re-plan.
 - Keep the CI/factory check live: PRs labelled `refactor` must show non-positive net runtime source line delta.
 
 **Exit criteria:**
+
 - Baseline file committed.
 - CI check live.
 - Anchor table in §8 verified with commit SHA `d18ba5f08a6496c462d27edf36773cb8a88cc4fe`.
@@ -130,6 +132,7 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 **Goal:** one gate, one merge order, one durable store.
 
 **Scope:**
+
 - Build on the current shared policy seam instead of creating a greenfield module by default: `ToolExecutionPolicyService` already exists in `apps/core/src/shared/tool-execution-policy-service.ts` and `apps/core/src/runner/claude/query-loop.ts` already routes interactive and autonomous SDK tool decisions through it.
 - Consolidate active capability composition in `apps/core/src/runner/agent-capabilities.ts`. The old apps/core/src/jobs/agent-capabilities.ts anchor is stale and must not be recreated as a compatibility path.
 - Keep `scheduler_grant_tool` behavior honest: today it appends a job-scoped rule through `scheduler_update_job`, persisting to `target_json.capabilityPolicy.allowedTools`/`job.capability_policy.allowed_tools`; Phase 1 must replace or back this with durable `capability_grants`.
@@ -138,6 +141,7 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 - Tighten the protected-capability guard so text payloads are allowed when safe and only target mutations of `.claude/`, `.mcp.json`, provider capability paths, or `settings.yaml` are denied. The current shared policy service contains target-oriented logic, but still has fail-closed protected-path mention branches that Phase 1 must verify against §99-D.
 
 **Exit criteria:**
+
 - One call site for "is this allowed."
 - §99-A repro (persistent grant for autonomous job) passes.
 - §99-D repro (`gh issue create` with capability words in body) passes.
@@ -150,12 +154,14 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 **Goal:** preemptive timeouts everywhere.
 
 **Scope:**
+
 - New `apps/core/src/watchdog/` running on a separate worker thread (not the main event loop).
 - Every `await` that crosses a process or IPC boundary registers a budget with the watchdog.
 - Permission IPC, scheduler runs, MCP calls, Telegram sends all migrate to this.
 - `scheduler_cancel_run` MCP tool ships in this phase, calling the watchdog cancel path. Closes #98.
 
 **Exit criteria:**
+
 - A wedged runner process is reaped within `timeout_ms + 1s`, verified by integration test that deliberately wedges a child.
 - No `setTimeout`-based cooperative timeouts remain in the runner or scheduler. Grep clean.
 - Stuck `running` rows older than their budget are auto-failed by the watchdog with a real `error_summary`.
@@ -167,12 +173,14 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 **Goal:** no tool ships without a backend; no delivery lies about success.
 
 **Scope:**
+
 - Tool registration becomes declarative: a tool listed in the registry must have a handler import, checked at boot. Boot fails loud otherwise. Closes the `scheduler_list_notification_targets` class of bug.
 - Telegram delivery: rewrite chunker as markdown-aware (treat code fences and links as atomic), unify direct and streaming paths, escape-then-chunk, never both. Surface `PartialMessageDeliveryError` to the operator, not the warn log. Closes #97.
-- `browser_status` reflects driveability, not just process liveness. If the credential broker is dead, `cdpReady=false`. Closes #95.
+- Browser facade `status` reflects driveability, not just process liveness. If the credential broker is dead, `cdpReady=false`. Closes #95.
 - `formatOperatorError` adopted by every surface. Grep for `new Error(\`` should be near zero outside the helper.
 
 **Exit criteria:**
+
 - Boot-time registry check live.
 - §97 repro (long markdown reply) round-trips losslessly.
 - §95 repro (broker outage) returns the real cause and a recover step.
@@ -185,11 +193,13 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 **Goal:** sandbox is defense-in-depth, capability is the primary gate. SecTrust regression fixed.
 
 **Scope:**
+
 - Sandbox profile narrowed to: deny writes outside `~/Workdir`, `/tmp/claude`, `$TMPDIR`; allow read of system trust store and Keychain trust evaluation (read-only). Fixes the `gh` OSStatus -26276 regression.
 - Egress firewall (host-side) replaces the in-sandbox network rules. Allowlist is per-job, resolved by L3.
 - Sandbox smoke test: `gh api user` and `curl https://api.github.com` both succeed; if they diverge, CI fails.
 
 **Exit criteria:**
+
 - `gh issue create` works from inside the agent's Bash subprocess without a workaround.
 - A job whose capability set excludes `api.github.com` cannot reach it even with `curl --cacert`.
 
@@ -200,12 +210,14 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 **Goal:** dreaming output reaches sessions; agents self-bootstrap.
 
 **Scope:**
+
 - Auto-promote low-risk staged memories (factual, no contradictions). Reserve human review for preference-style memory.
 - New `memory_status` tool: last dream run, candidates staged, candidates promoted, brief size injected at session start.
 - Open commitments surfaced as an explicit prompt block at session start, not as an optional tool call.
 - `continuity_summary` tool: last N runs, agent-filed open issues, paused jobs, recent decisions.
 
 **Exit criteria:**
+
 - A fresh session for `main_agent` injects non-empty continuity that includes any commitments older than 24h.
 - §99-C repro passes.
 
@@ -216,11 +228,13 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 **Goal:** the scheduler is the authority on run state, not the runner.
 
 **Scope:**
+
 - Lease ownership moves to the scheduler; the runner reports progress, not state.
 - Run state transitions are a single state machine in a jobs run-state module. No ad-hoc `UPDATE jobs.runs SET status = ...` calls outside it.
 - `scheduler_list_events` becomes the canonical event log; `error_summary` is required on `failed` and `cancelled`.
 
 **Exit criteria:**
+
 - Killing the runner mid-run leaves the scheduler in a recoverable state within one watchdog tick.
 - Every terminal state has either a non-empty `error_summary` or an explicit `success: true` event.
 
@@ -231,10 +245,12 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 **Goal:** delete the parallel old paths.
 
 **Scope:**
+
 - Remove the legacy permission callback, the substring guard, the cooperative timeouts, and any compat shims left from earlier phases.
 - Final cloc against the Phase 0 baseline. Net delta must be ≥ –2000 lines or the refactor failed its own thesis.
 
 **Exit criteria:**
+
 - No `// TODO: remove after refactor` comments remain.
 - No file imports both `legacy/` and the new modules.
 - `docs/architecture/agent-runtime.md` rewritten against the new layout. Old diagrams removed.
@@ -253,28 +269,28 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 
 ## 8. Code anchors (verify in Phase 0)
 
-| Concern | Path | Line | Phase |
-| --- | --- | --- | --- |
-| Credential broker error wrap | `apps/core/src/application/credentials/agent-credential-service.ts` | 97–126 | 3 |
-| Telegram streaming formatter | `apps/core/src/channels/telegram/channel-shared.ts` | 131–138 | 3 |
-| Telegram direct delivery chunking and partial errors | `apps/core/src/channels/telegram/channel-delivery.ts` | 53–158 | 3 |
-| Telegram private streaming divergence | `apps/core/src/channels/telegram/channel-delivery.ts` | 161–273 | 3 |
-| Partial-delivery domain error and metadata | `apps/core/src/domain/messages/partial-delivery.ts` | 30–113 | 3 |
-| Partial-delivery durable recovery handling | `apps/core/src/app/bootstrap/runtime-services.ts` | 627–640 | 3 |
-| Partial-delivery delivery status handling | `apps/core/src/jobs/delivery.ts` | 57–82 | 3 |
-| Group streaming overflow/truncation path | `apps/core/src/channels/telegram/channel-state.ts` | 317–395 | 3 |
-| Permission callback (file IPC, blocks) | `apps/core/src/runner/claude/permission-callback.ts` | 72–177 | 1, 2 |
-| Permission timeout default 5min | `apps/core/src/runner/claude/runtime-env.ts` | 27–35 | 1 |
-| Job timeout and lease budget setup | `apps/core/src/jobs/execution.ts` | 99–124 | 2 |
-| Job runner callback path | `apps/core/src/jobs/execution.ts` | 380–395 | 2 |
-| Mutate-handler decision options | `apps/core/src/jobs/ipc-scheduler-mutate-handlers.ts` | 58–80 | 1 |
-| `future_config_version` style flag | `apps/core/src/jobs/ipc-admin-handlers.ts` | 407–415 | 1 |
-| Active capability composition | `apps/core/src/runner/agent-capabilities.ts` | 68–95, 294–338 | 1 |
-| Shared tool execution policy service | `apps/core/src/shared/tool-execution-policy-service.ts` | 139–185, 226–339 | 1 |
-| Scheduler grant tool appends job policy | `apps/core/src/runner/mcp/tools/scheduler.ts` | 198–250 | 1 |
-| Effective job tool view | `apps/core/src/application/jobs/job-visibility-metadata.ts` | 139–147 | 1 |
-| Job policy update persistence | `apps/core/src/application/jobs/job-management-helpers.ts` | 343–345 | 1 |
-| Bash autonomous allowlist check | `apps/core/src/runner/claude/query-loop.ts` | 239–270 | 1 |
+| Concern                                              | Path                                                                | Line             | Phase |
+| ---------------------------------------------------- | ------------------------------------------------------------------- | ---------------- | ----- |
+| Credential broker error wrap                         | `apps/core/src/application/credentials/agent-credential-service.ts` | 97–126           | 3     |
+| Telegram streaming formatter                         | `apps/core/src/channels/telegram/channel-shared.ts`                 | 131–138          | 3     |
+| Telegram direct delivery chunking and partial errors | `apps/core/src/channels/telegram/channel-delivery.ts`               | 53–158           | 3     |
+| Telegram private streaming divergence                | `apps/core/src/channels/telegram/channel-delivery.ts`               | 161–273          | 3     |
+| Partial-delivery domain error and metadata           | `apps/core/src/domain/messages/partial-delivery.ts`                 | 30–113           | 3     |
+| Partial-delivery durable recovery handling           | `apps/core/src/app/bootstrap/runtime-services.ts`                   | 627–640          | 3     |
+| Partial-delivery delivery status handling            | `apps/core/src/jobs/delivery.ts`                                    | 57–82            | 3     |
+| Group streaming overflow/truncation path             | `apps/core/src/channels/telegram/channel-state.ts`                  | 317–395          | 3     |
+| Permission callback (file IPC, blocks)               | `apps/core/src/runner/claude/permission-callback.ts`                | 72–177           | 1, 2  |
+| Permission timeout default 5min                      | `apps/core/src/runner/claude/runtime-env.ts`                        | 27–35            | 1     |
+| Job timeout and lease budget setup                   | `apps/core/src/jobs/execution.ts`                                   | 99–124           | 2     |
+| Job runner callback path                             | `apps/core/src/jobs/execution.ts`                                   | 380–395          | 2     |
+| Mutate-handler decision options                      | `apps/core/src/jobs/ipc-scheduler-mutate-handlers.ts`               | 58–80            | 1     |
+| `future_config_version` style flag                   | `apps/core/src/jobs/ipc-admin-handlers.ts`                          | 407–415          | 1     |
+| Active capability composition                        | `apps/core/src/runner/agent-capabilities.ts`                        | 68–95, 294–338   | 1     |
+| Shared tool execution policy service                 | `apps/core/src/shared/tool-execution-policy-service.ts`             | 139–185, 226–339 | 1     |
+| Scheduler grant tool appends job policy              | `apps/core/src/runner/mcp/tools/scheduler.ts`                       | 198–250          | 1     |
+| Effective job tool view                              | `apps/core/src/application/jobs/job-visibility-metadata.ts`         | 139–147          | 1     |
+| Job policy update persistence                        | `apps/core/src/application/jobs/job-management-helpers.ts`          | 343–345          | 1     |
+| Bash autonomous allowlist check                      | `apps/core/src/runner/claude/query-loop.ts`                         | 239–270          | 1     |
 
 Removed or stale Phase 0 anchors:
 
@@ -283,13 +299,13 @@ Removed or stale Phase 0 anchors:
 
 ## 9. Risks and mitigations
 
-| Risk | Mitigation |
-| --- | --- |
-| Watchdog false-cancels long but legitimate work | Per-call-site budgets, not a global default; smoke tests for known-long calls. |
-| Capability rule format change breaks existing jobs | Phase 1 ships a one-shot migration that rewrites `jobs.target_json`. No dual-format read path. |
-| Egress firewall blocks something we forgot | Default-deny with a loud denial event; bootstrap allowlist seeded from current grants. |
-| Auto-promotion of memories surfaces wrong facts | Phase 5 limits auto-promote to factual + no-contradiction; preference memories still queue for review. |
-| Refactor stalls in a half-state | Phase 7 deletion budget is enforced; if missed, phase reopens. No "we'll come back to it." |
+| Risk                                               | Mitigation                                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Watchdog false-cancels long but legitimate work    | Per-call-site budgets, not a global default; smoke tests for known-long calls.                         |
+| Capability rule format change breaks existing jobs | Phase 1 ships a one-shot migration that rewrites `jobs.target_json`. No dual-format read path.         |
+| Egress firewall blocks something we forgot         | Default-deny with a loud denial event; bootstrap allowlist seeded from current grants.                 |
+| Auto-promotion of memories surfaces wrong facts    | Phase 5 limits auto-promote to factual + no-contradiction; preference memories still queue for review. |
+| Refactor stalls in a half-state                    | Phase 7 deletion budget is enforced; if missed, phase reopens. No "we'll come back to it."             |
 
 ## 10. Decision rules for the executing agent
 

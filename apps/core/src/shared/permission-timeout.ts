@@ -3,7 +3,7 @@ import path from 'path';
 import { getMyclawHome } from './myclaw-home.js';
 type PermissionTimeoutContext = 'interactive' | 'autonomous';
 const INTERACTIVE_MIN_MS = 10_000;
-const INTERACTIVE_DEFAULT_MS = 15_000;
+const INTERACTIVE_DEFAULT_MS = 300_000;
 const AUTONOMOUS_DEFAULT_MS = 0;
 const INTERACTIVE_KEYS = [
   'MYCLAW_INTERACTIVE_PERMISSION_TIMEOUT_MS',

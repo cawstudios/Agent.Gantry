@@ -7,11 +7,6 @@ import type { SkillArtifactStore } from '../../../domain/ports/skill-artifact-st
 import type { SkillCatalogRepository } from '../../../domain/ports/repositories.js';
 import { isSkillMaterializableLocally } from '../../../domain/skills/skills.js';
 
-export {
-  BROWSER_ACTION_MCP_SERVER_NAME,
-  createBrowserActionMcpServerConfig,
-} from '../../browser/action-mcp.js';
-
 export interface ClaudeSkillSourceItem {
   id: string;
   name: string;
@@ -104,10 +99,9 @@ Use this skill when a task needs a real browser session.
 
 MyClaw owns the persistent browser lifecycle and gives each agent conversation its own default profile:
 
-- Use \`mcp__myclaw__browser_status\` to inspect this conversation's browser profile.
-- Use \`mcp__myclaw__browser_launch\` to launch or reuse it only when the user task needs a real browser. The default launch is headed and cookie-preserving.
-- If the runtime \`mcp__agent_browser__*\` browser action tools are available, use them to navigate, click, type, wait, snapshot, or screenshot. MyClaw attaches them only when this conversation's browser is already running at agent startup.
-- If browser action tools are not available, launch the browser with \`mcp__myclaw__browser_launch\`, explain that browser actions will attach on the next run, and ask the user to continue.
+- Use MyClaw-owned browser tools such as \`mcp__myclaw__browser_status\`, \`mcp__myclaw__browser_launch\`, \`mcp__myclaw__browser_navigate\`, \`mcp__myclaw__browser_snapshot\`, \`mcp__myclaw__browser_click\`, \`mcp__myclaw__browser_type\`, \`mcp__myclaw__browser_wait_for\`, \`mcp__myclaw__browser_take_screenshot\`, \`mcp__myclaw__browser_console_messages\`, and \`mcp__myclaw__browser_close\`.
+- The Browser capability exposes projected MyClaw browser tools. Do not request Playwright, Puppeteer, agent_browser, or raw browser MCP tools.
+- MyClaw launches the backing browser lazily when an action needs it; \`browser_status\` is read-only and does not launch Chrome.
 - Do not install browser skills or edit user \`.claude/skills\` paths.
 
 If a site requires login, launch the headed browser and ask the user to complete authentication in that persistent profile. Do not scrape credentials or bypass normal site authentication.

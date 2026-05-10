@@ -70,18 +70,37 @@ export function registerServiceTools(server: McpServer): void {
         .describe('Declared skill dependencies for review'),
       reason: z.string().describe('Why this skill should be installed'),
     },
-    async (args) =>
-      submitCapabilityReviewTask('request_skill_install', 'Skill install', {
-        spec: args.spec,
-        provider: args.provider,
-        slug: args.slug,
-        version: args.version,
-        publisher: args.publisher,
-        verification: args.verification,
-        expectedFiles: args.expectedFiles ?? [],
-        dependencies: args.dependencies ?? [],
-        reason: args.reason,
-      }),
+    async (args) => {
+      const wrongLaneGuidance = browserWrongLaneRequestGuidance(
+        'request_skill_install',
+        {
+          spec: args.spec,
+          provider: args.provider,
+          slug: args.slug,
+          publisher: args.publisher,
+          verification: args.verification,
+          expectedFiles: args.expectedFiles ?? [],
+          dependencies: args.dependencies ?? [],
+          reason: args.reason,
+        },
+      );
+      if (wrongLaneGuidance) return wrongLaneGuidance;
+      return submitCapabilityReviewTask(
+        'request_skill_install',
+        'Skill install',
+        {
+          spec: args.spec,
+          provider: args.provider,
+          slug: args.slug,
+          version: args.version,
+          publisher: args.publisher,
+          verification: args.verification,
+          expectedFiles: args.expectedFiles ?? [],
+          dependencies: args.dependencies ?? [],
+          reason: args.reason,
+        },
+      );
+    },
   );
 
   server.tool(
@@ -150,7 +169,7 @@ export function registerServiceTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          'Single tool name to enable, such as Bash, Edit, Write, WebFetch, Agent, browser_open, scheduler_create_job, or an MCP tool name.',
+          'Single tool name to enable, such as Bash, Edit, Write, WebFetch, Agent, Browser, scheduler_create_job, or an MCP tool name.',
         ),
       toolNames: z
         .array(z.string())
@@ -263,6 +282,18 @@ export function registerServiceTools(server: McpServer): void {
       docsUrl: z.string().optional().describe('Optional documentation URL'),
     },
     async (args) => {
+      const wrongLaneGuidance = browserWrongLaneRequestGuidance(
+        'request_mcp_server',
+        {
+          name: args.name,
+          origin: args.origin,
+          requestedToolPatterns: args.requestedToolPatterns ?? [],
+          credentialNeeds: args.credentialNeeds ?? [],
+          reason: args.reason,
+          docsUrl: args.docsUrl,
+        },
+      );
+      if (wrongLaneGuidance) return wrongLaneGuidance;
       const taskId = makeIpcId('request-mcp');
       writeIpcFile(TASKS_DIR, {
         type: 'request_mcp_server',
@@ -546,6 +577,61 @@ The JID must be the current conversation. The folder name must be channel-prefix
       },
     );
   }
+}
+
+const BROWSER_WRONG_LANE_GUIDANCE = [
+  'Browser control is a built-in MyClaw tool capability, not a skill install or third-party MCP server request.',
+  'Do not request browser, agent-browser, agent_browser, Playwright, or Puppeteer through request_skill_install or request_mcp_server.',
+  'Use request_permission with permissionKind="tool", toolName="Browser", toolCategory="browser", temporaryOnly=false for persistent approval, then use the projected browser_* tools.',
+].join(' ');
+
+function browserWrongLaneRequestGuidance(
+  toolName: 'request_skill_install' | 'request_mcp_server',
+  payload: Record<string, unknown>,
+) {
+  if (!isBrowserWrongLanePayload(payload)) return null;
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: `${BROWSER_WRONG_LANE_GUIDANCE} No ${toolName} request was recorded.`,
+      },
+    ],
+    isError: true,
+  };
+}
+
+function isBrowserWrongLanePayload(payload: Record<string, unknown>): boolean {
+  return [
+    payload.name,
+    payload.slug,
+    payload.spec,
+    payload.origin,
+    payload.docsUrl,
+    payload.package,
+    payload.requestedToolPatterns,
+  ]
+    .flatMap(explicitWrongLaneText)
+    .some(isBrowserWrongLaneText);
+}
+
+function explicitWrongLaneText(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(explicitWrongLaneText);
+  return [];
+}
+
+function isBrowserWrongLaneText(value: string): boolean {
+  const normalized = value.toLowerCase();
+  const compact = normalized.replace(/[^a-z0-9]+/g, '');
+  if (
+    compact.includes('agentbrowser') ||
+    compact.includes('playwright') ||
+    compact.includes('puppeteer')
+  ) {
+    return true;
+  }
+  return normalized === 'browser' || normalized === 'browser-control';
 }
 
 type CapabilityReviewToolName =

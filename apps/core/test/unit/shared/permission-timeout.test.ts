@@ -4,7 +4,7 @@ import { getPermissionTimeoutMs } from '@core/shared/permission-timeout.js';
 
 describe('permission-timeout', () => {
   it('defaults interactive permission prompts to a human-scale timeout', () => {
-    expect(getPermissionTimeoutMs('interactive', {}, {})).toBe(15_000);
+    expect(getPermissionTimeoutMs('interactive', {}, {})).toBe(300_000);
   });
 
   it('defaults autonomous permission checks to no IPC wait', () => {

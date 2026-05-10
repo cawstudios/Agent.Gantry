@@ -34,10 +34,8 @@ import {
 import {
   ArtifactClaudeSkillSource,
   BundledClaudeSkillSource,
-  BROWSER_ACTION_MCP_SERVER_NAME,
   CompositeSkillSource,
   RuntimeInstalledAgentBrowserSkillSource,
-  createBrowserActionMcpServerConfig,
   type SkillSource,
 } from '../adapters/llm/anthropic-claude-agent/claude-skill-materializer.js';
 import { ensureGroupIpcLayout } from './agent-spawn-layout.js';
@@ -46,16 +44,14 @@ import {
   computeBrowserIpcAuthToken,
   createIpcAuthEnvelope,
   computeMemoryIpcAuthToken,
+  registerBrowserIpcAuthorization,
+  revokeBrowserIpcAuthorization,
   revokeIpcResponseSigningKey,
 } from './ipc-auth.js';
 import { getContinuationInputDir } from './continuation-input.js';
 import { getPromptProfileService } from './prompt-profile.js';
 import { executeRunnerProcess } from './agent-spawn-process.js';
-import {
-  applyAgentEgressNoProxyEnv,
-  mergeAgentEgressNoProxy,
-} from '../shared/no-proxy.js';
-import { createAgentBrowserRunWiring } from './agent-browser-run-wiring.js';
+import { applyAgentEgressNoProxyEnv } from '../shared/no-proxy.js';
 import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
 import {
   AgentInput,
@@ -63,6 +59,13 @@ import {
   RunAgentOptions,
 } from './agent-spawn-types.js';
 import { selectedMemoryIpcActionsFromToolRules } from '../shared/memory-ipc-actions.js';
+import {
+  BROWSER_ACTION_MCP_RULE_REJECTION_REASON,
+  BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON,
+  isBrowserActionMcpToolRule,
+  isCanonicalBrowserCapabilityRule,
+  isProjectedBrowserMcpToolRule,
+} from '../shared/agent-tool-references.js';
 
 type RunnerAgentInput = AgentInput & {
   modelCredentialEnv?: Record<string, string>;
@@ -142,6 +145,26 @@ export async function spawnAgent(
   const effectiveModelEntry =
     (resolvedModel?.ok ? resolvedModel.entry : undefined) ??
     findModelByRunnerModel(effectiveModel);
+  const rawBrowserActionRule = input.allowedTools?.find(
+    isBrowserActionMcpToolRule,
+  );
+  if (rawBrowserActionRule) {
+    return {
+      status: 'error',
+      result: null,
+      error: `Configured agent tool ${rawBrowserActionRule} is invalid. ${BROWSER_ACTION_MCP_RULE_REJECTION_REASON}`,
+    };
+  }
+  const projectedBrowserRule = input.allowedTools?.find(
+    isProjectedBrowserMcpToolRule,
+  );
+  if (projectedBrowserRule) {
+    return {
+      status: 'error',
+      result: null,
+      error: `Configured agent tool ${projectedBrowserRule} is invalid. ${BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON}`,
+    };
+  }
   const promptProfileService = getPromptProfileService();
   const agentIdentifier = group.folder.toLowerCase().replace(/_/g, '-');
 
@@ -165,8 +188,14 @@ export async function spawnAgent(
     conversationId: input.chatJid,
   });
 
+  const trustedAllowedTools = input.allowedTools;
+  const browserIpcEnabled = (trustedAllowedTools ?? []).some(
+    isCanonicalBrowserCapabilityRule,
+  );
+
   const runnerInput: RunnerAgentInput = {
     ...input,
+    allowedTools: trustedAllowedTools,
     modelCredentialEnv: undefined,
     browserProfileName,
     compiledSystemPrompt,
@@ -203,16 +232,6 @@ export async function spawnAgent(
       error: `Model ${effectiveModelEntry.displayName} is configured for ${effectiveModelEntry.providerLabel}, but AgentCredentialBroker returned OpenRouter-scoped Anthropic SDK credentials. Switch the session/job model to kimi or configure ${effectiveModelEntry.providerLabel} credentials for this model.`,
     };
   }
-  const browserWiring = createAgentBrowserRunWiring(
-    {
-      browserProfileName,
-    },
-    {
-      browserSkillSource: new RuntimeInstalledAgentBrowserSkillSource(),
-      actionMcpServerName: BROWSER_ACTION_MCP_SERVER_NAME,
-      createActionMcpServerConfig: createBrowserActionMcpServerConfig,
-    },
-  );
   const hostRunnerPath = path.join(
     hostRuntime.runnerDistDir,
     'claude',
@@ -235,8 +254,8 @@ export async function spawnAgent(
     packageRoot = resolvePackageRootFromSourceDir(path.dirname(hostRunnerPath));
     const skillSources: SkillSource[] = [
       new BundledClaudeSkillSource(packageRoot),
+      new RuntimeInstalledAgentBrowserSkillSource(),
     ];
-    skillSources.push(...browserWiring.skillSources);
     if (
       options?.skillRepository &&
       options.skillArtifactStore &&
@@ -281,7 +300,7 @@ export async function spawnAgent(
   const ipcInputDir = getContinuationInputDir(group.folder, input.threadId);
   const ipcAuth = createIpcAuthEnvelope(group.folder, input.threadId);
   const memoryIpcAllowedActions = selectedMemoryIpcActionsFromToolRules(
-    input.allowedTools ?? [],
+    trustedAllowedTools ?? [],
   );
   const modelCredentialEnv = projectClaudeModelCredentialEnv(
     hostCredentials.env,
@@ -303,11 +322,15 @@ export async function spawnAgent(
     MYCLAW_IPC_INPUT_DIR: ipcInputDir,
     MYCLAW_IPC_AUTH_TOKEN: ipcAuth.authToken,
     MYCLAW_CHAT_JID: input.chatJid,
-    MYCLAW_BROWSER_IPC_AUTH_TOKEN: computeBrowserIpcAuthToken(
-      group.folder,
-      input.chatJid,
-      input.threadId,
-    ),
+    ...(browserIpcEnabled
+      ? {
+          MYCLAW_BROWSER_IPC_AUTH_TOKEN: computeBrowserIpcAuthToken(
+            group.folder,
+            input.chatJid,
+            input.threadId,
+          ),
+        }
+      : {}),
     MYCLAW_MEMORY_IPC_AUTH_TOKEN: computeMemoryIpcAuthToken(group.folder, {
       chatJid: input.chatJid,
       userId: input.memoryUserId,
@@ -347,57 +370,7 @@ export async function spawnAgent(
   if (Object.keys(serializedModelCredentialEnv).length > 0) {
     runnerInput.modelCredentialEnv = serializedModelCredentialEnv;
   }
-  let browserRuntimeDetails: readonly string[] = [];
   let allMcpCapabilities: MaterializedMcpCapability[] = [];
-  try {
-    const browserProjection = await browserWiring.activate();
-    const existingNoProxy = [env.NO_PROXY, env.no_proxy] as const;
-    Object.assign(env, browserProjection.env);
-    const mergedNoProxy = mergeAgentEgressNoProxy(
-      ...existingNoProxy,
-      env.NO_PROXY,
-      env.no_proxy,
-    );
-    env.NO_PROXY = mergedNoProxy;
-    env.no_proxy = mergedNoProxy;
-    browserRuntimeDetails = browserProjection.runtimeDetails;
-    allMcpCapabilities = [
-      ...allMcpCapabilities,
-      ...browserProjection.mcpCapabilities,
-    ];
-    if (
-      input.isScheduledJob &&
-      jobAllowsBrowserActions(input.allowedTools) &&
-      !allMcpCapabilities.some(
-        (capability) => capability.name === BROWSER_ACTION_MCP_SERVER_NAME,
-      )
-    ) {
-      claudeRuntimeMaterialization.cleanup();
-      revokeIpcResponseSigningKey(
-        ipcAuth.responseKeyId,
-        group.folder,
-        input.threadId,
-      );
-      return {
-        status: 'error',
-        result: null,
-        error:
-          'Browser tools are on the autonomous job allowlist, but the conversation browser is unavailable. Launch the browser for this agent conversation before running the job.',
-      };
-    }
-  } catch (err) {
-    claudeRuntimeMaterialization.cleanup();
-    revokeIpcResponseSigningKey(
-      ipcAuth.responseKeyId,
-      group.folder,
-      input.threadId,
-    );
-    return {
-      status: 'error',
-      result: null,
-      error: `Browser wiring failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
   const mcpConfigPath =
     allMcpCapabilities.length > 0
       ? writeRunnerMcpConfigFile(hostRuntime.groupIpcDir, allMcpCapabilities)
@@ -430,7 +403,7 @@ export async function spawnAgent(
     `brokerApplied=${hostCredentials.brokerApplied}`,
     `mcpServers=${allMcpCapabilities.map((capability) => capability.name).join(',') || '(none)'}`,
     `runner=${hostRunnerPath}`,
-    ...browserRuntimeDetails,
+    `browserProfile=${browserProfileName}`,
   ];
 
   logger.debug(
@@ -459,6 +432,13 @@ export async function spawnAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   try {
+    if (browserIpcEnabled) {
+      registerBrowserIpcAuthorization({
+        workspaceKey: group.folder,
+        chatJid: input.chatJid,
+        threadId: input.threadId,
+      });
+    }
     const output = await executeRunnerProcess({
       group,
       input: runnerInput,
@@ -476,6 +456,13 @@ export async function spawnAgent(
     });
     return output;
   } finally {
+    if (browserIpcEnabled) {
+      revokeBrowserIpcAuthorization({
+        workspaceKey: group.folder,
+        chatJid: input.chatJid,
+        threadId: input.threadId,
+      });
+    }
     cleanupRunnerMcpConfigFile(mcpConfigPath);
     claudeRuntimeMaterialization.cleanup();
     revokeIpcResponseSigningKey(
@@ -484,16 +471,6 @@ export async function spawnAgent(
       input.threadId,
     );
   }
-}
-
-function jobAllowsBrowserActions(
-  allowedTools: readonly string[] | undefined,
-): boolean {
-  return (allowedTools ?? []).some(
-    (tool) =>
-      tool === `mcp__${BROWSER_ACTION_MCP_SERVER_NAME}__*` ||
-      tool.startsWith(`mcp__${BROWSER_ACTION_MCP_SERVER_NAME}__`),
-  );
 }
 
 function isOpenRouterBaseUrl(value?: string): boolean {

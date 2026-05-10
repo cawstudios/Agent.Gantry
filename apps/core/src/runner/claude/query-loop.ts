@@ -7,10 +7,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  composeAgentCapabilities,
-  type McpServerConfig,
-} from '../agent-capabilities.js';
+import { composeAgentCapabilities } from '../agent-capabilities.js';
 import { denyMemoryBoundaryToolUse } from '../memory-boundary.js';
 import { denyProtectedCapabilityToolUse } from './protected-capability-guard.js';
 import { MessageStream } from './message-stream.js';
@@ -48,6 +45,7 @@ import {
   ToolExecutionClassifier,
   ToolExecutionPolicyService,
 } from '../../shared/tool-execution-policy-service.js';
+import { readExternalMcpServers } from './mcp-server-validation.js';
 
 const PROTECTED_FILESYSTEM_PATHS_ENV = 'MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON';
 
@@ -132,6 +130,8 @@ export async function runQuery(
     persona: agentInput.persona,
     browserProfileName: agentInput.browserProfileName,
     configuredAllowedTools: agentInput.allowedTools,
+    selectedSkillIds: agentInput.selectedSkillIds,
+    selectedMcpServerIds: agentInput.selectedMcpServerIds,
     ipcDir: process.env.MYCLAW_IPC_DIR,
     ipcAuthToken: process.env.MYCLAW_IPC_AUTH_TOKEN,
     browserIpcAuthToken: process.env.MYCLAW_BROWSER_IPC_AUTH_TOKEN,
@@ -432,11 +432,13 @@ export async function runQuery(
         fallbackModel: configuredModel,
       });
       const contextUsage = await readContextUsage(sdkQuery);
+      const continuedByFollowup = steeringGate.pendingCount() > 0;
       writeOutput({
         status: 'success',
         result:
           textResult && !sawPartialTextSinceLastResult ? textResult : null,
         newSessionId,
+        ...(continuedByFollowup ? { continuedByFollowup: true } : {}),
         ...(contextUsage ? { contextUsage } : {}),
         ...(usage
           ? {
@@ -567,37 +569,6 @@ function assertRequiredMcpServerReady(message: unknown): void {
   if (status !== 'connected') {
     throw new Error(`Required MyClaw MCP server is not ready: ${status}`);
   }
-}
-
-function readExternalMcpServers(): Record<string, McpServerConfig> {
-  const configPath = process.env.MYCLAW_MCP_CONFIG_FILE?.trim();
-  if (configPath) {
-    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<
-      string,
-      McpServerConfig
-    >;
-    fs.rmSync(configPath, { force: true });
-    return validateExternalMcpServers(parsed);
-  }
-  const raw = process.env.MYCLAW_MCP_SERVERS_JSON?.trim();
-  if (!raw) return {};
-  const parsed = JSON.parse(raw) as Record<string, McpServerConfig>;
-  return validateExternalMcpServers(parsed);
-}
-
-function validateExternalMcpServers(
-  parsed: Record<string, McpServerConfig>,
-): Record<string, McpServerConfig> {
-  const servers: Record<string, McpServerConfig> = {};
-  for (const [name, config] of Object.entries(parsed)) {
-    if (name === 'myclaw') {
-      throw new Error(
-        'Configured MCP servers cannot override the built-in myclaw server',
-      );
-    }
-    servers[name] = config;
-  }
-  return servers;
 }
 
 async function readContextUsage(queryHandle: unknown) {

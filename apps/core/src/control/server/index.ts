@@ -156,6 +156,7 @@ export function startControlServer(input: {
         ops: getRuntimeRepositories(),
         repositories: getRuntimeStorage().repositories,
         appId,
+        reloadRuntimeState: () => input.app.loadState(),
       }),
   };
 

@@ -664,6 +664,33 @@ describe('skill registry integration flow', () => {
     });
   });
 
+  it('rejects temporary Browser request_permission activation before review', async () => {
+    const { processTaskIpc } = await import('@core/jobs/ipc-handler.js');
+    const { deps, requestPermissionApproval, sendMessage } =
+      createCapabilityReviewDeps();
+
+    await processTaskIpc(
+      {
+        type: 'request_permission',
+        taskId: 'request-permission-temporary-browser-test',
+        targetJid: 'chat-origin',
+        chatJid: 'chat-origin',
+        authThreadId: 'thread-origin',
+        payload: {
+          permissionKind: 'tool',
+          toolName: 'Browser',
+          temporaryOnly: true,
+          reason: 'Use browser action tools in this run.',
+        },
+      },
+      'agent:one',
+      deps as any,
+    );
+
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('persists request_permission persistent approvals as configured allowed tool rules', async () => {
     const { processTaskIpc } = await import('@core/jobs/ipc-handler.js');
     const {
@@ -742,6 +769,81 @@ describe('skill registry integration flow', () => {
         expect.stringContaining(
           'Persistent permission rule enabled for this run and future runs',
         ),
+        { threadId: 'thread-origin' },
+      );
+    });
+  });
+
+  it('persists Browser request_permission approval as the selected Browser catalog tool', async () => {
+    const { processTaskIpc } = await import('@core/jobs/ipc-handler.js');
+    const {
+      deps,
+      sendMessage,
+      toolRepository,
+      mirrorAgentToolRulesToSettings,
+    } = createCapabilityReviewDeps({
+      decision: {
+        approved: true,
+        mode: 'allow_persistent_rule',
+        decidedBy: 'Approver',
+        reason: 'persistent Browser allowed',
+        decisionClassification: 'user_permanent',
+        updatedPermissions: [
+          {
+            type: 'addRules',
+            behavior: 'allow',
+            destination: 'session',
+            rules: [{ toolName: 'Browser' }],
+          },
+        ],
+      },
+    });
+    toolRepository.listTools.mockResolvedValueOnce([
+      {
+        id: 'tool:Browser',
+        appId: 'default',
+        name: 'Browser',
+        status: 'active',
+        selectable: true,
+      },
+    ]);
+
+    await processTaskIpc(
+      {
+        type: 'request_permission',
+        taskId: 'request-permission-browser-persistent-test',
+        targetJid: 'chat-origin',
+        chatJid: 'chat-origin',
+        authThreadId: 'thread-origin',
+        payload: {
+          permissionKind: 'tool',
+          toolName: 'Browser',
+          temporaryOnly: false,
+          reason: 'Use persistent browser action tools on future runs.',
+        },
+      },
+      'agent:one',
+      deps as any,
+    );
+
+    await vi.waitFor(() => {
+      expect(toolRepository.saveAgentToolBinding).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appId: 'default',
+          agentId: 'agent:one',
+          toolId: 'tool:Browser',
+          status: 'active',
+        }),
+      );
+    });
+    expect(toolRepository.saveTool).not.toHaveBeenCalled();
+    expect(mirrorAgentToolRulesToSettings).toHaveBeenCalledWith('agent:one', [
+      'Browser',
+    ]);
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        'chat-origin',
+        expect.stringContaining('Persistent permission rule enabled'),
         { threadId: 'thread-origin' },
       );
     });

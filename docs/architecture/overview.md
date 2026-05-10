@@ -219,7 +219,7 @@ agent-visible tool surface (`apps/core/src/runner/agent-capabilities.ts:72`):
 ```text
 send_message            ask_user_question
 memory_search           memory_save           procedure_save
-browser_launch          browser_status
+browser
 mcp_list_tools          mcp_call_tool
 request_skill_install   request_skill_proposal
 request_skill_dependency_install

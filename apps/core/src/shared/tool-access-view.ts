@@ -4,11 +4,13 @@ import {
   adminMcpToolIdForFullName,
   type AdminMcpToolName,
 } from './admin-mcp-tools.js';
+import { isCanonicalBrowserCapabilityRule } from './agent-tool-references.js';
 
 export interface RequestableAdminToolAccess {
   tool: string;
   toolId: string;
   requestPermission: string;
+  note?: string;
 }
 
 export interface AgentToolAccessView {
@@ -35,6 +37,12 @@ export const PERMISSION_GATED_NATIVE_TOOLS = [
   'NotebookEdit',
 ] as const;
 
+export const BROWSER_TOOL_NAME = 'Browser';
+export const BROWSER_REQUEST_PERMISSION_ARGS =
+  'permissionKind=tool toolName=Browser toolCategory=browser temporaryOnly=false reason="<why this agent needs Browser>"';
+export const BROWSER_REQUESTABLE_NOTE =
+  'Browser approval exposes MyClaw-owned browser_* tools. Status is read-only; action calls launch the host-derived profile lazily.';
+
 export function buildRequestableAdminToolAccess(
   enabledAdminTools: ReadonlySet<AdminMcpToolName | string>,
 ): RequestableAdminToolAccess[] {
@@ -48,6 +56,24 @@ export function buildRequestableAdminToolAccess(
       requestPermission: `permissionKind=tool toolName=${fullName} temporaryOnly=false reason="<why this agent needs ${toolName}>"`,
     };
   });
+}
+
+export function buildRequestableBrowserToolAccess(input: {
+  configuredTools?: readonly string[];
+  externalMcpAllowedTools?: readonly string[];
+}): RequestableAdminToolAccess[] {
+  void input.externalMcpAllowedTools;
+  if (isBrowserCapabilitySelected(input.configuredTools ?? [])) {
+    return [];
+  }
+  return [
+    {
+      tool: BROWSER_TOOL_NAME,
+      toolId: `tool:${BROWSER_TOOL_NAME}`,
+      requestPermission: BROWSER_REQUEST_PERMISSION_ARGS,
+      note: BROWSER_REQUESTABLE_NOTE,
+    },
+  ];
 }
 
 export function buildAgentToolAccessView(input: {
@@ -140,4 +166,10 @@ function uniqueRequestableAdminTools(
     out.set(value.tool, value);
   }
   return [...out.values()];
+}
+
+function isBrowserCapabilitySelected(
+  configuredTools: readonly string[],
+): boolean {
+  return configuredTools.some(isCanonicalBrowserCapabilityRule);
 }

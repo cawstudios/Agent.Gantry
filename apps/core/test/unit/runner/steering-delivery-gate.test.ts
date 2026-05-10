@@ -9,9 +9,11 @@ describe('SteeringDeliveryGate', () => {
 
     expect(gate.accept('first')).toBe('buffered');
     expect(gate.accept('second')).toBe('buffered');
+    expect(gate.pendingCount()).toBe(2);
     expect(deliver).not.toHaveBeenCalled();
 
     expect(gate.markTurnBoundary()).toBe(2);
+    expect(gate.pendingCount()).toBe(0);
     expect(deliver.mock.calls.map(([text]) => text)).toEqual([
       'first',
       'second',

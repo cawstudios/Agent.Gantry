@@ -248,20 +248,40 @@ export async function runMessagePollingTick(
             .catch((err: unknown) =>
               logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
             );
+          logger.info(
+            {
+              chatJid,
+              queueJid,
+              threadId: progressThreadId,
+              replaceOnly: false,
+            },
+            'Progress lifecycle follow-up receipt send attempt',
+          );
           const progressPromise = deps.sendProgressUpdate(
             chatJid,
-            'Got your follow-up.',
+            'Working on it...',
             {
               ...(progressThreadId ? { threadId: progressThreadId } : {}),
-              replaceOnly: true,
             },
           );
-          progressPromise.catch((err: unknown) =>
-            logger.warn(
-              { chatJid, err },
-              'Failed to send follow-up progress update',
-            ),
-          );
+          progressPromise
+            .then(() =>
+              logger.info(
+                {
+                  chatJid,
+                  queueJid,
+                  threadId: progressThreadId,
+                  replaceOnly: false,
+                },
+                'Progress lifecycle follow-up receipt send complete',
+              ),
+            )
+            .catch((err: unknown) =>
+              logger.warn(
+                { chatJid, err },
+                'Failed to send follow-up progress update',
+              ),
+            );
         }
 
         if (!pipedAny || shouldEnqueueMessageCheck) {

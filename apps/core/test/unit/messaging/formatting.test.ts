@@ -14,7 +14,7 @@ import {
   stripInternalTags,
 } from '@core/messaging/router.js';
 import { Channel, NewMessage } from '@core/domain/types.js';
-import { parseTextStyles } from '@core/text-styles.js';
+import { parseTextStyles } from '@core/messaging/text-styles.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {

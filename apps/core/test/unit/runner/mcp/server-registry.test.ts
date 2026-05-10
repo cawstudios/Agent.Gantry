@@ -46,13 +46,13 @@ describe('MCP server registry handler parity', () => {
     expect(() =>
       assertRegisteredMcpToolHandlers({
         enabledTools: new Set([
-          'browser_status',
+          'browser',
           'scheduler_list_models',
           'scheduler_list_notification_targets',
         ]),
         registeredHandlers: new Set(['scheduler_list_models']),
       }),
-    ).toThrow(/browser_status.*scheduler_list_notification_targets/);
+    ).toThrow(/browser.*scheduler_list_notification_targets/);
   });
 
   it('allows boot when every enabled MCP tool has a handler', async () => {

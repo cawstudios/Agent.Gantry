@@ -357,6 +357,7 @@ export interface ProgressUpdateOptions {
   threadId?: string;
   done?: boolean;
   replaceOnly?: boolean;
+  generation?: number;
 }
 
 export interface MessageSendOptions {

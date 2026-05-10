@@ -55,6 +55,7 @@ export interface ActiveProgressState {
   threadId?: string;
   messageTs?: string;
   lastText: string;
+  generation?: number;
 }
 
 export interface PendingPermissionPrompt {

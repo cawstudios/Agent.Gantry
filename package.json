@@ -28,12 +28,9 @@
     "myclaw": "dist/cli/index.js"
   },
   "files": [
-    "index.js",
     "dist/",
     "packages/contracts/dist/",
     "packages/contracts/package.json",
-    "packages/sdk/dist/",
-    "packages/sdk/package.json",
     "docker-compose.yml",
     "ops/postgres/init/",
     "!**/*.map",
@@ -92,6 +89,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
+    "@myclaw/sdk": "file:packages/sdk",
     "@types/node": "^24.12.2",
     "@types/pg": "^8.15.5",
     "@vitest/coverage-v8": "^4.1.4",

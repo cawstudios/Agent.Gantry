@@ -3,7 +3,10 @@ import {
   MYCLAW_HOME,
   getCredentialBrokerRuntimeConfig,
 } from '../../config/index.js';
-import { mirrorAgentToolRulesToRuntimeSettings } from '../../config/settings/runtime-settings.js';
+import {
+  createAgentToolRuleSettingsMirror,
+  type AgentToolRuleSettingsRepositories,
+} from '../../config/settings/agent-tool-rule-settings-mirror.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
@@ -12,7 +15,7 @@ import { logger } from '../../infrastructure/logging/logger.js';
 import type { NewMessage } from '../../domain/types.js';
 import type { HostnameLookup } from '../../domain/network/public-address-policy.js';
 import { writeGroupsSnapshot } from '../../runtime/agent-spawn.js';
-import { startIpcWatcher } from '../../runtime/ipc.js';
+import { startIpcWatcher, type IpcDeps } from '../../runtime/ipc.js';
 import {
   recoverPendingMessages,
   startMessagePollingLoop,
@@ -63,7 +66,7 @@ type RuntimeBootstrapRepository = RuntimeChatMetadataRepository &
   RuntimeRouterStateRepository &
   RuntimeAgentSessionRepository &
   RuntimeConversationRouteRepository;
-interface RuntimeServicesDeps {
+interface Deps {
   startSchedulerLoop: typeof startSchedulerLoop;
   startIpcWatcher: typeof startIpcWatcher;
   writeGroupsSnapshot: typeof writeGroupsSnapshot;
@@ -74,18 +77,21 @@ interface RuntimeServicesDeps {
   mcpHostnameLookup?: HostnameLookup;
   collectSessionMemory: SessionMemoryCollector;
   getToolRepository: () => ToolCatalogRepository;
+  settingsRepositories?: AgentToolRuleSettingsRepositories;
   getOutboundDeliveryRepository?: () => OutboundDeliveryRepository | undefined;
   startOutboundDeliveryRecoveryLoop: typeof startOutboundDeliveryRecoveryLoop;
+  callBrowserTool: IpcDeps['callBrowserTool'];
+  closeBrowserToolBackends: IpcDeps['closeBrowserToolBackends'];
   exit: (code: number) => never;
 }
 type RuntimeServicesDefaults = Omit<
-  RuntimeServicesDeps,
+  Deps,
   'opsRepository' | 'getToolRepository'
 >;
-export interface RuntimeServicesOptions {
+export type RuntimeServicesOptions = {
   app: RuntimeApp;
   channelWiring: ChannelWiring;
-}
+};
 function makeDefaultDeps(): RuntimeServicesDefaults {
   return {
     startSchedulerLoop,
@@ -96,14 +102,13 @@ function makeDefaultDeps(): RuntimeServicesDefaults {
     logger,
     collectSessionMemory: collectRuntimeSessionMemory,
     startOutboundDeliveryRecoveryLoop,
+    callBrowserTool: undefined,
+    closeBrowserToolBackends: undefined,
     exit: (code: number) => process.exit(code),
   };
 }
 
-function createGroupSnapshotSync(
-  app: RuntimeApp,
-  deps: RuntimeServicesDeps,
-): () => void {
+function createGroupSnapshotSync(app: RuntimeApp, deps: Deps): () => void {
   let syncInFlight: Promise<void> | undefined;
   let syncDirty = false;
 
@@ -146,9 +151,9 @@ function createGroupSnapshotSync(
 export async function startRuntimeServices(
   options: RuntimeServicesOptions,
   deps: Partial<RuntimeServicesDefaults> &
-    Pick<RuntimeServicesDeps, 'opsRepository' | 'getToolRepository'>,
+    Pick<Deps, 'opsRepository' | 'getToolRepository'>,
 ): Promise<void> {
-  const resolved: RuntimeServicesDeps = {
+  const resolved: Deps = {
     ...makeDefaultDeps(),
     ...deps,
   };
@@ -195,23 +200,23 @@ export async function startRuntimeServices(
       }),
     conversationRoutes: () => app.getConversationRoutes(),
     registerGroup: app.registerGroup,
-    syncGroups: async (force: boolean) => {
-      await channelWiring.syncGroups(force);
-    },
+    syncGroups: (force: boolean) => channelWiring.syncGroups(force),
     getAvailableGroups: app.getAvailableGroups,
     writeGroupsSnapshot: (folder, availableGroups, registeredJids) =>
       resolved.writeGroupsSnapshot(folder, availableGroups, registeredJids),
     onSchedulerChanged,
     opsRepository: resolved.opsRepository,
     getToolRepository: resolved.getToolRepository,
-    mirrorAgentToolRulesToSettings: (sourceAgentFolder, rules) =>
-      mirrorAgentToolRulesToRuntimeSettings({
-        runtimeHome: MYCLAW_HOME,
-        agentFolder: sourceAgentFolder,
-        rules,
-      }),
+    mirrorAgentToolRulesToSettings: createAgentToolRuleSettingsMirror({
+      opsRepository: resolved.opsRepository,
+      repositories: resolved.settingsRepositories,
+      reloadRuntimeState: () => app.loadState(),
+    }),
+    reloadRuntimeState: () => app.loadState(),
     getCredentialBroker: app.getCredentialBroker,
     getCredentialBrokerProfile: () => getCredentialBrokerRuntimeConfig().mode,
+    callBrowserTool: resolved.callBrowserTool,
+    closeBrowserToolBackends: resolved.closeBrowserToolBackends,
     requestPermissionApproval: channelWiring.requestPermissionApproval,
     requestUserAnswer: channelWiring.requestUserAnswer,
     mcpHostnameLookup: resolved.mcpHostnameLookup,
@@ -521,10 +526,10 @@ export async function startRuntimeServices(
           } as const;
         }
         const resolvedProviderIdForComparison =
-          normalizeRecoveryDestinationProviderIdForComparison({
-            providerId: String(destination.providerId),
-            destinationJid,
-          });
+          destination.providerId === 'control-http' &&
+          destinationJid.startsWith('app:')
+            ? 'app'
+            : String(destination.providerId);
         if (
           destinationDescriptor.providerId !== resolvedProviderIdForComparison
         ) {
@@ -683,17 +688,4 @@ export async function startRuntimeServices(
       resolved.logger.fatal({ err }, 'Message loop crashed unexpectedly');
       resolved.exit(1);
     });
-}
-
-function normalizeRecoveryDestinationProviderIdForComparison(input: {
-  providerId: string;
-  destinationJid: string;
-}): string {
-  if (
-    input.providerId === 'control-http' &&
-    input.destinationJid.startsWith('app:')
-  ) {
-    return 'app';
-  }
-  return input.providerId;
 }

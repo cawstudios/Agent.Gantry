@@ -53,6 +53,7 @@ export interface ParsedBrowserIpcRequest {
   chatJid: string;
   threadId?: string;
   responseKeyId?: string;
+  timeoutMs?: number;
 }
 
 const TOOL_INPUT_MAX_DEPTH = 2;
@@ -439,6 +440,12 @@ export function parseBrowserIpcRequest(
   if (!isPlainObject(payload)) {
     throw new Error('Invalid browser IPC payload body');
   }
+  const context = isPlainObject(raw.context) ? raw.context : {};
+  const rawTimeoutMs = context.timeoutMs;
+  const timeoutMs =
+    typeof rawTimeoutMs === 'number' && Number.isFinite(rawTimeoutMs)
+      ? Math.max(1_000, Math.min(120_000, Math.trunc(rawTimeoutMs)))
+      : undefined;
   return {
     requestId,
     action: action as BrowserIpcAction,
@@ -446,5 +453,6 @@ export function parseBrowserIpcRequest(
     chatJid,
     ...(threadId ? { threadId } : {}),
     ...(responseKeyId ? { responseKeyId } : {}),
+    ...(timeoutMs ? { timeoutMs } : {}),
   };
 }

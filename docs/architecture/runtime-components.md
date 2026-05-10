@@ -90,7 +90,7 @@ sequenceDiagram
 5. Polling and recovery: the message loop polls for new messages during normal operation and calls recovery on startup so pending threads are not lost after a restart.
 6. Queueing: `GroupQueue` deduplicates checks per group/thread, limits concurrent containers, retries failed processing, and routes follow-up messages into an active child run when possible.
 7. Agent execution: the group processor resolves or creates the canonical session, hydrates scoped durable memory, then starts a live streaming child runner. Follow-up messages are piped into that runner until it is stopped or idles out.
-8. Delivery visibility today: final replies are user-visible through durable required sends. Progress updates, interaction receipts, and streaming chunks remain non-visible until durable ordered progress/chunk delivery exists; the app channel still records durable runtime events for `wait()`, `stream()`, webhooks, and replay.
+8. Delivery visibility today: final replies are user-visible through durable required sends. Channel runtimes may surface bounded visible progress and working updates, plus final-only provider-visible streaming. Raw partial provider deltas remain internal or sanitized before visibility, and final streaming or fallback delivery uses bounded, redacted, user-visible snapshots; the app channel still records durable runtime events for `wait()`, `stream()`, webhooks, and replay.
 
 ## Agent Runtime Deep Dive
 

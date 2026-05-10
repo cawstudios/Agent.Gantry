@@ -26,6 +26,8 @@ export interface AgentInput {
   persona?: AgentPersona;
   browserProfileName?: string;
   allowedTools?: string[];
+  selectedSkillIds?: string[];
+  selectedMcpServerIds?: string[];
   isScheduledJob?: boolean;
   jobId?: string;
   jobModelUseKind?: 'oneTimeJob' | 'recurringJob';
@@ -41,6 +43,7 @@ export interface AgentOutput {
   newSessionId?: string;
   compactBoundary?: boolean;
   interactionBoundary?: 'user_interaction';
+  continuedByFollowup?: boolean;
   usage?: NormalizedModelUsage;
   usageEventId?: string;
   contextUsage?: RuntimeContextUsageSnapshot;

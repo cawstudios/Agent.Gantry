@@ -3,6 +3,7 @@ import {
   selectedMemoryIpcActionsFromToolRules,
   type MyClawMemoryIpcAction,
 } from '../shared/memory-ipc-actions.js';
+import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-references.js';
 
 export const BASELINE_MYCLAW_MCP_TOOL_NAMES = [
   'send_message',
@@ -11,8 +12,6 @@ export const BASELINE_MYCLAW_MCP_TOOL_NAMES = [
   'memory_save',
   'continuity_summary',
   'procedure_save',
-  'browser_launch',
-  'browser_status',
   'request_skill_install',
   'request_skill_proposal',
   'request_skill_dependency_install',
@@ -24,8 +23,6 @@ export const BASELINE_MYCLAW_MCP_TOOL_NAMES = [
 ] as const;
 
 export const OPTIONAL_MYCLAW_MCP_TOOL_NAMES = [
-  'browser_profile_list',
-  'browser_close',
   'scheduler_list_models',
   'scheduler_upsert_job',
   'scheduler_get_job',
@@ -53,6 +50,32 @@ export const REVIEWED_MYCLAW_MCP_TOOL_NAMES = [
   'memory_review_decision',
 ] as const;
 
+export const GATED_MYCLAW_MCP_TOOL_NAMES = [
+  'browser_status',
+  'browser_launch',
+  'browser_close',
+  'browser_click',
+  'browser_console_messages',
+  'browser_drag',
+  'browser_drop',
+  'browser_evaluate',
+  'browser_file_upload',
+  'browser_fill_form',
+  'browser_handle_dialog',
+  'browser_hover',
+  'browser_navigate',
+  'browser_navigate_back',
+  'browser_network_requests',
+  'browser_press_key',
+  'browser_resize',
+  'browser_select_option',
+  'browser_snapshot',
+  'browser_take_screenshot',
+  'browser_tabs',
+  'browser_type',
+  'browser_wait_for',
+] as const;
+
 export const DEFAULT_MYCLAW_MCP_TOOL_NAMES = [
   ...BASELINE_MYCLAW_MCP_TOOL_NAMES,
   ...OPTIONAL_MYCLAW_MCP_TOOL_NAMES,
@@ -60,6 +83,7 @@ export const DEFAULT_MYCLAW_MCP_TOOL_NAMES = [
 
 export const ALL_MYCLAW_MCP_TOOL_NAMES = [
   ...DEFAULT_MYCLAW_MCP_TOOL_NAMES,
+  ...GATED_MYCLAW_MCP_TOOL_NAMES,
   ...REVIEWED_MYCLAW_MCP_TOOL_NAMES,
   ...ADMIN_MCP_TOOL_NAMES,
 ] as const;
@@ -81,11 +105,23 @@ export function selectedMyClawMcpToolNames(
   configuredTools: readonly string[],
 ): string[] {
   const names = new Set<string>(DEFAULT_MYCLAW_MCP_TOOL_NAMES);
+  if (isBrowserSelected(configuredTools)) {
+    for (const toolName of GATED_MYCLAW_MCP_TOOL_NAMES) names.add(toolName);
+  }
   for (const configuredTool of configuredTools) {
     const name = myclawMcpToolNameFromFullName(configuredTool);
-    if (name) names.add(name);
+    if (
+      name &&
+      !(GATED_MYCLAW_MCP_TOOL_NAMES as readonly string[]).includes(name)
+    ) {
+      names.add(name);
+    }
   }
   return [...names].sort();
+}
+
+function isBrowserSelected(configuredTools: readonly string[]): boolean {
+  return configuredTools.some(isCanonicalBrowserCapabilityRule);
 }
 
 export function selectedMyClawMcpFullToolNames(

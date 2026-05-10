@@ -18,3 +18,34 @@ export async function resolveTurnAllowedTools(
     agentId: turnContext.agentId,
   });
 }
+
+export async function resolveTurnSelectedSkillIds(
+  deps: Pick<GroupProcessingDeps, 'getSkillRepository'>,
+  turnContext?: { appId: string; agentId: string } | null,
+): Promise<string[] | undefined> {
+  const repository = deps.getSkillRepository?.();
+  if (!turnContext || !repository) return undefined;
+  const bindings = await repository.listAgentSkillBindings({
+    appId: turnContext.appId as never,
+    agentId: turnContext.agentId as never,
+  });
+  return bindings
+    .filter((binding) => binding.status === 'active')
+    .map((binding) => String(binding.skillId));
+}
+
+export async function resolveTurnSelectedMcpServerIds(
+  deps: Pick<GroupProcessingDeps, 'getMcpServerRepository'>,
+  turnContext?: { appId: string; agentId: string } | null,
+): Promise<string[] | undefined> {
+  const repository = deps.getMcpServerRepository?.();
+  if (!turnContext || !repository) return undefined;
+  const bindings = await repository.listAgentBindings({
+    appId: turnContext.appId as never,
+    agentId: turnContext.agentId as never,
+    limit: 500,
+  });
+  return bindings
+    .filter((binding) => binding.status === 'active')
+    .map((binding) => String(binding.serverId));
+}

@@ -39,6 +39,12 @@ import {
   adminCapabilityRequiredMessage,
   sourceAgentHasAdminToolCapability,
 } from './ipc-admin-authorization.js';
+import {
+  BROWSER_ACTION_MCP_RULE_REJECTION_REASON,
+  BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON,
+  isBrowserActionMcpToolRule,
+  isProjectedBrowserMcpToolRule,
+} from '../shared/agent-tool-references.js';
 
 function createContextTaskResponder(context: TaskContext) {
   return createTaskResponder(
@@ -392,6 +398,9 @@ function parseRequestOnlyCapabilityReview(toolName: RequestOnlyCapabilityToolNam
   if (spec.any && !spec.any.some((field) => payloadHasValue(payload[field]))) missing.push(spec.any.join(' or '));
   if (!reason) missing.push('reason');
   if (missing.length > 0) return { ok: false, error: `Missing required fields: ${missing.join(', ')}.` };
+  if (toolName === 'request_permission' && isTemporaryBrowserPermissionRequest(payload)) return { ok: false, error: 'Browser cannot be approved as temporary current-run access through request_permission. Request persistent Browser access with temporaryOnly=false, then use the projected browser_* tools.' };
+  if (toolName === 'request_permission' && isBrowserPermissionRequest(payload, isBrowserActionMcpToolRule)) return { ok: false, error: BROWSER_ACTION_MCP_RULE_REJECTION_REASON };
+  if (toolName === 'request_permission' && isBrowserPermissionRequest(payload, isProjectedBrowserMcpToolRule)) return { ok: false, error: BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON };
   const toolInput = sanitizeCapabilityPayload(payload);
   if (toolName === 'request_permission') {
     const toolNames = sanitizedStringList([
@@ -462,6 +471,19 @@ function sanitizedStringList(values: unknown[]): string[] {
         .filter((item): item is string => Boolean(item)),
     ),
   ];
+}
+
+// prettier-ignore
+function isTemporaryBrowserPermissionRequest(payload: Record<string, unknown>): boolean {
+  if (payload.temporaryOnly !== true) return false;
+  if (payload.permissionKind && payload.permissionKind !== 'tool') return false;
+  return sanitizedStringList([payload.toolName, ...(Array.isArray(payload.toolNames) ? payload.toolNames : [])]).some((toolName) => toolName === 'Browser');
+}
+
+// prettier-ignore
+function isBrowserPermissionRequest(payload: Record<string, unknown>, predicate: (toolName: string) => boolean): boolean {
+  if (payload.permissionKind && payload.permissionKind !== 'tool') return false;
+  return sanitizedStringList([payload.toolName, ...(Array.isArray(payload.toolNames) ? payload.toolNames : [])]).some(predicate);
 }
 
 // prettier-ignore

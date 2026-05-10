@@ -2050,6 +2050,25 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.editMessageText).not.toHaveBeenCalled();
     });
 
+    it('refreshes a stale unchanged initial progress handle with a new message', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendProgressUpdate('tg:100200300', 'Working on it...', {
+        generation: 1,
+      });
+      currentBot().api.sendMessage.mockClear();
+      currentBot().api.editMessageText.mockClear();
+
+      await channel.sendProgressUpdate('tg:100200300', 'Working on it...', {
+        generation: 1,
+      });
+
+      expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(1);
+      expect(currentBot().api.editMessageText).not.toHaveBeenCalled();
+    });
+
     it('does not create a progress message for replace-only updates', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
@@ -2090,6 +2109,41 @@ describe('TelegramChannel', () => {
 
       expect(currentBot().api.sendMessage).not.toHaveBeenCalled();
       expect(currentBot().api.editMessageText).not.toHaveBeenCalled();
+    });
+
+    it('starts a fresh progress handle when generation changes under the same chat key', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendProgressUpdate('tg:100200300', 'Working on it...', {
+        generation: 1,
+      });
+      await channel.sendProgressUpdate('tg:100200300', 'Working on it...', {
+        generation: 2,
+      });
+
+      expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(2);
+      expect(currentBot().api.editMessageText).not.toHaveBeenCalled();
+
+      await channel.sendProgressUpdate('tg:100200300', 'Done in old turn.', {
+        done: true,
+        replaceOnly: true,
+        generation: 1,
+      });
+      expect(currentBot().api.editMessageText).not.toHaveBeenCalled();
+
+      await channel.sendProgressUpdate('tg:100200300', 'Done in new turn.', {
+        done: true,
+        replaceOnly: true,
+        generation: 3,
+      });
+      expect(currentBot().api.editMessageText).toHaveBeenCalledWith(
+        '100200300',
+        987,
+        'Done in new turn.',
+        expect.objectContaining({ parse_mode: 'MarkdownV2' }),
+      );
     });
 
     it('restores progress handles after process restart', async () => {

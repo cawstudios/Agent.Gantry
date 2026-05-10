@@ -1,10 +1,10 @@
 import { CHROME_PATH as configuredChromePath } from '../config/index.js';
 
 export const DEFAULT_CHROME_ARGS = [
-  '--disable-blink-features=AutomationControlled',
   '--no-first-run',
   '--no-default-browser-check',
   '--disable-sync',
+  '--disable-features=OmniboxPopup',
   '--remote-debugging-address=127.0.0.1',
 ] as const;
 

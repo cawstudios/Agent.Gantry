@@ -155,6 +155,10 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'admin-mcp-tools.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/agent-tool-references.ts'),
+    path.join(sharedDir, 'agent-tool-references.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/memory-ipc-actions.ts'),
     path.join(sharedDir, 'memory-ipc-actions.ts'),
   );
@@ -657,7 +661,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'loads direct runtime MCP config from a private file and removes the handoff file',
+    'rejects host-private agent_browser MCP config from a private file',
     async () => {
       const fixture = createRunnerFixture();
       const mcpConfigPath = path.join(fixture.root, 'mcp-config.json');
@@ -681,15 +685,41 @@ describe('agent-runner IPC lifecycle', () => {
         ]),
       });
 
-      expect(result.exitCode).toBe(0);
-      const call = readRecord(fixture.recordPath).calls[0];
-      expect(call?.mcpServers.agent_browser).toEqual({
-        type: 'stdio',
-        command: '/tmp/playwright-mcp',
-        args: ['--shared-browser-context'],
-        env: { PLAYWRIGHT_MCP_CDP_ENDPOINT: 'http://127.0.0.1:4567' },
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('agent_browser is host-private');
+      expect(fs.existsSync(fixture.recordPath)).toBe(false);
+      expect(fs.existsSync(mcpConfigPath)).toBe(false);
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'rejects host-private Playwright MCP config from a private file',
+    async () => {
+      const fixture = createRunnerFixture();
+      const mcpConfigPath = path.join(fixture.root, 'mcp-config.json');
+      fs.writeFileSync(
+        mcpConfigPath,
+        JSON.stringify({
+          playwright: {
+            type: 'stdio',
+            command: '/tmp/playwright-mcp',
+            args: ['--shared-browser-context'],
+          },
+        }),
+      );
+
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_EXIT_AFTER_QUERY: '1',
+        MYCLAW_MCP_CONFIG_FILE: mcpConfigPath,
+        MYCLAW_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
+          'mcp__playwright__browser_click',
+        ]),
       });
-      expect(call?.sdkEnv.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('playwright is host-private');
+      expect(fs.existsSync(fixture.recordPath)).toBe(false);
       expect(fs.existsSync(mcpConfigPath)).toBe(false);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,

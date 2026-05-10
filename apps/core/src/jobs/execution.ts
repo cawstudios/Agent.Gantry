@@ -23,7 +23,7 @@ import { AgentOutput, spawnAgent } from '../runtime/agent-spawn.js';
 import {
   completeFailedRuntimeSessionRun,
   completeSuccessfulRuntimeSessionRun,
-  createRuntimeResultSummaryAccumulator,
+  createRuntimeUserVisibleResultAccumulator,
 } from '../runtime/session-resume-runtime.js';
 import { redactProviderSessionHandlesInText } from '../shared/provider-session-redaction.js';
 import {
@@ -37,7 +37,11 @@ import {
   resolveExecutionMemoryContext,
 } from './execution-context.js';
 import { computeNextJobRun } from './schedule-math.js';
-import { isDeliverySent, settleDeliveryAttempt } from './delivery.js';
+import {
+  isDeliverySent,
+  settleDeliveryAttempt,
+  type DeliverySettlement,
+} from './delivery.js';
 import {
   resolveJobNotificationRoutes,
   type NormalizedJobNotificationRoute,
@@ -68,7 +72,6 @@ import type {
   SchedulerDependencies,
   SchedulerDispatchPayload,
 } from './types.js';
-
 export function resetSchedulerExecutionStateForTests(): void {}
 export async function runJob(
   job: Job,
@@ -79,10 +82,7 @@ export async function runJob(
 ): Promise<void> {
   const runAgentImpl = deps.runAgent ?? spawnAgent;
   const currentJob = await deps.opsRepository.getJobById(job.id);
-  if (!currentJob || currentJob.status !== 'active') {
-    return;
-  }
-
+  if (!currentJob || currentJob.status !== 'active') return;
   const groups = deps.conversationRoutes();
   const execution = resolveExecutionContext(currentJob, groups);
   if (!execution) {
@@ -201,16 +201,17 @@ export async function runJob(
   });
   let result: string | null = null;
   let error: string | null = null;
-  const resultSummaryAccumulator = createRuntimeResultSummaryAccumulator();
+  const resultSummaryAccumulator = createRuntimeUserVisibleResultAccumulator();
   const userVisibleFallbackAccumulator =
-    createRuntimeResultSummaryAccumulator();
+    createRuntimeUserVisibleResultAccumulator();
   let hasStreamedResult = false;
   let attemptedStreamingOutputDelivery = false;
-  let streamedOutputDelivered = false;
+  const routeKey = (route: NormalizedJobNotificationRoute): string =>
+    `${route.conversationJid}\u0000${route.threadId ?? ''}\u0000${route.label}`;
+  const routesWithVisibleStreamingOutput = new Set<string>();
   const appendResultSummary = (delta: string | null | undefined): void => {
     if (!delta) return;
     resultSummaryAccumulator.append(delta);
-    result = resultSummaryAccumulator.snapshot();
   };
   const notificationRoutes = resolveJobNotificationRoutes(currentJob);
   const resetStreamingRoutes = (): void => {
@@ -234,13 +235,12 @@ export async function runJob(
     route: NormalizedJobNotificationRoute,
     rawText: string,
     options: { done?: boolean } = {},
-  ): Promise<boolean> => {
+  ): Promise<DeliverySettlement> => {
     const sendStreamingChunk = deps.sendStreamingChunk;
-    if (!sendStreamingChunk) return false;
-    const safeText = redactProviderSessionHandlesInText(rawText);
+    if (!sendStreamingChunk) return 'not_delivered';
     const settlement = await settleDeliveryAttempt(
       () =>
-        sendStreamingChunk(route.conversationJid, safeText, {
+        sendStreamingChunk(route.conversationJid, rawText, {
           ...(route.threadId ? { threadId: route.threadId } : {}),
           ...(options.done ? { done: true } : {}),
         }),
@@ -258,12 +258,15 @@ export async function runJob(
       );
       return 'not_delivered' as const;
     });
-    return isDeliverySent(settlement);
+    return settlement;
   };
-  const deliverFullResultFallback = async (text: string): Promise<boolean> => {
-    if (!text.trim() || notificationRoutes.length === 0) return false;
+  const deliverFullResultFallback = async (
+    text: string,
+    routes: NormalizedJobNotificationRoute[],
+  ): Promise<boolean> => {
+    if (!text.trim() || routes.length === 0) return false;
     let delivered = false;
-    for (const route of notificationRoutes) {
+    for (const route of routes) {
       try {
         const settlement = await settleDeliveryAttempt(
           () =>
@@ -382,7 +385,7 @@ export async function runJob(
             jobModelUseKind,
             assistantName: ASSISTANT_NAME,
             memoryContextBlock: turnContext?.memoryContextBlock,
-            allowedTools: effectiveAllowedTools,
+            allowedTools: effectiveAllowedTools.allowedTools,
           },
           (proc, runHandle) =>
             deps.onProcess(
@@ -404,24 +407,8 @@ export async function runJob(
             });
             if (streamedOutput.result) {
               hasStreamedResult = true;
-              userVisibleFallbackAccumulator.append(
-                redactProviderSessionHandlesInText(streamedOutput.result),
-              );
+              userVisibleFallbackAccumulator.append(streamedOutput.result);
               appendResultSummary(streamedOutput.result);
-              if (
-                !currentJob.silent &&
-                !(await deletionGuard.shouldSuppressDelivery())
-              ) {
-                for (const route of notificationRoutes) {
-                  attemptedStreamingOutputDelivery = true;
-                  if (
-                    await deliverStreamingChunk(route, streamedOutput.result)
-                  ) {
-                    streamedOutputDelivered = true;
-                  }
-                }
-                deletionGuard.resetDeliveryDeletionCheck();
-              }
               const chunkChars = streamedOutput.result.length;
               bufferedStreamingChars += chunkChars;
               totalStreamingChars += chunkChars;
@@ -442,15 +429,30 @@ export async function runJob(
             errorSummary: error,
           });
         } else if (output.result && !hasStreamedResult) {
-          userVisibleFallbackAccumulator.append(
-            redactProviderSessionHandlesInText(output.result),
-          );
+          userVisibleFallbackAccumulator.append(output.result);
           appendResultSummary(output.result);
         }
-        if (hasStreamedResult && deps.sendStreamingChunk) {
+        const finalVisibleOutput = userVisibleFallbackAccumulator.snapshot();
+        if (
+          finalVisibleOutput &&
+          deps.sendStreamingChunk &&
+          !currentJob.silent &&
+          !(await deletionGuard.shouldSuppressDelivery())
+        ) {
           for (const route of notificationRoutes) {
-            await deliverStreamingChunk(route, '', { done: true });
+            attemptedStreamingOutputDelivery = true;
+            const settlement = await deliverStreamingChunk(
+              route,
+              finalVisibleOutput,
+              {
+                done: true,
+              },
+            );
+            if (settlement !== 'not_delivered') {
+              routesWithVisibleStreamingOutput.add(routeKey(route));
+            }
           }
+          deletionGuard.resetDeliveryDeletionCheck();
         }
         if (!error) {
           const boundedResultSummary = resultSummaryAccumulator.snapshot();
@@ -502,7 +504,6 @@ export async function runJob(
   const safeErrorSummary = error
     ? redactProviderSessionHandlesInText(error)
     : null;
-
   if (deletionGuard.deletedDuringRun) {
     nextRun = null;
   } else if (error) {
@@ -571,24 +572,25 @@ export async function runJob(
       lease_expires_at: null,
     });
   }
-
   const resultSummary = deletionGuard.deletedDuringRun
     ? null
     : result || resultSummaryAccumulator.snapshot();
-  const safeResultSummary = resultSummary
-    ? redactProviderSessionHandlesInText(resultSummary)
-    : null;
+  const safeResultSummary = resultSummary ? resultSummary : null;
   const userVisibleFallbackSnapshot = userVisibleFallbackAccumulator.snapshot();
+  const fallbackRoutes = notificationRoutes.filter(
+    (route) => !routesWithVisibleStreamingOutput.has(routeKey(route)),
+  );
   let fullResultFallbackDelivered = false;
   if (
     runStatus === 'completed' &&
     !currentJob.silent &&
     !deletionGuard.deletedDuringRun &&
-    !streamedOutputDelivered &&
+    fallbackRoutes.length > 0 &&
     userVisibleFallbackSnapshot
   ) {
     fullResultFallbackDelivered = await deliverFullResultFallback(
       userVisibleFallbackSnapshot,
+      fallbackRoutes,
     );
   }
   if (attemptedStreamingOutputDelivery || fullResultFallbackDelivered) {
@@ -600,7 +602,6 @@ export async function runJob(
     safeResultSummary ? safeResultSummary.slice(0, 500) : null,
     safeErrorSummary ? safeErrorSummary.slice(0, 500) : null,
   );
-
   await emitJobEvent(runtimeEventTypeForRunStatus(runStatus), {
     next_run: nextRun,
     retry_count: retryCount,
@@ -610,7 +611,6 @@ export async function runJob(
     await emitJobEvent(RUNTIME_EVENT_TYPES.JOB_TOOL_DENIED, {
       error_summary: safeErrorSummary ? safeErrorSummary.slice(0, 500) : null,
     });
-
   const summary = safeErrorSummary
     ? safeErrorSummary.slice(0, 240)
     : safeResultSummary
@@ -686,7 +686,6 @@ export async function runJob(
     }
   } catch {} // eslint-disable-line no-empty
   deps.onSchedulerChanged?.(currentJob.id);
-
   if (
     !deletionGuard.deletedDuringRun &&
     currentJob.schedule_type === 'once' &&

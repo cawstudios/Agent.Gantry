@@ -1351,13 +1351,6 @@
     "maxOccurrences": 4
   },
   {
-    "file": "apps/core/src/text-styles.ts",
-    "rule": "provider_specific_path",
-    "reason": "Baseline provider/channel terminology debt from provider-neutral refactor; capped so new provider-specific code outside approved adapters fails.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 1
-  },
-  {
     "file": "apps/core/src/channels/slack.ts",
     "rule": "wrapper_only_file",
     "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",

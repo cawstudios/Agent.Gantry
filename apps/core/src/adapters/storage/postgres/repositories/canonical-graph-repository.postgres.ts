@@ -132,6 +132,44 @@ export class PostgresCanonicalGraphRepository {
     return agentId;
   }
 
+  async ensureAgentExists(
+    folder: string,
+    name: string = folder,
+    executor: CanonicalExecutor = this.db,
+  ): Promise<string> {
+    await this.ensureApp(executor);
+    const agentId = agentIdForFolder(folder);
+    const configVersionId = configVersionIdForAgent(agentId);
+    await executor
+      .insert(pgSchema.agentsPostgres)
+      .values({
+        id: agentId,
+        appId: CANONICAL_APP_ID,
+        name,
+        status: 'active',
+        currentConfigVersionId: configVersionId,
+      })
+      .onConflictDoUpdate({
+        target: pgSchema.agentsPostgres.id,
+        set: {
+          currentConfigVersionId: configVersionId,
+          updatedAt: sql`now()`,
+        },
+      });
+    await executor
+      .insert(pgSchema.agentConfigVersionsPostgres)
+      .values({
+        id: configVersionId,
+        appId: CANONICAL_APP_ID,
+        agentId,
+        version: 1,
+        promptProfileRef: 'default',
+        llmProfileId: DEFAULT_LLM_PROFILE_ID,
+      })
+      .onConflictDoNothing();
+    return agentId;
+  }
+
   async ensureConversation(
     jid: string,
     input: {

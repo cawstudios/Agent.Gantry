@@ -1,12 +1,54 @@
 # Browser Capability
 
-MyClaw browser support has two separate responsibilities:
+MyClaw exposes browser control through one durable capability: `Browser`.
+Durable settings and Postgres bindings store `Browser`, not Playwright,
+Puppeteer, `agent_browser`, or concrete browser subtool names.
 
-- MyClaw owns the browser session lifecycle.
-- Runtime-installed browser action tooling owns browser actions.
+At runtime, `Browser` projects into MyClaw-owned browser tools such as
+`mcp__myclaw__browser_status`, `mcp__myclaw__browser_launch`,
+`mcp__myclaw__browser_navigate`, `mcp__myclaw__browser_tabs`,
+`mcp__myclaw__browser_snapshot`, `mcp__myclaw__browser_click`,
+`mcp__myclaw__browser_type`, `mcp__myclaw__browser_wait_for`,
+`mcp__myclaw__browser_take_screenshot`, and
+`mcp__myclaw__browser_close`. These tool names are audited as concrete
+actions, but they are runtime projections, not durable authority.
 
-This keeps MyClaw from becoming a browser automation framework while still
-giving every persona a persistent browser capability on demand.
+The projected tools use backend-native schemas. Element actions use the
+backend's `element` and `target` fields directly; MyClaw does not translate
+model-facing `ref`, `selector`, tab index aliases, or action-dispatch fields. Long-running
+tools may pass `timeout_ms`; MyClaw clamps it and propagates the same deadline
+through signed IPC and the private backend call. Timeout errors name whether the
+IPC layer or backend layer timed out.
+
+Browser tools that accept `filename` write only under the run browser artifact
+root. When `browser_take_screenshot`, `browser_snapshot`,
+`browser_console_messages`, `browser_network_requests`, or `browser_evaluate`
+save output to that file, the model-facing result is a compact file reference
+with path, optional MIME type, and size. Screenshot responses must strip inline
+base64 image data after persisting the file, because screenshots can exceed the
+model context budget.
+
+Raw Playwright, Puppeteer, or `agent_browser` tools are host-private backend
+details. They must not be persisted, requested, advertised, or projected into
+the model-facing tool surface.
+
+## Capability Doctrine
+
+This rule is general, not browser-specific:
+
+- Durable authorization stores human-level capabilities: `Browser`, scoped
+  `Bash(...)`, approved MCP server ids, skill ids, scheduler grants, and future
+  tool-family grants.
+- Runtime projects approved capabilities into concrete tools for that run.
+- Concrete backend tool names are audited but are not persisted as durable
+  authority.
+- Backend subtools run without per-subaction approval inside the approved
+  capability envelope.
+- MyClaw enforces the outer boundary: filesystem, network, credentials,
+  timeout, process, display, redaction, audit, and selected-capability checks.
+- The same durable-vs-projected rule applies to Browser, Bash, third-party CLIs
+  invoked by Bash, MCP servers, skills, scheduler tools, and future IDE, DB,
+  Kubernetes, or document-editor tools.
 
 ## End-To-End Flow
 
@@ -14,176 +56,79 @@ giving every persona a persistent browser capability on demand.
 sequenceDiagram
   participant User as "User"
   participant Host as "MyClaw Host Runtime"
-  participant Browser as "Persistent Chrome Profile"
-  participant Mat as "Claude Runtime Materializer"
   participant Runner as "Claude Child Runner"
-  participant Action as "agent_browser MCP"
+  participant Tool as "mcp__myclaw__browser_*"
+  participant Browser as "Persistent Chrome Profile"
+  participant Backend as "Private Browser Backend"
 
-  User->>Host: Message for agent in DM/channel
-  Host->>Mat: Generate per-run CLAUDE_CONFIG_DIR
-  Mat->>Mat: Materialize runtime agent-browser skill
-  Host->>Browser: Check conversation-scoped profile status
-  Browser-->>Host: Existing CDP endpoint, or stopped
-  alt browser is already running and CDP-ready
-    Host->>Runner: Pass MCP handoff for agent_browser
-    Runner->>Action: Start package-managed browser action MCP
-    Action->>Browser: Attach through CDP endpoint
-  else browser is stopped
-    Host->>Runner: Spawn without browser action MCP
-  end
-  Runner-->>User: Agent can request browser lifecycle tools; action tools attach when a browser was already running
+  User->>Host: Message/job for Browser-selected agent
+  Host->>Runner: Spawn with MyClaw MCP server and host-derived browser context
+  Runner->>Tool: browser_status
+  Tool->>Host: Signed IPC status request
+  Host-->>Tool: Sanitized status without launching Chrome
+  Runner->>Tool: browser_navigate/browser_click/browser_snapshot/etc.
+  Tool->>Host: Signed IPC tool request
+  Host->>Browser: Lazily launch or reuse scoped profile
+  Host->>Browser: Close internal Chrome tabs and activate content tab
+  Host->>Backend: Invoke private backend-native tool
+  Backend->>Browser: Attach through host-owned CDP endpoint
+  Host-->>Tool: Sanitized result
 ```
 
-The default path is lazy for every persona. A normal first chat does not launch
-Chrome. Users do not install a browser skill, copy files into `.claude/skills`,
-or configure Playwright manually.
+Ordinary runs do not launch Chrome. `browser_status` is read-only and uses the
+host browser status path. Actions that require a page lazily ensure the
+host-derived profile is CDP-ready. Before action dispatch, the host closes
+internal Chrome targets such as `chrome://new-tab-page` and
+`chrome://omnibox-popup`, activates the real content tab, and rechecks after
+activation so internal tabs do not pollute tab-list output.
+Tab-list results are additionally filtered at the projection boundary: internal
+Chrome targets such as `chrome://new-tab-page` and `chrome://omnibox-popup`
+are removed from structured and text result content without remapping tab
+indices or refs.
 
 ## Runtime Responsibilities
 
-The host browser capability owns:
+The host browser capability owns persistent browser profiles, headed Chrome
+launch, CDP readiness checks, profile locks, persisted session records, crash
+adoption, orphan cleanup, signed IPC handling, browser artifact file roots,
+per-action audit logging, and redaction of backend details from model-visible
+responses.
 
-- persistent browser profiles scoped by agent plus conversation
-- headed local Chrome launch when the lifecycle tool requests it
-- CI-like headless default when no explicit mode is provided
-- CDP readiness checks
-- profile lock acquisition and stale lock recovery
-- persisted browser session records
-- host-crash adoption of a still-healthy Chrome process
-- orphan cleanup when the persisted Chrome process has unhealthy CDP
-- signed IPC handling for lifecycle requests
-- loopback proxy bypass through `NO_PROXY` and `no_proxy`
-
-The lifecycle MCP surface remains intentionally small:
-
-- `mcp__myclaw__browser_profile_list`
-- `mcp__myclaw__browser_launch`
-- `mcp__myclaw__browser_status`
-- `mcp__myclaw__browser_close`
-
-These tools do not click, type, navigate, inspect the DOM, or take browser
-screenshots. They manage the host-owned browser session only.
-
-## Action Tooling
-
-Browser actions are provided by the runtime-installed browser action
-capability:
-
-- MyClaw materializes a small `agent-browser` skill into the generated per-run
-  Claude config.
-- When a healthy browser is already running at agent startup, MyClaw registers
-  the package-managed `agent_browser` MCP server in the runner MCP handoff file.
-- In that case, MyClaw passes `PLAYWRIGHT_MCP_CDP_ENDPOINT` so the action MCP
-  attaches to the already-running persistent Chrome profile.
-- The action MCP owns workflows such as navigate, click, type, wait, snapshot,
-  and screenshot.
-
-The `@playwright/mcp` package is pinned in `package.json` so the installed
-action behavior is reproducible. MyClaw should not vendor or reimplement those
-action tools inside the lifecycle MCP.
-
-If the agent launches the browser during a run, the lifecycle request succeeds
-immediately but the `agent_browser` action MCP is not retroactively added to
-that already-started Claude SDK query. Browser action tools attach on the next
-agent run after the persistent browser is running.
-
-## Persistent Profile State
-
-Browser profiles live under MyClaw runtime data, not under the generated per-run
-Claude config. The generated config is scratch state and is deleted after the
-run.
-
-The default profile key is derived from the agent/binding folder and source
-conversation id. DM sessions, Slack/Teams channels, Telegram groups, and jobs
-created from those sessions therefore keep separate cookies and browser history.
-Threads/topics and scheduled jobs inherit the parent conversation profile so a
-job behaves like an extension of the place that created it. The legacy `myclaw`
-profile is used only when the runtime cannot determine a source conversation.
-User-facing surfaces should show the friendly profile label, such as
-`Kai conversation browser`, and keep the deterministic profile key as secondary
-debug detail. `/status`, job previews, and `myclaw browser profiles` expose the
-active profile so users can understand which signed-in browser state a run will
-use.
-
-Each persistent profile keeps:
-
-- Chrome user data, including cookies after the user logs in
-- profile metadata such as creation time, last-used time, CDP port, and auth
-  markers
-- a profile lock used to prevent concurrent launches against the same profile
-- a browser session record with PID, CDP port, target id, headless flag, and
-  last-used time
-
-On host restart, MyClaw reads the browser session record. If the PID is still
-alive, belongs to the same Chrome user-data directory, and the recorded CDP port
-is healthy, MyClaw adopts that browser session. If the process is dead, the
-record is cleared. If the process is owned by the profile but CDP is unhealthy,
-MyClaw terminates it and launches a fresh browser. If the PID has been reused by
-another process, MyClaw clears the stale record without terminating that
-process.
+The model cannot choose browser profile paths or arbitrary profile names. The
+profile comes from the agent, conversation, thread/job context, and host routing
+metadata.
 
 ## First-Use Login
 
 The default browser launch is headed for local user sessions. If a site needs
 authentication:
 
-1. The agent launches or reuses the persistent `myclaw` profile through the
-   lifecycle tool.
+1. The agent uses `mcp__myclaw__browser_launch`.
 2. The user completes login in the visible Chrome window.
-3. Cookies remain in that profile for later runs and restarts.
-4. Future browser action tools attach to the same profile through CDP.
+3. Cookies remain in that host-derived profile for later runs and restarts.
+4. Future browser tools reuse the same profile.
 
 MyClaw does not ask users to paste credentials into chat, does not scrape
 credentials, and does not bypass site authentication.
 
 ## Permissions
 
-Browser lifecycle tools and browser action tools go through the existing Claude
-Agent SDK permission path and MyClaw channel approval surface. MyClaw does not
-add a separate browser-specific permission system.
-
-When an existing browser is attached at startup, any persona with browser
-capability receives the browser action MCP for that conversation-scoped
-profile, but auto-approval remains empty. Risky actions continue to be
-evaluated by the existing `canUseTool` and channel approval flow.
-
-## Proxy Boundary
-
-Provider credential brokers may inject local provider-only proxy environment
-for model access when the selected broker requires it. Those proxy values are
-passed to the Claude SDK process with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` so
-Bash, hooks, MCP stdio servers, skills, monitors, and browser tooling do not
-inherit model credential transport. Tool/API proxy credentials require explicit
-capability projections rather than ambient process environment.
-
-MyClaw sets agent egress bypass values in both host-projected browser env and
-the runner env for cooperative tools. These values are compatibility hints, not
-authorization controls:
-
-- `NO_PROXY=127.0.0.1,localhost,::1,github.com,.github.com,api.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com`
-- `no_proxy=127.0.0.1,localhost,::1,github.com,.github.com,api.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com`
-
-Runner-side lifecycle MCP tools must not perform their own direct CDP health
-checks. The host browser capability is the authority for CDP readiness.
-
-## Agent Scope
-
-Browser support is a baseline persona capability. Each agent/conversation pair
-gets its own persistent profile name, and lifecycle MCP requests are bound by
-host-derived conversation context. The model does not choose arbitrary browser
-profiles. If a profile is already CDP-ready when the run starts, MyClaw adds the
-`agent_browser` action MCP handoff for that same profile. If the agent launches
-the browser during a run, action tools attach on the next run.
+Selecting `Browser` controls whether the projected `browser_*` tools are
+visible. Individual browser calls do not require separate persistent approvals
+inside the selected Browser envelope. Jobs may use browser tools only when their
+effective selected capabilities include canonical `Browser`; jobs without
+`Browser` fail closed because no browser tools are exposed.
 
 ## Operational Checks
 
 Useful checks during browser-related changes:
 
 ```bash
-npm run test:unit -- apps/core/test/unit/runtime/browser-capability.test.ts apps/core/test/unit/runtime/ipc-browser-handler.test.ts apps/core/test/unit/runtime/agent-browser-run-wiring.test.ts apps/core/test/unit/runtime/agent-spawn.test.ts
+npm run test:unit -- apps/core/test/unit/runtime/browser-capability.test.ts apps/core/test/unit/runtime/ipc-browser-handler.test.ts apps/core/test/unit/runtime/agent-spawn.test.ts apps/core/test/unit/runner/browser-tools.test.ts apps/core/test/unit/runner/agent-capabilities.test.ts
 npm run typecheck
 npm run build
 python3 .codex/scripts/check_architecture.py
 ```
 
-Stale-reference checks should confirm that browser action tools are not added
-to the lifecycle MCP and that direct runner-side CDP probes are not reintroduced.
+Cleanup searches should confirm that phrase-based browser intent, old action
+facades, and model-facing raw browser backend authority are not active.

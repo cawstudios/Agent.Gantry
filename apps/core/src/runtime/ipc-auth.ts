@@ -34,6 +34,7 @@ const responseSigningKeys = new Map<
     privateKeyPem: string;
   }
 >();
+const browserIpcAuthorizations = new Map<string, number>();
 
 export function responseSigningKeyId(publicKeyPem: string): string {
   return createHash('sha256').update(publicKeyPem).digest('base64url');
@@ -56,6 +57,50 @@ export function computeBrowserIpcAuthToken(
   return createHmac('sha256', IPC_AUTH_SECRET)
     .update(`browser\0${authScope(workspaceKey, threadId)}\0chat\0${chatJid}`)
     .digest('hex');
+}
+
+function browserIpcAuthorizationKey(input: {
+  workspaceKey: string;
+  chatJid: string;
+  threadId?: string | null;
+}): string {
+  return `${input.workspaceKey}\0${normalizedThreadId(input.threadId)}\0${input.chatJid}`;
+}
+
+export function registerBrowserIpcAuthorization(input: {
+  workspaceKey: string;
+  chatJid: string;
+  threadId?: string | null;
+}): void {
+  const key = browserIpcAuthorizationKey(input);
+  browserIpcAuthorizations.set(
+    key,
+    (browserIpcAuthorizations.get(key) ?? 0) + 1,
+  );
+}
+
+export function revokeBrowserIpcAuthorization(input: {
+  workspaceKey: string;
+  chatJid: string;
+  threadId?: string | null;
+}): void {
+  const key = browserIpcAuthorizationKey(input);
+  const count = browserIpcAuthorizations.get(key) ?? 0;
+  if (count <= 1) {
+    browserIpcAuthorizations.delete(key);
+    return;
+  }
+  browserIpcAuthorizations.set(key, count - 1);
+}
+
+export function isBrowserIpcAuthorized(input: {
+  workspaceKey: string;
+  chatJid: string;
+  threadId?: string | null;
+}): boolean {
+  return (
+    (browserIpcAuthorizations.get(browserIpcAuthorizationKey(input)) ?? 0) > 0
+  );
 }
 
 export function computeMemoryIpcAuthToken(

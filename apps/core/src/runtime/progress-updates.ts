@@ -5,18 +5,25 @@ export type FinalProgressState = 'completed' | 'failed' | 'delivery_incomplete';
 export function buildDoneProgressOptions(
   threadId?: string,
   replaceOnly?: boolean,
+  generation?: number,
 ): ProgressUpdateOptions {
   return {
     ...(threadId ? { threadId } : {}),
     done: true,
     ...(replaceOnly ? { replaceOnly: true } : {}),
+    ...(generation !== undefined ? { generation } : {}),
   };
 }
 
 export function buildReplaceOnlyProgressOptions(
   threadId?: string,
+  generation?: number,
 ): ProgressUpdateOptions {
-  return { ...(threadId ? { threadId } : {}), replaceOnly: true };
+  return {
+    ...(threadId ? { threadId } : {}),
+    replaceOnly: true,
+    ...(generation !== undefined ? { generation } : {}),
+  };
 }
 
 export async function sendFinalProgressUpdate(args: {

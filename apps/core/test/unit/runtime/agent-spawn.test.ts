@@ -6,6 +6,7 @@ import { PassThrough } from 'stream';
 const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
 const mockGetBrowserStatus = vi.hoisted(() => vi.fn());
+const mockEnsureBrowserReady = vi.hoisted(() => vi.fn());
 const mockMaterializeClaudeRuntime = vi.hoisted(() => vi.fn());
 
 // Mock config
@@ -130,6 +131,7 @@ vi.mock('@core/platform/group-folder.js', () => ({
 
 vi.mock('@core/runtime/browser-capability.js', () => ({
   DEFAULT_BROWSER_PROFILE_NAME: 'myclaw',
+  ensureBrowserReady: (...args: unknown[]) => mockEnsureBrowserReady(...args),
   getBrowserStatus: (...args: unknown[]) => mockGetBrowserStatus(...args),
   getKnownBrowserStatus: (...args: unknown[]) => mockGetBrowserStatus(...args),
 }));
@@ -307,14 +309,6 @@ function emitOutputMarker(
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
 
-function readMcpHandoffConfig(): Record<string, unknown> {
-  const call = vi
-    .mocked(fs.writeFileSync)
-    .mock.calls.find(([filePath]) => String(filePath).match(/mcp-.*\.json$/));
-  if (!call) return {};
-  return JSON.parse(String(call[1])) as Record<string, unknown>;
-}
-
 describe('agent-spawn timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -330,6 +324,7 @@ describe('agent-spawn timeout behavior', () => {
     });
     mockEnsureGroupIpcLayout.mockClear();
     mockGetBrowserStatus.mockReset();
+    mockEnsureBrowserReady.mockReset();
     mockGetBrowserStatus.mockResolvedValue({
       profile: 'myclaw',
       profileName: 'myclaw',
@@ -1051,7 +1046,7 @@ describe('agent-spawn timeout behavior', () => {
     );
   });
 
-  it('does not auto-launch the browser for the default agent', async () => {
+  it('does not launch or attach a raw browser backend during ordinary spawn', async () => {
     const resultPromise = spawnAgent(testGroup, { ...testInput }, () => {});
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
@@ -1062,20 +1057,78 @@ describe('agent-spawn timeout behavior', () => {
       string,
       string
     >;
-    expect(mockGetBrowserStatus).toHaveBeenCalledWith(
-      expect.stringMatching(/^c-test-group-[a-f0-9]{12}$/),
-    );
+    expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
+    expect(mockGetBrowserStatus).not.toHaveBeenCalled();
     expect(env.PLAYWRIGHT_MCP_CDP_ENDPOINT).toBeUndefined();
     expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
     expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+    expect(env.MYCLAW_BROWSER_IPC_AUTH_TOKEN).toBeUndefined();
   });
 
-  it('passes CDP endpoint when an existing browser session is already running', async () => {
+  it('does not launch or attach a raw browser backend when Browser is selected', async () => {
+    const resultPromise = spawnAgent(
+      testGroup,
+      { ...testInput, allowedTools: ['Browser'] },
+      () => {},
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
+    expect(mockGetBrowserStatus).not.toHaveBeenCalled();
+    expect(env.PLAYWRIGHT_MCP_CDP_ENDPOINT).toBeUndefined();
+    expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
+    expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+    expect(env.MYCLAW_BROWSER_IPC_AUTH_TOKEN).toEqual(expect.any(String));
+  });
+
+  it('fails closed on stale raw browser action MCP rules during spawn', async () => {
+    const result = await spawnAgent(
+      testGroup,
+      { ...testInput, allowedTools: ['Read', 'mcp__agent_browser__*'] },
+      () => {},
+    );
+    expect(result).toMatchObject({
+      status: 'error',
+      error: expect.stringContaining(
+        'Raw browser backend MCP tools are host-private',
+      ),
+    });
+    expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
+    expect(mockGetBrowserStatus).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on stale projected browser MCP rules during spawn', async () => {
+    const result = await spawnAgent(
+      testGroup,
+      { ...testInput, allowedTools: ['Read', 'mcp__myclaw__browser_click'] },
+      () => {},
+    );
+    expect(result).toMatchObject({
+      status: 'error',
+      error: expect.stringContaining(
+        'Concrete MyClaw browser tools are runtime projections',
+      ),
+    });
+    expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
+    expect(mockGetBrowserStatus).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+
+  it('keeps browser action backend private when Browser is selected', async () => {
     const originalNoProxy = process.env.NO_PROXY;
     const originalLowerNoProxy = process.env.no_proxy;
     process.env.NO_PROXY = 'corp.internal';
     process.env.no_proxy = 'lower.internal';
-    mockGetBrowserStatus.mockReturnValueOnce({
+    mockEnsureBrowserReady.mockResolvedValueOnce({
       profile: 'c-test-group-browser',
       profileName: 'c-test-group-browser',
       running: true,
@@ -1085,7 +1138,14 @@ describe('agent-spawn timeout behavior', () => {
       headless: false,
     });
 
-    const resultPromise = spawnAgent(testGroup, { ...testInput }, () => {});
+    const resultPromise = spawnAgent(
+      testGroup,
+      {
+        ...testInput,
+        allowedTools: ['Browser'],
+      },
+      () => {},
+    );
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
@@ -1095,26 +1155,11 @@ describe('agent-spawn timeout behavior', () => {
       string,
       string
     >;
-    expect(mockGetBrowserStatus).toHaveBeenCalledWith(
-      expect.stringMatching(/^c-test-group-[a-f0-9]{12}$/),
-    );
+    expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
     expect(env.PLAYWRIGHT_MCP_CDP_ENDPOINT).toBeUndefined();
-    expect(env.MYCLAW_MCP_CONFIG_FILE).toMatch(/mcp-.*\.json$/);
-    expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toContain(
-      'mcp__agent_browser__*',
-    );
-    expect(env.MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON).toBe('[]');
-    expect(readMcpHandoffConfig().agent_browser).toMatchObject({
-      command: process.execPath,
-      args: expect.arrayContaining(['--shared-browser-context']),
-      env: {
-        PLAYWRIGHT_MCP_CDP_ENDPOINT: 'http://127.0.0.1:4567',
-        NO_PROXY:
-          '127.0.0.1,localhost,::1,github.com,.github.com,api.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com',
-        no_proxy:
-          '127.0.0.1,localhost,::1,github.com,.github.com,api.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com',
-      },
-    });
+    expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
+    expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+    expect(env.MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON).toBeUndefined();
     expect(env.NO_PROXY.split(',')).toEqual(
       expect.arrayContaining([
         'corp.internal',
@@ -1145,7 +1190,17 @@ describe('agent-spawn timeout behavior', () => {
     }
   });
 
-  it('checks conversation browser status for conversation-scoped agents without auto-launching', async () => {
+  it('does not project action MCP merely because Chrome is already running', async () => {
+    mockEnsureBrowserReady.mockResolvedValueOnce({
+      profile: 'c-test-group-browser',
+      profileName: 'c-test-group-browser',
+      running: true,
+      cdpReady: true,
+      cdpUrl: 'http://127.0.0.1:4567',
+      port: 4567,
+      headless: false,
+    });
+
     const resultPromise = spawnAgent(testGroup, testInput, () => {});
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
@@ -1156,37 +1211,39 @@ describe('agent-spawn timeout behavior', () => {
       string,
       string
     >;
-    expect(mockGetBrowserStatus).toHaveBeenCalledWith(
-      expect.stringMatching(/^c-test-group-[a-f0-9]{12}$/),
-    );
+    expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
+    expect(mockGetBrowserStatus).not.toHaveBeenCalled();
     expect(env.PLAYWRIGHT_MCP_CDP_ENDPOINT).toBeUndefined();
     expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
   });
 
-  it('continues without browser action MCP when browser status fails', async () => {
-    mockGetBrowserStatus.mockImplementationOnce(() => {
-      throw new Error('Chrome unavailable');
-    });
+  it('does not launch or expose raw browser backend when Browser is selected', async () => {
+    mockEnsureBrowserReady.mockRejectedValueOnce(
+      new Error('Chrome CDP did not become healthy'),
+    );
+    const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
 
-    const resultPromise = spawnAgent(testGroup, { ...testInput }, () => {});
-    await vi.advanceTimersByTimeAsync(10);
-    emitOutputMarker(fakeProc, {
-      status: 'success',
-      result: 'Started without browser action MCP',
-    });
+    const resultPromise = spawnAgent(
+      testGroup,
+      {
+        ...testInput,
+        allowedTools: ['Browser'],
+      },
+      () => {},
+    );
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
-    const result = await resultPromise;
+    await resultPromise;
 
-    expect(result.status).toBe('success');
-    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
     const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
       string,
       string
     >;
-    expect(env.PLAYWRIGHT_MCP_CDP_ENDPOINT).toBeUndefined();
+    const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
+    expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
     expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
+    expect(runnerInput.allowedTools).toEqual(['Browser']);
   });
 
   it('continues without custom system prompt when compileSystemPrompt throws (line 70)', async () => {

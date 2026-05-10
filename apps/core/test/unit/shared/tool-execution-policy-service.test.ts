@@ -38,6 +38,40 @@ describe('ToolExecutionPolicyService', () => {
     });
   });
 
+  it('classifies raw agent browser MCP tools as generic MCP tools', () => {
+    expect(
+      classifier.classify({
+        origin: 'mcp',
+        toolName: 'mcp__agent_browser__click',
+        toolInput: { selector: '#submit' },
+      }),
+    ).toMatchObject({
+      origin: 'mcp',
+      toolKind: 'mcp',
+      toolName: 'mcp__agent_browser__click',
+      mutationIntent: 'unknown',
+    });
+  });
+
+  it('allows projected browser tools for autonomous jobs with canonical Browser capability', () => {
+    const request = classifier.classify({
+      origin: 'sdk',
+      toolName: 'mcp__myclaw__browser_status',
+      toolInput: {},
+      executionMode: 'autonomous',
+    });
+
+    expect(
+      policy.evaluate({
+        request,
+        schedulerAllowedToolRules: ['Browser'],
+      }),
+    ).toMatchObject({
+      status: 'allow',
+      matchedRule: 'Browser',
+    });
+  });
+
   it('denies protected capability file targets through canonical policy', () => {
     const request = classifier.classify({
       origin: 'sdk',

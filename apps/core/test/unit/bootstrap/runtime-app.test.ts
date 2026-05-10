@@ -153,7 +153,7 @@ describe('runtime app credential binding', () => {
     ]);
   });
 
-  it('disables provider-visible streaming in group processing until durable ordering is wired', async () => {
+  it('delegates provider-visible streaming support to channel runtime', async () => {
     const { createRuntimeApp, createGroupProcessor } =
       await loadRuntimeAppWithGroupProcessorSpy();
     const app = createRuntimeApp();
@@ -172,7 +172,7 @@ describe('runtime app credential binding', () => {
     });
 
     expect(capturedDeps?.channelRuntime.supportsStreaming('tg:primary')).toBe(
-      false,
+      true,
     );
   });
 });

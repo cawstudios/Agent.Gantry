@@ -139,6 +139,8 @@ describe('agent capability composition', () => {
         MYCLAW_BROWSER_PROFILE_NAME: 'c-team-abc123abc123',
         MYCLAW_ADMIN_MCP_TOOLS_JSON: '[]',
         MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON: '[]',
+        MYCLAW_SELECTED_SKILLS_JSON: '[]',
+        MYCLAW_SELECTED_MCP_SERVERS_JSON: '[]',
         MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify(
           selectedMyClawMcpToolNames([]),
         ),
@@ -147,7 +149,6 @@ describe('agent capability composition', () => {
         ),
         MYCLAW_IPC_DIR: '/tmp/ipc/team',
         MYCLAW_IPC_AUTH_TOKEN: 'token',
-        MYCLAW_BROWSER_IPC_AUTH_TOKEN: 'browser-token',
         MYCLAW_MEMORY_IPC_AUTH_TOKEN: 'memory-token',
         MYCLAW_IPC_RESPONSE_VERIFY_KEY: 'verify-key',
         MYCLAW_IPC_RESPONSE_KEY_ID: 'verify-key-id',
@@ -157,6 +158,38 @@ describe('agent capability composition', () => {
           '127.0.0.1,localhost,::1,github.com,.github.com,api.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com',
       },
     });
+  });
+
+  it('projects the browser IPC token only when canonical Browser is selected', () => {
+    const withoutBrowser = composeAgentCapabilities({
+      mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      chatJid: 'tg:team',
+      groupFolder: 'telegram_team',
+      browserIpcAuthToken: 'browser-token',
+      configuredAllowedTools: ['mcp__myclaw__browser'],
+    });
+    expect(
+      withoutBrowser.mcpServers.myclaw?.env?.MYCLAW_BROWSER_IPC_AUTH_TOKEN,
+    ).toBeUndefined();
+    expect(withoutBrowser.allowedTools).not.toContain('mcp__myclaw__browser');
+    expect(
+      JSON.parse(
+        String(
+          withoutBrowser.mcpServers.myclaw?.env?.MYCLAW_MCP_TOOL_NAMES_JSON,
+        ),
+      ),
+    ).not.toContain('browser');
+
+    const withBrowser = composeAgentCapabilities({
+      mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      chatJid: 'tg:team',
+      groupFolder: 'telegram_team',
+      browserIpcAuthToken: 'browser-token',
+      configuredAllowedTools: ['Browser'],
+    });
+    expect(
+      withBrowser.mcpServers.myclaw?.env?.MYCLAW_BROWSER_IPC_AUTH_TOKEN,
+    ).toBe('browser-token');
   });
 
   it('exposes global settings and service tools from selected capabilities', () => {
@@ -378,6 +411,26 @@ describe('agent capability composition', () => {
     expect(profile.mcpServers.myclaw?.env?.MYCLAW_ADMIN_MCP_TOOLS_JSON).toBe(
       JSON.stringify(['service_restart', 'settings_desired_state']),
     );
+    expect(profile.mcpServers.myclaw?.env?.MYCLAW_SELECTED_SKILLS_JSON).toBe(
+      JSON.stringify([]),
+    );
+  });
+
+  it('projects selected skills and MCP servers into capability_status environment', () => {
+    const profile = composeAgentCapabilities({
+      mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      chatJid: 'tg:sales',
+      groupFolder: 'sales',
+      selectedSkillIds: ['skill:release'],
+      selectedMcpServerIds: ['mcp:github'],
+    });
+
+    expect(profile.mcpServers.myclaw?.env?.MYCLAW_SELECTED_SKILLS_JSON).toBe(
+      JSON.stringify(['skill:release']),
+    );
+    expect(
+      profile.mcpServers.myclaw?.env?.MYCLAW_SELECTED_MCP_SERVERS_JSON,
+    ).toBe(JSON.stringify(['mcp:github']));
   });
 
   it('supports provider extension without replacing built-ins', () => {
@@ -429,7 +482,7 @@ describe('agent capability composition', () => {
     );
   });
 
-  it('treats runtime-projected MCP servers as configured MCP input', () => {
+  it('does not expose raw runtime browser MCP servers as configured MCP input', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'tg:team',
@@ -445,14 +498,9 @@ describe('agent capability composition', () => {
       externalMcpAllowedTools: ['mcp__agent_browser__*'],
     });
 
-    expect(profile.mcpServers.agent_browser).toEqual({
-      type: 'stdio',
-      command: '/tmp/playwright-mcp',
-      args: ['--shared-browser-context'],
-      env: { PLAYWRIGHT_MCP_CDP_ENDPOINT: 'http://127.0.0.1:4567' },
-    });
+    expect(profile.mcpServers.agent_browser).toBeUndefined();
     expect(profile.allowedTools).not.toContain('mcp__myclaw__*');
-    expect(profile.allowedTools).toContain('mcp__agent_browser__*');
+    expect(profile.allowedTools).not.toContain('mcp__agent_browser__*');
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
   });
 });

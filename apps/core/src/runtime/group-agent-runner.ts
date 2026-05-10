@@ -10,6 +10,8 @@ import type {
 import {
   memoryScopeForConversationKind,
   resolveTurnAllowedTools,
+  resolveTurnSelectedMcpServerIds,
+  resolveTurnSelectedSkillIds,
 } from './group-run-context.js';
 import {
   buildApprovedSkillContextBlock,
@@ -151,6 +153,7 @@ export function createGroupAgentRunner(input: {
         threadId?: string;
         recallQuery?: string;
       };
+      turnMessages?: readonly { content?: string | null }[];
     },
   ): Promise<'success' | 'error'> {
     const sessionThreadId = options?.memoryContext?.threadId ?? null;
@@ -256,10 +259,12 @@ export function createGroupAgentRunner(input: {
       skillArtifactStore: deps.getSkillArtifactStore?.(),
       turnContext,
     });
-    const configuredAllowedTools = await resolveTurnAllowedTools(
-      deps,
-      turnContext,
-    );
+    const [configuredAllowedTools, selectedSkillIds, selectedMcpServerIds] =
+      await Promise.all([
+        resolveTurnAllowedTools(deps, turnContext),
+        resolveTurnSelectedSkillIds(deps, turnContext),
+        resolveTurnSelectedMcpServerIds(deps, turnContext),
+      ]);
     const memoryContextBlock = [
       turnContext?.memoryContextBlock,
       approvedSkillContextBlock,
@@ -299,6 +304,8 @@ export function createGroupAgentRunner(input: {
             memoryReviewerIsControlApprover,
             persona: group.agentConfig?.persona,
             allowedTools: configuredAllowedTools,
+            selectedSkillIds,
+            selectedMcpServerIds,
             ...(turnContext?.externalSessionId
               ? { sessionId: turnContext.externalSessionId }
               : {}),

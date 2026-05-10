@@ -18,8 +18,7 @@ Job-scoped extra tool rules are persisted in `jobs.target_json` under:
   "capabilityPolicy": {
     "allowedTools": [
       "Bash(dedup-append-lead.py *)",
-      "Read(/Users/me/project/notes.md)",
-      "mcp__agent_browser__*"
+      "Read(/Users/me/project/notes.md)"
     ]
   }
 }
@@ -38,6 +37,12 @@ policy. Empty rules, global `*`, unregistered scoped tools, and other wildcard
 forms are invalid. Jobs cannot add admin-only MyClaw tools as extras unless the
 originating agent has the selected capability and the originating conversation
 approval policy allows it.
+
+Jobs also cannot add raw Browser action MCP rules such as
+`mcp__agent_browser__*`, `mcp__playwright__*`, or `mcp__puppeteer__*`, and
+cannot add projected `mcp__myclaw__browser_*` tools as job-scoped extras.
+Request persistent `Browser` capability for the agent first; jobs then use the
+projected tools inherited from that capability.
 
 ## Execution
 
@@ -81,11 +86,11 @@ object:
 {
   "toolAccess": {
     "inheritedAgentTools": ["Read", "Bash(git status *)"],
-    "jobExtraTools": ["mcp__agent_browser__*"],
+    "jobExtraTools": ["Read(/Users/me/project/notes.md)"],
     "effectiveAllowedTools": [
       "Read",
       "Bash(git status *)",
-      "mcp__agent_browser__*"
+      "Read(/Users/me/project/notes.md)"
     ],
     "source": "inherited agent grants plus target_json.capabilityPolicy.allowedTools"
   }

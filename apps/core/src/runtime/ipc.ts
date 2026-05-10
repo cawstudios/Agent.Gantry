@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, IPC_POLL_INTERVAL } from '../config/index.js';
-import { nowMs } from '../infrastructure/time/datetime.js';
 import { ensurePrivateDirSync } from '../shared/private-fs.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import { logger } from '../infrastructure/logging/logger.js';
@@ -10,9 +9,6 @@ import { logger } from '../infrastructure/logging/logger.js';
 import { processMemoryRequest, writeMemoryResponse } from '../memory/memory-ipc.js';
 // prettier-ignore
 import { getIpcResponseSigningPrivateKey } from './ipc-auth.js';
-// prettier-ignore
-import { processBrowserIpcRequest, writeBrowserIpcResponse } from './ipc-browser-handler.js';
-import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
 import type { IpcDeps } from './ipc-domain-types.js';
 import { writeTaskIpcResponse } from '../jobs/ipc-shared.js';
 // prettier-ignore
@@ -21,9 +17,11 @@ import { processTaskIpc } from '../jobs/ipc-handler.js';
 // prettier-ignore
 import { acquireIpcRootLock, archiveIpcErrorFile, claimIpcFile, ensureGroupIpcLayout, hasCompleteTrustedGroupIpcLayout, isPendingIpcJsonFile, isTrustedDirectory, readIpcRootLockDetails, recoverStaleIpcRootLock } from './ipc-filesystem.js';
 // prettier-ignore
-import { parseBrowserIpcRequest, parseIpcMessage, parseMemoryIpcRequest, parsePermissionIpcRequest, parseUserQuestionIpcRequest } from './ipc-parsing.js';
+import { parseIpcMessage, parseMemoryIpcRequest, parsePermissionIpcRequest, parseUserQuestionIpcRequest } from './ipc-parsing.js';
 import { parseTaskIpcData } from './ipc-task-parsing.js';
 import { clearConsumedIpcRequestIds } from './ipc-auth-validation.js';
+import { processBrowserRequestDirectory } from './ipc-browser-requests.js';
+import { canProcessIpcFile, clearIpcRateLimitState } from './ipc-rate-limit.js';
 import type { ConversationRoute as RuntimeGroupRecord } from '../domain/types.js';
 export type { IpcDeps } from './ipc-domain-types.js';
 export { isPendingIpcJsonFile } from './ipc-filesystem.js';
@@ -32,29 +30,8 @@ export { validateIpcAuthRequest } from './ipc-auth-validation.js';
 let ipcWatcherRunning = false;
 let ipcWatcherTimer: ReturnType<typeof setTimeout> | undefined;
 let ipcRootLockPath: string | undefined;
-const IPC_RATE_LIMIT_WINDOW_MS = 60_000;
-const IPC_RATE_LIMIT_MAX_FILES_PER_WINDOW = 300;
 const MAX_IN_FLIGHT_INTERACTION_IPC = 100;
-const ipcRateLimitState = new Map<
-  string,
-  { windowStart: number; count: number }
->();
 const inFlightInteractionIpc = new Set<string>();
-
-function canProcessIpcFile(sourceAgentFolder: string, kind: string): boolean {
-  const now = nowMs();
-  const key = `${sourceAgentFolder}:${kind}`;
-  const state = ipcRateLimitState.get(key);
-  if (!state || now - state.windowStart >= IPC_RATE_LIMIT_WINDOW_MS) {
-    ipcRateLimitState.set(key, { windowStart: now, count: 1 });
-    return true;
-  }
-  if (state.count >= IPC_RATE_LIMIT_MAX_FILES_PER_WINDOW) {
-    return false;
-  }
-  state.count += 1;
-  return true;
-}
 
 const isLongRunningTask = (type: string): boolean =>
   type.startsWith('mcp_') || type === 'scheduler_wait_for_events';
@@ -263,10 +240,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
     }
 
     for (const sourceAgentFolder of ipcFolders) {
-      resolveConversationBrowserProfile({
-        workspaceKey: sourceAgentFolder,
-        conversationId: folderTargetJid.get(sourceAgentFolder),
-      });
       const messagesDir = path.join(ipcBaseDir, sourceAgentFolder, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceAgentFolder, 'tasks');
       const memoryRequestsDir = path.join(
@@ -480,106 +453,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
 
       // Process browser request/response IPC for this group
-      try {
-        if (isTrustedDirectory(browserRequestsDir)) {
-          const browserFiles = fs
-            .readdirSync(browserRequestsDir)
-            .filter(isPendingIpcJsonFile);
-          for (const file of browserFiles) {
-            const filePath = path.join(browserRequestsDir, file);
-            let claimedPath = filePath;
-            let requestId: string | undefined;
-            let authThreadId: string | undefined;
-            let responseKeyId: string | undefined;
-            try {
-              if (!canProcessIpcFile(sourceAgentFolder, 'browser')) {
-                throw new Error('Browser IPC rate limit exceeded');
-              }
-              claimedPath = claimIpcFile(filePath);
-              const rawRequest = JSON.parse(
-                fs.readFileSync(claimedPath, 'utf-8'),
-              );
-              const request = parseBrowserIpcRequest(
-                rawRequest,
-                sourceAgentFolder,
-              );
-              requestId = request.requestId;
-              authThreadId = request.threadId;
-              responseKeyId = request.responseKeyId;
-              const browserProfileName = resolveConversationBrowserProfile({
-                workspaceKey: sourceAgentFolder,
-                conversationId: request.chatJid,
-              });
-              const response = await processBrowserIpcRequest(request, {
-                sourceAgentFolder,
-                browserProfileName,
-                getCredentialBroker: deps.getCredentialBroker,
-                getCredentialBrokerProfile: deps.getCredentialBrokerProfile,
-              });
-              writeBrowserIpcResponse(
-                ipcBaseDir,
-                sourceAgentFolder,
-                {
-                  requestId,
-                  ok: response.ok,
-                  data: response.data,
-                  error: response.error,
-                },
-                getIpcResponseSigningPrivateKey(
-                  sourceAgentFolder,
-                  request.threadId,
-                  request.responseKeyId,
-                ),
-              );
-              fs.unlinkSync(claimedPath);
-            } catch (err) {
-              if (requestId) {
-                try {
-                  writeBrowserIpcResponse(
-                    ipcBaseDir,
-                    sourceAgentFolder,
-                    {
-                      requestId,
-                      ok: false,
-                      error: 'Failed to process browser request',
-                    },
-                    getIpcResponseSigningPrivateKey(
-                      sourceAgentFolder,
-                      authThreadId,
-                      responseKeyId,
-                    ),
-                  );
-                } catch (writeErr) {
-                  logger.warn(
-                    { sourceAgentFolder, requestId, err: writeErr },
-                    'Failed to write browser IPC error fallback',
-                  );
-                }
-              }
-              logger.error(
-                { file, sourceAgentFolder, err },
-                'Error processing browser IPC request',
-              );
-              archiveIpcErrorFile(
-                ipcBaseDir,
-                sourceAgentFolder,
-                file,
-                claimedPath,
-              );
-            }
-          }
-        } else if (fs.existsSync(browserRequestsDir)) {
-          logger.warn(
-            { sourceAgentFolder, browserRequestsDir },
-            'Ignoring untrusted browser IPC requests directory',
-          );
-        }
-      } catch (err) {
-        logger.error(
-          { err, sourceAgentFolder },
-          'Error reading browser IPC requests directory',
-        );
-      }
+      processBrowserRequestDirectory({
+        ipcBaseDir,
+        sourceAgentFolder,
+        browserRequestsDir,
+        deps,
+        logger,
+      });
 
       // Process permission request/response IPC for this group
       try {
@@ -785,7 +665,7 @@ export function stopIpcWatcher(): void {
     ipcWatcherTimer = undefined;
   }
   ipcWatcherRunning = false;
-  ipcRateLimitState.clear();
+  clearIpcRateLimitState();
   inFlightInteractionIpc.clear();
   clearConsumedIpcRequestIds();
   releaseIpcRootLock();

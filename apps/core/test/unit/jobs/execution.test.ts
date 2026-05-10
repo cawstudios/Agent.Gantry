@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmbiguousDurableDeliveryError } from '@core/domain/messages/durable-delivery.js';
+import { PartialMessageDeliveryError } from '@core/domain/messages/partial-delivery.js';
 import type { ConversationRoute, Job } from '@core/domain/types.js';
 
 const runtimeStoreMock = vi.hoisted(() => ({
@@ -425,6 +426,58 @@ describe('jobs/execution', () => {
     );
   });
 
+  it('inherits Browser for jobs without projecting raw browser MCP tools', async () => {
+    const job = makeJob({
+      prompt: 'navigate to https://example.com and take a screenshot',
+    });
+    const opsRepository = {
+      ...makeOpsRepository(job),
+      getAgentTurnContext: vi.fn(async () => ({
+        appId: 'default',
+        agentId: 'agent:scheduler_agent',
+        agentSessionId: 'agent-session:scheduler',
+      })),
+    };
+    const runAgent = vi.fn(async () => ({
+      status: 'success',
+      result: 'runtime flow completed',
+    }));
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        getToolRepository: () =>
+          ({
+            listAgentToolBindings: vi.fn(async () => [
+              { toolId: 'tool:Browser', status: 'active' },
+            ]),
+            getTool: vi.fn(async () => ({
+              id: 'tool:Browser',
+              name: 'Browser',
+            })),
+          }) as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+      'serialized',
+    );
+
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        allowedTools: ['Browser'],
+      }),
+      expect.any(Function),
+      expect.any(Function),
+      expect.objectContaining({ timeoutMs: 30000 }),
+    );
+  });
+
   it('uses a bounded tail summary for long streamed scheduled job output', async () => {
     const job = makeJob();
     const opsRepository = makeOpsRepository(job);
@@ -484,7 +537,7 @@ describe('jobs/execution', () => {
     );
   });
 
-  it('delivers streamed scheduled job chunks and finalizes streaming state', async () => {
+  it('delivers one finalized scheduled job streaming result', async () => {
     const job = makeJob();
     const opsRepository = makeOpsRepository(job);
     const sendMessage = vi.fn(async () => undefined);
@@ -525,19 +578,10 @@ describe('jobs/execution', () => {
     expect(sendStreamingChunk).toHaveBeenNthCalledWith(
       1,
       'tg:scheduler',
-      'first visible chunk ',
-      { threadId: 'thread-scheduled' },
+      'first visible chunk second visible chunk',
+      { threadId: 'thread-scheduled', done: true },
     );
-    expect(sendStreamingChunk).toHaveBeenNthCalledWith(
-      2,
-      'tg:scheduler',
-      'second visible chunk',
-      { threadId: 'thread-scheduled' },
-    );
-    expect(sendStreamingChunk).toHaveBeenNthCalledWith(3, 'tg:scheduler', '', {
-      threadId: 'thread-scheduled',
-      done: true,
-    });
+    expect(sendStreamingChunk).toHaveBeenCalledTimes(1);
     expect(sendMessage).not.toHaveBeenCalledWith(
       'tg:scheduler',
       'first visible chunk second visible chunk',
@@ -551,7 +595,7 @@ describe('jobs/execution', () => {
     );
   });
 
-  it('redacts provider session handles before delivering streamed scheduler output chunks', async () => {
+  it('redacts provider session handles before delivering finalized scheduler streaming output', async () => {
     const job = makeJob();
     const opsRepository = makeOpsRepository(job);
     const sendStreamingChunk = vi.fn(async () => true);
@@ -595,6 +639,87 @@ describe('jobs/execution', () => {
     expect(deliveredChunk).not.toContain('"newSessionId":"json-stream"');
   });
 
+  it('strips complete internal tags before finalized scheduler streaming output delivery', async () => {
+    const job = makeJob();
+    const opsRepository = makeOpsRepository(job);
+    const sendStreamingChunk = vi.fn(async () => true);
+    const rawOutput =
+      'visible <internal>hidden provider-session:internal-handle</internal> done';
+    const runAgent = vi.fn(async (_group, _input, _onProcess, onStream) => {
+      await onStream({ status: 'success', result: rawOutput } as never);
+      return {
+        status: 'success',
+        result: rawOutput,
+      };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        sendStreamingChunk,
+        resetStreaming: vi.fn(),
+        opsRepository: opsRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+      'serialized',
+    );
+
+    const deliveredChunk = sendStreamingChunk.mock.calls[0]?.[1] as string;
+    expect(deliveredChunk).toBe('visible  done');
+    expect(deliveredChunk).not.toContain('hidden');
+    expect(deliveredChunk).not.toContain('provider-session:internal-handle');
+    expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+      expect.any(String),
+      'completed',
+      'visible  done',
+      null,
+    );
+  });
+
+  it('strips split internal tags across scheduled job streaming deltas', async () => {
+    const job = makeJob();
+    const opsRepository = makeOpsRepository(job);
+    const sendStreamingChunk = vi.fn(async () => true);
+    const runAgent = vi.fn(async (_group, _input, _onProcess, onStream) => {
+      await onStream({ status: 'success', result: 'visible <inter' } as never);
+      await onStream({
+        status: 'success',
+        result: 'nal>hidden provider-session:split-handle</internal> done',
+      } as never);
+      return {
+        status: 'success',
+        result:
+          'visible <internal>hidden provider-session:split-handle</internal> done',
+      };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        sendStreamingChunk,
+        resetStreaming: vi.fn(),
+        opsRepository: opsRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+      'serialized',
+    );
+
+    const deliveredChunk = sendStreamingChunk.mock.calls[0]?.[1] as string;
+    expect(deliveredChunk).toBe('visible  done');
+    expect(deliveredChunk).not.toContain('hidden');
+    expect(deliveredChunk).not.toContain('provider-session:split-handle');
+  });
+
   it('falls back to full result delivery when streamed scheduled job chunks are not delivered', async () => {
     const job = makeJob();
     const opsRepository = makeOpsRepository(job);
@@ -632,13 +757,15 @@ describe('jobs/execution', () => {
       'serialized',
     );
 
-    expect(sendStreamingChunk).toHaveBeenCalledWith('tg:scheduler', head, {
-      threadId: 'thread-scheduled',
-    });
-    expect(sendStreamingChunk).toHaveBeenCalledWith('tg:scheduler', '', {
-      threadId: 'thread-scheduled',
-      done: true,
-    });
+    expect(sendStreamingChunk).toHaveBeenCalledTimes(1);
+    expect(sendStreamingChunk).toHaveBeenCalledWith(
+      'tg:scheduler',
+      expect.stringContaining('FULL-TAIL-'),
+      {
+        threadId: 'thread-scheduled',
+        done: true,
+      },
+    );
     expect(resetStreaming).toHaveBeenCalledWith('tg:scheduler');
     const fallbackCall = sendMessage.mock.calls.find(
       ([jid, text]) =>
@@ -662,6 +789,184 @@ describe('jobs/execution', () => {
     expect(completionSummary).toHaveLength(500);
     expect(completionSummary).toContain('[output truncated; showing tail]');
     expect(completionSummary).not.toContain('FULL-HEAD-');
+  });
+
+  it('does not fall back to full result delivery when finalized scheduler streaming is partially visible', async () => {
+    const job = makeJob();
+    const opsRepository = makeOpsRepository(job);
+    const sendMessage = vi.fn(async () => undefined);
+    const sendStreamingChunk = vi.fn(async () => {
+      throw new PartialMessageDeliveryError({
+        cause: new Error('provider failed after partial send'),
+        deliveredChunks: 1,
+        totalChunks: 2,
+        name: 'SchedulerStreamingPartialDeliveryError',
+        message: 'final streaming was partially delivered',
+      });
+    });
+    const visibleResult = 'partially visible final scheduler result';
+    const runAgent = vi.fn(async (_group, _input, _onProcess, onStream) => {
+      await onStream({ status: 'success', result: visibleResult } as never);
+      return {
+        status: 'success',
+        result: visibleResult,
+      };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: sendMessage as never,
+        sendStreamingChunk,
+        resetStreaming: vi.fn(),
+        opsRepository: opsRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+      'serialized',
+    );
+
+    expect(sendStreamingChunk).toHaveBeenCalledWith(
+      'tg:scheduler',
+      visibleResult,
+      { threadId: 'thread-scheduled', done: true },
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      'tg:scheduler',
+      visibleResult,
+      { threadId: 'thread-scheduled' },
+    );
+    expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+      expect.any(String),
+      'completed',
+      visibleResult,
+      null,
+    );
+  });
+
+  it('falls back only for routes without visible finalized scheduler streaming', async () => {
+    const job = makeJob({
+      notification_routes: [
+        {
+          conversationJid: 'tg:partial',
+          threadId: 'thread-visible',
+          label: 'visible',
+        },
+        {
+          conversationJid: 'tg:fallback',
+          threadId: 'thread-fallback',
+          label: 'fallback',
+        },
+      ],
+    });
+    const opsRepository = makeOpsRepository(job);
+    const sendMessage = vi.fn(async () => undefined);
+    const finalResult = 'route scoped scheduler output';
+    const sendStreamingChunk = vi.fn(async (jid: string) => {
+      if (jid === 'tg:partial') {
+        throw new PartialMessageDeliveryError({
+          cause: new Error('provider failed after partial send'),
+          deliveredChunks: 1,
+          totalChunks: 2,
+          name: 'SchedulerStreamingPartialDeliveryError',
+          message: 'final streaming was partially delivered',
+        });
+      }
+      return false;
+    });
+    const runAgent = vi.fn(async (_group, _input, _onProcess, onStream) => {
+      await onStream({ status: 'success', result: finalResult } as never);
+      return {
+        status: 'success',
+        result: finalResult,
+      };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: sendMessage as never,
+        sendStreamingChunk,
+        resetStreaming: vi.fn(),
+        opsRepository: opsRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+      'serialized',
+    );
+
+    expect(sendStreamingChunk).toHaveBeenCalledWith('tg:partial', finalResult, {
+      threadId: 'thread-visible',
+      done: true,
+    });
+    expect(sendStreamingChunk).toHaveBeenCalledWith(
+      'tg:fallback',
+      finalResult,
+      {
+        threadId: 'thread-fallback',
+        done: true,
+      },
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith('tg:partial', finalResult, {
+      threadId: 'thread-visible',
+    });
+    expect(sendMessage).toHaveBeenCalledWith('tg:fallback', finalResult, {
+      threadId: 'thread-fallback',
+    });
+  });
+
+  it('falls back when finalized scheduler streaming throws an ordinary failure', async () => {
+    const job = makeJob();
+    const opsRepository = makeOpsRepository(job);
+    const sendMessage = vi.fn(async () => undefined);
+    const finalResult = 'ordinary failure scheduler output';
+    const sendStreamingChunk = vi.fn(async () => {
+      throw new Error('provider unavailable before visible send');
+    });
+    const runAgent = vi.fn(async (_group, _input, _onProcess, onStream) => {
+      await onStream({ status: 'success', result: finalResult } as never);
+      return {
+        status: 'success',
+        result: finalResult,
+      };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: sendMessage as never,
+        sendStreamingChunk,
+        resetStreaming: vi.fn(),
+        opsRepository: opsRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+      'serialized',
+    );
+
+    expect(sendStreamingChunk).toHaveBeenCalledWith(
+      'tg:scheduler',
+      finalResult,
+      { threadId: 'thread-scheduled', done: true },
+    );
+    expect(sendMessage).toHaveBeenCalledWith('tg:scheduler', finalResult, {
+      threadId: 'thread-scheduled',
+    });
+    expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+      expect.any(String),
+      'completed',
+      finalResult,
+      null,
+    );
   });
 
   it('redacts provider session handles before fallback scheduler full-result delivery', async () => {
@@ -718,5 +1023,63 @@ describe('jobs/execution', () => {
     expect(fallbackText).not.toContain('provider-session:fallback-tail');
     expect(fallbackText).not.toContain('sessionId=tail-inline');
     expect(fallbackText).not.toContain('"newSessionId":"fallback-json"');
+  });
+
+  it('redacts split provider-session and sessionId handles before bounded fallback slicing', async () => {
+    const job = makeJob();
+    const opsRepository = makeOpsRepository(job);
+    const sendMessage = vi.fn(async () => undefined);
+    const head = `SAFE-HEAD-${'a'.repeat(4_200)}`;
+    const middle = `${'b'.repeat(600)} provider-`;
+    const tail =
+      'session:split-handle sess' +
+      'ionId=tail-inline claude-session-split-handle SAFE-TAIL';
+    const fullResult = `${head}${middle}${tail}`;
+    const runAgent = vi.fn(async (_group, _input, _onProcess, onStream) => {
+      await onStream({ status: 'success', result: head } as never);
+      await onStream({ status: 'success', result: middle } as never);
+      await onStream({ status: 'success', result: tail } as never);
+      return {
+        status: 'success',
+        result: fullResult,
+      };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: sendMessage as never,
+        opsRepository: opsRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+      'serialized',
+    );
+
+    const fallbackCall = sendMessage.mock.calls.find(
+      ([, text]) => typeof text === 'string' && text.includes('SAFE-TAIL'),
+    );
+    expect(fallbackCall).toBeDefined();
+    const fallbackText = fallbackCall?.[1] as string;
+    expect(fallbackText).toContain('[output truncated; showing tail]');
+    expect(fallbackText).toContain('[REDACTED]');
+    expect(fallbackText).toContain('SAFE-TAIL');
+    expect(fallbackText).not.toContain('SAFE-HEAD-');
+    expect(fallbackText).not.toContain('provider-session:split-handle');
+    expect(fallbackText).not.toContain('session:split-handle');
+    expect(fallbackText).not.toContain('sessionId=tail-inline');
+    expect(fallbackText).not.toContain('tail-inline');
+    expect(fallbackText).not.toContain('claude-session-split-handle');
+    expect(fallbackText.length).toBeLessThanOrEqual(
+      RUNTIME_RESULT_SUMMARY_MAX_CHARS,
+    );
+
+    const completionSummary = vi.mocked(opsRepository.completeJobRun).mock
+      .calls[0]?.[2];
+    expect(completionSummary).not.toContain('tail-inline');
+    expect(completionSummary).not.toContain('claude-session-split-handle');
   });
 });

@@ -5,7 +5,7 @@ import { streamApi } from '@grammyjs/stream';
 import { PERMISSION_APPROVAL_TIMEOUT_MS } from '../../config/index.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import type { ChannelOpts } from '../channel-provider.js';
-import { parseTextStyles } from '../../text-styles.js';
+import { parseTextStyles } from '../../messaging/text-styles.js';
 import { splitTelegramDeliveryTextWithLimits } from './channel-delivery-text-splitting.js';
 import { escapeTelegramMarkdownV2 } from './telegram-markdown-v2-escape.js';
 
@@ -59,6 +59,7 @@ export type ActiveProgressState = {
   threadId?: number;
   messageId?: number;
   lastText: string;
+  generation?: number;
 };
 export type PendingUserQuestionState = {
   requestId: string;

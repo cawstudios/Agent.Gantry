@@ -660,7 +660,11 @@ export class PostgresCanonicalJobRepository {
         row.agentId?.replace(/^agent:/, '') ??
         'system')
       : 'system';
-    const agentId = await this.graph.ensureAgent(folder, folder, executor);
+    const agentId = await this.graph.ensureAgentExists(
+      folder,
+      folder,
+      executor,
+    );
     return { agentId, configVersionId: configVersionIdForAgent(agentId) };
   }
 
@@ -669,6 +673,6 @@ export class PostgresCanonicalJobRepository {
     name?: string;
   }): Promise<void> {
     const folder = input.agentId.replace(/^agent:/, '');
-    await this.graph.ensureAgent(folder, input.name || folder);
+    await this.graph.ensureAgentExists(folder, folder);
   }
 }

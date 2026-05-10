@@ -4,6 +4,7 @@ import path from 'path';
 
 import { logger } from '../infrastructure/logging/logger.js';
 import { CHROME_PATH, DEFAULT_CHROME_ARGS } from './browser-config.js';
+import { ensureBrowserTarget } from './browser-cdp-targets.js';
 import type {
   BrowserProfileStatus,
   BrowserSessionStatus,
@@ -166,20 +167,6 @@ function isPidOwnedByBrowserProfile(
   );
 }
 
-async function cdpJsonRequest(
-  port: number,
-  endpoint: string,
-  method = 'GET',
-): Promise<unknown> {
-  const response = await fetch(`http://127.0.0.1:${port}${endpoint}`, {
-    method,
-  });
-  if (!response.ok) {
-    throw new Error(`CDP HTTP ${response.status} for ${endpoint}`);
-  }
-  return response.json();
-}
-
 async function isCdpHttpHealthy(port: number): Promise<boolean> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1_000);
@@ -215,38 +202,6 @@ async function closeUnhealthySession(
   });
 }
 
-async function ensureTarget(port: number): Promise<string | undefined> {
-  const list = await cdpJsonRequest(port, '/json/list');
-  if (Array.isArray(list)) {
-    const firstPage = list.find((entry) => {
-      if (!entry || typeof entry !== 'object') return false;
-      const row = entry as Record<string, unknown>;
-      const id = typeof row.id === 'string' ? row.id : '';
-      const type = typeof row.type === 'string' ? row.type : '';
-      return Boolean(id) && (!type || type === 'page');
-    }) as Record<string, unknown> | undefined;
-    const id =
-      firstPage && typeof firstPage.id === 'string' ? firstPage.id : '';
-    if (id) return id;
-  }
-
-  let created: unknown;
-  try {
-    created = await cdpJsonRequest(port, '/json/new?about:blank', 'PUT');
-  } catch {
-    created = await cdpJsonRequest(port, '/json/new?about:blank');
-  }
-  if (created && typeof created === 'object') {
-    const id =
-      typeof (created as Record<string, unknown>).id === 'string'
-        ? ((created as Record<string, unknown>).id as string)
-        : '';
-    return id || undefined;
-  }
-
-  return undefined;
-}
-
 function touchSession(session: BrowserSession): void {
   const profile =
     getProfile(session.profileName) ?? createProfile(session.profileName);
@@ -266,6 +221,7 @@ function touchSession(session: BrowserSession): void {
       );
     });
   }, session.keepAliveMs);
+  session.keepAliveTimer.unref?.();
 }
 
 async function terminatePid(pid: number): Promise<void> {
@@ -429,7 +385,7 @@ export async function launchBrowser(
 
     const port = await waitForDevToolsActivePort(profile.userDataDir, 10_000);
     await waitForCdpHttp(port, 10_000);
-    const targetId = await ensureTarget(port);
+    const targetId = await ensureBrowserTarget(port);
 
     const session: BrowserSession = {
       profileName,
@@ -547,7 +503,8 @@ export function getKnownBrowserStatus(
 
 export async function closeBrowser(
   profileName = DEFAULT_BROWSER_PROFILE_NAME,
-): Promise<{ closed: boolean }> {
+): Promise<{ closed: boolean; reason?: string; elapsedMs?: number }> {
+  const startedAt = Date.now();
   const normalized = resolveProfileName(profileName);
   const session = sessions.get(normalized);
   if (!session) {
@@ -555,7 +512,13 @@ export async function closeBrowser(
     const lock = await acquireProfileLock(normalized);
     try {
       const record = readBrowserSessionRecord(profile);
-      if (!record) return { closed: false };
+      if (!record) {
+        return {
+          closed: true,
+          reason: 'not_running',
+          elapsedMs: Date.now() - startedAt,
+        };
+      }
       const shouldTerminate =
         isPidAlive(record.pid) &&
         isPidOwnedByBrowserProfile(record.pid, profile);
@@ -572,7 +535,18 @@ export async function closeBrowser(
         last_used: new Date().toISOString(),
         cdp_port: undefined,
       });
-      return { closed: shouldTerminate };
+      if (!shouldTerminate && isPidAlive(record.pid)) {
+        return {
+          closed: false,
+          reason: 'pid_not_owned_by_browser_profile',
+          elapsedMs: Date.now() - startedAt,
+        };
+      }
+      return {
+        closed: true,
+        reason: shouldTerminate ? 'terminated' : 'already_stopped',
+        elapsedMs: Date.now() - startedAt,
+      };
     } finally {
       lock.release();
     }
@@ -589,14 +563,14 @@ export async function closeBrowser(
     // ignore
   }
 
-  const exited = await waitForProcessExit(session, 2_000);
+  let exited = await waitForProcessExit(session, 2_000);
   if (!exited) {
     try {
       process.kill(session.pid, 'SIGKILL');
     } catch {
       // ignore
     }
-    await waitForProcessExit(session, 1_000);
+    exited = await waitForProcessExit(session, 1_000);
   }
 
   session.lock.release();
@@ -607,7 +581,11 @@ export async function closeBrowser(
     cdp_port: undefined,
   });
 
-  return { closed: true };
+  return {
+    closed: exited,
+    reason: exited ? 'terminated' : 'process_did_not_exit',
+    elapsedMs: Date.now() - startedAt,
+  };
 }
 
 export async function closeAllBrowsers(): Promise<void> {

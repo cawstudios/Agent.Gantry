@@ -1,3 +1,8 @@
+import {
+  isCanonicalBrowserCapabilityRule,
+  isKnownProjectedBrowserMcpToolName,
+} from './agent-tool-references.js';
+
 const MCP_WILDCARD_RE = /^mcp__([A-Za-z0-9_-]+)__\*$/;
 const MCP_EXACT_RE = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/;
 const SCOPED_RULE_RE = /^([^()\s]+)\(([^()]*)\)$/;
@@ -178,6 +183,13 @@ export function evaluateAutonomousToolUse(input: {
   let firstInvalidRuleReason: string | undefined;
   let firstRelevantScopedReason: string | undefined;
   for (const rule of normalizeToolRules(input.rules)) {
+    if (
+      isCanonicalBrowserCapabilityRule(rule) &&
+      isKnownProjectedBrowserMcpToolName(toolName)
+    ) {
+      return { allowed: true, matchedRule: rule };
+    }
+
     const validation = validateAutonomousToolRule(rule);
     if (!validation.ok) {
       firstInvalidRuleReason ??= `${validation.reason || 'Invalid tool rule'} (${rule})`;

@@ -11,6 +11,7 @@ import {
 } from '../../shared/admin-mcp-tools.js';
 import {
   buildAgentToolAccessView,
+  buildRequestableBrowserToolAccess,
   buildRequestableAdminToolAccess,
   formatAgentToolAccess,
   PERMISSION_GATED_NATIVE_TOOLS,
@@ -64,6 +65,12 @@ export const enabledMyClawMcpTools = parseEnabledMyClawMcpToolNames(
 export const configuredAllowedTools = parseConfiguredAllowedTools(
   process.env.MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON,
 );
+export const selectedSkillIds = parseJsonStringArray(
+  process.env.MYCLAW_SELECTED_SKILLS_JSON,
+);
+export const selectedMcpServerIds = parseJsonStringArray(
+  process.env.MYCLAW_SELECTED_MCP_SERVERS_JSON,
+);
 
 export function isAdminMcpToolEnabled(toolName: AdminMcpToolName): boolean {
   return enabledAdminMcpTools.has(toolName);
@@ -114,6 +121,9 @@ export function capabilityStatusText(): string {
   for (const adminToolName of enabledAdminMcpTools) {
     availableToolNames.push(adminToolName);
   }
+  const requestableBrowserTools = buildRequestableBrowserToolAccess({
+    configuredTools: configuredAllowedTools,
+  });
   const lines = [
     'MyClaw MCP tools available in this run:',
     ...availableToolNames
@@ -138,6 +148,35 @@ export function capabilityStatusText(): string {
       .slice()
       .sort()
       .map((action) => `- available: ${action}`),
+    '',
+    'Selected skills for this agent:',
+    ...(selectedSkillIds.length > 0
+      ? selectedSkillIds
+          .slice()
+          .sort()
+          .map((skillId) => `- selected: ${skillId}`)
+      : ['- none']),
+    '',
+    'Selected MCP servers for this agent:',
+    ...(selectedMcpServerIds.length > 0
+      ? selectedMcpServerIds
+          .slice()
+          .sort()
+          .map((serverId) => `- selected: ${serverId}`)
+      : ['- none']),
+    '',
+    'Browser capability:',
+    ...(requestableBrowserTools.length > 0
+      ? requestableBrowserTools.flatMap((tool) => [
+          `- requestable: ${tool.tool}`,
+          `  tool_id: ${tool.toolId}`,
+          `  request_permission: ${tool.requestPermission}`,
+          `  note: ${tool.note}`,
+        ])
+      : [
+          '- selected: Browser',
+          '  note: Browser exposes MyClaw-owned browser_* tools. Status is read-only; other actions launch the host-derived profile lazily.',
+        ]),
   ];
   const view = buildAgentToolAccessView({
     configuredTools: configuredAllowedTools,
@@ -151,8 +190,10 @@ export function capabilityStatusText(): string {
             configured === toolName || configured.startsWith(`${toolName}(`),
         ),
     ),
-    requestableAdminTools:
-      buildRequestableAdminToolAccess(enabledAdminMcpTools),
+    requestableAdminTools: [
+      ...buildRequestableAdminToolAccess(enabledAdminMcpTools),
+      ...requestableBrowserTools,
+    ],
     source: 'settings.yaml current agent tools plus runtime defaults',
   });
   return [...lines, '', formatAgentToolAccess(view)].join('\n');

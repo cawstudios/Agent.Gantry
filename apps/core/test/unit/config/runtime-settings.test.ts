@@ -459,6 +459,41 @@ conversations:
     );
   });
 
+  it('rejects raw agent_browser MCP rules in settings agent tools', () => {
+    for (const toolRule of [
+      'mcp__agent_browser__*',
+      'mcp__agent_browser__navigate',
+      'mcp__agent_browser__navigate(url=https://example.com)',
+      'mcp__playwright__browser_click',
+      'mcp__puppeteer__screenshot',
+    ]) {
+      const settings = createDefaultRuntimeSettings();
+      settings.agents.main_agent = {
+        name: 'Main',
+        folder: 'main_agent',
+        bindings: {},
+        capabilities: {
+          toolIds: [toolRule],
+          skillIds: [],
+          mcpServerIds: [],
+        },
+      };
+
+      const result = validateLoadedRuntimeSettings(
+        '/tmp/myclaw-tools',
+        settings,
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.failure?.details.join('\n')).toContain(
+        `agents.main_agent.tools contains invalid tool rule "${toolRule}"`,
+      );
+      expect(result.failure?.details.join('\n')).toContain(
+        'use the canonical Browser tool capability instead',
+      );
+    }
+  });
+
   it('fails closed when mirroring persistent tools for a missing settings agent', () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'myclaw-settings-tools-missing-'),
@@ -475,6 +510,108 @@ conversations:
       ).toThrow('missing settings agent');
       const parsed = loadRuntimeSettings(runtimeHome);
       expect(parsed.agents.missing_agent).toBeUndefined();
+    } finally {
+      fs.rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects raw agent_browser MCP rules before mirroring settings', () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-settings-tools-browser-'),
+    );
+    try {
+      const settings = createDefaultRuntimeSettings();
+      settings.agents.main_agent = {
+        name: 'Main',
+        folder: 'main_agent',
+        bindings: {},
+        capabilities: {
+          toolIds: [],
+          skillIds: [],
+          mcpServerIds: [],
+        },
+      };
+      saveRuntimeSettings(runtimeHome, settings);
+
+      expect(() =>
+        mirrorAgentToolRulesToRuntimeSettings({
+          runtimeHome,
+          agentFolder: 'main_agent',
+          rules: ['mcp__playwright__browser_click'],
+        }),
+      ).toThrow('canonical Browser tool capability');
+      const parsed = loadRuntimeSettings(runtimeHome);
+      expect(parsed.agents.main_agent.capabilities.toolIds).toEqual([]);
+    } finally {
+      fs.rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects projected browser MCP rules before mirroring settings', () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-settings-tools-browser-projected-'),
+    );
+    try {
+      const settings = createDefaultRuntimeSettings();
+      settings.agents.main_agent = {
+        name: 'Main',
+        folder: 'main_agent',
+        bindings: {},
+        capabilities: {
+          toolIds: [],
+          skillIds: [],
+          mcpServerIds: [],
+        },
+      };
+      saveRuntimeSettings(runtimeHome, settings);
+
+      expect(() =>
+        mirrorAgentToolRulesToRuntimeSettings({
+          runtimeHome,
+          agentFolder: 'main_agent',
+          rules: ['mcp__myclaw__browser_click'],
+        }),
+      ).toThrow('runtime projections, not durable capabilities');
+      const parsed = loadRuntimeSettings(runtimeHome);
+      expect(parsed.agents.main_agent.capabilities.toolIds).toEqual([]);
+    } finally {
+      fs.rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects non-exact Browser aliases before mirroring settings', () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-settings-tools-browser-alias-'),
+    );
+    try {
+      const settings = createDefaultRuntimeSettings();
+      settings.agents.main_agent = {
+        name: 'Main',
+        folder: 'main_agent',
+        bindings: {},
+        capabilities: {
+          toolIds: [],
+          skillIds: [],
+          mcpServerIds: [],
+        },
+      };
+      saveRuntimeSettings(runtimeHome, settings);
+
+      for (const rule of [
+        'browser',
+        'tool:Browser',
+        'Browser(https://example.com/*)',
+      ]) {
+        expect(() =>
+          mirrorAgentToolRulesToRuntimeSettings({
+            runtimeHome,
+            agentFolder: 'main_agent',
+            rules: [rule],
+          }),
+        ).toThrow(/exact canonical Browser capability/);
+      }
+      const parsed = loadRuntimeSettings(runtimeHome);
+      expect(parsed.agents.main_agent.capabilities.toolIds).toEqual([]);
     } finally {
       fs.rmSync(runtimeHome, { recursive: true, force: true });
     }

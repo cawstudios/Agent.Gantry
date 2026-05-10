@@ -22,7 +22,6 @@ import {
   sendFinalProgressUpdate,
 } from './progress-updates.js';
 import { finalizeGroupAgentUserVisibleOutput } from './group-output-finalization.js';
-import { createStreamingOutputState } from './streaming-output-state.js';
 import {
   formatMessages,
   formatOutboundForChannel,
@@ -35,6 +34,8 @@ import { runDreamingForGroup } from './memory-dreaming-runner.js';
 import { settleDeliveryAttempt } from '../jobs/delivery.js';
 import {
   createRuntimeResultSummaryAccumulator,
+  createRuntimeUserVisibleResultAccumulator,
+  createRuntimeUserVisibleStreamSanitizer,
   resolveMemoryUserId,
 } from './session-resume-runtime.js';
 import { firstThreadQueueId, parseThreadQueueKey } from './thread-queue-key.js';
@@ -56,13 +57,17 @@ import {
 import { groupTurnHasRequiredTrigger } from './group-trigger-policy.js';
 import {
   createResponseProgressSenders,
-  sendInitialGroupProgress,
+  startInitialGroupProgress,
   startGroupProgressHeartbeats,
 } from './group-progress-heartbeats.js';
 import { createGroupAgentRunner } from './group-agent-runner.js';
 import { buildMemoryRecallQueryFromMessages } from '../memory/app-memory-recall-query.js';
-import { redactProviderSessionHandlesInText } from '../shared/provider-session-redaction.js';
 let streamingGenerationCounter = 0;
+const PERMISSION_BACKGROUND_DEMOTE_MS = 120_000;
+const activeTurnUiCleanupByQueue = new Map<
+  string,
+  { token: symbol; cancel: () => void }
+>();
 
 export function createGroupProcessor(deps: GroupProcessingDeps) {
   const collectSessionMemory = deps.collectSessionMemory;
@@ -106,6 +111,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     );
     const resolveThreadId = (threadId?: string) => threadId ?? activeThreadId;
     let streamGeneration = (streamingGenerationCounter += 1);
+    let progressGeneration = streamGeneration;
     const buildMessageOptions = (threadId?: string) => {
       const resolved = resolveThreadId(threadId);
       return resolved ? { threadId: resolved } : undefined;
@@ -120,6 +126,20 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         : {}),
       ...(args.done !== undefined ? { done: args.done } : {}),
     });
+    const buildProgressOptions = (args: {
+      threadId?: string;
+      done?: boolean;
+      replaceOnly?: boolean;
+    } = {}): ProgressUpdateOptions => ({
+      ...(resolveThreadId(args.threadId)
+        ? { threadId: resolveThreadId(args.threadId) }
+        : {}),
+      generation: progressGeneration,
+      ...(args.done !== undefined ? { done: args.done } : {}),
+      ...(args.replaceOnly !== undefined
+        ? { replaceOnly: args.replaceOnly }
+        : {}),
+    });
     const sendMessageToChannel = async (
       text: string,
       options?: MessageSendOptions,
@@ -130,10 +150,55 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     const sendProgressToChannel = async (
       text: string,
       options?: ProgressUpdateOptions,
-    ): Promise<void> =>
-      options
-        ? deps.channelRuntime.sendProgressUpdate(chatJid, text, options)
-        : deps.channelRuntime.sendProgressUpdate(chatJid, text);
+    ): Promise<void> => {
+      logger.info(
+        {
+          chatJid,
+          group: group.name,
+          progressText: text,
+          supportsProgress: deps.channelRuntime.supportsProgress(chatJid),
+          done: options?.done ?? false,
+          replaceOnly: options?.replaceOnly ?? false,
+          generation: options?.generation,
+          threadId: options?.threadId,
+        },
+        'Progress lifecycle runtime send attempt',
+      );
+      try {
+        if (options) {
+          await deps.channelRuntime.sendProgressUpdate(chatJid, text, options);
+        } else {
+          await deps.channelRuntime.sendProgressUpdate(chatJid, text);
+        }
+        logger.info(
+          {
+            chatJid,
+            group: group.name,
+            progressText: text,
+            done: options?.done ?? false,
+            replaceOnly: options?.replaceOnly ?? false,
+            generation: options?.generation,
+            threadId: options?.threadId,
+          },
+          'Progress lifecycle runtime send complete',
+        );
+      } catch (err) {
+        logger.warn(
+          {
+            err,
+            chatJid,
+            group: group.name,
+            progressText: text,
+            done: options?.done ?? false,
+            replaceOnly: options?.replaceOnly ?? false,
+            generation: options?.generation,
+            threadId: options?.threadId,
+          },
+          'Progress lifecycle runtime send failed',
+        );
+        throw err;
+      }
+    };
     const memoryUserId = resolveMemoryUserId(missedMessages);
     const defaultMemoryScope = memoryScopeForConversationKind(
       group.conversationKind,
@@ -164,6 +229,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
               userId: memoryUserId,
               threadId: activeThreadId,
             },
+            turnMessages: missedMessages,
           }),
         closeStdin: () => deps.queue.closeStdin(queueJid),
         advanceCursor: createAdvanceCursorHandler({
@@ -299,45 +365,114 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     };
     await setTypingState(true);
     const startedAt = Date.now();
+    let pausedAt: number | null = null;
+    let pausedTotalMs = 0;
+    const activeElapsedMs = () =>
+      Date.now() -
+      startedAt -
+      pausedTotalMs -
+      (pausedAt === null ? 0 : Date.now() - pausedAt);
     let lastAgentProgressAt = startedAt;
     let typingHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let progressTimer: ReturnType<typeof setInterval> | null = null;
+    let progressHeartbeat:
+      | ReturnType<typeof startGroupProgressHeartbeats>
+      | null = null;
+    let backgroundDemoteTimer: ReturnType<typeof setTimeout> | null = null;
+    let backgroundDemoted = false;
+    const turnUiToken = Symbol(queueJid);
     const supportsProgress = deps.channelRuntime.supportsProgress(chatJid);
     const sendDoneProgress = async (state: FinalProgressState) =>
+      (logger.info(
+        {
+          chatJid,
+          group: group.name,
+          state,
+          supportsProgress,
+          elapsed: formatElapsed(activeElapsedMs()),
+          generation: progressGeneration,
+          threadId: activeThreadId,
+        },
+        'Progress lifecycle final requested',
+      ),
       sendFinalProgressUpdate({
         enabled: supportsProgress,
         state,
-        elapsed: formatElapsed(Date.now() - startedAt),
-        options: buildDoneProgressOptions(activeThreadId, true),
+        elapsed: formatElapsed(activeElapsedMs()),
+        options: buildDoneProgressOptions(
+          activeThreadId,
+          false,
+          progressGeneration,
+        ),
         send: sendProgressToChannel,
-      });
-    const { sendWaitingProgress, sendResponseReceipt } =
-      createResponseProgressSenders({
-        supportsProgress,
-        activeThreadId,
-        buildMessageOptions,
-        sendMessageToChannel,
-        sendProgressToChannel,
-      });
-    await sendInitialGroupProgress({
+        onError: (err) =>
+          logger.warn(
+            { err, chatJid, group: group.name, state },
+            'Progress lifecycle final failed',
+          ),
+      }));
+    let activeGenerationHasOutput = false;
+    let sentAnyTurnDoneProgress = false;
+    let sentTurnDoneProgressGeneration: number | null = null;
+    const sendTurnDoneProgress = async (state: FinalProgressState) => {
+      if (
+        !activeGenerationHasOutput ||
+        sentTurnDoneProgressGeneration === progressGeneration
+      ) {
+        return;
+      }
+      sentTurnDoneProgressGeneration = progressGeneration;
+      sentAnyTurnDoneProgress = true;
+      await sendDoneProgress(state);
+    };
+    const { sendResponseReceipt } = createResponseProgressSenders({
+      supportsProgress,
+      activeThreadId,
+      progressGeneration: () => progressGeneration,
+      buildMessageOptions,
+      sendMessageToChannel,
+      sendProgressToChannel,
+    });
+    activeTurnUiCleanupByQueue.get(queueJid)?.cancel();
+    activeTurnUiCleanupByQueue.delete(queueJid);
+    const initialProgress = startInitialGroupProgress({
       supportsProgress,
       groupName: group.name,
       buildMessageOptions,
+      buildProgressOptions,
       sendProgressToChannel,
       log: logger,
     });
-    ({ typingHeartbeatTimer, progressTimer } = startGroupProgressHeartbeats({
+    progressHeartbeat = startGroupProgressHeartbeats({
       supportsProgress,
       isTypingActive: () => typingActive,
       getLastAgentProgressAt: () => lastAgentProgressAt,
-      startedAt,
+      getElapsedMs: activeElapsedMs,
       chatJid,
       groupName: group.name,
       channelRuntime: deps.channelRuntime,
       buildMessageOptions,
+      buildProgressOptions,
       sendProgressToChannel,
       log: logger,
-    }));
+    });
+    ({ typingHeartbeatTimer, progressTimer } = progressHeartbeat);
+    const cancelTurnUiTimers = () => {
+      if (typingHeartbeatTimer) {
+        clearInterval(typingHeartbeatTimer);
+        typingHeartbeatTimer = null;
+      }
+      if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+      }
+      clearBackgroundDemoteTimer();
+      void initialProgress.cancel();
+    };
+    activeTurnUiCleanupByQueue.set(queueJid, {
+      token: turnUiToken,
+      cancel: cancelTurnUiTimers,
+    });
     let hadError = false;
     let outputSentToUser = false;
     const userVisibleTranscript = createRuntimeResultSummaryAccumulator();
@@ -351,35 +486,111 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let outputCallbackError: unknown;
     const supportsStreamingChunks =
       deps.channelRuntime.supportsStreaming(chatJid);
-    const streamingOutput = createStreamingOutputState({
-      enabled: supportsStreamingChunks,
-      finalizeChunk: async (reason) => {
+    let pendingOutputVisible = createRuntimeUserVisibleResultAccumulator();
+    let streamSanitizer = createRuntimeUserVisibleStreamSanitizer();
+    let pendingOutputRawChars = 0;
+    let pendingOutputHasParts = false;
+    const flushBufferedOutput = async (
+      reason: string,
+      options: { done?: boolean; terminal?: boolean } = {},
+    ) => {
+      if (!pendingOutputHasParts) return false;
+      const done = options.done ?? true;
+      const terminal = options.terminal ?? true;
+      const visibleOutput = pendingOutputVisible.snapshot();
+      const finalStreamDelta = streamSanitizer.finish();
+      const rawChars = pendingOutputRawChars;
+      pendingOutputVisible = createRuntimeUserVisibleResultAccumulator();
+      streamSanitizer = createRuntimeUserVisibleStreamSanitizer();
+      pendingOutputRawChars = 0;
+      pendingOutputHasParts = false;
+      const text = visibleOutput ? formatOutboundForChannel(visibleOutput) : '';
+      logger.info({ group: group.name }, `Agent output: ${rawChars} chars`);
+      if (!text) return false;
+      if (supportsStreamingChunks) {
         const settlement = await settleDeliveryAttempt(
           () =>
             deps.channelRuntime.sendStreamingChunk(
               chatJid,
-              '',
-              buildStreamingOptions({ done: true }),
+              finalStreamDelta,
+              buildStreamingOptions({ done }),
             ),
-          { scope: 'runtime-streaming-finalize', target: chatJid },
+          { scope: 'runtime-streaming-output-final', target: chatJid },
         ).catch((err) => {
           logger.warn(
             { err, group: group.name, reason },
-            'Failed to finalize streaming output',
+            'Failed to send finalized streaming output',
           );
           return 'not_delivered' as const;
         });
-        applyDeliverySettlement(settlement, { streamed: true, terminal: true });
-      },
-    });
-    const finalizeStreamingOutput = streamingOutput.finalize;
+        applyDeliverySettlement(settlement, {
+          streamed: true,
+          terminal,
+        });
+      } else {
+        const messageOptions = await buildMessageOptions();
+        const settlement = await settleDeliveryAttempt(
+          () => sendMessageToChannel(text, messageOptions),
+          { scope: 'runtime-output-message-final', target: chatJid },
+        );
+        applyDeliverySettlement(settlement, {
+          streamed: false,
+          terminal,
+        });
+      }
+      userVisibleTranscript.append(`${text}\n`);
+      return true;
+    };
+    const finalizeStreamingOutput = flushBufferedOutput;
     const startNextStreamingMessage = () => {
       streamGeneration = streamingGenerationCounter += 1;
-      streamingOutput.startNext();
+      progressGeneration = streamGeneration;
+      activeGenerationHasOutput = false;
+    };
+    const startNextContentStream = () => {
+      streamGeneration = streamingGenerationCounter += 1;
+      activeGenerationHasOutput = false;
     };
     const notifyTurnIdle = () => {
       deps.queue.notifyIdle(queueJid);
       pendingIdleBoundary = false;
+    };
+    const clearBackgroundDemoteTimer = () => {
+      if (!backgroundDemoteTimer) return;
+      clearTimeout(backgroundDemoteTimer);
+      backgroundDemoteTimer = null;
+    };
+    const pauseActiveElapsed = async () => {
+      if (pausedAt !== null) return;
+      pausedAt = Date.now();
+      progressHeartbeat?.pause();
+      if (supportsProgress) {
+        await sendProgressToChannel(
+          `Paused for approval (${formatElapsed(activeElapsedMs())}).`,
+          buildProgressOptions({ replaceOnly: true }),
+        ).catch(() => undefined);
+      }
+      clearBackgroundDemoteTimer();
+      backgroundDemoteTimer = setTimeout(() => {
+        backgroundDemoted = true;
+        void sendProgressToChannel(
+          'Running in background...',
+          buildProgressOptions({ done: true, replaceOnly: true }),
+        ).catch(() => undefined);
+      }, PERMISSION_BACKGROUND_DEMOTE_MS);
+      backgroundDemoteTimer.unref?.();
+    };
+    const resumeActiveElapsed = async () => {
+      if (pausedAt === null) return;
+      pausedTotalMs += Date.now() - pausedAt;
+      pausedAt = null;
+      clearBackgroundDemoteTimer();
+      progressHeartbeat?.resume();
+      if (backgroundDemoted) {
+        startNextStreamingMessage();
+        progressGeneration = streamGeneration;
+        backgroundDemoted = false;
+      }
     };
     const applyDeliverySettlement = (
       settlement: Awaited<ReturnType<typeof settleDeliveryAttempt>>,
@@ -409,58 +620,53 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       lastAgentProgressAt = Date.now();
       if (awaitingResponseReceipt && !result.interactionBoundary) {
         awaitingResponseReceipt = false;
+        await resumeActiveElapsed();
+        startNextContentStream();
         await sendResponseReceipt();
       }
       if (result.result) {
         if (!typingActive) {
           await setTypingState(true);
         }
+        activeGenerationHasOutput = true;
         const raw =
           typeof result.result === 'string'
             ? result.result
             : JSON.stringify(result.result);
-        const safeRaw = redactProviderSessionHandlesInText(raw);
         sawRawOutput = true;
         pendingIdleBoundary = true;
-        const text = formatOutboundForChannel(safeRaw);
-        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-        if (text) {
-          if (supportsStreamingChunks) {
-            streamingOutput.markContent();
+        pendingOutputHasParts = true;
+        pendingOutputRawChars += raw.length;
+        pendingOutputVisible.append(raw);
+        if (supportsStreamingChunks) {
+          const safeDelta = streamSanitizer.append(raw);
+          const text = safeDelta ? formatOutboundForChannel(safeDelta) : '';
+          if (text) {
             const settlement = await settleDeliveryAttempt(
               () =>
                 deps.channelRuntime.sendStreamingChunk(
                   chatJid,
-                  safeRaw,
-                  buildStreamingOptions({}),
+                  text,
+                  buildStreamingOptions({ done: false }),
                 ),
-              { scope: 'runtime-streaming-output', target: chatJid },
+              { scope: 'runtime-streaming-output-live', target: chatJid },
             );
             applyDeliverySettlement(settlement, {
               streamed: true,
               terminal: false,
             });
-          } else {
-            const messageOptions = await buildMessageOptions();
-            const settlement = await settleDeliveryAttempt(
-              () => sendMessageToChannel(text, messageOptions),
-              { scope: 'runtime-output-message', target: chatJid },
-            );
-            applyDeliverySettlement(settlement, {
-              streamed: false,
-              terminal: false,
-            });
           }
-          userVisibleTranscript.append(`${text}\n`);
         }
         resetIdleTimer();
       }
 
       if (result.interactionBoundary) {
         pendingIdleBoundary = true;
-        await finalizeStreamingOutput('interaction-boundary');
-        startNextStreamingMessage();
-        await sendWaitingProgress();
+        await finalizeStreamingOutput('interaction-boundary', {
+          done: true,
+          terminal: false,
+        });
+        await pauseActiveElapsed();
         await setTypingState(false);
         awaitingResponseReceipt = true;
         resetIdleTimer();
@@ -468,6 +674,12 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
 
       if (isAgentTurnCompleteMarker(result)) {
         await finalizeStreamingOutput('success-marker');
+        if (result.continuedByFollowup) {
+          startNextContentStream();
+          resetIdleTimer();
+          return;
+        }
+        await sendTurnDoneProgress('completed');
         notifyTurnIdle();
         startNextStreamingMessage();
         await setTypingState(false);
@@ -476,6 +688,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
 
       if (result.status === 'error') {
         hadError = true;
+        await resumeActiveElapsed();
         await finalizeStreamingOutput('error-marker');
         await setTypingState(false);
       }
@@ -500,6 +713,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             threadId: activeThreadId,
             recallQuery,
           },
+          turnMessages: missedMessages,
         },
       );
     } finally {
@@ -511,11 +725,15 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         logger,
       });
       await finalizeStreamingOutput('turn-complete');
+      await resumeActiveElapsed();
       if (output === 'success' && pendingIdleBoundary) {
         notifyTurnIdle();
       }
-      if (typingHeartbeatTimer) clearInterval(typingHeartbeatTimer);
-      if (progressTimer) clearInterval(progressTimer);
+      cancelTurnUiTimers();
+      const activeCleanup = activeTurnUiCleanupByQueue.get(queueJid);
+      if (activeCleanup?.token === turnUiToken) {
+        activeTurnUiCleanupByQueue.delete(queueJid);
+      }
       if (idleTimer) clearTimeout(idleTimer);
     }
 
@@ -569,7 +787,14 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
           : sawTerminalDeliveryFailure
             ? 'failed'
             : 'completed';
-    await sendDoneProgress(finalProgressState);
+    if (
+      finalProgressState !== 'completed' ||
+      !sentAnyTurnDoneProgress ||
+      (activeGenerationHasOutput &&
+        sentTurnDoneProgressGeneration !== progressGeneration)
+    ) {
+      await sendDoneProgress(finalProgressState);
+    }
     await setTypingState(false);
     return resultOk;
   }

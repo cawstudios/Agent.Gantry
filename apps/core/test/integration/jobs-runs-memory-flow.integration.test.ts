@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 
 import { _setRuntimeStorageForTest } from '@core/adapters/storage/postgres/runtime-store.js';
+import { PostgresCanonicalGraphRepository } from '@core/adapters/storage/postgres/repositories/canonical-graph-repository.postgres.js';
+import * as pgSchema from '@core/adapters/storage/postgres/schema/index.js';
 import { quotePostgresIdentifier } from '@core/adapters/storage/postgres/storage-service.js';
 import { _resetSchedulerLoopForTests, runJob } from '@core/jobs/scheduler.js';
 import { AppMemoryService } from '@core/memory/app-memory-service.js';
@@ -212,6 +215,38 @@ maybeDescribe('jobs, runs, memory, and scheduler flow', () => {
     await expect(runtime.ops.getJobById(job.id)).resolves.toMatchObject({
       session_id: 'control-session-correlation-only',
     });
+  });
+
+  it('does not overwrite canonical agent names from system job titles', async () => {
+    const graph = new PostgresCanonicalGraphRepository(runtime.service.db);
+    await graph.ensureAgent('main_agent', 'Main Agent');
+
+    await runtime.ops.upsertJob(
+      makeJob('system:dreaming:main_agent:tg-5759865942', {
+        group_scope: 'main_agent',
+        name: 'Memory Dreaming (main_agent tg:5759865942)',
+        execution_context: {
+          conversationJid: 'tg:5759865942',
+          threadId: null,
+          groupScope: 'main_agent',
+          sessionId: null,
+        },
+        notification_routes: [
+          {
+            conversationJid: 'tg:5759865942',
+            threadId: null,
+            label: 'Telegram DM',
+          },
+        ],
+      }),
+    );
+
+    const rows = await runtime.service.db
+      .select({ name: pgSchema.agentsPostgres.name })
+      .from(pgSchema.agentsPostgres)
+      .where(eq(pgSchema.agentsPostgres.id, 'agent:main_agent'))
+      .limit(1);
+    expect(rows[0]?.name).toBe('Main Agent');
   });
 
   it('uses durable scheduler lifecycle notifications for scheduler runs', async () => {

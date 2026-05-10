@@ -78,6 +78,15 @@ export async function startMyClawRuntime(
     ops: storage.ops,
     repositories: storage.repositories,
   });
+  const browserToolModulePath = [
+    '..',
+    'adapters',
+    'browser',
+    'browser-tool-proxy.js',
+  ].join('/');
+  let browserToolModule: Promise<any> | undefined;
+  const loadBrowserToolModule = () =>
+    (browserToolModule ??= import(browserToolModulePath));
 
   installShutdownHandlers({
     queue: app.queue,
@@ -89,6 +98,8 @@ export async function startMyClawRuntime(
     closeScheduler: stopSchedulerLoop,
     closeOutboundDeliveryRecovery: stopOutboundDeliveryRecoveryLoop,
     closeSettingsWatcher: settingsWatcher.close,
+    closeBrowserToolBackends: async () =>
+      (await loadBrowserToolModule()).closeBrowserToolBackends(),
   });
 
   await channelWiring.connectEnabledChannels(runtimeSettings);
@@ -108,8 +119,13 @@ export async function startMyClawRuntime(
       mcpHostnameLookup,
       opsRepository: storage.ops,
       getToolRepository: () => storage.repositories.tools,
+      settingsRepositories: storage.repositories,
       getOutboundDeliveryRepository: () =>
         storage.repositories.outboundDeliveries,
+      callBrowserTool: async (input) =>
+        (await loadBrowserToolModule()).callBrowserTool(input),
+      closeBrowserToolBackends: async (profileName) =>
+        (await loadBrowserToolModule()).closeBrowserToolBackends(profileName),
     },
   );
   controlServerRef.current = startControlServer({ app });

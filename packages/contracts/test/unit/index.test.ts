@@ -10,6 +10,7 @@ import {
   AgentConversationBindingRequestSchema,
   AgentConversationBindingListResponseSchema,
   AgentConversationBindingResponseSchema,
+  BROWSER_BACKEND_TOOL_NAMES,
   BROWSER_IPC_ACTIONS,
   BrowserProfileResponseSchema,
   ProviderConnectionListResponseSchema,
@@ -105,12 +106,10 @@ describe('contracts package', () => {
   });
 
   it('exports browser IPC actions from the canonical browser module', () => {
-    expect(BROWSER_IPC_ACTIONS).toEqual([
-      'browser_profile_list',
-      'browser_launch',
-      'browser_close',
-      'browser_status',
-    ]);
+    expect(BROWSER_IPC_ACTIONS).toEqual(BROWSER_BACKEND_TOOL_NAMES);
+    expect(BROWSER_IPC_ACTIONS).toContain('browser_status');
+    expect(BROWSER_IPC_ACTIONS).toContain('browser_navigate');
+    expect(BROWSER_IPC_ACTIONS).toContain('browser_take_screenshot');
   });
 
   it('exports and validates contract primitives', () => {

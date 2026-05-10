@@ -1,22 +1,22 @@
 import fs from 'fs';
 import path from 'path';
 
-import { BrowserIpcAction } from '@myclaw/contracts';
+import { BROWSER_IPC_ACTIONS, type BrowserIpcAction } from '@myclaw/contracts';
 
+import { DATA_DIR } from '../config/index.js';
 import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
 import {
   ensurePrivateDirSync,
   writePrivateFileSync,
 } from '../shared/private-fs.js';
-import { logger } from '../infrastructure/logging/logger.js';
 import {
   DEFAULT_BROWSER_PROFILE_NAME,
   closeBrowser,
   ensureBrowserReady,
   getBrowserStatus,
-  listBrowserProfiles,
 } from './browser-capability.js';
-import { IpcDomainContext } from './ipc-domain-types.js';
+import { ensureBrowserTarget } from './browser-cdp-targets.js';
+import { type IpcDomainContext } from './ipc-domain-types.js';
 import type { CredentialBrokerHealth } from '../domain/models/credentials.js';
 import { memoryAgentIdForGroupFolder } from '../memory/app-memory-boundaries.js';
 
@@ -36,18 +36,23 @@ type BrowserContext = Pick<
   IpcDomainContext,
   'sourceAgentFolder' | 'browserProfileName'
 > & {
+  browserIpcAuthorized?: boolean;
   getCredentialBroker?: IpcDomainContext['deps']['getCredentialBroker'];
   getCredentialBrokerProfile?: IpcDomainContext['deps']['getCredentialBrokerProfile'];
+  callBrowserTool?: IpcDomainContext['deps']['callBrowserTool'];
+  closeBrowserToolBackends?: IpcDomainContext['deps']['closeBrowserToolBackends'];
+  timeoutMs?: number;
 };
 type BrowserStatusPayload = Record<string, unknown> & {
   brokerHealthy?: boolean;
   brokerHealth?: CredentialBrokerHealth;
   warning?: string;
 };
-type BrowserActionHandler = (
-  request: BrowserRequest,
-  context: BrowserContext,
-) => Promise<BrowserResponse>;
+const BROKER_HEALTH_CACHE_MS = 5_000;
+const brokerHealthCache = new Map<
+  string,
+  { expiresAt: number; value: CredentialBrokerHealth | undefined }
+>();
 
 function toOptionalBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
@@ -87,21 +92,14 @@ function sanitizeBrowserStatus(value: unknown): unknown {
   };
 }
 
-function sanitizeBrowserProfiles(value: unknown): unknown {
-  if (!Array.isArray(value)) return value;
-  return value.map((row) => {
-    if (!row || typeof row !== 'object') return row;
-    const profile = row as Record<string, unknown>;
-    return {
-      name: profile.name,
-      created_at: profile.created_at,
-      last_used: profile.last_used,
-      auth_markers: profile.auth_markers,
-      has_state: profile.has_state,
-      running: profile.running,
-      cdpReady: profile.cdpReady,
-    };
-  });
+function sanitizeUrlForLog(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return '[invalid-url]';
+  }
 }
 
 async function inspectToolCapabilityBrokerHealth(
@@ -137,6 +135,23 @@ async function inspectToolCapabilityBrokerHealth(
   });
 }
 
+async function cachedToolCapabilityBrokerHealth(
+  context: BrowserContext,
+): Promise<CredentialBrokerHealth | undefined> {
+  const brokerProfile = context.getCredentialBrokerProfile?.() || 'default';
+  const cacheKey = `${context.sourceAgentFolder}:${brokerProfile}`;
+  const cached = brokerHealthCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = await inspectToolCapabilityBrokerHealth(context);
+  if (value?.status !== 'fail') {
+    brokerHealthCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + BROKER_HEALTH_CACHE_MS,
+    });
+  }
+  return value;
+}
+
 async function attachToolCapabilityBrokerHealth(
   data: unknown,
   context: BrowserContext,
@@ -144,11 +159,14 @@ async function attachToolCapabilityBrokerHealth(
   if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
   let brokerHealth: CredentialBrokerHealth | undefined;
   try {
-    brokerHealth = await inspectToolCapabilityBrokerHealth(context);
+    brokerHealth = await cachedToolCapabilityBrokerHealth(context);
   } catch (err) {
-    logger.warn(
-      { err, sourceAgentFolder: context.sourceAgentFolder },
+    console.warn(
       'Credential broker health check failed during browser IPC status',
+      {
+        err,
+        sourceAgentFolder: context.sourceAgentFolder,
+      },
     );
     brokerHealth = {
       status: 'fail',
@@ -173,71 +191,113 @@ async function attachToolCapabilityBrokerHealth(
   return next;
 }
 
-const browserActionHandlers: Record<BrowserIpcAction, BrowserActionHandler> = {
-  browser_profile_list: async () => {
+async function handleBrowserToolAction(
+  request: BrowserRequest,
+  context: BrowserContext,
+): Promise<BrowserResponse> {
+  const profileName = getProfileNameFromPayload(request.payload, context);
+  switch (request.action) {
+    case 'browser_status':
+      return {
+        ok: true,
+        data: await attachToolCapabilityBrokerHealth(
+          sanitizeBrowserStatus(await getBrowserStatus(profileName)),
+          context,
+        ),
+      };
+  }
+  if (!context.browserIpcAuthorized) {
     return {
-      ok: true,
-      data: { profiles: sanitizeBrowserProfiles(await listBrowserProfiles()) },
+      ok: false,
+      error:
+        'Browser IPC is not authorized for this run. Select the canonical Browser capability before using browser actions.',
     };
-  },
-  browser_launch: async (request, context) => {
-    const profileName = getProfileNameFromPayload(request.payload, context);
-    const status = await ensureBrowserReady({
+  }
+  switch (request.action) {
+    case 'browser_launch': {
+      const status = await ensureBrowserReady({
+        profileName,
+        headless: toOptionalBoolean(request.payload.headless),
+        keepAliveMs: toOptionalNumber(request.payload.keep_alive_ms, {
+          min: 10_000,
+          max: 3_600_000,
+        }),
+      });
+      return {
+        ok: true,
+        data: await attachToolCapabilityBrokerHealth(
+          sanitizeBrowserStatus(status),
+          context,
+        ),
+      };
+    }
+    case 'browser_close': {
+      const closed = await closeBrowser(profileName);
+      await context.closeBrowserToolBackends?.(profileName);
+      return { ok: true, data: closed };
+    }
+  }
+
+  if (!context.callBrowserTool) {
+    return {
+      ok: false,
+      error: 'Browser action backend is unavailable.',
+    };
+  }
+  const session = await ensureBrowserReady({ profileName });
+  if (session.port) await ensureBrowserTarget(session.port);
+  console.info(
+    'Browser tool action started',
+    {
+      sourceAgentFolder: context.sourceAgentFolder,
       profileName,
-      headless: toOptionalBoolean(request.payload.headless),
-      keepAliveMs: toOptionalNumber(request.payload.keep_alive_ms, {
-        min: 10_000,
-        max: 3_600_000,
-      }),
-    });
-    return {
-      ok: true,
-      data: await attachToolCapabilityBrokerHealth(
-        sanitizeBrowserStatus(status),
-        context,
-      ),
-    };
-  },
-  browser_close: async (request, context) => {
-    const profileName = getProfileNameFromPayload(request.payload, context);
-    const closed = await closeBrowser(profileName);
-    return { ok: true, data: closed };
-  },
-  browser_status: async (request, context) => {
-    const profileName = getProfileNameFromPayload(request.payload, context);
-    return {
-      ok: true,
-      data: await attachToolCapabilityBrokerHealth(
-        sanitizeBrowserStatus(await getBrowserStatus(profileName)),
-        context,
-      ),
-    };
-  },
-};
+      toolName: request.action,
+      url: sanitizeUrlForLog(request.payload.url),
+    },
+  );
+  const result = await context.callBrowserTool({
+    toolName: request.action,
+    arguments: request.payload,
+    session,
+    fileAccessRoot: path.join(
+      DATA_DIR,
+      'sessions',
+      context.sourceAgentFolder,
+      'extra',
+    ),
+    timeoutMs: context.timeoutMs,
+  });
+  console.info(
+    'Browser tool action completed',
+    {
+      sourceAgentFolder: context.sourceAgentFolder,
+      profileName,
+      toolName: request.action,
+      url: sanitizeUrlForLog(request.payload.url),
+    },
+  );
+  return { ok: true, data: result };
+}
 
 export async function processBrowserIpcRequest(
   request: BrowserRequest,
   context: BrowserContext,
 ): Promise<BrowserResponse> {
   try {
-    const handler = browserActionHandlers[request.action];
-    if (!handler) {
+    if (!BROWSER_IPC_ACTIONS.includes(request.action)) {
       return {
         ok: false,
-        error: `Unsupported browser action: ${String(request.action)}`,
+        error: `Unsupported browser IPC action: ${String(request.action)}`,
       };
     }
-    return await handler(request, context);
+    return await handleBrowserToolAction(request, context);
   } catch (err) {
-    logger.warn(
-      {
-        err,
-        sourceAgentFolder: context.sourceAgentFolder,
-        action: request.action,
-        requestId: request.requestId,
-      },
-      'Browser IPC request failed',
-    );
+    console.warn('Browser IPC request failed', {
+      err,
+      sourceAgentFolder: context.sourceAgentFolder,
+      action: request.action,
+      requestId: request.requestId,
+    });
     return {
       ok: false,
       error: err instanceof Error ? err.message : 'Browser IPC request failed',

@@ -184,4 +184,44 @@ describe('admin IPC handlers', () => {
     expect(registerGroup).not.toHaveBeenCalled();
     expect(syncRuntimeSettingsFromProjection).not.toHaveBeenCalled();
   });
+
+  it('rejects projected browser request_permission before queuing review', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { adminTaskHandlers, taskData } = await loadAdminHandlers(runtimeHome);
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: true,
+      decidedBy: 'U_APPROVER',
+    }));
+
+    await adminTaskHandlers.request_permission({
+      data: taskData('request-projected-browser', {
+        type: 'request_permission',
+        chatJid: 'sl:C123',
+        payload: {
+          permissionKind: 'tool',
+          toolName: 'mcp__myclaw__browser_click',
+          temporaryOnly: false,
+          reason: 'need browser click',
+        },
+      }) as never,
+      sourceAgentFolder: 'main_agent',
+      deps: depsWithAdminTools([], { requestPermissionApproval }) as never,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['sl:C123'],
+    });
+
+    expect(readResponse(runtimeHome, 'request-projected-browser')).toMatchObject(
+      {
+        ok: false,
+        code: 'invalid_request',
+        error: expect.stringContaining(
+          'runtime projections, not durable capabilities',
+        ),
+      },
+    );
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+  });
 });

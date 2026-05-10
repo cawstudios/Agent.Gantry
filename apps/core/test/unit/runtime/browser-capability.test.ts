@@ -76,6 +76,15 @@ function cdpResponse(body: unknown): Response {
   return {
     ok: true,
     json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as Response;
+}
+
+function cdpTextResponse(body: string): Response {
+  return {
+    ok: true,
+    json: async () => body,
+    text: async () => body,
   } as Response;
 }
 
@@ -173,9 +182,11 @@ describe('browser-capability', () => {
     mocks.fetch
       .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
       .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]))
+      .mockResolvedValueOnce(cdpTextResponse('ok'))
       .mockRejectedValueOnce(new Error('connection refused'))
       .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
-      .mockResolvedValueOnce(cdpResponse([{ id: 'target-2', type: 'page' }]));
+      .mockResolvedValueOnce(cdpResponse([{ id: 'target-2', type: 'page' }]))
+      .mockResolvedValueOnce(cdpTextResponse('ok'));
 
     await manager.launchBrowser();
     fs.writeFileSync(
@@ -206,6 +217,48 @@ describe('browser-capability', () => {
     expect(mocks.spawn.mock.calls[0][1]).toContain('--headless=new');
   });
 
+  it('creates a content target and closes Chrome internal startup tabs', async () => {
+    const manager = await import('@core/runtime/browser-capability.js');
+    mocks.fetch
+      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
+      .mockResolvedValueOnce(
+        cdpResponse([
+          {
+            id: 'new-tab',
+            type: 'page',
+            url: 'chrome://new-tab-page/',
+          },
+          {
+            id: 'omnibox',
+            type: 'page',
+            url: 'chrome://omnibox-popup/',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(cdpResponse({ id: 'target-1', type: 'page' }))
+      .mockResolvedValue(cdpTextResponse('ok'));
+
+    const status = await manager.launchBrowser();
+
+    expect(status.targetId).toBe('target-1');
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:4567/json/new?about:blank',
+      { method: 'PUT' },
+    );
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:4567/json/activate/target-1',
+      { method: 'GET' },
+    );
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:4567/json/close/new-tab',
+      { method: 'GET' },
+    );
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:4567/json/close/omnibox',
+      { method: 'GET' },
+    );
+  });
+
   it('reports known running sessions without a CDP health probe', async () => {
     const manager = await import('@core/runtime/browser-capability.js');
     mocks.fetch
@@ -222,6 +275,32 @@ describe('browser-capability', () => {
       port: 4567,
     });
     expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns idempotent success when closing an already stopped browser', async () => {
+    const manager = await import('@core/runtime/browser-capability.js');
+
+    await expect(manager.closeBrowser()).resolves.toMatchObject({
+      closed: true,
+      reason: 'not_running',
+    });
+  });
+
+  it('returns diagnostic close success for a running browser session', async () => {
+    const manager = await import('@core/runtime/browser-capability.js');
+    mocks.fetch
+      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
+      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]));
+
+    const status = await manager.launchBrowser();
+    const closed = await manager.closeBrowser();
+
+    expect(killSpy).toHaveBeenCalledWith(status.pid, 'SIGTERM');
+    expect(closed).toMatchObject({
+      closed: true,
+      reason: 'terminated',
+    });
+    expect(closed.elapsedMs).toEqual(expect.any(Number));
   });
 
   it('auto-detects headless mode in CI when no explicit mode is provided', async () => {

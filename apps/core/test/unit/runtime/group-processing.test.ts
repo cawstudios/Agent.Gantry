@@ -582,7 +582,7 @@ describe('createGroupProcessor', () => {
       expect(deps.queue.closeStdin).not.toHaveBeenCalled();
     });
 
-    it('clears typing at a live stream turn boundary before the runner exits', async () => {
+    it('sends done progress at a live stream turn boundary before the runner exits', async () => {
       const liveRun = deferred<AgentOutput>();
       const typingStopped = deferred();
       const channel = makeChannel({
@@ -612,22 +612,20 @@ describe('createGroupProcessor', () => {
 
       expect(deps.queue.notifyIdle).toHaveBeenCalledWith('group1@g.us');
       expect(channel.setTyping).toHaveBeenLastCalledWith('group1@g.us', false);
-      expect(
-        (
-          channel.sendProgressUpdate as ReturnType<typeof vi.fn>
-        ).mock.calls.some(
-          (call) =>
-            typeof call[1] === 'string' && call[1].startsWith('Done in '),
-        ),
-      ).toBe(false);
-
-      liveRun.resolve({ status: 'success', result: null });
-      await processing;
       expect(channel.sendProgressUpdate).toHaveBeenCalledWith(
         'group1@g.us',
         expect.stringMatching(/^Done in /),
-        { done: true, replaceOnly: true },
+        expect.objectContaining({ done: true }),
       );
+
+      liveRun.resolve({ status: 'success', result: null });
+      await processing;
+      const doneCalls = (
+        channel.sendProgressUpdate as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(
+        (call) => typeof call[1] === 'string' && call[1].startsWith('Done in '),
+      );
+      expect(doneCalls).toHaveLength(1);
     });
 
     it('drains unawaited output callbacks before clearing typing and marking idle', async () => {
@@ -1199,6 +1197,7 @@ describe('createGroupProcessor', () => {
       expect(channel.sendProgressUpdate).toHaveBeenCalledWith(
         'group1@g.us',
         'Working on it...',
+        expect.objectContaining({ generation: expect.any(Number) }),
       );
       expect(
         (
@@ -1221,6 +1220,105 @@ describe('createGroupProcessor', () => {
             call[2]?.done === true,
         ),
       ).toBe(true);
+    });
+
+    it('does not post elapsed progress on the first heartbeat tick', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const messages = [makeMessage()];
+      const channel = makeChannel({
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+      });
+      const { deps } = setupHappyPath({ group, messages });
+      deps.channelRuntime = channel;
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          _onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await vi.advanceTimersByTimeAsync(5_000);
+          return { status: 'success', result: 'done' } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(
+        (
+          channel.sendProgressUpdate as ReturnType<typeof vi.fn>
+        ).mock.calls.some(
+          (call) =>
+            typeof call[1] === 'string' &&
+            call[1].startsWith('Still working ('),
+        ),
+      ).toBe(false);
+    });
+
+    it('cancels the previous turn heartbeat when a new turn starts for the same queue', async () => {
+      const firstRun = deferred<AgentOutput>();
+      const group = makeGroup({ requiresTrigger: false });
+      const messages = [makeMessage()];
+      const channel = makeChannel({
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+      });
+      const { deps } = setupHappyPath({ group, messages });
+      deps.channelRuntime = channel;
+
+      mockSpawnAgent
+        .mockImplementationOnce(async () => firstRun.promise)
+        .mockResolvedValue({ status: 'success', result: 'second done' });
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      const first = processGroupMessages('group1@g.us');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await processGroupMessages('group1@g.us');
+
+      const callsAfterSecondTurn = (
+        channel.sendProgressUpdate as ReturnType<typeof vi.fn>
+      ).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(65_000);
+      expect(
+        (channel.sendProgressUpdate as ReturnType<typeof vi.fn>).mock.calls
+          .slice(callsAfterSecondTurn)
+          .some(
+            (call) =>
+              typeof call[1] === 'string' &&
+              call[1].startsWith('Still working ('),
+          ),
+      ).toBe(false);
+
+      firstRun.resolve({ status: 'success', result: null });
+      await first;
+    });
+
+    it('cancels initial progress before final completion on fast runs', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const messages = [makeMessage()];
+      const visibleProgress: string[] = [];
+      const channel = makeChannel({
+        sendProgressUpdate: vi.fn(async (_jid: string, text: string) => {
+          visibleProgress.push(text);
+        }),
+      });
+      const { deps } = setupHappyPath({ group, messages });
+      deps.channelRuntime = channel;
+
+      mockSpawnAgent.mockResolvedValue({
+        status: 'success',
+        result: 'done',
+      } satisfies AgentOutput);
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(visibleProgress).not.toContain('Working on it...');
+      expect(visibleProgress.some((item) => item.startsWith('Done in '))).toBe(
+        true,
+      );
     });
 
     it('posts no-output warning for long silent runs without auto-failing', async () => {
@@ -1296,7 +1394,10 @@ describe('createGroupProcessor', () => {
         1,
         'group1@g.us',
         'stream text',
-        expect.objectContaining({ generation: expect.any(Number) }),
+        expect.objectContaining({
+          done: false,
+          generation: firstCallGeneration,
+        }),
       );
       expect(streamingChannel.sendStreamingChunk).toHaveBeenNthCalledWith(
         2,
@@ -1334,7 +1435,7 @@ describe('createGroupProcessor', () => {
       expect(streamingChannel.sendStreamingChunk).toHaveBeenCalledWith(
         'group1@g.us',
         'stream text',
-        expect.any(Object),
+        expect.objectContaining({ done: false }),
       );
       expect(streamingChannel.sendMessage).toHaveBeenCalledWith(
         'group1@g.us',
@@ -1374,6 +1475,79 @@ describe('createGroupProcessor', () => {
       expect(deliveredChunk).not.toContain('claude-session-stream-handle');
       expect(deliveredChunk).not.toContain('sessionId=inline-stream');
       expect(deliveredChunk).not.toContain('"newSessionId":"json-stream"');
+    });
+
+    it('does not expose split internal tags or provider handles before final streaming delivery', async () => {
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({
+            status: 'success',
+            result: 'visible <inter',
+          });
+          expect(streamingChannel.sendStreamingChunk).toHaveBeenCalledWith(
+            'group1@g.us',
+            'visible',
+            expect.objectContaining({ done: false }),
+          );
+          await onOutput?.({
+            status: 'success',
+            result: 'nal>hidden provider-session:split-handle</internal> done',
+          });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(streamingChannel.sendStreamingChunk).toHaveBeenCalledTimes(3);
+      const deliveredChunk = (
+        streamingChannel.sendStreamingChunk as ReturnType<typeof vi.fn>
+      ).mock.calls.map((call) => call[1]).join('');
+      expect(deliveredChunk).toBe('visibledone');
+      expect(deliveredChunk).not.toContain('hidden');
+      expect(deliveredChunk).not.toContain('provider-session:split-handle');
+    });
+
+    it('suppresses canonical fallback sends when final streaming delivery succeeds', async () => {
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({ status: 'success', result: 'stream text' });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(streamingChannel.sendStreamingChunk).toHaveBeenCalledWith(
+        'group1@g.us',
+        'stream text',
+        expect.objectContaining({ done: false }),
+      );
+      expect(streamingChannel.sendMessage).not.toHaveBeenCalled();
     });
 
     it('redacts provider session handles for non-streaming live output and transcript summaries', async () => {
@@ -1437,6 +1611,7 @@ describe('createGroupProcessor', () => {
     it('advances streaming generation for each completed live SDK turn', async () => {
       const streamingChannel = makeChannel({
         sendStreamingChunk: vi.fn().mockResolvedValue(undefined),
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
       });
       const { deps } = setupHappyPath();
       deps.channelRuntime = streamingChannel;
@@ -1471,7 +1646,7 @@ describe('createGroupProcessor', () => {
       expect(calls[0]).toEqual([
         'group1@g.us',
         'first turn',
-        expect.objectContaining({ generation: firstGeneration }),
+        expect.objectContaining({ done: false, generation: firstGeneration }),
       ]);
       expect(calls[1]).toEqual([
         'group1@g.us',
@@ -1481,14 +1656,172 @@ describe('createGroupProcessor', () => {
       expect(calls[2]).toEqual([
         'group1@g.us',
         'second turn',
-        expect.objectContaining({ generation: secondGeneration }),
+        expect.objectContaining({ done: false, generation: secondGeneration }),
       ]);
       expect(calls[3]).toEqual([
         'group1@g.us',
         '',
         expect.objectContaining({ done: true, generation: secondGeneration }),
       ]);
+      const progressCalls = (
+        streamingChannel.sendProgressUpdate as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(
+        (call) => typeof call[1] === 'string' && call[1].startsWith('Done in '),
+      );
+      expect(progressCalls).toHaveLength(2);
+      expect(progressCalls[0]?.[2]).toEqual(
+        expect.objectContaining({ done: true, generation: firstGeneration }),
+      );
+      expect(progressCalls[1]?.[2]).toEqual(
+        expect.objectContaining({ done: true, generation: secondGeneration }),
+      );
       expect(deps.queue.notifyIdle).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps buffered follow-up work in one progress lifecycle', async () => {
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({ status: 'success', result: 'first answer' });
+          await onOutput?.({
+            status: 'success',
+            result: null,
+            continuedByFollowup: true,
+          });
+          await onOutput?.({ status: 'success', result: 'follow-up answer' });
+          await onOutput?.({ status: 'success', result: null });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      const streamCalls = (
+        streamingChannel.sendStreamingChunk as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      const firstGeneration = streamCalls[0]?.[2]?.generation;
+      const secondGeneration = streamCalls[2]?.[2]?.generation;
+      expect(secondGeneration).toBeGreaterThan(firstGeneration);
+      expect(streamCalls[1]).toEqual([
+        'group1@g.us',
+        '',
+        expect.objectContaining({ done: true, generation: firstGeneration }),
+      ]);
+      expect(streamCalls[3]).toEqual([
+        'group1@g.us',
+        '',
+        expect.objectContaining({ done: true, generation: secondGeneration }),
+      ]);
+
+      const doneProgressCalls = (
+        streamingChannel.sendProgressUpdate as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(
+        (call) => typeof call[1] === 'string' && call[1].startsWith('Done in '),
+      );
+      expect(doneProgressCalls).toHaveLength(1);
+      expect(doneProgressCalls[0]?.[2]).toEqual(
+        expect.objectContaining({ done: true, generation: firstGeneration }),
+      );
+      expect(deps.queue.notifyIdle).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps final progress on the active turn generation after a success marker', async () => {
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({ status: 'success', result: 'turn output' });
+          await onOutput?.({ status: 'success', result: null });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      const streamGeneration = (
+        streamingChannel.sendStreamingChunk as ReturnType<typeof vi.fn>
+      ).mock.calls[0]?.[2]?.generation;
+      expect(streamGeneration).toEqual(expect.any(Number));
+      expect(streamingChannel.sendProgressUpdate).toHaveBeenCalledWith(
+        'group1@g.us',
+        'Done in 0s.',
+        expect.objectContaining({
+          done: true,
+          generation: streamGeneration,
+        }),
+      );
+      expect(
+        (
+          streamingChannel.sendProgressUpdate as ReturnType<typeof vi.fn>
+        ).mock.calls.find((call) => call[1] === 'Done in 0s.')?.[2]
+          ?.replaceOnly,
+      ).toBeUndefined();
+    });
+
+    it('sends final done progress even when fast streaming skipped initial progress', async () => {
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({ status: 'success', result: 'fast output' });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      const progressCalls = (
+        streamingChannel.sendProgressUpdate as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      expect(progressCalls.some((call) => call[1] === 'Working on it...')).toBe(
+        false,
+      );
+      expect(progressCalls).toContainEqual([
+        'group1@g.us',
+        'Done in 0s.',
+        expect.objectContaining({
+          done: true,
+          generation: expect.any(Number),
+        }),
+      ]);
+      expect(
+        progressCalls.find((call) => call[1] === 'Done in 0s.')?.[2]
+          ?.replaceOnly,
+      ).toBeUndefined();
     });
 
     it('does not treat compact boundary markers as turn completion', async () => {
@@ -1528,7 +1861,7 @@ describe('createGroupProcessor', () => {
       expect(deps.queue.notifyIdle).not.toHaveBeenCalled();
     });
 
-    it('splits streaming messages around user interaction boundaries', async () => {
+    it('starts a new content stream after user interaction boundaries', async () => {
       const streamingChannel = makeChannel({
         sendStreamingChunk: vi.fn().mockResolvedValue(true),
         sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
@@ -1564,31 +1897,38 @@ describe('createGroupProcessor', () => {
       expect(calls).toHaveLength(4);
       const beforeGeneration = calls[0]?.[2]?.generation;
       const afterGeneration = calls[2]?.[2]?.generation;
+      expect(afterGeneration).toEqual(expect.any(Number));
       expect(afterGeneration).toBeGreaterThan(beforeGeneration);
       expect(calls[0]).toEqual([
         'group1@g.us',
         'before approval',
-        expect.objectContaining({ generation: beforeGeneration }),
+        expect.objectContaining({ done: false, generation: beforeGeneration }),
       ]);
+      expect(streamingChannel.sendProgressUpdate).toHaveBeenCalledWith(
+        'group1@g.us',
+        'Paused for approval (0s).',
+        expect.objectContaining({
+          replaceOnly: true,
+          generation: beforeGeneration,
+        }),
+      );
+      expect(streamingChannel.sendProgressUpdate).toHaveBeenCalledWith(
+        'group1@g.us',
+        'Response received. Continuing...',
+        expect.objectContaining({
+          replaceOnly: true,
+          generation: beforeGeneration,
+        }),
+      );
       expect(calls[1]).toEqual([
         'group1@g.us',
         '',
         expect.objectContaining({ done: true, generation: beforeGeneration }),
       ]);
-      expect(streamingChannel.sendProgressUpdate).toHaveBeenCalledWith(
-        'group1@g.us',
-        'Waiting for your input.',
-        { replaceOnly: true },
-      );
-      expect(streamingChannel.sendProgressUpdate).toHaveBeenCalledWith(
-        'group1@g.us',
-        'Response received. Continuing...',
-        { replaceOnly: true },
-      );
       expect(calls[2]).toEqual([
         'group1@g.us',
         'after approval',
-        expect.objectContaining({ generation: afterGeneration }),
+        expect.objectContaining({ done: false, generation: afterGeneration }),
       ]);
       expect(calls[3]).toEqual([
         'group1@g.us',
@@ -1596,6 +1936,99 @@ describe('createGroupProcessor', () => {
         expect.objectContaining({ done: true, generation: afterGeneration }),
       ]);
       expect(deps.queue.notifyIdle).toHaveBeenCalledTimes(1);
+    });
+
+    it('excludes permission wait time from final elapsed progress', async () => {
+      vi.useFakeTimers();
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({ status: 'success', result: 'before approval' });
+          await onOutput?.({
+            status: 'success',
+            result: null,
+            interactionBoundary: 'user_interaction',
+          });
+          await vi.advanceTimersByTimeAsync(30_000);
+          await onOutput?.({ status: 'success', result: 'after approval' });
+          await onOutput?.({ status: 'success', result: null });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(streamingChannel.sendProgressUpdate).toHaveBeenCalledWith(
+        'group1@g.us',
+        'Paused for approval (0s).',
+        expect.objectContaining({ replaceOnly: true }),
+      );
+      expect(streamingChannel.sendProgressUpdate).toHaveBeenCalledWith(
+        'group1@g.us',
+        'Done in 0s.',
+        expect.objectContaining({ done: true }),
+      );
+      vi.useRealTimers();
+    });
+
+    it('demotes long permission waits to background and resumes on a fresh generation', async () => {
+      vi.useFakeTimers();
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({ status: 'success', result: 'before approval' });
+          await onOutput?.({
+            status: 'success',
+            result: null,
+            interactionBoundary: 'user_interaction',
+          });
+          await vi.advanceTimersByTimeAsync(121_000);
+          await onOutput?.({ status: 'success', result: 'after approval' });
+          await onOutput?.({ status: 'success', result: null });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(streamingChannel.sendProgressUpdate).toHaveBeenCalledWith(
+        'group1@g.us',
+        'Running in background...',
+        expect.objectContaining({ done: true, replaceOnly: true }),
+      );
+      const calls = (
+        streamingChannel.sendStreamingChunk as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      const beforeGeneration = calls.find((call) => call[1] === 'before approval')?.[2]
+        ?.generation;
+      const afterGeneration = calls.find((call) => call[1] === 'after approval')?.[2]
+        ?.generation;
+      expect(afterGeneration).not.toBe(beforeGeneration);
+      vi.useRealTimers();
     });
 
     it('durably sends pre-boundary output before waiting when streaming is disabled', async () => {
@@ -1819,7 +2252,7 @@ describe('createGroupProcessor', () => {
       });
     });
 
-    it('caps persisted streamed transcript while delivering all chunks', async () => {
+    it('bounds provider-visible streamed output and persisted transcript for large chunked output', async () => {
       const streamingChannel = makeChannel({
         sendStreamingChunk: vi.fn().mockResolvedValue(true),
       });
@@ -1830,13 +2263,14 @@ describe('createGroupProcessor', () => {
         .mockResolvedValue(undefined);
 
       const tailChunk = `TAIL-${'z'.repeat(100)}END`;
+      const splitProviderHandle = 'provider-session:large-live-output';
       const chunks = [
         `HEAD-START${'a'.repeat(900)}`,
         ...Array.from(
           { length: 8 },
           (_, index) => `MIDDLE-${index}-${'b'.repeat(900)}`,
         ),
-        tailChunk,
+        `${splitProviderHandle} ${tailChunk}`,
       ];
       mockSpawnAgent.mockImplementation(
         async (
@@ -1860,7 +2294,12 @@ describe('createGroupProcessor', () => {
       ).mock.calls
         .map((call) => call[1])
         .filter((text): text is string => Boolean(text));
-      expect(streamedChunks).toEqual(chunks);
+      expect(streamedChunks.length).toBeGreaterThan(1);
+      const deliveredStream = streamedChunks.join('');
+      expect(deliveredStream).toContain('HEAD-START');
+      expect(deliveredStream).not.toContain(splitProviderHandle);
+      expect(deliveredStream).toContain('[REDACTED]');
+      expect(deliveredStream.endsWith(tailChunk)).toBe(true);
       const storedTranscript = (deps.opsRepository as any).storeMessage.mock
         .calls[0][0].content as string;
       expect(storedTranscript.length).toBeLessThanOrEqual(
@@ -1868,6 +2307,8 @@ describe('createGroupProcessor', () => {
       );
       expect(storedTranscript).toMatch(/^\[output truncated; showing tail\]\n/);
       expect(storedTranscript).not.toContain('HEAD-START');
+      expect(storedTranscript).not.toContain(splitProviderHandle);
+      expect(storedTranscript).toContain('[REDACTED]');
       expect(storedTranscript.endsWith(tailChunk)).toBe(true);
     });
 
@@ -1910,7 +2351,9 @@ describe('createGroupProcessor', () => {
       ).mock.calls
         .map((call) => call[1])
         .filter((text): text is string => Boolean(text));
-      expect(streamedChunks).toEqual(chunks);
+      expect(streamedChunks.length).toBeGreaterThan(1);
+      expect(streamedChunks.join('')).toContain('HEAD-START');
+      expect(streamedChunks.join('').endsWith(tailChunk)).toBe(true);
       const fallbackText = (
         streamingChannel.sendMessage as ReturnType<typeof vi.fn>
       ).mock.calls[0][1] as string;
@@ -1922,7 +2365,7 @@ describe('createGroupProcessor', () => {
       expect(fallbackText.endsWith(tailChunk)).toBe(true);
     });
 
-    it('caps the persisted run summary for one long streamed delta while streaming the full delta', async () => {
+    it('caps the persisted run summary for one long streamed delta while sending one bounded final chunk', async () => {
       const streamingChannel = makeChannel({
         sendStreamingChunk: vi.fn().mockResolvedValue(true),
       });
@@ -1958,11 +2401,11 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(streamingChannel.sendStreamingChunk).toHaveBeenCalledWith(
-        'group1@g.us',
-        longDelta,
-        expect.objectContaining({ generation: expect.any(Number) }),
-      );
+      const deliveredChunk = (
+        streamingChannel.sendStreamingChunk as ReturnType<typeof vi.fn>
+      ).mock.calls[0]?.[1] as string;
+      expect(deliveredChunk).toContain('HEAD-START');
+      expect(deliveredChunk.endsWith('TAIL-END')).toBe(true);
       const completion = (deps.opsRepository as any).completeSessionAgentRun
         .mock.calls[0][0];
       const summary = completion.resultSummary as string;
@@ -2014,13 +2457,10 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      for (const chunk of chunks) {
-        expect(streamingChannel.sendStreamingChunk).toHaveBeenCalledWith(
-          'group1@g.us',
-          chunk,
-          expect.objectContaining({ generation: expect.any(Number) }),
-        );
-      }
+      const deliveredChunk = (
+        streamingChannel.sendStreamingChunk as ReturnType<typeof vi.fn>
+      ).mock.calls[0]?.[1] as string;
+      expect(deliveredChunk).toContain('HEAD-START');
       const completion = (deps.opsRepository as any).completeSessionAgentRun
         .mock.calls[0][0];
       const summary = completion.resultSummary as string;
@@ -2032,7 +2472,7 @@ describe('createGroupProcessor', () => {
       expect(summary.endsWith('TAIL-END')).toBe(true);
     });
 
-    it('marks streamed transcript and final progress as delivery_incomplete when done finalization fails', async () => {
+    it('falls back to normal final delivery and marks progress incomplete when final streaming delivery fails', async () => {
       const streamingChannel = makeChannel({
         sendStreamingChunk: vi.fn(async (_jid, _text, options) => {
           if (options?.done) {
@@ -2040,6 +2480,7 @@ describe('createGroupProcessor', () => {
           }
           return true;
         }),
+        sendMessage: vi.fn().mockResolvedValue(undefined),
         sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
       });
       const { deps } = setupHappyPath();
@@ -2063,16 +2504,11 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.opsRepository.storeMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: 'stream text',
-          delivery_status: 'partially_sent',
-        }),
-      );
+      expect(streamingChannel.sendMessage).not.toHaveBeenCalled();
       expect(streamingChannel.sendProgressUpdate).toHaveBeenCalledWith(
         'group1@g.us',
         expect.stringMatching(/^Delivery incomplete after /),
-        { done: true, replaceOnly: true },
+        expect.objectContaining({ done: true }),
       );
     });
 

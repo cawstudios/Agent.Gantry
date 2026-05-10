@@ -144,6 +144,8 @@ function makeProvider(
     folderPrefix: `${id}_`,
     isGroupJid: (jid: string) =>
       id === 'telegram' ? jid.startsWith('tg:-') : jid.startsWith('sl:'),
+    canStreamToJid:
+      id === 'telegram' ? (jid: string) => jid.startsWith('tg:-') : undefined,
     formatting: id === 'telegram' ? 'telegram-html' : 'mrkdwn',
     isEnabled: (settings: RuntimeSettings) =>
       id === 'telegram'
@@ -1025,7 +1027,29 @@ describe('createChannelWiring', () => {
     expect(outbound.sendMessage).not.toHaveBeenCalled();
   });
 
-  it('advertises supportsStreaming=false while provider-visible streaming is disabled', async () => {
+  it('advertises supportsStreaming=true when provider streaming sink exists', async () => {
+    const app = makeApp();
+    const outbound = makeChannel({
+      ownsJid: vi.fn((jid: string) => jid === 'tg:-123'),
+      sendStreamingChunk: vi.fn(async () => true),
+    });
+
+    const wiring = createChannelWiring(app, {
+      providerIds: [
+        makeProvider(
+          'telegram',
+          vi.fn(() => outbound),
+        ),
+      ],
+    });
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: true, slack: false }),
+    );
+
+    expect(wiring.supportsStreaming('tg:-123')).toBe(true);
+  });
+
+  it('does not advertise Telegram private draft streaming', async () => {
     const app = makeApp();
     const outbound = makeChannel({
       ownsJid: vi.fn((jid: string) => jid === 'tg:123'),
@@ -1045,13 +1069,18 @@ describe('createChannelWiring', () => {
     );
 
     expect(wiring.supportsStreaming('tg:123')).toBe(false);
+    const ok = await wiring.sendStreamingChunk('tg:123', 'final text', {
+      done: true,
+    });
+    expect(ok).toBe(false);
+    expect(outbound.sendStreamingChunk).not.toHaveBeenCalled();
   });
 
-  it('does not call provider streaming sinks when sendStreamingChunk is invoked', async () => {
+  it('calls provider streaming sinks for partial chunks', async () => {
     const app = makeApp();
     const streamSink = vi.fn(async () => true);
     const outbound = makeChannel({
-      ownsJid: vi.fn((jid: string) => jid === 'tg:123'),
+      ownsJid: vi.fn((jid: string) => jid === 'tg:-123'),
       sendStreamingChunk: streamSink,
     });
 
@@ -1067,20 +1096,55 @@ describe('createChannelWiring', () => {
       makeRuntimeSettings({ telegram: true, slack: false }),
     );
 
-    const ok = await wiring.sendStreamingChunk('tg:123', 'chunk', {
+    const ok = await wiring.sendStreamingChunk('tg:-123', 'chunk', {
       threadId: 'thread-1',
     });
 
-    expect(ok).toBe(false);
-    expect(streamSink).not.toHaveBeenCalled();
+    expect(ok).toBe(true);
+    expect(streamSink).toHaveBeenCalledWith('tg:-123', 'chunk', {
+      threadId: 'thread-1',
+    });
     expect(outbound.sendMessage).not.toHaveBeenCalled();
   });
 
-  it('keeps done=true streaming callbacks non-visible while durable ordering is disabled', async () => {
+  it('calls provider streaming sinks for final chunks and returns their delivery result', async () => {
     const app = makeApp();
     const streamSink = vi.fn(async () => true);
     const outbound = makeChannel({
-      ownsJid: vi.fn((jid: string) => jid === 'tg:123'),
+      ownsJid: vi.fn((jid: string) => jid === 'tg:-123'),
+      sendStreamingChunk: streamSink,
+    });
+
+    const wiring = createChannelWiring(app, {
+      providerIds: [
+        makeProvider(
+          'telegram',
+          vi.fn(() => outbound),
+        ),
+      ],
+    });
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: true, slack: false }),
+    );
+
+    const ok = await wiring.sendStreamingChunk('tg:-123', 'chunk', {
+      threadId: 'thread-1',
+      done: true,
+    });
+
+    expect(ok).toBe(true);
+    expect(streamSink).toHaveBeenCalledWith('tg:-123', 'chunk', {
+      threadId: 'thread-1',
+      done: true,
+    });
+    expect(outbound.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('preserves done=true streaming callbacks after content stripping', async () => {
+    const app = makeApp();
+    const streamSink = vi.fn(async () => true);
+    const outbound = makeChannel({
+      ownsJid: vi.fn((jid: string) => jid === 'tg:-123'),
       sendStreamingChunk: streamSink,
     });
 
@@ -1097,13 +1161,13 @@ describe('createChannelWiring', () => {
     );
 
     const ok = await wiring.sendStreamingChunk(
-      'tg:123',
+      'tg:-123',
       '<internal>only-internal</internal>',
       { done: true },
     );
 
-    expect(ok).toBe(false);
-    expect(streamSink).not.toHaveBeenCalled();
+    expect(ok).toBe(true);
+    expect(streamSink).toHaveBeenCalledWith('tg:-123', '', { done: true });
     expect(outbound.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -1395,7 +1459,7 @@ describe('createChannelWiring', () => {
     expect(questionChannel.sendMessage).not.toHaveBeenCalled();
   });
 
-  it('keeps progress updates non-visible until durable progress delivery exists', async () => {
+  it('uses provider progress sink when available', async () => {
     const app = makeApp({
       'tg:group': { name: 'Group', folder: 'group' },
     });
@@ -1416,12 +1480,16 @@ describe('createChannelWiring', () => {
       makeRuntimeSettings({ telegram: true, slack: false }),
     );
 
-    expect(wiring.supportsProgress('tg:group')).toBe(false);
+    expect(wiring.supportsProgress('tg:group')).toBe(true);
     await wiring.sendProgressUpdate('tg:group', 'Working on it...', {
       threadId: 'thread-1',
     });
 
-    expect(sendProgressUpdate).not.toHaveBeenCalled();
+    expect(sendProgressUpdate).toHaveBeenCalledWith(
+      'tg:group',
+      'Working on it...',
+      { threadId: 'thread-1' },
+    );
   });
 
   it('does not emit user-question receipts through progress or direct sends', async () => {

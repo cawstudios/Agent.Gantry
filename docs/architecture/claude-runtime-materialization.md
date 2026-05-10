@@ -73,11 +73,11 @@ directory for that run, then the Claude Agent SDK loads them from
 For each persona with browser capability, MyClaw also materializes a pinned
 runtime-installed `agent-browser` skill into that same temp directory. It is not
 stored under the repo-bundled `.claude/skills` tree and does not require user
-`.claude` edits. The runtime browser run wiring module owns this per-run
-projection. It always materializes lifecycle guidance, and it only adds the
-`agent_browser` action MCP handoff plus `PLAYWRIGHT_MCP_CDP_ENDPOINT` when the
-persistent browser is already running and CDP-ready at agent startup. The skill
-owns agent guidance for both lifecycle requests and action workflows.
+`.claude` edits. The skill always points the model at the projected public
+`mcp__myclaw__browser_*` tools. Raw Playwright, Puppeteer, or `agent_browser`
+MCP servers may be used only as host-private backend implementation details and
+must not appear in model-visible MCP handoff, requestable capability lists, or
+persisted tool rules.
 
 Durable user-installed files under the runtime-home Claude skills directory are
 not read or copied by enterprise runtime.

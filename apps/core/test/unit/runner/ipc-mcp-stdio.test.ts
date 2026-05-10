@@ -99,6 +99,10 @@ function createMcpFixture(): {
     path.join(sharedDir, 'admin-mcp-tools.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/agent-tool-references.ts'),
+    path.join(sharedDir, 'agent-tool-references.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/memory-ipc-actions.ts'),
     path.join(sharedDir, 'memory-ipc-actions.ts'),
   );
@@ -441,6 +445,37 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     expect(record.result.content[0].text).toContain(
       'request_permission: permissionKind=tool toolName=mcp__myclaw__service_restart temporaryOnly=false',
     );
+    expect(record.result.content[0].text).toContain('requestable: Browser');
+    expect(record.result.content[0].text).toContain('tool_id: tool:Browser');
+    expect(record.result.content[0].text).toContain(
+      'request_permission: permissionKind=tool toolName=Browser toolCategory=browser temporaryOnly=false',
+    );
+    expect(record.result.content[0].text).toContain(
+      'Browser approval exposes MyClaw-owned browser_* tools',
+    );
+  });
+
+  it('shows configured tools, selected skills, and selected MCP servers', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(
+      fixture,
+      'capability_status',
+      {},
+      {
+        MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON: '["Bash(npm test *)"]',
+        MYCLAW_SELECTED_SKILLS_JSON: '["skill:release"]',
+        MYCLAW_SELECTED_MCP_SERVERS_JSON: '["mcp:github"]',
+      },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
+    expect(record.result.content[0].text).toContain(
+      'Configured tools: Bash(npm test *)',
+    );
+    expect(record.result.content[0].text).toContain('selected: skill:release');
+    expect(record.result.content[0].text).toContain('selected: mcp:github');
   });
 
   it('registers selected admin tools and reports remaining requestable tools', async () => {
@@ -505,8 +540,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       'memory_search',
       'memory_save',
       'procedure_save',
-      'browser_launch',
-      'browser_status',
+      'browser',
       'request_skill_install',
       'request_skill_proposal',
       'request_skill_dependency_install',
@@ -798,6 +832,68 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       });
     },
   );
+
+  it('rejects browser-control skill install requests with request_permission guidance', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(fixture, 'request_skill_install', {
+      spec: 'clawhub:agent-browser@1.0.0',
+      provider: 'clawhub',
+      slug: 'agent-browser',
+      reason: 'Install browser automation as a skill.',
+    });
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const taskDir = path.join(fixture.ipcDir, 'tasks');
+    const taskFiles = fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : [];
+    expect(taskFiles).toHaveLength(0);
+    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
+    expect(record.result.isError).toBe(true);
+    expect(record.result.content[0].text).toContain(
+      'Browser control is a built-in MyClaw tool capability',
+    );
+    expect(record.result.content[0].text).toContain(
+      'request_permission with permissionKind="tool", toolName="Browser"',
+    );
+    expect(record.result.content[0].text).toContain('temporaryOnly=false');
+    expect(record.result.content[0].text).not.toContain('temporaryOnly=true');
+    expect(record.result.content[0].text).toContain(
+      'No request_skill_install request was recorded.',
+    );
+  });
+
+  it('rejects browser-control third-party MCP requests with request_permission guidance', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(fixture, 'request_mcp_server', {
+      name: 'agent_browser',
+      transport: 'http',
+      origin: 'https://example.test/playwright/mcp',
+      requestedToolPatterns: ['browser_*', 'page_*'],
+      reason: 'Use Playwright for browser control.',
+      docsUrl: 'https://example.test/puppeteer',
+    });
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const taskDir = path.join(fixture.ipcDir, 'tasks');
+    const taskFiles = fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : [];
+    expect(taskFiles).toHaveLength(0);
+    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
+    expect(record.result.isError).toBe(true);
+    expect(record.result.content[0].text).toContain(
+      'Browser control is a built-in MyClaw tool capability',
+    );
+    expect(record.result.content[0].text).toContain(
+      'request_permission with permissionKind="tool", toolName="Browser"',
+    );
+    expect(record.result.content[0].text).toContain(
+      'projected browser_* tools',
+    );
+    expect(record.result.content[0].text).not.toContain('temporaryOnly=true');
+    expect(record.result.content[0].text).toContain(
+      'No request_mcp_server request was recorded.',
+    );
+  });
 
   it('rejects unsigned task responses from the host boundary', async () => {
     const fixture = createMcpFixture();

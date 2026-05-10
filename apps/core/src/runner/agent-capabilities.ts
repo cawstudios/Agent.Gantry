@@ -15,6 +15,7 @@ import {
   selectedMyClawMcpToolNames,
   selectedMemoryIpcActions,
 } from './myclaw-mcp-tool-surface.js';
+import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-references.js';
 
 export interface AgentCapabilityContext {
   mcpServerPath: string;
@@ -27,6 +28,8 @@ export interface AgentCapabilityContext {
   persona?: AgentPersona;
   browserProfileName?: string;
   configuredAllowedTools?: readonly string[];
+  selectedSkillIds?: readonly string[];
+  selectedMcpServerIds?: readonly string[];
   ipcDir?: string;
   ipcAuthToken?: string;
   browserIpcAuthToken?: string;
@@ -123,7 +126,6 @@ const DEFAULT_ALLOWED_TOOLS = [
   ...MYCLAW_MCP_ALLOWED_TOOLS,
 ] as const;
 
-const DIRECT_RUNTIME_MCP_SERVER_NAMES = new Set(['agent_browser']);
 function sdkToolName(toolRule: string): string {
   const paren = toolRule.indexOf('(');
   return (paren === -1 ? toolRule : toolRule.slice(0, paren)).trim();
@@ -132,6 +134,7 @@ function sdkToolName(toolRule: string): string {
 function configuredToolAllowedForPersona(toolRule: string): boolean {
   if (isMyClawMcpWildcardRule(toolRule)) return false;
   const myclawMcpToolName = myclawMcpToolNameFromFullName(toolRule);
+  if (myclawMcpToolName?.startsWith('browser')) return false;
   if (myclawMcpToolName) return true;
   const toolName = sdkToolName(toolRule);
   return CONFIGURABLE_NATIVE_SDK_TOOL_NAMES.has(toolName);
@@ -184,6 +187,10 @@ const myclawMcpProvider: AgentCapabilityProvider = {
       MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON: JSON.stringify(
         ctx.configuredAllowedTools ?? [],
       ),
+      MYCLAW_SELECTED_SKILLS_JSON: JSON.stringify(ctx.selectedSkillIds ?? []),
+      MYCLAW_SELECTED_MCP_SERVERS_JSON: JSON.stringify(
+        ctx.selectedMcpServerIds ?? [],
+      ),
       MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify(
         selectedMyClawMcpToolNames(ctx.configuredAllowedTools ?? []),
       ),
@@ -192,7 +199,8 @@ const myclawMcpProvider: AgentCapabilityProvider = {
       ),
       ...(ctx.ipcDir ? { MYCLAW_IPC_DIR: ctx.ipcDir } : {}),
       ...(ctx.ipcAuthToken ? { MYCLAW_IPC_AUTH_TOKEN: ctx.ipcAuthToken } : {}),
-      ...(ctx.browserIpcAuthToken
+      ...(ctx.browserIpcAuthToken &&
+      (ctx.configuredAllowedTools ?? []).some(isCanonicalBrowserCapabilityRule)
         ? { MYCLAW_BROWSER_IPC_AUTH_TOKEN: ctx.browserIpcAuthToken }
         : {}),
       ...(ctx.memoryIpcAuthToken
@@ -231,27 +239,11 @@ function selectedAdminMcpToolNames(
 
 const configuredMcpProvider: AgentCapabilityProvider = {
   id: 'configured-mcp',
-  provide: (ctx) => {
-    const mcpServers = Object.fromEntries(
-      Object.entries(ctx.externalMcpServers ?? {}).filter(([name]) =>
-        DIRECT_RUNTIME_MCP_SERVER_NAMES.has(name),
-      ),
-    );
-    const allowedServerPrefixes = Object.keys(mcpServers).map(
-      (name) => `mcp__${name}__`,
-    );
-    const isDirectRuntimeTool = (tool: string) =>
-      allowedServerPrefixes.some((prefix) => tool.startsWith(prefix));
-    return {
-      allowedTools: (ctx.externalMcpAllowedTools ?? []).filter(
-        isDirectRuntimeTool,
-      ),
-      alwaysAllowedTools: (ctx.externalMcpAlwaysAllowedTools ?? []).filter(
-        isDirectRuntimeTool,
-      ),
-      mcpServers,
-    };
-  },
+  provide: () => ({
+    allowedTools: [],
+    alwaysAllowedTools: [],
+    mcpServers: {},
+  }),
 };
 
 const configuredToolProvider: AgentCapabilityProvider = {

@@ -18,18 +18,6 @@ vi.mock('@core/runtime/browser-capability.js', () => ({
     pid: 123,
     targetId: 'target-1',
   })),
-  listBrowserProfiles: vi.fn(async () => [
-    {
-      name: 'default',
-      created_at: '2024-01-01T00:00:00.000Z',
-      last_used: '2024-01-01T00:00:00.000Z',
-      cdp_port: 9222,
-      auth_markers: [],
-      has_state: true,
-      running: false,
-      cdpReady: false,
-    },
-  ]),
 }));
 
 vi.mock('@core/runtime/browser-profiles.js', () => ({
@@ -48,6 +36,10 @@ vi.mock('@core/runtime/browser-profiles.js', () => ({
   ),
 }));
 
+vi.mock('@core/runtime/browser-cdp-targets.js', () => ({
+  ensureBrowserTarget: vi.fn(async () => 'target-1'),
+}));
+
 import { BrowserIpcAction } from '@myclaw/contracts';
 
 import {
@@ -62,7 +54,6 @@ import {
   ensureBrowserReady,
   getBrowserStatus,
 } from '@core/runtime/browser-capability.js';
-
 function fileMode(filePath: string): number {
   return fs.statSync(filePath).mode & 0o777;
 }
@@ -110,7 +101,9 @@ describe('ipc-browser-handler', () => {
       {
         requestId: 'req-1a',
         action: 'browser_status',
-        payload: { profile_name: 'c-child-other123456' },
+        payload: {
+          profile_name: 'c-child-other123456',
+        },
       },
       {
         sourceAgentFolder: 'child',
@@ -144,7 +137,9 @@ describe('ipc-browser-handler', () => {
       {
         requestId: 'req-1d',
         action: 'browser_status',
-        payload: { profile_name: 'c-child-other123456' },
+        payload: {
+          profile_name: 'c-child-other123456',
+        },
         browserProfileName: 'c-child-other123456',
       } as never,
       {
@@ -157,24 +152,55 @@ describe('ipc-browser-handler', () => {
     expect(getBrowserStatus).toHaveBeenCalledWith('c-child-abc123abc123');
   });
 
-  it('sanitizes browser profile lists for configured agents', async () => {
+  it('dispatches browser tools through the private backend after lazy launch', async () => {
+    const callBrowserTool = vi.fn(async () => ({ content: 'tool-result' }));
     const response = await processBrowserIpcRequest(
       {
         requestId: 'req-1c',
-        action: 'browser_profile_list',
-        payload: {},
+        action: 'browser_navigate',
+        payload: { url: 'https://example.test' },
       },
-      { sourceAgentFolder: 'main' },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+      },
     );
 
     expect(response.ok).toBe(true);
-    expect(response.data).toMatchObject({
-      profiles: [{ name: 'default', running: false, cdpReady: false }],
+    expect(ensureBrowserReady).toHaveBeenCalledWith({
+      profileName: 'c-main-abc123abc123',
     });
-    const first = (
-      response.data as { profiles: Array<Record<string, unknown>> }
-    ).profiles[0];
-    expect(first).not.toHaveProperty('cdp_port');
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileAccessRoot: expect.stringContaining('/sessions/main/extra'),
+        toolName: 'browser_navigate',
+        arguments: { url: 'https://example.test' },
+      }),
+    );
+    expect(response.data).toEqual({ content: 'tool-result' });
+  });
+
+  it('denies non-status browser IPC when Browser is not authorized for the run', async () => {
+    const callBrowserTool = vi.fn();
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-1e',
+        action: 'browser_navigate',
+        payload: { url: 'https://example.test' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        callBrowserTool,
+      },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('Browser IPC is not authorized');
+    expect(ensureBrowserReady).not.toHaveBeenCalled();
+    expect(callBrowserTool).not.toHaveBeenCalled();
   });
 
   it('dispatches browser actions via explicit handlers', async () => {
@@ -187,7 +213,7 @@ describe('ipc-browser-handler', () => {
           headless: true,
         },
       },
-      { sourceAgentFolder: 'main' },
+      { sourceAgentFolder: 'main', browserIpcAuthorized: true },
     );
 
     expect(response.ok).toBe(true);
@@ -220,6 +246,7 @@ describe('ipc-browser-handler', () => {
       },
       {
         sourceAgentFolder: 'main_agent',
+        browserIpcAuthorized: true,
         getCredentialBrokerProfile: () => 'onecli',
         getCredentialBroker: async () => ({
           getInjection: vi.fn(),
@@ -289,6 +316,40 @@ describe('ipc-browser-handler', () => {
     });
   });
 
+  it('caches healthy broker status for repeated browser status calls', async () => {
+    const healthCheck = vi.fn(async () => ({
+      status: 'pass' as const,
+      message: 'ok',
+    }));
+    const context = {
+      sourceAgentFolder: 'cache_agent',
+      getCredentialBrokerProfile: () => 'onecli',
+      getCredentialBroker: async () => ({
+        getInjection: vi.fn(),
+        healthCheck,
+        getCapabilities: () => ({
+          profile: 'onecli',
+          supportsAgentBinding: true,
+          returnsRawSecrets: false,
+        }),
+      }),
+    };
+
+    for (const requestId of ['req-cache-1', 'req-cache-2']) {
+      const response = await processBrowserIpcRequest(
+        {
+          requestId,
+          action: 'browser_status',
+          payload: {},
+        },
+        context,
+      );
+      expect(response.ok).toBe(true);
+      expect(response.data).toMatchObject({ brokerHealthy: true });
+    }
+    expect(healthCheck).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores main-agent profile overrides and uses host-derived profile', async () => {
     const response = await processBrowserIpcRequest(
       {
@@ -302,6 +363,7 @@ describe('ipc-browser-handler', () => {
       {
         sourceAgentFolder: 'main',
         browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
       },
     );
 
@@ -315,14 +377,14 @@ describe('ipc-browser-handler', () => {
     const response = await processBrowserIpcRequest(
       {
         requestId: 'req-3',
-        action: 'not-real-action' as BrowserIpcAction,
+        action: 'browser_not_real' as BrowserIpcAction,
         payload: {},
       },
       { sourceAgentFolder: 'main' },
     );
 
     expect(response.ok).toBe(false);
-    expect(response.error).toContain('Unsupported browser action');
+    expect(response.error).toContain('Unsupported browser IPC action');
   });
 
   it('writes browser response files atomically', () => {

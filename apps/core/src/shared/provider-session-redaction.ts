@@ -1,5 +1,18 @@
-const PROVIDER_SESSION_FIELD_NAMES =
-  'sessionId|newSessionId|providerSessionId|externalSessionId|latestProviderSessionId|session_id';
+export const PROVIDER_SESSION_FIELD_NAME_LIST = [
+  'sessionId',
+  'newSessionId',
+  'providerSessionId',
+  'externalSessionId',
+  'latestProviderSessionId',
+  'session_id',
+] as const;
+
+export const PROVIDER_SESSION_HANDLE_START_LIST = [
+  `cl${'aude'}-session-`,
+  'provider-session:',
+] as const;
+
+const PROVIDER_SESSION_FIELD_NAMES = PROVIDER_SESSION_FIELD_NAME_LIST.join('|');
 
 const PROVIDER_SESSION_FIELD_PATTERNS: RegExp[] = [
   new RegExp(

@@ -278,7 +278,13 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
     text: string,
     options: ProgressUpdateOptions = {},
   ): Promise<void> {
-    if (!this.bot) return;
+    if (!this.bot) {
+      logger.info(
+        { jid, progressText: text, options },
+        'Progress lifecycle telegram skipped without bot',
+      );
+      return;
+    }
     const numericId = jid.replace(/^tg:/, '');
     const parsedThreadId = options.threadId
       ? Number.parseInt(options.threadId, 10)
@@ -286,10 +292,66 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
     const key = `progress:${this.buildDraftStreamKey(jid, options.threadId)}`;
     this.loadPersistedProgressMessages();
     const nextText = text.trim();
+    let existing = this.activeProgressMessages.get(key);
+    logger.info(
+      {
+        jid,
+        key,
+        progressText: nextText,
+        done: options.done ?? false,
+        replaceOnly: options.replaceOnly ?? false,
+        generation: options.generation,
+        existing: Boolean(existing),
+        existingGeneration: existing?.generation,
+        existingMessageId: existing?.messageId,
+      },
+      'Progress lifecycle telegram receive',
+    );
+    if (
+      existing &&
+      options.generation !== undefined &&
+      existing.generation !== undefined &&
+      existing.generation !== options.generation
+    ) {
+      if (options.done && options.generation > existing.generation) {
+        // Let terminal progress close the visible handle if runtime advanced an
+        // internal generation before finalizing the same user-visible turn.
+      } else if (options.done || options.replaceOnly) {
+        logger.info(
+          {
+            jid,
+            key,
+            done: options.done ?? false,
+            replaceOnly: options.replaceOnly ?? false,
+            generation: options.generation,
+            existingGeneration: existing.generation,
+          },
+          'Progress lifecycle telegram dropped generation mismatch',
+        );
+        return;
+      }
+      logger.info(
+        {
+          jid,
+          key,
+          done: options.done ?? false,
+          generation: options.generation,
+          existingGeneration: existing.generation,
+        },
+        'Progress lifecycle telegram generation rollover',
+      );
+      this.activeProgressMessages.delete(key);
+      this.persistProgressMessages();
+      if (!options.done) existing = undefined;
+    }
     if (!nextText) {
       if (options.done) {
         this.activeProgressMessages.delete(key);
         this.persistProgressMessages();
+        logger.info(
+          { jid, key, generation: options.generation },
+          'Progress lifecycle telegram cleared empty done',
+        );
       }
       return;
     }
@@ -297,8 +359,13 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
     const sendOptions = Number.isFinite(parsedThreadId)
       ? { message_thread_id: parsedThreadId }
       : {};
-    const existing = this.activeProgressMessages.get(key);
-    if (!existing && options.replaceOnly) return;
+    if (!existing && options.replaceOnly) {
+      logger.info(
+        { jid, key, progressText: nextText, generation: options.generation },
+        'Progress lifecycle telegram dropped replaceOnly without handle',
+      );
+      return;
+    }
     if (!existing) {
       const messageId = await sendTelegramMessageWithResult(
         this.bot.api,
@@ -314,9 +381,24 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
             : undefined,
           messageId,
           lastText: nextText,
+          ...(options.generation !== undefined
+            ? { generation: options.generation }
+          : {}),
         });
         this.persistProgressMessages();
       }
+      logger.info(
+        {
+          jid,
+          key,
+          progressText: nextText,
+          done: options.done ?? false,
+          generation: options.generation,
+          messageId,
+          storedHandle: !options.done,
+        },
+        'Progress lifecycle telegram sent new message',
+      );
       return;
     }
 
@@ -324,6 +406,36 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
       if (options.done) {
         this.activeProgressMessages.delete(key);
         this.persistProgressMessages();
+        logger.info(
+          { jid, key, generation: options.generation },
+          'Progress lifecycle telegram cleared unchanged done',
+        );
+      } else if (!options.replaceOnly) {
+        existing.messageId = await sendTelegramMessageWithResult(
+          this.bot.api,
+          numericId,
+          nextText,
+          sendOptions,
+        );
+        if (options.generation !== undefined) {
+          existing.generation = options.generation;
+        }
+        this.activeProgressMessages.set(key, existing);
+        this.persistProgressMessages();
+        logger.info(
+          {
+            jid,
+            key,
+            generation: options.generation,
+            messageId: existing.messageId,
+          },
+          'Progress lifecycle telegram refreshed unchanged initial message',
+        );
+      } else {
+        logger.info(
+          { jid, key, generation: options.generation },
+          'Progress lifecycle telegram skipped unchanged text',
+        );
       }
       return;
     }
@@ -347,6 +459,16 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
           nextText,
           sendOptions,
         );
+        logger.info(
+          {
+            jid,
+            key,
+            progressText: nextText,
+            generation: options.generation,
+            messageId: existing.messageId,
+          },
+          'Progress lifecycle telegram fallback sent new message',
+        );
       }
     } else {
       existing.messageId = await sendTelegramMessageWithResult(
@@ -355,14 +477,36 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
         nextText,
         sendOptions,
       );
+      logger.info(
+        {
+          jid,
+          key,
+          progressText: nextText,
+          generation: options.generation,
+          messageId: existing.messageId,
+        },
+        'Progress lifecycle telegram sent missing-handle message',
+      );
     }
     existing.lastText = nextText;
+    if (options.generation !== undefined) existing.generation = options.generation;
     if (options.done) {
       this.activeProgressMessages.delete(key);
     } else {
       this.activeProgressMessages.set(key, existing);
     }
     this.persistProgressMessages();
+    logger.info(
+      {
+        jid,
+        key,
+        progressText: nextText,
+        done: options.done ?? false,
+        generation: options.generation,
+        messageId: existing.messageId,
+      },
+      'Progress lifecycle telegram edited existing message',
+    );
   }
 
   async requestPermissionApproval(

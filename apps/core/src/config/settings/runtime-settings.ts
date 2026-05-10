@@ -104,7 +104,16 @@ export function mirrorAgentToolRulesToRuntimeSettings(input: {
   rules: readonly string[];
 }): void {
   const settings = loadRuntimeSettings(input.runtimeHome);
-  const folder = input.agentFolder.trim();
+  addAgentToolRulesToRuntimeSettings(settings, input.agentFolder, input.rules);
+  saveRuntimeSettings(input.runtimeHome, settings);
+}
+
+export function addAgentToolRulesToRuntimeSettings(
+  settings: RuntimeSettings,
+  agentFolder: string,
+  rules: readonly string[],
+): void {
+  const folder = agentFolder.trim();
   const agent = settings.agents[folder];
   if (!agent) {
     throw new Error(
@@ -119,14 +128,13 @@ export function mirrorAgentToolRulesToRuntimeSettings(input: {
     if (!validation.ok) throw new Error(validation.reason);
     next.add(readable);
   }
-  for (const rule of input.rules) {
+  for (const rule of rules) {
     const readable = rule.trim();
     const validation = validateReadableAgentToolRule(readable);
     if (!validation.ok) throw new Error(validation.reason);
     if (readable) next.add(readable);
   }
   agent.capabilities.toolIds = [...next];
-  saveRuntimeSettings(input.runtimeHome, settings);
 }
 
 function writeSettingsYamlAtomic(filePath: string, content: string): void {

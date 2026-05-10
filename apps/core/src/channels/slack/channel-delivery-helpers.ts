@@ -1,5 +1,6 @@
 import { App } from '@slack/bolt';
 
+import { logger } from '../../infrastructure/logging/logger.js';
 import {
   MessageDeliveryResult,
   MessageSendOptions,
@@ -414,18 +415,99 @@ export async function sendSlackProgressUpdate(input: {
   activeProgress: Map<string, ActiveProgressState>;
   persistProgress: () => void;
 }): Promise<void> {
-  if (!input.app) return;
+  if (!input.app) {
+    logger.info(
+      {
+        channelId: input.channelId,
+        key: input.key,
+        progressText: input.text,
+        options: input.options,
+      },
+      'Progress lifecycle slack skipped without app',
+    );
+    return;
+  }
   const trimmed = input.text.trim();
   if (!trimmed) {
     if (input.options.done) {
       input.activeProgress.delete(input.key);
       input.persistProgress();
+      logger.info(
+        {
+          channelId: input.channelId,
+          key: input.key,
+          generation: input.options.generation,
+        },
+        'Progress lifecycle slack cleared empty done',
+      );
     }
     return;
   }
 
-  const existing = input.activeProgress.get(input.key);
-  if (!existing && input.options.replaceOnly) return;
+  let existing = input.activeProgress.get(input.key);
+  logger.info(
+    {
+      channelId: input.channelId,
+      key: input.key,
+      progressText: trimmed,
+      done: input.options.done ?? false,
+      replaceOnly: input.options.replaceOnly ?? false,
+      generation: input.options.generation,
+      existing: Boolean(existing),
+      existingGeneration: existing?.generation,
+      existingMessageTs: existing?.messageTs,
+    },
+    'Progress lifecycle slack receive',
+  );
+  if (
+    existing &&
+    input.options.generation !== undefined &&
+    existing.generation !== undefined &&
+    existing.generation !== input.options.generation
+  ) {
+    if (input.options.done && input.options.generation > existing.generation) {
+      // Let terminal progress close the visible handle if runtime advanced an
+      // internal generation before finalizing the same user-visible turn.
+    } else if (input.options.done || input.options.replaceOnly) {
+      logger.info(
+        {
+          channelId: input.channelId,
+          key: input.key,
+          done: input.options.done ?? false,
+          replaceOnly: input.options.replaceOnly ?? false,
+          generation: input.options.generation,
+          existingGeneration: existing.generation,
+        },
+        'Progress lifecycle slack dropped generation mismatch',
+      );
+      return;
+    }
+    logger.info(
+      {
+        channelId: input.channelId,
+        key: input.key,
+        done: input.options.done ?? false,
+        generation: input.options.generation,
+        existingGeneration: existing.generation,
+      },
+      'Progress lifecycle slack generation rollover',
+    );
+    input.activeProgress.delete(input.key);
+    input.persistProgress();
+    if (!input.options.done) existing = undefined;
+  }
+  if (!existing && input.options.replaceOnly) {
+    logger.info(
+      {
+        channelId: input.channelId,
+        key: input.key,
+        progressText: trimmed,
+        generation: input.options.generation,
+      },
+      'Progress lifecycle slack dropped replaceOnly without handle',
+    );
+    return;
+  }
 
   if (input.options.threadId) {
     try {
@@ -452,9 +534,24 @@ export async function sendSlackProgressUpdate(input: {
         threadId: input.options.threadId,
         messageTs: sent.ts,
         lastText: trimmed,
+        ...(input.options.generation !== undefined
+          ? { generation: input.options.generation }
+          : {}),
       });
       input.persistProgress();
     }
+    logger.info(
+      {
+        channelId: input.channelId,
+        key: input.key,
+        progressText: trimmed,
+        done: input.options.done ?? false,
+        generation: input.options.generation,
+        messageTs: sent.ts,
+        storedHandle: !input.options.done,
+      },
+      'Progress lifecycle slack sent new message',
+    );
     return;
   }
 
@@ -462,6 +559,23 @@ export async function sendSlackProgressUpdate(input: {
     if (input.options.done) {
       input.activeProgress.delete(input.key);
       input.persistProgress();
+      logger.info(
+        {
+          channelId: input.channelId,
+          key: input.key,
+          generation: input.options.generation,
+        },
+        'Progress lifecycle slack cleared unchanged done',
+      );
+    } else {
+      logger.info(
+        {
+          channelId: input.channelId,
+          key: input.key,
+          generation: input.options.generation,
+        },
+        'Progress lifecycle slack skipped unchanged text',
+      );
     }
     return;
   }
@@ -482,12 +596,26 @@ export async function sendSlackProgressUpdate(input: {
   }
 
   existing.lastText = trimmed;
+  if (input.options.generation !== undefined) {
+    existing.generation = input.options.generation;
+  }
   if (input.options.done) {
     input.activeProgress.delete(input.key);
   } else {
     input.activeProgress.set(input.key, existing);
   }
   input.persistProgress();
+  logger.info(
+    {
+      channelId: input.channelId,
+      key: input.key,
+      progressText: trimmed,
+      done: input.options.done ?? false,
+      generation: input.options.generation,
+      messageTs: existing.messageTs,
+    },
+    'Progress lifecycle slack edited existing message',
+  );
 }
 
 export async function waitForSlackUserQuestionSelection(input: {

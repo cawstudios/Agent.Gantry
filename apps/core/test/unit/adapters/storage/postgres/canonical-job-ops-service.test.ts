@@ -32,7 +32,7 @@ describe('CanonicalJobOpsService', () => {
       ],
       group_scope: '',
       capability_policy: {
-        allowed_tools: ['Read', 'mcp__agent_browser__*'],
+        allowed_tools: ['Read', 'Bash(git status *)'],
       },
     });
 
@@ -41,7 +41,7 @@ describe('CanonicalJobOpsService', () => {
     };
     const target = JSON.parse(stored.targetJson) as Record<string, unknown>;
     expect(target.capabilityPolicy).toEqual({
-      allowedTools: ['Read', 'mcp__agent_browser__*'],
+      allowedTools: ['Read', 'Bash(git status *)'],
     });
     expect(target.executionContext).toEqual({
       conversationJid: 'tg:1',

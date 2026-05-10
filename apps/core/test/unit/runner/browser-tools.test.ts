@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const requestBrowserAction = vi.hoisted(() => vi.fn());
 
@@ -25,8 +25,12 @@ class TestMcpServer {
   }
 }
 
-describe('runner browser MCP lifecycle tools', () => {
-  it('delegates browser status to signed IPC without direct CDP probing', async () => {
+describe('runner browser MCP projected tools', () => {
+  beforeEach(() => {
+    requestBrowserAction.mockReset();
+  });
+
+  it('delegates browser tools to signed IPC without direct CDP probing', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     requestBrowserAction.mockResolvedValueOnce({
@@ -44,7 +48,14 @@ describe('runner browser MCP lifecycle tools', () => {
 
     const result = await server.tools.get('browser_status')?.({});
 
-    expect(requestBrowserAction).toHaveBeenCalledWith('browser_status', {});
+    expect([...server.tools.keys()]).toContain('browser_status');
+    expect([...server.tools.keys()]).toContain('browser_navigate');
+    expect([...server.tools.keys()]).not.toContain('browser');
+    expect(requestBrowserAction).toHaveBeenCalledWith(
+      'browser_status',
+      {},
+      undefined,
+    );
     expect(fetch).not.toHaveBeenCalled();
     expect(result).toEqual({
       content: [
@@ -64,5 +75,47 @@ describe('runner browser MCP lifecycle tools', () => {
       ],
     });
     vi.unstubAllGlobals();
+  });
+
+  it('clamps and forwards browser action timeout_ms to signed IPC', async () => {
+    requestBrowserAction.mockResolvedValueOnce({
+      ok: true,
+      data: { ok: true },
+    });
+    const server = new TestMcpServer();
+    registerBrowserTools(server as never);
+
+    await server.tools.get('browser_take_screenshot')?.({
+      timeout_ms: 250_000,
+    });
+
+    expect(requestBrowserAction).toHaveBeenCalledWith(
+      'browser_take_screenshot',
+      {},
+      { timeoutMs: 120_000 },
+    );
+  });
+
+  it('passes through compact browser MCP results without wrapping them as JSON text', async () => {
+    const compactResult = {
+      content: [{ type: 'text', text: 'Saved to /tmp/browser/shot.png' }],
+      file: {
+        path: '/tmp/browser/shot.png',
+        mimeType: 'image/png',
+        sizeBytes: 12,
+      },
+    };
+    requestBrowserAction.mockResolvedValueOnce({
+      ok: true,
+      data: compactResult,
+    });
+    const server = new TestMcpServer();
+    registerBrowserTools(server as never);
+
+    const result = await server.tools.get('browser_take_screenshot')?.({
+      filename: 'shot.png',
+    });
+
+    expect(result).toBe(compactResult);
   });
 });

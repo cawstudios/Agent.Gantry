@@ -12,6 +12,8 @@ import type { ToolCatalogRepository } from '../domain/ports/repositories.js';
 import type { AgentCredentialBroker } from '../domain/ports/agent-credential-broker.js';
 import type { CredentialBrokerProfile } from '../domain/models/credentials.js';
 import type { JobControlPort } from '../application/jobs/job-management-types.js';
+import type { BrowserIpcAction } from '@myclaw/contracts';
+import type { BrowserSessionStatus } from './browser-capability-types.js';
 
 export interface IpcDeps {
   sendMessage: (
@@ -46,8 +48,17 @@ export interface IpcDeps {
     sourceAgentFolder: string,
     rules: string[],
   ) => Promise<void> | void;
+  reloadRuntimeState?: () => Promise<void>;
   getCredentialBroker?: () => Promise<AgentCredentialBroker | undefined>;
   getCredentialBrokerProfile?: () => CredentialBrokerProfile;
+  callBrowserTool?: (input: {
+    toolName: BrowserIpcAction;
+    arguments: Record<string, unknown>;
+    session: BrowserSessionStatus;
+    fileAccessRoot: string;
+    timeoutMs?: number;
+  }) => Promise<unknown>;
+  closeBrowserToolBackends?: (profileName?: string) => Promise<void>;
 }
 
 export interface IpcDomainContext {

@@ -46,6 +46,7 @@ import type { AppId } from '../../domain/app/app.js';
 import {
   asGroupDiscoverySource,
   asPermissionApprovalSurface,
+  asProgressSink,
   asStreamingSink,
   asStreamingStateSink,
   asTypingSink,
@@ -239,24 +240,15 @@ export function createChannelWiring(
   function supportsStreaming(jid: string): boolean {
     const channel = findBoundChannel(jid);
     if (!channel) return false;
-    const hasStreamingSink = asStreamingSink(channel) !== undefined;
-    if (hasStreamingSink) {
-      resolved.logger.debug(
-        { jid },
-        'Provider-visible streaming capability is present but intentionally disabled until durable ordered chunk delivery is available',
-      );
-    }
-    return false;
+    const provider = providerForJid(jid);
+    if (provider?.canStreamToJid?.(jid) === false) return false;
+    return asStreamingSink(channel) !== undefined;
   }
 
   function supportsProgress(jid: string): boolean {
     const channel = findBoundChannel(jid);
     if (!channel) return false;
-    resolved.logger.debug(
-      { jid },
-      'Provider-visible progress updates are intentionally non-visible until they use durable outbound delivery',
-    );
-    return false;
+    return asProgressSink(channel) !== undefined;
   }
   async function sendMessage(
     jid: string,
@@ -610,16 +602,15 @@ export function createChannelWiring(
     }
     const provider = providerForJid(jid);
     const isGroup = provider?.isGroupJid(jid) ?? false;
+    if (provider?.canStreamToJid?.(jid) === false) return false;
     const text = isGroup
       ? stripInternalTagsPreserveWhitespace(rawText)
       : formatOutboundForChannel(rawText, provider?.id ?? channel.name);
     if (!text && !options?.done) return false;
 
-    resolved.logger.debug(
-      { jid, done: options?.done === true },
-      'Provider-visible streaming disabled until durable ordered chunk delivery is available',
-    );
-    return false;
+    const sink = asStreamingSink(channel);
+    if (!sink) return false;
+    return sink.sendStreamingChunk(jid, text, options);
   }
 
   function resetStreaming(jid: string): void {
@@ -642,11 +633,31 @@ export function createChannelWiring(
     text: string,
     options?: ProgressUpdateOptions,
   ): Promise<void> {
-    resolved.logger.debug(
-      { jid, hasThread: typeof options?.threadId === 'string' },
-      'Suppressed provider-visible progress update because durable progress delivery is not available',
+    const channel = findBoundChannel(jid);
+    if (!channel) {
+      resolved.logger.info(
+        { jid, progressText: text, options },
+        'Progress lifecycle channel-wiring skipped without channel',
+      );
+      return;
+    }
+    const sink = asProgressSink(channel);
+    if (!sink) {
+      resolved.logger.info(
+        { jid, progressText: text, options },
+        'Progress lifecycle channel-wiring skipped without progress sink',
+      );
+      return;
+    }
+    resolved.logger.info(
+      { jid, progressText: text, options },
+      'Progress lifecycle channel-wiring send attempt',
     );
-    void text;
+    await sink.sendProgressUpdate(jid, text, options);
+    resolved.logger.info(
+      { jid, progressText: text, options },
+      'Progress lifecycle channel-wiring send complete',
+    );
   }
 
   async function syncGroups(force: boolean): Promise<void> {

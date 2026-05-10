@@ -42,11 +42,11 @@ Three statements. Conflict with any of them means the gap is not closed.
 | --- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------- |
 | G1  | `DEFAULT_MEMORY_AGENT_ID` still live; subject not threaded from session                 | `apps/core/src/memory/app-memory-boundaries.ts:13,54`                                                                      | **blocker** |
 | G2  | Permission timeout not split; autonomous jobs still wait 300s on prompts no one answers | `apps/core/src/shared/permission-timeout.ts`, `apps/core/src/runner/claude/runtime-env.ts:27-35`                           | **blocker** |
-| G3  | Boot does not fail when an MCP tool is registered without a handler                     | obsolete memory ingestion tools were unregistered; scheduler handler parity still needs verification                        | **blocker** |
+| G3  | Boot does not fail when an MCP tool is registered without a handler                     | obsolete memory ingestion tools were unregistered; scheduler handler parity still needs verification                       | **blocker** |
 | G4  | No `scheduler_cancel_run` and no watchdog reaping zombie `running` rows                 | parent plan A Phase 2                                                                                                      | high        |
 | G5  | Telegram chunker still markdown-unaware; long replies truncate silently                 | `apps/core/src/channels/telegram/channel-shared.ts:132-155`, partial-delivery surface                                      | high        |
 | G6  | `formatOperatorError(err)` helper not introduced; three-line errors only ad-hoc         | spot-checked at `permission-callback.ts:175-176`, `channel-wiring-interactions.ts:44`, `runner/mcp/tools/scheduler.ts:220` | medium      |
-| G7  | `browser_status.cdpReady` lies when credential broker is dead                           | parent plan A §95; untouched in this refactor                                                                              | medium      |
+| G7  | Browser facade `status.cdpReady` lies when credential broker is dead                    | parent plan A §95; untouched in this refactor                                                                              | medium      |
 | G8  | Net delta of this branch is +1282 lines, violating parent non-negotiable                | `git diff --stat HEAD` summary                                                                                             | medium      |
 
 ## 5. Phases
@@ -167,16 +167,16 @@ Each phase: **goal**, **scope**, **exit criteria**, **deletion target**, **repro
 
 ### Phase 7 — Browser surface honesty (G7)
 
-**Goal:** `browser_status.cdpReady` reflects driveability.
+**Goal:** Browser facade `status.cdpReady` reflects driveability.
 
 **Scope:**
 
-- `browser_status` checks both process liveness and credential broker reachability before reporting `cdpReady: true`. If the broker is unreachable, `cdpReady: false` with `formatOperatorError`-shaped reason.
+- `mcp__myclaw__browser_status` checks both process liveness and credential broker reachability before reporting `cdpReady: true`. If the broker is unreachable, `cdpReady: false` with `formatOperatorError`-shaped reason.
 - `mcp_list_tools` / `mcp_call_tool` failures during broker outage return the cause chain (Phase 6 helper), not the wrapper.
 
 **Exit criteria:**
 
-- **Repro:** kill the credential broker. `browser_status` reports `cdpReady: false` with cause + recover.
+- **Repro:** kill the credential broker. Browser facade status reports `cdpReady: false` with cause + recover.
 - No path returns `cdpReady: true` for a browser the agent cannot drive.
 
 **Deletion target:** ≥30 lines net.
@@ -223,7 +223,7 @@ Each phase: **goal**, **scope**, **exit criteria**, **deletion target**, **repro
 - [ ] G4 — wedged runner reaped within budget + 1s; `scheduler_cancel_run` ships with handler.
 - [ ] G5 — 30KB markdown round-trips; partial delivery surfaces to operator.
 - [ ] G6 — `formatOperatorError` adopted at audited surfaces; credential-broker error includes cause.
-- [ ] G7 — `browser_status.cdpReady` lies no more.
+- [ ] G7 — Browser facade `status.cdpReady` lies no more.
 - [ ] G8 — branch net delta ≤ 0 vs `main`.
 - [ ] All repros above produce the expected output on a clean clone.
 - [ ] Both parent plans' Phase 1 exit criteria are green.

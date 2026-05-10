@@ -104,8 +104,8 @@ describe('permission approval IPC boundary', () => {
     const pendingDecision = requestPermissionApproval({
       groupFolder,
       threadId,
-      toolName: 'browser_open',
-      title: 'Open internal dashboard',
+      toolName: 'WebFetch',
+      title: 'Fetch internal dashboard',
       decisionReason: 'Needs navigation to complete the task',
       toolInput: {
         url: 'https://example.internal/dashboard',
@@ -119,7 +119,7 @@ describe('permission approval IPC boundary', () => {
           destination: 'session',
           rules: [
             {
-              toolName: 'Browser',
+              toolName: 'WebFetch',
               ruleContent: 'domain:example.internal',
               secretToken: 'must-not-survive',
             },
@@ -142,7 +142,7 @@ describe('permission approval IPC boundary', () => {
       responseNonce: expect.any(String),
       sourceAgentFolder: groupFolder,
       threadId,
-      toolName: 'browser_open',
+      toolName: 'WebFetch',
       toolInput: {
         url: 'https://example.internal/dashboard',
         apiKey: '[REDACTED]',
@@ -157,7 +157,7 @@ describe('permission approval IPC boundary', () => {
           destination: 'session',
           rules: [
             {
-              toolName: 'Browser',
+              toolName: 'WebFetch',
               ruleContent: 'domain:example.internal',
             },
           ],

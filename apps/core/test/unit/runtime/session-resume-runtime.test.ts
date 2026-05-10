@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RuntimeAgentSessionRepository } from '@core/domain/repositories/ops-repo.js';
 import {
+  createRuntimeResultSummaryAccumulator,
   completeSuccessfulRuntimeSessionRun,
   completeFailedRuntimeSessionRun,
   RUNTIME_RESULT_SUMMARY_MAX_CHARS,
   summarizeRuntimeResultForPersistence,
+  truncateRuntimeResultSummary,
 } from '@core/runtime/session-resume-runtime.js';
 
 describe('session-resume-runtime', () => {
@@ -54,6 +56,22 @@ describe('session-resume-runtime', () => {
     expect(summary).toMatch(/^\[output truncated; showing tail\]\n/);
     expect(summary).not.toContain('HEAD-START');
     expect(summary.endsWith('TAIL-END')).toBe(true);
+  });
+
+  it('does not emit marker-only summaries when max chars cannot hold marker and content', () => {
+    const accumulator = createRuntimeResultSummaryAccumulator({ maxChars: 0 });
+    accumulator.append('important body');
+
+    expect(accumulator.snapshot()).toBeNull();
+  });
+
+  it('keeps content instead of marker-only summaries for tiny truncation limits', () => {
+    expect(truncateRuntimeResultSummary('important body', 8)).toBe(
+      'important body',
+    );
+    expect(
+      truncateRuntimeResultSummary('important body', 8),
+    ).not.toBe('[output truncated; showing tail]');
   });
 
   it('redacts completion summaries before storing successful runs', async () => {

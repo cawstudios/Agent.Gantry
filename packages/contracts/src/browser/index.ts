@@ -32,12 +32,33 @@ export type BrowserProfileResponse = z.infer<
   typeof BrowserProfileResponseSchema
 >;
 
-export const BROWSER_IPC_ACTIONS = [
-  'browser_profile_list',
+export const BROWSER_BACKEND_TOOL_NAMES = [
+  'browser_status',
   'browser_launch',
   'browser_close',
-  'browser_status',
+  'browser_click',
+  'browser_console_messages',
+  'browser_drag',
+  'browser_drop',
+  'browser_evaluate',
+  'browser_file_upload',
+  'browser_fill_form',
+  'browser_handle_dialog',
+  'browser_hover',
+  'browser_navigate',
+  'browser_navigate_back',
+  'browser_network_requests',
+  'browser_press_key',
+  'browser_resize',
+  'browser_select_option',
+  'browser_snapshot',
+  'browser_take_screenshot',
+  'browser_tabs',
+  'browser_type',
+  'browser_wait_for',
 ] as const;
+
+export const BROWSER_IPC_ACTIONS = BROWSER_BACKEND_TOOL_NAMES;
 
 export const BrowserIpcActionSchema = z.enum(BROWSER_IPC_ACTIONS);
 export type BrowserIpcAction = (typeof BROWSER_IPC_ACTIONS)[number];

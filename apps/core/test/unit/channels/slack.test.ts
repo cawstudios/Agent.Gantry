@@ -714,6 +714,43 @@ describe('Slack channel', () => {
     expect(appRef.current.client.chat.postMessage).not.toHaveBeenCalled();
   });
 
+  it('starts a fresh Slack progress handle when generation changes under the same chat key', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook(['U123']) as any,
+    );
+    await channel.connect();
+
+    await channel.sendProgressUpdate('sl:C1234567890', 'Working on it...', {
+      generation: 1,
+    });
+    await channel.sendProgressUpdate('sl:C1234567890', 'Working on it...', {
+      generation: 2,
+    });
+
+    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledTimes(2);
+    expect(appRef.current.client.chat.update).not.toHaveBeenCalled();
+
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done in old turn.', {
+      done: true,
+      replaceOnly: true,
+      generation: 1,
+    });
+    expect(appRef.current.client.chat.update).not.toHaveBeenCalled();
+
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done in new turn.', {
+      done: true,
+      replaceOnly: true,
+      generation: 3,
+    });
+    expect(appRef.current.client.chat.update).toHaveBeenCalledWith({
+      channel: 'C1234567890',
+      ts: '1710000000.100200',
+      text: 'Done in new turn.',
+    });
+  });
+
   it('restores Slack progress handles after process restart', async () => {
     const runtimeHome = fs.mkdtempSync('/tmp/myclaw-slack-progress-');
     const savedHome = process.env.MYCLAW_HOME;

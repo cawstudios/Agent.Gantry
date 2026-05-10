@@ -4,6 +4,9 @@ import {
   computeBrowserIpcAuthToken,
   computeIpcAuthToken,
   computeMemoryIpcAuthToken,
+  isBrowserIpcAuthorized,
+  registerBrowserIpcAuthorization,
+  revokeBrowserIpcAuthorization,
   validateIpcAuthToken,
 } from '@core/runtime/ipc-auth.js';
 
@@ -35,6 +38,23 @@ describe('ipc auth token', () => {
     expect(
       computeBrowserIpcAuthToken('team-alpha', 'tg:1', 'thread-a'),
     ).not.toBe(computeBrowserIpcAuthToken('team-alpha', 'tg:1', 'thread-b'));
+  });
+
+  it('ref-counts overlapping browser IPC authorizations for the same scope', () => {
+    const scope = {
+      workspaceKey: 'team-alpha',
+      chatJid: 'tg:1',
+      threadId: 'thread-a',
+    };
+
+    expect(isBrowserIpcAuthorized(scope)).toBe(false);
+    registerBrowserIpcAuthorization(scope);
+    registerBrowserIpcAuthorization(scope);
+    expect(isBrowserIpcAuthorized(scope)).toBe(true);
+    revokeBrowserIpcAuthorization(scope);
+    expect(isBrowserIpcAuthorized(scope)).toBe(true);
+    revokeBrowserIpcAuthorization(scope);
+    expect(isBrowserIpcAuthorized(scope)).toBe(false);
   });
 
   it('derives memory IPC tokens from group, chat, user, default scope, thread, and allowed actions', () => {

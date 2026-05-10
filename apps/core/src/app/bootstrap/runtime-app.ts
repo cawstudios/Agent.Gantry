@@ -433,9 +433,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   const groupProcessor = createGroupProcessor({
     channelRuntime: {
       hasChannel: (chatJid) => channelRuntime.hasChannel(chatJid),
-      // Provider-visible streaming stays disabled until chunk ordering is
-      // durably recorded before dispatch.
-      supportsStreaming: () => false,
+      supportsStreaming: (chatJid) => channelRuntime.supportsStreaming(chatJid),
       supportsProgress: (chatJid) => channelRuntime.supportsProgress(chatJid),
       sendMessage: (chatJid, rawText, options) =>
         channelRuntime.sendMessage(chatJid, rawText, options),
