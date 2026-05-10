@@ -11,6 +11,12 @@ import {
   ADMIN_MCP_TOOL_FULL_NAMES,
   isMyClawMcpWildcardRule,
 } from '../../shared/admin-mcp-tools.js';
+import {
+  BROWSER_ACTION_MCP_RULE_REJECTION_REASON,
+  BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON,
+  isBrowserActionMcpToolRule,
+  isProjectedBrowserMcpToolRule,
+} from '../../shared/agent-tool-references.js';
 
 const ADMIN_TOOLS = new Set<string>(ADMIN_MCP_TOOL_FULL_NAMES);
 
@@ -36,6 +42,40 @@ export function assertJobExtraToolsAllowedForTarget(input: {
   rules: readonly string[];
   inheritedTools: readonly string[];
 }): void {
+  const inheritedBrowserActionRule = input.inheritedTools.find((rule) =>
+    isBrowserActionMcpToolRule(rule),
+  );
+  if (inheritedBrowserActionRule) {
+    throw new ApplicationError(
+      'FORBIDDEN',
+      `Inherited agent tool ${inheritedBrowserActionRule} is invalid. ${BROWSER_ACTION_MCP_RULE_REJECTION_REASON}`,
+    );
+  }
+  const inheritedProjectedBrowserRule = input.inheritedTools.find(
+    isProjectedBrowserMcpToolRule,
+  );
+  if (inheritedProjectedBrowserRule) {
+    throw new ApplicationError(
+      'FORBIDDEN',
+      `Inherited agent tool ${inheritedProjectedBrowserRule} is invalid. ${BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON}`,
+    );
+  }
+  const browserActionRule = input.rules.find((rule) =>
+    isBrowserActionMcpToolRule(rule),
+  );
+  if (browserActionRule) {
+    throw new ApplicationError(
+      'FORBIDDEN',
+      `Tool ${browserActionRule} is a browser action MCP tool and cannot be added as a job-scoped extra. Request persistent Browser capability first with request_permission temporaryOnly=false, then use the projected browser_* tools.`,
+    );
+  }
+  const projectedBrowserRule = input.rules.find(isProjectedBrowserMcpToolRule);
+  if (projectedBrowserRule) {
+    throw new ApplicationError(
+      'FORBIDDEN',
+      `Tool ${projectedBrowserRule} is a runtime projection and cannot be added as a job-scoped extra. ${BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON}`,
+    );
+  }
   const forbidden = input.rules.find(
     (rule) =>
       isMyClawMcpWildcardRule(rule) ||
@@ -111,10 +151,25 @@ export async function resolveAgentToolBindings(input: {
   const tools = await Promise.all(
     activeBindings.map((binding) => input.repository?.getTool(binding.toolId)),
   );
-  return tools.flatMap((tool) => {
+  const rules = tools.flatMap((tool) => {
     const name = tool?.name?.trim();
     return name ? [name] : [];
   });
+  const staleBrowserRule = rules.find(isBrowserActionMcpToolRule);
+  if (staleBrowserRule) {
+    throw new ApplicationError(
+      'FORBIDDEN',
+      `Inherited agent tool ${staleBrowserRule} is invalid. ${BROWSER_ACTION_MCP_RULE_REJECTION_REASON}`,
+    );
+  }
+  const projectedBrowserRule = rules.find(isProjectedBrowserMcpToolRule);
+  if (projectedBrowserRule) {
+    throw new ApplicationError(
+      'FORBIDDEN',
+      `Inherited agent tool ${projectedBrowserRule} is invalid. ${BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON}`,
+    );
+  }
+  return rules;
 }
 
 function mergeUnique(

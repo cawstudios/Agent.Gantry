@@ -84,18 +84,6 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
     data.responseKeyId,
   );
 
-  if (typeof data.script === 'string' && data.script.trim().length > 0) {
-    logger.warn(
-      { sourceAgentFolder, name: data.name },
-      'Rejected scheduler_upsert_job with script payload from IPC',
-    );
-    reject(
-      'script mutation is not allowed for scheduler_upsert_job.',
-      'forbidden',
-    );
-    return;
-  }
-
   if (
     data.scheduleType === undefined ||
     data.scheduleType === null ||
@@ -120,9 +108,8 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
       modelProfileId: data.modelProfileId || null,
       scheduleType: normalizedScheduleType,
       scheduleValue: data.scheduleValue || '',
-      linkedSessions: data.linkedSessions,
-      deliverTo: data.deliverTo,
-      threadId: data.threadId ?? undefined,
+      executionContext: data.executionContext,
+      notificationRoutes: data.notificationRoutes,
       silent: data.silent,
       cleanupAfterMs: data.cleanupAfterMs,
       timeoutMs: data.timeoutMs,
@@ -131,7 +118,6 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
       maxConsecutiveFailures: data.maxConsecutiveFailures,
       executionMode: data.executionMode,
       serialize: data.serialize,
-      groupScope: data.groupScope,
       createdBy: data.createdBy,
       allowedTools: data.allowedTools,
     });
@@ -159,7 +145,9 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
         : ' Model: agent default for this job type.';
     const sourceJid = sourceAgentFolderJids[0] || '';
     const sourceConversation = conversationBindings[sourceJid];
-    const runtimeText = ` Runtime: notifications ${data.threadId || data.authThreadId ? 'this thread' : 'this conversation'}; browser ${formatBrowserProfileLabel({ agentName: sourceConversation?.name ?? sourceAgentFolder, conversationKind: sourceConversation?.conversationKind })}.`;
+    const runtimeThreadId =
+      data.executionContext?.threadId ?? data.authThreadId;
+    const runtimeText = ` Runtime: notifications ${runtimeThreadId ? 'this thread' : 'this conversation'}; browser ${formatBrowserProfileLabel({ agentName: sourceConversation?.name ?? sourceAgentFolder, conversationKind: sourceConversation?.conversationKind })}.`;
     accept(
       (result.created
         ? `Scheduler job created (${result.jobId}).`

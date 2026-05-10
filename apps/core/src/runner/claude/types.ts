@@ -16,9 +16,11 @@ export interface AgentRunnerInput {
   persona?: AgentPersona;
   browserProfileName?: string;
   allowedTools?: string[];
+  selectedSkillIds?: string[];
+  selectedMcpServerIds?: string[];
   isScheduledJob?: boolean;
+  jobId?: string;
   assistantName?: string;
-  script?: string;
   compiledSystemPrompt?: string;
   memoryContextBlock?: string;
   modelCredentialEnv?: Record<string, string>;
@@ -36,6 +38,7 @@ export interface AgentRunnerOutput {
   newSessionId?: string;
   compactBoundary?: boolean;
   interactionBoundary?: 'user_interaction';
+  continuedByFollowup?: boolean;
   usage?: NormalizedModelUsage;
   usageEventId?: string;
   contextUsage?: RuntimeContextUsageSnapshot;

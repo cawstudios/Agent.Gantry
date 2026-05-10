@@ -1,0 +1,24 @@
+# Postgres Adapter Notes
+
+- Provider session resume lookup must be scoped by the resolved canonical
+  `agentId` plus route scope. Route-only keys can leak provider session or
+  digest continuity after conversation or thread rebinding.
+- Conversation route upserts that represent rebinding must update the active
+  binding `agentId`; keeping the old owner active makes runtime session
+  ownership checks meaningless.
+- Legacy continuity rows that lack current `scope_key` and digest scope fields
+  are inert unsupported data. Postgres repositories must not import, backfill,
+  or repair them into current continuity.
+- Production continuity job hydration must pass the current
+  `AgentSession.appId` into scheduler job list filters so shared databases do
+  not leak active or paused jobs across app scopes.
+- Do not reintroduce the legacy domain `memory`, `jobs`, or `browserProfiles`
+  properties on `PostgresDomainRepositoryBundle`; runtime memory and jobs use
+  app-memory services and canonical job/session repositories, while browser
+  runtime state remains outside this obsolete repository bundle.
+- Repository adapters returning domain `IsoTimestamp` fields must normalize
+  Postgres timestamp strings to ISO strings before crossing the adapter
+  boundary.
+- Drizzle may wrap Postgres `23505` unique violations under `cause`; retry or
+  deterministic-upsert guards must inspect the wrapped cause instead of only
+  the top-level error.

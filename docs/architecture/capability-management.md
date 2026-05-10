@@ -23,6 +23,9 @@ The deterministic ownership rule is:
 
 - Agents own `selectedToolIds`, `selectedSkillIds`, and
   `selectedMcpServerIds`.
+- Local `settings.yaml` is the user-visible durable source for those selected
+  agent capabilities. Postgres stores the runtime projection, catalog rows,
+  artifact metadata, audit, and execution state.
 - Conversations own bound agents, default/routing metadata, sessions, sender
   policy, trigger policy, and control approver allowlists.
 - Conversation sender policy is separate from conversation membership and
@@ -51,20 +54,20 @@ place.
 
 ## Tool Matrix
 
-| Tool                               | Use                                                                                                                     | Never use for                                                                                         |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `send_message`                     | Progress updates or direct channel messages while the agent is still running.                                           | Persistent capability changes.                                                                        |
-| `ask_user_question`                | Structured choices with content, options, single-select, multi-select, preview/details, and channel-native buttons.     | Open-ended chat or approval of persistent capabilities.                                               |
-| `request_skill_install`            | Provider-backed skill installs such as `clawhub:<slug>@<version>`.                                                      | Downloading or installing the skill directly.                                                         |
-| `request_skill_proposal`           | Agent-created or modified `SKILL.md` bundles for review.                                                                | Writing directly to `.claude/skills`, `.agents/skills`, or agent-local `skills/`.                     |
-| `request_skill_dependency_install` | npm, brew, go, uv, or download dependencies needed by a reviewed skill.                                                 | Running dependency commands from the agent.                                                           |
-| `request_mcp_server`               | Third-party MCP server drafts with transport, origin, allowed tool patterns, credential needs, and reason.              | Editing `.mcp.json` or Claude `mcpServers`.                                                           |
-| `request_permission`               | SDK, host, browser, scheduler, memory, service, MCP, or provider/channel capability permission requests.                 | Changing permission settings directly or treating provider SDK permissions as already approved.        |
-| `capability_status`                | Lists current tool access, readable configured rules, default tools, gated tools, and unavailable-but-requestable admin tools with exact `request_permission` arguments. | Guessing hidden admin tools or requesting broad MyClaw MCP wildcards.                                  |
-| `settings_desired_state`           | Selected-capability reading of the current local desired-state settings before proposing a reviewed config change.      | Unselected access, mutating settings, or exposing raw secrets.                                        |
-| `request_settings_update`          | Selected-capability reviewed host-side edits to non-secret local `settings.yaml` desired state.                         | Unselected access, direct file edits, raw provider secrets, skill source injection, or MCP definitions. |
-| `service_restart`                  | Selected-capability restart after approved config or capability changes that require host restart.                      | Restarting to activate unapproved changes.                                                            |
-| `register_agent`                   | Selected-capability binding of a new channel conversation to an agent.                                                  | Letting an unselected agent bind arbitrary chats.                                                     |
+| Tool                               | Use                                                                                                                                                                                                             | Never use for                                                                                           |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `send_message`                     | Progress updates or direct channel messages while the agent is still running.                                                                                                                                   | Persistent capability changes.                                                                          |
+| `ask_user_question`                | Structured choices with content, options, single-select, multi-select, preview/details, and channel-native buttons.                                                                                             | Open-ended chat or approval of persistent capabilities.                                                 |
+| `request_skill_install`            | Provider-backed skill installs such as `clawhub:<slug>@<version>`.                                                                                                                                              | Downloading or installing the skill directly.                                                           |
+| `request_skill_proposal`           | Agent-created or modified `SKILL.md` bundles for review.                                                                                                                                                        | Writing directly to `.claude/skills`, `.agents/skills`, or agent-local `skills/`.                       |
+| `request_skill_dependency_install` | npm, brew, go, uv, or download dependencies needed by a reviewed skill.                                                                                                                                         | Running dependency commands from the agent.                                                             |
+| `request_mcp_server`               | Third-party MCP server drafts with transport, origin, allowed tool patterns, credential needs, and reason.                                                                                                      | Editing `.mcp.json` or Claude `mcpServers`.                                                             |
+| `request_permission`               | SDK, host, browser, scheduler, memory, service, MCP, or provider/channel capability permission requests.                                                                                                        | Changing permission settings directly or treating provider SDK permissions as already approved.         |
+| `capability_status`                | Lists current tool access, readable configured rules, selected skills, selected MCP servers, default tools, gated tools, and unavailable-but-requestable admin tools with exact `request_permission` arguments. | Guessing hidden admin tools or requesting broad MyClaw MCP wildcards.                                   |
+| `settings_desired_state`           | Selected-capability reading of the current local desired-state settings before proposing a reviewed config change.                                                                                              | Unselected access, mutating settings, or exposing raw secrets.                                          |
+| `request_settings_update`          | Selected-capability reviewed host-side edits to non-secret local `settings.yaml` desired state.                                                                                                                 | Unselected access, direct file edits, raw provider secrets, skill source injection, or MCP definitions. |
+| `service_restart`                  | Selected-capability restart after approved config or capability changes that require host restart.                                                                                                              | Restarting to activate unapproved changes.                                                              |
+| `register_agent`                   | Selected-capability binding of a new channel conversation to an agent.                                                                                                                                          | Letting an unselected agent bind arbitrary chats.                                                       |
 
 ## Capability Types
 
@@ -75,27 +78,62 @@ place.
 | Third-party MCP  | Definition, reviewed version, credential refs, allowed tool patterns, binding. | SDK `mcpServers` plus exact allowed MCP tool names.                                    |
 | SDK tool         | Tool catalog entry, risk, permission policy, sandbox profile, binding.         | Exact SDK tool name in `allowedTools` and `canUseTool` policy gate.                    |
 | Host tool        | Built-in MyClaw MCP tool entry, risk, binding, audit behavior.                 | Exact `mcp__myclaw__<tool>` name.                                                      |
-| Browser tool     | Browser lifecycle/action capability and sandbox policy.                        | Browser lifecycle MCP tools and optional action MCP server on next run.                |
+| Browser tool     | Canonical `Browser` capability and sandbox policy.                             | Gated MyClaw-owned `mcp__myclaw__browser_*` tools backed by native backend schemas.   |
 | Channel tool     | Provider capability enum, scopes, affected conversations, binding.             | Provider adapter enables only the named Slack/Telegram/Teams/Web capability.           |
 | Channel binding  | Agent-to-conversation/thread binding and control policy.                       | Message routing, trigger handling, and same-channel approval target.                   |
 
 ## Durable Model
 
-Postgres is the durable capability store. It owns definitions, reviewed
-versions, agent bindings, config-version links, credential reference names,
-permission decisions, audit events, and disablement state.
+`settings.yaml` owns the durable local list of user-manageable agent
+capabilities under `agents.<agent>.tools`, `agents.<agent>.skills`, and
+`agents.<agent>.mcp_servers`. Settings-side changes are validated, written,
+reconciled into Postgres by replacement, and reloaded immediately where safe;
+they do not rely only on the file watcher.
+
+Postgres is the runtime capability projection and catalog store. It owns
+definitions, reviewed versions, agent bindings, config-version links,
+credential reference names, permission decisions, audit events, and disablement
+state.
 
 Agent-owned persistent tool grants are also mirrored into `settings.yaml` as
 readable `agents.<id>.tools` entries. Use rules such as `Bash(git status *)`,
 `Read(/repo/**)`, or `mcp__myclaw__service_restart`; do not expose opaque
 permission-rule hashes in settings. Settings reconciliation resolves those
-readable rules back into Postgres tool catalog rows and agent bindings after
-restart.
+readable rules back into Postgres tool catalog rows and agent bindings
+immediately and after restart.
+
+Control API capability replacement and other DB/admin-side capability writes
+must export the readable Postgres projection back into `settings.yaml`, then
+validate, reconcile, and reload. Persistent `Always allow` permission approvals
+must fail closed if settings cannot be updated; any new active binding is rolled
+back so DB-only persistent grants do not survive as hidden authority. Empty
+non-authoritative settings may continue to observe preexisting DB-only
+capabilities, but any declared settings capability list replaces stale active
+Postgres tool, skill, and MCP bindings for that agent.
 
 Job-specific grants are single-cut runtime state. They remain on the job as
 `target_json.capabilityPolicy.allowedTools`, never under `settings.yaml`, and
 public inspection surfaces expose the canonical `toolAccess` object instead of
 parallel count or legacy tool fields.
+
+When an autonomous job fails because a tool is missing, recovery output should
+name the exact rule command:
+
+```text
+scheduler_grant_tool { "job_id": "<job_id>", "rule": "Bash(npm test)" }
+```
+
+`scheduler_grant_tool` appends one reviewed job-scoped rule to
+`target_json.capabilityPolicy.allowedTools`. It does not mutate
+`settings.yaml`, grant persistent agent tools, or bypass the canonical tool
+execution policy. The rule is validated with the same autonomous tool-rule
+parser before any scheduler update task is written.
+
+Direct writes to `settings.json`, `settings.local.json`, `.mcp.json`,
+generated provider MCP directories, and skill capability files are protected
+wholesale. Provider settings files are not partially parsed for "safe" keys;
+agents must use reviewed MyClaw request tools because future provider settings
+can become execution or permission policy.
 
 Readable skill bytes live outside catalog rows:
 
@@ -191,10 +229,10 @@ projected only from approved reviewed versions and active bindings. Their
 Skills are projected only when approved and bound. Draft, denied, disabled, or
 unbound skill files are never copied into per-run Claude config.
 
-Browser lifecycle tools manage the agent conversation's persistent browser
-profile. Browser action tools are a separate runtime-installed capability and
-attach only on a later run when that profile's healthy browser is already
-running at startup.
+The `Browser` tool manages the agent conversation's persistent browser profile
+through projected MyClaw-owned `browser_*` tools. There is no separate
+browser-action run, phrase intent, raw `agent_browser` MCP projection, or
+durable per-action browser authority.
 
 SDK built-in tools are denied by default unless the profile explicitly grants
 them. `Bash`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `Config` are

@@ -14,19 +14,6 @@ export interface ThinkingOverride {
   display?: 'summarized' | 'omitted';
 }
 
-/**
- * Mount allowlist configuration for additional host mounts.
- * Stored at `MYCLAW_HOME/mount-allowlist.json` and only editable from the host.
- */
-export interface MountAllowlist {
-  // Directories that can be exposed to agent runs.
-  allowedRoots: AllowedRoot[];
-  // Glob patterns for paths that should never be mounted (e.g., ".ssh", ".gnupg")
-  blockedPatterns: string[];
-  // If true, routes without explicit write capability can only mount read-only regardless of config
-  conversationReadOnlyByDefault: boolean;
-}
-
 export interface AllowedRoot {
   // Absolute path or ~ for home (e.g., "~/projects", "/var/repos")
   path: string;
@@ -72,6 +59,10 @@ export interface NewMessage {
   delivery_status?: MessageDeliveryStatus;
   delivered_at?: string;
   delivery_error?: string;
+  delivery_retry_tail?: {
+    canonicalText: string;
+    providerPayload?: unknown;
+  };
   attachments?: NewMessageAttachment[];
 }
 
@@ -94,16 +85,27 @@ export type JobStatus =
   | 'completed'
   | 'dead_lettered';
 
+export interface JobExecutionContext {
+  conversationJid: string;
+  threadId: string | null;
+  groupScope: string;
+  sessionId?: string | null;
+}
+
+export interface JobNotificationRoute {
+  conversationJid: string;
+  threadId: string | null;
+  label: string;
+}
+
 export interface Job {
   id: string;
   name: string;
   prompt: string;
   model?: string | null;
-  script?: string | null;
   schedule_type: JobScheduleType;
   schedule_value: string;
   status: JobStatus;
-  linked_sessions: string[];
   session_id: string | null;
   thread_id: string | null;
   group_scope: string;
@@ -126,6 +128,8 @@ export interface Job {
   capability_policy?: {
     allowed_tools: string[];
   };
+  execution_context?: JobExecutionContext;
+  notification_routes?: JobNotificationRoute[];
 }
 
 export type JobRunStatus =
@@ -353,6 +357,7 @@ export interface ProgressUpdateOptions {
   threadId?: string;
   done?: boolean;
   replaceOnly?: boolean;
+  generation?: number;
 }
 
 export interface MessageSendOptions {
@@ -367,6 +372,11 @@ export type MessageDeliveryStatus =
 
 export interface MessageDeliveryResult {
   externalMessageId?: string;
+  externalMessageIds?: string[];
+  deliveredParts?: number;
+  totalParts?: number;
+  warnings?: string[];
+  fallbackArtifactId?: string;
 }
 
 // Callback type that channels use to deliver inbound messages
@@ -385,11 +395,6 @@ export type OnChatMetadata = (
   channel?: string,
   isGroup?: boolean,
 ) => Promise<void>;
-
-export interface InboundMessageSource {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-}
 
 export interface ChannelLifecyclePort {
   name: string;

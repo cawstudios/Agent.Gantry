@@ -1,6 +1,5 @@
 import path from 'path';
 import fs from 'fs';
-
 import {
   resolveModelAlias,
   resolveModelSelection,
@@ -23,26 +22,21 @@ import { settingsFilePath } from './settings/runtime-home.js';
 import { DEFAULT_AGENT_NAME } from './settings/runtime-settings-defaults.js';
 import type { RuntimeSettings } from './settings/runtime-settings-types.js';
 import { isValidTimezone } from '../shared/timezone.js';
-
+import { resolvePermissionApprovalTimeoutMs } from '../shared/permission-timeout.js';
 export * from './memory.js';
 export { syncRuntimeSettingsFromProjection } from './settings/restart-sync.js';
-
 export const POLL_INTERVAL = 2000;
-
 export type ControlEnvKey =
   | 'MYCLAW_CONTROL_API_KEYS_JSON'
-  | 'MYCLAW_CONTROL_API_KEY'
-  | 'MYCLAW_CONTROL_APP_ID'
   | 'MYCLAW_CONTROL_PORT'
   | 'MYCLAW_CONTROL_SOCKET_PATH';
-
 export function getControlEnvValue(key: ControlEnvKey): string {
   return envValueDynamic(key);
 }
-
 const MYCLAW_HOME_RAW =
   process.env.MYCLAW_HOME?.trim() || envConfig.MYCLAW_HOME?.trim() || '';
 export const MYCLAW_HOME = getMyclawHome(MYCLAW_HOME_RAW);
+export const RUNTIME_SETTINGS_PATH = settingsFilePath(MYCLAW_HOME);
 const RUNTIME_ROOT = MYCLAW_HOME;
 let runtimeSettingsCache:
   | {
@@ -52,7 +46,6 @@ let runtimeSettingsCache:
       settings: RuntimeSettings;
     }
   | undefined;
-
 export function getRuntimeSettingsForConfig(): RuntimeSettings {
   const filePath = settingsFilePath(MYCLAW_HOME);
   try {
@@ -85,7 +78,6 @@ export function getRuntimeSettingsForConfig(): RuntimeSettings {
     return settings;
   }
 }
-
 export function getConfiguredAgentName(): string {
   try {
     return (
@@ -95,9 +87,7 @@ export function getConfiguredAgentName(): string {
     return DEFAULT_AGENT_NAME;
   }
 }
-
 export const ASSISTANT_NAME = getConfiguredAgentName();
-
 export function getPublicRuntimeSettings() {
   const settings = getRuntimeSettingsForConfig();
   return {
@@ -122,7 +112,6 @@ export function getPublicRuntimeSettings() {
     runtime: settings.runtime,
   };
 }
-
 export function getRuntimeQueueConfig() {
   const queue = getRuntimeSettingsForConfig().runtime.queue;
   return {
@@ -132,7 +121,6 @@ export function getRuntimeQueueConfig() {
     baseRetryMs: queue.baseRetryMs,
   };
 }
-
 export function updatePublicRuntimeSettings(patch: {
   agent?: {
     name?: string;
@@ -217,7 +205,6 @@ export function updatePublicRuntimeSettings(patch: {
     restartRequired: changed.length > 0,
   };
 }
-
 function normalizeSettingsModelPatch(value: string, field: string): string {
   const trimmed = value.trim();
   if (!trimmed) return '';
@@ -230,12 +217,10 @@ function normalizeSettingsModelPatch(value: string, field: string): string {
   }
   return resolved.alias;
 }
-
 export const STORE_DIR = path.resolve(RUNTIME_ROOT, 'store');
 export const AGENTS_DIR = path.resolve(RUNTIME_ROOT, 'agents');
 export const DATA_DIR = path.resolve(RUNTIME_ROOT, 'data');
 export const ARTIFACTS_DIR = path.resolve(RUNTIME_ROOT, 'artifacts');
-
 const runtimeStorageConfig = resolveRuntimeStorageConfig(
   MYCLAW_HOME,
   RUNTIME_ROOT,
@@ -243,40 +228,8 @@ const runtimeStorageConfig = resolveRuntimeStorageConfig(
 export const STORAGE_POSTGRES_URL_ENV = runtimeStorageConfig.postgresUrlEnv;
 export const STORAGE_POSTGRES_URL = runtimeStorageConfig.postgresUrl;
 export const STORAGE_POSTGRES_SCHEMA = runtimeStorageConfig.postgresSchema;
-export const PERMISSION_APPROVAL_TIMEOUT_MS = Math.max(
-  10_000,
-  parseInt(
-    process.env.PERMISSION_APPROVAL_TIMEOUT_MS ||
-      envConfig.PERMISSION_APPROVAL_TIMEOUT_MS ||
-      '300000',
-    10,
-  ) || 300_000,
-);
-function collectConversationApproverAllowlist(
-  providerId: string,
-  sourceAgentFolder?: string,
-): Set<string> {
-  const runtimeSettings = getRuntimeSettingsForConfig();
-  const approvers = Object.values(runtimeSettings.bindings)
-    .filter(
-      (binding) => !sourceAgentFolder || binding.agent === sourceAgentFolder,
-    )
-    .flatMap((binding) => {
-      const conversation = runtimeSettings.conversations[binding.conversation];
-      if (!conversation) return [];
-      const connection =
-        runtimeSettings.providerConnections[conversation.providerConnection];
-      return connection?.provider === providerId
-        ? conversation.controlApprovers
-        : [];
-    });
-  return new Set(approvers.filter((entry) => entry.trim().length > 0));
-}
-export function getSlackPermissionApproverIds(
-  sourceAgentFolder?: string,
-): Set<string> {
-  return collectConversationApproverAllowlist('slack', sourceAgentFolder);
-}
+export const PERMISSION_APPROVAL_TIMEOUT_MS =
+  resolvePermissionApprovalTimeoutMs(process.env, envConfig);
 export const AGENT_TIMEOUT = parseInt(
   process.env.AGENT_TIMEOUT || '1800000',
   10,
@@ -297,7 +250,6 @@ export function getCredentialBrokerRuntimeConfig(): {
     externalBrokerBaseUrl: settings.credentialBroker.external.baseUrl,
   };
 }
-
 export const ONECLI_DATABASE_URL = envValue('ONECLI_DATABASE_URL');
 export const ONECLI_SECRET_ENCRYPTION_KEY = envValue('SECRET_ENCRYPTION_KEY');
 const normModel = resolveModelAlias;
@@ -325,14 +277,12 @@ export const HOST_CREDENTIAL_ENV_KEYS = [
 ] as const;
 export const ONECLI_ALLOWED_ENV_KEYS = ['ANTHROPIC_BASE_URL'] as const;
 type HostCredentialSource = Partial<Record<string, string | undefined>>;
-
 function readHostCredentialValue(
   key: (typeof HOST_CREDENTIAL_ENV_KEYS)[number],
   source?: HostCredentialSource,
 ): string {
   return source?.[key]?.trim() || '';
 }
-
 export function getHostCredentialEnv(
   source?: HostCredentialSource,
 ): Record<string, string> {
@@ -353,13 +303,11 @@ export function getSlackAppToken(): string {
   return runtimeEnvValue('SLACK_APP_TOKEN');
 }
 export type ClaudeAuthMode = 'broker' | 'none';
-
 export interface ClaudeAuthState {
   hasOauthToken: boolean;
   hasApiKey: boolean;
   mode: ClaudeAuthMode;
 }
-
 export function resolveClaudeAuthState(): ClaudeAuthState {
   const brokerConfig = getCredentialBrokerRuntimeConfig();
   const credentialMode = brokerConfig.mode;
@@ -373,13 +321,11 @@ export function resolveClaudeAuthState(): ClaudeAuthState {
     mode: configured ? 'broker' : 'none',
   };
 }
-
 export function getMemoryModelRuntimeConfig(): ReturnType<
   typeof getMemoryModelConfig
 > {
   return getMemoryModelConfig(getConfiguredDefaultModel());
 }
-
 export type DefaultModelSource =
   | 'settings.yaml agents.<agent>.model'
   | 'settings.yaml agents.<agent>.one_time_job_default_model'
@@ -392,9 +338,7 @@ export type EffectiveModelSource =
   | 'settings.yaml agent.one_time_job_default_model'
   | 'settings.yaml agent.recurring_job_default_model'
   | DefaultModelSource;
-
 export type ModelUseKind = 'interactive' | 'oneTimeJob' | 'recurringJob';
-
 export function getDefaultModelConfig(
   kind: ModelUseKind = 'interactive',
   agentFolder?: string,
@@ -467,7 +411,6 @@ export function getDefaultModelConfig(
   }
   return { model: 'opus', source: 'system default' };
 }
-
 export function getEffectiveModelConfig(
   groupModel?: string,
   kind: ModelUseKind = 'interactive',
@@ -485,31 +428,24 @@ export function getEffectiveModelConfig(
   }
   return getDefaultModelConfig(kind, agentFolder);
 }
-
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
 );
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep the agent run alive after last result
-
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-
 export function buildTriggerPattern(trigger: string): RegExp {
   return new RegExp(`^${escapeRegex(trigger.trim())}\\b`, 'i');
 }
-
 export const DEFAULT_TRIGGER = `@${ASSISTANT_NAME}`;
-
 export function getTriggerPattern(trigger?: string): RegExp {
   const normalizedTrigger = trigger?.trim();
   return buildTriggerPattern(normalizedTrigger || DEFAULT_TRIGGER);
 }
-
 export const TRIGGER_PATTERN = buildTriggerPattern(DEFAULT_TRIGGER);
-
 // Timezone for scheduler jobs, message formatting, etc.
 // Validates each candidate is a real IANA identifier before accepting.
 function resolveConfigTimezone(): string {

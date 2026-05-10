@@ -31,22 +31,22 @@ ACP/ACPS are harness/runtime integration concerns. They are not part of the agen
 
 ## Runtime Map
 
-| Component                  | Main files                                                                                                                                                                                        | Responsibility                                                                                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bootstrap and orchestrator | `apps/core/src/index.ts`, `apps/core/src/app/bootstrap/startup.ts`, `apps/core/src/app/bootstrap/runtime-services.ts`                                                                             | Create `RuntimeApp`, initialize Postgres storage, wire channels, start polling, IPC, scheduler, and control server.                                      |
-| Runtime app                | `apps/core/src/app/bootstrap/runtime-app.ts`                                                                                                                                                      | Holds runtime settings, groups, services, channel wiring, queue, scheduler, storage, and control-server lifecycle.                                       |
-| Channels                   | `apps/core/src/app/bootstrap/channel-wiring.ts`, `apps/core/src/channels/channel-provider.ts`, `apps/core/src/channels/slack/`, `apps/core/src/channels/telegram/`                                | Connect Slack, Telegram, and app channel adapters; route inbound messages, outbound replies, progress, streaming, typing, and permission prompts.        |
-| App channel                | `apps/core/src/channels/app.ts`                                                                                                                                                                   | Converts SDK-originated session output into durable `RuntimeEvent` records instead of sending to a chat network.                                         |
-| Postgres storage           | `apps/core/src/adapters/storage/postgres/runtime-store.ts`, `apps/core/src/adapters/storage/postgres/factory.ts`, `apps/core/src/adapters/storage/postgres/schema/schema.ts`                      | Owns first-party runtime tables, readiness checks, repositories, migrations, pgvector, and full-text search columns.                                     |
-| Message loop               | `apps/core/src/runtime/message-loop.ts`                                                                                                                                                           | Polls for new durable messages, recovers pending messages, applies slash/control checks, and enqueues processing.                                        |
-| Queue                      | `apps/core/src/runtime/group-queue.ts`                                                                                                                                                            | Maintains per-group/thread work ordering, active process tracking, retry behavior, and continuation input routing.                                       |
-| Group processor            | `apps/core/src/runtime/group-processing.ts`                                                                                                                                                       | Loads unread messages, checks triggers, hydrates durable memory context, starts agent runs, and commits cursors/results.                                 |
-| Agent spawn                | `apps/core/src/runtime/agent-spawn.ts`, `apps/core/src/runtime/agent-spawn-process.ts`                                                                                                            | Builds the child process environment, group working directory, model config, IPC secrets, MCP server path, and runtime credentials.                      |
-| Child runner               | `apps/core/src/runner/claude/index.ts`, `apps/core/src/runner/claude/query-loop.ts`, `apps/core/src/runner/claude/permission-callback.ts`                                                         | Calls `@anthropic-ai/claude-agent-sdk`, streams follow-up input through `MessageStream`, and mediates tool permission callbacks.                         |
-| Tools and IPC              | `apps/core/src/runner/agent-capabilities.ts`, `apps/core/src/runner/mcp/server.ts`, `apps/core/src/runtime/ipc.ts`, `apps/core/src/runtime/ipc-parsing.ts`                                        | Defines allowed tools, exposes MyClaw MCP tools, validates signed IPC requests, and writes signed responses.                                             |
-| Control server and SDK     | `apps/core/src/control/server/index.ts`, `apps/core/src/control/server/routes/`, `packages/sdk/src/index.ts`                                                                                      | Exposes HTTP/SSE control APIs for backend apps; SDK wraps this API for server-side Node consumers.                                                       |
-| Scheduler                  | `apps/core/src/jobs/scheduler.ts`, `apps/core/src/jobs/execution.ts`, `apps/core/src/jobs/schedule-math.ts`, `apps/core/src/infrastructure/pgboss/scheduler-engine.ts`                            | Owns MyClaw job definitions, triggers, runs, events, pg-boss queueing, schedule sync, and dead-letter handling.                                          |
-| Memory and retrieval       | `apps/core/src/application/sessions/hydrate-agent-context-service.ts`, `apps/core/src/memory/app-memory-service.ts`, `apps/core/src/adapters/storage/postgres/schema/schema.ts`, `docs/MEMORY.md` | Stores app/agent/subject-boundary memory, records evidence and recall events, runs auditable dreaming, and builds bounded memory context for fresh runs. |
+| Component                  | Main files                                                                                                                                                                                        | Responsibility                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bootstrap and orchestrator | `apps/core/src/index.ts`, `apps/core/src/app/bootstrap/startup.ts`, `apps/core/src/app/bootstrap/runtime-services.ts`                                                                             | Create `RuntimeApp`, initialize Postgres storage, wire channels, start polling, IPC, scheduler, and control server.                                                                          |
+| Runtime app                | `apps/core/src/app/bootstrap/runtime-app.ts`                                                                                                                                                      | Holds runtime settings, groups, services, channel wiring, queue, scheduler, storage, and control-server lifecycle.                                                                           |
+| Channels                   | `apps/core/src/app/bootstrap/channel-wiring.ts`, `apps/core/src/channels/channel-provider.ts`, `apps/core/src/channels/slack/`, `apps/core/src/channels/telegram/`                                | Connect Slack, Telegram, and app channel adapters; route inbound messages, outbound replies, progress, streaming, typing, and permission prompts.                                            |
+| App channel                | `apps/core/src/channels/app.ts`                                                                                                                                                                   | Converts SDK-originated session output into durable `RuntimeEvent` records instead of sending to a chat network.                                                                             |
+| Postgres storage           | `apps/core/src/adapters/storage/postgres/runtime-store.ts`, `apps/core/src/adapters/storage/postgres/factory.ts`, `apps/core/src/adapters/storage/postgres/schema/schema.ts`                      | Owns first-party runtime tables, readiness checks, repositories, migrations, pgvector, and full-text search columns.                                                                         |
+| Message loop               | `apps/core/src/runtime/message-loop.ts`                                                                                                                                                           | Polls for new durable messages, recovers pending messages, applies slash/control checks, and enqueues processing.                                                                            |
+| Queue                      | `apps/core/src/runtime/group-queue.ts`                                                                                                                                                            | Maintains per-group/thread work ordering, active process tracking, retry behavior, and continuation input routing.                                                                           |
+| Group processor            | `apps/core/src/runtime/group-processing.ts`                                                                                                                                                       | Loads unread messages, checks triggers, hydrates durable memory context, starts agent runs, and commits cursors/results.                                                                     |
+| Agent spawn                | `apps/core/src/runtime/agent-spawn.ts`, `apps/core/src/runtime/agent-spawn-process.ts`                                                                                                            | Builds the child process environment, group working directory, model config, IPC secrets, MCP server path, and runtime credentials.                                                          |
+| Child runner               | `apps/core/src/runner/claude/index.ts`, `apps/core/src/runner/claude/query-loop.ts`, `apps/core/src/runner/claude/permission-callback.ts`                                                         | Calls `@anthropic-ai/claude-agent-sdk`, streams follow-up input through `MessageStream`, and mediates tool permission callbacks.                                                             |
+| Tools and IPC              | `apps/core/src/runner/agent-capabilities.ts`, `apps/core/src/runner/mcp/server.ts`, `apps/core/src/runtime/ipc.ts`, `apps/core/src/runtime/ipc-parsing.ts`                                        | Defines allowed tools, exposes MyClaw MCP tools, validates signed IPC requests, and writes signed responses.                                                                                 |
+| Control server and SDK     | `apps/core/src/control/server/index.ts`, `apps/core/src/control/server/routes/`, `packages/sdk/src/index.ts`                                                                                      | Exposes HTTP/SSE control APIs for backend apps; SDK wraps this API for server-side Node consumers.                                                                                           |
+| Scheduler                  | `apps/core/src/jobs/scheduler.ts`, `apps/core/src/jobs/execution.ts`, `apps/core/src/jobs/schedule-math.ts`, `apps/core/src/infrastructure/pgboss/scheduler-engine.ts`                            | Owns MyClaw job definitions, triggers, runs, events, pg-boss queueing, schedule sync, and dead-letter handling.                                                                              |
+| Memory and retrieval       | `apps/core/src/application/sessions/hydrate-agent-context-service.ts`, `apps/core/src/memory/app-memory-service.ts`, `apps/core/src/adapters/storage/postgres/schema/memory.ts`, `docs/MEMORY.md` | Stores flattened app/agent/subject-boundary memory in `memory_items`, records evidence and recall events, runs auditable dreaming, and builds bounded lexical memory context for fresh runs. |
 
 ## End-to-End Message Flow
 
@@ -90,7 +90,7 @@ sequenceDiagram
 5. Polling and recovery: the message loop polls for new messages during normal operation and calls recovery on startup so pending threads are not lost after a restart.
 6. Queueing: `GroupQueue` deduplicates checks per group/thread, limits concurrent containers, retries failed processing, and routes follow-up messages into an active child run when possible.
 7. Agent execution: the group processor resolves or creates the canonical session, hydrates scoped durable memory, then starts a live streaming child runner. Follow-up messages are piped into that runner until it is stopped or idles out.
-8. Streaming and final response: the processor forwards partial output, progress, typing, and final replies through channel wiring. Slack and Telegram send network responses; the app channel records durable runtime events for `wait()`, `stream()`, webhooks, and replay.
+8. Delivery visibility today: final replies are user-visible through durable required sends. Channel runtimes may surface bounded visible progress and working updates, plus final-only provider-visible streaming. Raw partial provider deltas remain internal or sanitized before visibility, and final streaming or fallback delivery uses bounded, redacted, user-visible snapshots; the app channel still records durable runtime events for `wait()`, `stream()`, webhooks, and replay.
 
 ## Agent Runtime Deep Dive
 
@@ -104,14 +104,21 @@ Key runner inputs:
 - IPC request/response directories
 - HMAC auth token and response signing key scoped to the group/thread
 - environment values for credentials and browser automation endpoints
+- concrete protected filesystem paths for SDK sandbox deny-write enforcement
 
 `apps/core/src/runner/claude/query-loop.ts` creates a `MessageStream` and passes it to `query()`. The stream lets the host add follow-up user messages to an already-running agent when the queue decides continuation is safe. The same `query()` call receives:
 
 - `allowedTools` from `apps/core/src/runner/agent-capabilities.ts`
 - MyClaw MCP server config from `apps/core/src/runner/mcp/server.ts`
-- `persistSession: false`; no SDK `resume`, `resumeSessionAt`, or `continue`
+- Claude live-chat session projection (`persistSession: true` and `resume`
+  when a scoped provider session handle exists; scheduled jobs do not resume)
 - working directory and extra directories
-- `canUseTool`, the permission callback that checks runtime policy before sensitive tools run
+- `canUseTool`, the permission callback that projects each SDK request through
+  the canonical tool execution boundary before sensitive tools run
+- Claude SDK sandbox settings with `enabled=true`, `failIfUnavailable=true`,
+  `allowUnsandboxedCommands=false`, and `filesystem.denyWrite` for
+  `settings.yaml`, generated Claude config, MCP handoff files, and local
+  capability/config paths
 
 The runner emits structured stdout markers back to the host. The group processor treats those markers as implementation signals, not as the public integration stream. SDK consumers should observe durable runtime events instead.
 
@@ -137,6 +144,33 @@ tools plus exact MyClaw request tools. Dangerous tools such as `Bash`, `Write`,
 set of worktree lifecycle tools is always allowed because it is required for
 runner operation. Other tool calls pass through `canUseTool` and host policy.
 
+All tool execution paths use the same lifecycle:
+
+1. Classify a `ToolExecutionRequest` with origin, tool kind/name, input,
+   run context, execution mode, target resource, and mutation intent.
+2. Authorize through `ToolExecutionPolicyService`, returning `allow`, `deny`,
+   `needs_approval`, or `not_applicable` with a reason, audit metadata, and
+   recovery action when useful.
+3. Execute only allowed calls, request approval only for interactive calls, or
+   deny without canceling unrelated parallel tool calls.
+4. Record the decision in the canonical audit shape.
+
+Protected capability checks inspect action targets. A Bash command that writes
+`.mcp.json`, edits skill files, touches provider settings, or runs
+`claude mcp add/remove/reset*` is denied. Bash is intentionally fail-closed for
+commands that reference protected capability paths; known text-payload flows
+such as `gh issue create --body ...` may mention those paths without becoming a
+capability mutation.
+
+SDK-managed Bash, file, hook, and MCP subprocesses also run behind the Claude
+SDK sandbox. MyClaw passes only concrete protected paths through
+`MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON`; the runner projects them into
+`sandbox.filesystem.denyWrite`. On macOS and Linux, the SDK must fail closed if
+its sandbox dependency is unavailable. Docker deployments should still mount
+durable MyClaw config and broker state read-only into the agent execution
+container wherever those paths are visible, because container mount policy is
+the OS boundary for non-SDK host-owned processes.
+
 MyClaw MCP tools are grouped by capability:
 
 - messaging and user interaction: send a message, ask a question
@@ -147,7 +181,8 @@ MyClaw MCP tools are grouped by capability:
   available tools plus exact requestable admin tool IDs and `request_permission`
   arguments
 - scheduler: create, inspect, mutate, pause, resume, list, and wait for jobs, runs, events, and dead letters
-- memory: search, save, and patch memory or procedures
+- memory: default tools include search/save for memory and procedures; patch
+  tools are reviewed/selected-only
 - browser: list profiles, launch, close, and inspect browser status
 - service control: request runtime restart
 - agent registration: register an agent with the runtime
@@ -164,6 +199,7 @@ sequenceDiagram
   participant User as "Approver"
 
   Agent->>Runner: canUseTool(tool, input)
+  Runner->>Runner: classify and evaluate canonical tool execution policy
   Runner->>Runner: check always-allowed tools and memory boundary
   Runner->>Dir: write request with group/thread auth token
   Host->>Host: validate path, token, kind, rate limit, and ownership
@@ -234,12 +270,17 @@ Serialized execution is a queue policy tied to session or group affinity. It is 
 
 Postgres is mandatory runtime storage. The supported deployment model is one database with separate schemas and roles: `myclaw` for first-party runtime tables, `onecli` for OneCLI broker state, and `pgboss` for pg-boss internals. MyClaw provisions and verifies the schema boundary, but it does not query OneCLI-owned tables or run OneCLI migrations. `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL` must use different Postgres users; the OneCLI `schema=onecli` URL parameter is not treated as a permission boundary by itself.
 
-The MyClaw schema contains first-party tables for groups, chats, messages, sessions, jobs, runs, runtime events, webhooks, deliveries, memory subjects, evidence, candidates, items, recall events, dream runs, dream decisions, and audit records.
+The MyClaw schema contains first-party tables for groups, chats, messages,
+sessions, jobs, runs, runtime events, webhooks, deliveries, flattened memory
+items, memory evidence, candidates, recall events, dream runs, dream decisions,
+and audit records. `memory_subjects` is not active current schema; memory
+subject identity is stored directly on `memory_items` and in item metadata.
 
 Retrieval uses two Postgres-native paths:
 
 - Postgres full-text search for lexical matching, filtering, and ranking
-- pgvector for semantic memory lookup and dedupe when brokered embeddings are enabled
+- Future pgvector semantic lookup only after memory item embedding indexing and
+  querying are fully implemented
 
 Memory injected into a prompt is context, not trusted authority. The agent may use it to answer better, but runtime authorization still happens outside the model.
 
@@ -251,7 +292,7 @@ Memory injected into a prompt is context, not trusted authority. The agent may u
 | Agent starts but does not answer           | `apps/core/src/runtime/group-processing.ts`, `apps/core/src/runtime/agent-spawn.ts`, `apps/core/src/runner/claude/query-loop.ts`                                                                                                                              | Prompt construction, broker-safe child process env, runner stdout markers, final-output handling.                                                                                                                                                                 |
 | Conversation does not resume after restart | `apps/core/src/application/sessions/`, `apps/core/src/adapters/storage/postgres/repositories/domain-repositories.postgres.ts`, `apps/core/src/runtime/group-processing.ts`                                                                                    | `agent_sessions` deterministic key, durable memory context, thread id isolation, expected cold-start behavior.                                                                                                                                                    |
 | Follow-up is ignored                       | `apps/core/src/runtime/continuation-input.ts`, `apps/core/src/runtime/group-queue.ts`                                                                                                                                                                         | Whether the active run accepts continuation, queue key, thread key, and stop aliases.                                                                                                                                                                             |
-| Permission request hangs or denies         | `apps/core/src/runtime/ipc.ts`, `apps/core/src/runtime/ipc-auth-validation.ts`, `apps/core/src/app/bootstrap/channel-wiring.ts`, `apps/core/src/runner/claude/permission-callback.ts`                                                                         | IPC auth token, response signing key, request path ownership, conversation approval surface, sender policy, and control approvers.                                                                                                                                 |
+| Permission request hangs or denies         | `apps/core/src/runtime/ipc.ts`, `apps/core/src/runtime/ipc-auth-validation.ts`, `apps/core/src/app/bootstrap/channel-wiring.ts`, `apps/core/src/runner/claude/permission-callback.ts`                                                                         | IPC auth token, response signing key, request path ownership, conversation approval surface, sender policy, and control approvers.                                                                                                                                |
 | SDK wait or stream misses output           | `apps/core/src/control/server/routes/sessions.ts`, `apps/core/src/channels/app.ts`, `apps/core/src/adapters/storage/postgres/repositories/control-plane-repository.postgres.ts`                                                                               | App response route, `runtime_events`, SSE replay cursor, response mode, webhook destination status.                                                                                                                                                               |
 | Webhook delivery fails                     | `apps/core/src/control/server/webhook-delivery.ts`, `apps/core/src/control/server/routes/webhooks.ts`, `apps/core/src/adapters/storage/postgres/repositories/control-plane-repository.postgres.ts`                                                            | Registered URL, enabled flag, signing secret, retry count, dead-letter state, replay result.                                                                                                                                                                      |
 | Scheduled job does not run                 | `apps/core/src/jobs/scheduler.ts`, `apps/core/src/jobs/execution.ts`, `apps/core/src/infrastructure/pgboss/scheduler-engine.ts`                                                                                                                               | Scheduler readiness, pg-boss connection, schedule sync, due time, pause state, dead-letter queue.                                                                                                                                                                 |

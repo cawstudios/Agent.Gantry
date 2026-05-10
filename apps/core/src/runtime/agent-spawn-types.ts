@@ -22,13 +22,16 @@ export interface AgentInput {
   threadId?: string;
   memoryUserId?: string;
   memoryDefaultScope?: 'user' | 'group';
+  memoryReviewerIsControlApprover?: boolean;
   persona?: AgentPersona;
   browserProfileName?: string;
   allowedTools?: string[];
+  selectedSkillIds?: string[];
+  selectedMcpServerIds?: string[];
   isScheduledJob?: boolean;
+  jobId?: string;
   jobModelUseKind?: 'oneTimeJob' | 'recurringJob';
   assistantName?: string;
-  script?: string;
   compiledSystemPrompt?: string;
   thinking?: ThinkingOverride;
   memoryContextBlock?: string;
@@ -40,6 +43,7 @@ export interface AgentOutput {
   newSessionId?: string;
   compactBoundary?: boolean;
   interactionBoundary?: 'user_interaction';
+  continuedByFollowup?: boolean;
   usage?: NormalizedModelUsage;
   usageEventId?: string;
   contextUsage?: RuntimeContextUsageSnapshot;

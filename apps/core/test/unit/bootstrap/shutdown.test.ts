@@ -38,6 +38,9 @@ describe('installShutdownHandlers', () => {
     installShutdownHandlers(
       {
         queue,
+        closeBrowserToolBackends: vi.fn(async () => {
+          order.push('closeBrowserToolBackends');
+        }),
         disconnectChannels: vi.fn(async () => {
           await channelA.disconnect();
           await channelB.disconnect();
@@ -65,6 +68,7 @@ describe('installShutdownHandlers', () => {
     expect(order).toEqual([
       'log-signal',
       'queue.shutdown',
+      'closeBrowserToolBackends',
       'closeAllBrowsers',
       'channel-a.disconnect',
       'channel-b.disconnect',

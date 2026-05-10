@@ -3,6 +3,7 @@ import {
   myclawMcpFullToolName,
   parseEnabledMyClawMcpToolNames,
 } from '../myclaw-mcp-tool-surface.js';
+import { normalizeMemoryIpcActions } from '../../shared/memory-ipc-actions.js';
 import {
   ADMIN_MCP_TOOL_NAMES,
   isAdminMcpToolName,
@@ -10,6 +11,7 @@ import {
 } from '../../shared/admin-mcp-tools.js';
 import {
   buildAgentToolAccessView,
+  buildRequestableBrowserToolAccess,
   buildRequestableAdminToolAccess,
   formatAgentToolAccess,
   PERMISSION_GATED_NATIVE_TOOLS,
@@ -38,8 +40,7 @@ export const MEMORY_IPC_AUTH_TOKEN =
   process.env.MYCLAW_MEMORY_IPC_AUTH_TOKEN || IPC_AUTH_TOKEN;
 export const IPC_RESPONSE_VERIFY_KEY =
   process.env.MYCLAW_IPC_RESPONSE_VERIFY_KEY || '';
-export const IPC_RESPONSE_KEY_ID =
-  process.env.MYCLAW_IPC_RESPONSE_KEY_ID || '';
+export const IPC_RESPONSE_KEY_ID = process.env.MYCLAW_IPC_RESPONSE_KEY_ID || '';
 
 export const chatJid = process.env.MYCLAW_CHAT_JID!;
 export const groupFolder = process.env.MYCLAW_GROUP_FOLDER!;
@@ -48,6 +49,11 @@ export const memoryUserId =
   process.env.MYCLAW_MEMORY_USER_ID?.trim() || undefined;
 export const memoryDefaultScope =
   process.env.MYCLAW_MEMORY_DEFAULT_SCOPE === 'user' ? 'user' : 'group';
+export const memoryReviewerIsControlApprover =
+  process.env.MYCLAW_MEMORY_REVIEWER_IS_CONTROL_APPROVER === '1';
+export const memoryIpcAllowedActions = normalizeMemoryIpcActions(
+  parseJsonStringArray(process.env.MYCLAW_MEMORY_IPC_ACTIONS_JSON),
+);
 export const browserProfileName =
   process.env.MYCLAW_BROWSER_PROFILE_NAME?.trim() || undefined;
 export const enabledAdminMcpTools = parseEnabledAdminMcpTools(
@@ -59,12 +65,22 @@ export const enabledMyClawMcpTools = parseEnabledMyClawMcpToolNames(
 export const configuredAllowedTools = parseConfiguredAllowedTools(
   process.env.MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON,
 );
+export const selectedSkillIds = parseJsonStringArray(
+  process.env.MYCLAW_SELECTED_SKILLS_JSON,
+);
+export const selectedMcpServerIds = parseJsonStringArray(
+  process.env.MYCLAW_SELECTED_MCP_SERVERS_JSON,
+);
 
 export function isAdminMcpToolEnabled(toolName: AdminMcpToolName): boolean {
   return enabledAdminMcpTools.has(toolName);
 }
 
 function parseConfiguredAllowedTools(raw: string | undefined): string[] {
+  return parseJsonStringArray(raw);
+}
+
+function parseJsonStringArray(raw: string | undefined): string[] {
   if (!raw?.trim()) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -105,6 +121,9 @@ export function capabilityStatusText(): string {
   for (const adminToolName of enabledAdminMcpTools) {
     availableToolNames.push(adminToolName);
   }
+  const requestableBrowserTools = buildRequestableBrowserToolAccess({
+    configuredTools: configuredAllowedTools,
+  });
   const lines = [
     'MyClaw MCP tools available in this run:',
     ...availableToolNames
@@ -123,6 +142,41 @@ export function capabilityStatusText(): string {
         `  request_permission: permissionKind=tool toolName=${fullName} temporaryOnly=false reason="<why this agent needs ${toolName}>"`,
       ].join('\n');
     }),
+    '',
+    'Memory IPC actions available in this run:',
+    ...memoryIpcAllowedActions
+      .slice()
+      .sort()
+      .map((action) => `- available: ${action}`),
+    '',
+    'Selected skills for this agent:',
+    ...(selectedSkillIds.length > 0
+      ? selectedSkillIds
+          .slice()
+          .sort()
+          .map((skillId) => `- selected: ${skillId}`)
+      : ['- none']),
+    '',
+    'Selected MCP servers for this agent:',
+    ...(selectedMcpServerIds.length > 0
+      ? selectedMcpServerIds
+          .slice()
+          .sort()
+          .map((serverId) => `- selected: ${serverId}`)
+      : ['- none']),
+    '',
+    'Browser capability:',
+    ...(requestableBrowserTools.length > 0
+      ? requestableBrowserTools.flatMap((tool) => [
+          `- requestable: ${tool.tool}`,
+          `  tool_id: ${tool.toolId}`,
+          `  request_permission: ${tool.requestPermission}`,
+          `  note: ${tool.note}`,
+        ])
+      : [
+          '- selected: Browser',
+          '  note: Browser exposes MyClaw-owned browser_* tools. Status is read-only; other actions launch the host-derived profile lazily.',
+        ]),
   ];
   const view = buildAgentToolAccessView({
     configuredTools: configuredAllowedTools,
@@ -136,8 +190,10 @@ export function capabilityStatusText(): string {
             configured === toolName || configured.startsWith(`${toolName}(`),
         ),
     ),
-    requestableAdminTools:
-      buildRequestableAdminToolAccess(enabledAdminMcpTools),
+    requestableAdminTools: [
+      ...buildRequestableAdminToolAccess(enabledAdminMcpTools),
+      ...requestableBrowserTools,
+    ],
     source: 'settings.yaml current agent tools plus runtime defaults',
   });
   return [...lines, '', formatAgentToolAccess(view)].join('\n');

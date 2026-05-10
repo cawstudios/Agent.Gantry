@@ -7,7 +7,6 @@ import { DATA_DIR } from '../config/index.js';
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const PROFILE_LOCK_STALE_MS = 10 * 60 * 1000;
 const PROFILE_LOCK_HEARTBEAT_MS = 30_000;
-const PROFILE_AUTH_SCAN_MAX_BYTES = 10 * 1024 * 1024;
 
 export interface BrowserProfileMetadata {
   created_at: string;
@@ -23,11 +22,6 @@ export interface BrowserProfile {
   userDataDir: string;
   statePath: string;
   metadata: BrowserProfileMetadata;
-}
-
-export interface BrowserProfileStateSummary {
-  hasState: boolean;
-  authMarkers: string[];
 }
 
 export interface BrowserProfileLock {
@@ -64,85 +58,6 @@ function getProfileDir(name: string): string {
 
 function getProfileMetadataPath(name: string): string {
   return path.join(getProfileDir(name), 'profile.json');
-}
-
-const AUTH_MARKER_DOMAINS = [
-  'linkedin.com',
-  'x.com',
-  'twitter.com',
-  'google.com',
-  'github.com',
-] as const;
-
-function chromeCookieDbPaths(userDataDir: string): string[] {
-  return [
-    path.join(userDataDir, 'Default', 'Cookies'),
-    path.join(userDataDir, 'Default', 'Network', 'Cookies'),
-    path.join(userDataDir, 'Profile 1', 'Cookies'),
-    path.join(userDataDir, 'Profile 1', 'Network', 'Cookies'),
-  ];
-}
-
-function hasNonEmptyPath(targetPath: string): boolean {
-  try {
-    const stat = fs.statSync(targetPath);
-    if (stat.isFile()) return stat.size > 0;
-    if (!stat.isDirectory()) return false;
-    return fs.readdirSync(targetPath).length > 0;
-  } catch {
-    return false;
-  }
-}
-
-function readSmallFileLowercase(targetPath: string): string {
-  try {
-    const stat = fs.statSync(targetPath);
-    if (!stat.isFile() || stat.size <= 0) return '';
-    const fd = fs.openSync(targetPath, 'r');
-    try {
-      const length = Math.min(stat.size, PROFILE_AUTH_SCAN_MAX_BYTES);
-      const buffer = Buffer.alloc(length);
-      fs.readSync(fd, buffer, 0, length, 0);
-      return buffer.toString('latin1').toLowerCase();
-    } finally {
-      fs.closeSync(fd);
-    }
-  } catch {
-    return '';
-  }
-}
-
-function detectChromeAuthMarkers(userDataDir: string): string[] {
-  const detected = new Set<string>();
-  for (const cookiePath of chromeCookieDbPaths(userDataDir)) {
-    const body = readSmallFileLowercase(cookiePath);
-    if (!body) continue;
-    for (const domain of AUTH_MARKER_DOMAINS) {
-      if (body.includes(domain)) detected.add(domain);
-    }
-  }
-  return [...detected].sort();
-}
-
-export function summarizeBrowserProfileState(
-  profile: Pick<BrowserProfile, 'userDataDir' | 'statePath' | 'metadata'>,
-): BrowserProfileStateSummary {
-  const metadataMarkers = profile.metadata.auth_markers || [];
-  const detectedMarkers = detectChromeAuthMarkers(profile.userDataDir);
-  const markerSet = new Set([...metadataMarkers, ...detectedMarkers]);
-  const hasChromeState =
-    chromeCookieDbPaths(profile.userDataDir).some(hasNonEmptyPath) ||
-    hasNonEmptyPath(
-      path.join(profile.userDataDir, 'Default', 'Local Storage', 'leveldb'),
-    ) ||
-    hasNonEmptyPath(
-      path.join(profile.userDataDir, 'Default', 'Session Storage'),
-    );
-
-  return {
-    hasState: fs.existsSync(profile.statePath) || hasChromeState,
-    authMarkers: [...markerSet].sort(),
-  };
 }
 
 function readMetadata(name: string): BrowserProfileMetadata {
@@ -213,19 +128,6 @@ function writeMetadata(name: string, metadata: BrowserProfileMetadata): void {
   fs.renameSync(tmpPath, metadataPath);
 }
 
-export function getProfileUserDataDir(name: string): string {
-  const profileDir = getProfileDir(name);
-  const userDataDir = path.join(profileDir, 'user-data');
-  ensureDir(userDataDir);
-  return userDataDir;
-}
-
-export function getProfileStatePath(name: string): string {
-  const profileDir = getProfileDir(name);
-  ensureDir(profileDir);
-  return path.join(profileDir, 'state.json');
-}
-
 export function createProfile(name: string): BrowserProfile {
   const normalized = assertProfileName(name);
   const profileDir = getProfileDir(normalized);
@@ -290,12 +192,6 @@ export function listProfiles(): BrowserProfile[] {
     .filter((profile): profile is BrowserProfile => profile !== null);
 }
 
-export function deleteProfile(name: string): void {
-  const normalized = assertProfileName(name);
-  const profileDir = getProfileDir(normalized);
-  fs.rmSync(profileDir, { recursive: true, force: true });
-}
-
 export function updateProfileMetadata(
   name: string,
   patch: Partial<BrowserProfileMetadata>,
@@ -317,28 +213,6 @@ export function updateProfileMetadata(
   }
   writeMetadata(normalized, merged);
   return merged;
-}
-
-export function readProfileState(name: string): string {
-  const statePath = getProfileStatePath(name);
-  if (!fs.existsSync(statePath)) {
-    throw new Error(`Profile state not found for ${name}`);
-  }
-  return fs.readFileSync(statePath, 'utf-8');
-}
-
-export function writeProfileState(name: string, stateJson: string): void {
-  const normalized = assertProfileName(name);
-  const parsed = JSON.parse(stateJson) as unknown;
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Profile state JSON must be an object');
-  }
-
-  const statePath = getProfileStatePath(normalized);
-  const tmpPath = `${statePath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(parsed, null, 2));
-  fs.renameSync(tmpPath, statePath);
-  updateProfileMetadata(normalized, { last_used: new Date().toISOString() });
 }
 
 function sleep(ms: number): Promise<void> {

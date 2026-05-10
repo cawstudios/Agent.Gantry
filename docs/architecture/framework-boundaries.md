@@ -14,7 +14,7 @@ MyClaw keeps the core runtime plain TypeScript and Node.js. Framework dependenci
 | Slack channel adapter | Slack Bolt only. |
 | Telegram channel adapter | Grammy and Grammy plugins only. |
 | Anthropic LLM adapter | Anthropic SDKs only. |
-| Browser adapter later | Playwright only. |
+| Browser adapter | Playwright only, behind the browser adapter boundary. |
 | Sandbox adapter later | Docker or sandbox libraries only. |
 | Admin Web UI later | Separate app. It may use a web framework but must integrate through the SDK/control API. |
 
@@ -24,7 +24,7 @@ MyClaw keeps the core runtime plain TypeScript and Node.js. Framework dependenci
 - Slack Bolt is allowed only in `apps/core/src/channels/slack/`.
 - Grammy is allowed only in `apps/core/src/channels/telegram/`.
 - Anthropic SDKs are allowed only in approved Anthropic provider adapter paths. The current approved paths are `apps/core/src/runner/claude/` and `apps/core/src/memory/claude-query.ts`; a later provider cleanup should move these behind a more explicit adapter path.
-- Playwright is reserved for a future browser adapter and must not enter core runtime layers.
+- Playwright belongs only behind the browser adapter boundary and must not enter domain, application, or core runtime layers.
 - Docker and sandbox libraries are reserved for a future sandbox adapter and must not enter core runtime layers.
 
 NestJS, NextJS, Express, tRPC, Socket.io, Prisma, BullMQ, Temporal, LangChain, and LlamaIndex are not core runtime dependencies.

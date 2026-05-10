@@ -43,7 +43,6 @@ CREATE TABLE jobs (
   name TEXT NOT NULL,
   prompt TEXT NOT NULL,
   model TEXT,
-  script TEXT,
   schedule_type TEXT NOT NULL,
   schedule_value TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',

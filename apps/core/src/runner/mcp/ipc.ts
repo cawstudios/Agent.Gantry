@@ -19,6 +19,8 @@ import {
   TASK_RESPONSES_DIR,
   chatJid,
   memoryDefaultScope,
+  memoryIpcAllowedActions,
+  memoryReviewerIsControlApprover,
   memoryUserId,
   threadId,
 } from './context.js';
@@ -80,11 +82,7 @@ export function hasValidIpcResponseSignature(
   if (!IPC_RESPONSE_VERIFY_KEY) return false;
   const signature =
     typeof raw.signature === 'string' ? raw.signature.trim() : '';
-  return verifyIpcResponsePayload(
-    IPC_RESPONSE_VERIFY_KEY,
-    payload,
-    signature,
-  );
+  return verifyIpcResponsePayload(IPC_RESPONSE_VERIFY_KEY, payload, signature);
 }
 
 export async function requestMemoryAction(
@@ -108,10 +106,13 @@ export async function requestMemoryAction(
     action,
     payload,
     context: {
+      chatJid,
       ...(threadId ? { threadId } : {}),
       ...(memoryUserId ? { userId: memoryUserId } : {}),
       ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
       defaultScope: memoryDefaultScope,
+      allowedActions: memoryIpcAllowedActions,
+      reviewerIsControlApprover: memoryReviewerIsControlApprover,
     },
     expiresAt: new Date(Date.now() + timeoutMs).toISOString(),
   };
@@ -185,6 +186,7 @@ export async function requestMemoryAction(
 export async function requestBrowserAction(
   action: BrowserIpcAction,
   payload: Record<string, unknown>,
+  options: { timeoutMs?: number } = {},
 ): Promise<{
   ok: boolean;
   data?: unknown;
@@ -193,7 +195,7 @@ export async function requestBrowserAction(
   ensurePrivateDirSync(BROWSER_REQUESTS_DIR);
   ensurePrivateDirSync(BROWSER_RESPONSES_DIR);
 
-  const timeoutMs = 30_000;
+  const timeoutMs = options.timeoutMs ?? 30_000;
   const requestId = makeIpcId('browser');
   const reqPath = path.join(BROWSER_REQUESTS_DIR, `${requestId}.json`);
   const tmpReqPath = `${reqPath}.tmp`;
@@ -204,6 +206,7 @@ export async function requestBrowserAction(
     payload,
     context: {
       chatJid,
+      timeoutMs,
       ...(threadId ? { threadId } : {}),
       ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
     },
@@ -269,7 +272,10 @@ export async function requestBrowserAction(
   }
 
   removeStaleRequestFile(reqPath);
-  return { ok: false, error: 'Timed out waiting for browser service response' };
+  return {
+    ok: false,
+    error: `Browser IPC timeout after ${timeoutMs}ms waiting for browser service response`,
+  };
 }
 
 export interface TaskResponseEnvelope {

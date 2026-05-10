@@ -1,7 +1,9 @@
 import { MemoryIpcAction } from '@myclaw/contracts';
 
 export function getMemoryActionTimeoutMs(action: MemoryIpcAction): number {
-  return action === 'memory_consolidate' || action === 'memory_dream'
+  return action === 'memory_consolidate' ||
+    action === 'memory_dream' ||
+    action === 'continuity_summary'
     ? 60_000
     : 15_000;
 }

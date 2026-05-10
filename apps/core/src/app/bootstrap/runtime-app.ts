@@ -40,7 +40,8 @@ import {
   getRuntimeSkillArtifactStore,
   getRuntimeStorage,
 } from '../../adapters/storage/postgres/runtime-store.js';
-import { collectDurableMemoryAtSessionBoundary } from '../../memory/app-memory-service.js';
+import { AppMemoryService } from '../../memory/app-memory-service.js';
+import { collectDurableMemoryAtBoundary } from '../../memory/app-memory-session-boundary-collector.js';
 import { memoryAgentIdForGroupFolder } from '../../memory/app-memory-boundaries.js';
 
 type RuntimeAppRepository = RuntimeRouterStateRepository &
@@ -79,6 +80,7 @@ export interface RuntimeApp {
   clearSessionForChatJid: (
     chatJid: string,
     threadId?: string | null,
+    metadata?: { memoryUserId?: string },
   ) => Promise<void>;
   processGroupMessages: (
     chatJid: string,
@@ -417,10 +419,15 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   async function clearSessionForChatJid(
     chatJid: string,
     threadId?: string | null,
+    metadata: { memoryUserId?: string } = {},
   ): Promise<void> {
     const group = conversationRoutes[chatJid];
     if (!group) return;
-    await ops().deleteSession(group.folder, threadId);
+    await ops().deleteSession(group.folder, threadId, {
+      conversationJid: chatJid,
+      conversationKind: group.conversationKind,
+      memoryUserId: metadata.memoryUserId,
+    });
   }
 
   const groupProcessor = createGroupProcessor({
@@ -437,10 +444,13 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
         channelRuntime.setTyping(chatJid, isTyping),
       sendProgressUpdate: (chatJid, text, options) =>
         channelRuntime.sendProgressUpdate(chatJid, text, options),
+      isControlApproverAllowed: (input) =>
+        channelRuntime.isControlApproverAllowed?.(input) ??
+        Promise.resolve(false),
     },
     getGroup: (chatJid) => conversationRoutes[chatJid],
-    clearSession: async (groupFolder, threadId) => {
-      await ops().deleteSession(groupFolder, threadId);
+    clearSession: async (groupFolder, threadId, metadata) => {
+      await ops().deleteSession(groupFolder, threadId, metadata);
     },
     getCursor: getOrRecoverCursor,
     setCursor: (chatJid, timestamp) => {
@@ -484,7 +494,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     getSkillArtifactStore:
       options.skillArtifactStore ?? getRuntimeSkillArtifactStore,
     collectSessionMemory:
-      options.collectSessionMemory ?? collectDurableMemoryAtSessionBoundary,
+      options.collectSessionMemory ?? collectRuntimeSessionMemory,
   });
 
   return {
@@ -517,6 +527,18 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     },
   };
 }
+
+export const collectRuntimeSessionMemory: import('../../domain/ports/session-memory-collector.js').SessionMemoryCollector =
+  async (input) => {
+    const { repositories } = getRuntimeStorage();
+    const memoryService = AppMemoryService.getInstance();
+    return collectDurableMemoryAtBoundary(input, {
+      repositories,
+      memory: {
+        recordEvidence: (value) => memoryService.recordEvidence(value),
+      },
+    });
+  };
 
 let defaultRuntimeApp: RuntimeApp | null = null;
 

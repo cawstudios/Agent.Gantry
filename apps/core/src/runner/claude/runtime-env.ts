@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { applyAgentEgressNoProxyEnv } from '../../shared/no-proxy.js';
+import { getPermissionTimeoutMs } from '../../shared/permission-timeout.js';
 import { log } from './logging.js';
 
 function requirePathEnv(name: string): string {
@@ -23,12 +24,9 @@ export const IPC_INTERACTION_BOUNDARY_DIR = path.join(
 export const IPC_AUTH_TOKEN = process.env.MYCLAW_IPC_AUTH_TOKEN || '';
 export const IPC_RESPONSE_VERIFY_KEY =
   process.env.MYCLAW_IPC_RESPONSE_VERIFY_KEY || '';
-export const IPC_RESPONSE_KEY_ID =
-  process.env.MYCLAW_IPC_RESPONSE_KEY_ID || '';
-export const PERMISSION_REQUEST_TIMEOUT_MS = Math.max(
-  10_000,
-  parseInt(process.env.MYCLAW_PERMISSION_TIMEOUT_MS || '300000', 10) || 300_000,
-);
+export const IPC_RESPONSE_KEY_ID = process.env.MYCLAW_IPC_RESPONSE_KEY_ID || '';
+export const PERMISSION_REQUEST_TIMEOUT_MS =
+  getPermissionTimeoutMs('interactive');
 export const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 export const IPC_POLL_MS = 500;
 
@@ -133,24 +131,6 @@ export function buildSdkEnv(
   delete sdkEnv.MYCLAW_MCP_SERVERS_JSON;
   delete sdkEnv.MYCLAW_MCP_ALLOWED_TOOLS_JSON;
   return sdkEnv;
-}
-
-export function buildToolEnv(): Record<string, string | undefined> {
-  const toolEnv: Record<string, string | undefined> = {
-    PATH: process.env.PATH,
-    TMPDIR: process.env.TMPDIR,
-    TMP: process.env.TMP,
-    TEMP: process.env.TEMP,
-    LANG: process.env.LANG,
-    LC_ALL: process.env.LC_ALL,
-    LC_CTYPE: process.env.LC_CTYPE,
-    TERM: process.env.TERM,
-    TZ: process.env.TZ,
-  };
-  copyEnv(toolEnv, ['NO_PROXY', 'no_proxy']);
-  stripNonModelProxyEnv(toolEnv);
-  applyAgentEgressNoProxyEnv(toolEnv);
-  return toolEnv;
 }
 
 export function resolveMcpServerPath(importMetaUrl: string): string {

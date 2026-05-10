@@ -189,8 +189,7 @@ describe('runtime admin IPC handlers', () => {
       startService,
       stopService: vi.fn(() => ({ ok: true, message: 'stopped' })),
     }));
-    const { serviceRestartHandler, taskData } =
-      await loadHandlers(runtimeHome);
+    const { serviceRestartHandler, taskData } = await loadHandlers(runtimeHome);
     const requestPermissionApproval = vi.fn(async () => ({
       approved: false,
       reason: 'not now',
@@ -339,5 +338,106 @@ describe('runtime admin IPC handlers', () => {
         }),
       }),
     );
+  });
+
+  it('reconciles approved settings updates immediately and reloads runtime state', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-settings-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    vi.stubEnv(
+      'MYCLAW_DATABASE_URL',
+      'postgres://myclaw_app:pass@localhost/myclaw',
+    );
+    vi.stubEnv(
+      'ONECLI_DATABASE_URL',
+      'postgres://onecli_app:pass@localhost/myclaw?schema=onecli',
+    );
+    vi.stubEnv(
+      'SECRET_ENCRYPTION_KEY',
+      '123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
+    );
+    const initial = createDefaultRuntimeSettings();
+    saveRuntimeSettings(runtimeHome, initial);
+    const expectedRevision = getRuntimeSettingsRevision(runtimeHome);
+    const replacement = createDefaultRuntimeSettings();
+    replacement.desiredState.authoritative = true;
+    replacement.agents.main_agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      bindings: {},
+      capabilities: {
+        toolIds: [],
+        skillIds: [],
+        mcpServerIds: [],
+      },
+    };
+    replacement.agents.main_agent.capabilities.toolIds = ['Bash(npm test *)'];
+    const replacementYaml = renderRuntimeSettingsYaml(replacement);
+    const replaceAgentCapabilityBindings = vi.fn(async () => undefined);
+    const reloadRuntimeState = vi.fn(async () => undefined);
+    vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
+      getRuntimeStorage: () => ({
+        ops: { getAllConversationRoutes: vi.fn(async () => ({})) },
+        repositories: {
+          agents: {
+            saveAgent: vi.fn(async () => undefined),
+            listAgents: vi.fn(async () => []),
+            replaceAgentCapabilityBindings,
+          },
+          tools: {
+            getTool: vi.fn(async () => null),
+            listTools: vi.fn(async () => []),
+            saveTool: vi.fn(async () => undefined),
+          },
+          skills: { getSkill: vi.fn(async () => null) },
+          mcpServers: { getServer: vi.fn(async () => null) },
+        },
+      }),
+    }));
+    const { requestSettingsUpdateHandler, taskData } =
+      await loadHandlers(runtimeHome);
+
+    await requestSettingsUpdateHandler({
+      data: taskData('settings-update', {
+        chatJid: 'tg:100',
+        payload: {
+          replacementYaml,
+          expectedRevision,
+          reason: 'enable test command',
+        },
+      }) as never,
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        ...depsWithAdminTools(['mcp__myclaw__request_settings_update']),
+        requestPermissionApproval: vi.fn(async () => ({
+          approved: true,
+          decidedBy: 'tg:admin',
+        })),
+        sendMessage: vi.fn(async () => undefined),
+        reloadRuntimeState,
+      } as any,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['tg:100'],
+    });
+
+    await expect(
+      waitForResponse(runtimeHome, 'settings-update'),
+    ).resolves.toMatchObject({
+      ok: true,
+      code: 'settings_updated',
+    });
+    expect(replaceAgentCapabilityBindings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agent:main_agent',
+        toolBindings: [
+          expect.objectContaining({
+            status: 'active',
+            toolId: expect.stringMatching(/^tool:permission-rule:/),
+          }),
+        ],
+      }),
+    );
+    expect(reloadRuntimeState).toHaveBeenCalled();
   });
 });

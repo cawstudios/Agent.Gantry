@@ -1,14 +1,13 @@
 import {
   query,
+  type SandboxSettings,
   type EffortLevel,
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import {
-  composeAgentCapabilities,
-  type McpServerConfig,
-} from '../agent-capabilities.js';
+import path from 'node:path';
+import { composeAgentCapabilities } from '../agent-capabilities.js';
 import { denyMemoryBoundaryToolUse } from '../memory-boundary.js';
 import { denyProtectedCapabilityToolUse } from './protected-capability-guard.js';
 import { MessageStream } from './message-stream.js';
@@ -40,9 +39,15 @@ import {
 } from '../../shared/model-catalog.js';
 import { validateAgentToolInput } from './agent-model-selection.js';
 import { usageEventIdForMessage } from './query-usage-event-id.js';
-import { evaluateAutonomousToolUse } from '../../shared/tool-rule-matcher.js';
 import { readLiveToolRules } from '../../shared/live-tool-rules.js';
 import { permissionUpdateAllowedToolRules } from '../../shared/permission-tool-rules.js';
+import {
+  ToolExecutionClassifier,
+  ToolExecutionPolicyService,
+} from '../../shared/tool-execution-policy-service.js';
+import { readExternalMcpServers } from './mcp-server-validation.js';
+
+const PROTECTED_FILESYSTEM_PATHS_ENV = 'MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON';
 
 export async function runQuery(
   prompt: string,
@@ -113,6 +118,7 @@ export async function runQuery(
   let sawPartialTextSinceLastResult = false;
   const systemPrompt = buildRunnerSystemPrompt(agentInput, memoryBlock);
   const extraDirs = discoverAdditionalDirectories();
+  const protectedFilesystemPaths = readProtectedFilesystemPaths();
   const currentModel = findModelByRunnerModel(configuredModel);
   const capabilities = composeAgentCapabilities({
     mcpServerPath,
@@ -124,6 +130,8 @@ export async function runQuery(
     persona: agentInput.persona,
     browserProfileName: agentInput.browserProfileName,
     configuredAllowedTools: agentInput.allowedTools,
+    selectedSkillIds: agentInput.selectedSkillIds,
+    selectedMcpServerIds: agentInput.selectedMcpServerIds,
     ipcDir: process.env.MYCLAW_IPC_DIR,
     ipcAuthToken: process.env.MYCLAW_IPC_AUTH_TOKEN,
     browserIpcAuthToken: process.env.MYCLAW_BROWSER_IPC_AUTH_TOKEN,
@@ -134,6 +142,8 @@ export async function runQuery(
     externalMcpAllowedTools: readExternalMcpAllowedTools(),
     externalMcpAlwaysAllowedTools: readExternalMcpAlwaysAllowedTools(),
   });
+  const toolExecutionClassifier = new ToolExecutionClassifier();
+  const toolExecutionPolicy = new ToolExecutionPolicyService();
   const liveApprovedRules = new Set<string>();
 
   function currentAllowedToolRules(): string[] {
@@ -170,6 +180,7 @@ export async function runQuery(
       allowedTools: [...capabilities.allowedTools],
       disallowedTools: [...capabilities.disallowedTools],
       env: sdkEnv,
+      sandbox: buildSdkFilesystemSandbox(protectedFilesystemPaths),
       permissionMode: capabilities.permissionMode,
       hooks: {
         PreToolUse: [
@@ -225,25 +236,33 @@ export async function runQuery(
           };
         }
 
+        const toolExecutionRequest = toolExecutionClassifier.classify({
+          origin: 'sdk',
+          toolName,
+          toolInput: input,
+          executionMode: agentInput.isScheduledJob
+            ? 'autonomous'
+            : 'interactive',
+          runContext: {
+            jobId: agentInput.isScheduledJob ? agentInput.jobId : undefined,
+            threadId: agentInput.threadId,
+            conversationId: agentInput.chatJid,
+          },
+        });
+
         if (agentInput.isScheduledJob) {
-          const toolPolicy = evaluateAutonomousToolUse({
-            rules: agentInput.allowedTools ?? [],
-            toolName,
-            toolInput: input,
+          const toolDecision = toolExecutionPolicy.evaluate({
+            request: toolExecutionRequest,
+            schedulerAllowedToolRules: agentInput.allowedTools ?? [],
           });
-          if (toolPolicy.allowed) {
+          if (toolDecision.status === 'allow') {
             log(
-              `Autonomous job allowed tool ${toolName} by ${toolPolicy.matchedRule}`,
+              `Autonomous job allowed tool ${toolName}: ${toolDecision.reason}`,
             );
             return { behavior: 'allow' as const, updatedInput: input };
           }
-          const baseMessage = `tool not on autonomous job allowlist: ${toolName}`;
-          const message =
-            toolPolicy.reason &&
-            !toolPolicy.reason.startsWith('No autonomous tool rule matched')
-              ? `${baseMessage}: ${toolPolicy.reason}`
-              : baseMessage;
-          log(`Autonomous job denied tool ${toolName}: ${toolPolicy.reason}`);
+          const message = `${toolDecision.reason} Recovery: ${toolDecision.recoveryAction}`;
+          log(`Autonomous job denied tool ${toolName}: ${message}`);
           return {
             behavior: 'deny' as const,
             message,
@@ -255,14 +274,13 @@ export async function runQuery(
           return { behavior: 'allow' as const, updatedInput: input };
         }
 
-        const currentToolPolicy = evaluateAutonomousToolUse({
-          rules: currentAllowedToolRules(),
-          toolName,
-          toolInput: input,
+        const currentToolDecision = toolExecutionPolicy.evaluate({
+          request: toolExecutionRequest,
+          allowedToolRules: currentAllowedToolRules(),
         });
-        if (currentToolPolicy.allowed) {
+        if (currentToolDecision.status === 'allow') {
           log(
-            `Permission allowed for tool ${toolName} by ${currentToolPolicy.matchedRule}`,
+            `Permission allowed for tool ${toolName}: ${currentToolDecision.reason}`,
           );
           return { behavior: 'allow' as const, updatedInput: input };
         }
@@ -351,7 +369,7 @@ export async function runQuery(
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
       assertRequiredMcpServerReady(message);
-      log(`Session initialized: ${newSessionId}`);
+      log('Session initialized: provider resume handle received');
     }
 
     if (
@@ -414,11 +432,13 @@ export async function runQuery(
         fallbackModel: configuredModel,
       });
       const contextUsage = await readContextUsage(sdkQuery);
+      const continuedByFollowup = steeringGate.pendingCount() > 0;
       writeOutput({
         status: 'success',
         result:
           textResult && !sawPartialTextSinceLastResult ? textResult : null,
         newSessionId,
+        ...(continuedByFollowup ? { continuedByFollowup: true } : {}),
         ...(contextUsage ? { contextUsage } : {}),
         ...(usage
           ? {
@@ -447,6 +467,48 @@ export async function runQuery(
     lastAssistantUuid,
     closedDuringQuery,
   };
+}
+
+function readProtectedFilesystemPaths(): string[] {
+  const raw = process.env[PROTECTED_FILESYSTEM_PATHS_ENV]?.trim();
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${PROTECTED_FILESYSTEM_PATHS_ENV} must be valid JSON.`);
+  }
+  if (!Array.isArray(parsed))
+    throw new Error(`${PROTECTED_FILESYSTEM_PATHS_ENV} must be a JSON array.`);
+  return normalizeProtectedPaths(parsed);
+}
+
+function buildSdkFilesystemSandbox(paths: readonly string[]): SandboxSettings {
+  return {
+    enabled: true,
+    failIfUnavailable: true,
+    autoAllowBashIfSandboxed: false,
+    allowUnsandboxedCommands: false,
+    filesystem: { denyWrite: normalizeProtectedPaths(paths) },
+  };
+}
+
+function normalizeProtectedPaths(values: readonly unknown[]): string[] {
+  return [...new Set(values.flatMap(resolvePathForSandbox))].sort();
+}
+
+function resolvePathForSandbox(value: unknown): string[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  const absolute = path.resolve(value.trim());
+  try {
+    if (fs.existsSync(absolute)) return [fs.realpathSync.native(absolute)];
+    const parent = path.dirname(absolute);
+    if (fs.existsSync(parent))
+      return [
+        path.join(fs.realpathSync.native(parent), path.basename(absolute)),
+      ];
+  } catch {}
+  return [absolute];
 }
 
 function synthesizePermissionSuggestions(
@@ -507,37 +569,6 @@ function assertRequiredMcpServerReady(message: unknown): void {
   if (status !== 'connected') {
     throw new Error(`Required MyClaw MCP server is not ready: ${status}`);
   }
-}
-
-function readExternalMcpServers(): Record<string, McpServerConfig> {
-  const configPath = process.env.MYCLAW_MCP_CONFIG_FILE?.trim();
-  if (configPath) {
-    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<
-      string,
-      McpServerConfig
-    >;
-    fs.rmSync(configPath, { force: true });
-    return validateExternalMcpServers(parsed);
-  }
-  const raw = process.env.MYCLAW_MCP_SERVERS_JSON?.trim();
-  if (!raw) return {};
-  const parsed = JSON.parse(raw) as Record<string, McpServerConfig>;
-  return validateExternalMcpServers(parsed);
-}
-
-function validateExternalMcpServers(
-  parsed: Record<string, McpServerConfig>,
-): Record<string, McpServerConfig> {
-  const servers: Record<string, McpServerConfig> = {};
-  for (const [name, config] of Object.entries(parsed)) {
-    if (name === 'myclaw') {
-      throw new Error(
-        'Configured MCP servers cannot override the built-in myclaw server',
-      );
-    }
-    servers[name] = config;
-  }
-  return servers;
 }
 
 async function readContextUsage(queryHandle: unknown) {

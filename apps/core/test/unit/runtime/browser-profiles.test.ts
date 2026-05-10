@@ -47,49 +47,6 @@ describe('browser-profiles', () => {
     expect(found?.metadata.last_used).toBeTruthy();
   });
 
-  it('writes and loads profile state', async () => {
-    const root = makeTmpRoot(roots);
-    vi.doMock('@core/config/index.js', () => ({
-      DATA_DIR: root,
-    }));
-
-    const mod = await import('@core/runtime/browser-profiles.js');
-    mod.createProfile('x');
-
-    const state = {
-      cookies: [{ name: 'sid', value: 'abc' }],
-      origins: [{ origin: 'https://x.com', localStorage: [] }],
-    };
-    mod.writeProfileState('x', JSON.stringify(state));
-
-    const loaded = JSON.parse(mod.readProfileState('x')) as {
-      cookies: Array<{ name: string; value: string }>;
-    };
-    expect(loaded.cookies[0].name).toBe('sid');
-    expect(loaded.cookies[0].value).toBe('abc');
-  });
-
-  it('detects Chrome cookie-backed profile state and auth markers', async () => {
-    const root = makeTmpRoot(roots);
-    vi.doMock('@core/config/index.js', () => ({
-      DATA_DIR: root,
-    }));
-
-    const mod = await import('@core/runtime/browser-profiles.js');
-    const profile = mod.createProfile('cookies');
-    const cookieDir = path.join(profile.userDataDir, 'Default', 'Network');
-    fs.mkdirSync(cookieDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(cookieDir, 'Cookies'),
-      'SQLite format 3\0.linkedin.com\0li_at\0',
-    );
-
-    expect(mod.summarizeBrowserProfileState(profile)).toEqual({
-      hasState: true,
-      authMarkers: ['linkedin.com'],
-    });
-  });
-
   it('acquires and releases locks', async () => {
     const root = makeTmpRoot(roots);
     vi.doMock('@core/config/index.js', () => ({

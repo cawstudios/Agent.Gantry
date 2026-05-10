@@ -507,8 +507,21 @@ Memory:
 - `mcp__myclaw__memory_search`
 - `mcp__myclaw__memory_save`
 - `mcp__myclaw__memory_patch`
+- `mcp__myclaw__memory_source_request`
+- `mcp__myclaw__memory_source_add`
+- `mcp__myclaw__memory_source_list`
+- `mcp__myclaw__memory_source_status`
+- `mcp__myclaw__memory_source_search`
+- `mcp__myclaw__memory_source_delete`
+- `mcp__myclaw__memory_source_ingest`
 - `mcp__myclaw__procedure_save`
 - `mcp__myclaw__procedure_patch`
+
+Use Memory Source tools for URLs, files, pasted articles, docs, posts, and
+other raw source material. `memory_save` is only for small explicit
+preferences, decisions, facts, corrections, and constraints; source ingestion
+stores evidence/chunks and stages reviewable candidates instead of writing
+active memory directly.
 
 Browser:
 

@@ -123,6 +123,195 @@ describe('request permission review helpers', () => {
     );
   });
 
+  it('binds persistent Browser approvals to the catalog Browser tool and mirrors settings', async () => {
+    const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
+    const repository = {
+      getTool: vi.fn(async () => null),
+      listTools: vi.fn(async () => [
+        {
+          id: 'tool:Browser',
+          appId: 'default',
+          name: 'Browser',
+          status: 'active',
+          selectable: true,
+        },
+      ]),
+      saveTool: vi.fn(async () => undefined),
+      saveAgentToolBinding: vi.fn(async () => undefined),
+      disableAgentToolBinding: vi.fn(async () => null),
+    };
+
+    const persisted = await persistRequestPermissionRules({
+      deps: {
+        getToolRepository: () => repository as never,
+        mirrorAgentToolRulesToSettings,
+      },
+      sourceAgentFolder: 'main_agent',
+      updates: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [{ toolName: 'Browser' }],
+        },
+      ],
+    });
+
+    expect(persisted).toEqual(['Browser']);
+    expect(repository.saveTool).not.toHaveBeenCalled();
+    expect(repository.saveAgentToolBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agent:main_agent',
+        toolId: 'tool:Browser',
+        status: 'active',
+      }),
+    );
+    expect(mirrorAgentToolRulesToSettings).toHaveBeenCalledWith('main_agent', [
+      'Browser',
+    ]);
+  });
+
+  it('does not suggest persistent grants for raw agent_browser request_permission', () => {
+    for (const toolName of [
+      'mcp__agent_browser__navigate',
+      'mcp__playwright__browser_click',
+      'mcp__puppeteer__screenshot',
+    ]) {
+      expect(
+        requestPermissionReviewSuggestions({
+          permissionKind: 'tool',
+          toolName,
+          rule: 'url=https://example.com',
+          temporaryOnly: false,
+        }),
+      ).toBeUndefined();
+    }
+  });
+
+  it('does not suggest persistent grants for projected browser request_permission', () => {
+    expect(
+      requestPermissionReviewSuggestions({
+        permissionKind: 'tool',
+        toolName: 'mcp__myclaw__browser_click',
+        temporaryOnly: false,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('rejects raw agent_browser persistent approval updates', async () => {
+    const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
+    const repository = {
+      getTool: vi.fn(async () => null),
+      listTools: vi.fn(async () => [
+        {
+          id: 'tool:Browser',
+          appId: 'default',
+          name: 'Browser',
+          status: 'active',
+          selectable: true,
+        },
+      ]),
+      saveTool: vi.fn(async () => undefined),
+      saveAgentToolBinding: vi.fn(async () => undefined),
+      disableAgentToolBinding: vi.fn(async () => null),
+    };
+
+    await expect(
+      persistRequestPermissionRules({
+        deps: {
+          getToolRepository: () => repository as never,
+          mirrorAgentToolRulesToSettings,
+        },
+        sourceAgentFolder: 'main_agent',
+        updates: [
+          {
+            type: 'addRules',
+            behavior: 'allow',
+            rules: [{ toolName: 'mcp__playwright__browser_click' }],
+          },
+        ],
+      }),
+    ).rejects.toThrow('Raw browser backend MCP tools are host-private');
+
+    expect(repository.saveTool).not.toHaveBeenCalled();
+    expect(repository.saveAgentToolBinding).not.toHaveBeenCalled();
+    expect(mirrorAgentToolRulesToSettings).not.toHaveBeenCalled();
+  });
+
+  it('rejects projected browser tool persistent approval updates', async () => {
+    const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
+    const repository = {
+      getTool: vi.fn(async () => null),
+      listTools: vi.fn(async () => []),
+      saveTool: vi.fn(async () => undefined),
+      saveAgentToolBinding: vi.fn(async () => undefined),
+      disableAgentToolBinding: vi.fn(async () => null),
+    };
+
+    await expect(
+      persistRequestPermissionRules({
+        deps: {
+          getToolRepository: () => repository as never,
+          mirrorAgentToolRulesToSettings,
+        },
+        sourceAgentFolder: 'main_agent',
+        updates: [
+          {
+            type: 'addRules',
+            behavior: 'allow',
+            rules: [{ toolName: 'mcp__myclaw__browser_click' }],
+          },
+        ],
+      }),
+    ).rejects.toThrow('runtime projections, not durable capabilities');
+
+    expect(repository.saveTool).not.toHaveBeenCalled();
+    expect(repository.saveAgentToolBinding).not.toHaveBeenCalled();
+    expect(mirrorAgentToolRulesToSettings).not.toHaveBeenCalled();
+  });
+
+  it('binds canonical Browser persistent approval updates to Browser', async () => {
+    const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
+    const repository = {
+      getTool: vi.fn(async () => null),
+      listTools: vi.fn(async () => [
+        {
+          id: 'tool:Browser',
+          appId: 'default',
+          name: 'Browser',
+          status: 'active',
+          selectable: true,
+        },
+      ]),
+      saveTool: vi.fn(async () => undefined),
+      saveAgentToolBinding: vi.fn(async () => undefined),
+      disableAgentToolBinding: vi.fn(async () => null),
+    };
+
+    const persisted = await persistRequestPermissionRules({
+      deps: {
+        getToolRepository: () => repository as never,
+        mirrorAgentToolRulesToSettings,
+      },
+      sourceAgentFolder: 'main_agent',
+      updates: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [{ toolName: 'Browser' }],
+        },
+      ],
+    });
+
+    expect(persisted).toEqual(['Browser']);
+    expect(repository.saveTool).not.toHaveBeenCalled();
+    expect(repository.saveAgentToolBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ toolId: 'tool:Browser' }),
+    );
+    expect(mirrorAgentToolRulesToSettings).toHaveBeenCalledWith('main_agent', [
+      'Browser',
+    ]);
+  });
+
   it('writes approved persistent rules to the current run live permission file', async () => {
     const ipcDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'myclaw-live-tool-rules-'),

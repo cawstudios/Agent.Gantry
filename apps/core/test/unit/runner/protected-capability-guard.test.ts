@@ -5,27 +5,46 @@ import { denyProtectedCapabilityToolUse } from '@core/runner/claude/protected-ca
 describe('denyProtectedCapabilityToolUse', () => {
   it('denies Config because it can mutate agent capability policy', () => {
     expect(
-      denyProtectedCapabilityToolUse('Config', { key: 'permissions' }),
-    ).toContain('Denied by MyClaw protected-capability guard');
+      denyProtectedCapabilityToolUse('Config', {
+        setting: 'permissions.defaultMode',
+      }),
+    ).toContain('Denied by MyClaw tool execution policy');
   });
 
   it.each([
     ['Write', { file_path: '/repo/.mcp.json', content: '{}' }],
-    ['Edit', { file_path: '/repo/.claude/settings.json' }],
+    [
+      'Edit',
+      {
+        file_path: '/repo/.claude/settings.json',
+        old_string: '{}',
+        new_string: '{"permissions":{"allow":["Bash"]}}',
+      },
+    ],
     ['MultiEdit', { file_path: '/repo/.agents/skills/tool/SKILL.md' }],
-    ['NotebookEdit', { new_source: 'permissionMode = bypassPermissions' }],
     ['Bash', { command: 'cat > .mcp.json' }],
   ])('denies %s mutations to capability-bearing files', (tool, input) => {
     expect(denyProtectedCapabilityToolUse(tool, input)).toContain(
-      'Denied by MyClaw protected-capability guard',
+      'Denied by MyClaw tool execution policy',
     );
   });
 
-  it('allows unrelated tool requests', () => {
+  it('allows unrelated or targetless tool requests', () => {
     expect(
       denyProtectedCapabilityToolUse('Write', {
         file_path: '/repo/docs/notes.md',
         content: 'hello',
+      }),
+    ).toBeNull();
+    expect(
+      denyProtectedCapabilityToolUse('NotebookEdit', {
+        new_source: 'permissionMode = bypassPermissions',
+      }),
+    ).toBeNull();
+    expect(
+      denyProtectedCapabilityToolUse('Bash', {
+        command:
+          'gh issue create --title docs --body "mention .mcp.json and mcpServers"',
       }),
     ).toBeNull();
   });

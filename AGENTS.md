@@ -38,6 +38,11 @@ Important constraints:
 - Transcript archive during `/new` is best-effort and must not block reset success.
 - Durable memory lives under the configured memory root; do not load `~/myclaw/agents/<folder>/memory/`.
 - Live channel turns must persist the provider SDK session ID as soon as the runner streams it. Do not wait for runner shutdown; launchd restarts can kill an active run before final completion.
+- Scheduler fallback delivery must accumulate bounded, already-redacted user-visible output snapshots; never retain or send unbounded raw streamed output.
+- Outbound durable delivery recovery startup must claim due items across app scopes; do not hard-code startup recovery claims to `appId: 'default'`.
+- Jobs must use canonical `execution_context` and `notification_routes` for runtime execution/delivery targeting; do not add or mirror legacy job-notification alias fields.
+- Postgres `pgcrypto` must be installed in `public` schema for shared test/runtime databases; schema-scoped extension installs break `digest()` lookups under per-schema `search_path`.
+- When using Drizzle Postgres upserts, do not assume `onConflictDoUpdate.target` supports SQL expressions; expression-index identities require explicit insert + unique-violation update flows.
 
 ## Architecture Rules
 
@@ -45,6 +50,7 @@ Important constraints:
 - Do not add more provider-specific behavior to core runtime.
 - Hide LLM and model-provider behavior behind provider ports.
 - Route all risky tool execution through deterministic permission evaluation and sandbox policy.
+- SDK-managed Bash/file/MCP execution must receive Claude SDK sandbox settings with fail-closed availability and protected-path `denyWrite` entries; direct host-owned scheduler scripts are not supported.
 - Domain must not import adapters, runtime, CLI, HTTP, Postgres, Slack, Telegram, Teams, WhatsApp, Claude, Anthropic SDK, OpenAI, Gemini, or provider-specific packages.
 - Application may depend on domain and ports, not provider implementations.
 - Adapters implement ports and may depend on external systems.
@@ -84,6 +90,7 @@ Important constraints:
 - Public admin API, local CLI, and MyClaw MCP tools are separate adapters over the same services. API is for owner/admin automation, CLI is for local service and setup operations, and MCP tools are for agent-requested reviewed changes.
 - Local desired-state configuration belongs in `settings.yaml` and is mediated by `SettingsDesiredStateService`. CLI commands and approved MyClaw admin tools write the file; only agents with selected `settings_desired_state` or `request_settings_update` capabilities may use those tools, and agents must not edit the file or DB directly.
 - Restart-owned sync rule: `settings.yaml` is the restart source of truth for agent identity/defaults, selected capabilities (`tools`, `skills`, `mcp_servers`), provider connections, conversations, sender policies, control approvers, triggers, `requires_trigger`, and agent-conversation bindings. Any Control API, CLI, or approved agent/admin-tool path that mutates those fields must update `settings.yaml` in the same operation or go through `request_settings_update`; Postgres/runtime rows are projections and must never be the only durable copy.
+- Capability sync is bidirectional and immediate: settings-side capability lists replace stale active Postgres bindings, while DB/admin-side capability writes must export readable tools, skills, and MCP servers back into `settings.yaml` before reporting success.
 - In personal/local mode, Postgres indexes runtime state, audit, artifacts, and execution data. It is not the source of truth for fields represented under `desired_state.*` or `agents.*` once those settings are present.
 - Use Provider for Slack/Teams/Telegram/Web/App, Provider Connection for an installed workspace/bot/tenant/app connection, Conversation for Slack channels/DMs, Teams channels/chats, and Telegram groups/DMs, and Thread/Topic for Slack threads, Teams reply chains, and Telegram forum topics. Conversation approvers govern approvals for both direct/private and group/channel conversations.
 - Verify provider-specific discovery and runtime behavior against official online provider docs before changing adapters. Slack `users.conversations` supports `exclude_archived`, pagination, and type filters but not a server-side text query, so search text locally after fetching allowed conversations. Microsoft Graph channel listing is setup/discovery only; Teams live channel messaging requires a Teams bot transport. Telegram membership checks should use Bot API primitives such as `getChatMember` and respect their bot-admin limitations.
@@ -95,7 +102,8 @@ Important constraints:
 - Runtime bootstrap code must not call `getRuntimeStorage()` while constructing wiring objects before `runStartup()` initializes storage. Pass lazy repository accessors or instantiate storage-backed services inside request handlers after startup.
 - Runtime queue concurrency and retry policy belongs under `runtime.queue` in `settings.yaml` and should be injected into `GroupQueue`; tests should not depend on hard-coded queue timing or concurrency defaults.
 - Agents must use `send_message`, `ask_user_question`, `request_skill_install`, `request_skill_proposal`, `request_skill_dependency_install`, `request_mcp_server`, `request_permission`, `service_restart`, and `register_agent` instead of direct installs, config edits, or legacy tool-enable guidance. Permission decisions are `Allow once`, `Always allow <granular rule>`, or `Cancel`.
-- The control API is part of the runtime process. launchd/systemd service definitions should stay secret-free; `MYCLAW_CONTROL_API_KEY(S)_JSON`, `MYCLAW_CONTROL_APP_ID`, `MYCLAW_CONTROL_PORT`, and `MYCLAW_CONTROL_SOCKET_PATH` belong in process env or the runtime `.env`.
+- Browser grants persist only as canonical `Browser`. Runtime projects that capability into MyClaw-owned `browser_*` tools with backend-native schemas; do not persist or expose raw `agent_browser`, Playwright, Puppeteer, or per-action browser tool names as durable authority.
+- The control API is part of the runtime process. launchd/systemd service definitions should stay secret-free; `MYCLAW_CONTROL_API_KEYS_JSON`, `MYCLAW_CONTROL_PORT`, and `MYCLAW_CONTROL_SOCKET_PATH` belong in process env or the runtime `.env`. Control API keys must include explicit `kid`, `token`, `appId`, and `scopes`.
 
 ## Docs Rules
 

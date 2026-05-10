@@ -22,7 +22,6 @@ describe('job app session resolution', () => {
       resolveAppSessionForJob(
         {
           session_id: 'session-1',
-          linked_sessions: ['app:app-one:conv-1'],
         } as never,
         control,
       ),
@@ -38,7 +37,6 @@ describe('job app session resolution', () => {
       resolveAppSessionForJob(
         {
           session_id: 'stale-session',
-          linked_sessions: ['app:app-one:conv-1'],
         } as never,
         control,
       ),

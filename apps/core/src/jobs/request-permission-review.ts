@@ -19,7 +19,12 @@ import {
 import { appendLiveToolRules } from '../shared/live-tool-rules.js';
 import { permissionUpdateAllowedToolRules } from '../shared/permission-tool-rules.js';
 import { ensureAgentToolCatalogItem } from '../domain/tools/agent-tool-catalog-references.js';
-import { persistentPermissionToolId } from '../shared/agent-tool-references.js';
+import {
+  isBrowserActionMcpToolRule,
+  isProjectedBrowserMcpToolRule,
+  persistentPermissionToolId,
+  validateReadableAgentToolRule,
+} from '../shared/agent-tool-references.js';
 
 export interface RequestPermissionReview {
   toolName: 'request_permission';
@@ -52,7 +57,9 @@ export async function persistRequestPermissionRules(input: {
   ipcDir?: string;
   runHandle?: string;
 }): Promise<string[]> {
-  const allowedRules = permissionUpdateAllowedToolRules(input.updates);
+  const allowedRules = canonicalPersistentPermissionRules(
+    permissionUpdateAllowedToolRules(input.updates),
+  );
   if (allowedRules.length === 0) return [];
   const repository = input.deps.getToolRepository?.();
   if (!repository) {
@@ -80,13 +87,17 @@ export async function persistRequestPermissionRules(input: {
         'Persistent MyClaw MCP wildcard grants are not supported; request one exact mcp__myclaw__ tool.',
       );
     }
+    const readableValidation = validateReadableAgentToolRule(allowedRule);
+    if (!readableValidation.ok) {
+      throw new Error(readableValidation.reason);
+    }
     const adminMcpTool = adminMcpToolFullNameFromRule(allowedRule);
     if (adminMcpTool && adminMcpTool !== allowedRule) {
       throw new Error(
         'Persistent MyClaw admin MCP tool grants must request the exact tool name without a scoped rule.',
       );
     }
-    const toolId = (
+    let toolId = (
       adminMcpTool
         ? adminMcpToolIdForFullName(adminMcpTool)
         : persistentPermissionToolId(allowedRule)
@@ -99,7 +110,7 @@ export async function persistRequestPermissionRules(input: {
         );
       }
     } else {
-      await ensureAgentToolCatalogItem({
+      const tool = await ensureAgentToolCatalogItem({
         repository,
         appId,
         reference: allowedRule,
@@ -108,6 +119,7 @@ export async function persistRequestPermissionRules(input: {
           'Persistent permission rule approved from request_permission.',
         adapterRef: 'permission/request_permission',
       });
+      toolId = tool.id as AgentToolBinding['toolId'];
     }
     const binding: AgentToolBinding = {
       id: persistentPermissionBindingId(appId, agentId, toolId),
@@ -170,6 +182,12 @@ export function requestPermissionReviewSuggestions(
   if (toolNames.length !== 1) return undefined;
   const ruleContent = strictRuleContent(toolInput.rule);
   if (ruleContent === null) return undefined;
+  if (
+    isBrowserActionMcpToolRule(toolNames[0]) ||
+    isProjectedBrowserMcpToolRule(toolNames[0])
+  ) {
+    return undefined;
+  }
   return [
     {
       type: 'addRules',
@@ -183,6 +201,12 @@ export function requestPermissionReviewSuggestions(
       ],
     },
   ];
+}
+
+function canonicalPersistentPermissionRules(
+  rules: readonly string[],
+): string[] {
+  return [...new Set(rules)];
 }
 
 function adminMcpToolFullNameFromRule(allowedRule: string): string | null {

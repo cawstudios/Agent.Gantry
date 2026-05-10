@@ -8,7 +8,6 @@ import type { BrandedId, ExternalRef } from '../../shared/ids/branded-id.js';
 import type { IsoTimestamp } from '../../shared/time/primitives.js';
 
 export type MessageId = BrandedId<'MessageId'>;
-export type ExternalMessageId = BrandedId<'ExternalMessageId'>;
 
 export type MessageDirection = 'inbound' | 'outbound' | 'system' | 'tool';
 export type MessageTrust = 'trusted' | 'untrusted' | 'system';
@@ -35,15 +34,6 @@ export interface Message {
   deliveryError?: string;
   parts: MessagePart[];
   attachments: MessageAttachment[];
-}
-
-export interface InboundMessage extends Message {
-  direction: 'inbound';
-  receivedAt: IsoTimestamp;
-}
-
-export interface OutboundMessage extends Message {
-  direction: 'outbound';
 }
 
 export type MessagePart =

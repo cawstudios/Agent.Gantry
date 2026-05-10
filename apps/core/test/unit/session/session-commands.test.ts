@@ -462,6 +462,11 @@ describe('handleSessionCommand', () => {
         top10_stalest: [
           { key: 'fact:key', updated_at: '2026-04-01T00:00:00Z' },
         ],
+        retrieval: {
+          searchMode: 'lexical_keyword',
+          embeddings: 'configured',
+          vectorSearch: 'inactive',
+        },
         disk_kb: { profile: 10, procedures: 2, sessions: 5, journal: 1 },
       }),
     });
@@ -476,6 +481,15 @@ describe('handleSessionCommand', () => {
     expect(deps.getMemoryStatus).toHaveBeenCalledTimes(1);
     expect(deps.sendMessage).toHaveBeenCalledWith(
       expect.stringContaining('Memory status'),
+    );
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('embeddings: configured'),
+    );
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('vector_search: inactive'),
+    );
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('top_used: fact:key(12)'),
     );
   });
 
@@ -1420,6 +1434,197 @@ describe('handleSessionCommand', () => {
     expect(deps.sendMessage).toHaveBeenCalledWith(
       'Using Sonnet 4.6 for this session.',
     );
+  });
+});
+
+describe('getGroupMemoryStatus', () => {
+  it('derives retrieval status and top-used counts from runtime inputs and memory metadata', async () => {
+    vi.resetModules();
+    const list = vi.fn().mockResolvedValue([
+      {
+        id: 'mem-1',
+        appId: 'default',
+        agentId: 'agent:test',
+        subjectType: 'group',
+        subjectId: 'test',
+        groupId: 'test',
+        kind: 'fact',
+        key: 'unused',
+        value: 'unused',
+        confidence: 0.7,
+        isPinned: false,
+        version: 1,
+        source: 'test',
+        evidenceIds: [],
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        metadata: { retrievalCount: 0 },
+      },
+      {
+        id: 'mem-2',
+        appId: 'default',
+        agentId: 'agent:test',
+        subjectType: 'group',
+        subjectId: 'test',
+        groupId: 'test',
+        kind: 'reference',
+        key: 'used',
+        value: 'used',
+        confidence: 0.7,
+        isPinned: false,
+        version: 1,
+        source: 'test',
+        evidenceIds: [],
+        createdAt: '2026-04-03T00:00:00.000Z',
+        updatedAt: '2026-04-03T00:00:00.000Z',
+        metadata: { retrievalCount: 7 },
+      },
+      {
+        id: 'mem-3',
+        appId: 'default',
+        agentId: 'agent:test',
+        subjectType: 'group',
+        subjectId: 'test',
+        groupId: 'test',
+        kind: 'fact',
+        key: 'json',
+        value: 'json',
+        confidence: 0.7,
+        isPinned: false,
+        version: 1,
+        source: 'test',
+        evidenceIds: [],
+        createdAt: '2026-04-02T00:00:00.000Z',
+        updatedAt: '2026-04-02T00:00:00.000Z',
+        sourceRefJson: JSON.stringify({ retrievalCount: 5 }),
+      },
+    ]);
+    const dreamingStatus = vi.fn().mockResolvedValue([]);
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
+        getInstance: () => ({
+          list,
+          dreamingStatus,
+        }),
+      },
+    }));
+
+    try {
+      const { getGroupMemoryStatus } =
+        await import('@core/runtime/group-memory-commands.js');
+      const status = await getGroupMemoryStatus('test', {
+        embeddings: 'configured',
+      });
+
+      expect(list).toHaveBeenCalledWith({
+        appId: 'default',
+        agentId: 'agent:test',
+        groupId: 'test',
+        subjectTypes: ['group'],
+        includeCommon: false,
+        limit: 100,
+      });
+      expect(dreamingStatus).toHaveBeenCalledWith({
+        appId: 'default',
+        agentId: 'agent:test',
+        subjectType: 'group',
+        subjectId: 'test',
+        groupId: 'test',
+      });
+      expect(status.retrieval).toEqual({
+        searchMode: 'lexical_keyword',
+        embeddings: 'configured',
+        vectorSearch: 'inactive',
+      });
+      expect(status.top10_most_used).toEqual([
+        { key: 'used', retrieval_count: 7 },
+        { key: 'json', retrieval_count: 5 },
+        { key: 'unused', retrieval_count: 0 },
+      ]);
+    } finally {
+      vi.doUnmock('@core/memory/app-memory-service.js');
+      vi.resetModules();
+    }
+  });
+
+  it('uses continuity status without calling direct dreaming status', async () => {
+    vi.resetModules();
+    const list = vi.fn().mockResolvedValue([]);
+    const continuityStatus = vi.fn().mockResolvedValue({
+      stagedCount: 2,
+      promotedCount: 1,
+      needsReviewCount: 3,
+      lastDreamRun: {
+        completedAt: '2026-04-04T00:00:00.000Z',
+        summary: { staged: 99, promoted: 99, needsReview: 99 },
+      },
+    });
+    const dreamingStatus = vi.fn().mockResolvedValue([
+      {
+        completedAt: '2026-04-05T00:00:00.000Z',
+        summary: { staged: 10, promoted: 10, needsReview: 10 },
+      },
+    ]);
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
+        getInstance: () => ({
+          list,
+          continuityStatus,
+          dreamingStatus,
+        }),
+      },
+    }));
+
+    try {
+      const { getGroupMemoryStatus } =
+        await import('@core/runtime/group-memory-commands.js');
+      const status = await getGroupMemoryStatus('test');
+
+      expect(continuityStatus).toHaveBeenCalledWith({
+        appId: 'default',
+        agentId: 'agent:test',
+        subjectType: 'group',
+        subjectId: 'test',
+        groupId: 'test',
+      });
+      expect(dreamingStatus).not.toHaveBeenCalled();
+      expect(status.memory_pipeline).toEqual({
+        staged: 2,
+        promoted: 1,
+        needs_review: 3,
+      });
+      expect(status.last_dream_run).toEqual({
+        at: '2026-04-04T00:00:00.000Z',
+        summary: JSON.stringify({ staged: 99, promoted: 99, needsReview: 99 }),
+      });
+    } finally {
+      vi.doUnmock('@core/memory/app-memory-service.js');
+      vi.resetModules();
+    }
+  });
+
+  it('reports embeddings disabled when runtime settings do not configure them', async () => {
+    vi.resetModules();
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
+        getInstance: () => ({
+          list: vi.fn().mockResolvedValue([]),
+          dreamingStatus: vi.fn().mockResolvedValue([]),
+        }),
+      },
+    }));
+
+    try {
+      const { getGroupMemoryStatus } =
+        await import('@core/runtime/group-memory-commands.js');
+      const status = await getGroupMemoryStatus('test');
+
+      expect(status.retrieval?.embeddings).toBe('disabled');
+      expect(status.retrieval?.vectorSearch).toBe('inactive');
+    } finally {
+      vi.doUnmock('@core/memory/app-memory-service.js');
+      vi.resetModules();
+    }
   });
 });
 

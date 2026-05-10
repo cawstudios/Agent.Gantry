@@ -21,7 +21,6 @@ import type { IsoTimestamp } from '../../shared/time/primitives.js';
 import type { RuntimeEventType } from './runtime-event-types.js';
 
 export type AgentRunId = BrandedId<'AgentRunId'>;
-export type AgentRunEventId = BrandedId<'AgentRunEventId'>;
 export type RuntimeEventId = number & {
   readonly __brand: 'RuntimeEventId';
 };
@@ -99,22 +98,4 @@ export interface AgentRun {
   endedAt?: IsoTimestamp;
   resultSummary?: string;
   errorSummary?: string;
-}
-
-export interface AgentRunEvent {
-  id: AgentRunEventId;
-  appId: AppId;
-  runId: AgentRunId;
-  type:
-    | 'queued'
-    | 'started'
-    | 'model_event'
-    | 'tool_request'
-    | 'permission_decision'
-    | 'output_chunk'
-    | 'completed'
-    | 'failed'
-    | 'canceled';
-  payload: unknown;
-  createdAt: IsoTimestamp;
 }

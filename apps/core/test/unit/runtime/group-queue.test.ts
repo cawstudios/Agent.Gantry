@@ -642,7 +642,8 @@ describe('GroupQueue', () => {
 
   // --- Coverage for shutdown with active processes (lines 355-356) ---
 
-  it('shutdown logs active agent runs and detaches them', async () => {
+  it('shutdown signals active message runs to close before waiting', async () => {
+    const fs = await import('fs');
     let resolveProcess: () => void;
     const processMessages = vi.fn(async () => {
       await new Promise<void>((resolve) => {
@@ -659,10 +660,16 @@ describe('GroupQueue', () => {
     const mockProcess = { killed: false } as any;
     queue.registerProcess('group1@g.us', mockProcess, 'run-active', 'team');
 
-    // Shutdown should complete without killing the process
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Shutdown should request a graceful runner close without killing the process.
     await queue.shutdown(0);
 
-    // The process should still not be killed (detached)
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(1);
     expect(mockProcess.killed).toBe(false);
 
     // After shutdown, new enqueues should be ignored

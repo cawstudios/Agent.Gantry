@@ -283,6 +283,16 @@ export class GroupQueue {
     ]);
   }
 
+  private closeActiveMessageRunsForShutdown(): string[] {
+    const signaledRuns: string[] = [];
+    for (const [groupJid, state] of this.groups) {
+      if (!state.active || state.isTaskRun) continue;
+      this.closeStdin(groupJid);
+      signaledRuns.push(state.runHandle ?? groupJid);
+    }
+    return signaledRuns;
+  }
+
   registerProcess(
     groupJid: string,
     proc: ChildProcess,
@@ -586,14 +596,16 @@ export class GroupQueue {
         detachedRuns.push(state.runHandle);
       }
     }
+    const signaledRuns = this.closeActiveMessageRunsForShutdown();
 
     logger.info(
       {
         activeMessageCount: this.activeMessageCount,
         activeTaskCount: this.activeTaskCount,
         detachedRuns,
+        signaledRuns,
       },
-      'GroupQueue shutting down (agent runs detached, not killed)',
+      'GroupQueue shutting down (active message runs signaled to close)',
     );
     await this.waitForActiveRuns(gracePeriodMs);
   }

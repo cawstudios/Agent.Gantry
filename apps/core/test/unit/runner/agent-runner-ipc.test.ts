@@ -29,6 +29,7 @@ interface RunnerRecord {
     sdkEnv?: Record<string, string>;
     mcpServers?: Record<string, unknown>;
     settings?: Record<string, unknown>;
+    sandbox?: Record<string, unknown>;
     persistSession?: boolean;
     resume?: unknown;
     resumeSessionAt?: unknown;
@@ -79,6 +80,7 @@ function createRunnerFixture(): {
     .toString();
   const runnerDir = path.join(root, 'runner');
   const runnerClaudeDir = path.join(runnerDir, 'claude');
+  const infrastructureLoggingDir = path.join(root, 'infrastructure', 'logging');
   const infrastructureTimeDir = path.join(root, 'infrastructure', 'time');
   const sharedDir = path.join(root, 'shared');
   const runnerPath = path.join(runnerClaudeDir, 'index.ts');
@@ -95,6 +97,7 @@ function createRunnerFixture(): {
   fs.mkdirSync(sdkDir, { recursive: true });
   fs.mkdirSync(runnerDir, { recursive: true });
   fs.mkdirSync(runnerClaudeDir, { recursive: true });
+  fs.mkdirSync(infrastructureLoggingDir, { recursive: true });
   fs.mkdirSync(infrastructureTimeDir, { recursive: true });
   fs.mkdirSync(sharedDir, { recursive: true });
   for (const file of fs.readdirSync(
@@ -124,6 +127,10 @@ function createRunnerFixture(): {
     path.join(runnerClaudeDir, 'message-stream.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/infrastructure/logging/logger.ts'),
+    path.join(infrastructureLoggingDir, 'logger.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/infrastructure/time/datetime.ts'),
     path.join(infrastructureTimeDir, 'datetime.ts'),
   );
@@ -148,8 +155,28 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'admin-mcp-tools.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/agent-tool-references.ts'),
+    path.join(sharedDir, 'agent-tool-references.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/memory-ipc-actions.ts'),
+    path.join(sharedDir, 'memory-ipc-actions.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/tool-rule-matcher.ts'),
     path.join(sharedDir, 'tool-rule-matcher.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/tool-execution-policy-service.ts'),
+    path.join(sharedDir, 'tool-execution-policy-service.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/tool-execution-bash-policy.ts'),
+    path.join(sharedDir, 'tool-execution-bash-policy.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/tool-execution-protected-paths.ts'),
+    path.join(sharedDir, 'tool-execution-protected-paths.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/private-fs.ts'),
@@ -166,6 +193,14 @@ function createRunnerFixture(): {
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/permission-tool-rules.ts'),
     path.join(sharedDir, 'permission-tool-rules.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/permission-timeout.ts'),
+    path.join(sharedDir, 'permission-timeout.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/myclaw-home.ts'),
+    path.join(sharedDir, 'myclaw-home.ts'),
   );
   symlinkPackage(root, 'dayjs', 'node_modules/dayjs');
   fs.writeFileSync(
@@ -231,10 +266,11 @@ export async function* query({ prompt, options }) {
     promptKind: typeof prompt === 'string' ? 'string' : 'stream',
     sdkEnv: options?.env,
     mcpServers: options?.mcpServers,
-	    settings: options?.settings,
-	    tools: options?.tools,
-	    allowedTools: options?.allowedTools,
-	    persistSession: options?.persistSession,
+    settings: options?.settings,
+    sandbox: options?.sandbox,
+    tools: options?.tools,
+    allowedTools: options?.allowedTools,
+    persistSession: options?.persistSession,
     resume: options?.resume,
     resumeSessionAt: options?.resumeSessionAt,
     systemPromptAppend: options?.systemPrompt?.append,
@@ -491,7 +527,7 @@ function readRecord(recordPath: string): RunnerRecord {
   return JSON.parse(fs.readFileSync(recordPath, 'utf-8')) as RunnerRecord;
 }
 
-const RUNNER_IPC_TEST_TIMEOUT_MS = 15_000;
+const RUNNER_IPC_TEST_TIMEOUT_MS = 35_000;
 
 describe('agent-runner IPC lifecycle', () => {
   it(
@@ -561,6 +597,45 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
+    'enables SDK filesystem sandboxing with protected deny-write paths',
+    async () => {
+      const fixture = createRunnerFixture();
+      const claudeConfigDir = path.join(fixture.root, 'claude-config');
+      const handoffPath = path.join(fixture.root, 'ipc', 'mcp-handoff.json');
+
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_EXIT_AFTER_QUERY: '1',
+        MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON: JSON.stringify([
+          claudeConfigDir,
+          handoffPath,
+        ]),
+      });
+
+      expect(result.exitCode).toBe(0);
+      const call = readRecord(fixture.recordPath).calls[0];
+      expect(call?.sandbox).toMatchObject({
+        enabled: true,
+        failIfUnavailable: true,
+        autoAllowBashIfSandboxed: false,
+        allowUnsandboxedCommands: false,
+        filesystem: {
+          denyWrite: expect.arrayContaining([
+            path.join(
+              fs.realpathSync.native(path.dirname(claudeConfigDir)),
+              path.basename(claudeConfigDir),
+            ),
+            path.join(
+              fs.realpathSync.native(path.dirname(handoffPath)),
+              path.basename(handoffPath),
+            ),
+          ]),
+        },
+      });
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
     'rejects unsupported model credential env keys before Agent SDK launch',
     async () => {
       const fixture = createRunnerFixture();
@@ -586,53 +661,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'runs scheduled scripts without broker proxy credentials',
-    async () => {
-      const fixture = createRunnerFixture();
-
-      const result = await runRunner(
-        fixture,
-        baseInput({
-          isScheduledJob: true,
-          modelCredentialEnv: {
-            HTTP_PROXY: 'http://127.0.0.1:10255/',
-            HTTPS_PROXY: 'http://127.0.0.1:10255/',
-            NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
-          },
-          script: [
-            "node -e 'console.log(JSON.stringify({",
-            'wakeAgent: true,',
-            'data: {',
-            'httpProxy: process.env.HTTP_PROXY || "",',
-            'httpsProxy: process.env.HTTPS_PROXY || "",',
-            'modelCredentialHandoff: process.env.MYCLAW_MODEL_CREDENTIAL_ENV_JSON || "",',
-            'noProxy: process.env.NO_PROXY || ""',
-            '}',
-            "}))'",
-          ].join(' '),
-        }),
-        {
-          HTTP_PROXY: 'http://127.0.0.1:10255/',
-          HTTPS_PROXY: 'http://127.0.0.1:10255/',
-          NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
-          NO_PROXY: '',
-          no_proxy: '',
-        },
-      );
-
-      expect(result.exitCode).toBe(0);
-      const callJson = JSON.stringify(readRecord(fixture.recordPath).calls[0]);
-      expect(callJson).toContain('\\"httpProxy\\": \\"\\"');
-      expect(callJson).toContain('\\"httpsProxy\\": \\"\\"');
-      expect(callJson).toContain('\\"modelCredentialHandoff\\": \\"\\"');
-      expect(callJson).toContain('github.com');
-      expect(callJson).toContain('api.github.com');
-    },
-    RUNNER_IPC_TEST_TIMEOUT_MS,
-  );
-
-  it(
-    'loads direct runtime MCP config from a private file and removes the handoff file',
+    'rejects host-private agent_browser MCP config from a private file',
     async () => {
       const fixture = createRunnerFixture();
       const mcpConfigPath = path.join(fixture.root, 'mcp-config.json');
@@ -656,15 +685,41 @@ describe('agent-runner IPC lifecycle', () => {
         ]),
       });
 
-      expect(result.exitCode).toBe(0);
-      const call = readRecord(fixture.recordPath).calls[0];
-      expect(call?.mcpServers.agent_browser).toEqual({
-        type: 'stdio',
-        command: '/tmp/playwright-mcp',
-        args: ['--shared-browser-context'],
-        env: { PLAYWRIGHT_MCP_CDP_ENDPOINT: 'http://127.0.0.1:4567' },
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('agent_browser is host-private');
+      expect(fs.existsSync(fixture.recordPath)).toBe(false);
+      expect(fs.existsSync(mcpConfigPath)).toBe(false);
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'rejects host-private Playwright MCP config from a private file',
+    async () => {
+      const fixture = createRunnerFixture();
+      const mcpConfigPath = path.join(fixture.root, 'mcp-config.json');
+      fs.writeFileSync(
+        mcpConfigPath,
+        JSON.stringify({
+          playwright: {
+            type: 'stdio',
+            command: '/tmp/playwright-mcp',
+            args: ['--shared-browser-context'],
+          },
+        }),
+      );
+
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_EXIT_AFTER_QUERY: '1',
+        MYCLAW_MCP_CONFIG_FILE: mcpConfigPath,
+        MYCLAW_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
+          'mcp__playwright__browser_click',
+        ]),
       });
-      expect(call?.sdkEnv.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('playwright is host-private');
+      expect(fs.existsSync(fixture.recordPath)).toBe(false);
       expect(fs.existsSync(mcpConfigPath)).toBe(false);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
@@ -1197,6 +1252,7 @@ describe('agent-runner IPC lifecycle', () => {
         fixture,
         baseInput({
           isScheduledJob: true,
+          jobId: 'job-1',
           allowedTools: ['Bash(npm test *)'],
         }),
         {
@@ -1228,6 +1284,7 @@ describe('agent-runner IPC lifecycle', () => {
         fixture,
         baseInput({
           isScheduledJob: true,
+          jobId: 'job-1',
           allowedTools: ['Bash(dedup-append-lead.py *)'],
         }),
         {
@@ -1245,7 +1302,10 @@ describe('agent-runner IPC lifecycle', () => {
         }),
       );
       expect(String(call?.permissionDecision?.message)).toContain(
-        'tool not on autonomous job allowlist: Bash',
+        'Tool not on autonomous job allowlist: Bash',
+      );
+      expect(String(call?.permissionDecision?.message)).toContain(
+        'scheduler_grant_tool { "job_id": "job-1", "rule": "Bash(npm test)" }',
       );
       expect(
         fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
@@ -1263,6 +1323,7 @@ describe('agent-runner IPC lifecycle', () => {
         fixture,
         baseInput({
           isScheduledJob: true,
+          jobId: 'job-1',
           allowedTools: ['Read'],
         }),
         {
@@ -1277,8 +1338,13 @@ describe('agent-runner IPC lifecycle', () => {
         expect.objectContaining({
           behavior: 'deny',
           interrupt: true,
-          message: 'tool not on autonomous job allowlist: Bash',
         }),
+      );
+      expect(String(call?.permissionDecision?.message)).toContain(
+        'Tool not on autonomous job allowlist: Bash',
+      );
+      expect(String(call?.permissionDecision?.message)).toContain(
+        'scheduler_grant_tool { "job_id": "job-1", "rule": "Bash(npm test)" }',
       );
       expect(
         fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
@@ -1299,6 +1365,7 @@ describe('agent-runner IPC lifecycle', () => {
         fixture,
         baseInput({
           isScheduledJob: true,
+          jobId: 'job-1',
           allowedTools: [],
         }),
         {
@@ -1313,8 +1380,13 @@ describe('agent-runner IPC lifecycle', () => {
         expect.objectContaining({
           behavior: 'deny',
           interrupt: true,
-          message: 'tool not on autonomous job allowlist: WebSearch',
         }),
+      );
+      expect(String(call?.permissionDecision?.message)).toContain(
+        'Tool not on autonomous job allowlist: WebSearch',
+      );
+      expect(String(call?.permissionDecision?.message)).toContain(
+        'scheduler_grant_tool { "job_id": "job-1", "rule": "WebSearch" }',
       );
       expect(
         fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),

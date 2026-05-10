@@ -23,24 +23,29 @@ cleanup.
 The end-to-end runtime flow is documented in
 [browser-capability.md](../architecture/browser-capability.md).
 
-MyClaw MCP exposes only lifecycle tools:
+When canonical `Browser` is selected, MyClaw MCP exposes projected
+MyClaw-owned browser tools:
 
-- `browser_profile_list`
-- `browser_launch`
 - `browser_status`
+- `browser_launch`
+- `browser_navigate`
+- `browser_tabs`
+- `browser_snapshot`
+- `browser_click`
+- `browser_type`
+- `browser_wait_for`
+- `browser_take_screenshot`
 - `browser_close`
 
 The runner-side MCP tool implementation is a signed IPC client. It does not
 open direct CDP HTTP connections and does not decide browser health.
 
 Browser actions such as click, type, navigate, snapshot, screenshot, and DOM
-interaction remain owned by the runtime-installed `agent-browser` skill or
-provider-native tooling. MyClaw does not add those action tools to its lifecycle
-MCP surface. For the local Claude runtime, MyClaw installs `agent-browser` into
-the generated per-run Claude config, registers the package-managed
-`agent_browser` action MCP server through a host-owned browser run wiring
-module, and projects the CDP endpoint into the child runner environment so that
-action capability can attach.
+interaction are concrete runtime projections of the one durable `Browser`
+capability. The host may use a package-managed browser backend internally, but
+raw Playwright, Puppeteer, `agent_browser`, and concrete browser subtool names
+are not persisted as durable authority. Durable settings and database bindings
+store only `Browser`; per-action tool names are audited runtime facts.
 
 The default local user experience is headed Chrome with the persistent `myclaw`
 profile. Headless mode is opt-in for tests, CI, doctor checks, or other
@@ -56,9 +61,9 @@ projections. Loopback browser traffic still receives explicit `NO_PROXY` and
 
 - Browser health bugs are diagnosed in the host browser capability, not in the
   runner MCP tool layer.
-- MyClaw does not duplicate browser automation actions already provided by
-  `agent-browser` or provider-native tools.
-- Future browser action features must either integrate an existing browser
-  tool/skill or add a separate browser-action adapter behind this boundary.
+- MyClaw presents one stable durable capability even if the private backend or
+  projected tool surface changes.
+- Future browser action features must be added as projected tools under the
+  canonical `Browser` capability boundary.
 - Historical migration files can retain old names, but active host execution
   code should use run/process terminology rather than container terminology.

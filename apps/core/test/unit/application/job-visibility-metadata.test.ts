@@ -13,11 +13,9 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     name: 'Once',
     prompt: 'Run once',
     model: null,
-    script: null,
     schedule_type: 'once',
     schedule_value: '2026-04-24T09:00:00.000Z',
     status: 'active',
-    linked_sessions: ['tg:team'],
     session_id: null,
     thread_id: null,
     group_scope: 'tg:team',
@@ -99,7 +97,6 @@ describe('job visibility metadata', () => {
     ]);
     const metadata = await buildJobVisibilityMetadata({
       job: makeJob({
-        linked_sessions: ['app:stale-app:conv-1'],
         session_id: 'session-app-one',
       }),
       appId: 'app-one',
@@ -121,10 +118,10 @@ describe('job visibility metadata', () => {
     expect(metadata.toolAccess.effectiveAllowedTools).toEqual(['Read']);
   });
 
-  it('does not derive inherited tool visibility from linked app sessions', async () => {
+  it('derives inherited tool visibility from canonical execution context only', async () => {
     const listAgentToolBindings = vi.fn(async () => []);
     await buildJobVisibilityMetadata({
-      job: makeJob({ linked_sessions: ['app:stale-app:conv-1'] }),
+      job: makeJob(),
       ops: {
         listJobRuns: vi.fn(async () => []),
       } as unknown as RuntimeJobRepository,

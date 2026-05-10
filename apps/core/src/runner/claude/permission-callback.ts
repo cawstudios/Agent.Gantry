@@ -172,7 +172,8 @@ export async function requestPermissionApproval(options: {
     }
     return {
       approved: false,
-      reason: 'Timed out waiting for host permission approval',
+      reason: `Timed out waiting ${PERMISSION_REQUEST_TIMEOUT_MS}ms for host permission approval. The host watchdog denied this tool call; retry only if the channel is healthy or request a persistent capability rule.`,
+      decisionClassification: 'user_reject',
     };
   } catch (err) {
     return {

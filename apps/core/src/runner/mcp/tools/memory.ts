@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { MemoryIpcAction } from '@myclaw/contracts';
 import { z } from 'zod';
 import { groupFolder, memoryDefaultScope, memoryUserId } from '../context.js';
 import { formatMemoryToolResponse } from '../formatting.js';
@@ -7,6 +8,30 @@ import {
   buildMemorySavePayload,
   buildProcedureSavePayload,
 } from './memory-payload.js';
+
+async function memoryToolResult(
+  label: string,
+  action: MemoryIpcAction,
+  args: Record<string, unknown>,
+) {
+  const response = await requestMemoryAction(action, args);
+  if (!response.ok) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `${label} failed: ${response.error || 'unknown error'}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+  return {
+    content: [
+      { type: 'text' as const, text: formatMemoryToolResponse(response) },
+    ],
+  };
+}
 
 export function registerMemoryTools(server: McpServer): void {
   server.tool(
@@ -47,20 +72,12 @@ export function registerMemoryTools(server: McpServer): void {
 
   server.tool(
     'memory_save',
-    'Save a durable memory statement. Defaults to group scope in group/channel conversations and user scope in DMs. Use this for user preferences, project facts, decisions, corrections, constraints, and reusable context that should survive future sessions. Do not save raw logs, temporary task progress, secrets, or generic summaries.',
+    'Save a durable memory statement. Defaults to group scope in group/channel conversations and user scope in DMs. Use this for preferences, facts, decisions, corrections, and constraints that should survive future sessions. Do not save raw logs, temporary task progress, secrets, generic summaries, or common/global memory without an approved admin path.',
     {
       scope: z.enum(['user', 'group', 'global']).optional(),
       group_folder: z.string().optional(),
       kind: z
-        .enum([
-          'preference',
-          'decision',
-          'fact',
-          'context',
-          'correction',
-          'constraint',
-          'recent_work',
-        ])
+        .enum(['preference', 'decision', 'fact', 'correction', 'constraint'])
         .optional(),
       key: z
         .string()
@@ -131,6 +148,25 @@ export function registerMemoryTools(server: McpServer): void {
   );
 
   server.tool(
+    'memory_demote',
+    'Demote an active memory item from the current trusted memory subject using optimistic concurrency.',
+    {
+      id: z.string(),
+      expected_version: z.number().int().min(1).optional(),
+      reason: z.string().optional(),
+    },
+    async (args) => memoryToolResult('Memory demote', 'memory_demote', args),
+  );
+
+  server.tool(
+    'continuity_summary',
+    'Summarize current durable memory continuity for the trusted memory subject, including active memory, staged candidates, reviews, dreaming, and last injected context when available.',
+    {},
+    async () =>
+      memoryToolResult('Continuity summary', 'continuity_summary', {}),
+  );
+
+  server.tool(
     'procedure_save',
     'Save a reusable procedure learned from successful work.',
     {
@@ -185,6 +221,114 @@ export function registerMemoryTools(server: McpServer): void {
             {
               type: 'text' as const,
               text: `Procedure patch failed: ${response.error || 'unknown error'}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          { type: 'text' as const, text: formatMemoryToolResponse(response) },
+        ],
+      };
+    },
+  );
+
+  server.tool(
+    'memory_consolidate',
+    'Run a deep memory consolidation pass for the current trusted memory subject.',
+    {},
+    async () => {
+      const response = await requestMemoryAction('memory_consolidate', {});
+      if (!response.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Memory consolidation failed: ${response.error || 'unknown error'}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          { type: 'text' as const, text: formatMemoryToolResponse(response) },
+        ],
+      };
+    },
+  );
+
+  server.tool(
+    'memory_dream',
+    'Run a full memory dreaming pass for the current trusted memory subject.',
+    {},
+    async () => {
+      const response = await requestMemoryAction('memory_dream', {});
+      if (!response.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Memory dreaming failed: ${response.error || 'unknown error'}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          { type: 'text' as const, text: formatMemoryToolResponse(response) },
+        ],
+      };
+    },
+  );
+
+  server.tool(
+    'memory_review_pending',
+    'List pending host-validated memory mutation reviews for the current trusted memory subject.',
+    {},
+    async () => {
+      const response = await requestMemoryAction('memory_review_pending', {});
+      if (!response.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Memory review lookup failed: ${response.error || 'unknown error'}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          { type: 'text' as const, text: formatMemoryToolResponse(response) },
+        ],
+      };
+    },
+  );
+
+  server.tool(
+    'memory_review_decision',
+    'Approve, reject, or edit-approve one pending memory mutation review. This approves only the specific reviewed data change, not any tool capability.',
+    {
+      review_id: z.string(),
+      decision: z.enum(['approve', 'reject', 'edit_approve']),
+      edited_value: z.string().optional(),
+      edited_reason: z.string().optional(),
+    },
+    async (args) => {
+      const response = await requestMemoryAction(
+        'memory_review_decision',
+        args,
+      );
+      if (!response.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Memory review decision failed: ${response.error || 'unknown error'}`,
             },
           ],
           isError: true,

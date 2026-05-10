@@ -10,6 +10,7 @@ import {
   AgentConversationBindingRequestSchema,
   AgentConversationBindingListResponseSchema,
   AgentConversationBindingResponseSchema,
+  BROWSER_BACKEND_TOOL_NAMES,
   BROWSER_IPC_ACTIONS,
   BrowserProfileResponseSchema,
   ProviderConnectionListResponseSchema,
@@ -30,11 +31,13 @@ import {
   JobScheduleSchema,
   LlmProfileRefSchema,
   MEMORY_IPC_ACTIONS,
+  MemoryKindSchema,
   MemoryItemResponseSchema,
   MemorySearchRequestSchema,
   MessageListResponseSchema,
   MessageResponseSchema,
   PageRequestSchema,
+  ProviderSessionResponseSchema,
   RuntimeLimitSchema,
   SchemaDescriptorSchema,
   StreamEventSchema,
@@ -86,20 +89,27 @@ describe('contracts package', () => {
       'memory_search',
       'memory_save',
       'memory_patch',
+      'memory_demote',
+      'continuity_summary',
       'memory_consolidate',
       'memory_dream',
+      'memory_review_pending',
+      'memory_review_decision',
       'procedure_save',
       'procedure_patch',
     ]);
   });
 
+  it('rejects retired project_fact as a public memory kind', () => {
+    expect(MemoryKindSchema.safeParse('project_fact').success).toBe(false);
+    expect(MemoryKindSchema.parse('fact')).toBe('fact');
+  });
+
   it('exports browser IPC actions from the canonical browser module', () => {
-    expect(BROWSER_IPC_ACTIONS).toEqual([
-      'browser_profile_list',
-      'browser_launch',
-      'browser_close',
-      'browser_status',
-    ]);
+    expect(BROWSER_IPC_ACTIONS).toEqual(BROWSER_BACKEND_TOOL_NAMES);
+    expect(BROWSER_IPC_ACTIONS).toContain('browser_status');
+    expect(BROWSER_IPC_ACTIONS).toContain('browser_navigate');
+    expect(BROWSER_IPC_ACTIONS).toContain('browser_take_screenshot');
   });
 
   it('exports and validates contract primitives', () => {
@@ -161,6 +171,27 @@ describe('contracts package', () => {
     });
     expectInvalid(CreateAgentRequestSchema, { appId: 'app-1', name: '' });
     expect(
+      ProviderSessionResponseSchema.parse({
+        provider: 'anthropic',
+        status: 'active',
+        hasProviderResume: true,
+        createdAt: iso,
+        updatedAt: iso,
+      }),
+    ).toMatchObject({
+      provider: 'anthropic',
+      status: 'active',
+      hasProviderResume: true,
+    });
+    expectInvalid(ProviderSessionResponseSchema, {
+      id: 'provider-session-sdk-resume-handle',
+      provider: 'anthropic',
+      status: 'active',
+      hasProviderResume: true,
+      createdAt: iso,
+      updatedAt: iso,
+    });
+    expect(
       AgentCapabilitiesResponseSchema.parse({
         agentId: 'agent-1',
         selectedToolIds: ['tool:mcp__myclaw__service_restart'],
@@ -195,24 +226,47 @@ describe('contracts package', () => {
     const sdkCreatePayload = {
       name: 'Daily summary',
       prompt: 'Summarize open work',
-      sessionId: 'session-1',
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+        sessionId: 'session-1',
+      },
+      notificationRoutes: [
+        {
+          conversationJid: 'app:app-one:session-1',
+          threadId: null,
+          label: 'primary',
+        },
+      ],
       kind: 'recurring',
       schedule: { type: 'cron', value: '0 9 * * *' },
       modelAlias: 'sonnet',
     } satisfies CreateJobInput;
     expect(CreateJobRequestSchema.parse(sdkCreatePayload)).toMatchObject({
       name: 'Daily summary',
-      sessionId: 'session-1',
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        sessionId: 'session-1',
+      },
     });
     expectInvalid(CreateJobRequestSchema, {
       name: '',
       prompt: 'Summarize open work',
-      sessionId: 'session-1',
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+      },
     });
     expectInvalid(CreateJobRequestSchema, {
       name: 'Daily summary',
       prompt: '',
-      sessionId: 'session-1',
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+      },
     });
     expectInvalid(CreateJobRequestSchema, {
       name: 'Daily summary',
@@ -221,21 +275,68 @@ describe('contracts package', () => {
     expectInvalid(CreateJobRequestSchema, {
       name: 'Daily summary',
       prompt: 'Summarize open work',
-      sessionId: 'session-1',
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+      },
       modelAlias: 'sonnet',
       modelProfileId: 'anthropic:sonnet-4.6',
     });
     expectInvalid(CreateJobRequestSchema, {
       name: 'Daily summary',
       prompt: 'Summarize open work',
-      sessionId: 'session-1',
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+      },
+    });
+    expectInvalid(CreateJobRequestSchema, {
+      name: 'Daily summary',
+      prompt: 'Summarize open work',
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+        sessionId: null,
+      },
+    });
+    expectInvalid(CreateJobRequestSchema, {
+      name: 'Daily summary',
+      prompt: 'Summarize open work',
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+      },
       model: 'claude-sonnet-4-6',
     });
     expectInvalid(CreateJobRequestSchema, {
       name: 'Daily summary',
       prompt: 'Summarize open work',
-      sessionId: 'session-1',
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+      },
       providerModelId: 'sonnet',
+    });
+    expectInvalid(CreateJobRequestSchema, {
+      ...sdkCreatePayload,
+      linkedSessions: ['app:app-one:session-1'],
+    });
+    expectInvalid(CreateJobRequestSchema, {
+      ...sdkCreatePayload,
+      deliverTo: ['app:app-one:session-1'],
+    });
+    expectInvalid(CreateJobRequestSchema, {
+      ...sdkCreatePayload,
+      notificationTarget: { linkedSessions: [], threadId: null, silent: false },
+    });
+    expectInvalid(CreateJobRequestSchema, {
+      ...sdkCreatePayload,
+      threadId: 'legacy-thread',
     });
 
     const sdkUpdatePayload = {
@@ -251,7 +352,34 @@ describe('contracts package', () => {
       modelProfileId: 'anthropic:sonnet-4.6',
     });
     expectInvalid(UpdateJobRequestSchema, {
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+      },
+    });
+    expectInvalid(UpdateJobRequestSchema, {
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+        sessionId: null,
+      },
+    });
+    expectInvalid(UpdateJobRequestSchema, {
       model: 'claude-sonnet-4-6',
+    });
+    expectInvalid(UpdateJobRequestSchema, {
+      linkedSessions: ['app:app-one:session-1'],
+    });
+    expectInvalid(UpdateJobRequestSchema, {
+      deliverTo: ['app:app-one:session-1'],
+    });
+    expectInvalid(UpdateJobRequestSchema, {
+      notificationTarget: { linkedSessions: [], threadId: null, silent: false },
+    });
+    expectInvalid(UpdateJobRequestSchema, {
+      threadId: 'legacy-thread',
     });
     expect(
       JobResponseSchema.parse({
@@ -260,7 +388,19 @@ describe('contracts package', () => {
         kind: 'once',
         status: 'active',
         schedule: { type: 'once', runAt: iso },
-        linkedSessions: ['app:app-one:session-1'],
+        executionContext: {
+          conversationJid: 'app:app-one:session-1',
+          threadId: null,
+          groupScope: 'app:app-one:session-1',
+          sessionId: null,
+        },
+        notificationRoutes: [
+          {
+            conversationJid: 'app:app-one:session-1',
+            threadId: null,
+            label: 'primary',
+          },
+        ],
         nextRun: iso,
         lastRun: null,
         staleness: 'missed_window',
@@ -268,7 +408,6 @@ describe('contracts package', () => {
         modelAlias: null,
         modelProfileId: null,
         model: null,
-        threadId: null,
         groupScope: 'app:app-one:session-1',
         sessionId: null,
         toolAccess: {
@@ -286,14 +425,18 @@ describe('contracts package', () => {
       kind: 'once',
       status: 'active',
       schedule: { type: 'once', runAt: iso },
-      linkedSessions: ['app:app-one:session-1'],
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+      },
+      notificationRoutes: [],
       nextRun: iso,
       lastRun: null,
       executionMode: 'parallel',
       modelAlias: null,
       modelProfileId: null,
       model: null,
-      threadId: null,
       groupScope: 'app:app-one:session-1',
       sessionId: null,
       toolAccess: {
@@ -311,7 +454,12 @@ describe('contracts package', () => {
       kind: 'once',
       status: 'active',
       schedule: { type: 'once', runAt: iso },
-      linkedSessions: ['app:app-one:session-1'],
+      executionContext: {
+        conversationJid: 'app:app-one:session-1',
+        threadId: null,
+        groupScope: 'app:app-one:session-1',
+      },
+      notificationRoutes: [],
       nextRun: iso,
       lastRun: null,
       staleness: 'delayed',
@@ -319,9 +467,32 @@ describe('contracts package', () => {
       modelAlias: null,
       modelProfileId: null,
       model: null,
-      threadId: null,
       groupScope: 'app:app-one:session-1',
       sessionId: null,
+    });
+    expectInvalid(JobResponseSchema, {
+      jobId: 'job-1',
+      name: 'Daily summary',
+      kind: 'once',
+      status: 'active',
+      schedule: { type: 'once', runAt: iso },
+      linkedSessions: ['app:app-one:session-1'],
+      notificationRoutes: [],
+      nextRun: iso,
+      lastRun: null,
+      executionMode: 'parallel',
+      modelAlias: null,
+      modelProfileId: null,
+      model: null,
+      groupScope: 'app:app-one:session-1',
+      sessionId: null,
+      toolAccess: {
+        inheritedAgentTools: ['Read'],
+        jobExtraTools: [],
+        effectiveAllowedTools: ['Read'],
+        source:
+          'inherited agent grants plus target_json.capabilityPolicy.allowedTools',
+      },
     });
 
     expect(

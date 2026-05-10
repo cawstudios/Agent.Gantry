@@ -26,10 +26,3 @@ export class ApplicationError extends Error {
 
   readonly details?: string[];
 }
-
-export function notImplemented(feature: string): ApplicationError {
-  return new ApplicationError(
-    'NOT_IMPLEMENTED',
-    `${feature} is reserved for the next application-layer migration phase.`,
-  );
-}

@@ -188,7 +188,7 @@ describe('canonical Postgres persistence cut', () => {
     );
 
     expect(seed).toContain("DEFAULT_APP_ID = 'default'");
-    expect(seed).toContain("DEFAULT_AGENT_ID = 'agent:personal'");
+    expect(seed).toContain("DEFAULT_AGENT_ID = 'agent:main_agent'");
     expect(seed).toContain("provider: 'anthropic'");
     expect(seed).toContain('permission-policy:default');
     expect(seed).toContain('sandbox-profile:local-dev');

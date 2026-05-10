@@ -172,6 +172,20 @@ policy, and audit.
 The runtime calls the application credential service and receives a generic
 `AgentCredentialInjection`; it does not instantiate OneCLI.
 
+OneCLI is only a credential broker. It never executes tools, approves
+permissions, owns scheduler policy, or evaluates protected capability changes.
+Model credential env is passed only to the Claude SDK process private model
+credential handoff. Bash tools, MCP stdio subprocesses, and browser tools
+receive scrubbed tool env without OneCLI model proxy, provider token, or broker
+CA variables. Host-owned scheduler scripts are not supported.
+
+The SDK process receives sandbox policy and model credentials as separate
+adapter projections. Protected filesystem paths are passed through
+`MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON` and become Claude SDK
+`sandbox.filesystem.denyWrite` entries; model credentials remain only in the
+private SDK env handoff. Do not use OneCLI, MCP stdio env, browser env, or any
+future scheduler script env to carry sandbox authority or provider credentials.
+
 ## Permission Boundary
 
 Credential injection is not permission approval. Agent actions must still pass

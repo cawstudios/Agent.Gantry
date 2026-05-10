@@ -22,7 +22,6 @@ export const DEFAULT_STORAGE_POSTGRES_SCHEMA = 'myclaw';
 export const DEFAULT_ONECLI_URL = 'http://localhost:10254';
 export const DEFAULT_ONECLI_DATABASE_URL_ENV = 'ONECLI_DATABASE_URL';
 export const DEFAULT_ONECLI_POSTGRES_SCHEMA = 'onecli';
-export const DEFAULT_MEMORY_STORAGE_DIR = 'memory';
 export const DEFAULT_EMBED_MODEL = 'text-embedding-3-large';
 export const DEFAULT_OPENAI_DAILY_EMBED_LIMIT = 500;
 export const DEFAULT_MEMORY_EXTRACTOR_MAX_FACTS = 8;
@@ -110,6 +109,11 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
     dreaming: {
       enabled: false,
       cron: DEFAULT_MEMORY_DREAMING_CRON,
+      embeddings: {
+        enabled: false,
+        provider: 'disabled',
+        model: DEFAULT_EMBED_MODEL,
+      },
     },
     llm: {
       models: getMemoryModelProfileDefaults('balanced'),

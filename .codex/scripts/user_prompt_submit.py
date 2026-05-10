@@ -22,6 +22,8 @@ def emit_context(extra: str = "") -> None:
     context = (
         "If the request is vague, convert it into acceptance criteria and capability-driven task decomposition before coding. "
         "Use the planner and decomposer prompts rather than improvising the task graph inline.\n"
+        "Act as an orchestrator. use parallel agents to do the research and execution work. Write detailed tasks of each parallel agent and force them to act, ierate, get their tasks done, and bring them back an in-depth report. Your job is to deeply analyse the agents work, provide feedback and provide them with continuous tasks.\n"
+        "Measure twice, cut once policy. keep the codebase clean, no tmp files, no dead code, no legacy code, no dead files. Stay organised all the time. No unnecessary folder, subfolder or files\n"
         + render_stage_context(run_state)
     )
     if extra:

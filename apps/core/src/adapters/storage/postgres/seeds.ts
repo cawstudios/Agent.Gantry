@@ -8,7 +8,7 @@ import {
 } from '../../../shared/admin-mcp-tools.js';
 
 export const DEFAULT_APP_ID = 'default';
-export const DEFAULT_AGENT_ID = 'agent:personal';
+export const DEFAULT_AGENT_ID = 'agent:main_agent';
 export const DEFAULT_LLM_PROFILE_ID = 'llm:default';
 export const DEFAULT_PERMISSION_POLICY_ID = 'permission-policy:default';
 export const DEFAULT_SANDBOX_PROFILE_ID = 'sandbox-profile:local-dev';

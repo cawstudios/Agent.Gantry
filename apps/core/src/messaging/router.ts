@@ -2,7 +2,7 @@ import { ChannelOwnershipPort, NewMessage } from '../domain/types.js';
 import { formatLocalTime } from '../shared/timezone.js';
 import '../channels/register-builtins.js';
 import { getProvider } from '../channels/provider-registry.js';
-import { parseTextStyles } from '../text-styles.js';
+import { parseTextStyles } from './text-styles.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';

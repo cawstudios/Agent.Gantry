@@ -18,7 +18,9 @@ export interface InstallShutdownHandlersOptions {
   closeStorage?: () => Promise<void>;
   closeControlServer?: () => Promise<void>;
   closeScheduler?: () => Promise<void>;
+  closeOutboundDeliveryRecovery?: () => Promise<void>;
   closeSettingsWatcher?: () => void;
+  closeBrowserToolBackends?: () => Promise<void>;
 }
 
 function makeDefaultDeps(): ShutdownDeps {
@@ -44,6 +46,16 @@ export function installShutdownHandlers(
   const shutdown = async (signal: string) => {
     resolved.logger.info({ signal }, 'Shutdown signal received');
     await options.queue.shutdown(10000);
+    if (options.closeBrowserToolBackends) {
+      try {
+        await options.closeBrowserToolBackends();
+      } catch (err) {
+        resolved.logger.warn(
+          { err },
+          'Failed to close browser tool backends during shutdown',
+        );
+      }
+    }
     await resolved.closeAllBrowsers();
     await options.disconnectChannels();
     if (options.closeControlServer) {
@@ -63,6 +75,16 @@ export function installShutdownHandlers(
         resolved.logger.warn(
           { err },
           'Failed to close scheduler during shutdown',
+        );
+      }
+    }
+    if (options.closeOutboundDeliveryRecovery) {
+      try {
+        await options.closeOutboundDeliveryRecovery();
+      } catch (err) {
+        resolved.logger.warn(
+          { err },
+          'Failed to stop outbound delivery recovery during shutdown',
         );
       }
     }

@@ -36,10 +36,13 @@ export interface ParsedMemoryIpcRequest {
   action: MemoryIpcAction;
   payload: Record<string, unknown>;
   responseKeyId?: string;
+  allowedActions: readonly MemoryIpcAction[];
   context?: {
     threadId?: string;
+    chatJid?: string;
     userId?: string;
     defaultScope?: 'user' | 'group';
+    reviewerIsControlApprover?: boolean;
   };
 }
 
@@ -50,6 +53,7 @@ export interface ParsedBrowserIpcRequest {
   chatJid: string;
   threadId?: string;
   responseKeyId?: string;
+  timeoutMs?: number;
 }
 
 const TOOL_INPUT_MAX_DEPTH = 2;
@@ -219,9 +223,12 @@ export function parseMemoryIpcRequest(
   if (!isPlainObject(raw)) throw new Error('Invalid memory IPC payload');
   const {
     authThreadId: threadId,
+    chatJid,
     responseKeyId,
     userId,
     defaultScope,
+    reviewerIsControlApprover,
+    allowedActions,
   } = validateMemoryIpcAuthRequest(raw, sourceAgentFolder, 'memory IPC');
   if (!responseKeyId) {
     throw new Error('memory IPC responseKeyId is required');
@@ -237,6 +244,9 @@ export function parseMemoryIpcRequest(
   if (!MEMORY_IPC_ACTIONS.includes(action as MemoryIpcAction)) {
     throw new Error(`Unsupported memory IPC action: ${action}`);
   }
+  if (!allowedActions.includes(action as MemoryIpcAction)) {
+    throw new Error(`Memory IPC action is not allowed: ${action}`);
+  }
   const payload = raw.payload === undefined ? {} : raw.payload;
   if (!isPlainObject(payload)) {
     throw new Error('Invalid memory IPC payload body');
@@ -245,13 +255,20 @@ export function parseMemoryIpcRequest(
     requestId,
     action: action as MemoryIpcAction,
     payload,
+    allowedActions,
     ...(responseKeyId ? { responseKeyId } : {}),
-    ...(threadId || userId || defaultScope
+    ...(threadId ||
+    chatJid ||
+    userId ||
+    defaultScope ||
+    reviewerIsControlApprover
       ? {
           context: {
             ...(threadId ? { threadId } : {}),
+            ...(chatJid ? { chatJid } : {}),
             ...(userId ? { userId } : {}),
             ...(defaultScope ? { defaultScope } : {}),
+            ...(reviewerIsControlApprover ? { reviewerIsControlApprover } : {}),
           },
         }
       : {}),
@@ -423,6 +440,12 @@ export function parseBrowserIpcRequest(
   if (!isPlainObject(payload)) {
     throw new Error('Invalid browser IPC payload body');
   }
+  const context = isPlainObject(raw.context) ? raw.context : {};
+  const rawTimeoutMs = context.timeoutMs;
+  const timeoutMs =
+    typeof rawTimeoutMs === 'number' && Number.isFinite(rawTimeoutMs)
+      ? Math.max(1_000, Math.min(120_000, Math.trunc(rawTimeoutMs)))
+      : undefined;
   return {
     requestId,
     action: action as BrowserIpcAction,
@@ -430,5 +453,6 @@ export function parseBrowserIpcRequest(
     chatJid,
     ...(threadId ? { threadId } : {}),
     ...(responseKeyId ? { responseKeyId } : {}),
+    ...(timeoutMs ? { timeoutMs } : {}),
   };
 }

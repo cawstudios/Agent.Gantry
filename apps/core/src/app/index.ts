@@ -13,6 +13,7 @@ import {
 } from '../adapters/storage/postgres/runtime-store.js';
 import { startControlServer } from '../control/server/index.js';
 import { stopSchedulerLoop } from '../jobs/scheduler.js';
+import { stopOutboundDeliveryRecoveryLoop } from '../jobs/outbound-delivery-recovery.js';
 import { MYCLAW_HOME } from '../config/index.js';
 import { startSettingsReloadWatcher } from '../runtime/settings-reload-watcher.js';
 import {
@@ -59,12 +60,14 @@ export async function startMyClawRuntime(
     supportsProgress: channelWiring.supportsProgress,
     sendMessage: (chatJid, rawText, options) =>
       channelWiring.sendMessage(chatJid, rawText, {
+        durability: 'required',
         messageOptions: options,
       }),
     sendStreamingChunk: channelWiring.sendStreamingChunk,
     resetStreaming: channelWiring.resetStreaming,
     setTyping: channelWiring.setTyping,
     sendProgressUpdate: channelWiring.sendProgressUpdate,
+    isControlApproverAllowed: channelWiring.isControlApproverAllowed,
   });
 
   const { runtimeSettings } = await runStartup(app);
@@ -75,6 +78,15 @@ export async function startMyClawRuntime(
     ops: storage.ops,
     repositories: storage.repositories,
   });
+  const browserToolModulePath = [
+    '..',
+    'adapters',
+    'browser',
+    'browser-tool-proxy.js',
+  ].join('/');
+  let browserToolModule: Promise<any> | undefined;
+  const loadBrowserToolModule = () =>
+    (browserToolModule ??= import(browserToolModulePath));
 
   installShutdownHandlers({
     queue: app.queue,
@@ -84,7 +96,10 @@ export async function startMyClawRuntime(
     },
     closeStorage: closeRuntimeStorage,
     closeScheduler: stopSchedulerLoop,
+    closeOutboundDeliveryRecovery: stopOutboundDeliveryRecoveryLoop,
     closeSettingsWatcher: settingsWatcher.close,
+    closeBrowserToolBackends: async () =>
+      (await loadBrowserToolModule()).closeBrowserToolBackends(),
   });
 
   await channelWiring.connectEnabledChannels(runtimeSettings);
@@ -104,6 +119,13 @@ export async function startMyClawRuntime(
       mcpHostnameLookup,
       opsRepository: storage.ops,
       getToolRepository: () => storage.repositories.tools,
+      settingsRepositories: storage.repositories,
+      getOutboundDeliveryRepository: () =>
+        storage.repositories.outboundDeliveries,
+      callBrowserTool: async (input) =>
+        (await loadBrowserToolModule()).callBrowserTool(input),
+      closeBrowserToolBackends: async (profileName) =>
+        (await loadBrowserToolModule()).closeBrowserToolBackends(profileName),
     },
   );
   controlServerRef.current = startControlServer({ app });

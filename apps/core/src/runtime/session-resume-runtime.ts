@@ -13,6 +13,264 @@ import type {
   MemoryBoundaryDefaultScope,
   SessionMemoryCollector,
 } from '../domain/ports/session-memory-collector.js';
+import {
+  PROVIDER_SESSION_FIELD_NAME_LIST,
+  PROVIDER_SESSION_HANDLE_START_LIST,
+  redactProviderSessionHandlesInText,
+} from '../shared/provider-session-redaction.js';
+
+export const RUNTIME_RESULT_SUMMARY_MAX_CHARS = 4_000;
+
+const RUNTIME_RESULT_SUMMARY_TRUNCATION_PREFIX =
+  '[output truncated; showing tail]\n';
+
+export function truncateRuntimeResultSummary(
+  value: string,
+  maxChars: number,
+): string {
+  if (value.length <= maxChars) return value;
+  if (maxChars <= 0) return '';
+  if (maxChars <= RUNTIME_RESULT_SUMMARY_TRUNCATION_PREFIX.length) {
+    return value;
+  }
+  const prefix =
+    maxChars > RUNTIME_RESULT_SUMMARY_TRUNCATION_PREFIX.length
+      ? RUNTIME_RESULT_SUMMARY_TRUNCATION_PREFIX
+      : '';
+  const tailChars = Math.max(0, maxChars - prefix.length);
+  return `${prefix}${value.slice(-tailChars)}`;
+}
+
+export function summarizeRuntimeResultForPersistence(
+  value: string | null | undefined,
+): string | null {
+  if (value == null) return null;
+  return truncateRuntimeResultSummary(
+    redactProviderSessionHandlesInText(value),
+    RUNTIME_RESULT_SUMMARY_MAX_CHARS,
+  );
+}
+
+export function createRuntimeResultSummaryAccumulator(input?: {
+  maxChars?: number;
+}): {
+  append: (delta: string) => void;
+  snapshot: () => string | null;
+} {
+  const maxChars = Math.max(
+    0,
+    Math.floor(input?.maxChars ?? RUNTIME_RESULT_SUMMARY_MAX_CHARS),
+  );
+  const prefix =
+    maxChars > RUNTIME_RESULT_SUMMARY_TRUNCATION_PREFIX.length
+      ? RUNTIME_RESULT_SUMMARY_TRUNCATION_PREFIX
+      : '';
+  const tailCapacity = Math.max(0, maxChars - prefix.length);
+  let tail = '';
+  let truncated = false;
+  let hasNonWhitespace = false;
+
+  return {
+    append(delta) {
+      if (!delta || maxChars <= 0) return;
+      hasNonWhitespace ||= /\S/.test(delta);
+      if (!truncated && tail.length + delta.length <= maxChars) {
+        tail += delta;
+        return;
+      }
+      truncated = true;
+      if (tailCapacity <= 0) {
+        tail = '';
+        truncated = false;
+        return;
+      }
+      if (delta.length >= tailCapacity) {
+        tail = delta.slice(-tailCapacity);
+        return;
+      }
+      tail = `${tail.slice(-(tailCapacity - delta.length))}${delta}`;
+    },
+    snapshot() {
+      if (!hasNonWhitespace) return null;
+      const summary = truncated ? `${prefix}${tail}` : tail;
+      return summary.trim() || null;
+    },
+  };
+}
+
+const INTERNAL_OPEN_TAG = '<internal>';
+const INTERNAL_CLOSE_TAG = '</internal>';
+const PROVIDER_SESSION_FIELD_END_PATTERN =
+  /\b(?:sessionId|newSessionId|providerSessionId|externalSessionId|latestProviderSessionId|session_id)\s*(?::|=|\s)\s*[^\s"',}\]]*$/i;
+const PROVIDER_SESSION_TOKEN_CHARS = /^[A-Za-z0-9._:-]*$/;
+const STREAM_SANITIZER_MAX_CARRY_CHARS = 512;
+
+function partialSuffixStart(value: string, candidates: readonly string[]) {
+  const lowerValue = value.toLowerCase();
+  for (const candidate of candidates) {
+    const lowerCandidate = candidate.toLowerCase();
+    const maxLength = Math.min(lowerCandidate.length - 1, lowerValue.length);
+    for (let length = maxLength; length >= 2; length -= 1) {
+      if (lowerValue.endsWith(lowerCandidate.slice(0, length))) {
+        return value.length - length;
+      }
+    }
+  }
+  return -1;
+}
+
+function splitInternalCarry(value: string, done: boolean) {
+  if (done) return { body: value, carry: '' };
+  const partialStart = partialSuffixStart(value, [INTERNAL_OPEN_TAG]);
+  if (partialStart < 0) return { body: value, carry: '' };
+  return {
+    body: value.slice(0, partialStart),
+    carry: value.slice(partialStart),
+  };
+}
+
+function stripInternalBlocksIncrementally(
+  value: string,
+  state: { insideInternal: boolean },
+): string {
+  let remaining = value;
+  let out = '';
+  while (remaining) {
+    if (state.insideInternal) {
+      const closeIndex = remaining.indexOf(INTERNAL_CLOSE_TAG);
+      if (closeIndex < 0) return out;
+      remaining = remaining.slice(closeIndex + INTERNAL_CLOSE_TAG.length);
+      state.insideInternal = false;
+      continue;
+    }
+    const openIndex = remaining.indexOf(INTERNAL_OPEN_TAG);
+    if (openIndex < 0) {
+      out += remaining;
+      return out;
+    }
+    out += remaining.slice(0, openIndex);
+    remaining = remaining.slice(openIndex + INTERNAL_OPEN_TAG.length);
+    state.insideInternal = true;
+  }
+  return out;
+}
+
+function splitProviderSessionCarry(value: string, done: boolean) {
+  if (done) return { body: value, carry: '' };
+  let carryStart = value.length;
+  const partialCandidates = [
+    ...PROVIDER_SESSION_HANDLE_START_LIST,
+    ...PROVIDER_SESSION_FIELD_NAME_LIST.map((name) => `"${name}"`),
+    ...PROVIDER_SESSION_FIELD_NAME_LIST.map((name) => `'${name}'`),
+  ];
+  const partialStart = partialSuffixStart(value, partialCandidates);
+  if (partialStart >= 0) carryStart = Math.min(carryStart, partialStart);
+
+  for (const marker of PROVIDER_SESSION_HANDLE_START_LIST) {
+    const markerIndex = value.lastIndexOf(marker);
+    if (markerIndex >= 0) {
+      const suffix = value.slice(markerIndex + marker.length);
+      if (PROVIDER_SESSION_TOKEN_CHARS.test(suffix)) {
+        carryStart = Math.min(carryStart, markerIndex);
+      }
+    }
+  }
+
+  const fieldMatch = PROVIDER_SESSION_FIELD_END_PATTERN.exec(value);
+  if (fieldMatch?.index !== undefined) {
+    carryStart = Math.min(carryStart, fieldMatch.index);
+  }
+
+  if (carryStart === value.length) return { body: value, carry: '' };
+  const carry = value.slice(carryStart);
+  if (carry.length <= STREAM_SANITIZER_MAX_CARRY_CHARS) {
+    return { body: value.slice(0, carryStart), carry };
+  }
+  return {
+    body: `${value.slice(0, carryStart)}[REDACTED]`,
+    carry: '',
+  };
+}
+
+export function createRuntimeUserVisibleResultAccumulator(input?: {
+  maxChars?: number;
+}): {
+  append: (delta: string) => void;
+  snapshot: () => string | null;
+} {
+  const bounded = createRuntimeResultSummaryAccumulator(input);
+  const state = {
+    carry: '',
+    insideInternal: false,
+  };
+  const flush = (delta: string, done: boolean): void => {
+    const { body: internalBody, carry: internalCarry } = splitInternalCarry(
+      `${state.carry}${delta}`,
+      done,
+    );
+    state.carry = internalCarry;
+    const withoutInternal = stripInternalBlocksIncrementally(
+      internalBody,
+      state,
+    );
+    const { body: providerBody, carry: providerCarry } =
+      splitProviderSessionCarry(withoutInternal, done);
+    state.carry = `${providerCarry}${state.carry}`;
+    const safe = redactProviderSessionHandlesInText(providerBody);
+    if (safe) bounded.append(safe);
+  };
+
+  return {
+    append(delta) {
+      if (!delta) return;
+      flush(delta, false);
+    },
+    snapshot() {
+      flush('', true);
+      state.carry = '';
+      state.insideInternal = false;
+      return bounded.snapshot();
+    },
+  };
+}
+
+export function createRuntimeUserVisibleStreamSanitizer(): {
+  append: (delta: string) => string;
+  finish: () => string;
+} {
+  const state = {
+    carry: '',
+    insideInternal: false,
+  };
+  const flush = (delta: string, done: boolean): string => {
+    const { body: internalBody, carry: internalCarry } = splitInternalCarry(
+      `${state.carry}${delta}`,
+      done,
+    );
+    state.carry = internalCarry;
+    const withoutInternal = stripInternalBlocksIncrementally(
+      internalBody,
+      state,
+    );
+    const { body: providerBody, carry: providerCarry } =
+      splitProviderSessionCarry(withoutInternal, done);
+    state.carry = `${providerCarry}${state.carry}`;
+    return redactProviderSessionHandlesInText(providerBody);
+  };
+
+  return {
+    append(delta) {
+      if (!delta) return '';
+      return flush(delta, false);
+    },
+    finish() {
+      const safe = flush('', true);
+      state.carry = '';
+      state.insideInternal = false;
+      return safe;
+    },
+  };
+}
 
 export async function archiveCurrentRuntimeSession(input: {
   ops: RuntimeAgentSessionRepository;
@@ -21,12 +279,16 @@ export async function archiveCurrentRuntimeSession(input: {
   threadId: string | null;
   cause?: 'new-session' | 'manual-compact';
   defaultScope?: MemoryBoundaryDefaultScope;
+  memoryUserId?: string;
   collectMemory?: SessionMemoryCollector;
 }): Promise<void> {
   const turnContext = await input.ops.getAgentTurnContext?.({
     agentFolder: input.group.folder,
     conversationJid: input.chatJid,
     threadId: input.threadId,
+    conversationKind: input.group.conversationKind,
+    memoryUserId: input.memoryUserId,
+    hydrateMemory: false,
   });
   const collectMemory = input.collectMemory;
   if (turnContext?.agentSessionId && collectMemory) {
@@ -120,6 +382,8 @@ export async function completeSuccessfulRuntimeSessionRun(input: {
   group: ConversationRoute;
   chatJid?: string;
   threadId?: string | null;
+  conversationKind?: 'dm' | 'channel';
+  memoryUserId?: string;
   agentSessionId?: string;
   providerSessionId?: string;
   runId?: string;
@@ -129,7 +393,7 @@ export async function completeSuccessfulRuntimeSessionRun(input: {
     await input.ops.completeSessionAgentRun?.({
       runId: input.runId,
       status: 'completed',
-      resultSummary: input.result ?? null,
+      resultSummary: summarizeRuntimeResultForPersistence(input.result),
     });
   }
   if (input.agentSessionId) {
@@ -140,6 +404,8 @@ export async function completeSuccessfulRuntimeSessionRun(input: {
         input.threadId,
         {
           conversationJid: input.chatJid,
+          conversationKind: input.conversationKind,
+          memoryUserId: input.memoryUserId,
         },
       );
     }
@@ -163,7 +429,7 @@ export async function completeFailedRuntimeSessionRun(input: {
   await input.ops.completeSessionAgentRun?.({
     runId: input.runId,
     status: 'failed',
-    errorSummary: input.errorSummary,
+    errorSummary: summarizeRuntimeResultForPersistence(input.errorSummary),
   });
 }
 

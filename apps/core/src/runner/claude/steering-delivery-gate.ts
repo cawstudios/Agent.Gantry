@@ -21,6 +21,10 @@ export class SteeringDeliveryGate {
     return 'buffered';
   }
 
+  pendingCount(): number {
+    return this.bufferedMessages.length;
+  }
+
   markTurnBoundary(): number {
     if (this.closed) return 0;
     this.atTurnBoundary = true;

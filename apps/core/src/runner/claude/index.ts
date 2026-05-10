@@ -26,12 +26,7 @@ import {
 } from './model-config.js';
 import { writeOutput } from './output.js';
 import { runQuery } from './query-loop.js';
-import {
-  buildSdkEnv,
-  buildToolEnv,
-  resolveMcpServerPath,
-} from './runtime-env.js';
-import { runScript } from './script-runner.js';
+import { buildSdkEnv, resolveMcpServerPath } from './runtime-env.js';
 import {
   parseSessionSlashCommand,
   runSessionSlashCommand,
@@ -55,7 +50,6 @@ async function main(): Promise<void> {
   }
 
   const sdkEnv = buildSdkEnv(agentInput.modelCredentialEnv);
-  const toolEnv = buildToolEnv();
   const mcpServerPath = resolveMcpServerPath(import.meta.url);
   const configuredModel = resolveConfiguredModel();
   const configuredThinking = resolveThinkingOptions(agentInput.thinking);
@@ -93,12 +87,6 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     return;
-  }
-
-  if (agentInput.script && agentInput.isScheduledJob) {
-    const scriptPrompt = await runScheduledScript(agentInput, toolEnv);
-    if (!scriptPrompt) return;
-    prompt = scriptPrompt;
   }
 
   if (agentInput.isScheduledJob) {
@@ -140,29 +128,6 @@ function buildInitialPrompt(agentInput: AgentRunnerInput): string {
     }
   }
   return prompt;
-}
-
-async function runScheduledScript(
-  agentInput: AgentRunnerInput,
-  sdkEnv: Record<string, string | undefined>,
-): Promise<string | null> {
-  if (!agentInput.script) return null;
-
-  log('Running scheduler job script...');
-  const scriptResult = await runScript(agentInput.script, sdkEnv);
-
-  if (!scriptResult || !scriptResult.wakeAgent) {
-    const reason = scriptResult ? 'wakeAgent=false' : 'script error/no output';
-    log(`Script decided not to wake agent: ${reason}`);
-    writeOutput({
-      status: 'success',
-      result: null,
-    });
-    return null;
-  }
-
-  log(`Script wakeAgent=true, enriching prompt with data`);
-  return `[SCHEDULED JOB]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${agentInput.prompt}`;
 }
 
 async function runScheduledQuery(opts: {
@@ -221,7 +186,7 @@ async function runInteractiveQueryLoop(opts: {
 
   try {
     log(
-      `Starting live streaming query with ${opts.agentInput.sessionId ? `resumed SDK session ${opts.agentInput.sessionId}` : 'new persistent SDK session'}...`,
+      `Starting live streaming query with ${opts.agentInput.sessionId ? 'resumed SDK session' : 'new persistent SDK session'}...`,
     );
     const queryResult = await runQuery(
       opts.prompt,

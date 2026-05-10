@@ -1,19 +1,45 @@
 {
   "name": "@myclaw/sdk",
   "version": "0.3.0",
+  "description": "Node.js SDK for the MyClaw runtime control API: sessions, jobs, agents, memory, webhooks, and ingress signing.",
+  "author": "MyClaw Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vrknetha/myclaw.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/vrknetha/myclaw/tree/main/packages/sdk",
+  "bugs": {
+    "url": "https://github.com/vrknetha/myclaw/issues"
+  },
+  "keywords": [
+    "myclaw",
+    "sdk",
+    "client",
+    "agent",
+    "ai",
+    "automation"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/browser.js",
       "import": "./dist/index.js"
     }
   },
   "files": [
-    "dist/"
+    "dist/",
+    "CHANGELOG.md"
   ],
+  "engines": {
+    "node": ">=24 <26"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json"
   }

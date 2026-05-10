@@ -86,58 +86,6 @@ export async function resolveJobAppSession(
   } satisfies JobAppSessionRecord;
 }
 
-export async function filterJobsByAppSession(
-  control: ReturnType<typeof getRuntimeControlRepository>,
-  jobs: readonly Job[],
-  appId: string,
-): Promise<Job[]> {
-  const sessionIds = Array.from(
-    new Set(
-      jobs
-        .map((job) => job.session_id?.trim())
-        .filter((sessionId): sessionId is string => Boolean(sessionId)),
-    ),
-  );
-  if (sessionIds.length === 0) return [];
-  const sessions = await control.getAppSessionsByIds(sessionIds);
-  const allowedSessionIds = new Set(
-    sessions
-      .filter((session) => session.appId === appId)
-      .map((session) => session.sessionId),
-  );
-  return jobs.filter((job) =>
-    job.session_id ? allowedSessionIds.has(job.session_id) : false,
-  );
-}
-
-export function encodeTriggerRequester(input: {
-  appId: string;
-  sessionId: string;
-}): string {
-  return JSON.stringify({
-    kind: 'sdk',
-    appId: input.appId,
-    sessionId: input.sessionId,
-  });
-}
-
-export async function resolveOwnedWebhookId(
-  control: ReturnType<typeof getRuntimeControlRepository>,
-  appId: string,
-  rawWebhookId: string | null,
-): Promise<string | null> {
-  const webhookId = rawWebhookId?.trim();
-  if (!webhookId) return null;
-  const webhook = await control.getWebhookById(webhookId, appId);
-  if (!webhook) {
-    throw Object.assign(new Error('Webhook not found'), {
-      code: 'WEBHOOK_NOT_FOUND',
-      statusCode: 404,
-    });
-  }
-  return webhook.webhookId;
-}
-
 export function mapManualJobToStored(
   job: Job,
   metadata: JobVisibilityMetadata,
@@ -166,7 +114,8 @@ export function mapManualJobToStored(
             type: job.schedule_type,
             value: job.schedule_value,
           },
-    linkedSessions: job.linked_sessions,
+    executionContext: metadata.executionContext,
+    notificationRoutes: metadata.notificationRoutes,
     nextRun: job.next_run,
     lastRun: job.last_run,
     staleness: metadata.staleness,
@@ -183,11 +132,9 @@ export function mapManualJobToStored(
           modelProfileId: resolvedModel.entry.id,
         }
       : null,
-    threadId: job.thread_id,
     groupScope: job.group_scope,
     sessionId: job.session_id,
     target: metadata.target,
-    notificationTarget: metadata.notificationTarget,
     toolAccess: metadata.toolAccess,
     ...(detail
       ? {

@@ -64,21 +64,3 @@ export interface AgentToolBinding {
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;
 }
-
-export interface ToolAction {
-  id: BrandedId<'ToolActionId'>;
-  appId: AppId;
-  toolId: ToolId;
-  action: string;
-  input: unknown;
-  output?: unknown;
-  status:
-    | 'requested'
-    | 'approved'
-    | 'running'
-    | 'completed'
-    | 'failed'
-    | 'denied';
-  createdAt: IsoTimestamp;
-  updatedAt: IsoTimestamp;
-}

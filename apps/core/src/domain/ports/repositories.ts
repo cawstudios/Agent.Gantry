@@ -5,7 +5,6 @@ import type {
   AgentId,
 } from '../agent/agent.js';
 import type { App, AppId } from '../app/app.js';
-import type { BrowserProfile, BrowserProfileId } from '../browser/browser.js';
 import type {
   AgentConversationBinding,
   ConversationApprover,
@@ -28,13 +27,18 @@ import type {
   RuntimeEventFilter,
   RuntimeEventPublishInput,
 } from '../events/events.js';
-import type { Job, JobId, JobTrigger } from '../jobs/jobs.js';
-import type {
-  MemoryItem,
-  MemoryItemId,
-  MemorySubject,
-} from '../memory/memory.js';
 import type { Message, MessageId } from '../messages/messages.js';
+import type {
+  ClaimedOutboundDeliveryItem,
+  OutboundDelivery,
+  OutboundDeliveryFinalAnswer,
+  OutboundDeliveryId,
+  OutboundDeliveryItem,
+  OutboundDeliveryItemId,
+  OutboundDeliveryReceipt,
+  OutboundDeliveryReceiptId,
+  OutboundDeliveryResolvedDestination,
+} from '../outbound-delivery/outbound-delivery.js';
 import type {
   AgentMcpServerBinding,
   MaterializedMcpServer,
@@ -59,6 +63,9 @@ import type {
   WorkspaceSnapshotId,
 } from '../sandbox/sandbox.js';
 import type {
+  AgentSessionDigest,
+  AgentSessionDigestScopeMetadata,
+  AgentSessionDigestId,
   AgentSession,
   AgentSessionId,
   AgentSessionSummary,
@@ -258,7 +265,24 @@ export interface AgentSessionSummaryRepository {
   getLatestAgentSessionSummary(
     agentSessionId: AgentSessionId,
   ): Promise<AgentSessionSummary | null>;
+  listRecentAgentSessionSummaries?(input: {
+    agentSessionId: AgentSessionId;
+    limit?: number;
+  }): Promise<AgentSessionSummary[]>;
   saveAgentSessionSummary(summary: AgentSessionSummary): Promise<void>;
+}
+
+export interface AgentSessionDigestRepository {
+  getAgentSessionDigest(
+    id: AgentSessionDigestId,
+  ): Promise<AgentSessionDigest | null>;
+  listAgentSessionDigests(input: {
+    agentSessionId: AgentSessionId;
+    trigger?: AgentSessionDigest['trigger'];
+    sessionScope?: AgentSessionDigestScopeMetadata['sessionScope'];
+    limit?: number;
+  }): Promise<AgentSessionDigest[]>;
+  saveAgentSessionDigest(digest: AgentSessionDigest): Promise<void>;
 }
 
 export interface AgentRunRepository {
@@ -275,20 +299,61 @@ export interface RuntimeEventRepository {
   listRuntimeEvents(filter: RuntimeEventFilter): Promise<RuntimeEvent[]>;
 }
 
-export interface MemoryRepository {
-  getMemoryItem(id: MemoryItemId): Promise<MemoryItem | null>;
-  saveMemoryItem(item: MemoryItem): Promise<void>;
-  listMemoryItems(
-    subject: MemorySubject,
-    limit?: number,
-  ): Promise<MemoryItem[]>;
-}
-
-export interface JobRepository {
-  getJob(id: JobId): Promise<Job | null>;
-  saveJob(job: Job): Promise<void>;
-  listJobs(appId: AppId): Promise<Job[]>;
-  saveJobTrigger(trigger: JobTrigger): Promise<void>;
+export interface OutboundDeliveryRepository {
+  enqueueDelivery(input: {
+    delivery: OutboundDelivery;
+    finalAnswer: OutboundDeliveryFinalAnswer;
+    items: OutboundDeliveryItem[];
+  }): Promise<{ created: boolean; delivery: OutboundDelivery }>;
+  getDelivery(id: OutboundDeliveryId): Promise<OutboundDelivery | null>;
+  claimDueDeliveryItems(input: {
+    appId?: OutboundDelivery['appId'];
+    profileId?: string;
+    now: string;
+    claimerId: string;
+    leaseMs: number;
+    limit: number;
+  }): Promise<ClaimedOutboundDeliveryItem[]>;
+  resolveDeliveryDestination(input: {
+    appId: OutboundDelivery['appId'];
+    conversationId: OutboundDelivery['conversationId'];
+    threadId?: OutboundDelivery['threadId'];
+  }): Promise<OutboundDeliveryResolvedDestination | null>;
+  markDeliveryItemSent(input: {
+    deliveryId: OutboundDeliveryId;
+    itemId: OutboundDeliveryItemId;
+    claimToken: string;
+    receipt: OutboundDeliveryReceipt;
+  }): Promise<{ applied: boolean; delivery: OutboundDelivery | null }>;
+  markDeliveryItemFailed(input: {
+    deliveryId: OutboundDeliveryId;
+    itemId: OutboundDeliveryItemId;
+    claimToken: string;
+    error: string;
+    failedAt: string;
+    maxAttempts: number;
+    retryBaseDelayMs: number;
+    retryMaxDelayMs: number;
+  }): Promise<{ applied: boolean; delivery: OutboundDelivery | null }>;
+  markDeliveryItemPartiallyDelivered(input: {
+    deliveryId: OutboundDeliveryId;
+    itemId: OutboundDeliveryItemId;
+    claimToken: string;
+    error: string;
+    partialAt: string;
+    deliveredParts?: number;
+    totalParts?: number;
+    retryTail?: {
+      canonicalText: string;
+      providerPayload?: unknown;
+    };
+  }): Promise<{ applied: boolean; delivery: OutboundDelivery | null }>;
+  listReceiptsForItem(
+    itemId: OutboundDeliveryItemId,
+  ): Promise<OutboundDeliveryReceipt[]>;
+  getReceipt(
+    id: OutboundDeliveryReceiptId,
+  ): Promise<OutboundDeliveryReceipt | null>;
 }
 
 export interface ToolCatalogRepository {
@@ -419,9 +484,4 @@ export interface SandboxRepository {
   getWorkspaceSnapshot(
     id: WorkspaceSnapshotId,
   ): Promise<WorkspaceSnapshot | null>;
-}
-
-export interface BrowserProfileRepository {
-  getBrowserProfile(id: BrowserProfileId): Promise<BrowserProfile | null>;
-  saveBrowserProfile(profile: BrowserProfile): Promise<void>;
 }

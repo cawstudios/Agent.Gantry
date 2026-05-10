@@ -55,11 +55,22 @@ export interface GroupProcessingDeps {
       text: string,
       options?: ProgressUpdateOptions,
     ) => Promise<void>;
+    isControlApproverAllowed?: (input: {
+      conversationJid: string;
+      userId: string;
+      sourceAgentFolder: string;
+      decisionPolicy?: 'same_channel';
+    }) => Promise<boolean>;
   };
   getGroup: (chatJid: string) => ConversationRoute | undefined;
   clearSession: (
     groupFolder: string,
     threadId?: string | null,
+    metadata?: {
+      conversationJid?: string;
+      conversationKind?: 'dm' | 'channel';
+      memoryUserId?: string;
+    },
   ) => Promise<void> | void;
   getCursor: (chatJid: string) => Promise<string> | string;
   setCursor: (chatJid: string, timestamp: string) => void;

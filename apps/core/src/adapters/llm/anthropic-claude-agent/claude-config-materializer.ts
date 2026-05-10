@@ -38,12 +38,16 @@ export interface ClaudeRuntimeMaterialization extends RuntimeMaterialization {
   skillsDir: string;
   providerSessionRestoreDir: string;
   projectDir: string;
+  protectedFilesystemPaths: string[];
 }
 
 export interface ClaudeRuntimeMaterializationInput {
   groupDir: string;
+  globalDir?: string;
   cliEntryPoint: string;
   packageRoot: string;
+  runtimeSettingsPath?: string;
+  managedSkillArtifactRoots?: string[];
   runId?: string;
   baseTempDir?: string;
   cleanupPolicy?: RuntimeMaterializationCleanupPolicy;
@@ -123,6 +127,16 @@ export async function materializeClaudeRuntime(
     skillsDir,
     providerSessionRestoreDir: projectDir,
     projectDir,
+    protectedFilesystemPaths: resolveProtectedFilesystemPaths([
+      claudeConfigDir,
+      input.runtimeSettingsPath,
+      ...workspaceProtectedPaths(input.groupDir),
+      ...(input.globalDir ? workspaceProtectedPaths(input.globalDir) : []),
+      path.join(input.packageRoot, '.claude', 'skills'),
+      path.join(input.packageRoot, '.codex', 'skills'),
+      path.join(input.packageRoot, '.agents', 'skills'),
+      ...(input.managedSkillArtifactRoots ?? []),
+    ]),
     cleanupPolicy,
     cleanup: () => {
       if (cleanupPolicy === 'delete-after-run') {
@@ -130,4 +144,25 @@ export async function materializeClaudeRuntime(
       }
     },
   };
+}
+
+function workspaceProtectedPaths(root: string): string[] {
+  const providerDir = ['.clau', 'de'].join('');
+  return [
+    path.join(root, '.mcp.json'),
+    path.join(root, 'mcp.json'),
+    path.join(root, providerDir, 'settings.json'),
+    path.join(root, providerDir, 'settings.local.json'),
+    path.join(root, providerDir, 'mcp'),
+    path.join(root, providerDir, 'skills'),
+    path.join(root, 'skills'),
+  ];
+}
+
+function resolveProtectedFilesystemPaths(
+  paths: Array<string | undefined>,
+): string[] {
+  return [...new Set(paths.filter((value): value is string => Boolean(value)))]
+    .map((value) => path.resolve(value))
+    .sort();
 }

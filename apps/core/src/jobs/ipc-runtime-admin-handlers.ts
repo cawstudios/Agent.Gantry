@@ -4,12 +4,12 @@ import { MYCLAW_HOME } from '../config/index.js';
 import {
   getRuntimeSettingsRevision,
   readRuntimeSettingsYaml,
-  saveRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 import { parseRuntimeSettings } from '../config/settings/runtime-settings-parser.js';
 import { validateLoadedRuntimeSettings } from '../config/settings/runtime-settings-validation.js';
 import { getRuntimeStorage } from '../adapters/storage/postgres/runtime-store.js';
 import { SettingsDesiredStateService } from '../config/settings/desired-state-service.js';
+import { applyRuntimeSettingsDesiredState } from '../config/settings/restart-sync.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { validateRuntimePreflightWithStorage } from '../config/preflight.js';
 import { TaskHandler } from './ipc-types.js';
@@ -352,9 +352,16 @@ export const requestSettingsUpdateHandler: TaskHandler = async (context) => {
         );
         return;
       }
-      saveRuntimeSettings(MYCLAW_HOME, parsed);
+      await applyRuntimeSettingsDesiredState({
+        runtimeHome: MYCLAW_HOME,
+        settings: parsed,
+        previousSettings: parseRuntimeSettings(beforeYaml),
+        ops: storage.ops,
+        repositories: storage.repositories,
+        reloadRuntimeState: deps.reloadRuntimeState,
+      });
       message =
-        'Approved settings update. settings.yaml was written; safe changes reload automatically and restart may be required for topology changes.';
+        'Approved settings update. settings.yaml was written and reconciled; restart may be required for topology changes.';
       accept(message, 'settings_updated');
     } catch (err) {
       logger.error({ err, sourceAgentFolder }, 'Settings update review failed');

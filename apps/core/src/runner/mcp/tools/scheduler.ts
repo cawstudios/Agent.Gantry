@@ -1,86 +1,124 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { CronExpressionParser } from 'cron-parser';
-import { nowIso, parseIso } from '../../../infrastructure/time/datetime.js';
-import { TASKS_DIR } from '../context.js';
-import { formatTaskFailureLines } from '../formatting.js';
-import {
-  waitForTaskResponse,
-  writeIpcFile,
-  type TaskResponseEnvelope,
-} from '../ipc.js';
+import { parseIso } from '../../../infrastructure/time/datetime.js';
 import { makeIpcId } from '../ipc-ids.js';
-import {
-  normalizeExecutionMode,
-  resolveSchedulerThreadArg,
-} from '../scheduler-utils.js';
+import { normalizeExecutionMode } from '../scheduler-utils.js';
 import { formatModelCatalog } from '../../../shared/model-catalog.js';
-import { chatJid, threadId } from '../context.js';
 import {
   schedulerJobSummary,
   schedulerJobsSummary,
 } from './scheduler-formatters.js';
+import { validateAutonomousToolRule } from '../../../shared/tool-rule-matcher.js';
+import {
+  canonicalTargetFromArgs,
+  normalizeSchedulerWaitTimeoutMs,
+  requestSchedulerData,
+  schedulerDataRecord as dataRecord,
+  schedulerTaskError as taskError,
+  submitSchedulerMutationTask,
+  SCHEDULER_WAIT_RESPONSE_GRACE_MS,
+} from './scheduler-tool-helpers.js';
 
-async function requestSchedulerData(
-  type: string,
-  payload: Record<string, unknown>,
-  timeoutMs = 20_000,
-): Promise<TaskResponseEnvelope | null> {
-  const taskId = makeIpcId(type.replace(/_/g, '-'));
-  writeIpcFile(TASKS_DIR, {
-    type,
-    taskId,
-    ...payload,
-    targetJid: chatJid,
-    chatJid,
-    authThreadId: threadId,
-    timestamp: nowIso(),
-  });
-  return waitForTaskResponse(taskId, timeoutMs);
+const SCHEDULER_UPSERT_ARG_KEYS = new Set([
+  'job_id',
+  'name',
+  'prompt',
+  'model_alias',
+  'model_profile_id',
+  'schedule_type',
+  'schedule_value',
+  'target',
+  'execution_context',
+  'notification_routes',
+  'silent',
+  'cleanup_after_ms',
+  'timeout_ms',
+  'max_retries',
+  'retry_backoff_ms',
+  'max_consecutive_failures',
+  'execution_mode',
+  'serialize',
+  'allowed_tools',
+]);
+
+const SCHEDULER_UPDATE_ARG_KEYS = new Set([
+  'job_id',
+  'name',
+  'prompt',
+  'model_alias',
+  'model_profile_id',
+  'schedule_type',
+  'schedule_value',
+  'target',
+  'execution_context',
+  'notification_routes',
+  'silent',
+  'cleanup_after_ms',
+  'timeout_ms',
+  'max_retries',
+  'retry_backoff_ms',
+  'max_consecutive_failures',
+  'execution_mode',
+  'serialize',
+  'allowed_tools',
+]);
+
+function unsupportedSchedulerArgError(
+  args: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>,
+) {
+  const unsupported = Object.keys(args).filter((key) => !allowedKeys.has(key));
+  if (unsupported.length === 0) return null;
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: `Unsupported scheduler fields: ${unsupported.join(
+          ', ',
+        )}. Use execution_context and notification_routes for routing.`,
+      },
+    ],
+    isError: true,
+  };
 }
 
-const SCHEDULER_WAIT_MIN_TIMEOUT_MS = 1_000;
-const SCHEDULER_WAIT_MAX_TIMEOUT_MS = 300_000;
-const SCHEDULER_WAIT_RESPONSE_GRACE_MS = 10_000;
-
-function normalizeSchedulerWaitTimeoutMs(value: unknown): number {
-  const raw =
-    typeof value === 'number' && Number.isFinite(value) ? value : 30_000;
-  return Math.max(
-    SCHEDULER_WAIT_MIN_TIMEOUT_MS,
-    Math.min(raw, SCHEDULER_WAIT_MAX_TIMEOUT_MS),
-  );
-}
-
-function taskError(response: TaskResponseEnvelope | null, fallback: string) {
-  if (!response) {
-    return {
-      content: [{ type: 'text' as const, text: `${fallback} timed out.` }],
-      isError: true,
-    };
+function validateScheduleInput(args: {
+  schedule_type: 'cron' | 'interval' | 'once';
+  schedule_value: string;
+}) {
+  if (args.schedule_type === 'cron') {
+    try {
+      CronExpressionParser.parse(args.schedule_value);
+    } catch {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid cron expression.' }],
+        isError: true,
+      };
+    }
   }
-  if (!response.ok) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: formatTaskFailureLines(response, fallback).join('\n'),
-        },
-      ],
-      isError: true,
-    };
+  if (args.schedule_type === 'interval') {
+    const ms = parseInt(args.schedule_value, 10);
+    if (isNaN(ms) || ms <= 0) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Invalid interval milliseconds.' },
+        ],
+        isError: true,
+      };
+    }
+  }
+  if (args.schedule_type === 'once') {
+    const date = parseIso(args.schedule_value);
+    if (!date) {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid once timestamp.' }],
+        isError: true,
+      };
+    }
   }
   return null;
 }
-
-function dataRecord(response: TaskResponseEnvelope): Record<string, unknown> {
-  return typeof response.data === 'object' &&
-    response.data !== null &&
-    !Array.isArray(response.data)
-    ? (response.data as Record<string, unknown>)
-    : {};
-}
-
 export function registerSchedulerTools(server: McpServer): void {
   server.tool(
     'scheduler_list_models',
@@ -90,7 +128,6 @@ export function registerSchedulerTools(server: McpServer): void {
       content: [{ type: 'text' as const, text: formatModelCatalog() }],
     }),
   );
-
   server.tool(
     'scheduler_upsert_job',
     'Create or update a scheduler job. Idempotent by job ID.',
@@ -102,12 +139,26 @@ export function registerSchedulerTools(server: McpServer): void {
       model_profile_id: z.string().optional(),
       schedule_type: z.enum(['cron', 'interval', 'once']),
       schedule_value: z.string().default(''),
-      linked_sessions: z.array(z.string()).optional(),
-      deliver_to: z.array(z.string()).optional(),
-      thread_id: z.string().optional(),
+      target: z.enum(['here', 'this_thread', 'this_topic', 'me_dm']).optional(),
+      execution_context: z
+        .object({
+          conversation_jid: z.string(),
+          thread_id: z.string().nullable(),
+          group_scope: z.string(),
+          session_id: z.string().nullable().optional(),
+        })
+        .optional(),
+      notification_routes: z
+        .array(
+          z.object({
+            conversation_jid: z.string(),
+            thread_id: z.string().nullable(),
+            label: z.string(),
+          }),
+        )
+        .optional(),
       silent: z.boolean().optional(),
       cleanup_after_ms: z.number().optional(),
-      group_scope: z.string().optional(),
       timeout_ms: z.number().optional(),
       max_retries: z.number().optional(),
       retry_backoff_ms: z.number().optional(),
@@ -117,120 +168,56 @@ export function registerSchedulerTools(server: McpServer): void {
       allowed_tools: z.array(z.string()).optional(),
     },
     async (args) => {
-      if (args.schedule_type === 'cron') {
-        try {
-          CronExpressionParser.parse(args.schedule_value);
-        } catch {
-          return {
-            content: [
-              { type: 'text' as const, text: 'Invalid cron expression.' },
-            ],
-            isError: true,
-          };
-        }
-      }
-      if (args.schedule_type === 'interval') {
-        const ms = parseInt(args.schedule_value, 10);
-        if (isNaN(ms) || ms <= 0) {
-          return {
-            content: [
-              { type: 'text' as const, text: 'Invalid interval milliseconds.' },
-            ],
-            isError: true,
-          };
-        }
-      }
-      if (args.schedule_type === 'once') {
-        const date = parseIso(args.schedule_value);
-        if (!date) {
-          return {
-            content: [
-              { type: 'text' as const, text: 'Invalid once timestamp.' },
-            ],
-            isError: true,
-          };
-        }
-      }
-
-      const schedulerThread = resolveSchedulerThreadArg(args.thread_id, true);
-      if (schedulerThread.error) {
+      const unsupportedArgError = unsupportedSchedulerArgError(
+        args as Record<string, unknown>,
+        SCHEDULER_UPSERT_ARG_KEYS,
+      );
+      if (unsupportedArgError) return unsupportedArgError;
+      const scheduleError = validateScheduleInput(args);
+      if (scheduleError) return scheduleError;
+      const canonicalTarget = canonicalTargetFromArgs(
+        args as Record<string, unknown>,
+        true,
+      );
+      if (canonicalTarget.error) {
         return {
-          content: [{ type: 'text' as const, text: schedulerThread.error }],
+          content: [{ type: 'text' as const, text: canonicalTarget.error }],
           isError: true,
         };
       }
-
       const taskId = makeIpcId('scheduler-upsert');
-      const data = {
-        type: 'scheduler_upsert_job',
+      return submitSchedulerMutationTask({
+        taskType: 'scheduler_upsert_job',
         taskId,
-        jobId: args.job_id,
-        name: args.name,
-        prompt: args.prompt,
-        modelAlias: args.model_alias,
-        modelProfileId: args.model_profile_id,
-        scheduleType: args.schedule_type,
-        scheduleValue: args.schedule_value,
-        linkedSessions: args.linked_sessions,
-        deliverTo: args.deliver_to,
-        ...(schedulerThread.threadId !== undefined &&
-        schedulerThread.threadId !== null
-          ? { threadId: schedulerThread.threadId }
-          : {}),
-        silent: args.silent,
-        cleanupAfterMs: args.cleanup_after_ms,
-        groupScope: args.group_scope,
-        timeoutMs: args.timeout_ms,
-        maxRetries: args.max_retries,
-        retryBackoffMs: args.retry_backoff_ms,
-        maxConsecutiveFailures: args.max_consecutive_failures,
-        executionMode: normalizeExecutionMode(
-          args.execution_mode,
-          args.serialize,
-        ),
-        serialize: args.serialize,
-        allowedTools: args.allowed_tools,
-        targetJid: chatJid,
-        chatJid,
-        authThreadId: threadId,
-        createdBy: 'agent',
-        timestamp: nowIso(),
-      };
-      writeIpcFile(TASKS_DIR, data);
-      const response = await waitForTaskResponse(taskId, 20_000);
-      if (!response) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Scheduler upsert timed out waiting for host confirmation.',
-            },
-          ],
-          isError: true,
-        };
-      }
-      if (!response.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: formatTaskFailureLines(
-                response,
-                'Scheduler upsert was rejected.',
-              ).join('\n'),
-            },
-          ],
-          isError: true,
-        };
-      }
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: response.message || 'Scheduler job upsert completed.',
-          },
-        ],
-      };
+        payload: {
+          jobId: args.job_id,
+          name: args.name,
+          prompt: args.prompt,
+          modelAlias: args.model_alias,
+          modelProfileId: args.model_profile_id,
+          scheduleType: args.schedule_type,
+          scheduleValue: args.schedule_value,
+          executionContext: canonicalTarget.executionContext,
+          notificationRoutes: canonicalTarget.notificationRoutes,
+          silent: args.silent,
+          cleanupAfterMs: args.cleanup_after_ms,
+          timeoutMs: args.timeout_ms,
+          maxRetries: args.max_retries,
+          retryBackoffMs: args.retry_backoff_ms,
+          maxConsecutiveFailures: args.max_consecutive_failures,
+          executionMode: normalizeExecutionMode(
+            args.execution_mode,
+            args.serialize,
+          ),
+          serialize: args.serialize,
+          allowedTools: args.allowed_tools,
+          createdBy: 'agent',
+        },
+        timeoutText:
+          'Scheduler upsert timed out waiting for host confirmation.',
+        rejectedText: 'Scheduler upsert was rejected.',
+        successText: 'Scheduler job upsert completed.',
+      });
     },
   );
   server.tool(
@@ -254,7 +241,61 @@ export function registerSchedulerTools(server: McpServer): void {
       };
     },
   );
-
+  server.tool(
+    'scheduler_grant_tool',
+    'Append one extra allowed tool rule to a scheduler job capability policy.',
+    { job_id: z.string(), rule: z.string() },
+    async (args) => {
+      const rule = args.rule.trim();
+      if (!rule) {
+        return {
+          content: [{ type: 'text' as const, text: 'Tool rule is required.' }],
+          isError: true,
+        };
+      }
+      const validation = validateAutonomousToolRule(rule);
+      if (!validation.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: validation.reason ?? 'Invalid scheduler tool rule.',
+            },
+          ],
+          isError: true,
+        };
+      }
+      const getResponse = await requestSchedulerData('scheduler_get_job', {
+        jobId: args.job_id,
+      });
+      const getError = taskError(getResponse, 'Scheduler get job failed.');
+      if (getError) return getError;
+      const job = dataRecord(getResponse!).job;
+      if (!job || typeof job !== 'object') {
+        return {
+          content: [{ type: 'text' as const, text: 'Job not found.' }],
+          isError: true,
+        };
+      }
+      const allowedTools = schedulerJobExtraTools(job);
+      const nextAllowedTools = allowedTools.includes(rule)
+        ? allowedTools
+        : [...allowedTools, rule];
+      const taskId = makeIpcId('scheduler-grant-tool');
+      return submitSchedulerMutationTask({
+        taskType: 'scheduler_update_job',
+        taskId,
+        payload: {
+          jobId: args.job_id,
+          allowedTools: nextAllowedTools,
+        },
+        timeoutText:
+          'Scheduler tool grant timed out waiting for host confirmation.',
+        rejectedText: 'Scheduler tool grant was rejected.',
+        successText: `Scheduler job tool rule granted: ${rule}`,
+      });
+    },
+  );
   server.tool(
     'scheduler_list_jobs',
     'List scheduler jobs from the host scheduler.',
@@ -280,7 +321,29 @@ export function registerSchedulerTools(server: McpServer): void {
       };
     },
   );
-
+  server.tool(
+    'scheduler_list_notification_targets',
+    'List valid notification targets for scheduler jobs in the current conversation context.',
+    {},
+    async () => {
+      const response = await requestSchedulerData(
+        'scheduler_list_notification_targets',
+        {},
+      );
+      const error = taskError(
+        response,
+        'Scheduler notification target listing failed.',
+      );
+      if (error) return error;
+      const targets = dataRecord(response!).targets;
+      const result = Array.isArray(targets) ? targets : [];
+      return {
+        content: [
+          { type: 'text' as const, text: JSON.stringify(result, null, 2) },
+        ],
+      };
+    },
+  );
   server.tool(
     'scheduler_update_job',
     'Update mutable fields on a scheduler job.',
@@ -292,12 +355,26 @@ export function registerSchedulerTools(server: McpServer): void {
       model_profile_id: z.string().nullable().optional(),
       schedule_type: z.enum(['cron', 'interval', 'once']).optional(),
       schedule_value: z.string().optional(),
-      linked_sessions: z.array(z.string()).optional(),
-      deliver_to: z.array(z.string()).optional(),
-      thread_id: z.string().nullable().optional(),
+      target: z.enum(['here', 'this_thread', 'this_topic', 'me_dm']).optional(),
+      execution_context: z
+        .object({
+          conversation_jid: z.string(),
+          thread_id: z.string().nullable(),
+          group_scope: z.string(),
+          session_id: z.string().nullable().optional(),
+        })
+        .optional(),
+      notification_routes: z
+        .array(
+          z.object({
+            conversation_jid: z.string(),
+            thread_id: z.string().nullable(),
+            label: z.string(),
+          }),
+        )
+        .optional(),
       silent: z.boolean().optional(),
       cleanup_after_ms: z.number().optional(),
-      group_scope: z.string().optional(),
       timeout_ms: z.number().optional(),
       max_retries: z.number().optional(),
       retry_backoff_ms: z.number().optional(),
@@ -307,241 +384,111 @@ export function registerSchedulerTools(server: McpServer): void {
       allowed_tools: z.array(z.string()).optional(),
     },
     async (args) => {
+      const unsupportedArgError = unsupportedSchedulerArgError(
+        args as Record<string, unknown>,
+        SCHEDULER_UPDATE_ARG_KEYS,
+      );
+      if (unsupportedArgError) return unsupportedArgError;
       const executionMode =
         args.execution_mode !== undefined || args.serialize !== undefined
           ? normalizeExecutionMode(args.execution_mode, args.serialize)
           : undefined;
-      const schedulerThread = resolveSchedulerThreadArg(args.thread_id, false);
-      if (schedulerThread.error) {
+      const canonicalTarget = canonicalTargetFromArgs(
+        args as Record<string, unknown>,
+        false,
+      );
+      if (canonicalTarget.error) {
         return {
-          content: [{ type: 'text' as const, text: schedulerThread.error }],
+          content: [{ type: 'text' as const, text: canonicalTarget.error }],
           isError: true,
         };
       }
       const taskId = makeIpcId('scheduler-update');
-      writeIpcFile(TASKS_DIR, {
-        type: 'scheduler_update_job',
+      return submitSchedulerMutationTask({
+        taskType: 'scheduler_update_job',
         taskId,
-        jobId: args.job_id,
-        name: args.name,
-        prompt: args.prompt,
-        modelAlias: args.model_alias,
-        modelProfileId: args.model_profile_id,
-        scheduleType: args.schedule_type,
-        scheduleValue: args.schedule_value,
-        linkedSessions: args.linked_sessions,
-        deliverTo: args.deliver_to,
-        ...(schedulerThread.threadId !== undefined
-          ? { threadId: schedulerThread.threadId }
-          : {}),
-        silent: args.silent,
-        cleanupAfterMs: args.cleanup_after_ms,
-        groupScope: args.group_scope,
-        timeoutMs: args.timeout_ms,
-        maxRetries: args.max_retries,
-        retryBackoffMs: args.retry_backoff_ms,
-        maxConsecutiveFailures: args.max_consecutive_failures,
-        executionMode,
-        serialize: args.serialize,
-        allowedTools: args.allowed_tools,
-        targetJid: chatJid,
-        chatJid,
-        authThreadId: threadId,
-        timestamp: nowIso(),
+        payload: {
+          jobId: args.job_id,
+          name: args.name,
+          prompt: args.prompt,
+          modelAlias: args.model_alias,
+          modelProfileId: args.model_profile_id,
+          scheduleType: args.schedule_type,
+          scheduleValue: args.schedule_value,
+          ...(args.execution_context !== undefined || args.target !== undefined
+            ? { executionContext: canonicalTarget.executionContext }
+            : {}),
+          ...(args.notification_routes !== undefined ||
+          args.target !== undefined
+            ? { notificationRoutes: canonicalTarget.notificationRoutes }
+            : {}),
+          silent: args.silent,
+          cleanupAfterMs: args.cleanup_after_ms,
+          timeoutMs: args.timeout_ms,
+          maxRetries: args.max_retries,
+          retryBackoffMs: args.retry_backoff_ms,
+          maxConsecutiveFailures: args.max_consecutive_failures,
+          executionMode,
+          serialize: args.serialize,
+          allowedTools: args.allowed_tools,
+        },
+        timeoutText:
+          'Scheduler update timed out waiting for host confirmation.',
+        rejectedText: 'Scheduler update was rejected.',
+        successText: 'Scheduler job update completed.',
       });
-      const response = await waitForTaskResponse(taskId, 20_000);
-      if (!response) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Scheduler update timed out waiting for host confirmation.',
-            },
-          ],
-          isError: true,
-        };
-      }
-      if (!response.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: formatTaskFailureLines(
-                response,
-                'Scheduler update was rejected.',
-              ).join('\n'),
-            },
-          ],
-          isError: true,
-        };
-      }
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: response.message || 'Scheduler job update completed.',
-          },
-        ],
-      };
     },
   );
-
   server.tool(
     'scheduler_delete_job',
     'Delete a scheduler job.',
     { job_id: z.string() },
     async (args) => {
       const taskId = makeIpcId('scheduler-delete');
-      writeIpcFile(TASKS_DIR, {
-        type: 'scheduler_delete_job',
+      return submitSchedulerMutationTask({
+        taskType: 'scheduler_delete_job',
         taskId,
-        jobId: args.job_id,
-        targetJid: chatJid,
-        chatJid,
-        authThreadId: threadId,
-        timestamp: nowIso(),
+        payload: { jobId: args.job_id },
+        timeoutText:
+          'Scheduler delete timed out waiting for host confirmation.',
+        rejectedText: 'Scheduler delete was rejected.',
+        successText: 'Scheduler job delete completed.',
       });
-      const response = await waitForTaskResponse(taskId, 20_000);
-      if (!response) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Scheduler delete timed out waiting for host confirmation.',
-            },
-          ],
-          isError: true,
-        };
-      }
-      if (!response.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: formatTaskFailureLines(
-                response,
-                'Scheduler delete was rejected.',
-              ).join('\n'),
-            },
-          ],
-          isError: true,
-        };
-      }
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: response.message || 'Scheduler job delete completed.',
-          },
-        ],
-      };
     },
   );
-
   server.tool(
     'scheduler_pause_job',
     'Pause a scheduler job.',
     { job_id: z.string() },
     async (args) => {
       const taskId = makeIpcId('scheduler-pause');
-      writeIpcFile(TASKS_DIR, {
-        type: 'scheduler_pause_job',
+      return submitSchedulerMutationTask({
+        taskType: 'scheduler_pause_job',
         taskId,
-        jobId: args.job_id,
-        targetJid: chatJid,
-        chatJid,
-        authThreadId: threadId,
-        timestamp: nowIso(),
+        payload: { jobId: args.job_id },
+        timeoutText: 'Scheduler pause timed out waiting for host confirmation.',
+        rejectedText: 'Scheduler pause was rejected.',
+        successText: 'Scheduler job pause completed.',
       });
-      const response = await waitForTaskResponse(taskId, 20_000);
-      if (!response) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Scheduler pause timed out waiting for host confirmation.',
-            },
-          ],
-          isError: true,
-        };
-      }
-      if (!response.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: formatTaskFailureLines(
-                response,
-                'Scheduler pause was rejected.',
-              ).join('\n'),
-            },
-          ],
-          isError: true,
-        };
-      }
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: response.message || 'Scheduler job pause completed.',
-          },
-        ],
-      };
     },
   );
-
   server.tool(
     'scheduler_resume_job',
     'Resume a paused scheduler job.',
     { job_id: z.string() },
     async (args) => {
       const taskId = makeIpcId('scheduler-resume');
-      writeIpcFile(TASKS_DIR, {
-        type: 'scheduler_resume_job',
+      return submitSchedulerMutationTask({
+        taskType: 'scheduler_resume_job',
         taskId,
-        jobId: args.job_id,
-        targetJid: chatJid,
-        chatJid,
-        authThreadId: threadId,
-        timestamp: nowIso(),
+        payload: { jobId: args.job_id },
+        timeoutText:
+          'Scheduler resume timed out waiting for host confirmation.',
+        rejectedText: 'Scheduler resume was rejected.',
+        successText: 'Scheduler job resume completed.',
       });
-      const response = await waitForTaskResponse(taskId, 20_000);
-      if (!response) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Scheduler resume timed out waiting for host confirmation.',
-            },
-          ],
-          isError: true,
-        };
-      }
-      if (!response.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: formatTaskFailureLines(
-                response,
-                'Scheduler resume was rejected.',
-              ).join('\n'),
-            },
-          ],
-          isError: true,
-        };
-      }
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: response.message || 'Scheduler job resume completed.',
-          },
-        ],
-      };
     },
   );
-
   server.tool(
     'scheduler_run_now',
     'Queue an immediate run of an existing scheduler job.',
@@ -560,7 +507,6 @@ export function registerSchedulerTools(server: McpServer): void {
       };
     },
   );
-
   server.tool(
     'scheduler_list_runs',
     'List job runs from the host scheduler.',
@@ -679,4 +625,41 @@ export function registerSchedulerTools(server: McpServer): void {
       };
     },
   );
+}
+
+function schedulerJobExtraTools(job: unknown): string[] {
+  const record =
+    typeof job === 'object' && job !== null
+      ? (job as Record<string, unknown>)
+      : {};
+  const visibility =
+    typeof record.visibility === 'object' && record.visibility !== null
+      ? (record.visibility as Record<string, unknown>)
+      : {};
+  const toolAccess =
+    typeof visibility.toolAccess === 'object' && visibility.toolAccess !== null
+      ? (visibility.toolAccess as Record<string, unknown>)
+      : {};
+  const visibleExtraTools = stringArray(toolAccess.jobExtraTools);
+  if (visibleExtraTools.length > 0) return visibleExtraTools;
+  const targetJson =
+    typeof record.targetJson === 'object' && record.targetJson !== null
+      ? (record.targetJson as Record<string, unknown>)
+      : {};
+  const target =
+    typeof record.target_json === 'object' && record.target_json !== null
+      ? (record.target_json as Record<string, unknown>)
+      : targetJson;
+  const capabilityPolicy =
+    typeof target.capabilityPolicy === 'object' &&
+    target.capabilityPolicy !== null
+      ? (target.capabilityPolicy as Record<string, unknown>)
+      : {};
+  return stringArray(capabilityPolicy.allowedTools);
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }

@@ -89,21 +89,3 @@ export function drainInteractionBoundaries(): number {
     return 0;
   }
 }
-
-export function waitForIpcMessage(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const poll = () => {
-      if (shouldClose()) {
-        resolve(null);
-        return;
-      }
-      const messages = drainIpcInput();
-      if (messages.length > 0) {
-        resolve(messages.join('\n'));
-        return;
-      }
-      setTimeout(poll, IPC_POLL_MS);
-    };
-    poll();
-  });
-}

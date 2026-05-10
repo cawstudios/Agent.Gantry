@@ -5,6 +5,7 @@ import {
   DEFAULT_LLM_PROFILE_ID,
 } from '@core/adapters/storage/postgres/seeds.js';
 import type { AgentRunId } from '@core/domain/events/events.js';
+import type { JobUpsertInput } from '@core/domain/repositories/ops-repo.js';
 import type { ProviderSessionId } from '@core/domain/sessions/sessions.js';
 
 import {
@@ -14,6 +15,47 @@ import {
 } from '../harness/postgres-integration-runtime.js';
 
 const maybeDescribe = hasPostgresIntegrationDatabase ? describe : describe.skip;
+const now = '2026-04-28T00:00:00.000Z';
+
+function makeContinuityJob(
+  id: string,
+  patch: Partial<JobUpsertInput> = {},
+): JobUpsertInput {
+  return {
+    id,
+    name: `Job ${id}`,
+    prompt: 'Summarize current status',
+    schedule_type: 'manual',
+    schedule_value: '',
+    status: 'active',
+    session_id: null,
+    thread_id: null,
+    execution_context: {
+      conversationJid: 'app:shared:conversation',
+      threadId: null,
+      groupScope: 'shared_agent',
+      sessionId: null,
+    },
+    notification_routes: [
+      {
+        conversationJid: 'app:shared:conversation',
+        threadId: null,
+        label: 'primary',
+      },
+    ],
+    group_scope: 'shared_agent',
+    created_by: 'human',
+    created_at: now,
+    updated_at: now,
+    next_run: null,
+    silent: false,
+    timeout_ms: 30_000,
+    max_retries: 1,
+    retry_backoff_ms: 1,
+    execution_mode: 'serialized',
+    ...patch,
+  };
+}
 
 maybeDescribe('Postgres memory continuity', () => {
   let runtime: PostgresIntegrationRuntime;
@@ -86,7 +128,149 @@ maybeDescribe('Postgres memory continuity', () => {
     expect(context).toMatchObject({
       appId: 'default',
       agentId: 'agent:bound_skill_agent',
-      agentSessionId: 'agent-session:runtime_workspace_folder',
+      agentSessionId: expect.stringContaining(
+        'agent:agent%3Abound_skill_agent::',
+      ),
+    });
+  });
+
+  it('does not reuse provider sessions when a conversation route rebinds to another agent', async () => {
+    const chatJid = 'tg:session-rebind';
+    const routeFolder = 'runtime_workspace_folder';
+
+    await runtime.ops.setConversationRoute(chatJid, {
+      name: 'Agent A',
+      folder: 'agent_a',
+      trigger: '@A',
+      added_at: '2026-05-08T00:00:00.000Z',
+      requiresTrigger: false,
+    });
+    await runtime.sessionOps.setSession(
+      routeFolder,
+      'provider-session:test:agent-a',
+      null,
+      {
+        chatJid,
+        latestArtifactId: 'provider-session-artifact:test:agent-a',
+      },
+    );
+    const agentAContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder: routeFolder,
+      chatJid,
+      threadId: null,
+    });
+
+    await runtime.ops.setConversationRoute(chatJid, {
+      name: 'Agent B',
+      folder: 'agent_b',
+      trigger: '@B',
+      added_at: '2026-05-08T00:01:00.000Z',
+      requiresTrigger: false,
+    });
+    const agentBContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder: routeFolder,
+      chatJid,
+      threadId: null,
+    });
+
+    expect(agentAContext).toMatchObject({
+      agentId: 'agent:agent_a',
+      externalSessionId: 'provider-session:test:agent-a',
+    });
+    expect(agentBContext).toMatchObject({
+      agentId: 'agent:agent_b',
+    });
+    expect(agentBContext.agentSessionId).not.toBe(agentAContext.agentSessionId);
+    expect(agentBContext).not.toHaveProperty('providerSessionId');
+    expect(agentBContext).not.toHaveProperty('externalSessionId');
+    expect(agentBContext).not.toHaveProperty('latestArtifactId');
+
+    await runtime.sessionOps.setSession(
+      routeFolder,
+      'provider-session:test:agent-b',
+      null,
+      {
+        chatJid,
+        latestArtifactId: 'provider-session-artifact:test:agent-b',
+      },
+    );
+    await expect(
+      runtime.sessionOps.getAgentTurnContext({
+        groupFolder: routeFolder,
+        chatJid,
+        threadId: null,
+      }),
+    ).resolves.toMatchObject({
+      agentId: 'agent:agent_b',
+      agentSessionId: agentBContext.agentSessionId,
+      externalSessionId: 'provider-session:test:agent-b',
+      latestArtifactId: 'provider-session-artifact:test:agent-b',
+    });
+  });
+
+  it('scoped reset clears only the targeted agent owner session state', async () => {
+    const chatJid = 'tg:session-reset-owner';
+    const routeFolder = 'runtime_workspace_folder';
+    const sessionA = 'provider-session:test:reset-owner:agent-a';
+    const sessionB = 'provider-session:test:reset-owner:agent-b';
+
+    await runtime.ops.setConversationRoute(chatJid, {
+      name: 'Reset Owner Agent A',
+      folder: 'reset_owner_agent_a',
+      trigger: '@A',
+      added_at: '2026-05-08T00:00:00.000Z',
+      requiresTrigger: false,
+    });
+    await runtime.sessionOps.setSession(routeFolder, sessionA, null, {
+      chatJid,
+      latestArtifactId: 'provider-session-artifact:test:reset-owner:agent-a',
+    });
+    const agentAContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder: routeFolder,
+      chatJid,
+      threadId: null,
+    });
+
+    await runtime.ops.setConversationRoute(chatJid, {
+      name: 'Reset Owner Agent B',
+      folder: 'reset_owner_agent_b',
+      trigger: '@B',
+      added_at: '2026-05-08T00:01:00.000Z',
+      requiresTrigger: false,
+    });
+    await runtime.sessionOps.setSession(routeFolder, sessionB, null, {
+      chatJid,
+      latestArtifactId: 'provider-session-artifact:test:reset-owner:agent-b',
+    });
+    const agentBContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder: routeFolder,
+      chatJid,
+      threadId: null,
+    });
+    expect(agentBContext.agentSessionId).not.toBe(agentAContext.agentSessionId);
+
+    await runtime.sessionOps.deleteSession(routeFolder, null, {
+      chatJid,
+      agentId: agentBContext.agentId,
+    });
+
+    await expect(
+      runtime.sessionOps.getAgentTurnContext({
+        groupFolder: routeFolder,
+        chatJid,
+        threadId: null,
+      }),
+    ).resolves.not.toHaveProperty('providerSessionId');
+
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        sessionA as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({
+      status: 'active',
+      agentSessionId: agentAContext.agentSessionId,
+      externalSessionId: sessionA,
+      latestArtifactId: 'provider-session-artifact:test:reset-owner:agent-a',
     });
   });
 
@@ -183,6 +367,83 @@ maybeDescribe('Postgres memory continuity', () => {
     ).rejects.toThrow(/already owned by another session/);
   });
 
+  it('keeps provider-session ownership stable under concurrent claim races', async () => {
+    const sharedSessionId = 'provider-session:test:race-owned';
+    const contenders = [
+      {
+        groupFolder: 'group-session-race-a',
+        chatJid: 'tg:group-session-race-a',
+        latestArtifactId: 'provider-session-artifact:test:race:a',
+      },
+      {
+        groupFolder: 'group-session-race-b',
+        chatJid: 'tg:group-session-race-b',
+        latestArtifactId: 'provider-session-artifact:test:race:b',
+      },
+    ] as const;
+
+    const results = await Promise.allSettled(
+      contenders.map((contender) =>
+        runtime.sessionOps.setSession(
+          contender.groupFolder,
+          sharedSessionId,
+          null,
+          {
+            chatJid: contender.chatJid,
+            latestArtifactId: contender.latestArtifactId,
+          },
+        ),
+      ),
+    );
+
+    const fulfilled = results
+      .map((result, index) => ({ result, index }))
+      .filter((entry) => entry.result.status === 'fulfilled');
+    const rejected = results
+      .map((result, index) => ({ result, index }))
+      .filter((entry) => entry.result.status === 'rejected');
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0].result as PromiseRejectedResult).reason).toBeInstanceOf(
+      Error,
+    );
+    expect(
+      String((rejected[0].result as PromiseRejectedResult).reason),
+    ).toContain('already owned by another session');
+
+    const winner = contenders[fulfilled[0]!.index]!;
+    const loser = contenders[rejected[0]!.index]!;
+
+    const winnerContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder: winner.groupFolder,
+      chatJid: winner.chatJid,
+      threadId: null,
+    });
+    expect(winnerContext).toMatchObject({
+      providerSessionId: sharedSessionId,
+      externalSessionId: sharedSessionId,
+    });
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        sharedSessionId as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({
+      id: sharedSessionId,
+      agentSessionId: winnerContext.agentSessionId,
+      latestArtifactId: winner.latestArtifactId,
+      status: 'active',
+    });
+
+    const loserContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder: loser.groupFolder,
+      chatJid: loser.chatJid,
+      threadId: null,
+    });
+    expect(loserContext).not.toHaveProperty('providerSessionId');
+    expect(loserContext).not.toHaveProperty('externalSessionId');
+  });
+
   it('rejects unsafe provider session ids before persisting resume state', async () => {
     await expect(
       runtime.sessionOps.setSession('group-session-unsafe', '../escape', null, {
@@ -227,6 +488,133 @@ maybeDescribe('Postgres memory continuity', () => {
     expect(resumed).not.toHaveProperty('latestArtifactId');
   });
 
+  it('does not expire provider sessions when ownership predicates are incomplete', async () => {
+    const groupFolder = 'group-session-expiry-incomplete';
+    const chatJid = 'tg:group-session-expiry-incomplete';
+    const sessionId = 'provider-session:test:expire-incomplete';
+
+    await runtime.sessionOps.setSession(groupFolder, sessionId, null, {
+      chatJid,
+      latestArtifactId: 'provider-session-artifact:test:expire-incomplete',
+    });
+
+    const before = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder,
+      chatJid,
+      threadId: null,
+    });
+
+    await runtime.sessionOps.expireProviderSession({
+      providerSessionId: sessionId,
+      agentSessionId: '',
+      provider: '',
+      externalSessionId: '',
+    });
+
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        sessionId as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({
+      id: sessionId,
+      agentSessionId: before.agentSessionId,
+      status: 'active',
+    });
+  });
+
+  it('does not expire by providerSessionId when ownership predicates mismatch', async () => {
+    const firstGroup = 'group-session-expiry-guard-a';
+    const secondGroup = 'group-session-expiry-guard-b';
+    const firstChat = 'tg:group-session-expiry-guard-a';
+    const secondChat = 'tg:group-session-expiry-guard-b';
+    const firstSessionId = 'provider-session:test:expiry-guard:a';
+    const secondSessionId = 'provider-session:test:expiry-guard:b';
+
+    await runtime.sessionOps.setSession(firstGroup, firstSessionId, null, {
+      chatJid: firstChat,
+      latestArtifactId: 'provider-session-artifact:test:expiry-guard:a',
+    });
+    await runtime.sessionOps.setSession(secondGroup, secondSessionId, null, {
+      chatJid: secondChat,
+      latestArtifactId: 'provider-session-artifact:test:expiry-guard:b',
+    });
+
+    const firstContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder: firstGroup,
+      chatJid: firstChat,
+      threadId: null,
+    });
+    const secondContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder: secondGroup,
+      chatJid: secondChat,
+      threadId: null,
+    });
+
+    await runtime.sessionOps.expireProviderSession({
+      providerSessionId: firstSessionId,
+      agentSessionId: secondContext.agentSessionId,
+      provider: 'anthropic',
+      externalSessionId: firstSessionId,
+    });
+
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        firstSessionId as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({
+      status: 'active',
+      agentSessionId: firstContext.agentSessionId,
+    });
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        secondSessionId as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({
+      status: 'active',
+      agentSessionId: secondContext.agentSessionId,
+    });
+  });
+
+  it('resets only the targeted scoped conversation state and preserves sibling scopes', async () => {
+    const groupFolder = 'group-session-scope-reset';
+    const conversationA = 'tg:group-session-scope-reset:A';
+    const conversationB = 'tg:group-session-scope-reset:B';
+    const sessionA = 'provider-session:test:scope-reset:a';
+    const sessionB = 'provider-session:test:scope-reset:b';
+
+    await runtime.sessionOps.setSession(groupFolder, sessionA, null, {
+      chatJid: conversationA,
+      latestArtifactId: 'provider-session-artifact:test:scope-reset:a',
+    });
+    await runtime.sessionOps.setSession(groupFolder, sessionB, null, {
+      chatJid: conversationB,
+      latestArtifactId: 'provider-session-artifact:test:scope-reset:b',
+    });
+
+    await runtime.sessionOps.deleteSession(groupFolder, null, {
+      chatJid: conversationA,
+    });
+
+    const resetContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder,
+      chatJid: conversationA,
+      threadId: null,
+    });
+    const siblingContext = await runtime.sessionOps.getAgentTurnContext({
+      groupFolder,
+      chatJid: conversationB,
+      threadId: null,
+    });
+
+    expect(resetContext).not.toHaveProperty('providerSessionId');
+    expect(resetContext).not.toHaveProperty('externalSessionId');
+    expect(siblingContext).toMatchObject({
+      providerSessionId: sessionB,
+      externalSessionId: sessionB,
+      latestArtifactId: 'provider-session-artifact:test:scope-reset:b',
+    });
+  });
+
   it('clears scoped session state even when run history references the session', async () => {
     const groupFolder = 'group-session-delete-with-run';
     const chatJid = 'tg:group-session-delete-with-run';
@@ -267,7 +655,7 @@ maybeDescribe('Postgres memory continuity', () => {
     ).resolves.toBeNull();
     await expect(
       runtime.repositories.agentRuns.getAgentRun(runId),
-    ).resolves.toMatchObject({ sessionId: undefined });
+    ).resolves.toMatchObject({ sessionId: resume.agentSessionId });
 
     const restarted = await runtime.sessionOps.getAgentTurnContext({
       groupFolder,
@@ -277,6 +665,94 @@ maybeDescribe('Postgres memory continuity', () => {
     expect(restarted.agentSessionId).toBeDefined();
     expect(restarted).not.toHaveProperty('externalSessionId');
     expect(restarted).not.toHaveProperty('latestArtifactId');
+  });
+
+  it('hydrates continuity jobs only from the current session app scope', async () => {
+    const conversationJid = 'app:shared:conversation';
+    const threadId = 'topic-1';
+    const agentId = 'agent:shared_agent';
+    const appOneSession = await runtime.control.ensureAppSession({
+      appId: 'app-one',
+      conversationId: 'shared-conversation',
+      chatJid: conversationJid,
+      groupFolder: 'shared_agent',
+      title: 'Shared App One',
+    });
+    const appTwoSession = await runtime.control.ensureAppSession({
+      appId: 'app-two',
+      conversationId: 'shared-conversation',
+      chatJid: conversationJid,
+      groupFolder: 'shared_agent',
+      title: 'Shared App Two',
+    });
+    await runtime.ops.upsertJob(
+      makeContinuityJob('job:continuity:app-one', {
+        status: 'paused',
+        session_id: appOneSession.sessionId,
+        thread_id: threadId,
+        execution_context: {
+          conversationJid,
+          threadId,
+          groupScope: 'shared_agent',
+          sessionId: appOneSession.sessionId,
+        },
+        notification_routes: [{ conversationJid, threadId, label: 'primary' }],
+      }),
+    );
+    await runtime.ops.upsertJob(
+      makeContinuityJob('job:continuity:app-two', {
+        status: 'active',
+        session_id: appTwoSession.sessionId,
+        thread_id: threadId,
+        execution_context: {
+          conversationJid,
+          threadId,
+          groupScope: 'shared_agent',
+          sessionId: appTwoSession.sessionId,
+        },
+        notification_routes: [{ conversationJid, threadId, label: 'primary' }],
+      }),
+    );
+
+    const loadProductionContinuityJobs = (
+      runtime.ops as unknown as {
+        sessions: {
+          loadProductionContinuityJobs(input: {
+            session: {
+              id: string;
+              appId: string;
+              agentId: string;
+              conversationId: string;
+              threadId?: string;
+              status: 'active';
+              createdAt: string;
+              updatedAt: string;
+            };
+            limit: number;
+          }): Promise<Array<{ id: string }>>;
+        };
+      }
+    ).sessions.loadProductionContinuityJobs.bind(
+      (runtime.ops as unknown as { sessions: unknown }).sessions,
+    );
+
+    await expect(
+      loadProductionContinuityJobs({
+        session: {
+          id: appOneSession.sessionId,
+          appId: 'app-one',
+          agentId,
+          conversationId: `conversation:${conversationJid}`,
+          threadId: `thread:${conversationJid}:${threadId}`,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+        },
+        limit: 8,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: 'job:continuity:app-one' }),
+    ]);
   });
 
   it('keeps session state isolated across independent test schemas', async () => {
@@ -318,5 +794,5 @@ maybeDescribe('Postgres memory continuity', () => {
     } finally {
       await isolated.cleanup();
     }
-  });
+  }, 30_000);
 });

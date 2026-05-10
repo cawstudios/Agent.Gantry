@@ -73,7 +73,7 @@ const DEFAULT_SHARED_TEMPLATE = `# Shared Agent Profile
 - Use current state to understand what work is active.
 - Use open commitments to avoid dropping promises.
 - Use recent digest context to understand what changed recently.
-- Dreaming currently stages candidates, marks items for review, and promotes reviewed memory; it does not automatically decay, retire, merge, rewrite, or rank memories by usefulness.
+- Dreaming stages candidates, applies safe promote/update decisions from validated staged candidates, and routes retire/rewrite/merge/contradiction proposals to memory review.
 - When the user says "continue", "resume", or similar, call memory_search for prior context instead of guessing.
 
 ## Privacy Rules
@@ -158,7 +158,7 @@ function personaPrompt(persona: AgentPersona): string {
 function capabilityGuidancePrompt(persona: AgentPersona): string {
   const baseline = [
     '# Capability guidance',
-    '- Browser and memory are baseline capabilities for every persona.',
+    '- Memory is baseline for every persona. Browser control is available only when the canonical Browser capability is selected, through MyClaw-owned browser_* tools.',
     '- Memory tools store durable evidence only; temporary task state does not belong in memory.',
     '- Generic Agent delegation is available for bounded subtasks. Write a clear prompt with goal, context, constraints, and expected output.',
     '- Do not delegate risky execution, secret handling, config edits, permission changes, or work requiring tools the parent run cannot use.',

@@ -26,6 +26,93 @@ Durable session resume changes should additionally run the focused unit checks:
 npm run test:unit -- apps/core/test/unit/application/session-resume-use-cases.test.ts apps/core/test/unit/runtime/group-processing.test.ts
 ```
 
+Postgres-backed continuity changes should add the focused repository and
+integration checks:
+
+```bash
+npm run test:unit -- apps/core/test/unit/application/session-resume-use-cases.test.ts apps/core/test/unit/runtime/session-resume-runtime.test.ts apps/core/test/unit/adapters/storage/postgres/canonical-session-repository.postgres.test.ts apps/core/test/unit/adapters/storage/postgres/canonical-ops-repo.postgres.test.ts
+npm run test:integration:postgres -- apps/core/test/integration/session-continuity-postgres.integration.test.ts apps/core/test/integration/postgres-domain-repositories.integration.test.ts
+```
+
+Provider-session artifact and redaction changes should run:
+
+```bash
+npm run test:unit -- apps/core/test/unit/session/provider-transcript-archive.test.ts apps/core/test/unit/adapters/postgres-provider-artifact-store.test.ts apps/core/test/unit/application/sessions/session-interaction-module.test.ts apps/core/test/unit/runner/claude-logging.test.ts
+```
+
+Canonical tool execution boundary changes should run:
+
+```bash
+npm run test:unit -- apps/core/test/unit/shared/tool-execution-policy-service.test.ts apps/core/test/unit/bootstrap/channel-wiring.test.ts apps/core/test/unit/runner/protected-capability-hook.test.ts apps/core/test/unit/runner/protected-capability-guard.test.ts apps/core/test/unit/runner/mcp/scheduler-tools.test.ts apps/core/test/unit/runner/agent-capabilities.test.ts apps/core/test/unit/runner/agent-runner-ipc.test.ts apps/core/test/unit/runtime/agent-spawn.test.ts
+npm run test:integration -- apps/core/test/integration/claude-agent-sdk-boundary.integration.test.ts apps/core/test/integration/permission-approval-ipc.integration.test.ts
+rg -n "PROTECTED_CAPABILITY_PATTERN|mcpServers.*Bash|\\.mcp\\.json.*Bash|permissionMode.*Bash|alwaysAllowedTools|continue: false|scheduler_grant_tool|runScript\\(" apps/core/src apps/core/test docs --glob '!docs/architecture/current-verification-commands.md'
+python3 .codex/scripts/check_architecture.py
+```
+
+Expected cleanup-search interpretation:
+
+- active protected capability denial should flow through
+  `ToolExecutionPolicyService`, with Claude hook/guard files acting only as
+  adapter projections;
+- `continue: false` remains expected only for single protected SDK hook blocks,
+  not ordinary tool-policy denial;
+- docs and tests may mention protected terms to prove target-based behavior;
+  active Bash policy should fail closed when a protected path is an action
+  target, while preserving explicitly safe text-payload flows such as issue or
+  PR bodies.
+- SDK Bash/file/MCP subprocess protection should be visible as
+  `sandbox.filesystem.denyWrite` entries sourced from
+  `MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON`; direct scheduler scripts should
+  fail closed until an equivalent OS sandbox runner exists.
+
+Clean-cut session continuity cleanup must also verify that unsupported legacy
+continuity paths did not return:
+
+```bash
+rg -n "legacyAgentSessionId|legacyDescendantIdLike|descendantUserIdLike|metadata_json::jsonb #>>|id LIKE 'agent-session|compatibility backfill|old-state import|repair old" apps/core/src apps/core/test docs --glob '!docs/architecture/current-verification-commands.md'
+rg -n "scope_key|agent_session_digests|ProviderSession.externalSessionId|provider-session" docs/architecture/session-resume.md docs/architecture/provider-session-artifacts.md apps/core/AGENTS.md apps/core/src/adapters/storage/postgres/AGENTS.md apps/core/src/adapters/storage/postgres/repositories apps/core/test/unit apps/core/test/integration
+```
+
+Expected cleanup-search interpretation:
+
+- stale legacy continuity identifiers, JSON metadata-derived scope lookups, old
+  state imports, and repair/backfill compatibility paths should have no active
+  runtime or repository matches;
+- `provider-session` remains expected in current provider metadata,
+  redaction/logging tests, artifact-store code, and docs because provider
+  artifacts and provider resume handles are adapter metadata, not canonical
+  continuity state;
+- migration or decision-history mentions are historical context only and must
+  not be referenced by active runtime startup, reset, or resume code.
+
+No-legacy runtime cleanup slices should also record broad search evidence:
+
+```bash
+rg -n "legacy|compat|shim|old path|TODO: remove|remove after refactor|legacy/|linkedSessions|deliverTo|threadId|sessionId|groupScope|legacy_message_row|system:dreaming" apps/core/src apps/core/test docs/architecture/current-verification-commands.md -S
+```
+
+Expected cleanup-search interpretation:
+
+- `threadId`, `sessionId`, and `groupScope` remain expected when they are the
+  current canonical execution, session, and thread field names; do not rewrite
+  them only to satisfy text search.
+- `linkedSessions`, `deliverTo`, `notificationTarget`, and old top-level
+  scheduler route aliases should appear only in reject-only tests, migration
+  rejection evidence, or the runtime parser's unsupported-field denylist.
+- `system:dreaming` remains expected for current system-owned memory dreaming
+  job IDs and unit tests.
+- `legacy`, `compat`, `shim`, and removal-TODO matches in active runtime code
+  require review unless they are denylist/error-message text or test names that
+  prove old behavior is rejected.
+
+Architecture cleanup slices that touch outbound delivery contracts should also run:
+
+```bash
+rg -n "iterTelegramTextChunks|countTelegramTextChunks|sendWithPartialDeliveryGuard|PartialMessageDeliveryError|TELEGRAM_DRAFT_MAX_LENGTH|partially_sent" .
+rg -n "bot\\.api\\.sendMessage\\(|chat\\.postMessage\\(|sdkClient\\.sendMessage\\(" apps/core/src/app apps/core/src/runtime apps/core/src/jobs apps/core/src/session apps/core/src/domain apps/core/src/application
+python3 .codex/scripts/check_architecture.py
+```
+
 ## Default Test And Build
 
 ```bash
@@ -57,6 +144,23 @@ python3 .codex/scripts/check_architecture.py
 python3 .codex/scripts/verify.py
 python3 .codex/scripts/validate_artifacts.py --allow-missing-run
 python3 .codex/scripts/validate_work.py
+```
+
+LOCAL-35 refactor phase progress uses the recorded T0 baseline:
+
+```bash
+python3 .codex/scripts/check_refactor_line_delta.py --check-diff --baseline-file docs/architecture/refactor-baseline.md
+```
+
+By default this phase check includes committed changes, tracked working-tree
+changes, and untracked source files under the checked paths. Use
+`--committed-only` only when intentionally inspecting the committed branch
+scope; the default gate must remain the working review scope.
+
+The final PR or overall refactor deletion target remains a branch-base check:
+
+```bash
+python3 .codex/scripts/check_refactor_line_delta.py --check-diff --base-ref origin/main
 ```
 
 `python3 .codex/scripts/verify.py` currently runs format, build, structural architecture, runtime truth, factory Python tests, typecheck, tests, and e2e unless overridden with `FACTORY_*` environment variables.

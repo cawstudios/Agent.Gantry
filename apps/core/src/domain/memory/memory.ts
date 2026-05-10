@@ -5,10 +5,6 @@ import type {
   ConversationThreadId,
   UserId,
 } from '../conversation/conversation.js';
-import type { BrandedId } from '../../shared/ids/branded-id.js';
-import type { IsoTimestamp } from '../../shared/time/primitives.js';
-
-export type MemoryItemId = BrandedId<'MemoryItemId'>;
 
 export type MemorySubject =
   | { kind: 'app'; appId: AppId }
@@ -21,25 +17,3 @@ export type MemorySubject =
       conversationId: ConversationId;
       threadId: ConversationThreadId;
     };
-
-export interface MemoryItem {
-  id: MemoryItemId;
-  appId: AppId;
-  agentId?: AgentId;
-  subject: MemorySubject;
-  kind:
-    | 'fact'
-    | 'preference'
-    | 'decision'
-    | 'procedure'
-    | 'correction'
-    | 'constraint';
-  key: string;
-  value: string;
-  source: string;
-  confidence: number;
-  isPinned: boolean;
-  isDeleted: boolean;
-  createdAt: IsoTimestamp;
-  updatedAt: IsoTimestamp;
-}

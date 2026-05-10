@@ -20,14 +20,15 @@ LaunchAgent.
 Control API settings are read from process env and from `~/myclaw/.env`:
 
 ```env
-MYCLAW_CONTROL_API_KEY=dev-key
-MYCLAW_CONTROL_APP_ID=default
+MYCLAW_CONTROL_API_KEYS_JSON=[{"kid":"local-admin","token":"dev-key","appId":"default","scopes":["sessions:read","sessions:write","jobs:read","jobs:write","providers:read","providers:admin","conversations:read","conversations:admin","messages:read","agents:admin","skills:read","skills:admin","mcp:read","mcp:admin","webhooks:read","webhooks:write","ingresses:read","ingresses:write","memory:read","memory:admin"]}]
 MYCLAW_CONTROL_PORT=8787
 ```
 
 `MYCLAW_CONTROL_PORT` is optional. Without it, the local SDK and CLI use the
 Unix socket at `~/myclaw/run/control.sock`. Do not put control API secrets in
 the launchd plist; keep the plist limited to `MYCLAW_HOME`, `HOME`, and `PATH`.
+Every Control API token must be listed in `MYCLAW_CONTROL_API_KEYS_JSON` with
+an explicit `kid`, `token`, `appId`, and `scopes` array.
 
 ## Settings
 
@@ -95,7 +96,7 @@ Agent-facing tools:
 - `request_skill_dependency_install`: dependency requests for npm, brew, go, uv, or downloads required by a skill.
 - `request_mcp_server`: third-party MCP server requests with transport, origin, tool patterns, credential needs, and reason.
 - `request_permission`: SDK, host, browser, scheduler, memory, service, MCP, or provider/channel capability permission requests.
-- `capability_status`: current tool access, readable configured rules, and exact `request_permission` arguments for missing admin tools.
+- `capability_status`: current tool access, readable configured rules, selected skills, selected MCP servers, and exact `request_permission` arguments for missing admin tools.
 - `service_restart`: selected-capability restart after approved changes that require host restart.
 - `register_agent`: selected-capability binding of a channel conversation to an agent.
 
@@ -104,6 +105,9 @@ decision, durable audit, new config version, and next-run activation.
 Persistent agent tool grants are mirrored into `settings.yaml` as readable
 `agents.<id>.tools` rules. Job-specific tool grants stay on the job only and
 are returned as `toolAccess` in job responses.
+Agent capability updates are bidirectional: settings-side changes reconcile
+Postgres immediately, and API/admin-side capability writes export the readable
+projection back into `settings.yaml` before returning.
 Permission prompts use `Allow once`, `Always allow <granular rule>`, or
 `Cancel`. Same-conversation review binds the request to the originating chat or
 thread; it does not bypass the configured conversation approvers.
@@ -228,6 +232,24 @@ client.sessions.stream(sessionId, { afterEventId?, signal? })
 client.sessions.wait(sessionId, { afterEventId?, timeoutMs? })
 ```
 
+`client.sessions.sendMessage` resolves after the runtime accepts and persists the
+inbound session message. The response shape is:
+
+```ts
+{
+  accepted: boolean;
+  messageId: string;
+  acceptedEventId: number;
+}
+```
+
+`accepted: true` and `acceptedEventId` mean the message was durably accepted
+into the session event stream and queued for runtime processing. They do not
+mean the model run has completed, a provider accepted outbound delivery, or the
+user-facing channel has received a response synchronously. Observe delivery and
+model progress through `client.sessions.stream`, `client.sessions.wait`,
+`client.sessions.listEvents`, or the configured outbound webhook events.
+
 Read-only history endpoints are available over the control API. SDK helpers are
 not exposed for these endpoints yet.
 
@@ -305,12 +327,17 @@ const signature = signIngressRequest({
 client.jobs.create({
   name,
   prompt,
-  sessionId,
+  executionContext: {
+    conversationJid,
+    threadId,  // null for whole-conversation jobs
+    groupScope,
+    sessionId, // required canonical app session id
+  },
+  notificationRoutes?, // defaults to primary execution context route
   kind?, // manual | once | recurring
   runAt?, // once
   schedule?, // recurring
   executionMode?, // parallel | serialized
-  threadId?,
   modelAlias?,    // friendly catalog alias, e.g. opus, sonnet, kimi
   modelProfileId?,
   dryRun?,        // preview model plus runtime context without scheduling
@@ -322,7 +349,13 @@ client.jobs.update(jobId, {
   name?,
   prompt?,
   executionMode?,
-  threadId?,
+  executionContext?: {
+    conversationJid,
+    threadId,
+    groupScope,
+    sessionId, // required when executionContext is provided
+  },
+  notificationRoutes?,
   status?,
   modelAlias?,    // use null to clear back to inherited defaults
   modelProfileId?,
@@ -339,10 +372,13 @@ cache policy, and provider labels. API job creation rejects raw provider model
 IDs unless they are registered catalog aliases.
 
 Job create and dry-run responses include `runtimeContext`: source conversation,
-thread target, notification target, resolved persona, and conversation-scoped
-browser profile. Jobs created from a DM/channel inherit that place's context; API
-or CLI callers should pass a session id for the conversation that should receive
-job notifications and permission issues.
+resolved `executionContext`, resolved `notificationRoutes`, resolved persona,
+and conversation-scoped browser profile. Jobs created from a DM/channel inherit
+that place's context; API or CLI callers should pass a session id for the
+conversation that should receive job notifications and permission issues.
+
+Job definitions, job instances, run history, and notification routes are
+runtime Postgres state. They are not written to `settings.yaml`.
 
 ## Runs
 
@@ -545,7 +581,9 @@ API version.
 
 Memory APIs are app-bound by the API key. Pass stable `appId`, `agentId`,
 `userId`, `groupId`, `channelId`, and `threadId` when your application has them.
-`common` memory is app-wide and requires admin memory scope to write.
+`common` memory is app-wide and requires admin/service authority to write. Agent
+MCP/IPC `memory_save` defaults to user or group scope and cannot directly write
+common/global memory.
 
 ```ts
 client.memory.save({
@@ -557,7 +595,7 @@ client.memory.save({
   threadId?,
   subjectType?, // user | group | channel | common
   subjectId?,
-  kind?,        // fact | preference | decision | correction | constraint | project_fact | reference
+  kind?,        // preference | decision | fact | correction | constraint
   key,
   value,
   why?,
@@ -583,7 +621,21 @@ client.memory.patch(memoryId, { appId?, agentId?, expectedVersion?, key?, value?
 client.memory.delete(memoryId, { appId?, agentId? })
 client.memory.dreaming.trigger({ appId?, agentId?, subjectType?, subjectId?, phase?, dryRun? })
 client.memory.dreaming.status({ appId?, agentId? })
+
+client.memory.sources.add({ sourceType: "text", text, title?, appId?, agentId?, userId?, groupId?, channelId?, threadId?, ingest? })
+client.memory.sources.list({ appId?, agentId?, userId?, groupId?, channelId?, threadId?, limit? })
+client.memory.sources.status(sourceId, { appId?, agentId?, userId?, groupId?, channelId?, threadId? })
+client.memory.sources.search({ query, appId?, agentId?, userId?, groupId?, channelId?, threadId?, limit? })
+client.memory.sources.delete(sourceId, { appId?, agentId? })
+client.memory.sources.ingest(sourceId, { appId?, agentId? })
 ```
+
+`reference` memory is reserved for procedure/knowledge-source flows instead of
+direct `memory_save` payloads.
+Blogs, articles, docs, posts, tweets/X content, pasted text, and files should
+be added through `client.memory.sources.*`; source ingestion stores
+provenance/chunks and stages reviewable candidates, but it does not directly
+create active `memory_items`.
 
 ## Webhooks
 

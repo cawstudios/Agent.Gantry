@@ -54,8 +54,11 @@ only durable MyClaw memory as an untrusted first user-message prefix; active
 chat continuity comes from the live SDK streaming-input session. Claude hook
 output and provider JSONL transcripts are not runtime state.
 
-Claude settings are not permission policy. Host-side `PermissionPolicyService`
-and sandbox policy remain authoritative for tool execution.
+Claude settings are not permission policy. Host-side
+`ToolExecutionPolicyService`, permission policy, and sandbox policy remain
+authoritative for tool execution. The Claude SDK `PreToolUse` hook and
+`canUseTool` callback are adapter projections of that canonical decision path,
+not separate policy engines.
 
 `settings.local.json` is ignored in enterprise runtime because local Claude
 settings are not MyClaw policy.
@@ -70,11 +73,11 @@ directory for that run, then the Claude Agent SDK loads them from
 For each persona with browser capability, MyClaw also materializes a pinned
 runtime-installed `agent-browser` skill into that same temp directory. It is not
 stored under the repo-bundled `.claude/skills` tree and does not require user
-`.claude` edits. The runtime browser run wiring module owns this per-run
-projection. It always materializes lifecycle guidance, and it only adds the
-`agent_browser` action MCP handoff plus `PLAYWRIGHT_MCP_CDP_ENDPOINT` when the
-persistent browser is already running and CDP-ready at agent startup. The skill
-owns agent guidance for both lifecycle requests and action workflows.
+`.claude` edits. The skill always points the model at the projected public
+`mcp__myclaw__browser_*` tools. Raw Playwright, Puppeteer, or `agent_browser`
+MCP servers may be used only as host-private backend implementation details and
+must not appear in model-visible MCP handoff, requestable capability lists, or
+persisted tool rules.
 
 Durable user-installed files under the runtime-home Claude skills directory are
 not read or copied by enterprise runtime.
@@ -87,9 +90,10 @@ skills use `skills/<skill-slug>/...`. Drafts survive restart but are not
 materialized or attached to hosted agents until approved. Rejected or disabled
 skills are retained for history and not used at runtime.
 
-The Claude Agent SDK `PreToolUse` hook blocks direct agent edits to skill
-capability files such as `SKILL.md`, runtime-home `.claude/skills`, and
-agent-local `skills/` folders. Agents must use
+The canonical tool execution policy, projected through the Claude Agent SDK
+`PreToolUse` hook, blocks direct agent edits to skill capability files such as
+`SKILL.md`, runtime-home `.claude/skills`, and agent-local `skills/` folders.
+Agents must use
 `mcp__myclaw__request_skill_install` for provider-backed imports or
 `mcp__myclaw__request_skill_proposal` for skill file bundles. Admins/users can
 also use the zip draft upload API. All paths review and persist the change
@@ -118,11 +122,13 @@ Agents can request an MCP server through the built-in MyClaw MCP tool, but that
 request only creates a pending draft for admin review. It never approves,
 binds, or activates the server in the current run.
 
-The same SDK `PreToolUse` hook blocks direct agent edits to MCP capability
-configuration such as `.mcp.json`, `mcpServers` settings, permission settings,
-and `claude mcp add*` shell commands. Agent-created MCP capabilities must go
-through `mcp__myclaw__request_mcp_server`, same-conversation review, binding,
-and next-run materialization.
+The same canonical policy blocks direct agent edits to MCP capability
+configuration such as `.mcp.json`, MCP server settings, permission settings,
+and `claude mcp add/remove/reset*` shell commands. Bash policy is target-based:
+issue text or command arguments that merely mention protected terms are not
+denied unless the command mutates a protected target. Agent-created MCP
+capabilities must go through `mcp__myclaw__request_mcp_server`,
+same-conversation review, binding, and next-run materialization.
 
 Same-conversation MCP prompts are only a delivery surface. The deciding user
 must still be listed as a conversation approver for the origin conversation and

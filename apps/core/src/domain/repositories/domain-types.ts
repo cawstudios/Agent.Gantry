@@ -6,12 +6,8 @@ export type {
   ConversationRoute,
 } from '../types.js';
 export type {
-  MemoryChunk,
-  MemoryItem,
-  MemoryProcedure,
   MemoryScope,
   MemorySearchResult,
-  SimilarMemoryItemMatch,
 } from '../../memory/memory-types.js';
 
 export interface ChatInfo {

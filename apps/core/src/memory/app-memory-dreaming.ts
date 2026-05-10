@@ -1,29 +1,33 @@
-import { randomUUID, createHash } from 'node:crypto';
-
-import { and, desc, eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-
 import * as pgSchema from '../adapters/storage/postgres/schema/schema.js';
 import type {
   AppMemoryItem,
   DreamDecisionAction,
+  MemoryLifecycleProposal,
   DreamingRunStatus,
   MemoryKind,
   NormalizedMemorySubject,
   SaveAppMemoryInput,
 } from './memory-types.js';
-
+import { memoryContentHash } from './app-memory-service-helpers.js';
+import { hashText } from './app-memory-canonical-codec.js';
+import {
+  extractMemoryValue,
+  parseStagedCandidateMetadata,
+  parseStructuredEvidenceCandidate,
+  validatePromotableCandidate,
+} from './app-memory-dreaming-candidate-guardrails.js';
 type Db = NodePgDatabase<typeof pgSchema>;
 type MemoryItemRow = typeof pgSchema.memoryItemsPostgres.$inferSelect;
-
+// prettier-ignore
+type CreatePendingReview = (p: MemoryLifecycleProposal, db?: Db) => Promise<string>;
+// prettier-ignore
+type DreamEmbeddingResult = { status: 'stored' | 'disabled' | 'retryable'; reason?: string };
 function nowIso(): string {
   return new Date().toISOString();
 }
-
-function hashText(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
 function parseJsonArray(value: string | null | undefined): string[] {
   if (!value) return [];
   try {
@@ -35,7 +39,6 @@ function parseJsonArray(value: string | null | undefined): string[] {
     return [];
   }
 }
-
 function parseJsonObject(
   value: string | null | undefined,
 ): Record<string, unknown> {
@@ -49,7 +52,27 @@ function parseJsonObject(
     return {};
   }
 }
-
+function isUnsafeEvidence(
+  evidence: typeof pgSchema.memoryEvidencePostgres.$inferSelect,
+): boolean {
+  const metadata = parseJsonObject(evidence.metadataJson);
+  return (
+    metadata.unsafeSource === true ||
+    metadata.quarantined === true ||
+    metadata.promptInjection === true ||
+    metadata.safety === 'unsafe' ||
+    metadata.safety === 'quarantined'
+  );
+}
+function sqlThreadScopeFilter(column: any, threadId: string | undefined) {
+  return threadId ? eq(column, threadId) : isNull(column);
+}
+async function setCandidateStatus(db: Db, id: string, status: string) {
+  await db
+    .update(pgSchema.memoryCandidatesPostgres)
+    .set({ status, updatedAt: nowIso() })
+    .where(eq(pgSchema.memoryCandidatesPostgres.id, id));
+}
 async function recordDreamDecision(input: {
   db: Db;
   runId: string;
@@ -66,6 +89,7 @@ async function recordDreamDecision(input: {
     runId: input.runId,
     appId: input.subject.appId,
     agentId: input.subject.agentId,
+    threadId: input.subject.threadId ?? null,
     itemId: input.itemId ?? null,
     candidateId: input.candidateId ?? null,
     action: input.action,
@@ -75,7 +99,97 @@ async function recordDreamDecision(input: {
     createdAt: nowIso(),
   });
 }
-
+async function candidateCitesUnsafeEvidence(db: Db, evidenceIds: string[]) {
+  if (evidenceIds.length === 0) return false;
+  const evidenceRows = await db
+    .select()
+    .from(pgSchema.memoryEvidencePostgres)
+    .where(inArray(pgSchema.memoryEvidencePostgres.id, evidenceIds))
+    .limit(Math.min(evidenceIds.length, 100));
+  return evidenceRows.some(isUnsafeEvidence);
+}
+// prettier-ignore
+function candidateMemoryKind(kind: string): MemoryKind | undefined { return ['preference', 'decision', 'fact', 'correction', 'constraint'].includes(kind) ? (kind as MemoryKind) : undefined; }
+async function routeMemoryProposalToReview(input: {
+  db: Db;
+  runId: string;
+  subject: NormalizedMemorySubject;
+  dryRun: boolean;
+  createPendingReview?: CreatePendingReview;
+  proposal: MemoryLifecycleProposal;
+  candidateId?: string;
+  itemId?: string;
+  evidenceIds?: string[];
+  reviewRationale: string;
+  blockRationale: string;
+}): Promise<DreamDecisionAction> {
+  if (input.dryRun) {
+    await recordDreamDecision({
+      db: input.db,
+      runId: input.runId,
+      subject: input.subject,
+      action: 'dry_run',
+      ...(input.itemId ? { itemId: input.itemId } : {}),
+      ...(input.candidateId ? { candidateId: input.candidateId } : {}),
+      rationale: input.reviewRationale,
+      ...(input.evidenceIds ? { evidenceIds: input.evidenceIds } : {}),
+      applied: false,
+    });
+    return 'dry_run';
+  }
+  let reviewId = '';
+  const createReview = (db = input.db) =>
+    input.createPendingReview?.(input.proposal, db) || '';
+  try {
+    if (input.candidateId) {
+      reviewId = await input.db.transaction(async (tx) => {
+        await setCandidateStatus(tx, input.candidateId!, 'needs_review');
+        const id = await createReview(tx);
+        if (!id) {
+          throw new Error('pending memory review creation returned empty id');
+        }
+        return id;
+      });
+    } else {
+      reviewId = await createReview();
+    }
+  } catch {
+    reviewId = '';
+  }
+  const action = reviewId ? 'needs_review' : 'blocked';
+  if (input.candidateId && !reviewId) {
+    await setCandidateStatus(input.db, input.candidateId, action);
+  }
+  await recordDreamDecision({
+    db: input.db,
+    runId: input.runId,
+    subject: input.subject,
+    action,
+    ...(input.itemId ? { itemId: input.itemId } : {}),
+    ...(input.candidateId ? { candidateId: input.candidateId } : {}),
+    rationale: reviewId
+      ? `${input.reviewRationale}: ${reviewId}.`
+      : input.blockRationale,
+    ...(input.evidenceIds ? { evidenceIds: input.evidenceIds } : {}),
+    applied: false,
+  });
+  return action;
+}
+async function blockCandidate(input: {
+  db: Db;
+  runId: string;
+  subject: NormalizedMemorySubject;
+  candidateId: string;
+  rationale: string;
+  evidenceIds: string[];
+  dryRun: boolean;
+  itemId?: string;
+}): Promise<void> {
+  if (!input.dryRun) {
+    await setCandidateStatus(input.db, input.candidateId, 'blocked');
+  }
+  await recordDreamDecision({ ...input, action: 'blocked', applied: false });
+}
 export async function runAppMemoryDreamPass(input: {
   db: Db;
   runId: string;
@@ -84,6 +198,25 @@ export async function runAppMemoryDreamPass(input: {
   dryRun: boolean;
   listItems: () => Promise<Array<{ row: MemoryItemRow }>>;
   save: (value: SaveAppMemoryInput) => Promise<AppMemoryItem>;
+  retire: (
+    input: {
+      id: string;
+      isAdminWrite?: boolean;
+    } & Partial<NormalizedMemorySubject>,
+  ) => Promise<{ deleted: boolean }>;
+  storeDreamEmbedding?: (input: {
+    item: AppMemoryItem;
+    contentHash: string;
+  }) => Promise<DreamEmbeddingResult>;
+  proposeDreaming?: (input: {
+    evidence: (typeof pgSchema.memoryEvidencePostgres.$inferSelect)[];
+    candidates: (typeof pgSchema.memoryCandidatesPostgres.$inferSelect)[];
+    activeItems: MemoryItemRow[];
+  }) => Promise<MemoryLifecycleProposal[]>;
+  proposeConsolidation?: (input: {
+    activeItems: MemoryItemRow[];
+  }) => Promise<MemoryLifecycleProposal[]>;
+  createPendingReview?: CreatePendingReview;
 }): Promise<Array<{ action: DreamDecisionAction }>> {
   const { db, runId, subject, phase, dryRun } = input;
   const decisions: Array<{ action: DreamDecisionAction }> = [];
@@ -96,73 +229,131 @@ export async function runAppMemoryDreamPass(input: {
         eq(pgSchema.memoryEvidencePostgres.agentId, subject.agentId),
         eq(pgSchema.memoryEvidencePostgres.subjectType, subject.subjectType),
         eq(pgSchema.memoryEvidencePostgres.subjectId, subject.subjectId),
+        sqlThreadScopeFilter(
+          pgSchema.memoryEvidencePostgres.threadId,
+          subject.threadId,
+        ),
       ),
     )
     .orderBy(desc(pgSchema.memoryEvidencePostgres.createdAt))
     .limit(25);
-
+  const unsafeEvidenceIds = new Set(
+    recentEvidence.filter(isUnsafeEvidence).map((evidence) => evidence.id),
+  );
+  const safeRecentEvidence = recentEvidence.filter(
+    (evidence) => !unsafeEvidenceIds.has(evidence.id),
+  );
   if (phase === 'light' || phase === 'all') {
-    for (const evidence of recentEvidence.slice(0, 10)) {
-      const key = `evidence:${hashText(evidence.text).slice(0, 16)}`;
-      const candidateId = `mca_${hashText(`${subject.appId}:${subject.agentId}:${key}`).slice(0, 32)}`;
-      await db
-        .insert(pgSchema.memoryCandidatesPostgres)
-        .values({
-          id: candidateId,
-          appId: subject.appId,
-          agentId: subject.agentId,
-          subjectType: subject.subjectType,
-          subjectId: subject.subjectId,
-          threadId: subject.threadId ?? null,
-          kind: 'fact',
-          key,
-          value: evidence.text.slice(0, 1000),
-          reason: 'Recent grounded evidence is available for memory review.',
-          evidenceIdsJson: JSON.stringify([evidence.id]),
-          confidence: 0.55,
-          status: 'staged',
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-        })
-        .onConflictDoNothing();
+    for (const evidence of safeRecentEvidence.slice(0, 10)) {
+      const parsed = parseStructuredEvidenceCandidate(evidence, subject);
+      if (!parsed.candidate) {
+        await recordDreamDecision({
+          db,
+          runId,
+          subject,
+          action: 'skip',
+          rationale: `Light dreaming skipped evidence: ${parsed.rejection}.`,
+          evidenceIds: [evidence.id],
+          applied: false,
+        });
+        decisions.push({ action: 'skip' });
+        continue;
+      }
+      const candidate = parsed.candidate;
+      const candidateId = `mca_${hashText(`${subject.appId}:${subject.agentId}:${subject.subjectType}:${subject.subjectId}:${subject.threadId ?? ''}:${candidate.kind}:${candidate.key}:${candidate.value}`).slice(0, 32)}`;
+      if (!dryRun) {
+        await db
+          .insert(pgSchema.memoryCandidatesPostgres)
+          .values({
+            id: candidateId,
+            appId: subject.appId,
+            agentId: subject.agentId,
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+            threadId: subject.threadId ?? null,
+            kind: candidate.kind,
+            key: candidate.key,
+            value: candidate.value,
+            reason: candidate.why,
+            metadataJson: JSON.stringify({
+              operation: candidate.operation,
+              ...(candidate.retireKey
+                ? { retire_key: candidate.retireKey }
+                : {}),
+            }),
+            evidenceIdsJson: JSON.stringify([evidence.id]),
+            confidence: candidate.confidence,
+            status: 'staged',
+            createdAt: nowIso(),
+            updatedAt: nowIso(),
+          })
+          .onConflictDoNothing();
+      }
       await recordDreamDecision({
         db,
         runId,
         subject,
         action: 'stage_candidate',
         candidateId,
-        rationale:
-          'Light dreaming staged recent evidence for promotion review.',
+        rationale: dryRun
+          ? 'Light dreaming would stage structured evidence that passed canonical kind, confidence, scope, and safety guardrails.'
+          : 'Light dreaming staged structured evidence that passed canonical kind, confidence, scope, and safety guardrails.',
         evidenceIds: [evidence.id],
-        applied: true,
+        applied: !dryRun,
       });
       decisions.push({ action: 'stage_candidate' });
     }
   }
-
-  const items = await input.listItems();
   if (phase === 'rem' || phase === 'all') {
+    const items = await input.listItems();
     for (const item of items) {
       const payload = parseJsonObject(item.row.valueJson);
       const value =
         typeof payload.value === 'string' ? payload.value.toLowerCase() : '';
       if (/\b(no longer|instead|actually|correction|wrong)\b/.test(value)) {
-        await recordDreamDecision({
+        const action = await routeMemoryProposalToReview({
           db,
           runId,
           subject,
-          action: 'needs_review',
+          dryRun,
+          createPendingReview: input.createPendingReview,
           itemId: item.row.id,
-          rationale:
-            'REM dreaming found correction language; human or admin review should decide whether to rewrite or retire related memory.',
-          applied: false,
+          evidenceIds: [],
+          proposal: {
+            action: 'needs_review',
+            itemId: item.row.id,
+            key: item.row.key,
+            value: extractMemoryValue(item.row),
+            reason:
+              'REM dreaming found correction language; human or admin review should decide whether to rewrite or retire related memory.',
+            confidence: item.row.confidence,
+            evidenceIds: [],
+          },
+          reviewRationale:
+            'REM dreaming routed correction language to memory review',
+          blockRationale:
+            'REM dreaming blocked correction-language review because memory review creation failed.',
         });
-        decisions.push({ action: 'needs_review' });
+        decisions.push({ action });
       }
     }
   }
-
   if (phase === 'deep' || phase === 'all') {
+    const activeItems = await input.listItems();
+    const activeByKey = new Map<
+      string,
+      { id: string; key: string; kind: string; value: string }
+    >();
+    for (const item of activeItems) {
+      if (!activeByKey.has(item.row.key)) {
+        activeByKey.set(item.row.key, {
+          id: item.row.id,
+          key: item.row.key,
+          kind: item.row.kind,
+          value: extractMemoryValue(item.row),
+        });
+      }
+    }
     const candidates = await db
       .select()
       .from(pgSchema.memoryCandidatesPostgres)
@@ -175,27 +366,252 @@ export async function runAppMemoryDreamPass(input: {
             subject.subjectType,
           ),
           eq(pgSchema.memoryCandidatesPostgres.subjectId, subject.subjectId),
+          sqlThreadScopeFilter(
+            pgSchema.memoryCandidatesPostgres.threadId,
+            subject.threadId,
+          ),
           eq(pgSchema.memoryCandidatesPostgres.status, 'staged'),
         ),
       )
       .orderBy(desc(pgSchema.memoryCandidatesPostgres.confidence))
       .limit(10);
+    const llmDreamingProposals =
+      (await input.proposeDreaming?.({
+        evidence: safeRecentEvidence,
+        candidates,
+        activeItems: activeItems.map((item) => item.row),
+      })) || [];
+    const llmConsolidationProposals =
+      (await input.proposeConsolidation?.({
+        activeItems: activeItems.map((item) => item.row),
+      })) || [];
+    for (const proposal of [
+      ...llmDreamingProposals,
+      ...llmConsolidationProposals,
+    ]) {
+      if (
+        proposal.action === 'retire' ||
+        proposal.action === 'rewrite' ||
+        proposal.action === 'merge' ||
+        proposal.action === 'needs_review'
+      ) {
+        const action = await routeMemoryProposalToReview({
+          db,
+          runId,
+          subject,
+          dryRun,
+          createPendingReview: input.createPendingReview,
+          proposal,
+          itemId: proposal.itemId || proposal.itemIds?.[0],
+          candidateId: proposal.candidateId,
+          evidenceIds: proposal.evidenceIds,
+          reviewRationale: 'LLM proposal requires memory review',
+          blockRationale:
+            'LLM proposal blocked because memory review creation failed.',
+        });
+        decisions.push({ action });
+      }
+    }
     for (const candidate of candidates) {
       const evidenceIds = parseJsonArray(candidate.evidenceIdsJson);
+      if (
+        evidenceIds.some((id) => unsafeEvidenceIds.has(id)) ||
+        (await candidateCitesUnsafeEvidence(db, evidenceIds))
+      ) {
+        await blockCandidate({
+          db,
+          runId,
+          subject,
+          candidateId: candidate.id,
+          rationale:
+            'Deep dreaming blocked candidate because it cites quarantined or unsafe Memory Source evidence.',
+          evidenceIds,
+          dryRun,
+        });
+        decisions.push({ action: 'blocked' });
+        continue;
+      }
+      const metadata = parseStagedCandidateMetadata(candidate);
+      const existing = activeByKey.get(candidate.key);
+      const reviewKind = candidateMemoryKind(candidate.kind);
+      if (metadata.operation === 'retire') {
+        const retireTarget = activeByKey.get(
+          metadata.retireKey || candidate.key,
+        );
+        if (!retireTarget) {
+          if (!dryRun) {
+            await setCandidateStatus(db, candidate.id, 'skipped');
+          }
+          await recordDreamDecision({
+            db,
+            runId,
+            subject,
+            action: 'skip',
+            candidateId: candidate.id,
+            rationale:
+              'Deep dreaming skipped retire candidate because no active target memory was found.',
+            evidenceIds,
+            applied: false,
+          });
+          decisions.push({ action: 'skip' });
+          continue;
+        }
+        if (dryRun) {
+          await recordDreamDecision({
+            db,
+            runId,
+            subject,
+            action: 'dry_run',
+            itemId: retireTarget.id,
+            candidateId: candidate.id,
+            rationale:
+              'Deep dreaming dry run would retire the targeted active memory item.',
+            evidenceIds,
+            applied: false,
+          });
+          decisions.push({ action: 'dry_run' });
+          continue;
+        }
+        const action = await routeMemoryProposalToReview({
+          db,
+          runId,
+          subject,
+          dryRun,
+          createPendingReview: input.createPendingReview,
+          candidateId: candidate.id,
+          itemId: retireTarget.id,
+          evidenceIds,
+          proposal: {
+            action: 'retire',
+            candidateId: candidate.id,
+            itemId: retireTarget.id,
+            ...(reviewKind ? { kind: reviewKind } : {}),
+            key: retireTarget.key,
+            reason:
+              candidate.reason ||
+              'Deep dreaming proposed retiring this active memory item.',
+            confidence: candidate.confidence,
+            evidenceIds,
+          },
+          reviewRationale:
+            'Deep dreaming routed retire candidate to memory review',
+          blockRationale:
+            'Deep dreaming blocked retire candidate because memory review creation failed.',
+        });
+        decisions.push({ action });
+        continue;
+      }
+      const validation = validatePromotableCandidate(candidate);
+      if (!validation.ok) {
+        if (!validation.needsReview) {
+          await blockCandidate({
+            db,
+            runId,
+            subject,
+            candidateId: candidate.id,
+            rationale: validation.rationale,
+            evidenceIds,
+            dryRun,
+          });
+          decisions.push({ action: 'blocked' });
+          continue;
+        }
+        const action = await routeMemoryProposalToReview({
+          db,
+          runId,
+          subject,
+          dryRun,
+          createPendingReview: input.createPendingReview,
+          candidateId: candidate.id,
+          evidenceIds,
+          proposal: {
+            action: 'promote',
+            candidateId: candidate.id,
+            ...(reviewKind ? { kind: reviewKind } : {}),
+            key: candidate.key,
+            value: candidate.value,
+            reason: candidate.reason || validation.rationale,
+            confidence: candidate.confidence,
+            evidenceIds,
+          },
+          reviewRationale: `${validation.rationale} Routed to memory review`,
+          blockRationale: validation.rationale,
+        });
+        decisions.push({ action });
+        continue;
+      }
+      if (existing && existing.value !== candidate.value) {
+        const action = await routeMemoryProposalToReview({
+          db,
+          runId,
+          subject,
+          dryRun,
+          createPendingReview: input.createPendingReview,
+          candidateId: candidate.id,
+          itemId: existing.id,
+          evidenceIds,
+          proposal: {
+            action: 'needs_review',
+            candidateId: candidate.id,
+            itemId: existing.id,
+            ...(reviewKind ? { kind: reviewKind } : {}),
+            key: existing.key,
+            value: candidate.value,
+            reason:
+              candidate.reason ||
+              'Deep dreaming proposed changing active memory with the same key.',
+            confidence: candidate.confidence,
+            evidenceIds,
+          },
+          reviewRationale:
+            'Deep dreaming routed candidate to memory review because it changes an active memory with the same key',
+          blockRationale:
+            'Deep dreaming blocked candidate because memory review creation failed.',
+        });
+        decisions.push({ action });
+        continue;
+      }
+      if (
+        existing &&
+        existing.kind === candidate.kind &&
+        existing.value === candidate.value
+      ) {
+        if (!dryRun) {
+          await setCandidateStatus(db, candidate.id, 'skipped');
+        }
+        await recordDreamDecision({
+          db,
+          runId,
+          subject,
+          action: 'skip',
+          itemId: existing.id,
+          candidateId: candidate.id,
+          rationale:
+            'Deep dreaming skipped candidate because active memory already matches the staged value.',
+          evidenceIds,
+          applied: false,
+        });
+        decisions.push({ action: 'skip' });
+        continue;
+      }
       if (dryRun) {
         await recordDreamDecision({
           db,
           runId,
           subject,
-          action: 'promote',
+          action: 'dry_run',
+          ...(existing ? { itemId: existing.id } : {}),
           candidateId: candidate.id,
-          rationale: 'Deep dreaming would promote this grounded candidate.',
+          rationale: existing
+            ? 'Deep dreaming dry run would update an active memory from this staged candidate.'
+            : 'Deep dreaming dry run would promote this staged candidate into active memory.',
           evidenceIds,
           applied: false,
         });
-        decisions.push({ action: 'promote' });
+        decisions.push({ action: 'dry_run' });
         continue;
       }
+      const promotedAt = nowIso();
       const saved = await input.save({
         appId: subject.appId,
         agentId: subject.agentId,
@@ -212,25 +628,67 @@ export async function runAppMemoryDreamPass(input: {
         confidence: Math.max(0.6, candidate.confidence),
         source: 'dreaming',
         evidenceIds,
+        dreamingPromotion: {
+          runId,
+          promotedAt,
+          candidateId: candidate.id,
+        },
         isAdminWrite: subject.subjectType === 'common',
       });
-      await db
-        .update(pgSchema.memoryCandidatesPostgres)
-        .set({ status: 'promoted', updatedAt: nowIso() })
-        .where(eq(pgSchema.memoryCandidatesPostgres.id, candidate.id));
+      await setCandidateStatus(
+        db,
+        candidate.id,
+        existing ? 'updated' : 'promoted',
+      );
+      const action: DreamDecisionAction = existing ? 'update' : 'promote';
       await recordDreamDecision({
         db,
         runId,
         subject,
-        action: 'promote',
+        action,
         itemId: saved.id,
         candidateId: candidate.id,
-        rationale:
-          'Deep dreaming promoted a grounded candidate into durable memory.',
+        rationale: existing
+          ? 'Deep dreaming updated an active memory item from a validated staged candidate.'
+          : validation.rationale,
         evidenceIds,
         applied: true,
       });
-      decisions.push({ action: 'promote' });
+      decisions.push({ action });
+      activeByKey.set(candidate.key, {
+        id: saved.id,
+        key: saved.key,
+        kind: saved.kind,
+        value: saved.value,
+      });
+      const contentHash = memoryContentHash({
+        appId: subject.appId,
+        agentId: subject.agentId,
+        subjectType: subject.subjectType,
+        subjectId: subject.subjectId,
+        key: saved.key,
+        value: saved.value,
+      });
+      const embeddingResult = await input.storeDreamEmbedding?.({
+        item: saved,
+        contentHash,
+      });
+      if (embeddingResult?.status === 'retryable') {
+        await recordDreamDecision({
+          db,
+          runId,
+          subject,
+          action: 'blocked',
+          itemId: saved.id,
+          candidateId: candidate.id,
+          rationale:
+            embeddingResult.reason ||
+            'Dream embedding persistence failed with retryable status.',
+          evidenceIds,
+          applied: false,
+        });
+        decisions.push({ action: 'blocked' });
+      }
     }
   }
   return decisions;

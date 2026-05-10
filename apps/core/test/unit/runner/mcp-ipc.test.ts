@@ -367,7 +367,50 @@ describe('runner MCP browser IPC signature verification', () => {
 
     await expect(requestPromise).resolves.toEqual({
       ok: false,
-      error: 'Timed out waiting for browser service response',
+      error:
+        'Browser IPC timeout after 30000ms waiting for browser service response',
+    });
+    expect(fs.existsSync(requestPath)).toBe(false);
+  });
+
+  it('uses caller-provided browser timeout for request expiry and stale cleanup', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-06T00:00:00.000Z'));
+    const tempRoot = makeTempRoot();
+    const { publicKey } = generateKeyPairSync('ed25519');
+    const responseVerifyKey = publicKey
+      .export({ format: 'pem', type: 'spki' })
+      .toString();
+
+    const { requestBrowserAction } = await loadIpcModule(
+      tempRoot,
+      responseVerifyKey,
+    );
+    const requestPromise = requestBrowserAction(
+      'browser_take_screenshot',
+      {},
+      { timeoutMs: 120_000 },
+    );
+    const requestDir = path.join(tempRoot, 'browser-requests');
+    const requestFiles = fs.readdirSync(requestDir);
+    expect(requestFiles).toHaveLength(1);
+    const requestPath = path.join(requestDir, requestFiles[0]!);
+    const request = JSON.parse(fs.readFileSync(requestPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+
+    expect(request.expiresAt).toBe('2026-05-06T00:02:00.000Z');
+
+    await vi.advanceTimersByTimeAsync(30_100);
+    expect(fs.existsSync(requestPath)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    await expect(requestPromise).resolves.toEqual({
+      ok: false,
+      error:
+        'Browser IPC timeout after 120000ms waiting for browser service response',
     });
     expect(fs.existsSync(requestPath)).toBe(false);
   });

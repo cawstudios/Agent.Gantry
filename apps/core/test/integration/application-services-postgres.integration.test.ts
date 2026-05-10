@@ -1,13 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { CreateAgentUseCase } from '@core/application/agents/create-agent-use-case.js';
-import { PublishAgentConfigVersionUseCase } from '@core/application/agents/publish-agent-config-version-use-case.js';
-import { ResolveEffectiveAgentConfigService } from '@core/application/agents/resolve-effective-agent-config-service.js';
-import { UpdateAgentConfigUseCase } from '@core/application/agents/update-agent-config-use-case.js';
-import { SaveMemoryUseCase } from '@core/application/memory/save-memory-use-case.js';
-import { RecordPermissionDecisionUseCase } from '@core/application/permissions/record-permission-decision-use-case.js';
-import { StartAgentRunUseCase } from '@core/application/runs/start-agent-run-use-case.js';
-import { CreateSandboxLeaseUseCase } from '@core/application/sandbox/create-sandbox-lease-use-case.js';
+import { AppMemoryService } from '@core/memory/app-memory-service.js';
 import {
   DEFAULT_APP_ID,
   DEFAULT_LLM_PROFILE_ID,
@@ -28,9 +21,6 @@ const now = '2026-04-28T00:00:00.000Z';
 
 maybeDescribe('application services with Postgres repositories', () => {
   let runtime: PostgresIntegrationRuntime;
-  let idCounter = 0;
-  const ids = { generate: () => `integration-id:${++idCounter}` };
-  const clock = { now: () => now };
 
   beforeAll(async () => {
     runtime = await createPostgresIntegrationRuntime({
@@ -43,20 +33,19 @@ maybeDescribe('application services with Postgres repositories', () => {
   });
 
   it('persists agent config, run events, memory, permission decisions, and sandbox leases across service boundaries', async () => {
-    const created = await new CreateAgentUseCase({
-      agents: runtime.repositories.agents,
-      ids,
-      clock,
-    }).execute({
+    const agentId = 'agent:integration:1' as AgentId;
+    await runtime.repositories.agents.saveAgent({
+      id: agentId,
       appId,
       name: 'Integration Agent',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
     });
-    const agentId = created.agent.id as AgentId;
 
-    const published = await new PublishAgentConfigVersionUseCase({
-      configs: runtime.repositories.agentConfigs,
-      ids,
-    }).execute({
+    const configVersionId = 'agent-config:integration:1' as never;
+    await runtime.repositories.agentConfigs.saveConfigVersion({
+      id: configVersionId,
       appId,
       agentId,
       version: 1,
@@ -69,39 +58,32 @@ maybeDescribe('application services with Postgres repositories', () => {
       createdAt: now,
     });
 
-    await new UpdateAgentConfigUseCase({
-      agents: runtime.repositories.agents,
-      clock,
-    }).execute({
-      agentId,
-      currentConfigVersionId: published.version.id,
+    await runtime.repositories.agents.saveAgent({
+      id: agentId,
+      appId,
+      name: 'Integration Agent',
+      status: 'active',
+      currentConfigVersionId: configVersionId,
+      createdAt: now,
+      updatedAt: now,
     });
     await expect(
-      new ResolveEffectiveAgentConfigService({
-        agents: runtime.repositories.agents,
-        configs: runtime.repositories.agentConfigs,
-      }).resolve({ agentId }),
+      runtime.repositories.agentConfigs.getConfigVersion(configVersionId),
     ).resolves.toMatchObject({
-      config: {
-        id: published.version.id,
-        permissionPolicyIds: ['permission-policy:review'],
-        skillIds: ['skill:approved'],
-      },
+      id: configVersionId,
+      permissionPolicyIds: ['permission-policy:review'],
+      skillIds: ['skill:approved'],
     });
 
-    await new RecordPermissionDecisionUseCase(
-      runtime.repositories.permissions,
-    ).execute({
-      decision: {
-        id: 'permission-decision:integration:allow' as never,
-        appId,
-        effect: 'allow',
-        reason: 'Approved in integration test',
-        actorContext: { channel: 'slack' },
-        actionPreview: 'Run tool',
-        approverRef: 'user:admin',
-        createdAt: now,
-      },
+    await runtime.repositories.permissions.saveDecision({
+      id: 'permission-decision:integration:allow' as never,
+      appId,
+      effect: 'allow',
+      reason: 'Approved in integration test',
+      actorContext: { channel: 'slack' },
+      actionPreview: 'Run tool',
+      approverRef: 'user:admin',
+      createdAt: now,
     });
     await expect(
       runtime.repositories.permissions.getDecision(
@@ -112,28 +94,23 @@ maybeDescribe('application services with Postgres repositories', () => {
       approverRef: 'user:admin',
     });
 
-    await new SaveMemoryUseCase(runtime.repositories.memory).execute({
-      item: {
-        id: 'memory:integration:agent' as never,
-        appId,
-        agentId,
-        subject: { kind: 'agent', appId, agentId },
-        kind: 'decision',
-        key: 'integration-depth',
-        value: 'Deep integration tests cover service boundaries.',
-        source: 'test',
-        confidence: 0.99,
-        isPinned: true,
-        isDeleted: false,
-        createdAt: now,
-        updatedAt: now,
-      },
+    const memoryService = new AppMemoryService(runtime.service.db);
+    await memoryService.save({
+      appId,
+      agentId,
+      groupId: 'integration-service-boundary',
+      kind: 'decision',
+      key: 'integration-depth',
+      value: 'Deep integration tests cover service boundaries.',
+      source: 'test',
+      confidence: 0.99,
     });
     await expect(
-      runtime.repositories.memory.listMemoryItems({
-        kind: 'agent',
+      memoryService.list({
         appId,
         agentId,
+        groupId: 'integration-service-boundary',
+        includeCommon: false,
       }),
     ).resolves.toEqual([
       expect.objectContaining({
@@ -146,7 +123,7 @@ maybeDescribe('application services with Postgres repositories', () => {
       id: 'agent-run:integration:1',
       appId,
       agentId,
-      configVersionId: published.version.id,
+      configVersionId,
       llmProfileId: DEFAULT_LLM_PROFILE_ID,
       permissionDecisionIds: ['permission-decision:integration:allow'],
       cause: 'manual',
@@ -154,9 +131,7 @@ maybeDescribe('application services with Postgres repositories', () => {
       createdAt: now,
       startedAt: now,
     } as never;
-    await new StartAgentRunUseCase(runtime.repositories.agentRuns).execute({
-      run,
-    });
+    await runtime.repositories.agentRuns.saveAgentRun(run);
     await runtime.repositories.runtimeEvents.appendRuntimeEvent({
       appId,
       runId: 'agent-run:integration:1' as never,
@@ -190,24 +165,15 @@ maybeDescribe('application services with Postgres repositories', () => {
       createdAt: now,
       updatedAt: now,
     });
-    const sandboxProvider = {
-      acquireLease: async () => ({
-        id: 'sandbox-lease:integration' as never,
-        appId,
-        profileId: 'sandbox-profile:integration' as never,
-        runId: 'agent-run:integration:1' as never,
-        permissionDecisionId: 'permission-decision:integration:allow' as never,
-        status: 'active',
-        grantedAt: now,
-        expiresAt: '2026-04-28T00:30:00.000Z',
-      }),
-    };
-    await new CreateSandboxLeaseUseCase({
-      provider: sandboxProvider as never,
-      sandboxes: runtime.repositories.sandboxes,
-    }).execute({
-      profile: { id: 'sandbox-profile:integration' } as never,
-      run,
+    await runtime.repositories.sandboxes.saveSandboxLease({
+      id: 'sandbox-lease:integration' as never,
+      appId,
+      profileId: 'sandbox-profile:integration' as never,
+      runId: 'agent-run:integration:1' as never,
+      permissionDecisionId: 'permission-decision:integration:allow' as never,
+      status: 'active',
+      grantedAt: now,
+      expiresAt: '2026-04-28T00:30:00.000Z',
     });
     await expect(
       runtime.repositories.sandboxes.getSandboxLease(
@@ -286,7 +252,7 @@ maybeDescribe('application services with Postgres repositories', () => {
     });
   });
 
-  it('keeps memory writes isolated by agent and updates existing memory ids idempotently', async () => {
+  it('keeps app memory writes isolated by agent and updates existing memory keys idempotently', async () => {
     const createAgent = new CreateAgentUseCase({
       agents: runtime.repositories.agents,
       ids,
@@ -301,96 +267,70 @@ maybeDescribe('application services with Postgres repositories', () => {
       name: 'Secondary Memory Agent',
     });
 
-    const saveMemory = new SaveMemoryUseCase(runtime.repositories.memory);
-    await saveMemory.execute({
-      item: {
-        id: 'memory:integration:isolation:primary' as never,
-        appId,
-        agentId: primary.agent.id as AgentId,
-        subject: {
-          kind: 'agent',
-          appId,
-          agentId: primary.agent.id as AgentId,
-        },
-        kind: 'fact',
-        key: 'shared-key',
-        value: 'primary value v1',
-        source: 'integration-test',
-        confidence: 0.7,
-        isPinned: false,
-        isDeleted: false,
-        createdAt: now,
-        updatedAt: now,
-      },
+    const memoryService = new AppMemoryService(runtime.service.db);
+    const primaryFirst = await memoryService.save({
+      appId,
+      agentId: primary.agent.id as AgentId,
+      groupId: 'shared-memory-group',
+      kind: 'fact',
+      key: 'shared-key',
+      value: 'primary value v1',
+      source: 'integration-test',
+      confidence: 0.7,
     });
-    await saveMemory.execute({
-      item: {
-        id: 'memory:integration:isolation:secondary' as never,
-        appId,
-        agentId: secondary.agent.id as AgentId,
-        subject: {
-          kind: 'agent',
-          appId,
-          agentId: secondary.agent.id as AgentId,
-        },
-        kind: 'fact',
-        key: 'shared-key',
-        value: 'secondary value v1',
-        source: 'integration-test',
-        confidence: 0.8,
-        isPinned: false,
-        isDeleted: false,
-        createdAt: now,
-        updatedAt: now,
-      },
+    const secondaryFirst = await memoryService.save({
+      appId,
+      agentId: secondary.agent.id as AgentId,
+      groupId: 'shared-memory-group',
+      kind: 'fact',
+      key: 'shared-key',
+      value: 'secondary value v1',
+      source: 'integration-test',
+      confidence: 0.8,
     });
-    await saveMemory.execute({
-      item: {
-        id: 'memory:integration:isolation:primary' as never,
-        appId,
-        agentId: primary.agent.id as AgentId,
-        subject: {
-          kind: 'agent',
-          appId,
-          agentId: primary.agent.id as AgentId,
-        },
-        kind: 'fact',
-        key: 'shared-key',
-        value: 'primary value v2',
-        source: 'integration-test',
-        confidence: 0.9,
-        isPinned: true,
-        isDeleted: false,
-        createdAt: now,
-        updatedAt: '2026-04-28T00:05:00.000Z',
-      },
+    const primaryUpdated = await memoryService.save({
+      appId,
+      agentId: primary.agent.id as AgentId,
+      groupId: 'shared-memory-group',
+      kind: 'fact',
+      key: 'shared-key',
+      value: 'primary value v2',
+      source: 'integration-test',
+      confidence: 0.9,
     });
+    expect(primaryUpdated.id).toBe(primaryFirst.id);
+    expect(primaryUpdated.version).toBe(2);
+    expect(secondaryFirst.version).toBe(1);
 
     await expect(
-      runtime.repositories.memory.listMemoryItems({
-        kind: 'agent',
+      memoryService.list({
         appId,
         agentId: primary.agent.id as AgentId,
+        groupId: 'shared-memory-group',
+        includeCommon: false,
       }),
     ).resolves.toEqual([
       expect.objectContaining({
-        id: 'memory:integration:isolation:primary',
+        id: primaryFirst.id,
         key: 'shared-key',
         value: 'primary value v2',
-        isPinned: true,
+        confidence: 0.9,
+        version: 2,
       }),
     ]);
     await expect(
-      runtime.repositories.memory.listMemoryItems({
-        kind: 'agent',
+      memoryService.list({
         appId,
         agentId: secondary.agent.id as AgentId,
+        groupId: 'shared-memory-group',
+        includeCommon: false,
       }),
     ).resolves.toEqual([
       expect.objectContaining({
-        id: 'memory:integration:isolation:secondary',
+        id: secondaryFirst.id,
         key: 'shared-key',
         value: 'secondary value v1',
+        version: 1,
       }),
     ]);
   });

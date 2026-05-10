@@ -146,6 +146,29 @@ describe('autonomous tool rule matcher', () => {
     ).toMatchObject({ allowed: false });
   });
 
+  it('allows canonical Browser only for known projected browser tools', () => {
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['Browser'],
+        toolName: 'mcp__myclaw__browser_click',
+        toolInput: {},
+      }),
+    ).toMatchObject({ allowed: true, matchedRule: 'Browser' });
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['Browser'],
+        toolName: 'mcp__myclaw__browser_fake',
+        toolInput: {},
+      }),
+    ).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining(
+        'Unsupported autonomous tool rule Browser',
+      ),
+    });
+  });
+
   it('validates scoped wildcards only inside registered scoped tool rules', () => {
     expect(validateAutonomousToolRule('Bash(dedup-append-lead.py *)').ok).toBe(
       true,

@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -17,6 +19,9 @@ jobs:
         run: python3 .codex/scripts/check_factory_scaffold.py
       - name: Check AGENTS hygiene
         run: python3 .codex/scripts/check_agents_hygiene.py
+      - name: Check LOCAL-35 phase refactor source line delta
+        if: ${{ github.event_name == 'pull_request' && (contains(join(github.event.pull_request.labels.*.name, ','), 'PR: Refactor') || contains(join(github.event.pull_request.labels.*.name, ','), 'refactor')) }}
+        run: python3 .codex/scripts/check_refactor_line_delta.py --check-diff --baseline-file docs/architecture/refactor-baseline.md
       - name: Compile factory scripts
         run: python3 -m compileall .codex/scripts
       - name: Unit test gate validation logic

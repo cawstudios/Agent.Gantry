@@ -3,7 +3,10 @@ import {
   MYCLAW_HOME,
   getCredentialBrokerRuntimeConfig,
 } from '../../config/index.js';
-import { mirrorAgentToolRulesToRuntimeSettings } from '../../config/settings/runtime-settings.js';
+import {
+  createAgentToolRuleSettingsMirror,
+  type AgentToolRuleSettingsRepositories,
+} from '../../config/settings/agent-tool-rule-settings-mirror.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
@@ -12,7 +15,7 @@ import { logger } from '../../infrastructure/logging/logger.js';
 import type { NewMessage } from '../../domain/types.js';
 import type { HostnameLookup } from '../../domain/network/public-address-policy.js';
 import { writeGroupsSnapshot } from '../../runtime/agent-spawn.js';
-import { startIpcWatcher } from '../../runtime/ipc.js';
+import { startIpcWatcher, type IpcDeps } from '../../runtime/ipc.js';
 import {
   recoverPendingMessages,
   startMessagePollingLoop,
@@ -21,6 +24,7 @@ import {
   requestSchedulerSync,
   startSchedulerLoop,
 } from '../../jobs/scheduler.js';
+import { createHash, randomUUID } from 'node:crypto';
 import { makeThreadQueueKey } from '../../runtime/thread-queue-key.js';
 import type {
   RuntimeAgentSessionRepository,
@@ -30,20 +34,39 @@ import type {
   RuntimeMessageRepository,
   RuntimeRouterStateRepository,
 } from '../../domain/repositories/ops-repo.js';
-import type { ToolCatalogRepository } from '../../domain/ports/repositories.js';
+import type {
+  OutboundDeliveryRepository,
+  ToolCatalogRepository,
+} from '../../domain/ports/repositories.js';
 import type { SessionMemoryCollector } from '../../domain/ports/session-memory-collector.js';
 import { ChannelWiring } from './channel-wiring.js';
-import { RuntimeApp } from './runtime-app.js';
-import { collectDurableMemoryAtSessionBoundary } from '../../memory/app-memory-service.js';
-
+import { RuntimeApp, collectRuntimeSessionMemory } from './runtime-app.js';
+import { OutboundDeliveryService } from '../../application/outbound-delivery/outbound-delivery-service.js';
+import {
+  getPartialMessageDeliveryMetadata,
+  isPartialMessageDeliveryError,
+} from '../../domain/messages/partial-delivery.js';
+import { isAmbiguousDurableDeliveryError } from '../../domain/messages/durable-delivery.js';
+import { startOutboundDeliveryRecoveryLoop } from '../../jobs/outbound-delivery-recovery.js';
+import type { OutboundDeliveryProfile } from '../../domain/outbound-delivery/planner.js';
+import {
+  LIVE_SEND_PROFILE_ID,
+  RETRY_TAIL_PROFILE_ID,
+  canonicalThreadIdFor,
+  normalizeDestinationHintAgainstCanonical,
+  resolveDurableOutboundTarget,
+  sanitizeRetryTailForCanonicalDestination,
+  sanitizeRetryTailProviderPayloadDestinationMetadata,
+} from './runtime-services-destination-hints.js';
+import { splitLiveSendProfileText } from './runtime-services-live-send-segmentation.js';
+import { createDurableOutboundAttempt } from './runtime-services-durable-outbound-attempt.js';
 type RuntimeBootstrapRepository = RuntimeChatMetadataRepository &
   RuntimeMessageRepository &
   RuntimeJobRepository &
   RuntimeRouterStateRepository &
   RuntimeAgentSessionRepository &
   RuntimeConversationRouteRepository;
-
-interface RuntimeServicesDeps {
+interface Deps {
   startSchedulerLoop: typeof startSchedulerLoop;
   startIpcWatcher: typeof startIpcWatcher;
   writeGroupsSnapshot: typeof writeGroupsSnapshot;
@@ -54,18 +77,21 @@ interface RuntimeServicesDeps {
   mcpHostnameLookup?: HostnameLookup;
   collectSessionMemory: SessionMemoryCollector;
   getToolRepository: () => ToolCatalogRepository;
+  settingsRepositories?: AgentToolRuleSettingsRepositories;
+  getOutboundDeliveryRepository?: () => OutboundDeliveryRepository | undefined;
+  startOutboundDeliveryRecoveryLoop: typeof startOutboundDeliveryRecoveryLoop;
+  callBrowserTool: IpcDeps['callBrowserTool'];
+  closeBrowserToolBackends: IpcDeps['closeBrowserToolBackends'];
   exit: (code: number) => never;
 }
 type RuntimeServicesDefaults = Omit<
-  RuntimeServicesDeps,
+  Deps,
   'opsRepository' | 'getToolRepository'
 >;
-
-export interface RuntimeServicesOptions {
+export type RuntimeServicesOptions = {
   app: RuntimeApp;
   channelWiring: ChannelWiring;
-}
-
+};
 function makeDefaultDeps(): RuntimeServicesDefaults {
   return {
     startSchedulerLoop,
@@ -74,15 +100,15 @@ function makeDefaultDeps(): RuntimeServicesDefaults {
     recoverPendingMessages,
     startMessagePollingLoop,
     logger,
-    collectSessionMemory: collectDurableMemoryAtSessionBoundary,
+    collectSessionMemory: collectRuntimeSessionMemory,
+    startOutboundDeliveryRecoveryLoop,
+    callBrowserTool: undefined,
+    closeBrowserToolBackends: undefined,
     exit: (code: number) => process.exit(code),
   };
 }
 
-function createGroupSnapshotSync(
-  app: RuntimeApp,
-  deps: RuntimeServicesDeps,
-): () => void {
+function createGroupSnapshotSync(app: RuntimeApp, deps: Deps): () => void {
   let syncInFlight: Promise<void> | undefined;
   let syncDirty = false;
 
@@ -125,9 +151,9 @@ function createGroupSnapshotSync(
 export async function startRuntimeServices(
   options: RuntimeServicesOptions,
   deps: Partial<RuntimeServicesDefaults> &
-    Pick<RuntimeServicesDeps, 'opsRepository' | 'getToolRepository'>,
+    Pick<Deps, 'opsRepository' | 'getToolRepository'>,
 ): Promise<void> {
-  const resolved: RuntimeServicesDeps = {
+  const resolved: Deps = {
     ...makeDefaultDeps(),
     ...deps,
   };
@@ -135,9 +161,7 @@ export async function startRuntimeServices(
   const { app, channelWiring } = options;
   const syncGroupSnapshots = createGroupSnapshotSync(app, resolved);
 
-  const onSchedulerChanged = (jobId?: string) => {
-    requestSchedulerSync(jobId);
-  };
+  const onSchedulerChanged = (jobId?: string) => requestSchedulerSync(jobId);
 
   await resolved.startSchedulerLoop({
     conversationRoutes: () => app.getConversationRoutes(),
@@ -152,15 +176,13 @@ export async function startRuntimeServices(
       ),
     sendMessage: (jid, rawText, options) =>
       channelWiring.sendMessage(jid, rawText, {
+        durability: 'required',
         ...(options?.threadId
           ? { messageOptions: { threadId: options.threadId } }
           : {}),
       }),
-    sendStreamingChunk: (jid, rawText, chunkOptions) =>
-      channelWiring.sendStreamingChunk(jid, rawText, chunkOptions),
-    resetStreaming: (jid) => {
-      channelWiring.resetStreaming(jid);
-    },
+    sendStreamingChunk: channelWiring.sendStreamingChunk,
+    resetStreaming: channelWiring.resetStreaming,
     onSchedulerChanged,
     opsRepository: resolved.opsRepository,
     collectSessionMemory: resolved.collectSessionMemory,
@@ -170,6 +192,7 @@ export async function startRuntimeServices(
   resolved.startIpcWatcher({
     sendMessage: (jid, text, options) =>
       channelWiring.sendMessage(jid, text, {
+        durability: 'required',
         throwOnMissing: true,
         ...(options?.threadId
           ? { messageOptions: { threadId: options.threadId } }
@@ -177,23 +200,23 @@ export async function startRuntimeServices(
       }),
     conversationRoutes: () => app.getConversationRoutes(),
     registerGroup: app.registerGroup,
-    syncGroups: async (force: boolean) => {
-      await channelWiring.syncGroups(force);
-    },
+    syncGroups: (force: boolean) => channelWiring.syncGroups(force),
     getAvailableGroups: app.getAvailableGroups,
     writeGroupsSnapshot: (folder, availableGroups, registeredJids) =>
       resolved.writeGroupsSnapshot(folder, availableGroups, registeredJids),
     onSchedulerChanged,
     opsRepository: resolved.opsRepository,
     getToolRepository: resolved.getToolRepository,
-    mirrorAgentToolRulesToSettings: (sourceAgentFolder, rules) =>
-      mirrorAgentToolRulesToRuntimeSettings({
-        runtimeHome: MYCLAW_HOME,
-        agentFolder: sourceAgentFolder,
-        rules,
-      }),
+    mirrorAgentToolRulesToSettings: createAgentToolRuleSettingsMirror({
+      opsRepository: resolved.opsRepository,
+      repositories: resolved.settingsRepositories,
+      reloadRuntimeState: () => app.loadState(),
+    }),
+    reloadRuntimeState: () => app.loadState(),
     getCredentialBroker: app.getCredentialBroker,
     getCredentialBrokerProfile: () => getCredentialBrokerRuntimeConfig().mode,
+    callBrowserTool: resolved.callBrowserTool,
+    closeBrowserToolBackends: resolved.closeBrowserToolBackends,
     requestPermissionApproval: channelWiring.requestPermissionApproval,
     requestUserAnswer: channelWiring.requestUserAnswer,
     mcpHostnameLookup: resolved.mcpHostnameLookup,
@@ -243,11 +266,10 @@ export async function startRuntimeServices(
         encodeGroupMessageCursor(toGroupMessageCursor(message)),
       );
       await app.saveState();
-      await channelWiring.sendMessage(
-        chatJid,
-        'Compacting current session.',
-        threadId ? { messageOptions: { threadId } } : undefined,
-      );
+      await channelWiring.sendMessage(chatJid, 'Compacting current session.', {
+        durability: 'required',
+        ...(threadId ? { messageOptions: { threadId } } : {}),
+      });
       return true;
     }
 
@@ -257,6 +279,9 @@ export async function startRuntimeServices(
           agentFolder: group.folder,
           conversationJid: chatJid,
           threadId,
+          conversationKind: group.conversationKind,
+          memoryUserId: message.sender?.trim() || undefined,
+          hydrateMemory: false,
         });
         if (turnContext?.agentSessionId) {
           await resolved.collectSessionMemory({
@@ -272,7 +297,9 @@ export async function startRuntimeServices(
         );
       }
       try {
-        await app.clearSessionForChatJid(chatJid, threadId);
+        await app.clearSessionForChatJid(chatJid, threadId, {
+          memoryUserId: message.sender?.trim() || undefined,
+        });
       } catch (err) {
         resolved.logger.warn(
           { err, chatJid, threadId },
@@ -281,7 +308,10 @@ export async function startRuntimeServices(
         await channelWiring.sendMessage(
           chatJid,
           'Could not start a fresh session because session state could not be persisted. The current run was left unchanged.',
-          threadId ? { messageOptions: { threadId } } : undefined,
+          {
+            durability: 'required',
+            ...(threadId ? { messageOptions: { threadId } } : {}),
+          },
         );
         return true;
       }
@@ -303,7 +333,10 @@ export async function startRuntimeServices(
       command.kind === 'stop'
         ? 'Stopping current run.'
         : 'Started a fresh session.',
-      threadId ? { messageOptions: { threadId } } : undefined,
+      {
+        durability: 'required',
+        ...(threadId ? { messageOptions: { threadId } } : {}),
+      },
     );
 
     return true;
@@ -333,6 +366,300 @@ export async function startRuntimeServices(
   ).catch((err) =>
     resolved.logger.warn({ err }, 'Pending message recovery failed'),
   );
+
+  const outboundDeliveryRepository = resolved.getOutboundDeliveryRepository?.();
+  if (outboundDeliveryRepository) {
+    const liveSendProfile: OutboundDeliveryProfile = {
+      profileId: LIVE_SEND_PROFILE_ID,
+      plan: (input) => {
+        const segments = splitLiveSendProfileText(input.text);
+        return {
+          parts: segments.map((segment) => ({
+            canonicalText: segment,
+          })),
+          canonicalFinalText: input.text,
+        };
+      },
+    };
+    const retryTailProfile: OutboundDeliveryProfile = {
+      profileId: RETRY_TAIL_PROFILE_ID,
+      plan: (input) => {
+        const providerPayload =
+          input.metadata &&
+          typeof input.metadata === 'object' &&
+          'providerPayload' in input.metadata
+            ? (input.metadata.providerPayload as unknown)
+            : undefined;
+        return {
+          parts: [
+            {
+              canonicalText: input.text,
+              providerPayload,
+            },
+          ],
+          canonicalFinalText: input.text,
+        };
+      },
+    };
+    const outboundDeliveryService = new OutboundDeliveryService({
+      repository: outboundDeliveryRepository,
+      profiles: {
+        resolve: (profileId) =>
+          profileId === RETRY_TAIL_PROFILE_ID
+            ? retryTailProfile
+            : profileId === LIVE_SEND_PROFILE_ID
+              ? liveSendProfile
+              : undefined,
+      },
+      now: () => new Date().toISOString(),
+      createId: () => randomUUID(),
+      hashSha256Hex: (value: string) =>
+        createHash('sha256').update(value, 'utf8').digest('hex'),
+    });
+    channelWiring.setDurableOutboundAttemptFactory(async (input) => {
+      const target = resolveDurableOutboundTarget({
+        defaultAppId: input.appId,
+        jid: input.chatJid,
+      });
+      const started = await outboundDeliveryService.enqueue({
+        appId: target.appId as never,
+        conversationId: target.conversationId as never,
+        threadId: canonicalThreadIdFor({
+          jid: input.chatJid,
+          threadId: input.threadId,
+        }) as never,
+        profileId: LIVE_SEND_PROFILE_ID,
+        idempotencyKey: `live-send:${input.sourceMessageId}`,
+        text: input.canonicalText,
+        metadata: {
+          sourceMessageId: input.sourceMessageId,
+          sourceProvider: input.provider,
+          destinationJid: input.chatJid,
+          destinationThreadId: input.threadId,
+        },
+        initialClaim: {
+          claimToken: `claim:live-send:${input.sourceMessageId}`,
+          claimExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      });
+      const claimedItems = started.claimedItems;
+      if (!started.created || !claimedItems || claimedItems.length === 0) {
+        throw new Error(
+          `Durable outbound immediate send claim was not created for ${input.sourceMessageId}.`,
+        );
+      }
+      return createDurableOutboundAttempt({
+        outboundDeliveryService,
+        deliveryId: started.delivery.id,
+        claimedItems,
+        sourceMessageId: input.sourceMessageId,
+      });
+    });
+    channelWiring.setRetryTailRecoveryEnqueue(async (input) => {
+      const target = resolveDurableOutboundTarget({
+        defaultAppId: input.appId,
+        jid: input.chatJid,
+      });
+      const sanitizedRetryTail = sanitizeRetryTailForCanonicalDestination(
+        input.retryTail,
+        input.chatJid,
+      );
+      if (!sanitizedRetryTail) return;
+      const retryTailFingerprint = createHash('sha256')
+        .update(
+          JSON.stringify({
+            canonicalText: sanitizedRetryTail.canonicalText,
+            providerPayload: sanitizedRetryTail.providerPayload ?? null,
+          }),
+          'utf8',
+        )
+        .digest('hex')
+        .slice(0, 24);
+      await outboundDeliveryService.enqueue({
+        appId: target.appId as never,
+        conversationId: target.conversationId as never,
+        threadId: canonicalThreadIdFor({
+          jid: input.chatJid,
+          threadId: input.threadId,
+        }) as never,
+        profileId: RETRY_TAIL_PROFILE_ID,
+        idempotencyKey: `retry-tail:${input.sourceMessageId}:${retryTailFingerprint}`,
+        text: sanitizedRetryTail.canonicalText,
+        metadata: {
+          providerPayload: sanitizedRetryTail.providerPayload,
+          sourceMessageId: input.sourceMessageId,
+          sourceProvider: input.provider,
+          destinationJid: input.chatJid,
+          destinationThreadId: input.threadId,
+        },
+      });
+    });
+    resolved.startOutboundDeliveryRecoveryLoop({
+      service: outboundDeliveryService,
+      claimerId: `runtime-recovery:${process.pid}`,
+      batchLimit: 25,
+      maxBatches: 5,
+      intervalMs: 5_000,
+      leaseMs: 20_000,
+      dispatch: async (claimed) => {
+        const destination = await outboundDeliveryService.resolveDestination({
+          appId: claimed.delivery.appId,
+          conversationId: claimed.delivery.conversationId,
+          threadId: claimed.delivery.threadId,
+        });
+        if (!destination) {
+          return {
+            status: 'failed',
+            error:
+              'Outbound delivery canonical destination/thread could not be resolved from app-owned conversation metadata.',
+          } as const;
+        }
+        const destinationJid = destination.conversationJid;
+        const destinationThreadId = destination.threadId;
+        const destinationDescriptor =
+          channelWiring.describeDestinationJid(destinationJid);
+        if (!destinationDescriptor.providerId) {
+          return {
+            status: 'failed',
+            error:
+              'Outbound delivery canonical destination resolves to an unknown provider JID prefix.',
+          } as const;
+        }
+        const resolvedProviderIdForComparison =
+          destination.providerId === 'control-http' &&
+          destinationJid.startsWith('app:')
+            ? 'app'
+            : String(destination.providerId);
+        if (
+          destinationDescriptor.providerId !== resolvedProviderIdForComparison
+        ) {
+          return {
+            status: 'failed',
+            error:
+              'Outbound delivery canonical destination provider does not match resolved conversation provider connection.',
+          } as const;
+        }
+        const isCrossAppClaim =
+          claimed.delivery.appId !== destinationDescriptor.runtimeAppId;
+        if (isCrossAppClaim && destinationDescriptor.internal !== true) {
+          return {
+            status: 'partially_delivered',
+            error: `Outbound delivery recovery quarantined cross-app external destination ${destinationJid} for app ${String(claimed.delivery.appId)} (providerConnectionId ${String(destination.providerConnectionId)}); runtime adapter credentials are scoped to app ${String(destinationDescriptor.runtimeAppId)}.`,
+          } as const;
+        }
+        const payload =
+          claimed.item.providerPayload &&
+          typeof claimed.item.providerPayload === 'object'
+            ? sanitizeRetryTailProviderPayloadDestinationMetadata(
+                claimed.item.providerPayload,
+                destinationJid,
+              )
+            : undefined;
+        const rawDestinationHint =
+          payload?.conversationJid ??
+          payload?.chatJid ??
+          payload?.jid ??
+          payload?.conversationId ??
+          (destinationJid.startsWith('sl:') ? payload?.channelId : undefined) ??
+          (destinationJid.startsWith('tg:') ? payload?.chatId : undefined);
+        const { providerJid: destinationHint, malformedCanonicalHint } =
+          normalizeDestinationHintAgainstCanonical(
+            rawDestinationHint,
+            destinationJid,
+          );
+        if (malformedCanonicalHint) {
+          return {
+            status: 'failed',
+            error:
+              'Outbound delivery provider destination hint has malformed canonical conversationId.',
+          } as const;
+        }
+        const threadHint = payload?.threadId;
+        if (
+          typeof destinationHint === 'string' &&
+          destinationHint.trim() &&
+          destinationHint.trim() !== destinationJid
+        ) {
+          return {
+            status: 'failed',
+            error:
+              'Outbound delivery provider destination hint conflicts with canonical conversationId.',
+          } as const;
+        }
+        if (
+          typeof threadHint === 'string' &&
+          threadHint.trim() &&
+          threadHint.trim() !== (destinationThreadId ?? '')
+        ) {
+          return {
+            status: 'failed',
+            error:
+              'Outbound delivery provider thread hint conflicts with canonical threadId.',
+          } as const;
+        }
+        if (!channelWiring.hasChannel(destinationJid)) {
+          return {
+            status: 'failed',
+            error:
+              'Outbound delivery channel for canonical destination is unavailable.',
+          } as const;
+        }
+        const recoveryPermit = channelWiring.createRecoveryDispatchPermit({
+          deliveryId: claimed.delivery.id,
+          itemId: claimed.item.id,
+          destinationJid,
+          canonicalText: claimed.item.canonicalText,
+          ...(destinationThreadId ? { threadId: destinationThreadId } : {}),
+        });
+        try {
+          const deliveryResult = await channelWiring.sendProviderMessage(
+            destinationJid,
+            claimed.item.canonicalText,
+            {
+              permit: recoveryPermit,
+              throwOnMissing: true,
+              ...(destinationThreadId
+                ? { messageOptions: { threadId: destinationThreadId } }
+                : {}),
+            },
+          );
+          return {
+            status: 'sent',
+            providerMessageId: deliveryResult?.externalMessageId,
+            providerPayload: deliveryResult,
+          } as const;
+        } catch (err) {
+          if (isPartialMessageDeliveryError(err)) {
+            const partialMetadata = getPartialMessageDeliveryMetadata(err);
+            const retryTail = sanitizeRetryTailForCanonicalDestination(
+              partialMetadata.retryTail,
+              destinationJid,
+            );
+            return {
+              status: 'partially_delivered',
+              error: err.message,
+              deliveredParts: partialMetadata.deliveredParts,
+              totalParts: partialMetadata.totalParts,
+              retryTail,
+            } as const;
+          }
+          if (isAmbiguousDurableDeliveryError(err)) {
+            return {
+              status: 'partially_delivered',
+              error: err.message,
+            } as const;
+          }
+          return {
+            status: 'failed',
+            error: err instanceof Error ? err.message : String(err),
+          } as const;
+        }
+      },
+      receiptIdempotencyKeyForItem: (claimed) =>
+        `item:${claimed.item.id}:receipt`,
+      warn: (meta, message) => resolved.logger.warn(meta, message),
+    });
+  }
 
   resolved.logger.info(`MyClaw running (default trigger: ${DEFAULT_TRIGGER})`);
 

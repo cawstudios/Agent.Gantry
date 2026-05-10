@@ -5,6 +5,10 @@ import { registerMessagingTools } from './tools/messaging.js';
 import { registerSchedulerTools } from './tools/scheduler.js';
 import { registerServiceTools } from './tools/service.js';
 import { parseEnabledMyClawMcpToolNames } from '../myclaw-mcp-tool-surface.js';
+import {
+  isAdminMcpToolName,
+  type AdminMcpToolName,
+} from '../../shared/admin-mcp-tools.js';
 
 type McpToolRegistrar = {
   tool: (name: string, ...args: unknown[]) => unknown;
@@ -13,15 +17,34 @@ type McpToolRegistrar = {
 function filteredToolRegistrar(
   server: McpServer,
   enabledTools: ReadonlySet<string>,
+  registeredHandlers: Set<string>,
 ): McpServer {
   const target = server as unknown as McpToolRegistrar;
   const registrar: McpToolRegistrar = {
     tool: (name, ...args) => {
       if (!enabledTools.has(name)) return undefined;
-      return target.tool(name, ...args);
+      const hasHandler = args.some((arg) => typeof arg === 'function');
+      const registration = target.tool(name, ...args);
+      if (hasHandler) registeredHandlers.add(name);
+      return registration;
     },
   };
   return registrar as unknown as McpServer;
+}
+
+export function assertRegisteredMcpToolHandlers(input: {
+  enabledTools: ReadonlySet<string>;
+  registeredHandlers: ReadonlySet<string>;
+}): void {
+  const missingHandlers = [...input.enabledTools]
+    .filter((toolName) => !input.registeredHandlers.has(toolName))
+    .sort();
+
+  if (missingHandlers.length === 0) return;
+
+  throw new Error(
+    `Missing MCP tool handlers for enabled tools: ${missingHandlers.join(', ')}`,
+  );
 }
 
 export function createMyClawMcpServer(): McpServer {
@@ -29,10 +52,16 @@ export function createMyClawMcpServer(): McpServer {
     name: 'myclaw',
     version: '1.0.0',
   });
-  const enabledTools = parseEnabledMyClawMcpToolNames(
+  const enabledTools = effectiveEnabledMcpToolNames(
     process.env.MYCLAW_MCP_TOOL_NAMES_JSON,
+    process.env.MYCLAW_ADMIN_MCP_TOOLS_JSON,
   );
-  const filteredServer = filteredToolRegistrar(server, enabledTools);
+  const registeredHandlers = new Set<string>();
+  const filteredServer = filteredToolRegistrar(
+    server,
+    enabledTools,
+    registeredHandlers,
+  );
 
   registerMessagingTools(filteredServer);
   registerSchedulerTools(filteredServer);
@@ -40,5 +69,41 @@ export function createMyClawMcpServer(): McpServer {
   registerBrowserTools(filteredServer);
   registerServiceTools(filteredServer);
 
+  assertRegisteredMcpToolHandlers({ enabledTools, registeredHandlers });
+
   return server;
+}
+
+function effectiveEnabledMcpToolNames(
+  rawToolNames: string | undefined,
+  rawAdminToolNames: string | undefined,
+): Set<string> {
+  const enabledTools = new Set(
+    [...parseEnabledMyClawMcpToolNames(rawToolNames)].filter(
+      (toolName) => !isAdminMcpToolName(toolName),
+    ),
+  );
+
+  for (const toolName of parseEnabledAdminMcpToolNames(rawAdminToolNames)) {
+    enabledTools.add(toolName);
+  }
+
+  return enabledTools;
+}
+
+function parseEnabledAdminMcpToolNames(
+  raw: string | undefined,
+): Set<AdminMcpToolName> {
+  if (!raw?.trim()) return new Set();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(
+      parsed
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter((item): item is AdminMcpToolName => isAdminMcpToolName(item)),
+    );
+  } catch {
+    return new Set();
+  }
 }

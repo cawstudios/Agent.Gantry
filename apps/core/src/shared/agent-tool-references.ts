@@ -7,6 +7,74 @@ import {
 
 const MCP_WILDCARD_RE = /^mcp__[A-Za-z0-9_-]+__\*$/;
 const SCOPED_RULE_RE = /^([^()\s]+)\(([^()]*)\)$/;
+const RAW_BROWSER_BACKEND_MCP_TOOL_PREFIXES = [
+  'mcp__agent_browser__',
+  'mcp__playwright__',
+  'mcp__puppeteer__',
+] as const;
+const MYCLAW_BROWSER_TOOL_PREFIX = 'mcp__myclaw__browser';
+const BROWSER_CANONICAL_TOOL_NAME = 'Browser';
+export const PROJECTED_BROWSER_MCP_TOOL_NAMES = [
+  'mcp__myclaw__browser_status',
+  'mcp__myclaw__browser_launch',
+  'mcp__myclaw__browser_close',
+  'mcp__myclaw__browser_click',
+  'mcp__myclaw__browser_console_messages',
+  'mcp__myclaw__browser_drag',
+  'mcp__myclaw__browser_drop',
+  'mcp__myclaw__browser_evaluate',
+  'mcp__myclaw__browser_file_upload',
+  'mcp__myclaw__browser_fill_form',
+  'mcp__myclaw__browser_handle_dialog',
+  'mcp__myclaw__browser_hover',
+  'mcp__myclaw__browser_navigate',
+  'mcp__myclaw__browser_navigate_back',
+  'mcp__myclaw__browser_network_requests',
+  'mcp__myclaw__browser_press_key',
+  'mcp__myclaw__browser_resize',
+  'mcp__myclaw__browser_select_option',
+  'mcp__myclaw__browser_snapshot',
+  'mcp__myclaw__browser_take_screenshot',
+  'mcp__myclaw__browser_tabs',
+  'mcp__myclaw__browser_type',
+  'mcp__myclaw__browser_wait_for',
+] as const;
+
+const PROJECTED_BROWSER_MCP_TOOL_NAME_SET = new Set<string>(
+  PROJECTED_BROWSER_MCP_TOOL_NAMES,
+);
+
+export const BROWSER_ACTION_MCP_RULE_REJECTION_REASON =
+  'Raw browser backend MCP tools are host-private and cannot be persisted as agent tool rules; use the canonical Browser tool capability instead.';
+export const BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON =
+  'Concrete MyClaw browser tools are runtime projections, not durable capabilities; persist the canonical Browser tool capability instead.';
+
+export function isBrowserActionMcpToolRule(value: string): boolean {
+  const rule = value.trim();
+  const scoped = SCOPED_RULE_RE.exec(rule);
+  const toolName = scoped ? scoped[1]?.trim() : rule;
+  return RAW_BROWSER_BACKEND_MCP_TOOL_PREFIXES.some((prefix) =>
+    toolName?.startsWith(prefix),
+  );
+}
+
+export function isProjectedBrowserMcpToolRule(value: string): boolean {
+  const rule = value.trim();
+  const scoped = SCOPED_RULE_RE.exec(rule);
+  const toolName = scoped ? scoped[1]?.trim() : rule;
+  return (
+    toolName === MYCLAW_BROWSER_TOOL_PREFIX ||
+    Boolean(toolName?.startsWith(`${MYCLAW_BROWSER_TOOL_PREFIX}_`))
+  );
+}
+
+export function isKnownProjectedBrowserMcpToolName(value: string): boolean {
+  return PROJECTED_BROWSER_MCP_TOOL_NAME_SET.has(value.trim());
+}
+
+export function isCanonicalBrowserCapabilityRule(value: string): boolean {
+  return value.trim() === BROWSER_CANONICAL_TOOL_NAME;
+}
 
 export function persistentPermissionToolId(allowedRule: string): string {
   const digest = createHash('sha256').update(allowedRule).digest('hex');
@@ -29,6 +97,13 @@ export function validateReadableAgentToolRule(
 ): { ok: true } | { ok: false; reason: string } {
   const rule = value.trim();
   if (!rule) return { ok: false, reason: 'Tool rule cannot be empty.' };
+  if (isBrowserAliasOrScopedRule(rule)) {
+    return {
+      ok: false,
+      reason:
+        'Browser grants must use the exact canonical Browser capability with no scope, alias, or internal ID.',
+    };
+  }
   if (rule.startsWith('tool:')) {
     return {
       ok: false,
@@ -38,6 +113,18 @@ export function validateReadableAgentToolRule(
   }
   if (rule === '*') {
     return { ok: false, reason: 'Global wildcard tool rule is not allowed.' };
+  }
+  if (isBrowserActionMcpToolRule(rule)) {
+    return {
+      ok: false,
+      reason: BROWSER_ACTION_MCP_RULE_REJECTION_REASON,
+    };
+  }
+  if (isProjectedBrowserMcpToolRule(rule)) {
+    return {
+      ok: false,
+      reason: BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON,
+    };
   }
   if (isMyClawMcpWildcardRule(rule)) {
     return {
@@ -74,4 +161,15 @@ export function validateReadableAgentToolRule(
     };
   }
   return { ok: true };
+}
+
+function isBrowserAliasOrScopedRule(rule: string): boolean {
+  if (rule === BROWSER_CANONICAL_TOOL_NAME) return false;
+  const scoped = SCOPED_RULE_RE.exec(rule);
+  const toolName = scoped ? scoped[1]?.trim() : rule;
+  const normalized = toolName?.toLowerCase();
+  return (
+    normalized === BROWSER_CANONICAL_TOOL_NAME.toLowerCase() ||
+    normalized === `tool:${BROWSER_CANONICAL_TOOL_NAME.toLowerCase()}`
+  );
 }

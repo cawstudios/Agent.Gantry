@@ -6,7 +6,6 @@ export interface FakeAgentInvocation {
   sessionId?: string;
   memoryContextBlock?: string;
   model?: string;
-  script?: string;
   input: any;
 }
 
@@ -46,7 +45,6 @@ export function createFakeAgentRunner(options: FakeAgentRunnerOptions = {}) {
       sessionId: input.sessionId,
       memoryContextBlock: input.memoryContextBlock,
       model: input.model,
-      script: input.script,
       input,
     });
 

@@ -124,18 +124,6 @@ const schedulerUpdateJobHandler: TaskHandler = async (context) => {
     reject('scheduler_update_job requires jobId.', 'invalid_request');
     return;
   }
-  if (data.script !== undefined) {
-    logger.warn(
-      { sourceAgentFolder, jobId },
-      'Rejected scheduler_update_job script mutation from IPC',
-    );
-    reject(
-      'script mutation is not allowed for scheduler_update_job.',
-      'forbidden',
-    );
-    return;
-  }
-
   try {
     const patch: Parameters<JobManagementService['updateJob']>[0]['patch'] = {};
     if (data.name !== undefined) patch.name = data.name;
@@ -165,7 +153,6 @@ const schedulerUpdateJobHandler: TaskHandler = async (context) => {
     }
     if (data.scheduleValue !== undefined)
       patch.scheduleValue = data.scheduleValue;
-    if (data.groupScope !== undefined) patch.groupScope = data.groupScope;
     if (data.timeoutMs !== undefined) patch.timeoutMs = data.timeoutMs;
     if (data.maxRetries !== undefined) patch.maxRetries = data.maxRetries;
     if (data.retryBackoffMs !== undefined) {
@@ -184,18 +171,11 @@ const schedulerUpdateJobHandler: TaskHandler = async (context) => {
         data.serialize,
       ) as JobExecutionMode;
     }
-    if (data.threadId !== undefined) {
-      patch.threadId =
-        typeof data.threadId === 'string' && data.threadId.trim()
-          ? data.threadId.trim()
-          : null;
+    if (data.executionContext !== undefined) {
+      patch.executionContext = data.executionContext;
     }
-    if (Array.isArray(data.linkedSessions) || Array.isArray(data.deliverTo)) {
-      patch.linkedSessions = (
-        Array.isArray(data.deliverTo)
-          ? data.deliverTo
-          : data.linkedSessions || []
-      ).map((item) => String(item));
+    if (Array.isArray(data.notificationRoutes)) {
+      patch.notificationRoutes = data.notificationRoutes;
     }
     if (Array.isArray(data.allowedTools)) {
       patch.allowedTools = data.allowedTools.map((item) => String(item));

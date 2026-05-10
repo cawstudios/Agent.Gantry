@@ -2,6 +2,7 @@ import { createHash, createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { createIpcResponseSigningKeyPair } from '../infrastructure/ipc/response-signing.js';
 import { MYCLAW_IPC_AUTH_SECRET } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
+import { normalizeMemoryIpcActions } from '../shared/memory-ipc-actions.js';
 
 const IPC_AUTH_SECRET =
   MYCLAW_IPC_AUTH_SECRET ||
@@ -33,6 +34,7 @@ const responseSigningKeys = new Map<
     privateKeyPem: string;
   }
 >();
+const browserIpcAuthorizations = new Map<string, number>();
 
 export function responseSigningKeyId(publicKeyPem: string): string {
   return createHash('sha256').update(publicKeyPem).digest('base64url');
@@ -57,19 +59,71 @@ export function computeBrowserIpcAuthToken(
     .digest('hex');
 }
 
+function browserIpcAuthorizationKey(input: {
+  workspaceKey: string;
+  chatJid: string;
+  threadId?: string | null;
+}): string {
+  return `${input.workspaceKey}\0${normalizedThreadId(input.threadId)}\0${input.chatJid}`;
+}
+
+export function registerBrowserIpcAuthorization(input: {
+  workspaceKey: string;
+  chatJid: string;
+  threadId?: string | null;
+}): void {
+  const key = browserIpcAuthorizationKey(input);
+  browserIpcAuthorizations.set(
+    key,
+    (browserIpcAuthorizations.get(key) ?? 0) + 1,
+  );
+}
+
+export function revokeBrowserIpcAuthorization(input: {
+  workspaceKey: string;
+  chatJid: string;
+  threadId?: string | null;
+}): void {
+  const key = browserIpcAuthorizationKey(input);
+  const count = browserIpcAuthorizations.get(key) ?? 0;
+  if (count <= 1) {
+    browserIpcAuthorizations.delete(key);
+    return;
+  }
+  browserIpcAuthorizations.set(key, count - 1);
+}
+
+export function isBrowserIpcAuthorized(input: {
+  workspaceKey: string;
+  chatJid: string;
+  threadId?: string | null;
+}): boolean {
+  return (
+    (browserIpcAuthorizations.get(browserIpcAuthorizationKey(input)) ?? 0) > 0
+  );
+}
+
 export function computeMemoryIpcAuthToken(
   workspaceKey: string,
   input: {
+    chatJid?: string | null;
     userId?: string | null;
     defaultScope?: 'user' | 'group' | null;
     threadId?: string | null;
+    allowedActions?: readonly string[] | null;
+    reviewerIsControlApprover?: boolean | null;
   },
 ): string {
+  const normalizedChatJid = input.chatJid?.trim() || '';
   const normalizedUserId = input.userId?.trim() || '';
   const normalizedDefaultScope = input.defaultScope || 'group';
+  const normalizedAllowedActions = normalizeMemoryIpcActions(
+    input.allowedActions ?? undefined,
+  ).join(',');
+  const reviewerScope = input.reviewerIsControlApprover ? 'approver' : 'user';
   return createHmac('sha256', IPC_AUTH_SECRET)
     .update(
-      `memory\0${authScope(workspaceKey, input.threadId)}\0user\0${normalizedUserId}\0scope\0${normalizedDefaultScope}`,
+      `memory\0${authScope(workspaceKey, input.threadId)}\0chat\0${normalizedChatJid}\0user\0${normalizedUserId}\0scope\0${normalizedDefaultScope}\0actions\0${normalizedAllowedActions}\0reviewer\0${reviewerScope}`,
     )
     .digest('hex');
 }
