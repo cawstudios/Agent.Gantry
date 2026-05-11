@@ -570,6 +570,39 @@ describe('ipc-browser-handler', () => {
     });
   });
 
+  it('fails browser_resize when the backend reports an error result', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    const callBrowserTool = vi.fn(async () => ({
+      content: [{ type: 'text', text: 'Cannot resize viewport.' }],
+      isError: true,
+    }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-resize-error',
+        action: 'browser_resize',
+        payload: { width: 1280, height: 720 },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+      },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('Cannot resize viewport.');
+  });
+
   it('passes the remaining browser IPC budget to CDP activation and backend dispatch', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
@@ -837,7 +870,7 @@ describe('ipc-browser-handler', () => {
     });
   });
 
-  it('leaves headed launch viewport ownership to the action backend', async () => {
+  it('sets headed launch viewport through the action backend', async () => {
     vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
       profile: 'c-main-abc123abc123',
       profileName: 'c-main-abc123abc123',
@@ -864,7 +897,12 @@ describe('ipc-browser-handler', () => {
 
     expect(response.ok).toBe(true);
     expect(ensureBrowserTarget).not.toHaveBeenCalled();
-    expect(callBrowserTool).not.toHaveBeenCalled();
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'browser_resize',
+        arguments: { width: 1280, height: 900 },
+      }),
+    );
   });
 
   it('fails closed before launch when the signed deadline is already exhausted', async () => {

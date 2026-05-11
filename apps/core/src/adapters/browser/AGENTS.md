@@ -25,9 +25,10 @@
   immediately before backend dispatch with CDP `Target.activateTarget` plus
   page-level `Page.bringToFront`; target setup done earlier in the request is
   not enough for reliable headed Chrome interaction.
-- Headed Chrome launch must include an explicit nonzero window size. A 0x0
-  inner viewport makes Playwright report every target outside the viewport and
-  causes click, hover, and screenshot failures downstream.
+- Browser launch must set a nonzero initial page viewport through the
+  Playwright MCP backend. A 0x0 inner viewport makes Playwright report every
+  target outside the viewport and causes click, hover, and screenshot failures
+  downstream.
 - `browser_resize` viewport ownership belongs to the Playwright MCP backend.
   Do not split viewport state between sidecar CDP `Browser.setWindowBounds`
   calls and backend `page.setViewportSize`; explicit resize should be

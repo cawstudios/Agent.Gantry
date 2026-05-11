@@ -57,6 +57,7 @@ type BrowserStatusPayload = Record<string, unknown> & {
 const BROKER_HEALTH_CACHE_MS = 5_000;
 const MIN_BROWSER_BACKEND_TIMEOUT_MS = 1_000;
 const MAX_BROWSER_RESIZE_DIMENSION = 8_192;
+const DEFAULT_BROWSER_VIEWPORT = { width: 1280, height: 900 } as const;
 const brokerHealthCache = new Map<
   string,
   { expiresAt: number; value: CredentialBrokerHealth | undefined }
@@ -141,6 +142,33 @@ function browserResizeDimensions(payload: Record<string, unknown>): {
   };
 }
 
+function browserToolResultIsError(result: unknown): boolean {
+  return (
+    !!result &&
+    typeof result === 'object' &&
+    !Array.isArray(result) &&
+    (result as { isError?: unknown }).isError === true
+  );
+}
+
+function browserToolResultText(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((item) => {
+      if (!item || typeof item !== 'object') return undefined;
+      const row = item as Record<string, unknown>;
+      return row.type === 'text' && typeof row.text === 'string'
+        ? row.text
+        : undefined;
+    })
+    .filter((item): item is string => !!item)
+    .join('\n')
+    .trim();
+  return text || undefined;
+}
+
 function createBrowserIpcDeadline(
   timeoutMs: number | undefined,
   deadlineAtMs: number | undefined,
@@ -197,7 +225,7 @@ async function callBrowserResizeBackend(input: {
     );
   }
   const backendTimeoutMs = browserBackendTimeoutMs(input.deadline);
-  await input.context.callBrowserTool({
+  const result = await input.context.callBrowserTool({
     toolName: 'browser_resize',
     arguments: { width: input.width, height: input.height },
     session: input.session,
@@ -209,6 +237,11 @@ async function callBrowserResizeBackend(input: {
     ),
     timeoutMs: backendTimeoutMs,
   });
+  if (browserToolResultIsError(result)) {
+    throw new Error(
+      browserToolResultText(result) || 'Browser viewport resize failed.',
+    );
+  }
 }
 
 async function inspectToolCapabilityBrokerHealth(
@@ -339,6 +372,20 @@ async function handleBrowserToolAction(
         }),
         deadlineAtMs: deadline.deadlineAtMs,
       });
+      if (
+        context.callBrowserTool &&
+        status.running &&
+        status.cdpReady &&
+        status.port
+      ) {
+        await callBrowserResizeBackend({
+          context,
+          session: status,
+          width: DEFAULT_BROWSER_VIEWPORT.width,
+          height: DEFAULT_BROWSER_VIEWPORT.height,
+          deadline,
+        });
+      }
       return {
         ok: true,
         data: await attachToolCapabilityBrokerHealth(
