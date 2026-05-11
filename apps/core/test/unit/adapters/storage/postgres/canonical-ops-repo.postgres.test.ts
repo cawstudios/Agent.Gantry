@@ -204,6 +204,9 @@ describe('PostgresRuntimeRepositoryBundle', () => {
       conversationJid: 'sl:C-A',
       conversationKind: 'channel',
       memoryUserId: 'sl:U-Z',
+      expectedAgentSessionId:
+        'agent-session:main::conversation:sl%3AC-A::thread:111.222',
+      expectedAgentSessionResetAt: null,
     });
 
     expect(new Set(seenScopes).size).toBe(6);
@@ -227,6 +230,9 @@ describe('PostgresRuntimeRepositoryBundle', () => {
         threadId: '111.222',
         conversationKind: 'channel',
         memoryUserId: 'sl:U-Z',
+        expectedAgentSessionId:
+          'agent-session:main::conversation:sl%3AC-A::thread:111.222',
+        expectedAgentSessionResetAt: null,
       }),
     );
   });

@@ -20,6 +20,7 @@ import {
   buildJobToolAccessView,
   type JobToolAccessView,
 } from '../../shared/tool-access-view.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 export interface JobVisibilityMetadata {
   executionContext: JobExecutionContextInput;
@@ -67,7 +68,7 @@ export async function buildJobVisibilityMetadata(input: {
     agentId,
     toolRepository: input.toolRepository,
   });
-  const nowMs = input.nowMs ?? Date.now();
+  const nowMs = input.nowMs ?? currentTimeMs();
   const staleness = schedulerJobStaleness(input.job, nowMs);
   const runs =
     typeof input.ops.listJobRuns === 'function'
@@ -111,7 +112,7 @@ export async function buildJobListVisibilityMetadata(input: {
   appId?: string;
   nowMs?: number;
 }): Promise<Map<string, JobVisibilityMetadata>> {
-  const nowMs = input.nowMs ?? Date.now();
+  const nowMs = input.nowMs ?? currentTimeMs();
   const inheritedToolsByTarget = new Map<string, Promise<string[]>>();
   const loadInheritedTools = (appId: string, agentId: string) => {
     const key = `${appId}\0${agentId}`;

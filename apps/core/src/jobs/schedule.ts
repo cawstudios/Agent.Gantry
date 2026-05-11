@@ -1,7 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 
 import { TIMEZONE } from '../config/index.js';
-import { parseIso } from '../infrastructure/time/datetime.js';
+import { parseIso } from '../shared/time/datetime.js';
 
 interface ScheduleValidationInput {
   schedule_type: string;

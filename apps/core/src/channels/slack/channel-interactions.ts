@@ -15,6 +15,7 @@ import {
   SLACK_NATIVE_APPEND_MAX_LENGTH,
   splitSlackTextByCodeUnits,
 } from './text-limits.js';
+import { nowIso } from '../../shared/time/datetime.js';
 const SLACK_RETRY_DELAY_FALLBACK_MS = 1000;
 const SLACK_RETRY_DELAY_MAX_MS = 5000;
 function clampSlackRetryDelayMs(delayMs: number): number {
@@ -79,7 +80,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
     const chatName = await this.resolveChannelName(event.channel);
     await this.opts.onChatMetadata(
       jid,
-      new Date().toISOString(),
+      nowIso(),
       chatName,
       'slack',
       this.isLikelyGroupConversation(event.channel),

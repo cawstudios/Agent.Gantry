@@ -3,6 +3,7 @@ import path from 'path';
 
 import { DATA_DIR } from '../config/index.js';
 import { normalizeThreadQueueId } from './thread-queue-key.js';
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
 const THREAD_INPUT_PREFIX = 'thread-';
 
@@ -38,7 +39,7 @@ export function writeContinuationInput(
 ): void {
   const inputDir = getContinuationInputDir(groupFolder, threadId);
   fs.mkdirSync(inputDir, { recursive: true });
-  const filename = `${Date.now()}-${String(sequence).padStart(12, '0')}.json`;
+  const filename = `${currentTimeMs()}-${String(sequence).padStart(12, '0')}.json`;
   const filepath = path.join(inputDir, filename);
   const tempPath = `${filepath}.tmp`;
   fs.writeFileSync(

@@ -108,6 +108,91 @@ describe('collectDurableMemoryFromRepositories', () => {
     );
   });
 
+  it('records extraction outcome metadata on zero-fact boundary digests', async () => {
+    const { repositories, digests, evidence } = makeRepositories();
+
+    const result = await collectDurableMemoryFromRepositories({
+      agentSessionId: 'agent-session:1',
+      trigger: 'session-end',
+      repositories,
+      defaultScope: 'group',
+      extractFacts: () => ({
+        facts: [],
+        status: 'auth_unavailable',
+        zeroFactReason: 'auth_unavailable',
+      }),
+    });
+
+    expect(result).toEqual({ saved: 0 });
+    expect(evidence).toHaveLength(0);
+    expect(digests).toHaveLength(1);
+    expect(digests[0]).toMatchObject({
+      metadata: {
+        boundaryCapture: {
+          status: 'digest_captured',
+          trigger: 'session-end',
+          turnCount: 1,
+          plannedEvidenceCount: 0,
+        },
+        extraction: {
+          status: 'auth_unavailable',
+          factCount: 0,
+          zeroFactReason: 'auth_unavailable',
+        },
+      },
+    });
+  });
+
+  it('records array-only zero-fact extractors as qualified empty outcomes', async () => {
+    const { repositories, digests } = makeRepositories();
+
+    await collectDurableMemoryFromRepositories({
+      agentSessionId: 'agent-session:1',
+      trigger: 'session-end',
+      repositories,
+      defaultScope: 'group',
+      extractFacts: () => [],
+    });
+
+    expect(digests[0]).toMatchObject({
+      metadata: {
+        extraction: {
+          status: 'empty_qualified',
+          factCount: 0,
+          zeroFactReason: 'no_qualifying_facts',
+        },
+      },
+    });
+  });
+
+  it('preserves explicit outcome-unavailable provider reports', async () => {
+    const { repositories, digests, evidence } = makeRepositories();
+
+    const result = await collectDurableMemoryFromRepositories({
+      agentSessionId: 'agent-session:1',
+      trigger: 'session-end',
+      repositories,
+      defaultScope: 'group',
+      extractFacts: () => ({
+        facts: [],
+        status: 'outcome_unavailable',
+        zeroFactReason: 'outcome_unavailable',
+      }),
+    });
+
+    expect(result).toEqual({ saved: 0 });
+    expect(evidence).toHaveLength(0);
+    expect(digests[0]).toMatchObject({
+      metadata: {
+        extraction: {
+          status: 'outcome_unavailable',
+          factCount: 0,
+          zeroFactReason: 'outcome_unavailable',
+        },
+      },
+    });
+  });
+
   it('persists automatic channel boundary evidence with group-scope candidate metadata', async () => {
     const { repositories, evidence } = makeRepositories();
 

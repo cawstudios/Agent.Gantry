@@ -1,7 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { BrowserIpcAction, MemoryIpcAction } from '@myclaw/contracts';
-import { nowMs, sleep } from '../../infrastructure/time/datetime.js';
+import {
+  nowMs,
+  nowMs as currentTimeMs,
+  sleep,
+} from '../../shared/time/datetime.js';
 import {
   formatMemoryTimeoutError,
   getMemoryActionTimeoutMs,
@@ -114,7 +118,7 @@ export async function requestMemoryAction(
       allowedActions: memoryIpcAllowedActions,
       reviewerIsControlApprover: memoryReviewerIsControlApprover,
     },
-    expiresAt: new Date(Date.now() + timeoutMs).toISOString(),
+    expiresAt: new Date(currentTimeMs() + timeoutMs).toISOString(),
   };
   const requestEnvelope = createSignedIpcRequestEnvelope(
     MEMORY_IPC_AUTH_TOKEN,
@@ -210,7 +214,7 @@ export async function requestBrowserAction(
       ...(threadId ? { threadId } : {}),
       ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
     },
-    expiresAt: new Date(Date.now() + timeoutMs).toISOString(),
+    expiresAt: new Date(currentTimeMs() + timeoutMs).toISOString(),
   };
   const requestEnvelope = createSignedIpcRequestEnvelope(
     BROWSER_IPC_AUTH_TOKEN,

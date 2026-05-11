@@ -155,7 +155,8 @@ Current user controls:
 
 - `myclaw status` for runtime state
 - `myclaw doctor` for health checks
-- `/new` to reset session state while preserving memory
+- `/new` to reset session state immediately while preserving memory; the
+  replaced session's continuation digest is finalized asynchronously
 - `/compact` to ask the Claude Agent SDK to compact active context and collect
   continuation digests plus staged extraction evidence at the compact boundary
 - default memory MCP tools available to agents: `memory_search`,

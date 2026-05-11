@@ -15,6 +15,7 @@ import {
   resolveCanonicalAppSessionForOrigin,
 } from '../application/jobs/job-management-helpers.js';
 import { normalizeOptional } from '../application/jobs/job-management-access.js';
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
 const SCHEDULER_WAIT_MIN_TIMEOUT_MS = 1_000;
 const SCHEDULER_WAIT_MAX_TIMEOUT_MS = 300_000;
@@ -255,21 +256,21 @@ const schedulerWaitForEventsHandler: TaskHandler = async (context) => {
   );
   const filters = schedulerEventFilters(data);
   const timeoutMs = normalizeSchedulerWaitTimeoutMs(data.timeoutMs);
-  const deadline = Date.now() + timeoutMs;
+  const deadline = currentTimeMs() + timeoutMs;
   try {
     while (true) {
       const result = await makeJobService(context).listJobEvents({
         access: schedulerAccessFromContext(context),
         ...filters,
       });
-      if (result.events.length > 0 || Date.now() >= deadline) {
+      if (result.events.length > 0 || currentTimeMs() >= deadline) {
         acceptData(
           `Listed ${result.events.length} scheduler event(s).`,
           result,
         );
         return;
       }
-      const remainingMs = Math.max(0, deadline - Date.now());
+      const remainingMs = Math.max(0, deadline - currentTimeMs());
       await delay(Math.min(SCHEDULER_WAIT_POLL_MS, remainingMs));
     }
   } catch (err) {

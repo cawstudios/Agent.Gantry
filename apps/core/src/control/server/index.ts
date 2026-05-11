@@ -49,6 +49,7 @@ import {
   logWebhookFlushFailure,
 } from './webhook-delivery.js';
 import { isPrivateAddress } from './webhook-target.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 export interface ControlServerHandle {
   close: () => Promise<void>;
@@ -196,7 +197,7 @@ export function startControlServer(input: {
     ingressMaintenanceInFlight = true;
     void getRuntimeControlRepository()
       .sweepExpiredExternalIngressState({
-        now: new Date().toISOString(),
+        now: nowIso(),
       })
       .catch((error) => {
         logger.warn(

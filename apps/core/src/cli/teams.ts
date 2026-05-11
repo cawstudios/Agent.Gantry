@@ -29,6 +29,7 @@ import {
   normalizeDefaultAgentName,
 } from './main-agent.js';
 import { renderDefaultCapabilityRules } from '../shared/capability-guidance.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 type TeamsChannelChoice =
   | { type: 'selected'; channel: TeamsDiscoveredChannel }
@@ -121,7 +122,7 @@ export async function registerTeamsMainGroup(options: {
       name: groupName,
       folder,
       trigger: existingGroup?.trigger || defaultTriggerForAgentName(groupName),
-      added_at: existingGroup?.added_at || new Date().toISOString(),
+      added_at: existingGroup?.added_at || nowIso(),
       requiresTrigger: false,
       agentConfig: existingGroup?.agentConfig,
     };

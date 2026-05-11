@@ -73,14 +73,14 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 
 ### Technology Stack
 
-| Component          | Technology                                                        | Purpose                                                        |
-| ------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------- |
-| Channel System     | Provider registry (`apps/core/src/channels/provider-registry.ts`) | Channels are looked up by provider id and JID prefix           |
-| Message Storage    | Postgres with Drizzle                                             | Store messages, jobs, events, memory, and runtime state        |
-| Runtime Execution  | Host process execution                                            | Agent execution with runtime-home scoped paths                 |
-| Agent              | @anthropic-ai/claude-agent-sdk                                    | Run Claude with tools and MCP servers                          |
+| Component          | Technology                                                        | Purpose                                                                          |
+| ------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Channel System     | Provider registry (`apps/core/src/channels/provider-registry.ts`) | Channels are looked up by provider id and JID prefix                             |
+| Message Storage    | Postgres with Drizzle                                             | Store messages, jobs, events, memory, and runtime state                          |
+| Runtime Execution  | Host process execution                                            | Agent execution with runtime-home scoped paths                                   |
+| Agent              | @anthropic-ai/claude-agent-sdk                                    | Run Claude with tools and MCP servers                                            |
 | Browser Automation | MyClaw Browser capability + Chromium                              | Web interaction and screenshots through projected `mcp__myclaw__browser_*` tools |
-| Runtime            | Node.js 25+                                                       | Host process for routing and pg-boss job execution             |
+| Runtime            | Node.js 25+                                                       | Host process for routing and pg-boss job execution                               |
 
 ---
 
@@ -462,16 +462,16 @@ decisions. It stores app-grade memory in Postgres.
 
 #### Storage Backend
 
-| Component           | Technology                                                                       | Purpose                                                                                                                         |
-| ------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| **Memory items**    | Postgres (`memory_items`)                                                        | Canonical durable statements with flattened app/agent/subject columns, confidence, status, version metadata, and evidence links |
-| **Evidence**        | Postgres (`memory_evidence`)                                                     | Grounding from sessions, messages, tools, manual saves, and sources                                                             |
-| **Candidates**      | Postgres (`memory_candidates`)                                                   | Extracted facts awaiting promotion or review                                                                                    |
-| **Recall events**   | Postgres (`memory_recall_events`)                                                | Search/usefulness signals for future dreaming                                                                                   |
-| **Dream runs**      | Postgres (`memory_dream_runs`)                                                   | Dreaming lifecycle runs per boundary                                                                                            |
-| **Dream decisions** | Postgres (`memory_dream_decisions`)                                              | Auditable promotion, merge, rewrite, decay, retire, or review rows                                                              |
-| **Lexical search**  | Postgres full-text search                                                        | Always-on memory retrieval path                                                                                                 |
-| **Vector search**   | Future `pgvector` path                                                           | Inactive until memory item embedding indexing and query are fully implemented                                                   |
+| Component           | Technology                          | Purpose                                                                                                                         |
+| ------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Memory items**    | Postgres (`memory_items`)           | Canonical durable statements with flattened app/agent/subject columns, confidence, status, version metadata, and evidence links |
+| **Evidence**        | Postgres (`memory_evidence`)        | Grounding from sessions, messages, tools, manual saves, and sources                                                             |
+| **Candidates**      | Postgres (`memory_candidates`)      | Extracted facts awaiting promotion or review                                                                                    |
+| **Recall events**   | Postgres (`memory_recall_events`)   | Search/usefulness signals for future dreaming                                                                                   |
+| **Dream runs**      | Postgres (`memory_dream_runs`)      | Dreaming lifecycle runs per boundary                                                                                            |
+| **Dream decisions** | Postgres (`memory_dream_decisions`) | Auditable promotion, merge, rewrite, decay, retire, or review rows                                                              |
+| **Lexical search**  | Postgres full-text search           | Always-on memory retrieval path                                                                                                 |
+| **Vector search**   | Future `pgvector` path              | Inactive until memory item embedding indexing and query are fully implemented                                                   |
 
 `memory_subjects` is not an active current-schema table. Subject identity is
 flattened into `memory_items` and preserved in item metadata for visibility
@@ -481,11 +481,11 @@ checks.
 
 Agents interact with memory via MCP tools over IPC:
 
-| Tool                    | Purpose                                                                                            |
-| ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `memory_save`           | Save a durable preference, decision, fact, correction, or constraint in user/group scope           |
-| `memory_search`         | Search scoped memory statements and source snippets                                                |
-| `procedure_save`        | Save a reusable multi-step procedure                                                               |
+| Tool             | Purpose                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `memory_save`    | Save a durable preference, decision, fact, correction, or constraint in user/group scope |
+| `memory_search`  | Search scoped memory statements and source snippets                                      |
+| `procedure_save` | Save a reusable multi-step procedure                                                     |
 
 Patch and review tools exist in the host protocol for reviewed/admin flows, but
 they are not part of the default agent capability bundle.
@@ -539,10 +539,18 @@ memory extraction output from the conversation. `/new` uses a `session-end`
 trigger, while manual `/compact` and observed SDK auto-compaction boundaries
 use a `precompact` trigger:
 
-- Uses a provider interface; the default extractor is rule-based and can be replaced without changing storage or recall.
+- Uses a provider interface; the current extractor is LLM-backed and
+  auth-gated, and can be replaced without changing storage or recall.
 - Detects preferences, decisions, facts, corrections, and constraints.
 - Stores real human-readable extraction output with reflection-derived confidence scores.
 - Filters sensitive material (API keys, tokens, passwords)
+- Records boundary/extraction metadata on `agent_session_digests`; zero facts is
+  a typed successful-empty outcome when no qualifying durable facts are found.
+  Extraction status is one of `facts_extracted`, `empty_qualified`,
+  `auth_unavailable`, `sensitive_blocked`, `extractor_failed`, or
+  `outcome_unavailable`; only `empty_qualified` with
+  `no_qualifying_facts` means the extractor ran successfully and found nothing
+  durable.
 - Rejects prompt-injection style text before it becomes future context
 - Controlled by memory extractor settings and the app-grade memory service.
 - Automatic durable promotion/update is dreaming-only.

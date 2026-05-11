@@ -26,6 +26,11 @@ import {
   defaultModelStatusSelection,
   type ModelStatusSelectionUpdate,
 } from './session-model-status.js';
+import {
+  prepareNewSessionArchive,
+  runNewSessionArchiveFinalizer,
+  type PrepareSessionArchive,
+} from './session-new-archive.js';
 
 export type SessionCommand =
   | { kind: 'compact'; raw: '/compact' }
@@ -211,6 +216,7 @@ export interface SessionCommandDeps {
   archiveCurrentSession: (
     cause?: 'new-session' | 'manual-compact',
   ) => Promise<void>;
+  prepareSessionArchive?: PrepareSessionArchive;
   onSessionArchived?: (
     cause?: 'new-session' | 'manual-compact',
   ) => Promise<void>;
@@ -322,16 +328,12 @@ export async function handleSessionCommand(opts: {
   // /new is the recovery path when the persisted provider session is bad.
   // Do not try to run older queued messages before clearing the session.
   if (command.kind === 'new') {
-    let archived = false;
-    try {
-      await deps.archiveCurrentSession('new-session');
-      archived = true;
-    } catch (err) {
-      logger.warn(
-        { group: groupName, err },
-        'Session archive failed during /new; continuing with reset',
-      );
-    }
+    const finalizeArchive = await prepareNewSessionArchive({
+      groupName,
+      logger,
+      prepareSessionArchive: deps.prepareSessionArchive,
+      archiveCurrentSession: deps.archiveCurrentSession,
+    });
 
     try {
       await deps.clearCurrentSession();
@@ -344,16 +346,12 @@ export async function handleSessionCommand(opts: {
       return { handled: true, success: false };
     }
 
-    if (archived) {
-      try {
-        await deps.onSessionArchived?.('new-session');
-      } catch (err) {
-        logger.warn(
-          { group: groupName, err },
-          'Session archive hook failed during /new; continuing with reset',
-        );
-      }
-    }
+    runNewSessionArchiveFinalizer({
+      groupName,
+      logger,
+      finalizeArchive,
+      onSessionArchived: deps.onSessionArchived,
+    });
 
     deps.advanceCursor(cmdMsg);
     await deps.sendMessage('Started a fresh session.');

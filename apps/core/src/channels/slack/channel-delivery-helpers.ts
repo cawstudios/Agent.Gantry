@@ -6,13 +6,12 @@ import {
   MessageSendOptions,
   ProgressUpdateOptions,
 } from '../../domain/types.js';
+import { PartialMessageDeliveryError } from '../../domain/messages/partial-delivery.js';
 import {
   channelProgressStateFilePath,
   readProgressStateEntries,
   writeProgressStateEntries,
 } from '../progress-state-file.js';
-import { PartialMessageDeliveryError } from '../../domain/messages/partial-delivery.js';
-
 import {
   ActiveProgressState,
   ActiveStreamState,
@@ -23,6 +22,7 @@ import {
   SLACK_FALLBACK_CHUNK_MAX_LENGTH,
   splitSlackTextByCodeUnits,
 } from './text-limits.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 type SlackPostMessagePayload = {
   channel: string;
@@ -738,7 +738,7 @@ export async function syncSlackGroups(input: {
   ) => Promise<void>;
 }): Promise<void> {
   if (!input.app) return;
-  const now = new Date().toISOString();
+  const now = nowIso();
   let cursor: string | undefined;
 
   do {

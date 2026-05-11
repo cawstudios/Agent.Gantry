@@ -1,10 +1,3 @@
-import dayjs from 'dayjs';
-import duration from 'dayjs/plugin/duration.js';
-import utc from 'dayjs/plugin/utc.js';
-
-dayjs.extend(duration);
-dayjs.extend(utc);
-
 export interface Clock {
   now: () => Date;
   nowMs: () => number;
@@ -25,36 +18,38 @@ export function fixedClock(input: Date | number | string): Clock {
 }
 
 export function nowIso(clock: Clock = systemClock): string {
-  return dayjs(clock.nowMs()).utc().toISOString();
+  return new Date(clock.nowMs()).toISOString();
 }
 
 export function nowMs(clock: Clock = systemClock): number {
   return clock.nowMs();
 }
 
+export function nowDate(clock: Clock = systemClock): Date {
+  return clock.now();
+}
+
 export function toIso(input: Date | number | string): string {
-  return dayjs(toDate(input)).utc().toISOString();
+  return toDate(input).toISOString();
 }
 
 export function parseIso(value: string): Date | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  const parsed = dayjs(trimmed);
-  if (!parsed.isValid()) return undefined;
-  return parsed.toDate();
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
 export function formatDurationMs(durationMs: number): string {
   if (!Number.isFinite(durationMs)) return '0ms';
   const sign = durationMs < 0 ? '-' : '';
   const abs = Math.abs(Math.round(durationMs));
-  const d = dayjs.duration(abs);
   const parts: string[] = [];
-  const hours = Math.floor(d.asHours());
-  const minutes = d.minutes();
-  const seconds = d.seconds();
-  const milliseconds = d.milliseconds();
+  const hours = Math.floor(abs / 3_600_000);
+  const minutes = Math.floor((abs % 3_600_000) / 60_000);
+  const seconds = Math.floor((abs % 60_000) / 1_000);
+  const milliseconds = abs % 1_000;
   if (hours > 0) parts.push(`${hours}h`);
   if (minutes > 0 || hours > 0) parts.push(`${minutes}m`);
   if (seconds > 0 || minutes > 0 || hours > 0) parts.push(`${seconds}s`);
@@ -67,9 +62,9 @@ export function sleep(ms: number): Promise<void> {
 }
 
 function toDate(input: Date | number | string): Date {
-  const parsed = dayjs(input);
-  if (!parsed.isValid()) {
+  const parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) {
     throw new Error(`Invalid date input: ${String(input)}`);
   }
-  return parsed.toDate();
+  return parsed;
 }

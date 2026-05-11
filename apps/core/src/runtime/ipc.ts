@@ -411,6 +411,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   action: request.action,
                   payload: request.payload || {},
                   allowedActions: request.allowedActions,
+                  ...(request.deadlineAtMs
+                    ? { deadlineAtMs: request.deadlineAtMs }
+                    : {}),
                   ...(request.context ? { context: request.context } : {}),
                 },
                 sourceAgentFolder,

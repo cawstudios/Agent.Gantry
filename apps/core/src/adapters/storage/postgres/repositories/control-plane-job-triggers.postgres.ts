@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { and, asc, eq } from 'drizzle-orm';
 
-import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
+import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import {
   mapTrigger,
   type CanonicalControlRow,

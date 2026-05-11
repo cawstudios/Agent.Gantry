@@ -25,7 +25,6 @@ README explains the artifacts themselves.
 │   ├── performance.json
 │   └── security.json
 ├── validation-report.json     # output of validate_artifacts.py / validate_work.py
-├── tool-history.jsonl         # raw tool-call audit trail (append-only, large)
 └── decomposition.LOCAL-*.json # archived decompositions from prior runs (optional)
 ```
 
@@ -35,7 +34,7 @@ README explains the artifacts themselves.
 > Do not track generated run/hook artifacts: `__pycache__`, `*.pyc`, coverage,
 > validation reports, active `.factory/`, or tarballs.
 
-Do not commit `.factory/*.json` or `tool-history.jsonl`. They are local state.
+Do not commit generated `.factory/*.json` files. They are local state.
 
 ---
 
@@ -152,13 +151,6 @@ Written by `validate_artifacts.py` and `validate_work.py`. Aggregates the gate
 evaluation plus the verify/pr-ready step results. Useful when a gate fails and
 you want a single file to inspect.
 
-### `tool-history.jsonl`
-
-Append-only audit trail of tool calls during the run. Large. Don't commit.
-Useful for diagnosing why an agent did something unexpected.
-
----
-
 ## 4. The PR-Ready Gate
 
 `pr_ready.py` (called by `validate_work.py`) refuses to mark a run PR-ready
@@ -223,7 +215,6 @@ current phase — when in doubt, run it.
   `run.json`; archive the previous decomposition if you want to keep it
   (`decomposition.LOCAL-*.json` in this folder are old archives — keep or
   delete as you like, they are not read by the gates).
-- `tool-history.jsonl` grows large; rotate or delete locally as needed.
 - If gates fail because an artifact is stale, **re-record** it; never edit
   the JSON by hand. Recording stamps `recorded_at` and updates `run.json`
   consistently.

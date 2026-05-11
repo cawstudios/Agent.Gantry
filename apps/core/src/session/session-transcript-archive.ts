@@ -1,6 +1,7 @@
 import type { ProviderArtifactStore } from '../domain/ports/provider-artifact-store.js';
 import { isSafeProviderSessionId } from '../domain/sessions/provider-session-id.js';
 import { logger } from '../infrastructure/logging/logger.js';
+import { nowDate } from '../shared/time/datetime.js';
 
 export type SessionArchiveCause =
   | 'new-session'
@@ -207,7 +208,7 @@ export async function archiveProviderSessionTranscript(
       provider,
       artifactKind: 'claude-jsonl',
     });
-    const now = new Date();
+    const now = nowDate();
     if (!artifact) {
       logger.info(
         { providerSessionId, sessionId },

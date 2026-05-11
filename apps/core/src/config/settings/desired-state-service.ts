@@ -54,6 +54,7 @@ import type {
   RuntimeSettings,
 } from './runtime-settings-types.js';
 import { resolveAgentToolReference } from '../../domain/tools/agent-tool-catalog-references.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 export class SettingsDesiredStateService {
   private readonly appId: AppId;
@@ -61,7 +62,7 @@ export class SettingsDesiredStateService {
 
   constructor(private readonly deps: SettingsDesiredStateServiceDeps) {
     this.appId = deps.appId ?? ('default' as AppId);
-    this.clock = deps.clock ?? { now: () => new Date().toISOString() };
+    this.clock = deps.clock ?? { now: () => nowIso() };
   }
 
   async exportCurrent(settings: RuntimeSettings): Promise<RuntimeSettings> {

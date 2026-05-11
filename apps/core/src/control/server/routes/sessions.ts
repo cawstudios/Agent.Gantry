@@ -23,6 +23,7 @@ import {
   ensureSessionForControl,
   type SessionEventSubscription,
 } from '../session-interaction-adapter.js';
+import { nowMs as currentTimeMs } from '../../../shared/time/datetime.js';
 
 function sendApplicationError(res: ServerResponse, error: unknown): boolean {
   const notFoundCode =
@@ -292,14 +293,14 @@ export async function handleSessionRoutes(
       300_000,
       Math.max(1000, Number(url.searchParams.get('timeoutMs') || 60_000)),
     );
-    const startedAt = Date.now();
+    const startedAt = currentTimeMs();
     try {
       const visible =
         await createSessionInteractionModule().waitForVisibleEvent({
           appId: auth.appId,
           sessionId: sessionRoute.sessionId,
           afterEventId,
-          timeoutMs: Math.max(0, timeoutMs - (Date.now() - startedAt)),
+          timeoutMs: Math.max(0, timeoutMs - (currentTimeMs() - startedAt)),
         });
       sendJson(res, 200, {
         ...serializeSessionEventEnvelope(visible),

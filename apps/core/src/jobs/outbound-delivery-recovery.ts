@@ -8,6 +8,7 @@ import type {
   ClaimedOutboundDeliveryItem,
   OutboundDelivery,
 } from '../domain/outbound-delivery/outbound-delivery.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 export interface OutboundDeliveryPartialRetryTail {
   canonicalText: string;
@@ -70,7 +71,7 @@ export async function runBoundedOutboundDeliveryRecovery(
   const batchLimit = Math.max(1, input.batchLimit ?? 20);
   const leaseMs = Math.max(1_000, input.leaseMs ?? 15_000);
   const maxBatches = Math.max(1, input.maxBatches ?? 5);
-  const now = input.now ?? (() => new Date().toISOString());
+  const now = input.now ?? (() => nowIso());
 
   let batches = 0;
   let claimedTotal = 0;

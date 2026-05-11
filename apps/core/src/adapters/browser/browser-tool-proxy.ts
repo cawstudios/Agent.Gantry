@@ -10,12 +10,19 @@ import {
   createBrowserActionMcpServerConfig,
   type BrowserActionMcpServerConfig,
 } from './action-mcp.js';
+import {
+  clearBrowserTabIndexMappings,
+  projectBrowserTabsResult,
+  translateBrowserTabsInput,
+} from './browser-tabs.js';
+import { nowMs } from '../../shared/time/datetime.js';
 import { applyAgentEgressNoProxyEnv } from '../../shared/no-proxy.js';
 
 const BROWSER_MCP_TIMEOUT_MS = 60_000;
 const BROWSER_MCP_IDLE_MS = 120_000;
 const MIN_BROWSER_ACTION_TIMEOUT_MS = 1_000;
 const MAX_BROWSER_ACTION_TIMEOUT_MS = 120_000;
+const BROWSER_BACKEND_ACTION_TIMEOUT_MS = MAX_BROWSER_ACTION_TIMEOUT_MS;
 const INLINE_SNAPSHOT_COMPACTION_BYTES = 32 * 1024;
 const SNAPSHOT_PREVIEW_BYTES = 4 * 1024;
 const BROWSER_FILE_OUTPUT_TOOLS = new Set<BrowserIpcAction>([
@@ -41,7 +48,7 @@ export async function callBrowserTool(input: {
   timeoutMs?: number;
   createBackendConfig?: (
     cdpEndpoint: string,
-    options: { outputDir?: string },
+    options: { outputDir?: string; actionTimeoutMs?: number },
   ) => BrowserActionMcpServerConfig;
 }): Promise<unknown> {
   const args = normalizeBrowserFilePayload(input.arguments, {
@@ -57,22 +64,36 @@ export async function callBrowserTool(input: {
 
   const cdpEndpoint = `http://127.0.0.1:${input.session.port}`;
   const outputDir = ensureBrowserArtifactRoot(input.fileAccessRoot);
+  const actionTimeoutMs = browserActionTimeoutMs(input.timeoutMs);
+  const deadline = nowMs() + actionTimeoutMs;
+  const sessionKey = `${input.session.profileName || 'default'}\0${cdpEndpoint}`;
+  const backendArgs = translateBrowserTabsInput(
+    input.toolName,
+    args,
+    sessionKey,
+  );
   const config = (
     input.createBackendConfig ?? createBrowserActionMcpServerConfig
-  )(cdpEndpoint, { outputDir });
+  )(cdpEndpoint, {
+    outputDir,
+    actionTimeoutMs: BROWSER_BACKEND_ACTION_TIMEOUT_MS,
+  });
   const backend = await getBackendClient({
     key: backendKey(input.session.profileName, cdpEndpoint, outputDir),
     config,
+    deadline,
   });
 
   try {
+    const remainingTimeoutMs = remainingBrowserActionTimeoutMs(deadline);
     const result = await backend.client.callTool(
-      { name: input.toolName, arguments: args },
+      { name: input.toolName, arguments: backendArgs },
       undefined,
-      { timeout: browserActionTimeoutMs(input.timeoutMs) },
+      { timeout: remainingTimeoutMs },
     );
     return normalizeBrowserToolResult(input.toolName, args, result, {
       artifactRoot: outputDir,
+      tabSessionKey: sessionKey,
     });
   } catch (err) {
     await closeCachedBackend(backend.key);
@@ -86,9 +107,14 @@ export function normalizeBrowserToolResult(
   toolName: BrowserIpcAction,
   args: Record<string, unknown>,
   result: unknown,
-  options: { artifactRoot?: string } = {},
+  options: { artifactRoot?: string; tabSessionKey?: string } = {},
 ): unknown {
-  const sanitized = sanitizeInternalChromeTargets(result);
+  const sanitized = projectBrowserTabsResult(
+    sanitizeInternalChromeTargets(result),
+    options.tabSessionKey,
+    toolName,
+    args,
+  );
   const filename = stringValue(args.filename);
   if (!filename || !BROWSER_FILE_OUTPUT_TOOLS.has(toolName)) {
     if (toolName === 'browser_snapshot' && options.artifactRoot) {
@@ -111,7 +137,7 @@ function compactLargeBrowserSnapshot(result: unknown, artifactRoot: string) {
     return result;
   }
   const root = ensureBrowserArtifactRoot(artifactRoot);
-  const filename = path.join(root, `snapshot-${Date.now()}.txt`);
+  const filename = path.join(root, `snapshot-${nowMs()}.txt`);
   fs.writeFileSync(filename, text, 'utf8');
   const stat = fs.statSync(filename);
   const preview = truncateUtf8(text, SNAPSHOT_PREVIEW_BYTES);
@@ -185,7 +211,12 @@ function browserOutputFileStat(filename: string): fs.Stats | undefined {
 }
 
 export function sanitizeBrowserTabsResult(result: unknown): unknown {
-  return sanitizeInternalChromeTargets(result);
+  return projectBrowserTabsResult(
+    sanitizeInternalChromeTargets(result),
+    undefined,
+    'browser_tabs',
+    { action: 'list' },
+  );
 }
 
 function sanitizeInternalChromeTargets(value: unknown): unknown {
@@ -284,6 +315,7 @@ interface CachedBackend {
 interface PendingBackend {
   promise: Promise<CachedBackend>;
   closeOnResolve: boolean;
+  claimed: boolean;
 }
 
 const cachedBackends = new Map<string, CachedBackend>();
@@ -300,6 +332,7 @@ function backendKey(
 async function getBackendClient(input: {
   key: string;
   config: BrowserActionMcpServerConfig;
+  deadline: number;
 }): Promise<CachedBackend> {
   const cached = cachedBackends.get(input.key);
   if (cached) {
@@ -307,22 +340,36 @@ async function getBackendClient(input: {
     return cached;
   }
   const pending = pendingBackends.get(input.key);
-  if (pending) return pending.promise;
+  if (pending) {
+    return await pendingBackendWithinDeadline(pending, input.deadline);
+  }
   const pendingEntry: PendingBackend = {
     closeOnResolve: false,
+    claimed: false,
     promise: Promise.resolve(undefined as never),
   };
-  pendingEntry.promise = createBackendClient(input)
+  pendingEntry.promise = createBackendClient({
+    key: input.key,
+    config: input.config,
+  })
     .then(async (backend) => {
       if (!pendingEntry.closeOnResolve) return backend;
       await closeCachedBackend(input.key);
       throw new Error('Browser backend was closed before it became ready.');
     })
+    .then((backend) => {
+      scheduleUnclaimedPendingBackendIdleClose(
+        input.key,
+        pendingEntry,
+        backend,
+      );
+      return backend;
+    })
     .finally(() => {
       pendingBackends.delete(input.key);
     });
   pendingBackends.set(input.key, pendingEntry);
-  return pendingEntry.promise;
+  return await pendingBackendWithinDeadline(pendingEntry, input.deadline);
 }
 
 async function createBackendClient(input: {
@@ -349,6 +396,59 @@ async function createBackendClient(input: {
     await transport.close().catch(() => undefined);
     throw new Error(`Browser backend startup failed: ${errorMessage(err)}`);
   }
+}
+
+async function pendingBackendWithinDeadline(
+  pending: PendingBackend,
+  deadline: number,
+): Promise<CachedBackend> {
+  const remainingTimeoutMs = remainingBrowserActionTimeoutMs(deadline);
+  const backend = await withTimeout(
+    pending.promise,
+    remainingTimeoutMs,
+    'Browser backend startup timed out.',
+  );
+  pending.claimed = true;
+  return backend;
+}
+
+function scheduleUnclaimedPendingBackendIdleClose(
+  key: string,
+  pending: PendingBackend,
+  backend: CachedBackend,
+): void {
+  const timer = setTimeout(() => {
+    if (!pending.claimed && cachedBackends.get(key) === backend) {
+      scheduleBackendIdleClose(key);
+    }
+  }, 0);
+  timer.unref?.();
+}
+
+class BrowserRequestTimeoutError extends Error {}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new BrowserRequestTimeoutError(message)),
+      timeoutMs,
+    );
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 function clearBackendIdleTimer(backend: CachedBackend): void {
@@ -392,6 +492,7 @@ export async function closeBrowserToolBackends(
       entry.promise.then(() => closeCachedBackend(key)).catch(() => undefined),
     ),
   ]);
+  clearBrowserTabIndexMappings(profileName);
 }
 
 function backendEnv(configEnv: Record<string, string>): Record<string, string> {
@@ -525,6 +626,13 @@ function browserActionTimeoutMs(value: number | undefined): number {
     MIN_BROWSER_ACTION_TIMEOUT_MS,
     Math.min(MAX_BROWSER_ACTION_TIMEOUT_MS, Math.trunc(value)),
   );
+}
+
+function remainingBrowserActionTimeoutMs(deadline: number): number {
+  const remaining = deadline - nowMs();
+  if (remaining <= 0)
+    throw new BrowserRequestTimeoutError('Browser action timed out.');
+  return Math.max(1, Math.trunc(remaining));
 }
 
 export function formatBackendError(toolName: string, err: unknown): string {

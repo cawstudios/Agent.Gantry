@@ -18,6 +18,7 @@ import {
   permissionDecisionOptions,
 } from './permission-interaction.js';
 import { sendTeamsTextMessage } from './teams-delivery.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 export const TEAMS_JID_PREFIX = 'teams:';
 export const TEAMS_ADAPTIVE_CARD_CONTENT_TYPE =
@@ -267,7 +268,7 @@ export class TeamsChannel implements ChannelAdapter {
     const jid = normalizeTeamsJid(message.conversationId);
     if (!jid) return;
 
-    const timestamp = message.timestamp || new Date().toISOString();
+    const timestamp = message.timestamp || nowIso();
     const sender = message.senderId || message.from?.id || 'unknown';
     const senderName = message.senderName || message.from?.name || sender;
     if (await this.handlePermissionDecision(message, jid, sender, senderName)) {

@@ -4,7 +4,7 @@ import {
   MEMORY_EXTRACTOR_MIN_CONFIDENCE,
 } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
-import { sleep } from '../infrastructure/time/datetime.js';
+import { sleep } from '../shared/time/datetime.js';
 import {
   MEMORY_EXTRACTION_FEW_SHOTS,
   MEMORY_EXTRACTION_SYSTEM_PROMPT,
@@ -18,6 +18,7 @@ import type {
   ArcExtractionInput,
   ExtractedMemoryFact,
   ExtractableMemoryKind,
+  MemoryExtractionResult,
   MemoryExtractionProvider,
 } from './extractor-types.js';
 import { sanitizeOutboundLlmText } from '../shared/sensitive-material.js';
@@ -26,6 +27,8 @@ import {
   type CanonicalMemoryItemRow,
 } from './app-memory-canonical-codec.js';
 import { extractMemoryValue } from './app-memory-dreaming-candidate-guardrails.js';
+import { extractionResult } from './extraction-result.js';
+import { isTransientExtractorError } from './extractor-llm-errors.js';
 import type {
   MemoryKind,
   MemoryLifecycleProposal,
@@ -328,43 +331,25 @@ function buildPromptParts(input: ArcExtractionInput): {
   };
 }
 
-function extractStatusCode(err: unknown): number | null {
-  if (!err || typeof err !== 'object') return null;
-  const candidate = err as {
-    status?: unknown;
-    response?: { status?: unknown };
-  };
-  const direct = Number(candidate.status);
-  if (Number.isFinite(direct)) return direct;
-  const nested = Number(candidate.response?.status);
-  if (Number.isFinite(nested)) return nested;
-  return null;
-}
-
-function isTransientExtractorError(err: unknown): boolean {
-  const status = extractStatusCode(err);
-  if (status === 429 || status === 503) return true;
-  if (err instanceof Error) {
-    return /\b(429|503|rate limit|temporar|timeout|econnreset|etimedout|service unavailable)\b/i.test(
-      err.message,
-    );
-  }
-  return false;
-}
-
 export class LlmMemoryExtractionProvider implements MemoryExtractionProvider {
   readonly providerName = 'llm-haiku';
 
   async extractFacts(
     input: ArcExtractionInput,
   ): Promise<ExtractedMemoryFact[]> {
+    return (await this.extractFactsWithOutcome(input)).facts;
+  }
+
+  async extractFactsWithOutcome(
+    input: ArcExtractionInput,
+  ): Promise<MemoryExtractionResult> {
     const modelExtractor = getMemoryModelRuntimeConfig().extractor;
     const turns = Array.isArray(input.turns) ? input.turns : [];
     if (!turns.length) {
-      return [];
+      return extractionResult([]);
     }
     if (!hasClaudeAuthConfigured()) {
-      return [];
+      return extractionResult([], 'auth_unavailable', 'auth_unavailable');
     }
 
     const sanitizedTurns = turns.map((turn) => {
@@ -386,7 +371,7 @@ export class LlmMemoryExtractionProvider implements MemoryExtractionProvider {
         },
         'LLM extraction blocked due to potential sensitive transcript material',
       );
-      return [];
+      return extractionResult([], 'sensitive_blocked', 'sensitive_blocked');
     }
 
     const sanitizedRetrievedItems = (input.retrievedItems || [])
@@ -468,19 +453,34 @@ export class LlmMemoryExtractionProvider implements MemoryExtractionProvider {
             'LLM extraction token usage',
           );
         }
-        if (!text) return [];
+        if (!text.trim()) {
+          logger.warn(
+            { model: modelExtractor, trigger: input.trigger },
+            'LLM extraction returned malformed output; skipping this boundary extraction',
+          );
+          return extractionResult([], 'extractor_failed', 'extractor_failed');
+        }
         const parsed = parseFirstJson(text);
-        return parseFacts(parsed, {
-          minConfidence: MEMORY_EXTRACTOR_MIN_CONFIDENCE,
-          maxFacts: MEMORY_EXTRACTOR_MAX_FACTS,
-          userId: input.userId,
-          turns,
-          retrievedKeys: new Set(
-            (input.retrievedItems || [])
-              .map((item) => item.key.toLowerCase().trim())
-              .filter(Boolean),
-          ),
-        });
+        if (!Array.isArray(parsed)) {
+          logger.warn(
+            { model: modelExtractor, trigger: input.trigger },
+            'LLM extraction returned malformed output; skipping this boundary extraction',
+          );
+          return extractionResult([], 'extractor_failed', 'extractor_failed');
+        }
+        return extractionResult(
+          parseFacts(parsed, {
+            minConfidence: MEMORY_EXTRACTOR_MIN_CONFIDENCE,
+            maxFacts: MEMORY_EXTRACTOR_MAX_FACTS,
+            userId: input.userId,
+            turns,
+            retrievedKeys: new Set(
+              (input.retrievedItems || [])
+                .map((item) => item.key.toLowerCase().trim())
+                .filter(Boolean),
+            ),
+          }),
+        );
       } catch (err) {
         const transient = isTransientExtractorError(err);
         if (attempt === 0 && transient) {
@@ -495,10 +495,10 @@ export class LlmMemoryExtractionProvider implements MemoryExtractionProvider {
           { err, model: modelExtractor },
           'LLM extraction failed; skipping this boundary extraction',
         );
-        return [];
+        return extractionResult([], 'extractor_failed', 'extractor_failed');
       }
     }
-    return [];
+    return extractionResult([], 'extractor_failed', 'extractor_failed');
   }
 }
 

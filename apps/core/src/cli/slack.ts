@@ -27,6 +27,7 @@ import {
 } from '../config/settings/runtime-settings.js';
 import { renderDefaultCapabilityRules } from '../shared/capability-guidance.js';
 import { chooseSlackChatForConnect } from './slack-connect-chat-picker.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 export interface SlackTokenValidation {
   ok: boolean;
@@ -439,7 +440,7 @@ export async function registerSlackMainGroup(options: {
       name: groupName,
       folder,
       trigger: existingGroup?.trigger || defaultTriggerForAgentName(groupName),
-      added_at: existingGroup?.added_at || new Date().toISOString(),
+      added_at: existingGroup?.added_at || nowIso(),
       requiresTrigger: false,
       agentConfig: existingGroup?.agentConfig,
     };

@@ -46,6 +46,7 @@ import {
   ToolExecutionPolicyService,
 } from '../../shared/tool-execution-policy-service.js';
 import { readExternalMcpServers } from './mcp-server-validation.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 const PROTECTED_FILESYSTEM_PATHS_ENV = 'MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON';
 
@@ -600,7 +601,7 @@ async function readContextUsage(queryHandle: unknown) {
         percentage: category.percentage,
       })),
       apiUsage: usage.apiUsage,
-      at: new Date().toISOString(),
+      at: nowIso(),
     } satisfies RuntimeContextUsageSnapshot;
   } catch (err) {
     log(

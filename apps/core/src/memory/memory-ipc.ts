@@ -8,11 +8,11 @@ import {
 } from '@myclaw/contracts';
 
 import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
+import { nowMs } from '../shared/time/datetime.js';
 import {
   ensurePrivateDirSync,
   writePrivateFileSync,
 } from '../shared/private-fs.js';
-import { logger } from '../infrastructure/logging/logger.js';
 import { resolveGroupIpcPath } from '../platform/group-folder.js';
 import {
   DEFAULT_MEMORY_APP_ID,
@@ -37,7 +37,18 @@ export {
   parseOptionalNumber,
   parseOptionalString,
 } from './memory-ipc-parsing.js';
-import { SaveMemoryInput, SaveProcedureInput } from './memory-types.js';
+import {
+  assertMemoryRequestNotExpired,
+  deadlineUnavailableResponse,
+  hasEnoughMemoryBudget,
+  runWithinMemoryDeadline,
+} from './memory-ipc-deadline.js';
+import {
+  AppMemorySearchInput,
+  AppMemorySearchResult,
+  SaveMemoryInput,
+  SaveProcedureInput,
+} from './memory-types.js';
 
 const MEMORY_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 
@@ -52,6 +63,7 @@ interface TrustedMemoryContext {
 type TrustedMemoryRequest = Omit<MemoryIpcRequest, 'context'> & {
   context?: TrustedMemoryContext;
   allowedActions?: readonly MemoryIpcAction[];
+  deadlineAtMs?: number;
 };
 
 const DEFAULT_ALLOWED_MEMORY_IPC_ACTIONS = new Set<MemoryIpcAction>([
@@ -65,6 +77,16 @@ type SubjectForMemoryIpc = ReturnType<typeof resolveTrustedMemorySubject>;
 type MemoryDemoteService = {
   demote(input: Record<string, unknown>): Promise<unknown>;
 };
+type MemorySearchReadOnlyService = {
+  searchReadOnly(
+    input: AppMemorySearchInput,
+    options?: { signal?: AbortSignal; statementTimeoutMs?: number },
+  ): Promise<AppMemorySearchResult[]>;
+  recordRecallEvents?(
+    input: AppMemorySearchInput,
+    results: AppMemorySearchResult[],
+  ): Promise<void>;
+};
 
 function asMemoryDemoteService(memory: AppMemoryService): MemoryDemoteService {
   const candidate = memory as unknown as Partial<MemoryDemoteService>;
@@ -73,6 +95,18 @@ function asMemoryDemoteService(memory: AppMemoryService): MemoryDemoteService {
   }
   throw new Error(
     'memory demote service is unavailable; AppMemoryService.demote(input) is required',
+  );
+}
+
+function asMemorySearchReadOnlyService(
+  memory: AppMemoryService,
+): MemorySearchReadOnlyService {
+  const candidate = memory as unknown as Partial<MemorySearchReadOnlyService>;
+  if (typeof candidate.searchReadOnly === 'function') {
+    return candidate as MemorySearchReadOnlyService;
+  }
+  throw new Error(
+    'memory read-only search service is unavailable; AppMemoryService.searchReadOnly(input) is required',
   );
 }
 
@@ -93,6 +127,40 @@ function assertMemoryActionAllowed(request: TrustedMemoryRequest): void {
   if (!allowedActions.has(request.action)) {
     throw new Error(`Memory IPC action is not allowed: ${request.action}`);
   }
+}
+
+async function runMemoryMutation<T>(
+  request: TrustedMemoryRequest,
+  work: () => Promise<T>,
+): Promise<T> {
+  assertMemoryRequestNotExpired(request, nowMs);
+  return work();
+}
+
+function continuityDeadlineUnavailableResponse(
+  request: TrustedMemoryRequest,
+  provider: string,
+  subject: SubjectForMemoryIpc,
+): MemoryIpcResponse {
+  return {
+    ok: true,
+    requestId: request.requestId,
+    provider,
+    data: {
+      continuity: {
+        subject,
+        overall_status: 'unavailable',
+        sections: {
+          memory_service: {
+            status: 'unavailable',
+            count: 0,
+            items: [],
+            reason: 'deadline_exceeded',
+          },
+        },
+      },
+    },
+  };
 }
 
 export function resolveTrustedMemorySubject(
@@ -121,13 +189,12 @@ export async function processMemoryRequest(
   try {
     assertValidRequestId(request.requestId);
     assertMemoryActionAllowed(request);
-    const memory = AppMemoryService.getInstance();
-    provider = 'postgres';
-    logger.debug(
-      { action: request.action, sourceAgentFolder, provider },
-      'Processing memory IPC request',
-    );
-
+    assertMemoryRequestNotExpired(request, nowMs);
+    const getMemory = (): AppMemoryService => {
+      const memory = AppMemoryService.getInstance();
+      provider = 'postgres';
+      return memory;
+    };
     switch (request.action) {
       case 'memory_search': {
         const query = String(request.payload.query || '').trim();
@@ -147,7 +214,61 @@ export async function processMemoryRequest(
             ? { limit: Number(request.payload.limit) }
             : {}),
         };
-        const results = await memory.search(searchInput);
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          const outcome = describeAppMemorySearchOutcome(searchInput, 0);
+          return {
+            ok: true,
+            requestId: request.requestId,
+            provider,
+            data: {
+              status: 'unavailable',
+              unavailable_reason: 'deadline_exceeded',
+              results: [],
+              resolved_subject: outcome.resolvedSubject,
+              ...(outcome.empty_reason
+                ? { empty_reason: outcome.empty_reason }
+                : {}),
+            },
+          };
+        }
+        const readOnlySearch = asMemorySearchReadOnlyService(getMemory());
+        const searchResult = await runWithinMemoryDeadline(
+          request,
+          (signal, statementTimeoutMs) =>
+            readOnlySearch.searchReadOnly(searchInput, {
+              signal,
+              statementTimeoutMs,
+            }),
+          nowMs,
+        );
+        if (searchResult.status === 'deadline_exceeded') {
+          const outcome = describeAppMemorySearchOutcome(searchInput, 0);
+          return {
+            ok: true,
+            requestId: request.requestId,
+            provider,
+            data: {
+              status: 'unavailable',
+              unavailable_reason: 'deadline_exceeded',
+              results: [],
+              resolved_subject: outcome.resolvedSubject,
+              ...(outcome.empty_reason
+                ? { empty_reason: outcome.empty_reason }
+                : {}),
+            },
+          };
+        }
+        const results = searchResult.value;
+        if (
+          results.length > 0 &&
+          typeof readOnlySearch.recordRecallEvents === 'function' &&
+          request.deadlineAtMs === undefined
+        ) {
+          await runMemoryMutation(request, () =>
+            readOnlySearch.recordRecallEvents!(searchInput, results),
+          );
+        }
         const outcome = describeAppMemorySearchOutcome(
           searchInput,
           results.length,
@@ -177,21 +298,27 @@ export async function processMemoryRequest(
           request.context,
           input.scope,
         );
-        const saved = await memory.save({
-          ...subject,
-          appId: subject.appId,
-          agentId: subject.agentId,
-          subjectType: subject.subjectType,
-          kind: input.kind,
-          key: input.key,
-          value: input.value,
-          why: input.why,
-          confidence: input.confidence,
-          source: input.source || 'mcp-tool',
-          actorId: 'mcp-tool',
-          isAdminWrite: false,
-          evidenceText: input.why || input.value,
-        });
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const saved = await runMemoryMutation(request, () =>
+          getMemory().save({
+            ...subject,
+            appId: subject.appId,
+            agentId: subject.agentId,
+            subjectType: subject.subjectType,
+            kind: input.kind,
+            key: input.key,
+            value: input.value,
+            why: input.why,
+            confidence: input.confidence,
+            source: input.source || 'mcp-tool',
+            actorId: 'mcp-tool',
+            isAdminWrite: false,
+            evidenceText: input.why || input.value,
+          }),
+        );
         return {
           ok: true,
           requestId: request.requestId,
@@ -205,21 +332,27 @@ export async function processMemoryRequest(
           sourceAgentFolder,
           request.context,
         );
-        const patched = await memory.patch({
-          ...subject,
-          id: input.id,
-          appId: DEFAULT_MEMORY_APP_ID,
-          agentId: memoryAgentIdForGroupFolder(sourceAgentFolder),
-          subjectType: subject.subjectType,
-          subjectId: subject.subjectId,
-          key: input.key,
-          value: input.value,
-          why: input.why,
-          confidence: input.confidence,
-          isPinned: input.load_bearing,
-          expectedVersion: input.expected_version,
-          isAdminWrite: false,
-        });
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const patched = await runMemoryMutation(request, () =>
+          getMemory().patch({
+            ...subject,
+            id: input.id,
+            appId: DEFAULT_MEMORY_APP_ID,
+            agentId: memoryAgentIdForGroupFolder(sourceAgentFolder),
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+            key: input.key,
+            value: input.value,
+            why: input.why,
+            confidence: input.confidence,
+            isPinned: input.load_bearing,
+            expectedVersion: input.expected_version,
+            isAdminWrite: false,
+          }),
+        );
         return {
           ok: true,
           requestId: request.requestId,
@@ -233,20 +366,26 @@ export async function processMemoryRequest(
           sourceAgentFolder,
           request.context,
         );
-        const demoted = await asMemoryDemoteService(memory).demote({
-          ...subject,
-          appId: subject.appId,
-          agentId: subject.agentId,
-          subjectType: subject.subjectType,
-          subjectId: subject.subjectId,
-          id: input.id,
-          ...(input.expectedVersion !== undefined
-            ? { expectedVersion: input.expectedVersion }
-            : {}),
-          ...(input.reason ? { reason: input.reason } : {}),
-          actorId: 'mcp-tool',
-          isAdminWrite: false,
-        });
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const demoted = await runMemoryMutation(request, () =>
+          asMemoryDemoteService(getMemory()).demote({
+            ...subject,
+            appId: subject.appId,
+            agentId: subject.agentId,
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+            id: input.id,
+            ...(input.expectedVersion !== undefined
+              ? { expectedVersion: input.expectedVersion }
+              : {}),
+            ...(input.reason ? { reason: input.reason } : {}),
+            actorId: 'mcp-tool',
+            isAdminWrite: false,
+          }),
+        );
         return {
           ok: true,
           requestId: request.requestId,
@@ -259,7 +398,35 @@ export async function processMemoryRequest(
           sourceAgentFolder,
           request.context,
         );
-        const continuity = await memory.continuitySummary(subject);
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return continuityDeadlineUnavailableResponse(
+            request,
+            provider,
+            subject,
+          );
+        }
+        const continuityResult = await runWithinMemoryDeadline(
+          request,
+          (signal, statementTimeoutMs) =>
+            getMemory().continuitySummary({
+              ...subject,
+              signal,
+              statementTimeoutMs,
+              ...(request.deadlineAtMs
+                ? { deadlineAtMs: request.deadlineAtMs, nowMs: nowMs() }
+                : {}),
+            }),
+          nowMs,
+        );
+        if (continuityResult.status === 'deadline_exceeded') {
+          return continuityDeadlineUnavailableResponse(
+            request,
+            provider,
+            subject,
+          );
+        }
+        const continuity = continuityResult.value;
         return {
           ok: true,
           requestId: request.requestId,
@@ -272,15 +439,21 @@ export async function processMemoryRequest(
           sourceAgentFolder,
           request.context,
         );
-        const result = await memory.triggerDreaming({
-          ...subject,
-          appId: subject.appId,
-          agentId: subject.agentId,
-          subjectType: subject.subjectType,
-          subjectId: subject.subjectId,
-          phase: 'deep',
-          dryRun: false,
-        });
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const result = await runMemoryMutation(request, () =>
+          getMemory().triggerDreaming({
+            ...subject,
+            appId: subject.appId,
+            agentId: subject.agentId,
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+            phase: 'deep',
+            dryRun: false,
+          }),
+        );
         return {
           ok: true,
           requestId: request.requestId,
@@ -293,15 +466,21 @@ export async function processMemoryRequest(
           sourceAgentFolder,
           request.context,
         );
-        const result = await memory.triggerDreaming({
-          ...subject,
-          appId: subject.appId,
-          agentId: subject.agentId,
-          subjectType: subject.subjectType,
-          subjectId: subject.subjectId,
-          phase: 'all',
-          dryRun: false,
-        });
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const result = await runMemoryMutation(request, () =>
+          getMemory().triggerDreaming({
+            ...subject,
+            appId: subject.appId,
+            agentId: subject.agentId,
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+            phase: 'all',
+            dryRun: false,
+          }),
+        );
         return {
           ok: true,
           requestId: request.requestId,
@@ -314,13 +493,29 @@ export async function processMemoryRequest(
           sourceAgentFolder,
           request.context,
         );
-        const reviews = await memory.listPendingReviews({
-          ...subject,
-          appId: subject.appId,
-          agentId: subject.agentId,
-          subjectType: subject.subjectType,
-          subjectId: subject.subjectId,
-        });
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const reviewsOutcome = await runWithinMemoryDeadline(
+          request,
+          (signal, statementTimeoutMs) =>
+            getMemory().listPendingReviews(
+              {
+                ...subject,
+                appId: subject.appId,
+                agentId: subject.agentId,
+                subjectType: subject.subjectType,
+                subjectId: subject.subjectId,
+              },
+              { signal, statementTimeoutMs },
+            ),
+          nowMs,
+        );
+        if (reviewsOutcome.status === 'deadline_exceeded') {
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const reviews = reviewsOutcome.value;
         return {
           ok: true,
           requestId: request.requestId,
@@ -344,15 +539,22 @@ export async function processMemoryRequest(
             'memory_review_decision requires a conversation control approver',
           );
         }
-        const review = await memory.decideReview({
-          ...subject,
-          appId: subject.appId,
-          agentId: subject.agentId,
-          subjectType: subject.subjectType,
-          subjectId: subject.subjectId,
-          ...input,
-          reviewerId: request.context.userId,
-        });
+        const reviewerId = request.context.userId;
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const review = await runMemoryMutation(request, () =>
+          getMemory().decideReview({
+            ...subject,
+            appId: subject.appId,
+            agentId: subject.agentId,
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+            ...input,
+            reviewerId,
+          }),
+        );
         return {
           ok: true,
           requestId: request.requestId,
@@ -372,21 +574,27 @@ export async function processMemoryRequest(
           request.context,
           input.scope,
         );
-        const saved = await memory.save({
-          ...subject,
-          appId: subject.appId,
-          agentId: subject.agentId,
-          subjectType: subject.subjectType,
-          kind: 'reference',
-          key: `procedure:${input.title}`,
-          value: input.body,
-          why: input.trigger || undefined,
-          confidence: input.confidence,
-          source: input.source || 'mcp-tool',
-          actorId: 'mcp-tool',
-          isAdminWrite: false,
-          evidenceText: input.body,
-        });
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const saved = await runMemoryMutation(request, () =>
+          getMemory().save({
+            ...subject,
+            appId: subject.appId,
+            agentId: subject.agentId,
+            subjectType: subject.subjectType,
+            kind: 'reference',
+            key: `procedure:${input.title}`,
+            value: input.body,
+            why: input.trigger || undefined,
+            confidence: input.confidence,
+            source: input.source || 'mcp-tool',
+            actorId: 'mcp-tool',
+            isAdminWrite: false,
+            evidenceText: input.body,
+          }),
+        );
         return {
           ok: true,
           requestId: request.requestId,
@@ -400,20 +608,26 @@ export async function processMemoryRequest(
           sourceAgentFolder,
           request.context,
         );
-        const patched = await memory.patch({
-          ...subject,
-          id: input.id,
-          appId: DEFAULT_MEMORY_APP_ID,
-          agentId: memoryAgentIdForGroupFolder(sourceAgentFolder),
-          subjectType: subject.subjectType,
-          subjectId: subject.subjectId,
-          key: input.title ? `procedure:${input.title}` : undefined,
-          value: input.body,
-          why: input.trigger === null ? null : input.trigger,
-          confidence: input.confidence,
-          expectedVersion: input.expected_version,
-          isAdminWrite: false,
-        });
+        if (!hasEnoughMemoryBudget(request, nowMs)) {
+          provider = 'postgres';
+          return deadlineUnavailableResponse(request, provider);
+        }
+        const patched = await runMemoryMutation(request, () =>
+          getMemory().patch({
+            ...subject,
+            id: input.id,
+            appId: DEFAULT_MEMORY_APP_ID,
+            agentId: memoryAgentIdForGroupFolder(sourceAgentFolder),
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+            key: input.title ? `procedure:${input.title}` : undefined,
+            value: input.body,
+            why: input.trigger === null ? null : input.trigger,
+            confidence: input.confidence,
+            expectedVersion: input.expected_version,
+            isAdminWrite: false,
+          }),
+        );
         return {
           ok: true,
           requestId: request.requestId,

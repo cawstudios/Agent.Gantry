@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { nowIso } from '../../../infrastructure/time/datetime.js';
+import { nowIso } from '../../../shared/time/datetime.js';
 import {
   capabilityStatusText,
   chatJid,

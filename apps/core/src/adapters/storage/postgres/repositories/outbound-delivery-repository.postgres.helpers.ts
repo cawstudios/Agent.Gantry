@@ -13,6 +13,7 @@ import type {
 import { sanitizeRetryTailProviderPayload } from '../../../../domain/messages/retry-tail-provider-payload.js';
 import * as pgSchema from '../schema/schema.js';
 import type { CanonicalExecutor } from './canonical-graph-repository.postgres.js';
+import { nowMs as currentTimeMs } from '../../../../shared/time/datetime.js';
 
 export type DeliveryRow =
   typeof pgSchema.outboundDeliveriesPostgres.$inferSelect;
@@ -121,7 +122,8 @@ export function mapReceipt(row: ReceiptRow): OutboundDeliveryReceipt {
 
 export function computeLeaseExpiry(now: string, leaseMs: number): string {
   const ms = Date.parse(now);
-  if (!Number.isFinite(ms)) return new Date(Date.now() + leaseMs).toISOString();
+  if (!Number.isFinite(ms))
+    return new Date(currentTimeMs() + leaseMs).toISOString();
   return new Date(ms + leaseMs).toISOString();
 }
 

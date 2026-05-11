@@ -66,6 +66,7 @@ import {
   isCanonicalBrowserCapabilityRule,
   isProjectedBrowserMcpToolRule,
 } from '../shared/agent-tool-references.js';
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
 type RunnerAgentInput = AgentInput & {
   modelCredentialEnv?: Record<string, string>;
@@ -114,13 +115,13 @@ export async function spawnAgent(
   onOutput?: (output: AgentOutput) => Promise<void>,
   options?: RunAgentOptions,
 ): Promise<AgentOutput> {
-  const startTime = Date.now();
+  const startTime = currentTimeMs();
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const processName = `myclaw-${safeName}-${Date.now()}`;
+  const processName = `myclaw-${safeName}-${currentTimeMs()}`;
   const modelConfig = getEffectiveModelConfig(
     input.isScheduledJob ? undefined : group.agentConfig?.model,
     input.isScheduledJob

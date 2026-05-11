@@ -105,9 +105,11 @@ export class CanonicalSessionOpsService {
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
       latestArtifactId?: string | null;
+      expectedAgentSessionId?: string;
+      expectedAgentSessionResetAt?: string | null;
     } = {},
-  ): Promise<void> {
-    await this.repository.setProviderSession({
+  ): Promise<boolean> {
+    return this.repository.setProviderSession({
       groupFolder,
       sessionId,
       scopeKey: makeSessionScopeKey(groupFolder, threadId, {
@@ -120,6 +122,8 @@ export class CanonicalSessionOpsService {
       conversationKind: metadata.conversationKind,
       memoryUserId: metadata.memoryUserId,
       latestArtifactId: metadata.latestArtifactId,
+      expectedAgentSessionId: metadata.expectedAgentSessionId,
+      expectedAgentSessionResetAt: metadata.expectedAgentSessionResetAt,
     });
   }
 
@@ -138,6 +142,7 @@ export class CanonicalSessionOpsService {
     providerSessionId?: string;
     externalSessionId?: string;
     latestArtifactId?: string | null;
+    agentSessionResetAt?: string | null;
     memoryContextBlock?: string;
   }> {
     const context = await this.repository.getAgentTurnContext({

@@ -1,3 +1,5 @@
+import { nowIso } from './time/datetime.js';
+
 export type ModelProviderId = 'anthropic' | 'openrouter';
 
 export type ModelCacheMode =
@@ -555,7 +557,7 @@ export function normalizeModelUsage(input: {
         cacheWriteTokens,
         !hasUnknownModel,
       ),
-      at: new Date().toISOString(),
+      at: nowIso(),
     };
   }
 
@@ -587,7 +589,7 @@ export function normalizeModelUsage(input: {
         cacheWriteTokens,
         Boolean(entry && entry.cacheMode !== 'none'),
       ),
-      at: new Date().toISOString(),
+      at: nowIso(),
     };
   }
 

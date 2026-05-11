@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+import { nowMs } from './datetime.js';
+
 export function verifyWebhookSignature(input: {
   secret: string;
   timestamp: string;
@@ -15,7 +17,7 @@ export function verifyWebhookSignature(input: {
   if (
     !Number.isFinite(timestampMs) ||
     (toleranceMs >= 0 &&
-      Math.abs((input.nowMs ?? Date.now()) - timestampMs) > toleranceMs)
+      Math.abs((input.nowMs ?? nowMs()) - timestampMs) > toleranceMs)
   ) {
     return false;
   }

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { MessageSendOptions, NewMessage } from '../domain/types.js';
 import type { DeliverySettlement } from '../jobs/delivery.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 const NO_VISIBLE_OUTPUT_FALLBACK_MESSAGE =
   'I finished that run but did not generate a user-visible reply. Please send your message again.';
@@ -44,12 +45,12 @@ export async function finalizeGroupAgentUserVisibleOutput(input: {
         sender: 'myclaw',
         sender_name: 'MyClaw',
         content: transcriptText,
-        timestamp: new Date().toISOString(),
+        timestamp: nowIso(),
         is_from_me: true,
         is_bot_message: true,
         thread_id: input.activeThreadId,
         delivery_status: deliveryStatus,
-        delivered_at: new Date().toISOString(),
+        delivered_at: nowIso(),
       };
       await input
         .storeMessage(transcriptMessage)

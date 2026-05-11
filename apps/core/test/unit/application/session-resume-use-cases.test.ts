@@ -263,7 +263,14 @@ describe('durable session resume use cases', () => {
       digest: 'Recent digest: narrowed scope to continuity docs and tests.',
       messageCount: 6,
       extractedFactCount: 1,
-      metadata: scopedDigestMetadataForSession(session),
+      metadata: {
+        ...scopedDigestMetadataForSession(session),
+        extraction: {
+          status: 'empty_qualified',
+          factCount: 0,
+          zeroFactReason: 'no_qualifying_facts',
+        },
+      },
       createdAt: now as never,
     };
     const digestsRepo: AgentSessionDigestRepository = {
@@ -327,7 +334,14 @@ describe('durable session resume use cases', () => {
       digest: 'Recent digest: Worker C kept continuity focused.',
       messageCount: 4,
       extractedFactCount: 1,
-      metadata: scopedDigestMetadataForSession(session),
+      metadata: {
+        ...scopedDigestMetadataForSession(session),
+        extraction: {
+          status: 'empty_qualified',
+          factCount: 0,
+          zeroFactReason: 'no_qualifying_facts',
+        },
+      },
       createdAt: now as never,
     };
     const digestsRepo: AgentSessionDigestRepository = {
@@ -437,6 +451,14 @@ describe('durable session resume use cases', () => {
       blockEmpty: false,
       sections: hydrated.continuityStatus.sections,
     });
+    expect(
+      hydrated.continuityStatus.sections.recent_session_digests.items,
+    ).toEqual([
+      expect.objectContaining({
+        extractionStatus: 'empty_qualified',
+        zeroFactReason: 'no_qualifying_facts',
+      }),
+    ]);
     expect(
       hydrated.continuityStatus.sections.recent_session_digests.items,
     ).toEqual([

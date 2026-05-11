@@ -4,6 +4,7 @@ import type {
 } from '../domain/types.js';
 import { buildReplaceOnlyProgressOptions } from './progress-updates.js';
 import { formatElapsed } from './time-format.js';
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
 const TYPING_HEARTBEAT_INTERVAL_MS = 4_000;
 const ELAPSED_PROGRESS_INTERVAL_MS = 60_000;
@@ -179,7 +180,7 @@ export function startGroupProgressHeartbeats(input: {
   pause(): void;
   resume(): void;
 } {
-  let lastElapsedProgressAt = Date.now();
+  let lastElapsedProgressAt = currentTimeMs();
   let lastNoOutputWarningAt = 0;
   let paused = false;
   const typingHeartbeatTimer = setInterval(() => {
@@ -196,7 +197,7 @@ export function startGroupProgressHeartbeats(input: {
   const progressTimer = setInterval(() => {
     void (async () => {
       if (!input.supportsProgress || paused || !input.isTypingActive()) return;
-      const now = Date.now();
+      const now = currentTimeMs();
       const elapsedMs = input.getElapsedMs();
       if (now - lastElapsedProgressAt >= ELAPSED_PROGRESS_INTERVAL_MS) {
         lastElapsedProgressAt = now;

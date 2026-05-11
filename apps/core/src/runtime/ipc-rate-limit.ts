@@ -1,3 +1,5 @@
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
+
 const IPC_RATE_LIMIT_WINDOW_MS = 60_000;
 const IPC_RATE_LIMIT_MAX_FILES_PER_WINDOW = 300;
 
@@ -10,7 +12,7 @@ export function canProcessIpcFile(
   sourceAgentFolder: string,
   kind: string,
 ): boolean {
-  const now = Date.now();
+  const now = currentTimeMs();
   const key = `${sourceAgentFolder}:${kind}`;
   const state = ipcRateLimitState.get(key);
   if (!state || now - state.windowStart >= IPC_RATE_LIMIT_WINDOW_MS) {

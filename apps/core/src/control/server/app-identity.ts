@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { Job, ConversationRoute } from '../../domain/types.js';
 import type { JobVisibilityMetadata } from '../../application/jobs/job-visibility-metadata.js';
 import type { getRuntimeControlRepository } from '../../adapters/storage/postgres/runtime-store.js';
-import { nowIso as runtimeNowIso } from '../../infrastructure/time/datetime.js';
+import { nowIso as runtimeNowIso } from '../../shared/time/datetime.js';
 import { resolveAppScopeAppId as applicationResolveAppScopeAppId } from '../../application/app-scope/resolve-app-scope.js';
 import type { AppSessionRecord as JobAppSessionRecord } from '../../application/jobs/job-management-types.js';
 import type { IsoTimestamp } from '../../shared/time/primitives.js';

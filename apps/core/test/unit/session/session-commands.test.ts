@@ -269,6 +269,10 @@ function makeDeps(
 
 const trigger = /^@Andy\b/i;
 
+async function flushAsyncFinalizers(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
 describe('handleSessionCommand', () => {
   it('returns handled:false when no session command found', async () => {
     const deps = makeDeps();
@@ -335,13 +339,14 @@ describe('handleSessionCommand', () => {
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.runAgent).not.toHaveBeenCalled();
     expect(deps.archiveCurrentSession).toHaveBeenCalledWith('new-session');
+    await flushAsyncFinalizers();
     expect(deps.onSessionArchived).toHaveBeenCalledWith('new-session');
     expect(deps.clearCurrentSession).toHaveBeenCalledTimes(1);
     expect(
-      (deps.archiveCurrentSession as ReturnType<typeof vi.fn>).mock
+      (deps.clearCurrentSession as ReturnType<typeof vi.fn>).mock
         .invocationCallOrder[0],
     ).toBeLessThan(
-      (deps.clearCurrentSession as ReturnType<typeof vi.fn>).mock
+      (deps.archiveCurrentSession as ReturnType<typeof vi.fn>).mock
         .invocationCallOrder[0],
     );
     expect(deps.sendMessage).toHaveBeenCalledWith('Started a fresh session.');
@@ -1051,7 +1056,7 @@ describe('handleSessionCommand', () => {
     expect(deps.setGroupModelOverride).not.toHaveBeenCalled();
   });
 
-  it('/new archives first but does not advance cursor when clearing rejects', async () => {
+  it('/new does not archive or advance cursor when clearing rejects', async () => {
     const deps = makeDeps({
       clearCurrentSession: vi.fn().mockRejectedValue(new Error('clear failed')),
     });
@@ -1064,12 +1069,63 @@ describe('handleSessionCommand', () => {
     });
 
     expect(result).toEqual({ handled: true, success: false });
-    expect(deps.archiveCurrentSession).toHaveBeenCalledWith('new-session');
+    expect(deps.archiveCurrentSession).not.toHaveBeenCalled();
     expect(deps.onSessionArchived).not.toHaveBeenCalled();
     expect(deps.advanceCursor).not.toHaveBeenCalled();
     expect(deps.sendMessage).toHaveBeenCalledWith(
       '/new failed. The session is unchanged.',
     );
+  });
+
+  it('/new schedules archive finalization before clearing but runs finalizer after reset', async () => {
+    const finalizeArchive = vi.fn().mockResolvedValue(undefined);
+    const prepareSessionArchive = vi.fn().mockResolvedValue(finalizeArchive);
+    const deps = makeDeps({ prepareSessionArchive });
+
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/new')],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: true });
+    expect(prepareSessionArchive).toHaveBeenCalledWith('new-session');
+    expect(deps.archiveCurrentSession).not.toHaveBeenCalled();
+    expect(deps.clearCurrentSession).toHaveBeenCalledTimes(1);
+    expect(prepareSessionArchive.mock.invocationCallOrder[0]).toBeLessThan(
+      (deps.clearCurrentSession as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0],
+    );
+    expect(
+      (deps.clearCurrentSession as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(finalizeArchive.mock.invocationCallOrder[0]);
+    await flushAsyncFinalizers();
+    expect(deps.onSessionArchived).toHaveBeenCalledWith('new-session');
+  });
+
+  it('/new does not run prepared archive finalizer when clearing rejects', async () => {
+    const finalizeArchive = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      prepareSessionArchive: vi.fn().mockResolvedValue(finalizeArchive),
+      clearCurrentSession: vi.fn().mockRejectedValue(new Error('clear failed')),
+    });
+
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/new')],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.prepareSessionArchive).toHaveBeenCalledWith('new-session');
+    expect(finalizeArchive).not.toHaveBeenCalled();
+    expect(deps.onSessionArchived).not.toHaveBeenCalled();
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
   });
 
   it('denies unauthorized /thinking in conversation-scoped group', async () => {
@@ -1157,6 +1213,7 @@ describe('handleSessionCommand', () => {
       deps,
     });
     expect(result).toEqual({ handled: true, success: true });
+    await flushAsyncFinalizers();
     expect(onSessionArchived).toHaveBeenCalledTimes(1);
   });
 

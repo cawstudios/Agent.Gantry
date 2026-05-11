@@ -19,10 +19,7 @@ import {
   schedulerJobStaleness,
   staleOnceRequeueBucket,
 } from '../../shared/scheduler-job-staleness.js';
-import {
-  nowMs as currentTimeMs,
-  toIso,
-} from '../../infrastructure/time/datetime.js';
+import { nowMs as currentTimeMs, toIso } from '../../shared/time/datetime.js';
 
 const SCHEDULER_QUEUE_PARALLEL = 'myclaw.jobs.parallel';
 const SCHEDULER_QUEUE_SERIALIZED = 'myclaw.jobs.serialized';

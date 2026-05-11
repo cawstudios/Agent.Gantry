@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, like } from 'drizzle-orm';
 
 import type { ConversationRoute } from '../../../../domain/repositories/domain-types.js';
-import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
+import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
 import {
   CANONICAL_APP_ID,

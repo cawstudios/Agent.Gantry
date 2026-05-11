@@ -81,8 +81,8 @@ function createRunnerFixture(): {
   const runnerDir = path.join(root, 'runner');
   const runnerClaudeDir = path.join(runnerDir, 'claude');
   const infrastructureLoggingDir = path.join(root, 'infrastructure', 'logging');
-  const infrastructureTimeDir = path.join(root, 'infrastructure', 'time');
   const sharedDir = path.join(root, 'shared');
+  const sharedTimeDir = path.join(sharedDir, 'time');
   const runnerPath = path.join(runnerClaudeDir, 'index.ts');
   const sdkDir = path.join(
     root,
@@ -98,8 +98,8 @@ function createRunnerFixture(): {
   fs.mkdirSync(runnerDir, { recursive: true });
   fs.mkdirSync(runnerClaudeDir, { recursive: true });
   fs.mkdirSync(infrastructureLoggingDir, { recursive: true });
-  fs.mkdirSync(infrastructureTimeDir, { recursive: true });
   fs.mkdirSync(sharedDir, { recursive: true });
+  fs.mkdirSync(sharedTimeDir, { recursive: true });
   for (const file of fs.readdirSync(
     path.resolve('apps/core/src/runner/claude'),
   )) {
@@ -131,8 +131,8 @@ function createRunnerFixture(): {
     path.join(infrastructureLoggingDir, 'logger.ts'),
   );
   fs.copyFileSync(
-    path.resolve('apps/core/src/infrastructure/time/datetime.ts'),
-    path.join(infrastructureTimeDir, 'datetime.ts'),
+    path.resolve('apps/core/src/shared/time/datetime.ts'),
+    path.join(sharedTimeDir, 'datetime.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/no-proxy.ts'),
@@ -202,7 +202,6 @@ function createRunnerFixture(): {
     path.resolve('apps/core/src/shared/myclaw-home.ts'),
     path.join(sharedDir, 'myclaw-home.ts'),
   );
-  symlinkPackage(root, 'dayjs', 'node_modules/dayjs');
   fs.writeFileSync(
     path.join(sdkDir, 'package.json'),
     JSON.stringify({ type: 'module', main: 'index.js' }),

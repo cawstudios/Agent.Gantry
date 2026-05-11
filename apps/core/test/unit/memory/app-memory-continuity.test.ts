@@ -170,7 +170,7 @@ describe('app memory continuity summary', () => {
     });
 
     expect(dreamingStatus).toHaveBeenCalledTimes(1);
-    expect(dreamingStatus).toHaveBeenCalledWith({
+    expect(dreamingStatus.mock.calls[0]?.[0]).toEqual({
       appId: 'default',
       agentId: 'agent:team',
       subjectType: 'channel',
@@ -230,6 +230,79 @@ describe('app memory continuity summary', () => {
               },
             },
           ],
+        },
+      },
+    });
+  });
+
+  it('marks continuity summary partial when one memory section is unavailable', async () => {
+    const memory = {
+      dreamingStatus: vi.fn().mockResolvedValue([
+        {
+          completedAt: '2026-05-08T02:00:00.000Z',
+          status: 'completed',
+          phase: 'deep',
+          summary: { staged: 1, promoted: 0, needsReview: 0 },
+        },
+      ]),
+      listPendingReviews: vi.fn().mockResolvedValue([]),
+      list: vi.fn().mockRejectedValue(new Error('memory unavailable')),
+    };
+
+    const summary = await buildAppMemoryContinuitySummary(memory, {
+      appId: 'default',
+      agentId: 'agent:team',
+      channelId: 'conversation:sl:C-target',
+    });
+
+    expect(summary).toMatchObject({
+      overall_status: 'partial',
+      active_count: 0,
+      staged_count: 1,
+      sections: {
+        recent_decisions: {
+          status: 'unavailable',
+          count: 0,
+          items: [],
+          reason: 'service_error',
+        },
+        last_dream_summary: {
+          status: 'populated',
+          count: 1,
+        },
+      },
+    });
+  });
+
+  it('marks continuity summary unavailable when every section misses the deadline', async () => {
+    const nowMs = Date.parse('2026-05-08T02:00:00.000Z');
+    const memory = {
+      dreamingStatus: vi.fn().mockResolvedValue([]),
+      listPendingReviews: vi.fn().mockResolvedValue([]),
+      list: vi.fn().mockResolvedValue([]),
+    };
+
+    const summary = await buildAppMemoryContinuitySummary(memory, {
+      appId: 'default',
+      agentId: 'agent:team',
+      channelId: 'conversation:sl:C-target',
+      deadlineAtMs: nowMs + 500,
+      nowMs,
+    });
+
+    expect(memory.list).not.toHaveBeenCalled();
+    expect(memory.dreamingStatus).not.toHaveBeenCalled();
+    expect(memory.listPendingReviews).not.toHaveBeenCalled();
+    expect(summary).toMatchObject({
+      overall_status: 'unavailable',
+      sections: {
+        recent_decisions: {
+          status: 'unavailable',
+          reason: 'deadline_exceeded',
+        },
+        last_dream_summary: {
+          status: 'unavailable',
+          reason: 'deadline_exceeded',
         },
       },
     });

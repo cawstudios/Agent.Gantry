@@ -9,7 +9,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 
 import { EnvRuntimeSecretProvider } from '../../../credentials/env-runtime-secret-provider.js';
 import type { RuntimeSecretProvider } from '../../../../domain/ports/runtime-secret-provider.js';
-import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
+import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
 import type { CanonicalDb } from './canonical-graph-repository.postgres.js';
 import { ensureControlGraph } from './control-plane-graph.postgres.js';

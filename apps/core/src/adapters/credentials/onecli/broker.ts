@@ -22,6 +22,7 @@ import {
   NATIVE_EMBED_API_KEY_ENV,
 } from './env-policy.js';
 import { validateOnecliUrl } from './policy.js';
+import { nowMs as currentTimeMs } from '../../../shared/time/datetime.js';
 
 type OneCliClient = Pick<OneCLI, 'getContainerConfig' | 'ensureAgent'>;
 type OneCliAgentRuntimeConfig = Awaited<
@@ -234,7 +235,7 @@ export class OnecliAgentCredentialBroker implements AgentCredentialBroker {
       );
     }
     const cacheKey = resolvedAgentIdentifier;
-    const now = Date.now();
+    const now = currentTimeMs();
     const cached = this.configCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
       return cached.config;
@@ -252,7 +253,7 @@ export class OnecliAgentCredentialBroker implements AgentCredentialBroker {
         if (ttlMs > 0) {
           this.configCache.set(cacheKey, {
             config,
-            expiresAt: Date.now() + ttlMs,
+            expiresAt: currentTimeMs() + ttlMs,
           });
         }
         return config;

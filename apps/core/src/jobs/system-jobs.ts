@@ -15,7 +15,7 @@ import {
 } from '../memory/app-memory-boundaries.js';
 import { resolveScopedMemorySubject } from '../memory/app-memory-subject-resolver.js';
 import { AppMemoryService } from '../memory/app-memory-service.js';
-import { nowIso as currentIso } from '../infrastructure/time/datetime.js';
+import { nowIso as currentIso } from '../shared/time/datetime.js';
 import {
   getSystemJobRegistrationSignature,
   setSystemJobRegistrationSignature,

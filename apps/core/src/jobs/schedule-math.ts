@@ -6,7 +6,7 @@ import {
   nowIso as currentIso,
   nowMs as currentTimeMs,
   toIso,
-} from '../infrastructure/time/datetime.js';
+} from '../shared/time/datetime.js';
 
 export function computeNextJobRun(
   job: Pick<Job, 'schedule_value'> & { schedule_type: string },

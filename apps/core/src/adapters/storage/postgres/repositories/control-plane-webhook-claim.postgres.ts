@@ -1,6 +1,9 @@
 import { and, asc, inArray, sql } from 'drizzle-orm';
 
-import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
+import {
+  nowIso as currentIso,
+  nowMs as currentTimeMs,
+} from '../../../../shared/time/datetime.js';
 import type {
   ClaimedWebhookDeliveryRecord,
   WebhookDeliveryRecord,
@@ -25,7 +28,7 @@ export async function claimDueWebhookDeliveriesWithDrizzleLock(
 ): Promise<ClaimedWebhookDeliveryRecord[]> {
   return db.transaction(async (tx) => {
     const now = currentIso();
-    const leaseUntil = new Date(Date.now() + 15_000).toISOString();
+    const leaseUntil = new Date(currentTimeMs() + 15_000).toISOString();
     const candidates = await tx
       .select({
         deliveryId: pgSchema.controlHttpWebhookDeliveriesPostgres.deliveryId,

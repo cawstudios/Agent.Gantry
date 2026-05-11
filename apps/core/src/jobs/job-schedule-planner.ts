@@ -4,9 +4,13 @@ import type { JobSchedulePlanner } from '../application/jobs/job-management-type
 import { ApplicationError } from '../application/common/application-error.js';
 import { computeNextJobRun } from './schedule-math.js';
 import { validateScheduleConfig } from './schedule.js';
+import {
+  nowIso as currentIso,
+  nowMs as currentTimeMs,
+} from '../shared/time/datetime.js';
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return currentIso();
 }
 
 export const runtimeJobSchedulePlanner: JobSchedulePlanner = {
@@ -98,7 +102,7 @@ export const runtimeJobSchedulePlanner: JobSchedulePlanner = {
           'Invalid interval milliseconds for scheduler job.',
         );
       }
-      return { nextRun: new Date(Date.now() + ms).toISOString() };
+      return { nextRun: new Date(currentTimeMs() + ms).toISOString() };
     }
     const date = Date.parse(scheduleValue);
     if (!Number.isFinite(date)) {

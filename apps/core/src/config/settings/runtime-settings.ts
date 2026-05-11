@@ -30,6 +30,7 @@ import type {
   RuntimeSettingsValidationResult,
 } from './runtime-settings-types.js';
 import { validateReadableAgentToolRule } from '../../shared/agent-tool-references.js';
+import { nowIso, nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 const DEFAULT_PROVIDER_CONNECTION_IDS: Record<string, string> = {
   app: 'app_default',
@@ -142,7 +143,7 @@ function writeSettingsYamlAtomic(filePath: string, content: string): void {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const tmpPath = path.join(
     dir,
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
+    `.${path.basename(filePath)}.${process.pid}.${currentTimeMs()}.tmp`,
   );
   try {
     fs.writeFileSync(tmpPath, content, { mode: 0o600 });
@@ -292,7 +293,7 @@ export function ensureConfiguredConversationBinding(
     agent: agentId,
     conversation: conversationId,
     trigger: input.trigger,
-    addedAt: existingBinding?.addedAt || new Date().toISOString(),
+    addedAt: existingBinding?.addedAt || nowIso(),
     requiresTrigger: input.requiresTrigger,
     memoryScope: existingBinding?.memoryScope || 'conversation',
     model: existingBinding?.model,
@@ -357,7 +358,7 @@ function stableSettingsId(
     const candidate = `${base}_${hash.slice(0, length)}`.slice(0, 96);
     if (!Object.hasOwn(existing, candidate)) return candidate;
   }
-  return `${base}_${Date.now()}`.slice(0, 96);
+  return `${base}_${currentTimeMs()}`.slice(0, 96);
 }
 
 export function loadRuntimeSettingsFromPath(filePath: string): RuntimeSettings {

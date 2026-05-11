@@ -11,6 +11,7 @@ import {
 import {
   createSqlThreadIdentityFilter,
   nowIso,
+  withStatementTimeout,
 } from './app-memory-service-query-helpers.js';
 import type {
   AppMemoryItem,
@@ -161,34 +162,45 @@ function toMemoryReview(row: MemoryReviewRow): MemoryReviewRecord {
 export async function listPendingMemoryReviews(input: {
   db: Db;
   subject: NormalizedMemorySubject;
+  statementTimeoutMs?: number;
 }): Promise<MemoryReviewRecord[]> {
-  const rows = await input.db
-    .select()
-    .from(pgSchema.memoryReviewRequestsPostgres)
-    .where(
-      and(
-        eq(pgSchema.memoryReviewRequestsPostgres.appId, input.subject.appId),
-        eq(
-          pgSchema.memoryReviewRequestsPostgres.agentId,
-          input.subject.agentId,
-        ),
-        eq(
-          pgSchema.memoryReviewRequestsPostgres.subjectType,
-          input.subject.subjectType,
-        ),
-        eq(
-          pgSchema.memoryReviewRequestsPostgres.subjectId,
-          input.subject.subjectId,
-        ),
-        sqlThreadIdentityFilter(
-          pgSchema.memoryReviewRequestsPostgres,
-          input.subject.threadId,
-        ),
-        eq(pgSchema.memoryReviewRequestsPostgres.status, 'pending_review'),
-      ),
-    )
-    .orderBy(desc(pgSchema.memoryReviewRequestsPostgres.createdAt))
-    .limit(20);
+  const rows = (await withStatementTimeout(
+    input.db,
+    input.statementTimeoutMs,
+    (timeoutMs) =>
+      sql`select set_config('statement_timeout', ${String(timeoutMs)}, true)`,
+    (db) =>
+      db
+        .select()
+        .from(pgSchema.memoryReviewRequestsPostgres)
+        .where(
+          and(
+            eq(
+              pgSchema.memoryReviewRequestsPostgres.appId,
+              input.subject.appId,
+            ),
+            eq(
+              pgSchema.memoryReviewRequestsPostgres.agentId,
+              input.subject.agentId,
+            ),
+            eq(
+              pgSchema.memoryReviewRequestsPostgres.subjectType,
+              input.subject.subjectType,
+            ),
+            eq(
+              pgSchema.memoryReviewRequestsPostgres.subjectId,
+              input.subject.subjectId,
+            ),
+            sqlThreadIdentityFilter(
+              pgSchema.memoryReviewRequestsPostgres,
+              input.subject.threadId,
+            ),
+            eq(pgSchema.memoryReviewRequestsPostgres.status, 'pending_review'),
+          ),
+        )
+        .orderBy(desc(pgSchema.memoryReviewRequestsPostgres.createdAt))
+        .limit(20),
+  )) as MemoryReviewRow[];
   return rows.map(toMemoryReview);
 }
 export async function createPendingMemoryReview(input: {

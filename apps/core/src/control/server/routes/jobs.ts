@@ -49,6 +49,7 @@ import {
   TRIGGER_RATE_LIMIT_PER_JOB,
 } from '../rate-limit.js';
 import { parseJobRoute, parseTriggerWaitRoute } from '../route-parser.js';
+import { nowMs as currentTimeMs } from '../../../shared/time/datetime.js';
 
 function sendApplicationError(res: ServerResponse, error: unknown): boolean {
   if (!(error instanceof ApplicationError)) return false;
@@ -593,12 +594,12 @@ export async function handleJobRoutes(
       300_000,
       Math.max(1000, Number(url.searchParams.get('timeoutMs') || 60_000)),
     );
-    const startedAt = Date.now();
+    const startedAt = currentTimeMs();
     try {
       const result = await createJobManagementService().waitForTrigger({
         appId: auth.appId,
         triggerId,
-        timeoutMs: Math.max(0, timeoutMs - (Date.now() - startedAt)),
+        timeoutMs: Math.max(0, timeoutMs - (currentTimeMs() - startedAt)),
       });
       sendJson(res, 200, result);
       return true;

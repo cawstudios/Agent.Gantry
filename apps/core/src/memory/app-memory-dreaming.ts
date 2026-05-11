@@ -19,6 +19,7 @@ import {
   parseStructuredEvidenceCandidate,
   validatePromotableCandidate,
 } from './app-memory-dreaming-candidate-guardrails.js';
+import { nowIso as currentIso } from '../shared/time/datetime.js';
 type Db = NodePgDatabase<typeof pgSchema>;
 type MemoryItemRow = typeof pgSchema.memoryItemsPostgres.$inferSelect;
 // prettier-ignore
@@ -26,7 +27,7 @@ type CreatePendingReview = (p: MemoryLifecycleProposal, db?: Db) => Promise<stri
 // prettier-ignore
 type DreamEmbeddingResult = { status: 'stored' | 'disabled' | 'retryable'; reason?: string };
 function nowIso(): string {
-  return new Date().toISOString();
+  return currentIso();
 }
 function parseJsonArray(value: string | null | undefined): string[] {
   if (!value) return [];
@@ -39,6 +40,7 @@ function parseJsonArray(value: string | null | undefined): string[] {
     return [];
   }
 }
+
 function parseJsonObject(
   value: string | null | undefined,
 ): Record<string, unknown> {

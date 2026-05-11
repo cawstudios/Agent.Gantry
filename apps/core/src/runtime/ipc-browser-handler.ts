@@ -5,6 +5,7 @@ import { BROWSER_IPC_ACTIONS, type BrowserIpcAction } from '@myclaw/contracts';
 
 import { DATA_DIR } from '../config/index.js';
 import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
+import { nowMs } from '../shared/time/datetime.js';
 import {
   ensurePrivateDirSync,
   writePrivateFileSync,
@@ -15,7 +16,12 @@ import {
   ensureBrowserReady,
   getBrowserStatus,
 } from './browser-capability.js';
-import { ensureBrowserTarget } from './browser-cdp-targets.js';
+import {
+  type BrowserCdpTargetOptions,
+  ensureBrowserTarget,
+  foregroundBrowserTarget,
+  resizeHeadedBrowserWindow,
+} from './browser-cdp-targets.js';
 import { type IpcDomainContext } from './ipc-domain-types.js';
 import type { CredentialBrokerHealth } from '../domain/models/credentials.js';
 import { memoryAgentIdForGroupFolder } from '../memory/app-memory-boundaries.js';
@@ -42,6 +48,7 @@ type BrowserContext = Pick<
   callBrowserTool?: IpcDomainContext['deps']['callBrowserTool'];
   closeBrowserToolBackends?: IpcDomainContext['deps']['closeBrowserToolBackends'];
   timeoutMs?: number;
+  deadlineAtMs?: number;
 };
 type BrowserStatusPayload = Record<string, unknown> & {
   brokerHealthy?: boolean;
@@ -49,10 +56,28 @@ type BrowserStatusPayload = Record<string, unknown> & {
   warning?: string;
 };
 const BROKER_HEALTH_CACHE_MS = 5_000;
+const MIN_BROWSER_BACKEND_TIMEOUT_MS = 1_000;
+const MAX_HEADED_BROWSER_RESIZE_DIMENSION = 8_192;
 const brokerHealthCache = new Map<
   string,
   { expiresAt: number; value: CredentialBrokerHealth | undefined }
 >();
+const POINTER_ACTIONS = new Set<BrowserIpcAction>([
+  'browser_click',
+  'browser_hover',
+  'browser_drag',
+  'browser_drop',
+  'browser_select_option',
+  'browser_fill_form',
+]);
+const FOREGROUND_BEFORE_DISPATCH_ACTIONS = new Set<BrowserIpcAction>([
+  ...POINTER_ACTIONS,
+  'browser_take_screenshot',
+]);
+
+interface BrowserIpcDeadline {
+  deadlineAtMs?: number;
+}
 
 function toOptionalBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
@@ -102,6 +127,64 @@ function sanitizeUrlForLog(value: unknown): string | undefined {
   }
 }
 
+function browserResizeDimensions(payload: Record<string, unknown>): {
+  width: number;
+  height: number;
+} {
+  const width = toOptionalNumber(payload.width, { min: 1 });
+  const height = toOptionalNumber(payload.height, { min: 1 });
+  if (width === undefined || height === undefined) {
+    throw new Error('browser_resize requires positive width and height');
+  }
+  return {
+    width: Math.min(Math.trunc(width), MAX_HEADED_BROWSER_RESIZE_DIMENSION),
+    height: Math.min(Math.trunc(height), MAX_HEADED_BROWSER_RESIZE_DIMENSION),
+  };
+}
+
+function createBrowserIpcDeadline(
+  timeoutMs: number | undefined,
+  deadlineAtMs: number | undefined,
+): BrowserIpcDeadline {
+  if (typeof deadlineAtMs === 'number' && Number.isFinite(deadlineAtMs)) {
+    return { deadlineAtMs: Math.trunc(deadlineAtMs) };
+  }
+  if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs)) return {};
+  return { deadlineAtMs: nowMs() + Math.max(1, Math.trunc(timeoutMs)) };
+}
+
+function browserIpcRemainingMs(
+  deadline: BrowserIpcDeadline,
+): number | undefined {
+  if (deadline.deadlineAtMs === undefined) return undefined;
+  const remainingMs = Math.trunc(deadline.deadlineAtMs - nowMs());
+  if (remainingMs <= 0) {
+    throw new Error('Browser IPC deadline exceeded');
+  }
+  return remainingMs;
+}
+
+function browserCdpOptions(
+  deadline: BrowserIpcDeadline,
+): BrowserCdpTargetOptions | undefined {
+  if (deadline.deadlineAtMs === undefined) return undefined;
+  browserIpcRemainingMs(deadline);
+  return { deadlineAtMs: deadline.deadlineAtMs };
+}
+
+function browserBackendTimeoutMs(
+  deadline: BrowserIpcDeadline,
+): number | undefined {
+  const remainingMs = browserIpcRemainingMs(deadline);
+  if (
+    remainingMs !== undefined &&
+    remainingMs < MIN_BROWSER_BACKEND_TIMEOUT_MS
+  ) {
+    throw new Error('Browser IPC deadline exceeded before backend dispatch');
+  }
+  return remainingMs;
+}
+
 async function inspectToolCapabilityBrokerHealth(
   context: BrowserContext,
 ): Promise<CredentialBrokerHealth | undefined> {
@@ -141,12 +224,12 @@ async function cachedToolCapabilityBrokerHealth(
   const brokerProfile = context.getCredentialBrokerProfile?.() || 'default';
   const cacheKey = `${context.sourceAgentFolder}:${brokerProfile}`;
   const cached = brokerHealthCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached && cached.expiresAt > nowMs()) return cached.value;
   const value = await inspectToolCapabilityBrokerHealth(context);
   if (value?.status !== 'fail') {
     brokerHealthCache.set(cacheKey, {
       value,
-      expiresAt: Date.now() + BROKER_HEALTH_CACHE_MS,
+      expiresAt: nowMs() + BROKER_HEALTH_CACHE_MS,
     });
   }
   return value;
@@ -195,6 +278,10 @@ async function handleBrowserToolAction(
   request: BrowserRequest,
   context: BrowserContext,
 ): Promise<BrowserResponse> {
+  const deadline = createBrowserIpcDeadline(
+    context.timeoutMs,
+    context.deadlineAtMs,
+  );
   const profileName = getProfileNameFromPayload(request.payload, context);
   switch (request.action) {
     case 'browser_status':
@@ -215,6 +302,7 @@ async function handleBrowserToolAction(
   }
   switch (request.action) {
     case 'browser_launch': {
+      browserIpcRemainingMs(deadline);
       const status = await ensureBrowserReady({
         profileName,
         headless: toOptionalBoolean(request.payload.headless),
@@ -232,26 +320,78 @@ async function handleBrowserToolAction(
       };
     }
     case 'browser_close': {
+      browserIpcRemainingMs(deadline);
       const closed = await closeBrowser(profileName);
       await context.closeBrowserToolBackends?.(profileName);
       return { ok: true, data: closed };
     }
   }
 
+  browserIpcRemainingMs(deadline);
+  const session = await ensureBrowserReady({ profileName });
+  const cdpOptions = browserCdpOptions(deadline);
+  const targetId = session.port
+    ? cdpOptions
+      ? await ensureBrowserTarget(session.port, cdpOptions)
+      : await ensureBrowserTarget(session.port)
+    : undefined;
+  if (request.action === 'browser_resize' && session.headless === false) {
+    if (!session.port || !targetId) {
+      return {
+        ok: false,
+        error: 'Browser CDP target is unavailable for headed resize.',
+      };
+    }
+    const { width, height } = browserResizeDimensions(request.payload);
+    const resizeOptions = browserCdpOptions(deadline);
+    if (resizeOptions) {
+      await resizeHeadedBrowserWindow(
+        session.port,
+        targetId,
+        width,
+        height,
+        resizeOptions,
+      );
+    } else {
+      await resizeHeadedBrowserWindow(session.port, targetId, width, height);
+    }
+    return {
+      ok: true,
+      data: {
+        content: [
+          {
+            type: 'text',
+            text: `Browser window resized to ${width}x${height}.`,
+          },
+        ],
+      },
+    };
+  }
   if (!context.callBrowserTool) {
     return {
       ok: false,
       error: 'Browser action backend is unavailable.',
     };
   }
-  const session = await ensureBrowserReady({ profileName });
-  if (session.port) await ensureBrowserTarget(session.port);
   console.info('Browser tool action started', {
     sourceAgentFolder: context.sourceAgentFolder,
     profileName,
     toolName: request.action,
     url: sanitizeUrlForLog(request.payload.url),
   });
+  if (
+    session.port &&
+    targetId &&
+    FOREGROUND_BEFORE_DISPATCH_ACTIONS.has(request.action)
+  ) {
+    const foregroundOptions = browserCdpOptions(deadline);
+    if (foregroundOptions) {
+      await foregroundBrowserTarget(session.port, targetId, foregroundOptions);
+    } else {
+      await foregroundBrowserTarget(session.port, targetId);
+    }
+  }
+  const backendTimeoutMs = browserBackendTimeoutMs(deadline);
   const result = await context.callBrowserTool({
     toolName: request.action,
     arguments: request.payload,
@@ -262,7 +402,7 @@ async function handleBrowserToolAction(
       context.sourceAgentFolder,
       'extra',
     ),
-    timeoutMs: context.timeoutMs,
+    timeoutMs: backendTimeoutMs,
   });
   console.info('Browser tool action completed', {
     sourceAgentFolder: context.sourceAgentFolder,

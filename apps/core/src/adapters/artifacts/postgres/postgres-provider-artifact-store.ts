@@ -15,6 +15,10 @@ import type {
 import { assertSafeProviderSessionId } from '../../../domain/sessions/provider-session-id.js';
 import * as pgSchema from '../../storage/postgres/schema/schema.js';
 import type { CanonicalDb } from '../../storage/postgres/repositories/canonical-graph-repository.postgres.js';
+import {
+  nowIso,
+  nowMs as currentTimeMs,
+} from '../../../shared/time/datetime.js';
 
 type ArtifactRow =
   typeof pgSchema.providerSessionArtifactsPostgres.$inferSelect;
@@ -78,7 +82,7 @@ function writeFileAtomic(filePath: string, content: Buffer): void {
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = path.join(
     dir,
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
+    `.${path.basename(filePath)}.${process.pid}.${currentTimeMs()}.tmp`,
   );
   fs.writeFileSync(tmpPath, content, { mode: 0o600 });
   fs.renameSync(tmpPath, filePath);
@@ -140,7 +144,7 @@ export class PostgresProviderArtifactStore implements ProviderArtifactStore {
       input.id ??
       (`provider-session-artifact:${randomUUID()}` as ProviderSessionArtifactId);
     const storageType = input.storageType ?? this.defaultStorageType;
-    const createdAt = input.createdAt ?? new Date().toISOString();
+    const createdAt = input.createdAt ?? nowIso();
     const contentHash = sha256(content);
     const metadata = {
       ...(input.metadata ?? {}),
@@ -314,7 +318,7 @@ export class PostgresProviderArtifactStore implements ProviderArtifactStore {
 
   async markDeleted(
     ref: ProviderSessionArtifactId | ProviderSessionArtifact,
-    deletedAt = new Date().toISOString(),
+    deletedAt = nowIso(),
   ): Promise<void> {
     const id = typeof ref === 'string' ? ref : ref.id;
     await this.db

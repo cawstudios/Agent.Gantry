@@ -34,6 +34,7 @@ import {
   readProgressStateEntries,
   writeProgressStateEntries,
 } from '../progress-state-file.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 export abstract class TelegramChannelState implements ChannelAdapter {
   name = 'telegram';
@@ -309,7 +310,7 @@ export abstract class TelegramChannelState implements ChannelAdapter {
       return false;
     }
 
-    const now = Date.now();
+    const now = currentTimeMs();
     const shouldFlush =
       options.done ||
       !state.messageId ||

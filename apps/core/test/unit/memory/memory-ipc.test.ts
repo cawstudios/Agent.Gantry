@@ -53,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.resetModules();
   try {
     const { AppMemoryService } =
@@ -205,7 +206,7 @@ describe('memory IPC provider integration', () => {
     vi.doMock('@core/memory/app-memory-service.js', () => ({
       AppMemoryService: {
         getInstance: () => ({
-          search,
+          searchReadOnly: search,
         }),
         resetForTest: () => undefined,
       },
@@ -226,13 +227,16 @@ describe('memory IPC provider integration', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(search).toHaveBeenCalledWith(
+    expect(search.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         query: 'status',
         appId: 'default',
         agentId: 'agent:main-group',
         groupId: 'main-group',
       }),
+    );
+    expect(search.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     vi.doUnmock('@core/memory/app-memory-service.js');
   });
@@ -243,7 +247,7 @@ describe('memory IPC provider integration', () => {
     vi.doMock('@core/memory/app-memory-service.js', () => ({
       AppMemoryService: {
         getInstance: () => ({
-          search,
+          searchReadOnly: search,
         }),
         resetForTest: () => undefined,
       },
@@ -262,13 +266,16 @@ describe('memory IPC provider integration', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(search).toHaveBeenCalledWith(
+    expect(search.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         query: 'status',
         agentId: 'agent:main-group',
         groupId: 'main-group',
         threadId: 'trusted-thread',
       }),
+    );
+    expect(search.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     vi.doUnmock('@core/memory/app-memory-service.js');
   });
@@ -279,7 +286,7 @@ describe('memory IPC provider integration', () => {
     vi.doMock('@core/memory/app-memory-service.js', () => ({
       AppMemoryService: {
         getInstance: () => ({
-          search,
+          searchReadOnly: search,
         }),
         resetForTest: () => undefined,
       },
@@ -298,8 +305,11 @@ describe('memory IPC provider integration', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(search).toHaveBeenCalledWith(
+    expect(search.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({ userId: 'trusted-user' }),
+    );
+    expect(search.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     vi.doUnmock('@core/memory/app-memory-service.js');
   });
@@ -500,7 +510,7 @@ describe('memory IPC provider integration', () => {
     vi.doMock('@core/memory/app-memory-service.js', () => ({
       AppMemoryService: {
         getInstance: () => ({
-          search: vi.fn(async () => []),
+          searchReadOnly: vi.fn(async () => []),
         }),
       },
     }));
@@ -606,12 +616,20 @@ describe('processMemoryRequest additional branches', () => {
     const demote =
       overrides.demote ||
       vi.fn().mockResolvedValue({ id: 'mem-1', status: 'demoted' });
+    const searchReadOnly =
+      overrides.searchReadOnly ||
+      overrides.search ||
+      vi.fn().mockResolvedValue([]);
+    const recordRecallEvents =
+      overrides.recordRecallEvents || vi.fn().mockResolvedValue(undefined);
     const list = overrides.list || vi.fn().mockResolvedValue([]);
     const dreamingStatus =
       overrides.dreamingStatus || vi.fn().mockResolvedValue([]);
     return {
       getInstance: () => ({
-        search: vi.fn(),
+        search: searchReadOnly,
+        searchReadOnly,
+        recordRecallEvents,
         list,
         save,
         patch,
@@ -866,8 +884,447 @@ describe('processMemoryRequest additional branches', () => {
         subjectType: 'channel',
         subjectId: 'conversation:sl:C123',
         threadId: 'thread-7',
+        signal: expect.any(AbortSignal),
       }),
     );
+  });
+
+  it('returns unavailable memory_search without calling storage when the IPC deadline is too close', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    const search = vi.fn().mockResolvedValue([{ id: 'mem-1' }]);
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ search }),
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const response = await processMemoryRequest(
+      {
+        requestId: 'req-search-deadline',
+        action: 'memory_search',
+        payload: { query: 'deploy' },
+        deadlineAtMs: fixedNowMs + 500,
+      },
+      'team',
+      false,
+    );
+
+    expect(response.ok).toBe(true);
+    expect(search).not.toHaveBeenCalled();
+    expect(response.data).toMatchObject({
+      status: 'unavailable',
+      unavailable_reason: 'deadline_exceeded',
+      results: [],
+    });
+  });
+
+  it('returns unavailable when an already-started memory_search exceeds the IPC deadline', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    let resolveSearch: ((value: unknown[]) => void) | undefined;
+    const search = vi.fn(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolveSearch = resolve;
+        }),
+    );
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ search }),
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const responsePromise = processMemoryRequest(
+      {
+        requestId: 'req-search-slow-deadline',
+        action: 'memory_search',
+        payload: { query: 'deploy' },
+        deadlineAtMs: fixedNowMs + 1_200,
+      },
+      'team',
+      false,
+    );
+
+    expect(search).toHaveBeenCalledTimes(1);
+    const searchSignal = search.mock.calls[0]?.[1]?.signal as
+      | AbortSignal
+      | undefined;
+    expect(searchSignal).toBeInstanceOf(AbortSignal);
+    expect(searchSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(201);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(true);
+    expect(searchSignal?.aborted).toBe(true);
+    expect(response.data).toMatchObject({
+      status: 'unavailable',
+      unavailable_reason: 'deadline_exceeded',
+      results: [],
+    });
+    resolveSearch?.([]);
+  });
+
+  it('passes a deadline abort signal to searchReadOnly and aborts in-flight work on timeout', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    let capturedSignal: AbortSignal | undefined;
+    let capturedStatementTimeoutMs: number | undefined;
+    let backgroundAborted = false;
+    const searchReadOnly = vi.fn(
+      (
+        _input,
+        options?: { signal?: AbortSignal; statementTimeoutMs?: number },
+      ) => {
+        capturedSignal =
+          options?.signal ?? (_input as { signal?: AbortSignal }).signal;
+        capturedStatementTimeoutMs = options?.statementTimeoutMs;
+        capturedSignal?.addEventListener('abort', () => {
+          backgroundAborted = true;
+        });
+        return new Promise<unknown[]>(() => undefined);
+      },
+    );
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ searchReadOnly }),
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const responsePromise = processMemoryRequest(
+      {
+        requestId: 'req-search-abort-signal',
+        action: 'memory_search',
+        payload: { query: 'deploy' },
+        deadlineAtMs: fixedNowMs + 1_200,
+      },
+      'team',
+      false,
+    );
+
+    expect(searchReadOnly).toHaveBeenCalledTimes(1);
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal?.aborted).toBe(false);
+    expect(capturedStatementTimeoutMs).toBe(200);
+
+    await vi.advanceTimersByTimeAsync(201);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(true);
+    expect(response.data).toMatchObject({
+      status: 'unavailable',
+      unavailable_reason: 'deadline_exceeded',
+      results: [],
+    });
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(backgroundAborted).toBe(true);
+  });
+
+  it('records recall events after successful memory_search without a deadline', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    const searchResult = {
+      item: {
+        id: 'mem-1',
+        key: 'decision:deploy',
+        value: 'Deploy after tests pass.',
+      },
+      score: 0.9,
+      lexicalScore: 0.9,
+      vectorScore: 0,
+      reasons: ['lexical'],
+    };
+    const searchReadOnly = vi.fn().mockResolvedValue([searchResult]);
+    const recordRecallEvents = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({
+        searchReadOnly,
+        recordRecallEvents,
+      }),
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const response = await processMemoryRequest(
+      {
+        requestId: 'req-search-recall',
+        action: 'memory_search',
+        payload: { query: 'deploy' },
+      },
+      'team',
+      false,
+    );
+
+    expect(response.ok).toBe(true);
+    expect(searchReadOnly).toHaveBeenCalledTimes(1);
+    expect(recordRecallEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ query: 'deploy' }),
+      [searchResult],
+    );
+  });
+
+  it('skips recall event writes for deadline-bound memory_search responses', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    const searchResult = {
+      item: {
+        id: 'mem-1',
+        key: 'decision:deploy',
+        value: 'Deploy after tests pass.',
+      },
+      score: 0.9,
+      lexicalScore: 0.9,
+      vectorScore: 0,
+      reasons: ['lexical'],
+    };
+    const searchReadOnly = vi.fn().mockResolvedValue([searchResult]);
+    const recordRecallEvents = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({
+        searchReadOnly,
+        recordRecallEvents,
+      }),
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const response = await processMemoryRequest(
+      {
+        requestId: 'req-search-recall-deadline',
+        action: 'memory_search',
+        payload: { query: 'deploy' },
+        deadlineAtMs: fixedNowMs + 5_000,
+      },
+      'team',
+      false,
+    );
+
+    expect(response.ok).toBe(true);
+    expect(searchReadOnly).toHaveBeenCalledTimes(1);
+    expect(recordRecallEvents).not.toHaveBeenCalled();
+  });
+
+  it('returns unavailable memory_save without calling storage when the IPC deadline is too close', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    const saveMemory = vi.fn().mockResolvedValue({ id: 'mem-1' });
+    const getInstance = vi.fn(() => ({
+      save: saveMemory,
+    }));
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
+        getInstance,
+        resetForTest: () => undefined,
+      },
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const response = await processMemoryRequest(
+      {
+        requestId: 'req-save-deadline',
+        action: 'memory_save',
+        payload: {
+          key: 'decision:deadline',
+          value: 'Do not start writes when the deadline is too close.',
+        },
+        deadlineAtMs: fixedNowMs + 500,
+      },
+      'team',
+      false,
+    );
+
+    expect(response.ok).toBe(true);
+    expect(getInstance).not.toHaveBeenCalled();
+    expect(saveMemory).not.toHaveBeenCalled();
+    expect(response.data).toMatchObject({
+      status: 'unavailable',
+      unavailable_reason: 'deadline_exceeded',
+    });
+  });
+
+  it('does not return deadline_exceeded while an accepted memory_save is still committing', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    let resolveSave: ((value: unknown) => void) | undefined;
+    let settled = false;
+    const saveMemory = vi.fn(
+      () =>
+        new Promise<unknown>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ save: saveMemory }),
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const responsePromise = processMemoryRequest(
+      {
+        requestId: 'req-save-slow-deadline',
+        action: 'memory_save',
+        payload: {
+          key: 'decision:deadline',
+          value: 'Do not report unavailable while a write is still pending.',
+        },
+        deadlineAtMs: fixedNowMs + 1_200,
+      },
+      'team',
+      false,
+    ).then((response) => {
+      settled = true;
+      return response;
+    });
+
+    expect(saveMemory).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(settled).toBe(false);
+
+    resolveSave?.({ id: 'mem-accepted' });
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(true);
+    expect(response.data).toEqual({ memory: { id: 'mem-accepted' } });
+  });
+
+  it('returns unavailable continuity summary without service work when the IPC deadline is too close', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    const continuitySummary = vi.fn().mockResolvedValue({
+      overall_status: 'complete',
+    });
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ continuitySummary }),
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const response = await processMemoryRequest(
+      {
+        requestId: 'req-continuity-deadline',
+        action: 'continuity_summary',
+        payload: {},
+        context: { chatJid: 'sl:C123', threadId: 'thread-7' },
+        deadlineAtMs: fixedNowMs + 500,
+      },
+      'team',
+      false,
+    );
+
+    expect(response.ok).toBe(true);
+    expect(continuitySummary).not.toHaveBeenCalled();
+    expect(response.data).toMatchObject({
+      continuity: {
+        overall_status: 'unavailable',
+        sections: {
+          memory_service: {
+            status: 'unavailable',
+            reason: 'deadline_exceeded',
+          },
+        },
+      },
+    });
+  });
+
+  it('passes a deadline abort signal to continuitySummary and aborts in-flight work on timeout', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    let capturedSignal: AbortSignal | undefined;
+    let capturedStatementTimeoutMs: number | undefined;
+    let backgroundAborted = false;
+    const continuitySummary = vi.fn(
+      (
+        _input,
+        options?: { signal?: AbortSignal; statementTimeoutMs?: number },
+      ) => {
+        capturedSignal =
+          options?.signal ?? (_input as { signal?: AbortSignal }).signal;
+        capturedStatementTimeoutMs =
+          options?.statementTimeoutMs ??
+          (_input as { statementTimeoutMs?: number }).statementTimeoutMs;
+        capturedSignal?.addEventListener('abort', () => {
+          backgroundAborted = true;
+        });
+        return new Promise(() => undefined);
+      },
+    );
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ continuitySummary }),
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const responsePromise = processMemoryRequest(
+      {
+        requestId: 'req-continuity-abort-signal',
+        action: 'continuity_summary',
+        payload: {},
+        context: { chatJid: 'sl:C123', threadId: 'thread-7' },
+        deadlineAtMs: fixedNowMs + 1_200,
+      },
+      'team',
+      false,
+    );
+
+    expect(continuitySummary).toHaveBeenCalledTimes(1);
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal?.aborted).toBe(false);
+    expect(capturedStatementTimeoutMs).toBe(200);
+
+    await vi.advanceTimersByTimeAsync(201);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(true);
+    expect(response.data).toMatchObject({
+      continuity: {
+        overall_status: 'unavailable',
+        sections: {
+          memory_service: {
+            status: 'unavailable',
+            reason: 'deadline_exceeded',
+          },
+        },
+      },
+    });
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(backgroundAborted).toBe(true);
+  });
+
+  it('rejects expired memory IPC requests before initializing memory service', async () => {
+    vi.resetModules();
+    const getInstance = vi.fn();
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
+        getInstance,
+        resetForTest: () => undefined,
+      },
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const response = await processMemoryRequest(
+      {
+        requestId: 'req-expired',
+        action: 'memory_search',
+        payload: { query: 'deploy' },
+        deadlineAtMs: Date.now() - 1,
+      },
+      'team',
+      false,
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('memory IPC request expired');
+    expect(getInstance).not.toHaveBeenCalled();
   });
 
   it('rejects reviewed patch actions when the host allowlist omits them', async () => {
@@ -1033,7 +1490,64 @@ describe('processMemoryRequest additional branches', () => {
         subjectId: 'conversation:sl:C123',
         threadId: 'thread-7',
       }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('passes a deadline abort signal to pending review reads and aborts in-flight work on timeout', async () => {
+    const fixedNowMs = Date.parse('2026-05-11T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNowMs));
+    vi.resetModules();
+    let capturedSignal: AbortSignal | undefined;
+    let capturedStatementTimeoutMs: number | undefined;
+    let backgroundAborted = false;
+    const listPendingReviews = vi.fn(
+      (
+        _input,
+        options?: { signal?: AbortSignal; statementTimeoutMs?: number },
+      ) => {
+        capturedSignal = options?.signal;
+        capturedStatementTimeoutMs = options?.statementTimeoutMs;
+        capturedSignal?.addEventListener('abort', () => {
+          backgroundAborted = true;
+        });
+        return new Promise(() => undefined);
+      },
+    );
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: mockMemoryService({ listPendingReviews }),
+    }));
+
+    const { processMemoryRequest } = await import('@core/memory/memory-ipc.js');
+    const responsePromise = processMemoryRequest(
+      {
+        requestId: 'req-review-pending-abort-signal',
+        action: 'memory_review_pending',
+        allowedActions: ['memory_review_pending'],
+        payload: {},
+        context: { chatJid: 'sl:C123', threadId: 'thread-7' },
+        deadlineAtMs: fixedNowMs + 1_200,
+      },
+      'team',
+      false,
+    );
+
+    expect(listPendingReviews).toHaveBeenCalledTimes(1);
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal?.aborted).toBe(false);
+    expect(capturedStatementTimeoutMs).toBe(200);
+
+    await vi.advanceTimersByTimeAsync(201);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(true);
+    expect(response.data).toMatchObject({
+      status: 'unavailable',
+      unavailable_reason: 'deadline_exceeded',
+    });
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(backgroundAborted).toBe(true);
   });
 
   it('applies memory review decisions for the trusted subject', async () => {
@@ -1259,7 +1773,7 @@ describe('processMemoryRequest additional branches', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(search).toHaveBeenCalledWith(
+    expect(search.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         query: 'deploy',
         appId: 'default',
@@ -1269,6 +1783,9 @@ describe('processMemoryRequest additional branches', () => {
         subjectTypes: ['channel'],
         includeCommon: false,
       }),
+    );
+    expect(search.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(search.mock.calls[0]?.[0]).not.toHaveProperty('groupId');
   });

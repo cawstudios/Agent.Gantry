@@ -16,6 +16,7 @@ import {
   type ContinuitySectionName,
   type ContinuitySectionStatus,
 } from './session-continuity-injection-status.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 const MEMORY_CONTEXT_TRUNCATION_LADDER = [4000, 2000, 1000, 500, 250, 120];
 const MYCLAW_CONTEXT_OPENING_PATTERN = /<\s*\/?\s*myclaw[_a-z0-9-]*/gi;
@@ -269,6 +270,34 @@ function scopedUnknown(value: unknown): string | null | undefined {
   return undefined;
 }
 
+function extractionPreview(metadata: unknown):
+  | {
+      extractionStatus?: string;
+      zeroFactReason?: string;
+    }
+  | undefined {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return undefined;
+  }
+  const extraction = (metadata as Record<string, unknown>).extraction;
+  if (
+    !extraction ||
+    typeof extraction !== 'object' ||
+    Array.isArray(extraction)
+  ) {
+    return undefined;
+  }
+  const record = extraction as Record<string, unknown>;
+  const extractionStatus = scopedString(record.status);
+  const zeroFactReason = scopedString(record.zeroFactReason);
+  return extractionStatus || zeroFactReason
+    ? {
+        ...(extractionStatus ? { extractionStatus } : {}),
+        ...(zeroFactReason ? { zeroFactReason } : {}),
+      }
+    : undefined;
+}
+
 function buildContinuitySections(input: {
   digests: HydratedSessionDigest[];
   memories: HydratedContextMemoryItem[];
@@ -291,6 +320,7 @@ function buildContinuitySections(input: {
         messageCount: digest.messageCount,
         runCount: digest.runCount,
         extractedFactCount: digest.extractedFactCount,
+        ...extractionPreview(digest.metadata),
         metadata: digest.metadata,
         createdAt: digest.createdAt,
       })),
@@ -410,6 +440,8 @@ function continuityStatusItemPreview(
       'messageCount',
       'runCount',
       'extractedFactCount',
+      'extractionStatus',
+      'zeroFactReason',
       'createdAt',
     ]);
   }
@@ -499,7 +531,7 @@ function recordHydrationStatus(input: {
   sections: HydratedContinuitySections;
 }) {
   recordSessionContinuityInjectionStatus({
-    injectedAt: new Date().toISOString(),
+    injectedAt: nowIso(),
     subject: continuitySubjectForSession(input.session, input.conversationKind),
     bytes: Buffer.byteLength(input.block, 'utf8'),
     maxBytes: input.maxChars,

@@ -17,6 +17,7 @@ import {
   getRuntimeEventExchange,
 } from '../adapters/storage/postgres/runtime-store.js';
 import { adaptSessionControlPort } from '../control/server/session-control-port.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 function canonicalTextMetadata(text: string): {
   lengthChars: number;
@@ -60,7 +61,7 @@ function createSessionInteractionModule(): SessionInteractionModule {
     ops: {} as never,
     repositories: {} as never,
     runtimeEvents: getRuntimeEventExchange(),
-    now: () => new Date().toISOString() as never,
+    now: () => nowIso() as never,
     createId: randomUUID,
     stableHash: (input) => createHash('sha256').update(input).digest('hex'),
   });

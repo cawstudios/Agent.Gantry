@@ -287,8 +287,10 @@ structured untrusted data with a system-level boundary policy that forbids
 treating memory records as instructions or tool-use authority.
 
 Automatic boundaries such as `/new`, manual `/compact`, and observed SDK
-compact boundaries capture continuation digests and extraction evidence. Durable
-memory auto-promotion remains dreaming-only.
+compact boundaries capture continuation digests and extraction evidence. `/new`
+resets scoped provider-session state first and finalizes the previous session's
+digest in the background, so a slow extractor cannot block starting fresh.
+Durable memory auto-promotion remains dreaming-only.
 
 Embedding work runs only during dreaming promotion/update passes. Runtime recall
 and context injection continue to use active memory items through lexical search

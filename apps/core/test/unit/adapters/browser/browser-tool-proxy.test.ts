@@ -4,12 +4,59 @@ import path from 'path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const browserMcpMocks = vi.hoisted(() => ({
+  clients: [] as Array<{
+    connect: ReturnType<typeof vi.fn>;
+    callTool: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+  }>,
+  transports: [] as Array<{
+    options: Record<string, unknown>;
+    close: ReturnType<typeof vi.fn>;
+  }>,
+  nextResult: undefined as unknown,
+  connectImpl: undefined as
+    | ((transport: unknown, options: unknown) => Promise<unknown>)
+    | undefined,
+}));
+
+vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
+  Client: vi.fn(function Client() {
+    const client = {
+      connect: vi.fn(async () => undefined),
+      callTool: vi.fn(
+        async () => browserMcpMocks.nextResult ?? { content: [] },
+      ),
+      close: vi.fn(async () => undefined),
+    };
+    if (browserMcpMocks.connectImpl) {
+      client.connect.mockImplementation(browserMcpMocks.connectImpl);
+    }
+    browserMcpMocks.clients.push(client);
+    return client;
+  }),
+}));
+
+vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
+  StdioClientTransport: vi.fn(function StdioClientTransport(
+    options: Record<string, unknown>,
+  ) {
+    const transport = {
+      options,
+      close: vi.fn(async () => undefined),
+    };
+    browserMcpMocks.transports.push(transport);
+    return transport;
+  }),
+}));
+
 vi.mock('@core/runtime/browser-cdp-targets.js', () => ({
   ensureBrowserTarget: vi.fn(async () => 'target-1'),
 }));
 
 import {
   callBrowserTool,
+  closeBrowserToolBackends,
   formatBackendError,
   normalizeBrowserToolResult,
   sanitizeBrowserTabsResult,
@@ -27,22 +74,371 @@ function tempRoot(): string {
   return root;
 }
 
-afterEach(() => {
+afterEach(async () => {
+  await closeBrowserToolBackends();
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
   }
+  browserMcpMocks.clients.splice(0);
+  browserMcpMocks.transports.splice(0);
+  browserMcpMocks.nextResult = undefined;
+  browserMcpMocks.connectImpl = undefined;
+  vi.useRealTimers();
 });
 
 describe('browser tool proxy file policy', () => {
   it('starts the private backend with a longer action timeout', () => {
-    const config = createBrowserActionMcpServerConfig('http://127.0.0.1:12345');
+    const config = createBrowserActionMcpServerConfig(
+      'http://127.0.0.1:12345',
+      { actionTimeoutMs: 45_000 },
+    );
 
     expect(config.args).toEqual(
-      expect.arrayContaining([
-        '--timeout-action',
-        String(BROWSER_ACTION_TIMEOUT_MS),
-      ]),
+      expect.arrayContaining(['--timeout-action', String(45_000)]),
     );
+  });
+
+  it('uses a stable backend action timeout while clamping each tool call', async () => {
+    const root = tempRoot();
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/' },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+      timeoutMs: 999,
+    });
+
+    expect(browserMcpMocks.transports[0]?.options.args).toEqual(
+      expect.arrayContaining(['--timeout-action', '120000']),
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenLastCalledWith(
+      {
+        name: 'browser_navigate',
+        arguments: { url: 'https://example.test/' },
+      },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    const timeout = browserMcpMocks.clients[0]?.callTool.mock.lastCall?.[2]
+      ?.timeout as number;
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(1_000);
+  });
+
+  it('defaults non-finite action timeouts before backend startup and tool calls', async () => {
+    const root = tempRoot();
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/' },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+      timeoutMs: Number.NaN,
+    });
+
+    expect(browserMcpMocks.transports[0]?.options.args).toEqual(
+      expect.arrayContaining(['--timeout-action', '120000']),
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenLastCalledWith(
+      {
+        name: 'browser_navigate',
+        arguments: { url: 'https://example.test/' },
+      },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    const timeout = browserMcpMocks.clients[0]?.callTool.mock.lastCall?.[2]
+      ?.timeout as number;
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(BROWSER_ACTION_TIMEOUT_MS);
+  });
+
+  it('reuses one backend across varied action timeouts', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/one' },
+      session,
+      fileAccessRoot: root,
+      timeoutMs: 2_000,
+    });
+    await callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/two' },
+      session,
+      fileAccessRoot: root,
+      timeoutMs: 2_000,
+    });
+    await callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/three' },
+      session,
+      fileAccessRoot: root,
+      timeoutMs: 120_001,
+    });
+    await callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/four' },
+      session,
+      fileAccessRoot: root,
+      timeoutMs: 999,
+    });
+    await callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/five' },
+      session,
+      fileAccessRoot: root,
+      timeoutMs: 1_000,
+    });
+
+    expect(browserMcpMocks.transports).toHaveLength(1);
+    expect(browserMcpMocks.transports[0]?.options.args).toEqual(
+      expect.arrayContaining(['--timeout-action', '120000']),
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledTimes(5);
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      1,
+      {
+        name: 'browser_navigate',
+        arguments: { url: 'https://example.test/one' },
+      },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    const firstTimeout = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[2]
+      ?.timeout as number;
+    expect(firstTimeout).toBeGreaterThan(0);
+    expect(firstTimeout).toBeLessThanOrEqual(2_000);
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      3,
+      {
+        name: 'browser_navigate',
+        arguments: { url: 'https://example.test/three' },
+      },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    const maxTimeout = browserMcpMocks.clients[0]?.callTool.mock.calls[2]?.[2]
+      ?.timeout as number;
+    expect(maxTimeout).toBeGreaterThan(0);
+    expect(maxTimeout).toBeLessThanOrEqual(120_000);
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      4,
+      {
+        name: 'browser_navigate',
+        arguments: { url: 'https://example.test/four' },
+      },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    const minTimeout = browserMcpMocks.clients[0]?.callTool.mock.calls[3]?.[2]
+      ?.timeout as number;
+    expect(minTimeout).toBeGreaterThan(0);
+    expect(minTimeout).toBeLessThanOrEqual(1_000);
+  });
+
+  it('subtracts backend startup time from the tool call timeout', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const root = tempRoot();
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+    browserMcpMocks.connectImpl = vi.fn(async () => {
+      vi.setSystemTime(1_750);
+      return undefined;
+    });
+
+    await callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/' },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+      timeoutMs: 2_000,
+    });
+
+    expect(browserMcpMocks.clients[0]?.connect).toHaveBeenCalledWith(
+      expect.anything(),
+      { timeout: 60_000 },
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenLastCalledWith(
+      {
+        name: 'browser_navigate',
+        arguments: { url: 'https://example.test/' },
+      },
+      undefined,
+      { timeout: 1_250 },
+    );
+  });
+
+  it('fails backend startup on the request deadline before tool dispatch', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const root = tempRoot();
+    let resolveConnect: (() => void) | undefined;
+    browserMcpMocks.connectImpl = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveConnect = () => resolve(undefined);
+        }),
+    );
+
+    const call = callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/' },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+      timeoutMs: 1_000,
+    });
+
+    const rejection = expect(call).rejects.toThrow(
+      'Browser backend startup timed out',
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejection;
+
+    expect(browserMcpMocks.clients[0]?.connect).toHaveBeenCalledWith(
+      expect.anything(),
+      { timeout: 60_000 },
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).not.toHaveBeenCalled();
+
+    resolveConnect?.();
+    await vi.runOnlyPendingTimersAsync();
+  });
+
+  it('does not let a short startup waiter poison a longer pending backend waiter', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const root = tempRoot();
+    let resolveConnect: (() => void) | undefined;
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+    browserMcpMocks.connectImpl = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveConnect = () => resolve(undefined);
+        }),
+    );
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    const shortCall = callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/short' },
+      session,
+      fileAccessRoot: root,
+      timeoutMs: 1_000,
+    });
+    const longCall = callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/long' },
+      session,
+      fileAccessRoot: root,
+      timeoutMs: 5_000,
+    });
+
+    const shortRejection = expect(shortCall).rejects.toThrow(
+      'Browser backend startup timed out',
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await shortRejection;
+
+    expect(browserMcpMocks.clients).toHaveLength(1);
+    expect(browserMcpMocks.clients[0]?.callTool).not.toHaveBeenCalled();
+
+    vi.setSystemTime(2_500);
+    resolveConnect?.();
+    await Promise.resolve();
+    await expect(longCall).resolves.toEqual({
+      content: [{ type: 'text', text: 'ok' }],
+    });
+
+    expect(browserMcpMocks.clients).toHaveLength(1);
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledWith(
+      {
+        name: 'browser_navigate',
+        arguments: { url: 'https://example.test/long' },
+      },
+      undefined,
+      { timeout: 3_500 },
+    );
+    expect(browserMcpMocks.clients[0]?.close).not.toHaveBeenCalled();
+  });
+
+  it('schedules idle cleanup for a backend that resolves after all startup waiters time out', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const root = tempRoot();
+    let resolveConnect: (() => void) | undefined;
+    browserMcpMocks.connectImpl = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveConnect = () => resolve(undefined);
+        }),
+    );
+
+    const call = callBrowserTool({
+      toolName: 'browser_navigate',
+      arguments: { url: 'https://example.test/' },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+      timeoutMs: 1_000,
+    });
+
+    const rejection = expect(call).rejects.toThrow(
+      'Browser backend startup timed out',
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejection;
+
+    resolveConnect?.();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(browserMcpMocks.clients[0]?.close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(browserMcpMocks.clients[0]?.close).toHaveBeenCalledTimes(1);
+    expect(browserMcpMocks.transports[0]?.close).toHaveBeenCalledTimes(1);
   });
 
   it('sanitizes filename on snapshot, console, and evaluate before backend dispatch', async () => {
@@ -117,7 +513,7 @@ describe('browser tool proxy file policy', () => {
     ).rejects.toThrow('cannot traverse symlinks');
   });
 
-  it('passes the run extra workspace as the backend default output directory', async () => {
+  it('passes backend config derived by the browser proxy', async () => {
     const root = tempRoot();
     const createBackendConfig = vi.fn(() => {
       throw new Error('stop before backend connect');
@@ -140,6 +536,7 @@ describe('browser tool proxy file policy', () => {
 
     expect(createBackendConfig).toHaveBeenCalledWith('http://127.0.0.1:12345', {
       outputDir: fs.realpathSync.native(root),
+      actionTimeoutMs: 120_000,
     });
   });
 
@@ -296,7 +693,7 @@ describe('browser tool proxy file policy', () => {
     });
   });
 
-  it('removes internal Chrome targets from tab list responses without renumbering visible tabs', () => {
+  it('removes internal Chrome targets from tab list responses and renumbers visible tabs', () => {
     const result = sanitizeBrowserTabsResult({
       content: [
         {
@@ -335,7 +732,7 @@ describe('browser tool proxy file policy', () => {
           type: 'text',
           text: [
             '- 0: New Links | Hacker News https://news.ycombinator.com/newest',
-            '- 4: Example https://example.test/',
+            '- 1: Example https://example.test/',
           ].join('\n'),
         },
       ],
@@ -347,13 +744,466 @@ describe('browser tool proxy file policy', () => {
             url: 'https://news.ycombinator.com/newest',
           },
           {
-            index: 4,
+            index: 1,
             title: 'Example',
             url: 'https://example.test/',
           },
         ],
       },
     });
+  });
+
+  it('maps visible tab indices back to backend indices for select and close', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    browserMcpMocks.nextResult = {
+      content: [
+        {
+          type: 'text',
+          text: [
+            '- 0: New Links | Hacker News https://news.ycombinator.com/newest',
+            '- 1: New tab chrome://new-tab-page/',
+            '- 4: Example https://example.test/',
+          ].join('\n'),
+        },
+      ],
+      structuredContent: {
+        tabs: [
+          {
+            index: 0,
+            title: 'New Links | Hacker News',
+            url: 'https://news.ycombinator.com/newest',
+          },
+          { index: 1, title: 'New tab', url: 'chrome://new-tab-page/' },
+          { index: 4, title: 'Example', url: 'https://example.test/' },
+        ],
+      },
+    };
+
+    const listResult = await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    expect(listResult).toMatchObject({
+      structuredContent: {
+        tabs: [
+          { index: 0, url: 'https://news.ycombinator.com/newest' },
+          { index: 1, url: 'https://example.test/' },
+        ],
+      },
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: 'selected' }],
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'select', index: 1 },
+      session,
+      fileAccessRoot: root,
+    });
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'close', index: 0 },
+      session,
+      fileAccessRoot: root,
+    });
+
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      2,
+      { name: 'browser_tabs', arguments: { action: 'select', index: 4 } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      3,
+      { name: 'browser_tabs', arguments: { action: 'close', index: 0 } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    expect(
+      browserMcpMocks.clients[0]?.callTool.mock.calls[1]?.[2]?.timeout,
+    ).toBeGreaterThan(0);
+    expect(
+      browserMcpMocks.clients[0]?.callTool.mock.calls[1]?.[2]?.timeout,
+    ).toBeLessThanOrEqual(BROWSER_ACTION_TIMEOUT_MS);
+  });
+
+  it('invalidates tab mappings after close without a fresh structured tab list', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: '- 4: Example https://example.test/' }],
+      structuredContent: {
+        tabs: [{ index: 4, title: 'Example', url: 'https://example.test/' }],
+      },
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: 'closed' }],
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'close', index: 0 },
+      session,
+      fileAccessRoot: root,
+    });
+
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_tabs',
+        arguments: { action: 'select', index: 0 },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('requires a current tab list');
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates tab mappings after new without a fresh structured tab list', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: '- 4: Example https://example.test/' }],
+      structuredContent: {
+        tabs: [{ index: 4, title: 'Example', url: 'https://example.test/' }],
+      },
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: 'opened' }],
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'new' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_tabs',
+        arguments: { action: 'close', index: 0 },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('requires a current tab list');
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('replaces tab mappings when close returns a fresh structured tab list', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: '- 4: Example https://example.test/' }],
+      structuredContent: {
+        tabs: [{ index: 4, title: 'Example', url: 'https://example.test/' }],
+      },
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: '- 9: Other https://other.test/' }],
+      structuredContent: {
+        tabs: [{ index: 9, title: 'Other', url: 'https://other.test/' }],
+      },
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'close', index: 0 },
+      session,
+      fileAccessRoot: root,
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: 'selected' }],
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'select', index: 0 },
+      session,
+      fileAccessRoot: root,
+    });
+
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      2,
+      { name: 'browser_tabs', arguments: { action: 'close', index: 4 } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      3,
+      { name: 'browser_tabs', arguments: { action: 'select', index: 9 } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+  });
+
+  it('fails numeric tab select and close before backend dispatch when no mapping exists', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_tabs',
+        arguments: { action: 'select', index: 0 },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('requires a current tab list');
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_tabs',
+        arguments: { action: 'close', index: 0 },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('requires a current tab list');
+
+    expect(browserMcpMocks.clients).toHaveLength(0);
+  });
+
+  it('fails tab select and close before backend dispatch for non-finite or missing indexes', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    for (const action of ['select', 'close'] as const) {
+      for (const args of [
+        { action },
+        { action, index: '0' },
+        { action, index: null },
+        { action, index: Number.NaN },
+        { action, index: Infinity },
+        { action, index: 0.5 },
+      ]) {
+        await expect(
+          callBrowserTool({
+            toolName: 'browser_tabs',
+            arguments: args,
+            session,
+            fileAccessRoot: root,
+          }),
+        ).rejects.toThrow('requires an integer numeric index');
+      }
+    }
+
+    expect(browserMcpMocks.clients).toHaveLength(0);
+  });
+
+  it('fails numeric tab select and close before backend dispatch for unknown visible indices', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: '- 4: Example https://example.test/' }],
+      structuredContent: {
+        tabs: [{ index: 4, title: 'Example', url: 'https://example.test/' }],
+      },
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_tabs',
+        arguments: { action: 'select', index: 1 },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('is not visible');
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_tabs',
+        arguments: { action: 'close', index: 1 },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('is not visible');
+
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not leak raw backend tab indices from text-only tab lists', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    browserMcpMocks.nextResult = {
+      content: [
+        {
+          type: 'text',
+          text: [
+            '- 4: Example https://example.test/',
+            '- 9: Other https://other.test/',
+          ].join('\n'),
+        },
+      ],
+    };
+
+    const result = await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    expect(result).toEqual({
+      content: [
+        {
+          type: 'text',
+          text: 'Browser tab list failed closed because the backend did not return structured tab metadata.',
+        },
+      ],
+      isError: true,
+    });
+    expect(JSON.stringify(result)).not.toContain('- 4:');
+    expect(JSON.stringify(result)).not.toContain('- 9:');
+  });
+
+  it('keeps visible tab index mappings isolated per browser session', async () => {
+    const root = tempRoot();
+    const mainSession = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+    const childSession = {
+      running: true,
+      cdpReady: true,
+      port: 12346,
+      profileName: 'c-main',
+    };
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: '- 3: Main https://main.test/' }],
+      structuredContent: {
+        tabs: [{ index: 3, title: 'Main', url: 'https://main.test/' }],
+      },
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session: mainSession,
+      fileAccessRoot: root,
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: '- 8: Child https://child.test/' }],
+      structuredContent: {
+        tabs: [{ index: 8, title: 'Child', url: 'https://child.test/' }],
+      },
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session: childSession,
+      fileAccessRoot: root,
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: 'selected' }],
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'select', index: 0 },
+      session: mainSession,
+      fileAccessRoot: root,
+    });
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'select', index: 0 },
+      session: childSession,
+      fileAccessRoot: root,
+    });
+
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      2,
+      { name: 'browser_tabs', arguments: { action: 'select', index: 3 } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    const mainTimeout = browserMcpMocks.clients[0]?.callTool.mock.calls[1]?.[2]
+      ?.timeout as number;
+    expect(mainTimeout).toBeGreaterThan(0);
+    expect(mainTimeout).toBeLessThanOrEqual(BROWSER_ACTION_TIMEOUT_MS);
+    expect(browserMcpMocks.clients[1]?.callTool).toHaveBeenNthCalledWith(
+      2,
+      { name: 'browser_tabs', arguments: { action: 'select', index: 8 } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    const childTimeout = browserMcpMocks.clients[1]?.callTool.mock.calls[1]?.[2]
+      ?.timeout as number;
+    expect(childTimeout).toBeGreaterThan(0);
+    expect(childTimeout).toBeLessThanOrEqual(BROWSER_ACTION_TIMEOUT_MS);
   });
 
   it('names backend timeout failures distinctly from IPC timeout failures', () => {

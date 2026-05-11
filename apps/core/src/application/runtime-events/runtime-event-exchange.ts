@@ -6,6 +6,7 @@ import type {
 } from '../../domain/events/events.js';
 import type { RuntimeEventRepository } from '../../domain/ports/repositories.js';
 import { runtimeEventMatchesFilter } from '../../domain/events/runtime-event-filter.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 export interface RuntimeEventNotifier {
   notify(event: RuntimeEvent): Promise<void>;
@@ -65,7 +66,7 @@ class DurableRuntimeEventSubscription implements RuntimeEventSubscription {
   async next(options: { timeoutMs?: number } = {}): Promise<RuntimeEvent[]> {
     if (this.closed) return [];
     const timeoutMs = Math.max(0, options.timeoutMs ?? 30_000);
-    const deadline = Date.now() + timeoutMs;
+    const deadline = currentTimeMs() + timeoutMs;
 
     while (!this.closed) {
       const events = await this.repository.listRuntimeEvents({
@@ -76,7 +77,7 @@ class DurableRuntimeEventSubscription implements RuntimeEventSubscription {
         this.cursor = events[events.length - 1]!.eventId;
         return events;
       }
-      const remaining = deadline - Date.now();
+      const remaining = deadline - currentTimeMs();
       if (remaining <= 0) return [];
       await this.waitForWakeup(
         Math.min(remaining, MAX_SUBSCRIPTION_WAKE_WAIT_MS),

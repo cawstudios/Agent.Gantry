@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DEFAULT_AGENT_NAME } from '../shared/default-agent.js';
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
 export const DEFAULT_AGENT_CLI_NAME = DEFAULT_AGENT_NAME;
 export const DEFAULT_AGENT_FOLDER = 'main_agent';
@@ -38,7 +39,7 @@ export function allocateDefaultAgentFolder(
     const candidate = `${DEFAULT_AGENT_FOLDER}_${i}`;
     if (!used.has(candidate) && !hasOnDiskFolder(candidate)) return candidate;
   }
-  return `${DEFAULT_AGENT_FOLDER}_${Date.now()}`;
+  return `${DEFAULT_AGENT_FOLDER}_${currentTimeMs()}`;
 }
 
 export function displayAgentName(

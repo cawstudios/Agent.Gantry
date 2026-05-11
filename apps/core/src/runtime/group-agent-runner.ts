@@ -24,6 +24,7 @@ import {
 import { createRuntimeModelStatusAccess } from './model-status-store.js';
 import { recordRuntimeModelUsage } from './model-status-output.js';
 import { buildBoundedMemoryRecallQuery } from '../memory/app-memory-recall-query.js';
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 const DEFAULT_ASSISTANT_NAME = 'MyClaw';
 const DEFAULT_MODEL_ALIAS = 'opus';
 const MEMORY_REVIEW_APPROVER_CACHE_TTL_MS = 60_000;
@@ -96,7 +97,7 @@ async function memoryReviewerApproverAllowed(
   const hook = deps.channelRuntime.isControlApproverAllowed;
   if (!hook) return false;
   const key = `${conversationJid}\0${sourceAgentFolder}\0${userId}`;
-  const now = Date.now();
+  const now = currentTimeMs();
   const cached = memoryReviewApproverCache.get(key);
   if (cached && cached[1] > now) return cached[0];
   const allowed =
@@ -185,11 +186,19 @@ export function createGroupAgentRunner(input: {
       ) {
         return;
       }
-      await ops().setSession(group.folder, providerSessionId, sessionThreadId, {
-        conversationJid: chatJid,
-        conversationKind: group.conversationKind,
-        memoryUserId: options?.memoryContext?.userId,
-      });
+      const persisted = await ops().setSession(
+        group.folder,
+        providerSessionId,
+        sessionThreadId,
+        {
+          conversationJid: chatJid,
+          conversationKind: group.conversationKind,
+          memoryUserId: options?.memoryContext?.userId,
+          expectedAgentSessionId: turnContext.agentSessionId,
+          expectedAgentSessionResetAt: turnContext.agentSessionResetAt ?? null,
+        },
+      );
+      if (persisted === false) return;
       persistedProviderSessionIds.add(providerSessionId);
     };
     let defaultRuntimeModel: string | undefined;
@@ -347,6 +356,7 @@ export function createGroupAgentRunner(input: {
         conversationKind: group.conversationKind,
         memoryUserId: options?.memoryContext?.userId,
         agentSessionId: turnContext?.agentSessionId,
+        agentSessionResetAt: turnContext?.agentSessionResetAt ?? null,
         providerSessionId: persistedProviderSessionIds.has(
           output.newSessionId ?? latestProviderSessionId ?? '',
         )

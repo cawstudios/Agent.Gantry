@@ -51,18 +51,14 @@ import {
   isUniqueViolation,
   memoryContentHash,
 } from './app-memory-service-helpers.js';
-import {
-  createSqlThreadIdentityFilter,
-  nowIso,
-} from './app-memory-service-query-helpers.js';
+import { nowIso } from './app-memory-service-query-helpers.js';
 import {
   queryAppMemoryItems,
   recordAppMemoryRecallEvents,
+  toAppMemoryItems,
+  toAppMemorySearchResults,
 } from './app-memory-recall.js';
-import {
-  hasDreamingStatusSubjectScope,
-  summarizeDreamDecisions,
-} from './app-memory-service-dreaming.js';
+import { summarizeDreamDecisions } from './app-memory-service-dreaming.js';
 import { createEmbeddingProvider } from './memory-embeddings.js';
 import {
   DREAM_EMBEDDING_DEADLINE_MS,
@@ -83,6 +79,7 @@ import {
   deleteOwnedMemoryItem,
   findActiveMemoryByKey,
   getOwnedMemoryItem,
+  listDreamingStatuses,
 } from './app-memory-item-queries.js';
 import {
   buildAppMemoryContinuityStatus,
@@ -97,7 +94,6 @@ const APP_MEMORY_RECALL_DEPS = {
   },
   sqlOps: { and, asc, desc, eq, isNull, or, sql },
 } as const;
-const sqlThreadIdentityFilter = createSqlThreadIdentityFilter({ eq, isNull });
 export class AppMemoryService {
   private static singleton: AppMemoryService | null = null;
 
@@ -110,11 +106,7 @@ export class AppMemoryService {
     AppMemoryService.singleton = null;
   }
 
-  private readonly explicitDb: Db | null;
-
-  constructor(db?: Db) {
-    this.explicitDb = db ?? null;
-  }
+  constructor(private readonly explicitDb: Db | null = null) {}
 
   get db(): Db {
     if (this.explicitDb) return this.explicitDb;
@@ -271,19 +263,44 @@ export class AppMemoryService {
     }
   }
 
-  async list(input: AppMemorySearchInput = {}): Promise<AppMemoryItem[]> {
+  async list(
+    input: AppMemorySearchInput = {},
+    options: { signal?: AbortSignal; statementTimeoutMs?: number } = {},
+  ): Promise<AppMemoryItem[]> {
     if (!this.isEnabled()) return [];
     const rows = await queryAppMemoryItems(
       this.db,
       input,
       false,
       APP_MEMORY_RECALL_DEPS,
+      {
+        signal: options.signal,
+        statementTimeoutMs: options.statementTimeoutMs,
+      },
     );
-    return rows.map((row) => toAppItem(row.row));
+    return toAppMemoryItems(rows);
   }
 
-  async search(
+  async search(input: AppMemorySearchInput = {}) {
+    const results = await this.searchReadOnly(input);
+    await this.recordRecallEvents(input, results);
+    return results;
+  }
+
+  recordRecallEvents = (
+    input: AppMemorySearchInput,
+    results: AppMemorySearchResult[],
+  ) =>
+    recordAppMemoryRecallEvents(
+      this.db,
+      input,
+      results,
+      APP_MEMORY_RECALL_DEPS,
+    );
+
+  async searchReadOnly(
     input: AppMemorySearchInput = {},
+    options: { signal?: AbortSignal; statementTimeoutMs?: number } = {},
   ): Promise<AppMemorySearchResult[]> {
     if (!this.isEnabled()) return [];
     const rows = await queryAppMemoryItems(
@@ -291,21 +308,12 @@ export class AppMemoryService {
       input,
       true,
       APP_MEMORY_RECALL_DEPS,
+      {
+        signal: options.signal,
+        statementTimeoutMs: options.statementTimeoutMs,
+      },
     );
-    const results = rows.map((row) => ({
-      item: toAppItem(row.row),
-      score: row.score,
-      lexicalScore: row.lexicalScore,
-      vectorScore: row.vectorScore,
-      reasons: row.reasons,
-    }));
-    await recordAppMemoryRecallEvents(
-      this.db,
-      input,
-      results,
-      APP_MEMORY_RECALL_DEPS,
-    );
-    return results;
+    return toAppMemorySearchResults(rows);
   }
 
   async listForHydrationReadOnly(
@@ -319,7 +327,7 @@ export class AppMemoryService {
       APP_MEMORY_RECALL_DEPS,
       { threadScope: 'exact' },
     );
-    return rows.map((row) => toAppItem(row.row));
+    return toAppMemoryItems(rows);
   }
 
   async searchForHydrationReadOnly(
@@ -333,13 +341,7 @@ export class AppMemoryService {
       APP_MEMORY_RECALL_DEPS,
       { threadScope: 'exact' },
     );
-    return rows.map((row) => ({
-      item: toAppItem(row.row),
-      score: row.score,
-      lexicalScore: row.lexicalScore,
-      vectorScore: row.vectorScore,
-      reasons: row.reasons,
-    }));
+    return toAppMemorySearchResults(rows);
   }
 
   async patch(input: PatchAppMemoryInput): Promise<AppMemoryItem> {
@@ -458,7 +460,14 @@ export class AppMemoryService {
     return buildAppMemoryContinuityStatus(this, input);
   }
 
-  async continuitySummary(input: Partial<MemoryBoundaryContext> = {}) {
+  async continuitySummary(
+    input: Partial<MemoryBoundaryContext> & {
+      deadlineAtMs?: number;
+      nowMs?: number;
+      signal?: AbortSignal;
+      statementTimeoutMs?: number;
+    } = {},
+  ) {
     this.assertEnabled();
     return buildAppMemoryContinuitySummary(this, input);
   }
@@ -640,33 +649,10 @@ export class AppMemoryService {
       subjectType?: MemorySubjectType;
       subjectId?: string;
     } = {},
+    options: { signal?: AbortSignal; statementTimeoutMs?: number } = {},
   ): Promise<DreamingRunStatus[]> {
     if (!this.isEnabled()) return [];
-    const hasSubjectScope = hasDreamingStatusSubjectScope(input);
-    const subject = normalizeSubject(input);
-    const subjectFilters = hasSubjectScope
-      ? [
-          eq(pgSchema.memoryDreamRunsPostgres.subjectType, subject.subjectType),
-          eq(pgSchema.memoryDreamRunsPostgres.subjectId, subject.subjectId),
-          sqlThreadIdentityFilter(
-            pgSchema.memoryDreamRunsPostgres,
-            subject.threadId,
-          ),
-        ]
-      : [];
-    const rows = await this.db
-      .select()
-      .from(pgSchema.memoryDreamRunsPostgres)
-      .where(
-        and(
-          eq(pgSchema.memoryDreamRunsPostgres.appId, subject.appId),
-          eq(pgSchema.memoryDreamRunsPostgres.agentId, subject.agentId),
-          ...subjectFilters,
-        ),
-      )
-      .orderBy(desc(pgSchema.memoryDreamRunsPostgres.startedAt))
-      .limit(20);
-    return rows.map(toRun);
+    return listDreamingStatuses(this.db, input, options);
   }
 
   async listPendingReviews(
@@ -674,10 +660,18 @@ export class AppMemoryService {
       subjectType?: MemorySubjectType;
       subjectId?: string;
     } = {},
+    options: { signal?: AbortSignal; statementTimeoutMs?: number } = {},
   ): Promise<MemoryReviewRecord[]> {
     if (!this.isEnabled()) return [];
+    options.signal?.throwIfAborted();
     const subject = normalizeSubject(input);
-    return listPendingMemoryReviews({ db: this.db, subject });
+    const reviews = await listPendingMemoryReviews({
+      db: this.db,
+      subject,
+      statementTimeoutMs: options.statementTimeoutMs,
+    });
+    options.signal?.throwIfAborted();
+    return reviews;
   }
 
   async decideReview(
@@ -695,6 +689,5 @@ export class AppMemoryService {
     });
   }
 }
-
 // prettier-ignore
 export const _testAppMemory = { conversationIdForChannel, conflictingDreamPhases: pgSchema.conflictingDreamPhases, itemMatchesSubjectBoundary, normalizeSubject, subjectIdFor };

@@ -1,4 +1,5 @@
 import { getLastSessionContinuityInjectionStatus } from '../application/sessions/session-continuity-injection-status.js';
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { normalizeSubject } from './app-memory-boundaries.js';
 import type {
   AppMemoryItem,
@@ -7,15 +8,26 @@ import type {
   MemorySubjectType,
 } from './memory-types.js';
 type ContinuityMemoryPort = {
-  dreamingStatus(input?: ContinuityInput): Promise<ContinuityRun[]>;
-  listPendingReviews(input?: ContinuityInput): Promise<MemoryReviewRecord[]>;
+  dreamingStatus(
+    input?: ContinuityInput,
+    options?: { signal?: AbortSignal; statementTimeoutMs?: number },
+  ): Promise<ContinuityRun[]>;
+  listPendingReviews(
+    input?: ContinuityInput,
+    options?: { signal?: AbortSignal; statementTimeoutMs?: number },
+  ): Promise<MemoryReviewRecord[]>;
   list(
     input?: Partial<MemoryBoundaryContext> & { limit?: number },
+    options?: { signal?: AbortSignal; statementTimeoutMs?: number },
   ): Promise<AppMemoryItem[]>;
 };
 type ContinuityInput = Partial<MemoryBoundaryContext> & {
   subjectType?: MemorySubjectType;
   subjectId?: string;
+  deadlineAtMs?: number;
+  nowMs?: number;
+  signal?: AbortSignal;
+  statementTimeoutMs?: number;
 };
 type ContinuityRun = {
   completedAt?: string | null;
@@ -37,14 +49,41 @@ export async function buildAppMemoryContinuityStatus(
 }
 export async function buildAppMemoryContinuitySummary(
   memory: ContinuityMemoryPort,
-  input: Partial<MemoryBoundaryContext> = {},
+  input: ContinuityInput = {},
 ) {
   const subject = normalizeSubject(input);
-  const [memories, runs, reviews] = await Promise.all([
-    memory.list({ ...subject, limit: 100 }),
-    memory.dreamingStatus(subject),
-    memory.listPendingReviews(subject),
+  const startedAtMs = input.nowMs ?? currentTimeMs();
+  const [memoriesResult, runsResult, reviewsResult] = await Promise.all([
+    settleContinuitySection(
+      (signal, statementTimeoutMs) =>
+        memory.list({ ...subject, limit: 100 }, { signal, statementTimeoutMs }),
+      input.deadlineAtMs,
+      startedAtMs,
+      input.signal,
+      input.statementTimeoutMs,
+    ),
+    settleContinuitySection(
+      (signal, statementTimeoutMs) =>
+        memory.dreamingStatus(subject, { signal, statementTimeoutMs }),
+      input.deadlineAtMs,
+      startedAtMs,
+      input.signal,
+      input.statementTimeoutMs,
+    ),
+    settleContinuitySection(
+      (signal, statementTimeoutMs) =>
+        memory.listPendingReviews(subject, { signal, statementTimeoutMs }),
+      input.deadlineAtMs,
+      startedAtMs,
+      input.signal,
+      input.statementTimeoutMs,
+    ),
   ]);
+  const memories =
+    memoriesResult.status === 'fulfilled' ? memoriesResult.value : [];
+  const runs = runsResult.status === 'fulfilled' ? runsResult.value : [];
+  const reviews =
+    reviewsResult.status === 'fulfilled' ? reviewsResult.value : [];
   const status = statusFromParts(subject, runs, reviews.length);
   const injected = injectedStatus(subject);
   const recentDecisions = memories
@@ -58,7 +97,17 @@ export async function buildAppMemoryContinuitySummary(
     }));
   const latestDreamSummary = summaryObject(runs[0]?.summary);
   const lastRun = runs[0];
+  const unavailableCount = [memoriesResult, runsResult, reviewsResult].filter(
+    (result) => result.status === 'unavailable',
+  ).length;
+  const sectionCount = [memoriesResult, runsResult, reviewsResult].length;
   return {
+    overall_status:
+      unavailableCount === 0
+        ? 'complete'
+        : unavailableCount === sectionCount
+          ? 'unavailable'
+          : 'partial',
     subject,
     active_count: memories.length,
     staged_count: status.stagedCount,
@@ -68,8 +117,15 @@ export async function buildAppMemoryContinuitySummary(
     last_dream_run: status.lastDreamRun,
     sections: {
       recent_decisions: section(
-        recentDecisions.length > 0 ? 'populated' : 'empty',
+        memoriesResult.status === 'unavailable'
+          ? 'unavailable'
+          : recentDecisions.length > 0
+            ? 'populated'
+            : 'empty',
         recentDecisions,
+        memoriesResult.status === 'unavailable'
+          ? memoriesResult.reason
+          : undefined,
       ),
       active_paused_jobs: sectionFromInjected(
         injected?.sections.active_paused_jobs,
@@ -79,7 +135,11 @@ export async function buildAppMemoryContinuitySummary(
         'No session digest loader was available for this subject.',
       ),
       last_dream_summary: section(
-        lastRun && latestDreamSummary ? 'populated' : 'empty',
+        runsResult.status === 'unavailable'
+          ? 'unavailable'
+          : lastRun && latestDreamSummary
+            ? 'populated'
+            : 'empty',
         lastRun && latestDreamSummary
           ? [
               {
@@ -90,6 +150,7 @@ export async function buildAppMemoryContinuitySummary(
               },
             ]
           : [],
+        runsResult.status === 'unavailable' ? runsResult.reason : undefined,
       ),
       issue_index: section(
         'deferred',
@@ -167,3 +228,63 @@ function sectionFromInjected(
       }
     : section('unavailable', [], reason);
 }
+
+async function settleContinuitySection<T>(
+  work: (signal: AbortSignal, statementTimeoutMs?: number) => Promise<T>,
+  deadlineAtMs: number | undefined,
+  nowMs: number,
+  parentSignal?: AbortSignal,
+  statementTimeoutMs?: number,
+): Promise<ContinuitySectionResult<T>> {
+  const remainingMs = deadlineAtMs ? deadlineAtMs - nowMs : undefined;
+  if (parentSignal?.aborted) {
+    return { status: 'unavailable', reason: 'deadline_exceeded' };
+  }
+  if (
+    remainingMs !== undefined &&
+    remainingMs <= MEMORY_CONTINUITY_DEADLINE_SAFETY_MS
+  ) {
+    return { status: 'unavailable', reason: 'deadline_exceeded' };
+  }
+  const controller = new AbortController();
+  const abortFromParent = () =>
+    controller.abort(parentSignal?.reason ?? new Error('memory IPC aborted'));
+  parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+  const effectiveStatementTimeoutMs =
+    statementTimeoutMs ??
+    (remainingMs === undefined
+      ? undefined
+      : Math.max(1, remainingMs - MEMORY_CONTINUITY_DEADLINE_SAFETY_MS));
+  const promise = work(controller.signal, effectiveStatementTimeoutMs);
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise.then((value) => ({ status: 'fulfilled' as const, value })),
+      new Promise<{ status: 'unavailable'; reason: string }>((resolve) => {
+        if (remainingMs === undefined) return;
+        timeout = setTimeout(
+          () => {
+            controller.abort(new Error('memory continuity deadline exceeded'));
+            resolve({ status: 'unavailable', reason: 'deadline_exceeded' });
+          },
+          Math.max(1, remainingMs - MEMORY_CONTINUITY_DEADLINE_SAFETY_MS),
+        );
+      }),
+    ]);
+  } catch {
+    if (controller.signal.aborted || parentSignal?.aborted) {
+      return { status: 'unavailable', reason: 'deadline_exceeded' };
+    }
+    return { status: 'unavailable', reason: 'service_error' };
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    parentSignal?.removeEventListener('abort', abortFromParent);
+    promise.catch(() => undefined);
+  }
+}
+
+const MEMORY_CONTINUITY_DEADLINE_SAFETY_MS = 1_000;
+
+type ContinuitySectionResult<T> =
+  | { status: 'fulfilled'; value: T }
+  | { status: 'unavailable'; reason: string };

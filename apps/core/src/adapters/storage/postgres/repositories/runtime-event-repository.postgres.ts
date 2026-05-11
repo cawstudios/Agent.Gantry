@@ -14,6 +14,7 @@ import type {
   CanonicalDb,
   CanonicalExecutor,
 } from './canonical-graph-repository.postgres.js';
+import { nowIso } from '../../../../shared/time/datetime.js';
 
 type RuntimeEventRow = typeof pgSchema.runtimeEventsPostgres.$inferSelect;
 
@@ -46,7 +47,7 @@ function parseJson<T>(
 }
 
 function currentIso(): string {
-  return new Date().toISOString();
+  return nowIso();
 }
 
 function requiredId(value: unknown, name: string): string {

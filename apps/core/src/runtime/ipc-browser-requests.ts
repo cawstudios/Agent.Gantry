@@ -117,6 +117,7 @@ function processOneBrowserRequest(input: {
       callBrowserTool: deps.callBrowserTool,
       closeBrowserToolBackends: deps.closeBrowserToolBackends,
       timeoutMs: request.timeoutMs,
+      deadlineAtMs: request.deadlineAtMs,
     })
       .then((response) => {
         writeBrowserIpcResponse(

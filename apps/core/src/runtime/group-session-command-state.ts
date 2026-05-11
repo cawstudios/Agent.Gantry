@@ -58,6 +58,48 @@ export function createArchiveCurrentSessionHandler(input: {
   };
 }
 
+export function createPrepareSessionArchiveHandler(input: {
+  ops: () => RuntimeAgentSessionRepository;
+  group: ArchiveSessionInput['group'];
+  chatJid: string;
+  threadId: string | null;
+  defaultScope: 'user' | 'group';
+  memoryUserId?: string;
+  collectMemory?: SessionMemoryCollector;
+}) {
+  return async (_cause: 'new-session') => {
+    const ops = input.ops();
+    const turnContext = await ops.getAgentTurnContext?.({
+      agentFolder: input.group.folder,
+      conversationJid: input.chatJid,
+      threadId: input.threadId,
+      conversationKind: input.group.conversationKind,
+      memoryUserId: input.memoryUserId,
+      hydrateMemory: false,
+    });
+    if (!turnContext?.agentSessionId || !input.collectMemory) {
+      return undefined;
+    }
+    const agentSessionId = turnContext.agentSessionId;
+    return async () => {
+      await input.collectMemory?.({
+        agentSessionId,
+        trigger: 'session-end',
+        defaultScope: input.defaultScope,
+      });
+    };
+  };
+}
+
+export function createSessionArchiveHandlers(
+  input: Parameters<typeof createArchiveCurrentSessionHandler>[0],
+) {
+  return {
+    archiveCurrentSession: createArchiveCurrentSessionHandler(input),
+    prepareSessionArchive: createPrepareSessionArchiveHandler(input),
+  };
+}
+
 export function createSaveProcedureHandler(input: {
   folder: string;
   conversationId: string;

@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import * as pgSchema from '../adapters/storage/postgres/schema/schema.js';
@@ -8,15 +8,20 @@ import {
   parseItemSource,
   type CanonicalMemoryItemRow,
 } from './app-memory-canonical-codec.js';
-import { subjectIdFor } from './app-memory-boundaries.js';
+import { normalizeSubject, subjectIdFor } from './app-memory-boundaries.js';
 import {
   createSqlThreadIdentityFilter,
   nowIso,
+  withStatementTimeout,
 } from './app-memory-service-query-helpers.js';
+import { hasDreamingStatusSubjectScope } from './app-memory-service-dreaming.js';
+import { toRun } from './app-memory-service-record-mappers.js';
 import type {
   DemoteDreamingMemoryInput,
   DeleteAppMemoryInput,
+  DreamingRunStatus,
   MemoryBoundaryContext,
+  MemorySubjectType,
   NormalizedMemorySubject,
 } from './memory-types.js';
 
@@ -51,6 +56,50 @@ export async function findActiveMemoryByKey(input: {
     )
     .limit(1);
   return rows[0] ?? null;
+}
+
+export async function listDreamingStatuses(
+  db: Db,
+  input: Partial<MemoryBoundaryContext> & {
+    subjectType?: MemorySubjectType;
+    subjectId?: string;
+  } = {},
+  options: { signal?: AbortSignal; statementTimeoutMs?: number } = {},
+): Promise<DreamingRunStatus[]> {
+  options.signal?.throwIfAborted();
+  const hasSubjectScope = hasDreamingStatusSubjectScope(input);
+  const subject = normalizeSubject(input);
+  const subjectFilters = hasSubjectScope
+    ? [
+        eq(pgSchema.memoryDreamRunsPostgres.subjectType, subject.subjectType),
+        eq(pgSchema.memoryDreamRunsPostgres.subjectId, subject.subjectId),
+        sqlThreadIdentityFilter(
+          pgSchema.memoryDreamRunsPostgres,
+          subject.threadId,
+        ),
+      ]
+    : [];
+  const rows = (await withStatementTimeout(
+    db,
+    options.statementTimeoutMs,
+    (timeoutMs) =>
+      sql`select set_config('statement_timeout', ${String(timeoutMs)}, true)`,
+    (queryDb) =>
+      queryDb
+        .select()
+        .from(pgSchema.memoryDreamRunsPostgres)
+        .where(
+          and(
+            eq(pgSchema.memoryDreamRunsPostgres.appId, subject.appId),
+            eq(pgSchema.memoryDreamRunsPostgres.agentId, subject.agentId),
+            ...subjectFilters,
+          ),
+        )
+        .orderBy(desc(pgSchema.memoryDreamRunsPostgres.startedAt))
+        .limit(20),
+  )) as Array<typeof pgSchema.memoryDreamRunsPostgres.$inferSelect>;
+  options.signal?.throwIfAborted();
+  return rows.map(toRun);
 }
 
 export async function getOwnedMemoryItem(input: {

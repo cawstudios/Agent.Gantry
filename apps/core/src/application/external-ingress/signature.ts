@@ -1,3 +1,5 @@
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
+
 export interface ExternalIngressSignaturePort {
   sha256(input: string): string;
   hmacSha256(secret: string, payload: string): string;
@@ -36,7 +38,7 @@ export function isExternalIngressTimestampFresh(input: {
   if (!Number.isFinite(timestampMs)) return false;
   return (
     toleranceMs < 0 ||
-    Math.abs((input.nowMs ?? Date.now()) - timestampMs) <= toleranceMs
+    Math.abs((input.nowMs ?? currentTimeMs()) - timestampMs) <= toleranceMs
   );
 }
 

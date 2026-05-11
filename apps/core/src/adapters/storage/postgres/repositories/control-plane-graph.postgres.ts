@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 
-import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
+import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
 import type { CanonicalExecutor } from './canonical-graph-repository.postgres.js';
 

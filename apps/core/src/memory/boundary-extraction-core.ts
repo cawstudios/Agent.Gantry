@@ -14,7 +14,9 @@ import type {
 import type {
   ArcExtractionInput,
   ExtractedMemoryFact,
+  MemoryExtractionResult,
 } from './extractor-types.js';
+import { nowIso } from '../shared/time/datetime.js';
 import { resolveScopedMemorySubject } from './app-memory-subject-resolver.js';
 import { rawThreadIdFromSession } from './app-memory-session-scope.js';
 import { sanitizeOutboundLlmText } from '../shared/sensitive-material.js';
@@ -27,6 +29,19 @@ const EXTRACTION_RETRIEVED_KEY_CHAR_BUDGET = 180;
 const EXTRACTION_RETRIEVED_VALUE_CHAR_BUDGET = 420;
 const EXTRACTION_RETRIEVED_TOTAL_CHAR_BUDGET = 3_000;
 const RETRIEVED_TOOL_RESULT_TEXT_PATTERN = /\btool[_ -]?result\b/i;
+
+function normalizeExtractionResult(
+  value: ExtractedMemoryFact[] | MemoryExtractionResult,
+): MemoryExtractionResult {
+  if (Array.isArray(value)) {
+    return {
+      facts: value,
+      status: value.length > 0 ? 'facts_extracted' : 'empty_qualified',
+      ...(value.length === 0 ? { zeroFactReason: 'no_qualifying_facts' } : {}),
+    };
+  }
+  return value;
+}
 
 interface BoundaryMemoryRepositories {
   agentSessions: {
@@ -74,9 +89,13 @@ export async function collectDurableMemoryFromRepositories(input: {
   repositories: BoundaryMemoryRepositories;
   extractFacts: (
     input: ArcExtractionInput,
-  ) => Promise<ExtractedMemoryFact[]> | ExtractedMemoryFact[];
+  ) =>
+    | Promise<ExtractedMemoryFact[] | MemoryExtractionResult>
+    | ExtractedMemoryFact[]
+    | MemoryExtractionResult;
   defaultScope?: MemoryBoundaryDefaultScope;
   additionalTurns?: MemoryBoundaryTurn[];
+  nowIso?: () => string;
 }): Promise<{ saved: number }> {
   const session = await input.repositories.agentSessions.getAgentSession(
     input.agentSessionId as AgentSession['id'],
@@ -121,13 +140,16 @@ export async function collectDurableMemoryFromRepositories(input: {
   const turns = promptPayload.turns;
   if (turns.length === 0) return { saved: 0 };
 
-  const facts = await input.extractFacts({
-    turns,
-    trigger: input.trigger,
-    userId: session.userId,
-    retrievedItems: promptPayload.retrievedItems,
-  });
-  const now = new Date().toISOString();
+  const extraction = normalizeExtractionResult(
+    await input.extractFacts({
+      turns,
+      trigger: input.trigger,
+      userId: session.userId,
+      retrievedItems: promptPayload.retrievedItems,
+    }),
+  );
+  const facts = extraction.facts;
+  const now = (input.nowIso ?? (() => nowIso()))();
   const digestId = `msd_${randomUUID().replace(/-/g, '')}`;
   const digestText = buildDigestText(input.trigger, turns, facts);
   await input.repositories.sessionDigests.saveAgentSessionDigest({
@@ -143,6 +165,19 @@ export async function collectDurableMemoryFromRepositories(input: {
       source: 'automatic_memory_boundary_capture',
       defaultScope: input.defaultScope ?? null,
       hasAdditionalTurns: Boolean(input.additionalTurns?.length),
+      boundaryCapture: {
+        status: 'digest_captured',
+        trigger: input.trigger,
+        turnCount: turns.length,
+        plannedEvidenceCount: facts.length,
+      },
+      extraction: {
+        status: extraction.status,
+        factCount: facts.length,
+        ...(extraction.zeroFactReason
+          ? { zeroFactReason: extraction.zeroFactReason }
+          : {}),
+      },
     },
     createdAt: now as AgentSessionDigest['createdAt'],
   });

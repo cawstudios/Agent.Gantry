@@ -3,6 +3,7 @@ import type {
   NormalizedModelUsage,
   RuntimeContextUsageSnapshot,
 } from '../shared/model-catalog.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 export interface RuntimeModelStatusSnapshot {
   scopeKey: string;
@@ -36,7 +37,7 @@ function emptyUsage(): NormalizedModelUsage {
     totalBillableInputTokens: 0,
     cacheProvider: 'none',
     cacheStatus: 'unknown',
-    at: new Date().toISOString(),
+    at: nowIso(),
   };
 }
 

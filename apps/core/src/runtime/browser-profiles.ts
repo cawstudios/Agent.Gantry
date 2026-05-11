@@ -3,6 +3,11 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 
 import { DATA_DIR } from '../config/index.js';
+import {
+  nowDate,
+  nowIso,
+  nowMs as currentTimeMs,
+} from '../shared/time/datetime.js';
 
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const PROFILE_LOCK_STALE_MS = 10 * 60 * 1000;
@@ -63,7 +68,7 @@ function getProfileMetadataPath(name: string): string {
 function readMetadata(name: string): BrowserProfileMetadata {
   const profileDir = getProfileDir(name);
   const metadataPath = getProfileMetadataPath(name);
-  const now = new Date().toISOString();
+  const now = nowIso();
   const fallback: BrowserProfileMetadata = {
     created_at: now,
     last_used: now,
@@ -137,7 +142,7 @@ export function createProfile(name: string): BrowserProfile {
   ensureDir(profileDir);
   ensureDir(userDataDir);
 
-  const now = new Date().toISOString();
+  const now = nowIso();
   const existing = readMetadata(normalized);
   const metadata: BrowserProfileMetadata = {
     ...existing,
@@ -203,7 +208,7 @@ export function updateProfileMetadata(
     ...patch,
     auth_markers: patch.auth_markers || existing.auth_markers || [],
   };
-  if (!merged.created_at) merged.created_at = new Date().toISOString();
+  if (!merged.created_at) merged.created_at = nowIso();
   if (!merged.last_used) merged.last_used = merged.created_at;
   if (patch.cdp_port === undefined && 'cdp_port' in patch) {
     delete (merged as { cdp_port?: number }).cdp_port;
@@ -254,9 +259,9 @@ export async function acquireProfileLock(
   const profileDir = getProfileDir(normalized);
   ensureDir(profileDir);
   const lockPath = path.join(profileDir, 'profile.lock');
-  const started = Date.now();
+  const started = currentTimeMs();
 
-  while (Date.now() - started < timeoutMs) {
+  while (currentTimeMs() - started < timeoutMs) {
     const token = randomUUID();
     try {
       const fd = fs.openSync(lockPath, 'wx', 0o600);
@@ -265,7 +270,7 @@ export async function acquireProfileLock(
         JSON.stringify({
           pid: process.pid,
           token,
-          created_at: new Date().toISOString(),
+          created_at: nowIso(),
         }),
       );
       fs.closeSync(fd);
@@ -275,7 +280,7 @@ export async function acquireProfileLock(
         try {
           const current = readLockFile(lockPath);
           if (current.token === token) {
-            const now = new Date();
+            const now = nowDate();
             fs.utimesSync(lockPath, now, now);
           }
         } catch {
@@ -313,7 +318,7 @@ export async function acquireProfileLock(
         if (
           !isPidAlive(existing.pid) ||
           (existing.pid === undefined &&
-            Date.now() - stat.mtimeMs > PROFILE_LOCK_STALE_MS)
+            currentTimeMs() - stat.mtimeMs > PROFILE_LOCK_STALE_MS)
         ) {
           fs.rmSync(lockPath, { force: true });
           continue;

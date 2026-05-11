@@ -9,6 +9,7 @@ import {
   type HostnameLookup,
 } from '../../domain/network/public-address-policy.js';
 import { ApplicationError } from '../common/application-error.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 const DEFAULT_REMOTE_DNS_CACHE_TTL_MS = 1_000;
 
@@ -102,7 +103,7 @@ export async function assertRemoteMcpDestinationPublic(
     .toLowerCase();
   if (isIpAddress(hostname)) return;
   const cache = options.cache;
-  const nowMs = options.nowMs ?? Date.now();
+  const nowMs = options.nowMs ?? currentTimeMs();
   const ttlMs = options.ttlMs ?? DEFAULT_REMOTE_DNS_CACHE_TTL_MS;
   if (cache) {
     const cached = cache.get(hostname);
