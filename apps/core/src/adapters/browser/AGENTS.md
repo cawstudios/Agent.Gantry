@@ -33,6 +33,9 @@
   bounds, then delegate to the Playwright backend resize so the active page
   viewport is updated after navigation. Keep headless resize behavior
   backend-native.
+- Headed launch and screenshot must reassert page viewport through the backend
+  native resize path. CDP window bounds alone can leave Playwright page state at
+  a tiny first-paint viewport even when the outer Chrome window is normal.
 - `browser_file_upload` should accept inline file content and materialize it
   under the run artifact root. Requiring agents to pre-create files there is
   not usable from restricted tool sandboxes.

@@ -59,6 +59,10 @@ const BROKER_HEALTH_CACHE_MS = 5_000;
 const MIN_BROWSER_BACKEND_TIMEOUT_MS = 1_000;
 const MAX_HEADED_BROWSER_RESIZE_DIMENSION = 8_192;
 const DEFAULT_HEADED_BROWSER_WINDOW = { width: 1280, height: 900 } as const;
+const headedViewportByProfile = new Map<
+  string,
+  { width: number; height: number }
+>();
 const brokerHealthCache = new Map<
   string,
   { expiresAt: number; value: CredentialBrokerHealth | undefined }
@@ -184,6 +188,38 @@ function browserBackendTimeoutMs(
     throw new Error('Browser IPC deadline exceeded before backend dispatch');
   }
   return remainingMs;
+}
+
+async function callBrowserResizeBackend(input: {
+  context: BrowserContext;
+  session: Awaited<ReturnType<typeof ensureBrowserReady>>;
+  profileName: string;
+  width: number;
+  height: number;
+  deadline: BrowserIpcDeadline;
+}): Promise<void> {
+  if (!input.context.callBrowserTool) {
+    throw new Error(
+      'Browser action backend is unavailable for viewport resize.',
+    );
+  }
+  const backendTimeoutMs = browserBackendTimeoutMs(input.deadline);
+  await input.context.callBrowserTool({
+    toolName: 'browser_resize',
+    arguments: { width: input.width, height: input.height },
+    session: input.session,
+    fileAccessRoot: path.join(
+      DATA_DIR,
+      'sessions',
+      input.context.sourceAgentFolder,
+      'extra',
+    ),
+    timeoutMs: backendTimeoutMs,
+  });
+  headedViewportByProfile.set(input.profileName, {
+    width: input.width,
+    height: input.height,
+  });
 }
 
 async function inspectToolCapabilityBrokerHealth(
@@ -336,6 +372,14 @@ async function handleBrowserToolAction(
               DEFAULT_HEADED_BROWSER_WINDOW.height,
             );
           }
+          await callBrowserResizeBackend({
+            context,
+            session: status,
+            profileName,
+            width: DEFAULT_HEADED_BROWSER_WINDOW.width,
+            height: DEFAULT_HEADED_BROWSER_WINDOW.height,
+            deadline,
+          });
         }
       }
       return {
@@ -385,24 +429,13 @@ async function handleBrowserToolAction(
     } else {
       await resizeHeadedBrowserWindow(session.port, targetId, width, height);
     }
-    if (!context.callBrowserTool) {
-      return {
-        ok: false,
-        error: 'Browser action backend is unavailable for viewport resize.',
-      };
-    }
-    const backendTimeoutMs = browserBackendTimeoutMs(deadline);
-    await context.callBrowserTool({
-      toolName: request.action,
-      arguments: { ...request.payload, width, height },
+    await callBrowserResizeBackend({
+      context,
       session,
-      fileAccessRoot: path.join(
-        DATA_DIR,
-        'sessions',
-        context.sourceAgentFolder,
-        'extra',
-      ),
-      timeoutMs: backendTimeoutMs,
+      profileName,
+      width,
+      height,
+      deadline,
     });
     return {
       ok: true,
@@ -439,6 +472,21 @@ async function handleBrowserToolAction(
     } else {
       await foregroundBrowserTarget(session.port, targetId);
     }
+  }
+  if (
+    request.action === 'browser_take_screenshot' &&
+    session.headless === false
+  ) {
+    const viewport =
+      headedViewportByProfile.get(profileName) || DEFAULT_HEADED_BROWSER_WINDOW;
+    await callBrowserResizeBackend({
+      context,
+      session,
+      profileName,
+      width: viewport.width,
+      height: viewport.height,
+      deadline,
+    });
   }
   const backendTimeoutMs = browserBackendTimeoutMs(deadline);
   const result = await context.callBrowserTool({

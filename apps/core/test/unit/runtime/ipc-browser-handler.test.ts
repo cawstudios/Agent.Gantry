@@ -320,6 +320,13 @@ describe('ipc-browser-handler', () => {
     );
     expect(callBrowserTool).toHaveBeenNthCalledWith(
       2,
+      expect.objectContaining({
+        toolName: 'browser_resize',
+        arguments: { width: 1280, height: 900 },
+      }),
+    );
+    expect(callBrowserTool).toHaveBeenNthCalledWith(
+      3,
       expect.objectContaining({ toolName: 'browser_take_screenshot' }),
     );
     expect(
@@ -327,7 +334,7 @@ describe('ipc-browser-handler', () => {
     ).toBeLessThan(callBrowserTool.mock.invocationCallOrder[0]);
     expect(
       vi.mocked(foregroundBrowserTarget).mock.invocationCallOrder[1],
-    ).toBeLessThan(callBrowserTool.mock.invocationCallOrder[1]);
+    ).toBeLessThan(callBrowserTool.mock.invocationCallOrder[2]);
   });
 
   it('keeps other pointer actions covered by foregrounding before dispatch', async () => {
@@ -830,7 +837,11 @@ describe('ipc-browser-handler', () => {
           headless: true,
         },
       },
-      { sourceAgentFolder: 'main', browserIpcAuthorized: true },
+      {
+        sourceAgentFolder: 'main',
+        browserIpcAuthorized: true,
+        callBrowserTool: vi.fn(async () => ({ content: 'resized' })),
+      },
     );
 
     expect(response.ok).toBe(true);
@@ -865,7 +876,11 @@ describe('ipc-browser-handler', () => {
         action: 'browser_launch',
         payload: {},
       },
-      { sourceAgentFolder: 'main', browserIpcAuthorized: true },
+      {
+        sourceAgentFolder: 'main',
+        browserIpcAuthorized: true,
+        callBrowserTool: vi.fn(async () => ({ content: 'resized' })),
+      },
     );
 
     expect(response.ok).toBe(true);
