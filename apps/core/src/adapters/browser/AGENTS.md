@@ -6,8 +6,11 @@
   0-based visible tab indices after filtering internal Chrome targets, and
   select/close requests translate those visible indices to backend indices
   inside the adapter. Numeric select/close must fail closed when that mapping
-  is missing or stale, and text-only tab lists must not be shown as stable tab
-  lists.
+  is missing or stale. Backend-specific output compatibility, such as
+  Playwright MCP markdown tab lists, belongs in a clearly named provider
+  compatibility helper before the neutral tab projection consumes it.
+- Treat Chrome internal targets by both URL and title. Omnibox popups can
+  surface with a non-`chrome://` URL but title `Omnibox Popup`.
 - `timeout_ms` must reach both budgets: the signed IPC/backend call timeout and
   the private Playwright MCP action budget. Keep backend process identity
   stable across per-call timeout changes; use a stable backend max/default
@@ -26,8 +29,27 @@
   inner viewport makes Playwright report every target outside the viewport and
   causes click, hover, and screenshot failures downstream.
 - Headed `browser_resize` should resize the visible Chrome window with CDP
-  `Browser.setWindowBounds`. Keep headless and emulated resize behavior
-  backend-native.
+  `Browser.setWindowBounds` and force `windowState: normal` with the requested
+  bounds. Keep headless and emulated resize behavior backend-native.
+- `browser_file_upload` should accept inline file content and materialize it
+  under the run artifact root. Requiring agents to pre-create files there is
+  not usable from restricted tool sandboxes.
+- Check browser readiness before materializing inline upload files. A timed-out
+  or unhealthy browser action must not leave background-created files behind.
+  Inline uploads need bounded file count, per-file bytes, total bytes, and plain
+  filenames only.
+- Inline upload materialization must use collision-safe per-request paths.
+  Duplicate filenames in one request, same-name concurrent requests, and
+  existing files under `uploads/` must not overwrite or alias each other.
+- Keep artifact path policy separate from provider argument compatibility.
+  File confinement is MyClaw-owned safety policy; Playwright MCP field-shape
+  enrichment is backend projection.
+- Text-only backend tab lists are not trusted UI state unless the compatibility
+  layer can parse them into adapter-owned tab metadata. Unparseable tab lists
+  must fail closed and clear stale visible-index mappings.
+- Treat an unhealthy tool-capability broker as a non-driveable browser status
+  for agent tools. Reporting `cdpReady: true` while the credential broker is
+  down is misleading because backend browser actions still cannot run.
 - Browser deadline and artifact timestamp code should use the shared
   datetime helpers (`nowMs`/`nowIso`) instead of direct `Date.now()` or
   `new Date()` current-time reads so runtime timeout behavior stays

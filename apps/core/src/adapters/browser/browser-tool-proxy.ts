@@ -11,10 +11,18 @@ import {
   type BrowserActionMcpServerConfig,
 } from './action-mcp.js';
 import {
+  ensureBrowserArtifactRoot,
+  writeBrowserArtifactFileSync,
+} from './browser-artifact-policy.js';
+import {
   clearBrowserTabIndexMappings,
   projectBrowserTabsResult,
   translateBrowserTabsInput,
 } from './browser-tabs.js';
+import {
+  isStalePlaywrightMcpSnapshotRefResult,
+  normalizePlaywrightMcpPayload,
+} from './playwright-mcp-compat.js';
 import { nowMs } from '../../shared/time/datetime.js';
 import { applyAgentEgressNoProxyEnv } from '../../shared/no-proxy.js';
 
@@ -30,6 +38,18 @@ const BROWSER_FILE_OUTPUT_TOOLS = new Set<BrowserIpcAction>([
   'browser_snapshot',
   'browser_console_messages',
   'browser_network_requests',
+  'browser_evaluate',
+]);
+const TARGET_RESOLUTION_RETRY_ACTIONS = new Set<BrowserIpcAction>([
+  'browser_click',
+  'browser_type',
+  'browser_hover',
+  'browser_drag',
+  'browser_drop',
+  'browser_select_option',
+  'browser_fill_form',
+  'browser_snapshot',
+  'browser_take_screenshot',
   'browser_evaluate',
 ]);
 
@@ -51,9 +71,6 @@ export async function callBrowserTool(input: {
     options: { outputDir?: string; actionTimeoutMs?: number },
   ) => BrowserActionMcpServerConfig;
 }): Promise<unknown> {
-  const args = normalizeBrowserFilePayload(input.arguments, {
-    fileAccessRoot: input.fileAccessRoot,
-  });
   if (
     !input.session.running ||
     !input.session.cdpReady ||
@@ -64,6 +81,9 @@ export async function callBrowserTool(input: {
 
   const cdpEndpoint = `http://127.0.0.1:${input.session.port}`;
   const outputDir = ensureBrowserArtifactRoot(input.fileAccessRoot);
+  const args = normalizePlaywrightMcpPayload(input.toolName, input.arguments, {
+    fileAccessRoot: outputDir,
+  });
   const actionTimeoutMs = browserActionTimeoutMs(input.timeoutMs);
   const deadline = nowMs() + actionTimeoutMs;
   const sessionKey = `${input.session.profileName || 'default'}\0${cdpEndpoint}`;
@@ -85,11 +105,11 @@ export async function callBrowserTool(input: {
   });
 
   try {
-    const remainingTimeoutMs = remainingBrowserActionTimeoutMs(deadline);
-    const result = await backend.client.callTool(
-      { name: input.toolName, arguments: backendArgs },
-      undefined,
-      { timeout: remainingTimeoutMs },
+    const result = await callBackendBrowserToolWithRetry(
+      backend.client,
+      input.toolName,
+      backendArgs,
+      deadline,
     );
     return normalizeBrowserToolResult(input.toolName, args, result, {
       artifactRoot: outputDir,
@@ -101,6 +121,56 @@ export async function callBrowserTool(input: {
   } finally {
     scheduleBackendIdleClose(backend.key);
   }
+}
+
+async function callBackendBrowserToolWithRetry(
+  client: Client,
+  toolName: BrowserIpcAction,
+  args: Record<string, unknown>,
+  deadline: number,
+): Promise<unknown> {
+  try {
+    const result = await callBackendBrowserTool(
+      client,
+      toolName,
+      args,
+      deadline,
+    );
+    if (!shouldRefreshSnapshotAndRetry(toolName, result)) return result;
+  } catch (err) {
+    if (!shouldRefreshSnapshotAndRetry(toolName, err)) throw err;
+  }
+  await refreshBackendTargetModel(client, deadline);
+  return await callBackendBrowserTool(client, toolName, args, deadline);
+}
+
+async function refreshBackendTargetModel(
+  client: Client,
+  deadline: number,
+): Promise<void> {
+  await callBackendBrowserTool(client, 'browser_snapshot', {}, deadline).catch(
+    () => undefined,
+  );
+}
+
+async function callBackendBrowserTool(
+  client: Client,
+  toolName: BrowserIpcAction,
+  args: Record<string, unknown>,
+  deadline: number,
+): Promise<unknown> {
+  const remainingTimeoutMs = remainingBrowserActionTimeoutMs(deadline);
+  return await client.callTool({ name: toolName, arguments: args }, undefined, {
+    timeout: remainingTimeoutMs,
+  });
+}
+
+function shouldRefreshSnapshotAndRetry(
+  toolName: BrowserIpcAction,
+  err: unknown,
+): boolean {
+  if (!TARGET_RESOLUTION_RETRY_ACTIONS.has(toolName)) return false;
+  return isStalePlaywrightMcpSnapshotRefResult(err);
 }
 
 export function normalizeBrowserToolResult(
@@ -138,7 +208,7 @@ function compactLargeBrowserSnapshot(result: unknown, artifactRoot: string) {
   }
   const root = ensureBrowserArtifactRoot(artifactRoot);
   const filename = path.join(root, `snapshot-${nowMs()}.txt`);
-  fs.writeFileSync(filename, text, 'utf8');
+  writeBrowserArtifactFileSync(filename, text, 'utf8');
   const stat = fs.statSync(filename);
   const preview = truncateUtf8(text, SNAPSHOT_PREVIEW_BYTES);
   return {
@@ -210,6 +280,10 @@ function browserOutputFileStat(filename: string): fs.Stats | undefined {
   return stat.isFile() ? stat : undefined;
 }
 
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 export function sanitizeBrowserTabsResult(result: unknown): unknown {
   return projectBrowserTabsResult(
     sanitizeInternalChromeTargets(result),
@@ -273,7 +347,9 @@ function isInternalChromeTargetText(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return (
     normalized.includes('chrome://new-tab-page') ||
-    normalized.includes('chrome://omnibox-popup')
+    normalized.includes('chrome://omnibox-popup') ||
+    normalized === 'omnibox popup' ||
+    normalized.includes('omnibox popup')
   );
 }
 
@@ -283,7 +359,7 @@ function persistInlineScreenshot(
 ): { wroteFile: boolean; mimeType?: string } {
   const image = firstInlineImage(result);
   if (!image) return { wroteFile: false };
-  fs.writeFileSync(filename, Buffer.from(image.data, 'base64'));
+  writeBrowserArtifactFileSync(filename, Buffer.from(image.data, 'base64'));
   return { wroteFile: true, mimeType: image.mimeType };
 }
 
@@ -499,123 +575,6 @@ function backendEnv(configEnv: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = { ...configEnv };
   applyAgentEgressNoProxyEnv(env);
   return env;
-}
-
-export function ensureBrowserArtifactRoot(dir: string): string {
-  fs.mkdirSync(dir, { recursive: true });
-  return fs.realpathSync.native(dir);
-}
-
-function normalizeBrowserFilePayload(
-  payload: Record<string, unknown>,
-  options: { fileAccessRoot: string },
-): Record<string, unknown> {
-  const next = { ...payload };
-  if (next.filename !== undefined) {
-    next.filename = resolveBrowserOutputPath(
-      next.filename,
-      options.fileAccessRoot,
-    );
-  }
-  if (next.paths !== undefined) {
-    if (!Array.isArray(next.paths)) {
-      throw new Error('Browser upload/drop paths must be an array.');
-    }
-    next.paths = next.paths.map((item) =>
-      resolveBrowserInputFilePath(item, options.fileAccessRoot),
-    );
-  }
-  return next;
-}
-
-function resolveBrowserPath(value: unknown, fileAccessRoot: string): string {
-  const raw = stringValue(value);
-  if (!raw) throw new Error('Browser file action requires a path.');
-  const root = path.resolve(fileAccessRoot);
-  const candidate = path.resolve(root, raw);
-  const relative = path.relative(root, candidate);
-  if (
-    relative === '' ||
-    relative.startsWith('..') ||
-    path.isAbsolute(relative)
-  ) {
-    throw new Error(
-      'Browser file actions are limited to the run browser artifact root.',
-    );
-  }
-  const segments = relative.split(path.sep);
-  if (segments.some(isSensitivePathSegment)) {
-    throw new Error(
-      'Browser file actions cannot access hidden or sensitive paths.',
-    );
-  }
-  return candidate;
-}
-
-function resolveBrowserInputFilePath(
-  value: unknown,
-  fileAccessRoot: string,
-): string {
-  const candidate = resolveBrowserPath(value, fileAccessRoot);
-  const root = ensureBrowserArtifactRoot(fileAccessRoot);
-  const stat = fs.lstatSync(candidate);
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error('Browser upload/drop paths must be regular files.');
-  }
-  assertInsideRoot(fs.realpathSync.native(candidate), root);
-  return candidate;
-}
-
-function resolveBrowserOutputPath(
-  value: unknown,
-  fileAccessRoot: string,
-): string {
-  const candidate = resolveBrowserPath(value, fileAccessRoot);
-  const root = ensureBrowserArtifactRoot(fileAccessRoot);
-  const parent = path.dirname(candidate);
-  fs.mkdirSync(parent, { recursive: true });
-  assertNoSymlinkPath(parent, path.resolve(fileAccessRoot));
-  assertInsideRoot(fs.realpathSync.native(parent), root);
-  if (fs.existsSync(candidate) && fs.lstatSync(candidate).isSymbolicLink()) {
-    throw new Error('Browser file actions cannot write through symlinks.');
-  }
-  return candidate;
-}
-
-function assertInsideRoot(candidate: string, root: string): void {
-  const relative = path.relative(root, candidate);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(
-      'Browser file actions are limited to the run browser artifact root.',
-    );
-  }
-}
-
-function assertNoSymlinkPath(target: string, root: string): void {
-  let current = root;
-  for (const segment of path.relative(root, target).split(path.sep)) {
-    if (!segment) continue;
-    current = path.join(current, segment);
-    if (fs.lstatSync(current).isSymbolicLink()) {
-      throw new Error('Browser file actions cannot traverse symlinks.');
-    }
-  }
-}
-
-function isSensitivePathSegment(segment: string): boolean {
-  const lower = segment.toLowerCase();
-  return (
-    lower.startsWith('.') ||
-    lower === 'settings.yaml' ||
-    lower === 'secrets' ||
-    lower === 'credentials' ||
-    lower === 'browser-profiles' ||
-    lower === 'ipc'
-  );
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function browserActionTimeoutMs(value: number | undefined): number {
