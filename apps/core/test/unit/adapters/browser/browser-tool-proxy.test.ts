@@ -15,6 +15,9 @@ const browserMcpMocks = vi.hoisted(() => ({
     close: ReturnType<typeof vi.fn>;
   }>,
   nextResult: undefined as unknown,
+  callToolImpl: undefined as
+    | ((request: unknown, extra: unknown, options: unknown) => Promise<unknown>)
+    | undefined,
   connectImpl: undefined as
     | ((transport: unknown, options: unknown) => Promise<unknown>)
     | undefined,
@@ -25,7 +28,10 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
     const client = {
       connect: vi.fn(async () => undefined),
       callTool: vi.fn(
-        async () => browserMcpMocks.nextResult ?? { content: [] },
+        async (request: unknown, extra: unknown, options: unknown) =>
+          browserMcpMocks.callToolImpl
+            ? browserMcpMocks.callToolImpl(request, extra, options)
+            : (browserMcpMocks.nextResult ?? { content: [] }),
       ),
       close: vi.fn(async () => undefined),
     };
@@ -82,6 +88,7 @@ afterEach(async () => {
   browserMcpMocks.clients.splice(0);
   browserMcpMocks.transports.splice(0);
   browserMcpMocks.nextResult = undefined;
+  browserMcpMocks.callToolImpl = undefined;
   browserMcpMocks.connectImpl = undefined;
   vi.useRealTimers();
 });
@@ -443,6 +450,12 @@ describe('browser tool proxy file policy', () => {
 
   it('sanitizes filename on snapshot, console, and evaluate before backend dispatch', async () => {
     const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
 
     for (const toolName of [
       'browser_snapshot',
@@ -455,7 +468,7 @@ describe('browser tool proxy file policy', () => {
           arguments: {
             filename: '/tmp/outside-browser-facade.txt',
           },
-          session: { running: false, cdpReady: false },
+          session,
           fileAccessRoot: root,
         }),
       ).rejects.toThrow('limited to the run browser artifact root');
@@ -464,6 +477,12 @@ describe('browser tool proxy file policy', () => {
 
   it('rejects hidden and sensitive browser output path segments', async () => {
     const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
 
     for (const filename of [
       '.hidden/out.txt',
@@ -475,7 +494,7 @@ describe('browser tool proxy file policy', () => {
         callBrowserTool({
           toolName: 'browser_snapshot',
           arguments: { filename },
-          session: { running: false, cdpReady: false },
+          session,
           fileAccessRoot: root,
         }),
       ).rejects.toThrow('hidden or sensitive paths');
@@ -492,10 +511,370 @@ describe('browser tool proxy file policy', () => {
       callBrowserTool({
         toolName: 'browser_file_upload',
         arguments: { paths: ['linked.txt'] },
-        session: { running: false, cdpReady: false },
+        session: {
+          running: true,
+          cdpReady: true,
+          port: 12345,
+          profileName: 'c-main',
+        },
         fileAccessRoot: root,
       }),
     ).rejects.toThrow('regular files');
+  });
+
+  it('materializes inline upload files under the browser artifact root', async () => {
+    const root = tempRoot();
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_file_upload',
+      arguments: {
+        files: [
+          { name: 'note.txt', content: 'hello' },
+          {
+            name: 'encoded.bin',
+            content: Buffer.from('bytes').toString('base64'),
+            encoding: 'base64',
+          },
+        ],
+      },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(2);
+    expect(new Set(paths).size).toBe(2);
+    expect(paths[0]).toContain(`${path.sep}uploads${path.sep}inline-`);
+    expect(paths[1]).toContain(`${path.sep}uploads${path.sep}inline-`);
+    expect(fs.readFileSync(paths[0]!, 'utf8')).toBe('hello');
+    expect(fs.readFileSync(paths[1]!, 'utf8')).toBe('bytes');
+  });
+
+  it('combines existing upload paths with inline upload files', async () => {
+    const root = tempRoot();
+    fs.writeFileSync(path.join(root, 'existing.txt'), 'existing');
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_file_upload',
+      arguments: {
+        paths: ['existing.txt'],
+        files: [{ name: 'note.txt', content: 'hello' }],
+      },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).toBe(
+      fs.realpathSync.native(path.join(root, 'existing.txt')),
+    );
+    expect(paths[1]).toContain(`${path.sep}uploads${path.sep}inline-`);
+    expect(fs.readFileSync(paths[1]!, 'utf8')).toBe('hello');
+  });
+
+  it('does not overwrite an existing uploads file with the same inline filename', async () => {
+    const root = tempRoot();
+    fs.mkdirSync(path.join(root, 'uploads'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'uploads/note.txt'), 'existing');
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_file_upload',
+      arguments: {
+        files: [{ name: 'note.txt', content: 'inline' }],
+      },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(1);
+    expect(paths[0]).not.toBe(
+      fs.realpathSync.native(path.join(root, 'uploads/note.txt')),
+    );
+    expect(fs.readFileSync(path.join(root, 'uploads/note.txt'), 'utf8')).toBe(
+      'existing',
+    );
+    expect(fs.readFileSync(paths[0]!, 'utf8')).toBe('inline');
+  });
+
+  it('keeps existing upload paths distinct from inline files with the same basename', async () => {
+    const root = tempRoot();
+    fs.mkdirSync(path.join(root, 'uploads'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'uploads/note.txt'), 'existing');
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_file_upload',
+      arguments: {
+        paths: ['uploads/note.txt'],
+        files: [{ name: 'note.txt', content: 'inline' }],
+      },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).toBe(
+      fs.realpathSync.native(path.join(root, 'uploads/note.txt')),
+    );
+    expect(paths[1]).not.toBe(paths[0]);
+    expect(fs.readFileSync(paths[0]!, 'utf8')).toBe('existing');
+    expect(fs.readFileSync(paths[1]!, 'utf8')).toBe('inline');
+  });
+
+  it('uses distinct inline upload paths for duplicate filenames', async () => {
+    const root = tempRoot();
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_file_upload',
+      arguments: {
+        files: [
+          { name: 'same.txt', content: 'first' },
+          { name: 'same.txt', content: 'second' },
+        ],
+      },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(2);
+    expect(new Set(paths).size).toBe(2);
+    expect(fs.readFileSync(paths[0]!, 'utf8')).toBe('first');
+    expect(fs.readFileSync(paths[1]!, 'utf8')).toBe('second');
+  });
+
+  it('uses distinct inline upload paths for concurrent same-name requests', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await Promise.all([
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: { files: [{ name: 'same.txt', content: 'first' }] },
+        session,
+        fileAccessRoot: root,
+      }),
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: { files: [{ name: 'same.txt', content: 'second' }] },
+        session,
+        fileAccessRoot: root,
+      }),
+    ]);
+
+    const firstPaths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    const secondPaths = browserMcpMocks.clients[0]?.callTool.mock.calls[1]?.[0]
+      ?.arguments?.paths as string[];
+    expect(firstPaths).toHaveLength(1);
+    expect(secondPaths).toHaveLength(1);
+    expect(firstPaths[0]).not.toBe(secondPaths[0]);
+    expect(
+      [
+        fs.readFileSync(firstPaths[0]!, 'utf8'),
+        fs.readFileSync(secondPaths[0]!, 'utf8'),
+      ].sort(),
+    ).toEqual(['first', 'second']);
+  });
+
+  it('does not materialize inline upload files when the browser is not ready', async () => {
+    const root = tempRoot();
+
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: {
+          files: [{ name: 'note.txt', content: 'hello' }],
+        },
+        session: { running: false, cdpReady: false },
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('Browser is not ready');
+
+    expect(fs.existsSync(path.join(root, 'uploads/note.txt'))).toBe(false);
+  });
+
+  it('rejects inline upload file names with path segments', async () => {
+    const root = tempRoot();
+
+    for (const name of ['../note.txt', 'nested/note.txt', 'nested\\note.txt']) {
+      await expect(
+        callBrowserTool({
+          toolName: 'browser_file_upload',
+          arguments: {
+            files: [{ name, content: 'hello' }],
+          },
+          session: {
+            running: true,
+            cdpReady: true,
+            port: 12345,
+            profileName: 'c-main',
+          },
+          fileAccessRoot: root,
+        }),
+      ).rejects.toThrow('plain filenames');
+    }
+  });
+
+  it('rejects malformed and oversized inline upload payloads', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: { files: 'not-array' },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('files must be an array');
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: { files: ['not-object'] },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('file entries must be objects');
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: { files: [{ name: 'note.txt', content: 42 }] },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('content must be a string');
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: {
+          files: [
+            { name: 'note.txt', content: 'not-base64', encoding: 'base64' },
+          ],
+        },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('base64 content is invalid');
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: {
+          files: [
+            {
+              name: 'large.txt',
+              content: 'x'.repeat(8 * 1024 * 1024 + 1),
+            },
+          ],
+        },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('decoded bytes each');
+  });
+
+  it('infers fill_form field metadata from target and value', async () => {
+    const root = tempRoot();
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_fill_form',
+      arguments: {
+        fields: [
+          { target: 'e1', value: 'Ravi' },
+          { target: 'e2', element: 'Subscribe', value: true },
+          { target: 'e3', name: 'Age', type: 'slider', value: 42 },
+        ],
+      },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledWith(
+      {
+        name: 'browser_fill_form',
+        arguments: {
+          fields: [
+            {
+              target: 'e1',
+              element: 'e1',
+              name: 'e1',
+              type: 'textbox',
+              value: 'Ravi',
+            },
+            {
+              target: 'e2',
+              element: 'Subscribe',
+              name: 'Subscribe',
+              type: 'checkbox',
+              value: 'true',
+            },
+            {
+              target: 'e3',
+              element: 'Age',
+              name: 'Age',
+              type: 'slider',
+              value: '42',
+            },
+          ],
+        },
+      },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
   });
 
   it('rejects output paths that traverse symlinked parents', async () => {
@@ -507,7 +886,12 @@ describe('browser tool proxy file policy', () => {
       callBrowserTool({
         toolName: 'browser_take_screenshot',
         arguments: { filename: 'linked-dir/out.png' },
-        session: { running: false, cdpReady: false },
+        session: {
+          running: true,
+          cdpReady: true,
+          port: 12345,
+          profileName: 'c-main',
+        },
         fileAccessRoot: root,
       }),
     ).rejects.toThrow('cannot traverse symlinks');
@@ -538,6 +922,100 @@ describe('browser tool proxy file policy', () => {
       outputDir: fs.realpathSync.native(root),
       actionTimeoutMs: 120_000,
     });
+  });
+
+  it('refreshes the snapshot once when an aria ref is stale', async () => {
+    const root = tempRoot();
+    browserMcpMocks.callToolImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: [
+          {
+            type: 'text',
+            text: 'Ref e6 not found in the current page snapshot. Try capturing new snapshot.',
+          },
+        ],
+        isError: true,
+      })
+      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'snapshot' }] })
+      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'clicked' }] });
+
+    const result = await callBrowserTool({
+      toolName: 'browser_click',
+      arguments: { target: 'e6' },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    expect(result).toEqual({ content: [{ type: 'text', text: 'clicked' }] });
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      1,
+      { name: 'browser_click', arguments: { target: 'e6' } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      2,
+      { name: 'browser_snapshot', arguments: {} },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      3,
+      { name: 'browser_click', arguments: { target: 'e6' } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+  });
+
+  it('refreshes the target model for targeted snapshot stale refs', async () => {
+    const root = tempRoot();
+    browserMcpMocks.callToolImpl = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          'Ref e6 not found in the current page snapshot. Try capturing new snapshot.',
+        ),
+      )
+      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'snapshot' }] })
+      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'section' }] });
+
+    const result = await callBrowserTool({
+      toolName: 'browser_snapshot',
+      arguments: { target: 'e6' },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    expect(result).toEqual({ content: [{ type: 'text', text: 'section' }] });
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      1,
+      { name: 'browser_snapshot', arguments: { target: 'e6' } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      2,
+      { name: 'browser_snapshot', arguments: {} },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      3,
+      { name: 'browser_snapshot', arguments: { target: 'e6' } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
   });
 
   it('returns a compact file ref for screenshot filenames instead of inline image bytes', () => {
@@ -877,7 +1355,7 @@ describe('browser tool proxy file policy', () => {
         session,
         fileAccessRoot: root,
       }),
-    ).rejects.toThrow('requires a current tab list');
+    ).rejects.toThrow('needs a fresh browser_tabs list');
     expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledTimes(2);
   });
 
@@ -920,7 +1398,7 @@ describe('browser tool proxy file policy', () => {
         session,
         fileAccessRoot: root,
       }),
-    ).rejects.toThrow('requires a current tab list');
+    ).rejects.toThrow('needs a fresh browser_tabs list');
     expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledTimes(2);
   });
 
@@ -999,7 +1477,7 @@ describe('browser tool proxy file policy', () => {
         session,
         fileAccessRoot: root,
       }),
-    ).rejects.toThrow('requires a current tab list');
+    ).rejects.toThrow('needs a fresh browser_tabs list');
     await expect(
       callBrowserTool({
         toolName: 'browser_tabs',
@@ -1007,7 +1485,7 @@ describe('browser tool proxy file policy', () => {
         session,
         fileAccessRoot: root,
       }),
-    ).rejects.toThrow('requires a current tab list');
+    ).rejects.toThrow('needs a fresh browser_tabs list');
 
     expect(browserMcpMocks.clients).toHaveLength(0);
   });
@@ -1073,7 +1551,7 @@ describe('browser tool proxy file policy', () => {
         session,
         fileAccessRoot: root,
       }),
-    ).rejects.toThrow('is not visible');
+    ).rejects.toThrow('is not in the current visible tab list');
     await expect(
       callBrowserTool({
         toolName: 'browser_tabs',
@@ -1081,12 +1559,12 @@ describe('browser tool proxy file policy', () => {
         session,
         fileAccessRoot: root,
       }),
-    ).rejects.toThrow('is not visible');
+    ).rejects.toThrow('is not in the current visible tab list');
 
     expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledTimes(1);
   });
 
-  it('does not leak raw backend tab indices from text-only tab lists', async () => {
+  it('projects markdown-only backend tab lists into stable visible indices', async () => {
     const root = tempRoot();
     const session = {
       running: true,
@@ -1114,17 +1592,112 @@ describe('browser tool proxy file policy', () => {
       fileAccessRoot: root,
     });
 
+    expect(result).toMatchObject({
+      content: [
+        {
+          type: 'text',
+          text: [
+            '- 0: Example https://example.test/',
+            '- 1: Other https://other.test/',
+          ].join('\n'),
+        },
+      ],
+      structuredContent: {
+        tabs: [
+          { index: 0, title: 'Example', url: 'https://example.test/' },
+          { index: 1, title: 'Other', url: 'https://other.test/' },
+        ],
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('- 4:');
+    expect(JSON.stringify(result)).not.toContain('- 9:');
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: 'selected' }],
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'select', index: 1 },
+      session,
+      fileAccessRoot: root,
+    });
+
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      2,
+      { name: 'browser_tabs', arguments: { action: 'select', index: 9 } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+  });
+
+  it('fails closed and clears stale mapping for unparseable markdown tab lists', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: '- 4: Example https://example.test/' }],
+      structuredContent: {
+        tabs: [{ index: 4, title: 'Example', url: 'https://example.test/' }],
+      },
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: '- 4: files processed' }],
+    };
+    const result = await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_tabs',
+        arguments: { action: 'select', index: 0 },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('needs a fresh browser_tabs list');
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not parse tab-shaped markdown from non-tab tool results', () => {
+    const result = normalizeBrowserToolResult(
+      'browser_evaluate',
+      {},
+      {
+        content: [
+          {
+            type: 'text',
+            text: '- 4: Example https://example.test/',
+          },
+        ],
+      },
+      { tabSessionKey: 'c-main\0http://127.0.0.1:12345' },
+    );
+
     expect(result).toEqual({
       content: [
         {
           type: 'text',
-          text: 'Browser tab list failed closed because the backend did not return structured tab metadata.',
+          text: '- 4: Example https://example.test/',
         },
       ],
-      isError: true,
     });
-    expect(JSON.stringify(result)).not.toContain('- 4:');
-    expect(JSON.stringify(result)).not.toContain('- 9:');
+    expect(JSON.stringify(result)).not.toContain('structuredContent');
   });
 
   it('keeps visible tab index mappings isolated per browser session', async () => {
