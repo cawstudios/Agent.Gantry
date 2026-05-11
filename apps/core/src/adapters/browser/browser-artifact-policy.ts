@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import type { BrowserIpcAction } from '@myclaw/contracts';
 
@@ -16,11 +17,13 @@ export function writeBrowserArtifactFileSync(
   filename: string,
   content: Buffer | string,
   encoding?: BufferEncoding,
+  options: { exclusive?: boolean } = {},
 ): void {
   const flags =
     fs.constants.O_WRONLY |
     fs.constants.O_CREAT |
     fs.constants.O_TRUNC |
+    (options.exclusive ? fs.constants.O_EXCL : 0) |
     (fs.constants.O_NOFOLLOW ?? 0);
   const fd = fs.openSync(filename, flags, 0o600);
   try {
@@ -76,8 +79,9 @@ function materializeBrowserUploadFiles(
       `Browser inline uploads are limited to ${MAX_INLINE_UPLOAD_FILES} files.`,
     );
   }
+  const requestDir = `inline-${randomUUID()}`;
   const files = value.map((item, index) =>
-    parseBrowserUploadFile(item, index, fileAccessRoot),
+    parseBrowserUploadFile(item, index, requestDir, fileAccessRoot),
   );
   const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
   if (totalBytes > MAX_INLINE_UPLOAD_TOTAL_BYTES) {
@@ -86,7 +90,9 @@ function materializeBrowserUploadFiles(
     );
   }
   return files.map((file) => {
-    writeBrowserArtifactFileSync(file.outputPath, file.bytes);
+    writeBrowserArtifactFileSync(file.outputPath, file.bytes, undefined, {
+      exclusive: true,
+    });
     return path.relative(
       ensureBrowserArtifactRoot(fileAccessRoot),
       file.outputPath,
@@ -97,6 +103,7 @@ function materializeBrowserUploadFiles(
 function parseBrowserUploadFile(
   value: unknown,
   index: number,
+  requestDir: string,
   fileAccessRoot: string,
 ): { outputPath: string; bytes: Buffer; sizeBytes: number } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -104,7 +111,7 @@ function parseBrowserUploadFile(
   }
   const row = value as Record<string, unknown>;
   const rawName = uploadFileName(row.name, index);
-  const filename = path.join('uploads', rawName);
+  const filename = path.join('uploads', requestDir, `${index + 1}-${rawName}`);
   const outputPath = resolveBrowserOutputPath(filename, fileAccessRoot);
   const content = row.content;
   if (typeof content !== 'string') {

@@ -547,25 +547,14 @@ describe('browser tool proxy file policy', () => {
       fileAccessRoot: root,
     });
 
-    expect(fs.readFileSync(path.join(root, 'uploads/note.txt'), 'utf8')).toBe(
-      'hello',
-    );
-    expect(
-      fs.readFileSync(path.join(root, 'uploads/encoded.bin'), 'utf8'),
-    ).toBe('bytes');
-    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledWith(
-      {
-        name: 'browser_file_upload',
-        arguments: {
-          paths: [
-            fs.realpathSync.native(path.join(root, 'uploads/note.txt')),
-            fs.realpathSync.native(path.join(root, 'uploads/encoded.bin')),
-          ],
-        },
-      },
-      undefined,
-      { timeout: expect.any(Number) },
-    );
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(2);
+    expect(new Set(paths).size).toBe(2);
+    expect(paths[0]).toContain(`${path.sep}uploads${path.sep}inline-`);
+    expect(paths[1]).toContain(`${path.sep}uploads${path.sep}inline-`);
+    expect(fs.readFileSync(paths[0]!, 'utf8')).toBe('hello');
+    expect(fs.readFileSync(paths[1]!, 'utf8')).toBe('bytes');
   });
 
   it('combines existing upload paths with inline upload files', async () => {
@@ -588,19 +577,147 @@ describe('browser tool proxy file policy', () => {
       fileAccessRoot: root,
     });
 
-    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledWith(
-      {
-        name: 'browser_file_upload',
-        arguments: {
-          paths: [
-            fs.realpathSync.native(path.join(root, 'existing.txt')),
-            fs.realpathSync.native(path.join(root, 'uploads/note.txt')),
-          ],
-        },
-      },
-      undefined,
-      { timeout: expect.any(Number) },
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).toBe(
+      fs.realpathSync.native(path.join(root, 'existing.txt')),
     );
+    expect(paths[1]).toContain(`${path.sep}uploads${path.sep}inline-`);
+    expect(fs.readFileSync(paths[1]!, 'utf8')).toBe('hello');
+  });
+
+  it('does not overwrite an existing uploads file with the same inline filename', async () => {
+    const root = tempRoot();
+    fs.mkdirSync(path.join(root, 'uploads'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'uploads/note.txt'), 'existing');
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_file_upload',
+      arguments: {
+        files: [{ name: 'note.txt', content: 'inline' }],
+      },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(1);
+    expect(paths[0]).not.toBe(
+      fs.realpathSync.native(path.join(root, 'uploads/note.txt')),
+    );
+    expect(fs.readFileSync(path.join(root, 'uploads/note.txt'), 'utf8')).toBe(
+      'existing',
+    );
+    expect(fs.readFileSync(paths[0]!, 'utf8')).toBe('inline');
+  });
+
+  it('keeps existing upload paths distinct from inline files with the same basename', async () => {
+    const root = tempRoot();
+    fs.mkdirSync(path.join(root, 'uploads'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'uploads/note.txt'), 'existing');
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_file_upload',
+      arguments: {
+        paths: ['uploads/note.txt'],
+        files: [{ name: 'note.txt', content: 'inline' }],
+      },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).toBe(
+      fs.realpathSync.native(path.join(root, 'uploads/note.txt')),
+    );
+    expect(paths[1]).not.toBe(paths[0]);
+    expect(fs.readFileSync(paths[0]!, 'utf8')).toBe('existing');
+    expect(fs.readFileSync(paths[1]!, 'utf8')).toBe('inline');
+  });
+
+  it('uses distinct inline upload paths for duplicate filenames', async () => {
+    const root = tempRoot();
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await callBrowserTool({
+      toolName: 'browser_file_upload',
+      arguments: {
+        files: [
+          { name: 'same.txt', content: 'first' },
+          { name: 'same.txt', content: 'second' },
+        ],
+      },
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    const paths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    expect(paths).toHaveLength(2);
+    expect(new Set(paths).size).toBe(2);
+    expect(fs.readFileSync(paths[0]!, 'utf8')).toBe('first');
+    expect(fs.readFileSync(paths[1]!, 'utf8')).toBe('second');
+  });
+
+  it('uses distinct inline upload paths for concurrent same-name requests', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+
+    await Promise.all([
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: { files: [{ name: 'same.txt', content: 'first' }] },
+        session,
+        fileAccessRoot: root,
+      }),
+      callBrowserTool({
+        toolName: 'browser_file_upload',
+        arguments: { files: [{ name: 'same.txt', content: 'second' }] },
+        session,
+        fileAccessRoot: root,
+      }),
+    ]);
+
+    const firstPaths = browserMcpMocks.clients[0]?.callTool.mock.calls[0]?.[0]
+      ?.arguments?.paths as string[];
+    const secondPaths = browserMcpMocks.clients[0]?.callTool.mock.calls[1]?.[0]
+      ?.arguments?.paths as string[];
+    expect(firstPaths).toHaveLength(1);
+    expect(secondPaths).toHaveLength(1);
+    expect(firstPaths[0]).not.toBe(secondPaths[0]);
+    expect(
+      [
+        fs.readFileSync(firstPaths[0]!, 'utf8'),
+        fs.readFileSync(secondPaths[0]!, 'utf8'),
+      ].sort(),
+    ).toEqual(['first', 'second']);
   });
 
   it('does not materialize inline upload files when the browser is not ready', async () => {

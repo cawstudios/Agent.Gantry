@@ -38,6 +38,9 @@
   or unhealthy browser action must not leave background-created files behind.
   Inline uploads need bounded file count, per-file bytes, total bytes, and plain
   filenames only.
+- Inline upload materialization must use collision-safe per-request paths.
+  Duplicate filenames in one request, same-name concurrent requests, and
+  existing files under `uploads/` must not overwrite or alias each other.
 - Keep artifact path policy separate from provider argument compatibility.
   File confinement is MyClaw-owned safety policy; Playwright MCP field-shape
   enrichment is backend projection.
