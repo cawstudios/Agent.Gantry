@@ -20,7 +20,6 @@ import {
   type BrowserCdpTargetOptions,
   ensureBrowserTarget,
   foregroundBrowserTarget,
-  resizeHeadedBrowserWindow,
 } from './browser-cdp-targets.js';
 import { type IpcDomainContext } from './ipc-domain-types.js';
 import type { CredentialBrokerHealth } from '../domain/models/credentials.js';
@@ -57,12 +56,7 @@ type BrowserStatusPayload = Record<string, unknown> & {
 };
 const BROKER_HEALTH_CACHE_MS = 5_000;
 const MIN_BROWSER_BACKEND_TIMEOUT_MS = 1_000;
-const MAX_HEADED_BROWSER_RESIZE_DIMENSION = 8_192;
-const DEFAULT_HEADED_BROWSER_WINDOW = { width: 1280, height: 900 } as const;
-const headedViewportByProfile = new Map<
-  string,
-  { width: number; height: number }
->();
+const MAX_BROWSER_RESIZE_DIMENSION = 8_192;
 const brokerHealthCache = new Map<
   string,
   { expiresAt: number; value: CredentialBrokerHealth | undefined }
@@ -142,8 +136,8 @@ function browserResizeDimensions(payload: Record<string, unknown>): {
     throw new Error('browser_resize requires positive width and height');
   }
   return {
-    width: Math.min(Math.trunc(width), MAX_HEADED_BROWSER_RESIZE_DIMENSION),
-    height: Math.min(Math.trunc(height), MAX_HEADED_BROWSER_RESIZE_DIMENSION),
+    width: Math.min(Math.trunc(width), MAX_BROWSER_RESIZE_DIMENSION),
+    height: Math.min(Math.trunc(height), MAX_BROWSER_RESIZE_DIMENSION),
   };
 }
 
@@ -193,7 +187,6 @@ function browserBackendTimeoutMs(
 async function callBrowserResizeBackend(input: {
   context: BrowserContext;
   session: Awaited<ReturnType<typeof ensureBrowserReady>>;
-  profileName: string;
   width: number;
   height: number;
   deadline: BrowserIpcDeadline;
@@ -215,10 +208,6 @@ async function callBrowserResizeBackend(input: {
       'extra',
     ),
     timeoutMs: backendTimeoutMs,
-  });
-  headedViewportByProfile.set(input.profileName, {
-    width: input.width,
-    height: input.height,
   });
 }
 
@@ -350,38 +339,6 @@ async function handleBrowserToolAction(
         }),
         deadlineAtMs: deadline.deadlineAtMs,
       });
-      if (status.headless === false && status.port) {
-        const cdpOptions = browserCdpOptions(deadline);
-        const launchTargetId = cdpOptions
-          ? await ensureBrowserTarget(status.port, cdpOptions)
-          : await ensureBrowserTarget(status.port);
-        if (launchTargetId) {
-          if (cdpOptions) {
-            await resizeHeadedBrowserWindow(
-              status.port,
-              launchTargetId,
-              DEFAULT_HEADED_BROWSER_WINDOW.width,
-              DEFAULT_HEADED_BROWSER_WINDOW.height,
-              cdpOptions,
-            );
-          } else {
-            await resizeHeadedBrowserWindow(
-              status.port,
-              launchTargetId,
-              DEFAULT_HEADED_BROWSER_WINDOW.width,
-              DEFAULT_HEADED_BROWSER_WINDOW.height,
-            );
-          }
-          await callBrowserResizeBackend({
-            context,
-            session: status,
-            profileName,
-            width: DEFAULT_HEADED_BROWSER_WINDOW.width,
-            height: DEFAULT_HEADED_BROWSER_WINDOW.height,
-            deadline,
-          });
-        }
-      }
       return {
         ok: true,
         data: await attachToolCapabilityBrokerHealth(
@@ -403,36 +360,11 @@ async function handleBrowserToolAction(
     profileName,
     deadlineAtMs: deadline.deadlineAtMs,
   });
-  const cdpOptions = browserCdpOptions(deadline);
-  const targetId = session.port
-    ? cdpOptions
-      ? await ensureBrowserTarget(session.port, cdpOptions)
-      : await ensureBrowserTarget(session.port)
-    : undefined;
-  if (request.action === 'browser_resize' && session.headless === false) {
-    if (!session.port || !targetId) {
-      return {
-        ok: false,
-        error: 'Browser CDP target is unavailable for headed resize.',
-      };
-    }
+  if (request.action === 'browser_resize') {
     const { width, height } = browserResizeDimensions(request.payload);
-    const resizeOptions = browserCdpOptions(deadline);
-    if (resizeOptions) {
-      await resizeHeadedBrowserWindow(
-        session.port,
-        targetId,
-        width,
-        height,
-        resizeOptions,
-      );
-    } else {
-      await resizeHeadedBrowserWindow(session.port, targetId, width, height);
-    }
     await callBrowserResizeBackend({
       context,
       session,
-      profileName,
       width,
       height,
       deadline,
@@ -449,6 +381,12 @@ async function handleBrowserToolAction(
       },
     };
   }
+  const cdpOptions = browserCdpOptions(deadline);
+  const targetId = session.port
+    ? cdpOptions
+      ? await ensureBrowserTarget(session.port, cdpOptions)
+      : await ensureBrowserTarget(session.port)
+    : undefined;
   if (!context.callBrowserTool) {
     return {
       ok: false,
@@ -472,21 +410,6 @@ async function handleBrowserToolAction(
     } else {
       await foregroundBrowserTarget(session.port, targetId);
     }
-  }
-  if (
-    request.action === 'browser_take_screenshot' &&
-    session.headless === false
-  ) {
-    const viewport =
-      headedViewportByProfile.get(profileName) || DEFAULT_HEADED_BROWSER_WINDOW;
-    await callBrowserResizeBackend({
-      context,
-      session,
-      profileName,
-      width: viewport.width,
-      height: viewport.height,
-      deadline,
-    });
   }
   const backendTimeoutMs = browserBackendTimeoutMs(deadline);
   const result = await context.callBrowserTool({

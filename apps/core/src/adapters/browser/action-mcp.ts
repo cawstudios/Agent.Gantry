@@ -14,6 +14,7 @@ export interface BrowserActionMcpServerConfig {
 }
 
 export const BROWSER_ACTION_TIMEOUT_MS = 30_000;
+export const BROWSER_ACTION_VIEWPORT = { width: 1280, height: 900 } as const;
 
 export function resolveBrowserActionMcpCliPath(): string {
   return path.join(
@@ -40,6 +41,8 @@ export function createBrowserActionMcpServerConfig(
       '--shared-browser-context',
       '--timeout-action',
       String(options.actionTimeoutMs ?? BROWSER_ACTION_TIMEOUT_MS),
+      '--viewport-size',
+      `${BROWSER_ACTION_VIEWPORT.width}x${BROWSER_ACTION_VIEWPORT.height}`,
       ...(options.outputDir ? ['--output-dir', options.outputDir] : []),
     ],
     env,

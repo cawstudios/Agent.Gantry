@@ -105,6 +105,14 @@ describe('browser tool proxy file policy', () => {
     );
   });
 
+  it('starts the private backend with a nonzero headed viewport', () => {
+    const config = createBrowserActionMcpServerConfig('http://127.0.0.1:12345');
+
+    expect(config.args).toEqual(
+      expect.arrayContaining(['--viewport-size', '1280x900']),
+    );
+  });
+
   it('uses a stable backend action timeout while clamping each tool call', async () => {
     const root = tempRoot();
     browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
@@ -922,6 +930,45 @@ describe('browser tool proxy file policy', () => {
       outputDir: fs.realpathSync.native(root),
       actionTimeoutMs: 120_000,
     });
+  });
+
+  it('closes the cached backend when a tool returns an isError result', async () => {
+    const root = tempRoot();
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: 'Cannot take screenshot with 0 width.' }],
+      isError: true,
+    };
+
+    const errorResult = await callBrowserTool({
+      toolName: 'browser_take_screenshot',
+      arguments: {},
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    expect(errorResult).toMatchObject({ isError: true });
+    expect(browserMcpMocks.clients[0]?.close).toHaveBeenCalledTimes(1);
+    expect(browserMcpMocks.transports[0]?.close).toHaveBeenCalledTimes(1);
+
+    browserMcpMocks.nextResult = { content: [{ type: 'text', text: 'ok' }] };
+    await callBrowserTool({
+      toolName: 'browser_snapshot',
+      arguments: {},
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    expect(browserMcpMocks.clients).toHaveLength(2);
   });
 
   it('refreshes the snapshot once when an aria ref is stale', async () => {

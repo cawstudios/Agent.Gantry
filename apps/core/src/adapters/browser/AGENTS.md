@@ -28,14 +28,19 @@
 - Headed Chrome launch must include an explicit nonzero window size. A 0x0
   inner viewport makes Playwright report every target outside the viewport and
   causes click, hover, and screenshot failures downstream.
-- Headed `browser_resize` should resize the visible Chrome window with CDP
-  `Browser.setWindowBounds` and force `windowState: normal` with the requested
-  bounds, then delegate to the Playwright backend resize so the active page
-  viewport is updated after navigation. Keep headless resize behavior
-  backend-native.
-- Headed launch and screenshot must reassert page viewport through the backend
-  native resize path. CDP window bounds alone can leave Playwright page state at
-  a tiny first-paint viewport even when the outer Chrome window is normal.
+- `browser_resize` viewport ownership belongs to the Playwright MCP backend.
+  Do not split viewport state between sidecar CDP `Browser.setWindowBounds`
+  calls and backend `page.setViewportSize`; explicit resize should be
+  backend-native in both headed and headless sessions.
+- `browser_take_screenshot` should dispatch directly to the Playwright MCP
+  screenshot tool. Do not auto-resize before screenshots; screenshot failures
+  should reset the cached backend instead of trying to repair page state in the
+  runtime wrapper.
+- Headed Playwright MCP backends must start with an explicit
+  `--viewport-size`. The bundled backend defaults headed shared-browser
+  contexts to `viewport: null` unless configured, so late CDP window sizing or
+  late `browser_resize` calls can still let the first page/screenshot observe a
+  0x0 or unusably tiny viewport.
 - `browser_file_upload` should accept inline file content and materialize it
   under the run artifact root. Requiring agents to pre-create files there is
   not usable from restricted tool sandboxes.

@@ -40,7 +40,6 @@ vi.mock('@core/runtime/browser-cdp-targets.js', () => ({
   ensureBrowserTarget: vi.fn(async () => 'target-1'),
   activateBrowserTarget: vi.fn(async () => undefined),
   foregroundBrowserTarget: vi.fn(async () => undefined),
-  resizeHeadedBrowserWindow: vi.fn(async () => undefined),
 }));
 
 import { BrowserIpcAction } from '@myclaw/contracts';
@@ -60,7 +59,6 @@ import {
 import {
   ensureBrowserTarget,
   foregroundBrowserTarget,
-  resizeHeadedBrowserWindow,
 } from '@core/runtime/browser-cdp-targets.js';
 function fileMode(filePath: string): number {
   return fs.statSync(filePath).mode & 0o777;
@@ -320,13 +318,6 @@ describe('ipc-browser-handler', () => {
     );
     expect(callBrowserTool).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({
-        toolName: 'browser_resize',
-        arguments: { width: 1280, height: 900 },
-      }),
-    );
-    expect(callBrowserTool).toHaveBeenNthCalledWith(
-      3,
       expect.objectContaining({ toolName: 'browser_take_screenshot' }),
     );
     expect(
@@ -334,7 +325,7 @@ describe('ipc-browser-handler', () => {
     ).toBeLessThan(callBrowserTool.mock.invocationCallOrder[0]);
     expect(
       vi.mocked(foregroundBrowserTarget).mock.invocationCallOrder[1],
-    ).toBeLessThan(callBrowserTool.mock.invocationCallOrder[2]);
+    ).toBeLessThan(callBrowserTool.mock.invocationCallOrder[1]);
   });
 
   it('keeps other pointer actions covered by foregrounding before dispatch', async () => {
@@ -499,7 +490,7 @@ describe('ipc-browser-handler', () => {
     );
   });
 
-  it('resizes headed browser windows through CDP and backend viewport delegation', async () => {
+  it('resizes headed browser viewport through the private backend', async () => {
     vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
       profile: 'c-main-abc123abc123',
       profileName: 'c-main-abc123abc123',
@@ -509,7 +500,6 @@ describe('ipc-browser-handler', () => {
       targetId: 'stale-target',
       headless: false,
     });
-    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
     const callBrowserTool = vi.fn(async () => ({ content: 'backend-resized' }));
 
     const response = await processBrowserIpcRequest(
@@ -528,16 +518,7 @@ describe('ipc-browser-handler', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(ensureBrowserTarget).toHaveBeenCalledWith(9333, {
-      deadlineAtMs: expect.any(Number),
-    });
-    expect(resizeHeadedBrowserWindow).toHaveBeenCalledWith(
-      9333,
-      'content-target',
-      1280,
-      720,
-      { deadlineAtMs: expect.any(Number) },
-    );
+    expect(ensureBrowserTarget).not.toHaveBeenCalled();
     expect(callBrowserTool).toHaveBeenCalledWith(
       expect.objectContaining({
         toolName: 'browser_resize',
@@ -550,7 +531,7 @@ describe('ipc-browser-handler', () => {
     });
   });
 
-  it('clamps oversized headed browser resize dimensions before CDP resize', async () => {
+  it('clamps oversized headed browser resize dimensions before backend dispatch', async () => {
     vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
       profile: 'c-main-abc123abc123',
       profileName: 'c-main-abc123abc123',
@@ -560,7 +541,6 @@ describe('ipc-browser-handler', () => {
       targetId: 'stale-target',
       headless: false,
     });
-    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
     const callBrowserTool = vi.fn(async () => ({ content: 'backend-resized' }));
 
     const response = await processBrowserIpcRequest(
@@ -578,12 +558,7 @@ describe('ipc-browser-handler', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(resizeHeadedBrowserWindow).toHaveBeenCalledWith(
-      9333,
-      'content-target',
-      8192,
-      8192,
-    );
+    expect(ensureBrowserTarget).not.toHaveBeenCalled();
     expect(callBrowserTool).toHaveBeenCalledWith(
       expect.objectContaining({
         toolName: 'browser_resize',
@@ -758,14 +733,16 @@ describe('ipc-browser-handler', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(resizeHeadedBrowserWindow).not.toHaveBeenCalled();
+    expect(ensureBrowserTarget).not.toHaveBeenCalled();
     expect(callBrowserTool).toHaveBeenCalledWith(
       expect.objectContaining({
         toolName: 'browser_resize',
         arguments: { width: 1280, height: 720 },
       }),
     );
-    expect(response.data).toEqual({ content: 'backend-resized' });
+    expect(response.data).toEqual({
+      content: [{ type: 'text', text: 'Browser window resized to 1280x720.' }],
+    });
   });
 
   it('keeps oversized headless resize delegated to the private backend', async () => {
@@ -796,14 +773,16 @@ describe('ipc-browser-handler', () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(resizeHeadedBrowserWindow).not.toHaveBeenCalled();
+    expect(ensureBrowserTarget).not.toHaveBeenCalled();
     expect(callBrowserTool).toHaveBeenCalledWith(
       expect.objectContaining({
         toolName: 'browser_resize',
-        arguments: { width: 12_000, height: 20_000 },
+        arguments: { width: 8192, height: 8192 },
       }),
     );
-    expect(response.data).toEqual({ content: 'backend-resized' });
+    expect(response.data).toEqual({
+      content: [{ type: 'text', text: 'Browser window resized to 8192x8192.' }],
+    });
   });
 
   it('denies non-status browser IPC when Browser is not authorized for the run', async () => {
@@ -858,7 +837,7 @@ describe('ipc-browser-handler', () => {
     });
   });
 
-  it('normalizes headed browser launch to a nonzero default window size', async () => {
+  it('leaves headed launch viewport ownership to the action backend', async () => {
     vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
       profile: 'c-main-abc123abc123',
       profileName: 'c-main-abc123abc123',
@@ -868,7 +847,7 @@ describe('ipc-browser-handler', () => {
       targetId: 'stale-target',
       headless: false,
     });
-    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    const callBrowserTool = vi.fn(async () => ({ content: 'resized' }));
 
     const response = await processBrowserIpcRequest(
       {
@@ -879,18 +858,13 @@ describe('ipc-browser-handler', () => {
       {
         sourceAgentFolder: 'main',
         browserIpcAuthorized: true,
-        callBrowserTool: vi.fn(async () => ({ content: 'resized' })),
+        callBrowserTool,
       },
     );
 
     expect(response.ok).toBe(true);
-    expect(ensureBrowserTarget).toHaveBeenCalledWith(9333);
-    expect(resizeHeadedBrowserWindow).toHaveBeenCalledWith(
-      9333,
-      'content-target',
-      1280,
-      900,
-    );
+    expect(ensureBrowserTarget).not.toHaveBeenCalled();
+    expect(callBrowserTool).not.toHaveBeenCalled();
   });
 
   it('fails closed before launch when the signed deadline is already exhausted', async () => {

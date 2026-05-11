@@ -111,10 +111,19 @@ export async function callBrowserTool(input: {
       backendArgs,
       deadline,
     );
-    return normalizeBrowserToolResult(input.toolName, args, result, {
-      artifactRoot: outputDir,
-      tabSessionKey: sessionKey,
-    });
+    const normalized = normalizeBrowserToolResult(
+      input.toolName,
+      args,
+      result,
+      {
+        artifactRoot: outputDir,
+        tabSessionKey: sessionKey,
+      },
+    );
+    if (isBrowserToolErrorResult(normalized)) {
+      await closeCachedBackend(backend.key);
+    }
+    return normalized;
   } catch (err) {
     await closeCachedBackend(backend.key);
     throw new Error(formatBackendError(input.toolName, err));
@@ -199,6 +208,15 @@ export function normalizeBrowserToolResult(
   const stat = browserOutputFileStat(filename);
   if (!saved.wroteFile && !stat) return sanitized;
   return browserFileReferenceResult(filename, stat, saved.mimeType);
+}
+
+function isBrowserToolErrorResult(result: unknown): boolean {
+  return (
+    !!result &&
+    typeof result === 'object' &&
+    !Array.isArray(result) &&
+    (result as { isError?: unknown }).isError === true
+  );
 }
 
 function compactLargeBrowserSnapshot(result: unknown, artifactRoot: string) {
