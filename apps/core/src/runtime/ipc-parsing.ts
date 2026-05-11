@@ -36,6 +36,7 @@ export interface ParsedMemoryIpcRequest {
   action: MemoryIpcAction;
   payload: Record<string, unknown>;
   responseKeyId?: string;
+  deadlineAtMs?: number;
   allowedActions: readonly MemoryIpcAction[];
   context?: {
     threadId?: string;
@@ -54,6 +55,7 @@ export interface ParsedBrowserIpcRequest {
   threadId?: string;
   responseKeyId?: string;
   timeoutMs?: number;
+  deadlineAtMs?: number;
 }
 
 const TOOL_INPUT_MAX_DEPTH = 2;
@@ -251,12 +253,15 @@ export function parseMemoryIpcRequest(
   if (!isPlainObject(payload)) {
     throw new Error('Invalid memory IPC payload body');
   }
+  const rawExpiresAt = typeof raw.expiresAt === 'string' ? raw.expiresAt : '';
+  const deadlineAtMs = Date.parse(rawExpiresAt);
   return {
     requestId,
     action: action as MemoryIpcAction,
     payload,
     allowedActions,
     ...(responseKeyId ? { responseKeyId } : {}),
+    ...(Number.isFinite(deadlineAtMs) ? { deadlineAtMs } : {}),
     ...(threadId ||
     chatJid ||
     userId ||
@@ -446,6 +451,8 @@ export function parseBrowserIpcRequest(
     typeof rawTimeoutMs === 'number' && Number.isFinite(rawTimeoutMs)
       ? Math.max(1_000, Math.min(120_000, Math.trunc(rawTimeoutMs)))
       : undefined;
+  const rawExpiresAt = typeof raw.expiresAt === 'string' ? raw.expiresAt : '';
+  const deadlineAtMs = Date.parse(rawExpiresAt);
   return {
     requestId,
     action: action as BrowserIpcAction,
@@ -454,5 +461,6 @@ export function parseBrowserIpcRequest(
     ...(threadId ? { threadId } : {}),
     ...(responseKeyId ? { responseKeyId } : {}),
     ...(timeoutMs ? { timeoutMs } : {}),
+    ...(Number.isFinite(deadlineAtMs) ? { deadlineAtMs } : {}),
   };
 }

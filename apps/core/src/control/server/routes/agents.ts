@@ -17,6 +17,7 @@ import {
   type ControlRouteContext,
 } from '../handler-context.js';
 import { readJson, sendError, sendJson } from '../http.js';
+import { nowIso } from '../../../shared/time/datetime.js';
 
 function sendApplicationError(res: ServerResponse, error: unknown): boolean {
   if (!(error instanceof ApplicationError)) return false;
@@ -63,7 +64,7 @@ export async function handleAgentRoutes(
       sendError(res, 403, 'FORBIDDEN', 'API key cannot create agent for app');
       return true;
     }
-    const now = new Date().toISOString();
+    const now = nowIso();
     const agent: Agent = {
       id: `agent:${randomUUID()}` as AgentId,
       appId: auth.appId as AppId,
@@ -154,7 +155,7 @@ export async function handleAgentRoutes(
       ...agent,
       name: parsed.data.name?.trim() ?? agent.name,
       status: parsed.data.status ?? agent.status,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso(),
     };
     await repository.saveAgent(updated);
     await ctx.syncSettingsFromProjection(auth.appId as AppId);

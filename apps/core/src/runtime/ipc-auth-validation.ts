@@ -3,7 +3,7 @@ import {
   validateIpcRequestFreshness,
   verifyIpcRequestPayload,
 } from '../infrastructure/ipc/request-signing.js';
-import { nowMs } from '../infrastructure/time/datetime.js';
+import { nowMs } from '../shared/time/datetime.js';
 import { isPlainObject, toTrimmedString } from '../shared/object.js';
 import {
   normalizeMemoryIpcActions,

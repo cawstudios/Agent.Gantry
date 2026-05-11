@@ -10,6 +10,7 @@ import {
 } from '../config/index.js';
 import { logger, redactString } from '../infrastructure/logging/logger.js';
 import { AgentOutput, RunnerProcessSpec } from './agent-spawn-types.js';
+import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
 const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
@@ -228,16 +229,16 @@ export function executeRunnerProcess(
 
     runner.on('close', (code) => {
       clearTimeout(timeout);
-      const duration = Date.now() - startTime;
+      const duration = currentTimeMs() - startTime;
 
       if (timedOut) {
-        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const ts = nowIso().replace(/[:.]/g, '-');
         const timeoutLog = path.join(logsDir, `agent-${ts}.log`);
         fs.writeFileSync(
           timeoutLog,
           [
             `=== Agent Run Log (TIMEOUT) ===`,
-            `Timestamp: ${new Date().toISOString()}`,
+            `Timestamp: ${nowIso()}`,
             `Group: ${group.name}`,
             `Process: ${processName}`,
             `Duration: ${duration}ms`,
@@ -274,13 +275,13 @@ export function executeRunnerProcess(
         return;
       }
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const timestamp = nowIso().replace(/[:.]/g, '-');
       const logFile = path.join(logsDir, `agent-${timestamp}.log`);
       const isVerbose = LOG_LEVEL === 'debug' || LOG_LEVEL === 'trace';
 
       const logLines = [
         `=== Agent Run Log ===`,
-        `Timestamp: ${new Date().toISOString()}`,
+        `Timestamp: ${nowIso()}`,
         `Group: ${group.name}`,
         `Duration: ${duration}ms`,
         `Exit Code: ${code}`,

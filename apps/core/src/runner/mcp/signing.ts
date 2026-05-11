@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, verify as cryptoVerify } from 'crypto';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 export function signIpcRequestPayload(
   requestSigningKey: string | undefined,
@@ -18,7 +19,7 @@ export function createSignedIpcRequestEnvelope(
   const expiresAt =
     typeof payload.expiresAt === 'string' && payload.expiresAt.trim()
       ? payload.expiresAt
-      : new Date(Date.now() + 5 * 60_000).toISOString();
+      : new Date(currentTimeMs() + 5 * 60_000).toISOString();
   const signedPayload = {
     ...payload,
     requestId:

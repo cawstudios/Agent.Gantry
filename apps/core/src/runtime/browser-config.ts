@@ -5,6 +5,7 @@ export const DEFAULT_CHROME_ARGS = [
   '--no-default-browser-check',
   '--disable-sync',
   '--disable-features=OmniboxPopup',
+  '--window-size=1280,900',
   '--remote-debugging-address=127.0.0.1',
 ] as const;
 

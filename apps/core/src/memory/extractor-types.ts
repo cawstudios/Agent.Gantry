@@ -29,6 +29,20 @@ export interface ExtractedMemoryFact {
   supersedes?: string[];
 }
 
+export type MemoryExtractionStatus =
+  | 'facts_extracted'
+  | 'empty_qualified'
+  | 'outcome_unavailable'
+  | 'auth_unavailable'
+  | 'sensitive_blocked'
+  | 'extractor_failed';
+
+export interface MemoryExtractionResult {
+  facts: ExtractedMemoryFact[];
+  status: MemoryExtractionStatus;
+  zeroFactReason?: string;
+}
+
 export type ExtractableMemoryKind = Extract<
   MemoryKind,
   'preference' | 'decision' | 'fact' | 'correction' | 'constraint'
@@ -39,4 +53,7 @@ export interface MemoryExtractionProvider {
   extractFacts(
     input: ArcExtractionInput,
   ): ExtractedMemoryFact[] | Promise<ExtractedMemoryFact[]>;
+  extractFactsWithOutcome?(
+    input: ArcExtractionInput,
+  ): MemoryExtractionResult | Promise<MemoryExtractionResult>;
 }

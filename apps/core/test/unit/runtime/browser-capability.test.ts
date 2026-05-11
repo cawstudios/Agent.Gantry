@@ -41,7 +41,7 @@ vi.mock('child_process', () => ({
 vi.mock('@core/runtime/browser-config.js', () => ({
   CHROME_PATH: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   DEFAULT_BROWSER_KEEPALIVE_MS: 60_000,
-  DEFAULT_CHROME_ARGS: ['--no-first-run'],
+  DEFAULT_CHROME_ARGS: ['--no-first-run', '--window-size=1280,900'],
 }));
 
 vi.mock('@core/runtime/browser-profiles.js', () => ({
@@ -88,6 +88,53 @@ function cdpTextResponse(body: string): Response {
   } as Response;
 }
 
+function cdpVersionResponse(port = 4567): Response {
+  return cdpResponse({
+    Browser: 'Chrome',
+    webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/root`,
+  });
+}
+
+function stubCdpWebSocket() {
+  const sent: Array<Record<string, unknown>> = [];
+  class FakeWebSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onerror: ((event: unknown) => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(_url: string) {
+      queueMicrotask(() => this.onopen?.());
+    }
+
+    send(data: string) {
+      const parsed = JSON.parse(data) as Record<string, unknown>;
+      sent.push(parsed);
+      queueMicrotask(() =>
+        this.onmessage?.({
+          data: JSON.stringify({ id: parsed.id, result: {} }),
+        }),
+      );
+    }
+
+    close() {
+      // Caller-initiated close should not trigger onclose in these tests.
+    }
+  }
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  return { sent };
+}
+
+function queueHealthyContentTarget(targetId = 'target-1', port = 4567) {
+  const target = { id: targetId, type: 'page' };
+  mocks.fetch
+    .mockResolvedValueOnce(cdpVersionResponse(port))
+    .mockResolvedValueOnce(cdpResponse([target]))
+    .mockResolvedValueOnce(cdpResponse([target]))
+    .mockResolvedValueOnce(cdpVersionResponse(port))
+    .mockResolvedValueOnce(cdpResponse([target]));
+}
+
 describe('browser-capability', () => {
   let killSpy: ReturnType<typeof vi.spyOn>;
   let existsSyncSpy: ReturnType<typeof vi.spyOn>;
@@ -108,6 +155,7 @@ describe('browser-capability', () => {
     mocks.release.mockClear();
     mocks.fetch.mockReset();
     vi.stubGlobal('fetch', mocks.fetch);
+    stubCdpWebSocket();
     rmSyncSpy = vi.spyOn(fs, 'rmSync').mockImplementation(() => undefined);
     killSpy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
       const numericPid = Number(pid);
@@ -150,10 +198,8 @@ describe('browser-capability', () => {
 
   it('reports stopped when the CDP HTTP endpoint is unhealthy', async () => {
     const manager = await import('@core/runtime/browser-capability.js');
-    mocks.fetch
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
-      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]))
-      .mockRejectedValueOnce(new Error('connection refused'));
+    queueHealthyContentTarget('target-1');
+    mocks.fetch.mockRejectedValueOnce(new Error('connection refused'));
 
     const launchStatus = await manager.launchBrowser();
     expect(launchStatus.headless).toBe(false);
@@ -179,14 +225,9 @@ describe('browser-capability', () => {
 
   it('relaunches instead of reusing a process with an unhealthy CDP endpoint', async () => {
     const manager = await import('@core/runtime/browser-capability.js');
-    mocks.fetch
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
-      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]))
-      .mockResolvedValueOnce(cdpTextResponse('ok'))
-      .mockRejectedValueOnce(new Error('connection refused'))
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
-      .mockResolvedValueOnce(cdpResponse([{ id: 'target-2', type: 'page' }]))
-      .mockResolvedValueOnce(cdpTextResponse('ok'));
+    queueHealthyContentTarget('target-1');
+    mocks.fetch.mockRejectedValueOnce(new Error('connection refused'));
+    queueHealthyContentTarget('target-2', 4568);
 
     await manager.launchBrowser();
     fs.writeFileSync(
@@ -207,9 +248,7 @@ describe('browser-capability', () => {
 
   it('uses headless mode only when explicitly requested', async () => {
     const manager = await import('@core/runtime/browser-capability.js');
-    mocks.fetch
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
-      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]));
+    queueHealthyContentTarget('target-1');
 
     const status = await manager.launchBrowser({ headless: true });
 
@@ -219,8 +258,9 @@ describe('browser-capability', () => {
 
   it('creates a content target and closes Chrome internal startup tabs', async () => {
     const manager = await import('@core/runtime/browser-capability.js');
+    const cdp = stubCdpWebSocket();
     mocks.fetch
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
+      .mockResolvedValueOnce(cdpVersionResponse())
       .mockResolvedValueOnce(
         cdpResponse([
           {
@@ -235,35 +275,43 @@ describe('browser-capability', () => {
           },
         ]),
       )
+      .mockResolvedValueOnce(cdpTextResponse('ok'))
+      .mockResolvedValueOnce(cdpTextResponse('ok'))
+      .mockResolvedValueOnce(cdpResponse([]))
+      .mockResolvedValueOnce(cdpResponse([]))
       .mockResolvedValueOnce(cdpResponse({ id: 'target-1', type: 'page' }))
-      .mockResolvedValue(cdpTextResponse('ok'));
+      .mockResolvedValueOnce(cdpVersionResponse())
+      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]));
 
     const status = await manager.launchBrowser();
 
     expect(status.targetId).toBe('target-1');
+    expect(mocks.spawn.mock.calls[0][1]).toContain('--window-size=1280,900');
+    expect(mocks.spawn.mock.calls[0][1]).not.toContain('--headless=new');
     expect(mocks.fetch).toHaveBeenCalledWith(
       'http://127.0.0.1:4567/json/new?about:blank',
-      { method: 'PUT' },
-    );
-    expect(mocks.fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:4567/json/activate/target-1',
-      { method: 'GET' },
+      expect.objectContaining({ method: 'PUT' }),
     );
     expect(mocks.fetch).toHaveBeenCalledWith(
       'http://127.0.0.1:4567/json/close/new-tab',
-      { method: 'GET' },
+      expect.objectContaining({ method: 'GET' }),
     );
     expect(mocks.fetch).toHaveBeenCalledWith(
       'http://127.0.0.1:4567/json/close/omnibox',
-      { method: 'GET' },
+      expect.objectContaining({ method: 'GET' }),
     );
+    expect(cdp.sent).toEqual([
+      {
+        id: 1,
+        method: 'Target.activateTarget',
+        params: { targetId: 'target-1' },
+      },
+    ]);
   });
 
   it('reports known running sessions without a CDP health probe', async () => {
     const manager = await import('@core/runtime/browser-capability.js');
-    mocks.fetch
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
-      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]));
+    queueHealthyContentTarget('target-1');
     await manager.launchBrowser();
     mocks.fetch.mockClear();
 
@@ -288,9 +336,7 @@ describe('browser-capability', () => {
 
   it('returns diagnostic close success for a running browser session', async () => {
     const manager = await import('@core/runtime/browser-capability.js');
-    mocks.fetch
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
-      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]));
+    queueHealthyContentTarget('target-1');
 
     const status = await manager.launchBrowser();
     const closed = await manager.closeBrowser();
@@ -306,9 +352,7 @@ describe('browser-capability', () => {
   it('auto-detects headless mode in CI when no explicit mode is provided', async () => {
     vi.stubEnv('CI', 'true');
     const manager = await import('@core/runtime/browser-capability.js');
-    mocks.fetch
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
-      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]));
+    queueHealthyContentTarget('target-1');
 
     const status = await manager.launchBrowser();
 
@@ -383,7 +427,9 @@ describe('browser-capability', () => {
     );
     mocks.fetch
       .mockRejectedValueOnce(new Error('cdp unavailable'))
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
+      .mockResolvedValueOnce(cdpVersionResponse())
+      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]))
+      .mockResolvedValueOnce(cdpVersionResponse())
       .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]));
 
     const manager = await import('@core/runtime/browser-capability.js');
@@ -417,7 +463,9 @@ describe('browser-capability', () => {
       String(filePath).endsWith('/browser-session.json'),
     );
     mocks.fetch
-      .mockResolvedValueOnce(cdpResponse({ Browser: 'Chrome' }))
+      .mockResolvedValueOnce(cdpVersionResponse())
+      .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]))
+      .mockResolvedValueOnce(cdpVersionResponse())
       .mockResolvedValueOnce(cdpResponse([{ id: 'target-1', type: 'page' }]));
 
     const manager = await import('@core/runtime/browser-capability.js');

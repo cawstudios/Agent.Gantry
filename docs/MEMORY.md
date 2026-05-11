@@ -70,7 +70,9 @@ The current runtime pipeline is:
    Memory Source ingestion
 2. automatically capture a recent session digest at explicit continuation
    boundaries such as `/new`, `/compact`, stale-session archival, job
-   completion, or observed SDK compact boundaries
+   completion, or observed SDK compact boundaries. `/new` clears the active
+   provider-session state before expensive extraction, then finalizes the
+   replaced session digest in the background.
 3. extract and stage grounded candidate facts from boundary evidence
 4. reject sensitive or ungrounded material
 5. run dreaming promotion/update passes; automatic durable promotion is

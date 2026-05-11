@@ -6,6 +6,7 @@ import {
 } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import type { EmbeddingProvider } from './memory-embeddings.js';
+import { nowDate } from '../shared/time/datetime.js';
 
 export interface EmbeddingCacheStore {
   getCachedEmbedding(textHash: string, model: string): Promise<number[] | null>;
@@ -17,10 +18,10 @@ export interface EmbeddingCacheStore {
 }
 
 let dailyApiCalls = 0;
-let dailyResetDate = new Date().toDateString();
+let dailyResetDate = nowDate().toDateString();
 
 function trackAndCheckBudget(callCount: number): boolean {
-  const today = new Date().toDateString();
+  const today = nowDate().toDateString();
   if (today !== dailyResetDate) {
     dailyApiCalls = 0;
     dailyResetDate = today;

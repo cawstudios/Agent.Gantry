@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { nowIso, nowMs, sleep } from '../../infrastructure/time/datetime.js';
+import { nowIso, nowMs, sleep } from '../../shared/time/datetime.js';
 import { isPlainObject } from '../../shared/object.js';
 import { hasValidIpcResponseSignature } from './ipc-signing.js';
 import { createSignedIpcRequestEnvelope } from './ipc-signing.js';

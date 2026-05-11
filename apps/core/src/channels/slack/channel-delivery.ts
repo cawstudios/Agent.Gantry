@@ -44,6 +44,7 @@ import {
   splitSlackTextByCodeUnits,
 } from './text-limits.js';
 import type { PendingUserQuestionState } from './channel-state.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 const SLACK_STREAM_SNIPPET_FALLBACK_MIN_PARTS = 4;
 export abstract class SlackChannelDelivery extends SlackChannelInteractions {
   protected async sendSnippetFallback(
@@ -133,7 +134,7 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
       return false;
     }
 
-    const now = Date.now();
+    const now = currentTimeMs();
     const hasMessageHandle = Boolean(state.messageTs || state.nativeStreamTs);
     const shouldFlush =
       options.done ||

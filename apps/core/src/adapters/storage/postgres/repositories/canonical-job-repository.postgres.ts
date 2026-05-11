@@ -6,7 +6,7 @@ import type {
   JobRunListFilters,
 } from '../../../../domain/repositories/ops-repo.js';
 import { RUNTIME_EVENT_TYPES } from '../../../../domain/events/runtime-event-types.js';
-import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
+import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
 import {
   CANONICAL_APP_ID,

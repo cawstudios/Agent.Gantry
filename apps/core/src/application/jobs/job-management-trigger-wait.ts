@@ -1,6 +1,7 @@
 import { ApplicationError } from '../common/application-error.js';
 import type { Job, JobManagementServiceDeps } from './job-management-types.js';
 import { requireJobControl } from './job-management-require.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 const TRIGGER_POLL_INTERVAL_MS = 2_000;
 
@@ -27,19 +28,19 @@ export async function waitForTriggerCompletion(input: {
   }
   const job = await input.requireJob(initialTrigger.jobId);
   await input.assertJobAppAccess(job, input.appId);
-  const startedAt = Date.now();
+  const startedAt = currentTimeMs();
   const subscription = input.deps.runtimeEvents?.subscribe?.({
     appId: input.appId as never,
     triggerId: input.triggerId,
   });
   try {
-    while (Date.now() - startedAt < input.timeoutMs) {
+    while (currentTimeMs() - startedAt < input.timeoutMs) {
       const completed = await getCompletedTriggerRun(
         input.deps,
         input.triggerId,
       );
       if (completed) return completed;
-      const remaining = input.timeoutMs - (Date.now() - startedAt);
+      const remaining = input.timeoutMs - (currentTimeMs() - startedAt);
       if (remaining <= 0) break;
       if (subscription) {
         await subscription.next({

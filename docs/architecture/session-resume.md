@@ -81,8 +81,10 @@ fallback, or repair branches for that state.
 
 ## Reset And Restart Behavior
 
-- `/new` does best-effort continuation capture (`session-end` trigger), then
-  clears scoped provider-session state.
+- `/new` captures the old canonical session boundary, clears scoped
+  provider-session state, and finalizes continuation capture (`session-end`
+  trigger) in the background. A slow extractor must not block the fresh session
+  reset.
 - Reset preserves canonical `agent_sessions` identity and scoped
   `agent_session_digests`; digest hydration still works after reset.
 - During live runs, MyClaw persists newly emitted SDK session ids as soon as

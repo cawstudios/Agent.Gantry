@@ -11,6 +11,7 @@ import { initializeRuntimeStorage } from '../../adapters/storage/postgres/runtim
 import { SettingsDesiredStateService } from '../../config/settings/desired-state-service.js';
 import { loadSessionAppMemoryItems } from '../../memory/app-memory-session-hydration.js';
 import { RuntimeApp } from './runtime-app.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 interface StartupDeps {
   ensureRuntimeLayoutDirectories: typeof ensureRuntimeLayoutDirectories;
@@ -125,7 +126,7 @@ async function ensureFreshRuntimeHasDefaultAgent(
     name: agentName,
     folder: DEFAULT_AGENT_FOLDER,
     trigger: `@${agentName}`,
-    added_at: new Date().toISOString(),
+    added_at: nowIso(),
     requiresTrigger: false,
   };
 

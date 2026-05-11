@@ -25,6 +25,7 @@ import {
   persistentPermissionToolId,
   validateReadableAgentToolRule,
 } from '../shared/agent-tool-references.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 export interface RequestPermissionReview {
   toolName: 'request_permission';
@@ -79,7 +80,7 @@ export async function persistRequestPermissionRules(input: {
   }
   const appId = DEFAULT_MEMORY_APP_ID as never;
   const agentId = memoryAgentIdForGroupFolder(input.sourceAgentFolder) as never;
-  const timestamp = new Date().toISOString();
+  const timestamp = nowIso();
   const savedBindings: AgentToolBinding[] = [];
   for (const allowedRule of allowedRules) {
     if (isMyClawMcpWildcardRule(allowedRule)) {
@@ -142,7 +143,7 @@ export async function persistRequestPermissionRules(input: {
           appId: binding.appId,
           agentId: binding.agentId,
           toolId: binding.toolId,
-          updatedAt: new Date().toISOString(),
+          updatedAt: nowIso(),
         }),
       ),
     );

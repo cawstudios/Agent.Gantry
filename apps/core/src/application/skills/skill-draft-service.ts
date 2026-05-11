@@ -14,6 +14,7 @@ import {
   isSkillMaterializableLocally,
   isSkillUsableForBinding,
 } from '../../domain/skills/skills.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 export interface HostedSkillPublisher {
   publishSkill(input: {
@@ -44,7 +45,7 @@ export class SkillDraftService {
     }>;
     now?: string;
   }): Promise<SkillCatalogItem> {
-    const now = input.now ?? new Date().toISOString();
+    const now = input.now ?? nowIso();
     const skillId = `skill:${globalThis.crypto.randomUUID()}` as SkillId;
     const stored = await this.artifacts.putSkillArtifact({
       appId: input.appId,
@@ -110,7 +111,7 @@ export class SkillDraftService {
     if (!skill.storage) {
       throw new Error(`Skill draft has no stored artifact: ${skill.id}`);
     }
-    const now = input.now ?? new Date().toISOString();
+    const now = input.now ?? nowIso();
     let providerRef: SkillProviderRef | undefined;
     if (input.target === 'hosted') {
       if (!this.hostedPublisher) {
@@ -152,7 +153,7 @@ export class SkillDraftService {
     if (skill.status !== 'draft') {
       throw new Error(`Only draft skills can be rejected: ${skill.id}`);
     }
-    const now = input.now ?? new Date().toISOString();
+    const now = input.now ?? nowIso();
     const rejected: SkillCatalogItem = {
       ...skill,
       status: 'rejected',
@@ -174,7 +175,7 @@ export class SkillDraftService {
     if (!isSkillUsableForBinding(skill)) {
       throw new Error(`Skill must be approved before binding: ${skill.id}`);
     }
-    const now = input.now ?? new Date().toISOString();
+    const now = input.now ?? nowIso();
     const binding: AgentSkillBinding = {
       id: `agent-skill-binding:${input.agentId}:${input.skillId}` as AgentSkillBindingId,
       appId: input.appId,
@@ -198,7 +199,7 @@ export class SkillDraftService {
       appId: input.appId,
       agentId: input.agentId,
       skillId: input.skillId,
-      updatedAt: input.now ?? new Date().toISOString(),
+      updatedAt: input.now ?? nowIso(),
     });
   }
 

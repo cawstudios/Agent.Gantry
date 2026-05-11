@@ -9,6 +9,7 @@ import {
   type ResolvedWebhookTarget,
   validateWebhookTarget,
 } from './webhook-target.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 const WEBHOOK_DELIVERY_BATCH_SIZE = 20;
 const WEBHOOK_DELIVERY_CONCURRENCY = 4;
@@ -91,7 +92,7 @@ export async function deliverWebhookDelivery(
       payload: JSON.parse(event.payload),
     });
     const target = await validateWebhookTarget(webhook.url);
-    const timestamp = String(Date.now());
+    const timestamp = String(currentTimeMs());
     const signature = createHmac('sha256', webhook.secret)
       .update(`${timestamp}.${event.eventId}.${event.eventType}.${body}`)
       .digest('hex');
@@ -126,7 +127,7 @@ export async function deliverWebhookDelivery(
       return;
     }
     const nextAttemptAt = new Date(
-      Date.now() + Math.min(60_000, 1000 * 2 ** attemptCount),
+      currentTimeMs() + Math.min(60_000, 1000 * 2 ** attemptCount),
     ).toISOString();
     await control.markWebhookDeliveryRetry({
       deliveryId: delivery.deliveryId,
@@ -139,7 +140,7 @@ export async function deliverWebhookDelivery(
       await control.markWebhookDeliveryDead(delivery.deliveryId, message);
     } else {
       const nextAttemptAt = new Date(
-        Date.now() + Math.min(60_000, 1000 * 2 ** attemptCount),
+        currentTimeMs() + Math.min(60_000, 1000 * 2 ** attemptCount),
       ).toISOString();
       await control.markWebhookDeliveryRetry({
         deliveryId: delivery.deliveryId,

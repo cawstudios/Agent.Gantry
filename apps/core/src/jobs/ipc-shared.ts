@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR } from '../config/index.js';
-import { nowIso } from '../infrastructure/time/datetime.js';
+import { nowIso } from '../shared/time/datetime.js';
 import { writeFileAtomic } from '../infrastructure/filesystem/paths.js';
 import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
 import { JobExecutionMode } from '../domain/types.js';

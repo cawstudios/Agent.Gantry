@@ -50,9 +50,9 @@ import {
 } from './group-processing-flow.js';
 import {
   createAdvanceCursorHandler,
-  createArchiveCurrentSessionHandler,
   createSaveProcedureHandler,
   createSenderCommandPolicy,
+  createSessionArchiveHandlers,
 } from './group-session-command-state.js';
 import { groupTurnHasRequiredTrigger } from './group-trigger-policy.js';
 import {
@@ -62,6 +62,7 @@ import {
 } from './group-progress-heartbeats.js';
 import { createGroupAgentRunner } from './group-agent-runner.js';
 import { buildMemoryRecallQueryFromMessages } from '../memory/app-memory-recall-query.js';
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 let streamingGenerationCounter = 0;
 const PERMISSION_BACKGROUND_DEMOTE_MS = 120_000;
 const activeTurnUiCleanupByQueue = new Map<
@@ -81,7 +82,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     return repository;
   };
   const runAgent = createGroupAgentRunner({ deps, ops });
-
   async function processGroupMessages(
     queueJid: string,
     options: { queued?: boolean } = {},
@@ -260,7 +260,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         getGroupThinkingOverride: () => group.agentConfig?.thinking,
         setGroupThinkingOverride: async (value) =>
           deps.setGroupThinkingOverride(chatJid, value),
-        archiveCurrentSession: createArchiveCurrentSessionHandler({
+        ...createSessionArchiveHandlers({
           ops,
           group,
           chatJid,
@@ -366,14 +366,14 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       await deps.channelRuntime.setTyping(chatJid, isTyping);
     };
     await setTypingState(true);
-    const startedAt = Date.now();
+    const startedAt = currentTimeMs();
     let pausedAt: number | null = null;
     let pausedTotalMs = 0;
     const activeElapsedMs = () =>
-      Date.now() -
+      currentTimeMs() -
       startedAt -
       pausedTotalMs -
-      (pausedAt === null ? 0 : Date.now() - pausedAt);
+      (pausedAt === null ? 0 : currentTimeMs() - pausedAt);
     let lastAgentProgressAt = startedAt;
     let typingHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let progressTimer: ReturnType<typeof setInterval> | null = null;
@@ -565,7 +565,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     };
     const pauseActiveElapsed = async () => {
       if (pausedAt !== null) return;
-      pausedAt = Date.now();
+      pausedAt = currentTimeMs();
       progressHeartbeat?.pause();
       if (supportsProgress) {
         await sendProgressToChannel(
@@ -585,7 +585,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     };
     const resumeActiveElapsed = async () => {
       if (pausedAt === null) return;
-      pausedTotalMs += Date.now() - pausedAt;
+      pausedTotalMs += currentTimeMs() - pausedAt;
       pausedAt = null;
       clearBackgroundDemoteTimer();
       progressHeartbeat?.resume();
@@ -620,7 +620,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     };
     let output: 'success' | 'error' = 'error';
     const handleAgentOutput = async (result: AgentOutput) => {
-      lastAgentProgressAt = Date.now();
+      lastAgentProgressAt = currentTimeMs();
       if (awaitingResponseReceipt && !result.interactionBoundary) {
         awaitingResponseReceipt = false;
         await resumeActiveElapsed();

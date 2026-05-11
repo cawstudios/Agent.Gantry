@@ -19,6 +19,7 @@ import {
 } from './main-agent.js';
 import { renderDefaultCapabilityRules } from '../shared/capability-guidance.js';
 import { syncConfiguredConversationBinding } from './group-helpers.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 export interface TelegramTokenValidation {
   ok: boolean;
@@ -383,7 +384,7 @@ export async function registerTelegramMainGroup(options: {
       name: groupName,
       folder,
       trigger: existingGroup?.trigger || defaultTriggerForAgentName(groupName),
-      added_at: new Date().toISOString(),
+      added_at: nowIso(),
       requiresTrigger: false,
       agentConfig: existingGroup?.agentConfig,
     };

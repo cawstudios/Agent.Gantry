@@ -76,7 +76,7 @@ import {
   sanitizeDeliveryError,
 } from './channel-wiring-delivery-guards.js';
 import { sanitizeRetryTailForCanonicalDestination } from './runtime-services-destination-hints.js';
-
+import { nowIso } from '../../shared/time/datetime.js';
 export type { ChannelWiring } from './channel-wiring-types.js';
 
 export function createChannelWiring(
@@ -310,7 +310,7 @@ export function createChannelWiring(
     );
     if (!formatted) return;
     const provider = providerForJid(jid)?.id ?? channel.name;
-    const now = new Date().toISOString();
+    const now = nowIso();
     const messageId = `outbound:${randomUUID()}`;
     const baseMessage = {
       id: messageId,
@@ -388,7 +388,7 @@ export function createChannelWiring(
         try {
           if (partial) {
             await durableAttempt.settlePartiallyDelivered({
-              partialAt: new Date().toISOString(),
+              partialAt: nowIso(),
               error:
                 err instanceof Error
                   ? err.message
@@ -399,7 +399,7 @@ export function createChannelWiring(
             });
           } else {
             await durableAttempt.settleFailed({
-              failedAt: new Date().toISOString(),
+              failedAt: nowIso(),
               error: sanitizeDeliveryError(err, provider),
             });
           }
@@ -462,7 +462,7 @@ export function createChannelWiring(
         await outboundOps?.storeMessage({
           ...baseMessage,
           delivery_status: partial ? 'partially_sent' : 'failed',
-          delivered_at: partial ? new Date().toISOString() : undefined,
+          delivered_at: partial ? nowIso() : undefined,
           delivery_error: sanitizeDeliveryError(err, provider),
           delivery_retry_tail: sanitizedRetryTail,
         });
@@ -480,12 +480,12 @@ export function createChannelWiring(
         'Provider send succeeded but durable sent-status persistence failed. Delivery may already be visible and cannot be blindly retried.';
       try {
         await durableAttempt.settleSent({
-          sentAt: new Date().toISOString(),
+          sentAt: nowIso(),
           providerMessageId: result?.externalMessageId,
           providerPayload: result,
         });
       } catch (err) {
-        const partialAt = new Date().toISOString();
+        const partialAt = nowIso();
         try {
           await durableAttempt.settlePartiallyDelivered({
             partialAt,
@@ -531,7 +531,7 @@ export function createChannelWiring(
         ...baseMessage,
         external_message_id: result?.externalMessageId,
         delivery_status: 'sent',
-        delivered_at: new Date().toISOString(),
+        delivered_at: nowIso(),
       });
     } catch (err) {
       const ambiguousError =
@@ -556,7 +556,7 @@ export function createChannelWiring(
             ...baseMessage,
             external_message_id: result?.externalMessageId,
             delivery_status: 'partially_sent',
-            delivered_at: new Date().toISOString(),
+            delivered_at: nowIso(),
             delivery_error: ambiguousError,
           });
         } catch (ambiguousPersistErr) {

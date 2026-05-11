@@ -18,6 +18,7 @@ describe('browser Chrome launch args', () => {
     expect(args).not.toContain('--no-sandbox');
     expect(args).not.toContain('--disable-setuid-sandbox');
     expect(args).not.toContain('--headless=new');
+    expect(args).toContain('--window-size=1280,900');
   });
 
   it('keeps the sandbox enabled for non-root Linux host launches', () => {
@@ -49,6 +50,7 @@ describe('browser Chrome launch args', () => {
       '--remote-debugging-address=127.0.0.1',
     );
     expect(DEFAULT_CHROME_ARGS).toContain('--disable-features=OmniboxPopup');
+    expect(DEFAULT_CHROME_ARGS).toContain('--window-size=1280,900');
     expect(DEFAULT_CHROME_ARGS).not.toContain(
       '--disable-blink-features=AutomationControlled',
     );

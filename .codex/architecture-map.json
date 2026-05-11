@@ -5,12 +5,15 @@
     "apps/core/src/adapters/storage/postgres/repositories/domain-repositories.postgres.ts": 2100,
     "apps/core/src/adapters/storage/postgres/schema/canonical-ops-repo.postgres.ts": 950,
     "apps/core/src/adapters/storage/postgres/schema/schema.ts": 900,
+    "apps/core/src/app/bootstrap/channel-wiring.ts": 711,
+    "apps/core/src/channels/slack/channel-delivery-helpers.ts": 774,
+    "apps/core/src/channels/telegram/channel-delivery.ts": 766,
     "apps/core/src/cli/group.ts": 820,
     "apps/core/src/config/settings/desired-state-service.ts": 820,
     "apps/core/src/config/settings/runtime-settings-parser.ts": 1120,
     "apps/core/src/jobs/ipc-admin-handlers.ts": 883,
     "apps/core/src/runner/mcp/tools/service.ts": 850,
-    "apps/core/src/runtime/group-processing.ts": 738,
+    "apps/core/src/runtime/group-processing.ts": 806,
     "apps/core/src/runtime/ipc.ts": 794
   },
   "layers": {

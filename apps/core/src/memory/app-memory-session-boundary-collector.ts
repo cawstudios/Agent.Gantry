@@ -32,6 +32,9 @@ export async function collectDurableMemoryAtBoundary(
       },
       sessionDigests: deps.repositories.agentSessionDigests,
     },
-    extractFacts: (extractInput) => extractor.extractFacts(extractInput),
+    extractFacts: (extractInput) =>
+      extractor.extractFactsWithOutcome
+        ? extractor.extractFactsWithOutcome(extractInput)
+        : extractor.extractFacts(extractInput),
   });
 }

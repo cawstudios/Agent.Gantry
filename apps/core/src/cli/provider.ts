@@ -12,6 +12,7 @@ import { readEnvFile } from '../config/env/file.js';
 import { envFilePath } from '../config/settings/runtime-home.js';
 import { ensureRuntimeSettings } from '../config/settings/runtime-settings.js';
 import type { DoctorReport } from './doctor.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 function usage(): string {
   return [
@@ -127,7 +128,7 @@ export async function runProviderCommand(
           appId: 'default' as never,
           conversationId: providerId as never,
           userIds: parseCsv(allowValue),
-          updatedAt: new Date().toISOString(),
+          updatedAt: nowIso(),
         });
         p.note(
           formatUserList(controlAllowlist.userIds),

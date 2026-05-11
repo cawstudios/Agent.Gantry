@@ -4,6 +4,7 @@ import path from 'path';
 
 import { DATA_DIR, REMOTE_CONTROL_AUTO_ACCEPT } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
+import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
 interface RemoteControlSession {
   pid: number;
@@ -110,10 +111,7 @@ export function restoreRemoteControl(): void {
       startedBy: typeof raw.startedBy === 'string' ? raw.startedBy : 'unknown',
       startedInChat:
         typeof raw.startedInChat === 'string' ? raw.startedInChat : 'unknown',
-      startedAt:
-        typeof raw.startedAt === 'string'
-          ? raw.startedAt
-          : new Date().toISOString(),
+      startedAt: typeof raw.startedAt === 'string' ? raw.startedAt : nowIso(),
     };
     logger.info(
       { pid: activeSession.pid },
@@ -216,7 +214,7 @@ export async function startRemoteControl(
 
   // Poll the stdout file for the URL
   return new Promise((resolve) => {
-    const startTime = Date.now();
+    const startTime = currentTimeMs();
 
     const poll = () => {
       // Check if process died
@@ -240,7 +238,7 @@ export async function startRemoteControl(
           url: match[0],
           startedBy: sender,
           startedInChat: chatJid,
-          startedAt: new Date().toISOString(),
+          startedAt: nowIso(),
         };
         activeSession = session;
         saveState(session);
@@ -251,7 +249,7 @@ export async function startRemoteControl(
       }
 
       // Timeout check
-      if (Date.now() - startTime >= URL_TIMEOUT_MS) {
+      if (currentTimeMs() - startTime >= URL_TIMEOUT_MS) {
         try {
           process.kill(-pid, 'SIGTERM');
         } catch {

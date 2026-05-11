@@ -1,5 +1,6 @@
 import { createHmac, randomUUID, verify as cryptoVerify } from 'crypto';
 import { IPC_RESPONSE_VERIFY_KEY } from './runtime-env.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 export function hasValidIpcResponseSignature(
   raw: Record<string, unknown>,
@@ -22,7 +23,7 @@ export function createSignedIpcRequestEnvelope(
         ? payload.requestId
         : `ipc-${randomUUID()}`,
     nonce: randomUUID(),
-    expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+    expiresAt: new Date(currentTimeMs() + 5 * 60_000).toISOString(),
   };
   const signature = signIpcRequestPayload(requestSigningKey, signedPayload);
   return signature ? { ...signedPayload, signature } : signedPayload;

@@ -38,6 +38,9 @@ vi.mock('@core/runtime/browser-profiles.js', () => ({
 
 vi.mock('@core/runtime/browser-cdp-targets.js', () => ({
   ensureBrowserTarget: vi.fn(async () => 'target-1'),
+  activateBrowserTarget: vi.fn(async () => undefined),
+  foregroundBrowserTarget: vi.fn(async () => undefined),
+  resizeHeadedBrowserWindow: vi.fn(async () => undefined),
 }));
 
 import { BrowserIpcAction } from '@myclaw/contracts';
@@ -54,6 +57,11 @@ import {
   ensureBrowserReady,
   getBrowserStatus,
 } from '@core/runtime/browser-capability.js';
+import {
+  ensureBrowserTarget,
+  foregroundBrowserTarget,
+  resizeHeadedBrowserWindow,
+} from '@core/runtime/browser-cdp-targets.js';
 function fileMode(filePath: string): number {
   return fs.statSync(filePath).mode & 0o777;
 }
@@ -67,6 +75,8 @@ describe('ipc-browser-handler', () => {
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
@@ -182,6 +192,601 @@ describe('ipc-browser-handler', () => {
     expect(response.data).toEqual({ content: 'tool-result' });
   });
 
+  it('foregrounds the content target immediately before pointer action dispatch', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    const callBrowserTool = vi.fn(async () => ({ content: 'clicked' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-pointer',
+        action: 'browser_click',
+        payload: { target: 'button-ref' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 2_000,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(ensureBrowserTarget).toHaveBeenCalledWith(9333, {
+      deadlineAtMs: expect.any(Number),
+    });
+    expect(foregroundBrowserTarget).toHaveBeenCalledWith(
+      9333,
+      'content-target',
+      {
+        deadlineAtMs: expect.any(Number),
+      },
+    );
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'browser_click',
+        session: expect.objectContaining({ port: 9333 }),
+        timeoutMs: expect.any(Number),
+      }),
+    );
+    expect(
+      vi.mocked(foregroundBrowserTarget).mock.invocationCallOrder[0],
+    ).toBeLessThan(callBrowserTool.mock.invocationCallOrder[0]);
+  });
+
+  it('foregrounds hover and screenshot actions before backend dispatch', async () => {
+    vi.mocked(ensureBrowserReady)
+      .mockResolvedValueOnce({
+        profile: 'c-main-abc123abc123',
+        profileName: 'c-main-abc123abc123',
+        running: true,
+        cdpReady: true,
+        port: 9333,
+        targetId: 'stale-target',
+        headless: false,
+      })
+      .mockResolvedValueOnce({
+        profile: 'c-main-abc123abc123',
+        profileName: 'c-main-abc123abc123',
+        running: true,
+        cdpReady: true,
+        port: 9333,
+        targetId: 'stale-target',
+        headless: false,
+      });
+    vi.mocked(ensureBrowserTarget)
+      .mockResolvedValueOnce('hover-target')
+      .mockResolvedValueOnce('screenshot-target');
+    const callBrowserTool = vi.fn(async ({ toolName }) => ({
+      content: toolName,
+    }));
+
+    const hoverResponse = await processBrowserIpcRequest(
+      {
+        requestId: 'req-hover',
+        action: 'browser_hover',
+        payload: { target: 'button-ref' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 2_000,
+      },
+    );
+    const screenshotResponse = await processBrowserIpcRequest(
+      {
+        requestId: 'req-screenshot',
+        action: 'browser_take_screenshot',
+        payload: {},
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 2_000,
+      },
+    );
+
+    expect(hoverResponse.ok).toBe(true);
+    expect(screenshotResponse.ok).toBe(true);
+    expect(foregroundBrowserTarget).toHaveBeenNthCalledWith(
+      1,
+      9333,
+      'hover-target',
+      { deadlineAtMs: expect.any(Number) },
+    );
+    expect(foregroundBrowserTarget).toHaveBeenNthCalledWith(
+      2,
+      9333,
+      'screenshot-target',
+      { deadlineAtMs: expect.any(Number) },
+    );
+    expect(callBrowserTool).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ toolName: 'browser_hover' }),
+    );
+    expect(callBrowserTool).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ toolName: 'browser_take_screenshot' }),
+    );
+    expect(
+      vi.mocked(foregroundBrowserTarget).mock.invocationCallOrder[0],
+    ).toBeLessThan(callBrowserTool.mock.invocationCallOrder[0]);
+    expect(
+      vi.mocked(foregroundBrowserTarget).mock.invocationCallOrder[1],
+    ).toBeLessThan(callBrowserTool.mock.invocationCallOrder[1]);
+  });
+
+  it('keeps other pointer actions covered by foregrounding before dispatch', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    const callBrowserTool = vi.fn(async () => ({ content: 'dragged' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-drag',
+        action: 'browser_drag',
+        payload: { target: 'source', target2: 'destination' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 2_000,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(foregroundBrowserTarget).toHaveBeenCalledWith(
+      9333,
+      'content-target',
+      {
+        deadlineAtMs: expect.any(Number),
+      },
+    );
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'browser_drag' }),
+    );
+  });
+
+  it('fails closed before backend dispatch when foregrounding exceeds the deadline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    vi.mocked(foregroundBrowserTarget).mockImplementationOnce(async () => {
+      vi.setSystemTime(1_101);
+    });
+    const callBrowserTool = vi.fn(async () => ({ content: 'clicked' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-foreground-deadline',
+        action: 'browser_click',
+        payload: { target: 'button-ref' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 100,
+      },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('Browser IPC deadline exceeded');
+    expect(callBrowserTool).not.toHaveBeenCalled();
+  });
+
+  it('does not foreground non-pointer non-screenshot backend actions', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    const callBrowserTool = vi.fn(async () => ({ content: 'navigated' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-navigate-no-foreground',
+        action: 'browser_navigate',
+        payload: { url: 'https://example.test' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(foregroundBrowserTarget).not.toHaveBeenCalled();
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'browser_navigate' }),
+    );
+  });
+
+  it('uses signed IPC deadline ahead of reconstructed timeout budget', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    const callBrowserTool = vi.fn(async () => ({ content: 'clicked' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-signed-deadline',
+        action: 'browser_click',
+        payload: { target: 'button-ref' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 10_000,
+        deadlineAtMs: 5_000,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(ensureBrowserTarget).toHaveBeenCalledWith(9333, {
+      deadlineAtMs: 5_000,
+    });
+    expect(foregroundBrowserTarget).toHaveBeenCalledWith(
+      9333,
+      'content-target',
+      {
+        deadlineAtMs: 5_000,
+      },
+    );
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeoutMs: 4_000,
+      }),
+    );
+  });
+
+  it('resizes headed browser windows through CDP without backend delegation', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    const callBrowserTool = vi.fn(async () => ({ content: 'backend-resized' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-resize-headed',
+        action: 'browser_resize',
+        payload: { width: 1280, height: 720 },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 20,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(ensureBrowserTarget).toHaveBeenCalledWith(9333, {
+      deadlineAtMs: expect.any(Number),
+    });
+    expect(resizeHeadedBrowserWindow).toHaveBeenCalledWith(
+      9333,
+      'content-target',
+      1280,
+      720,
+      { deadlineAtMs: expect.any(Number) },
+    );
+    expect(callBrowserTool).not.toHaveBeenCalled();
+    expect(response.data).toEqual({
+      content: [{ type: 'text', text: 'Browser window resized to 1280x720.' }],
+    });
+  });
+
+  it('clamps oversized headed browser resize dimensions before CDP resize', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    const callBrowserTool = vi.fn(async () => ({ content: 'backend-resized' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-resize-headed-oversized',
+        action: 'browser_resize',
+        payload: { width: 12_000, height: 20_000 },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(resizeHeadedBrowserWindow).toHaveBeenCalledWith(
+      9333,
+      'content-target',
+      8192,
+      8192,
+    );
+    expect(callBrowserTool).not.toHaveBeenCalled();
+    expect(response.data).toEqual({
+      content: [{ type: 'text', text: 'Browser window resized to 8192x8192.' }],
+    });
+  });
+
+  it('passes the remaining browser IPC budget to CDP activation and backend dispatch', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    vi.mocked(ensureBrowserTarget).mockImplementationOnce(async () => {
+      vi.setSystemTime(1_100);
+      return 'content-target';
+    });
+    vi.mocked(foregroundBrowserTarget).mockImplementationOnce(async () => {
+      vi.setSystemTime(1_300);
+    });
+    const callBrowserTool = vi.fn(async () => ({ content: 'clicked' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-remaining-budget',
+        action: 'browser_click',
+        payload: { target: 'button-ref' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 10_000,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(ensureBrowserTarget).toHaveBeenCalledWith(9333, {
+      deadlineAtMs: 11_000,
+    });
+    expect(foregroundBrowserTarget).toHaveBeenCalledWith(
+      9333,
+      'content-target',
+      {
+        deadlineAtMs: 11_000,
+      },
+    );
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeoutMs: 9_700,
+      }),
+    );
+  });
+
+  it('fails closed before backend dispatch when the browser IPC budget is exhausted', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: false,
+    });
+    vi.mocked(ensureBrowserTarget).mockImplementationOnce(async () => {
+      vi.setSystemTime(1_050);
+      return 'content-target';
+    });
+    vi.mocked(foregroundBrowserTarget).mockImplementationOnce(async () => {
+      vi.setSystemTime(1_101);
+    });
+    const callBrowserTool = vi.fn(async () => ({ content: 'clicked' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-exhausted-budget',
+        action: 'browser_click',
+        payload: { target: 'button-ref' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 100,
+      },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('Browser IPC deadline exceeded');
+    expect(callBrowserTool).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before backend dispatch when remaining budget is below backend minimum', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: true,
+    });
+    vi.mocked(ensureBrowserTarget).mockImplementationOnce(async () => {
+      vi.setSystemTime(10_100);
+      return 'content-target';
+    });
+    const callBrowserTool = vi.fn(async () => ({ content: 'clicked' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-below-backend-min',
+        action: 'browser_navigate',
+        payload: { url: 'https://example.test' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        timeoutMs: 10_000,
+      },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain(
+      'Browser IPC deadline exceeded before backend dispatch',
+    );
+    expect(callBrowserTool).not.toHaveBeenCalled();
+  });
+
+  it('keeps headless resize delegated to the private backend', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: true,
+    });
+    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    const callBrowserTool = vi.fn(async () => ({ content: 'backend-resized' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-resize-headless',
+        action: 'browser_resize',
+        payload: { width: 1280, height: 720 },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(resizeHeadedBrowserWindow).not.toHaveBeenCalled();
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'browser_resize',
+        arguments: { width: 1280, height: 720 },
+      }),
+    );
+    expect(response.data).toEqual({ content: 'backend-resized' });
+  });
+
+  it('keeps oversized headless resize delegated to the private backend', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValueOnce({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'stale-target',
+      headless: true,
+    });
+    vi.mocked(ensureBrowserTarget).mockResolvedValueOnce('content-target');
+    const callBrowserTool = vi.fn(async () => ({ content: 'backend-resized' }));
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-resize-headless-oversized',
+        action: 'browser_resize',
+        payload: { width: 12_000, height: 20_000 },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(resizeHeadedBrowserWindow).not.toHaveBeenCalled();
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'browser_resize',
+        arguments: { width: 12_000, height: 20_000 },
+      }),
+    );
+    expect(response.data).toEqual({ content: 'backend-resized' });
+  });
+
   it('denies non-status browser IPC when Browser is not authorized for the run', async () => {
     const callBrowserTool = vi.fn();
     const response = await processBrowserIpcRequest(
@@ -227,6 +832,28 @@ describe('ipc-browser-handler', () => {
       headless: true,
       keepAliveMs: undefined,
     });
+  });
+
+  it('fails closed before launch when the signed deadline is already exhausted', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(2_000);
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-launch-expired',
+        action: 'browser_launch',
+        payload: { headless: true },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserIpcAuthorized: true,
+        deadlineAtMs: 1_999,
+      },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('Browser IPC deadline exceeded');
+    expect(ensureBrowserReady).not.toHaveBeenCalled();
   });
 
   it('includes tool-capability broker health on browser launch', async () => {

@@ -67,8 +67,8 @@ function createMcpFixture(): {
     .toString();
   const runnerDir = path.join(root, 'runner');
   const runnerMcpDir = path.join(runnerDir, 'mcp');
-  const infrastructureTimeDir = path.join(root, 'infrastructure', 'time');
   const sharedDir = path.join(root, 'shared');
+  const sharedTimeDir = path.join(sharedDir, 'time');
   const serverPath = path.join(runnerMcpDir, 'stdio.ts');
   const ipcDir = path.join(root, 'ipc', 'team');
   const resultPath = path.join(root, 'mcp-result.json');
@@ -82,8 +82,8 @@ function createMcpFixture(): {
 
   fs.mkdirSync(runnerDir, { recursive: true });
   fs.mkdirSync(runnerMcpDir, { recursive: true });
-  fs.mkdirSync(infrastructureTimeDir, { recursive: true });
   fs.mkdirSync(sharedDir, { recursive: true });
+  fs.mkdirSync(sharedTimeDir, { recursive: true });
   fs.mkdirSync(sdkServerDir, { recursive: true });
   fs.writeFileSync(
     path.join(root, 'package.json'),
@@ -127,10 +127,9 @@ function createMcpFixture(): {
     path.join(sharedDir, 'tool-rule-matcher.ts'),
   );
   fs.copyFileSync(
-    path.resolve('apps/core/src/infrastructure/time/datetime.ts'),
-    path.join(infrastructureTimeDir, 'datetime.ts'),
+    path.resolve('apps/core/src/shared/time/datetime.ts'),
+    path.join(sharedTimeDir, 'datetime.ts'),
   );
-  symlinkPackage(root, 'dayjs', 'node_modules/dayjs');
   symlinkPackage(root, 'zod', 'node_modules/zod');
   symlinkPackage(root, 'cron-parser', 'node_modules/cron-parser');
   symlinkPackage(root, '@myclaw/contracts', 'packages/contracts');

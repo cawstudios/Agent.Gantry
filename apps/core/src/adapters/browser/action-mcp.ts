@@ -26,7 +26,7 @@ export function resolveBrowserActionMcpCliPath(): string {
 
 export function createBrowserActionMcpServerConfig(
   cdpEndpoint: string,
-  options: { outputDir?: string } = {},
+  options: { outputDir?: string; actionTimeoutMs?: number } = {},
 ): BrowserActionMcpServerConfig {
   const env: Record<string, string> = {
     PLAYWRIGHT_MCP_CDP_ENDPOINT: cdpEndpoint,
@@ -39,7 +39,7 @@ export function createBrowserActionMcpServerConfig(
       resolveBrowserActionMcpCliPath(),
       '--shared-browser-context',
       '--timeout-action',
-      String(BROWSER_ACTION_TIMEOUT_MS),
+      String(options.actionTimeoutMs ?? BROWSER_ACTION_TIMEOUT_MS),
       ...(options.outputDir ? ['--output-dir', options.outputDir] : []),
     ],
     env,

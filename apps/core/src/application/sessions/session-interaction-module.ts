@@ -20,6 +20,7 @@ import type {
 import type { IsoTimestamp } from '../../shared/time/primitives.js';
 import { ApplicationError } from '../common/application-error.js';
 import { isValidControlId } from '../app-scope/control-id.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 type ControlResponseMode = Exclude<RuntimeResponseMode, 'sse'> | 'sse';
 
@@ -320,10 +321,10 @@ export class SessionInteractionModule {
     timeoutMs: number;
   }): Promise<RuntimeEvent> {
     const subscription = await this.subscribeEvents(input);
-    const startedAt = Date.now();
+    const startedAt = currentTimeMs();
     try {
-      while (Date.now() - startedAt < input.timeoutMs) {
-        const remaining = input.timeoutMs - (Date.now() - startedAt);
+      while (currentTimeMs() - startedAt < input.timeoutMs) {
+        const remaining = input.timeoutMs - (currentTimeMs() - startedAt);
         const events = await subscription.next({ timeoutMs: remaining });
         const visible = events.find(isVisibleWaitEvent);
         if (visible) return visible;

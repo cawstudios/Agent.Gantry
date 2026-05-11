@@ -2,6 +2,7 @@ import fs from 'fs';
 
 import type { HostCredentialMode } from '../config/credentials/mode.js';
 import { onboardingStatePath } from '../config/settings/runtime-home.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 export type OnboardingStep =
   | 'welcome'
@@ -58,7 +59,7 @@ export function createInitialState(runtimeHome: string): OnboardingState {
     version: 1,
     status: 'in_progress',
     currentStep: 'welcome',
-    updatedAt: new Date().toISOString(),
+    updatedAt: nowIso(),
     data: { runtimeHome },
   };
 }
@@ -81,7 +82,7 @@ export function readOnboardingState(
       version: 1,
       status: parsed.status,
       currentStep: parsed.currentStep,
-      updatedAt: parsed.updatedAt || new Date().toISOString(),
+      updatedAt: parsed.updatedAt || nowIso(),
       data: parsed.data,
     };
   } catch {
@@ -97,7 +98,7 @@ export function writeOnboardingState(
   const next: OnboardingState = {
     ...state,
     version: 1,
-    updatedAt: new Date().toISOString(),
+    updatedAt: nowIso(),
     data: {
       ...state.data,
       runtimeHome,

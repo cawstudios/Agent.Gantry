@@ -14,7 +14,7 @@ import {
 } from '../../../../domain/outbound-delivery/outbound-delivery.js';
 import { sanitizeRetryTailProviderPayload } from '../../../../domain/messages/retry-tail-provider-payload.js';
 import type { OutboundDeliveryRepository } from '../../../../domain/ports/repositories.js';
-import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
+import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
 import type {
   CanonicalDb,

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { nowMs } from '../../infrastructure/time/datetime.js';
+import { nowMs } from '../../shared/time/datetime.js';
 
 export function makeIpcId(prefix: string): string {
   return `${prefix}-${nowMs()}-${randomUUID()}`;

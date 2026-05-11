@@ -2,12 +2,19 @@ import {
   normalizeSubject,
   visibleSubjectFilters,
 } from './app-memory-boundaries.js';
-import { hashText, parseItemSource } from './app-memory-canonical-codec.js';
+import {
+  hashText,
+  parseItemSource,
+  toAppItem,
+} from './app-memory-canonical-codec.js';
 import type {
+  AppMemoryItem,
   AppMemorySearchInput,
   AppMemorySearchResult,
   NormalizedMemorySubject,
 } from './memory-types.js';
+import { nowIso as currentIso } from '../shared/time/datetime.js';
+import { withStatementTimeout } from './app-memory-service-query-helpers.js';
 
 export type AppMemorySearchEmptyReason =
   | 'no_visible_subject_filters'
@@ -35,7 +42,7 @@ interface AppMemoryRecallDeps {
 }
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return currentIso();
 }
 
 function sqlThreadVisibilityFilter(
@@ -91,6 +98,8 @@ export async function queryAppMemoryItems(
   deps: AppMemoryRecallDeps,
   options: {
     threadScope?: 'visible' | 'exact';
+    signal?: AbortSignal;
+    statementTimeoutMs?: number;
   } = {},
 ): Promise<
   Array<{
@@ -101,6 +110,7 @@ export async function queryAppMemoryItems(
     reasons: string[];
   }>
 > {
+  options.signal?.throwIfAborted();
   const { and, asc, desc, eq, or, sql } = deps.sqlOps;
   const context = normalizeSubject(input);
   const query = input.query?.trim() || '';
@@ -121,34 +131,47 @@ export async function queryAppMemoryItems(
   );
   const vectorScore = sql`0`;
   const combinedScore = sql`(${lexicalScore} * 0.65) + (${i.confidence} * 0.10)`;
-  const rows = await db
-    .select({
-      row: i,
-      lexicalScore,
-      vectorScore,
-      score: ranked ? combinedScore : sql`${i.confidence}`,
-    })
-    .from(i)
-    .where(
-      and(
-        eq(i.status, 'active'),
-        eq(i.appId, context.appId),
-        visible.length === 0
-          ? sql`false`
-          : visible.length === 1
-            ? visible[0]
-            : or(...visible),
-        threadFilter,
-        query ? sql`${document} @@ ${searchQuery}` : undefined,
-      ),
-    )
-    .orderBy(
-      ranked ? desc(combinedScore) : desc(i.updatedAt),
-      desc(i.updatedAt),
-      asc(i.key),
-      asc(i.id),
-    )
-    .limit(Math.max(1, Math.min(input.limit || 20, 100)));
+  const rows = (await withStatementTimeout(
+    db,
+    options.statementTimeoutMs,
+    (timeoutMs) =>
+      sql`select set_config('statement_timeout', ${String(timeoutMs)}, true)`,
+    (queryDb) =>
+      queryDb
+        .select({
+          row: i,
+          lexicalScore,
+          vectorScore,
+          score: ranked ? combinedScore : sql`${i.confidence}`,
+        })
+        .from(i)
+        .where(
+          and(
+            eq(i.status, 'active'),
+            eq(i.appId, context.appId),
+            visible.length === 0
+              ? sql`false`
+              : visible.length === 1
+                ? visible[0]
+                : or(...visible),
+            threadFilter,
+            query ? sql`${document} @@ ${searchQuery}` : undefined,
+          ),
+        )
+        .orderBy(
+          ranked ? desc(combinedScore) : desc(i.updatedAt),
+          desc(i.updatedAt),
+          asc(i.key),
+          asc(i.id),
+        )
+        .limit(Math.max(1, Math.min(input.limit || 20, 100))),
+  )) as Array<{
+    row: any;
+    score: number;
+    lexicalScore: number;
+    vectorScore: number;
+  }>;
+  options.signal?.throwIfAborted();
   return rows.map((row: any) => ({
     row: row.row,
     score: Number(row.score || 0),
@@ -163,6 +186,28 @@ export async function queryAppMemoryItems(
       row.vectorScore ? 'semantic' : '',
       parseItemSource(row.row).isPinned ? 'pinned' : '',
     ].filter(Boolean),
+  }));
+}
+
+export function toAppMemoryItems(rows: Array<{ row: any }>): AppMemoryItem[] {
+  return rows.map((row) => toAppItem(row.row));
+}
+
+export function toAppMemorySearchResults(
+  rows: Array<{
+    row: any;
+    score: number;
+    lexicalScore: number;
+    vectorScore: number;
+    reasons: string[];
+  }>,
+): AppMemorySearchResult[] {
+  return rows.map((row) => ({
+    item: toAppItem(row.row),
+    score: row.score,
+    lexicalScore: row.lexicalScore,
+    vectorScore: row.vectorScore,
+    reasons: row.reasons,
   }));
 }
 

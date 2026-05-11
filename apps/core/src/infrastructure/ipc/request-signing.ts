@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 export const IPC_REQUEST_MAX_AGE_MS = 5 * 60_000;
 
@@ -28,7 +29,7 @@ export function verifyIpcRequestPayload(
 
 export function validateIpcRequestFreshness(
   payload: Record<string, unknown>,
-  nowMs = Date.now(),
+  nowMs = currentTimeMs(),
 ): { ok: true } | { ok: false; reason: string } {
   const requestId =
     typeof payload.requestId === 'string' ? payload.requestId.trim() : '';

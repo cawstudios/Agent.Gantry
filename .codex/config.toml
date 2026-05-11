@@ -5,11 +5,19 @@ web_search = "cached"
 
 
 [features]
-codex_hooks = true
+hooks = true
 multi_agent = true
 streamable_shell = true
 skills = true
-goal = true
+goals = true
+view_image_tool = true
+apply_patch = true
+steer = true
+unified_exec = true
+shell_snapshot = true
+ghost_commit = true
+collaboration_modes = true
+responses_websockets_v2 = true
 
 [agents]
 max_threads = 6

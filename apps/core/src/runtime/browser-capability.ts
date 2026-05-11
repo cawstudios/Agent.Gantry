@@ -18,6 +18,7 @@ import { clearBrowserSessionRecord, readBrowserSessionRecord, writeBrowserSessio
 import { resolveBrowserHeadless, resolveBrowserKeepAliveMs } from './browser-launch-options.js';
 // prettier-ignore
 import { hasPersistentBrowserState, inferAuthMarkers } from './browser-profile-state.js';
+import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
 export const DEFAULT_BROWSER_PROFILE_NAME = 'myclaw';
 export type {
@@ -77,8 +78,8 @@ function resolveProfileName(profileName?: string): string {
 }
 
 async function waitForCdpHttp(port: number, timeoutMs: number): Promise<void> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
+  const startedAt = currentTimeMs();
+  while (currentTimeMs() - startedAt < timeoutMs) {
     if (await isCdpHttpHealthy(port)) return;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -93,8 +94,8 @@ async function waitForDevToolsActivePort(
   timeoutMs: number,
 ): Promise<number> {
   const activePortPath = path.join(userDataDir, 'DevToolsActivePort');
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
+  const startedAt = currentTimeMs();
+  while (currentTimeMs() - startedAt < timeoutMs) {
     try {
       const [portLine] = fs
         .readFileSync(activePortPath, 'utf-8')
@@ -205,7 +206,7 @@ async function closeUnhealthySession(
 function touchSession(session: BrowserSession): void {
   const profile =
     getProfile(session.profileName) ?? createProfile(session.profileName);
-  session.lastUsedAt = Date.now();
+  session.lastUsedAt = currentTimeMs();
   updateProfileMetadata(session.profileName, {
     last_used: new Date(session.lastUsedAt).toISOString(),
     cdp_port: session.port,
@@ -231,8 +232,8 @@ async function terminatePid(pid: number): Promise<void> {
   } catch {
     return;
   }
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 2_000) {
+  const startedAt = currentTimeMs();
+  while (currentTimeMs() - startedAt < 2_000) {
     try {
       process.kill(pid, 0);
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -289,7 +290,7 @@ async function recoverPersistedBrowserSession(input: {
     targetId: record.targetId,
     pid: record.pid,
     lock: input.lock,
-    lastUsedAt: Date.parse(record.lastUsedAt) || Date.now(),
+    lastUsedAt: Date.parse(record.lastUsedAt) || currentTimeMs(),
     keepAliveMs: input.keepAliveMs,
     keepAliveTimer: null,
     headless: record.headless,
@@ -394,7 +395,7 @@ export async function launchBrowser(
       chromeProcess,
       pid,
       lock,
-      lastUsedAt: Date.now(),
+      lastUsedAt: currentTimeMs(),
       keepAliveMs,
       keepAliveTimer: null,
       headless,
@@ -448,8 +449,8 @@ async function waitForProcessExit(
     if (exited) return true;
   }
 
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
+  const startedAt = currentTimeMs();
+  while (currentTimeMs() - startedAt < timeoutMs) {
     if (!isChromeAlive(session)) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -504,7 +505,7 @@ export function getKnownBrowserStatus(
 export async function closeBrowser(
   profileName = DEFAULT_BROWSER_PROFILE_NAME,
 ): Promise<{ closed: boolean; reason?: string; elapsedMs?: number }> {
-  const startedAt = Date.now();
+  const startedAt = currentTimeMs();
   const normalized = resolveProfileName(profileName);
   const session = sessions.get(normalized);
   if (!session) {
@@ -516,7 +517,7 @@ export async function closeBrowser(
         return {
           closed: true,
           reason: 'not_running',
-          elapsedMs: Date.now() - startedAt,
+          elapsedMs: currentTimeMs() - startedAt,
         };
       }
       const shouldTerminate =
@@ -532,20 +533,20 @@ export async function closeBrowser(
       }
       clearBrowserSessionRecord(profile);
       updateProfileMetadata(normalized, {
-        last_used: new Date().toISOString(),
+        last_used: nowIso(),
         cdp_port: undefined,
       });
       if (!shouldTerminate && isPidAlive(record.pid)) {
         return {
           closed: false,
           reason: 'pid_not_owned_by_browser_profile',
-          elapsedMs: Date.now() - startedAt,
+          elapsedMs: currentTimeMs() - startedAt,
         };
       }
       return {
         closed: true,
         reason: shouldTerminate ? 'terminated' : 'already_stopped',
-        elapsedMs: Date.now() - startedAt,
+        elapsedMs: currentTimeMs() - startedAt,
       };
     } finally {
       lock.release();
@@ -577,14 +578,14 @@ export async function closeBrowser(
   sessions.delete(normalized);
   clearBrowserSessionRecord(createProfile(normalized));
   updateProfileMetadata(normalized, {
-    last_used: new Date().toISOString(),
+    last_used: nowIso(),
     cdp_port: undefined,
   });
 
   return {
     closed: exited,
     reason: exited ? 'terminated' : 'process_did_not_exit',
-    elapsedMs: Date.now() - startedAt,
+    elapsedMs: currentTimeMs() - startedAt,
   };
 }
 

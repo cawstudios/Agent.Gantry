@@ -9,6 +9,7 @@ import {
 } from '../../adapters/storage/postgres/runtime-store.js';
 import { adaptSessionControlPort } from './session-control-port.js';
 import type { ControlRouteContext } from './handler-context.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 export type SessionEventSubscription = Awaited<
   ReturnType<SessionInteractionModule['subscribeEvents']>
@@ -20,7 +21,7 @@ export function createSessionInteractionModule(): SessionInteractionModule {
     ops: getRuntimeRepositories(),
     repositories: getRuntimeStorage().repositories,
     runtimeEvents: getRuntimeEventExchange(),
-    now: () => new Date().toISOString() as never,
+    now: () => nowIso() as never,
     createId: randomUUID,
     stableHash: (input) => createHash('sha256').update(input).digest('hex'),
   });

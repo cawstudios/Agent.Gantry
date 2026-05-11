@@ -1,3 +1,5 @@
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
+
 export const TRIGGER_RATE_WINDOW_MS = 60_000;
 export const TRIGGER_RATE_LIMIT_PER_APP = 120;
 export const TRIGGER_RATE_LIMIT_PER_JOB = 20;
@@ -13,7 +15,7 @@ export function createRateLimiter(
 
   return {
     consume(key, limit) {
-      const now = Date.now();
+      const now = currentTimeMs();
       for (const [bucketKey, bucket] of buckets) {
         if (bucket.resetAt <= now) buckets.delete(bucketKey);
       }

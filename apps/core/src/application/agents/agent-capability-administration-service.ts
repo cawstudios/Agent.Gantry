@@ -32,6 +32,7 @@ import {
   type AgentToolAccessView,
 } from '../../shared/tool-access-view.js';
 import { adminMcpToolNameFromFullName } from '../../shared/admin-mcp-tools.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 export interface CapabilityCatalogView {
   tools: ToolCatalogItem[];
@@ -57,7 +58,7 @@ export class AgentCapabilityAdministrationService {
       mcpServers: McpServerRepository;
     },
     private readonly clock: { now(): string } = {
-      now: () => new Date().toISOString(),
+      now: () => nowIso(),
     },
   ) {}
 

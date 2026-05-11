@@ -54,7 +54,7 @@ describe('runner browser MCP projected tools', () => {
     expect(requestBrowserAction).toHaveBeenCalledWith(
       'browser_status',
       {},
-      undefined,
+      { timeoutMs: 120_000 },
     );
     expect(fetch).not.toHaveBeenCalled();
     expect(result).toEqual({
@@ -78,7 +78,7 @@ describe('runner browser MCP projected tools', () => {
   });
 
   it('clamps and forwards browser action timeout_ms to signed IPC', async () => {
-    requestBrowserAction.mockResolvedValueOnce({
+    requestBrowserAction.mockResolvedValue({
       ok: true,
       data: { ok: true },
     });
@@ -93,6 +93,16 @@ describe('runner browser MCP projected tools', () => {
       'browser_take_screenshot',
       {},
       { timeoutMs: 120_000 },
+    );
+
+    await server.tools.get('browser_take_screenshot')?.({
+      timeout_ms: 500,
+    });
+
+    expect(requestBrowserAction).toHaveBeenLastCalledWith(
+      'browser_take_screenshot',
+      {},
+      { timeoutMs: 1_000 },
     );
   });
 

@@ -921,6 +921,7 @@ describe('createGroupProcessor', () => {
           appId: 'app:test',
           agentId: 'agent:test',
           agentSessionId: 'agent-session:1',
+          agentSessionResetAt: null,
         });
 
       const { processGroupMessages } = createGroupProcessor(deps);
@@ -930,7 +931,11 @@ describe('createGroupProcessor', () => {
         group.folder,
         'new-sess-123',
         null,
-        expect.objectContaining({ conversationJid: 'group1@g.us' }),
+        expect.objectContaining({
+          conversationJid: 'group1@g.us',
+          expectedAgentSessionId: 'agent-session:1',
+          expectedAgentSessionResetAt: null,
+        }),
       );
     });
 
@@ -943,6 +948,7 @@ describe('createGroupProcessor', () => {
           appId: 'app:test',
           agentId: 'agent:test',
           agentSessionId: 'agent-session:1',
+          agentSessionResetAt: null,
         });
       const streamed = deferred<void>();
       const releaseRunner = deferred<AgentOutput>();
@@ -974,7 +980,11 @@ describe('createGroupProcessor', () => {
         group.folder,
         'streamed-sess',
         null,
-        expect.objectContaining({ conversationJid: 'group1@g.us' }),
+        expect.objectContaining({
+          conversationJid: 'group1@g.us',
+          expectedAgentSessionId: 'agent-session:1',
+          expectedAgentSessionResetAt: null,
+        }),
       );
 
       releaseRunner.resolve({ status: 'success', result: 'text' });
@@ -999,6 +1009,7 @@ describe('createGroupProcessor', () => {
           appId: 'app:test',
           agentId: 'agent:test',
           agentSessionId: 'agent-session:dm',
+          agentSessionResetAt: null,
         });
 
       const { processGroupMessages } = createGroupProcessor(deps);
@@ -1020,6 +1031,8 @@ describe('createGroupProcessor', () => {
           conversationJid: 'sl:D123',
           conversationKind: 'dm',
           memoryUserId: 'sl:U123',
+          expectedAgentSessionId: 'agent-session:dm',
+          expectedAgentSessionResetAt: null,
         }),
       );
     });
@@ -1564,6 +1577,7 @@ describe('createGroupProcessor', () => {
           appId: 'app:test',
           agentId: 'agent:test',
           agentSessionId: 'agent-session:1',
+          agentSessionResetAt: null,
         });
       (deps.opsRepository as any).createSessionAgentRun = vi
         .fn()
@@ -3627,7 +3641,80 @@ describe('createGroupProcessor', () => {
         group.folder,
         'session-42',
         null,
-        expect.objectContaining({ conversationJid: 'group1@g.us' }),
+        expect.objectContaining({
+          conversationJid: 'group1@g.us',
+          expectedAgentSessionId: 'agent-session:1',
+          expectedAgentSessionResetAt: null,
+        }),
+      );
+    });
+
+    it('does not treat stale streamed provider-session persistence as durable', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const channel = makeChannel();
+      const messages = [makeMessage()];
+
+      const deps = makeDeps({
+        channelRuntime: channel,
+        getGroup: vi.fn().mockReturnValue(group),
+        getCursor: vi.fn().mockReturnValue('0'),
+      });
+      mockGetMessagesSince.mockReturnValue(messages);
+      mockHandleSessionCommand.mockResolvedValue({ handled: false });
+      mockFormatMessages.mockReturnValue('formatted prompt');
+      mockGetAllJobs.mockReturnValue([]);
+      mockGetRecentJobRuns.mockReturnValue([]);
+      mockLoadSenderAllowlist.mockReturnValue({});
+      (deps.opsRepository as any).getAgentTurnContext = vi
+        .fn()
+        .mockResolvedValue({
+          appId: 'app:test',
+          agentId: 'agent:test',
+          agentSessionId: 'agent-session:1',
+          agentSessionResetAt: '2026-05-11T00:00:00.000Z',
+        });
+      (deps.opsRepository.setSession as any).mockResolvedValueOnce(false);
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: unknown,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          const output: AgentOutput = {
+            status: 'success',
+            result: 'hello',
+            newSessionId: 'session-42',
+          };
+          await onOutput?.(output);
+          return output;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(deps.opsRepository.setSession).toHaveBeenCalledTimes(2);
+      expect(deps.opsRepository.setSession).toHaveBeenNthCalledWith(
+        1,
+        group.folder,
+        'session-42',
+        null,
+        expect.objectContaining({
+          expectedAgentSessionId: 'agent-session:1',
+          expectedAgentSessionResetAt: '2026-05-11T00:00:00.000Z',
+        }),
+      );
+      expect(deps.opsRepository.setSession).toHaveBeenNthCalledWith(
+        2,
+        group.folder,
+        'session-42',
+        null,
+        expect.objectContaining({
+          expectedAgentSessionId: 'agent-session:1',
+          expectedAgentSessionResetAt: '2026-05-11T00:00:00.000Z',
+        }),
       );
     });
   });

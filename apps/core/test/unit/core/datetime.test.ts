@@ -8,7 +8,7 @@ import {
   parseIso,
   sleep,
   toIso,
-} from '@core/infrastructure/time/datetime.js';
+} from '@core/shared/time/datetime.js';
 
 describe('datetime helpers', () => {
   it('returns deterministic values with fixedClock', () => {

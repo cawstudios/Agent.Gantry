@@ -190,6 +190,7 @@ export interface RuntimeAgentSessionRepository {
     appId: string;
     agentId: string;
     agentSessionId: string;
+    agentSessionResetAt?: string | null;
     providerSessionId?: string;
     externalSessionId?: string;
     latestArtifactId?: string | null;
@@ -204,8 +205,10 @@ export interface RuntimeAgentSessionRepository {
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
       latestArtifactId?: string | null;
+      expectedAgentSessionId?: string;
+      expectedAgentSessionResetAt?: string | null;
     },
-  ): Promise<void>;
+  ): Promise<boolean | void>;
   expireProviderSession?(input: {
     providerSessionId: string;
     agentSessionId: string;

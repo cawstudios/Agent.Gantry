@@ -6,6 +6,8 @@ import { requestBrowserAction } from '../ipc.js';
 
 type BrowserToolSchema = Record<string, z.ZodTypeAny>;
 
+const DEFAULT_BROWSER_TOOL_TIMEOUT_MS = 120_000;
+
 function formatBrowserFailure(action: string, error: string | undefined) {
   return {
     content: [
@@ -18,10 +20,15 @@ function formatBrowserFailure(action: string, error: string | undefined) {
   };
 }
 
-function browserTimeoutMs(args: Record<string, unknown>): number | undefined {
+function browserTimeoutMs(args: Record<string, unknown>): number {
   const raw = args.timeout_ms;
-  if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined;
-  return Math.max(1_000, Math.min(120_000, Math.trunc(raw)));
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return DEFAULT_BROWSER_TOOL_TIMEOUT_MS;
+  }
+  return Math.max(
+    1_000,
+    Math.min(DEFAULT_BROWSER_TOOL_TIMEOUT_MS, Math.trunc(raw)),
+  );
 }
 
 function stripRuntimeArgs(
@@ -36,11 +43,9 @@ async function callBrowserTool(
   args: Record<string, unknown>,
 ) {
   const timeoutMs = browserTimeoutMs(args);
-  const response = await requestBrowserAction(
-    action,
-    stripRuntimeArgs(args),
-    timeoutMs ? { timeoutMs } : undefined,
-  );
+  const response = await requestBrowserAction(action, stripRuntimeArgs(args), {
+    timeoutMs,
+  });
   if (!response.ok) return formatBrowserFailure(action, response.error);
   if (isBrowserMcpResult(response.data)) {
     return response.data as never;
@@ -123,7 +128,7 @@ export function registerBrowserTools(server: McpServer): void {
     'List, create, close, or select a browser tab.',
     {
       action: z.enum(['list', 'new', 'select', 'close']),
-      index: z.number().optional(),
+      index: z.number().int().optional(),
       url: z.string().optional(),
     },
   );
@@ -222,7 +227,7 @@ export function registerBrowserTools(server: McpServer): void {
     promptText: z.string().optional(),
   });
   register(server, 'browser_resize', 'Resize the browser window.', {
-    width: z.number(),
-    height: z.number(),
+    width: z.number().int().min(1).max(8192),
+    height: z.number().int().min(1).max(8192),
   });
 }

@@ -198,13 +198,15 @@ describe('LlmMemoryExtractionProvider', () => {
 
   it('does not pre-filter non-keyword turns before LLM extraction', async () => {
     configureClaudeQueryMock();
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          content: [{ type: 'text', text: '[]' }],
-        }),
-        { status: 200 },
-      ),
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    fetchSpy.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            content: [{ type: 'text', text: '[]' }],
+          }),
+          { status: 200 },
+        ),
     );
 
     const provider = await createProvider();
@@ -219,6 +221,21 @@ describe('LlmMemoryExtractionProvider', () => {
 
     expect(facts).toEqual([]);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await expect(
+      provider.extractFactsWithOutcome({
+        turns: [
+          { role: 'user', text: 'Check again please.' },
+          { role: 'assistant', text: 'Done.' },
+        ],
+        trigger: 'precompact',
+        retrievedItems: [],
+      }),
+    ).resolves.toMatchObject({
+      facts: [],
+      status: 'empty_qualified',
+      zeroFactReason: 'no_qualifying_facts',
+    });
   });
 
   it('runs LLM extraction for role assignment facts like CTO', async () => {
@@ -322,7 +339,7 @@ describe('LlmMemoryExtractionProvider', () => {
     );
 
     const provider = await createProvider();
-    const facts = await provider.extractFacts({
+    const result = await provider.extractFactsWithOutcome({
       turns: [
         {
           role: 'user',
@@ -334,7 +351,11 @@ describe('LlmMemoryExtractionProvider', () => {
       retrievedItems: [],
     });
 
-    expect(facts).toEqual([]);
+    expect(result).toMatchObject({
+      facts: [],
+      status: 'sensitive_blocked',
+      zeroFactReason: 'sensitive_blocked',
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -404,7 +425,7 @@ describe('LlmMemoryExtractionProvider', () => {
     );
 
     const provider = await createProvider();
-    const facts = await provider.extractFacts({
+    const result = await provider.extractFactsWithOutcome({
       turns: [
         { role: 'user', text: 'Team decision: use npm test before deploy.' },
         { role: 'assistant', text: 'Decision recorded.' },
@@ -413,7 +434,11 @@ describe('LlmMemoryExtractionProvider', () => {
       retrievedItems: [],
     });
 
-    expect(facts).toEqual([]);
+    expect(result).toMatchObject({
+      facts: [],
+      status: 'extractor_failed',
+      zeroFactReason: 'extractor_failed',
+    });
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         err: expect.any(Error),
@@ -423,12 +448,51 @@ describe('LlmMemoryExtractionProvider', () => {
     );
   });
 
+  it.each([
+    ['empty text', ''],
+    ['malformed JSON', '[{"kind": "fact"'],
+    ['non-array JSON', '{"kind": "fact"}'],
+  ])('classifies %s extractor output as a failure', async (_name, text) => {
+    configureClaudeQueryMock();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text }],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const provider = await createProvider();
+    const result = await provider.extractFactsWithOutcome({
+      turns: [
+        { role: 'user', text: 'Team decision: use npm test before deploy.' },
+        { role: 'assistant', text: 'Decision recorded.' },
+      ],
+      trigger: 'precompact',
+      retrievedItems: [],
+    });
+
+    expect(result).toMatchObject({
+      facts: [],
+      status: 'extractor_failed',
+      zeroFactReason: 'extractor_failed',
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: expect.any(String),
+        trigger: 'precompact',
+      }),
+      'LLM extraction returned malformed output; skipping this boundary extraction',
+    );
+  });
+
   it('skips extraction when Claude auth is unavailable', async () => {
     writeCredentialSettings('none');
     vi.resetModules();
     const provider = await createProvider();
 
-    const facts = await provider.extractFacts({
+    const result = await provider.extractFactsWithOutcome({
       turns: [
         { role: 'user', text: 'Team decision: use npm test before deploy.' },
         { role: 'assistant', text: 'Decision recorded.' },
@@ -437,7 +501,11 @@ describe('LlmMemoryExtractionProvider', () => {
       retrievedItems: [],
     });
 
-    expect(facts).toEqual([]);
+    expect(result).toMatchObject({
+      facts: [],
+      status: 'auth_unavailable',
+      zeroFactReason: 'auth_unavailable',
+    });
     expect(claudeQueryMock).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,5 @@
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
+
 export type ContinuitySectionName =
   | 'recent_session_digests'
   | 'top_scoped_memories'
@@ -37,7 +39,7 @@ const bySubject = new Map<string, SessionContinuityInjectionStatus>();
 export function recordSessionContinuityInjectionStatus(
   status: SessionContinuityInjectionStatus,
 ): void {
-  prune(Date.now());
+  prune(currentTimeMs());
   bySubject.delete(keyFor(status.subject));
   while (bySubject.size >= MAX) {
     const oldest = bySubject.keys().next().value;
@@ -53,7 +55,7 @@ export function getLastSessionContinuityInjectionStatus(
   const key = keyFor(subject);
   const status = bySubject.get(key);
   if (!status) return undefined;
-  if (expired(status, Date.now())) {
+  if (expired(status, currentTimeMs())) {
     bySubject.delete(key);
     return undefined;
   }

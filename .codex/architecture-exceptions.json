@@ -1394,6 +1394,13 @@
     "removeByPhase": "canonical-boundary-cleanup-phase"
   },
   {
+    "file": "apps/core/src/messaging/text-styles.ts",
+    "rule": "provider_specific_path",
+    "reason": "Baseline channel formatting dialect name remains in the messaging formatter until provider-specific rendering is moved fully behind channel adapters.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
     "file": "apps/core/src/platform/index.ts",
     "rule": "wrapper_only_file",
     "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",

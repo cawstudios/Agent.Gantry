@@ -2,7 +2,7 @@ import { asc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import type { ChatInfo } from '../../../../domain/repositories/domain-types.js';
-import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
+import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import {
   normalizeProviderId,
   providerIdForJid as resolveProviderIdForJid,

@@ -48,6 +48,7 @@ import {
   PERMISSION_GATED_NATIVE_TOOLS,
 } from '../shared/tool-access-view.js';
 import { adminMcpToolNameFromFullName } from '../shared/admin-mcp-tools.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -326,7 +327,7 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
       name: displayName,
       folder: agentFolder,
       trigger: (parsed.trigger || defaultTrigger).trim() || defaultTrigger,
-      added_at: new Date().toISOString(),
+      added_at: nowIso(),
       requiresTrigger,
     };
 

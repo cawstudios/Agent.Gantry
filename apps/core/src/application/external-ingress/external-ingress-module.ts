@@ -15,6 +15,7 @@ import {
   renderTemplate,
   validateIngressMetadata,
 } from './target-policy.js';
+import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 
 type ExternalIngressRecord = {
   ingressId: string;
@@ -581,7 +582,7 @@ function readTarget(body: Record<string, unknown>): IngressTarget {
 
 function addDaysIso(value: string, days: number): string {
   const time = Date.parse(value);
-  const base = Number.isFinite(time) ? time : Date.now();
+  const base = Number.isFinite(time) ? time : currentTimeMs();
   return new Date(base + days * 24 * 60 * 60 * 1000).toISOString();
 }
 

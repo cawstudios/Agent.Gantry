@@ -60,6 +60,8 @@ import {
 } from './runtime-services-destination-hints.js';
 import { splitLiveSendProfileText } from './runtime-services-live-send-segmentation.js';
 import { createDurableOutboundAttempt } from './runtime-services-durable-outbound-attempt.js';
+import { handleActiveNewSessionCommand } from './runtime-services-active-new.js';
+import { nowIso, nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 type RuntimeBootstrapRepository = RuntimeChatMetadataRepository &
   RuntimeMessageRepository &
   RuntimeJobRepository &
@@ -274,47 +276,18 @@ export async function startRuntimeServices(
     }
 
     if (command.kind === 'new') {
-      try {
-        const turnContext = await resolved.opsRepository.getAgentTurnContext?.({
-          agentFolder: group.folder,
-          conversationJid: chatJid,
-          threadId,
-          conversationKind: group.conversationKind,
-          memoryUserId: message.sender?.trim() || undefined,
-          hydrateMemory: false,
-        });
-        if (turnContext?.agentSessionId) {
-          await resolved.collectSessionMemory({
-            agentSessionId: turnContext.agentSessionId,
-            trigger: 'session-end',
-            defaultScope: group.conversationKind === 'dm' ? 'user' : 'group',
-          });
-        }
-      } catch (err) {
-        resolved.logger.warn(
-          { err, chatJid, threadId },
-          'Failed to collect active session memory for /new; continuing with reset',
-        );
-      }
-      try {
-        await app.clearSessionForChatJid(chatJid, threadId, {
-          memoryUserId: message.sender?.trim() || undefined,
-        });
-      } catch (err) {
-        resolved.logger.warn(
-          { err, chatJid, threadId },
-          'Failed to clear active session for /new',
-        );
-        await channelWiring.sendMessage(
-          chatJid,
-          'Could not start a fresh session because session state could not be persisted. The current run was left unchanged.',
-          {
-            durability: 'required',
-            ...(threadId ? { messageOptions: { threadId } } : {}),
-          },
-        );
-        return true;
-      }
+      return handleActiveNewSessionCommand({
+        app,
+        channelWiring,
+        opsRepository: resolved.opsRepository,
+        collectSessionMemory: resolved.collectSessionMemory,
+        logger: resolved.logger,
+        group,
+        chatJid,
+        queueJid,
+        threadId,
+        message,
+      });
     }
 
     const stopped = app.queue.stopGroup(queueJid);
@@ -411,7 +384,7 @@ export async function startRuntimeServices(
               ? liveSendProfile
               : undefined,
       },
-      now: () => new Date().toISOString(),
+      now: () => nowIso(),
       createId: () => randomUUID(),
       hashSha256Hex: (value: string) =>
         createHash('sha256').update(value, 'utf8').digest('hex'),
@@ -439,7 +412,7 @@ export async function startRuntimeServices(
         },
         initialClaim: {
           claimToken: `claim:live-send:${input.sourceMessageId}`,
-          claimExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          claimExpiresAt: new Date(currentTimeMs() + 60_000).toISOString(),
         },
       });
       const claimedItems = started.claimedItems;

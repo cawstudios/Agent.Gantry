@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { nowIso } from '../../../infrastructure/time/datetime.js';
+import { nowIso } from '../../../shared/time/datetime.js';
 import { chatJid, TASKS_DIR, threadId } from '../context.js';
 import { waitForTaskResponse, writeIpcFile } from '../ipc.js';
 import type { AdminMcpToolName } from '../../../shared/admin-mcp-tools.js';

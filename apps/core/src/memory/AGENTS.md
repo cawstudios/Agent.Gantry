@@ -10,6 +10,13 @@
 - Normal runtime memory search/status hydration must pass the resolved subject type explicitly (`user` for DM/private, `channel` for channel/group) and must not make channel contexts visible to legacy agent-folder `group` rows.
 - `/dream`, scheduled dreaming, `/memory-status`, and `/save-procedure` must use trusted conversation context: DM/private uses the trusted user id and drops thread scope; channel/group uses the trusted conversation id and may retain thread/topic scope.
 - Memory IPC must enforce host-derived allowed actions from the signed runtime context/token. Reviewed actions such as `memory_patch`, `procedure_patch`, `memory_dream`, and `memory_consolidate` must stay denied unless the selected MyClaw MCP capability explicitly enables the matching action.
+- Memory IPC may return deadline-based `unavailable` responses for read-only
+  work before transport timeouts, but mutating actions must not use
+  non-cancelling `Promise.race` wrappers that can return unavailable while the
+  durable write keeps running in the background.
+- Deadline-bounded read-only IPC work must propagate an `AbortSignal` through
+  the memory service and continuity section calls; timer-only races are not
+  enough because background search/status work can outlive the IPC response.
 - IPC patch actions must resolve the subject with the same trusted resolver used by search/save; never trust `group_folder`, `user_id`, channel, or thread hints from the patch payload.
 - If digest or app-memory hydration dependencies are missing, fail closed to an empty memory context; never fall back to legacy session summaries or legacy memory-item reads.
 - Production `CanonicalSessionOpsService` hydration must pass `loadAppMemoryItems` with the current turn query when available; query-aware hydration searches app-memory first, then tops up from `list` using session-derived app/agent/user/conversation/thread scope. Direct/private conversations stay user-scoped, channel/group conversations stay channel-scoped, and `thread_id` only narrows channel/group scope.
@@ -92,6 +99,16 @@
 - Automatic boundary capture (`precompact`/`session-end`) must persist
   `agent_session_digests` and grounded `memory_evidence` metadata first; it
   must not write active `memory_items` directly.
+- `/new` must reset scoped provider-session state before expensive boundary
+  extraction and finalize the replaced session digest in the background.
+- New boundary digests with zero extracted facts must carry typed extraction
+  metadata, such as `empty_qualified` and `no_qualifying_facts`, rather than
+  leaving operators to infer whether extraction failed.
+- `empty_qualified` is the only successful zero-fact status. Legacy array-only
+  extractors that return `[]` are successful qualified-empty extraction with
+  `no_qualifying_facts`; auth failures, sensitive-material blocks, extractor
+  failures, and explicit unavailable outcomes must use explicit non-success
+  statuses.
 - Boundary extraction prompts must enforce per-part, per-turn, and total
   transcript budgets before LLM calls, and large text/code/tool payloads should
   be structurally summarized instead of forwarded verbatim.

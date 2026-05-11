@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fixedClock } from '@core/infrastructure/time/datetime.js';
+import { fixedClock } from '@core/shared/time/datetime.js';
 import {
   createLogger,
   installGlobalErrorHandlers,

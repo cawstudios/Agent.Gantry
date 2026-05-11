@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { nowMs } from '../time/datetime.js';
+import { nowMs } from '../../shared/time/datetime.js';
 
 export function safeRealpathSync(targetPath: string): string {
   try {

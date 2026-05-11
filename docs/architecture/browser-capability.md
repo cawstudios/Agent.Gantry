@@ -9,16 +9,19 @@ At runtime, `Browser` projects into MyClaw-owned browser tools such as
 `mcp__myclaw__browser_navigate`, `mcp__myclaw__browser_tabs`,
 `mcp__myclaw__browser_snapshot`, `mcp__myclaw__browser_click`,
 `mcp__myclaw__browser_type`, `mcp__myclaw__browser_wait_for`,
-`mcp__myclaw__browser_take_screenshot`, and
+`mcp__myclaw__browser_take_screenshot`, `mcp__myclaw__browser_resize`, and
 `mcp__myclaw__browser_close`. These tool names are audited as concrete
 actions, but they are runtime projections, not durable authority.
 
 The projected tools use backend-native schemas. Element actions use the
 backend's `element` and `target` fields directly; MyClaw does not translate
-model-facing `ref`, `selector`, tab index aliases, or action-dispatch fields. Long-running
-tools may pass `timeout_ms`; MyClaw clamps it and propagates the same deadline
-through signed IPC and the private backend call. Timeout errors name whether the
-IPC layer or backend layer timed out.
+model-facing `ref`, `selector`, or action-dispatch fields. Long-running tools
+may pass `timeout_ms`; MyClaw clamps it and applies the resulting budget to the
+signed IPC/backend call timeout. The private Playwright MCP process is reused by
+profile, CDP endpoint, and output root with a stable maximum action timeout, so
+per-call timeout changes do not fan out subprocesses while longer requests still
+fit inside the backend budget. Timeout errors name whether the IPC layer or
+backend layer timed out.
 
 Browser tools that accept `filename` write only under the run browser artifact
 root. When `browser_take_screenshot`, `browser_snapshot`,
@@ -81,10 +84,23 @@ host-derived profile is CDP-ready. Before action dispatch, the host closes
 internal Chrome targets such as `chrome://new-tab-page` and
 `chrome://omnibox-popup`, activates the real content tab, and rechecks after
 activation so internal tabs do not pollute tab-list output.
-Tab-list results are additionally filtered at the projection boundary: internal
-Chrome targets such as `chrome://new-tab-page` and `chrome://omnibox-popup`
-are removed from structured and text result content without remapping tab
-indices or refs.
+Tab-list results are additionally filtered at the projection boundary. MyClaw
+removes internal Chrome targets such as `chrome://new-tab-page` and
+`chrome://omnibox-popup`, presents stable 0-based visible tab indices to the
+model, and translates `browser_tabs` select and close requests from those
+visible indices back to the backend's raw tab indices internally. Raw backend
+tab indices must not leak into model-facing structured or text results. Numeric
+select and close requests fail closed unless a current visible-to-backend tab
+mapping exists. Text-only tab lists without `structuredContent.tabs` also fail
+closed instead of presenting backend indices as stable model-facing indices.
+Successful tab-set mutations such as close and new invalidate that mapping
+unless the backend returns a fresh structured tab list, which replaces it.
+
+`browser_resize` must preserve the user's visible headed browser session. For
+headed Chrome, MyClaw resizes the outer browser window through CDP
+`Browser.setWindowBounds`; for headless or emulated browser contexts, resize
+stays backend-native so viewport emulation continues to follow the backend's
+own contract.
 
 ## Runtime Responsibilities
 

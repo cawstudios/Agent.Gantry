@@ -2,7 +2,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
-import { nowIso, nowMs, sleep } from '../../../infrastructure/time/datetime.js';
+import {
+  nowIso,
+  nowMs,
+  nowMs as currentTimeMs,
+  sleep,
+} from '../../../shared/time/datetime.js';
 import {
   ensurePrivateDirSync,
   writePrivateFileSync,
@@ -188,7 +193,7 @@ export function registerMessagingTools(server: McpServer): void {
         },
         timestamp: nowIso(),
         expiresAt: new Date(
-          Date.now() + USER_QUESTION_TIMEOUT_MS,
+          currentTimeMs() + USER_QUESTION_TIMEOUT_MS,
         ).toISOString(),
       };
       const envelope = createSignedIpcRequestEnvelope(IPC_AUTH_TOKEN, payload);

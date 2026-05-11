@@ -41,6 +41,7 @@ import { CanonicalJobOpsService } from '../services/canonical-job-ops-service.js
 import { CanonicalMessageOpsService } from '../services/canonical-message-ops-service.js';
 import { CanonicalSessionOpsService } from '../services/canonical-session-ops-service.js';
 import { redactProviderSessionHandlesInText } from '../../../../shared/provider-session-redaction.js';
+import { nowIso } from '../../../../shared/time/datetime.js';
 
 interface SessionRuntimeOptions {
   memoryItemLimit?: number;
@@ -276,13 +277,17 @@ export class PostgresRuntimeRepositoryBundle
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
       latestArtifactId?: string | null;
+      expectedAgentSessionId?: string;
+      expectedAgentSessionResetAt?: string | null;
     } = {},
-  ): Promise<void> {
-    await this.sessions.setSession(agentFolder, sessionId, threadId, {
+  ): Promise<boolean> {
+    return this.sessions.setSession(agentFolder, sessionId, threadId, {
       chatJid: metadata.conversationJid,
       conversationKind: metadata.conversationKind,
       memoryUserId: metadata.memoryUserId,
       latestArtifactId: metadata.latestArtifactId,
+      expectedAgentSessionId: metadata.expectedAgentSessionId,
+      expectedAgentSessionResetAt: metadata.expectedAgentSessionResetAt,
     });
   }
 
@@ -298,6 +303,10 @@ export class PostgresRuntimeRepositoryBundle
     appId: string;
     agentId: string;
     agentSessionId: string;
+    agentSessionResetAt?: string | null;
+    providerSessionId?: string;
+    externalSessionId?: string;
+    latestArtifactId?: string | null;
     memoryContextBlock?: string;
   }> {
     return this.sessions.getAgentTurnContext({
@@ -330,7 +339,7 @@ export class PostgresRuntimeRepositoryBundle
     );
     if (!session) return undefined;
     const runId = `agent-run:${randomUUID()}`;
-    const now = new Date().toISOString();
+    const now = nowIso();
     await repositories.agentRuns.saveAgentRun({
       id: runId,
       appId: session.appId,
@@ -376,7 +385,7 @@ export class PostgresRuntimeRepositoryBundle
       input.errorSummary == null
         ? input.errorSummary
         : redactProviderSessionHandlesInText(input.errorSummary);
-    const now = new Date().toISOString();
+    const now = nowIso();
     await repositories.agentRuns.saveAgentRun({
       ...run,
       status: input.status,

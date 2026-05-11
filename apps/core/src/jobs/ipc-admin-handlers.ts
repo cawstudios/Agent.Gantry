@@ -11,7 +11,7 @@ import {
   MYCLAW_HOME,
   syncRuntimeSettingsFromProjection,
 } from '../config/index.js';
-import { nowIso } from '../infrastructure/time/datetime.js';
+import { nowIso } from '../shared/time/datetime.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import { TaskContext, TaskHandler } from './ipc-types.js';

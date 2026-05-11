@@ -1,4 +1,9 @@
-import { Clock, nowIso, systemClock, toIso } from '../time/datetime.js';
+import {
+  Clock,
+  nowIso,
+  systemClock,
+  toIso,
+} from '../../shared/time/datetime.js';
 import { isPlainObject } from '../../shared/object.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal';

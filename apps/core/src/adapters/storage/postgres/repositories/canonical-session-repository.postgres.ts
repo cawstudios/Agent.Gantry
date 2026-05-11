@@ -78,6 +78,7 @@ export class PostgresCanonicalSessionRepository {
     appId: string;
     agentId: string;
     agentSessionId: string;
+    agentSessionResetAt?: string | null;
     providerSessionId?: string;
     externalSessionId?: string;
     latestArtifactId?: string | null;
@@ -106,6 +107,7 @@ export class PostgresCanonicalSessionRepository {
       appId: CANONICAL_APP_ID,
       agentId: ensured.agentId,
       agentSessionId: ensured.agentSessionId,
+      agentSessionResetAt: ensured.agentSessionResetAt ?? null,
       ...(providerSession
         ? {
             providerSessionId: providerSession.id,
@@ -123,7 +125,11 @@ export class PostgresCanonicalSessionRepository {
     scopeKey: string;
     conversationKind?: 'dm' | 'channel';
     memoryUserId?: string;
-  }): Promise<{ agentSessionId: string; agentId: string }> {
+  }): Promise<{
+    agentSessionId: string;
+    agentId: string;
+    agentSessionResetAt?: string | null;
+  }> {
     const {
       groupFolder: folder,
       chatJid,
@@ -183,7 +189,17 @@ export class PostgresCanonicalSessionRepository {
             updatedAt: sql`now()`,
           },
         });
-      return { agentId, agentSessionId };
+      const [session] = await tx
+        .select({ resetAt: pgSchema.agentSessionsPostgres.resetAt })
+        .from(pgSchema.agentSessionsPostgres)
+        .where(eq(pgSchema.agentSessionsPostgres.id, agentSessionId))
+        .for('update')
+        .limit(1);
+      return {
+        agentId,
+        agentSessionId,
+        agentSessionResetAt: session?.resetAt ?? null,
+      };
     });
     return ensured;
   }
@@ -264,7 +280,9 @@ export class PostgresCanonicalSessionRepository {
     conversationKind?: 'dm' | 'channel';
     memoryUserId?: string;
     latestArtifactId?: string | null;
-  }): Promise<void> {
+    expectedAgentSessionId?: string;
+    expectedAgentSessionResetAt?: string | null;
+  }): Promise<boolean> {
     assertSafeProviderSessionId(input.sessionId);
     const {
       groupFolder: folder,
@@ -275,13 +293,15 @@ export class PostgresCanonicalSessionRepository {
       conversationKind,
       memoryUserId,
       latestArtifactId,
+      expectedAgentSessionId,
+      expectedAgentSessionResetAt,
     } = input;
     const resolvedMemoryUserId = memoryUserId?.trim() || null;
     const sessionUserId =
       conversationKind === 'dm' && resolvedMemoryUserId
         ? resolvedMemoryUserId
         : scopeKey;
-    await this.db.transaction(async (tx) => {
+    return this.db.transaction(async (tx) => {
       const conversationId = chatJid
         ? await this.graph.ensureConversation(
             chatJid,
@@ -329,6 +349,26 @@ export class PostgresCanonicalSessionRepository {
             updatedAt: sql`now()`,
           },
         });
+      const [agentSession] = await tx
+        .select({
+          resetAt: pgSchema.agentSessionsPostgres.resetAt,
+        })
+        .from(pgSchema.agentSessionsPostgres)
+        .where(eq(pgSchema.agentSessionsPostgres.id, agentSessionId))
+        .for('update')
+        .limit(1);
+      if (
+        expectedAgentSessionId !== undefined &&
+        expectedAgentSessionId !== agentSessionId
+      ) {
+        return false;
+      }
+      if (
+        expectedAgentSessionResetAt !== undefined &&
+        (agentSession?.resetAt ?? null) !== expectedAgentSessionResetAt
+      ) {
+        return false;
+      }
       await tx
         .insert(pgSchema.providerSessionsPostgres)
         .values({
@@ -428,6 +468,7 @@ export class PostgresCanonicalSessionRepository {
           updatedAt: sql`now()`,
         })
         .where(eq(pgSchema.agentSessionsPostgres.id, agentSessionId));
+      return true;
     });
   }
 

@@ -4,6 +4,7 @@ import path from 'path';
 
 import { resolveGroupIpcPath } from '../platform/group-folder.js';
 import { AvailableGroup } from './agent-spawn-types.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 const MAX_SNAPSHOT_DIGEST_CACHE_ENTRIES = 512;
 const snapshotContentDigestCache = new Map<string, string>();
@@ -71,6 +72,6 @@ export async function writeGroupsSnapshot(
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
   await writeSnapshotJson(groupsFile, {
     groups,
-    lastSync: new Date().toISOString(),
+    lastSync: nowIso(),
   });
 }

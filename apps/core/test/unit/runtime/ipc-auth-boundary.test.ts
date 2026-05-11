@@ -255,10 +255,11 @@ describe('validateIpcAuthRequest', () => {
   });
 
   it('requires browser IPC signatures to match the chat-scoped token', () => {
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
     const payload = {
       requestId: 'browser-1',
       nonce: randomUUID(),
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      expiresAt,
       action: 'browser_status',
       payload: { profile_name: 'c-team-abc123abc123' },
       context: { chatJid: 'tg:team', responseKeyId: TEST_RESPONSE_KEY_ID },
@@ -270,6 +271,7 @@ describe('validateIpcAuthRequest', () => {
       requestId: 'browser-1',
       chatJid: 'tg:team',
       action: 'browser_status',
+      deadlineAtMs: Date.parse(expiresAt),
     });
     expect(() =>
       parseBrowserIpcRequest(signedPayload(payload), 'team'),
@@ -277,10 +279,11 @@ describe('validateIpcAuthRequest', () => {
   });
 
   it('requires memory IPC signatures to match trusted user scope', () => {
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
     const payload = {
       requestId: 'mem-1',
       nonce: randomUUID(),
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      expiresAt,
       action: 'memory_search',
       payload: { query: 'travel' },
       context: {
@@ -304,6 +307,7 @@ describe('validateIpcAuthRequest', () => {
       requestId: 'mem-1',
       context: { userId: 'u-1', defaultScope: 'user' },
       allowedActions: ['memory_search'],
+      deadlineAtMs: Date.parse(expiresAt),
     });
     expect(() => parseMemoryIpcRequest(signedPayload(payload), 'team')).toThrow(
       /Invalid memory IPC signature/,

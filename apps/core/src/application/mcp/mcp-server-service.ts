@@ -34,6 +34,7 @@ import {
   type MaterializedMcpCapability,
 } from './mcp-server-materialization.js';
 import { stableSha256Json } from '../../shared/stable-hash.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 export type { MaterializedMcpCapability } from './mcp-server-materialization.js';
 
@@ -86,7 +87,7 @@ export class McpServerService {
       );
     }
 
-    const now = new Date().toISOString();
+    const now = nowIso();
     const serverId = `mcp:${globalThis.crypto.randomUUID()}` as McpServerId;
     const definition: McpServerDefinition = {
       id: serverId,
@@ -160,7 +161,7 @@ export class McpServerService {
       this.options.lookupHostname,
       { cache: this.options.dnsValidationCache },
     );
-    const now = new Date().toISOString();
+    const now = nowIso();
     const approved: McpServerDefinition = {
       ...server,
       status: 'approved',
@@ -210,7 +211,7 @@ export class McpServerService {
         `Only draft MCP servers can be rejected: ${server.id}`,
       );
     }
-    const now = new Date().toISOString();
+    const now = nowIso();
     const rejected: McpServerDefinition = {
       ...server,
       status: 'rejected',
@@ -253,7 +254,7 @@ export class McpServerService {
         `Only approved MCP servers can be disabled: ${server.id}`,
       );
     }
-    const now = new Date().toISOString();
+    const now = nowIso();
     const disabled: McpServerDefinition = {
       ...server,
       status: 'disabled',
@@ -371,7 +372,7 @@ export class McpServerService {
         `MCP server changed before binding completed: ${input.serverId}`,
       );
     }
-    const now = new Date().toISOString();
+    const now = nowIso();
     const binding: AgentMcpServerBinding = {
       id: `agent-mcp-binding:${input.agentId}:${input.serverId}` as AgentMcpServerBinding['id'],
       appId: input.appId,
@@ -410,7 +411,7 @@ export class McpServerService {
     await this.assertAgentInApp(input.appId, input.agentId);
     const binding = await this.mcpServers.disableAgentBinding({
       ...input,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso(),
     });
     if (binding) {
       await this.audit({
@@ -553,7 +554,7 @@ export class McpServerService {
     await this.mcpServers.appendAuditEvent({
       id: `mcp-audit:${globalThis.crypto.randomUUID()}` as never,
       metadata: input.metadata ?? {},
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso(),
       ...input,
     });
   }
@@ -588,7 +589,7 @@ function buildVersion(input: {
     credentialRefs: input.credentialRefs,
     sandboxProfileId: input.sandboxProfileId,
     configHash,
-    createdAt: new Date().toISOString(),
+    createdAt: nowIso(),
   };
 }
 

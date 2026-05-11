@@ -76,6 +76,7 @@ import {
   resolveAuthenticatedRouteContextForUpdate,
 } from './job-management-context-access.js';
 import { createJobVisibilityReaders } from './job-management-visibility-readers.js';
+import { nowIso } from '../../shared/time/datetime.js';
 
 const DEFAULT_JOB_LIST_LIMIT = 100;
 const MAX_JOB_LIST_LIMIT = 500;
@@ -648,7 +649,7 @@ export class JobManagementService {
   }
 
   private clock(): Clock {
-    return this.deps.clock ?? { now: () => new Date().toISOString() };
+    return this.deps.clock ?? { now: () => nowIso() };
   }
 
   private visibilityReaders() {

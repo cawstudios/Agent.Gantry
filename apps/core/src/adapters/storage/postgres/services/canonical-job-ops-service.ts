@@ -9,7 +9,7 @@ import type {
   JobRunListFilters,
   JobUpsertInput,
 } from '../../../../domain/repositories/ops-repo.js';
-import { nowIso as currentIso } from '../../../../infrastructure/time/datetime.js';
+import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import {
   CANONICAL_APP_ID,
   agentIdForFolder,
