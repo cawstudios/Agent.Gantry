@@ -971,6 +971,40 @@ describe('browser tool proxy file policy', () => {
     expect(browserMcpMocks.clients).toHaveLength(2);
   });
 
+  it('returns a fresh snapshot when navigate back times out after navigation', async () => {
+    const root = tempRoot();
+    browserMcpMocks.callToolImpl = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Timeout 60000ms exceeded.'))
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'snapshot after back' }],
+      });
+
+    const result = await callBrowserTool({
+      toolName: 'browser_navigate_back',
+      arguments: {},
+      session: {
+        running: true,
+        cdpReady: true,
+        port: 12345,
+        profileName: 'c-main',
+      },
+      fileAccessRoot: root,
+    });
+
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'snapshot after back' }],
+    });
+    expect(browserMcpMocks.clients[0]?.close).toHaveBeenCalledTimes(1);
+    expect(browserMcpMocks.transports[0]?.close).toHaveBeenCalledTimes(1);
+    expect(browserMcpMocks.clients).toHaveLength(2);
+    expect(browserMcpMocks.clients[1]?.callTool).toHaveBeenCalledWith(
+      { name: 'browser_snapshot', arguments: {} },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+  });
+
   it('refreshes the snapshot once when an aria ref is stale', async () => {
     const root = tempRoot();
     browserMcpMocks.callToolImpl = vi

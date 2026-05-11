@@ -53,6 +53,7 @@ import {
   writeBrowserIpcResponse,
 } from '@core/runtime/ipc-browser-handler.js';
 import {
+  closeBrowser,
   ensureBrowserReady,
   getBrowserStatus,
 } from '@core/runtime/browser-capability.js';
@@ -899,6 +900,71 @@ describe('ipc-browser-handler', () => {
     expect(ensureBrowserTarget).not.toHaveBeenCalled();
     expect(callBrowserTool).toHaveBeenCalledWith(
       expect.objectContaining({
+        toolName: 'browser_resize',
+        arguments: { width: 1280, height: 900 },
+      }),
+    );
+  });
+
+  it('relaunches once when launch viewport setup hits a stale backend target', async () => {
+    vi.mocked(ensureBrowserReady)
+      .mockResolvedValueOnce({
+        profile: 'c-main-abc123abc123',
+        profileName: 'c-main-abc123abc123',
+        running: true,
+        cdpReady: true,
+        port: 9333,
+        targetId: 'stale-target',
+        headless: false,
+      })
+      .mockResolvedValueOnce({
+        profile: 'c-main-abc123abc123',
+        profileName: 'c-main-abc123abc123',
+        running: true,
+        cdpReady: true,
+        port: 9444,
+        targetId: 'fresh-target',
+        headless: false,
+      });
+    const callBrowserTool = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: [
+          {
+            type: 'text',
+            text: 'Emulation.setDeviceMetricsOverride: Target does not support metrics override',
+          },
+        ],
+        isError: true,
+      })
+      .mockResolvedValueOnce({ content: 'resized' });
+    const closeBrowserToolBackends = vi.fn(async () => undefined);
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-launch-stale-backend',
+        action: 'browser_launch',
+        payload: {},
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        closeBrowserToolBackends,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(closeBrowserToolBackends).toHaveBeenCalledWith(
+      'c-main-abc123abc123',
+    );
+    expect(closeBrowser).toHaveBeenCalledWith('c-main-abc123abc123');
+    expect(ensureBrowserReady).toHaveBeenCalledTimes(2);
+    expect(callBrowserTool).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        session: expect.objectContaining({ port: 9444 }),
         toolName: 'browser_resize',
         arguments: { width: 1280, height: 900 },
       }),

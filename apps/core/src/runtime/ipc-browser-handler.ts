@@ -244,6 +244,48 @@ async function callBrowserResizeBackend(input: {
   }
 }
 
+async function initializeBrowserLaunchViewport(input: {
+  context: BrowserContext;
+  profileName: string;
+  launchOptions: Parameters<typeof ensureBrowserReady>[0];
+  session: Awaited<ReturnType<typeof ensureBrowserReady>>;
+  deadline: BrowserIpcDeadline;
+}): Promise<Awaited<ReturnType<typeof ensureBrowserReady>>> {
+  if (
+    !input.context.callBrowserTool ||
+    !input.session.running ||
+    !input.session.cdpReady ||
+    !input.session.port
+  ) {
+    return input.session;
+  }
+  try {
+    await callBrowserResizeBackend({
+      context: input.context,
+      session: input.session,
+      width: DEFAULT_BROWSER_VIEWPORT.width,
+      height: DEFAULT_BROWSER_VIEWPORT.height,
+      deadline: input.deadline,
+    });
+    return input.session;
+  } catch (err) {
+    await input.context.closeBrowserToolBackends?.(input.profileName);
+    await closeBrowser(input.profileName);
+    const relaunched = await ensureBrowserReady(input.launchOptions);
+    if (!relaunched.running || !relaunched.cdpReady || !relaunched.port) {
+      throw err;
+    }
+    await callBrowserResizeBackend({
+      context: input.context,
+      session: relaunched,
+      width: DEFAULT_BROWSER_VIEWPORT.width,
+      height: DEFAULT_BROWSER_VIEWPORT.height,
+      deadline: input.deadline,
+    });
+    return relaunched;
+  }
+}
+
 async function inspectToolCapabilityBrokerHealth(
   context: BrowserContext,
 ): Promise<CredentialBrokerHealth | undefined> {
@@ -363,7 +405,7 @@ async function handleBrowserToolAction(
   switch (request.action) {
     case 'browser_launch': {
       browserIpcRemainingMs(deadline);
-      const status = await ensureBrowserReady({
+      const launchOptions = {
         profileName,
         headless: toOptionalBoolean(request.payload.headless),
         keepAliveMs: toOptionalNumber(request.payload.keep_alive_ms, {
@@ -371,21 +413,14 @@ async function handleBrowserToolAction(
           max: 3_600_000,
         }),
         deadlineAtMs: deadline.deadlineAtMs,
+      };
+      const status = await initializeBrowserLaunchViewport({
+        context,
+        profileName,
+        launchOptions,
+        session: await ensureBrowserReady(launchOptions),
+        deadline,
       });
-      if (
-        context.callBrowserTool &&
-        status.running &&
-        status.cdpReady &&
-        status.port
-      ) {
-        await callBrowserResizeBackend({
-          context,
-          session: status,
-          width: DEFAULT_BROWSER_VIEWPORT.width,
-          height: DEFAULT_BROWSER_VIEWPORT.height,
-          deadline,
-        });
-      }
       return {
         ok: true,
         data: await attachToolCapabilityBrokerHealth(

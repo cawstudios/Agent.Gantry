@@ -126,6 +126,13 @@ export async function callBrowserTool(input: {
     return normalized;
   } catch (err) {
     await closeCachedBackend(backend.key);
+    if (shouldReturnSnapshotAfterNavigateBackTimeout(input.toolName, err)) {
+      return await callBrowserTool({
+        ...input,
+        toolName: 'browser_snapshot',
+        arguments: {},
+      });
+    }
     throw new Error(formatBackendError(input.toolName, err));
   } finally {
     scheduleBackendIdleClose(backend.key);
@@ -180,6 +187,16 @@ function shouldRefreshSnapshotAndRetry(
 ): boolean {
   if (!TARGET_RESOLUTION_RETRY_ACTIONS.has(toolName)) return false;
   return isStalePlaywrightMcpSnapshotRefResult(err);
+}
+
+function shouldReturnSnapshotAfterNavigateBackTimeout(
+  toolName: BrowserIpcAction,
+  err: unknown,
+): boolean {
+  return (
+    toolName === 'browser_navigate_back' &&
+    /timed? out|timeout/i.test(errorMessage(err))
+  );
 }
 
 export function normalizeBrowserToolResult(
