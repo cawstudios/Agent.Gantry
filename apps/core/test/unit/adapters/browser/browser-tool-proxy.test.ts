@@ -1356,6 +1356,14 @@ describe('browser tool proxy file policy', () => {
         fileAccessRoot: root,
       }),
     ).rejects.toThrow('needs a fresh browser_tabs list');
+    await expect(
+      callBrowserTool({
+        toolName: 'browser_tabs',
+        arguments: { action: 'close', index: 0 },
+        session,
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('needs a fresh browser_tabs list');
     expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenCalledTimes(2);
   });
 
@@ -1625,6 +1633,90 @@ describe('browser tool proxy file policy', () => {
     expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
       2,
       { name: 'browser_tabs', arguments: { action: 'select', index: 9 } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+  });
+
+  it('projects Playwright MCP markdown tab lists into usable select and close indices', async () => {
+    const root = tempRoot();
+    const session = {
+      running: true,
+      cdpReady: true,
+      port: 12345,
+      profileName: 'c-main',
+    };
+
+    browserMcpMocks.nextResult = {
+      content: [
+        {
+          type: 'text',
+          text: [
+            '- 4: (current) [Example](https://example.test/)',
+            '- 9: [Other](about:blank)',
+          ].join('\n'),
+        },
+      ],
+    };
+
+    const result = await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'list' },
+      session,
+      fileAccessRoot: root,
+    });
+
+    expect(result).toMatchObject({
+      content: [
+        {
+          text: [
+            '- 0: (current) [Example](https://example.test/)',
+            '- 1: [Other](about:blank)',
+          ].join('\n'),
+        },
+      ],
+      structuredContent: {
+        tabs: [
+          {
+            index: 0,
+            title: 'Example',
+            url: 'https://example.test/',
+            current: true,
+          },
+          { index: 1, title: 'Other', url: 'about:blank' },
+        ],
+      },
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: 'selected' }],
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'select', index: 1 },
+      session,
+      fileAccessRoot: root,
+    });
+
+    browserMcpMocks.nextResult = {
+      content: [{ type: 'text', text: 'closed' }],
+    };
+    await callBrowserTool({
+      toolName: 'browser_tabs',
+      arguments: { action: 'close', index: 0 },
+      session,
+      fileAccessRoot: root,
+    });
+
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      2,
+      { name: 'browser_tabs', arguments: { action: 'select', index: 9 } },
+      undefined,
+      { timeout: expect.any(Number) },
+    );
+    expect(browserMcpMocks.clients[0]?.callTool).toHaveBeenNthCalledWith(
+      3,
+      { name: 'browser_tabs', arguments: { action: 'close', index: 4 } },
       undefined,
       { timeout: expect.any(Number) },
     );

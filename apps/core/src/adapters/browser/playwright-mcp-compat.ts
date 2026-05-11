@@ -101,6 +101,19 @@ function parsePlaywrightMcpTabLine(
   const index = Number(match[1]);
   if (!Number.isInteger(index)) return undefined;
   const rest = match[2]?.trim() || '';
+
+  const markdown = rest.match(
+    /^(\(current\)\s*)?\[([^\]]*)\]\(((?:https?:\/\/|file:\/\/|about:)[^)]+)\)$/,
+  );
+  if (markdown) {
+    return {
+      index,
+      title: markdown[2] || '',
+      url: markdown[3],
+      ...(markdown[1] ? { current: true } : {}),
+    };
+  }
+
   const urlMatch = rest.match(/\s((?:https?:\/\/|file:\/\/|about:)[^\s]+)\s*$/);
   const url = urlMatch?.[1] || '';
   if (!url) return undefined;

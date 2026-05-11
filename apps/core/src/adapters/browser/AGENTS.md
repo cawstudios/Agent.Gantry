@@ -47,6 +47,10 @@
 - Text-only backend tab lists are not trusted UI state unless the compatibility
   layer can parse them into adapter-owned tab metadata. Unparseable tab lists
   must fail closed and clear stale visible-index mappings.
+- Playwright MCP tab lists render as Markdown links such as
+  `- 0: (current) [Title](https://example.test/)`. Keep that backend-specific
+  shape in the compatibility parser, then feed only structured tab metadata to
+  the neutral visible-index projection.
 - Treat an unhealthy tool-capability broker as a non-driveable browser status
   for agent tools. Reporting `cdpReady: true` while the credential broker is
   down is misleading because backend browser actions still cannot run.
