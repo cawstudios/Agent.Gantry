@@ -17,6 +17,7 @@ import type { CredentialBrokerProfile } from '../domain/models/credentials.js';
 import type { JobControlPort } from '../application/jobs/job-management-types.js';
 import type { BrowserIpcAction } from '@myclaw/contracts';
 import type { BrowserSessionStatus } from './browser-capability-types.js';
+import type { BrowserUsageSettings } from './browser-usage-governor.js';
 
 export interface IpcDeps {
   sendMessage: (
@@ -64,6 +65,10 @@ export interface IpcDeps {
     timeoutMs?: number;
   }) => Promise<unknown>;
   closeBrowserToolBackends?: (profileName?: string) => Promise<void>;
+  getBrowserUsageSettings?: () =>
+    | BrowserUsageSettings
+    | undefined
+    | Promise<BrowserUsageSettings | undefined>;
 }
 
 export interface IpcDomainContext {

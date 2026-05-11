@@ -39,9 +39,13 @@ vi.mock('child_process', () => ({
 }));
 
 vi.mock('@core/runtime/browser-config.js', () => ({
-  CHROME_PATH: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   DEFAULT_BROWSER_KEEPALIVE_MS: 60_000,
   DEFAULT_CHROME_ARGS: ['--no-first-run', '--window-size=1280,900'],
+}));
+
+vi.mock('@core/shared/chrome-executable.js', () => ({
+  resolveChromeExecutablePath: () =>
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 }));
 
 vi.mock('@core/runtime/browser-profiles.js', () => ({
@@ -213,11 +217,15 @@ describe('browser-capability', () => {
     expect(mocks.spawn.mock.calls[0][1]).not.toContain('--headless=new');
     const status = await manager.getBrowserStatus();
 
-    expect(status).toEqual({
+    expect(status).toMatchObject({
       profile: 'myclaw',
       profileName: 'myclaw',
       running: false,
       cdpReady: false,
+      profilePersistent: false,
+      chromeExecutable:
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      authMarkers: [],
     });
     expect(killSpy).not.toHaveBeenCalledWith(expect.any(Number), 'SIGTERM');
     expect(mocks.release).not.toHaveBeenCalled();
@@ -262,16 +270,6 @@ describe('browser-capability', () => {
       port: 4568,
       targetId: 'target-2',
     });
-  });
-
-  it('uses headless mode only when explicitly requested', async () => {
-    const manager = await import('@core/runtime/browser-capability.js');
-    queueHealthyContentTarget('target-1');
-
-    const status = await manager.launchBrowser({ headless: true });
-
-    expect(status.headless).toBe(true);
-    expect(mocks.spawn.mock.calls[0][1]).toContain('--headless=new');
   });
 
   it('creates a content target and closes Chrome internal startup tabs', async () => {
@@ -367,15 +365,15 @@ describe('browser-capability', () => {
     expect(closed.elapsedMs).toEqual(expect.any(Number));
   });
 
-  it('auto-detects headless mode in CI when no explicit mode is provided', async () => {
+  it('keeps the default browser visible even in CI-like environments', async () => {
     vi.stubEnv('CI', 'true');
     const manager = await import('@core/runtime/browser-capability.js');
     queueHealthyContentTarget('target-1');
 
     const status = await manager.launchBrowser();
 
-    expect(status.headless).toBe(true);
-    expect(mocks.spawn.mock.calls[0][1]).toContain('--headless=new');
+    expect(status.headless).toBe(false);
+    expect(mocks.spawn.mock.calls[0][1]).not.toContain('--headless=new');
   });
 
   it('adopts a healthy persisted browser session after host restart', async () => {
@@ -415,6 +413,47 @@ describe('browser-capability', () => {
       port: 5678,
       pid: adopted.pid,
       targetId: 'persisted-target',
+    });
+  });
+
+  it('refuses to adopt a non-visible persisted browser session', async () => {
+    const persisted = new EventEmitter() as EventEmitter & {
+      pid: number;
+      unref: ReturnType<typeof vi.fn>;
+    };
+    persisted.pid = 7878;
+    persisted.unref = vi.fn();
+    mocks.processes.set(persisted.pid, persisted);
+    mocks.commandLines.set(
+      persisted.pid,
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --headless=new --user-data-dir=/tmp/myclaw-browser-capability-test --remote-debugging-port=5680',
+    );
+    fs.writeFileSync(
+      '/tmp/myclaw-browser-capability-test/browser-session.json',
+      JSON.stringify({
+        pid: persisted.pid,
+        port: 5680,
+        targetId: 'persisted-target',
+        startedAt: '2026-04-29T00:00:00.000Z',
+        lastUsedAt: '2026-04-29T00:01:00.000Z',
+        headless: true,
+      }),
+    );
+    existsSyncSpy.mockImplementation((filePath) =>
+      String(filePath).endsWith('/browser-session.json'),
+    );
+    queueHealthyContentTarget('target-visible');
+
+    const manager = await import('@core/runtime/browser-capability.js');
+    const status = await manager.launchBrowser();
+
+    expect(killSpy).toHaveBeenCalledWith(persisted.pid, 'SIGTERM');
+    expect(mocks.spawn).toHaveBeenCalledTimes(1);
+    expect(mocks.spawn.mock.calls[0][1]).not.toContain('--headless=new');
+    expect(status).toMatchObject({
+      running: true,
+      headless: false,
+      port: 4567,
     });
   });
 
@@ -543,6 +582,13 @@ describe('browser-capability', () => {
         cdp_port: undefined,
         auth_markers: ['cookies', 'login-data'],
         has_state: true,
+        authMarkers: ['cookies', 'login-data'],
+        hasState: true,
+        profilePersistent: true,
+        userDataDir: '/tmp/myclaw-browser-capability-test',
+        chromeExecutable:
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        headless: undefined,
         running: false,
         cdpReady: false,
       },

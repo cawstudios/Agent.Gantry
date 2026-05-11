@@ -2,6 +2,7 @@ import {
   DEFAULT_TRIGGER,
   MYCLAW_HOME,
   getCredentialBrokerRuntimeConfig,
+  getRuntimeSettingsForConfig,
 } from '../../config/index.js';
 import {
   createAgentToolRuleSettingsMirror,
@@ -223,6 +224,7 @@ export async function startRuntimeServices(
     getCredentialBrokerProfile: () => getCredentialBrokerRuntimeConfig().mode,
     callBrowserTool: resolved.callBrowserTool,
     closeBrowserToolBackends: resolved.closeBrowserToolBackends,
+    getBrowserUsageSettings: () => getRuntimeSettingsForConfig().browser.usage,
     requestPermissionApproval: channelWiring.requestPermissionApproval,
     requestUserAnswer: channelWiring.requestUserAnswer,
     mcpHostnameLookup: resolved.mcpHostnameLookup,

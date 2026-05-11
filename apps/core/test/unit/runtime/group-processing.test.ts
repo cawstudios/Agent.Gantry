@@ -18,7 +18,6 @@ vi.mock('@core/config/index.js', () => ({
   IDLE_TIMEOUT: 1_800_000,
   MEMORY_MAINTENANCE_MAX_PENDING: 5_000,
   MAX_MESSAGES_PER_PROMPT: 50,
-  CHROME_PATH: undefined,
   TIMEZONE: 'UTC',
   getRuntimeSettingsForConfig: () => ({
     memory: {

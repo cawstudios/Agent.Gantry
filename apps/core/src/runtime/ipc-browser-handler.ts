@@ -17,10 +17,19 @@ import {
   getBrowserStatus,
 } from './browser-capability.js';
 import {
+  beginBrowserUsage,
+  finishBrowserUsage,
+  rememberBrowserUsageSite,
+} from './browser-usage-governor.js';
+import {
   type BrowserCdpTargetOptions,
   ensureBrowserTarget,
   foregroundBrowserTarget,
 } from './browser-cdp-targets.js';
+import {
+  browserUsagePayloadUrl,
+  resolveActiveBrowserUrlForUsage,
+} from './browser-usage-active-site.js';
 import { type IpcDomainContext } from './ipc-domain-types.js';
 import type { CredentialBrokerHealth } from '../domain/models/credentials.js';
 import { memoryAgentIdForGroupFolder } from '../memory/app-memory-boundaries.js';
@@ -46,6 +55,7 @@ type BrowserContext = Pick<
   getCredentialBrokerProfile?: IpcDomainContext['deps']['getCredentialBrokerProfile'];
   callBrowserTool?: IpcDomainContext['deps']['callBrowserTool'];
   closeBrowserToolBackends?: IpcDomainContext['deps']['closeBrowserToolBackends'];
+  getBrowserUsageSettings?: IpcDomainContext['deps']['getBrowserUsageSettings'];
   timeoutMs?: number;
   deadlineAtMs?: number;
 };
@@ -58,6 +68,8 @@ const BROKER_HEALTH_CACHE_MS = 5_000;
 const MIN_BROWSER_BACKEND_TIMEOUT_MS = 1_000;
 const MAX_BROWSER_RESIZE_DIMENSION = 8_192;
 const DEFAULT_BROWSER_VIEWPORT = { width: 1280, height: 900 } as const;
+const BROWSER_IPC_UNAUTHORIZED_ERROR =
+  'Browser IPC is not authorized for this run. Select the canonical Browser capability before using browser actions.';
 const brokerHealthCache = new Map<
   string,
   { expiresAt: number; value: CredentialBrokerHealth | undefined }
@@ -79,10 +91,6 @@ interface BrowserIpcDeadline {
   deadlineAtMs?: number;
 }
 
-function toOptionalBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined;
-}
-
 function toOptionalNumber(
   value: unknown,
   opts: { min?: number; max?: number } = {},
@@ -91,6 +99,20 @@ function toOptionalNumber(
   if (opts.min !== undefined && value < opts.min) return undefined;
   if (opts.max !== undefined && value > opts.max) return undefined;
   return value;
+}
+
+function assertPayloadKeys(
+  action: BrowserIpcAction,
+  payload: Record<string, unknown>,
+  allowedKeys: readonly string[],
+): void {
+  const allowed = new Set(allowedKeys);
+  const unknown = Object.keys(payload).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    throw new Error(
+      `${action} does not support payload field(s): ${unknown.sort().join(', ')}`,
+    );
+  }
 }
 
 function getProfileNameFromPayload(
@@ -113,18 +135,13 @@ function sanitizeBrowserStatus(value: unknown): unknown {
     headless: row.headless,
     keepAliveMs: row.keepAliveMs,
     idleExpiresAt: row.idleExpiresAt,
+    profilePersistent: row.profilePersistent,
+    userDataDir: row.userDataDir,
+    chromeExecutable: row.chromeExecutable,
+    hasState: row.hasState,
+    authMarkers: row.authMarkers,
     error: row.error,
   };
-}
-
-function sanitizeUrlForLog(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  try {
-    const url = new URL(value);
-    return `${url.origin}${url.pathname}`;
-  } catch {
-    return '[invalid-url]';
-  }
 }
 
 function browserResizeDimensions(payload: Record<string, unknown>): {
@@ -376,15 +393,21 @@ async function attachToolCapabilityBrokerHealth(
   return next;
 }
 
-async function handleBrowserToolAction(
+async function getBrowserUsageSettings(context: BrowserContext) {
+  return context.getBrowserUsageSettings
+    ? await context.getBrowserUsageSettings()
+    : undefined;
+}
+
+async function handleBrowserToolActionInner(
   request: BrowserRequest,
   context: BrowserContext,
+  profileName: string,
 ): Promise<BrowserResponse> {
   const deadline = createBrowserIpcDeadline(
     context.timeoutMs,
     context.deadlineAtMs,
   );
-  const profileName = getProfileNameFromPayload(request.payload, context);
   switch (request.action) {
     case 'browser_status':
       return {
@@ -398,16 +421,18 @@ async function handleBrowserToolAction(
   if (!context.browserIpcAuthorized) {
     return {
       ok: false,
-      error:
-        'Browser IPC is not authorized for this run. Select the canonical Browser capability before using browser actions.',
+      error: BROWSER_IPC_UNAUTHORIZED_ERROR,
     };
   }
   switch (request.action) {
     case 'browser_launch': {
+      assertPayloadKeys(request.action, request.payload, [
+        'profile_name',
+        'keep_alive_ms',
+      ]);
       browserIpcRemainingMs(deadline);
       const launchOptions = {
         profileName,
-        headless: toOptionalBoolean(request.payload.headless),
         keepAliveMs: toOptionalNumber(request.payload.keep_alive_ms, {
           min: 10_000,
           max: 3_600_000,
@@ -475,12 +500,6 @@ async function handleBrowserToolAction(
       error: 'Browser action backend is unavailable.',
     };
   }
-  console.info('Browser tool action started', {
-    sourceAgentFolder: context.sourceAgentFolder,
-    profileName,
-    toolName: request.action,
-    url: sanitizeUrlForLog(request.payload.url),
-  });
   if (
     session.port &&
     targetId &&
@@ -506,13 +525,87 @@ async function handleBrowserToolAction(
     ),
     timeoutMs: backendTimeoutMs,
   });
-  console.info('Browser tool action completed', {
-    sourceAgentFolder: context.sourceAgentFolder,
-    profileName,
-    toolName: request.action,
-    url: sanitizeUrlForLog(request.payload.url),
-  });
   return { ok: true, data: result };
+}
+
+async function handleBrowserToolAction(
+  request: BrowserRequest,
+  context: BrowserContext,
+): Promise<BrowserResponse> {
+  const profileName = getProfileNameFromPayload(request.payload, context);
+  if (request.action !== 'browser_status' && !context.browserIpcAuthorized) {
+    return {
+      ok: false,
+      error: BROWSER_IPC_UNAUTHORIZED_ERROR,
+    };
+  }
+  const fileAccessRoot = path.join(
+    DATA_DIR,
+    'sessions',
+    context.sourceAgentFolder,
+    'extra',
+  );
+  const usageSettings = await getBrowserUsageSettings(context);
+  const activeUrl = await resolveActiveBrowserUrlForUsage({
+    action: request.action,
+    payload: request.payload,
+    browserIpcAuthorized: context.browserIpcAuthorized,
+    profileName,
+    settings: usageSettings,
+    timeoutMs: context.timeoutMs,
+    deadlineAtMs: context.deadlineAtMs,
+    sourceAgentFolder: context.sourceAgentFolder,
+    callBrowserTool: context.callBrowserTool,
+    fileAccessRoot,
+  });
+  const payloadUrl = browserUsagePayloadUrl(request.action, request.payload);
+  const usageDecision = beginBrowserUsage({
+    action: request.action,
+    payload: request.payload,
+    profileName,
+    settings: usageSettings,
+    payloadUrl: payloadUrl ?? null,
+    activeUrl,
+  });
+  const startedAt = nowMs();
+  let response: BrowserResponse | undefined;
+  try {
+    if (!usageDecision.allowed) {
+      response = {
+        ok: false,
+        error:
+          usageDecision.warning || 'Browser usage policy denied this action.',
+      };
+      return response;
+    }
+    response = await handleBrowserToolActionInner(
+      request,
+      context,
+      profileName,
+    );
+    rememberBrowserUsageSite({
+      action: request.action,
+      payload: request.payload,
+      profileName,
+      ok: response.ok,
+      payloadUrl: payloadUrl ?? null,
+      activeUrl,
+    });
+    return response;
+  } finally {
+    finishBrowserUsage(usageDecision);
+    console.info('Browser tool action audit', {
+      sourceAgentFolder: context.sourceAgentFolder,
+      profileName,
+      toolName: request.action,
+      normalizedSite: usageDecision.normalizedSite,
+      policyMode: usageDecision.policyMode,
+      warning: usageDecision.warning,
+      elapsedMs: nowMs() - startedAt,
+      ok: response?.ok ?? false,
+      result: response?.ok ? 'success' : 'error',
+    });
+  }
 }
 
 export async function processBrowserIpcRequest(

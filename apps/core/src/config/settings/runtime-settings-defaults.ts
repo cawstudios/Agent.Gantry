@@ -9,6 +9,7 @@ import type {
   MemoryModelProfile,
   RuntimeCredentialBrokerSettings,
   RuntimeAgentSettings,
+  RuntimeBrowserSettings,
   RuntimeMemoryLlmModels,
   RuntimeMemorySettings,
   RuntimeSettings,
@@ -31,6 +32,11 @@ export const DEFAULT_MEMORY_EMBED_BATCH_SIZE = 16;
 export const DEFAULT_MEMORY_MAINTENANCE_MAX_PENDING = 5_000;
 export const DEFAULT_AGENT_SESSION_MEMORY_ITEM_LIMIT = 8;
 export const DEFAULT_AGENT_SESSION_MAX_MEMORY_CONTEXT_CHARS = 12_000;
+export const DEFAULT_BROWSER_USAGE_ENABLED = false;
+export const DEFAULT_BROWSER_USAGE_MODE = 'audit';
+export const DEFAULT_BROWSER_USAGE_WINDOW_MS = 60_000;
+export const DEFAULT_BROWSER_USAGE_MAX_ACTIONS_PER_WINDOW = 120;
+export const DEFAULT_BROWSER_USAGE_MAX_CONCURRENT_PER_SITE = 1;
 
 const DEFAULT_MODEL_HAIKU = MEMORY_MODEL_DEFAULT_ALIASES.extractor;
 const DEFAULT_MODEL_SONNET = MEMORY_MODEL_DEFAULT_ALIASES.dreaming;
@@ -132,6 +138,16 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
       baseRetryMs: 5000,
     },
   };
+  const browser: RuntimeBrowserSettings = {
+    usage: {
+      enabled: DEFAULT_BROWSER_USAGE_ENABLED,
+      mode: DEFAULT_BROWSER_USAGE_MODE,
+      windowMs: DEFAULT_BROWSER_USAGE_WINDOW_MS,
+      maxActionsPerWindow: DEFAULT_BROWSER_USAGE_MAX_ACTIONS_PER_WINDOW,
+      maxConcurrentPerSite: DEFAULT_BROWSER_USAGE_MAX_CONCURRENT_PER_SITE,
+      overrides: {},
+    },
+  };
   return {
     desiredState: {
       authoritative: false,
@@ -151,6 +167,7 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
     credentialBroker,
     memory,
     runtime,
+    browser,
   };
 }
 

@@ -193,4 +193,11 @@ describe('runner browser MCP projected tools', () => {
         .success,
     ).toBe(true);
   });
+
+  it('does not expose a headless launch option to agents', () => {
+    const server = new TestMcpServer();
+    registerBrowserTools(server as never);
+
+    expect(server.schemas.get('browser_launch')).not.toHaveProperty('headless');
+  });
 });

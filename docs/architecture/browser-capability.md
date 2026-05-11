@@ -23,6 +23,12 @@ per-call timeout changes do not fan out subprocesses while longer requests still
 fit inside the backend budget. Timeout errors name whether the IPC layer or
 backend layer timed out.
 
+MyClaw is an assistive browser controller for an owner-managed Chrome profile,
+not an undetectable automation system. Browser launch is visible by default and
+the agent-facing `browser_launch` tool does not expose a headless option. MyClaw
+does not override user agent, client hints, `Accept-Language`, or fetch headers
+as a browser hardening feature.
+
 Browser tools that accept `filename` write only under the run browser artifact
 root. When `browser_take_screenshot`, `browser_snapshot`,
 `browser_console_messages`, `browser_network_requests`, or `browser_evaluate`
@@ -99,11 +105,10 @@ model-facing indices.
 Successful tab-set mutations such as close and new invalidate that mapping
 unless the backend returns a fresh structured tab list, which replaces it.
 
-`browser_resize` must preserve the user's visible headed browser session. For
-headed Chrome, MyClaw resizes the outer browser window through CDP
-`Browser.setWindowBounds`; for headless or emulated browser contexts, resize
-stays backend-native so viewport emulation continues to follow the backend's
-own contract.
+`browser_resize` must preserve the user's visible browser session. The action is
+delegated to the private browser backend so viewport state has one owner; any
+non-visible browser mode remains an internal test harness detail and is not
+exposed as a launch mode to agents.
 
 ## Runtime Responsibilities
 
@@ -116,6 +121,39 @@ responses.
 The model cannot choose browser profile paths or arbitrary profile names. The
 profile comes from the agent, conversation, thread/job context, and host routing
 metadata.
+
+Browser status reports the persistent profile path, Chrome executable, visible
+mode, stored state markers, and detected auth markers without launching a new
+tab. The runtime discovers Chrome from known Chrome/Chromium executable paths;
+`CHROME_PATH` is not a supported runtime `.env` knob because arbitrary wrapper
+executables can undermine visible-browser guarantees. Browser action audit
+records are neutral: they include the tool name, normalized site, profile name,
+timing, result, and policy mode without any built-in protected-site list.
+For URL-less page actions such as click, type, snapshot, screenshot, and upload,
+enabled usage policy asks the browser backend for its current tab list before
+metering so redirects, in-page cross-site navigation, and multi-tab selection
+are attributed to the same backend page the action will use. If an enforce rule
+is active and the runtime cannot verify that page site, the action fails closed
+before backend dispatch.
+
+`browser.usage` in `settings.yaml` is optional and disabled by default. When an
+owner enables it, the default rolling-window and per-site concurrency limits are
+the same for every normalized site, and the default policy mode is `audit`
+rather than denial. Owner-defined overrides may target specific site keys, but
+MyClaw ships no preloaded site rules. Override keys are canonicalized to the
+same public-suffix-aware registrable site keys used by runtime URL audit, and
+public settings responses redact override site names.
+
+```yaml
+browser:
+  usage:
+    enabled: false
+    mode: audit
+    window_ms: 60000
+    max_actions_per_window: 120
+    max_concurrent_per_site: 1
+    overrides: {}
+```
 
 ## First-Use Login
 

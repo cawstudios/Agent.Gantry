@@ -4,11 +4,17 @@ import path from 'path';
 
 import * as p from '@clack/prompts';
 
+import { resolveChromeExecutablePath } from '../shared/chrome-executable.js';
+
 interface CliBrowserProfile {
   name: string;
   last_used?: string;
   auth_markers: string[];
   has_state: boolean;
+  userDataDir: string;
+  profilePersistent: boolean;
+  chromeExecutable: string;
+  headless?: boolean;
   running: boolean;
   cdpReady: boolean;
 }
@@ -96,6 +102,10 @@ function hasProfileState(dir: string): boolean {
   }
 }
 
+function chromeExecutable(): string {
+  return resolveChromeExecutablePath();
+}
+
 async function listProfiles(runtimeHome: string): Promise<CliBrowserProfile[]> {
   const root = path.join(runtimeHome, 'data', 'browser-profiles');
   if (!fs.existsSync(root)) return [];
@@ -124,6 +134,10 @@ async function listProfiles(runtimeHome: string): Promise<CliBrowserProfile[]> {
               : undefined,
           auth_markers: authMarkers,
           has_state: hasProfileState(dir),
+          userDataDir,
+          profilePersistent: true,
+          chromeExecutable: chromeExecutable(),
+          headless: session.headless === true,
           running,
           cdpReady: running && (await isCdpReady(session.port)),
         };
@@ -148,8 +162,12 @@ function formatProfiles(profiles: CliBrowserProfile[]): string {
       return [
         `- ${profile.name}`,
         `  status: ${state}`,
+        `  persistent profile: ${profile.profilePersistent ? 'yes' : 'no'}`,
         `  profile data: ${profile.has_state ? 'saved' : 'empty'}`,
         `  signed-in sites: ${auth}`,
+        `  profile directory: ${profile.userDataDir}`,
+        `  chrome: ${profile.chromeExecutable}`,
+        `  mode: ${profile.headless ? 'headless' : 'visible browser'}`,
         `  last used: ${formatDate(profile.last_used)}`,
       ].join('\n');
     })

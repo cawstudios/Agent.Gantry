@@ -1064,13 +1064,6 @@
     "maxViolations": 9
   },
   {
-    "file": "apps/core/src/runtime/browser-config.ts",
-    "rule": "forbidden_import_by_layer",
-    "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 1
-  },
-  {
     "file": "apps/core/src/runtime/browser-capability.ts",
     "rule": "direct_risky_execution",
     "reason": "Baseline host-execution debt pending sandbox adapter cutover; capped so new direct execution calls fail.",
@@ -1089,6 +1082,13 @@
     "rule": "forbidden_import_by_layer",
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/runtime/browser-process.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Browser runtime inspects persisted Chrome command lines to reject non-visible or non-profile-owned session adoption; capped to this host process helper until runtime process ports are extracted.",
+    "removeByPhase": "browser-process-port-extraction",
     "maxViolations": 1
   },
   {
@@ -1341,6 +1341,13 @@
     "rule": "forbidden_import_by_layer",
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/shared/browser-site.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Browser usage settings and runtime auditing need one shared public-suffix-aware eTLD+1 normalizer; capped to this helper until shared parser dependencies are formally modeled.",
+    "removeByPhase": "browser-usage-config-contract",
     "maxViolations": 1
   },
   {

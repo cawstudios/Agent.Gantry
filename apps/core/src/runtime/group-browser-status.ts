@@ -43,8 +43,16 @@ export async function getGroupBrowserStatus(input: {
     }),
     running: status.running,
     cdpReady: status.cdpReady,
-    hasState: profile ? hasPersistentBrowserState(profile) : undefined,
-    authMarkers,
+    profilePersistent: status.profilePersistent,
+    userDataDir: status.userDataDir,
+    chromeExecutable: status.chromeExecutable,
+    hasState:
+      status.hasState ??
+      (profile ? hasPersistentBrowserState(profile) : undefined),
+    authMarkers:
+      status.authMarkers && status.authMarkers.length > 0
+        ? status.authMarkers
+        : authMarkers,
     headless: status.headless,
     error: status.error,
   };

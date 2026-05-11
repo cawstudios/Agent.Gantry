@@ -10,7 +10,6 @@ describe('browser Chrome launch args', () => {
     const args = buildChromeLaunchArgs({
       userDataDir: '/tmp/myclaw-browser',
       port: 9222,
-      headless: false,
       platform: 'darwin',
       uid: 501,
     });
@@ -31,6 +30,7 @@ describe('browser Chrome launch args', () => {
 
     expect(args).not.toContain('--no-sandbox');
     expect(args).not.toContain('--disable-setuid-sandbox');
+    expect(args).not.toContain('--headless=new');
   });
 
   it('uses only no-sandbox for Linux root launches', () => {

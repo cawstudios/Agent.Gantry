@@ -110,6 +110,15 @@ export function getPublicRuntimeSettings() {
       },
     },
     runtime: settings.runtime,
+    browser: {
+      usage: {
+        enabled: settings.browser.usage.enabled,
+        mode: settings.browser.usage.mode,
+        windowMs: settings.browser.usage.windowMs,
+        maxActionsPerWindow: settings.browser.usage.maxActionsPerWindow,
+        maxConcurrentPerSite: settings.browser.usage.maxConcurrentPerSite,
+      },
+    },
   };
 }
 export function getRuntimeQueueConfig() {
@@ -264,7 +273,6 @@ export const REMOTE_CONTROL_AUTO_ACCEPT = parseBooleanEnv(
   envValue('REMOTE_CONTROL_AUTO_ACCEPT'),
   false,
 );
-export const CHROME_PATH = envValue('CHROME_PATH') || undefined;
 export const LOG_LEVEL = envValue('LOG_LEVEL') || 'info';
 export const HOST_CREDENTIAL_ENV_KEYS = [
   'ANTHROPIC_BASE_URL',

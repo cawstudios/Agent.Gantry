@@ -1,0 +1,46 @@
+import { parse as parseDomain } from 'tldts';
+
+export interface BrowserSiteKeyDetails {
+  hostname: string;
+  siteKey: string;
+  isIp: boolean;
+  isPublicSuffixOnly: boolean;
+}
+
+export function browserSiteKeyDetails(
+  hostname: string,
+): BrowserSiteKeyDetails | undefined {
+  const normalized = hostname.trim().toLowerCase().replace(/\.$/, '');
+  if (!normalized) return undefined;
+  const parsed = parseDomain(normalized, {
+    allowPrivateDomains: true,
+  });
+  const parsedHostname = parsed.hostname ?? normalized;
+  const siteKey = parsed.domain ?? parsedHostname;
+  return {
+    hostname: parsedHostname,
+    siteKey,
+    isIp: parsed.isIp === true,
+    isPublicSuffixOnly:
+      parsed.publicSuffix === parsedHostname && parsed.domain === null,
+  };
+}
+
+export function normalizeBrowserSiteKey(hostname: string): string | undefined {
+  return browserSiteKeyDetails(hostname)?.siteKey;
+}
+
+export function normalizeBrowserSiteFromUrl(
+  value: unknown,
+): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return undefined;
+    }
+    return normalizeBrowserSiteKey(url.hostname);
+  } catch {
+    return undefined;
+  }
+}

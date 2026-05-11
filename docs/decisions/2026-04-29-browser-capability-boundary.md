@@ -47,9 +47,10 @@ raw Playwright, Puppeteer, `agent_browser`, and concrete browser subtool names
 are not persisted as durable authority. Durable settings and database bindings
 store only `Browser`; per-action tool names are audited runtime facts.
 
-The default local user experience is headed Chrome with the persistent `myclaw`
-profile. Headless mode is opt-in for tests, CI, doctor checks, or other
-non-interactive checks.
+The default local user experience is visible Chrome with the persistent
+`myclaw` profile. Agent-facing browser tools do not expose a headless launch
+option; non-visible modes are internal test harness details only and must not
+become durable settings or model-facing tool choices.
 
 Local provider proxy environment may be used only for model credential
 transport to the Claude SDK process, with SDK subprocess env scrubbing enabled.

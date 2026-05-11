@@ -38,6 +38,9 @@ export interface BrowserStatusSnapshot {
   profileLabel: string;
   running: boolean;
   cdpReady: boolean;
+  profilePersistent?: boolean;
+  userDataDir?: string;
+  chromeExecutable?: string;
   hasState?: boolean;
   authMarkers?: string[];
   headless?: boolean;
@@ -60,13 +63,23 @@ export function formatBrowserStatus(status: BrowserStatusSnapshot): string {
     status.authMarkers && status.authMarkers.length > 0
       ? status.authMarkers.join(', ')
       : 'none detected';
+  const persistentProfile =
+    status.profilePersistent === undefined
+      ? 'unknown'
+      : status.profilePersistent
+        ? 'yes'
+        : 'no';
   const lines = [
     'Browser status',
     `Using ${status.profileLabel}.`,
     `State: ${state}`,
+    `Persistent profile: ${persistentProfile}`,
     `Profile data: ${profileData}`,
     `Signed-in sites: ${authMarkers}`,
   ];
+  if (status.userDataDir)
+    lines.push(`Profile directory: ${status.userDataDir}`);
+  if (status.chromeExecutable) lines.push(`Chrome: ${status.chromeExecutable}`);
   if (typeof status.headless === 'boolean') {
     lines.push(`Mode: ${status.headless ? 'headless' : 'visible browser'}`);
   }

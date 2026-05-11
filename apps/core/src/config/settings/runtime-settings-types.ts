@@ -159,6 +159,28 @@ export interface RuntimeProcessSettings {
   queue: RuntimeQueueSettings;
 }
 
+export type RuntimeBrowserUsagePolicyMode = 'audit' | 'enforce';
+
+export interface RuntimeBrowserUsageOverride {
+  mode?: RuntimeBrowserUsagePolicyMode;
+  windowMs?: number;
+  maxActionsPerWindow?: number;
+  maxConcurrentPerSite?: number;
+}
+
+export interface RuntimeBrowserUsageSettings {
+  enabled: boolean;
+  mode: RuntimeBrowserUsagePolicyMode;
+  windowMs: number;
+  maxActionsPerWindow: number;
+  maxConcurrentPerSite: number;
+  overrides: Record<string, RuntimeBrowserUsageOverride>;
+}
+
+export interface RuntimeBrowserSettings {
+  usage: RuntimeBrowserUsageSettings;
+}
+
 export interface RuntimeSettings {
   desiredState: RuntimeDesiredStateSettings;
   providers: Record<string, RuntimeProviderSettings>;
@@ -171,6 +193,7 @@ export interface RuntimeSettings {
   credentialBroker: RuntimeCredentialBrokerSettings;
   memory: RuntimeMemorySettings;
   runtime: RuntimeProcessSettings;
+  browser: RuntimeBrowserSettings;
 }
 
 export interface RuntimeSettingsValidationFailure {

@@ -20,7 +20,6 @@ vi.mock('@core/config/index.js', () => ({
   MYCLAW_HOME: '/tmp/myclaw-config',
   MYCLAW_HOME: '/tmp/myclaw-config',
   RUNTIME_SETTINGS_PATH: '/tmp/myclaw-config/settings.yaml',
-  CHROME_PATH: undefined,
   ONECLI_URL: 'http://localhost:10254',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
   TIMEZONE: 'America/Los_Angeles',

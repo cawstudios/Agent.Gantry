@@ -13,11 +13,7 @@ import {
   RUNTIME_EVENT_TYPES,
   type RuntimeEventType,
 } from '../domain/events/runtime-event-types.js';
-import {
-  nowIso as currentIso,
-  nowMs as currentTimeMs,
-  toIso,
-} from '../shared/time/datetime.js';
+import { nowIso, nowMs, toIso } from '../shared/time/datetime.js';
 import { resolveGroupFolderPath } from '../platform/group-folder.js';
 import { AgentOutput, spawnAgent } from '../runtime/agent-spawn.js';
 import {
@@ -97,15 +93,15 @@ export async function runJob(
     return;
   }
   const scheduledFor =
-    dispatch?.scheduledFor || currentJob.next_run || currentIso();
+    dispatch?.scheduledFor || currentJob.next_run || nowIso();
   const runId = dispatch?.runId ?? randomUUID();
-  const startedAt = currentIso();
+  const startedAt = nowIso();
   const timeoutMs = Math.max(30_000, currentJob.timeout_ms || 300_000);
   const executionMode: JobExecutionMode =
     (executionModeHint ?? currentJob.execution_mode) === 'serialized'
       ? 'serialized'
       : 'parallel';
-  const leaseExpiresAt = toIso(currentTimeMs() + timeoutMs + 30_000);
+  const leaseExpiresAt = toIso(nowMs() + timeoutMs + 30_000);
   const runtimeAppId = DEFAULT_JOB_RUNTIME_APP_ID;
   const jobModelUseKind = modelUseKindForJobSchedule(currentJob.schedule_type);
   const resolvedModel = resolveJobModel(
@@ -158,7 +154,7 @@ export async function runJob(
   const deletionGuard = createJobExecutionDeletionGuard({
     jobId: currentJob.id,
     runId,
-    nowMs: currentTimeMs,
+    nowMs,
     getJobById: (jobId) => deps.opsRepository.getJobById(jobId),
     log: logger,
   });
@@ -335,14 +331,14 @@ export async function runJob(
       let agentRunId: string | undefined;
       const flushStreamingEvent = (force = false): void => {
         if (bufferedStreamingChars <= 0) return;
-        const nowMs = currentTimeMs();
-        if (!force && nowMs - lastStreamingEventMs < 1000) return;
+        const timestampMs = nowMs();
+        if (!force && timestampMs - lastStreamingEventMs < 1000) return;
         void emitJobEvent(RUNTIME_EVENT_TYPES.JOB_STREAMING, {
           buffered_chars: bufferedStreamingChars,
           total_chars: totalStreamingChars,
         });
         bufferedStreamingChars = 0;
-        lastStreamingEventMs = nowMs;
+        lastStreamingEventMs = timestampMs;
       };
       try {
         turnContext = await deps.opsRepository.getAgentTurnContext?.(
@@ -494,7 +490,7 @@ export async function runJob(
       }
     }
   }
-  const now = currentIso();
+  const now = nowIso();
   await deletionGuard.isJobDeleted(true);
   if (deletionGuard.deletedDuringRun) {
     result = null;
@@ -551,7 +547,7 @@ export async function runJob(
         const boundedDelay = Number.isFinite(rawDelay)
           ? Math.min(rawDelay, 30 * 24 * 60 * 60 * 1000)
           : 30 * 24 * 60 * 60 * 1000;
-        nextRun = toIso(currentTimeMs() + boundedDelay);
+        nextRun = toIso(nowMs() + boundedDelay);
         await deps.opsRepository.updateJob(currentJob.id, {
           status: 'active',
           next_run: nextRun,

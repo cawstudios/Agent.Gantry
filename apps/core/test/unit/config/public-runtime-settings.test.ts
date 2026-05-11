@@ -61,4 +61,36 @@ describe('public runtime settings updates', () => {
       dreaming: { enabled: true },
     });
   });
+
+  it('redacts owner-defined browser usage override sites from public settings', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'myclaw-settings-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    vi.resetModules();
+    vi.stubEnv('MYCLAW_HOME', runtimeHome);
+    const runtimeSettings =
+      await import('@core/config/settings/runtime-settings.js');
+    const defaults = runtimeSettings.ensureRuntimeSettings(runtimeHome);
+    defaults.browser.usage = {
+      enabled: true,
+      mode: 'audit',
+      windowMs: 60_000,
+      maxActionsPerWindow: 100,
+      maxConcurrentPerSite: 2,
+      overrides: {
+        'example.test': { mode: 'enforce' },
+      },
+    };
+    runtimeSettings.saveRuntimeSettings(runtimeHome, defaults);
+    const config = await import('@core/config/index.js');
+
+    expect(config.getPublicRuntimeSettings().browser.usage).toEqual({
+      enabled: true,
+      mode: 'audit',
+      windowMs: 60_000,
+      maxActionsPerWindow: 100,
+      maxConcurrentPerSite: 2,
+    });
+  });
 });

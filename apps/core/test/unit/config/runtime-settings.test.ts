@@ -72,6 +72,84 @@ describe('runtime settings', () => {
     expect(parsed.runtime.queue).toEqual(settings.runtime.queue);
   });
 
+  it('defaults, renders, and parses neutral browser usage policy', () => {
+    const settings = createDefaultRuntimeSettings();
+    expect(settings.browser.usage).toEqual({
+      enabled: false,
+      mode: 'audit',
+      windowMs: 60_000,
+      maxActionsPerWindow: 120,
+      maxConcurrentPerSite: 1,
+      overrides: {},
+    });
+
+    settings.browser.usage = {
+      enabled: true,
+      mode: 'audit',
+      windowMs: 30_000,
+      maxActionsPerWindow: 10,
+      maxConcurrentPerSite: 1,
+      overrides: {
+        'example.com': {
+          mode: 'enforce',
+          maxActionsPerWindow: 3,
+        },
+      },
+    };
+
+    const yaml = renderRuntimeSettingsYaml(settings);
+    expect(yaml).toContain('browser:');
+    expect(yaml).toContain('enabled: true');
+    expect(yaml).toContain('"example.com":');
+
+    const parsed = parseRuntimeSettings(yaml);
+    expect(parsed.browser.usage).toEqual({
+      ...settings.browser.usage,
+    });
+  });
+
+  it('canonicalizes browser usage override site keys', () => {
+    const parsed = parseRuntimeSettings(`browser:
+  usage:
+    enabled: true
+    overrides:
+      app.example.co.uk:
+        mode: enforce
+        max_actions_per_window: 3
+`);
+    expect(parsed.browser.usage.overrides).toEqual({
+      'example.co.uk': {
+        mode: 'enforce',
+        maxActionsPerWindow: 3,
+      },
+    });
+    expect(renderRuntimeSettingsYaml(parsed)).toContain('"example.co.uk":');
+  });
+
+  it('rejects unsupported browser usage keys', () => {
+    expect(() =>
+      parseRuntimeSettings(`browser:
+  usage:
+    enabled: false
+    website_rules: {}
+`),
+    ).toThrow('browser.usage.website_rules is not supported');
+  });
+
+  it('rejects browser usage overrides that normalize to duplicate site keys', () => {
+    expect(() =>
+      parseRuntimeSettings(`browser:
+  usage:
+    enabled: true
+    overrides:
+      example.com:
+        mode: audit
+      app.example.com:
+        mode: enforce
+`),
+    ).toThrow('normalizes to duplicate site key example.com');
+  });
+
   it('rejects unsupported runtime queue keys', () => {
     expect(() =>
       parseRuntimeSettings(`runtime:

@@ -35,6 +35,7 @@ import type {
 } from './runtime-settings-types.js';
 import type { ChatAllowlistEntry } from './sender-allowlist.js';
 import { parseMemorySettings } from './runtime-settings-memory-parser.js';
+import { parseBrowserSettings } from './runtime-settings-browser-parser.js';
 
 function parseStringArrayValue(raw: unknown, pathPrefix: string): string[] {
   if (!Array.isArray(raw)) {
@@ -906,10 +907,11 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
       key !== 'agent' &&
       key !== 'credential_broker' &&
       key !== 'memory' &&
-      key !== 'runtime'
+      key !== 'runtime' &&
+      key !== 'browser'
     ) {
       throw new Error(
-        `${key} is not supported. Supported root keys are defaults, desired_state, providers, provider_connections, conversations, bindings, agents, storage, credential_broker, memory, and runtime.`,
+        `${key} is not supported. Supported root keys are defaults, desired_state, providers, provider_connections, conversations, bindings, agents, storage, agent, credential_broker, memory, runtime, and browser.`,
       );
     }
   }
@@ -943,6 +945,7 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
   );
   const memory = parseMemorySettings(root.memory);
   const runtime = parseRuntimeProcessSettings(root.runtime);
+  const browser = parseBrowserSettings(root.browser);
 
   return {
     desiredState,
@@ -956,5 +959,6 @@ export function parseRuntimeSettings(raw: string): RuntimeSettings {
     credentialBroker,
     memory,
     runtime,
+    browser,
   };
 }

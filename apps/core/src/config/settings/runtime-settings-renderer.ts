@@ -3,6 +3,11 @@ import {
   DEFAULT_AGENT_NAME,
   DEFAULT_AGENT_SESSION_MAX_MEMORY_CONTEXT_CHARS,
   DEFAULT_AGENT_SESSION_MEMORY_ITEM_LIMIT,
+  DEFAULT_BROWSER_USAGE_ENABLED,
+  DEFAULT_BROWSER_USAGE_MAX_ACTIONS_PER_WINDOW,
+  DEFAULT_BROWSER_USAGE_MAX_CONCURRENT_PER_SITE,
+  DEFAULT_BROWSER_USAGE_MODE,
+  DEFAULT_BROWSER_USAGE_WINDOW_MS,
   DEFAULT_EMBED_MODEL,
   DEFAULT_MEMORY_DREAMING_CRON,
   DEFAULT_MEMORY_EMBED_BATCH_SIZE,
@@ -20,6 +25,7 @@ import {
 import type {
   RuntimeCredentialBrokerSettings,
   RuntimeAgentSettings,
+  RuntimeBrowserSettings,
   RuntimeConfiguredAgent,
   RuntimeConfiguredBinding,
   RuntimeConfiguredConversation,
@@ -405,6 +411,62 @@ function isDefaultRuntime(runtime: RuntimeSettings['runtime']): boolean {
   );
 }
 
+function isDefaultBrowserSettings(browser: RuntimeBrowserSettings): boolean {
+  return (
+    browser.usage.enabled === DEFAULT_BROWSER_USAGE_ENABLED &&
+    browser.usage.mode === DEFAULT_BROWSER_USAGE_MODE &&
+    browser.usage.windowMs === DEFAULT_BROWSER_USAGE_WINDOW_MS &&
+    browser.usage.maxActionsPerWindow ===
+      DEFAULT_BROWSER_USAGE_MAX_ACTIONS_PER_WINDOW &&
+    browser.usage.maxConcurrentPerSite ===
+      DEFAULT_BROWSER_USAGE_MAX_CONCURRENT_PER_SITE &&
+    Object.keys(browser.usage.overrides).length === 0
+  );
+}
+
+function renderBrowserSettingsYaml(
+  lines: string[],
+  browser: RuntimeBrowserSettings,
+): void {
+  lines.push(
+    'browser:',
+    '  usage:',
+    `    enabled: ${browser.usage.enabled ? 'true' : 'false'}`,
+    `    mode: ${quoteYamlString(browser.usage.mode)}`,
+    `    window_ms: ${browser.usage.windowMs}`,
+    `    max_actions_per_window: ${browser.usage.maxActionsPerWindow}`,
+    `    max_concurrent_per_site: ${browser.usage.maxConcurrentPerSite}`,
+  );
+  const overrides = Object.entries(browser.usage.overrides).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  if (overrides.length > 0) {
+    lines.push('    overrides:');
+    for (const [site, override] of overrides) {
+      lines.push(`      ${quoteYamlKey(site)}:`);
+      if (override.mode !== undefined) {
+        lines.push(`        mode: ${quoteYamlString(override.mode)}`);
+      }
+      if (override.windowMs !== undefined) {
+        lines.push(`        window_ms: ${override.windowMs}`);
+      }
+      if (override.maxActionsPerWindow !== undefined) {
+        lines.push(
+          `        max_actions_per_window: ${override.maxActionsPerWindow}`,
+        );
+      }
+      if (override.maxConcurrentPerSite !== undefined) {
+        lines.push(
+          `        max_concurrent_per_site: ${override.maxConcurrentPerSite}`,
+        );
+      }
+    }
+  } else {
+    lines.push('    overrides: {}');
+  }
+  lines.push('');
+}
+
 function renderRuntimeProcessYaml(
   lines: string[],
   runtime: RuntimeSettings['runtime'],
@@ -501,6 +563,9 @@ export function renderRuntimeSettingsYaml(settings: RuntimeSettings): string {
   }
   if (!isDefaultRuntime(settings.runtime)) {
     renderRuntimeProcessYaml(lines, settings.runtime);
+  }
+  if (!isDefaultBrowserSettings(settings.browser)) {
+    renderBrowserSettingsYaml(lines, settings.browser);
   }
 
   return lines.join('\n');

@@ -131,6 +131,19 @@ export const RuntimeSettingsPublicSchema = z
           .strict(),
       })
       .strict(),
+    browser: z
+      .object({
+        usage: z
+          .object({
+            enabled: z.boolean(),
+            mode: z.enum(['audit', 'enforce']),
+            windowMs: z.number().int().positive(),
+            maxActionsPerWindow: z.number().int().positive(),
+            maxConcurrentPerSite: z.number().int().positive(),
+          })
+          .strict(),
+      })
+      .strict(),
   })
   .strict();
 export type RuntimeSettingsPublic = z.infer<typeof RuntimeSettingsPublicSchema>;

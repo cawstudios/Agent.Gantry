@@ -57,6 +57,23 @@ export type RuntimeSettingsResponse = {
         enabled: boolean;
       };
     };
+    runtime: {
+      queue: {
+        maxMessageRuns: number;
+        maxJobRuns: number;
+        maxRetries: number;
+        baseRetryMs: number;
+      };
+    };
+    browser: {
+      usage: {
+        enabled: boolean;
+        mode: 'audit' | 'enforce';
+        windowMs: number;
+        maxActionsPerWindow: number;
+        maxConcurrentPerSite: number;
+      };
+    };
   };
 };
 

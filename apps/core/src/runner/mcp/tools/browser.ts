@@ -125,7 +125,6 @@ export function registerBrowserTools(server: McpServer): void {
     'browser_launch',
     'Launch or reuse the headed browser profile.',
     {
-      headless: z.boolean().optional(),
       keep_alive_ms: z.number().optional(),
     },
   );

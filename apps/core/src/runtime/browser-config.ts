@@ -1,5 +1,3 @@
-import { CHROME_PATH as configuredChromePath } from '../config/index.js';
-
 export const DEFAULT_CHROME_ARGS = [
   '--no-first-run',
   '--no-default-browser-check',
@@ -12,7 +10,6 @@ export const DEFAULT_CHROME_ARGS = [
 export interface ChromeLaunchArgsInput {
   userDataDir: string;
   port: number;
-  headless?: boolean;
   platform?: NodeJS.Platform;
   uid?: number;
 }
@@ -31,12 +28,9 @@ export function buildChromeLaunchArgs(input: ChromeLaunchArgsInput): string[] {
   return [
     ...DEFAULT_CHROME_ARGS,
     ...sandboxArgs,
-    ...(input.headless === false ? [] : ['--headless=new']),
     `--user-data-dir=${input.userDataDir}`,
     `--remote-debugging-port=${input.port}`,
   ];
 }
 
 export const DEFAULT_BROWSER_KEEPALIVE_MS = 5 * 60 * 1000;
-
-export const CHROME_PATH = configuredChromePath;

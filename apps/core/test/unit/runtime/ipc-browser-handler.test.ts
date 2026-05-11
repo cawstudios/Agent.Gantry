@@ -57,6 +57,7 @@ import {
   ensureBrowserReady,
   getBrowserStatus,
 } from '@core/runtime/browser-capability.js';
+import { resetBrowserUsageGovernorForTests } from '@core/runtime/browser-usage-governor.js';
 import {
   ensureBrowserTarget,
   foregroundBrowserTarget,
@@ -77,6 +78,7 @@ describe('ipc-browser-handler', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    resetBrowserUsageGovernorForTests();
   });
 
   it('allows conversation-scoped groups to inspect browser status', async () => {
@@ -190,6 +192,440 @@ describe('ipc-browser-handler', () => {
       }),
     );
     expect(response.data).toEqual({ content: 'tool-result' });
+  });
+
+  it('keeps browser usage policy audit-only when enabled in audit mode', async () => {
+    const callBrowserTool = vi.fn(async () => ({ content: 'tool-result' }));
+    const context = {
+      sourceAgentFolder: 'main',
+      browserProfileName: 'c-main-abc123abc123',
+      browserIpcAuthorized: true,
+      callBrowserTool,
+      getBrowserUsageSettings: () => ({
+        enabled: true,
+        mode: 'audit' as const,
+        windowMs: 60_000,
+        maxActionsPerWindow: 1,
+        maxConcurrentPerSite: 1,
+        overrides: {},
+      }),
+    };
+
+    const first = await processBrowserIpcRequest(
+      {
+        requestId: 'req-audit-1',
+        action: 'browser_navigate',
+        payload: { url: 'https://first.example.test/a' },
+      },
+      context,
+    );
+    const second = await processBrowserIpcRequest(
+      {
+        requestId: 'req-audit-2',
+        action: 'browser_navigate',
+        payload: { url: 'https://second.example.test/b' },
+      },
+      context,
+    );
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(callBrowserTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('enforces neutral browser usage limits only when configured', async () => {
+    const callBrowserTool = vi.fn(async () => ({ content: 'tool-result' }));
+    const context = {
+      sourceAgentFolder: 'main',
+      browserProfileName: 'c-main-abc123abc123',
+      browserIpcAuthorized: true,
+      callBrowserTool,
+      getBrowserUsageSettings: () => ({
+        enabled: true,
+        mode: 'enforce' as const,
+        windowMs: 60_000,
+        maxActionsPerWindow: 1,
+        maxConcurrentPerSite: 1,
+        overrides: {},
+      }),
+    };
+
+    const first = await processBrowserIpcRequest(
+      {
+        requestId: 'req-enforce-1',
+        action: 'browser_navigate',
+        payload: { url: 'https://first.example.test/a' },
+      },
+      context,
+    );
+    const second = await processBrowserIpcRequest(
+      {
+        requestId: 'req-enforce-2',
+        action: 'browser_navigate',
+        payload: { url: 'https://second.example.test/b' },
+      },
+      context,
+    );
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(second.error).toContain('Browser usage policy warning');
+    expect(callBrowserTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks browser authorization before metering usage', async () => {
+    const callBrowserTool = vi.fn(async () => ({ content: 'tool-result' }));
+    const usageSettings = {
+      enabled: true,
+      mode: 'enforce' as const,
+      windowMs: 60_000,
+      maxActionsPerWindow: 1,
+      maxConcurrentPerSite: 1,
+      overrides: {},
+    };
+    const getBrowserUsageSettings = vi.fn(() => usageSettings);
+
+    const unauthorized = await processBrowserIpcRequest(
+      {
+        requestId: 'req-unauthorized-before-metering',
+        action: 'browser_navigate',
+        payload: { url: 'https://first.example.test/a' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: false,
+        callBrowserTool,
+        getBrowserUsageSettings,
+      },
+    );
+    const authorized = await processBrowserIpcRequest(
+      {
+        requestId: 'req-authorized-after-stale-request',
+        action: 'browser_navigate',
+        payload: { url: 'https://second.example.test/b' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        getBrowserUsageSettings,
+      },
+    );
+
+    expect(unauthorized.ok).toBe(false);
+    expect(unauthorized.error).toContain(
+      'Select the canonical Browser capability',
+    );
+    expect(authorized.ok).toBe(true);
+    expect(getBrowserUsageSettings).toHaveBeenCalledTimes(1);
+    expect(callBrowserTool).toHaveBeenCalledTimes(1);
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'browser_navigate' }),
+    );
+  });
+
+  it('does not let usage enforcement block browser status or close', async () => {
+    const context = {
+      sourceAgentFolder: 'main',
+      browserProfileName: 'c-main-abc123abc123',
+      browserIpcAuthorized: true,
+      callBrowserTool: vi.fn(async () => ({ content: 'tool-result' })),
+      getBrowserUsageSettings: () => ({
+        enabled: true,
+        mode: 'enforce' as const,
+        windowMs: 60_000,
+        maxActionsPerWindow: 1,
+        maxConcurrentPerSite: 1,
+        overrides: {},
+      }),
+    };
+
+    const navigate = await processBrowserIpcRequest(
+      {
+        requestId: 'req-enforce-navigate',
+        action: 'browser_navigate',
+        payload: { url: 'https://first.example.test/a' },
+      },
+      context,
+    );
+    const status = await processBrowserIpcRequest(
+      {
+        requestId: 'req-enforce-status',
+        action: 'browser_status',
+        payload: {},
+      },
+      context,
+    );
+    const close = await processBrowserIpcRequest(
+      {
+        requestId: 'req-enforce-close',
+        action: 'browser_close',
+        payload: {},
+      },
+      context,
+    );
+
+    expect(navigate.ok).toBe(true);
+    expect(status.ok).toBe(true);
+    expect(close.ok).toBe(true);
+    expect(getBrowserStatus).toHaveBeenCalledWith('c-main-abc123abc123');
+    expect(closeBrowser).toHaveBeenCalledWith('c-main-abc123abc123');
+  });
+
+  it('meters URL-less actions against the backend current tab after in-page navigation', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValue({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'content-target',
+      headless: false,
+    });
+    const callBrowserTool = vi.fn(async ({ toolName }) => {
+      if (toolName === 'browser_tabs') {
+        return {
+          structuredContent: {
+            tabs: [
+              {
+                index: 0,
+                current: true,
+                url: 'https://blocked.example.com/account',
+              },
+            ],
+          },
+        };
+      }
+      return { content: 'tool-result' };
+    });
+    const context = {
+      sourceAgentFolder: 'main',
+      browserProfileName: 'c-main-abc123abc123',
+      browserIpcAuthorized: true,
+      callBrowserTool,
+      getBrowserUsageSettings: () => ({
+        enabled: true,
+        mode: 'audit' as const,
+        windowMs: 60_000,
+        maxActionsPerWindow: 120,
+        maxConcurrentPerSite: 1,
+        overrides: {
+          'example.com': {
+            mode: 'enforce' as const,
+            maxActionsPerWindow: 1,
+          },
+        },
+      }),
+    };
+
+    const navigate = await processBrowserIpcRequest(
+      {
+        requestId: 'req-cross-site-navigate',
+        action: 'browser_navigate',
+        payload: { url: 'https://safe.example.org/start' },
+      },
+      context,
+    );
+    const firstClick = await processBrowserIpcRequest(
+      {
+        requestId: 'req-cross-site-click',
+        action: 'browser_click',
+        payload: { target: 'button-ref' },
+      },
+      context,
+    );
+    const secondClick = await processBrowserIpcRequest(
+      {
+        requestId: 'req-cross-site-click-again',
+        action: 'browser_type',
+        payload: { target: 'input-ref', text: 'hello' },
+      },
+      context,
+    );
+
+    expect(navigate.ok).toBe(true);
+    expect(firstClick.ok).toBe(true);
+    expect(secondClick.ok).toBe(false);
+    expect(secondClick.error).toContain('Browser usage policy warning');
+    expect(callBrowserTool.mock.calls.map((call) => call[0].toolName)).toEqual([
+      'browser_navigate',
+      'browser_tabs',
+      'browser_click',
+      'browser_tabs',
+    ]);
+  });
+
+  it('ignores forged browser_tabs URLs unless creating a new tab', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValue({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'content-target',
+      headless: false,
+    });
+    const callBrowserTool = vi.fn(async () => ({
+      structuredContent: {
+        tabs: [
+          {
+            index: 0,
+            current: true,
+            url: 'https://blocked.example.com/account',
+          },
+        ],
+      },
+    }));
+    const context = {
+      sourceAgentFolder: 'main',
+      browserProfileName: 'c-main-abc123abc123',
+      browserIpcAuthorized: true,
+      callBrowserTool,
+      getBrowserUsageSettings: () => ({
+        enabled: true,
+        mode: 'enforce' as const,
+        windowMs: 60_000,
+        maxActionsPerWindow: 1,
+        maxConcurrentPerSite: 1,
+        overrides: {},
+      }),
+    };
+
+    const list = await processBrowserIpcRequest(
+      {
+        requestId: 'req-tabs-list',
+        action: 'browser_tabs',
+        payload: { action: 'list' },
+      },
+      context,
+    );
+    const select = await processBrowserIpcRequest(
+      {
+        requestId: 'req-tabs-select-forged-url',
+        action: 'browser_tabs',
+        payload: {
+          action: 'select',
+          index: 0,
+          url: 'https://safe.example.org/',
+        },
+      },
+      context,
+    );
+
+    expect(list.ok).toBe(true);
+    expect(select.ok).toBe(false);
+    expect(select.error).toContain('Browser usage policy warning');
+    expect(callBrowserTool.mock.calls.map((call) => call[0].toolName)).toEqual([
+      'browser_tabs',
+      'browser_tabs',
+      'browser_tabs',
+    ]);
+  });
+
+  it('fails closed when enforce mode cannot verify a URL-less action site', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValue({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'content-target',
+      headless: false,
+    });
+    const callBrowserTool = vi.fn(async ({ toolName }) => {
+      if (toolName === 'browser_tabs') throw new Error('tabs unavailable');
+      return { content: 'clicked' };
+    });
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-unverified-active-site',
+        action: 'browser_click',
+        payload: { target: 'button-ref' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        getBrowserUsageSettings: () => ({
+          enabled: true,
+          mode: 'enforce' as const,
+          windowMs: 60_000,
+          maxActionsPerWindow: 120,
+          maxConcurrentPerSite: 1,
+          overrides: {},
+        }),
+      },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain(
+      'Browser usage policy could not verify the active page site',
+    );
+    expect(callBrowserTool).toHaveBeenCalledTimes(1);
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'browser_tabs' }),
+    );
+  });
+
+  it('fails closed when enforce mode sees an unnormalizable active tab URL', async () => {
+    vi.mocked(ensureBrowserReady).mockResolvedValue({
+      profile: 'c-main-abc123abc123',
+      profileName: 'c-main-abc123abc123',
+      running: true,
+      cdpReady: true,
+      port: 9333,
+      targetId: 'content-target',
+      headless: false,
+    });
+    const callBrowserTool = vi.fn(async ({ toolName }) => {
+      if (toolName === 'browser_tabs') {
+        return {
+          structuredContent: {
+            tabs: [
+              {
+                index: 0,
+                current: true,
+                url: 'chrome://settings/',
+              },
+            ],
+          },
+        };
+      }
+      return { content: 'clicked' };
+    });
+
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-unnormalizable-active-site',
+        action: 'browser_click',
+        payload: { target: 'button-ref' },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        getBrowserUsageSettings: () => ({
+          enabled: true,
+          mode: 'enforce' as const,
+          windowMs: 60_000,
+          maxActionsPerWindow: 120,
+          maxConcurrentPerSite: 1,
+          overrides: {},
+        }),
+      },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('not a normalizable site');
+    expect(callBrowserTool).toHaveBeenCalledTimes(1);
+    expect(callBrowserTool).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'browser_tabs' }),
+    );
   });
 
   it('foregrounds the content target immediately before pointer action dispatch', async () => {
@@ -847,7 +1283,6 @@ describe('ipc-browser-handler', () => {
         action: 'browser_launch',
         payload: {
           profile_name: 'default',
-          headless: true,
         },
       },
       {
@@ -865,10 +1300,32 @@ describe('ipc-browser-handler', () => {
     expect(ensureBrowserReady).toHaveBeenCalledTimes(1);
     expect(ensureBrowserReady).toHaveBeenCalledWith({
       profileName: 'default',
-      headless: true,
       keepAliveMs: undefined,
       deadlineAtMs: undefined,
     });
+  });
+
+  it('rejects unsupported browser_launch payload fields', async () => {
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-launch-headless',
+        action: 'browser_launch',
+        payload: {
+          headless: true,
+        },
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserIpcAuthorized: true,
+        callBrowserTool: vi.fn(async () => ({ content: 'resized' })),
+      },
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain(
+      'browser_launch does not support payload field(s): headless',
+    );
+    expect(ensureBrowserReady).not.toHaveBeenCalled();
   });
 
   it('sets headed launch viewport through the action backend', async () => {
@@ -979,7 +1436,7 @@ describe('ipc-browser-handler', () => {
       {
         requestId: 'req-launch-expired',
         action: 'browser_launch',
-        payload: { headless: true },
+        payload: {},
       },
       {
         sourceAgentFolder: 'main',
@@ -1001,7 +1458,7 @@ describe('ipc-browser-handler', () => {
       {
         requestId: 'req-launch-deadline',
         action: 'browser_launch',
-        payload: { headless: true },
+        payload: {},
       },
       {
         sourceAgentFolder: 'main',
@@ -1013,7 +1470,6 @@ describe('ipc-browser-handler', () => {
     expect(response.ok).toBe(true);
     expect(ensureBrowserReady).toHaveBeenCalledWith({
       profileName: 'default',
-      headless: true,
       keepAliveMs: undefined,
       deadlineAtMs: 3_000,
     });
@@ -1148,7 +1604,6 @@ describe('ipc-browser-handler', () => {
         action: 'browser_launch',
         payload: {
           profile_name: 'other-profile',
-          headless: true,
         },
       },
       {

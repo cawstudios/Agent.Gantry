@@ -1,6 +1,5 @@
 export interface LaunchBrowserOptions {
   profileName?: string;
-  headless?: boolean;
   keepAliveMs?: number;
   deadlineAtMs?: number;
 }
@@ -18,6 +17,11 @@ export interface BrowserSessionStatus {
   headless?: boolean;
   keepAliveMs?: number;
   idleExpiresAt?: string;
+  profilePersistent?: boolean;
+  userDataDir?: string;
+  chromeExecutable?: string;
+  hasState?: boolean;
+  authMarkers?: string[];
   error?: string;
 }
 
@@ -28,6 +32,12 @@ export interface BrowserProfileStatus {
   cdp_port?: number;
   auth_markers: string[];
   has_state: boolean;
+  authMarkers: string[];
+  hasState: boolean;
+  profilePersistent: boolean;
+  userDataDir: string;
+  chromeExecutable: string;
+  headless?: boolean;
   running: boolean;
   cdpReady: boolean;
 }
