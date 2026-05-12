@@ -111,23 +111,27 @@ non-authoritative settings may continue to observe preexisting DB-only
 capabilities, but any declared settings capability list replaces stale active
 Postgres tool, skill, and MCP bindings for that agent.
 
-Job-specific grants are single-cut runtime state. They remain on the job as
-`target_json.capabilityPolicy.allowedTools`, never under `settings.yaml`, and
-public inspection surfaces expose the canonical `toolAccess` object instead of
-parallel count or legacy tool fields.
+Jobs are scheduled runs of the target agent. They inherit that agent's selected
+tools, skills, and MCP servers at execution time, never carry a separate
+job-scoped grant surface, and expose the canonical `toolAccess` object instead
+of parallel count or legacy tool fields.
 
-When an autonomous job fails because a tool is missing, recovery output should
-name the exact rule command:
+When an autonomous job fails because a capability is missing, recovery output
+uses the same reviewed request tools as interactive agents:
 
 ```text
-scheduler_grant_tool { "job_id": "<job_id>", "rule": "Bash(npm test)" }
+request_permission { "permissionKind": "tool", "toolName": "Bash", "temporaryOnly": false, "reason": "This scheduled job needs Bash access." }
+request_mcp_server { "name": "github", "transport": "http", "reason": "This scheduled job needs the github MCP server capability." }
 ```
 
-`scheduler_grant_tool` appends one reviewed job-scoped rule to
-`target_json.capabilityPolicy.allowedTools`. It does not mutate
-`settings.yaml`, grant persistent agent tools, or bypass the canonical tool
-execution policy. The rule is validated with the same autonomous tool-rule
-parser before any scheduler update task is written.
+Approved requests update the target agent's durable selected tools, skills, or
+MCP server bindings and export the readable projection to `settings.yaml`.
+Tool permission approval can resume the blocked active tool call immediately:
+`Allow once` is current-run only, while `Always allow` also applies the approved
+rule to the active run and future runs. New skill or MCP materialization occurs
+on the next scheduled run or a manual rerun. Browser remains a single public
+`Browser` tool capability; projected browser tools and admin MyClaw MCP tools
+are not job-local grants.
 
 Direct writes to `settings.json`, `settings.local.json`, `.mcp.json`,
 generated provider MCP directories, and skill capability files are protected

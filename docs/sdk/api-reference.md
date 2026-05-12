@@ -103,8 +103,9 @@ Agent-facing tools:
 Every persistent capability change follows request, validation, review,
 decision, durable audit, new config version, and next-run activation.
 Persistent agent tool grants are mirrored into `settings.yaml` as readable
-`agents.<id>.tools` rules. Job-specific tool grants stay on the job only and
-are returned as `toolAccess` in job responses.
+`agents.<id>.tools` rules. Jobs inherit the target agent's tools, skills, and
+MCP servers at run time; `toolAccess` in job responses reports that inherited
+effective projection and any runtime-only projected tools.
 Agent capability updates are bidirectional: settings-side changes reconcile
 Postgres immediately, and API/admin-side capability writes export the readable
 projection back into `settings.yaml` before returning.

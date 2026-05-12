@@ -38,6 +38,8 @@ interface BrowserRequest {
   requestId: string;
   action: BrowserIpcAction;
   payload: Record<string, unknown>;
+  jobId?: string;
+  runId?: string;
 }
 
 interface BrowserResponse {
@@ -54,6 +56,7 @@ type BrowserContext = Pick<
   getCredentialBroker?: IpcDomainContext['deps']['getCredentialBroker'];
   getCredentialBrokerProfile?: IpcDomainContext['deps']['getCredentialBrokerProfile'];
   callBrowserTool?: IpcDomainContext['deps']['callBrowserTool'];
+  publishBrowserJobActivity?: IpcDomainContext['deps']['publishBrowserJobActivity'];
   closeBrowserToolBackends?: IpcDomainContext['deps']['closeBrowserToolBackends'];
   getBrowserUsageSettings?: IpcDomainContext['deps']['getBrowserUsageSettings'];
   timeoutMs?: number;
@@ -555,6 +558,8 @@ async function handleBrowserToolAction(
     finishBrowserUsage(usageDecision);
     console.info('Browser tool action audit', {
       sourceAgentFolder: context.sourceAgentFolder,
+      jobId: request.jobId,
+      runId: request.runId,
       profileName,
       toolName: request.action,
       normalizedSite: usageDecision.normalizedSite,
@@ -563,6 +568,48 @@ async function handleBrowserToolAction(
       elapsedMs: nowMs() - startedAt,
       ok: response?.ok ?? false,
       result: response?.ok ? 'success' : 'error',
+    });
+    await publishBrowserJobActivity({
+      request,
+      publish: context.publishBrowserJobActivity,
+      elapsedMs: nowMs() - startedAt,
+      ok: response?.ok ?? false,
+      normalizedSite: usageDecision.normalizedSite,
+      policyMode: usageDecision.policyMode,
+      warning: usageDecision.warning,
+      error: response?.ok ? undefined : response?.error,
+    });
+  }
+}
+
+async function publishBrowserJobActivity(input: {
+  request: BrowserRequest;
+  publish?: IpcDomainContext['deps']['publishBrowserJobActivity'];
+  elapsedMs: number;
+  ok: boolean;
+  normalizedSite?: string | null;
+  policyMode?: string;
+  warning?: string;
+  error?: string;
+}): Promise<void> {
+  if (!input.request.jobId || !input.request.runId || !input.publish) return;
+  try {
+    await input.publish({
+      jobId: input.request.jobId,
+      runId: input.request.runId,
+      tool: input.request.action,
+      ok: input.ok,
+      elapsedMs: input.elapsedMs,
+      normalizedSite: input.normalizedSite ?? null,
+      policyMode: input.policyMode ?? null,
+      warning: input.warning ?? null,
+      error: input.error ?? null,
+    });
+  } catch (err) {
+    console.warn('Failed to publish browser job activity', {
+      err,
+      jobId: input.request.jobId,
+      runId: input.request.runId,
     });
   }
 }

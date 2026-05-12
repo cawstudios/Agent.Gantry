@@ -292,21 +292,14 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
     const key = `progress:${this.buildDraftStreamKey(jid, options.threadId)}`;
     this.loadPersistedProgressMessages();
     const nextText = text.trim();
+    if (options.done) {
+      this.markProgressGenerationDone(key, options.generation);
+    } else if (
+      !this.shouldAcceptProgressUpdate(key, options.generation, options.done)
+    ) {
+      return;
+    }
     let existing = this.activeProgressMessages.get(key);
-    logger.info(
-      {
-        jid,
-        key,
-        progressText: nextText,
-        done: options.done ?? false,
-        replaceOnly: options.replaceOnly ?? false,
-        generation: options.generation,
-        existing: Boolean(existing),
-        existingGeneration: existing?.generation,
-        existingMessageId: existing?.messageId,
-      },
-      'Progress lifecycle telegram receive',
-    );
     if (
       existing &&
       options.generation !== undefined &&

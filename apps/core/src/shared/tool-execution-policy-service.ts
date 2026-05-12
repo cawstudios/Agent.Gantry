@@ -1,6 +1,7 @@
 import { evaluateAutonomousToolUse } from './tool-rule-matcher.js';
+import { isAdminMcpToolFullName } from './admin-mcp-tools.js';
+import { isKnownProjectedBrowserMcpToolName } from './agent-tool-references.js';
 import {
-  canRepresentBashGrantCommand,
   commandText,
   hasBashMutationVerb,
   hasBashRedirect,
@@ -235,7 +236,6 @@ function evaluateProtectedCapabilityRequest(
     const safeTextPayloadCommand =
       isSafeProtectedPathTextPayloadCommand(command);
     const protectedPathMention = allProtectedPathMentions(command)[0];
-    const target = inferBashTarget(command);
     if (!safeTextPayloadCommand && protectedPathMention) {
       return decision(request, 'deny', {
         reason: `Shell command references protected capability target "${protectedPathMention}".`,
@@ -385,37 +385,29 @@ function protectedCapabilityRecovery(): string {
 }
 
 function schedulerGrantRecovery(request: ToolExecutionRequest): string {
-  const jobId = request.runContext.jobId ?? '<job_id>';
-  let rule: string | undefined;
-  let manualReviewNote: string | undefined;
-  if (request.toolName === 'Bash') {
-    const command = commandText(request.input);
-    if (command && canRepresentBashGrantCommand(command)) {
-      rule = `Bash(${command})`;
-    } else if (
-      request.targetResource &&
-      canRepresentGrantTarget(request.targetResource)
-    ) {
-      rule = `Bash(*${request.targetResource}*)`;
-    } else {
-      rule = 'Bash';
-      manualReviewNote =
-        ' Manual review required: command could not be safely represented as Bash(...).';
-    }
-  } else {
-    if (
-      request.targetResource &&
-      canRepresentGrantTarget(request.targetResource)
-    ) {
-      rule = `${request.toolName}(${request.targetResource})`;
-    } else {
-      rule = request.toolName;
-    }
+  if (isKnownProjectedBrowserMcpToolName(request.toolName)) {
+    return 'request_permission { "permissionKind": "tool", "toolName": "Browser", "toolCategory": "browser", "temporaryOnly": false, "reason": "This scheduled job needs browser access." }';
   }
-  const escapedRule = rule.replaceAll('"', '\\"');
-  return `scheduler_grant_tool { "job_id": "${jobId}", "rule": "${escapedRule}" }${manualReviewNote ?? ''}`;
+  if (isAdminMcpToolFullName(request.toolName)) {
+    return `request_permission { "permissionKind": "tool", "toolName": "${request.toolName}", "temporaryOnly": false, "reason": "This scheduled job needs ${request.toolName} access." }`;
+  }
+  const thirdPartyMcp = thirdPartyMcpToolServerName(request.toolName);
+  if (thirdPartyMcp) {
+    return `request_mcp_server { "name": "${escapeJson(thirdPartyMcp)}", "transport": "http", "reason": "This scheduled job needs the ${escapeJson(thirdPartyMcp)} MCP server capability." }`;
+  }
+  const toolName = isKnownProjectedBrowserMcpToolName(request.toolName)
+    ? 'Browser'
+    : request.toolName;
+  return `request_permission { "permissionKind": "tool", "toolName": "${escapeJson(toolName)}", "temporaryOnly": false, "reason": "This scheduled job needs ${escapeJson(toolName)} access." }`;
 }
 
-function canRepresentGrantTarget(target: string): boolean {
-  return !!target.trim() && !/[()\r\n]/.test(target);
+function thirdPartyMcpToolServerName(toolName: string): string | undefined {
+  const match = /^mcp__([^_][A-Za-z0-9_.-]*)__/.exec(toolName);
+  const serverName = match?.[1];
+  if (!serverName || serverName === 'myclaw') return undefined;
+  return serverName;
+}
+
+function escapeJson(value: string): string {
+  return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
 }

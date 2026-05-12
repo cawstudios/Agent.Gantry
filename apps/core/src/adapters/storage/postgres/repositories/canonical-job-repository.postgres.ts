@@ -1,9 +1,10 @@
-import { and, desc, eq, gt, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 
 import type { JobRun } from '../../../../domain/repositories/domain-types.js';
 import type {
   JobListFilters,
   JobRunListFilters,
+  ReleasedStaleJobLease,
 } from '../../../../domain/repositories/ops-repo.js';
 import { RUNTIME_EVENT_TYPES } from '../../../../domain/events/runtime-event-types.js';
 import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
@@ -16,6 +17,7 @@ import {
   configVersionIdForAgent,
   parseJson,
 } from './canonical-graph-repository.postgres.js';
+import { releaseStaleCanonicalJobLeases } from './canonical-job-lease-release.postgres.js';
 
 export interface CanonicalJobRecord {
   id: string;
@@ -70,6 +72,7 @@ export interface CanonicalRunRecord {
   endedAt: string | null;
   resultSummary: string | null;
   errorSummary: string | null;
+  notifiedAt: string | null;
 }
 
 export interface CanonicalJobEventRecord {
@@ -88,6 +91,7 @@ const CANONICAL_JOB_EVENT_TYPES = [
   RUNTIME_EVENT_TYPES.JOB_STARTED,
   RUNTIME_EVENT_TYPES.JOB_STREAMING,
   RUNTIME_EVENT_TYPES.JOB_TOOL_DENIED,
+  RUNTIME_EVENT_TYPES.JOB_TOOL_ACTIVITY,
   RUNTIME_EVENT_TYPES.RUN_COMPLETED,
   RUNTIME_EVENT_TYPES.RUN_FAILED,
   RUNTIME_EVENT_TYPES.RUN_TIMEOUT,
@@ -304,24 +308,10 @@ export class PostgresCanonicalJobRepository {
     });
   }
 
-  async releaseStaleLeases(nowIso: string = currentIso()): Promise<number> {
-    const rows = await this.db
-      .update(pgSchema.canonicalJobsPostgres)
-      .set({
-        status: 'active',
-        leaseRunId: null,
-        leaseExpiresAt: null,
-        updatedAt: nowIso,
-      })
-      .where(
-        and(
-          eq(pgSchema.canonicalJobsPostgres.status, 'running'),
-          isNotNull(pgSchema.canonicalJobsPostgres.leaseExpiresAt),
-          lt(pgSchema.canonicalJobsPostgres.leaseExpiresAt, nowIso),
-        ),
-      )
-      .returning({ id: pgSchema.canonicalJobsPostgres.id });
-    return rows.length;
+  async releaseStaleLeases(
+    nowIso: string = currentIso(),
+  ): Promise<ReleasedStaleJobLease[]> {
+    return releaseStaleCanonicalJobLeases(this.db, nowIso);
   }
 
   async insertRun(
@@ -347,6 +337,7 @@ export class PostgresCanonicalJobRepository {
         endedAt: run.ended_at,
         resultSummary: run.result_summary,
         errorSummary: run.error_summary,
+        notifiedAt: run.notified_at,
       })
       .onConflictDoNothing()
       .returning({ id: pgSchema.agentRunsPostgres.id });
@@ -370,6 +361,13 @@ export class PostgresCanonicalJobRepository {
         resultSummary: input.resultSummary,
         errorSummary: input.errorSummary,
       })
+      .where(eq(pgSchema.agentRunsPostgres.id, runId));
+  }
+
+  async markRunNotified(runId: string, notifiedAt: string): Promise<void> {
+    await this.db
+      .update(pgSchema.agentRunsPostgres)
+      .set({ notifiedAt })
       .where(eq(pgSchema.agentRunsPostgres.id, runId));
   }
 
@@ -434,6 +432,7 @@ export class PostgresCanonicalJobRepository {
         endedAt: pgSchema.agentRunsPostgres.endedAt,
         resultSummary: pgSchema.agentRunsPostgres.resultSummary,
         errorSummary: pgSchema.agentRunsPostgres.errorSummary,
+        notifiedAt: pgSchema.agentRunsPostgres.notifiedAt,
       })
       .from(pgSchema.controlHttpSessionsPostgres)
       .innerJoin(

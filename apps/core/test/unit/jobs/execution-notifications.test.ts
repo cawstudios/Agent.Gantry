@@ -62,7 +62,7 @@ describe('jobs/execution-notifications', () => {
     expect(delivered).toBe(true);
     expect(sendMessage).toHaveBeenCalledWith(
       'tg:scheduler',
-      expect.stringContaining('Scheduler started: Daily summary'),
+      expect.stringContaining('Running: Daily summary'),
       { threadId: 'thread-1' },
     );
   });
@@ -118,8 +118,31 @@ describe('jobs/execution-notifications', () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(sendMessage).toHaveBeenCalledWith(
       'tg:scheduler',
-      expect.stringContaining('Scheduler failed: Daily summary'),
+      expect.stringContaining('Failed: Daily summary'),
       { threadId: 'thread-1' },
     );
+  });
+
+  it('sends a user-facing needs-permission receipt without repair commands', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+
+    await notifySchedulerTerminalRunState({
+      job: makeJob(),
+      runId: 'run-1',
+      runStatus: 'dead_lettered',
+      summary:
+        'Tool not on autonomous job allowlist: mcp__myclaw__browser_navigate. Recovery: request_permission { "toolName": "Browser" }',
+      nextRun: null,
+      retryCount: 1,
+      pauseReason: 'Needs permission: mcp__myclaw__browser_navigate',
+      sendMessage,
+      durationMs: 41_000,
+    });
+
+    const message = String(sendMessage.mock.calls[0]?.[1]);
+    expect(message).toContain('Needs permission: Daily summary');
+    expect(message).toContain('Outcome: Could not use the browser');
+    expect(message).toContain('Action: Browser access needs approval.');
+    expect(message).not.toContain('request_permission');
   });
 });

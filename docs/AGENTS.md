@@ -13,7 +13,7 @@
 - Prefer repo-relative paths and current commands such as `apps/core/...`, `packages/agent-runner/...`, and `ops/...` when describing the codebase.
 - When docs change operational commands, verify the command still exists in this repo before publishing it.
 - Treat `/v1/webhooks` as outbound callback delivery only. Signed inbound sidecar systems use external ingress records under `/v1/ingresses`; do not describe webhooks as ingress authority.
-- Job docs must preserve the settings/runtime boundary: job instances, prompts, schedules, leases, runs, notification targets, and job-scoped tool extras are Postgres runtime state, not `settings.yaml` desired state.
+- Job docs must preserve the settings/runtime boundary: job instances, prompts, schedules, leases, runs, and notification targets are Postgres runtime state, while jobs inherit target-agent tools, skills, and MCP servers instead of carrying job-scoped capability grants.
 - Admin docs must describe conversation-scoped approvers for both direct/private and group/channel conversations; do not imply Slack, Teams, Telegram, Web, or local user ids are interchangeable.
 - Memory docs must describe the current first slice truthfully: flattened `memory_items` is canonical, lexical retrieval is active, vector retrieval is inactive until item embedding indexing/querying ships, `memory_subjects` is not current active schema, and MyClaw has no `PostCompact`/`compact_summary` prompt-replay behavior.
 - Memory and continuity docs must describe digest-first fresh-run context hydration (recent persisted session digests before active durable memory items), dreaming-only automatic durable promotion/update, and embedding work limited to dreaming promotion/update.

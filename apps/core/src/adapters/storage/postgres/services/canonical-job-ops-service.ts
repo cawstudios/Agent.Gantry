@@ -8,6 +8,7 @@ import type {
   JobListFilters,
   JobRunListFilters,
   JobUpsertInput,
+  ReleasedStaleJobLease,
 } from '../../../../domain/repositories/ops-repo.js';
 import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import {
@@ -66,7 +67,6 @@ export class CanonicalJobOpsService {
         last_run: job.last_run,
         silent: job.silent,
         pause_reason: job.pause_reason,
-        capability_policy: job.capability_policy,
         execution_context: job.execution_context,
         notification_routes: job.notification_routes,
         created_at: job.created_at || now,
@@ -159,7 +159,9 @@ export class CanonicalJobOpsService {
     });
   }
 
-  async releaseStaleJobLeases(nowIso: string = currentIso()): Promise<number> {
+  async releaseStaleJobLeases(
+    nowIso: string = currentIso(),
+  ): Promise<ReleasedStaleJobLease[]> {
     return this.repository.releaseStaleLeases(nowIso);
   }
 
@@ -193,7 +195,9 @@ export class CanonicalJobOpsService {
     });
   }
 
-  async markJobRunNotified(_runId: string): Promise<void> {}
+  async markJobRunNotified(runId: string): Promise<void> {
+    await this.repository.markRunNotified(runId, currentIso());
+  }
 
   async getJobRunById(runId: string): Promise<JobRun | undefined> {
     const row = await this.repository.findRunById(runId);
@@ -276,7 +280,6 @@ export class CanonicalJobOpsService {
       targetRoutes: target.notificationRoutes,
       executionContext,
     });
-    const capabilityPolicy = parseCapabilityPolicy(target.capabilityPolicy);
     return {
       id: row.id,
       name: row.name,
@@ -304,7 +307,6 @@ export class CanonicalJobOpsService {
       lease_run_id: row.leaseRunId,
       lease_expires_at: row.leaseExpiresAt,
       pause_reason: (target.pauseReason as string | null | undefined) ?? null,
-      capability_policy: capabilityPolicy,
       execution_context: executionContext,
       notification_routes: notificationRoutes,
     };
@@ -338,11 +340,6 @@ export class CanonicalJobOpsService {
         maxConsecutiveFailures: job.max_consecutive_failures ?? 5,
         consecutiveFailures: job.consecutive_failures ?? 0,
         pauseReason: job.pause_reason ?? null,
-        capabilityPolicy: {
-          allowedTools: normalizeAllowedTools(
-            job.capability_policy?.allowed_tools,
-          ),
-        },
       }),
       silent: Boolean(job.silent),
       timeoutMs: job.timeout_ms ?? 300000,
@@ -368,7 +365,7 @@ export class CanonicalJobOpsService {
       result_summary: row.resultSummary,
       error_summary: row.errorSummary,
       retry_count: 0,
-      notified_at: null,
+      notified_at: row.notifiedAt,
     };
   }
 
@@ -387,25 +384,6 @@ export class CanonicalJobOpsService {
       created_at: row.createdAt,
     };
   }
-}
-
-function normalizeAllowedTools(input: unknown): string[] {
-  if (!Array.isArray(input)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of input) {
-    const value = typeof item === 'string' ? item.trim() : '';
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    out.push(value);
-  }
-  return out;
-}
-
-function parseCapabilityPolicy(input: unknown): Job['capability_policy'] {
-  if (!input || typeof input !== 'object') return { allowed_tools: [] };
-  const allowedTools = (input as { allowedTools?: unknown }).allowedTools;
-  return { allowed_tools: normalizeAllowedTools(allowedTools) };
 }
 
 function parseExecutionContext(

@@ -23,11 +23,20 @@ export function schedulerJobSummary(job: unknown): string {
   const staleness =
     typeof visibility.staleness === 'string' ? visibility.staleness : 'none';
   const toolAccess = toolAccessRecord(visibility.toolAccess);
+  const health =
+    typeof visibility.health === 'object' && visibility.health !== null
+      ? (visibility.health as Record<string, any>)
+      : {};
   const toolAccessLine = toolAccess.present
-    ? `Tool access: inherited ${formatTools(toolAccess.inheritedAgentTools)}, job extra ${formatTools(toolAccess.jobExtraTools)}, effective ${formatTools(toolAccess.effectiveAllowedTools)}`
+    ? `Tool access: inherited ${formatTools(toolAccess.inheritedAgentTools)}, effective ${formatTools(toolAccess.effectiveAllowedTools)}, projected ${formatTools(toolAccess.projectedRuntimeTools)}`
     : 'Tool access: missing canonical toolAccess';
+  const nextAction =
+    typeof health.nextAction === 'string' && health.nextAction.trim()
+      ? health.nextAction
+      : 'none';
   return [
     `Job: ${String(record.name ?? record.id ?? 'unknown')}`,
+    `Health: ${String(health.state ?? 'unknown')} | latest ${String(health.latestRunStatus ?? 'none')} | action ${nextAction}`,
     `Target: ${String(target.agentId ?? record.group_scope ?? 'unknown')} in ${String(target.conversationJids?.[0] ?? 'no conversation')}`,
     `Execution context: ${String(executionContext.conversationJid ?? 'unknown')} | thread ${String(executionContext.threadId ?? 'none')} | group ${String(executionContext.groupScope ?? record.group_scope ?? 'unknown')}`,
     `Notification routes: ${notificationRoutes.length}`,
@@ -62,10 +71,14 @@ export function schedulerJobsSummary(jobs: unknown[]): string {
         ? (visibility.executionContext as Record<string, any>)
         : {};
     const toolAccess = toolAccessRecord(visibility.toolAccess);
+    const health =
+      typeof visibility.health === 'object' && visibility.health !== null
+        ? (visibility.health as Record<string, any>)
+        : {};
     const toolsLabel = toolAccess.present
       ? formatTools(toolAccess.effectiveAllowedTools)
       : '(missing toolAccess)';
-    return `- ${String(record.id ?? 'unknown')} | ${String(record.name ?? '')} | ${String(record.schedule_type ?? '')} | ${String(record.status ?? '')} | ${String(executionContext.conversationJid ?? target.conversationJids?.[0] ?? '')} | tools: ${toolsLabel}`;
+    return `- ${String(record.id ?? 'unknown')} | ${String(record.name ?? '')} | ${String(health.state ?? record.status ?? '')} | ${String(executionContext.conversationJid ?? target.conversationJids?.[0] ?? '')} | tools: ${toolsLabel}`;
   });
   return [
     `Scheduler jobs (${jobs.length})`,
@@ -79,8 +92,8 @@ export function schedulerJobsSummary(jobs: unknown[]): string {
 function toolAccessRecord(value: unknown): {
   present: boolean;
   inheritedAgentTools: string[];
-  jobExtraTools: string[];
   effectiveAllowedTools: string[];
+  projectedRuntimeTools: string[];
 } {
   const present = typeof value === 'object' && value !== null;
   const record =
@@ -90,8 +103,8 @@ function toolAccessRecord(value: unknown): {
   return {
     present,
     inheritedAgentTools: stringArray(record.inheritedAgentTools),
-    jobExtraTools: stringArray(record.jobExtraTools),
     effectiveAllowedTools: stringArray(record.effectiveAllowedTools),
+    projectedRuntimeTools: stringArray(record.projectedRuntimeTools),
   };
 }
 

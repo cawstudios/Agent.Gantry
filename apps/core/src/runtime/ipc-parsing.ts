@@ -54,6 +54,8 @@ export interface ParsedBrowserIpcRequest {
   chatJid: string;
   threadId?: string;
   responseKeyId?: string;
+  jobId?: string;
+  runId?: string;
   timeoutMs?: number;
   deadlineAtMs?: number;
 }
@@ -312,6 +314,29 @@ export function parsePermissionIpcRequest(
   const toolUseID = toTrimmedString(raw.toolUseID, { maxLen: 200 });
   const agentID = toTrimmedString(raw.agentID, { maxLen: 200 });
   const agentId = binding.agentId;
+  const context = isPlainObject(raw.context) ? raw.context : undefined;
+  const payloadJobId = toTrimmedString(raw.jobId, { maxLen: 200 });
+  const contextJobId = toTrimmedString(context?.jobId, { maxLen: 200 });
+  if (payloadJobId && contextJobId && payloadJobId !== contextJobId) {
+    throw new Error('permission IPC jobId mismatch');
+  }
+  const jobId = payloadJobId ?? contextJobId;
+  const payloadRunId = toTrimmedString(raw.runId, { maxLen: 200 });
+  const contextRunId = toTrimmedString(context?.runId, { maxLen: 200 });
+  if (payloadRunId && contextRunId && payloadRunId !== contextRunId) {
+    throw new Error('permission IPC runId mismatch');
+  }
+  const runId = payloadRunId ?? contextRunId;
+  const payloadTargetJid = toTrimmedString(raw.targetJid, { maxLen: 255 });
+  const contextTargetJid = toTrimmedString(context?.chatJid, { maxLen: 255 });
+  if (
+    payloadTargetJid &&
+    contextTargetJid &&
+    payloadTargetJid !== contextTargetJid
+  ) {
+    throw new Error('permission IPC targetJid mismatch');
+  }
+  const targetJid = payloadTargetJid ?? contextTargetJid;
   const subagentType = toTrimmedString(raw.subagentType, { maxLen: 200 });
   const toolInput = sanitizeToolInput(raw.toolInput);
   const suggestions = parsePermissionApprovalUpdates(raw.suggestions);
@@ -322,6 +347,9 @@ export function parsePermissionIpcRequest(
     ...(agentId ? { agentId } : {}),
     ...(responseNonce ? { responseNonce } : {}),
     sourceAgentFolder,
+    ...(jobId ? { jobId } : {}),
+    ...(runId ? { runId } : {}),
+    ...(targetJid ? { targetJid } : {}),
     ...(binding.authThreadId ? { threadId: binding.authThreadId } : {}),
     ...(binding.responseKeyId ? { responseKeyId: binding.responseKeyId } : {}),
     toolName,
@@ -454,6 +482,8 @@ export function parseBrowserIpcRequest(
   }
   const context = isPlainObject(raw.context) ? raw.context : {};
   const rawTimeoutMs = context.timeoutMs;
+  const jobId = toTrimmedString(context.jobId, { maxLen: 128 });
+  const runId = toTrimmedString(context.runId, { maxLen: 128 });
   const timeoutMs =
     typeof rawTimeoutMs === 'number' && Number.isFinite(rawTimeoutMs)
       ? Math.max(1_000, Math.min(120_000, Math.trunc(rawTimeoutMs)))
@@ -467,6 +497,8 @@ export function parseBrowserIpcRequest(
     chatJid,
     ...(threadId ? { threadId } : {}),
     ...(responseKeyId ? { responseKeyId } : {}),
+    ...(jobId ? { jobId } : {}),
+    ...(runId ? { runId } : {}),
     ...(timeoutMs ? { timeoutMs } : {}),
     ...(Number.isFinite(deadlineAtMs) ? { deadlineAtMs } : {}),
   };

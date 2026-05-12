@@ -5,6 +5,7 @@ import {
   isBrowserActionMcpToolRule,
   isProjectedBrowserMcpToolRule,
 } from '../shared/agent-tool-references.js';
+import { isMyClawMcpWildcardRule } from '../shared/admin-mcp-tools.js';
 
 export async function resolveConfiguredAllowedTools(input: {
   repository?: ToolCatalogRepository;
@@ -37,6 +38,12 @@ export async function resolveConfiguredAllowedTools(input: {
   if (projectedBrowserRule) {
     throw new Error(
       `Configured agent tool ${projectedBrowserRule} is invalid. ${BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON}`,
+    );
+  }
+  const myclawWildcardRule = rules.find(isMyClawMcpWildcardRule);
+  if (myclawWildcardRule) {
+    throw new Error(
+      `Configured agent tool ${myclawWildcardRule} is invalid. Persistent MyClaw MCP wildcard grants are not supported; request one exact mcp__myclaw__ tool.`,
     );
   }
   return rules;

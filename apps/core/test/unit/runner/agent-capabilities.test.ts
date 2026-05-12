@@ -456,7 +456,7 @@ describe('agent capability composition', () => {
     expect(profile.alwaysAllowedTools).toContain('CustomTool');
   });
 
-  it('does not expose approved third-party MCP servers as direct SDK tools', () => {
+  it('exposes approved third-party MCP servers through direct SDK MCP config', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'tg:team',
@@ -469,15 +469,23 @@ describe('agent capability composition', () => {
         },
       },
       externalMcpAllowedTools: ['mcp__github__search_repositories'],
+      externalMcpAlwaysAllowedTools: ['mcp__github__search_repositories'],
     });
 
     expect(profile.mcpServers.myclaw).toMatchObject({
       command: 'node',
     });
-    expect(profile.mcpServers.github).toBeUndefined();
-    expect(profile.allowedTools).toEqual(DEVELOPER_ALLOWED_TOOLS);
+    expect(profile.mcpServers.github).toEqual({
+      type: 'http',
+      url: 'https://mcp.example.test/github',
+      headers: { Authorization: 'broker-safe-token' },
+    });
+    expect(profile.allowedTools).toEqual([
+      ...DEVELOPER_ALLOWED_TOOLS,
+      'mcp__github__search_repositories',
+    ]);
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
-    expect(profile.allowedTools).not.toContain(
+    expect(profile.alwaysAllowedTools).toContain(
       'mcp__github__search_repositories',
     );
   });

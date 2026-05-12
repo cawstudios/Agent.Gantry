@@ -748,6 +748,33 @@ describe('Slack channel', () => {
     expect(appRef.current.client.chat.update).not.toHaveBeenCalled();
   });
 
+  it('drops stale Slack progress updates after a generation is done', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook(['U123']) as any,
+    );
+    await channel.connect();
+
+    await channel.sendProgressUpdate('sl:C1234567890', 'Working on it...', {
+      generation: 1,
+    });
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done in 10s.', {
+      done: true,
+      generation: 1,
+    });
+
+    appRef.current.client.chat.postMessage.mockClear();
+    appRef.current.client.chat.update.mockClear();
+
+    await channel.sendProgressUpdate('sl:C1234567890', 'Still working...', {
+      generation: 1,
+    });
+
+    expect(appRef.current.client.chat.postMessage).not.toHaveBeenCalled();
+    expect(appRef.current.client.chat.update).not.toHaveBeenCalled();
+  });
+
   it('starts a fresh Slack progress handle when generation changes under the same chat key', async () => {
     const channel = new SlackChannel(
       'xoxb-token',

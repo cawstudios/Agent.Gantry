@@ -52,6 +52,8 @@ Runtime event types remain explicit strings. Initial active families are:
 - `job.run.started`
 - `job.started`
 - `job.streaming`
+- `job.tool_denied`
+- `job.tool_activity`
 - `job.completed`
 - `job.failed`
 - `job.run.completed`

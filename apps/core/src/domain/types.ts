@@ -125,9 +125,6 @@ export interface Job {
   lease_run_id: string | null;
   lease_expires_at: string | null;
   pause_reason: string | null;
-  capability_policy?: {
-    allowed_tools: string[];
-  };
   execution_context?: JobExecutionContext;
   notification_routes?: JobNotificationRoute[];
 }
@@ -169,6 +166,8 @@ export interface PermissionApprovalRequest {
   responseNonce?: string;
   sourceAgentFolder: string;
   runHandle?: string;
+  jobId?: string;
+  runId?: string;
   targetJid?: string;
   approvalContextJid?: string;
   threadId?: string;
@@ -191,7 +190,6 @@ export interface PermissionApprovalRequest {
 
 export type PermissionApprovalDecisionMode =
   | 'allow_once'
-  | 'allow_job_policy'
   | 'allow_persistent_rule'
   | 'cancel';
 

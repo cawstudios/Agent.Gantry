@@ -72,6 +72,50 @@ describe('ToolExecutionPolicyService', () => {
     });
   });
 
+  it('recovers projected browser denials through persistent Browser permission', () => {
+    const request = classifier.classify({
+      origin: 'mcp',
+      toolName: 'mcp__myclaw__browser_navigate',
+      toolInput: { url: 'https://example.com' },
+      executionMode: 'autonomous',
+      runContext: { jobId: 'job-1' },
+    });
+
+    expect(policy.evaluate({ request, schedulerAllowedToolRules: [] })).toEqual(
+      expect.objectContaining({
+        status: 'deny',
+        reason:
+          'Tool not on autonomous job allowlist: mcp__myclaw__browser_navigate.',
+        recoveryAction: expect.stringContaining('"toolName": "Browser"'),
+      }),
+    );
+    expect(
+      policy.evaluate({ request, schedulerAllowedToolRules: [] })
+        .recoveryAction,
+    ).not.toContain('scheduler_grant_tool');
+  });
+
+  it('recovers admin tool denials through request_permission', () => {
+    const request = classifier.classify({
+      origin: 'mcp',
+      toolName: 'mcp__myclaw__service_restart',
+      toolInput: {},
+      executionMode: 'autonomous',
+      runContext: { jobId: 'job-1' },
+    });
+
+    expect(policy.evaluate({ request, schedulerAllowedToolRules: [] })).toEqual(
+      expect.objectContaining({
+        status: 'deny',
+        recoveryAction: expect.stringContaining('request_permission'),
+      }),
+    );
+    expect(
+      policy.evaluate({ request, schedulerAllowedToolRules: [] })
+        .recoveryAction,
+    ).toContain('"toolName": "mcp__myclaw__service_restart"');
+  });
+
   it('denies protected capability file targets through canonical policy', () => {
     const request = classifier.classify({
       origin: 'sdk',
@@ -317,7 +361,7 @@ describe('ToolExecutionPolicyService', () => {
     });
   });
 
-  it('fails autonomous jobs fast with a scoped Bash scheduler grant command', () => {
+  it('fails autonomous jobs fast and points to persistent agent tool approval', () => {
     const request = classifier.classify({
       origin: 'sdk',
       toolName: 'Bash',
@@ -332,13 +376,13 @@ describe('ToolExecutionPolicyService', () => {
         status: 'deny',
         reason: 'Tool not on autonomous job allowlist: Bash.',
         recoveryAction:
-          'scheduler_grant_tool { "job_id": "job-1", "rule": "Bash(npm test)" }',
+          'request_permission { "permissionKind": "tool", "toolName": "Bash", "temporaryOnly": false, "reason": "This scheduled job needs Bash access." }',
       }),
     );
-    expect(result.recoveryAction).not.toContain('"rule": "Bash" }');
+    expect(result.recoveryAction).not.toContain('scheduler_grant_tool');
   });
 
-  it('suggests Bash scheduler grant rules that match command input', () => {
+  it('uses the same agent permission flow for mutating scheduled Bash use', () => {
     const request = classifier.classify({
       origin: 'sdk',
       toolName: 'Bash',
@@ -353,12 +397,12 @@ describe('ToolExecutionPolicyService', () => {
       expect.objectContaining({
         status: 'deny',
         recoveryAction:
-          'scheduler_grant_tool { "job_id": "job-2", "rule": "Bash(echo \\"{}\\" > /tmp/archive.tgz)" }',
+          'request_permission { "permissionKind": "tool", "toolName": "Bash", "temporaryOnly": false, "reason": "This scheduled job needs Bash access." }',
       }),
     );
   });
 
-  it('falls back to broad Bash grant only with manual review wording', () => {
+  it('does not suggest job-scoped broad Bash grants', () => {
     const request = classifier.classify({
       origin: 'sdk',
       toolName: 'Bash',
@@ -373,7 +417,7 @@ describe('ToolExecutionPolicyService', () => {
       expect.objectContaining({
         status: 'deny',
         recoveryAction:
-          'scheduler_grant_tool { "job_id": "job-3", "rule": "Bash" } Manual review required: command could not be safely represented as Bash(...).',
+          'request_permission { "permissionKind": "tool", "toolName": "Bash", "temporaryOnly": false, "reason": "This scheduled job needs Bash access." }',
       }),
     );
   });

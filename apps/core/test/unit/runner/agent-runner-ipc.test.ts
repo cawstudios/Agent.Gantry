@@ -317,6 +317,10 @@ export async function* query({ prompt, options }) {
         : {}),
       decidedBy: 'runner-test-admin',
       reason: process.env.TEST_PERMISSION_DECISION,
+      ...(process.env.TEST_PERMISSION_RETURN_SUGGESTIONS === '1' &&
+      Array.isArray(request.suggestions)
+        ? { updatedPermissions: request.suggestions }
+        : {}),
       ...(process.env.TEST_PERMISSION_CLASSIFICATION
         ? {
             decisionClassification:
@@ -390,6 +394,7 @@ export async function* query({ prompt, options }) {
       appendRecord(call);
       if (process.env.TEST_EXIT_AFTER_QUERY === '1') {
         setTimeout(() => {
+          fs.mkdirSync(process.env.MYCLAW_IPC_INPUT_DIR, { recursive: true });
           fs.writeFileSync(path.join(process.env.MYCLAW_IPC_INPUT_DIR, '_close'), '');
         }, 20);
       }
@@ -421,6 +426,7 @@ export async function* query({ prompt, options }) {
 
   if (process.env.TEST_EXIT_AFTER_QUERY === '1') {
     setTimeout(() => {
+      fs.mkdirSync(process.env.MYCLAW_IPC_INPUT_DIR, { recursive: true });
       fs.writeFileSync(path.join(process.env.MYCLAW_IPC_INPUT_DIR, '_close'), '');
     }, 20);
   }
@@ -1233,6 +1239,32 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
+    'scheduled jobs include a concise final report instruction in the prompt',
+    async () => {
+      const fixture = createRunnerFixture();
+
+      const result = await runRunner(
+        fixture,
+        baseInput({
+          isScheduledJob: true,
+          jobId: 'job-1',
+          prompt: 'Find new leads.',
+        }),
+      );
+
+      expect(result.exitCode).toBe(0);
+      const call = readRecord(fixture.recordPath).calls[0];
+      const prompt =
+        (call?.stringPrompt as string | undefined) ??
+        JSON.stringify(call?.streamMessages ?? []);
+      expect(prompt).toContain('Final Job Report');
+      expect(prompt).toContain('found, added, skipped, and errors');
+      expect(prompt).toContain('Find new leads.');
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
     'scheduled jobs allow scoped Bash rules without writing permission IPC',
     async () => {
       const fixture = createRunnerFixture();
@@ -1265,7 +1297,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'scheduled jobs deny nonmatching scoped Bash rules without writing permission IPC',
+    'scheduled jobs request permission for nonmatching scoped Bash rules and resume after approval',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1277,34 +1309,38 @@ describe('agent-runner IPC lifecycle', () => {
           allowedTools: ['Bash(dedup-append-lead.py *)'],
         }),
         {
-          TEST_TOOL_USE_ONLY: 'Bash',
+          TEST_PERMISSION_DECISION: 'approve',
+          TEST_PERMISSION_TOOL_NAME: 'Bash',
           TEST_EXIT_AFTER_QUERY: '1',
         },
       );
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(
+        '"interactionBoundary":"user_interaction"',
+      );
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.permissionDecision).toEqual(
         expect.objectContaining({
-          behavior: 'deny',
-          interrupt: true,
+          behavior: 'allow',
         }),
       );
-      expect(String(call?.permissionDecision?.message)).toContain(
-        'Tool not on autonomous job allowlist: Bash',
+      expect(call?.permissionRequest).toEqual(
+        expect.objectContaining({
+          targetJid: 'tg:team',
+          sourceAgentFolder: 'team',
+          toolName: 'Bash',
+        }),
       );
-      expect(String(call?.permissionDecision?.message)).toContain(
-        'scheduler_grant_tool { "job_id": "job-1", "rule": "Bash(npm test)" }',
+      expect(call?.permissionRequest?.context).toEqual(
+        expect.objectContaining({ chatJid: 'tg:team' }),
       );
-      expect(
-        fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
-    'scheduled jobs deny missing tools without writing permission IPC',
+    'scheduled jobs apply persistent permission approvals to the active run',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1316,37 +1352,45 @@ describe('agent-runner IPC lifecycle', () => {
           allowedTools: ['Read'],
         }),
         {
-          TEST_TOOL_USE_ONLY: 'Bash',
+          TEST_PERMISSION_DECISION: 'approve',
+          TEST_PERMISSION_MODE: 'allow_persistent_rule',
+          TEST_PERMISSION_CLASSIFICATION: 'user_permanent',
+          TEST_PERMISSION_RETURN_SUGGESTIONS: '1',
+          TEST_PERMISSION_TOOL_NAME: 'Bash',
           TEST_EXIT_AFTER_QUERY: '1',
         },
       );
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(0);
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.permissionDecision).toEqual(
         expect.objectContaining({
-          behavior: 'deny',
-          interrupt: true,
+          behavior: 'allow',
+          decisionClassification: 'user_permanent',
         }),
       );
-      expect(String(call?.permissionDecision?.message)).toContain(
-        'Tool not on autonomous job allowlist: Bash',
-      );
-      expect(String(call?.permissionDecision?.message)).toContain(
-        'scheduler_grant_tool { "job_id": "job-1", "rule": "Bash(npm test)" }',
-      );
-      expect(
-        fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
-      expect(result.stdout).not.toContain(
-        '"interactionBoundary":"user_interaction"',
+      expect(call?.permissionRequest?.suggestions).toEqual([
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          destination: 'session',
+          rules: [
+            {
+              toolName: 'Bash',
+              ruleContent: call.permissionRequest.blockedPath,
+            },
+          ],
+        },
+      ]);
+      expect(call?.permissionDecision?.updatedPermissions).toEqual(
+        call?.permissionRequest?.suggestions,
       );
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
-    'scheduled jobs do not inherit default interactive tools',
+    'scheduled jobs do not inherit default interactive tools before approval',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1358,28 +1402,28 @@ describe('agent-runner IPC lifecycle', () => {
           allowedTools: [],
         }),
         {
-          TEST_TOOL_USE_ONLY: 'WebSearch',
+          TEST_PERMISSION_DECISION: 'deny',
+          TEST_PERMISSION_TOOL_NAME: 'WebSearch',
+          TEST_PERMISSION_CLASSIFICATION: 'user_reject',
           TEST_EXIT_AFTER_QUERY: '1',
         },
       );
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(0);
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.permissionDecision).toEqual(
         expect.objectContaining({
           behavior: 'deny',
           interrupt: true,
+          decisionClassification: 'user_reject',
         }),
       );
       expect(String(call?.permissionDecision?.message)).toContain(
-        'Tool not on autonomous job allowlist: WebSearch',
+        'Permission denied: deny',
       );
       expect(String(call?.permissionDecision?.message)).toContain(
-        'scheduler_grant_tool { "job_id": "job-1", "rule": "WebSearch" }',
+        'request_permission { "permissionKind": "tool", "toolName": "WebSearch", "temporaryOnly": false, "reason": "This scheduled job needs WebSearch access." }',
       );
-      expect(
-        fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );

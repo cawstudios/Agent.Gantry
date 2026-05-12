@@ -17,6 +17,11 @@ interface JobRecord {
   nextRun: string | null;
   lastRun: string | null;
   modelAlias: string | null;
+  health?: {
+    state?: string;
+    nextAction?: string | null;
+    latestRunStatus?: string | null;
+  };
   prompt?: string;
   promptPreview?: string;
   schedule?: unknown;
@@ -92,7 +97,7 @@ function formatJobTable(jobs: JobRecord[]): string {
   const rows = jobs.map((job) => [
     job.jobId,
     job.kind,
-    job.status,
+    job.health?.state ?? job.status,
     job.groupScope,
     job.threadId ?? '',
     job.nextRun ?? '',
@@ -128,6 +133,7 @@ function formatJobDetail(job: JobRecord): string {
     `Name: ${job.name}`,
     `Kind: ${job.kind}`,
     `Status: ${job.status}`,
+    `Health: ${job.health?.state ?? job.status}`,
     `Group: ${job.groupScope}`,
     `Thread: ${job.threadId ?? '(none)'}`,
     `Next Run: ${job.nextRun ?? '(none)'}`,
@@ -138,6 +144,9 @@ function formatJobDetail(job: JobRecord): string {
   ];
   if (job.promptPreview || job.prompt) {
     lines.push('', `Prompt: ${job.promptPreview ?? job.prompt}`);
+  }
+  if (job.health?.nextAction) {
+    lines.push('', `Next Action: ${job.health.nextAction}`);
   }
   if (job.recentRunErrors?.length) {
     lines.push(

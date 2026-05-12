@@ -55,6 +55,10 @@ export const agentRunsPostgres = pgTable(
     endedAt: timestamp('ended_at', { withTimezone: true, mode: 'string' }),
     resultSummary: text('result_summary'),
     errorSummary: text('error_summary'),
+    notifiedAt: timestamp('notified_at', {
+      withTimezone: true,
+      mode: 'string',
+    }),
   },
   (table) => ({
     jobStartedIdx: index('idx_agent_runs_job_started').on(

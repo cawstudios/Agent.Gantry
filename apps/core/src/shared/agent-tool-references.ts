@@ -69,6 +69,14 @@ export function isBrowserActionMcpToolRule(value: string): boolean {
   );
 }
 
+export function isHostPrivateBrowserMcpServerName(value: string): boolean {
+  const serverName = value.trim().toLowerCase();
+  if (!serverName) return false;
+  return RAW_BROWSER_BACKEND_MCP_TOOL_PREFIXES.some(
+    (prefix) => prefix.toLowerCase() === `mcp__${serverName}__`,
+  );
+}
+
 export function isProjectedBrowserMcpToolRule(value: string): boolean {
   const rule = value.trim();
   const scoped = parseReadableScopedToolRule(rule);

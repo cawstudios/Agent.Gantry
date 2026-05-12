@@ -143,18 +143,39 @@ describe('autonomous tool rule matcher', () => {
     });
   });
 
-  it('keeps MCP wildcard behavior unchanged', () => {
+  it('keeps non-browser MCP wildcard behavior available', () => {
     expect(
       evaluateAutonomousToolUse({
-        rules: ['mcp__agent_browser__*'],
-        toolName: 'mcp__agent_browser__open',
+        rules: ['mcp__github__*'],
+        toolName: 'mcp__github__search',
         toolInput: {},
       }),
     ).toMatchObject({ allowed: true });
     expect(
       evaluateAutonomousToolUse({
+        rules: ['mcp__github__*'],
+        toolName: 'mcp__linear__search',
+        toolInput: {},
+      }),
+    ).toMatchObject({ allowed: false });
+  });
+
+  it('rejects browser and MyClaw wildcard rules at the shared matcher boundary', () => {
+    for (const rule of [
+      'mcp__agent_browser__*',
+      'mcp__agent_browser__navigate',
+      'mcp__playwright__browser_click',
+      'mcp__puppeteer__screenshot',
+      'mcp__myclaw__browser_click',
+      'mcp__myclaw__*',
+    ]) {
+      expect(validateAutonomousToolRule(rule).ok).toBe(false);
+    }
+
+    expect(
+      evaluateAutonomousToolUse({
         rules: ['mcp__agent_browser__*'],
-        toolName: 'mcp__github__search',
+        toolName: 'mcp__agent_browser__open',
         toolInput: {},
       }),
     ).toMatchObject({ allowed: false });

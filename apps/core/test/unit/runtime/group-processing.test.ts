@@ -1234,6 +1234,50 @@ describe('createGroupProcessor', () => {
       ).toBe(true);
     });
 
+    it('resets elapsed progress when a continuation message starts a new visible turn', async () => {
+      let continuationHandler: (() => void) | undefined;
+      const run = deferred<AgentOutput>();
+      const group = makeGroup({ requiresTrigger: false });
+      const messages = [makeMessage()];
+      const channel = makeChannel({
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+      });
+      const { deps } = setupHappyPath({ group, messages });
+      deps.channelRuntime = channel;
+      deps.queue = {
+        ...deps.queue,
+        registerContinuationHandler: vi.fn((_queueJid, handler) => {
+          continuationHandler = handler;
+          return () => {
+            if (continuationHandler === handler)
+              continuationHandler = undefined;
+          };
+        }),
+      };
+
+      mockSpawnAgent.mockImplementation(async () => run.promise);
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      const processing = processGroupMessages('group1@g.us');
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+
+      (channel.sendProgressUpdate as ReturnType<typeof vi.fn>).mockClear();
+      continuationHandler?.();
+      await vi.advanceTimersByTimeAsync(65_000);
+
+      const progressTexts = (
+        channel.sendProgressUpdate as ReturnType<typeof vi.fn>
+      ).mock.calls.map((call) => String(call[1]));
+      expect(progressTexts).toContain('Working on it...');
+      expect(
+        progressTexts.some((text) => text.startsWith('Still working (1m ')),
+      ).toBe(true);
+      expect(progressTexts.some((text) => text.includes('20m'))).toBe(false);
+
+      run.resolve({ status: 'success', result: null });
+      await processing;
+    });
+
     it('does not post elapsed progress on the first heartbeat tick', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const messages = [makeMessage()];

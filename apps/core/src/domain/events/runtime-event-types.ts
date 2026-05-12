@@ -10,6 +10,7 @@ export const RUNTIME_EVENT_TYPES = {
   JOB_STARTED: 'job.started',
   JOB_STREAMING: 'job.streaming',
   JOB_TOOL_DENIED: 'job.tool_denied',
+  JOB_TOOL_ACTIVITY: 'job.tool_activity',
   JOB_COMPLETED: 'job.completed',
   JOB_FAILED: 'job.failed',
   JOB_RUN_COMPLETED: 'job.run.completed',

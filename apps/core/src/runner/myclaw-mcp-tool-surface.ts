@@ -26,7 +26,6 @@ export const OPTIONAL_MYCLAW_MCP_TOOL_NAMES = [
   'scheduler_list_models',
   'scheduler_upsert_job',
   'scheduler_get_job',
-  'scheduler_grant_tool',
   'scheduler_list_jobs',
   'scheduler_list_notification_targets',
   'scheduler_update_job',

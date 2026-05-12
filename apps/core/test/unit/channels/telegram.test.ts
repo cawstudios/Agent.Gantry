@@ -2065,6 +2065,30 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.editMessageText).not.toHaveBeenCalled();
     });
 
+    it('drops stale progress updates after a generation is done', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendProgressUpdate('tg:100200300', 'Working on it...', {
+        generation: 1,
+      });
+      await channel.sendProgressUpdate('tg:100200300', 'Done in 10s.', {
+        done: true,
+        generation: 1,
+      });
+
+      currentBot().api.sendMessage.mockClear();
+      currentBot().api.editMessageText.mockClear();
+
+      await channel.sendProgressUpdate('tg:100200300', 'Still working...', {
+        generation: 1,
+      });
+
+      expect(currentBot().api.sendMessage).not.toHaveBeenCalled();
+      expect(currentBot().api.editMessageText).not.toHaveBeenCalled();
+    });
+
     it('refreshes a stale unchanged initial progress handle with a new message', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);

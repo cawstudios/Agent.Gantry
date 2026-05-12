@@ -330,6 +330,13 @@
       "when": 1777151400000,
       "tag": "0046_session_scope_indexes_and_digest_scope_filters",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1777155000000,
+      "tag": "0047_agent_runs_notified_at",
+      "breakpoints": true
     }
   ]
 }

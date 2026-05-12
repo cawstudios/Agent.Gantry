@@ -278,12 +278,12 @@ maybeDescribe('jobs, runs, memory, and scheduler flow', () => {
       expect.arrayContaining([
         expect.objectContaining({
           jid: 'tg:scheduler',
-          text: expect.stringContaining('Scheduler started: Job'),
+          text: expect.stringContaining('Running: Job'),
           threadId: job.thread_id,
         }),
         expect.objectContaining({
           jid: 'tg:scheduler',
-          text: expect.stringContaining('Scheduler completed: Job'),
+          text: expect.stringContaining('Completed: Job'),
           threadId: job.thread_id,
         }),
       ]),

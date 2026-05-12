@@ -146,8 +146,9 @@ describe('scheduler MCP tools', () => {
       schemas.get('scheduler_list_jobs')?.conversation_jid,
     ).toBeUndefined();
     expect(schemas.get('scheduler_run_now')?.job_id).toBeDefined();
-    expect(schemas.get('scheduler_grant_tool')?.job_id).toBeDefined();
-    expect(schemas.get('scheduler_grant_tool')?.rule).toBeDefined();
+    expect(schemas.get('scheduler_grant_tool')).toBeUndefined();
+    expect(schemas.get('scheduler_upsert_job')?.allowed_tools).toBeUndefined();
+    expect(schemas.get('scheduler_update_job')?.allowed_tools).toBeUndefined();
     expect(schemas.get('scheduler_list_notification_targets')).toBeDefined();
   });
 
@@ -202,171 +203,6 @@ describe('scheduler MCP tools', () => {
     expect(waitForTaskResponse).toHaveBeenCalledWith(
       expect.any(String),
       310_000,
-    );
-  });
-
-  it('appends one scheduler tool grant to the existing job policy', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
-    tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
-    const waitForTaskResponse = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        data: {
-          job: {
-            id: 'job-1',
-            visibility: {
-              toolAccess: {
-                jobExtraTools: ['Read'],
-              },
-            },
-          },
-        },
-      })
-      .mockResolvedValueOnce({ ok: true });
-    const writeIpcFile = vi.fn();
-    vi.doMock('../../../../src/runner/mcp/ipc.js', () => ({
-      waitForTaskResponse,
-      writeIpcFile,
-    }));
-    const { registerSchedulerTools } =
-      await import('../../../../src/runner/mcp/tools/scheduler.js');
-    const tools = new Map<
-      string,
-      (
-        args: Record<string, unknown>,
-      ) => Promise<{ content: { text: string }[]; isError?: boolean }>
-    >();
-    const server = {
-      tool: (
-        name: string,
-        _description: string,
-        _schema: unknown,
-        handler: never,
-      ) => {
-        tools.set(name, handler);
-      },
-    };
-
-    registerSchedulerTools(server as never);
-    const response = await tools.get('scheduler_grant_tool')!({
-      job_id: 'job-1',
-      rule: 'Bash(npm test)',
-    });
-
-    expect(response.isError).not.toBe(true);
-    expect(writeIpcFile).toHaveBeenNthCalledWith(
-      2,
-      expect.any(String),
-      expect.objectContaining({
-        type: 'scheduler_update_job',
-        jobId: 'job-1',
-        allowedTools: ['Read', 'Bash(npm test)'],
-      }),
-    );
-  });
-
-  it('rejects malformed scheduler tool grants before host mutation', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
-    tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
-    const writeIpcFile = vi.fn();
-    vi.doMock('../../../../src/runner/mcp/ipc.js', () => ({
-      waitForTaskResponse: vi.fn(),
-      writeIpcFile,
-    }));
-    const { registerSchedulerTools } =
-      await import('../../../../src/runner/mcp/tools/scheduler.js');
-    const tools = new Map<
-      string,
-      (
-        args: Record<string, unknown>,
-      ) => Promise<{ content: { text: string }[]; isError?: boolean }>
-    >();
-    const server = {
-      tool: (
-        name: string,
-        _description: string,
-        _schema: unknown,
-        handler: never,
-      ) => {
-        tools.set(name, handler);
-      },
-    };
-
-    registerSchedulerTools(server as never);
-    const response = await tools.get('scheduler_grant_tool')!({
-      job_id: 'job-1',
-      rule: '*',
-    });
-
-    expect(response.isError).toBe(true);
-    expect(response.content[0].text).toContain(
-      'Global wildcard tool rule is not allowed',
-    );
-    expect(writeIpcFile).not.toHaveBeenCalled();
-  });
-
-  it('falls back to targetJson capability policy for scheduler tool grants', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
-    tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
-    const waitForTaskResponse = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        data: {
-          job: {
-            id: 'job-1',
-            targetJson: {
-              capabilityPolicy: {
-                allowedTools: ['Read'],
-              },
-            },
-          },
-        },
-      })
-      .mockResolvedValueOnce({ ok: true });
-    const writeIpcFile = vi.fn();
-    vi.doMock('../../../../src/runner/mcp/ipc.js', () => ({
-      waitForTaskResponse,
-      writeIpcFile,
-    }));
-    const { registerSchedulerTools } =
-      await import('../../../../src/runner/mcp/tools/scheduler.js');
-    const tools = new Map<
-      string,
-      (
-        args: Record<string, unknown>,
-      ) => Promise<{ content: { text: string }[]; isError?: boolean }>
-    >();
-    const server = {
-      tool: (
-        name: string,
-        _description: string,
-        _schema: unknown,
-        handler: never,
-      ) => {
-        tools.set(name, handler);
-      },
-    };
-
-    registerSchedulerTools(server as never);
-    const response = await tools.get('scheduler_grant_tool')!({
-      job_id: 'job-1',
-      rule: 'Bash(npm test)',
-    });
-
-    expect(response.isError).not.toBe(true);
-    expect(writeIpcFile).toHaveBeenNthCalledWith(
-      2,
-      expect.any(String),
-      expect.objectContaining({
-        type: 'scheduler_update_job',
-        jobId: 'job-1',
-        allowedTools: ['Read', 'Bash(npm test)'],
-      }),
     );
   });
 
@@ -489,13 +325,43 @@ describe('scheduler MCP tools', () => {
           target: { agentId: 'agent:main', conversationJids: ['tg:team'] },
           toolAccess: {
             inheritedAgentTools: [],
-            jobExtraTools: [],
             effectiveAllowedTools: [],
+            projectedRuntimeTools: [],
+          },
+          health: {
+            state: 'missed_window',
+            latestRunStatus: null,
+            nextAction: 'Run the job now or update its schedule.',
           },
           recentRunErrors: [],
         },
       }),
     ).toContain('Staleness: missed_window');
+    expect(
+      schedulerJobSummary({
+        id: 'job-1',
+        name: 'Follow up',
+        schedule_type: 'once',
+        status: 'active',
+        visibility: {
+          staleness: 'missed_window',
+          target: { agentId: 'agent:main', conversationJids: ['tg:team'] },
+          toolAccess: {
+            inheritedAgentTools: ['Browser'],
+            effectiveAllowedTools: ['Browser'],
+            projectedRuntimeTools: ['mcp__myclaw__browser_navigate'],
+          },
+          health: {
+            state: 'needs_permission',
+            latestRunStatus: 'dead_lettered',
+            nextAction: 'request_permission { "toolName": "Browser" }',
+          },
+          recentRunErrors: [],
+        },
+      }),
+    ).toContain(
+      'Health: needs_permission | latest dead_lettered | action request_permission',
+    );
   });
 
   it('does not hide missing canonical toolAccess in scheduler summaries', async () => {

@@ -8,6 +8,7 @@ import {
 } from '../../config/index.js';
 import { logger } from '../logging/logger.js';
 import type { Job, JobExecutionMode } from '../../domain/types.js';
+import type { ReleasedStaleJobLease } from '../../domain/repositories/ops-repo.js';
 import { getRuntimeControlRepository } from '../../adapters/storage/postgres/runtime-store.js';
 import { acquireRunSlot } from '../../jobs/concurrency.js';
 import { validateScheduleConfig } from '../../jobs/schedule.js';
@@ -26,6 +27,7 @@ const SCHEDULER_QUEUE_SERIALIZED = 'myclaw.jobs.serialized';
 const SCHEDULER_QUEUE_DEAD_LETTER = 'myclaw.jobs.dead_letter';
 const PGBOSS_KEY_PREFIX = 'myclaw';
 const STALE_ONCE_REENQUEUE_THROTTLE_MS = 60_000;
+export const SCHEDULER_MAINTENANCE_SYNC_INTERVAL_MS = 60_000;
 
 interface PgBossSchedulerCallbacks {
   registerSystemJobs: (deps: SchedulerDependencies) => Promise<void>;
@@ -37,6 +39,10 @@ interface PgBossSchedulerCallbacks {
     dispatch?: SchedulerDispatchPayload,
   ) => Promise<void>;
   sweepCompletedOneTimeJobs: (deps: SchedulerDependencies) => Promise<boolean>;
+  handleReleasedStaleLeases?: (
+    releases: readonly ReleasedStaleJobLease[],
+    deps: SchedulerDependencies,
+  ) => Promise<void>;
 }
 
 function jobQueueName(job: Pick<Job, 'execution_mode'>): string {
@@ -97,6 +103,7 @@ export class PgBossSchedulerEngine {
   private fullSyncRequested = false;
   private readonly pendingJobSyncs = new Set<string>();
   private readonly scheduleSignatures = new Map<string, string>();
+  private maintenanceTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly deps: SchedulerDependencies,
@@ -142,12 +149,14 @@ export class PgBossSchedulerEngine {
     );
     await this.syncAllJobs();
     this.ready = true;
+    this.startMaintenanceTimer();
   }
 
   async stop(): Promise<void> {
     const boss = this.boss;
     this.ready = false;
     this.boss = null;
+    this.stopMaintenanceTimer();
     await boss?.stop({ graceful: true, close: true, timeout: 10_000 });
   }
 
@@ -173,6 +182,24 @@ export class PgBossSchedulerEngine {
         if (this.fullSyncRequested || this.pendingJobSyncs.size > 0)
           this.startDrain();
       });
+  }
+
+  private startMaintenanceTimer(): void {
+    if (this.maintenanceTimer) return;
+    const timer = setInterval(
+      () => this.requestSync(),
+      SCHEDULER_MAINTENANCE_SYNC_INTERVAL_MS,
+    );
+    (
+      timer as ReturnType<typeof setInterval> & { unref?: () => void }
+    ).unref?.();
+    this.maintenanceTimer = timer;
+  }
+
+  private stopMaintenanceTimer(): void {
+    if (!this.maintenanceTimer) return;
+    clearInterval(this.maintenanceTimer);
+    this.maintenanceTimer = null;
   }
 
   async enqueueTrigger(
@@ -243,8 +270,12 @@ export class PgBossSchedulerEngine {
     const boss = this.requireBoss();
     await this.callbacks.registerSystemJobs(this.deps);
     const released = await this.deps.opsRepository.releaseStaleJobLeases();
-    if (released > 0) {
-      logger.warn({ count: released }, 'Released stale scheduler leases');
+    if (released.length > 0) {
+      logger.warn(
+        { count: released.length },
+        'Released stale scheduler leases',
+      );
+      await this.callbacks.handleReleasedStaleLeases?.(released, this.deps);
       this.scheduleSignatures.clear();
       this.deps.onSchedulerChanged?.();
     }

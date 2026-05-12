@@ -15,6 +15,7 @@ import type {
   JobListFilters,
   JobRunListFilters,
   JobUpsertInput,
+  ReleasedStaleJobLease,
   RuntimeAgentSessionRepository,
   RuntimeChatMetadataRepository,
   RuntimeConversationRouteRepository,
@@ -216,7 +217,9 @@ export class PostgresRuntimeRepositoryBundle
     return this.jobs.claimDueJobRunStart(input);
   }
 
-  async releaseStaleJobLeases(nowIso?: string): Promise<number> {
+  async releaseStaleJobLeases(
+    nowIso?: string,
+  ): Promise<ReleasedStaleJobLease[]> {
     return this.jobs.releaseStaleJobLeases(nowIso);
   }
 
@@ -297,6 +300,7 @@ export class PostgresRuntimeRepositoryBundle
     threadId?: string | null;
     conversationKind?: 'dm' | 'channel';
     memoryUserId?: string;
+    jobId?: string;
     query?: string;
     hydrateMemory?: boolean;
   }): Promise<{
@@ -315,6 +319,7 @@ export class PostgresRuntimeRepositoryBundle
       threadId: input.threadId,
       conversationKind: input.conversationKind,
       memoryUserId: input.memoryUserId,
+      jobId: input.jobId,
       query: input.query,
       hydrateMemory: input.hydrateMemory,
     });

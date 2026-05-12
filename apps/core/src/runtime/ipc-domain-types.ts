@@ -64,6 +64,17 @@ export interface IpcDeps {
     fileAccessRoot: string;
     timeoutMs?: number;
   }) => Promise<unknown>;
+  publishBrowserJobActivity?: (input: {
+    jobId: string;
+    runId: string;
+    tool: BrowserIpcAction;
+    ok: boolean;
+    elapsedMs: number;
+    normalizedSite?: string | null;
+    policyMode?: string | null;
+    warning?: string | null;
+    error?: string | null;
+  }) => Promise<void> | void;
   closeBrowserToolBackends?: (profileName?: string) => Promise<void>;
   getBrowserUsageSettings?: () =>
     | BrowserUsageSettings

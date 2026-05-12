@@ -1,8 +1,13 @@
 import {
+  BROWSER_ACTION_MCP_RULE_REJECTION_REASON,
+  BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON,
+  isBrowserActionMcpToolRule,
   isCanonicalBrowserCapabilityRule,
   isKnownProjectedBrowserMcpToolName,
+  isProjectedBrowserMcpToolRule,
   parseReadableScopedToolRule,
 } from './agent-tool-references.js';
+import { isMyClawMcpWildcardRule } from './admin-mcp-tools.js';
 
 const MCP_WILDCARD_RE = /^mcp__([A-Za-z0-9_-]+)__\*$/;
 const MCP_EXACT_RE = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/;
@@ -80,6 +85,19 @@ export function validateAutonomousToolRule(
   if (!value) return { ok: false, reason: 'Tool rule cannot be empty.' };
   if (value === '*') {
     return { ok: false, reason: 'Global wildcard tool rule is not allowed.' };
+  }
+  if (isBrowserActionMcpToolRule(value)) {
+    return { ok: false, reason: BROWSER_ACTION_MCP_RULE_REJECTION_REASON };
+  }
+  if (isProjectedBrowserMcpToolRule(value)) {
+    return { ok: false, reason: BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON };
+  }
+  if (isMyClawMcpWildcardRule(value)) {
+    return {
+      ok: false,
+      reason:
+        'Persistent MyClaw MCP wildcard grants are not supported; request one exact mcp__myclaw__ tool.',
+    };
   }
   const parsed = parseToolRule(value);
   if (!parsed) {

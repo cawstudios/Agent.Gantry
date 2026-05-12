@@ -9,9 +9,9 @@ on the child runner's provider credential environment. In particular, provider
 proxy variables affected Node loopback HTTP calls when `NODE_USE_ENV_PROXY`
 was enabled.
 
-OpenClaw's browser implementation keeps lifecycle/status ownership in a browser
-module and layers action routes on top. MyClaw should adopt that responsibility
-boundary without importing OpenClaw's browser action stack.
+The reference browser implementation keeps lifecycle/status ownership in a
+browser module and layers action routes on top. MyClaw should adopt that
+responsibility boundary without importing a separate browser action stack.
 
 ## Decision
 

@@ -170,7 +170,10 @@ Capability changes are never direct edits. Agents must not run dependency
 install commands, edit `.claude/skills`, edit `.mcp.json`, edit `settings.yaml`,
 edit Claude permission settings, or mutate generated capability config. Every
 capability change goes through request, review, approval or denial, durable
-audit, a new config version, and next-run activation.
+audit, and a new config version. Tool permission approval can also resume the
+blocked active tool call: `Allow once` is current-run only, while `Always allow`
+updates the target agent capability binding, mirrors `settings.yaml`, and
+applies to future runs too.
 
 Use these MyClaw tools for capability work:
 
@@ -198,8 +201,8 @@ Permission selection:
   option descriptions so Slack, Telegram, Teams, and Web/API can render native
   controls.
 - Use `request_permission` before enabling provider-neutral tools or
-  provider/channel capabilities such as `Bash`, `Write`, `Edit`, browser action
-  tools, scheduler tools, memory tools, service tools, Slack file reads,
+  provider/channel capabilities such as `Bash`, `Write`, `Edit`, the canonical
+  `Browser` tool, scheduler tools, memory tools, service tools, Slack file reads,
   Telegram file downloads, Teams proactive messages, Teams card updates, or
   Web/API file browser access.
 - Permission prompts offer exactly three user decisions: `Allow once`, `Always
@@ -219,6 +222,14 @@ Permission selection:
     tools by path, web tools by domain, agent tools by subagent type, MCP tools
     by tool pattern, and service/scheduler/memory tools by the specific
     operation when possible.
+- Browser state is scoped by agent plus conversation. Jobs inherit the target
+  agent's selected tools, skills, and MCP servers at run time; jobs do not carry
+  job-scoped tool, skill, or MCP grants. If a scheduled job needs a missing tool
+  permission, the approval prompt uses the same channel/thread/topic flow as an
+  agent run and resumes the blocked tool call after approval. Skill and MCP
+  additions are requested through `request_skill_install`,
+  `request_skill_proposal`, or `request_mcp_server` and become available after
+  the next run materializes those capabilities.
 - Browser state is scoped by agent plus conversation. Use `/status` or
   `myclaw browser profiles` when a user asks which browser profile, cookies, or
   signed-in state an agent or job will use. Jobs created from a conversation use

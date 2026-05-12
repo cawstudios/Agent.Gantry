@@ -97,6 +97,10 @@ export interface GroupProcessingDeps {
       stopAliasJids?: string | string[],
       threadId?: string | null,
     ) => void;
+    registerContinuationHandler?: (
+      groupJid: string,
+      handler: () => void,
+    ) => () => void;
   };
   runAgent?: typeof spawnAgent;
   getCredentialBroker?: () => Promise<AgentCredentialBroker | undefined>;

@@ -195,6 +195,38 @@ describe('ipc-browser-handler', () => {
     expect(response.data).toEqual({ content: 'tool-result' });
   });
 
+  it('publishes browser activity events for scheduled job browser calls', async () => {
+    const callBrowserTool = vi.fn(async () => ({ content: 'tool-result' }));
+    const publishBrowserJobActivity = vi.fn(async () => undefined);
+    const response = await processBrowserIpcRequest(
+      {
+        requestId: 'req-job-browser',
+        action: 'browser_navigate',
+        payload: { url: 'https://example.test' },
+        jobId: 'job-1',
+        runId: 'run-1',
+      },
+      {
+        sourceAgentFolder: 'main',
+        browserProfileName: 'c-main-abc123abc123',
+        browserIpcAuthorized: true,
+        callBrowserTool,
+        publishBrowserJobActivity,
+      },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(publishBrowserJobActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: 'job-1',
+        runId: 'run-1',
+        tool: 'browser_navigate',
+        ok: true,
+        normalizedSite: 'example.test',
+      }),
+    );
+  });
+
   it('keeps browser usage policy audit-only when enabled in audit mode', async () => {
     const callBrowserTool = vi.fn(async () => ({ content: 'tool-result' }));
     const context = {

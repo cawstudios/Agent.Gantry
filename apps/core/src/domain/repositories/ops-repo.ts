@@ -34,7 +34,6 @@ export interface JobUpsertInput {
   lease_run_id?: string | null;
   lease_expires_at?: string | null;
   pause_reason?: string | null;
-  capability_policy?: Job['capability_policy'];
   execution_context?: Job['execution_context'];
   notification_routes?: Job['notification_routes'];
 }
@@ -73,12 +72,14 @@ export function makeSessionScopeKey(
     conversationJid?: string | null;
     conversationKind?: 'dm' | 'channel';
     userId?: string | null;
+    jobId?: string | null;
   },
 ): string {
   const conversationJid = scope?.conversationJid?.trim();
   const dmUserId =
     scope?.conversationKind === 'dm' ? scope.userId?.trim() : undefined;
   const normalizedThreadId = threadId?.trim();
+  const jobId = scope?.jobId?.trim();
   const parts = [agentFolder];
   if (conversationJid) {
     parts.push(`conversation:${encodeSessionScopeComponent(conversationJid)}`);
@@ -88,6 +89,9 @@ export function makeSessionScopeKey(
   }
   if (normalizedThreadId) {
     parts.push(`thread:${encodeSessionScopeComponent(normalizedThreadId)}`);
+  }
+  if (jobId) {
+    parts.push(`job:${encodeSessionScopeComponent(jobId)}`);
   }
   return parts.join('::');
 }
@@ -150,7 +154,7 @@ export interface RuntimeJobRepository {
     leaseExpiresAt: string;
     requireNextRun?: boolean;
   }): Promise<boolean>;
-  releaseStaleJobLeases(nowIso?: string): Promise<number>;
+  releaseStaleJobLeases(nowIso?: string): Promise<ReleasedStaleJobLease[]>;
   createJobRun(run: JobRun): Promise<boolean>;
   completeJobRun(
     runId: string,
@@ -172,6 +176,13 @@ export interface RuntimeJobRepository {
   ): Promise<JobEvent[]>;
 }
 
+export interface ReleasedStaleJobLease {
+  jobId: string;
+  runId: string | null;
+  releasedAt: string;
+  runTimedOut: boolean;
+}
+
 export interface RuntimeRouterStateRepository {
   getRouterState(key: string): Promise<string | undefined>;
   setRouterState(key: string, value: string): Promise<void>;
@@ -184,6 +195,7 @@ export interface RuntimeAgentSessionRepository {
     threadId?: string | null;
     conversationKind?: 'dm' | 'channel';
     memoryUserId?: string;
+    jobId?: string;
     query?: string;
     hydrateMemory?: boolean;
   }): Promise<{
@@ -204,6 +216,7 @@ export interface RuntimeAgentSessionRepository {
       conversationJid?: string;
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
+      jobId?: string;
       latestArtifactId?: string | null;
       expectedAgentSessionId?: string;
       expectedAgentSessionResetAt?: string | null;

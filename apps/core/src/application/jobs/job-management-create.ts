@@ -4,19 +4,12 @@ import type {
   JobManagementServiceDeps,
 } from './job-management-types.js';
 import { resolveRequestedJobModel } from './job-model-selection.js';
-import { requireJobExtraToolApproval } from './job-extra-tool-approval.js';
 import {
   normalizeExecutionContext,
   normalizeNotificationRoutes,
   requireJobNotificationRouteApproval,
   routesBeyondAuthenticatedContext,
 } from './job-management-helpers.js';
-import {
-  agentIdForJobGroupScope,
-  assertJobExtraToolsAllowedForTarget,
-  normalizeJobExtraTools,
-  resolveAgentToolBindings,
-} from './job-tool-policy.js';
 
 export async function createManagedJob(
   deps: JobManagementServiceDeps,
@@ -106,16 +99,6 @@ export async function createManagedJob(
     routes: notificationRoutes,
     authenticatedContext,
   });
-  const allowedTools = normalizeJobExtraTools(input.allowedTools);
-  const inheritedTools = await resolveAgentToolBindings({
-    repository: deps.toolRepository,
-    appId: input.appId,
-    agentId: agentIdForJobGroupScope(session.workspaceKey),
-  });
-  assertJobExtraToolsAllowedForTarget({
-    rules: allowedTools,
-    inheritedTools,
-  });
   if (input.dryRun === true) {
     return { jobId, created: false, modelAlias, runtimeContext };
   }
@@ -130,16 +113,6 @@ export async function createManagedJob(
       existingRoutes: [],
       routesBeyondContext,
     },
-  });
-  await requireJobExtraToolApproval({
-    deps,
-    jobId,
-    jobName: input.name.trim(),
-    appId: input.appId,
-    groupScope: session.workspaceKey,
-    allowedTools,
-    existingJobExtraTools: [],
-    operation: 'create',
   });
   const result = await deps.ops.upsertJob({
     id: jobId,
@@ -156,7 +129,6 @@ export async function createManagedJob(
     next_run: schedule.nextRun,
     execution_mode:
       input.executionMode === 'serialized' ? 'serialized' : 'parallel',
-    capability_policy: { allowed_tools: allowedTools },
     execution_context: executionContext,
     notification_routes: notificationRoutes,
   });

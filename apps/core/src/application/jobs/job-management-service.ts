@@ -2,7 +2,6 @@ import { RUNTIME_EVENT_TYPES } from '../../domain/events/runtime-event-types.js'
 import { ApplicationError } from '../common/application-error.js';
 import type { Clock } from '../common/clock.js';
 import {
-  DEFAULT_JOB_RUNTIME_APP_ID,
   filterJobsByCanonicalAppSession,
   resolveJobAppSession,
 } from './job-access.js';
@@ -13,7 +12,6 @@ import {
   validateSchedulerUpdate,
 } from './job-management-access.js';
 import { createManagedJob } from './job-management-create.js';
-import { requireJobExtraToolApproval } from './job-extra-tool-approval.js';
 import {
   assertExecutionContextMatchesAuthenticatedContext,
   authenticatedContextFromAccess,
@@ -26,7 +24,6 @@ import {
   normalizeScheduleType,
   requireJobNotificationRouteApproval,
   resolveCanonicalAppSessionForOrigin,
-  resolveJobPolicyAppId,
   resolveLimit,
   routesBeyondAuthenticatedContext,
 } from './job-management-helpers.js';
@@ -58,12 +55,6 @@ import {
   requireRuntimeEvents,
   requireTriggerQueue,
 } from './job-management-require.js';
-import {
-  agentIdForJobGroupScope,
-  assertJobExtraToolsAllowedForTarget,
-  normalizeJobExtraTools,
-  resolveAgentToolBindings,
-} from './job-tool-policy.js';
 import { runSchedulerJobNowFromMcp } from './job-management-run-now.js';
 import {
   listManagedDeadLetterRuns,
@@ -176,35 +167,9 @@ export class JobManagementService {
     }
     existingJob ??= await this.deps.ops.getJobById(id);
     if (existingJob) assertSchedulerJobAccess(existingJob, access);
-    const allowedTools =
-      input.allowedTools === undefined
-        ? (existingJob?.capability_policy?.allowed_tools ?? [])
-        : normalizeJobExtraTools(input.allowedTools);
-    const { originAppId, canonicalSession } =
-      await resolveCanonicalAppSessionForOrigin({
-        access,
-        control: this.deps.control,
-      });
-    const runtimeAppId = canonicalSession?.appId ?? originAppId ?? 'default';
-    const inheritedTools = await resolveAgentToolBindings({
-      repository: this.deps.toolRepository,
-      appId: runtimeAppId,
-      agentId: agentIdForJobGroupScope(groupScope),
-    });
-    assertJobExtraToolsAllowedForTarget({
-      rules: allowedTools,
-      inheritedTools,
-    });
-    await requireJobExtraToolApproval({
-      deps: this.deps,
-      jobId: id,
-      jobName: name,
-      appId: runtimeAppId,
-      groupScope,
-      allowedTools,
-      existingJobExtraTools:
-        existingJob?.capability_policy?.allowed_tools ?? [],
-      operation: existingJob ? 'update' : 'create',
+    const { canonicalSession } = await resolveCanonicalAppSessionForOrigin({
+      access,
+      control: this.deps.control,
     });
     await requireJobNotificationRouteApproval({
       deps: this.deps as never,
@@ -246,7 +211,6 @@ export class JobManagementService {
         input.executionMode,
         input.serialize,
       ),
-      capability_policy: { allowed_tools: allowedTools },
       execution_context: executionContext,
       notification_routes: requestedNotificationRoutes,
     };
@@ -305,37 +269,6 @@ export class JobManagementService {
     const targetGroupScope = patch.groupScope ?? job.group_scope;
     if (typeof patch.model === 'string')
       patch.model = resolveOptionalJobModel(patch.model);
-    const allowedTools =
-      patch.allowedTools === undefined
-        ? undefined
-        : normalizeJobExtraTools(patch.allowedTools);
-    if (allowedTools) {
-      const policyAppId =
-        (await resolveJobPolicyAppId({
-          appId: input.appId,
-          access: input.access,
-          control: this.deps.control,
-        })) ?? DEFAULT_JOB_RUNTIME_APP_ID;
-      const inheritedTools = await resolveAgentToolBindings({
-        repository: this.deps.toolRepository,
-        appId: policyAppId,
-        agentId: agentIdForJobGroupScope(targetGroupScope),
-      });
-      assertJobExtraToolsAllowedForTarget({
-        rules: allowedTools,
-        inheritedTools,
-      });
-      await requireJobExtraToolApproval({
-        deps: this.deps,
-        jobId: job.id,
-        jobName: patch.name ?? job.name,
-        appId: policyAppId,
-        groupScope: targetGroupScope,
-        allowedTools,
-        existingJobExtraTools: job.capability_policy?.allowed_tools ?? [],
-        operation: 'update',
-      });
-    }
     const authenticatedContext =
       await resolveAuthenticatedRouteContextForUpdate({
         deps: this.deps,
@@ -410,7 +343,6 @@ export class JobManagementService {
         ...(normalizedNotificationRoutes
           ? { notificationRoutes: normalizedNotificationRoutes }
           : {}),
-        ...(allowedTools ? { allowedTools } : {}),
       },
       this.deps.schedulePlanner,
       this.clock(),

@@ -96,6 +96,29 @@ describe('configured agent tools', () => {
     ).rejects.toThrow('runtime projections, not durable capabilities');
   });
 
+  it('fails closed for stale active MyClaw MCP wildcard bindings', async () => {
+    const repository = {
+      listAgentToolBindings: async () => [
+        {
+          status: 'active',
+          toolId: 'tool:permission-rule:myclaw-wildcard',
+        },
+      ],
+      getTool: async () => ({
+        appId: 'default',
+        name: 'mcp__myclaw__*',
+      }),
+    };
+
+    await expect(
+      resolveConfiguredAllowedTools({
+        repository: repository as never,
+        appId: 'default',
+        agentId: 'agent:one',
+      }),
+    ).rejects.toThrow('wildcard grants are not supported');
+  });
+
   it('drops bindings whose catalog row belongs to a different app', async () => {
     const repository = {
       listAgentToolBindings: async () => [

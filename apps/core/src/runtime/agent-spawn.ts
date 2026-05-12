@@ -25,7 +25,10 @@ import {
   getHostRuntimeCredentialEnv,
   prepareHostRuntimeContext,
 } from './agent-spawn-host.js';
-import type { MaterializedMcpCapability } from '../application/mcp/mcp-server-service.js';
+import {
+  McpServerService,
+  type MaterializedMcpCapability,
+} from '../application/mcp/mcp-server-service.js';
 import {
   applyOpenRouterSdkEnv,
   materializeClaudeRuntime,
@@ -256,8 +259,10 @@ export async function spawnAgent(
     packageRoot = resolvePackageRootFromSourceDir(path.dirname(hostRunnerPath));
     const skillSources: SkillSource[] = [
       new BundledClaudeSkillSource(packageRoot),
-      new RuntimeInstalledAgentBrowserSkillSource(),
     ];
+    if (browserIpcEnabled) {
+      skillSources.push(new RuntimeInstalledAgentBrowserSkillSource());
+    }
     if (
       options?.skillRepository &&
       options.skillArtifactStore &&
@@ -305,6 +310,25 @@ export async function spawnAgent(
     appId: runnerAppId,
     agentId: input.agentId,
   });
+  const allMcpCapabilities: MaterializedMcpCapability[] =
+    options?.mcpServerRepository &&
+    options.mcpContext?.appId &&
+    options.mcpContext.agentId
+      ? await new McpServerService(options.mcpServerRepository, undefined, {
+          lookupHostname: options.mcpHostnameLookup,
+          dnsValidationCache: options.mcpDnsValidationCache,
+        }).materializeForAgent({
+          appId: options.mcpContext.appId as never,
+          agentId: options.mcpContext.agentId as never,
+          credentialEnv: (
+            await getHostRuntimeCredentialEnv(
+              agentIdentifier,
+              options.credentialBroker,
+              { purpose: 'tool_capability' },
+            )
+          ).env,
+        })
+      : [];
   const memoryIpcAllowedActions = selectedMemoryIpcActionsFromToolRules(
     trustedAllowedTools ?? [],
   );
@@ -330,6 +354,8 @@ export async function spawnAgent(
     MYCLAW_IPC_INPUT_DIR: ipcInputDir,
     MYCLAW_IPC_AUTH_TOKEN: ipcAuth.authToken,
     MYCLAW_CHAT_JID: input.chatJid,
+    ...(input.jobId ? { MYCLAW_JOB_ID: input.jobId } : {}),
+    ...(input.runId ? { MYCLAW_JOB_RUN_ID: input.runId } : {}),
     ...(browserIpcEnabled
       ? {
           MYCLAW_BROWSER_IPC_AUTH_TOKEN: computeBrowserIpcAuthToken(
@@ -378,7 +404,6 @@ export async function spawnAgent(
   if (Object.keys(serializedModelCredentialEnv).length > 0) {
     runnerInput.modelCredentialEnv = serializedModelCredentialEnv;
   }
-  let allMcpCapabilities: MaterializedMcpCapability[] = [];
   const mcpConfigPath =
     allMcpCapabilities.length > 0
       ? writeRunnerMcpConfigFile(hostRuntime.groupIpcDir, allMcpCapabilities)

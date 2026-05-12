@@ -32,6 +32,7 @@ export interface AgentInput {
   selectedMcpServerIds?: string[];
   isScheduledJob?: boolean;
   jobId?: string;
+  runId?: string;
   jobModelUseKind?: 'oneTimeJob' | 'recurringJob';
   assistantName?: string;
   compiledSystemPrompt?: string;

@@ -4,7 +4,7 @@ import { CanonicalJobOpsService } from '@core/adapters/storage/postgres/services
 import type { PostgresCanonicalJobRepository } from '@core/adapters/storage/postgres/repositories/canonical-job-repository.postgres.js';
 
 describe('CanonicalJobOpsService', () => {
-  it('persists job-scoped allowed tools under target capability policy', async () => {
+  it('persists execution context and notification routes without job capability policy', async () => {
     const repository = {
       findJobById: vi.fn(async () => null),
       upsertJob: vi.fn(async () => undefined),
@@ -31,18 +31,13 @@ describe('CanonicalJobOpsService', () => {
         },
       ],
       group_scope: '',
-      capability_policy: {
-        allowed_tools: ['Read', 'Bash(git status *)'],
-      },
     });
 
     const stored = vi.mocked(repository.upsertJob).mock.calls[0]?.[0] as {
       targetJson: string;
     };
     const target = JSON.parse(stored.targetJson) as Record<string, unknown>;
-    expect(target.capabilityPolicy).toEqual({
-      allowedTools: ['Read', 'Bash(git status *)'],
-    });
+    expect(target.capabilityPolicy).toBeUndefined();
     expect(target.executionContext).toEqual({
       conversationJid: 'tg:1',
       threadId: null,
@@ -58,7 +53,7 @@ describe('CanonicalJobOpsService', () => {
     ]);
   });
 
-  it('defaults missing capability policy to an empty allowed-tools list', async () => {
+  it('projects target routing context into job records', async () => {
     const repository = {
       findJobById: vi.fn(async () => ({
         id: 'job-1',
@@ -99,7 +94,6 @@ describe('CanonicalJobOpsService', () => {
     const service = new CanonicalJobOpsService(repository);
 
     await expect(service.getJobById('job-1')).resolves.toMatchObject({
-      capability_policy: { allowed_tools: [] },
       session_id: 'session-1',
       thread_id: null,
       group_scope: 'agent_one',

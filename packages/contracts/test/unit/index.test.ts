@@ -404,6 +404,15 @@ describe('contracts package', () => {
         nextRun: iso,
         lastRun: null,
         staleness: 'missed_window',
+        health: {
+          state: 'needs_permission',
+          latestRunId: 'run-1',
+          latestRunStatus: 'failed',
+          latestSummary: 'Needs permission: Browser',
+          activeRunId: null,
+          leaseExpiresAt: null,
+          nextAction: 'Approve Browser access, then rerun the job.',
+        },
         executionMode: 'parallel',
         modelAlias: null,
         modelProfileId: null,
@@ -412,13 +421,15 @@ describe('contracts package', () => {
         sessionId: null,
         toolAccess: {
           inheritedAgentTools: ['Read'],
-          jobExtraTools: [],
           effectiveAllowedTools: ['Read'],
-          source:
-            'inherited agent grants plus target_json.capabilityPolicy.allowedTools',
+          projectedRuntimeTools: [],
+          source: 'inherited target agent capabilities',
         },
       }),
-    ).toMatchObject({ staleness: 'missed_window' });
+    ).toMatchObject({
+      staleness: 'missed_window',
+      health: { state: 'needs_permission' },
+    });
     expectInvalid(JobResponseSchema, {
       jobId: 'job-1',
       name: 'Daily summary',
@@ -441,10 +452,8 @@ describe('contracts package', () => {
       sessionId: null,
       toolAccess: {
         inheritedAgentTools: ['Read'],
-        jobExtraTools: [],
         effectiveAllowedTools: ['Read'],
-        source:
-          'inherited agent grants plus target_json.capabilityPolicy.allowedTools',
+        source: 'inherited target agent capabilities',
       },
       inheritedTools: ['Read'],
     });
@@ -488,10 +497,8 @@ describe('contracts package', () => {
       sessionId: null,
       toolAccess: {
         inheritedAgentTools: ['Read'],
-        jobExtraTools: [],
         effectiveAllowedTools: ['Read'],
-        source:
-          'inherited agent grants plus target_json.capabilityPolicy.allowedTools',
+        source: 'inherited target agent capabilities',
       },
     });
 

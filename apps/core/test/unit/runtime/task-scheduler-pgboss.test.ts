@@ -11,7 +11,10 @@ vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => ({
 }));
 
 import type { Job } from '@core/domain/types.js';
-import { PgBossSchedulerEngine } from '@core/infrastructure/pgboss/scheduler-engine.js';
+import {
+  PgBossSchedulerEngine,
+  SCHEDULER_MAINTENANCE_SYNC_INTERVAL_MS,
+} from '@core/infrastructure/pgboss/scheduler-engine.js';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -73,7 +76,7 @@ describe('PgBossSchedulerEngine', () => {
           onProcess: vi.fn(),
           sendMessage: vi.fn(),
           opsRepository: {
-            releaseStaleJobLeases: vi.fn().mockResolvedValue(0),
+            releaseStaleJobLeases: vi.fn().mockResolvedValue([]),
             getAllJobs: vi.fn().mockResolvedValue([staleJob]),
           } as never,
         },
@@ -134,8 +137,15 @@ describe('PgBossSchedulerEngine', () => {
     const opsRepository = {
       releaseStaleJobLeases: vi
         .fn()
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(1),
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            jobId: 'job-1',
+            runId: 'run-1',
+            releasedAt: '2026-04-24T08:00:00.000Z',
+            runTimedOut: true,
+          },
+        ]),
       getAllJobs: vi.fn().mockResolvedValue([activeJob]),
     };
     const onSchedulerChanged = vi.fn();
@@ -167,6 +177,51 @@ describe('PgBossSchedulerEngine', () => {
     expect(onSchedulerChanged).toHaveBeenCalledWith();
   });
 
+  it('periodically runs a full sync so stale leases are released while idle', async () => {
+    vi.useFakeTimers();
+    try {
+      const activeJob = createJob();
+      const boss = {
+        send: vi.fn().mockResolvedValue(undefined),
+        schedule: vi.fn().mockResolvedValue(undefined),
+        unschedule: vi.fn().mockResolvedValue(undefined),
+        deleteJob: vi.fn().mockResolvedValue(undefined),
+      };
+      const opsRepository = {
+        releaseStaleJobLeases: vi.fn().mockResolvedValue([]),
+        getAllJobs: vi.fn().mockResolvedValue([activeJob]),
+      };
+      const engine = new PgBossSchedulerEngine(
+        {
+          conversationRoutes: () => ({}),
+          queue: {} as never,
+          onProcess: vi.fn(),
+          sendMessage: vi.fn(),
+          opsRepository: opsRepository as never,
+        },
+        {
+          registerSystemJobs: vi.fn().mockResolvedValue(undefined),
+          runJob: vi.fn().mockResolvedValue(undefined),
+          sweepCompletedOneTimeJobs: vi.fn().mockResolvedValue(false),
+        },
+      );
+      (engine as unknown as { boss: typeof boss }).boss = boss;
+
+      (
+        engine as unknown as { startMaintenanceTimer: () => void }
+      ).startMaintenanceTimer();
+      await vi.advanceTimersByTimeAsync(SCHEDULER_MAINTENANCE_SYNC_INTERVAL_MS);
+
+      expect(opsRepository.releaseStaleJobLeases).toHaveBeenCalledTimes(1);
+
+      (
+        engine as unknown as { stopMaintenanceTimer: () => void }
+      ).stopMaintenanceTimer();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('schedules cron jobs with pg-boss using serialized queue affinity', async () => {
     const cronJob = createJob({
       schedule_type: 'cron',
@@ -188,7 +243,7 @@ describe('PgBossSchedulerEngine', () => {
         onProcess: vi.fn(),
         sendMessage: vi.fn(),
         opsRepository: {
-          releaseStaleJobLeases: vi.fn().mockResolvedValue(0),
+          releaseStaleJobLeases: vi.fn().mockResolvedValue([]),
           getAllJobs: vi.fn().mockResolvedValue([cronJob]),
         } as never,
       },
@@ -243,7 +298,7 @@ describe('PgBossSchedulerEngine', () => {
         onProcess: vi.fn(),
         sendMessage: vi.fn(),
         opsRepository: {
-          releaseStaleJobLeases: vi.fn().mockResolvedValue(0),
+          releaseStaleJobLeases: vi.fn().mockResolvedValue([]),
           getAllJobs: vi.fn().mockResolvedValue([manualJob, pausedJob]),
         } as never,
       },

@@ -42,7 +42,7 @@ export async function notifySchedulerRunStart(input: {
   if (input.job.silent) return false;
   return sendJobNotification({
     job: input.job,
-    text: `Scheduler started: ${input.job.name} (#${input.runId.slice(0, 8)})`,
+    text: `Running: ${input.job.name} (#${input.runId.slice(0, 8)})`,
     phase: 'start',
     runId: input.runId,
     sendMessage: input.sendMessage,
@@ -57,6 +57,7 @@ export async function notifySchedulerTerminalRunState(input: {
   nextRun: string | null;
   retryCount: number;
   pauseReason: string | null;
+  durationMs?: number;
   sendMessage: SchedulerSendMessage;
   updateLifecycleNotification?: (input: {
     job: Job;
@@ -74,6 +75,7 @@ export async function notifySchedulerTerminalRunState(input: {
     nextRun: input.nextRun,
     retryCount: input.retryCount,
     pauseReason: input.pauseReason,
+    durationMs: input.durationMs,
   });
   const updateResult =
     input.updateLifecycleNotification === undefined

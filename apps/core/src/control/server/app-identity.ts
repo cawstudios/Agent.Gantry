@@ -119,6 +119,7 @@ export function mapManualJobToStored(
     nextRun: job.next_run,
     lastRun: job.last_run,
     staleness: metadata.staleness,
+    health: metadata.health,
     executionMode: job.execution_mode,
     modelAlias: job.model ?? null,
     modelProfileId: resolvedModel.ok ? resolvedModel.entry.id : null,

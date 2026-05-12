@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 
 import { ApplicationError } from '../application/common/application-error.js';
 import { JobManagementService } from '../application/jobs/job-management-service.js';
-import type { JobExtraToolApprovalRequest } from '../application/jobs/job-management-types.js';
 import type { JobExecutionMode, JobScheduleType } from '../domain/types.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { TaskContext, TaskHandler } from './ipc-types.js';
@@ -15,7 +14,6 @@ import { mapApplicationError } from './ipc-application-error.js';
 import { runtimeJobSchedulePlanner } from './job-schedule-planner.js';
 import { invalidateSystemJobRegistrationSignature } from './system-registration-cache.js';
 import { resolveRequestedJobModelPatch } from '../application/jobs/job-model-selection.js';
-import { resolveSchedulerApprovalTarget } from './ipc-scheduler-approval-target.js';
 import { schedulerAccessFromContext } from './ipc-scheduler-access.js';
 import { getRuntimeEventExchange } from '../adapters/storage/postgres/runtime-store.js';
 import { enqueueJobTrigger, isSchedulerReady } from './scheduler.js';
@@ -26,9 +24,6 @@ function makeJobService(context: TaskContext): JobManagementService {
     control: context.deps.getJobControl?.(),
     scheduler: { requestSchedulerSync: context.deps.onSchedulerChanged },
     schedulePlanner: runtimeJobSchedulePlanner,
-    toolRepository: context.deps.getToolRepository?.(),
-    approveJobExtraTools: (request) =>
-      requestJobExtraToolApproval(context, request),
   });
 }
 
@@ -37,7 +32,6 @@ function makeRunNowJobService(context: TaskContext): JobManagementService {
     ops: context.deps.opsRepository,
     scheduler: { requestSchedulerSync: context.deps.onSchedulerChanged },
     schedulePlanner: runtimeJobSchedulePlanner,
-    toolRepository: context.deps.getToolRepository?.(),
     control: context.deps.getJobControl?.(),
     runtimeEvents: getRuntimeEventExchange(),
     triggerQueue: {
@@ -45,42 +39,6 @@ function makeRunNowJobService(context: TaskContext): JobManagementService {
       enqueue: enqueueJobTrigger,
     },
   });
-}
-
-async function requestJobExtraToolApproval(
-  context: TaskContext,
-  request: JobExtraToolApprovalRequest,
-): Promise<{ approved: boolean; reason?: string }> {
-  const approvalTarget = resolveSchedulerApprovalTarget(context);
-  if (!approvalTarget.ok) {
-    return { approved: false, reason: approvalTarget.reason };
-  }
-  const decision = await context.deps.requestPermissionApproval({
-    requestId: `job-tools-${randomUUID()}`,
-    appId: request.target.appId as never,
-    agentId: request.target.agentId as never,
-    sourceAgentFolder: context.sourceAgentFolder,
-    targetJid: approvalTarget.targetJid,
-    threadId: context.data.authThreadId,
-    decisionPolicy: 'same_channel',
-    toolName: 'scheduler_job_tools',
-    displayName: 'Autonomous job tools',
-    title: 'Approve job-scoped autonomous tools',
-    description:
-      'stored on this job only; inherited agent grants are shown separately.',
-    decisionReason: `Update scheduler job ${request.jobName} with job-scoped extra tools.`,
-    toolInput: {
-      jobId: request.jobId,
-      target: request.target,
-      inheritedTools: request.inheritedTools,
-      existingJobExtraTools: request.existingJobExtraTools,
-      requestedJobExtraTools: request.requestedJobExtraTools,
-      extrasBeyondInherited: request.extrasBeyondInherited,
-      persistence: 'target_json.capabilityPolicy.allowedTools',
-    },
-    decisionOptions: ['allow_job_policy', 'cancel'],
-  });
-  return { approved: decision.approved, reason: decision.reason };
 }
 
 function scheduleType(raw: unknown): JobScheduleType | undefined {
@@ -179,10 +137,6 @@ const schedulerUpdateJobHandler: TaskHandler = async (context) => {
     if (Array.isArray(data.notificationRoutes)) {
       patch.notificationRoutes = data.notificationRoutes;
     }
-    if (Array.isArray(data.allowedTools)) {
-      patch.allowedTools = data.allowedTools.map((item) => String(item));
-    }
-
     await makeJobService(context).updateJob({
       jobId,
       access: schedulerAccessFromContext(context),

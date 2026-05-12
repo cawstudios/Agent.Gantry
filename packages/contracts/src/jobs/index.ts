@@ -126,11 +126,34 @@ export const JobRecentRunErrorSchema = z.object({
 
 export const JobStalenessSchema = z.enum(['missed_window']);
 
+export const JobHealthSchema = z
+  .object({
+    state: z.enum([
+      'ready',
+      'running',
+      'completed',
+      'failed',
+      'needs_permission',
+      'timed_out',
+      'dead_lettered',
+      'stale_lease',
+      'missed_window',
+    ]),
+    latestRunId: z.string().nullable(),
+    latestRunStatus: z.string().nullable(),
+    latestSummary: z.string().nullable(),
+    activeRunId: z.string().nullable(),
+    leaseExpiresAt: IsoDateTimeSchema.nullable(),
+    nextAction: z.string().nullable(),
+  })
+  .strict();
+export type JobHealth = z.infer<typeof JobHealthSchema>;
+
 export const JobToolAccessSchema = z
   .object({
     inheritedAgentTools: z.array(z.string()),
-    jobExtraTools: z.array(z.string()),
     effectiveAllowedTools: z.array(z.string()),
+    projectedRuntimeTools: z.array(z.string()).optional(),
     source: z.string(),
   })
   .strict();
@@ -153,7 +176,6 @@ export const CreateJobRequestSchema = z
     executionMode: JobExecutionModeSchema.optional(),
     modelAlias: z.string().optional(),
     modelProfileId: z.string().optional(),
-    allowedTools: z.array(z.string()).optional(),
     dryRun: z.boolean().optional(),
   })
   .strict()
@@ -173,7 +195,6 @@ export const UpdateJobRequestSchema = z
     status: z.enum(['active', 'paused']).optional(),
     modelAlias: z.string().nullable().optional(),
     modelProfileId: z.string().nullable().optional(),
-    allowedTools: z.array(z.string()).optional(),
   })
   .strict()
   .refine(
@@ -207,6 +228,7 @@ export const JobResponseSchema = z
     nextRun: IsoDateTimeSchema.nullable(),
     lastRun: IsoDateTimeSchema.nullable(),
     staleness: JobStalenessSchema.nullable().optional(),
+    health: JobHealthSchema.optional(),
     executionMode: JobExecutionModeSchema,
     modelAlias: z.string().nullable().optional(),
     modelProfileId: z.string().nullable().optional(),

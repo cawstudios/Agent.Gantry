@@ -68,18 +68,4 @@ describe('permission interaction', () => {
     expect(decision.approved).toBe(false);
     expect(decision.reason).toBe('persistent rule unavailable');
   });
-
-  it('labels job-scoped durable approvals without saying allow once', () => {
-    const request = requestWithSuggestions([]);
-
-    expect(permissionButtonLabel('allow_job_policy', request)).toBe(
-      'Store on this job',
-    );
-    expect(decisionForMode(request, 'allow_job_policy')).toMatchObject({
-      approved: true,
-      mode: 'allow_job_policy',
-      reason: 'job-scoped policy approved',
-      decisionClassification: 'user_permanent',
-    });
-  });
 });

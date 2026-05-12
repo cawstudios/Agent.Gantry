@@ -140,7 +140,6 @@ export function createJobManagementService() {
     ops: getRuntimeRepositories(),
     control: adaptJobControl(control),
     runtimeEvents: getRuntimeEventExchange(),
-    toolRepository: getRuntimeToolRepositoryIfReady(),
     scheduler: { requestSchedulerSync },
     schedulePlanner: runtimeJobSchedulePlanner,
     clock: { now: nowIso },
@@ -348,7 +347,6 @@ export async function handleJobRoutes(
         modelAlias: resolvedModel.explicit
           ? resolvedModel.modelAlias
           : undefined,
-        allowedTools: body.allowedTools,
         dryRun: body.dryRun,
       });
       const runtimePreviewExecutionContext = {
@@ -407,6 +405,7 @@ export async function handleJobRoutes(
     });
     const metadata = await buildJobListVisibilityMetadata({
       jobs: visibleJobs,
+      ops: getRuntimeRepositories(),
       toolRepository: getRuntimeToolRepositoryIfReady(),
       appId: auth.appId,
     });
@@ -500,9 +499,6 @@ export async function handleJobRoutes(
           ...(requestedModel.specified ? { model: requestedModel.model } : {}),
           ...(Array.isArray(body.notificationRoutes)
             ? { notificationRoutes: body.notificationRoutes }
-            : {}),
-          ...(Array.isArray(body.allowedTools)
-            ? { allowedTools: body.allowedTools }
             : {}),
           ...(body.status === 'active' || body.status === 'paused'
             ? { status: body.status }

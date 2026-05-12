@@ -124,6 +124,7 @@ const opsRepo = {
   })),
   upsertJob: vi.fn(async (job) => ({ job, created: true })),
   listJobs: vi.fn(async () => []),
+  listJobRuns: vi.fn(async () => []),
   updateJob: vi.fn(async () => undefined),
 };
 
@@ -1235,7 +1236,6 @@ describe('control job trigger', () => {
         schedule_type: 'once',
         schedule_value: '2000-01-01T00:00:00.000Z',
         next_run: '2000-01-01T00:00:00.000Z',
-        capability_policy: { allowed_tools: ['Read'] },
       }),
       makeJob({
         id: 'mixed',
@@ -1262,10 +1262,8 @@ describe('control job trigger', () => {
             staleness: 'missed_window',
             toolAccess: expect.objectContaining({
               inheritedAgentTools: [],
-              jobExtraTools: ['Read'],
-              effectiveAllowedTools: ['Read'],
-              source:
-                'inherited agent grants plus target_json.capabilityPolicy.allowedTools',
+              effectiveAllowedTools: [],
+              source: 'inherited target agent capabilities',
             }),
           }),
         ],
@@ -1298,7 +1296,6 @@ describe('control job trigger', () => {
         schedule_type: 'once',
         schedule_value: '2000-01-01T00:00:00.000Z',
         next_run: '2000-01-01T00:00:00.000Z',
-        capability_policy: { allowed_tools: ['Read'] },
       }),
     );
     const handle = startControlServer({
@@ -1320,10 +1317,8 @@ describe('control job trigger', () => {
         staleness: 'missed_window',
         toolAccess: expect.objectContaining({
           inheritedAgentTools: [],
-          jobExtraTools: ['Read'],
-          effectiveAllowedTools: ['Read'],
-          source:
-            'inherited agent grants plus target_json.capabilityPolicy.allowedTools',
+          effectiveAllowedTools: [],
+          source: 'inherited target agent capabilities',
         }),
         recentRunErrors: [],
       });

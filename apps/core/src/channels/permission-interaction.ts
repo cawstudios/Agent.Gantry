@@ -15,7 +15,6 @@ export function normalizePermissionAction(
   action: string,
 ): PermissionApprovalDecisionMode | null {
   if (action === 'allow_once' || action === 'approve') return 'allow_once';
-  if (action === 'allow_job_policy') return 'allow_job_policy';
   if (action === 'allow_persistent_rule') return 'allow_persistent_rule';
   if (action === 'cancel' || action === 'deny') return 'cancel';
   return null;
@@ -93,7 +92,6 @@ export function permissionButtonLabel(
   request: PermissionApprovalRequest,
 ): string {
   if (mode === 'allow_once') return 'Allow once';
-  if (mode === 'allow_job_policy') return 'Store on this job';
   if (mode === 'cancel') return 'Cancel';
   const rule = firstPersistentRule(request);
   if (!rule) return 'Always allow';
@@ -136,15 +134,6 @@ export function decisionForMode(
       decidedBy,
       reason: 'persistent rule allowed',
       updatedPermissions: updates,
-      decisionClassification: 'user_permanent',
-    };
-  }
-  if (mode === 'allow_job_policy') {
-    return {
-      approved: true,
-      mode,
-      decidedBy,
-      reason: 'job-scoped policy approved',
       decisionClassification: 'user_permanent',
     };
   }

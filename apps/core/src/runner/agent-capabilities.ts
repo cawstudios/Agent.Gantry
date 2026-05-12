@@ -15,7 +15,11 @@ import {
   selectedMyClawMcpToolNames,
   selectedMemoryIpcActions,
 } from './myclaw-mcp-tool-surface.js';
-import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-references.js';
+import {
+  isBrowserActionMcpToolRule,
+  isCanonicalBrowserCapabilityRule,
+  isHostPrivateBrowserMcpServerName,
+} from '../shared/agent-tool-references.js';
 
 export interface AgentCapabilityContext {
   mcpServerPath: string;
@@ -237,13 +241,32 @@ function selectedAdminMcpToolNames(
   return [...names].sort();
 }
 
+function isPublicExternalMcpServerName(name: string): boolean {
+  return !isHostPrivateBrowserMcpServerName(name);
+}
+
+function isPublicExternalMcpToolRule(toolRule: string): boolean {
+  return !isBrowserActionMcpToolRule(toolRule);
+}
+
 const configuredMcpProvider: AgentCapabilityProvider = {
   id: 'configured-mcp',
-  provide: () => ({
-    allowedTools: [],
-    alwaysAllowedTools: [],
-    mcpServers: {},
-  }),
+  provide: (ctx) => {
+    const mcpServers = Object.fromEntries(
+      Object.entries(ctx.externalMcpServers ?? {}).filter(([name]) =>
+        isPublicExternalMcpServerName(name),
+      ),
+    );
+    return {
+      allowedTools: (ctx.externalMcpAllowedTools ?? []).filter(
+        isPublicExternalMcpToolRule,
+      ),
+      alwaysAllowedTools: (ctx.externalMcpAlwaysAllowedTools ?? []).filter(
+        isPublicExternalMcpToolRule,
+      ),
+      mcpServers,
+    };
+  },
 };
 
 const configuredToolProvider: AgentCapabilityProvider = {

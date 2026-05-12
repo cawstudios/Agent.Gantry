@@ -2,7 +2,7 @@
 
 > **Audience:** the executing agent picking this up cold.
 > **Companion to:** `runtime-refactor-plan.md` and `memory-continuity-fixes-plan.md`. Read both before starting.
-> **Author context:** drafted by main_agent after validating the in-flight 86-file refactor (working tree at HEAD `d18ba5f0`, +1845/-563) against the two parent plans. The refactor lands real work — protected-capability guard rewrite, `scheduler_grant_tool`, dreaming unsafe-evidence quarantine, deletion of `script-runner.ts` — but leaves the changes that would actually unblock day-to-day agent driving on the floor. This plan finishes the job before merge.
+> **Author context:** drafted by main_agent after validating the in-flight 86-file refactor (working tree at HEAD `d18ba5f0`, +1845/-563) against the two parent plans. The refactor lands real work, including protected-capability guard changes, dreaming unsafe-evidence quarantine, and deletion of `script-runner.ts`, but leaves the changes that would actually unblock day-to-day agent driving on the floor. This plan finishes the job before merge.
 
 ---
 

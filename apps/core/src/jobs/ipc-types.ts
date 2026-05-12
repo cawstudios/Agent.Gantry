@@ -38,7 +38,6 @@ export interface TaskIpcData {
   maxConsecutiveFailures?: number;
   executionMode?: string;
   serialize?: boolean;
-  allowedTools?: string[];
   statuses?: string[];
   kind?: 'manual' | 'once' | 'recurring';
   runId?: string;

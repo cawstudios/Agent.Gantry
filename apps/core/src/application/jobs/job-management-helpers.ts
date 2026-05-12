@@ -82,21 +82,6 @@ export async function resolveCanonicalAppSessionForOrigin(input: {
   return { originAppId, canonicalSession };
 }
 
-export async function resolveJobPolicyAppId(input: {
-  appId?: string;
-  access?: SchedulerJobAccess;
-  control?: JobControlPort;
-}): Promise<string | undefined> {
-  if (input.appId) return input.appId;
-  if (!input.access) return undefined;
-  return (
-    await resolveCanonicalAppSessionForOrigin({
-      access: input.access,
-      control: input.control,
-    })
-  ).canonicalSession?.appId;
-}
-
 export function normalizeScheduleType(raw: unknown): JobScheduleType {
   if (
     raw === 'cron' ||
@@ -339,9 +324,6 @@ export function buildJobUpdates(
     updates.retry_backoff_ms = patch.retryBackoffMs;
   if (patch.maxConsecutiveFailures !== undefined) {
     updates.max_consecutive_failures = patch.maxConsecutiveFailures;
-  }
-  if (patch.allowedTools !== undefined) {
-    updates.capability_policy = { allowed_tools: patch.allowedTools };
   }
   if (patch.scheduleType !== undefined)
     updates.schedule_type = patch.scheduleType;

@@ -107,10 +107,10 @@ export function executeRunnerProcess(
     let hadStreamingOutput = false;
     const configuredTimeout =
       options?.timeoutMs ?? group.agentConfig?.timeout ?? AGENT_TIMEOUT;
-    const timeoutMs =
-      options?.timeoutMs != null
-        ? configuredTimeout
-        : Math.max(configuredTimeout, IDLE_TIMEOUT + 30_000);
+    const hasExplicitTimeout = options?.timeoutMs != null;
+    const timeoutMs = hasExplicitTimeout
+      ? configuredTimeout
+      : Math.max(configuredTimeout, IDLE_TIMEOUT + 30_000);
 
     const killOnTimeout = () => {
       timedOut = true;
@@ -123,6 +123,7 @@ export function executeRunnerProcess(
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
     const resetTimeout = () => {
+      if (hasExplicitTimeout) return;
       clearTimeout(timeout);
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
@@ -247,7 +248,7 @@ export function executeRunnerProcess(
           ].join('\n'),
         );
 
-        if (hadStreamingOutput) {
+        if (hadStreamingOutput && !hasExplicitTimeout) {
           logger.info(
             { group: group.name, processName, duration, code },
             `${runnerLabel} timed out after output (idle cleanup)`,
@@ -263,14 +264,25 @@ export function executeRunnerProcess(
         }
 
         logger.error(
-          { group: group.name, processName, duration, code },
-          `${runnerLabel} timed out with no output`,
+          {
+            group: group.name,
+            processName,
+            duration,
+            code,
+            hadStreamingOutput,
+          },
+          hadStreamingOutput
+            ? `${runnerLabel} timed out after streamed output`
+            : `${runnerLabel} timed out with no output`,
         );
 
-        resolve({
-          status: 'error',
-          result: null,
-          error: `${runnerLabel} timed out after ${timeoutMs}ms`,
+        outputChain.then(() => {
+          resolve({
+            status: 'error',
+            result: null,
+            newSessionId,
+            error: `${runnerLabel} timed out after ${timeoutMs}ms`,
+          });
         });
         return;
       }

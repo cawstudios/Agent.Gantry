@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildJobToolAccessView,
   buildRequestableBrowserToolAccess,
   BROWSER_REQUEST_PERMISSION_ARGS,
 } from '@core/shared/tool-access-view.js';
@@ -34,5 +35,18 @@ describe('tool access view', () => {
         configuredTools: ['mcp__myclaw__browser_click'],
       }),
     ).toHaveLength(1);
+  });
+
+  it('projects canonical Browser grants into MyClaw browser runtime tools for jobs', () => {
+    expect(
+      buildJobToolAccessView({
+        effectiveAllowedTools: ['Read', 'Browser'],
+      }).projectedRuntimeTools,
+    ).toEqual(
+      expect.arrayContaining([
+        'mcp__myclaw__browser_navigate',
+        'mcp__myclaw__browser_wait_for',
+      ]),
+    );
   });
 });

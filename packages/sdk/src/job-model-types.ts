@@ -10,10 +10,31 @@ export type JobStatus =
   | 'archived';
 export type JobStaleness = 'missed_window';
 
+export type JobHealthState =
+  | 'ready'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'needs_permission'
+  | 'timed_out'
+  | 'dead_lettered'
+  | 'stale_lease'
+  | 'missed_window';
+
+export interface JobHealth {
+  state: JobHealthState;
+  latestRunId: string | null;
+  latestRunStatus: string | null;
+  latestSummary: string | null;
+  activeRunId: string | null;
+  leaseExpiresAt: string | null;
+  nextAction: string | null;
+}
+
 export interface JobToolAccess {
   inheritedAgentTools: string[];
-  jobExtraTools: string[];
   effectiveAllowedTools: string[];
+  projectedRuntimeTools?: string[];
   source: string;
 }
 
@@ -54,6 +75,7 @@ export interface JobRecord {
   nextRun: string | null;
   lastRun: string | null;
   staleness?: JobStaleness | null;
+  health?: JobHealth;
   executionMode: JobExecutionMode;
   modelAlias: string | null;
   modelProfileId: string | null;
@@ -104,7 +126,6 @@ export interface CreateJobInput {
   executionMode?: 'parallel' | 'serialized';
   modelAlias?: string;
   modelProfileId?: string;
-  allowedTools?: string[];
   dryRun?: boolean;
 }
 
@@ -117,7 +138,6 @@ export interface UpdateJobInput {
   status?: 'active' | 'paused';
   modelAlias?: string | null;
   modelProfileId?: string | null;
-  allowedTools?: string[];
 }
 
 export interface ListJobsInput {

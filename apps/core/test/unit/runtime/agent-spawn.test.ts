@@ -873,12 +873,14 @@ describe('agent-spawn timeout behavior', () => {
     expect(runnerInput.modelCredentialEnv).toBeUndefined();
   });
 
-  it('does not expose approved third-party MCP servers through direct SDK MCP config', async () => {
+  it('materializes approved third-party MCP servers through direct SDK MCP config', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
-    const rmSyncSpy = vi.spyOn(fs, 'rmSync');
+    const rmSyncSpy = vi
+      .spyOn(fs, 'rmSync')
+      .mockImplementation(() => undefined);
     const { getHostRuntimeCredentialEnv } =
       await import('@core/runtime/agent-spawn-host.js');
-    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
+    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValue({
       env: { GITHUB_TOKEN_REF: 'broker-token' },
       credentialProviders: {},
       brokerApplied: true,
@@ -919,14 +921,38 @@ describe('agent-spawn timeout behavior', () => {
       string
     >;
     expect(env.MYCLAW_MCP_SERVERS_JSON).toBeUndefined();
-    expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
-    expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
-    expect(env.MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON).toBeUndefined();
-    expect(rmSyncSpy).not.toHaveBeenCalledWith(
-      expect.stringMatching(/mcp-.*\.json$/),
-      expect.anything(),
+    expect(env.MYCLAW_MCP_CONFIG_FILE).toMatch(/mcp-.*\.json$/);
+    expect(JSON.parse(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON)).toEqual([
+      'mcp__github__search_repositories',
+    ]);
+    expect(JSON.parse(env.MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON)).toEqual([
+      'mcp__github__search_repositories',
+    ]);
+    expect(rmSyncSpy).toHaveBeenCalledWith(env.MYCLAW_MCP_CONFIG_FILE, {
+      force: true,
+    });
+    const mcpConfigWrite = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find(([target]) => String(target).includes('/mcp-'));
+    expect(mcpConfigWrite).toBeDefined();
+    expect(JSON.parse(String(mcpConfigWrite?.[1]))).toEqual({
+      github: {
+        type: 'http',
+        url: 'https://mcp.example.com/github',
+        headers: { Authorization: 'broker-token' },
+      },
+    });
+    expect(repository.auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'materialize',
+          agentId: 'agent-one',
+          serverId: 'mcp:github',
+          metadata: expect.objectContaining({ name: 'github' }),
+        }),
+      ]),
     );
-    expect(repository.auditEvents).toEqual([]);
+    rmSyncSpy.mockRestore();
   });
 
   it('does not write MCP handoff files when runner files are missing', async () => {

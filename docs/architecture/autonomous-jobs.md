@@ -4,76 +4,81 @@ Autonomous jobs are runtime state, not desired-state configuration. Recurring,
 one-time, and manually triggered scheduler jobs are stored in Postgres and must
 not be written to `settings.yaml`.
 
-## Capability Policy
+## Capability Resolution
 
 At execution time, a job resolves its target agent from the runtime target:
 `group_scope` plus `execution_context` (`conversationJid`, optional `threadId`,
 optional `sessionId`). The job inherits that target agent's currently selected
-tool bindings for the run.
+tool bindings, skills, and MCP server bindings for the run. Job records do not
+carry separate tool, skill, or MCP capability grants.
 
-Job-scoped extra tool rules are persisted in `jobs.target_json` under:
-
-```json
-{
-  "capabilityPolicy": {
-    "allowedTools": [
-      "Bash(dedup-append-lead.py *)",
-      "Read(/Users/me/project/notes.md)"
-    ]
-  }
-}
-```
-
-Missing `capabilityPolicy.allowedTools` means an empty extra-tool list.
-These rules are stored on the job only. They are never mirrored into
-`settings.yaml`; inherited agent grants are resolved dynamically from the target
-agent and shown separately.
-
-Allowed job tool rules support exact tool names, registered scoped SDK tool
-rules such as `Tool(scope-pattern)`, and `mcp__server__*`. Scoped rules are
+The inherited tool rules still support exact tool names, registered scoped SDK
+tool rules such as `Tool(scope-pattern)`, and `mcp__server__*`. Scoped rules are
 evaluated by `apps/core/src/shared/tool-rule-matcher.ts`; new tools must be
-registered there with allow/deny tests before they can be used in scheduled job
-policy. Empty rules, global `*`, unregistered scoped tools, and other wildcard
-forms are invalid. Jobs cannot add admin-only MyClaw tools as extras unless the
-originating agent has the selected capability and the originating conversation
-approval policy allows it.
+registered there with allow/deny tests before they can be used by scheduled
+runs. Empty rules, global `*`, unregistered scoped tools, raw Browser action MCP
+rules, and projected `mcp__myclaw__browser_*` rules are invalid as persistent
+agent capabilities.
 
-Jobs also cannot add raw Browser action MCP rules such as
-`mcp__agent_browser__*`, `mcp__playwright__*`, or `mcp__puppeteer__*`, and
-cannot add projected `mcp__myclaw__browser_*` tools as job-scoped extras.
-Request persistent `Browser` capability for the agent first; jobs then use the
-projected tools inherited from that capability.
+Browser is one durable public capability: `Browser`. A job with an inherited
+`Browser` grant receives the projected MyClaw browser tools for that run. A job
+without that inherited grant must request `Browser` through `request_permission`;
+it must not request or persist raw Playwright, Puppeteer, agent-browser, or
+projected browser action tool names.
 
 ## Execution
 
 Scheduled job execution keeps protected capability and memory guards active
-before autonomous allowance. It must not write permission IPC or wait for chat
-approval during execution. If a tool is outside the effective job allowlist, the
-runner denies it immediately with:
+before autonomous allowance. If a tool is outside the effective job allowlist,
+the runner uses the same permission IPC path as interactive agent runs: it sends
+the approval prompt to the job's source conversation/thread or topic and waits
+at the tool boundary. `Allow once` resumes that tool call in the current job run.
+`Always allow` applies the approved rule to the target agent, mirrors it to
+`settings.yaml`, appends the live rule for the active run, and resumes the same
+tool call so recurring jobs do not need the same approval next time.
+
+If the approval surface is unavailable, denied, or times out, the runner fails
+the tool call with recovery guidance such as:
 
 ```text
 Tool not on autonomous job allowlist: Bash.
-Recovery: scheduler_grant_tool { "job_id": "job-1", "rule": "Bash(git status --short)" }
+Recovery: request_permission { "permissionKind": "tool", "toolName": "Bash", "temporaryOnly": false, "reason": "This scheduled job needs Bash access." }
 ```
 
-If a safe scoped `Bash(<command>)` rule cannot represent the requested command,
-fallback to broad `Bash` should require manual review.
+Missing capability recovery uses the same reviewed request tools as interactive
+agents: `request_permission` for tools and Browser, `request_skill_install` or
+`request_skill_proposal` for skills, and `request_mcp_server` for third-party
+MCP servers. Approval updates the target agent's durable bindings, exports the
+readable projection to `settings.yaml`, and activates on the next scheduled run
+or a manual rerun.
 
-The scheduler records the failure summary, emits `job.tool_denied`, and notifies
-the linked group/thread or DM unless the job is silent.
+The scheduler records the failure summary, emits `job.tool_denied`, pauses
+recurring jobs that need a missing persistent capability, and notifies the
+linked group/thread or DM unless the job is silent. Notification routes receive
+one terminal outcome message; they do not receive streamed assistant output or
+full-output fallback messages. Successful scheduled runs must end with a concise
+user-facing `Final Job Report` that states the outcome, notable counts, and the
+next action, and the terminal outcome message may summarize that report.
+Browser calls made by jobs emit
+`job.tool_activity` events with the job id, run id, tool name, result, elapsed
+time, and normalized site.
+
+Jobs use a job-owned `AgentSession` keyed by the target agent, source
+conversation/thread, and `jobId`. That gives each job its own provider resume
+handle, run history, and session digests. Durable memory sharing is explicit:
+DM-created jobs extract and hydrate against the trusted DM user subject, while
+channel/group/topic jobs extract and hydrate against the trusted
+conversation/thread subject. Caller-supplied memory subject overrides are not
+part of job creation or update; the host derives the share target from
+`executionContext`.
 
 Host-owned job scripts are not supported. Raw host Bash is not equivalent to
 Claude SDK Bash because it does not inherit the SDK filesystem sandbox,
 provider tool lifecycle, or per-tool permission callback. Move job logic into
-the scheduled prompt and grant exact SDK tools with `scheduler_grant_tool`. Any
-future script-like job runner must first provide the same protected-path
-deny-write boundary on macOS, Linux, and Docker deployments.
-
-`scheduler_grant_tool` is the agent-facing recovery path for job-local tools.
-It reads the current job, appends one rule if absent, and writes the updated
-`target_json.capabilityPolicy.allowedTools` through the normal scheduler update
-IPC path after validating the rule. It is not a settings-owned persistent agent
-grant.
+the scheduled prompt and grant exact SDK tools to the target agent through the
+normal capability request flow. Any future script-like job runner must first
+provide the same protected-path deny-write boundary on macOS, Linux, and Docker
+deployments.
 
 ## Visibility
 
@@ -86,16 +91,24 @@ object:
 {
   "toolAccess": {
     "inheritedAgentTools": ["Read", "Bash(git status *)"],
-    "jobExtraTools": ["Read(/Users/me/project/notes.md)"],
-    "effectiveAllowedTools": [
-      "Read",
-      "Bash(git status *)",
-      "Read(/Users/me/project/notes.md)"
-    ],
-    "source": "inherited agent grants plus target_json.capabilityPolicy.allowedTools"
+    "effectiveAllowedTools": ["Read", "Bash(git status *)"],
+    "projectedRuntimeTools": ["mcp__myclaw__browser_navigate"],
+    "source": "inherited target agent capabilities"
+  },
+  "health": {
+    "state": "ready",
+    "latestRunStatus": null,
+    "activeRunId": null,
+    "nextAction": null
   }
 }
 ```
+
+`health.state` is the user-facing run condition for list/detail views. It can
+show `ready`, `running`, `completed`, `failed`, `needs_permission`,
+`timed_out`, `dead_lettered`, `stale_lease`, or `missed_window`.
+The pg-boss scheduler runs periodic full sync maintenance so expired running
+leases move to timed-out runs even when the process is otherwise idle.
 
 Normal agent-facing scheduler MCP tools are not an admin surface. They may list,
 read, mutate, inspect runs/events, inspect dead letters, and manually queue runs

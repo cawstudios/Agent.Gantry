@@ -1,12 +1,9 @@
 import {
   query,
-  type SandboxSettings,
   type EffortLevel,
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { composeAgentCapabilities } from '../agent-capabilities.js';
 import { denyMemoryBoundaryToolUse } from '../memory-boundary.js';
 import { denyProtectedCapabilityToolUse } from './protected-capability-guard.js';
@@ -20,6 +17,10 @@ import { SteeringDeliveryGate } from './steering-delivery-gate.js';
 import { log } from './logging.js';
 import { writeOutput } from './output.js';
 import { requestPermissionApproval } from './permission-callback.js';
+import {
+  buildSdkFilesystemSandbox,
+  readProtectedFilesystemPaths,
+} from './filesystem-sandbox.js';
 import { protectedCapabilityPreToolUseHook } from './protected-capability-hook.js';
 import {
   discoverAdditionalDirectories,
@@ -45,10 +46,13 @@ import {
   ToolExecutionClassifier,
   ToolExecutionPolicyService,
 } from '../../shared/tool-execution-policy-service.js';
+import {
+  permissionRequestToolName,
+  scheduledPermissionSuggestions,
+  synthesizePermissionSuggestions,
+} from './permission-suggestions.js';
 import { readExternalMcpServers } from './mcp-server-validation.js';
 import { nowIso } from '../../shared/time/datetime.js';
-
-const PROTECTED_FILESYSTEM_PATHS_ENV = 'MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON';
 
 export async function runQuery(
   prompt: string,
@@ -121,10 +125,11 @@ export async function runQuery(
   const extraDirs = discoverAdditionalDirectories();
   const protectedFilesystemPaths = readProtectedFilesystemPaths();
   const currentModel = findModelByRunnerModel(configuredModel);
+  const workspaceFolder = agentInput.groupFolder;
   const capabilities = composeAgentCapabilities({
     mcpServerPath,
     chatJid: agentInput.chatJid,
-    groupFolder: agentInput.groupFolder,
+    groupFolder: workspaceFolder,
     threadId: agentInput.threadId,
     memoryUserId: agentInput.memoryUserId,
     memoryDefaultScope: agentInput.memoryDefaultScope,
@@ -151,6 +156,17 @@ export async function runQuery(
   function currentAllowedToolRules(): string[] {
     return [
       ...capabilities.allowedTools,
+      ...readLiveToolRules({
+        ipcDir: process.env.MYCLAW_IPC_DIR,
+        runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE,
+      }),
+      ...liveApprovedRules,
+    ];
+  }
+
+  function currentScheduledAllowedToolRules(): string[] {
+    return [
+      ...(agentInput.allowedTools ?? []),
       ...readLiveToolRules({
         ipcDir: process.env.MYCLAW_IPC_DIR,
         runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE,
@@ -255,7 +271,7 @@ export async function runQuery(
         if (agentInput.isScheduledJob) {
           const toolDecision = toolExecutionPolicy.evaluate({
             request: toolExecutionRequest,
-            schedulerAllowedToolRules: agentInput.allowedTools ?? [],
+            schedulerAllowedToolRules: currentScheduledAllowedToolRules(),
           });
           if (toolDecision.status === 'allow') {
             log(
@@ -263,12 +279,80 @@ export async function runQuery(
             );
             return { behavior: 'allow' as const, updatedInput: input };
           }
-          const message = `${toolDecision.reason} Recovery: ${toolDecision.recoveryAction}`;
+          if (permissionOpts.signal.aborted) {
+            return {
+              behavior: 'deny' as const,
+              message: 'Permission request aborted',
+              interrupt: true,
+            };
+          }
+          const recoveryMessage = `${toolDecision.reason} Recovery: ${toolDecision.recoveryAction}`;
+          const publicToolName = permissionRequestToolName(toolName);
+          log(
+            `Autonomous job requesting permission for tool ${toolName}: ${recoveryMessage}`,
+          );
+          emitInteractionBoundary();
+          const decision = await requestPermissionApproval({
+            appId: agentInput.appId,
+            agentId: agentInput.agentId,
+            groupFolder: workspaceFolder,
+            targetJid: agentInput.chatJid,
+            toolName: publicToolName,
+            title: permissionOpts.title,
+            displayName:
+              publicToolName === toolName
+                ? permissionOpts.displayName
+                : publicToolName,
+            description: permissionOpts.description,
+            decisionReason:
+              permissionOpts.decisionReason ?? toolDecision.reason,
+            blockedPath: permissionOpts.blockedPath,
+            toolInput: input,
+            toolUseID: permissionOpts.toolUseID,
+            agentID: permissionOpts.agentID,
+            suggestions: scheduledPermissionSuggestions(
+              toolName,
+              permissionOpts.suggestions,
+              { blockedPath: permissionOpts.blockedPath },
+            ),
+            threadId: agentInput.threadId,
+          });
+          if (decision.approved) {
+            for (const rule of permissionUpdateAllowedToolRules(
+              decision.updatedPermissions,
+            )) {
+              liveApprovedRules.add(rule);
+            }
+            log(
+              `Autonomous job permission approved for tool ${toolName} by ${decision.decidedBy || 'unknown'}`,
+            );
+            return {
+              behavior: 'allow' as const,
+              updatedInput: input,
+              ...(decision.updatedPermissions
+                ? { updatedPermissions: decision.updatedPermissions as never }
+                : {}),
+              ...(decision.decisionClassification
+                ? {
+                    decisionClassification:
+                      decision.decisionClassification as never,
+                  }
+                : {}),
+            };
+          }
+          const reason = decision.reason || 'Denied by operator';
+          const message = `Permission denied: ${reason}. ${recoveryMessage}`;
           log(`Autonomous job denied tool ${toolName}: ${message}`);
           return {
             behavior: 'deny' as const,
             message,
             interrupt: true,
+            ...(decision.decisionClassification
+              ? {
+                  decisionClassification:
+                    decision.decisionClassification as never,
+                }
+              : {}),
           };
         }
 
@@ -297,7 +381,7 @@ export async function runQuery(
         const decision = await requestPermissionApproval({
           appId: agentInput.appId,
           agentId: agentInput.agentId,
-          groupFolder: agentInput.groupFolder,
+          groupFolder: workspaceFolder,
           toolName,
           title: permissionOpts.title,
           displayName: permissionOpts.displayName,
@@ -471,85 +555,6 @@ export async function runQuery(
     lastAssistantUuid,
     closedDuringQuery,
   };
-}
-
-function readProtectedFilesystemPaths(): string[] {
-  const raw = process.env[PROTECTED_FILESYSTEM_PATHS_ENV]?.trim();
-  if (!raw) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`${PROTECTED_FILESYSTEM_PATHS_ENV} must be valid JSON.`);
-  }
-  if (!Array.isArray(parsed))
-    throw new Error(`${PROTECTED_FILESYSTEM_PATHS_ENV} must be a JSON array.`);
-  return normalizeProtectedPaths(parsed);
-}
-
-function buildSdkFilesystemSandbox(paths: readonly string[]): SandboxSettings {
-  return {
-    enabled: true,
-    failIfUnavailable: true,
-    autoAllowBashIfSandboxed: false,
-    allowUnsandboxedCommands: false,
-    filesystem: { denyWrite: normalizeProtectedPaths(paths) },
-  };
-}
-
-function normalizeProtectedPaths(values: readonly unknown[]): string[] {
-  return [...new Set(values.flatMap(resolvePathForSandbox))].sort();
-}
-
-function resolvePathForSandbox(value: unknown): string[] {
-  if (typeof value !== 'string' || !value.trim()) return [];
-  const absolute = path.resolve(value.trim());
-  try {
-    if (fs.existsSync(absolute)) return [fs.realpathSync.native(absolute)];
-    const parent = path.dirname(absolute);
-    if (fs.existsSync(parent))
-      return [
-        path.join(fs.realpathSync.native(parent), path.basename(absolute)),
-      ];
-  } catch {}
-  return [absolute];
-}
-
-function synthesizePermissionSuggestions(
-  toolName: string,
-  options: { blockedPath?: string },
-): unknown[] | undefined {
-  const normalizedToolName = toolName.trim();
-  if (!normalizedToolName) return undefined;
-  const ruleContent = inferPermissionRuleContent(options);
-  if (!ruleContent) return undefined;
-  return [
-    {
-      type: 'addRules',
-      behavior: 'allow',
-      destination: 'session',
-      rules: [
-        {
-          toolName: normalizedToolName,
-          ...(ruleContent ? { ruleContent } : {}),
-        },
-      ],
-    },
-  ];
-}
-
-function inferPermissionRuleContent(options: {
-  blockedPath?: string;
-}): string | undefined {
-  const scope = trimmed(options.blockedPath);
-  if (!scope) return undefined;
-  return scope;
-}
-
-function trimmed(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const out = value.trim();
-  return out || undefined;
 }
 
 function assertRequiredMcpServerReady(message: unknown): void {

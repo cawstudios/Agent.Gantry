@@ -84,6 +84,7 @@ const UNSUPPORTED_SCHEDULER_JOB_TASK_FIELDS = [
   'thread_id',
   'sessionId',
   'groupScope',
+  'allowedTools',
 ] as const;
 
 function isSchedulerJobMutationTask(type: string): boolean {
@@ -297,7 +298,6 @@ export function parseTaskIpcData(
   });
   const contextMode = toTrimmedString(raw.contextMode, { maxLen: 64 });
   const jobId = toTrimmedString(raw.jobId, { maxLen: 128 });
-  const allowedTools = toOptionalStringArray(raw.allowedTools, 200, 255);
   const executionContext = toOptionalExecutionContext(raw.executionContext);
   const notificationRoutes = toOptionalNotificationRoutes(
     raw.notificationRoutes,
@@ -356,7 +356,6 @@ export function parseTaskIpcData(
   if (scheduleValue !== undefined) parsed.scheduleValue = scheduleValue;
   if (contextMode) parsed.contextMode = contextMode;
   if (jobId) parsed.jobId = jobId;
-  if (allowedTools !== undefined) parsed.allowedTools = allowedTools;
   if (executionContext !== undefined) {
     (
       parsed as TaskIpcData & {

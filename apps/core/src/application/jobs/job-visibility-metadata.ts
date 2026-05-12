@@ -1,4 +1,4 @@
-import type { Job } from '../../domain/types.js';
+import type { Job, JobRun } from '../../domain/types.js';
 import type { ToolCatalogRepository } from '../../domain/ports/repositories.js';
 import type { RuntimeJobRepository } from '../../domain/repositories/ops-repo.js';
 import type {
@@ -8,7 +8,6 @@ import type {
 import { DEFAULT_JOB_RUNTIME_APP_ID } from './job-access.js';
 import {
   agentIdForJobGroupScope,
-  normalizeJobExtraTools,
   resolveAgentToolBindings,
   resolveJobToolPolicy,
 } from './job-tool-policy.js';
@@ -21,6 +20,10 @@ import {
   type JobToolAccessView,
 } from '../../shared/tool-access-view.js';
 import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
+import {
+  parseAutonomousToolDenial,
+  type AutonomousToolDenial,
+} from '../../shared/autonomous-tool-denial.js';
 
 export interface JobVisibilityMetadata {
   executionContext: JobExecutionContextInput;
@@ -35,9 +38,9 @@ export interface JobVisibilityMetadata {
   promptPreview: string;
   fullPrompt?: string;
   inheritedTools: string[];
-  jobExtraTools: string[];
   effectiveAllowedTools: string[];
   toolAccess: JobToolAccessView;
+  health: JobHealthMetadata;
   recentRunErrors: Array<{
     runId: string;
     status: string;
@@ -45,6 +48,25 @@ export interface JobVisibilityMetadata {
     endedAt: string | null;
   }>;
   staleness: SchedulerJobStaleness | null;
+}
+
+export interface JobHealthMetadata {
+  state:
+    | 'ready'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'needs_permission'
+    | 'timed_out'
+    | 'dead_lettered'
+    | 'stale_lease'
+    | 'missed_window';
+  latestRunId: string | null;
+  latestRunStatus: string | null;
+  latestSummary: string | null;
+  activeRunId: string | null;
+  leaseExpiresAt: string | null;
+  nextAction: string | null;
 }
 
 export async function buildJobVisibilityMetadata(input: {
@@ -74,6 +96,12 @@ export async function buildJobVisibilityMetadata(input: {
     typeof input.ops.listJobRuns === 'function'
       ? await input.ops.listJobRuns(input.job.id, input.recentRunLimit ?? 5)
       : [];
+  const health = buildJobHealth({
+    job: input.job,
+    runs,
+    staleness,
+    nowMs,
+  });
   return {
     executionContext,
     notificationRoutes,
@@ -87,13 +115,12 @@ export async function buildJobVisibilityMetadata(input: {
     promptPreview: promptPreview(input.job.prompt),
     fullPrompt: input.job.prompt,
     inheritedTools: policy.inheritedTools,
-    jobExtraTools: policy.jobExtraTools,
     effectiveAllowedTools: policy.effectiveAllowedTools,
     toolAccess: buildJobToolAccessView({
       inheritedAgentTools: policy.inheritedTools,
-      jobExtraTools: policy.jobExtraTools,
       effectiveAllowedTools: policy.effectiveAllowedTools,
     }),
+    health,
     staleness,
     recentRunErrors: runs
       .filter((run) => Boolean(run.error_summary))
@@ -108,11 +135,13 @@ export async function buildJobVisibilityMetadata(input: {
 
 export async function buildJobListVisibilityMetadata(input: {
   jobs: Job[];
+  ops?: Pick<RuntimeJobRepository, 'listJobRuns'>;
   toolRepository?: ToolCatalogRepository;
   appId?: string;
   nowMs?: number;
 }): Promise<Map<string, JobVisibilityMetadata>> {
   const nowMs = input.nowMs ?? currentTimeMs();
+  const latestRunsByJobId = await loadLatestRunsByJobId(input.jobs, input.ops);
   const inheritedToolsByTarget = new Map<string, Promise<string[]>>();
   const loadInheritedTools = (appId: string, agentId: string) => {
     const key = `${appId}\0${agentId}`;
@@ -139,13 +168,9 @@ export async function buildJobListVisibilityMetadata(input: {
         );
         const agentId = agentIdForJobGroupScope(job.group_scope);
         const inheritedTools = await loadInheritedTools(appId, agentId);
-        const jobExtraTools = normalizeJobExtraTools(
-          job.capability_policy?.allowed_tools,
-        );
-        const effectiveAllowedTools = mergeUnique(
-          inheritedTools,
-          jobExtraTools,
-        );
+        const effectiveAllowedTools = mergeUnique(inheritedTools);
+        const staleness = schedulerJobStaleness(job, nowMs);
+        const runs = latestRunsByJobId.get(job.id) ?? [];
         const metadata: JobVisibilityMetadata = {
           executionContext,
           notificationRoutes,
@@ -158,15 +183,26 @@ export async function buildJobListVisibilityMetadata(input: {
           },
           promptPreview: promptPreview(job.prompt),
           inheritedTools,
-          jobExtraTools,
           effectiveAllowedTools,
           toolAccess: buildJobToolAccessView({
             inheritedAgentTools: inheritedTools,
-            jobExtraTools,
             effectiveAllowedTools,
           }),
-          staleness: schedulerJobStaleness(job, nowMs),
-          recentRunErrors: [],
+          health: buildJobHealth({
+            job,
+            runs,
+            staleness,
+            nowMs,
+          }),
+          staleness,
+          recentRunErrors: runs
+            .filter((run) => Boolean(run.error_summary))
+            .map((run) => ({
+              runId: run.run_id,
+              status: run.status,
+              errorSummary: run.error_summary ?? '',
+              endedAt: run.ended_at,
+            })),
         };
         return [job.id, metadata] as const;
       }),
@@ -174,9 +210,106 @@ export async function buildJobListVisibilityMetadata(input: {
   );
 }
 
+async function loadLatestRunsByJobId(
+  jobs: readonly Job[],
+  ops: Pick<RuntimeJobRepository, 'listJobRuns'> | undefined,
+): Promise<Map<string, JobRun[]>> {
+  if (!ops || jobs.length === 0) return new Map();
+  return new Map(
+    await Promise.all(
+      jobs.map(
+        async (job): Promise<[string, JobRun[]]> => [
+          job.id,
+          await ops.listJobRuns(job.id, 1),
+        ],
+      ),
+    ),
+  );
+}
+
 function promptPreview(prompt: string): string {
   const compact = prompt.replace(/\s+/g, ' ').trim();
   return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
+}
+
+function buildJobHealth(input: {
+  job: Job;
+  runs: JobRun[];
+  staleness: SchedulerJobStaleness | null;
+  nowMs: number;
+}): JobHealthMetadata {
+  const latestRun = input.runs[0];
+  const latestSummary =
+    latestRun?.error_summary ?? latestRun?.result_summary ?? null;
+  const denial =
+    parseAutonomousToolDenial(latestSummary) ??
+    parsePermissionPauseReason(input.job.pause_reason);
+  const leaseExpired =
+    input.job.status === 'running' &&
+    Boolean(input.job.lease_expires_at) &&
+    Date.parse(input.job.lease_expires_at || '') < input.nowMs;
+  const state: JobHealthMetadata['state'] = leaseExpired
+    ? 'stale_lease'
+    : denial
+      ? 'needs_permission'
+      : input.job.status === 'dead_lettered'
+        ? 'dead_lettered'
+        : input.job.status === 'running' || latestRun?.status === 'running'
+          ? 'running'
+          : latestRun?.status === 'timeout'
+            ? 'timed_out'
+            : latestRun?.status === 'failed'
+              ? 'failed'
+              : latestRun?.status === 'completed'
+                ? 'completed'
+                : input.staleness === 'missed_window'
+                  ? 'missed_window'
+                  : 'ready';
+  return {
+    state,
+    latestRunId: latestRun?.run_id ?? null,
+    latestRunStatus: latestRun?.status ?? null,
+    latestSummary,
+    activeRunId:
+      input.job.lease_run_id ??
+      (latestRun?.status === 'running' ? latestRun.run_id : null),
+    leaseExpiresAt: input.job.lease_expires_at,
+    nextAction: nextJobHealthAction(state, denial),
+  };
+}
+
+function parsePermissionPauseReason(
+  value: string | null | undefined,
+): AutonomousToolDenial | null {
+  if (!value) return null;
+  const match = value.match(/^Needs permission:\s*(\S+)/i);
+  return match?.[1] ? { toolName: match[1] } : null;
+}
+
+function nextJobHealthAction(
+  state: JobHealthMetadata['state'],
+  denial: ReturnType<typeof parseAutonomousToolDenial>,
+): string | null {
+  if (denial?.recoveryAction) return denial.recoveryAction;
+  if (state === 'needs_permission' && denial?.toolName) {
+    if (denial.toolName.startsWith('mcp__myclaw__browser_')) {
+      return 'Approve Browser access, then rerun the job.';
+    }
+    return `Approve ${denial.toolName} access, then rerun the job.`;
+  }
+  if (state === 'timed_out') {
+    return 'Narrow the job scope or update timeout_ms, then rerun the job.';
+  }
+  if (state === 'dead_lettered') {
+    return 'Fix the blocker, then use scheduler_resume_job.';
+  }
+  if (state === 'stale_lease') {
+    return 'Wait for scheduler cleanup, then inspect the latest run.';
+  }
+  if (state === 'missed_window') {
+    return 'Run the job now or update its schedule.';
+  }
+  return null;
 }
 
 function resolveExecutionContext(job: Job): JobExecutionContextInput {
@@ -250,12 +383,9 @@ function dedupeConversationJids(routes: readonly JobNotificationRouteInput[]) {
   return [...out];
 }
 
-function mergeUnique(
-  base: readonly string[],
-  next: readonly string[],
-): string[] {
+function mergeUnique(base: readonly string[]): string[] {
   const out = new Set<string>();
-  for (const item of [...base, ...next]) {
+  for (const item of base) {
     const value = item.trim();
     if (value) out.add(value);
   }

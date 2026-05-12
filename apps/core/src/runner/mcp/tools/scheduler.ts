@@ -9,7 +9,6 @@ import {
   schedulerJobSummary,
   schedulerJobsSummary,
 } from './scheduler-formatters.js';
-import { validateAutonomousToolRule } from '../../../shared/tool-rule-matcher.js';
 import {
   canonicalTargetFromArgs,
   normalizeSchedulerWaitTimeoutMs,
@@ -39,7 +38,6 @@ const SCHEDULER_UPSERT_ARG_KEYS = new Set([
   'max_consecutive_failures',
   'execution_mode',
   'serialize',
-  'allowed_tools',
 ]);
 
 const SCHEDULER_UPDATE_ARG_KEYS = new Set([
@@ -61,7 +59,6 @@ const SCHEDULER_UPDATE_ARG_KEYS = new Set([
   'max_consecutive_failures',
   'execution_mode',
   'serialize',
-  'allowed_tools',
 ]);
 
 function unsupportedSchedulerArgError(
@@ -165,7 +162,6 @@ export function registerSchedulerTools(server: McpServer): void {
       max_consecutive_failures: z.number().optional(),
       execution_mode: z.enum(['parallel', 'serialized']).optional(),
       serialize: z.boolean().optional(),
-      allowed_tools: z.array(z.string()).optional(),
     },
     async (args) => {
       const unsupportedArgError = unsupportedSchedulerArgError(
@@ -210,7 +206,6 @@ export function registerSchedulerTools(server: McpServer): void {
             args.serialize,
           ),
           serialize: args.serialize,
-          allowedTools: args.allowed_tools,
           createdBy: 'agent',
         },
         timeoutText:
@@ -239,61 +234,6 @@ export function registerSchedulerTools(server: McpServer): void {
           },
         ],
       };
-    },
-  );
-  server.tool(
-    'scheduler_grant_tool',
-    'Append one extra allowed tool rule to a scheduler job capability policy.',
-    { job_id: z.string(), rule: z.string() },
-    async (args) => {
-      const rule = args.rule.trim();
-      if (!rule) {
-        return {
-          content: [{ type: 'text' as const, text: 'Tool rule is required.' }],
-          isError: true,
-        };
-      }
-      const validation = validateAutonomousToolRule(rule);
-      if (!validation.ok) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: validation.reason ?? 'Invalid scheduler tool rule.',
-            },
-          ],
-          isError: true,
-        };
-      }
-      const getResponse = await requestSchedulerData('scheduler_get_job', {
-        jobId: args.job_id,
-      });
-      const getError = taskError(getResponse, 'Scheduler get job failed.');
-      if (getError) return getError;
-      const job = dataRecord(getResponse!).job;
-      if (!job || typeof job !== 'object') {
-        return {
-          content: [{ type: 'text' as const, text: 'Job not found.' }],
-          isError: true,
-        };
-      }
-      const allowedTools = schedulerJobExtraTools(job);
-      const nextAllowedTools = allowedTools.includes(rule)
-        ? allowedTools
-        : [...allowedTools, rule];
-      const taskId = makeIpcId('scheduler-grant-tool');
-      return submitSchedulerMutationTask({
-        taskType: 'scheduler_update_job',
-        taskId,
-        payload: {
-          jobId: args.job_id,
-          allowedTools: nextAllowedTools,
-        },
-        timeoutText:
-          'Scheduler tool grant timed out waiting for host confirmation.',
-        rejectedText: 'Scheduler tool grant was rejected.',
-        successText: `Scheduler job tool rule granted: ${rule}`,
-      });
     },
   );
   server.tool(
@@ -381,7 +321,6 @@ export function registerSchedulerTools(server: McpServer): void {
       max_consecutive_failures: z.number().optional(),
       execution_mode: z.enum(['parallel', 'serialized']).optional(),
       serialize: z.boolean().optional(),
-      allowed_tools: z.array(z.string()).optional(),
     },
     async (args) => {
       const unsupportedArgError = unsupportedSchedulerArgError(
@@ -430,7 +369,6 @@ export function registerSchedulerTools(server: McpServer): void {
           maxConsecutiveFailures: args.max_consecutive_failures,
           executionMode,
           serialize: args.serialize,
-          allowedTools: args.allowed_tools,
         },
         timeoutText:
           'Scheduler update timed out waiting for host confirmation.',
@@ -625,41 +563,4 @@ export function registerSchedulerTools(server: McpServer): void {
       };
     },
   );
-}
-
-function schedulerJobExtraTools(job: unknown): string[] {
-  const record =
-    typeof job === 'object' && job !== null
-      ? (job as Record<string, unknown>)
-      : {};
-  const visibility =
-    typeof record.visibility === 'object' && record.visibility !== null
-      ? (record.visibility as Record<string, unknown>)
-      : {};
-  const toolAccess =
-    typeof visibility.toolAccess === 'object' && visibility.toolAccess !== null
-      ? (visibility.toolAccess as Record<string, unknown>)
-      : {};
-  const visibleExtraTools = stringArray(toolAccess.jobExtraTools);
-  if (visibleExtraTools.length > 0) return visibleExtraTools;
-  const targetJson =
-    typeof record.targetJson === 'object' && record.targetJson !== null
-      ? (record.targetJson as Record<string, unknown>)
-      : {};
-  const target =
-    typeof record.target_json === 'object' && record.target_json !== null
-      ? (record.target_json as Record<string, unknown>)
-      : targetJson;
-  const capabilityPolicy =
-    typeof target.capabilityPolicy === 'object' &&
-    target.capabilityPolicy !== null
-      ? (target.capabilityPolicy as Record<string, unknown>)
-      : {};
-  return stringArray(capabilityPolicy.allowedTools);
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string')
-    : [];
 }

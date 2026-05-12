@@ -124,6 +124,7 @@ export abstract class SlackChannelState {
   protected streamGenerationByJid = new Map<string, number>();
   protected sealedStreamGenerationByJid = new Map<string, number>();
   protected activeProgress = new Map<string, ActiveProgressState>();
+  protected sealedProgressGenerationByKey = new Map<string, number>();
   protected progressStateLoaded = false;
   protected pendingPermissionPrompts: PendingPermissionPromptMap = new Map();
   protected pendingUserQuestions = new Map<string, PendingUserQuestionState>();
@@ -140,6 +141,24 @@ export abstract class SlackChannelState {
 
   protected progressKey(jid: string, threadId?: string): string {
     return `progress:${this.streamKey(jid, threadId)}`;
+  }
+
+  protected shouldAcceptProgressUpdate(
+    key: string,
+    generation?: number,
+    done?: boolean,
+  ): boolean {
+    if (done || generation === undefined) return true;
+    const sealed = this.sealedProgressGenerationByKey.get(key);
+    return sealed === undefined || generation > sealed;
+  }
+
+  protected markProgressGenerationDone(key: string, generation?: number): void {
+    if (generation === undefined) return;
+    const sealed = this.sealedProgressGenerationByKey.get(key);
+    if (sealed === undefined || generation > sealed) {
+      this.sealedProgressGenerationByKey.set(key, generation);
+    }
   }
 
   protected pendingUserQuestionKey(

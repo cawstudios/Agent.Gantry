@@ -17,10 +17,15 @@ import { nowIso, nowMs, toIso } from '../shared/time/datetime.js';
 import { resolveGroupFolderPath } from '../platform/group-folder.js';
 import { AgentOutput, spawnAgent } from '../runtime/agent-spawn.js';
 import {
+  buildRuntimeRunOptions,
   completeFailedRuntimeSessionRun,
   completeSuccessfulRuntimeSessionRun,
   createRuntimeUserVisibleResultAccumulator,
 } from '../runtime/session-resume-runtime.js';
+import {
+  resolveTurnSelectedMcpServerIds,
+  resolveTurnSelectedSkillIds,
+} from '../runtime/group-run-context.js';
 import { redactProviderSessionHandlesInText } from '../shared/provider-session-redaction.js';
 import {
   collectCompactBoundaryMemory,
@@ -34,19 +39,11 @@ import {
 } from './execution-context.js';
 import { computeNextJobRun } from './schedule-math.js';
 import {
-  isDeliverySent,
-  settleDeliveryAttempt,
-  type DeliverySettlement,
-} from './delivery.js';
-import {
-  resolveJobNotificationRoutes,
-  type NormalizedJobNotificationRoute,
-} from './job-notification-routes.js';
-import {
   logMemoryDreamJobFailure,
   notifySchedulerRunStart,
   notifySchedulerTerminalRunState,
 } from './execution-notifications.js';
+import { deadLetterUnresolvedExecutionContext } from './execution-dead-letter.js';
 import { handleSystemJob } from './system-jobs.js';
 import { createJobExecutionDeletionGuard } from './execution-deletion-guard.js';
 import { runtimeEventTypeForRunStatus } from './run-status-event.js';
@@ -58,17 +55,19 @@ import {
   type NormalizedModelUsage,
 } from './model-resolution.js';
 import { resolveExecutionAllowedTools } from './execution-tool-policy.js';
+import { parseAutonomousToolDenial } from '../shared/autonomous-tool-denial.js';
 import {
   resolveAppSessionForJob,
   resolveAppSessionForTrigger,
   type SchedulerEventAppSession,
 } from './app-session-resolution.js';
+import { publishSchedulerRunCompletion } from './execution-completion-events.js';
 import type {
   JobTurnContext,
   SchedulerDependencies,
   SchedulerDispatchPayload,
 } from './types.js';
-export function resetSchedulerExecutionStateForTests(): void {}
+
 export async function runJob(
   job: Job,
   deps: SchedulerDependencies,
@@ -79,30 +78,38 @@ export async function runJob(
   const runAgentImpl = deps.runAgent ?? spawnAgent;
   const currentJob = await deps.opsRepository.getJobById(job.id);
   if (!currentJob || currentJob.status !== 'active') return;
-  const groups = deps.conversationRoutes();
-  const execution = resolveExecutionContext(currentJob, groups);
-  if (!execution) {
-    const unresolvedConversation =
-      currentJob.execution_context?.conversationJid || 'unknown';
-    await deps.opsRepository.updateJob(currentJob.id, {
-      status: 'dead_lettered',
-      pause_reason: `Execution context route not found: ${unresolvedConversation}`,
-      next_run: null,
-    });
-    deps.onSchedulerChanged?.(currentJob.id);
-    return;
-  }
   const scheduledFor =
     dispatch?.scheduledFor || currentJob.next_run || nowIso();
   const runId = dispatch?.runId ?? randomUUID();
-  const startedAt = nowIso();
+  const startedAtMs = nowMs();
+  const startedAt = toIso(startedAtMs);
+  const runtimeAppId = DEFAULT_JOB_RUNTIME_APP_ID;
+  const groups = deps.conversationRoutes();
+  const execution = resolveExecutionContext(currentJob, groups);
+  if (!execution) {
+    await deadLetterUnresolvedExecutionContext({
+      currentJob,
+      deps,
+      runId,
+      scheduledFor,
+      startedAt,
+      startedAtMs,
+      dispatch,
+      runtimeAppId,
+      control: getRuntimeControlRepository(),
+      publishRuntimeEvent: async (event) => {
+        await getRuntimeEventExchange().publish(event);
+      },
+      logger,
+    });
+    return;
+  }
   const timeoutMs = Math.max(30_000, currentJob.timeout_ms || 300_000);
   const executionMode: JobExecutionMode =
     (executionModeHint ?? currentJob.execution_mode) === 'serialized'
       ? 'serialized'
       : 'parallel';
   const leaseExpiresAt = toIso(nowMs() + timeoutMs + 30_000);
-  const runtimeAppId = DEFAULT_JOB_RUNTIME_APP_ID;
   const jobModelUseKind = modelUseKindForJobSchedule(currentJob.schedule_type);
   const resolvedModel = resolveJobModel(
     currentJob,
@@ -198,95 +205,10 @@ export async function runJob(
   let result: string | null = null;
   let error: string | null = null;
   const resultSummaryAccumulator = createRuntimeUserVisibleResultAccumulator();
-  const userVisibleFallbackAccumulator =
-    createRuntimeUserVisibleResultAccumulator();
   let hasStreamedResult = false;
-  let attemptedStreamingOutputDelivery = false;
-  const routeKey = (route: NormalizedJobNotificationRoute): string =>
-    `${route.conversationJid}\u0000${route.threadId ?? ''}\u0000${route.label}`;
-  const routesWithVisibleStreamingOutput = new Set<string>();
   const appendResultSummary = (delta: string | null | undefined): void => {
     if (!delta) return;
     resultSummaryAccumulator.append(delta);
-  };
-  const notificationRoutes = resolveJobNotificationRoutes(currentJob);
-  const resetStreamingRoutes = (): void => {
-    if (!deps.resetStreaming) return;
-    for (const route of notificationRoutes) {
-      try {
-        deps.resetStreaming(route.conversationJid);
-      } catch (err) {
-        logger.warn(
-          {
-            err,
-            jobId: currentJob.id,
-            conversationJid: route.conversationJid,
-          },
-          'Failed to reset scheduler streaming state',
-        );
-      }
-    }
-  };
-  const deliverStreamingChunk = async (
-    route: NormalizedJobNotificationRoute,
-    rawText: string,
-    options: { done?: boolean } = {},
-  ): Promise<DeliverySettlement> => {
-    const sendStreamingChunk = deps.sendStreamingChunk;
-    if (!sendStreamingChunk) return 'not_delivered';
-    const settlement = await settleDeliveryAttempt(
-      () =>
-        sendStreamingChunk(route.conversationJid, rawText, {
-          ...(route.threadId ? { threadId: route.threadId } : {}),
-          ...(options.done ? { done: true } : {}),
-        }),
-      { scope: 'job-streaming-output', target: route.conversationJid },
-    ).catch((err) => {
-      logger.warn(
-        {
-          err,
-          jobId: currentJob.id,
-          runId,
-          conversationJid: route.conversationJid,
-          done: options.done === true,
-        },
-        'Failed to send scheduler streaming output',
-      );
-      return 'not_delivered' as const;
-    });
-    return settlement;
-  };
-  const deliverFullResultFallback = async (
-    text: string,
-    routes: NormalizedJobNotificationRoute[],
-  ): Promise<boolean> => {
-    if (!text.trim() || routes.length === 0) return false;
-    let delivered = false;
-    for (const route of routes) {
-      try {
-        const settlement = await settleDeliveryAttempt(
-          () =>
-            deps.sendMessage(
-              route.conversationJid,
-              text,
-              route.threadId ? { threadId: route.threadId } : undefined,
-            ),
-          { scope: 'job-output-fallback', target: route.conversationJid },
-        );
-        if (isDeliverySent(settlement)) delivered = true;
-      } catch (err) {
-        logger.warn(
-          {
-            err,
-            jobId: currentJob.id,
-            runId,
-            conversationJid: route.conversationJid,
-          },
-          'Failed to send scheduler full output fallback',
-        );
-      }
-    }
-    return delivered;
   };
   let latestUsage: NormalizedModelUsage | undefined;
   let startNotified = false;
@@ -301,7 +223,6 @@ export async function runJob(
     executionJid: execution.executionJid,
   });
   if (!(await deletionGuard.shouldSuppressDelivery())) {
-    resetStreamingRoutes();
     startNotified = await notifySchedulerRunStart({
       job: currentJob,
       runId,
@@ -329,6 +250,8 @@ export async function runJob(
       let lastStreamingEventMs = 0;
       let turnContext: JobTurnContext | undefined;
       let agentRunId: string | undefined;
+      let latestProviderSessionId: string | undefined;
+      const persistedProviderSessionIds = new Set<string>();
       const flushStreamingEvent = (force = false): void => {
         if (bufferedStreamingChars <= 0) return;
         const timestampMs = nowMs();
@@ -348,6 +271,7 @@ export async function runJob(
             threadId: execution.threadId,
             conversationKind: execution.group.conversationKind,
             memoryUserId,
+            jobId: currentJob.id,
             query: currentJob.prompt,
           }),
         );
@@ -356,11 +280,40 @@ export async function runJob(
         const executionAgentId =
           turnContext?.agentId ??
           agentIdForJobGroupScope(execution.group.folder);
-        const effectiveAllowedTools = await resolveExecutionAllowedTools({
-          job: currentJob,
-          appId: executionAppId,
-          agentId: executionAgentId,
-          toolRepository: deps.getToolRepository?.(),
+        const [
+          effectiveAllowedTools,
+          selectedSkillIds,
+          selectedMcpServerIds,
+          credentialBroker,
+        ] = await Promise.all([
+          resolveExecutionAllowedTools({
+            job: currentJob,
+            appId: executionAppId,
+            agentId: executionAgentId,
+            toolRepository: deps.getToolRepository?.(),
+          }),
+          resolveTurnSelectedSkillIds(deps, {
+            appId: executionAppId,
+            agentId: executionAgentId,
+          }),
+          resolveTurnSelectedMcpServerIds(deps, {
+            appId: executionAppId,
+            agentId: executionAgentId,
+          }),
+          deps.getCredentialBroker?.() ?? Promise.resolve(undefined),
+        ]);
+        const runOptions = buildRuntimeRunOptions({
+          timeoutMs,
+          credentialBroker,
+          skillRepository: deps.getSkillRepository?.(),
+          skillArtifactStore: deps.getSkillArtifactStore?.(),
+          mcpServerRepository: deps.getMcpServerRepository?.(),
+          mcpHostnameLookup: deps.getMcpHostnameLookup?.(),
+          mcpDnsValidationCache: deps.getMcpDnsValidationCache?.(),
+          skillContext: {
+            appId: executionAppId,
+            agentId: executionAgentId,
+          },
         });
         agentRunId = turnContext?.agentSessionId
           ? await deps.opsRepository.createSessionAgentRun?.({
@@ -368,6 +321,33 @@ export async function runJob(
               cause: 'job',
             })
           : undefined;
+        const persistProviderSessionId = async (
+          providerSessionId: string | undefined,
+        ): Promise<void> => {
+          if (
+            !providerSessionId ||
+            !turnContext?.agentSessionId ||
+            persistedProviderSessionIds.has(providerSessionId)
+          ) {
+            return;
+          }
+          const persisted = await deps.opsRepository.setSession(
+            execution.group.folder,
+            providerSessionId,
+            execution.threadId,
+            {
+              conversationJid: execution.executionJid,
+              conversationKind: execution.group.conversationKind,
+              memoryUserId,
+              jobId: currentJob.id,
+              expectedAgentSessionId: turnContext.agentSessionId,
+              expectedAgentSessionResetAt:
+                turnContext.agentSessionResetAt ?? null,
+            },
+          );
+          if (persisted === false) return;
+          persistedProviderSessionIds.add(providerSessionId);
+        };
         const output = await runAgentImpl(
           execution.group,
           {
@@ -383,10 +363,13 @@ export async function runJob(
             memoryDefaultScope,
             isScheduledJob: true,
             jobId: currentJob.id,
+            runId,
             jobModelUseKind,
             assistantName: ASSISTANT_NAME,
             memoryContextBlock: turnContext?.memoryContextBlock,
             allowedTools: effectiveAllowedTools.allowedTools,
+            selectedSkillIds,
+            selectedMcpServerIds,
           },
           (proc, runHandle) =>
             deps.onProcess(
@@ -398,6 +381,13 @@ export async function runJob(
             ),
           async (streamedOutput: AgentOutput) => {
             if (streamedOutput.usage) latestUsage = streamedOutput.usage;
+            if (
+              streamedOutput.status !== 'error' &&
+              streamedOutput.newSessionId
+            ) {
+              latestProviderSessionId = streamedOutput.newSessionId;
+              await persistProviderSessionId(streamedOutput.newSessionId);
+            }
             await collectCompactBoundaryMemory({
               compactBoundary: streamedOutput.compactBoundary,
               agentSessionId: turnContext?.agentSessionId,
@@ -408,7 +398,6 @@ export async function runJob(
             });
             if (streamedOutput.result) {
               hasStreamedResult = true;
-              userVisibleFallbackAccumulator.append(streamedOutput.result);
               appendResultSummary(streamedOutput.result);
               const chunkChars = streamedOutput.result.length;
               bufferedStreamingChars += chunkChars;
@@ -419,7 +408,7 @@ export async function runJob(
               error = streamedOutput.error || 'Unknown error';
             }
           },
-          { timeoutMs },
+          runOptions,
         );
         flushStreamingEvent(true);
         if (output.status === 'error') {
@@ -430,37 +419,25 @@ export async function runJob(
             errorSummary: error,
           });
         } else if (output.result && !hasStreamedResult) {
-          userVisibleFallbackAccumulator.append(output.result);
           appendResultSummary(output.result);
-        }
-        const finalVisibleOutput = userVisibleFallbackAccumulator.snapshot();
-        if (
-          finalVisibleOutput &&
-          deps.sendStreamingChunk &&
-          !currentJob.silent &&
-          !(await deletionGuard.shouldSuppressDelivery())
-        ) {
-          for (const route of notificationRoutes) {
-            attemptedStreamingOutputDelivery = true;
-            const settlement = await deliverStreamingChunk(
-              route,
-              finalVisibleOutput,
-              {
-                done: true,
-              },
-            );
-            if (settlement !== 'not_delivered') {
-              routesWithVisibleStreamingOutput.add(routeKey(route));
-            }
-          }
-          deletionGuard.resetDeliveryDeletionCheck();
         }
         if (!error) {
           const boundedResultSummary = resultSummaryAccumulator.snapshot();
           await completeSuccessfulRuntimeSessionRun({
             ops: deps.opsRepository,
             group: execution.group,
+            chatJid: execution.executionJid,
+            threadId: execution.threadId,
+            conversationKind: execution.group.conversationKind,
+            memoryUserId,
+            jobId: currentJob.id,
             agentSessionId: turnContext?.agentSessionId,
+            agentSessionResetAt: turnContext?.agentSessionResetAt ?? null,
+            providerSessionId: persistedProviderSessionIds.has(
+              output.newSessionId ?? latestProviderSessionId ?? '',
+            )
+              ? undefined
+              : (output.newSessionId ?? latestProviderSessionId),
             runId: agentRunId,
             result: boundedResultSummary,
           });
@@ -505,6 +482,7 @@ export async function runJob(
   const safeErrorSummary = error
     ? redactProviderSessionHandlesInText(error)
     : null;
+  const policyToolDenial = parseAutonomousToolDenial(safeErrorSummary);
   if (deletionGuard.deletedDuringRun) {
     nextRun = null;
   } else if (error) {
@@ -525,10 +503,12 @@ export async function runJob(
       const exceededRetry = retryCount > currentJob.max_retries;
       const exceededConsecutive =
         retryCount >= currentJob.max_consecutive_failures;
-      if (exceededRetry || exceededConsecutive) {
+      if (policyToolDenial || exceededRetry || exceededConsecutive) {
         runStatus = 'dead_lettered';
         nextRun = null;
-        pauseReason = `Paused after ${retryCount} failures. Last error: ${safeErrorSummary || 'Unknown error'}`;
+        pauseReason = policyToolDenial
+          ? `Needs permission: ${policyToolDenial.toolName}`
+          : `Paused after ${retryCount} failures. Last error: ${safeErrorSummary || 'Unknown error'}`;
         await deps.opsRepository.updateJob(currentJob.id, {
           status: 'dead_lettered',
           next_run: null,
@@ -577,26 +557,6 @@ export async function runJob(
     ? null
     : result || resultSummaryAccumulator.snapshot();
   const safeResultSummary = resultSummary ? resultSummary : null;
-  const userVisibleFallbackSnapshot = userVisibleFallbackAccumulator.snapshot();
-  const fallbackRoutes = notificationRoutes.filter(
-    (route) => !routesWithVisibleStreamingOutput.has(routeKey(route)),
-  );
-  let fullResultFallbackDelivered = false;
-  if (
-    runStatus === 'completed' &&
-    !currentJob.silent &&
-    !deletionGuard.deletedDuringRun &&
-    fallbackRoutes.length > 0 &&
-    userVisibleFallbackSnapshot
-  ) {
-    fullResultFallbackDelivered = await deliverFullResultFallback(
-      userVisibleFallbackSnapshot,
-      fallbackRoutes,
-    );
-  }
-  if (attemptedStreamingOutputDelivery || fullResultFallbackDelivered) {
-    resetStreamingRoutes();
-  }
   await deps.opsRepository.completeJobRun(
     runId,
     runStatus,
@@ -608,15 +568,21 @@ export async function runJob(
     retry_count: retryCount,
     pause_reason: pauseReason,
   });
-  if (error?.includes('tool not on autonomous job allowlist'))
+  const toolDenial = policyToolDenial;
+  if (toolDenial)
     await emitJobEvent(RUNTIME_EVENT_TYPES.JOB_TOOL_DENIED, {
       error_summary: safeErrorSummary ? safeErrorSummary.slice(0, 500) : null,
+      denied_tool: toolDenial.toolName,
+      recovery_action: toolDenial.recoveryAction ?? null,
+      recovery_kind: toolDenial.recoveryAction?.startsWith('request_permission')
+        ? 'persistent_capability'
+        : 'job_policy',
     });
   const summary = safeErrorSummary
     ? safeErrorSummary.slice(0, 240)
     : safeResultSummary
       ? safeResultSummary.slice(0, 240)
-      : 'Completed';
+      : 'Completed, no reportable output.';
   logMemoryDreamJobFailure({ job: currentJob, runId, error, logger });
   const notified =
     !(await deletionGuard.shouldSuppressDelivery()) &&
@@ -628,6 +594,7 @@ export async function runJob(
       nextRun,
       retryCount,
       pauseReason,
+      durationMs: Math.max(0, nowMs() - startedAtMs),
       sendMessage: deps.sendMessage,
     }));
   if (notified) {
@@ -649,43 +616,26 @@ export async function runJob(
       ...jobCompletedModelPayload(resolvedModel, latestUsage),
     },
   );
-  try {
-    const control = getRuntimeControlRepository();
-    eventAppSession =
-      eventAppSession ?? (await resolveAppSessionForJob(currentJob, control));
-    if (boundTriggerId) {
-      await control.markTriggerCompleted(
-        boundTriggerId,
-        runStatus === 'completed' ? 'completed' : 'failed',
-      );
-    }
-    const completionEventAppId = eventAppSession?.appId ?? runtimeAppId;
-    if (completionEventAppId) {
-      await getRuntimeEventExchange().publish({
-        appId: completionEventAppId as never,
-        eventType:
-          runStatus === 'completed'
-            ? RUNTIME_EVENT_TYPES.JOB_RUN_COMPLETED
-            : RUNTIME_EVENT_TYPES.JOB_RUN_FAILED,
-        payload: {
-          jobId: currentJob.id,
-          runId,
-          status: runStatus,
-          deliveryState: notified ? 'sent' : 'not_sent',
-          startNotificationState: startNotified ? 'sent' : 'not_sent',
-          summary,
-          nextRun,
-        },
-        actor: 'scheduler',
-        sessionId: eventAppSession?.sessionId as never,
-        jobId: currentJob.id as never,
-        runId: runId as never,
-        triggerId: boundTriggerId,
-        responseMode: eventAppSession?.defaultResponseMode,
-        webhookId: eventAppSession?.defaultWebhookId,
-      });
-    }
-  } catch {} // eslint-disable-line no-empty
+  const control = getRuntimeControlRepository();
+  eventAppSession = await publishSchedulerRunCompletion({
+    currentJob,
+    runId,
+    runStatus,
+    notified,
+    startNotified,
+    summary,
+    nextRun,
+    boundTriggerId,
+    eventAppSession,
+    resolveEventAppSession: () => resolveAppSessionForJob(currentJob, control),
+    markTriggerCompleted: (status) =>
+      control.markTriggerCompleted(boundTriggerId!, status),
+    publishRuntimeEvent: async (event) => {
+      await getRuntimeEventExchange().publish(event);
+    },
+    runtimeAppId,
+    logger,
+  });
   deps.onSchedulerChanged?.(currentJob.id);
   if (
     !deletionGuard.deletedDuringRun &&

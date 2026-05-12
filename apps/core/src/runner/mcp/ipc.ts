@@ -215,6 +215,12 @@ export async function requestBrowserAction(
     context: {
       chatJid,
       timeoutMs,
+      ...(process.env.MYCLAW_JOB_ID
+        ? { jobId: process.env.MYCLAW_JOB_ID }
+        : {}),
+      ...(process.env.MYCLAW_JOB_RUN_ID
+        ? { runId: process.env.MYCLAW_JOB_RUN_ID }
+        : {}),
       ...(threadId ? { threadId } : {}),
       ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
     },

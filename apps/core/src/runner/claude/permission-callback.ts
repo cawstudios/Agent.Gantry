@@ -9,6 +9,9 @@ import {
   IPC_AUTH_TOKEN,
   AGENT_ID,
   APP_ID,
+  CHAT_JID,
+  JOB_ID,
+  JOB_RUN_ID,
   IPC_RESPONSE_KEY_ID,
   PERMISSION_REQUEST_TIMEOUT_MS,
   resolveGroupIpcDir,
@@ -31,11 +34,13 @@ export async function requestPermissionApproval(options: {
   toolUseID?: string;
   agentID?: string;
   suggestions?: unknown[];
+  targetJid?: string;
   threadId?: string;
 }): Promise<PermissionDecision> {
   try {
     const appId = options.appId?.trim() || APP_ID || DEFAULT_RUNNER_APP_ID;
     const agentId = options.agentId?.trim() || AGENT_ID;
+    const targetJid = options.targetJid?.trim() || CHAT_JID;
     const groupIpcDir = resolveGroupIpcDir(options.groupFolder);
     const permissionRequestsDir = path.join(groupIpcDir, 'permission-requests');
     const permissionResponsesDir = path.join(
@@ -54,9 +59,12 @@ export async function requestPermissionApproval(options: {
       ...(agentId ? { agentId } : {}),
       responseNonce,
       sourceAgentFolder: options.groupFolder,
+      ...(targetJid ? { targetJid } : {}),
       ...(process.env.MYCLAW_AGENT_RUN_HANDLE
         ? { runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE }
         : {}),
+      ...(JOB_ID ? { jobId: JOB_ID } : {}),
+      ...(JOB_RUN_ID ? { runId: JOB_RUN_ID } : {}),
       toolName: options.toolName,
       ...(options.title ? { title: options.title } : {}),
       ...(options.displayName ? { displayName: options.displayName } : {}),
@@ -75,6 +83,9 @@ export async function requestPermissionApproval(options: {
       context: {
         appId,
         ...(agentId ? { agentId } : {}),
+        ...(targetJid ? { chatJid: targetJid } : {}),
+        ...(JOB_ID ? { jobId: JOB_ID } : {}),
+        ...(JOB_RUN_ID ? { runId: JOB_RUN_ID } : {}),
         ...(options.threadId ? { threadId: options.threadId } : {}),
         ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
       },
