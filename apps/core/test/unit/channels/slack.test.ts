@@ -714,7 +714,7 @@ describe('Slack channel', () => {
     expect(appRef.current.client.chat.postMessage).not.toHaveBeenCalled();
   });
 
-  it('sends normal Slack done progress as a new message and clears the active handle', async () => {
+  it('edits normal Slack done progress and clears the active handle', async () => {
     const channel = new SlackChannel(
       'xoxb-token',
       'xapp-token',
@@ -727,12 +727,17 @@ describe('Slack channel', () => {
       done: true,
     });
 
-    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledTimes(2);
-    expect(appRef.current.client.chat.postMessage).toHaveBeenNthCalledWith(2, {
+    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledTimes(1);
+    expect(appRef.current.client.chat.postMessage).toHaveBeenNthCalledWith(1, {
       channel: 'C1234567890',
+      text: 'Working on it...',
+    });
+    expect(appRef.current.client.chat.update).toHaveBeenCalledTimes(1);
+    expect(appRef.current.client.chat.update).toHaveBeenCalledWith({
+      channel: 'C1234567890',
+      ts: '1710000000.100200',
       text: 'Done in 10s.',
     });
-    expect(appRef.current.client.chat.update).not.toHaveBeenCalled();
 
     appRef.current.client.chat.postMessage.mockClear();
     appRef.current.client.chat.update.mockClear();

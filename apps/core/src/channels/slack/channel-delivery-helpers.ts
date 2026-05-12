@@ -519,7 +519,7 @@ export async function sendSlackProgressUpdate(input: {
     }
   }
 
-  if (!existing || (input.options.done && !input.options.replaceOnly)) {
+  if (!existing) {
     const sent = (await input.app.client.chat.postMessage({
       channel: input.channelId,
       text: trimmed,
@@ -535,9 +535,6 @@ export async function sendSlackProgressUpdate(input: {
           ? { generation: input.options.generation }
           : {}),
       });
-      input.persistProgress();
-    } else if (existing) {
-      input.activeProgress.delete(input.key);
       input.persistProgress();
     }
     logger.info(

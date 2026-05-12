@@ -363,7 +363,7 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
       );
       return;
     }
-    if (!existing || (options.done && !options.replaceOnly)) {
+    if (!existing) {
       const messageId = await sendTelegramMessageWithResult(
         this.bot.api,
         numericId,
@@ -382,9 +382,6 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
             ? { generation: options.generation }
             : {}),
         });
-        this.persistProgressMessages();
-      } else if (existing) {
-        this.activeProgressMessages.delete(key);
         this.persistProgressMessages();
       }
       logger.info(
