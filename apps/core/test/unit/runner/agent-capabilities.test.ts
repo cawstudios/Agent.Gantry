@@ -88,6 +88,8 @@ describe('agent capability composition', () => {
   it('uses exact safe defaults and myclaw MCP server wiring', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      appId: 'app-main',
+      agentId: 'agent:telegram_team',
       chatJid: 'tg:team',
       groupFolder: 'telegram_team',
       threadId: 'topic-1',
@@ -130,6 +132,8 @@ describe('agent capability composition', () => {
       command: 'node',
       args: ['/tmp/ipc-mcp-stdio.js'],
       env: {
+        MYCLAW_APP_ID: 'app-main',
+        MYCLAW_AGENT_ID: 'agent:telegram_team',
         MYCLAW_CHAT_JID: 'tg:team',
         MYCLAW_GROUP_FOLDER: 'telegram_team',
         MYCLAW_THREAD_ID: 'topic-1',

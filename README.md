@@ -258,7 +258,7 @@ Each memory record is scoped by `appId`, `agentId`, and subject (`user`, `group`
 
 Continuity is explicit runtime resume/current-work state. Durable memory is separate and is retrieved only when it matches the current query:
 
-- provider session resume state
+- canonical session digests and current-work evidence
 - query-relevant remembered facts
 - query-relevant prior decisions
 - user/group preferences that match the current request
@@ -407,7 +407,7 @@ Use these as standalone chat messages:
 /model default
 ```
 
-- `/new` resets the current provider conversation and archives the previous transcript. It preserves durable memory, approved skills, MCP bindings, model choices, and agent configuration; the next user message starts fresh and drives memory retrieval.
+- `/new` resets the current MyClaw session boundary and captures best-effort boundary memory/digests. It preserves durable memory, approved skills, MCP bindings, model choices, and agent configuration; the next user message starts fresh and drives memory retrieval. Transcript export is an explicit debug/export workflow, not provider continuity.
 - `/models` lists the curated model catalog with aliases, provider label, context window, cache support, and default badges.
 - `/model <value>` switches the group model override through the catalog. Friendly aliases are case/punctuation-insensitive; raw provider model IDs are rejected.
 - `/status` shows the current model source, context window usage percentage, cache hit percentage, top context contributors when the SDK reports them, current/cumulative input/output/cache tokens, and estimated cost when reported.
@@ -436,9 +436,9 @@ Key paths:
 - `apps/core/src/runtime/agent-spawn.ts` — host agent execution path
 - `apps/core/src/session/session-commands.ts` — host-managed slash commands
 - `apps/core/src/infrastructure/postgres/schema/` — Postgres runtime, control-plane, job, and memory persistence
-- `~/gantry/agents/shared/CLAUDE.md` — static shared prompt guidance
-- `~/gantry/agents/*/SOUL.md` — per-agent personality prompt
-- `~/gantry/agents/*/CLAUDE.md` — static group-specific prompt guidance
+- Prompt defaults are compiled from built-in runtime/persona/capability/operating guidance plus protected per-agent FileArtifacts
+- Prompt FileArtifact path `<agent-folder>/SOUL` plus `.md` suffix — per-agent personality prompt
+- Prompt FileArtifact path `<agent-folder>/CLAUDE` plus `.md` suffix — stable agent-specific prompt guidance
 - `GANTRY_DATABASE_URL` — Postgres runtime and memory database
 - `ONECLI_DATABASE_URL` — same Postgres database with a separate OneCLI role and `schema=onecli` for broker persistence
 - `SECRET_ENCRYPTION_KEY` — stable generated base64-encoded 32-byte OneCLI broker encryption secret for stateless restarts

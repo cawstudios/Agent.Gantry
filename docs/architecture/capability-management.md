@@ -264,7 +264,7 @@ keys must remain human-readable and API-readable; hashes are metadata, not path
 names. A local skill can be inspected with normal filesystem tools, and the API
 can list/read individual files under `skills:read`.
 
-Claude settings, `CLAUDE_CONFIG_DIR`, MCP handoff files, and provider artifacts
+Claude settings, `CLAUDE_CONFIG_DIR`, MCP handoff files, and FileArtifacts
 are per-run projections. They are compatibility inputs for a provider adapter,
 not durable MyClaw truth.
 

@@ -211,7 +211,6 @@ export interface RuntimeAgentSessionRepository {
     agentSessionResetAt?: string | null;
     providerSessionId?: string;
     externalSessionId?: string;
-    latestArtifactId?: string | null;
     memoryContextBlock?: string;
   }>;
   setSession(
@@ -223,7 +222,6 @@ export interface RuntimeAgentSessionRepository {
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
       jobId?: string;
-      latestArtifactId?: string | null;
       expectedAgentSessionId?: string;
       expectedAgentSessionResetAt?: string | null;
     },

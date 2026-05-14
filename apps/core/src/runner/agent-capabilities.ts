@@ -24,6 +24,8 @@ import {
 
 export interface AgentCapabilityContext {
   mcpServerPath: string;
+  appId?: string;
+  agentId?: string;
   chatJid: string;
   groupFolder: string;
   threadId?: string;
@@ -187,6 +189,8 @@ const myclawMcpProvider: AgentCapabilityProvider = {
   id: 'myclaw-mcp',
   provide: (ctx) => {
     const env: Record<string, string> = {
+      ...(ctx.appId ? { MYCLAW_APP_ID: ctx.appId } : {}),
+      ...(ctx.agentId ? { MYCLAW_AGENT_ID: ctx.agentId } : {}),
       MYCLAW_CHAT_JID: ctx.chatJid,
       MYCLAW_GROUP_FOLDER: ctx.groupFolder,
       MYCLAW_THREAD_ID: ctx.threadId || '',

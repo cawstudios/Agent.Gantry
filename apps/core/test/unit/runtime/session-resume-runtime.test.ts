@@ -97,7 +97,7 @@ describe('session-resume-runtime', () => {
     expect(summary).not.toContain('provider-session:standalone-success');
   });
 
-  it('persists provider resume handles under the job-owned session scope', async () => {
+  it('does not persist provider resume handles under the job-owned session scope', async () => {
     const setSession = vi.fn().mockResolvedValue(true);
     const ops = {
       setSession,
@@ -115,16 +115,6 @@ describe('session-resume-runtime', () => {
       result: 'ok',
     });
 
-    expect(setSession).toHaveBeenCalledWith(
-      'scheduler_agent',
-      'claude-session-job-1',
-      'topic-1',
-      expect.objectContaining({
-        conversationJid: 'tg:scheduler',
-        conversationKind: 'channel',
-        jobId: 'job-1',
-        expectedAgentSessionId: 'agent-session:job-1',
-      }),
-    );
+    expect(setSession).not.toHaveBeenCalled();
   });
 });

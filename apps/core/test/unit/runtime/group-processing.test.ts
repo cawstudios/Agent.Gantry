@@ -890,7 +890,7 @@ describe('createGroupProcessor', () => {
   // =======================================================================
 
   describe('Postgres-authoritative session context', () => {
-    it('passes hydrated memory context and provider session resume id', async () => {
+    it('passes hydrated memory context without provider session resume id', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const { deps } = setupHappyPath({ group });
       (deps.opsRepository as any).getAgentTurnContext = vi
@@ -916,15 +916,15 @@ describe('createGroupProcessor', () => {
         }),
       );
       expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
-        sessionId: 'claude-session-1',
         memoryContextBlock: expect.stringContaining(
           '<myclaw_memory_context>memory</myclaw_memory_context>',
         ),
       });
+      expect(mockSpawnAgent.mock.calls[0][1]).not.toHaveProperty('sessionId');
       expect(mockSpawnAgent.mock.calls[0][4]).toBeUndefined();
     });
 
-    it('persists SDK session ids from final agent output for the next turn', async () => {
+    it('does not persist SDK session ids from final agent output for the next turn', async () => {
       const agentOutput: AgentOutput = {
         status: 'success',
         result: 'response',
@@ -944,19 +944,10 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
-        group.folder,
-        'new-sess-123',
-        null,
-        expect.objectContaining({
-          conversationJid: 'group1@g.us',
-          expectedAgentSessionId: 'agent-session:1',
-          expectedAgentSessionResetAt: null,
-        }),
-      );
+      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
     });
 
-    it('persists SDK session ids from streamed output before the runner exits', async () => {
+    it('does not persist SDK session ids from streamed output before the runner exits', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const { deps } = setupHappyPath({ group });
       (deps.opsRepository as any).getAgentTurnContext = vi
@@ -993,22 +984,13 @@ describe('createGroupProcessor', () => {
       const processing = processGroupMessages('group1@g.us');
       await streamed.promise;
 
-      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
-        group.folder,
-        'streamed-sess',
-        null,
-        expect.objectContaining({
-          conversationJid: 'group1@g.us',
-          expectedAgentSessionId: 'agent-session:1',
-          expectedAgentSessionResetAt: null,
-        }),
-      );
+      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
 
       releaseRunner.resolve({ status: 'success', result: 'text' });
       await processing;
     });
 
-    it('passes direct conversation user scope when looking up and persisting provider sessions', async () => {
+    it('passes direct conversation user scope when looking up turns without persisting provider sessions', async () => {
       const agentOutput: AgentOutput = {
         status: 'success',
         result: 'response',
@@ -1040,18 +1022,7 @@ describe('createGroupProcessor', () => {
           memoryUserId: 'sl:U123',
         }),
       );
-      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
-        group.folder,
-        'dm-sess-123',
-        null,
-        expect.objectContaining({
-          conversationJid: 'sl:D123',
-          conversationKind: 'dm',
-          memoryUserId: 'sl:U123',
-          expectedAgentSessionId: 'agent-session:dm',
-          expectedAgentSessionResetAt: null,
-        }),
-      );
+      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
     });
 
     it('derives memory review approver status from canonical conversation approvers', async () => {
@@ -3652,8 +3623,8 @@ describe('createGroupProcessor', () => {
     });
   });
 
-  describe('double setSession from streamed + final output', () => {
-    it('persists a streamed SDK session ID once even when final output repeats it', async () => {
+  describe('SDK session ids from streamed + final output', () => {
+    it('does not persist a streamed SDK session ID when final output repeats it', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const channel = makeChannel();
       const messages = [makeMessage()];
@@ -3697,20 +3668,10 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.opsRepository.setSession).toHaveBeenCalledTimes(1);
-      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
-        group.folder,
-        'session-42',
-        null,
-        expect.objectContaining({
-          conversationJid: 'group1@g.us',
-          expectedAgentSessionId: 'agent-session:1',
-          expectedAgentSessionResetAt: null,
-        }),
-      );
+      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
     });
 
-    it('does not treat stale streamed provider-session persistence as durable', async () => {
+    it('does not retry stale provider-session persistence from SDK output', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const channel = makeChannel();
       const messages = [makeMessage()];
@@ -3756,27 +3717,7 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.opsRepository.setSession).toHaveBeenCalledTimes(2);
-      expect(deps.opsRepository.setSession).toHaveBeenNthCalledWith(
-        1,
-        group.folder,
-        'session-42',
-        null,
-        expect.objectContaining({
-          expectedAgentSessionId: 'agent-session:1',
-          expectedAgentSessionResetAt: '2026-05-11T00:00:00.000Z',
-        }),
-      );
-      expect(deps.opsRepository.setSession).toHaveBeenNthCalledWith(
-        2,
-        group.folder,
-        'session-42',
-        null,
-        expect.objectContaining({
-          expectedAgentSessionId: 'agent-session:1',
-          expectedAgentSessionResetAt: '2026-05-11T00:00:00.000Z',
-        }),
-      );
+      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
     });
   });
 });

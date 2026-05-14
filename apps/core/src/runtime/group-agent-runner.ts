@@ -183,8 +183,6 @@ export function createGroupAgentRunner(input: {
       sessionThreadId,
     );
     const streamedResult = createRuntimeResultSummaryAccumulator();
-    let latestProviderSessionId: string | undefined;
-    const persistedProviderSessionIds = new Set<string>();
     const turnContext = await ops().getAgentTurnContext?.({
       agentFolder: group.folder,
       conversationJid: chatJid,
@@ -196,31 +194,6 @@ export function createGroupAgentRunner(input: {
           ? buildBoundedMemoryRecallQuery(options.memoryContext.recallQuery)
           : undefined,
     });
-    const persistProviderSessionId = async (
-      providerSessionId: string | undefined,
-    ) => {
-      if (
-        !providerSessionId ||
-        !turnContext?.agentSessionId ||
-        persistedProviderSessionIds.has(providerSessionId)
-      ) {
-        return;
-      }
-      const persisted = await ops().setSession(
-        group.folder,
-        providerSessionId,
-        sessionThreadId,
-        {
-          conversationJid: chatJid,
-          conversationKind: group.conversationKind,
-          memoryUserId: options?.memoryContext?.userId,
-          expectedAgentSessionId: turnContext.agentSessionId,
-          expectedAgentSessionResetAt: turnContext.agentSessionResetAt ?? null,
-        },
-      );
-      if (persisted === false) return;
-      persistedProviderSessionIds.add(providerSessionId);
-    };
     let defaultRuntimeModel: string | undefined;
     const defaultMemoryScope = memoryScopeForConversationKind(
       group.conversationKind,
@@ -258,10 +231,6 @@ export function createGroupAgentRunner(input: {
                 : 'chat default',
               contextUsage: output.contextUsage,
             });
-          }
-          if (output.status !== 'error' && output.newSessionId) {
-            latestProviderSessionId = output.newSessionId;
-            await persistProviderSessionId(output.newSessionId);
           }
           if (output.status !== 'error' && output.result) {
             streamedResult.append(String(output.result));
@@ -366,9 +335,6 @@ export function createGroupAgentRunner(input: {
             allowedTools: configuredAllowedTools,
             selectedSkillIds,
             selectedMcpServerIds,
-            ...(turnContext?.externalSessionId
-              ? { sessionId: turnContext.externalSessionId }
-              : {}),
             assistantName: group.trigger || DEFAULT_ASSISTANT_NAME,
             thinking: group.agentConfig?.thinking,
             memoryContextBlock: agentInput.memoryContextBlock,
@@ -408,11 +374,6 @@ export function createGroupAgentRunner(input: {
         memoryUserId: options?.memoryContext?.userId,
         agentSessionId: turnContext?.agentSessionId,
         agentSessionResetAt: turnContext?.agentSessionResetAt ?? null,
-        providerSessionId: persistedProviderSessionIds.has(
-          output.newSessionId ?? latestProviderSessionId ?? '',
-        )
-          ? undefined
-          : (output.newSessionId ?? latestProviderSessionId),
         runId,
         result:
           output.result == null

@@ -27,7 +27,7 @@ afterEach(async () => {
   vi.doUnmock('@core/infrastructure/logging/logger.js');
   vi.doUnmock('@core/runtime/agent-spawn-host.js');
   vi.doUnmock('@core/runtime/agent-spawn-layout.js');
-  vi.doUnmock('@core/runtime/prompt-profile.js');
+  vi.doUnmock('@core/application/agents/prompt-profile-service.js');
   vi.doUnmock('@core/platform/group-folder.js');
   vi.resetModules();
 
@@ -155,10 +155,10 @@ describe('host child-process runtime smoke', () => {
         }
       },
     }));
-    vi.doMock('@core/runtime/prompt-profile.js', () => ({
-      getPromptProfileService: () => ({
+    vi.doMock('@core/application/agents/prompt-profile-service.js', () => ({
+      PromptProfileService: vi.fn(() => ({
         compileSystemPrompt: () => 'compiled host smoke prompt',
-      }),
+      })),
     }));
     vi.doMock('@core/platform/group-folder.js', () => ({
       resolveGroupFolderPath: () => groupDir,

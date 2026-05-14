@@ -87,7 +87,6 @@ export interface RunAgentOptions {
 
 export interface HostRuntimeContext {
   groupDir: string;
-  globalDir?: string;
   groupIpcDir: string;
   runnerDistDir: string;
 }

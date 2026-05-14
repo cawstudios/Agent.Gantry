@@ -129,6 +129,8 @@ export async function runQuery(
   const workspaceFolder = agentInput.groupFolder;
   const capabilities = composeAgentCapabilities({
     mcpServerPath,
+    appId: agentInput.appId,
+    agentId: agentInput.agentId,
     chatJid: agentInput.chatJid,
     groupFolder: workspaceFolder,
     threadId: agentInput.threadId,
@@ -158,11 +160,7 @@ export async function runQuery(
       effort: queryEffort,
       cwd: WORKSPACE_GROUP_DIR,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      persistSession: !agentInput.isScheduledJob,
-      resume:
-        !agentInput.isScheduledJob && agentInput.sessionId
-          ? agentInput.sessionId
-          : undefined,
+      persistSession: false,
       systemPrompt,
       settings: {
         includeGitInstructions: includeGitInstructionsForPersona(

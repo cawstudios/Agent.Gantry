@@ -399,21 +399,6 @@ export async function completeSuccessfulRuntimeSessionRun(input: {
     });
   }
   if (input.agentSessionId) {
-    if (input.providerSessionId && input.chatJid) {
-      await input.ops.setSession(
-        input.group.folder,
-        input.providerSessionId,
-        input.threadId,
-        {
-          conversationJid: input.chatJid,
-          conversationKind: input.conversationKind,
-          memoryUserId: input.memoryUserId,
-          jobId: input.jobId,
-          expectedAgentSessionId: input.agentSessionId,
-          expectedAgentSessionResetAt: input.agentSessionResetAt ?? null,
-        },
-      );
-    }
     logger.debug(
       {
         group: input.group.name,

@@ -680,7 +680,7 @@ describe('jobs/execution', () => {
     );
   });
 
-  it('persists streamed provider resume handles in the job-owned session scope', async () => {
+  it('does not persist streamed provider resume handles in the job-owned session scope', async () => {
     const job = makeJob();
     const opsRepository = {
       ...makeOpsRepository(job),
@@ -718,20 +718,7 @@ describe('jobs/execution', () => {
       'tg:scheduler',
     );
 
-    expect(opsRepository.setSession).toHaveBeenCalledTimes(1);
-    expect(opsRepository.setSession).toHaveBeenCalledWith(
-      'scheduler_agent',
-      'provider-session:streamed',
-      'thread-scheduled',
-      expect.objectContaining({
-        conversationJid: 'tg:scheduler',
-        conversationKind: undefined,
-        memoryUserId: undefined,
-        jobId: 'job-1',
-        expectedAgentSessionId: 'agent-session:scheduler',
-        expectedAgentSessionResetAt: null,
-      }),
-    );
+    expect(opsRepository.setSession).not.toHaveBeenCalled();
   });
 
   it('inherits Browser for jobs without projecting raw browser MCP tools', async () => {

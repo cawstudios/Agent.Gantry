@@ -110,8 +110,8 @@ Key runner inputs:
 
 - `allowedTools` from `apps/core/src/runner/agent-capabilities.ts`
 - MyClaw MCP server config from `apps/core/src/runner/mcp/server.ts`
-- Claude live-chat session projection (`persistSession: true` and `resume`
-  when a scoped provider session handle exists; scheduled jobs do not resume)
+- Claude SDK stateless session projection (`persistSession: false`; no
+  `resume` or `resumeSessionAt` for live turns or scheduled jobs)
 - working directory and extra directories
 - `canUseTool`, the permission callback that projects each SDK request through
   the canonical tool execution boundary before sensitive tools run

@@ -235,8 +235,6 @@ export async function runJob(
       let lastStreamingEventMs = 0;
       let turnContext: JobTurnContext | undefined;
       let agentRunId: string | undefined;
-      let latestProviderSessionId: string | undefined;
-      const persistedProviderSessionIds = new Set<string>();
       const flushStreamingEvent = (force = false): void => {
         if (bufferedStreamingChars <= 0) return;
         const timestampMs = nowMs();
@@ -328,33 +326,6 @@ export async function runJob(
                 cause: 'job',
               })
             : undefined;
-          const persistProviderSessionId = async (
-            providerSessionId: string | undefined,
-          ): Promise<void> => {
-            if (
-              !providerSessionId ||
-              !turnContext?.agentSessionId ||
-              persistedProviderSessionIds.has(providerSessionId)
-            ) {
-              return;
-            }
-            const persisted = await deps.opsRepository.setSession(
-              execution.group.folder,
-              providerSessionId,
-              execution.threadId,
-              {
-                conversationJid: execution.executionJid,
-                conversationKind: execution.group.conversationKind,
-                memoryUserId,
-                jobId: currentJob.id,
-                expectedAgentSessionId: turnContext.agentSessionId,
-                expectedAgentSessionResetAt:
-                  turnContext.agentSessionResetAt ?? null,
-              },
-            );
-            if (persisted === false) return;
-            persistedProviderSessionIds.add(providerSessionId);
-          };
           const output = await runAgentImpl(
             execution.group,
             {
@@ -393,13 +364,6 @@ export async function runJob(
                 emitJobEvent,
               });
               if (streamedOutput.usage) latestUsage = streamedOutput.usage;
-              if (
-                streamedOutput.status !== 'error' &&
-                streamedOutput.newSessionId
-              ) {
-                latestProviderSessionId = streamedOutput.newSessionId;
-                await persistProviderSessionId(streamedOutput.newSessionId);
-              }
               await collectCompactBoundaryMemory({
                 compactBoundary: streamedOutput.compactBoundary,
                 agentSessionId: turnContext?.agentSessionId,
@@ -481,11 +445,6 @@ export async function runJob(
               jobId: currentJob.id,
               agentSessionId: turnContext?.agentSessionId,
               agentSessionResetAt: turnContext?.agentSessionResetAt ?? null,
-              providerSessionId: persistedProviderSessionIds.has(
-                output.newSessionId ?? latestProviderSessionId ?? '',
-              )
-                ? undefined
-                : (output.newSessionId ?? latestProviderSessionId),
               runId: agentRunId,
               result: boundedResultSummary,
             });

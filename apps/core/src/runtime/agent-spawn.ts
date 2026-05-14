@@ -52,7 +52,10 @@ import {
   revokeIpcResponseSigningKey,
 } from './ipc-auth.js';
 import { getContinuationInputDir } from './continuation-input.js';
-import { getPromptProfileService } from './prompt-profile.js';
+import {
+  PromptProfileService,
+  promptProfileAgentIdForFolder,
+} from '../application/agents/prompt-profile-service.js';
 import { executeRunnerProcess } from './agent-spawn-process.js';
 import { applyAgentEgressNoProxyEnv } from '../shared/no-proxy.js';
 import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
@@ -65,6 +68,7 @@ import { selectedMemoryIpcActionsFromToolRules } from '../shared/memory-ipc-acti
 import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-references.js';
 import { validateAgentToolRuntimeRules } from '../application/agents/agent-tool-runtime-rules.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
+import { getRuntimeFileArtifactStore } from '../adapters/storage/postgres/runtime-store.js';
 
 type RunnerAgentInput = AgentInput & {
   modelCredentialEnv?: Record<string, string>;
@@ -167,19 +171,23 @@ export async function spawnAgent(
       error: allowedToolValidationError,
     };
   }
-  const promptProfileService = getPromptProfileService();
+  const promptProfileService = new PromptProfileService({
+    fileArtifactStore: () => getRuntimeFileArtifactStore(),
+  });
   const agentIdentifier = group.folder.toLowerCase().replace(/_/g, '-');
 
   let compiledSystemPrompt = '';
 
   try {
-    compiledSystemPrompt = promptProfileService.compileSystemPrompt({
-      groupFolder: group.folder,
+    compiledSystemPrompt = await promptProfileService.compileSystemPrompt({
+      agentFolder: group.folder,
       persona: input.persona ?? group.agentConfig?.persona,
+      appId: input.appId || DEFAULT_RUNNER_APP_ID,
+      agentId: input.agentId || promptProfileAgentIdForFolder(group.folder),
     });
   } catch (err) {
     logger.warn(
-      { err, groupFolder: group.folder },
+      { err, agentFolder: group.folder },
       'Failed to compile prompt profile; continuing without custom system prompt',
     );
   }
@@ -279,7 +287,6 @@ export async function spawnAgent(
     }
     llmRuntimeMaterialization = await materializeClaudeRuntime({
       groupDir,
-      globalDir: hostRuntime.globalDir,
       baseTempDir: path.join(groupDir, '.llm-runtime'),
       cleanupPolicy: 'retain-for-debug',
       cliEntryPoint: path.join(packageRoot, 'dist', 'cli', 'index.js'),
@@ -340,7 +347,7 @@ export async function spawnAgent(
     ...pickSafeHostEnv(process.env),
     TZ: TIMEZONE,
     MYCLAW_WORKSPACE_GROUP_DIR: hostRuntime.groupDir,
-    MYCLAW_WORKSPACE_GLOBAL_DIR: hostRuntime.globalDir || '',
+    MYCLAW_WORKSPACE_GLOBAL_DIR: '',
     MYCLAW_GROUP_FOLDER: group.folder,
     MYCLAW_APP_ID: runnerAppId,
     ...(input.agentId ? { MYCLAW_AGENT_ID: input.agentId } : {}),
@@ -428,7 +435,7 @@ export async function spawnAgent(
 
   const runtimeDetails = [
     `groupDir=${hostRuntime.groupDir}`,
-    `globalDir=${hostRuntime.globalDir || '(none)'}`,
+    'globalDir=(none)',
     `ipcInput=${ipcInputDir}`,
     `broker=${hostCredentials.brokerProfile}`,
     `brokerApplied=${hostCredentials.brokerApplied}`,

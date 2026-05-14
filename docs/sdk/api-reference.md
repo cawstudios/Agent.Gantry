@@ -246,7 +246,7 @@ client.agents.mcpServers.disable(agentId, serverId)
 MCP definitions store credential reference names only. Broker-injected values
 are projected into a private per-run config file with `0600` permissions and
 deleted by the runner after startup and by the host on early spawn failures;
-they are not saved in Claude config, provider artifacts, or Postgres rows.
+they are not saved in Claude config, FileArtifacts, or Postgres rows.
 `allowedToolPatterns` is the enforced SDK allowlist for third-party MCP tool
 names. `autoApproveToolPatterns` is session auto-allow scope and must be a
 subset of `allowedToolPatterns` when an explicit allowlist is present.

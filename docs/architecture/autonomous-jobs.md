@@ -131,10 +131,11 @@ tool, pending permission state, total tool calls, browser activity count, and
 streamed-output size diagnostics.
 
 Jobs use a job-owned `AgentSession` keyed by the target agent, source
-conversation/thread, and `jobId`. That gives each job its own provider resume
-handle, run history, and session digests. Durable memory sharing is explicit:
-DM-created jobs extract and hydrate against the trusted DM user subject, while
-channel/group/topic jobs extract and hydrate against the trusted
+conversation/thread, and `jobId`. That gives each job its own run history,
+session digests, and durable MyClaw evidence without provider resume handles.
+Durable memory sharing is explicit: DM-created jobs extract and hydrate against
+the trusted DM user subject, while channel/group/topic jobs extract and hydrate
+against the trusted
 conversation/thread subject. Caller-supplied memory subject overrides are not
 part of job creation or update; the host derives the share target from
 `executionContext`.

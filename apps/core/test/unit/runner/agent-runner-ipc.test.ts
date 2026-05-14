@@ -1306,13 +1306,17 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'resumes persisted SDK sessions for live channel turns',
+    'does not resume or persist SDK sessions for live channel turns',
     async () => {
       const fixture = createRunnerFixture();
 
       const result = await runRunner(
         fixture,
-        baseInput({ sessionId: 'stale-sdk-session' }),
+        baseInput({
+          appId: 'app-runner-test',
+          agentId: 'agent:team',
+          sessionId: 'stale-sdk-session',
+        }),
         {
           TEST_EXIT_AFTER_QUERY: '1',
         },
@@ -1320,15 +1324,21 @@ describe('agent-runner IPC lifecycle', () => {
 
       expect(result.exitCode).toBe(0);
       const call = readRecord(fixture.recordPath).calls[0];
-      expect(call?.persistSession).toBe(true);
-      expect(call?.resume).toBe('stale-sdk-session');
+      expect(call?.persistSession).toBe(false);
+      expect(call?.resume).toBeUndefined();
       expect(call?.resumeSessionAt).toBeUndefined();
+      expect(
+        (call?.mcpServers?.myclaw as { env?: Record<string, string> })?.env,
+      ).toMatchObject({
+        MYCLAW_APP_ID: 'app-runner-test',
+        MYCLAW_AGENT_ID: 'agent:team',
+      });
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
-    'routes /compact through the live streaming SDK session with persistence',
+    'routes /compact through a stateless live streaming SDK query',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1341,7 +1351,33 @@ describe('agent-runner IPC lifecycle', () => {
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.promptKind).toBe('stream');
       expect(call?.streamMessages?.[0]).toBe('/compact');
-      expect(call?.persistSession).toBe(true);
+      expect(call?.persistSession).toBe(false);
+      expect(call?.resume).toBeUndefined();
+      expect(call?.resumeSessionAt).toBeUndefined();
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'does not resume or persist SDK sessions for scheduled job turns',
+    async () => {
+      const fixture = createRunnerFixture();
+
+      const result = await runRunner(
+        fixture,
+        baseInput({
+          sessionId: 'scheduled-sdk-session',
+          isScheduledJob: true,
+          jobId: 'job-1',
+        }),
+        {
+          TEST_EXIT_AFTER_QUERY: '1',
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      const call = readRecord(fixture.recordPath).calls[0];
+      expect(call?.persistSession).toBe(false);
       expect(call?.resume).toBeUndefined();
       expect(call?.resumeSessionAt).toBeUndefined();
     },

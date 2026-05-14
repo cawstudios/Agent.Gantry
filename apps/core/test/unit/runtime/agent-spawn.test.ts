@@ -72,7 +72,6 @@ vi.mock('@core/runtime/agent-spawn-host.js', () => ({
   }),
   prepareHostRuntimeContext: vi.fn(() => ({
     groupDir: '/tmp/myclaw-test-data/agents/test-group',
-    globalDir: '/tmp/myclaw-test-data/agents/shared',
     groupIpcDir: '/tmp/myclaw-test-data/ipc/test-group',
     runnerDistDir: '/tmp/myclaw-home/dist/runner',
   })),
@@ -115,10 +114,18 @@ vi.mock('@core/runtime/agent-spawn-layout.js', () => ({
 }));
 
 // Mock prompt-profile
-vi.mock('@core/runtime/prompt-profile.js', () => ({
-  getPromptProfileService: vi.fn(() => ({
-    compileSystemPrompt: vi.fn(() => ''),
-  })),
+vi.mock('@core/application/agents/prompt-profile-service.js', () => ({
+  PromptProfileService: vi.fn(function PromptProfileService() {
+    return {
+      compileSystemPrompt: vi.fn(() => ''),
+    };
+  }),
+  promptProfileAgentIdForFolder: (agentFolder: string) =>
+    `agent:${agentFolder}`,
+}));
+
+vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => ({
+  getRuntimeFileArtifactStore: vi.fn(() => ({})),
 }));
 
 // Mock platform
@@ -169,7 +176,7 @@ import { getEffectiveModelConfig } from '@core/config/index.js';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import type { ConversationRoute } from '@core/domain/types.js';
-import { getPromptProfileService } from '@core/runtime/prompt-profile.js';
+import { PromptProfileService } from '@core/application/agents/prompt-profile-service.js';
 import { logger } from '@core/infrastructure/logging/logger.js';
 import { getHostRuntimeCredentialEnv } from '@core/runtime/agent-spawn-host.js';
 import { createSignedIpcRequestEnvelope } from '@core/runner/mcp/signing.js';
@@ -359,10 +366,6 @@ describe('agent-spawn timeout behavior', () => {
         `${input.groupDir}/.claude/settings.json`,
         `${input.groupDir}/.claude/skills`,
         `${input.groupDir}/skills`,
-        `${input.globalDir}/.mcp.json`,
-        `${input.globalDir}/.claude/settings.json`,
-        `${input.globalDir}/.claude/skills`,
-        `${input.globalDir}/skills`,
         `${input.packageRoot}/.claude/skills`,
         `${input.packageRoot}/.codex/skills`,
         `${input.packageRoot}/.agents/skills`,
@@ -803,9 +806,13 @@ describe('agent-spawn timeout behavior', () => {
   });
 
   it('passes compiled system prompt through runner stdin for normal message runs', async () => {
-    vi.mocked(getPromptProfileService).mockReturnValueOnce({
-      compileSystemPrompt: vi.fn(() => 'compiled profile prompt'),
-    } as any);
+    vi.mocked(PromptProfileService).mockImplementationOnce(
+      function PromptProfileService() {
+        return {
+          compileSystemPrompt: vi.fn(() => 'compiled profile prompt'),
+        };
+      } as never,
+    );
     const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
 
     const resultPromise = spawnAgent(testGroup, testInput, () => {});
@@ -848,9 +855,13 @@ describe('agent-spawn timeout behavior', () => {
   });
 
   it('keeps memory-derived injection text out of compiled system prompt assembly', async () => {
-    vi.mocked(getPromptProfileService).mockReturnValueOnce({
-      compileSystemPrompt: vi.fn(() => 'static profile only'),
-    } as any);
+    vi.mocked(PromptProfileService).mockImplementationOnce(
+      function PromptProfileService() {
+        return {
+          compileSystemPrompt: vi.fn(() => 'static profile only'),
+        };
+      } as never,
+    );
     const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
 
     const resultPromise = spawnAgent(
@@ -1190,9 +1201,6 @@ describe('agent-spawn timeout behavior', () => {
         '/tmp/myclaw-test-data/agents/test-group/.claude/settings.json',
         '/tmp/myclaw-test-data/agents/test-group/.claude/skills',
         '/tmp/myclaw-test-data/agents/test-group/skills',
-        '/tmp/myclaw-test-data/agents/shared/.mcp.json',
-        '/tmp/myclaw-test-data/agents/shared/.claude/settings.json',
-        '/tmp/myclaw-test-data/agents/shared/skills',
         '/tmp/myclaw-home/dist/runner/claude/.claude/skills',
         '/tmp/myclaw-home/dist/runner/claude/.codex/skills',
         '/tmp/myclaw-home/dist/runner/claude/.agents/skills',
@@ -1461,11 +1469,15 @@ describe('agent-spawn timeout behavior', () => {
 
   it('continues without custom system prompt when compileSystemPrompt throws (line 70)', async () => {
     // Make compileSystemPrompt throw
-    vi.mocked(getPromptProfileService).mockReturnValueOnce({
-      compileSystemPrompt: vi.fn(() => {
-        throw new Error('Bad template');
-      }),
-    } as any);
+    vi.mocked(PromptProfileService).mockImplementationOnce(
+      function PromptProfileService() {
+        return {
+          compileSystemPrompt: vi.fn(() => {
+            throw new Error('Bad template');
+          }),
+        };
+      } as never,
+    );
 
     const resultPromise = spawnAgent(testGroup, testInput, () => {});
     await vi.advanceTimersByTimeAsync(10);
@@ -1482,7 +1494,7 @@ describe('agent-spawn timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ groupFolder: 'test-group' }),
+      expect.objectContaining({ agentFolder: 'test-group' }),
       'Failed to compile prompt profile; continuing without custom system prompt',
     );
   });

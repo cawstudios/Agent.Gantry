@@ -1,11 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import {
-  AGENTS_DIR,
-  DATA_DIR,
-  getCredentialBrokerRuntimeConfig,
-} from '../config/index.js';
+import { DATA_DIR, getCredentialBrokerRuntimeConfig } from '../config/index.js';
 import { resolveExternalCredentialBaseUrl } from '../config/credentials/broker-url-policy.js';
 import { getAgentCredentialInjection } from '../application/credentials/agent-credential-service.js';
 import { createAgentCredentialBroker } from '../adapters/credentials/agent-credential-broker-factory.js';
@@ -108,14 +104,8 @@ export function prepareHostRuntimeContext(
   const groupIpcDir = resolveGroupIpcPath(group.folder);
   ensureGroupIpcLayout(groupIpcDir);
 
-  const sharedDirCandidate = path.join(AGENTS_DIR, 'shared');
-  const globalDir = fs.existsSync(sharedDirCandidate)
-    ? sharedDirCandidate
-    : undefined;
-
   return {
     groupDir,
-    globalDir,
     groupIpcDir,
     runnerDistDir,
   };
