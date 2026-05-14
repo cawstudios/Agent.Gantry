@@ -318,6 +318,32 @@ function parseRedirect(
     cursor += 1;
   }
   while (/\s/.test(command[cursor] ?? '')) cursor += 1;
+  if (command[cursor] === '&') {
+    const dupStart = cursor;
+    cursor += 1;
+    if (command[cursor] === '-') {
+      cursor += 1;
+    } else {
+      const fdStart = cursor;
+      while (/\d/.test(command[cursor] ?? '')) cursor += 1;
+      if (cursor === fdStart) {
+        return {
+          ok: false,
+          reason: 'Bash redirection file descriptor target missing.',
+        };
+      }
+    }
+    const target = command.slice(dupStart, cursor).trim();
+    return {
+      ok: true,
+      redirect: {
+        operator,
+        target,
+        destructive: false,
+      },
+      nextIndex: cursor - 1,
+    };
+  }
   const targetStart = cursor;
   while (
     cursor < command.length &&

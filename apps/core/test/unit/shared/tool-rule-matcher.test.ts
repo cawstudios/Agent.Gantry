@@ -229,6 +229,33 @@ describe('autonomous tool rule matcher', () => {
     });
   });
 
+  it('allows non-destructive stderr redirection used by common CLI probes', () => {
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['Bash(gog sheets get *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            'gog sheets get 12s6uzwLDLV-DVcTH6XBa5vV3FZJUo04fLm0npfgACb4 "\'Bot Recommendation\'!A1:G5000" --json --account ravi@knacklabs.ai 2>&1',
+        },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['Bash(gog sheets get *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            'gog sheets get 12s6uzwLDLV-DVcTH6XBa5vV3FZJUo04fLm0npfgACb4 "\'Bot Recommendation\'!A1:G5000" --json --account ravi@knacklabs.ai 2>&1 | head -20',
+        },
+      }),
+    ).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining('head -20'),
+    });
+  });
+
   it('rejects absolute-path Bash meta executors in persistent scopes', () => {
     for (const rule of [
       'Bash(/bin/sh -c npm)',

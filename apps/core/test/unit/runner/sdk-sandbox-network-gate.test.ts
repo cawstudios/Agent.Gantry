@@ -34,7 +34,7 @@ function sha256(value: string): string {
 
 function makeGate(nowRef: { value: number }): SdkSandboxNetworkGate {
   return createSdkSandboxNetworkGate(runnerInput, {
-    ttlMs: 30_000,
+    ttlMs: 300_000,
     nowMs: () => nowRef.value,
   });
 }
@@ -77,12 +77,12 @@ describe('sdk sandbox network gate', () => {
       hostHash: sha256('registry.npmjs.org'),
       commandHash: sha256('npm test --runInBand'),
       tokenCreatedAtMs: 1_000,
-      tokenExpiresAtMs: 31_000,
-      tokenTtlMs: 30_000,
+      tokenExpiresAtMs: 301_000,
+      tokenTtlMs: 300_000,
     });
   });
 
-  it('consumes a token and denies the second SDK network prompt', () => {
+  it('allows repeated SDK network prompts for the same recent Bash approval', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now);
 
@@ -103,14 +103,13 @@ describe('sdk sandbox network gate', () => {
     );
 
     expect(second).toEqual({
-      behavior: 'deny',
-      message:
-        'SDK requested sandbox network access before any Bash tool call was allowed by MyClaw. Approve the scoped Bash(...) command through MyClaw first.',
-      interrupt: false,
+      behavior: 'allow',
+      updatedInput: { host: 'example.com' },
     });
     expect(latestPayload()).toMatchObject({
-      decision: 'sdk_network_gate_denied',
+      decision: 'sdk_network_gate_suppressed',
       networkToolUseID: 'toolu_network_2',
+      bashToolUseID: 'toolu_bash_1',
       hostHash: sha256('example.com'),
       expiredTokenCount: 0,
     });
@@ -195,7 +194,7 @@ describe('sdk sandbox network gate', () => {
       { command: 'npm test --runInBand' },
       { toolUseID: 'toolu_bash_1' },
     );
-    now.value = 31_001;
+    now.value = 301_001;
     const decision = gate.decide(
       'SandboxNetworkAccess',
       { host: 'registry.npmjs.org' },
@@ -219,7 +218,7 @@ describe('sdk sandbox network gate', () => {
       { command: 'npm test first' },
       { toolUseID: 'toolu_bash_expired' },
     );
-    now.value = 31_001;
+    now.value = 301_001;
     gate.rememberAllowedTool(
       'Bash',
       { command: 'npm test second' },

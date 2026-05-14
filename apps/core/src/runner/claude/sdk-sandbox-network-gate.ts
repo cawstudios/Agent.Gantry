@@ -30,7 +30,6 @@ interface SdkSandboxNetworkApprovalToken {
   commandHash: string;
   createdAtMs: number;
   expiresAtMs: number;
-  consumed: boolean;
 }
 
 export interface SdkSandboxNetworkGateOptions {
@@ -38,7 +37,7 @@ export interface SdkSandboxNetworkGateOptions {
   nowMs?: () => number;
 }
 
-const DEFAULT_SANDBOX_NETWORK_TOKEN_TTL_MS = 30_000;
+const DEFAULT_SANDBOX_NETWORK_TOKEN_TTL_MS = 300_000;
 
 export function createSdkSandboxNetworkGate(
   agentInput: AgentRunnerInput,
@@ -94,7 +93,7 @@ export function createSdkSandboxNetworkGate(
     let expired = 0;
     for (let index = tokens.length - 1; index >= 0; index -= 1) {
       const token = tokens[index];
-      if (!token || token.consumed) {
+      if (!token) {
         tokens.splice(index, 1);
         continue;
       }
@@ -125,7 +124,6 @@ export function createSdkSandboxNetworkGate(
         commandHash: hashString(command),
         createdAtMs,
         expiresAtMs: createdAtMs + ttlMs,
-        consumed: false,
       });
     },
     decide(toolName, input, permissionOpts) {
@@ -137,7 +135,7 @@ export function createSdkSandboxNetworkGate(
       const parentToolUseID =
         permissionOpts.parentToolUseID?.trim() ??
         sandboxNetworkParentToolUseID(input);
-      const activeTokens = tokens.filter((candidate) => !candidate.consumed);
+      const activeTokens = tokens;
       const token = parentToolUseID
         ? activeTokens.find(
             (candidate) => candidate.bashToolUseID === parentToolUseID,
@@ -146,12 +144,10 @@ export function createSdkSandboxNetworkGate(
           ? activeTokens[0]
           : undefined;
       if (token) {
-        token.consumed = true;
-        pruneExpiredTokens(now);
         writeEvent({
           decision: 'sdk_network_gate_suppressed',
           reason:
-            'SDK requested network approval for the Bash invocation MyClaw already allowed; suppressing duplicate user approval.',
+            'SDK requested network approval for a recently approved Bash invocation; suppressing duplicate user approval.',
           networkToolUseID: permissionOpts.toolUseID,
           bashToolUseID: token.bashToolUseID,
           hostHash,

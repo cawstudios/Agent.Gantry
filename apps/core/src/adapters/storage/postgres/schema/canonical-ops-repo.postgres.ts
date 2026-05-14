@@ -351,6 +351,7 @@ export class PostgresRuntimeRepositoryBundle
     if (!session) return undefined;
     const runId = `agent-run:${randomUUID()}`;
     const now = nowIso();
+    const jobId = input.cause === 'job' ? undefined : session.jobId;
     await repositories.agentRuns.saveAgentRun({
       id: runId,
       appId: session.appId,
@@ -359,7 +360,7 @@ export class PostgresRuntimeRepositoryBundle
       sessionId: session.id,
       conversationId: session.conversationId,
       threadId: session.threadId,
-      jobId: session.jobId,
+      jobId,
       llmProfileId: DEFAULT_LLM_PROFILE_ID,
       permissionDecisionIds: [],
       cause: input.cause,

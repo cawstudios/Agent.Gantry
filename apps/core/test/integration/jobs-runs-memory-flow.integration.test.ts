@@ -160,6 +160,36 @@ maybeDescribe('jobs, runs, memory, and scheduler flow', () => {
       status: 'completed',
       result_summary: 'runtime flow completed',
     });
+    const persistedRuns = await runtime.service.db
+      .select({
+        id: pgSchema.agentRunsPostgres.id,
+        sessionId: pgSchema.agentRunsPostgres.sessionId,
+        jobId: pgSchema.agentRunsPostgres.jobId,
+        cause: pgSchema.agentRunsPostgres.cause,
+      })
+      .from(pgSchema.agentRunsPostgres);
+    expect(
+      persistedRuns
+        .filter((row) => row.jobId === job.id)
+        .map((row) => ({
+          id: row.id,
+          sessionId: row.sessionId,
+          cause: row.cause,
+        })),
+    ).toEqual([
+      {
+        id: runs[0]?.run_id,
+        sessionId: null,
+        cause: 'job',
+      },
+    ]);
+    expect(
+      persistedRuns.find((row) => row.id.startsWith('agent-run:')),
+    ).toMatchObject({
+      sessionId: expect.any(String),
+      jobId: null,
+      cause: 'job',
+    });
     await expect(runtime.ops.getJobById(job.id)).resolves.toMatchObject({
       status: 'active',
       last_run: expect.any(String),

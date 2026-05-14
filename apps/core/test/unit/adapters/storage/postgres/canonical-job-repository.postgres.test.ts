@@ -231,4 +231,22 @@ describe('PostgresCanonicalJobRepository', () => {
     });
     expect(where).toHaveBeenCalled();
   });
+
+  it('filters nested session agent runs out of scheduler run lists', async () => {
+    const limit = vi.fn(async () => []);
+    const orderBy = vi.fn(() => ({ limit }));
+    const where = vi.fn(() => ({ orderBy }));
+    const dynamic = vi.fn(() => ({ where, orderBy }));
+    const from = vi.fn(() => ({ $dynamic: dynamic }));
+    const db = { select: vi.fn(() => ({ from })) };
+    const repository = new PostgresCanonicalJobRepository(db as never);
+
+    await repository.listRuns('job-1');
+
+    expect(where).toHaveBeenCalledTimes(1);
+    const predicate = where.mock.calls[0]?.[0];
+    const predicateShape = flattenSqlShape(predicate);
+    expect(predicateShape).toContain('job_id');
+    expect(predicateShape).toContain('session_id');
+  });
 });

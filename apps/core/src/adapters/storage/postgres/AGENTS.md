@@ -29,3 +29,7 @@
   serialized/parallel job modes, or repository DTO fields that project an
   execution mode; pg-boss scheduling uses one durable jobs queue and runtime
   concurrency is handled outside the persisted job shape.
+- Scheduled job sessions may carry `jobId` for memory and execution context,
+  but nested provider/session `agent-run:*` rows must not copy that `jobId`.
+  Keep job-scoped run lists and health metadata tied to the scheduler lifecycle
+  run row only.
