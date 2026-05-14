@@ -122,6 +122,7 @@ export class PgBossSchedulerEngine {
     this.boss = boss;
     await this.ensureQueues();
     const queuePolicy = getRuntimeQueueConfig();
+    await this.releaseInterruptedStartupLeases();
     await boss.work<SchedulerDispatchPayload>(
       SCHEDULER_QUEUE,
       {
@@ -131,7 +132,6 @@ export class PgBossSchedulerEngine {
       },
       (jobs) => this.processBossJobs(jobs),
     );
-    await this.releaseInterruptedStartupLeases();
     await this.syncAllJobs();
     this.ready = true;
     this.startMaintenanceTimer();
@@ -408,7 +408,7 @@ export class PgBossSchedulerEngine {
       const current = await this.deps.opsRepository.getJobById(payload.jobId);
       if (!current) continue;
       const queueJid = schedulerQueueJid(current.group_scope, current.id);
-      const releaseSlot = acquireRunSlot(current.group_scope);
+      const releaseSlot = await acquireRunSlot(current.group_scope);
       try {
         await this.callbacks.runJob(current, this.deps, queueJid, payload);
       } catch (err) {

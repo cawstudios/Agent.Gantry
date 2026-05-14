@@ -1530,6 +1530,7 @@ describe('jobs/execution', () => {
     expect(closeBrowserSession).toHaveBeenCalledWith(
       expect.stringMatching(/^c-scheduler_agent-/),
     );
+    expect(opsRepository.listRecentJobEvents).toHaveBeenCalledTimes(1);
     expect(runtimeStoreMock.publish).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'job.tool_activity',

@@ -49,6 +49,7 @@ export type {
   JobHealthState,
   JobKind,
   JobRecord,
+  JobSetup,
   JobStatus,
   JobTriggerWaitResult,
   ListJobEventsInput,

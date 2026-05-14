@@ -524,7 +524,8 @@ export async function runJob(
   }
   if (
     !deletionGuard.deletedDuringRun &&
-    requiredToolsIncludeBrowser(currentJob.required_tools ?? [])
+    requiredToolsIncludeBrowser(currentJob.required_tools ?? []) &&
+    diagnostics.browserActivityCount <= 0
   ) {
     diagnostics.browserActivityCount = await countBrowserActivityForRun({
       deps,

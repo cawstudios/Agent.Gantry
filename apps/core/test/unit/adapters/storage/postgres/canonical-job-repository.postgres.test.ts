@@ -170,6 +170,81 @@ describe('PostgresCanonicalJobRepository', () => {
     expect(tx.update).not.toHaveBeenCalled();
   });
 
+  it('retries generated run short ids after a concurrent insert wins the same id', async () => {
+    const graphSelectLimit = vi.fn(async () => [
+      {
+        agentId: 'agent:scheduler_agent',
+        targetJson: JSON.stringify({
+          executionContext: { groupScope: 'scheduler_agent' },
+        }),
+      },
+    ]);
+    const nextShortIdLimit = vi
+      .fn()
+      .mockResolvedValueOnce([{ nextShortId: 7 }])
+      .mockResolvedValueOnce([{ nextShortId: 8 }]);
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: graphSelectLimit })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: nextShortIdLimit })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: nextShortIdLimit })),
+        })),
+      });
+    const returning = vi
+      .fn()
+      .mockRejectedValueOnce({
+        code: '23505',
+        constraint: 'idx_agent_runs_job_short_id_unique',
+      })
+      .mockResolvedValueOnce([{ id: 'run-1' }]);
+    const values = vi.fn(() => ({ returning }));
+    const insert = vi.fn(() => ({ values }));
+    const db = { select, insert };
+    const repository = new PostgresCanonicalJobRepository(db as never);
+    (
+      repository as unknown as {
+        graph: { ensureAgentExists: typeof vi.fn };
+      }
+    ).graph = {
+      ensureAgentExists: vi.fn(async () => 'agent:scheduler_agent'),
+    };
+
+    await expect(
+      repository.insertRun({
+        run_id: 'run-1',
+        job_id: 'job-1',
+        scheduled_for: '2026-05-12T10:00:00.000Z',
+        started_at: '2026-05-12T10:00:00.000Z',
+        ended_at: null,
+        status: 'running',
+        result_summary: null,
+        error_summary: null,
+        retry_count: 0,
+        notified_at: null,
+      }),
+    ).resolves.toBe(true);
+
+    expect(returning).toHaveBeenCalledTimes(2);
+    expect(values).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ shortId: 7 }),
+    );
+    expect(values).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ shortId: 8 }),
+    );
+  });
+
   it('ensures job agents without overwriting the canonical agent display name', async () => {
     const db = makeInsertOnlyDb();
     const repository = new PostgresCanonicalJobRepository(db as never);

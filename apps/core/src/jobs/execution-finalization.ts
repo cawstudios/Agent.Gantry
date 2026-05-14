@@ -17,6 +17,8 @@ import {
 import { notifyJobSetupRequired } from './execution-readiness.js';
 import type { SchedulerDependencies } from './types.js';
 
+const MAX_RETRY_BACKOFF_MS = 30 * 24 * 60 * 60 * 1000;
+
 export type SchedulerRunStatus =
   | 'completed'
   | 'failed'
@@ -232,6 +234,6 @@ function retryBackoffMs(job: Job, retryCount: number): number {
   const multiplier = Math.max(1, 2 ** cappedExponent);
   const rawDelay = baseBackoff * multiplier;
   return Number.isFinite(rawDelay)
-    ? Math.min(rawDelay, 30 * 24 * 60 * 60 * 1000)
-    : 30 * 24 * 60 * 60 * 1000;
+    ? Math.min(rawDelay, MAX_RETRY_BACKOFF_MS)
+    : MAX_RETRY_BACKOFF_MS;
 }

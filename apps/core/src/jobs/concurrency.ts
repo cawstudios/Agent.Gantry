@@ -1,7 +1,18 @@
 const activeParallelRunsByGroupScope = new Map<string, number>();
 
-function acquireParallelRunSlot(groupScope: string): () => void {
+const DEFAULT_MAX_PARALLEL_RUNS_PER_GROUP = 1;
+const RUN_SLOT_RETRY_DELAY_MS = 100;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function tryAcquireParallelRunSlot(
+  groupScope: string,
+  maxParallelRuns: number,
+): (() => void) | null {
   const current = activeParallelRunsByGroupScope.get(groupScope) || 0;
+  if (current >= maxParallelRuns) return null;
   activeParallelRunsByGroupScope.set(groupScope, current + 1);
   let released = false;
   return () => {
@@ -16,8 +27,19 @@ function acquireParallelRunSlot(groupScope: string): () => void {
   };
 }
 
-export function acquireRunSlot(groupScope: string): () => void {
-  return acquireParallelRunSlot(groupScope);
+export async function acquireRunSlot(
+  groupScope: string,
+  maxParallelRuns = DEFAULT_MAX_PARALLEL_RUNS_PER_GROUP,
+): Promise<() => void> {
+  const normalizedMaxParallelRuns = Math.max(1, Math.floor(maxParallelRuns));
+  for (;;) {
+    const release = tryAcquireParallelRunSlot(
+      groupScope,
+      normalizedMaxParallelRuns,
+    );
+    if (release) return release;
+    await delay(RUN_SLOT_RETRY_DELAY_MS);
+  }
 }
 
 export function resetSchedulerRunSlots(): void {

@@ -1,6 +1,5 @@
+import { RUNTIME_EVENT_TYPES } from '../../domain/events/runtime-event-types.js';
 import type { AgentRunnerInput, AgentRunnerOutput } from './types.js';
-
-const SANDBOX_BLOCKED_EVENT_TYPE = 'sandbox.blocked';
 
 export function sandboxBlockedRuntimeEvents(
   agentInput: AgentRunnerInput,
@@ -8,7 +7,7 @@ export function sandboxBlockedRuntimeEvents(
 ): NonNullable<AgentRunnerOutput['runtimeEvents']> {
   return [
     {
-      eventType: SANDBOX_BLOCKED_EVENT_TYPE,
+      eventType: RUNTIME_EVENT_TYPES.SANDBOX_BLOCKED,
       appId: agentInput.appId,
       agentId: agentInput.agentId,
       runId: agentInput.runId,

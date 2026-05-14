@@ -260,9 +260,6 @@ function isBrowserToolActivity(payload: Record<string, unknown>): boolean {
   }
   const publicTool = stringValue(payload.public_tool);
   const action = stringValue(payload.action);
-  if (payload.satisfies_required_tool === true) {
-    return isBrowserGatewayActivity(publicTool, action);
-  }
   return isBrowserGatewayActivity(publicTool, action);
 }
 

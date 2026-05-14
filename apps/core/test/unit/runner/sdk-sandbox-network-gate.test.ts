@@ -139,7 +139,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('uses the most recent Bash approval when SDK omits a parent id', () => {
+  it('denies network prompts without a parent id when multiple Bash approvals are active', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now);
 
@@ -155,20 +155,16 @@ describe('sdk sandbox network gate', () => {
       { toolUseID: 'toolu_bash_2' },
     );
 
-    const latest = gate.decide(
+    const ambiguous = gate.decide(
       'SandboxNetworkAccess',
       { host: 'registry.npmjs.org' },
       { toolUseID: 'toolu_network_1' },
     );
-    expect(latest).toEqual({
-      behavior: 'allow',
-      updatedInput: { host: 'registry.npmjs.org' },
-    });
+    expect(ambiguous?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
-      decision: 'sdk_network_gate_suppressed',
-      bashToolUseID: 'toolu_bash_2',
+      decision: 'sdk_network_gate_denied',
       networkToolUseID: 'toolu_network_1',
-      commandHash: sha256('npm test second'),
+      expiredTokenCount: 0,
     });
 
     const matched = gate.decide(

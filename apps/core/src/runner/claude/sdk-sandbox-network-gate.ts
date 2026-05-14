@@ -136,6 +136,22 @@ export function createSdkSandboxNetworkGate(
         permissionOpts.parentToolUseID?.trim() ??
         sandboxNetworkParentToolUseID(input);
       const activeTokens = tokens;
+      if (!parentToolUseID && activeTokens.length > 1) {
+        const reason =
+          'SDK requested sandbox network access without a parent Bash tool-use id while multiple Bash approvals are active.';
+        writeEvent({
+          decision: 'sdk_network_gate_denied',
+          reason,
+          networkToolUseID: permissionOpts.toolUseID,
+          hostHash,
+          expiredTokenCount,
+        });
+        return {
+          behavior: 'deny',
+          message: `${reason} Approve the scoped Bash(...) command through MyClaw first.`,
+          interrupt: false,
+        };
+      }
       const token = parentToolUseID
         ? activeTokens.find(
             (candidate) => candidate.bashToolUseID === parentToolUseID,
@@ -144,13 +160,10 @@ export function createSdkSandboxNetworkGate(
           ? latestToken(activeTokens)
           : undefined;
       if (token) {
-        const matchedWithoutParent =
-          !parentToolUseID && activeTokens.length > 1;
         writeEvent({
           decision: 'sdk_network_gate_suppressed',
-          reason: matchedWithoutParent
-            ? 'SDK requested network approval without a parent Bash tool-use id; suppressing duplicate user approval for the most recent allowed Bash invocation.'
-            : 'SDK requested network approval for a recently approved Bash invocation; suppressing duplicate user approval.',
+          reason:
+            'SDK requested network approval for a recently approved Bash invocation; suppressing duplicate user approval.',
           networkToolUseID: permissionOpts.toolUseID,
           bashToolUseID: token.bashToolUseID,
           hostHash,

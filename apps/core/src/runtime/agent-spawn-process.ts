@@ -8,6 +8,7 @@ import {
   IDLE_TIMEOUT,
   LOG_LEVEL,
 } from '../config/index.js';
+import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
 import { logger, redactString } from '../infrastructure/logging/logger.js';
 import { AgentOutput, RunnerProcessSpec } from './agent-spawn-types.js';
 import { formatDuration } from '../shared/human-format.js';
@@ -104,7 +105,7 @@ function readScheduledJobHeartbeat(
   output: AgentOutput,
 ): ScheduledJobHeartbeatPayload | null {
   for (const event of output.runtimeEvents ?? []) {
-    if (event.eventType !== 'job.heartbeat') continue;
+    if (event.eventType !== RUNTIME_EVENT_TYPES.JOB_HEARTBEAT) continue;
     const payload = event.payload;
     if (!payload || typeof payload !== 'object') return null;
     const record = payload as Record<string, unknown>;

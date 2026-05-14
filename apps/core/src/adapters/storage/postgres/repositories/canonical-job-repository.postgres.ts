@@ -10,13 +10,13 @@ import * as pgSchema from '../schema/schema.js';
 import {
   CANONICAL_APP_ID,
   type CanonicalDb,
-  DEFAULT_LLM_PROFILE_ID,
   PostgresCanonicalGraphRepository,
   configVersionIdForAgent,
   parseJson,
 } from './canonical-graph-repository.postgres.js';
 // prettier-ignore
 import { releaseInterruptedCanonicalJobLeases, releaseStaleCanonicalJobLeases } from './canonical-job-lease-release.postgres.js';
+import { insertCanonicalJobRun } from './canonical-job-run-insert.postgres.js';
 
 export interface CanonicalJobRecord {
   id: string;
@@ -336,32 +336,12 @@ export class PostgresCanonicalJobRepository {
       | Parameters<Parameters<CanonicalDb['transaction']>[0]>[0] = this.db,
   ): Promise<boolean> {
     const graph = await this.ensureJobRunGraph(run.job_id, executor);
-    const shortId =
-      run.short_id ??
-      (run.job_id ? await this.nextRunShortId(run.job_id, executor) : null);
-    run.short_id = shortId;
-    const rows = await executor
-      .insert(pgSchema.agentRunsPostgres)
-      .values({
-        id: run.run_id,
-        shortId,
-        appId: CANONICAL_APP_ID,
-        agentId: graph.agentId,
-        configVersionId: graph.configVersionId,
-        jobId: run.job_id,
-        llmProfileId: DEFAULT_LLM_PROFILE_ID,
-        cause: 'job',
-        status: run.status,
-        createdAt: run.scheduled_for || run.started_at,
-        startedAt: run.started_at,
-        endedAt: run.ended_at,
-        resultSummary: run.result_summary,
-        errorSummary: run.error_summary,
-        notifiedAt: run.notified_at,
-      })
-      .onConflictDoNothing()
-      .returning({ id: pgSchema.agentRunsPostgres.id });
-    return rows.length > 0;
+    return insertCanonicalJobRun({
+      run,
+      executor,
+      graph,
+      nextRunShortId: (jobId) => this.nextRunShortId(jobId, executor),
+    });
   }
 
   async updateRunCompletion(
