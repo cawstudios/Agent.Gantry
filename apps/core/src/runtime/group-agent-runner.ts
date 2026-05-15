@@ -317,6 +317,7 @@ export function createGroupAgentRunner(input: {
         mcpServerRepository: deps.getMcpServerRepository?.(),
         mcpHostnameLookup: deps.getMcpHostnameLookup?.(),
         mcpDnsValidationCache: deps.getMcpDnsValidationCache?.(),
+        publishRuntimeEvent: deps.publishRuntimeEvent,
         turnContext,
       });
       const invokeAgent = (agentInput: { memoryContextBlock?: string }) =>

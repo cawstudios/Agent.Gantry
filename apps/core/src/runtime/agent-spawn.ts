@@ -2,6 +2,7 @@
  * Agent runner for MyClaw — host-only execution.
  */
 import { ChildProcess } from 'child_process';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -11,6 +12,7 @@ import {
   PERMISSION_APPROVAL_TIMEOUT_MS,
   RUNTIME_SETTINGS_PATH,
   TIMEZONE,
+  getRuntimeSettingsForConfig,
   getEffectiveModelConfig,
 } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
@@ -58,6 +60,7 @@ import {
 } from '../application/agents/prompt-profile-service.js';
 import { executeRunnerProcess } from './agent-spawn-process.js';
 import { applyAgentEgressNoProxyEnv } from '../shared/no-proxy.js';
+import { closeEgressGateway, ensureEgressGateway } from './egress-gateway.js';
 import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
 import {
   AgentInput,
@@ -69,6 +72,7 @@ import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-reference
 import { validateAgentToolRuntimeRules } from '../application/agents/agent-tool-runtime-rules.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { getRuntimeFileArtifactStore } from '../adapters/storage/postgres/runtime-store.js';
+import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 
 type RunnerAgentInput = AgentInput & {
   modelCredentialEnv?: Record<string, string>;
@@ -136,7 +140,7 @@ export async function spawnAgent(
   fs.mkdirSync(groupDir, { recursive: true });
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const processName = `myclaw-${safeName}-${currentTimeMs()}`;
+  const processName = `myclaw-${safeName}-${currentTimeMs()}-${randomUUID().slice(0, 8)}`;
   const modelConfig = getEffectiveModelConfig(
     input.isScheduledJob ? undefined : group.agentConfig?.model,
     input.isScheduledJob
@@ -209,6 +213,9 @@ export async function spawnAgent(
     modelCredentialEnv: undefined,
     browserProfileName,
     compiledSystemPrompt,
+    yoloMode: effectiveYoloModeSettings(
+      getRuntimeSettingsForConfig().permissions.yoloMode,
+    ),
   };
 
   const hostRuntime = prepareHostRuntimeContext(group);
@@ -342,6 +349,36 @@ export async function spawnAgent(
   const modelCredentialEnv = projectClaudeModelCredentialEnv(
     hostCredentials.env,
   );
+  const upstreamProxyUrl =
+    hostCredentials.proxy?.https || hostCredentials.proxy?.http;
+  const egressGateway = await ensureEgressGateway({
+    key: `${runnerAppId}:${input.agentId || group.folder}:${processName}`,
+    settings: getRuntimeSettingsForConfig().permissions.egress,
+    principal: {
+      appId: runnerAppId,
+      conversationId: input.chatJid,
+      ...(input.agentId ? { agentId: input.agentId } : {}),
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.runId ? { runId: input.runId } : {}),
+      ...(input.jobId ? { jobId: input.jobId } : {}),
+    },
+    ...(upstreamProxyUrl
+      ? {
+          upstreamProxy: {
+            url: upstreamProxyUrl,
+            provider: hostCredentials.brokerProfile,
+          },
+        }
+      : {}),
+    ...(options?.publishRuntimeEvent
+      ? { publishRuntimeEvent: options.publishRuntimeEvent }
+      : {}),
+  });
+  modelCredentialEnv.HTTP_PROXY = egressGateway.proxyUrl;
+  modelCredentialEnv.HTTPS_PROXY = egressGateway.proxyUrl;
+  modelCredentialEnv.http_proxy = egressGateway.proxyUrl;
+  modelCredentialEnv.https_proxy = egressGateway.proxyUrl;
+  modelCredentialEnv.NODE_USE_ENV_PROXY = '1';
   const { claudeConfigDir } = llmRuntimeMaterialization;
   const env: NodeJS.ProcessEnv = {
     ...pickSafeHostEnv(process.env),
@@ -393,6 +430,7 @@ export async function spawnAgent(
       PERMISSION_APPROVAL_TIMEOUT_MS,
     ),
     MYCLAW_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
+    MYCLAW_EGRESS_PROXY_URL: egressGateway.proxyUrl,
     CLAUDE_CONFIG_DIR: claudeConfigDir,
   };
   applyAgentEgressNoProxyEnv(env);
@@ -502,6 +540,7 @@ export async function spawnAgent(
       });
     }
     cleanupRunnerMcpConfigFile(mcpConfigPath);
+    await closeEgressGateway(egressGateway);
     llmRuntimeMaterialization.cleanup();
     revokeIpcResponseSigningKey(
       ipcAuth.responseKeyId,

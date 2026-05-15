@@ -36,6 +36,7 @@ export async function getHostRuntimeCredentialEnv(
   credentialProviders: NonNullable<
     AgentCredentialInjection['credentialProviders']
   >;
+  proxy?: AgentCredentialInjection['proxy'];
   brokerApplied: boolean;
   brokerProfile: CredentialBrokerProfile;
 }> {
@@ -69,6 +70,7 @@ export async function getHostRuntimeCredentialEnv(
   return {
     env: injection.env,
     credentialProviders: injection.credentialProviders ?? {},
+    ...(injection.proxy ? { proxy: injection.proxy } : {}),
     brokerApplied: injection.applied,
     brokerProfile: injection.brokerProfile,
   };

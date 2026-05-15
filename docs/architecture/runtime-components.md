@@ -222,6 +222,11 @@ Important permission boundaries:
 - Conversations can act on their own chat/session scope and need selected
   capability plus conversation approval for cross-conversation destinations.
 - Agents cannot set webhook URLs, secrets, headers, API keys, or channel destinations. Those are host-owned records and policies.
+- `permissions.yolo_mode` is a settings-owned safety valve for the 5-minute
+  all-tools timed grant only. The shipped command and path denylist is merged
+  with user entries; matches skip the timed-grant bypass, emit an audit event,
+  and fall through to the normal permission prompt. `enabled: false` disables
+  this check and makes YOLO total.
 
 For the full security model, use [SECURITY.md](../SECURITY.md).
 

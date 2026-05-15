@@ -24,6 +24,8 @@ export const RUNTIME_EVENT_TYPES = {
   PERMISSION_PERSISTED: 'permission.persisted',
   PERMISSION_RESUMED: 'permission.resumed',
   PERMISSION_FINAL_OUTCOME: 'permission.final_outcome',
+  PERMISSION_YOLO_DENYLIST_HIT: 'permission.yolo_denylist_hit',
+  EGRESS_CONNECT: 'egress.connect',
   SANDBOX_BLOCKED: 'sandbox.blocked',
   RUN_STARTED: 'run.started',
   RUN_CANCELED: 'run.canceled',

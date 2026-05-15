@@ -209,6 +209,10 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'persistent-permission-rules.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/yolo-mode-policy.ts'),
+    path.join(sharedDir, 'yolo-mode-policy.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/sensitive-material.ts'),
     path.join(sharedDir, 'sensitive-material.ts'),
   );
@@ -422,8 +426,8 @@ export async function* query({ prompt, options }) {
     call.permissionDecision = await decisionPromise;
   }
 
-  if (process.env.TEST_SDK_NETWORK_AFTER_BASH === '1') {
-    const bashDecision = await options.canUseTool(
+  if (process.env.TEST_SDK_NETWORK_AFTER_TOOL === '1') {
+    const toolDecision = await options.canUseTool(
       'Bash',
       { cmd: process.env.TEST_TOOL_USE_CMD || 'npm test --runInBand' },
       {
@@ -444,12 +448,12 @@ export async function* query({ prompt, options }) {
         title: 'Network request outside of sandbox',
         displayName: 'SandboxNetworkAccess',
         description: 'Allow network connection to registry.npmjs.org?',
-        decisionReason: 'Sandboxed Bash command attempted outbound network access',
+        decisionReason: 'Sandboxed tool attempted outbound network access',
         toolUseID: 'toolu_network_1',
       },
     );
     const secondNetworkDecision =
-      process.env.TEST_SECOND_SDK_NETWORK_AFTER_BASH === '1'
+      process.env.TEST_SECOND_SDK_NETWORK_AFTER_TOOL === '1'
         ? await options.canUseTool(
             'SandboxNetworkAccess',
             { host: 'example.com' },
@@ -459,13 +463,13 @@ export async function* query({ prompt, options }) {
               displayName: 'SandboxNetworkAccess',
               description: 'Allow network connection to example.com?',
               decisionReason:
-                'Sandboxed Bash command attempted outbound network access',
+                'Sandboxed tool attempted outbound network access',
               toolUseID: 'toolu_network_2',
             },
           )
         : undefined;
     call.permissionDecisions = {
-      bash: bashDecision,
+      tool: toolDecision,
       network: networkDecision,
       ...(secondNetworkDecision ? { network2: secondNetworkDecision } : {}),
     };
@@ -727,8 +731,10 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({
           modelCredentialEnv: {
             ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
-            HTTP_PROXY: 'http://127.0.0.1:10255/',
-            HTTPS_PROXY: 'http://127.0.0.1:10255/',
+            HTTP_PROXY: 'http://127.0.0.1:18080/',
+            HTTPS_PROXY: 'http://127.0.0.1:18080/',
+            http_proxy: 'http://127.0.0.1:18080/',
+            https_proxy: 'http://127.0.0.1:18080/',
             NODE_USE_ENV_PROXY: '1',
             NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
           },
@@ -746,6 +752,7 @@ describe('agent-runner IPC lifecycle', () => {
           NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
           MYCLAW_IPC_AUTH_TOKEN: 'runner-test-token',
           MYCLAW_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
+          MYCLAW_EGRESS_PROXY_URL: 'http://127.0.0.1:18080/',
         },
       );
 
@@ -754,8 +761,10 @@ describe('agent-runner IPC lifecycle', () => {
       expect(sdkEnv.ANTHROPIC_BASE_URL).toBe('https://broker.local/anthropic');
       expect(sdkEnv.ANTHROPIC_API_KEY).toBeUndefined();
       expect(sdkEnv.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-      expect(sdkEnv.HTTP_PROXY).toBe('http://127.0.0.1:10255/');
-      expect(sdkEnv.HTTPS_PROXY).toBe('http://127.0.0.1:10255/');
+      expect(sdkEnv.HTTP_PROXY).toBe('http://127.0.0.1:18080/');
+      expect(sdkEnv.HTTPS_PROXY).toBe('http://127.0.0.1:18080/');
+      expect(sdkEnv.http_proxy).toBe('http://127.0.0.1:18080/');
+      expect(sdkEnv.https_proxy).toBe('http://127.0.0.1:18080/');
       expect(sdkEnv.NODE_USE_ENV_PROXY).toBe('1');
       expect(sdkEnv.GIT_HTTP_PROXY_AUTHMETHOD).toBeUndefined();
       expect(sdkEnv.NODE_EXTRA_CA_CERTS).toBe('/tmp/onecli-ca.pem');
@@ -787,6 +796,34 @@ describe('agent-runner IPC lifecycle', () => {
       expect(sdkEnv.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
       expect(sdkEnv.MYCLAW_MCP_SERVERS_JSON).toBeUndefined();
       expect(sdkEnv.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'rejects model proxy env that bypasses the Gantry egress gateway',
+    async () => {
+      const fixture = createRunnerFixture();
+
+      const result = await runRunner(
+        fixture,
+        baseInput({
+          modelCredentialEnv: {
+            HTTP_PROXY: 'http://127.0.0.1:10255/',
+            HTTPS_PROXY: 'http://127.0.0.1:18080/',
+          },
+        }),
+        {
+          TEST_EXIT_AFTER_QUERY: '1',
+          MYCLAW_EGRESS_PROXY_URL: 'http://127.0.0.1:18080/',
+        },
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        'modelCredentialEnv.HTTP_PROXY must match MYCLAW_EGRESS_PROXY_URL.',
+      );
+      expect(fs.existsSync(fixture.recordPath)).toBe(false);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
@@ -1871,7 +1908,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'suppresses SDK sandbox network prompts after MyClaw allowed scoped Bash',
+    'suppresses SDK sandbox network prompts after MyClaw allowed a scoped tool',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1883,7 +1920,7 @@ describe('agent-runner IPC lifecycle', () => {
           allowedTools: ['Bash(npm test *)'],
         }),
         {
-          TEST_SDK_NETWORK_AFTER_BASH: '1',
+          TEST_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_TOOL_USE_CMD: 'npm test --runInBand',
         },
       );
@@ -1892,13 +1929,14 @@ describe('agent-runner IPC lifecycle', () => {
       expect(result.stdout).toContain('"eventType":"sandbox.blocked"');
       expect(result.stdout).toContain('sdk_network_gate_suppressed');
       expect(result.stdout).toContain('"networkToolUseID":"toolu_network_1"');
-      expect(result.stdout).toContain('"bashToolUseID":"toolu_bash_1"');
-      expect(result.stdout).toContain('"commandHash"');
+      expect(result.stdout).toContain('"parentToolUseID":"toolu_bash_1"');
+      expect(result.stdout).toContain('"approvedToolName":"Bash"');
+      expect(result.stdout).toContain('"inputHash"');
       expect(result.stdout).toContain('"hostHash"');
       expect(result.stdout).not.toContain('registry.npmjs.org');
       expect(result.stdout).not.toContain('npm test --runInBand');
       const call = readRecord(fixture.recordPath).calls[0];
-      expect(call?.permissionDecisions?.bash).toEqual(
+      expect(call?.permissionDecisions?.tool).toEqual(
         expect.objectContaining({
           behavior: 'allow',
         }),
@@ -1915,7 +1953,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'suppresses repeated SDK sandbox network prompts for an allowed Bash invocation',
+    'suppresses repeated SDK sandbox network prompts for an allowed tool invocation',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1927,8 +1965,8 @@ describe('agent-runner IPC lifecycle', () => {
           allowedTools: ['Bash(npm test *)'],
         }),
         {
-          TEST_SDK_NETWORK_AFTER_BASH: '1',
-          TEST_SECOND_SDK_NETWORK_AFTER_BASH: '1',
+          TEST_SDK_NETWORK_AFTER_TOOL: '1',
+          TEST_SECOND_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_TOOL_USE_CMD: 'npm test --runInBand',
         },
       );

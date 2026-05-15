@@ -1,8 +1,8 @@
-# MyClaw
+# Gantry
 
 ## What This Repo Is
 
-MyClaw is a provider-neutral and channel-neutral agent runtime platform.
+Gantry is a provider-neutral and channel-neutral agent runtime platform.
 Personal Telegram/WhatsApp and enterprise Slack, Teams, and WebUI are deployment modes.
 Channels, LLM providers, storage, CLI, and control HTTP are replaceable adapters around stable app concepts.
 
@@ -72,11 +72,11 @@ Important constraints:
   - Use `ccc` when you do not know the exact symbol name, need concept-level discovery, or need to find behavior across renamed/moved code.
   - Use `ast-grep` for structural TypeScript/JavaScript searches such as constructor injection, method calls regardless of receiver, nested calls, missing wrappers, unsafe patterns, and dead-code/refactor candidates where text search is too noisy or misses multiline shape.
   - For dead-code cleanup, combine all three: `ccc` for intent/ownership, `rg` for references and public exports, and `ast-grep` for call sites, instantiations, inheritance, decorators, and object-shape usage before deleting.
-- Every meaningful feature or fix plan must include a Surface Impact Matrix. Classify runtime behavior, `settings.yaml`, Postgres/runtime projection, control API, SDK/contracts, CLI, MyClaw MCP tools/admin skill, channel/provider adapters, docs/prompts, audit/events, and tests/verification as `Changed`, `Read-only/observable`, `Unchanged by design`, `Deferred`, or `Not applicable`.
+- Every meaningful feature or fix plan must include a Surface Impact Matrix. Classify runtime behavior, `settings.yaml`, Postgres/runtime projection, control API, SDK/contracts, CLI, Gantry MCP tools/admin skill, channel/provider adapters, docs/prompts, audit/events, and tests/verification as `Changed`, `Read-only/observable`, `Unchanged by design`, `Deferred`, or `Not applicable`.
 - Every `Deferred` or `Unchanged by design` Surface Impact Matrix entry must include a short reason. Do not leave API, CLI, MCP tools, database projection, docs, or tests implicit.
 - For settings-owned config changes, explicitly state whether the change writes `settings.yaml`, reconciles Postgres/runtime projection, and updates API/CLI/MCP/admin-tool surfaces.
 - For permission and capability changes, explicitly state whether the change affects transient approval, persistent capability selection, or both.
-- MyClaw is early-stage: prefer deleting legacy code over compatibility shims because no users are live yet.
+- Gantry is early-stage: prefer deleting legacy code over compatibility shims because no users are live yet.
 - Do not add migration compatibility commands, auto-migration flows, cleanup shims, or runtime branches that exist only to support old local state.
 - Remove obsolete code paths in the same change when introducing a breaking replacement.
 - Treat cleanup as part of replacement work: remove obsolete active code, schemas, tests, docs, exports, and wiring in the same PR, or retain them with owner, reason, and removal condition.
@@ -85,15 +85,15 @@ Important constraints:
 - Classify every new config value first: non-secrets in `settings.yaml`, runtime secrets behind `RuntimeSecretProvider`, and agent credentials behind `AgentCredentialBroker`.
 - Model selection must go through the provider-neutral catalog and friendly aliases. Do not accept raw provider model IDs at user/API/job/MCP boundaries unless they are registered aliases; job defaults inherit interactive defaults before falling back to system `opus`. Do not reintroduce legacy Claude model registries or runner-ID defaults in public config paths.
 - Native Agent subagents inherit the parent run model by default. Any subagent model override must resolve through the same catalog and stay on the parent provider backend; use a separate session or job for cross-provider delegation.
-- Wrong-lane config must fail loudly. Raw provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `CLAUDE_CODE_OAUTH_TOKEN` must never be accepted from MyClaw `.env` or process env.
+- Wrong-lane config must fail loudly. Raw provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `CLAUDE_CODE_OAUTH_TOKEN` must never be accepted from Gantry `.env` or process env.
 - Agent-requested third-party MCP servers use same-channel approval until real admin RBAC exists. Host must verify the origin chat belongs to the requesting agent; approval only decides that pending draft, binds only that agent, and activates next run.
 - Treat third-party MCP servers as approved agent capabilities. Durable MCP truth belongs in Postgres definitions, versions, bindings, credential refs, and audit events; Claude SDK `mcpServers` is only a per-run adapter projection.
 - Use typed capability catalogs for skills, MCP servers, SDK tools, host tools, browser tools, provider-native channel tools, and conversation bindings; provider or channel flags are metadata, not authorization.
 - Agent administration source of truth is Postgres plus application services. Agents own identity, model/persona defaults, and selected capability ids (`selectedToolIds`, `selectedSkillIds`, `selectedMcpServerIds`). Conversations own sender policy, trigger policy, control approvers, and agent bindings. Do not add channel-scoped tool selections, per-agent direct-message policy, per-agent direct-message approvers, or any separate browser capability list.
-- First-party non-admin MyClaw MCP tools are default agent capabilities and must stay visible to ToolSearch/mcp_list_tools even if a stale runner projection is missing them. Gate admin MCP tools such as service restart, settings desired-state/update, and agent registration through selected capabilities plus server-side checks.
+- First-party non-admin Gantry MCP tools are default agent capabilities and must stay visible to ToolSearch/mcp_list_tools even if a stale runner projection is missing them. Gate admin MCP tools such as service restart, settings desired-state/update, and agent registration through selected capabilities plus server-side checks.
 - Conversation approvers are the only user-facing approval policy. Direct/private conversations and group/channel conversations both use `sender_policy`, `requires_trigger`, and `control_approvers`; approvers must be verified members of that Conversation and authorize permission prompts for all agents bound there.
-- Public admin API, local CLI, and MyClaw MCP tools are separate adapters over the same services. API is for owner/admin automation, CLI is for local service and setup operations, and MCP tools are for agent-requested reviewed changes.
-- Local desired-state configuration belongs in `settings.yaml` and is mediated by `SettingsDesiredStateService`. CLI commands and approved MyClaw admin tools write the file; only agents with selected `settings_desired_state` or `request_settings_update` capabilities may use those tools, and agents must not edit the file or DB directly.
+- Public admin API, local CLI, and Gantry MCP tools are separate adapters over the same services. API is for owner/admin automation, CLI is for local service and setup operations, and MCP tools are for agent-requested reviewed changes.
+- Local desired-state configuration belongs in `settings.yaml` and is mediated by `SettingsDesiredStateService`. CLI commands and approved Gantry admin tools write the file; only agents with selected `settings_desired_state` or `request_settings_update` capabilities may use those tools, and agents must not edit the file or DB directly.
 - Restart-owned sync rule: `settings.yaml` is the restart source of truth for agent identity/defaults, selected capabilities (`tools`, `skills`, `mcp_servers`), provider connections, conversations, sender policies, control approvers, triggers, `requires_trigger`, and agent-conversation bindings. Any Control API, CLI, or approved agent/admin-tool path that mutates those fields must update `settings.yaml` in the same operation or go through `request_settings_update`; Postgres/runtime rows are projections and must never be the only durable copy.
 - Capability sync is bidirectional and immediate: settings-side capability lists replace stale active Postgres bindings, while DB/admin-side capability writes must export readable tools, skills, and MCP servers back into `settings.yaml` before reporting success.
 - In personal/local mode, Postgres indexes runtime state, audit, artifacts, and execution data. It is not the source of truth for fields represented under `desired_state.*` or `agents.*` once those settings are present.
@@ -108,14 +108,20 @@ Important constraints:
 - Runtime queue concurrency and retry policy belongs under `runtime.queue` in `settings.yaml` and should be injected into `GroupQueue`; tests should not depend on hard-coded queue timing or concurrency defaults.
 - Agents must use `send_message`, `ask_user_question`, `request_skill_install`, `request_skill_proposal`, `request_skill_dependency_install`, `request_mcp_server`, `capability_search`, `request_capability`, `propose_local_cli_capability`, `manage_capability`, `request_permission`, `service_restart`, and `register_agent` instead of direct installs, config edits, or legacy tool-enable guidance. Permission decisions are `Allow once`, `Always allow for this agent/job` for semantic capabilities, `Always allow Browser`, `Always allow mcp__myclaw__<admin_tool>`, `Always allow Bash(<literal command prefix pattern>)`, and `Cancel`; broad exact SDK/native tools, exact third-party MCP tools, bare persistent `Bash`, `Bash(*)`, and leading-wildcard Bash scopes are not durable `request_permission` authority. User-defined `local_cli` capabilities are reviewable drafts until runtime enforcement verifies executable identity, preflight, protected paths, and denied environment overrides.
 - Prefer semantic capability requests (`capability_search`, `request_capability`, `propose_local_cli_capability`, and `manage_capability`) for app/tool access such as Google Sheets, Gmail, or business CLIs. Fall back to raw scoped `Bash(...)` only for one-off exact commands or when no reviewed semantic capability exists.
-- `SandboxNetworkAccess` is an SDK-internal defense-in-depth prompt, never durable authority. Suppress it only with a short-lived run-local token created by an already-approved Bash tool call; persist the scoped Bash rule or semantic capability instead.
-- Browser grants persist only as canonical `Browser`. Runtime projects that capability into MyClaw-owned gateway tools (`browser_status`, `browser_open`, `browser_inspect`, `browser_act`, and `browser_close`) with MyClaw-owned schemas. Private browser backend details are internal implementation details. Do not persist or expose per-action browser tool names as durable authority.
+- `SandboxNetworkAccess` is an SDK-internal defense-in-depth prompt, never durable authority. Suppress it only with a short-lived run-local token created by an already-approved tool call with a matching parent tool-use id, or while the same agent/conversation has an active eligible-tools/SDK-API-prompt timed grant; persist only the scoped Bash rule, canonical Browser grant, exact admin MCP tool, or semantic capability instead.
+- `permissions.yolo_mode` is a root settings safety valve for the 5-minute all-tools timed grant. User entries merge with shipped defaults; denylist hits skip timed-grant bypass, write audit, and re-prompt unless `enabled: false`.
+- Egress policy is runtime-owned and provider-neutral. Model credential brokers such as OneCLI may supply an upstream proxy, but the runner should see the Gantry loopback egress gateway; `permissions.egress.denylist` is an optional hostname-glob denylist, default egress is allow, and every CONNECT decision must be audited.
+- Browser grants persist only as canonical `Browser`. Runtime projects that capability into Gantry-owned gateway tools (`browser_status`, `browser_open`, `browser_inspect`, `browser_act`, and `browser_close`) with Gantry-owned schemas. Private browser backend details are internal implementation details. Do not persist or expose per-action browser tool names as durable authority.
 - The control API is part of the runtime process. launchd/systemd service definitions should stay secret-free; `MYCLAW_CONTROL_API_KEYS_JSON`, `MYCLAW_CONTROL_PORT`, and `MYCLAW_CONTROL_SOCKET_PATH` belong in process env or the runtime `.env`. Control API keys must include explicit `kid`, `token`, `appId`, and `scopes`.
 - Don't fight errors! Whenever you encounter the same error twice, research the web and find 3-5 possible ways to fix it. Then choose the most efficient solution and implement it.
 
 ## Docs Rules
 
-- User-facing and project-facing docs must use `MyClaw` naming.
+- User-facing and project-facing docs must use `Gantry` naming.
+- Existing code identifiers, package names, CLI binaries, environment variables,
+  paths, MCP tool names, and database schema names that still contain `myclaw`
+  are literal implementation names until an explicit rename task changes them.
+  Do not rewrite those literals casually in docs or tests.
 - Do not reintroduce legacy branding in active docs or instructions.
 - Avoid fork/upstream framing in active guidance. Prefer neutral repo, branch, or shared-remote wording.
 - Prefer local repo docs over speculative external docs links unless the external target is verified current.

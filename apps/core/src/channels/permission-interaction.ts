@@ -97,7 +97,9 @@ export function permissionButtonLabel(
   request: PermissionApprovalRequest,
 ): string {
   if (mode === 'allow_once') return 'Allow once';
-  if (mode === 'allow_timed_grant') return 'Allow 5 min for this tool';
+  if (mode === 'allow_timed_grant') {
+    return 'Allow eligible tools and SDK API prompts for 5 min';
+  }
   if (mode === 'cancel') return 'Cancel';
   const rule = firstPersistentRule(request);
   if (!rule) return 'Always allow';
@@ -174,7 +176,7 @@ export function formatPermissionPromptText(
 }
 
 export function formatPermissionReceiptText(
-  requestId: string,
+  _requestId: string,
   request: PermissionApprovalRequest | undefined,
   decision: PermissionApprovalDecision,
 ): string {
@@ -197,10 +199,11 @@ export function formatPermissionReceiptText(
       : 'soon';
     return limitPermissionMessage(
       [
-        `Timed grant active until ${expiresLabel}`,
-        `For tool: ${formatPermissionActionSummary(request)}`,
+        'Allowed for 5 minutes',
+        `Until: ${expiresLabel}`,
+        `Why: ${formatPermissionReceiptActionSummary(request)}`,
+        'Allows: eligible tools and SDK API/network prompts in this chat',
         `By: ${sanitizePermissionText(actor, 120, 40)}`,
-        `Request ID: \`${sanitizePermissionText(requestId, 160, 40)}\``,
       ].join('\n'),
     );
   }
@@ -208,24 +211,22 @@ export function formatPermissionReceiptText(
     const rules = request ? persistentRules(request) : [];
     const lines = ['Persistent permission approval received'];
     if (rules.length > 0) {
-      lines.push('Requested grants:');
+      lines.push('Grants:');
       lines.push(...formatRuleList(rules));
     }
-    lines.push(`For tool: ${formatPermissionActionSummary(request)}`);
+    lines.push(`For: ${formatPermissionReceiptActionSummary(request)}`);
     lines.push(`By: ${sanitizePermissionText(actor, 120, 40)}`);
     lines.push(
       'Applying persistent grants now; final success or failure will be reported separately.',
     );
     lines.push('If applied, revoke with: /permissions remove <rule>');
-    lines.push(`Request ID: \`${sanitizePermissionText(requestId, 160, 40)}\``);
     return limitPermissionMessage(lines.join('\n'));
   }
   return limitPermissionMessage(
     [
       'Allowed once',
-      `For tool: ${formatPermissionActionSummary(request)}`,
+      `For: ${formatPermissionReceiptActionSummary(request)}`,
       `By: ${sanitizePermissionText(actor, 120, 40)}`,
-      `Request ID: \`${sanitizePermissionText(requestId, 160, 40)}\``,
     ].join('\n'),
   );
 }
@@ -344,7 +345,7 @@ function formatPermissionBoundaryLines(
   const capabilityName = semanticCapabilityName(request, rule);
   if (!rule) {
     return [
-      'What this changes: Allow once applies only to this tool call. Allow 5 min auto-approves additional calls to the same tool for 5 minutes.',
+      'What this changes: Allow once applies only to this tool call. Allow 5 min auto-approves eligible tool calls and SDK API/network prompts for this agent in this conversation for 5 minutes. Protected-path, memory-boundary, and sandbox hard guards still apply.',
     ];
   }
   if (capabilityName) {
@@ -484,4 +485,43 @@ function formatPermissionActionSummary(
     return `${tool} (${sanitizePermissionText(pattern.trim(), 200, 100)})`;
   }
   return tool;
+}
+
+function formatPermissionReceiptActionSummary(
+  request: PermissionApprovalRequest | undefined,
+): string {
+  if (!request) return 'permission request';
+  const tool = request.displayName || request.toolName;
+  const input = request.toolInput;
+  if (!input || typeof input !== 'object') return tool;
+  const command = permissionCommand(request);
+  if (command) {
+    const safeCommand = sanitizeReceiptDetail(command);
+    return safeCommand ? `${tool} (${safeCommand})` : `${tool} command`;
+  }
+  const filePath = input.file_path;
+  if (typeof filePath === 'string' && filePath.trim()) {
+    const safePath = sanitizeReceiptDetail(filePath.trim());
+    return safePath ? `${tool} (${safePath})` : `${tool} file action`;
+  }
+  const url = input.url;
+  if (typeof url === 'string' && url.trim()) {
+    const safeUrl = sanitizeReceiptDetail(url.trim());
+    return safeUrl ? `${tool} (${safeUrl})` : `${tool} URL action`;
+  }
+  const pattern = input.pattern;
+  if (typeof pattern === 'string' && pattern.trim()) {
+    const safePattern = sanitizeReceiptDetail(pattern.trim());
+    return safePattern ? `${tool} (${safePattern})` : `${tool} pattern action`;
+  }
+  return tool;
+}
+
+function sanitizeReceiptDetail(input: string): string | null {
+  const result = sanitizeOutboundLlmText(input);
+  if (result.redacted || result.blocked) return null;
+  if (/\[REDACTED_(?:SECRET|POTENTIALLY_SENSITIVE)\]/.test(result.text)) {
+    return null;
+  }
+  return headTailTruncate(result.text, 200, 100);
 }

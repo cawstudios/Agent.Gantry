@@ -103,7 +103,7 @@ describe('permission interaction', () => {
     ]);
     const decision = decisionForMode(request, 'allow_persistent_rule');
     expect(decision.approved).toBe(false);
-    expect(decision.reason).toBe('persistent rule unavailable');
+    expect(decision.reason).toBe('approval option unavailable');
   });
 
   it('does not offer persistent approval for wildcard-scoped Bash suggestions', () => {
@@ -141,6 +141,50 @@ describe('permission interaction', () => {
       'allow_timed_grant',
       'cancel',
     ]);
+    expect(permissionButtonLabel('allow_timed_grant', request)).toBe(
+      'Allow eligible tools and SDK API prompts for 5 min',
+    );
+  });
+
+  it('describes timed grants as eligible-tools/SDK-API-prompt approval decisions', () => {
+    const decision = decisionForMode(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Read',
+      },
+      'allow_timed_grant',
+      'user-1',
+    );
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        approved: true,
+        mode: 'allow_timed_grant',
+        decidedBy: 'user-1',
+        reason: 'timed grant for eligible tools and SDK API prompts (5 min)',
+        decisionClassification: 'user_temporary',
+        timedGrantExpiresAtMs: expect.any(Number),
+      }),
+    );
+  });
+
+  it('rejects forged timed-grant decisions when the request did not offer them', () => {
+    const decision = decisionForMode(
+      {
+        ...requestWithSuggestions([]),
+        decisionOptions: ['allow_once', 'cancel'],
+      },
+      'allow_timed_grant',
+      'user-1',
+    );
+
+    expect(decision).toEqual({
+      approved: false,
+      mode: 'cancel',
+      decidedBy: 'user-1',
+      reason: 'approval option unavailable',
+      decisionClassification: 'user_reject',
+    });
   });
 
   it('renders semantic capability prompts before raw implementation details', () => {
@@ -387,8 +431,36 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain('Allowed once');
-    expect(receipt).toContain('For tool: Bash (git status --short)');
-    expect(receipt).toContain('Request ID: `perm-abc-123`');
+    expect(receipt).toContain('For: Bash (git status --short)');
+    expect(receipt).not.toContain('Request ID');
+    expect(receipt).not.toContain('perm-abc-123');
+  });
+
+  it('describes timed receipts with the trigger reason and no internal request id', () => {
+    const receipt = formatPermissionReceiptText(
+      'perm-abc-123',
+      {
+        requestId: 'perm-abc-123',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'Bash',
+        toolInput: { command: 'git status --short' },
+      },
+      {
+        approved: true,
+        mode: 'allow_timed_grant',
+        decidedBy: 'ravi',
+        timedGrantExpiresAtMs: Date.parse('2026-05-15T12:05:00Z'),
+      },
+    );
+
+    expect(receipt).toContain('Allowed for 5 minutes');
+    expect(receipt).toContain('Until:');
+    expect(receipt).toContain('Why: Bash (git status --short)');
+    expect(receipt).toContain(
+      'Allows: eligible tools and SDK API/network prompts in this chat',
+    );
+    expect(receipt).not.toContain('Request ID');
+    expect(receipt).not.toContain('perm-abc-123');
   });
 
   it('lists persistent rules and revoke hint in receipts', () => {
@@ -428,8 +500,37 @@ describe('permission interaction', () => {
       'If applied, revoke with: /permissions remove <rule>',
     );
     expect(receipt).toContain(
-      'For tool: Bash (curl https://api.example.com/leads > /tmp/out)',
+      'For: Bash (curl https://api.example.com/leads > /tmp/out)',
     );
+    expect(receipt).not.toContain('Request ID');
+    expect(receipt).not.toContain('perm-abc-123');
+  });
+
+  it('omits sensitive details instead of showing redaction markers in accepted receipts', () => {
+    const receipt = formatPermissionReceiptText(
+      'perm-abc-123',
+      {
+        requestId: 'perm-abc-123',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            'curl https://api.example.com -H "Authorization: bearer abcdefghijklmnopqrstuvwxyz123456"',
+        },
+      },
+      {
+        approved: true,
+        mode: 'allow_once',
+        decidedBy: 'ravi',
+      },
+    );
+
+    expect(receipt).toContain('Allowed once');
+    expect(receipt).toContain('For: Bash command');
+    expect(receipt).not.toContain('REDACTED');
+    expect(receipt).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
+    expect(receipt).not.toContain('Request ID');
+    expect(receipt).not.toContain('perm-abc-123');
   });
 
   it('bounds and redacts prompt-visible free text and unknown input previews', () => {

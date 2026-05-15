@@ -315,6 +315,9 @@ export async function runJob(
             mcpServerRepository: deps.getMcpServerRepository?.(),
             mcpHostnameLookup: deps.getMcpHostnameLookup?.(),
             mcpDnsValidationCache: deps.getMcpDnsValidationCache?.(),
+            publishRuntimeEvent: async (event) => {
+              await getRuntimeEventExchange().publish(event);
+            },
             skillContext: {
               appId: executionAppId,
               agentId: executionAgentId,

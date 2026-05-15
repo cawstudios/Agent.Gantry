@@ -10,24 +10,34 @@ import { sandboxBlockedRuntimeEvents } from './sandbox-events.js';
 import type { AgentRunnerInput } from './types.js';
 
 export interface SdkSandboxNetworkGate {
+  rememberGlobalApproval(principal: string, expiresAtMs: number): void;
   rememberAllowedTool(
     toolName: string,
     input: Record<string, unknown>,
     permissionOpts: { toolUseID?: string },
+    principal?: string,
   ): void;
   decide(
     toolName: string,
     input: Record<string, unknown>,
     permissionOpts: { toolUseID?: string; parentToolUseID?: string },
+    principal?: string,
   ):
     | { behavior: 'allow'; updatedInput: Record<string, unknown> }
     | { behavior: 'deny'; message: string; interrupt: false }
     | null;
 }
 
+interface SdkSandboxNetworkGlobalApproval {
+  createdAtMs: number;
+  expiresAtMs: number;
+}
+
 interface SdkSandboxNetworkApprovalToken {
-  bashToolUseID?: string;
-  commandHash: string;
+  principal: string;
+  parentToolUseID: string;
+  approvedToolName: string;
+  inputHash: string;
   createdAtMs: number;
   expiresAtMs: number;
 }
@@ -38,6 +48,17 @@ export interface SdkSandboxNetworkGateOptions {
 }
 
 const DEFAULT_SANDBOX_NETWORK_TOKEN_TTL_MS = 300_000;
+const LOCAL_ONLY_SDK_TOOLS = new Set([
+  'Read',
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+  'LS',
+  'Glob',
+  'Grep',
+  'TodoWrite',
+]);
 
 export function createSdkSandboxNetworkGate(
   agentInput: AgentRunnerInput,
@@ -46,14 +67,16 @@ export function createSdkSandboxNetworkGate(
   const ttlMs = options.ttlMs ?? DEFAULT_SANDBOX_NETWORK_TOKEN_TTL_MS;
   const nowMs = options.nowMs ?? Date.now;
   const tokens: SdkSandboxNetworkApprovalToken[] = [];
+  const globalApprovals = new Map<string, SdkSandboxNetworkGlobalApproval>();
 
   function writeEvent(input: {
     decision: string;
     reason: string;
     networkToolUseID?: string;
-    bashToolUseID?: string;
+    parentToolUseID?: string;
+    approvedToolName?: string;
     hostHash?: string;
-    commandHash?: string;
+    inputHash?: string;
     tokenCreatedAtMs?: number;
     tokenExpiresAtMs?: number;
     tokenTtlMs?: number;
@@ -61,16 +84,21 @@ export function createSdkSandboxNetworkGate(
   }): void {
     const payload: Record<string, unknown> = {
       toolName: SDK_SANDBOX_NETWORK_ACCESS_TOOL_NAME,
-      canonicalCapability: 'Bash',
+      canonicalCapability: SDK_SANDBOX_NETWORK_ACCESS_TOOL_NAME,
       decision: input.decision,
       reason: input.reason,
       tokenTtlMs: input.tokenTtlMs ?? ttlMs,
       ...(input.networkToolUseID
         ? { networkToolUseID: input.networkToolUseID }
         : {}),
-      ...(input.bashToolUseID ? { bashToolUseID: input.bashToolUseID } : {}),
+      ...(input.parentToolUseID
+        ? { parentToolUseID: input.parentToolUseID }
+        : {}),
+      ...(input.approvedToolName
+        ? { approvedToolName: input.approvedToolName }
+        : {}),
       ...(input.hostHash ? { hostHash: input.hostHash } : {}),
-      ...(input.commandHash ? { commandHash: input.commandHash } : {}),
+      ...(input.inputHash ? { inputHash: input.inputHash } : {}),
       ...(input.tokenCreatedAtMs !== undefined
         ? { tokenCreatedAtMs: input.tokenCreatedAtMs }
         : {}),
@@ -106,39 +134,89 @@ export function createSdkSandboxNetworkGate(
   }
 
   return {
-    rememberAllowedTool(toolName, input, permissionOpts) {
-      if (toolName !== 'Bash') return;
-      const bashToolUseID = permissionOpts.toolUseID?.trim();
-      const command = readBashCommand(input)?.trim();
-      if (!bashToolUseID || !command) {
+    rememberGlobalApproval(principal, expiresAtMs) {
+      const now = nowMs();
+      const normalizedPrincipal = principal.trim();
+      if (!normalizedPrincipal || expiresAtMs <= now) return;
+      globalApprovals.set(normalizedPrincipal, {
+        createdAtMs: now,
+        expiresAtMs,
+      });
+      writeEvent({
+        decision: 'sdk_network_gate_global_approval_activated',
+        reason:
+          'MyClaw activated a short-lived eligible-tools/SDK-API-prompt approval; SDK sandbox network prompts will be suppressed until it expires.',
+        tokenCreatedAtMs: now,
+        tokenExpiresAtMs: expiresAtMs,
+        tokenTtlMs: expiresAtMs - now,
+      });
+    },
+    rememberAllowedTool(
+      toolName,
+      input,
+      permissionOpts,
+      principal = agentInput.agentId ?? 'runner',
+    ) {
+      if (isSdkSandboxNetworkAccessToolName(toolName)) return;
+      if (LOCAL_ONLY_SDK_TOOLS.has(toolName)) return;
+      const normalizedPrincipal = principal.trim();
+      const parentToolUseID = permissionOpts.toolUseID?.trim();
+      if (!normalizedPrincipal || !parentToolUseID) {
         writeEvent({
           decision: 'sdk_network_gate_token_rejected',
           reason:
-            'MyClaw did not mint a sandbox network token because Bash tool-use id or command was missing.',
+            'MyClaw did not mint a sandbox network token because principal or tool-use id was missing.',
         });
         return;
       }
       const createdAtMs = nowMs();
       tokens.push({
-        bashToolUseID,
-        commandHash: hashString(command),
+        principal: normalizedPrincipal,
+        parentToolUseID,
+        approvedToolName: toolName,
+        inputHash: hashString(stableJson(input)),
         createdAtMs,
         expiresAtMs: createdAtMs + ttlMs,
       });
     },
-    decide(toolName, input, permissionOpts) {
+    decide(
+      toolName,
+      input,
+      permissionOpts,
+      principal = agentInput.agentId ?? 'runner',
+    ) {
       if (!isSdkSandboxNetworkAccessToolName(toolName)) return null;
 
       const hostHash = sandboxNetworkHostHash(input);
       const now = nowMs();
       const expiredTokenCount = pruneExpiredTokens(now);
+      const globalApproval = globalApprovals.get(principal);
+      if (globalApproval) {
+        if (globalApproval.expiresAtMs > now) {
+          writeEvent({
+            decision: 'sdk_network_gate_global_approval_suppressed',
+            reason:
+              'SDK requested network approval during an active eligible-tools/SDK-API-prompt approval; suppressing duplicate user approval.',
+            networkToolUseID: permissionOpts.toolUseID,
+            hostHash,
+            tokenCreatedAtMs: globalApproval.createdAtMs,
+            tokenExpiresAtMs: globalApproval.expiresAtMs,
+            tokenTtlMs: globalApproval.expiresAtMs - globalApproval.createdAtMs,
+            expiredTokenCount,
+          });
+          return { behavior: 'allow', updatedInput: input };
+        }
+        globalApprovals.delete(principal);
+      }
       const parentToolUseID =
         permissionOpts.parentToolUseID?.trim() ??
         sandboxNetworkParentToolUseID(input);
-      const activeTokens = tokens;
+      const activeTokens = tokens.filter(
+        (candidate) => candidate.principal === principal,
+      );
       if (!parentToolUseID && activeTokens.length > 1) {
         const reason =
-          'SDK requested sandbox network access without a parent Bash tool-use id while multiple Bash approvals are active.';
+          'SDK requested sandbox network access without a parent tool-use id while multiple tool approvals are active.';
         writeEvent({
           decision: 'sdk_network_gate_denied',
           reason,
@@ -148,26 +226,27 @@ export function createSdkSandboxNetworkGate(
         });
         return {
           behavior: 'deny',
-          message: `${reason} Approve the scoped Bash(...) command through MyClaw first.`,
+          message: `${reason} Approve the tool call through MyClaw first.`,
           interrupt: false,
         };
       }
       const token = parentToolUseID
         ? activeTokens.find(
-            (candidate) => candidate.bashToolUseID === parentToolUseID,
+            (candidate) => candidate.parentToolUseID === parentToolUseID,
           )
-        : activeTokens.length > 0
-          ? latestToken(activeTokens)
+        : activeTokens.length === 1
+          ? activeTokens[0]
           : undefined;
       if (token) {
         writeEvent({
           decision: 'sdk_network_gate_suppressed',
           reason:
-            'SDK requested network approval for a recently approved Bash invocation; suppressing duplicate user approval.',
+            'SDK requested network approval for a recently approved tool invocation; suppressing duplicate user approval.',
           networkToolUseID: permissionOpts.toolUseID,
-          bashToolUseID: token.bashToolUseID,
+          parentToolUseID: token.parentToolUseID,
+          approvedToolName: token.approvedToolName,
           hostHash,
-          commandHash: token.commandHash,
+          inputHash: token.inputHash,
           tokenCreatedAtMs: token.createdAtMs,
           tokenExpiresAtMs: token.expiresAtMs,
           expiredTokenCount,
@@ -176,29 +255,23 @@ export function createSdkSandboxNetworkGate(
       }
 
       const reason = parentToolUseID
-        ? 'SDK requested sandbox network access for a Bash tool-use id MyClaw did not approve.'
-        : 'SDK requested sandbox network access before any Bash tool call was allowed by MyClaw.';
+        ? 'SDK requested sandbox network access for a tool-use id MyClaw did not approve.'
+        : 'SDK requested sandbox network access before any tool call was allowed by MyClaw.';
       writeEvent({
         decision: 'sdk_network_gate_denied',
         reason,
         networkToolUseID: permissionOpts.toolUseID,
-        ...(parentToolUseID ? { bashToolUseID: parentToolUseID } : {}),
+        ...(parentToolUseID ? { parentToolUseID } : {}),
         hostHash,
         expiredTokenCount,
       });
       return {
         behavior: 'deny',
-        message: `${reason} Approve the scoped Bash(...) command through MyClaw first.`,
+        message: `${reason} Approve the tool call through MyClaw first.`,
         interrupt: false,
       };
     },
   };
-}
-
-function readBashCommand(input: Record<string, unknown>): string | undefined {
-  if (typeof input.command === 'string') return input.command;
-  if (typeof input.cmd === 'string') return input.cmd;
-  return undefined;
 }
 
 function sandboxNetworkHostHash(input: unknown): string | undefined {
@@ -214,21 +287,28 @@ function sandboxNetworkParentToolUseID(input: unknown): string | undefined {
   const value =
     record.parentToolUseID ??
     record.parent_tool_use_id ??
-    record.bashToolUseID ??
-    record.bash_tool_use_id;
+    record.toolUseID ??
+    record.tool_use_id;
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function latestToken(
-  tokens: readonly SdkSandboxNetworkApprovalToken[],
-): SdkSandboxNetworkApprovalToken | undefined {
-  return tokens.reduce<SdkSandboxNetworkApprovalToken | undefined>(
-    (latest, token) =>
-      !latest || token.createdAtMs >= latest.createdAtMs ? token : latest,
-    undefined,
-  );
 }
 
 function hashString(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(stableValue(value));
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      out[key] = stableValue(record[key]);
+    }
+    return out;
+  }
+  return value;
 }

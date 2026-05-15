@@ -18,7 +18,7 @@ import {
   buildSdkFilesystemSandbox,
   readProtectedFilesystemPaths,
 } from './filesystem-sandbox.js';
-import { protectedCapabilityPreToolUseHook } from './protected-capability-hook.js';
+import { createSafetyPreToolUseHook } from './protected-capability-hook.js';
 import {
   discoverAdditionalDirectories,
   IPC_POLL_MS,
@@ -176,7 +176,7 @@ export async function runQuery(
       hooks: {
         PreToolUse: [
           {
-            hooks: [protectedCapabilityPreToolUseHook],
+            hooks: [createSafetyPreToolUseHook(memoryBlock)],
             timeout: 5,
           },
         ],

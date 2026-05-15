@@ -97,6 +97,28 @@ describe('session-resume-runtime', () => {
     expect(summary).not.toContain('provider-session:standalone-success');
   });
 
+  it('redacts provider resume handles before storing failed runs', async () => {
+    const completeSessionAgentRun = vi.fn().mockResolvedValue(undefined);
+    const ops = {
+      completeSessionAgentRun,
+    } as unknown as RuntimeAgentSessionRepository;
+
+    await completeFailedRuntimeSessionRun({
+      ops,
+      runId: 'run-failed-redaction',
+      errorSummary:
+        'failed latestProviderSessionId=latest-failed provider-session:standalone-failed {"externalSessionId":"claude-session-failed"}',
+    });
+
+    expect(completeSessionAgentRun).toHaveBeenCalledTimes(1);
+    const completion = completeSessionAgentRun.mock.calls[0][0];
+    const summary = completion.errorSummary as string;
+    expect(summary).toContain('[REDACTED]');
+    expect(summary).not.toContain('latest-failed');
+    expect(summary).not.toContain('provider-session:standalone-failed');
+    expect(summary).not.toContain('claude-session-failed');
+  });
+
   it('does not persist provider resume handles under the job-owned session scope', async () => {
     const setSession = vi.fn().mockResolvedValue(true);
     const ops = {

@@ -1382,5 +1382,19 @@
     "reason": "Runtime settings watcher composes filesystem reload, validation, and desired-state reconciliation until reload is represented as an application port.",
     "removeByPhase": "settings-desired-state-port-extraction",
     "maxViolations": 6
+  },
+  {
+    "file": "apps/core/src/runtime/egress-gateway.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "The runtime-owned egress gateway currently writes through the shared logger while the outbound transport adapter port is still being extracted.",
+    "removeByPhase": "egress-gateway-adapter-extraction",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/runtime/egress-gateway.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "The runtime-owned egress gateway owns temporary Node HTTP/socket plumbing until the outbound transport adapter port is extracted.",
+    "removeByPhase": "egress-gateway-adapter-extraction",
+    "maxViolations": 3
   }
 ]

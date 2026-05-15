@@ -10,6 +10,7 @@ import {
   formatPermissionPromptText as formatSharedPermissionPromptText,
   formatPermissionReceiptText,
   normalizePermissionAction,
+  permissionDecisionOptions,
 } from '../permission-interaction.js';
 import { SlackChannelState, SlackMessageLike } from './channel-state.js';
 import {
@@ -419,6 +420,9 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
       if (!mode) return;
       const pending = this.pendingPermissionPrompts.get(payload.requestId);
       if (!pending) return;
+      if (!permissionDecisionOptions(pending.request).includes(mode)) {
+        return;
+      }
       if (
         pending.decisionPolicy === 'same_channel' &&
         body.channel?.id !== pending.channelId

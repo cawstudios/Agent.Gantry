@@ -330,6 +330,7 @@ export function buildRuntimeRunOptions(input: {
   mcpServerRepository?: McpServerRepository;
   mcpHostnameLookup?: HostnameLookup;
   mcpDnsValidationCache?: RemoteMcpDnsValidationCache;
+  publishRuntimeEvent?: RunAgentOptions['publishRuntimeEvent'];
   skillContext?: {
     appId: string;
     agentId: string;
@@ -373,6 +374,9 @@ export function buildRuntimeRunOptions(input: {
       : {}),
     ...skillOptions,
     ...mcpOptions,
+    ...(input.publishRuntimeEvent
+      ? { publishRuntimeEvent: input.publishRuntimeEvent }
+      : {}),
   };
   return Object.keys(options).length > 0 ? options : undefined;
 }
