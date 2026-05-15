@@ -118,7 +118,7 @@ describe('jobs/execution-notifications', () => {
     expect(sendMessage).toHaveBeenCalledWith(
       'tg:scheduler',
       expect.stringContaining('Failed: Daily summary'),
-      { threadId: 'thread-1' },
+      expect.objectContaining({ threadId: 'thread-1' }),
     );
   });
 
@@ -146,6 +146,48 @@ describe('jobs/execution-notifications', () => {
     expect(message).not.toContain('request_permission');
     expect(options).toMatchObject({
       threadId: 'thread-1',
+      actionAffordances: [
+        { kind: 'scheduler_run_now', label: 'Retry now', jobId: 'job-1' },
+        {
+          kind: 'scheduler_show_last_logs',
+          label: 'Show last 50 log lines',
+          jobId: 'job-1',
+        },
+        { kind: 'scheduler_pause_job', label: 'Pause job', jobId: 'job-1' },
+        {
+          kind: 'scheduler_open',
+          label: 'Open in scheduler',
+          jobId: 'job-1',
+        },
+      ],
+    });
+  });
+
+  it('describes expected long-running timeout recovery without blaming job scope', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+
+    await notifySchedulerTerminalRunState({
+      job: makeJob({ timeout_ms: 300_000 }),
+      runId: 'run-1',
+      runStatus: 'timeout',
+      summary: 'Scheduler run lease expired before completion.',
+      nextRun: '2026-05-15T16:00:00.000Z',
+      retryCount: 1,
+      pauseReason: null,
+      sendMessage,
+      durationMs: 362_000,
+    });
+
+    const message = String(sendMessage.mock.calls[0]?.[1]);
+    expect(message).toContain('Timed out: Daily summary');
+    expect(message).toContain(
+      'Outcome: Scheduler run lease expired before completion.',
+    );
+    expect(message).toContain(
+      'Action: Rerun with a longer job timeout if this work is expected to take more time.',
+    );
+    expect(message).not.toContain('Narrow the job scope');
+    expect(sendMessage.mock.calls[0]?.[2]).toMatchObject({
       actionAffordances: [
         { kind: 'scheduler_run_now', label: 'Retry now', jobId: 'job-1' },
         {

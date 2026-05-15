@@ -226,7 +226,7 @@ export function executeRunnerProcess(
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
     const resetTimeout = () => {
-      if (hasExplicitTimeout) return;
+      if (hasExplicitTimeout && !input.isScheduledJob) return;
       clearTimeout(timeout);
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };

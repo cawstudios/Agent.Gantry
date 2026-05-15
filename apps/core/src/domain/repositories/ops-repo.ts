@@ -187,6 +187,7 @@ export interface ReleasedStaleJobLease {
   runId: string | null;
   releasedAt: string;
   runTimedOut: boolean;
+  reason: 'lease_expired' | 'runtime_restarted';
 }
 
 export interface RuntimeRouterStateRepository {

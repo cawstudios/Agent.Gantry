@@ -487,6 +487,54 @@ describe('executeRunnerProcess', () => {
       expect(onOutput).toHaveBeenCalledTimes(2);
     });
 
+    it('resets explicit timeout on scheduled job progress chunks', async () => {
+      const onOutput = vi.fn(async () => {});
+      const spec = makeSpec({
+        input: {
+          prompt: 'Run lead maintenance',
+          groupFolder: 'test-group',
+          chatJid: 'test@g.us',
+          isScheduledJob: true,
+          jobId: 'job-1',
+          runId: 'run-1',
+        },
+        onOutput,
+        options: { timeoutMs: 300 },
+      });
+      const resultP = executeRunnerProcess(spec);
+
+      const json1 = JSON.stringify({ status: 'success', result: 'chunk1' });
+      fakeProc.stdout.push(
+        `${OUTPUT_START_MARKER}\n${json1}\n${OUTPUT_END_MARKER}\n`,
+      );
+      await vi.advanceTimersByTimeAsync(10);
+
+      await vi.advanceTimersByTimeAsync(250);
+      const json2 = JSON.stringify({
+        status: 'success',
+        result: 'chunk2',
+        newSessionId: 'sess-2',
+      });
+      fakeProc.stdout.push(
+        `${OUTPUT_START_MARKER}\n${json2}\n${OUTPUT_END_MARKER}\n`,
+      );
+      await vi.advanceTimersByTimeAsync(10);
+
+      await vi.advanceTimersByTimeAsync(250);
+      expect(fakeProc.kill).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(60);
+      expect(fakeProc.kill).toHaveBeenCalledWith('SIGKILL');
+
+      fakeProc.emit('close', 137);
+      await vi.advanceTimersByTimeAsync(10);
+
+      const result = await resultP;
+      expect(result.status).toBe('error');
+      expect(result.newSessionId).toBe('sess-2');
+      expect(onOutput).toHaveBeenCalledTimes(2);
+    });
+
     it('uses group agentConfig.timeout when options.timeoutMs not set', async () => {
       const groupWithTimeout: ConversationRoute = {
         ...testGroup,

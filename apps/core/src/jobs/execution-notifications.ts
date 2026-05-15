@@ -20,7 +20,7 @@ export type JobNotificationLifecycleUpdateResult =
   | 'unsupported'
   | 'failed';
 
-function deadLetterActionAffordances(input: {
+function recoveryActionAffordances(input: {
   job: Job;
   runId: string;
 }): MessageActionAffordance[] {
@@ -168,9 +168,9 @@ export async function notifySchedulerTerminalRunState(input: {
         });
   if (updateResult === 'updated') return true;
   const actionAffordances =
-    input.runStatus === 'dead_lettered'
-      ? deadLetterActionAffordances({ job: input.job, runId: input.runId })
-      : undefined;
+    input.runStatus === 'completed'
+      ? undefined
+      : recoveryActionAffordances({ job: input.job, runId: input.runId });
   return sendJobNotification({
     job: input.job,
     text: summaryMessage,
