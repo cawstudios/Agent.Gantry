@@ -348,6 +348,7 @@ describe('permission interaction', () => {
       "Bash request
 
       Tool: Bash
+      From: agent chat
       Agent: main_agent
 
       Command:
@@ -366,6 +367,41 @@ describe('permission interaction', () => {
 
       Reply within 5 minute(s)."
     `);
+  });
+
+  it('marks scheduled-job permission prompts without exposing job ids', () => {
+    const text = formatPermissionPromptText(
+      {
+        requestId: 'permission_123',
+        sourceAgentFolder: 'main_agent',
+        jobId: 'knacklabs-lead-maintenance-controller-2026-05-15',
+        toolName: 'Bash',
+        toolInput: { command: 'npm run lead-generator' },
+      },
+      60_000,
+    );
+
+    expect(text).toContain('From: scheduled job');
+    expect(text).toContain('Agent: main_agent');
+    expect(text).not.toContain(
+      'knacklabs-lead-maintenance-controller-2026-05-15',
+    );
+  });
+
+  it('marks interactive-agent permission prompts', () => {
+    const text = formatPermissionPromptText(
+      {
+        requestId: 'permission_123',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'Bash',
+        toolInput: { command: 'git status --short' },
+      },
+      60_000,
+    );
+
+    expect(text).toContain('From: agent chat');
+    expect(text).toContain('Agent: main_agent');
+    expect(text).not.toContain('From: scheduled job');
   });
 
   it('renders typed tool input families without JSON dumps', () => {
@@ -451,6 +487,8 @@ describe('permission interaction', () => {
 
     expect(receipt).toContain('Allowed once');
     expect(receipt).toContain('For: Bash (git status --short)');
+    expect(receipt).toContain('From: agent chat');
+    expect(receipt).toContain('Agent: main_agent');
     expect(receipt).not.toContain('Request ID');
     expect(receipt).not.toContain('perm-abc-123');
   });
@@ -475,10 +513,38 @@ describe('permission interaction', () => {
     expect(receipt).toContain('Allowed for 5 minutes');
     expect(receipt).toContain('Until:');
     expect(receipt).toContain('Why: Bash (git status --short)');
+    expect(receipt).toContain('From: agent chat');
+    expect(receipt).toContain('Agent: main_agent');
     expect(receipt).toContain(
       'Allows: eligible tools and SDK API/network prompts in this chat',
     );
     expect(receipt).not.toContain('Request ID');
+    expect(receipt).not.toContain('perm-abc-123');
+  });
+
+  it('marks scheduled-job receipts without exposing job ids', () => {
+    const receipt = formatPermissionReceiptText(
+      'perm-abc-123',
+      {
+        requestId: 'perm-abc-123',
+        sourceAgentFolder: 'main_agent',
+        jobId: 'knacklabs-lead-maintenance-controller-2026-05-15',
+        toolName: 'Bash',
+        toolInput: { command: 'npm run lead-generator' },
+      },
+      {
+        approved: true,
+        mode: 'allow_once',
+        decidedBy: 'ravi',
+      },
+    );
+
+    expect(receipt).toContain('Allowed once');
+    expect(receipt).toContain('From: scheduled job');
+    expect(receipt).toContain('Agent: main_agent');
+    expect(receipt).not.toContain(
+      'knacklabs-lead-maintenance-controller-2026-05-15',
+    );
     expect(receipt).not.toContain('perm-abc-123');
   });
 

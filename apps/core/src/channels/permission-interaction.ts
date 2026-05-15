@@ -134,7 +134,7 @@ export function formatPermissionPromptText(
     sanitizePermissionText(title, 160, 40),
     '',
     `Tool: ${request.displayName || request.toolName}`,
-    `Agent: ${request.sourceAgentFolder}`,
+    ...formatPermissionOriginLines(request),
   ];
   if (request.agentID || request.subagentType) {
     lines.push(
@@ -187,7 +187,12 @@ export function formatPermissionReceiptText(
     : 'permission request';
   if (!decision.approved || decision.mode === 'cancel') {
     return limitPermissionMessage(
-      `Canceled: no permission changed\nAction: ${sanitizePermissionText(action, 160, 40)}\nBy: ${sanitizePermissionText(actor, 120, 40)}`,
+      [
+        'Canceled: no permission changed',
+        `Action: ${sanitizePermissionText(action, 160, 40)}`,
+        ...formatPermissionOriginLines(request),
+        `By: ${sanitizePermissionText(actor, 120, 40)}`,
+      ].join('\n'),
     );
   }
   if (decision.mode === 'allow_timed_grant') {
@@ -203,6 +208,7 @@ export function formatPermissionReceiptText(
         'Allowed for 5 minutes',
         `Until: ${expiresLabel}`,
         `Why: ${formatPermissionReceiptActionSummary(request)}`,
+        ...formatPermissionOriginLines(request),
         'Allows: eligible tools and SDK API/network prompts in this chat',
         `By: ${sanitizePermissionText(actor, 120, 40)}`,
       ].join('\n'),
@@ -216,6 +222,7 @@ export function formatPermissionReceiptText(
       lines.push(...formatRuleList(rules));
     }
     lines.push(`For: ${formatPermissionReceiptActionSummary(request)}`);
+    lines.push(...formatPermissionOriginLines(request));
     lines.push(`By: ${sanitizePermissionText(actor, 120, 40)}`);
     lines.push(
       'Applying persistent grants now; final success or failure will be reported separately.',
@@ -227,6 +234,7 @@ export function formatPermissionReceiptText(
     [
       'Allowed once',
       `For: ${formatPermissionReceiptActionSummary(request)}`,
+      ...formatPermissionOriginLines(request),
       `By: ${sanitizePermissionText(actor, 120, 40)}`,
     ].join('\n'),
   );
@@ -258,6 +266,17 @@ function limitPermissionMessage(input: string): string {
   return `${input.slice(0, PERMISSION_MESSAGE_BUDGET - 44)}\n\n[additional permission details omitted]`;
 }
 
+function formatPermissionOriginLines(
+  request: PermissionApprovalRequest | undefined,
+): string[] {
+  if (!request) return [];
+  const source = request.jobId ? 'scheduled job' : 'agent chat';
+  return [
+    `From: ${source}`,
+    `Agent: ${sanitizePermissionText(request.sourceAgentFolder, 120, 40)}`,
+  ];
+}
+
 function formatRuleList(rules: string[]): string[] {
   const shown = rules
     .slice(0, 5)
@@ -276,7 +295,7 @@ function formatInteractionPermissionPrompt(
   const title = capabilityName
     ? `Allow ${capabilityName}?`
     : sanitizePermissionText(interaction.title, 160, 40);
-  const lines = [title, `Agent: ${request.sourceAgentFolder}`];
+  const lines = [title, ...formatPermissionOriginLines(request)];
   const accountLabel = request.toolInput?.accountLabel;
   if (typeof accountLabel === 'string' && accountLabel.trim()) {
     lines.push(
@@ -309,7 +328,7 @@ function formatSemanticPermissionPrompt(
   const definition = semanticCapabilityDefinition(request, rule);
   const lines = [
     `Allow ${capabilityName}?`,
-    `Agent: ${request.sourceAgentFolder}`,
+    ...formatPermissionOriginLines(request),
   ];
   const capabilityId =
     definition?.capabilityId ?? semanticCapabilityId(request, rule);
