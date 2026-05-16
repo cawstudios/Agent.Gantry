@@ -107,6 +107,21 @@ access, `propose_local_cli_capability` for reviewed authenticated CLIs,
 agent's durable bindings, exports the readable projection to `settings.yaml`,
 and activates on the next scheduled run or a manual rerun.
 
+Job creation can declare `capability_requirements` on `scheduler_upsert_job`
+instead of embedding provider-specific shell commands in the prompt. Each
+requirement names a semantic capability id, a human reason, and optional
+implementation hints such as `configured_access`, `local_cli`, `mcp_server`, or
+`builtin_tool`. Gantry stores those requirements on the canonical job target and
+derives `capability:<id>` required-tool rules from them. The pre-confirmation
+plan shows the required capabilities in human terms, for example
+`Google Sheets write using gog`.
+
+`local_cli` requirements are setup blockers until reviewed local CLI capability
+enforcement exists for that executable and command template. They do not create
+or imply broad `Bash(cli *)` authority. The setup state points the agent to
+`propose_local_cli_capability`, while configured built-in capabilities use
+`request_capability`.
+
 The scheduler records the failure summary, emits `job.tool_denied`, pauses
 recurring jobs that need a missing persistent capability as `Setup required`,
 and notifies the linked group/thread or DM unless the job is silent.

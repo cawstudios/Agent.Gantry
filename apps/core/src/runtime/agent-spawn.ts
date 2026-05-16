@@ -400,6 +400,7 @@ export async function spawnAgent(
     MYCLAW_IPC_AUTH_TOKEN: ipcAuth.authToken,
     MYCLAW_CHAT_JID: input.chatJid,
     ...(input.jobId ? { MYCLAW_JOB_ID: input.jobId } : {}),
+    ...(input.jobName ? { MYCLAW_JOB_NAME: input.jobName } : {}),
     ...(input.runId ? { MYCLAW_JOB_RUN_ID: input.runId } : {}),
     ...(browserIpcEnabled
       ? {

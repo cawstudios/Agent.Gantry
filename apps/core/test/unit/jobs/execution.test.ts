@@ -1524,6 +1524,58 @@ describe('jobs/execution', () => {
     );
   });
 
+  it('does not leave a completed required-Browser job running when browser activity verification hangs', async () => {
+    vi.useFakeTimers();
+    try {
+      const job = makeJob({ required_tools: ['Browser'] });
+      const opsRepository = makeOpsRepository(job);
+      vi.mocked(opsRepository.listRecentJobEvents).mockImplementation(
+        () => new Promise(() => undefined),
+      );
+      const toolRepository = makeToolRepository(['Browser']);
+
+      const done = runJob(
+        job,
+        {
+          conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+          queue: {} as never,
+          onProcess: () => {},
+          sendMessage: vi.fn(async () => undefined) as never,
+          opsRepository: opsRepository as never,
+          getToolRepository: () => toolRepository as never,
+          getBrowserStatus: vi.fn(async () => ({ hasState: true })),
+          runAgent: vi.fn(async () => ({
+            status: 'success',
+            result: 'browser done',
+          })) as never,
+        },
+        'tg:scheduler',
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await done;
+
+      expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+        expect.any(String),
+        'completed',
+        'browser done',
+        null,
+      );
+      expect(runtimeStoreMock.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'job.tool_activity',
+          payload: expect.objectContaining({
+            phase: 'required_tool_verification_skipped',
+            tool: 'Browser',
+            ok: true,
+          }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 10_000);
+
   it('closes the dedicated browser profile after a Browser job reaches terminal state', async () => {
     const job = makeJob({ required_tools: ['Browser'] });
     const opsRepository = makeOpsRepository(job);

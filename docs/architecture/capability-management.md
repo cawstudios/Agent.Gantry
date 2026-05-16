@@ -41,7 +41,8 @@ Each semantic capability record includes:
 - `capabilityId`, `displayName`, `category`, `risk`, and optional
   `accountLabel`
 - `can` and `cannot` user-facing scope statements
-- `credentialSource`: `onecli`, `external_broker`, `local_cli`, or `none`
+- `credentialSource`: implementation metadata such as `configured_access`,
+  `onecli`, `external_broker`, `local_cli`, or `none`
 - low-level implementation bindings such as exact tools, scoped
   `Bash(<template>)`, MCP tools, adapter refs, or local CLI command templates
 - optional preflight metadata, protected credential/config paths, redaction
@@ -394,11 +395,29 @@ Before calling a cutover complete, run targeted searches for:
    not enable recurring-job reuse until runtime local-CLI enforcement verifies
    executable identity, preflight, protected paths, and denied env overrides.
 
+## Scheduler Capability Requirements
+
+Agents creating jobs should declare needed app/tool access with
+`scheduler_upsert_job.capability_requirements` when the job depends on a
+semantic capability such as Google Sheets write access. Requirements are stored
+with the job, included in the confirmation token, and projected into
+`required_tools` as `capability:<id>` so readiness checks and runtime permission
+evaluation use the same durable authority model.
+
+Use `implementation.kind: configured_access` when Gantry should use an existing
+reviewed provider-neutral capability. Use `implementation.kind: local_cli` only
+as a request to review a specific local CLI implementation such as `gog`; it
+stays `draft_only` and points to `propose_local_cli_capability` until runtime
+local-CLI enforcement can verify executable identity, command templates,
+protected paths, and denied environment overrides. Do not replace that review
+with a broad `Bash(gog *)` grant.
+
 Examples:
 
-- Google Sheets through OneCLI: request `request_capability` with
+- Google Sheets through configured access: request `request_capability` with
   `capabilityId=google.sheets.write`. The prompt shows `Google Sheets write`;
-  OneCLI broker details and command hashes stay in Details.
+  concrete implementation details such as OneCLI, `gog`, command rules, and
+  hashes stay out of the primary prompt and belong in audit/details surfaces.
 - Google Sheets through `gog`: propose a `local_cli` capability with pinned
   `/usr/local/bin/gog`, command template `/usr/local/bin/gog sheets write *`,
   auth preflight `/usr/local/bin/gog auth status`, and protected

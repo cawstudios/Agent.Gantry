@@ -164,6 +164,22 @@ describe('scheduler MCP tools', () => {
       schemas.get('scheduler_upsert_job')?.required_tools.safeParse(['Browser'])
         .success,
     ).toBe(true);
+    expect(
+      schemas.get('scheduler_upsert_job')?.capability_requirements.safeParse([
+        {
+          capability_id: 'google.sheets.write',
+          reason: 'Write lead rows after each run',
+          implementation: {
+            kind: 'local_cli',
+            name: 'gog',
+            executable_path: '/usr/local/bin/gog',
+            command_template: 'gog sheets append *',
+            auth_preflight: 'gog auth status',
+            protected_paths: ['~/.config/gog/*'],
+          },
+        },
+      ]).success,
+    ).toBe(true);
     expect(schemas.get('scheduler_upsert_job')?.confirm).toBeDefined();
     expect(
       schemas.get('scheduler_upsert_job')?.confirmation_token,
@@ -173,7 +189,99 @@ describe('scheduler MCP tools', () => {
       schemas.get('scheduler_update_job')?.required_tools.safeParse(['Browser'])
         .success,
     ).toBe(true);
+    expect(
+      schemas.get('scheduler_update_job')?.capability_requirements.safeParse([
+        {
+          capability_id: 'google.sheets.write',
+          reason: 'Write lead rows after each run',
+          implementation: {
+            kind: 'local_cli',
+            name: 'gog',
+            executable_path: '/usr/local/bin/gog',
+            command_template: 'gog sheets append *',
+            auth_preflight: 'gog auth status',
+            protected_paths: ['~/.config/gog/*'],
+          },
+        },
+      ]).success,
+    ).toBe(true);
     expect(schemas.get('scheduler_list_notification_targets')).toBeDefined();
+  });
+
+  it('writes scheduler capability requirements for update mutations', async () => {
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
+    tempRoots.push(ipcDir);
+    process.env.MYCLAW_IPC_DIR = ipcDir;
+    const waitForTaskResponse = vi.fn(async () => ({ ok: true }));
+    const writeIpcFile = vi.fn();
+    vi.doMock('../../../../src/runner/mcp/ipc.js', () => ({
+      waitForTaskResponse,
+      writeIpcFile,
+    }));
+    const { registerSchedulerTools } =
+      await import('../../../../src/runner/mcp/tools/scheduler.js');
+    const tools = new Map<
+      string,
+      (
+        args: Record<string, unknown>,
+      ) => Promise<{ content: { text: string }[]; isError?: boolean }>
+    >();
+    const server = {
+      tool: (
+        name: string,
+        _description: string,
+        _schema: unknown,
+        handler: never,
+      ) => {
+        tools.set(name, handler);
+      },
+    };
+
+    registerSchedulerTools(server as never);
+    const response = await tools.get('scheduler_update_job')!({
+      job_id: 'job-1',
+      execution_context: {
+        conversation_jid: 'tg:team',
+        thread_id: null,
+        group_scope: 'team',
+      },
+      capability_requirements: [
+        {
+          capability_id: 'google.sheets.write',
+          reason: 'Write lead rows after each run',
+          implementation: {
+            kind: 'local_cli',
+            name: 'gog',
+            command_template: 'gog sheets append *',
+          },
+        },
+      ],
+    });
+
+    expect(response.isError).not.toBe(true);
+    expect(writeIpcFile).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        type: 'scheduler_update_job',
+        jobId: 'job-1',
+        executionContext: {
+          conversationJid: 'tg:team',
+          threadId: null,
+          groupScope: 'team',
+        },
+        capabilityRequirements: [
+          {
+            capabilityId: 'google.sheets.write',
+            reason: 'Write lead rows after each run',
+            implementation: {
+              kind: 'local_cli',
+              name: 'gog',
+              commandTemplate: 'gog sheets append *',
+            },
+          },
+        ],
+      }),
+    );
   });
 
   it('passes five-minute scheduler event waits through to host IPC', async () => {
@@ -269,6 +377,17 @@ describe('scheduler MCP tools', () => {
       schedule_type: 'once',
       schedule_value: '2026-05-04T00:00:00.000Z',
       target: 'here',
+      capability_requirements: [
+        {
+          capability_id: 'google.sheets.write',
+          reason: 'Write lead rows after each run',
+          implementation: {
+            kind: 'local_cli',
+            name: 'gog',
+            command_template: 'gog sheets append *',
+          },
+        },
+      ],
       required_tools: ['Browser'],
     });
 
@@ -277,6 +396,9 @@ describe('scheduler MCP tools', () => {
     expect(response.content[0].text).toContain('- Schedule: once');
     expect(response.content[0].text).toContain('- Model: job default');
     expect(response.content[0].text).toContain('- Tool access:');
+    expect(response.content[0].text).toContain(
+      '- Required capabilities: Google Sheets write using gog',
+    );
     expect(response.content[0].text).toContain('- Required tools: Browser');
     expect(response.content[0].text).toContain('- Network:');
     expect(response.content[0].text).toContain('- Memory:');

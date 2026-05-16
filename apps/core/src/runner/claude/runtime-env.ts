@@ -27,6 +27,7 @@ export const APP_ID = process.env.MYCLAW_APP_ID?.trim() || '';
 export const AGENT_ID = process.env.MYCLAW_AGENT_ID?.trim() || '';
 export const CHAT_JID = process.env.MYCLAW_CHAT_JID?.trim() || '';
 export const JOB_ID = process.env.MYCLAW_JOB_ID?.trim() || '';
+export const JOB_NAME = process.env.MYCLAW_JOB_NAME?.trim() || '';
 export const JOB_RUN_ID = process.env.MYCLAW_JOB_RUN_ID?.trim() || '';
 export const IPC_RESPONSE_VERIFY_KEY =
   process.env.MYCLAW_IPC_RESPONSE_VERIFY_KEY || '';

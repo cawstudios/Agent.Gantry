@@ -1343,7 +1343,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'does not resume or persist SDK sessions for live channel turns',
+    'resumes and persists SDK sessions for live channel turns',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1361,8 +1361,8 @@ describe('agent-runner IPC lifecycle', () => {
 
       expect(result.exitCode).toBe(0);
       const call = readRecord(fixture.recordPath).calls[0];
-      expect(call?.persistSession).toBe(false);
-      expect(call?.resume).toBeUndefined();
+      expect(call?.persistSession).toBe(true);
+      expect(call?.resume).toBe('stale-sdk-session');
       expect(call?.resumeSessionAt).toBeUndefined();
       expect(
         (call?.mcpServers?.myclaw as { env?: Record<string, string> })?.env,
@@ -1375,7 +1375,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'routes /compact through a stateless live streaming SDK query',
+    'routes /compact through a persistent live streaming SDK query',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1388,7 +1388,7 @@ describe('agent-runner IPC lifecycle', () => {
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.promptKind).toBe('stream');
       expect(call?.streamMessages?.[0]).toBe('/compact');
-      expect(call?.persistSession).toBe(false);
+      expect(call?.persistSession).toBe(true);
       expect(call?.resume).toBeUndefined();
       expect(call?.resumeSessionAt).toBeUndefined();
     },
@@ -1534,7 +1534,7 @@ describe('agent-runner IPC lifecycle', () => {
       expect(result.exitCode).toBe(0);
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.streamEnded).toBe(true);
-      expect(result.stdout.match(/---MYCLAW_OUTPUT_START---/g)).toHaveLength(1);
+      expect(result.stdout.match(/---MYCLAW_OUTPUT_START---/g)).toHaveLength(2);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
@@ -2084,7 +2084,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'scheduled jobs do not inherit default interactive tools before approval',
+    'scheduled jobs request missing tool approval before denying current run',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -2112,14 +2112,14 @@ describe('agent-runner IPC lifecycle', () => {
         }),
       );
       expect(String(call?.permissionDecision?.message)).toContain(
-        'Autonomous permission approval is disabled for unattended jobs.',
+        'Unattended jobs do not wait for approval during the active tool call',
       );
       expect(String(call?.permissionDecision?.message)).toContain(
         'request_permission { "permissionKind": "tool", "toolName": "WebSearch", "temporaryOnly": false, "reason": "This scheduled job needs WebSearch access." }',
       );
       expect(
         fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
+      ).toBe(true);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );

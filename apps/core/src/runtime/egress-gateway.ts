@@ -41,6 +41,7 @@ interface EgressGatewayState {
   key: string;
   port: number;
   server: http.Server;
+  sockets: Set<Duplex>;
   settings: EgressSettings;
   principal: EgressGatewayPrincipal;
   upstreamProxy?: EgressGatewayUpstreamProxy;
@@ -53,19 +54,13 @@ const EGRESS_GATEWAY_BASE_PORT = 18_080;
 const EGRESS_GATEWAY_PORT_SPAN = 2_000;
 const EGRESS_GATEWAY_MAX_PORT_PROBES = 50;
 const EGRESS_GATEWAY_CONNECT_TIMEOUT_MS = 30_000;
+const EGRESS_GATEWAY_CLOSE_TIMEOUT_MS = 1_000;
 const gateways = new Map<string, EgressGatewayState>();
 
 export async function closeEgressGatewaysForTest(): Promise<void> {
   const states = [...gateways.values()];
   gateways.clear();
-  await Promise.all(
-    states.map(
-      (state) =>
-        new Promise<void>((resolve) => {
-          state.server.close(() => resolve());
-        }),
-    ),
-  );
+  await Promise.all(states.map((state) => closeGatewayState(state)));
 }
 
 export async function closeEgressGateway(
@@ -76,9 +71,7 @@ export async function closeEgressGateway(
   const state = gateways.get(key);
   if (!state) return;
   gateways.delete(key);
-  await new Promise<void>((resolve) => {
-    state.server.close(() => resolve());
-  });
+  await closeGatewayState(state);
 }
 
 export async function ensureEgressGateway(input: {
@@ -121,6 +114,7 @@ export async function ensureEgressGateway(input: {
         key: input.key,
         port,
         server: createEgressGatewayServer(input.key),
+        sockets: new Set(),
         settings: input.settings,
         principal: input.principal,
         ...(input.upstreamProxy ? { upstreamProxy: input.upstreamProxy } : {}),
@@ -158,6 +152,10 @@ function createEgressGatewayServer(key: string): http.Server {
       socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
     });
   });
+  server.on('connection', (socket) => {
+    const state = gateways.get(key);
+    if (state) trackGatewaySocket(state, socket);
+  });
   return server;
 }
 
@@ -168,6 +166,7 @@ async function handleConnectRequest(
   head: Buffer,
 ): Promise<void> {
   const state = requireGatewayState(key);
+  trackGatewaySocket(state, clientSocket);
   const target = parseConnectTarget(req.url || '');
   if (!target) {
     clientSocket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
@@ -196,6 +195,7 @@ async function handleConnectRequest(
   });
   if (state.upstreamProxy) {
     await tunnelViaUpstreamProxy(
+      state,
       state.upstreamProxy,
       target,
       clientSocket,
@@ -203,7 +203,7 @@ async function handleConnectRequest(
     );
     return;
   }
-  await tunnelDirect(target, clientSocket, head);
+  await tunnelDirect(state, target, clientSocket, head);
 }
 
 async function handleHttpProxyRequest(
@@ -297,6 +297,7 @@ function requestViaUpstreamProxy(
 }
 
 async function tunnelDirect(
+  state: EgressGatewayState,
   target: { host: string; port: number; authority: string },
   clientSocket: Duplex,
   head: Buffer,
@@ -308,6 +309,7 @@ async function tunnelDirect(
     upstreamSocket.pipe(clientSocket);
     clientSocket.pipe(upstreamSocket);
   });
+  trackGatewaySocket(state, upstreamSocket);
   upstreamSocket.on('error', () => {
     clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
   });
@@ -318,6 +320,7 @@ async function tunnelDirect(
 }
 
 async function tunnelViaUpstreamProxy(
+  state: EgressGatewayState,
   upstream: EgressGatewayUpstreamProxy,
   target: { host: string; port: number; authority: string },
   clientSocket: Duplex,
@@ -337,6 +340,7 @@ async function tunnelViaUpstreamProxy(
       proxySocket.write(`${headers.join('\r\n')}\r\n\r\n`);
     },
   );
+  trackGatewaySocket(state, proxySocket);
   let buffered = Buffer.alloc(0);
   let established = false;
   let failed = false;
@@ -377,6 +381,39 @@ async function tunnelViaUpstreamProxy(
     EGRESS_GATEWAY_CONNECT_TIMEOUT_MS,
     failBeforeEstablished,
   );
+}
+
+function trackGatewaySocket(state: EgressGatewayState, socket: Duplex): void {
+  state.sockets.add(socket);
+  socket.once('close', () => {
+    state.sockets.delete(socket);
+  });
+}
+
+async function closeGatewayState(state: EgressGatewayState): Promise<void> {
+  state.server.closeIdleConnections?.();
+  state.server.closeAllConnections?.();
+  for (const socket of state.sockets) {
+    socket.destroy();
+  }
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(() => {
+      logger.warn(
+        { key: state.key, port: state.port, sockets: state.sockets.size },
+        'Timed out closing egress gateway; continuing run finalization',
+      );
+      finish();
+    }, EGRESS_GATEWAY_CLOSE_TIMEOUT_MS);
+    timeout.unref?.();
+    state.server.close(() => finish());
+  });
 }
 
 function writeDeniedConnect(

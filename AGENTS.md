@@ -52,6 +52,7 @@ Important constraints:
 - Scheduler maintenance must periodically full-sync active jobs so expired leases are released even when no new pg-boss job fires.
 - Scheduler terminal states must leave durable user-visible evidence: persist a `JobRun`, emit terminal runtime events, send a concise outcome notification when routes exist, and persist `notified_at` after successful delivery.
 - Jobs paused for missing capabilities must surface one clear user action in job list/status metadata, such as approving `Browser`; do not require users to inspect logs to discover the blocker.
+- Scheduler job capability metadata must stay runtime-neutral. Put business-specific sheet ids, document ids, accounts, ranges, URLs, and workflow details in the job prompt or job-owned manifest; keep `capability_requirements`, preflight commands, and setup actions scoped to generic provider/tool readiness such as an installed CLI, auth presence, command template, protected paths, and reviewed capability id.
 - Outbound durable delivery recovery startup must claim due items across app scopes; do not hard-code startup recovery claims to `appId: 'default'`.
 - Jobs must use canonical `execution_context` and `notification_routes` for runtime execution/delivery targeting; do not add or mirror legacy job-notification alias fields.
 - Postgres `pgcrypto` must be installed in `public` schema for shared test/runtime databases; schema-scoped extension installs break `digest()` lookups under per-schema `search_path`.

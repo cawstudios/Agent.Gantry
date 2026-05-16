@@ -149,7 +149,7 @@ Capability catalog response:
       "semanticCapability": {
         "capabilityId": "google.sheets.write",
         "displayName": "Google Sheets write",
-        "credentialSource": "onecli"
+        "credentialSource": "configured_access"
       }
     }
   ],

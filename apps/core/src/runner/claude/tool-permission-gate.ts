@@ -35,6 +35,8 @@ import {
   emitYoloDenylistHit,
   yoloDenylistPromptReason,
 } from './tool-permission-events.js';
+import { waitOnlyBashMonitoringDenial } from './wait-only-bash-guard.js';
+import { forceBackgroundNativeAgentInput } from './native-agent-tool-input.js';
 
 type PermissionApprovalInput = Parameters<typeof requestPermissionApproval>[0];
 
@@ -66,21 +68,6 @@ interface CreateCanUseToolCallbackInput {
   getNewSessionId: () => string | undefined;
   emitInteractionBoundary: () => void;
   recordToolActivity: (toolName: string) => void;
-}
-
-function forceBackgroundNativeAgentInput(
-  toolName: string,
-  input: unknown,
-): Record<string, unknown> {
-  if (toolName !== 'Agent' && toolName !== 'Task') {
-    return input !== null && typeof input === 'object' && !Array.isArray(input)
-      ? (input as Record<string, unknown>)
-      : {};
-  }
-  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
-    return { run_in_background: true };
-  }
-  return { ...(input as Record<string, unknown>), run_in_background: true };
 }
 
 function stableTimedGrantKey(value: unknown): string {
@@ -203,6 +190,26 @@ export function createCanUseToolCallback(
       },
     );
     const toolInput = forceBackgroundNativeAgentInput(toolName, rawToolInput);
+    const waitOnlyDenial = waitOnlyBashMonitoringDenial(toolName, toolInput);
+    if (waitOnlyDenial) {
+      log(`Permission denied by wait-only Bash guard: ${waitOnlyDenial}`);
+      emitJobToolActivity(
+        input.agentInput,
+        input.getNewSessionId,
+        'deny',
+        toolName,
+        {
+          ok: false,
+          reason: waitOnlyDenial,
+          decision: 'wait_only_bash_guard',
+        },
+      );
+      return {
+        behavior: 'deny' as const,
+        message: waitOnlyDenial,
+        interrupt: false,
+      };
+    }
     if (input.agentInput.runMode === 'prime') {
       const deniedReason =
         'Prime mode records requested tool access without executing tools.';

@@ -127,6 +127,7 @@ export async function runQuery(
   const extraDirs = discoverAdditionalDirectories();
   const protectedFilesystemPaths = readProtectedFilesystemPaths();
   const workspaceFolder = agentInput.groupFolder;
+  const shouldPersistSdkSession = agentInput.isScheduledJob !== true;
   const capabilities = composeAgentCapabilities({
     mcpServerPath,
     appId: agentInput.appId,
@@ -160,7 +161,10 @@ export async function runQuery(
       effort: queryEffort,
       cwd: WORKSPACE_GROUP_DIR,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      persistSession: false,
+      persistSession: shouldPersistSdkSession,
+      ...(shouldPersistSdkSession && agentInput.sessionId
+        ? { resume: agentInput.sessionId }
+        : {}),
       systemPrompt,
       settings: {
         includeGitInstructions: includeGitInstructionsForPersona(
@@ -215,6 +219,11 @@ export async function runQuery(
         newSessionId = message.session_id;
         assertRequiredMcpServerReady(message);
         log('Session initialized: provider resume handle received');
+        writeOutput({
+          status: 'success',
+          result: null,
+          newSessionId,
+        });
       }
       if (
         message.type === 'system' &&

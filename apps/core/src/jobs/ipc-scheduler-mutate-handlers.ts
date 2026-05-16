@@ -135,6 +135,9 @@ const schedulerUpdateJobHandler: TaskHandler = async (context) => {
     if (Array.isArray(data.notificationRoutes)) {
       patch.notificationRoutes = data.notificationRoutes;
     }
+    if (Array.isArray(data.capabilityRequirements)) {
+      patch.capabilityRequirements = data.capabilityRequirements;
+    }
     if (Array.isArray(data.requiredTools)) {
       patch.requiredTools = data.requiredTools;
     }

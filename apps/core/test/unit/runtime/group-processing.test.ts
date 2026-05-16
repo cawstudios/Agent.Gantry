@@ -890,7 +890,7 @@ describe('createGroupProcessor', () => {
   // =======================================================================
 
   describe('Postgres-authoritative session context', () => {
-    it('passes hydrated memory context without provider session resume id', async () => {
+    it('passes hydrated memory context with provider session resume id', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const { deps } = setupHappyPath({ group });
       (deps.opsRepository as any).getAgentTurnContext = vi
@@ -919,12 +919,12 @@ describe('createGroupProcessor', () => {
         memoryContextBlock: expect.stringContaining(
           '<myclaw_memory_context>memory</myclaw_memory_context>',
         ),
+        sessionId: 'claude-session-1',
       });
-      expect(mockSpawnAgent.mock.calls[0][1]).not.toHaveProperty('sessionId');
       expect(mockSpawnAgent.mock.calls[0][4]).toBeUndefined();
     });
 
-    it('does not persist SDK session ids from final agent output for the next turn', async () => {
+    it('persists SDK session ids from final agent output for the next turn', async () => {
       const agentOutput: AgentOutput = {
         status: 'success',
         result: 'response',
@@ -944,10 +944,21 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
+      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
+        group.folder,
+        'new-sess-123',
+        null,
+        {
+          conversationJid: 'group1@g.us',
+          conversationKind: undefined,
+          memoryUserId: 'user1@s.whatsapp.net',
+          expectedAgentSessionId: 'agent-session:1',
+          expectedAgentSessionResetAt: null,
+        },
+      );
     });
 
-    it('does not persist SDK session ids from streamed output before the runner exits', async () => {
+    it('persists SDK session ids from streamed output before the runner exits', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const { deps } = setupHappyPath({ group });
       (deps.opsRepository as any).getAgentTurnContext = vi
@@ -984,13 +995,24 @@ describe('createGroupProcessor', () => {
       const processing = processGroupMessages('group1@g.us');
       await streamed.promise;
 
-      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
+      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
+        group.folder,
+        'streamed-sess',
+        null,
+        {
+          conversationJid: 'group1@g.us',
+          conversationKind: undefined,
+          memoryUserId: 'user1@s.whatsapp.net',
+          expectedAgentSessionId: 'agent-session:1',
+          expectedAgentSessionResetAt: null,
+        },
+      );
 
       releaseRunner.resolve({ status: 'success', result: 'text' });
       await processing;
     });
 
-    it('passes direct conversation user scope when looking up turns without persisting provider sessions', async () => {
+    it('passes direct conversation user scope when looking up turns and persisting provider sessions', async () => {
       const agentOutput: AgentOutput = {
         status: 'success',
         result: 'response',
@@ -1022,7 +1044,18 @@ describe('createGroupProcessor', () => {
           memoryUserId: 'sl:U123',
         }),
       );
-      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
+      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
+        group.folder,
+        'dm-sess-123',
+        null,
+        {
+          conversationJid: 'sl:D123',
+          conversationKind: 'dm',
+          memoryUserId: 'sl:U123',
+          expectedAgentSessionId: 'agent-session:dm',
+          expectedAgentSessionResetAt: null,
+        },
+      );
     });
 
     it('derives memory review approver status from canonical conversation approvers', async () => {
@@ -2288,7 +2321,7 @@ describe('createGroupProcessor', () => {
         expect.objectContaining({
           chat_jid: 'group1@g.us',
           sender: 'myclaw',
-          sender_name: 'MyClaw',
+          sender_name: 'Gantry',
           content: 'stream text',
           is_from_me: true,
           is_bot_message: true,
@@ -3515,7 +3548,7 @@ describe('createGroupProcessor', () => {
         group,
         expect.objectContaining({ prompt: 'test prompt' }),
         expect.any(Function),
-        undefined,
+        expect.any(Function),
         undefined,
       );
     });
@@ -3624,7 +3657,7 @@ describe('createGroupProcessor', () => {
   });
 
   describe('SDK session ids from streamed + final output', () => {
-    it('does not persist a streamed SDK session ID when final output repeats it', async () => {
+    it('persists a streamed SDK session ID only once when final output repeats it', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const channel = makeChannel();
       const messages = [makeMessage()];
@@ -3668,7 +3701,19 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
+      expect(deps.opsRepository.setSession).toHaveBeenCalledTimes(1);
+      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
+        group.folder,
+        'session-42',
+        null,
+        {
+          conversationJid: 'group1@g.us',
+          conversationKind: undefined,
+          memoryUserId: 'user1@s.whatsapp.net',
+          expectedAgentSessionId: 'agent-session:1',
+          expectedAgentSessionResetAt: null,
+        },
+      );
     });
 
     it('does not retry stale provider-session persistence from SDK output', async () => {
@@ -3717,7 +3762,19 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.opsRepository.setSession).not.toHaveBeenCalled();
+      expect(deps.opsRepository.setSession).toHaveBeenCalledTimes(1);
+      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
+        group.folder,
+        'session-42',
+        null,
+        {
+          conversationJid: 'group1@g.us',
+          conversationKind: undefined,
+          memoryUserId: 'user1@s.whatsapp.net',
+          expectedAgentSessionId: 'agent-session:1',
+          expectedAgentSessionResetAt: '2026-05-11T00:00:00.000Z',
+        },
+      );
     });
   });
 });

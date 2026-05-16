@@ -289,6 +289,17 @@ describe('contracts package', () => {
           label: 'primary',
         },
       ],
+      capabilityRequirements: [
+        {
+          capabilityId: 'google.sheets.write',
+          reason: 'Append rows after each run',
+          implementation: {
+            kind: 'local_cli',
+            name: 'gog',
+            commandTemplate: 'gog sheets append *',
+          },
+        },
+      ],
       requiredTools: ['Browser'],
       kind: 'recurring',
       schedule: { type: 'cron', value: '0 9 * * *' },
@@ -296,6 +307,12 @@ describe('contracts package', () => {
     } satisfies CreateJobInput;
     expect(CreateJobRequestSchema.parse(sdkCreatePayload)).toMatchObject({
       name: 'Daily summary',
+      capabilityRequirements: [
+        expect.objectContaining({
+          capabilityId: 'google.sheets.write',
+          implementation: expect.objectContaining({ name: 'gog' }),
+        }),
+      ],
       requiredTools: ['Browser'],
       executionContext: {
         conversationJid: 'app:app-one:session-1',
@@ -405,11 +422,23 @@ describe('contracts package', () => {
 
     const sdkUpdatePayload = {
       modelAlias: null,
+      capabilityRequirements: [
+        {
+          capabilityId: 'google.sheets.write',
+          reason: 'Append rows after each run',
+        },
+      ],
       requiredTools: ['Browser'],
       status: 'paused',
     } satisfies UpdateJobInput;
     expect(UpdateJobRequestSchema.parse(sdkUpdatePayload)).toEqual({
       modelAlias: null,
+      capabilityRequirements: [
+        {
+          capabilityId: 'google.sheets.write',
+          reason: 'Append rows after each run',
+        },
+      ],
       requiredTools: ['Browser'],
       status: 'paused',
     });
@@ -476,6 +505,12 @@ describe('contracts package', () => {
             label: 'primary',
           },
         ],
+        capabilityRequirements: [
+          {
+            capabilityId: 'google.sheets.write',
+            reason: 'Append rows after each run',
+          },
+        ],
         requiredTools: ['Browser'],
         requiredMcpServers: [],
         nextRun: iso,
@@ -504,6 +539,7 @@ describe('contracts package', () => {
       }),
     ).toMatchObject({
       staleness: 'missed_window',
+      capabilityRequirements: [{ capabilityId: 'google.sheets.write' }],
       health: { state: 'needs_permission' },
     });
     expectInvalid(JobResponseSchema, {

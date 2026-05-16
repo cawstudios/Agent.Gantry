@@ -296,6 +296,35 @@ describe('autonomous tool rule matcher', () => {
     ).toMatchObject({ allowed: false });
   });
 
+  it('allows safe interpreter invocation of an approved script path', () => {
+    for (const command of [
+      'python3 /tmp/dedup-append-lead.py \'[["lead"]]\'',
+      '/usr/bin/python3 /tmp/dedup-append-lead.py \'[["lead"]]\'',
+      'python /tmp/dedup-append-lead.py \'[["lead"]]\'',
+    ]) {
+      expect(
+        evaluateAutonomousToolUse({
+          rules: ['Bash(/tmp/dedup-append-lead.py *)'],
+          toolName: 'Bash',
+          toolInput: { command },
+        }),
+      ).toMatchObject({
+        allowed: true,
+        matchedRule: 'Bash(/tmp/dedup-append-lead.py *)',
+      });
+    }
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['Bash(/tmp/dedup-append-lead.py *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command: 'python3 -c "print(1)" /tmp/dedup-append-lead.py',
+        },
+      }),
+    ).toMatchObject({ allowed: false });
+  });
+
   it('rejects exact bare Bash as too broad', () => {
     expect(validateAutonomousToolRule('Bash')).toMatchObject({
       ok: false,

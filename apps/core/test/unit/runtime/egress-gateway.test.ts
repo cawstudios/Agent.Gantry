@@ -4,6 +4,7 @@ import net from 'net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  closeEgressGateway,
   closeEgressGatewaysForTest,
   ensureEgressGateway,
 } from '@core/runtime/egress-gateway.js';
@@ -145,6 +146,34 @@ describe('egress gateway', () => {
     expect(response.statusCode).toBe(502);
     await upstream.close();
   });
+
+  it('closes promptly while CONNECT tunnels are still open', async () => {
+    const target = await startHoldingTarget();
+    const gateway = await ensureEgressGateway({
+      key: 'test:close-open-connect',
+      settings: { denylist: [] },
+      principal: { appId: 'default', agentId: 'agent:test' },
+    });
+
+    const tunnel = await openTunnelThroughGateway({
+      gatewayPort: gateway.port,
+      authority: `127.0.0.1:${target.port}`,
+    });
+
+    await expect(
+      Promise.race([
+        closeEgressGateway(gateway),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error('closeEgressGateway timed out')),
+            500,
+          ),
+        ),
+      ]),
+    ).resolves.toBeUndefined();
+    await waitForSocketClose(tunnel);
+    await target.close();
+  });
 });
 
 async function startTargetServer(): Promise<{
@@ -191,6 +220,93 @@ async function startClosingProxy(): Promise<{
         server.close(() => resolve());
       }),
   };
+}
+
+async function startHoldingTarget(): Promise<{
+  port: number;
+  close: () => Promise<void>;
+}> {
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.once('close', () => {
+      sockets.delete(socket);
+    });
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Holding target did not bind to TCP.');
+  }
+  return {
+    port: address.port,
+    close: () =>
+      new Promise((resolve) => {
+        for (const socket of sockets) socket.destroy();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+function openTunnelThroughGateway(input: {
+  gatewayPort: number;
+  authority: string;
+}): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
+    let response = '';
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    const socket = net.connect(input.gatewayPort, '127.0.0.1', () => {
+      socket.write(
+        [`CONNECT ${input.authority} HTTP/1.1`, `Host: ${input.authority}`, '']
+          .join('\r\n')
+          .concat('\r\n'),
+      );
+    });
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (!/^HTTP\/1\.[01]\s+200\b/.test(response)) {
+        socket.destroy();
+        reject(new Error(`CONNECT response was not 200: ${response}`));
+        return;
+      }
+      resolve(socket);
+    };
+    timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(new Error(`Timed out waiting for CONNECT response: ${response}`));
+    }, 1_000);
+    socket.setEncoding('utf-8');
+    socket.on('data', (chunk) => {
+      response += chunk;
+      if (response.includes('\r\n\r\n')) finish();
+    });
+    socket.once('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+function waitForSocketClose(socket: net.Socket): Promise<void> {
+  if (socket.destroyed) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Socket did not close after gateway shutdown'));
+    }, 500);
+    socket.once('close', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
 }
 
 function connectThroughGateway(input: {

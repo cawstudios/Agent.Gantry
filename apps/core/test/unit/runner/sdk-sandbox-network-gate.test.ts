@@ -354,7 +354,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('denies network prompts without a parent id when tool approvals are active', () => {
+  it('uses the most recent approved tool for parentless network prompts', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now);
 
@@ -375,11 +375,14 @@ describe('sdk sandbox network gate', () => {
       { host: 'registry.npmjs.org' },
       { toolUseID: 'toolu_network_1' },
     );
-    expect(ambiguous?.behavior).toBe('deny');
+    expect(ambiguous).toEqual({
+      behavior: 'allow',
+      updatedInput: { host: 'registry.npmjs.org' },
+    });
     expect(latestPayload()).toMatchObject({
-      decision: 'sdk_network_gate_denied',
-      reason:
-        'SDK requested sandbox network access without a parent tool-use id while multiple tool approvals are active.',
+      decision: 'sdk_network_gate_suppressed',
+      parentToolUseID: 'toolu_bash_2',
+      approvedToolName: 'Bash',
       networkToolUseID: 'toolu_network_1',
       expiredTokenCount: 0,
     });

@@ -199,6 +199,11 @@ describe('PromptProfileService', () => {
       virtualPath: 'team/SOUL.md',
     });
     expect(soul.content).toContain('Name:** Kai');
+    expect(soul.content).toContain('speak in user intent and outcome first');
+    expect(soul.content).toContain('ask the smallest plain-language question');
+    expect(soul.content).toContain(
+      'For migrated jobs, describe what the job will do',
+    );
   });
 
   it('does not overwrite existing per-agent prompt artifacts', async () => {

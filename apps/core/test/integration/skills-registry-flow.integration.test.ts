@@ -775,7 +775,7 @@ describe('skill registry integration flow', () => {
           permissionKind: 'tool',
           capabilityId: 'google.sheets.write',
           capabilityDisplayName: 'Google Sheets write',
-          accountLabel: 'OneCLI Google account',
+          accountLabel: 'Configured Google access',
           can: 'Read and update spreadsheet values.',
           cannot: 'Change sharing or receive raw OAuth tokens.',
           temporaryOnly: false,

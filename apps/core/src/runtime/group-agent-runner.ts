@@ -204,83 +204,116 @@ export function createGroupAgentRunner(input: {
       group.folder,
       options?.memoryContext?.userId,
     );
-    const wrappedOnOutput = onOutput
-      ? async (output: AgentOutput) => {
-          if (output.usage) {
-            recordRuntimeModelUsage({
-              group,
-              threadId: sessionThreadId,
-              usage: output.usage,
-              usageEventId: output.usageEventId,
-              getDefaultModel: () => {
-                defaultRuntimeModel ??=
-                  group.agentConfig?.model ?? DEFAULT_MODEL_ALIAS;
-                return defaultRuntimeModel;
-              },
-            });
-          }
-          if (output.contextUsage) {
-            modelStatus.updateSelection({
-              ...defaultModelStatusSelection(
-                group.agentConfig?.model ??
-                  (defaultRuntimeModel ??=
-                    group.agentConfig?.model ?? DEFAULT_MODEL_ALIAS),
-              ),
-              selectionSource: group.agentConfig?.model
-                ? 'session override'
-                : 'chat default',
-              contextUsage: output.contextUsage,
-            });
-          }
-          if (output.status !== 'error' && output.result) {
-            streamedResult.append(String(output.result));
-          }
-          if (output.runtimeEvents?.length && deps.publishRuntimeEvent) {
-            for (const event of output.runtimeEvents) {
-              if (!isRuntimeEventType(event.eventType)) continue;
-              const appId = event.appId ?? turnContext?.appId;
-              if (!appId) continue;
-              await deps.publishRuntimeEvent({
-                appId: appId as never,
-                ...((event.agentId ?? turnContext?.agentId)
-                  ? {
-                      agentId: (event.agentId ?? turnContext?.agentId) as never,
-                    }
-                  : {}),
-                ...((event.runId ?? runId)
-                  ? { runId: (event.runId ?? runId) as never }
-                  : {}),
-                ...(event.jobId ? { jobId: event.jobId as never } : {}),
-                conversationId: (event.conversationId ?? chatJid) as never,
-                ...((event.threadId ?? sessionThreadId)
-                  ? {
-                      threadId: (event.threadId ?? sessionThreadId) as never,
-                    }
-                  : {}),
-                eventType: event.eventType,
-                actor: event.actor ?? 'runner',
-                responseMode: event.responseMode ?? 'none',
-                payload: event.payload,
-              });
-            }
-          }
-          if (
-            output.compactBoundary &&
-            turnContext?.agentSessionId &&
-            collectSessionMemory
-          ) {
-            await collectCompactBoundaryMemory({
-              compactBoundary: output.compactBoundary,
-              agentSessionId: turnContext.agentSessionId,
-              collectMemory: collectSessionMemory,
-              defaultScope: defaultMemoryScope,
-              logger: runtimeLogger,
-              context: { group: group.name },
-            });
-          }
-          await onOutput(output);
+    let latestProviderSessionId =
+      turnContext?.externalSessionId?.trim() || undefined;
+    const persistProviderSessionFromOutput = async (output: AgentOutput) => {
+      if (output.status === 'error') return;
+      const nextSessionId = output.newSessionId?.trim();
+      if (
+        !nextSessionId ||
+        nextSessionId === latestProviderSessionId ||
+        !turnContext?.agentSessionId ||
+        !ops().setSession
+      ) {
+        return;
+      }
+      const persisted = await ops().setSession(
+        group.folder,
+        nextSessionId,
+        sessionThreadId,
+        {
+          conversationJid: chatJid,
+          conversationKind: group.conversationKind,
+          memoryUserId: options?.memoryContext?.userId,
+          expectedAgentSessionId: turnContext.agentSessionId,
+          expectedAgentSessionResetAt: turnContext.agentSessionResetAt ?? null,
+        },
+      );
+      if (persisted === false) {
+        runtimeLogger.warn(
+          { group: group.name },
+          'Provider session update skipped because turn ownership changed',
+        );
+        return;
+      }
+      latestProviderSessionId = nextSessionId;
+    };
+    const wrappedOnOutput = async (output: AgentOutput) => {
+      await persistProviderSessionFromOutput(output);
+      if (output.usage) {
+        recordRuntimeModelUsage({
+          group,
+          threadId: sessionThreadId,
+          usage: output.usage,
+          usageEventId: output.usageEventId,
+          getDefaultModel: () => {
+            defaultRuntimeModel ??=
+              group.agentConfig?.model ?? DEFAULT_MODEL_ALIAS;
+            return defaultRuntimeModel;
+          },
+        });
+      }
+      if (output.contextUsage) {
+        modelStatus.updateSelection({
+          ...defaultModelStatusSelection(
+            group.agentConfig?.model ??
+              (defaultRuntimeModel ??=
+                group.agentConfig?.model ?? DEFAULT_MODEL_ALIAS),
+          ),
+          selectionSource: group.agentConfig?.model
+            ? 'session override'
+            : 'chat default',
+          contextUsage: output.contextUsage,
+        });
+      }
+      if (output.status !== 'error' && output.result) {
+        streamedResult.append(String(output.result));
+      }
+      if (output.runtimeEvents?.length && deps.publishRuntimeEvent) {
+        for (const event of output.runtimeEvents) {
+          if (!isRuntimeEventType(event.eventType)) continue;
+          const appId = event.appId ?? turnContext?.appId;
+          if (!appId) continue;
+          await deps.publishRuntimeEvent({
+            appId: appId as never,
+            ...((event.agentId ?? turnContext?.agentId)
+              ? {
+                  agentId: (event.agentId ?? turnContext?.agentId) as never,
+                }
+              : {}),
+            ...((event.runId ?? runId)
+              ? { runId: (event.runId ?? runId) as never }
+              : {}),
+            ...(event.jobId ? { jobId: event.jobId as never } : {}),
+            conversationId: (event.conversationId ?? chatJid) as never,
+            ...((event.threadId ?? sessionThreadId)
+              ? {
+                  threadId: (event.threadId ?? sessionThreadId) as never,
+                }
+              : {}),
+            eventType: event.eventType,
+            actor: event.actor ?? 'runner',
+            responseMode: event.responseMode ?? 'none',
+            payload: event.payload,
+          });
         }
-      : undefined;
+      }
+      if (
+        output.compactBoundary &&
+        turnContext?.agentSessionId &&
+        collectSessionMemory
+      ) {
+        await collectCompactBoundaryMemory({
+          compactBoundary: output.compactBoundary,
+          agentSessionId: turnContext.agentSessionId,
+          collectMemory: collectSessionMemory,
+          defaultScope: defaultMemoryScope,
+          logger: runtimeLogger,
+          context: { group: group.name },
+        });
+      }
+      await onOutput?.(output);
+    };
     const approvedSkillContextBlock = await buildApprovedSkillContextBlock({
       skillRepository: deps.getSkillRepository?.(),
       skillArtifactStore: deps.getSkillArtifactStore?.(),
@@ -339,6 +372,9 @@ export function createGroupAgentRunner(input: {
             assistantName: group.trigger || DEFAULT_ASSISTANT_NAME,
             thinking: group.agentConfig?.thinking,
             memoryContextBlock: agentInput.memoryContextBlock,
+            ...(turnContext?.externalSessionId
+              ? { sessionId: turnContext.externalSessionId }
+              : {}),
             [WORKSPACE_FOLDER_INPUT_KEY]: group.folder,
           } as Parameters<typeof runAgentImpl>[1],
           (proc, runHandle) =>

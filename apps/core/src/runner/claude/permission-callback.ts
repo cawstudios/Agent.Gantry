@@ -13,6 +13,7 @@ import {
   APP_ID,
   CHAT_JID,
   JOB_ID,
+  JOB_NAME,
   JOB_RUN_ID,
   IPC_RESPONSE_KEY_ID,
   PERMISSION_REQUEST_TIMEOUT_MS,
@@ -70,6 +71,7 @@ export async function requestPermissionApproval(options: {
         ? { runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE }
         : {}),
       ...(JOB_ID ? { jobId: JOB_ID } : {}),
+      ...(JOB_NAME ? { jobName: JOB_NAME } : {}),
       ...(JOB_RUN_ID ? { runId: JOB_RUN_ID } : {}),
       toolName: options.toolName,
       ...(options.title ? { title: options.title } : {}),
@@ -92,6 +94,7 @@ export async function requestPermissionApproval(options: {
         ...(agentId ? { agentId } : {}),
         ...(targetJid ? { chatJid: targetJid } : {}),
         ...(JOB_ID ? { jobId: JOB_ID } : {}),
+        ...(JOB_NAME ? { jobName: JOB_NAME } : {}),
         ...(JOB_RUN_ID ? { runId: JOB_RUN_ID } : {}),
         ...(options.threadId ? { threadId: options.threadId } : {}),
         ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),

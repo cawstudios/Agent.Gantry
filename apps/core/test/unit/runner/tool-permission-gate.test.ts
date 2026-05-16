@@ -486,6 +486,46 @@ describe('createCanUseToolCallback', () => {
     );
   });
 
+  it('denies wait-only Bash monitoring instead of asking for permission', async () => {
+    const canUseTool = makeCallback();
+    const result = await canUseTool(
+      'Bash',
+      {
+        command:
+          'echo "waiting for run completion..."; until_done() { while true; do sleep 30; done; }; echo "Will use scheduler tools to poll instead."',
+      },
+      makePermissionOptions() as never,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        interrupt: false,
+        message: expect.stringContaining('scheduler_wait_for_events'),
+      }),
+    );
+    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
+  });
+
+  it('does not deny Bash commands that perform work before sleeping', async () => {
+    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
+      approved: true,
+      mode: 'allow_once',
+      updatedPermissions: undefined,
+      decidedBy: 'user',
+    });
+
+    const canUseTool = makeCallback();
+    const result = await canUseTool(
+      'Bash',
+      { command: 'npm test; sleep 1' },
+      makePermissionOptions() as never,
+    );
+
+    expect(result.behavior).toBe('allow');
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
+  });
+
   it('interrupts scheduled jobs when autonomous permission is denied', async () => {
     permissionMock.requestPermissionApproval.mockResolvedValueOnce({
       approved: false,

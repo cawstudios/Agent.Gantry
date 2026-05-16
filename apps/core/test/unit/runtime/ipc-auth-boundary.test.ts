@@ -229,6 +229,11 @@ describe('validateIpcAuthRequest', () => {
     assertRejected({ group_scope: 'team' });
     assertRejected({ groupScope: 'team' });
     assertRejected({ required_mcp_servers: ['mcp:legacy'] });
+    assertRejected({
+      capability_requirements: [
+        { capabilityId: 'google.sheets.write', reason: 'required' },
+      ],
+    });
   });
 
   it('rejects scheduler job allowedTools because jobs inherit agent capabilities', () => {
@@ -281,6 +286,48 @@ describe('validateIpcAuthRequest', () => {
       type: 'scheduler_upsert_job',
       requiredTools: ['Browser'],
       requiredMcpServers: ['mcp:company-crm'],
+    });
+  });
+
+  it('preserves scheduler capability requirements at the IPC boundary', () => {
+    const payload = signedPayload({
+      requestId: 'task-capability-requirements',
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      type: 'scheduler_upsert_job',
+      context: { responseKeyId: TEST_RESPONSE_KEY_ID },
+      name: 'Job',
+      prompt: 'Run',
+      scheduleType: 'interval',
+      scheduleValue: '60000',
+      capabilityRequirements: [
+        {
+          capabilityId: 'google.sheets.write',
+          reason: 'Need spreadsheet',
+          implementation: {
+            kind: 'local_cli',
+            name: 'Sheets CLI',
+            commandTemplate: 'sheet-write',
+            protectedPaths: ['/tmp'],
+          },
+        },
+      ],
+    });
+
+    expect(parseTaskIpcData(payload, 'team')).toMatchObject({
+      type: 'scheduler_upsert_job',
+      capabilityRequirements: [
+        {
+          capabilityId: 'google.sheets.write',
+          reason: 'Need spreadsheet',
+          implementation: {
+            kind: 'local_cli',
+            name: 'Sheets CLI',
+            commandTemplate: 'sheet-write',
+            protectedPaths: ['/tmp'],
+          },
+        },
+      ],
     });
   });
 

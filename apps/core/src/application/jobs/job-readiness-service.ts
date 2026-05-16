@@ -25,11 +25,18 @@ import {
   isCanonicalBrowserCapabilityRule,
   isProjectedBrowserMcpToolRule,
 } from '../../shared/agent-tool-references.js';
-import { parseSemanticCapabilityRule } from '../../shared/semantic-capability-ids.js';
+import {
+  parseSemanticCapabilityRule,
+  semanticCapabilityRule,
+} from '../../shared/semantic-capability-ids.js';
 import { getBuiltinSemanticCapability } from '../../shared/semantic-capabilities.js';
 import { resolveConversationBrowserProfile } from '../../shared/browser-profile-scope.js';
 import { stableSha256Json } from '../../shared/stable-hash.js';
 import { nowIso } from '../../shared/time/datetime.js';
+import {
+  capabilityRequirementSetupAction,
+  formatCapabilityRequirement,
+} from './job-capability-requirements.js';
 
 export const SETUP_REQUIRED_PAUSE_REASON = 'Setup required';
 
@@ -56,6 +63,7 @@ export interface JobReadinessInput extends JobReadinessDeps {
     | 'group_scope'
     | 'required_tools'
     | 'required_mcp_servers'
+    | 'capability_requirements'
     | 'execution_context'
     | 'notification_routes'
     | 'setup_state'
@@ -88,8 +96,18 @@ export async function evaluateJobReadiness(
     requiredTools: input.job.required_tools,
     effectiveAllowedTools: policy.effectiveAllowedTools,
   });
+  const draftOnlyRequirementRules = new Set(
+    (input.job.capability_requirements ?? [])
+      .filter((requirement) => requirement.implementation?.kind === 'local_cli')
+      .map((requirement) => semanticCapabilityRule(requirement.capabilityId)),
+  );
   for (const missingTool of toolPreflight.missingTools) {
+    if (draftOnlyRequirementRules.has(missingTool)) continue;
     blockers.push(missingToolBlocker(missingTool));
+  }
+  for (const requirement of input.job.capability_requirements ?? []) {
+    const blocker = capabilityRequirementBlocker(requirement);
+    if (blocker) blockers.push(blocker);
   }
 
   const missingToolSet = new Set(toolPreflight.missingTools);
@@ -131,6 +149,19 @@ export async function evaluateJobReadiness(
     setupState,
     pauseReason:
       setupState.state === 'ready' ? null : SETUP_REQUIRED_PAUSE_REASON,
+  };
+}
+
+function capabilityRequirementBlocker(
+  requirement: NonNullable<Job['capability_requirements']>[number],
+): JobSetupBlocker | null {
+  if (requirement.implementation?.kind !== 'local_cli') return null;
+  return {
+    state: 'draft_only',
+    requirementType: 'local_cli',
+    requirementId: requirement.capabilityId,
+    message: `${formatCapabilityRequirement(requirement)} needs reviewed local CLI access before this job can run autonomously.`,
+    nextAction: capabilityRequirementSetupAction(requirement),
   };
 }
 
@@ -328,7 +359,8 @@ async function semanticCapabilityCredentialBlocker(input: {
   }
   if (
     capability.credentialSource !== 'onecli' &&
-    capability.credentialSource !== 'external_broker'
+    capability.credentialSource !== 'external_broker' &&
+    !semanticCapabilityNeedsBroker(capability)
   ) {
     return null;
   }
@@ -389,6 +421,17 @@ async function semanticCapabilityCredentialBlocker(input: {
     };
   }
   return null;
+}
+
+function semanticCapabilityNeedsBroker(
+  capability: NonNullable<ReturnType<typeof getBuiltinSemanticCapability>>,
+): boolean {
+  return capability.implementationBindings.some(
+    (binding) =>
+      binding.kind === 'adapter' ||
+      binding.kind === 'tool_rule' ||
+      binding.rule?.startsWith('Bash(onecli '),
+  );
 }
 
 async function mcpReadinessBlockers(input: {

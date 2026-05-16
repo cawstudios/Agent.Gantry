@@ -214,29 +214,13 @@ export function createSdkSandboxNetworkGate(
       const activeTokens = tokens.filter(
         (candidate) => candidate.principal === principal,
       );
-      if (!parentToolUseID && activeTokens.length > 1) {
-        const reason =
-          'SDK requested sandbox network access without a parent tool-use id while multiple tool approvals are active.';
-        writeEvent({
-          decision: 'sdk_network_gate_denied',
-          reason,
-          networkToolUseID: permissionOpts.toolUseID,
-          hostHash,
-          expiredTokenCount,
-        });
-        return {
-          behavior: 'deny',
-          message: `${reason} Approve the tool call through MyClaw first.`,
-          interrupt: false,
-        };
-      }
       const token = parentToolUseID
         ? activeTokens.find(
             (candidate) => candidate.parentToolUseID === parentToolUseID,
           )
         : activeTokens.length === 1
           ? activeTokens[0]
-          : undefined;
+          : mostRecentToken(activeTokens);
       if (token) {
         writeEvent({
           decision: 'sdk_network_gate_suppressed',
@@ -279,6 +263,16 @@ function sandboxNetworkHostHash(input: unknown): string | undefined {
   const host = (input as Record<string, unknown>).host;
   if (typeof host !== 'string' || !host.trim()) return undefined;
   return hashString(host.trim());
+}
+
+function mostRecentToken(
+  tokens: readonly SdkSandboxNetworkApprovalToken[],
+): SdkSandboxNetworkApprovalToken | undefined {
+  let latest: SdkSandboxNetworkApprovalToken | undefined;
+  for (const token of tokens) {
+    if (!latest || token.createdAtMs > latest.createdAtMs) latest = token;
+  }
+  return latest;
 }
 
 function sandboxNetworkParentToolUseID(input: unknown): string | undefined {

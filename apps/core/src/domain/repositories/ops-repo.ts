@@ -36,6 +36,7 @@ export interface JobUpsertInput {
   pause_reason?: string | null;
   execution_context?: Job['execution_context'];
   notification_routes?: Job['notification_routes'];
+  capability_requirements?: Job['capability_requirements'];
   required_tools?: string[];
   required_mcp_servers?: string[];
   setup_state?: Job['setup_state'];

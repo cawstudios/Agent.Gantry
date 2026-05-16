@@ -142,7 +142,7 @@ describe('permission interaction', () => {
       'cancel',
     ]);
     expect(permissionButtonLabel('allow_timed_grant', request)).toBe(
-      'Allow eligible tools and SDK API prompts for 5 min',
+      'Allow for 5 min',
     );
   });
 
@@ -214,19 +214,16 @@ describe('permission interaction', () => {
     expect(text.split('\n')[0]).toBe('Allow Google Sheets write?');
     expect(text).toContain('Capability: capability:google.sheets.write');
     expect(text).toContain('Risk: write');
-    expect(text).toContain('Account: OneCLI Google account');
+    expect(text).toContain('Account: Configured Google access');
     expect(text).toContain(
-      'Allows: Read and update spreadsheet values through the configured brokered Google account.',
+      'Allows: Read and update spreadsheet values through configured Google access.',
     );
     expect(text).toContain(
       'Does not allow: Change sharing, manage Drive files outside Sheets operations, access Gmail, or receive raw OAuth tokens.',
     );
-    expect(text).toContain('Raw rule: capability:google.sheets.write');
+    expect(text).not.toContain('Raw rule: capability:google.sheets.write');
     expect(text).not.toContain('ravi@example.com');
     expect(text).not.toContain('Change sharing or read Gmail.');
-    expect(text.indexOf('Allow Google Sheets write?')).toBeLessThan(
-      text.indexOf('Raw rule: capability:google.sheets.write'),
-    );
     expect(
       permissionButtonLabel(
         'allow_persistent_rule',
@@ -241,7 +238,7 @@ describe('permission interaction', () => {
     ).toBe('Always allow for this agent');
   });
 
-  it('redacts Bash secrets in permission prompt previews', () => {
+  it('hides Bash commands with secrets in permission prompt previews', () => {
     const text = formatPermissionPromptText(
       {
         ...requestWithSuggestions([]),
@@ -253,12 +250,16 @@ describe('permission interaction', () => {
       60_000,
     );
 
-    expect(text).toContain('OPENAI_API_KEY=[REDACTED_SECRET]');
+    expect(text).toContain(
+      'Command: hidden because it may contain sensitive values.',
+    );
+    expect(text).toContain('Program: npm');
+    expect(text).not.toContain('REDACTED');
     expect(text).not.toContain('sk-testsecretsecretsecretsecretsecretsecret');
-    expect(text).toContain('Command:\n```');
+    expect(text).not.toContain('Command:\n```');
   });
 
-  it('keeps Bash command context visible when an opaque token is redacted', () => {
+  it('keeps safe Bash command context when an opaque token is hidden', () => {
     const text = formatPermissionPromptText(
       {
         ...requestWithSuggestions([]),
@@ -270,10 +271,11 @@ describe('permission interaction', () => {
       60_000,
     );
 
-    expect(text).toContain('curl https://api.example.com');
-    expect(text).toContain('bearer [REDACTED_SECRET]');
-    expect(text).toContain('--data ok');
-    expect(text).not.toContain('[REDACTED_POTENTIALLY_SENSITIVE]');
+    expect(text).toContain(
+      'Command: hidden because it may contain sensitive values.',
+    );
+    expect(text).toContain('Program: curl');
+    expect(text).not.toContain('REDACTED');
     expect(text).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
   });
 
@@ -311,9 +313,7 @@ describe('permission interaction', () => {
     );
 
     expect(text).toContain('Redirect: > /etc/passwd');
-    expect(text).toContain(
-      'What this changes: Allow once applies only to this tool call.',
-    );
+    expect(text).toContain('Scope: Allow once applies only to this request.');
     expect(text).not.toContain('Always allow applies');
   });
 
@@ -361,9 +361,9 @@ describe('permission interaction', () => {
         • Bash(curl https://api.example.com/*)
         • Bash(jq *)
 
-      What this changes: Allow once applies only to this tool call.
+      Scope: Allow once applies only to this request.
       Always allow applies these rules to matching future tool calls: Bash(curl https://api.example.com/*), Bash(jq *)
-      What this does not allow: unrelated tools, secrets, settings edits, or broader access outside the rule.
+      Safety: unrelated tools, secrets, settings edits, and broader access outside the rule are not allowed.
 
       Reply within 5 minute(s)."
     `);
@@ -375,13 +375,16 @@ describe('permission interaction', () => {
         requestId: 'permission_123',
         sourceAgentFolder: 'main_agent',
         jobId: 'knacklabs-lead-maintenance-controller-2026-05-15',
+        jobName: 'KnackLabs Lead Maintenance Controller',
         toolName: 'Bash',
         toolInput: { command: 'npm run lead-generator' },
       },
       60_000,
     );
 
-    expect(text).toContain('From: scheduled job');
+    expect(text).toContain(
+      'From: scheduled job: KnackLabs Lead Maintenance Controller',
+    );
     expect(text).toContain('Agent: main_agent');
     expect(text).not.toContain(
       'knacklabs-lead-maintenance-controller-2026-05-15',
@@ -640,11 +643,12 @@ describe('permission interaction', () => {
     );
 
     expect(text.length).toBeLessThanOrEqual(2_800);
-    expect(text).toContain('Reason: [REDACTED_POTENTIALLY_SENSITIVE]');
-    expect(text).toContain('password=[REDACTED_SECRET]');
-    expect(text).toContain('"cookie": "[REDACTED_SECRET]"');
+    expect(text).toContain('Reason: Sensitive detail hidden.');
+    expect(text).toContain('Details: Sensitive detail hidden.');
+    expect(text).toContain('"cookie": "[hidden]"');
     expect(text).toContain('"safe": "visible"');
     expect(text).toContain('"__omitted_keys": "more"');
+    expect(text).not.toContain('REDACTED');
     expect(text).not.toContain('session-cookie-value');
     expect(text).not.toContain('top-secret-value');
     expect(text).not.toContain('extra_99');

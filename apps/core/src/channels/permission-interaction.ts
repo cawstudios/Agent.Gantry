@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import type {
   PermissionApprovalDecision,
   PermissionApprovalDecisionMode,
@@ -98,7 +96,7 @@ export function permissionButtonLabel(
 ): string {
   if (mode === 'allow_once') return 'Allow once';
   if (mode === 'allow_timed_grant') {
-    return 'Allow eligible tools and SDK API prompts for 5 min';
+    return 'Allow for 5 min';
   }
   if (mode === 'cancel') return 'Cancel';
   const rule = firstPersistentRule(request);
@@ -250,7 +248,15 @@ function sanitizePermissionText(
   head: number,
   tail: number,
 ): string {
-  return headTailTruncate(sanitizeOutboundLlmText(input).text, head, tail);
+  const result = sanitizeOutboundLlmText(input);
+  if (
+    result.redacted ||
+    result.blocked ||
+    /\[REDACTED_(?:SECRET|POTENTIALLY_SENSITIVE)\]/.test(result.text)
+  ) {
+    return 'Sensitive detail hidden.';
+  }
+  return headTailTruncate(result.text, head, tail);
 }
 
 function sanitizePermissionCommandText(
@@ -270,7 +276,9 @@ function formatPermissionOriginLines(
   request: PermissionApprovalRequest | undefined,
 ): string[] {
   if (!request) return [];
-  const source = request.jobId ? 'scheduled job' : 'agent chat';
+  const source = request.jobId
+    ? `scheduled job${request.jobName ? `: ${sanitizePermissionText(request.jobName, 120, 40)}` : ''}`
+    : 'agent chat';
   return [
     `From: ${source}`,
     `Agent: ${sanitizePermissionText(request.sourceAgentFolder, 120, 40)}`,
@@ -305,7 +313,6 @@ function formatInteractionPermissionPrompt(
   if (interaction.body)
     lines.push('', sanitizePermissionText(interaction.body, 500, 160));
   lines.push('', ...formatPermissionBoundaryLines(request));
-  lines.push(...formatPermissionAdvancedDetails(request, rule));
   if (interaction.details?.length) {
     lines.push(
       '',
@@ -352,7 +359,6 @@ function formatSemanticPermissionPrompt(
     );
   }
   lines.push('', ...formatPermissionBoundaryLines(request));
-  lines.push(...formatPermissionAdvancedDetails(request, rule));
   lines.push(`Reply within ${timeoutMinutes} minute(s).`);
   return limitPermissionMessage(lines.join('\n'));
 }
@@ -373,21 +379,21 @@ function formatPermissionBoundaryLines(
   const capabilityName = semanticCapabilityName(request, rule);
   if (!rule) {
     return [
-      'What this changes: Allow once applies only to this tool call. Allow 5 min auto-approves eligible tool calls and SDK API/network prompts for this agent in this conversation for 5 minutes. Protected-path, memory-boundary, and sandbox hard guards still apply.',
+      'Scope: Allow once applies only to this request. Allow for 5 min covers eligible tools and SDK API/network prompts in this chat.',
+      'Safety: protected paths, memory boundaries, and sandbox hard guards still apply.',
     ];
   }
   if (capabilityName) {
     return [
-      'Choices: Allow once, Always allow for this agent, or Cancel.',
-      'What this changes: Allow once applies only to this invocation.',
-      `Always allow grants the named capability for matching future runs: ${capabilityName}.`,
-      'What this does not allow: unrelated apps, credentials, settings edits, or access outside the capability.',
+      'Scope: Allow once applies only to this request.',
+      `Always allow grants this capability for matching future runs: ${capabilityName}.`,
+      'Safety: unrelated apps, credentials, settings edits, and access outside the capability are not allowed.',
     ];
   }
   return [
-    'What this changes: Allow once applies only to this tool call.',
+    'Scope: Allow once applies only to this request.',
     `Always allow applies ${persistentRules(request).length > 1 ? 'these rules' : 'this rule'} to matching future tool calls: ${persistentRules(request).join(', ')}`,
-    'What this does not allow: unrelated tools, secrets, settings edits, or broader access outside the rule.',
+    'Safety: unrelated tools, secrets, settings edits, and broader access outside the rule are not allowed.',
   ];
 }
 
@@ -433,49 +439,6 @@ function semanticCapabilityId(
     : undefined;
 }
 
-function formatPermissionAdvancedDetails(
-  request: PermissionApprovalRequest,
-  rule?: string,
-): string[] {
-  const details = [
-    '',
-    'Details:',
-    `Request ID: ${request.requestId}`,
-    `Raw tool: ${request.toolName}`,
-  ];
-  if (rule) details.push(`Raw rule: ${rule}`);
-  const rules = persistentRules(request);
-  if (rules.length > 1) details.push(`Raw rules: ${rules.join(', ')}`);
-  const closestRule = formatClosestRuleLine(request);
-  if (closestRule) details.push(closestRule);
-  const command = permissionCommand(request);
-  if (command) {
-    details.push(
-      `Command preview: \`${sanitizePermissionCommandText(command, 200, 100)}\``,
-      `Command hash: ${createHash('sha256').update(command).digest('hex')}`,
-    );
-  }
-  const executablePath = request.toolInput?.executablePath;
-  if (typeof executablePath === 'string' && executablePath.trim()) {
-    details.push(
-      `Executable: ${sanitizePermissionText(executablePath.trim(), 180, 60)}`,
-    );
-  }
-  const executableVersion = request.toolInput?.executableVersion;
-  if (typeof executableVersion === 'string' && executableVersion.trim()) {
-    details.push(
-      `Executable version: ${sanitizePermissionText(executableVersion.trim(), 100, 40)}`,
-    );
-  }
-  const sandboxProfile = request.toolInput?.sandboxProfile;
-  if (typeof sandboxProfile === 'string' && sandboxProfile.trim()) {
-    details.push(
-      `Sandbox: ${sanitizePermissionText(sandboxProfile.trim(), 120, 40)}`,
-    );
-  }
-  return details;
-}
-
 function formatClosestRuleLine(
   request: PermissionApprovalRequest,
 ): string | undefined {
@@ -487,32 +450,6 @@ function permissionCommand(request: PermissionApprovalRequest): string | null {
   if (!request.toolInput) return null;
   const command = request.toolInput.command ?? request.toolInput.cmd;
   return typeof command === 'string' && command.trim() ? command.trim() : null;
-}
-
-function formatPermissionActionSummary(
-  request: PermissionApprovalRequest | undefined,
-): string {
-  if (!request) return 'permission request';
-  const tool = request.displayName || request.toolName;
-  const input = request.toolInput;
-  if (!input || typeof input !== 'object') return tool;
-  const command = permissionCommand(request);
-  if (command) {
-    return `${tool} (${sanitizePermissionCommandText(command, 200, 100)})`;
-  }
-  const filePath = input.file_path;
-  if (typeof filePath === 'string' && filePath.trim()) {
-    return `${tool} (${sanitizePermissionText(filePath.trim(), 200, 100)})`;
-  }
-  const url = input.url;
-  if (typeof url === 'string' && url.trim()) {
-    return `${tool} (${sanitizePermissionText(url.trim(), 200, 100)})`;
-  }
-  const pattern = input.pattern;
-  if (typeof pattern === 'string' && pattern.trim()) {
-    return `${tool} (${sanitizePermissionText(pattern.trim(), 200, 100)})`;
-  }
-  return tool;
 }
 
 function formatPermissionReceiptActionSummary(
