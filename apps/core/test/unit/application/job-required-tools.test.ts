@@ -10,14 +10,14 @@ describe('job required tools', () => {
     expect(
       normalizeRequiredTools([
         'Browser',
-        'mcp__myclaw__send_message',
+        'mcp__gantry__send_message',
         'capability:google_sheets',
         'Bash(npm test *)',
         'Browser',
       ]),
     ).toEqual([
       'Browser',
-      'mcp__myclaw__send_message',
+      'mcp__gantry__send_message',
       'capability:google_sheets',
       'Bash(npm test *)',
     ]);
@@ -36,11 +36,11 @@ describe('job required tools', () => {
     expect(() =>
       normalizeRequiredTools([`mcp__${'pup'}${'peteer'}__screenshot`]),
     ).toThrow(/canonical Browser/);
-    expect(() => normalizeRequiredTools(['mcp__myclaw__browser_act'])).toThrow(
+    expect(() => normalizeRequiredTools(['mcp__gantry__browser_act'])).toThrow(
       /canonical Browser/,
     );
     expect(() => normalizeRequiredTools(['Bash'])).toThrow(/scoped Bash/);
-    expect(() => normalizeRequiredTools(['mcp__myclaw__*'])).toThrow(
+    expect(() => normalizeRequiredTools(['mcp__gantry__*'])).toThrow(
       /wildcard/,
     );
   });

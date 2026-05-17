@@ -31,8 +31,8 @@ function writeMemorySettings(runtimeHome: string): void {
       '    enabled: false',
       'storage:',
       '  postgres:',
-      '    url_env: MYCLAW_DATABASE_URL',
-      '    schema: myclaw',
+      '    url_env: GANTRY_DATABASE_URL',
+      '    schema: gantry',
       'credential_broker:',
       '  mode: onecli',
       '  onecli:',
@@ -46,9 +46,9 @@ function writeMemorySettings(runtimeHome: string): void {
 }
 
 beforeEach(() => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-memory-ipc-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-memory-ipc-'));
   tempRoots.push(root);
-  process.env.MYCLAW_HOME = root;
+  process.env.GANTRY_HOME = root;
   writeMemorySettings(root);
 });
 
@@ -81,7 +81,7 @@ afterEach(async () => {
 
 describe('memory IPC provider integration', () => {
   it('routes memory IPC requests through memory service', async () => {
-    writeMemorySettings(process.env.MYCLAW_HOME!);
+    writeMemorySettings(process.env.GANTRY_HOME!);
     process.env.OPENAI_API_KEY = 'test-key';
     process.env.MEMORY_SEMANTIC_DEDUP_ENABLED = 'false';
 
@@ -502,7 +502,7 @@ describe('memory IPC provider integration', () => {
   it('memory_search succeeds when embeddings are disabled by default', async () => {
     // Embeddings are disabled by default, so search should stay available even
     // when OPENAI_API_KEY is empty.
-    writeMemorySettings(process.env.MYCLAW_HOME!);
+    writeMemorySettings(process.env.GANTRY_HOME!);
     process.env.OPENAI_API_KEY = '';
     process.env.MEMORY_SEMANTIC_DEDUP_ENABLED = 'false';
 
@@ -543,7 +543,7 @@ describe('memory IPC provider integration', () => {
   });
 
   it('returns error for empty search query', async () => {
-    writeMemorySettings(process.env.MYCLAW_HOME!);
+    writeMemorySettings(process.env.GANTRY_HOME!);
     process.env.OPENAI_API_KEY = 'test-key';
     process.env.MEMORY_SEMANTIC_DEDUP_ENABLED = 'false';
 
@@ -565,7 +565,7 @@ describe('memory IPC provider integration', () => {
   });
 
   it('returns error for unsupported memory action', async () => {
-    writeMemorySettings(process.env.MYCLAW_HOME!);
+    writeMemorySettings(process.env.GANTRY_HOME!);
     process.env.OPENAI_API_KEY = 'test-key';
     process.env.MEMORY_SEMANTIC_DEDUP_ENABLED = 'false';
 

@@ -2,7 +2,7 @@
 
 ## Context
 
-MyClaw is replacing the legacy runtime identity shape with the canonical app,
+Gantry is replacing the legacy runtime identity shape with the canonical app,
 agent, provider connection, conversation, thread, message, session, run,
 memory, job, permission, sandbox, workspace, and browser model.
 
@@ -31,7 +31,7 @@ or old-state migration is provided.
 ## Consequences
 
 Existing local databases that contain the old runtime shape must be recreated
-or migrated destructively. This is acceptable because MyClaw is still in an
+or migrated destructively. This is acceptable because Gantry is still in an
 early-stage clean-cut refactor period.
 
 Provider adapters must normalize external identifiers into canonical

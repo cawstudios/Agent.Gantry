@@ -12,7 +12,7 @@ import {
 } from '@core/memory/memory-embeddings.js';
 
 function runtimeHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-memory-health-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-memory-health-'));
 }
 
 describe('memory health', () => {

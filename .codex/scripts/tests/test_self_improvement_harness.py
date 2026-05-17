@@ -294,7 +294,7 @@ class SelfImprovementHarnessTests(unittest.TestCase):
             target = root / "apps" / "core" / "src" / "runtime" / "bad.ts"
             target.parent.mkdir(parents=True)
             target.write_text(
-                "const p = path.join(MYCLAW_HOME, '.claude', 'settings.json');\n"
+                "const p = path.join(GANTRY_HOME, '.claude', 'settings.json');\n"
             )
             script = root / ".codex" / "scripts" / "check_task_completion.py"
             script.parent.mkdir(parents=True)

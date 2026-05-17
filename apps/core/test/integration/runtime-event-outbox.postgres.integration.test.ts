@@ -82,7 +82,7 @@ maybeDescribe('Postgres runtime event outbox', () => {
     expect(rows[0]).toMatchObject({
       eventType: RUNTIME_EVENT_TYPES.JOB_STARTED,
       eventVersion: 1,
-      source: 'myclaw.runtime_events',
+      source: 'gantry.runtime_events',
       appId,
       runtimeEventId: event.eventId,
       correlationId: 'corr:test:runtime-event-outbox',

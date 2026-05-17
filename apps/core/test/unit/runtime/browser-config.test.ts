@@ -8,7 +8,7 @@ import {
 describe('browser Chrome launch args', () => {
   it('does not disable the sandbox for macOS host launches', () => {
     const args = buildChromeLaunchArgs({
-      userDataDir: '/tmp/myclaw-browser',
+      userDataDir: '/tmp/gantry-browser',
       port: 9222,
       platform: 'darwin',
       uid: 501,
@@ -22,7 +22,7 @@ describe('browser Chrome launch args', () => {
 
   it('keeps the sandbox enabled for non-root Linux host launches', () => {
     const args = buildChromeLaunchArgs({
-      userDataDir: '/tmp/myclaw-browser',
+      userDataDir: '/tmp/gantry-browser',
       port: 9222,
       platform: 'linux',
       uid: 1000,
@@ -35,7 +35,7 @@ describe('browser Chrome launch args', () => {
 
   it('uses only no-sandbox for Linux root launches', () => {
     const args = buildChromeLaunchArgs({
-      userDataDir: '/tmp/myclaw-browser',
+      userDataDir: '/tmp/gantry-browser',
       port: 9222,
       platform: 'linux',
       uid: 0,

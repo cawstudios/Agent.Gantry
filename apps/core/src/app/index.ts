@@ -18,7 +18,7 @@ import { startControlServer } from '../control/server/index.js';
 import { stopSchedulerLoop } from '../jobs/scheduler.js';
 import { stopOutboundDeliveryRecoveryLoop } from '../jobs/outbound-delivery-recovery.js';
 import { publishBrowserJobActivityEvent } from '../jobs/browser-activity-events.js';
-import { MYCLAW_HOME } from '../config/index.js';
+import { GANTRY_HOME } from '../config/index.js';
 import { getBrowserStatus } from '../runtime/browser-capability.js';
 import { startSettingsReloadWatcher } from '../runtime/settings-reload-watcher.js';
 import {
@@ -34,17 +34,17 @@ export {
   _setConversationRoutes,
 } from './bootstrap/runtime-app.js';
 
-export interface StartMyClawRuntimeOptions {
+export interface StartGantryRuntimeOptions {
   skipPreflight?: boolean;
   mcpHostnameLookup?: HostnameLookup;
 }
 
-export async function startMyClawRuntime(
-  options: StartMyClawRuntimeOptions = {},
+export async function startGantryRuntime(
+  options: StartGantryRuntimeOptions = {},
 ): Promise<void> {
   const mcpHostnameLookup = options.mcpHostnameLookup ?? defaultHostnameLookup;
   if (!options.skipPreflight) {
-    const validation = await validateRuntimePreflightWithStorage(MYCLAW_HOME);
+    const validation = await validateRuntimePreflightWithStorage(GANTRY_HOME);
     if (!validation.ok && validation.failure) {
       throw new Error(formatRuntimePreflightFailure(validation.failure));
     }
@@ -81,7 +81,7 @@ export async function startMyClawRuntime(
   const { runtimeSettings } = await runStartup(app);
   const storage = getRuntimeStorage();
   const settingsWatcher = startSettingsReloadWatcher({
-    runtimeHome: MYCLAW_HOME,
+    runtimeHome: GANTRY_HOME,
     app,
     ops: storage.ops,
     repositories: storage.repositories,
@@ -165,8 +165,8 @@ const isDirectRun =
 
 if (isDirectRun) {
   installGlobalErrorHandlers(logger);
-  startMyClawRuntime().catch((err) => {
-    logger.error({ err }, 'Failed to start MyClaw');
+  startGantryRuntime().catch((err) => {
+    logger.error({ err }, 'Failed to start Gantry');
     process.exit(1);
   });
 }

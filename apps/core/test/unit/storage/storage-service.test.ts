@@ -15,17 +15,17 @@ describe('storage-service', () => {
     expect(() =>
       createStorageService({
         postgresUrl: '',
-        postgresUrlEnv: 'MYCLAW_DATABASE_URL',
-        postgresSchema: 'myclaw',
+        postgresUrlEnv: 'GANTRY_DATABASE_URL',
+        postgresSchema: 'gantry',
       }),
-    ).toThrow(/MYCLAW_DATABASE_URL is required for runtime storage/);
+    ).toThrow(/GANTRY_DATABASE_URL is required for runtime storage/);
   });
 
   it('constructs postgres storage when url is present', async () => {
     const service = createStorageService({
-      postgresUrl: 'postgres://user:pass@127.0.0.1:5432/myclaw',
-      postgresUrlEnv: 'MYCLAW_DATABASE_URL',
-      postgresSchema: 'myclaw',
+      postgresUrl: 'postgres://user:pass@127.0.0.1:5432/gantry',
+      postgresUrlEnv: 'GANTRY_DATABASE_URL',
+      postgresSchema: 'gantry',
     });
     expect(service).toBeInstanceOf(PostgresStorageService);
     await service.close();
@@ -33,8 +33,8 @@ describe('storage-service', () => {
 
   it('constructs postgres storage with custom runtime schema', async () => {
     const service = createStorageService({
-      postgresUrl: 'postgres://user:pass@127.0.0.1:5432/myclaw',
-      postgresUrlEnv: 'MYCLAW_DATABASE_URL',
+      postgresUrl: 'postgres://user:pass@127.0.0.1:5432/gantry',
+      postgresUrlEnv: 'GANTRY_DATABASE_URL',
       postgresSchema: 'other_schema',
     });
     expect(service).toBeInstanceOf(PostgresStorageService);
@@ -44,9 +44,9 @@ describe('storage-service', () => {
   it('rejects remote postgres urls without sslmode=require', () => {
     expect(() =>
       createStorageService({
-        postgresUrl: 'postgres://user:pass@db.example.com:5432/myclaw',
-        postgresUrlEnv: 'MYCLAW_DATABASE_URL',
-        postgresSchema: 'myclaw',
+        postgresUrl: 'postgres://user:pass@db.example.com:5432/gantry',
+        postgresUrlEnv: 'GANTRY_DATABASE_URL',
+        postgresSchema: 'gantry',
       }),
     ).toThrow(/sslmode=require/i);
   });
@@ -54,9 +54,9 @@ describe('storage-service', () => {
   it('accepts remote postgres urls with sslmode=require', async () => {
     const service = createStorageService({
       postgresUrl:
-        'postgres://user:pass@db.example.com:5432/myclaw?sslmode=require',
-      postgresUrlEnv: 'MYCLAW_DATABASE_URL',
-      postgresSchema: 'myclaw',
+        'postgres://user:pass@db.example.com:5432/gantry?sslmode=require',
+      postgresUrlEnv: 'GANTRY_DATABASE_URL',
+      postgresSchema: 'gantry',
     });
     expect(service).toBeInstanceOf(PostgresStorageService);
     await service.close();

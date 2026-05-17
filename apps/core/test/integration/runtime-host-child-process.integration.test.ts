@@ -37,7 +37,7 @@ afterEach(async () => {
 });
 
 function makeTempRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-host-smoke-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-host-smoke-'));
   tempRoots.push(root);
   return root;
 }
@@ -63,21 +63,21 @@ process.stdin.on('end', () => {
     JSON.stringify({
       input,
       env: {
-        groupDir: process.env.MYCLAW_WORKSPACE_GROUP_DIR,
-        ipcDir: process.env.MYCLAW_IPC_DIR,
-        ipcInputDir: process.env.MYCLAW_IPC_INPUT_DIR,
-        authTokenPresent: Boolean(process.env.MYCLAW_IPC_AUTH_TOKEN),
+        groupDir: process.env.GANTRY_WORKSPACE_GROUP_DIR,
+        ipcDir: process.env.GANTRY_IPC_DIR,
+        ipcInputDir: process.env.GANTRY_IPC_INPUT_DIR,
+        authTokenPresent: Boolean(process.env.GANTRY_IPC_AUTH_TOKEN),
         brokerBaseUrlPresent: Boolean(process.env.ANTHROPIC_BASE_URL),
       },
     }, null, 2),
   );
-  console.log('---MYCLAW_OUTPUT_START---');
+  console.log('---GANTRY_OUTPUT_START---');
   console.log(JSON.stringify({
     status: 'success',
     result: 'host child saw: ' + input.prompt,
     newSessionId: 'host-child-session',
   }));
-  console.log('---MYCLAW_OUTPUT_END---');
+  console.log('---GANTRY_OUTPUT_END---');
 });
 `,
   );
@@ -106,8 +106,8 @@ describe('host child-process runtime smoke', () => {
         DATA_DIR: dataDir,
         AGENTS_DIR: agentRoot,
         IDLE_TIMEOUT: 5_000,
-        MYCLAW_HOME: agentRoot,
-        MYCLAW_HOME: agentRoot,
+        GANTRY_HOME: agentRoot,
+        GANTRY_HOME: agentRoot,
         ONECLI_URL: '',
         PERMISSION_APPROVAL_TIMEOUT_MS: 5_000,
         TIMEZONE: 'UTC',

@@ -1,4 +1,4 @@
-# MyClaw Product Brief
+# Gantry Product Brief
 
 ## Problem
 

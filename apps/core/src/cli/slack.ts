@@ -434,7 +434,7 @@ export async function runSlackConnectCommand(
   p.note(
     [
       'Create the Slack app first: create an app in the target workspace, add a bot user, then install it.',
-      'Recommended bot scopes: chat:write, app_mentions:read, channels:read, groups:read, im:read, mpim:read, plus message history scopes for the conversation types MyClaw should read.',
+      'Recommended bot scopes: chat:write, app_mentions:read, channels:read, groups:read, im:read, mpim:read, plus message history scopes for the conversation types Gantry should read.',
       'Enable Socket Mode and generate an app-level xapp token with connections:write.',
       'After scope changes, reinstall the app and invite it to the target channel or DM it once before discovery.',
       'Docs: https://docs.slack.dev/apis/events-api/using-socket-mode/',
@@ -553,7 +553,7 @@ export async function runSlackConnectCommand(
     p.outro('Slack conversation is configured and ready.');
   } else {
     p.outro(
-      'Slack tokens saved. Next: run `myclaw provider connect slack` to register a conversation.',
+      'Slack tokens saved. Next: run `gantry provider connect slack` to register a conversation.',
     );
   }
 

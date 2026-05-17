@@ -120,7 +120,7 @@ vi.mock('@core/cli/runtime-group-db.js', () => ({
 }));
 
 function createRuntimeHome(): string {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-group-test-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-group-test-'));
   fs.mkdirSync(path.join(home, 'store'), { recursive: true });
   fs.mkdirSync(path.join(home, 'agents'), { recursive: true });
   fs.mkdirSync(path.join(home, 'logs'), { recursive: true });
@@ -135,8 +135,8 @@ function createRuntimeHome(): string {
       '    enabled: false',
       'storage:',
       '  postgres:',
-      '    url_env: MYCLAW_DATABASE_URL',
-      '    schema: myclaw',
+      '    url_env: GANTRY_DATABASE_URL',
+      '    schema: gantry',
       'memory:',
       '  enabled: true',
       '  embeddings:',
@@ -182,23 +182,23 @@ beforeEach(() => {
   messagesStore.clear();
   fileArtifacts.clear();
   runtimeHome = createRuntimeHome();
-  process.env.MYCLAW_HOME = runtimeHome;
-  process.env.MYCLAW_DATABASE_URL =
-    'postgres://user:pass@127.0.0.1:5432/myclaw';
+  process.env.GANTRY_HOME = runtimeHome;
+  process.env.GANTRY_DATABASE_URL =
+    'postgres://user:pass@127.0.0.1:5432/gantry';
   process.env.ONECLI_DATABASE_URL =
-    'postgres://onecli:pass@127.0.0.1:5432/myclaw?schema=onecli';
+    'postgres://onecli:pass@127.0.0.1:5432/gantry?schema=onecli';
   process.env.SECRET_ENCRYPTION_KEY =
     'MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=';
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
-  delete process.env.MYCLAW_DATABASE_URL;
+  delete process.env.GANTRY_DATABASE_URL;
   delete process.env.ONECLI_DATABASE_URL;
   delete process.env.ONECLI_URL;
   delete process.env.SECRET_ENCRYPTION_KEY;
   delete process.env.ANTHROPIC_BASE_URL;
-  delete process.env.MYCLAW_CREDENTIAL_MODE;
+  delete process.env.GANTRY_CREDENTIAL_MODE;
 });
 
 describe('group CLI commands', () => {
@@ -221,7 +221,7 @@ describe('group CLI commands', () => {
       parseRuntimeSettings(
         base.replace(
           '  postgres:\n',
-          '  sqlite:\n    path: ./store/myclaw.db\n  postgres:\n',
+          '  sqlite:\n    path: ./store/gantry.db\n  postgres:\n',
         ),
       ),
     ).toThrow(/storage\.sqlite is not supported/);
@@ -250,7 +250,7 @@ describe('group CLI commands', () => {
 
     expect(() =>
       parseRuntimeSettings(
-        base.replace('    schema: myclaw', '    schema: MyClaw'),
+        base.replace('    schema: gantry', '    schema: Gantry'),
       ),
     ).toThrow(
       /storage\.postgres\.schema must be a lowercase PostgreSQL schema identifier/,
@@ -313,9 +313,9 @@ describe('group CLI commands', () => {
     ).toThrow(/memory\.embeddings\.provider must be a lowercase provider id/);
   });
 
-  it('rejects runtime settings when MyClaw and OneCLI use the same database role', () => {
+  it('rejects runtime settings when Gantry and OneCLI use the same database role', () => {
     process.env.ONECLI_DATABASE_URL =
-      'postgres://user:pass@127.0.0.1:5432/myclaw?schema=onecli';
+      'postgres://user:pass@127.0.0.1:5432/gantry?schema=onecli';
 
     const result = validateRuntimeSettings(runtimeHome);
 
@@ -325,7 +325,7 @@ describe('group CLI commands', () => {
     );
   });
 
-  it('rejects runtime settings when MyClaw and OneCLI use different databases', () => {
+  it('rejects runtime settings when Gantry and OneCLI use different databases', () => {
     process.env.ONECLI_DATABASE_URL =
       'postgres://onecli:pass@127.0.0.1:5432/other?schema=onecli';
 
@@ -401,7 +401,7 @@ describe('group CLI commands', () => {
     expect(await runAgentCommand(runtimeHome, ['list'])).toBe(0);
 
     expect(info).toHaveBeenCalledWith(
-      expect.stringContaining('myclaw provider connect telegram'),
+      expect.stringContaining('gantry provider connect telegram'),
     );
   });
 

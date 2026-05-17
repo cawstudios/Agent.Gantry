@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { MemoryIpcAction } from '@myclaw/contracts';
+import { MemoryIpcAction } from '@gantry/contracts';
 import type { BrowserBackendAction } from '../../shared/browser-backend-actions.js';
 import {
   nowMs,
@@ -217,11 +217,11 @@ export async function requestBrowserAction(
     context: {
       chatJid,
       timeoutMs,
-      ...(process.env.MYCLAW_JOB_ID
-        ? { jobId: process.env.MYCLAW_JOB_ID }
+      ...(process.env.GANTRY_JOB_ID
+        ? { jobId: process.env.GANTRY_JOB_ID }
         : {}),
-      ...(process.env.MYCLAW_JOB_RUN_ID
-        ? { runId: process.env.MYCLAW_JOB_RUN_ID }
+      ...(process.env.GANTRY_JOB_RUN_ID
+        ? { runId: process.env.GANTRY_JOB_RUN_ID }
         : {}),
       ...(threadId ? { threadId } : {}),
       ...(options.publicToolName

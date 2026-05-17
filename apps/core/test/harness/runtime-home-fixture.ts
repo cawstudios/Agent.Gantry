@@ -24,7 +24,7 @@ export function createRuntimeHomeFixture(options?: {
   env?: Record<string, string>;
 }): RuntimeHomeFixture {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), options?.prefix || 'myclaw-runtime-home-'),
+    path.join(os.tmpdir(), options?.prefix || 'gantry-runtime-home-'),
   );
   const settings = createDefaultRuntimeSettings();
   options?.mutateSettings?.(settings);

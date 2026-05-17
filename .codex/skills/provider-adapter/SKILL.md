@@ -1,6 +1,6 @@
 ---
 name: provider-adapter
-description: Use for LLM, channel, browser, sandbox, credential, and external provider adapter changes in MyClaw.
+description: Use for LLM, channel, browser, sandbox, credential, and external provider adapter changes in Gantry.
 ---
 
 # Provider Adapter

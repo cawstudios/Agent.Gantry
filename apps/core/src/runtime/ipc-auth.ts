@@ -1,15 +1,15 @@
 import { createHash, createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { createIpcResponseSigningKeyPair } from '../infrastructure/ipc/response-signing.js';
-import { MYCLAW_IPC_AUTH_SECRET } from '../config/index.js';
+import { GANTRY_IPC_AUTH_SECRET } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { normalizeMemoryIpcActions } from '../shared/memory-ipc-actions.js';
 
 const IPC_AUTH_SECRET =
-  MYCLAW_IPC_AUTH_SECRET ||
+  GANTRY_IPC_AUTH_SECRET ||
   (() => {
     const generated = randomBytes(32).toString('hex');
     logger.warn(
-      'MYCLAW_IPC_AUTH_SECRET not set; using ephemeral secret (IPC tokens will not survive restarts)',
+      'GANTRY_IPC_AUTH_SECRET not set; using ephemeral secret (IPC tokens will not survive restarts)',
     );
     return generated;
   })();

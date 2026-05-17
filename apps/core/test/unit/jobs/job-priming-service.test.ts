@@ -28,7 +28,7 @@ describe('JobPrimingService', () => {
         ],
       },
       {
-        requestedToolName: 'mcp__myclaw__browser_act',
+        requestedToolName: 'mcp__gantry__browser_act',
         toolName: 'Browser',
         toolInput: { url: 'https://example.com' },
       },
@@ -53,7 +53,7 @@ describe('JobPrimingService', () => {
         ],
       },
       {
-        requestedToolName: 'mcp__myclaw__browser_act',
+        requestedToolName: 'mcp__gantry__browser_act',
         toolName: 'Browser',
         suggestions: [
           {

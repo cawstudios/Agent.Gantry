@@ -13,7 +13,7 @@ import {
 
 describe('cli onboarding-state helpers', () => {
   it('writes and reads onboarding state', () => {
-    const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-state-'));
+    const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-state-'));
     const state = createInitialState(runtimeHome);
     state.currentStep = 'telegram';
     state.data.telegramChatJid = 'tg:-1001';
@@ -29,7 +29,7 @@ describe('cli onboarding-state helpers', () => {
   });
 
   it('clears onboarding state file', () => {
-    const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-state-'));
+    const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-state-'));
     writeOnboardingState(runtimeHome, createInitialState(runtimeHome));
 
     clearOnboardingState(runtimeHome);

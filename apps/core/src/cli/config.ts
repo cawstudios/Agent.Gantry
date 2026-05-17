@@ -10,10 +10,10 @@ import { classifyConfigKey } from '../config/source-classification.js';
 function usage(): string {
   return [
     'Config commands:',
-    '  myclaw config list',
-    '  myclaw config get <KEY> [--raw]',
-    '  myclaw config set <KEY> <VALUE>',
-    '  myclaw config unset <KEY>',
+    '  gantry config list',
+    '  gantry config get <KEY> [--raw]',
+    '  gantry config set <KEY> <VALUE>',
+    '  gantry config unset <KEY>',
   ].join('\n');
 }
 
@@ -32,7 +32,7 @@ function isBlockedDirectProviderCredential(key: string): boolean {
 function blockedKeyMessage(key: string): string {
   return (
     classifyConfigKey(key)?.message ||
-    `${key} must not be configured in MyClaw .env.`
+    `${key} must not be configured in Gantry .env.`
   );
 }
 
@@ -85,7 +85,7 @@ function runList(runtimeHome: string): number {
 function runGet(runtimeHome: string, args: string[]): number {
   const [key, ...rest] = args;
   if (!key) {
-    p.log.error('Usage: myclaw config get <KEY> [--raw]');
+    p.log.error('Usage: gantry config get <KEY> [--raw]');
     return 1;
   }
   if (!isValidEnvKey(key)) {
@@ -112,7 +112,7 @@ function runGet(runtimeHome: string, args: string[]): number {
 function runSet(runtimeHome: string, args: string[]): number {
   const [key, ...valueParts] = args;
   if (!key || valueParts.length === 0) {
-    p.log.error('Usage: myclaw config set <KEY> <VALUE>');
+    p.log.error('Usage: gantry config set <KEY> <VALUE>');
     return 1;
   }
   if (!isValidEnvKey(key)) {
@@ -127,7 +127,7 @@ function runSet(runtimeHome: string, args: string[]): number {
   const value = valueParts.join(' ').trim();
   if (!value) {
     p.log.error(
-      'Value cannot be empty. Use `myclaw config unset <KEY>` to remove a key.',
+      'Value cannot be empty. Use `gantry config unset <KEY>` to remove a key.',
     );
     return 1;
   }
@@ -143,7 +143,7 @@ function runSet(runtimeHome: string, args: string[]): number {
 function runUnset(runtimeHome: string, args: string[]): number {
   const [key] = args;
   if (!key) {
-    p.log.error('Usage: myclaw config unset <KEY>');
+    p.log.error('Usage: gantry config unset <KEY>');
     return 1;
   }
   if (!isValidEnvKey(key)) {

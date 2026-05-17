@@ -250,12 +250,12 @@ describe('PromptProfileService', () => {
       prompt.indexOf('[[GROUP_CONTEXT]]'),
     );
     expect(prompt).not.toContain('[[SHARED_CONTEXT]]');
-    expect(prompt).toContain('source: myclaw://soul');
-    expect(prompt).toContain('source: myclaw://persona');
+    expect(prompt).toContain('source: gantry://soul');
+    expect(prompt).toContain('source: gantry://persona');
     expect(prompt).toContain('Personal assistant persona');
-    expect(prompt).toContain('source: myclaw://capability-guidance');
-    expect(prompt).toContain('source: myclaw://operating-guidance');
-    expect(prompt).toContain('source: myclaw://group-context');
+    expect(prompt).toContain('source: gantry://capability-guidance');
+    expect(prompt).toContain('source: gantry://operating-guidance');
+    expect(prompt).toContain('source: gantry://group-context');
   });
 
   it('consolidates former shared guidance into generated operating guidance', async () => {

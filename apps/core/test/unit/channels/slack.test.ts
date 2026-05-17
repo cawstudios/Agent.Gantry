@@ -177,18 +177,18 @@ function createOptsWithApproverHook(
 }
 
 describe('Slack channel', () => {
-  let savedMyclawHome: string | undefined;
+  let savedGantryHome: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    savedMyclawHome = process.env.MYCLAW_HOME;
-    delete process.env.MYCLAW_HOME;
+    savedGantryHome = process.env.GANTRY_HOME;
+    delete process.env.GANTRY_HOME;
     defaultSlackPermissionApproverIds.clear();
   });
 
   afterEach(() => {
-    if (savedMyclawHome === undefined) delete process.env.MYCLAW_HOME;
-    else process.env.MYCLAW_HOME = savedMyclawHome;
+    if (savedGantryHome === undefined) delete process.env.GANTRY_HOME;
+    else process.env.GANTRY_HOME = savedGantryHome;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -522,7 +522,7 @@ describe('Slack channel', () => {
     ]);
     expect(payload.blocks[1].elements[0]).toEqual(
       expect.objectContaining({
-        action_id: 'myclaw_message_action',
+        action_id: 'gantry_message_action',
         value: expect.stringContaining('"kind":"scheduler_run_now"'),
       }),
     );
@@ -537,7 +537,7 @@ describe('Slack channel', () => {
     await channel.connect();
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_message_action',
+      'gantry_message_action',
     );
     expect(actionHandler).toBeDefined();
     const ack = vi.fn();
@@ -890,9 +890,9 @@ describe('Slack channel', () => {
   });
 
   it('restores Slack progress handles after process restart', async () => {
-    const runtimeHome = fs.mkdtempSync('/tmp/myclaw-slack-progress-');
-    const savedHome = process.env.MYCLAW_HOME;
-    process.env.MYCLAW_HOME = runtimeHome;
+    const runtimeHome = fs.mkdtempSync('/tmp/gantry-slack-progress-');
+    const savedHome = process.env.GANTRY_HOME;
+    process.env.GANTRY_HOME = runtimeHome;
     try {
       const first = new SlackChannel(
         'xoxb-token',
@@ -921,8 +921,8 @@ describe('Slack channel', () => {
         text: 'Done in 1s.',
       });
     } finally {
-      if (savedHome === undefined) delete process.env.MYCLAW_HOME;
-      else process.env.MYCLAW_HOME = savedHome;
+      if (savedHome === undefined) delete process.env.GANTRY_HOME;
+      else process.env.GANTRY_HOME = savedHome;
       fs.rmSync(runtimeHome, { recursive: true, force: true });
     }
   });
@@ -976,7 +976,7 @@ describe('Slack channel', () => {
     expect(postCall?.text).toContain('Command:\n```\ngit status --short\n```');
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_perm_decision',
+      'gantry_perm_decision',
     );
     await actionHandler?.({
       ack: vi.fn().mockResolvedValue(undefined),
@@ -1010,7 +1010,7 @@ describe('Slack channel', () => {
     );
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_perm_decision',
+      'gantry_perm_decision',
     );
     await actionHandler?.({
       ack: vi.fn().mockResolvedValue(undefined),
@@ -1058,7 +1058,7 @@ describe('Slack channel', () => {
     );
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_perm_decision',
+      'gantry_perm_decision',
     );
     await actionHandler?.({
       ack: vi.fn().mockResolvedValue(undefined),
@@ -1107,7 +1107,7 @@ describe('Slack channel', () => {
     );
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_perm_decision',
+      'gantry_perm_decision',
     );
     await actionHandler?.({
       ack: vi.fn().mockResolvedValue(undefined),
@@ -1138,6 +1138,106 @@ describe('Slack channel', () => {
     );
   });
 
+  it('authorizes Slack same-channel decisions from block action container channel', async () => {
+    const isControlApproverAllowed = vi.fn(async () => true);
+    const channel = new SlackChannel('xoxb-token', 'xapp-token', {
+      ...createOpts({ default: [], agents: {} }),
+      isControlApproverAllowed,
+    } as any);
+    await channel.connect();
+
+    const approvalPromise = channel.requestPermissionApproval(
+      'sl:C1234567890',
+      {
+        requestId: 'perm-container-channel',
+        sourceAgentFolder: 'slack_main',
+        decisionPolicy: 'same_channel',
+        toolName: 'Bash',
+      },
+    );
+
+    const actionHandler = appRef.current.actionHandlers.get(
+      'gantry_perm_decision',
+    );
+    await actionHandler?.({
+      ack: vi.fn().mockResolvedValue(undefined),
+      body: {
+        container: { channel_id: 'C1234567890' },
+        user: { id: 'U_CHANNEL_ADMIN', name: 'ChannelAdmin' },
+      },
+      action: {
+        value: JSON.stringify({
+          requestId: 'perm-container-channel',
+          decision: 'approve',
+        }),
+      },
+    });
+
+    await expect(approvalPromise).resolves.toEqual(
+      expect.objectContaining({
+        approved: true,
+        decidedBy: 'ChannelAdmin',
+      }),
+    );
+    expect(isControlApproverAllowed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: 'slack',
+        conversationJid: 'sl:C1234567890',
+        userId: 'U_CHANNEL_ADMIN',
+      }),
+    );
+    expect(appRef.current.client.chat.postEphemeral).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when Slack same-channel callbacks omit channel context', async () => {
+    const isControlApproverAllowed = vi.fn(async () => true);
+    const channel = new SlackChannel('xoxb-token', 'xapp-token', {
+      ...createOpts({ default: [], agents: {} }),
+      isControlApproverAllowed,
+    } as any);
+    await channel.connect();
+
+    const approvalPromise = channel.requestPermissionApproval(
+      'sl:C1234567890',
+      {
+        requestId: 'perm-missing-channel',
+        sourceAgentFolder: 'slack_main',
+        decisionPolicy: 'same_channel',
+        toolName: 'Bash',
+      },
+    );
+
+    const actionHandler = appRef.current.actionHandlers.get(
+      'gantry_perm_decision',
+    );
+    await actionHandler?.({
+      ack: vi.fn().mockResolvedValue(undefined),
+      body: {
+        user: { id: 'U_CHANNEL_ADMIN', name: 'ChannelAdmin' },
+      },
+      action: {
+        value: JSON.stringify({
+          requestId: 'perm-missing-channel',
+          decision: 'approve',
+        }),
+      },
+    });
+
+    expect(appRef.current.client.chat.postEphemeral).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C1234567890',
+        user: 'U_CHANNEL_ADMIN',
+        text: 'This approval request belongs to a different chat.',
+      }),
+    );
+    expect(isControlApproverAllowed).not.toHaveBeenCalled();
+
+    await channel.disconnect();
+    await expect(approvalPromise).resolves.toEqual(
+      expect.objectContaining({ approved: false }),
+    );
+  });
+
   it('does not let an agent-scoped Slack approver decide another agent request', async () => {
     const channel = new SlackChannel(
       'xoxb-token',
@@ -1162,7 +1262,7 @@ describe('Slack channel', () => {
     );
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_perm_decision',
+      'gantry_perm_decision',
     );
     await actionHandler?.({
       ack: vi.fn().mockResolvedValue(undefined),
@@ -1210,7 +1310,7 @@ describe('Slack channel', () => {
     currentControlAllowlist.current = { default: [], agents: {} };
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_perm_decision',
+      'gantry_perm_decision',
     );
     await actionHandler?.({
       ack: vi.fn().mockResolvedValue(undefined),
@@ -1270,7 +1370,7 @@ describe('Slack channel', () => {
     expect(postCall?.text).toContain('Thread: 1711111111.000200');
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_userq_select',
+      'gantry_userq_select',
     );
     expect(actionHandler).toBeTypeOf('function');
     const ack = vi.fn().mockResolvedValue(undefined);
@@ -1321,7 +1421,7 @@ describe('Slack channel', () => {
     });
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_userq_select',
+      'gantry_userq_select',
     );
     expect(actionHandler).toBeTypeOf('function');
 
@@ -1394,9 +1494,9 @@ describe('Slack channel', () => {
     });
 
     const selectHandler = appRef.current.actionHandlers.get(
-      'myclaw_userq_select',
+      'gantry_userq_select',
     );
-    const doneHandler = appRef.current.actionHandlers.get('myclaw_userq_done');
+    const doneHandler = appRef.current.actionHandlers.get('gantry_userq_done');
     expect(selectHandler).toBeTypeOf('function');
     expect(doneHandler).toBeTypeOf('function');
 
@@ -2237,7 +2337,7 @@ describe('Slack channel', () => {
     );
 
     const actionHandler = appRef.current.actionHandlers.get(
-      'myclaw_perm_decision',
+      'gantry_perm_decision',
     );
     expect(actionHandler).toBeTypeOf('function');
     await actionHandler?.({

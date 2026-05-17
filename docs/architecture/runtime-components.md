@@ -1,12 +1,12 @@
 # Runtime Components
 
-This is the contributor entrypoint for MyClaw runtime internals. It explains how channel messages and SDK messages become durable Postgres records, queued work, Claude Agent SDK runs, tool calls, and outbound responses.
+This is the contributor entrypoint for Gantry runtime internals. It explains how channel messages and SDK messages become durable Postgres records, queued work, Claude Agent SDK runs, tool calls, and outbound responses.
 
 For external backend app usage, start with the SDK docs instead: [SDK overview](../sdk/overview.md), [API reference](../sdk/api-reference.md), and [agent internals for SDK consumers](../sdk/agent-internals.md). For threat model details, use [SECURITY.md](../SECURITY.md).
 
 ## Runtime Boundary
 
-MyClaw is a host runtime around agents. The runtime owns durable state, queueing, scheduling, auth, and delivery. The agent owns prompt interpretation, reply generation, and use of runtime-exposed tools.
+Gantry is a host runtime around agents. The runtime owns durable state, queueing, scheduling, auth, and delivery. The agent owns prompt interpretation, reply generation, and use of runtime-exposed tools.
 
 Runtime responsibilities:
 
@@ -16,7 +16,7 @@ Runtime responsibilities:
 - admit interactive and background work through separate `GroupQueue` lanes
 - spawn and supervise child agent runners
 - enforce IPC, MCP tool, sender, control, and scheduler permissions
-- expose the internal control server used by `@myclaw/sdk`
+- expose the internal control server used by `@gantry/sdk`
 - run pg-boss-backed scheduled, manual, and recurring jobs
 
 Agent responsibilities:
@@ -43,9 +43,9 @@ ACP/ACPS are harness/runtime integration concerns. They are not part of the agen
 | Group processor            | `apps/core/src/runtime/group-processing.ts`                                                                                                                                                       | Loads unread messages, checks triggers, hydrates durable memory context, starts agent runs, and commits cursors/results.                                                                     |
 | Agent spawn                | `apps/core/src/runtime/agent-spawn.ts`, `apps/core/src/runtime/agent-spawn-process.ts`                                                                                                            | Builds the child process environment, group working directory, model config, IPC secrets, MCP server path, and runtime credentials.                                                          |
 | Child runner               | `apps/core/src/runner/claude/index.ts`, `apps/core/src/runner/claude/query-loop.ts`, `apps/core/src/runner/claude/permission-callback.ts`                                                         | Calls `@anthropic-ai/claude-agent-sdk`, streams follow-up input through `MessageStream`, and mediates tool permission callbacks.                                                             |
-| Tools and IPC              | `apps/core/src/runner/agent-capabilities.ts`, `apps/core/src/runner/mcp/server.ts`, `apps/core/src/runtime/ipc.ts`, `apps/core/src/runtime/ipc-parsing.ts`                                        | Defines allowed tools, exposes MyClaw MCP tools, validates signed IPC requests, and writes signed responses.                                                                                 |
+| Tools and IPC              | `apps/core/src/runner/agent-capabilities.ts`, `apps/core/src/runner/mcp/server.ts`, `apps/core/src/runtime/ipc.ts`, `apps/core/src/runtime/ipc-parsing.ts`                                        | Defines allowed tools, exposes Gantry MCP tools, validates signed IPC requests, and writes signed responses.                                                                                 |
 | Control server and SDK     | `apps/core/src/control/server/index.ts`, `apps/core/src/control/server/routes/`, `packages/sdk/src/index.ts`                                                                                      | Exposes HTTP/SSE control APIs for backend apps; SDK wraps this API for server-side Node consumers.                                                                                           |
-| Scheduler                  | `apps/core/src/jobs/scheduler.ts`, `apps/core/src/jobs/execution.ts`, `apps/core/src/jobs/schedule-math.ts`, `apps/core/src/infrastructure/pgboss/scheduler-engine.ts`                            | Owns MyClaw job definitions, triggers, runs, events, pg-boss queueing, schedule sync, and dead-letter handling.                                                                              |
+| Scheduler                  | `apps/core/src/jobs/scheduler.ts`, `apps/core/src/jobs/execution.ts`, `apps/core/src/jobs/schedule-math.ts`, `apps/core/src/infrastructure/pgboss/scheduler-engine.ts`                            | Owns Gantry job definitions, triggers, runs, events, pg-boss queueing, schedule sync, and dead-letter handling.                                                                              |
 | Memory and retrieval       | `apps/core/src/application/sessions/hydrate-agent-context-service.ts`, `apps/core/src/memory/app-memory-service.ts`, `apps/core/src/adapters/storage/postgres/schema/memory.ts`, `docs/MEMORY.md` | Stores flattened app/agent/subject-boundary memory in `memory_items`, records evidence and recall events, runs auditable dreaming, and builds bounded lexical memory context for fresh runs. |
 
 ## End-to-End Message Flow
@@ -100,7 +100,7 @@ Key runner inputs:
 
 - group working directory and allowed additional directories
 - prompt profile, system prompt, model, and thinking configuration
-- MCP server command for MyClaw tools
+- MCP server command for Gantry tools
 - IPC request/response directories
 - HMAC auth token and response signing key scoped to the group/thread
 - environment values for credentials and browser automation endpoints
@@ -109,7 +109,7 @@ Key runner inputs:
 `apps/core/src/runner/claude/query-loop.ts` creates a `MessageStream` and passes it to `query()`. The stream lets the host add follow-up user messages to an already-running agent when the queue decides continuation is safe. The same `query()` call receives:
 
 - `allowedTools` from `apps/core/src/runner/agent-capabilities.ts`
-- MyClaw MCP server config from `apps/core/src/runner/mcp/server.ts`
+- Gantry MCP server config from `apps/core/src/runner/mcp/server.ts`
 - Claude SDK stateless session projection (`persistSession: false`; no
   `resume` or `resumeSessionAt` for live turns or scheduled jobs)
 - working directory and extra directories
@@ -129,18 +129,18 @@ provider-specific resume metadata such as Claude session ids and optional JSONL
 artifact references. Provider transcript artifacts are export/debug data, not a
 runtime continuation mechanism. Active chat continuity comes from the live
 Claude SDK streaming-input query; cold starts resolve the deterministic
-canonical session key and inject durable MyClaw memory only.
+canonical session key and inject durable Gantry memory only.
 
 ## Tools And Permissions
 
 Tool access has two layers:
 
 - Claude Agent SDK tools declared in `agent-capabilities.ts`
-- MyClaw MCP tools served over stdio by `apps/core/src/runner/mcp/server.ts`
+- Gantry MCP tools served over stdio by `apps/core/src/runner/mcp/server.ts`
 
 The default SDK tool list is intentionally narrow: read/search/web/task/skill
-tools plus exact MyClaw request tools. Dangerous tools such as `Bash`, `Write`,
-`Edit`, config mutation, and wildcard `mcp__myclaw__*` are not defaults. A small
+tools plus exact Gantry request tools. Dangerous tools such as `Bash`, `Write`,
+`Edit`, config mutation, and wildcard `mcp__gantry__*` are not defaults. A small
 set of worktree lifecycle tools is always allowed because it is required for
 runner operation. Other tool calls pass through `canUseTool` and host policy.
 
@@ -163,15 +163,15 @@ such as `gh issue create --body ...` may mention those paths without becoming a
 capability mutation.
 
 SDK-managed Bash, file, hook, and MCP subprocesses also run behind the Claude
-SDK sandbox. MyClaw passes only concrete protected paths through
-`MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON`; the runner projects them into
+SDK sandbox. Gantry passes only concrete protected paths through
+`GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON`; the runner projects them into
 `sandbox.filesystem.denyWrite`. On macOS and Linux, the SDK must fail closed if
 its sandbox dependency is unavailable. Docker deployments should still mount
-durable MyClaw config and broker state read-only into the agent execution
+durable Gantry config and broker state read-only into the agent execution
 container wherever those paths are visible, because container mount policy is
 the OS boundary for non-SDK host-owned processes.
 
-MyClaw MCP tools are grouped by capability:
+Gantry MCP tools are grouped by capability:
 
 - messaging and user interaction: send a message, ask a question
 - capability requests: skill install/proposal/dependency install, MCP server,
@@ -232,7 +232,7 @@ For the full security model, use [SECURITY.md](../SECURITY.md).
 
 ## SDK Control Plane
 
-The control server is an internal runtime API with HTTP and SSE. The public integration surface is the server-only Node package `@myclaw/sdk`.
+The control server is an internal runtime API with HTTP and SSE. The public integration surface is the server-only Node package `@gantry/sdk`.
 
 The control server owns:
 
@@ -248,7 +248,7 @@ The SDK is not a browser API. Backend apps use it from NestJS, Next.js route han
 
 ## Scheduler And Jobs
 
-MyClaw exposes MyClaw jobs, not raw pg-boss jobs. The runtime stores job definitions, triggers, runs, events, and results in first-party tables, then uses pg-boss for queueing, claiming, scheduling, and restart-safe execution.
+Gantry exposes Gantry jobs, not raw pg-boss jobs. The runtime stores job definitions, triggers, runs, events, and results in first-party tables, then uses pg-boss for queueing, claiming, scheduling, and restart-safe execution.
 Active one-shot jobs whose fire window passed before pg-boss delivered them
 are treated as `missed_window`: scheduler sync re-enqueues them immediately,
 throttled to one reissue per minute, and job visibility surfaces the derived
@@ -262,7 +262,7 @@ Job schedule types:
 
 The public lifecycle is:
 
-1. create or update a MyClaw job definition
+1. create or update a Gantry job definition
 2. enqueue or schedule through the pg-boss engine
 3. return `triggerId` immediately for manual triggers
 4. claim execution and create or bind `runId`
@@ -276,9 +276,9 @@ Jobs have no serialized execution mode. Interactive message admission stays in
 
 ## Storage And Retrieval
 
-Postgres is mandatory runtime storage. The supported deployment model is one database with separate schemas and roles: `myclaw` for first-party runtime tables, `onecli` for OneCLI broker state, and `pgboss` for pg-boss internals. MyClaw provisions and verifies the schema boundary, but it does not query OneCLI-owned tables or run OneCLI migrations. `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL` must use different Postgres users; the OneCLI `schema=onecli` URL parameter is not treated as a permission boundary by itself.
+Postgres is mandatory runtime storage. The supported deployment model is one database with separate schemas and roles: `gantry` for first-party runtime tables, `onecli` for OneCLI broker state, and `pgboss` for pg-boss internals. Gantry provisions and verifies the schema boundary, but it does not query OneCLI-owned tables or run OneCLI migrations. `GANTRY_DATABASE_URL` and `ONECLI_DATABASE_URL` must use different Postgres users; the OneCLI `schema=onecli` URL parameter is not treated as a permission boundary by itself.
 
-The MyClaw schema contains first-party tables for groups, chats, messages,
+The Gantry schema contains first-party tables for groups, chats, messages,
 sessions, jobs, runs, runtime events, webhooks, deliveries, flattened memory
 items, memory evidence, candidates, recall events, dream runs, dream decisions,
 and audit records. `memory_subjects` is not active current schema; memory

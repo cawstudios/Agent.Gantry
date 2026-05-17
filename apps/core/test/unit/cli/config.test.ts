@@ -9,7 +9,7 @@ import { readEnvFile } from '@core/config/env/file.js';
 import { envFilePath } from '@core/config/settings/runtime-home.js';
 
 function makeRuntimeHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-config-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-config-test-'));
 }
 
 afterEach(() => {
@@ -59,7 +59,7 @@ describe('config CLI commands', () => {
     runConfigCommand(runtimeHome, [
       'set',
       'ONECLI_DATABASE_URL',
-      'postgresql://onecli:secret@localhost:5432/myclaw?schema=onecli',
+      'postgresql://onecli:secret@localhost:5432/gantry?schema=onecli',
     ]);
 
     const spy = vi.spyOn(console, 'log').mockImplementation(() => undefined);

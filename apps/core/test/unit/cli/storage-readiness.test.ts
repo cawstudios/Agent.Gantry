@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 function createRuntimeHome(): string {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-storage-ready-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-storage-ready-'));
   fs.mkdirSync(path.join(home, 'store'), { recursive: true });
   fs.mkdirSync(path.join(home, 'agents'), { recursive: true });
   fs.mkdirSync(path.join(home, 'logs'), { recursive: true });
@@ -29,24 +29,24 @@ describe('inspectRuntimeStorageReadiness', () => {
   it('fails when postgres url env is missing', async () => {
     const runtimeHome = createRuntimeHome();
     const settings = loadRuntimeSettings(runtimeHome);
-    settings.storage.postgres.urlEnv = 'MYCLAW_DATABASE_URL';
+    settings.storage.postgres.urlEnv = 'GANTRY_DATABASE_URL';
     saveRuntimeSettings(runtimeHome, settings);
 
     const result = await inspectRuntimeStorageReadiness(runtimeHome);
     expect(result.status).toBe('fail');
-    expect(result.message).toContain('MYCLAW_DATABASE_URL is required');
+    expect(result.message).toContain('GANTRY_DATABASE_URL is required');
     expect(result.nextAction).toContain('docker-compose.yml');
   });
 
   it('runs migrations before health checks when requested', async () => {
     const runtimeHome = createRuntimeHome();
     const settings = loadRuntimeSettings(runtimeHome);
-    settings.storage.postgres.urlEnv = 'MYCLAW_DATABASE_URL';
-    settings.storage.postgres.schema = 'myclaw';
+    settings.storage.postgres.urlEnv = 'GANTRY_DATABASE_URL';
+    settings.storage.postgres.schema = 'gantry';
     saveRuntimeSettings(runtimeHome, settings);
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:5432/myclaw\n',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:5432/gantry\n',
     );
     const migrate = vi.fn().mockResolvedValue(undefined);
     const healthCheck = vi.fn().mockResolvedValue({

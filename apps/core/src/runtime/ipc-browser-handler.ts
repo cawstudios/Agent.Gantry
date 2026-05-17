@@ -289,7 +289,7 @@ async function inspectToolCapabilityBrokerHealth(
       status: 'warn',
       message:
         'Credential broker health is not available from this runtime process.',
-      nextAction: 'Run `myclaw doctor` to verify credential broker settings.',
+      nextAction: 'Run `gantry doctor` to verify credential broker settings.',
     };
   }
   return broker.healthCheck({
@@ -337,7 +337,7 @@ async function attachToolCapabilityBrokerHealth(
     brokerHealth = {
       status: 'fail',
       message: 'Credential broker health check failed.',
-      nextAction: 'Run `myclaw doctor` to verify credential broker settings.',
+      nextAction: 'Run `gantry doctor` to verify credential broker settings.',
     };
   }
   if (!brokerHealth) return data;

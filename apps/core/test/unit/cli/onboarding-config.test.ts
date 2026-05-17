@@ -16,7 +16,7 @@ const runtimeHomes: string[] = [];
 
 function makeRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'myclaw-onboarding-config-'),
+    path.join(os.tmpdir(), 'gantry-onboarding-config-'),
   );
   runtimeHomes.push(runtimeHome);
   return runtimeHome;
@@ -25,10 +25,10 @@ function makeRuntimeHome(): string {
 function baseInput(runtimeHome: string) {
   return {
     runtimeHome,
-    postgresDatabaseUrl: 'postgresql://myclaw_app:pass@localhost:15432/myclaw',
+    postgresDatabaseUrl: 'postgresql://gantry_app:pass@localhost:15432/gantry',
     onecliPostgresDatabaseUrl:
-      'postgresql://onecli_app:pass@localhost:15432/myclaw?schema=onecli',
-    postgresSchema: 'myclaw',
+      'postgresql://onecli_app:pass@localhost:15432/gantry?schema=onecli',
+    postgresSchema: 'gantry',
     onecliPostgresSchema: 'onecli',
     primaryProvider: 'telegram' as const,
     telegramBotToken: 'telegram-token',
@@ -73,13 +73,13 @@ describe('onboarding config persistence', () => {
     expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(env.ANTHROPIC_MODEL).toBeUndefined();
-    expect(env.MYCLAW_DATABASE_URL).toContain('myclaw_app');
+    expect(env.GANTRY_DATABASE_URL).toContain('gantry_app');
     expect(env.ONECLI_DATABASE_URL).toContain('onecli_app');
     expect(env.SECRET_ENCRYPTION_KEY).toBe(
       '123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
     );
     expect(env.ONECLI_URL).toBeUndefined();
-    expect(env.MYCLAW_CREDENTIAL_MODE).toBeUndefined();
+    expect(env.GANTRY_CREDENTIAL_MODE).toBeUndefined();
     expect(env.SLACK_PERMISSION_APPROVER_IDS).toBeUndefined();
     expect(env.TELEGRAM_PERMISSION_APPROVER_IDS).toBeUndefined();
     const settings = loadRuntimeSettingsFromPath(settingsFilePath(runtimeHome));
@@ -130,7 +130,7 @@ describe('onboarding config persistence', () => {
     expect(settings.conversations).toEqual({});
   });
 
-  it('requires OneCLI database URL when MyClaw database URL is configured', () => {
+  it('requires OneCLI database URL when Gantry database URL is configured', () => {
     const runtimeHome = makeRuntimeHome();
 
     expect(() =>
@@ -141,11 +141,11 @@ describe('onboarding config persistence', () => {
     ).toThrow(/ONECLI_DATABASE_URL is required/);
 
     expect(
-      readEnvFile(envFilePath(runtimeHome)).MYCLAW_DATABASE_URL,
+      readEnvFile(envFilePath(runtimeHome)).GANTRY_DATABASE_URL,
     ).toBeUndefined();
   });
 
-  it('rejects OneCLI database URLs that do not share the MyClaw database', () => {
+  it('rejects OneCLI database URLs that do not share the Gantry database', () => {
     const runtimeHome = makeRuntimeHome();
 
     expect(() =>
@@ -157,7 +157,7 @@ describe('onboarding config persistence', () => {
     ).toThrow(/same Postgres database/);
 
     expect(
-      readEnvFile(envFilePath(runtimeHome)).MYCLAW_DATABASE_URL,
+      readEnvFile(envFilePath(runtimeHome)).GANTRY_DATABASE_URL,
     ).toBeUndefined();
   });
 });

@@ -16,7 +16,7 @@ import {
   ConversationResponseSchema,
   ConversationThreadListResponseSchema,
   MessageListResponseSchema,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 import {
   loadRuntimeSettings,
   saveRuntimeSettings,
@@ -24,7 +24,7 @@ import {
 import { signExternalIngressRequest } from '@core/application/external-ingress/signature.js';
 
 vi.mock('@core/config/index.js', async () => {
-  const runtimeHome = '/tmp/myclaw-control-test-home';
+  const runtimeHome = '/tmp/gantry-control-test-home';
   const settingsModule =
     await import('@core/config/settings/runtime-settings.js');
   const yoloPolicy = await import('@core/shared/yolo-mode-policy.js');
@@ -50,7 +50,7 @@ vi.mock('@core/config/index.js', async () => {
     };
   };
   return {
-    MYCLAW_HOME: runtimeHome,
+    GANTRY_HOME: runtimeHome,
     getControlEnvValue: vi.fn((key: string) => process.env[key]?.trim() || ''),
     syncRuntimeSettingsFromProjection: vi.fn(async () => undefined),
     getDefaultModelConfig: vi.fn(() => ({
@@ -58,121 +58,6 @@ vi.mock('@core/config/index.js', async () => {
       source: 'system default',
     })),
     getPublicRuntimeSettings: toPublic,
-    updatePublicRuntimeSettings: (patch: any) => {
-      const rejectInvalid = (message: string) => {
-        throw Object.assign(new Error(message), {
-          statusCode: 400,
-          code: 'INVALID_REQUEST',
-        });
-      };
-      const assertOptionalString = (value: unknown, field: string) => {
-        if (value !== undefined && typeof value !== 'string') {
-          rejectInvalid(`${field} must be a string.`);
-        }
-      };
-      const assertOptionalBoolean = (value: unknown, field: string) => {
-        if (value !== undefined && typeof value !== 'boolean') {
-          rejectInvalid(`${field} must be a boolean.`);
-        }
-      };
-      for (const key of Object.keys(patch || {})) {
-        if (!['agent', 'memory', 'permissions'].includes(key)) {
-          rejectInvalid(`settings.${key} is not supported.`);
-        }
-      }
-      assertOptionalString(patch.agent?.name, 'agent.name');
-      assertOptionalString(patch.agent?.defaultModel, 'agent.defaultModel');
-      assertOptionalString(
-        patch.agent?.oneTimeJobDefaultModel,
-        'agent.oneTimeJobDefaultModel',
-      );
-      assertOptionalString(
-        patch.agent?.recurringJobDefaultModel,
-        'agent.recurringJobDefaultModel',
-      );
-      assertOptionalBoolean(patch.memory?.enabled, 'memory.enabled');
-      assertOptionalBoolean(
-        patch.memory?.dreaming?.enabled,
-        'memory.dreaming.enabled',
-      );
-      assertOptionalBoolean(
-        patch.permissions?.yoloMode?.enabled,
-        'permissions.yoloMode.enabled',
-      );
-      if (patch.permissions?.egress?.denylist !== undefined) {
-        if (!Array.isArray(patch.permissions.egress.denylist)) {
-          rejectInvalid('permissions.egress.denylist must be an array.');
-        }
-        patch.permissions.egress.denylist.forEach(
-          (value: unknown, index: number) => {
-            if (typeof value !== 'string' || !value.trim()) {
-              rejectInvalid(
-                `permissions.egress.denylist[${index}] must be a non-empty string.`,
-              );
-            }
-          },
-        );
-      }
-      const settings = settingsModule.loadRuntimeSettings(runtimeHome);
-      const changed: string[] = [];
-      if (patch.agent?.name !== undefined) {
-        if (!patch.agent.name.trim()) {
-          throw Object.assign(
-            new Error('agent.name must be a non-empty string.'),
-            {
-              statusCode: 400,
-              code: 'INVALID_REQUEST',
-            },
-          );
-        }
-        settings.agent.name = patch.agent.name.trim();
-        changed.push('agent.name');
-      }
-      if (patch.agent?.defaultModel !== undefined) {
-        settings.agent.defaultModel = patch.agent.defaultModel.trim();
-        changed.push('agent.defaultModel');
-      }
-      if (patch.agent?.oneTimeJobDefaultModel !== undefined) {
-        settings.agent.oneTimeJobDefaultModel =
-          patch.agent.oneTimeJobDefaultModel.trim();
-        changed.push('agent.oneTimeJobDefaultModel');
-      }
-      if (patch.agent?.recurringJobDefaultModel !== undefined) {
-        settings.agent.recurringJobDefaultModel =
-          patch.agent.recurringJobDefaultModel.trim();
-        changed.push('agent.recurringJobDefaultModel');
-      }
-      if (patch.memory?.dreaming?.enabled !== undefined) {
-        settings.memory.dreaming.enabled = patch.memory.dreaming.enabled;
-        changed.push('memory.dreaming.enabled');
-      }
-      if (patch.permissions?.yoloMode?.denylist !== undefined) {
-        settings.permissions.yoloMode.denylist =
-          patch.permissions.yoloMode.denylist;
-        changed.push('permissions.yoloMode.denylist');
-      }
-      if (patch.permissions?.yoloMode?.denylistPaths !== undefined) {
-        settings.permissions.yoloMode.denylistPaths =
-          patch.permissions.yoloMode.denylistPaths;
-        changed.push('permissions.yoloMode.denylistPaths');
-      }
-      if (patch.permissions?.yoloMode?.enabled !== undefined) {
-        settings.permissions.yoloMode.enabled =
-          patch.permissions.yoloMode.enabled;
-        changed.push('permissions.yoloMode.enabled');
-      }
-      if (patch.permissions?.egress?.denylist !== undefined) {
-        settings.permissions.egress.denylist =
-          patch.permissions.egress.denylist;
-        changed.push('permissions.egress.denylist');
-      }
-      settingsModule.saveRuntimeSettings(runtimeHome, settings);
-      return {
-        settings: toPublic(),
-        changed,
-        restartRequired: changed.length > 0,
-      };
-    },
   };
 });
 
@@ -695,39 +580,39 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.MYCLAW_CONTROL_API_KEYS_JSON;
-  delete process.env.MYCLAW_CONTROL_API_KEY;
-  delete process.env.MYCLAW_CONTROL_APP_ID;
-  delete process.env.MYCLAW_CONTROL_PORT;
-  delete process.env.MYCLAW_CONTROL_SOCKET_PATH;
-  delete process.env.MYCLAW_CONTROL_ALLOW_PRIVATE_WEBHOOKS;
+  delete process.env.GANTRY_CONTROL_API_KEYS_JSON;
+  delete process.env.GANTRY_CONTROL_API_KEY;
+  delete process.env.GANTRY_CONTROL_APP_ID;
+  delete process.env.GANTRY_CONTROL_PORT;
+  delete process.env.GANTRY_CONTROL_SOCKET_PATH;
+  delete process.env.GANTRY_CONTROL_ALLOW_PRIVATE_WEBHOOKS;
 });
 
 describe('control server auth key parsing', () => {
   function parseControlApiKeysFromEnv() {
     return _testControlServer.parseControlApiKeys({
-      rawJson: process.env.MYCLAW_CONTROL_API_KEYS_JSON,
+      rawJson: process.env.GANTRY_CONTROL_API_KEYS_JSON,
     });
   }
 
-  it('returns no keys when MYCLAW_CONTROL_API_KEYS_JSON is malformed', () => {
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = '{"kid":"broken"';
+  it('returns no keys when GANTRY_CONTROL_API_KEYS_JSON is malformed', () => {
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = '{"kid":"broken"';
 
     expect(parseControlApiKeysFromEnv()).toEqual([]);
   });
 
-  it('fails strict parsing when MYCLAW_CONTROL_API_KEYS_JSON is malformed', () => {
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = '{"kid":"broken"';
+  it('fails strict parsing when GANTRY_CONTROL_API_KEYS_JSON is malformed', () => {
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = '{"kid":"broken"';
 
     expect(() =>
       _testControlServer.parseControlApiKeysStrict({
-        rawJson: process.env.MYCLAW_CONTROL_API_KEYS_JSON,
+        rawJson: process.env.GANTRY_CONTROL_API_KEYS_JSON,
       }),
-    ).toThrow('MYCLAW_CONTROL_API_KEYS_JSON must be valid JSON');
+    ).toThrow('GANTRY_CONTROL_API_KEYS_JSON must be valid JSON');
   });
 
   it('fails strict parsing when a configured key has invalid scope data', () => {
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-bad-scope',
@@ -738,13 +623,13 @@ describe('control server auth key parsing', () => {
 
     expect(() =>
       _testControlServer.parseControlApiKeysStrict({
-        rawJson: process.env.MYCLAW_CONTROL_API_KEYS_JSON,
+        rawJson: process.env.GANTRY_CONTROL_API_KEYS_JSON,
       }),
     ).toThrow('unsupported scope invalid:scope');
   });
 
   it('fails strict parsing when a configured key uses obsolete memory write scope', () => {
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-obsolete-scope',
@@ -755,13 +640,13 @@ describe('control server auth key parsing', () => {
 
     expect(() =>
       _testControlServer.parseControlApiKeysStrict({
-        rawJson: process.env.MYCLAW_CONTROL_API_KEYS_JSON,
+        rawJson: process.env.GANTRY_CONTROL_API_KEYS_JSON,
       }),
     ).toThrow('unsupported scope memory:write');
   });
 
   it('filters out JSON keys that are not app-bound', () => {
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'missing-app',
         token: 'token-a',
@@ -789,31 +674,31 @@ describe('control server auth key parsing', () => {
   });
 
   it('ignores legacy single-token auth even when an app id is present', () => {
-    process.env.MYCLAW_CONTROL_API_KEY = 'single-token';
+    process.env.GANTRY_CONTROL_API_KEY = 'single-token';
     expect(parseControlApiKeysFromEnv()).toHaveLength(0);
 
-    process.env.MYCLAW_CONTROL_APP_ID = 'app:unsafe';
+    process.env.GANTRY_CONTROL_APP_ID = 'app:unsafe';
     expect(parseControlApiKeysFromEnv()).toHaveLength(0);
 
-    process.env.MYCLAW_CONTROL_APP_ID = 'app-two';
+    process.env.GANTRY_CONTROL_APP_ID = 'app-two';
     expect(parseControlApiKeysFromEnv()).toHaveLength(0);
   });
 
   it('strict parsing ignores legacy single-token auth', () => {
-    process.env.MYCLAW_CONTROL_API_KEY = 'single-token';
+    process.env.GANTRY_CONTROL_API_KEY = 'single-token';
 
     expect(
       _testControlServer.parseControlApiKeysStrict({
-        rawJson: process.env.MYCLAW_CONTROL_API_KEYS_JSON,
+        rawJson: process.env.GANTRY_CONTROL_API_KEYS_JSON,
       }),
     ).toEqual([]);
   });
 
   it('rejects legacy single-token auth on protected control routes', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEY = 'single-token';
-    process.env.MYCLAW_CONTROL_APP_ID = 'app-one';
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEY = 'single-token';
+    process.env.GANTRY_CONTROL_APP_ID = 'app-one';
     const handle = startControlServer({
       app: {
         registerGroup: vi.fn(),
@@ -955,12 +840,12 @@ describe('control server auth key parsing', () => {
 });
 
 describe('control server runtime hardening', () => {
-  it('serves and updates typed runtime settings', async () => {
-    const runtimeHome = '/tmp/myclaw-control-test-home';
+  it('serves typed runtime settings to agents admins but keeps them read-only', async () => {
+    const runtimeHome = '/tmp/gantry-control-test-home';
     fs.rmSync(runtimeHome, { recursive: true, force: true });
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'admin-key',
@@ -1018,21 +903,11 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(patchResponse.status).toBe(200);
+      expect(patchResponse.status).toBe(409);
+      expect(patchResponse.headers.get('connection')).toBe('close');
       await expect(patchResponse.json()).resolves.toMatchObject({
-        changed: [
-          'permissions.yoloMode.denylist',
-          'permissions.egress.denylist',
-        ],
-        settings: {
-          permissions: {
-            yoloMode: {
-              denylist: expect.arrayContaining(['rm -rf /', 'npm run nuke']),
-            },
-            egress: {
-              denylist: ['api.linkedin.com'],
-            },
-          },
+        error: {
+          code: 'SETTINGS_READ_ONLY',
         },
       });
 
@@ -1040,10 +915,8 @@ describe('control server runtime hardening', () => {
         path.join(runtimeHome, 'settings.yaml'),
         'utf-8',
       );
-      expect(raw).toContain('defaults:');
-      expect(raw).toContain('model: opus');
-      expect(raw).toContain('npm run nuke');
-      expect(raw).toContain('api.linkedin.com');
+      expect(raw).not.toContain('npm run nuke');
+      expect(raw).not.toContain('api.linkedin.com');
 
       const unsupportedResponse = await requestWithRetry(
         `http://127.0.0.1:${port}/v1/settings`,
@@ -1059,8 +932,8 @@ describe('control server runtime hardening', () => {
 
   it('serves model catalog without exposing provider slugs', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'read-key',
@@ -1098,16 +971,16 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects arbitrary runtime settings patches', async () => {
-    const runtimeHome = '/tmp/myclaw-control-test-home';
+  it('rejects settings patches from non-admin keys before read-only handling', async () => {
+    const runtimeHome = '/tmp/gantry-control-test-home';
     fs.rmSync(runtimeHome, { recursive: true, force: true });
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
-        token: 'admin-key',
-        scopes: ['agents:admin', 'conversations:admin'],
+        token: 'read-key',
+        scopes: ['sessions:read'],
         appId: 'app-one',
       },
     ]);
@@ -1122,7 +995,7 @@ describe('control server runtime hardening', () => {
     try {
       const response = await requestWithRetry(
         `http://127.0.0.1:${port}/v1/settings`,
-        'admin-key',
+        'read-key',
         {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
@@ -1131,10 +1004,10 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({
         error: {
-          code: 'INVALID_REQUEST',
+          code: 'FORBIDDEN',
         },
       });
     } finally {
@@ -1142,12 +1015,12 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects blank runtime agent names in typed settings patches', async () => {
-    const runtimeHome = '/tmp/myclaw-control-test-home';
+  it('keeps typed settings patches read-only before patch validation', async () => {
+    const runtimeHome = '/tmp/gantry-control-test-home';
     fs.rmSync(runtimeHome, { recursive: true, force: true });
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'admin-key',
@@ -1174,10 +1047,10 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(409);
       await expect(response.json()).resolves.toMatchObject({
         error: {
-          code: 'INVALID_REQUEST',
+          code: 'SETTINGS_READ_ONLY',
         },
       });
     } finally {
@@ -1185,12 +1058,12 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects malformed typed runtime settings patches', async () => {
-    const runtimeHome = '/tmp/myclaw-control-test-home';
+  it('does not parse malformed typed runtime settings patches in read-only mode', async () => {
+    const runtimeHome = '/tmp/gantry-control-test-home';
     fs.rmSync(runtimeHome, { recursive: true, force: true });
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'admin-key',
@@ -1220,11 +1093,10 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(409);
       await expect(response.json()).resolves.toMatchObject({
         error: {
-          code: 'INVALID_REQUEST',
-          message: 'permissions.egress.denylist[0] must be a non-empty string.',
+          code: 'SETTINGS_READ_ONLY',
         },
       });
     } finally {
@@ -1234,8 +1106,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects bearer auth when key is not app-bound', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'missing-app',
         token: 'bad-key',
@@ -1255,11 +1127,11 @@ describe('control server runtime hardening', () => {
 
   it('sets unix socket mode to 0600', async () => {
     const tempDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-control-socket-'),
+      path.join(os.tmpdir(), 'gantry-control-socket-'),
     );
     const socketPath = path.join(tempDir, 'control.sock');
-    process.env.MYCLAW_CONTROL_SOCKET_PATH = socketPath;
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_SOCKET_PATH = socketPath;
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 't',
@@ -1304,20 +1176,20 @@ describe('control server runtime hardening', () => {
 
   it('fails startup when control key config is malformed', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = '{"kid":"broken"';
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = '{"kid":"broken"';
 
     expect(() =>
       startControlServer({
         app: { queue: { enqueueMessageCheck: vi.fn() } } as any,
       }),
-    ).toThrow('MYCLAW_CONTROL_API_KEYS_JSON must be valid JSON');
+    ).toThrow('GANTRY_CONTROL_API_KEYS_JSON must be valid JSON');
   });
 
   it('blocks session ensure for mismatched app access', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-1',
@@ -1354,8 +1226,8 @@ describe('control server runtime hardening', () => {
 
   it('returns forbidden when an otherwise valid key lacks required scope', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-read-only',
@@ -1397,8 +1269,8 @@ describe('control server runtime hardening', () => {
 
   it('uses API key app scope when session ensure omits appId', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-ensure-implicit-app',
@@ -1531,7 +1403,7 @@ describe('control server runtime hardening', () => {
 
   it('accepts signed external ingress session messages and registers before enqueue', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const app = {
       registerGroup: vi.fn(async () => undefined),
       queue: { enqueueMessageCheck: vi.fn() },
@@ -1571,9 +1443,9 @@ describe('control server runtime hardening', () => {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-myclaw-ingress-timestamp': signed.timestamp,
-            'x-myclaw-ingress-nonce': signed.nonce,
-            'x-myclaw-ingress-signature': signed.signature,
+            'x-gantry-ingress-timestamp': signed.timestamp,
+            'x-gantry-ingress-nonce': signed.nonce,
+            'x-gantry-ingress-signature': signed.signature,
           },
           body: rawBody,
         },
@@ -1604,7 +1476,7 @@ describe('control server runtime hardening', () => {
 
   it('rejects missing external ingress signature headers before lookup', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: {
         registerGroup: vi.fn(),
@@ -1639,7 +1511,7 @@ describe('control server runtime hardening', () => {
 
   it('rejects tampered external ingress signatures before nonce reservation', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: {
         registerGroup: vi.fn(),
@@ -1665,9 +1537,9 @@ describe('control server runtime hardening', () => {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-myclaw-ingress-timestamp': signed.timestamp,
-            'x-myclaw-ingress-nonce': signed.nonce,
-            'x-myclaw-ingress-signature': 'bad-signature',
+            'x-gantry-ingress-timestamp': signed.timestamp,
+            'x-gantry-ingress-nonce': signed.nonce,
+            'x-gantry-ingress-signature': 'bad-signature',
           },
           body: rawBody,
         },
@@ -1682,8 +1554,8 @@ describe('control server runtime hardening', () => {
 
   it('blocks memory access for mismatched app access', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'memory-token',
@@ -1723,8 +1595,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects direct HTTP memory writes with non-direct-save kinds', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'memory-token',
@@ -1769,8 +1641,8 @@ describe('control server runtime hardening', () => {
 
   it('passes admin authority only when memory:admin scope is present', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'memory-admin-token',
@@ -1816,8 +1688,8 @@ describe('control server runtime hardening', () => {
 
   it('fails memory writes closed when runtime memory is disabled', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'memory-disabled-token',
@@ -1861,8 +1733,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects provider routes when the token lacks provider scopes', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'sessions-only-token',
@@ -1890,8 +1762,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects raw channel secrets in providerConnection config', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'providers-admin-token',
@@ -1932,8 +1804,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects placeholder provider connection creation', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'providers-admin-token',
@@ -1973,8 +1845,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects discovery for disabled provider connections', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'providers-admin-token',
@@ -2026,8 +1898,8 @@ describe('control server runtime hardening', () => {
 
   it('returns contract-valid channel onboarding responses', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'provider-all-token',
@@ -2298,8 +2170,8 @@ describe('control server runtime hardening', () => {
 
   it('shows agent capabilities and conversation-owned policies in agent admin API', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'agents-admin-token',
@@ -2463,8 +2335,8 @@ describe('control server runtime hardening', () => {
 
   it('manages conversation approvers without conversation-owned DM access', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'providers-admin-token',
@@ -2625,8 +2497,8 @@ describe('control server runtime hardening', () => {
     'rejects route group without $name scope',
     async ({ path, tokenScopes, init }) => {
       const port = await reservePort();
-      process.env.MYCLAW_CONTROL_PORT = String(port);
-      process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+      process.env.GANTRY_CONTROL_PORT = String(port);
+      process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
         {
           kid: 'k',
           token: 'insufficient-scope-token',
@@ -2656,8 +2528,8 @@ describe('control server runtime hardening', () => {
 
   it('lists conversation messages with messages:read scope', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'messages-token',
@@ -2713,8 +2585,8 @@ describe('control server runtime hardening', () => {
 
   it('enables and disables an agent conversation binding through repository state', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'agents-admin-token',
@@ -2821,8 +2693,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects invalid or missing agent conversation binding updates', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'agents-admin-token',
@@ -2899,8 +2771,8 @@ describe('control server runtime hardening', () => {
 
   it('routes memory list, search, patch, delete, dreaming trigger, and status with app auth', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'memory-all-token',
@@ -3014,8 +2886,8 @@ describe('control server runtime hardening', () => {
 
   it('fails patch, delete, and dreaming trigger closed when runtime memory is disabled', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'memory-disabled-all-token',
@@ -3070,8 +2942,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects unsafe session identifiers before registering app groups', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-unsafe-session',
@@ -3108,8 +2980,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects unsupported session ensure fields before registration', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-strict-session',
@@ -3152,9 +3024,9 @@ describe('control server runtime hardening', () => {
 
   it('binds webhook registration to authenticated app id', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_ALLOW_PRIVATE_WEBHOOKS = 'true';
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_ALLOW_PRIVATE_WEBHOOKS = 'true';
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-2',
@@ -3198,8 +3070,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects session ensure when webhook id is not owned by the app', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-ensure-webhook',
@@ -3242,8 +3114,8 @@ describe('control server runtime hardening', () => {
 
   it('rejects session messages when webhook id is not owned by the app', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-message-webhook',
@@ -3295,8 +3167,8 @@ describe('control server runtime hardening', () => {
 
   it('persists SDK session messages, emits control events, and queues app work', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-message',
@@ -3388,8 +3260,8 @@ describe('control server runtime hardening', () => {
 
   it('returns session event envelopes with correlation metadata from list events', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-events-list',
@@ -3450,8 +3322,8 @@ describe('control server runtime hardening', () => {
 
   it('streams session event envelopes over SSE with metadata and payload', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-events-sse',
@@ -3533,8 +3405,8 @@ describe('control server runtime hardening', () => {
 
   it('waits over the full session cursor while returning only visible events', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-wait',
@@ -3615,7 +3487,7 @@ describe('control server runtime hardening', () => {
 
   it('rejects signed wait requests with missing required signature headers before ingress lookup', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: { registerGroup: vi.fn(), queue: { enqueueMessageCheck: vi.fn() } },
     } as any);
@@ -3641,7 +3513,7 @@ describe('control server runtime hardening', () => {
 
   it('rejects ingress invokes for disabled ingresses', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     controlRepo.getExternalIngressById.mockResolvedValue({
       ingressId: 'ingress-1',
       appId: 'app-one',
@@ -3673,9 +3545,9 @@ describe('control server runtime hardening', () => {
           method: signed.method,
           headers: {
             'content-type': 'application/json',
-            'x-myclaw-ingress-timestamp': signed.timestamp,
-            'x-myclaw-ingress-nonce': signed.nonce,
-            'x-myclaw-ingress-signature': signed.signature,
+            'x-gantry-ingress-timestamp': signed.timestamp,
+            'x-gantry-ingress-nonce': signed.nonce,
+            'x-gantry-ingress-signature': signed.signature,
           },
           body: rawBody,
         },
@@ -3695,7 +3567,7 @@ describe('control server runtime hardening', () => {
 
   it('rejects stale or malformed ingress signatures', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const pathName = '/v1/ingresses/ingress-1/invoke';
     const rawBody = JSON.stringify({
       target: { kind: 'session_message', sessionId: 'session-1', message: 'x' },
@@ -3719,9 +3591,9 @@ describe('control server runtime hardening', () => {
           method: stale.method,
           headers: {
             'content-type': 'application/json',
-            'x-myclaw-ingress-timestamp': stale.timestamp,
-            'x-myclaw-ingress-nonce': stale.nonce,
-            'x-myclaw-ingress-signature': stale.signature,
+            'x-gantry-ingress-timestamp': stale.timestamp,
+            'x-gantry-ingress-nonce': stale.nonce,
+            'x-gantry-ingress-signature': stale.signature,
           },
           body: rawBody,
         },
@@ -3742,9 +3614,9 @@ describe('control server runtime hardening', () => {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-myclaw-ingress-timestamp': String(Date.now()),
-            'x-myclaw-ingress-nonce': 'nonce-bad-sig',
-            'x-myclaw-ingress-signature': 'bad-signature',
+            'x-gantry-ingress-timestamp': String(Date.now()),
+            'x-gantry-ingress-nonce': 'nonce-bad-sig',
+            'x-gantry-ingress-signature': 'bad-signature',
           },
           body: rawBody,
         },
@@ -3764,7 +3636,7 @@ describe('control server runtime hardening', () => {
 
   it('returns conflict for nonce replays and duplicate active invocations', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const pathName = '/v1/ingresses/ingress-1/invoke';
     const rawBody = JSON.stringify({
       idempotencyKey: 'idem-conflict',
@@ -3792,9 +3664,9 @@ describe('control server runtime hardening', () => {
           method: signed.method,
           headers: {
             'content-type': 'application/json',
-            'x-myclaw-ingress-timestamp': signed.timestamp,
-            'x-myclaw-ingress-nonce': signed.nonce,
-            'x-myclaw-ingress-signature': signed.signature,
+            'x-gantry-ingress-timestamp': signed.timestamp,
+            'x-gantry-ingress-nonce': signed.nonce,
+            'x-gantry-ingress-signature': signed.signature,
           },
           body: rawBody,
         },
@@ -3824,9 +3696,9 @@ describe('control server runtime hardening', () => {
           method: signed.method,
           headers: {
             'content-type': 'application/json',
-            'x-myclaw-ingress-timestamp': signed.timestamp,
-            'x-myclaw-ingress-nonce': 'nonce-duplicate-active',
-            'x-myclaw-ingress-signature': signIngressRequest({
+            'x-gantry-ingress-timestamp': signed.timestamp,
+            'x-gantry-ingress-nonce': 'nonce-duplicate-active',
+            'x-gantry-ingress-signature': signIngressRequest({
               ingressId: 'ingress-1',
               path: pathName,
               rawBody,
@@ -3851,7 +3723,7 @@ describe('control server runtime hardening', () => {
 
   it('reuses prior invocation for exact retries with same nonce and idempotency key', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const app = {
       registerGroup: vi.fn(),
       queue: { enqueueMessageCheck: vi.fn() },
@@ -3914,9 +3786,9 @@ describe('control server runtime hardening', () => {
           method: signed.method,
           headers: {
             'content-type': 'application/json',
-            'x-myclaw-ingress-timestamp': signed.timestamp,
-            'x-myclaw-ingress-nonce': signed.nonce,
-            'x-myclaw-ingress-signature': signed.signature,
+            'x-gantry-ingress-timestamp': signed.timestamp,
+            'x-gantry-ingress-nonce': signed.nonce,
+            'x-gantry-ingress-signature': signed.signature,
           },
           body: rawBody,
         },
@@ -3930,9 +3802,9 @@ describe('control server runtime hardening', () => {
           method: signed.method,
           headers: {
             'content-type': 'application/json',
-            'x-myclaw-ingress-timestamp': signed.timestamp,
-            'x-myclaw-ingress-nonce': signed.nonce,
-            'x-myclaw-ingress-signature': signed.signature,
+            'x-gantry-ingress-timestamp': signed.timestamp,
+            'x-gantry-ingress-nonce': signed.nonce,
+            'x-gantry-ingress-signature': signed.signature,
           },
           body: rawBody,
         },
@@ -3950,8 +3822,8 @@ describe('control server runtime hardening', () => {
 
   it('lists run events using the authenticated app scope', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-run-events',
@@ -4066,8 +3938,8 @@ describe('control server runtime hardening', () => {
 
   it('lists app runs only after resolving visible canonical jobs', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-runs-list',
@@ -4152,8 +4024,8 @@ describe('control server runtime hardening', () => {
 
   it('scopes webhook lookups to the authenticated app id', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-3',
@@ -4189,8 +4061,8 @@ describe('control server runtime hardening', () => {
 
   it('scopes webhook listing to the authenticated app id', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-4',
@@ -4219,8 +4091,8 @@ describe('control server runtime hardening', () => {
 
   it('threads authenticated app id into webhook dead-letter replay', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-replay',
@@ -4261,8 +4133,8 @@ describe('control server runtime hardening', () => {
 
   it('threads authenticated app id into webhook dead-letter purge', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-purge',
@@ -4302,8 +4174,8 @@ describe('control server runtime hardening', () => {
   });
 
   it('delivers signed webhooks and marks delivery complete', async () => {
-    process.env.MYCLAW_CONTROL_ALLOW_INSECURE_WEBHOOKS = 'true';
-    process.env.MYCLAW_CONTROL_ALLOW_PRIVATE_WEBHOOKS = 'true';
+    process.env.GANTRY_CONTROL_ALLOW_INSECURE_WEBHOOKS = 'true';
+    process.env.GANTRY_CONTROL_ALLOW_PRIVATE_WEBHOOKS = 'true';
     const received: Array<{ body: string; signature: string | undefined }> = [];
     const receiver = net.createServer((socket) => {
       let raw = '';
@@ -4311,7 +4183,7 @@ describe('control server runtime hardening', () => {
         raw += chunk.toString();
         if (!raw.includes('\r\n\r\n')) return;
         const body = raw.split('\r\n\r\n')[1] ?? '';
-        const signature = /x-myclaw-webhook-signature: ([^\r\n]+)/i.exec(
+        const signature = /x-gantry-webhook-signature: ([^\r\n]+)/i.exec(
           raw,
         )?.[1];
         received.push({ body, signature });
@@ -4362,8 +4234,8 @@ describe('control server runtime hardening', () => {
       expect(controlRepo.markWebhookDeliveryDead).not.toHaveBeenCalled();
     } finally {
       await new Promise<void>((resolve) => receiver.close(() => resolve()));
-      delete process.env.MYCLAW_CONTROL_ALLOW_INSECURE_WEBHOOKS;
-      delete process.env.MYCLAW_CONTROL_ALLOW_PRIVATE_WEBHOOKS;
+      delete process.env.GANTRY_CONTROL_ALLOW_INSECURE_WEBHOOKS;
+      delete process.env.GANTRY_CONTROL_ALLOW_PRIVATE_WEBHOOKS;
     }
   });
 
@@ -4397,8 +4269,8 @@ describe('control server runtime hardening', () => {
       'Webhook registration does not belong to event app',
     );
 
-    process.env.MYCLAW_CONTROL_ALLOW_INSECURE_WEBHOOKS = 'true';
-    process.env.MYCLAW_CONTROL_ALLOW_PRIVATE_WEBHOOKS = 'true';
+    process.env.GANTRY_CONTROL_ALLOW_INSECURE_WEBHOOKS = 'true';
+    process.env.GANTRY_CONTROL_ALLOW_PRIVATE_WEBHOOKS = 'true';
     const receiver = net.createServer((socket) => {
       socket.on('data', () => {
         socket.end(
@@ -4446,8 +4318,8 @@ describe('control server runtime hardening', () => {
       );
     } finally {
       await new Promise<void>((resolve) => receiver.close(() => resolve()));
-      delete process.env.MYCLAW_CONTROL_ALLOW_INSECURE_WEBHOOKS;
-      delete process.env.MYCLAW_CONTROL_ALLOW_PRIVATE_WEBHOOKS;
+      delete process.env.GANTRY_CONTROL_ALLOW_INSECURE_WEBHOOKS;
+      delete process.env.GANTRY_CONTROL_ALLOW_PRIVATE_WEBHOOKS;
     }
   });
 });

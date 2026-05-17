@@ -10,7 +10,7 @@ let server: http.Server | null = null;
 const originalEnv = { ...process.env };
 
 function makeTempDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-skill-cli-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-skill-cli-'));
   tempDirs.push(dir);
   return dir;
 }
@@ -87,7 +87,7 @@ describe('skill CLI', () => {
         );
       });
     });
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'cli-test',
         token: 'test-key',
@@ -95,7 +95,7 @@ describe('skill CLI', () => {
         scopes: ['skills:admin'],
       },
     ]);
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
 
     const { runSkillCommand } = await import('@core/cli/skills.js');
     const code = await runSkillCommand(runtimeHome, [

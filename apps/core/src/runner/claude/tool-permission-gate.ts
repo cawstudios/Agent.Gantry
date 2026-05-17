@@ -153,8 +153,8 @@ export function createCanUseToolCallback(
     ...(input.agentInput.allowedTools ?? []),
     ...input.capabilities.allowedTools,
     ...readLiveToolRules({
-      ipcDir: process.env.MYCLAW_IPC_DIR,
-      runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE,
+      ipcDir: process.env.GANTRY_IPC_DIR,
+      runHandle: process.env.GANTRY_AGENT_RUN_HANDLE,
     }),
     ...liveApprovedRules,
   ];
@@ -163,8 +163,8 @@ export function createCanUseToolCallback(
     ...(input.agentInput.allowedTools ?? []),
     ...readExternalMcpAllowedTools(),
     ...readLiveToolRules({
-      ipcDir: process.env.MYCLAW_IPC_DIR,
-      runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE,
+      ipcDir: process.env.GANTRY_IPC_DIR,
+      runHandle: process.env.GANTRY_AGENT_RUN_HANDLE,
     }),
     ...liveApprovedRules,
   ];
@@ -467,6 +467,11 @@ export function createCanUseToolCallback(
           ...(recoveryAction ? { recovery_action: recoveryAction } : {}),
         },
       );
+      const suggestions = scheduledPermissionSuggestions(
+        toolName,
+        permissionOpts.suggestions,
+        { blockedPath: permissionOpts.blockedPath, toolInput },
+      );
       const decision = await requestPermissionApproval({
         appId: input.agentInput.appId,
         agentId: input.agentInput.agentId,
@@ -490,14 +495,13 @@ export function createCanUseToolCallback(
         toolInput,
         toolUseID: permissionOpts.toolUseID,
         agentID: permissionOpts.agentID,
-        suggestions: scheduledPermissionSuggestions(
-          toolName,
-          permissionOpts.suggestions,
-          { blockedPath: permissionOpts.blockedPath, toolInput },
-        ),
+        suggestions,
+        decisionOptions: permissionUpdateAllowedToolRules(suggestions).length
+          ? ['allow_once', 'allow_persistent_rule', 'cancel']
+          : ['allow_once', 'cancel'],
         threadId: input.agentInput.threadId,
         [GROUP_FOLDER_KEY]: input.workspaceFolder,
-      } as PermissionApprovalInput);
+      } as unknown as PermissionApprovalInput);
       if (decision.approved) {
         const persistentUpdates = persistentPermissionUpdates(decision);
         for (const rule of permissionUpdateAllowedToolRules(
@@ -602,6 +606,14 @@ export function createCanUseToolCallback(
         reason: timedGrantDenylistReason ?? currentToolDecision.reason,
       },
     );
+    const suggestions = scheduledPermissionSuggestions(
+      toolName,
+      permissionOpts.suggestions,
+      {
+        blockedPath: permissionOpts.blockedPath,
+        toolInput,
+      },
+    );
     const decision = await requestPermissionApproval({
       appId: input.agentInput.appId,
       agentId: input.agentInput.agentId,
@@ -621,17 +633,10 @@ export function createCanUseToolCallback(
       toolInput,
       toolUseID: permissionOpts.toolUseID,
       agentID: permissionOpts.agentID,
-      suggestions: scheduledPermissionSuggestions(
-        toolName,
-        permissionOpts.suggestions,
-        {
-          blockedPath: permissionOpts.blockedPath,
-          toolInput,
-        },
-      ),
+      suggestions,
       threadId: input.agentInput.threadId,
       [GROUP_FOLDER_KEY]: input.workspaceFolder,
-    } as PermissionApprovalInput);
+    } as unknown as PermissionApprovalInput);
     if (decision.approved) {
       const persistentUpdates = persistentPermissionUpdates(decision);
       for (const rule of permissionUpdateAllowedToolRules(persistentUpdates)) {

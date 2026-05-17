@@ -76,7 +76,7 @@ describe('channel CLI command', () => {
     }));
 
     const { runProviderCommand } = await import('@core/cli/provider.js');
-    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
+    const code = await runProviderCommand(import.meta.url, '/tmp/gantry', [
       'list',
     ]);
 
@@ -103,14 +103,14 @@ describe('channel CLI command', () => {
     }));
 
     const { runProviderCommand } = await import('@core/cli/provider.js');
-    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
+    const code = await runProviderCommand(import.meta.url, '/tmp/gantry', [
       'connect',
       'telegram',
     ]);
 
     expect(code).toBe(0);
     expect(runProviderConnectCommand).toHaveBeenCalledWith(
-      '/tmp/myclaw',
+      '/tmp/gantry',
       'telegram',
     );
   });
@@ -127,7 +127,7 @@ describe('channel CLI command', () => {
     }));
 
     const { runProviderCommand } = await import('@core/cli/provider.js');
-    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
+    const code = await runProviderCommand(import.meta.url, '/tmp/gantry', [
       'connect',
     ]);
 
@@ -147,13 +147,13 @@ describe('channel CLI command', () => {
     }));
 
     const { runProviderCommand } = await import('@core/cli/provider.js');
-    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
+    const code = await runProviderCommand(import.meta.url, '/tmp/gantry', [
       'connect',
     ]);
 
     expect(code).toBe(1);
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining('myclaw provider connect <telegram|slack|teams>'),
+      expect.stringContaining('gantry provider connect <telegram|slack|teams>'),
     );
   });
 
@@ -169,7 +169,7 @@ describe('channel CLI command', () => {
     }));
 
     const { runProviderCommand } = await import('@core/cli/provider.js');
-    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
+    const code = await runProviderCommand(import.meta.url, '/tmp/gantry', [
       'connect',
       'unknown',
     ]);
@@ -190,7 +190,7 @@ describe('channel CLI command', () => {
     }));
 
     const { runProviderCommand } = await import('@core/cli/provider.js');
-    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
+    const code = await runProviderCommand(import.meta.url, '/tmp/gantry', [
       'bogus',
     ]);
 
@@ -234,7 +234,7 @@ describe('channel CLI command', () => {
     }));
 
     const { runProviderCommand } = await import('@core/cli/provider.js');
-    const code = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
+    const code = await runProviderCommand(import.meta.url, '/tmp/gantry', [
       'doctor',
     ]);
 
@@ -279,6 +279,8 @@ describe('channel CLI command', () => {
       })),
     );
     vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
+      initializeRuntimeStorage: vi.fn(async () => undefined),
+      closeRuntimeStorage: vi.fn(async () => undefined),
       getRuntimeStorage: () => ({
         repositories: {
           providerConnections: {
@@ -314,11 +316,13 @@ describe('channel CLI command', () => {
     }));
 
     const { runProviderCommand } = await import('@core/cli/provider.js');
-    const showCode = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
+    const runtimeStore =
+      await import('@core/adapters/storage/postgres/runtime-store.js');
+    const showCode = await runProviderCommand(import.meta.url, '/tmp/gantry', [
       'control-allowlist',
       'conversation-1',
     ]);
-    const setCode = await runProviderCommand(import.meta.url, '/tmp/myclaw', [
+    const setCode = await runProviderCommand(import.meta.url, '/tmp/gantry', [
       'control-allowlist',
       'conversation-1',
       '--allow',
@@ -327,9 +331,106 @@ describe('channel CLI command', () => {
 
     expect(showCode).toBe(0);
     expect(setCode).toBe(0);
+    expect(runtimeStore.initializeRuntimeStorage).toHaveBeenCalledTimes(2);
+    expect(runtimeStore.closeRuntimeStorage).toHaveBeenCalledTimes(2);
     expect(note).toHaveBeenCalledWith('123', 'Conversation Approvers');
     expect(replaceConversationApprovers).toHaveBeenCalledWith(
       expect.objectContaining({ externalUserIds: ['123', '456'] }),
     );
   });
+
+  it.each([
+    ['unprefixed external id', '-1003986348737'],
+    ['provider-prefixed external id', 'tg:-1003986348737'],
+  ])(
+    'resolves configured conversation keys for approver inspection with %s',
+    async (_label, externalId) => {
+      const { note } = mockClack();
+      const provider = mockProviders();
+      const iso = new Date(0).toISOString();
+      const conversation = {
+        id: 'conversation:tg:-1003986348737',
+        appId: 'default',
+        providerConnectionId: 'providerConnection-telegram',
+        externalRef: { kind: 'conversation', value: 'tg:-1003986348737' },
+        kind: 'channel',
+        title: 'Main Agent Telegram Group',
+        status: 'active',
+        createdAt: iso,
+        updatedAt: iso,
+      };
+      const getConversation = vi.fn(async (id: string) =>
+        id === conversation.id ? conversation : null,
+      );
+      vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
+        initializeRuntimeStorage: vi.fn(async () => undefined),
+        closeRuntimeStorage: vi.fn(async () => undefined),
+        getRuntimeStorage: () => ({
+          repositories: {
+            providerConnections: {
+              getProviderConnection: vi.fn(async () => ({
+                id: 'providerConnection-telegram',
+                appId: 'default',
+                providerId: 'telegram',
+                label: 'Telegram',
+                status: 'active',
+                config: {},
+                runtimeSecretRefs: [],
+                createdAt: iso,
+                updatedAt: iso,
+              })),
+              listAgentConversationBindings: vi.fn(async () => []),
+              updateProviderConnection: vi.fn(),
+            },
+            conversations: {
+              getConversation,
+              listThreads: vi.fn(async () => []),
+              listConversationApprovers: vi.fn(async () => [
+                {
+                  id: 'approver:5759865942',
+                  appId: 'default',
+                  conversationId: conversation.id,
+                  externalUserId: '5759865942',
+                  createdAt: iso,
+                  updatedAt: iso,
+                },
+              ]),
+              replaceConversationApprovers: vi.fn(),
+              listParticipantExternalUserIds: vi.fn(async () => ['5759865942']),
+            },
+          },
+        }),
+      }));
+      vi.doMock('@core/config/settings/runtime-settings.js', () => ({
+        ensureRuntimeSettings: vi.fn(() => ({
+          providerConnections: {
+            telegram_default: { provider: 'telegram' },
+          },
+          conversations: {
+            main_telegram_group: {
+              providerConnection: 'telegram_default',
+              externalId,
+            },
+          },
+        })),
+      }));
+      vi.doMock('@core/config/env/file.js', () => ({ readEnvFile: vi.fn() }));
+      vi.doMock('@core/config/settings/runtime-home.js', () => ({
+        envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
+      }));
+
+      const { runConversationCommand } = await import('@core/cli/provider.js');
+      const code = await runConversationCommand('/tmp/gantry', [
+        'approvers',
+        'main_telegram_group',
+      ]);
+
+      expect(code).toBe(0);
+      expect(getConversation).toHaveBeenCalledWith(
+        'conversation:tg:-1003986348737',
+      );
+      expect(note).toHaveBeenCalledWith('5759865942', 'Conversation Approvers');
+      expect(provider.id).toBe('telegram');
+    },
+  );
 });

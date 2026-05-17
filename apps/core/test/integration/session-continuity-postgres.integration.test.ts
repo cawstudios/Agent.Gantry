@@ -69,7 +69,7 @@ maybeDescribe('Postgres memory continuity', () => {
     await runtime.cleanup();
   });
 
-  it('returns canonical MyClaw turn context when provider session metadata exists', async () => {
+  it('returns canonical Gantry turn context when provider session metadata exists', async () => {
     const groupFolder = 'group-session-mode';
     const chatJid = 'tg:group-session-mode';
     const sessionId = 'provider-session:test:mode';

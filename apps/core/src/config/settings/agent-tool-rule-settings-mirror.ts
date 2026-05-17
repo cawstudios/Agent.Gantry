@@ -1,4 +1,4 @@
-import { MYCLAW_HOME } from '../index.js';
+import { GANTRY_HOME } from '../index.js';
 import type { RuntimeConversationRouteRepository } from '../../domain/repositories/ops-repo.js';
 import type { SettingsDesiredStateRepositories } from './desired-state-service.js';
 import { mirrorAgentToolRulesToRuntimeSettings } from './runtime-settings.js';
@@ -19,7 +19,7 @@ export function createAgentToolRuleSettingsMirror(input: {
   return (sourceAgentFolder, rules, options) =>
     input.repositories
       ? addAgentToolRulesToSyncedRuntimeSettings({
-          runtimeHome: MYCLAW_HOME,
+          runtimeHome: GANTRY_HOME,
           agentFolder: sourceAgentFolder,
           rules,
           ops: input.opsRepository,
@@ -28,7 +28,7 @@ export function createAgentToolRuleSettingsMirror(input: {
           reloadRuntimeState: input.reloadRuntimeState,
         })
       : mirrorAgentToolRulesToRuntimeSettings({
-          runtimeHome: MYCLAW_HOME,
+          runtimeHome: GANTRY_HOME,
           agentFolder: sourceAgentFolder,
           rules,
         });

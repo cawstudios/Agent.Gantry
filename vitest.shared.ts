@@ -42,7 +42,7 @@ export function makeVitestConfig(options: VitestConfigOptions) {
   return defineConfig({
     resolve: {
       alias: {
-        '@myclaw/contracts': path.resolve(
+        '@gantry/contracts': path.resolve(
           __dirname,
           'packages/contracts/src/index.ts',
         ),

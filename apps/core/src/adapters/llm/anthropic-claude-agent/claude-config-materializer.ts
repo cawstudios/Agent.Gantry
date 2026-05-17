@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { getClaudeProjectDirName } from '../../../shared/myclaw-home.js';
+import { getClaudeProjectDirName } from '../../../shared/gantry-home.js';
 import type {
   RuntimeMaterialization,
   RuntimeMaterializationCleanupPolicy,
@@ -84,7 +84,7 @@ export async function materializeClaudeRuntime(
   const ownsBaseTempDir = !input.baseTempDir;
   const baseTempDir =
     input.baseTempDir ??
-    fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-claude-config-'));
+    fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-claude-config-'));
   const cleanupPolicy = input.cleanupPolicy ?? 'delete-after-run';
   const claudeConfigDir = path.join(baseTempDir, 'claude');
   const skillsDir = path.join(claudeConfigDir, 'skills');

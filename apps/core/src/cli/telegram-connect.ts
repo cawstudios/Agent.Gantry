@@ -195,7 +195,7 @@ export async function runTelegramConnectCommand(
     [
       'Create the bot first: open Telegram, chat with @BotFather, send /newbot, then copy the returned token.',
       'For groups: add the bot to the group and send a message there before discovery.',
-      'If MyClaw should see all group messages, make the bot an admin or disable Group Privacy in BotFather with /setprivacy.',
+      'If Gantry should see all group messages, make the bot an admin or disable Group Privacy in BotFather with /setprivacy.',
       'Docs: https://core.telegram.org/bots/faq',
     ].join('\n'),
     'Telegram bot setup',
@@ -289,7 +289,7 @@ export async function runTelegramConnectCommand(
       );
     } else {
       p.log.info(
-        'No Telegram conversation approver was configured. Run `myclaw provider connect telegram` again and enter your own Telegram user ID if you want chat commands.',
+        'No Telegram conversation approver was configured. Run `gantry provider connect telegram` again and enter your own Telegram user ID if you want chat commands.',
       );
     }
   }
@@ -299,7 +299,7 @@ export async function runTelegramConnectCommand(
     p.outro('Telegram conversation is configured and ready.');
   } else {
     p.outro(
-      'Telegram token saved. Next: run `myclaw provider connect telegram` to register a conversation.',
+      'Telegram token saved. Next: run `gantry provider connect telegram` to register a conversation.',
     );
   }
 

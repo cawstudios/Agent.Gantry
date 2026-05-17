@@ -16,7 +16,7 @@ table.
 
 ## Decision
 
-MyClaw will use a single Runtime Event Exchange for runtime delivery streams.
+Gantry will use a single Runtime Event Exchange for runtime delivery streams.
 `RuntimeEvent` is the canonical observable runtime event concept for SDK event
 listing, SSE/wait, webhook projection, run events, job events, and app-channel
 session/control output.

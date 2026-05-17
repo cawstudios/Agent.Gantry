@@ -1,6 +1,6 @@
 # Codex Factory
 
-MyClaw can run a doc-driven Codex factory mode with optional ACP/ACPX orchestration.
+Gantry can run a doc-driven Codex factory mode with optional ACP/ACPX orchestration.
 
 ## Runtime Model
 

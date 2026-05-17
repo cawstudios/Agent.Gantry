@@ -1,26 +1,26 @@
-# MyClaw Debug Checklist
+# Gantry Debug Checklist
 
 ## Runtime Truth
 
-MyClaw runs as a local host process.
+Gantry runs as a local host process.
 
 ## Quick Status Check
 
 ```bash
 # 1. Is the service running?
-myclaw status
+gantry status
 
 # 2. Recent runtime errors
-grep -E 'ERROR|WARN' logs/myclaw.log | tail -20
+grep -E 'ERROR|WARN' logs/gantry.log | tail -20
 
 # 3. Are channels connected?
-grep -E 'Connected|Connection closed|channel.*ready' logs/myclaw.log | tail -5
+grep -E 'Connected|Connection closed|channel.*ready' logs/gantry.log | tail -5
 
 # 4. Are groups loaded?
-grep 'groupCount' logs/myclaw.log | tail -3
+grep 'groupCount' logs/gantry.log | tail -3
 
 # 5. Runtime diagnostics output
-myclaw status
+gantry status
 ```
 
 ## Session Transcript Inspection
@@ -33,7 +33,7 @@ myclaw status
 # Check parentUuid branching in a temporary SDK JSONL export
 python3 -c "
 import json
-lines = open('/tmp/myclaw-sdk-jsonl-export/<session>.jsonl').read().strip().split('\n')
+lines = open('/tmp/gantry-sdk-jsonl-export/<session>.jsonl').read().strip().split('\n')
 for i, line in enumerate(lines):
   try:
     d = json.loads(line)
@@ -50,58 +50,58 @@ for i, line in enumerate(lines):
 
 ```bash
 # Check for recent timeout logs
-grep -E 'timeout|timed out|idle timeout' logs/myclaw.log | tail -20
+grep -E 'timeout|timed out|idle timeout' logs/gantry.log | tail -20
 
 # Check if retries were scheduled
-grep -E 'Scheduling retry|retry|Max retries' logs/myclaw.log | tail -10
+grep -E 'Scheduling retry|retry|Max retries' logs/gantry.log | tail -10
 
 # Check processing pipeline
-grep -E 'Processing messages|Spawning host agent|Piped messages' logs/myclaw.log | tail -20
+grep -E 'Processing messages|Spawning host agent|Piped messages' logs/gantry.log | tail -20
 
 # Confirm runtime health before DB-level checks
-myclaw status
+gantry status
 ```
 
 ## Group Config Inspection
 
 ```bash
 # Review runtime settings
-cat ~/myclaw/settings.yaml
+cat ~/gantry/settings.yaml
 
 # Inspect canonical conversation bindings
-psql "$MYCLAW_DATABASE_URL" -c "SELECT display_name, conversation_id, trigger_pattern FROM myclaw.agent_conversation_bindings;"
+psql "$GANTRY_DATABASE_URL" -c "SELECT display_name, conversation_id, trigger_pattern FROM gantry.agent_conversation_bindings;"
 ```
 
 ## Channel Auth Issues
 
 ```bash
 # Check auth-related logs
-grep 'authentication required\|token\|connect' logs/myclaw.log | tail -20
+grep 'authentication required\|token\|connect' logs/gantry.log | tail -20
 
 # Check auth files
 ls -la store/auth/
 ```
 
-If auth state is missing or expired, rerun guided setup with `myclaw setup`.
+If auth state is missing or expired, rerun guided setup with `gantry setup`.
 
 ## Service Management
 
 ```bash
 # Restart
-myclaw service restart
+gantry service restart
 
 # View live logs
-tail -f logs/myclaw.log
+tail -f logs/gantry.log
 
 # Stop service
-myclaw service stop
+gantry service stop
 
 # Install or reinstall service
-myclaw service install
+gantry service install
 
 # Start an already-installed service without rewriting it
-myclaw service start
+gantry service start
 
 # Rebuild after code changes
-npm run build && myclaw service restart
+npm run build && gantry service restart
 ```

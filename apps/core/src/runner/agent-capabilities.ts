@@ -5,16 +5,16 @@ import {
 } from '../shared/agent-persona.js';
 import {
   adminMcpToolNameFromFullName,
-  isMyClawMcpWildcardRule,
+  isGantryMcpWildcardRule,
 } from '../shared/admin-mcp-tools.js';
 import {
-  DEFAULT_MYCLAW_MCP_TOOL_NAMES,
-  myclawMcpFullToolName,
-  myclawMcpToolNameFromFullName,
-  selectedMyClawMcpFullToolNames,
-  selectedMyClawMcpToolNames,
+  DEFAULT_GANTRY_MCP_TOOL_NAMES,
+  gantryMcpFullToolName,
+  gantryMcpToolNameFromFullName,
+  selectedGantryMcpFullToolNames,
+  selectedGantryMcpToolNames,
   selectedMemoryIpcActions,
-} from './myclaw-mcp-tool-surface.js';
+} from './gantry-mcp-tool-surface.js';
 import {
   isBrowserActionMcpToolRule,
   isCanonicalBrowserCapabilityRule,
@@ -125,13 +125,13 @@ export const UNSUPPORTED_CLAUDE_CODE_BUILTIN_TOOLS = [
   'ReadMcpResource',
 ] as const;
 
-const MYCLAW_MCP_ALLOWED_TOOLS = DEFAULT_MYCLAW_MCP_TOOL_NAMES.map(
-  myclawMcpFullToolName,
+const GANTRY_MCP_ALLOWED_TOOLS = DEFAULT_GANTRY_MCP_TOOL_NAMES.map(
+  gantryMcpFullToolName,
 );
 
 const DEFAULT_ALLOWED_TOOLS = [
   ...SAFE_NATIVE_SDK_TOOLS,
-  ...MYCLAW_MCP_ALLOWED_TOOLS,
+  ...GANTRY_MCP_ALLOWED_TOOLS,
 ] as const;
 
 function sdkToolName(toolRule: string): string {
@@ -143,10 +143,10 @@ function configuredToolAllowedForPersona(toolRule: string): boolean {
   if (toolRule.trim() === 'Bash') return false;
   if (hasScopeSyntax(toolRule)) return false;
   if (parseReadableScopedToolRule(toolRule)) return false;
-  if (isMyClawMcpWildcardRule(toolRule)) return false;
-  const myclawMcpToolName = myclawMcpToolNameFromFullName(toolRule);
-  if (myclawMcpToolName?.startsWith('browser')) return false;
-  if (myclawMcpToolName) return true;
+  if (isGantryMcpWildcardRule(toolRule)) return false;
+  const gantryMcpToolName = gantryMcpToolNameFromFullName(toolRule);
+  if (gantryMcpToolName?.startsWith('browser')) return false;
+  if (gantryMcpToolName) return true;
   const toolName = sdkToolName(toolRule);
   return CONFIGURABLE_NATIVE_SDK_TOOL_NAMES.has(toolName);
 }
@@ -158,7 +158,7 @@ function configuredToolAvailableSdkName(toolRule: string): string | null {
   }
   if (toolRule.trim() === 'Bash') return null;
   if (hasScopeSyntax(toolRule)) return null;
-  if (myclawMcpToolNameFromFullName(toolRule)) return null;
+  if (gantryMcpToolNameFromFullName(toolRule)) return null;
   const toolName = sdkToolName(toolRule);
   return CONFIGURABLE_NATIVE_SDK_TOOL_NAMES.has(toolName) ? toolName : null;
 }
@@ -196,56 +196,56 @@ const permissionProvider: AgentCapabilityProvider = {
   }),
 };
 
-const myclawMcpProvider: AgentCapabilityProvider = {
-  id: 'myclaw-mcp',
+const gantryMcpProvider: AgentCapabilityProvider = {
+  id: 'gantry-mcp',
   provide: (ctx) => {
     const env: Record<string, string> = {
-      ...(ctx.appId ? { MYCLAW_APP_ID: ctx.appId } : {}),
-      ...(ctx.agentId ? { MYCLAW_AGENT_ID: ctx.agentId } : {}),
-      MYCLAW_CHAT_JID: ctx.chatJid,
-      MYCLAW_GROUP_FOLDER: ctx.groupFolder,
-      MYCLAW_THREAD_ID: ctx.threadId || '',
-      MYCLAW_MEMORY_USER_ID: ctx.memoryUserId || '',
-      MYCLAW_MEMORY_DEFAULT_SCOPE: ctx.memoryDefaultScope || 'group',
-      MYCLAW_MEMORY_REVIEWER_IS_CONTROL_APPROVER:
+      ...(ctx.appId ? { GANTRY_APP_ID: ctx.appId } : {}),
+      ...(ctx.agentId ? { GANTRY_AGENT_ID: ctx.agentId } : {}),
+      GANTRY_CHAT_JID: ctx.chatJid,
+      GANTRY_GROUP_FOLDER: ctx.groupFolder,
+      GANTRY_THREAD_ID: ctx.threadId || '',
+      GANTRY_MEMORY_USER_ID: ctx.memoryUserId || '',
+      GANTRY_MEMORY_DEFAULT_SCOPE: ctx.memoryDefaultScope || 'group',
+      GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER:
         ctx.memoryReviewerIsControlApprover ? '1' : '',
-      MYCLAW_BROWSER_PROFILE_NAME: ctx.browserProfileName || '',
-      MYCLAW_ADMIN_MCP_TOOLS_JSON: JSON.stringify(
+      GANTRY_BROWSER_PROFILE_NAME: ctx.browserProfileName || '',
+      GANTRY_ADMIN_MCP_TOOLS_JSON: JSON.stringify(
         selectedAdminMcpToolNames(ctx.configuredAllowedTools ?? []),
       ),
-      MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON: JSON.stringify(
+      GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: JSON.stringify(
         ctx.configuredAllowedTools ?? [],
       ),
-      MYCLAW_SELECTED_SKILLS_JSON: JSON.stringify(ctx.selectedSkillIds ?? []),
-      MYCLAW_SELECTED_MCP_SERVERS_JSON: JSON.stringify(
+      GANTRY_SELECTED_SKILLS_JSON: JSON.stringify(ctx.selectedSkillIds ?? []),
+      GANTRY_SELECTED_MCP_SERVERS_JSON: JSON.stringify(
         ctx.selectedMcpServerIds ?? [],
       ),
-      MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify(
-        selectedMyClawMcpToolNames(ctx.configuredAllowedTools ?? []),
+      GANTRY_MCP_TOOL_NAMES_JSON: JSON.stringify(
+        selectedGantryMcpToolNames(ctx.configuredAllowedTools ?? []),
       ),
-      MYCLAW_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(
+      GANTRY_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(
         selectedMemoryIpcActions(ctx.configuredAllowedTools ?? []),
       ),
-      ...(ctx.ipcDir ? { MYCLAW_IPC_DIR: ctx.ipcDir } : {}),
-      ...(ctx.ipcAuthToken ? { MYCLAW_IPC_AUTH_TOKEN: ctx.ipcAuthToken } : {}),
+      ...(ctx.ipcDir ? { GANTRY_IPC_DIR: ctx.ipcDir } : {}),
+      ...(ctx.ipcAuthToken ? { GANTRY_IPC_AUTH_TOKEN: ctx.ipcAuthToken } : {}),
       ...(ctx.browserIpcAuthToken &&
       (ctx.configuredAllowedTools ?? []).some(isCanonicalBrowserCapabilityRule)
-        ? { MYCLAW_BROWSER_IPC_AUTH_TOKEN: ctx.browserIpcAuthToken }
+        ? { GANTRY_BROWSER_IPC_AUTH_TOKEN: ctx.browserIpcAuthToken }
         : {}),
       ...(ctx.memoryIpcAuthToken
-        ? { MYCLAW_MEMORY_IPC_AUTH_TOKEN: ctx.memoryIpcAuthToken }
+        ? { GANTRY_MEMORY_IPC_AUTH_TOKEN: ctx.memoryIpcAuthToken }
         : {}),
       ...(ctx.ipcResponseVerifyKey
-        ? { MYCLAW_IPC_RESPONSE_VERIFY_KEY: ctx.ipcResponseVerifyKey }
+        ? { GANTRY_IPC_RESPONSE_VERIFY_KEY: ctx.ipcResponseVerifyKey }
         : {}),
       ...(ctx.ipcResponseKeyId
-        ? { MYCLAW_IPC_RESPONSE_KEY_ID: ctx.ipcResponseKeyId }
+        ? { GANTRY_IPC_RESPONSE_KEY_ID: ctx.ipcResponseKeyId }
         : {}),
     };
     applyAgentEgressNoProxyEnv(env);
     return {
       mcpServers: {
-        myclaw: {
+        gantry: {
           command: 'node',
           args: [ctx.mcpServerPath],
           env,
@@ -285,7 +285,7 @@ export function isPublicExternalMcpToolRule(toolRule: string): boolean {
   const value = toolRule.trim();
   return (
     PUBLIC_EXTERNAL_MCP_TOOL_RULE_RE.test(value) &&
-    !value.startsWith('mcp__myclaw__') &&
+    !value.startsWith('mcp__gantry__') &&
     !isBrowserActionMcpToolRule(value)
   );
 }
@@ -334,7 +334,7 @@ const configuredToolProvider: AgentCapabilityProvider = {
     return {
       allowedTools: mergeUnique(
         allowedTools,
-        selectedMyClawMcpFullToolNames(ctx.configuredAllowedTools ?? []),
+        selectedGantryMcpFullToolNames(ctx.configuredAllowedTools ?? []),
       ),
       availableTools,
     };
@@ -345,7 +345,7 @@ export const BUILTIN_AGENT_CAPABILITY_PROVIDERS: readonly AgentCapabilityProvide
   [
     sdkToolsProvider,
     permissionProvider,
-    myclawMcpProvider,
+    gantryMcpProvider,
     configuredToolProvider,
     configuredMcpProvider,
   ];

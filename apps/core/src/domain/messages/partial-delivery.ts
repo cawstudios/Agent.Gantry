@@ -1,6 +1,6 @@
 import { sanitizeRetryTailProviderPayload } from './retry-tail-provider-payload.js';
 
-const PARTIAL_MESSAGE_DELIVERY_BRAND = Symbol('myclaw.partialMessageDelivery');
+const PARTIAL_MESSAGE_DELIVERY_BRAND = Symbol('gantry.partialMessageDelivery');
 
 type PartialDeliveryRetryTail = {
   canonicalText: string;

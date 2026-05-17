@@ -203,7 +203,7 @@ export function restoreDraft(
     ? settings.memory.dreaming.enabled
     : true;
   const postgresUrlEnv =
-    settings.storage.postgres.urlEnv || 'MYCLAW_DATABASE_URL';
+    settings.storage.postgres.urlEnv || 'GANTRY_DATABASE_URL';
   const postgresDatabaseUrl =
     env[postgresUrlEnv]?.trim() || process.env[postgresUrlEnv]?.trim() || '';
   const onecliDatabaseUrlEnv =
@@ -222,7 +222,7 @@ export function restoreDraft(
     postgresSchema:
       state?.data.postgresSchema ||
       settings.storage.postgres.schema ||
-      'myclaw',
+      'gantry',
     onecliPostgresSchema:
       state?.data.onecliPostgresSchema ||
       settings.credentialBroker.onecli.postgres.schema ||

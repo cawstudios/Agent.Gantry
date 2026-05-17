@@ -1,4 +1,4 @@
-import type { MemoryIpcResponse } from '@myclaw/contracts';
+import type { MemoryIpcResponse } from '@gantry/contracts';
 
 type DeadlineRequest = {
   requestId: string;

@@ -148,7 +148,7 @@ export class McpToolProxy {
       return cached.client;
     }
     const client = new Client(
-      { name: 'myclaw-mcp-proxy', version: '1.0.0' },
+      { name: 'gantry-mcp-proxy', version: '1.0.0' },
       { capabilities: {} },
     );
     const transport = await this.createTransport(capability);

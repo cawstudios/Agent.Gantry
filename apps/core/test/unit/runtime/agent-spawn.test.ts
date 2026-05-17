@@ -3,8 +3,8 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
 // Sentinel markers must match runtime agent output framing.
-const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = '---GANTRY_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---GANTRY_OUTPUT_END---';
 const mockGetBrowserStatus = vi.hoisted(() => vi.fn());
 const mockEnsureBrowserReady = vi.hoisted(() => vi.fn());
 const mockMaterializeClaudeRuntime = vi.hoisted(() => vi.fn());
@@ -21,18 +21,18 @@ const mockCloseEgressGateway = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('@core/config/index.js', () => ({
   AGENT_MAX_OUTPUT_SIZE: 10485760,
   AGENT_TIMEOUT: 1800000, // 30min
-  DATA_DIR: '/tmp/myclaw-test-data',
-  ARTIFACTS_DIR: '/tmp/myclaw-test-data/artifacts',
-  AGENTS_DIR: '/tmp/myclaw-test-groups',
+  DATA_DIR: '/tmp/gantry-test-data',
+  ARTIFACTS_DIR: '/tmp/gantry-test-data/artifacts',
+  AGENTS_DIR: '/tmp/gantry-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
-  MYCLAW_HOME: '/tmp/myclaw-config',
-  MYCLAW_HOME: '/tmp/myclaw-config',
-  RUNTIME_SETTINGS_PATH: '/tmp/myclaw-config/settings.yaml',
+  GANTRY_HOME: '/tmp/gantry-config',
+  GANTRY_HOME: '/tmp/gantry-config',
+  RUNTIME_SETTINGS_PATH: '/tmp/gantry-config/settings.yaml',
   ONECLI_URL: 'http://localhost:10254',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
   TIMEZONE: 'America/Los_Angeles',
   LOG_LEVEL: 'info',
-  MYCLAW_IPC_AUTH_SECRET: 'test-ipc-secret',
+  GANTRY_IPC_AUTH_SECRET: 'test-ipc-secret',
   getEffectiveModelConfig: vi.fn((groupModel?: string) =>
     groupModel
       ? { model: groupModel, source: 'group.agentConfig.model' }
@@ -91,9 +91,9 @@ vi.mock('@core/runtime/agent-spawn-host.js', () => ({
     brokerProfile: 'none',
   }),
   prepareHostRuntimeContext: vi.fn(() => ({
-    groupDir: '/tmp/myclaw-test-data/agents/test-group',
-    groupIpcDir: '/tmp/myclaw-test-data/ipc/test-group',
-    runnerDistDir: '/tmp/myclaw-home/dist/runner',
+    groupDir: '/tmp/gantry-test-data/agents/test-group',
+    groupIpcDir: '/tmp/gantry-test-data/ipc/test-group',
+    runnerDistDir: '/tmp/gantry-home/dist/runner',
   })),
 }));
 
@@ -151,12 +151,12 @@ vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => ({
 // Mock platform
 vi.mock('@core/platform/group-folder.js', () => ({
   resolveGroupFolderPath: vi.fn(
-    (folder: string) => `/tmp/myclaw-test-data/agents/${folder}`,
+    (folder: string) => `/tmp/gantry-test-data/agents/${folder}`,
   ),
 }));
 
 vi.mock('@core/runtime/browser-capability.js', () => ({
-  DEFAULT_BROWSER_PROFILE_NAME: 'myclaw',
+  DEFAULT_BROWSER_PROFILE_NAME: 'gantry',
   ensureBrowserReady: (...args: unknown[]) => mockEnsureBrowserReady(...args),
   getBrowserStatus: (...args: unknown[]) => mockGetBrowserStatus(...args),
   getKnownBrowserStatus: (...args: unknown[]) => mockGetBrowserStatus(...args),
@@ -378,8 +378,8 @@ describe('agent-spawn timeout behavior', () => {
     mockGetBrowserStatus.mockReset();
     mockEnsureBrowserReady.mockReset();
     mockGetBrowserStatus.mockResolvedValue({
-      profile: 'myclaw',
-      profileName: 'myclaw',
+      profile: 'gantry',
+      profileName: 'gantry',
       running: false,
       cdpReady: false,
     });
@@ -509,7 +509,7 @@ describe('agent-spawn timeout behavior', () => {
   });
 
   it('fails scheduled jobs with an explicit idle-stall diagnostic', async () => {
-    process.env.MYCLAW_SCHEDULED_JOB_IDLE_TIMEOUT_MS = '60000';
+    process.env.GANTRY_SCHEDULED_JOB_IDLE_TIMEOUT_MS = '60000';
     const onOutput = vi.fn(async () => {});
     const resultPromise = spawnAgent(
       testGroup,
@@ -561,7 +561,7 @@ describe('agent-spawn timeout behavior', () => {
         ],
       }),
     );
-    delete process.env.MYCLAW_SCHEDULED_JOB_IDLE_TIMEOUT_MS;
+    delete process.env.GANTRY_SCHEDULED_JOB_IDLE_TIMEOUT_MS;
   });
 
   it('ensures group IPC layout before spawning host runner', async () => {
@@ -572,7 +572,7 @@ describe('agent-spawn timeout behavior', () => {
     await resultPromise;
 
     expect(mockEnsureGroupIpcLayout).toHaveBeenCalledWith(
-      '/tmp/myclaw-test-data/ipc/test-group',
+      '/tmp/gantry-test-data/ipc/test-group',
     );
   });
 
@@ -594,17 +594,17 @@ describe('agent-spawn timeout behavior', () => {
       string,
       string
     >;
-    expect(env.MYCLAW_CHAT_JID).toBe('tg:trusted-chat');
+    expect(env.GANTRY_CHAT_JID).toBe('tg:trusted-chat');
     const allowedActions = JSON.parse(
-      env.MYCLAW_MEMORY_IPC_ACTIONS_JSON,
+      env.GANTRY_MEMORY_IPC_ACTIONS_JSON,
     ) as string[];
     const runnerContext = {
-      chatJid: env.MYCLAW_CHAT_JID,
-      threadId: env.MYCLAW_THREAD_ID,
-      userId: env.MYCLAW_MEMORY_USER_ID,
-      defaultScope: env.MYCLAW_MEMORY_DEFAULT_SCOPE,
+      chatJid: env.GANTRY_CHAT_JID,
+      threadId: env.GANTRY_THREAD_ID,
+      userId: env.GANTRY_MEMORY_USER_ID,
+      defaultScope: env.GANTRY_MEMORY_DEFAULT_SCOPE,
       allowedActions,
-      responseKeyId: env.MYCLAW_IPC_RESPONSE_KEY_ID,
+      responseKeyId: env.GANTRY_IPC_RESPONSE_KEY_ID,
     };
     const requestPayload = {
       requestId: 'mem-spawn-chat-scope',
@@ -617,7 +617,7 @@ describe('agent-spawn timeout behavior', () => {
     expect(
       parseMemoryIpcRequest(
         createSignedIpcRequestEnvelope(
-          env.MYCLAW_MEMORY_IPC_AUTH_TOKEN,
+          env.GANTRY_MEMORY_IPC_AUTH_TOKEN,
           requestPayload,
         ),
         testGroup.folder,
@@ -640,7 +640,7 @@ describe('agent-spawn timeout behavior', () => {
 
     expect(() =>
       parseMemoryIpcRequest(
-        createSignedIpcRequestEnvelope(env.MYCLAW_MEMORY_IPC_AUTH_TOKEN, {
+        createSignedIpcRequestEnvelope(env.GANTRY_MEMORY_IPC_AUTH_TOKEN, {
           ...requestPayload,
           requestId: 'mem-spawn-missing-chat-scope',
           context: {
@@ -876,7 +876,7 @@ describe('agent-spawn timeout behavior', () => {
       string,
       string
     >;
-    expect(env.MYCLAW_IPC_MEMORY_CONTEXT_FILE).toBeUndefined();
+    expect(env.GANTRY_IPC_MEMORY_CONTEXT_FILE).toBeUndefined();
     const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
     expect(runnerInput.memoryContextBlock).toBe('Runtime Continuity Envelope');
   });
@@ -973,7 +973,7 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.HTTPS_PROXY).toBeUndefined();
     expect(env.NODE_USE_ENV_PROXY).toBeUndefined();
     expect(env.NODE_EXTRA_CA_CERTS).toBeUndefined();
-    expect(env.MYCLAW_MODEL_CREDENTIAL_ENV_JSON).toBeUndefined();
+    expect(env.GANTRY_MODEL_CREDENTIAL_ENV_JSON).toBeUndefined();
     const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
     expect(runnerInput.modelCredentialEnv).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
@@ -1097,15 +1097,15 @@ describe('agent-spawn timeout behavior', () => {
         serverIds: ['mcp:github'],
       }),
     ]);
-    expect(env.MYCLAW_MCP_SERVERS_JSON).toBeUndefined();
-    expect(env.MYCLAW_MCP_CONFIG_FILE).toMatch(/mcp-.*\.json$/);
-    expect(JSON.parse(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON)).toEqual([
+    expect(env.GANTRY_MCP_SERVERS_JSON).toBeUndefined();
+    expect(env.GANTRY_MCP_CONFIG_FILE).toMatch(/mcp-.*\.json$/);
+    expect(JSON.parse(env.GANTRY_MCP_ALLOWED_TOOLS_JSON)).toEqual([
       'mcp__github__search_repositories',
     ]);
-    expect(JSON.parse(env.MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON)).toEqual([
+    expect(JSON.parse(env.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON)).toEqual([
       'mcp__github__search_repositories',
     ]);
-    expect(rmSyncSpy).toHaveBeenCalledWith(env.MYCLAW_MCP_CONFIG_FILE, {
+    expect(rmSyncSpy).toHaveBeenCalledWith(env.GANTRY_MCP_CONFIG_FILE, {
       force: true,
     });
     const mcpConfigWrite = vi
@@ -1172,8 +1172,8 @@ describe('agent-spawn timeout behavior', () => {
         .mocked(getHostRuntimeCredentialEnv)
         .mock.calls.some((call) => call[2]?.purpose === 'tool_capability'),
     ).toBe(false);
-    expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
-    expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+    expect(env.GANTRY_MCP_CONFIG_FILE).toBeUndefined();
+    expect(env.GANTRY_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
   });
 
   it('does not write MCP handoff files when runner files are missing', async () => {
@@ -1228,9 +1228,9 @@ describe('agent-spawn timeout behavior', () => {
       string
     >;
     expect(env.CLAUDE_CONFIG_DIR).toContain(
-      '/tmp/myclaw-test-data/agents/test-group/.llm-runtime/claude',
+      '/tmp/gantry-test-data/agents/test-group/.llm-runtime/claude',
     );
-    expect(env.CLAUDE_CONFIG_DIR).not.toBe('/tmp/myclaw-config/.claude');
+    expect(env.CLAUDE_CONFIG_DIR).not.toBe('/tmp/gantry-config/.claude');
   });
 
   it('hands protected filesystem paths to the runner for SDK sandboxing', async () => {
@@ -1245,20 +1245,20 @@ describe('agent-spawn timeout behavior', () => {
       string
     >;
     const protectedPaths = JSON.parse(
-      env.MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON,
+      env.GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON,
     ) as string[];
     expect(protectedPaths).toEqual(
       expect.arrayContaining([
-        '/tmp/myclaw-config/settings.yaml',
+        '/tmp/gantry-config/settings.yaml',
         env.CLAUDE_CONFIG_DIR,
-        '/tmp/myclaw-test-data/agents/test-group/.mcp.json',
-        '/tmp/myclaw-test-data/agents/test-group/.claude/settings.json',
-        '/tmp/myclaw-test-data/agents/test-group/.claude/skills',
-        '/tmp/myclaw-test-data/agents/test-group/skills',
-        '/tmp/myclaw-home/dist/runner/claude/.claude/skills',
-        '/tmp/myclaw-home/dist/runner/claude/.codex/skills',
-        '/tmp/myclaw-home/dist/runner/claude/.agents/skills',
-        '/tmp/myclaw-test-data/artifacts/skills',
+        '/tmp/gantry-test-data/agents/test-group/.mcp.json',
+        '/tmp/gantry-test-data/agents/test-group/.claude/settings.json',
+        '/tmp/gantry-test-data/agents/test-group/.claude/skills',
+        '/tmp/gantry-test-data/agents/test-group/skills',
+        '/tmp/gantry-home/dist/runner/claude/.claude/skills',
+        '/tmp/gantry-home/dist/runner/claude/.codex/skills',
+        '/tmp/gantry-home/dist/runner/claude/.agents/skills',
+        '/tmp/gantry-test-data/artifacts/skills',
       ]),
     );
   });
@@ -1303,9 +1303,9 @@ describe('agent-spawn timeout behavior', () => {
     expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
     expect(mockGetBrowserStatus).not.toHaveBeenCalled();
     expect(env.RAW_BROWSER_BACKEND_ENDPOINT).toBeUndefined();
-    expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
-    expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
-    expect(env.MYCLAW_BROWSER_IPC_AUTH_TOKEN).toBeUndefined();
+    expect(env.GANTRY_MCP_CONFIG_FILE).toBeUndefined();
+    expect(env.GANTRY_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+    expect(env.GANTRY_BROWSER_IPC_AUTH_TOKEN).toBeUndefined();
   });
 
   it('does not launch or attach a raw browser backend when Browser is selected', async () => {
@@ -1326,9 +1326,9 @@ describe('agent-spawn timeout behavior', () => {
     expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
     expect(mockGetBrowserStatus).not.toHaveBeenCalled();
     expect(env.RAW_BROWSER_BACKEND_ENDPOINT).toBeUndefined();
-    expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
-    expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
-    expect(env.MYCLAW_BROWSER_IPC_AUTH_TOKEN).toEqual(expect.any(String));
+    expect(env.GANTRY_MCP_CONFIG_FILE).toBeUndefined();
+    expect(env.GANTRY_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+    expect(env.GANTRY_BROWSER_IPC_AUTH_TOKEN).toEqual(expect.any(String));
   });
 
   it('fails closed on stale raw browser action MCP rules during spawn', async () => {
@@ -1352,13 +1352,13 @@ describe('agent-spawn timeout behavior', () => {
   it('fails closed on stale projected browser MCP rules during spawn', async () => {
     const result = await spawnAgent(
       testGroup,
-      { ...testInput, allowedTools: ['Read', 'mcp__myclaw__browser_act'] },
+      { ...testInput, allowedTools: ['Read', 'mcp__gantry__browser_act'] },
       () => {},
     );
     expect(result).toMatchObject({
       status: 'error',
       error: expect.stringContaining(
-        'MyClaw browser tools are runtime projections',
+        'Gantry browser tools are runtime projections',
       ),
     });
     expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
@@ -1432,9 +1432,9 @@ describe('agent-spawn timeout behavior', () => {
     >;
     expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
     expect(env.RAW_BROWSER_BACKEND_ENDPOINT).toBeUndefined();
-    expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
-    expect(env.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
-    expect(env.MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON).toBeUndefined();
+    expect(env.GANTRY_MCP_CONFIG_FILE).toBeUndefined();
+    expect(env.GANTRY_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+    expect(env.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON).toBeUndefined();
     expect(env.NO_PROXY.split(',')).toEqual(
       expect.arrayContaining([
         'corp.internal',
@@ -1489,7 +1489,7 @@ describe('agent-spawn timeout behavior', () => {
     expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
     expect(mockGetBrowserStatus).not.toHaveBeenCalled();
     expect(env.RAW_BROWSER_BACKEND_ENDPOINT).toBeUndefined();
-    expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
+    expect(env.GANTRY_MCP_CONFIG_FILE).toBeUndefined();
   });
 
   it('does not launch or expose raw browser backend when Browser is selected', async () => {
@@ -1517,7 +1517,7 @@ describe('agent-spawn timeout behavior', () => {
     >;
     const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
     expect(mockEnsureBrowserReady).not.toHaveBeenCalled();
-    expect(env.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
+    expect(env.GANTRY_MCP_CONFIG_FILE).toBeUndefined();
     expect(runnerInput.allowedTools).toEqual(['Browser']);
   });
 

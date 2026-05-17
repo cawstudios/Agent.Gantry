@@ -73,7 +73,7 @@ export async function verifyModelAccess(
       ok: false,
       message: check.message,
       nextAction:
-        'Open Model Access, add the required Claude/OpenRouter credentials once, then rerun `myclaw setup`.',
+        'Open Model Access, add the required Claude/OpenRouter credentials once, then rerun `gantry setup`.',
     };
   }
   return {

@@ -1,4 +1,4 @@
-# MyClaw Runtime Refactor Plan
+# Gantry Runtime Refactor Plan
 
 > **Audience:** the executing agent picking this up cold.
 > **Author context:** drafted by main_agent after a long driving session that surfaced a coherent set of architectural failures (issues #95, #97, #98, #99 with sub-issues A–E, plus the SecTrust sandbox regression and the missing `scheduler_list_notification_targets` IPC handler). Read those issues first; this plan is the response to them.
@@ -17,7 +17,7 @@
 
 ## 1. Mission
 
-Replace the current MyClaw runtime with a smaller, principled runtime that an autonomous agent can drive without supervision.
+Replace the current Gantry runtime with a smaller, principled runtime that an autonomous agent can drive without supervision.
 
 The current runtime is **optimistic in the wrong direction**: it assumes things succeeded, assumes a human is watching, and assumes wedged components will recover. The new runtime must be **pessimistic by default**: verify, preempt, surface.
 
@@ -74,7 +74,7 @@ Cross-cutting:
 A grant is a tuple: `{ scope, rule, granted_by, granted_at, reason }`.
 
 - `scope`: `org | agent:<id> | run:<id>` — merged in that order, narrowest wins on conflict, additive otherwise. Scheduled jobs resolve the target agent scope at run time instead of carrying separate job grants.
-- `rule`: a semantic capability entry such as `capability:google.sheets.write`, canonical `Browser`, an exact MyClaw admin tool, or a scoped Bash fallback rule such as `Bash(npm test *)`. Broad exact SDK/native request_permission grants and exact third-party MCP tool names are not durable authority. Browser remains the canonical whole browser capability.
+- `rule`: a semantic capability entry such as `capability:google.sheets.write`, canonical `Browser`, an exact Gantry admin tool, or a scoped Bash fallback rule such as `Bash(npm test *)`. Broad exact SDK/native request_permission grants and exact third-party MCP tool names are not durable authority. Browser remains the canonical whole browser capability.
 - Persisted in the agent capability stores and mirrored to readable `settings.yaml` capability entries.
 - `scheduler_get_job` returns the **effective** target-agent rule set for the job, not a job-local grant slice.
 

@@ -2,7 +2,7 @@ import {
   installGlobalErrorHandlers,
   logger,
 } from './infrastructure/logging/logger.js';
-import { startMyClawRuntime } from './app/index.js';
+import { startGantryRuntime } from './app/index.js';
 
 export * from './app/index.js';
 
@@ -13,7 +13,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   installGlobalErrorHandlers(logger);
-  startMyClawRuntime().catch((err) => {
+  startGantryRuntime().catch((err) => {
     logger.error({ err }, 'Failed to start Gantry');
     process.exit(1);
   });

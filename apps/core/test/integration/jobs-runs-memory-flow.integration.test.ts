@@ -147,7 +147,7 @@ maybeDescribe('jobs, runs, memory, and scheduler flow', () => {
       isScheduledJob: true,
     });
     expect(String(harness.runner.calls[0]?.input.memoryContextBlock)).toContain(
-      '<myclaw_memory_context trust="untrusted_data_only">',
+      '<gantry_memory_context trust="untrusted_data_only">',
     );
     expect(String(harness.runner.calls[0]?.input.memoryContextBlock)).toContain(
       'Previous run says keep user data private.',

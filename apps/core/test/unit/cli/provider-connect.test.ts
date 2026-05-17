@@ -20,7 +20,7 @@ afterEach(() => {
 
 function makeRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'myclaw-provider-connect-test-'),
+    path.join(os.tmpdir(), 'gantry-provider-connect-test-'),
   );
   runtimeHomes.push(runtimeHome);
   return runtimeHome;

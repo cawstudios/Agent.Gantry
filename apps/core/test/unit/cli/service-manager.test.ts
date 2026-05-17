@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { settingsFilePath } from '@core/config/settings/runtime-home.js';
 
 function createRuntimeHome(): string {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-service-test-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-service-test-'));
   fs.mkdirSync(path.join(home, 'logs'), { recursive: true });
   fs.mkdirSync(path.join(home, 'store'), { recursive: true });
   fs.mkdirSync(path.join(home, 'agents'), { recursive: true });
@@ -27,7 +27,7 @@ async function loadServiceManagerWithMocks(
   } = {},
 ) {
   vi.resetModules();
-  vi.stubEnv('MYCLAW_HOME', options.runtimeHome ?? createRuntimeHome());
+  vi.stubEnv('GANTRY_HOME', options.runtimeHome ?? createRuntimeHome());
   const actualHomeDir = os.homedir();
   vi.spyOn(os, 'homedir').mockReturnValue(options.homeDir ?? actualHomeDir);
   const platform = options.platform ?? 'unknown';
@@ -68,7 +68,7 @@ afterEach(() => {
 describe('service manager background start', () => {
   it('installs systemd user service on linux', async () => {
     const runtimeHome = createRuntimeHome();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-home-'));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-home-'));
     const tryExecMock = vi
       .fn()
       .mockReturnValue({ ok: true, stdout: '', stderr: '' });
@@ -90,7 +90,7 @@ describe('service manager background start', () => {
     expect(tryExecMock).toHaveBeenCalledWith('systemctl', [
       '--user',
       'enable',
-      'myclaw',
+      'gantry',
     ]);
 
     const installedAt = outcome.message.match(/at (.+)\.$/)?.[1];
@@ -99,14 +99,14 @@ describe('service manager background start', () => {
     const unit = fs.readFileSync(installedAt!, 'utf-8');
     expect(unit).not.toContain('ExecStartPre=');
     expect(unit).not.toContain('--local-services-start');
-    expect(unit).toContain('Environment="MYCLAW_HOME=');
+    expect(unit).toContain('Environment="GANTRY_HOME=');
     expect(unit).toContain('WorkingDirectory="');
     expect(unit).toContain('StandardOutput="append:');
   });
 
   it('rejects control characters in systemd unit values', async () => {
     const runtimeHome = `${createRuntimeHome()}\nInjected=bad`;
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-home-'));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-home-'));
     const tryExecMock = vi
       .fn()
       .mockReturnValue({ ok: true, stdout: '', stderr: '' });
@@ -129,7 +129,7 @@ describe('service manager background start', () => {
 
   it('starts systemd user service on linux', async () => {
     const runtimeHome = createRuntimeHome();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-home-'));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-home-'));
     const tryExecMock = vi
       .fn()
       .mockReturnValue({ ok: true, stdout: '', stderr: '' });
@@ -147,7 +147,7 @@ describe('service manager background start', () => {
     expect(tryExecMock).toHaveBeenCalledWith('systemctl', [
       '--user',
       'start',
-      'myclaw',
+      'gantry',
     ]);
   });
 
@@ -164,16 +164,16 @@ describe('service manager background start', () => {
     expect(outcome.ok).toBe(true);
     expect(outcome.kind).toBe('nohup');
     const script = fs.readFileSync(
-      path.join(runtimeHome, 'start-myclaw.sh'),
+      path.join(runtimeHome, 'start-gantry.sh'),
       'utf-8',
     );
     expect(script).not.toContain('--local-services-start');
     expect(script).toContain('nohup');
   });
 
-  it('installs launchd service with MYCLAW_HOME in the plist', async () => {
+  it('installs launchd service with GANTRY_HOME in the plist', async () => {
     const runtimeHome = createRuntimeHome();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-home-'));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-home-'));
     const tryExecMock = vi
       .fn()
       .mockReturnValue({ ok: true, stdout: '', stderr: '' });
@@ -190,10 +190,10 @@ describe('service manager background start', () => {
       homeDir,
       'Library',
       'LaunchAgents',
-      'com.myclaw.plist',
+      'com.gantry.plist',
     );
     const plist = fs.readFileSync(plistPath, 'utf-8');
-    expect(plist).toContain('<key>MYCLAW_HOME</key>');
+    expect(plist).toContain('<key>GANTRY_HOME</key>');
     expect(plist).toContain(`<string>${runtimeHome}</string>`);
     expect(plist).not.toContain('--local-services-start');
     expect(plist).not.toContain('&quot;');
@@ -211,7 +211,7 @@ describe('service manager background start', () => {
 
   it('bootstraps and kickstarts launchd service on start', async () => {
     const runtimeHome = createRuntimeHome();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-home-'));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-home-'));
     const tryExecMock = vi.fn((command: string, args: string[]) => {
       if (command === 'launchctl' && args[0] === 'print') {
         return { ok: false, stdout: '', stderr: 'not loaded' };
@@ -232,18 +232,18 @@ describe('service manager background start', () => {
     expect(tryExecMock).toHaveBeenCalledWith('launchctl', [
       'bootstrap',
       expect.stringMatching(/^gui\//),
-      path.join(homeDir, 'Library', 'LaunchAgents', 'com.myclaw.plist'),
+      path.join(homeDir, 'Library', 'LaunchAgents', 'com.gantry.plist'),
     ]);
     expect(tryExecMock).toHaveBeenCalledWith('launchctl', [
       'kickstart',
       '-k',
-      expect.stringMatching(/^gui\/\d+\/com\.myclaw$/),
+      expect.stringMatching(/^gui\/\d+\/com\.gantry$/),
     ]);
   });
 
   it('kickstarts loaded launchd service without bootstrapping again', async () => {
     const runtimeHome = createRuntimeHome();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-home-'));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-home-'));
     const tryExecMock = vi.fn((command: string, args: string[]) => {
       if (command === 'launchctl' && args[0] === 'print') {
         return { ok: true, stdout: '\tstate = running\n', stderr: '' };
@@ -268,7 +268,7 @@ describe('service manager background start', () => {
     expect(tryExecMock).toHaveBeenCalledWith('launchctl', [
       'kickstart',
       '-k',
-      expect.stringMatching(/^gui\/\d+\/com\.myclaw$/),
+      expect.stringMatching(/^gui\/\d+\/com\.gantry$/),
     ]);
   });
 
@@ -324,7 +324,7 @@ describe('service manager background start', () => {
 
     const originalWriteFileSync = fs.writeFileSync.bind(fs);
     vi.spyOn(fs, 'writeFileSync').mockImplementation((file, data, options) => {
-      if (path.basename(String(file)) === 'myclaw.pid') {
+      if (path.basename(String(file)) === 'gantry.pid') {
         throw new Error('disk full');
       }
       return originalWriteFileSync(file as any, data as any, options as any);
@@ -361,14 +361,14 @@ describe('service manager background start', () => {
     expect(unrefSpy).toHaveBeenCalledTimes(1);
 
     const pidCallIndex = writeSpy.mock.calls.findIndex(
-      (call) => path.basename(String(call[0])) === 'myclaw.pid',
+      (call) => path.basename(String(call[0])) === 'gantry.pid',
     );
     expect(pidCallIndex).toBeGreaterThanOrEqual(0);
     const pidWriteOrder = writeSpy.mock.invocationCallOrder[pidCallIndex];
     const unrefOrder = unrefSpy.mock.invocationCallOrder[0];
     expect(pidWriteOrder).toBeLessThan(unrefOrder);
 
-    const pidPath = path.join(runtimeHome, 'myclaw.pid');
+    const pidPath = path.join(runtimeHome, 'gantry.pid');
     expect(fs.existsSync(pidPath)).toBe(true);
     expect(fs.readFileSync(pidPath, 'utf-8').trim()).toBe('5555');
   });
@@ -376,7 +376,7 @@ describe('service manager background start', () => {
   it('refuses to stop pid when ownership cannot be verified', async () => {
     const runtimeHome = createRuntimeHome();
     writeFallbackMetadata(runtimeHome);
-    fs.writeFileSync(path.join(runtimeHome, 'myclaw.pid'), '9999\n', 'utf-8');
+    fs.writeFileSync(path.join(runtimeHome, 'gantry.pid'), '9999\n', 'utf-8');
 
     const tryExecMock = vi.fn((command: string) => {
       if (command === 'ps') {
@@ -398,7 +398,7 @@ describe('service manager background start', () => {
     const outcome = stopService(runtimeHome);
 
     expect(outcome.ok).toBe(false);
-    expect(outcome.message).toContain('not a MyClaw process');
+    expect(outcome.message).toContain('not a Gantry process');
     expect(killSpy).toHaveBeenCalledWith(9999, 0);
     expect(killSpy).not.toHaveBeenCalledWith(9999, 'SIGTERM');
   });

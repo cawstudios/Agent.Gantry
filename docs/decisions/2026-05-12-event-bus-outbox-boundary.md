@@ -2,7 +2,7 @@
 
 ## Context
 
-MyClaw may later publish runtime events through SNS/SQS, Kafka, or another
+Gantry may later publish runtime events through SNS/SQS, Kafka, or another
 broker. The runtime already has a clean `runtime_events` stream, while MCP,
 permission, memory, webhook delivery, and provider-session histories own their
 own audit records.

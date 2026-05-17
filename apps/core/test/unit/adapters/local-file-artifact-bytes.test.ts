@@ -16,7 +16,7 @@ afterEach(() => {
 
 describe('LocalFileArtifactBytes', () => {
   it('stores bytes under the configured files root and verifies hash metadata', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-files-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-files-'));
     roots.push(root);
     const bytes = new LocalFileArtifactBytes(root);
 
@@ -46,7 +46,7 @@ describe('LocalFileArtifactBytes', () => {
   });
 
   it('rejects storage refs that escape the files root', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-files-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-files-'));
     roots.push(root);
     const bytes = new LocalFileArtifactBytes(root);
 
@@ -56,7 +56,7 @@ describe('LocalFileArtifactBytes', () => {
   });
 
   it('detects tampered bytes and removes stored content', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-files-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-files-'));
     roots.push(root);
     const bytes = new LocalFileArtifactBytes(root);
     const stored = await bytes.putBytes({
@@ -84,7 +84,7 @@ describe('LocalFileArtifactBytes', () => {
 
   it('creates a writable storage root during health checks', async () => {
     const root = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-files-')),
+      fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-files-')),
       'nested',
       'files',
     );

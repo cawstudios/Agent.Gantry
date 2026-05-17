@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# ops/bootstrap.sh — Bootstrap script for MyClaw
+# ops/bootstrap.sh — Bootstrap script for Gantry
 # Handles Node.js/npm setup, then hands off to the Node.js setup modules.
 # This is the only bash script in the setup flow.
 
@@ -143,7 +143,7 @@ curl -sS --max-time 3 -X POST https://us.i.posthog.com/capture/ \
   >/dev/null 2>&1 &
 
 cat <<EOF
-=== MYCLAW SETUP: BOOTSTRAP ===
+=== GANTRY SETUP: BOOTSTRAP ===
 PLATFORM: $PLATFORM
 IS_WSL: $IS_WSL
 IS_ROOT: $IS_ROOT

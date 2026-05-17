@@ -23,7 +23,7 @@ export async function controlApiRequest(
   if (!apiKey) {
     throw new Error(
       input.missingKeyMessage ||
-        'MYCLAW_CONTROL_API_KEYS_JSON with at least one complete key record is required.',
+        'GANTRY_CONTROL_API_KEYS_JSON with at least one complete key record is required.',
     );
   }
   const body = requestBody(input.body);
@@ -114,7 +114,7 @@ function readEnvFile(filePath: string): Record<string, string> {
 }
 
 function controlApiKey(env: Record<string, string>): string {
-  const rawJson = env.MYCLAW_CONTROL_API_KEYS_JSON?.trim();
+  const rawJson = env.GANTRY_CONTROL_API_KEYS_JSON?.trim();
   if (!rawJson) return '';
   try {
     const parsed = JSON.parse(rawJson);
@@ -156,10 +156,10 @@ function isCompleteControlApiKeyEntry(input: unknown): input is {
 }
 
 function controlBaseUrl(env: Record<string, string>): string {
-  if (env.MYCLAW_CONTROL_BASE_URL?.trim()) {
-    return env.MYCLAW_CONTROL_BASE_URL.trim();
+  if (env.GANTRY_CONTROL_BASE_URL?.trim()) {
+    return env.GANTRY_CONTROL_BASE_URL.trim();
   }
-  const port = Number(env.MYCLAW_CONTROL_PORT || 0);
+  const port = Number(env.GANTRY_CONTROL_PORT || 0);
   return port > 0 ? `http://127.0.0.1:${port}` : 'http://127.0.0.1';
 }
 
@@ -167,10 +167,10 @@ function controlSocketPath(
   runtimeHome: string,
   env: Record<string, string>,
 ): string | undefined {
-  if (env.MYCLAW_CONTROL_BASE_URL?.trim()) return undefined;
-  if (Number(env.MYCLAW_CONTROL_PORT || 0) > 0) return undefined;
+  if (env.GANTRY_CONTROL_BASE_URL?.trim()) return undefined;
+  if (Number(env.GANTRY_CONTROL_PORT || 0) > 0) return undefined;
   return (
-    env.MYCLAW_CONTROL_SOCKET_PATH?.trim() ||
+    env.GANTRY_CONTROL_SOCKET_PATH?.trim() ||
     path.join(runtimeHome, 'run', 'control.sock')
   );
 }
@@ -180,15 +180,15 @@ function parseJson(raw: string): unknown {
   try {
     return JSON.parse(raw);
   } catch (err) {
-    throw new Error('MyClaw returned a non-JSON response', { cause: err });
+    throw new Error('Gantry returned a non-JSON response', { cause: err });
   }
 }
 
 function errorMessage(input: unknown): string {
   if (isRecord(input) && isRecord(input.error)) {
-    return String(input.error.message || 'MyClaw request failed');
+    return String(input.error.message || 'Gantry request failed');
   }
-  return 'MyClaw request failed';
+  return 'Gantry request failed';
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

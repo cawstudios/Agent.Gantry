@@ -165,7 +165,7 @@ describe('logger', () => {
 
   it('redacts credential-bearing URLs and assignment strings', () => {
     const input =
-      "postgresql://postgres:secret@localhost:5432/myclaw?sslmode=require POSTGRES_PASSWORD=secret ALTER ROLE myclaw_app PASSWORD 'role-secret' https://user:pass@example.com/path?token=secret";
+      "postgresql://postgres:secret@localhost:5432/gantry?sslmode=require POSTGRES_PASSWORD=secret ALTER ROLE gantry_app PASSWORD 'role-secret' https://user:pass@example.com/path?token=secret";
 
     const redacted = redactString(input);
 

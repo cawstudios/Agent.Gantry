@@ -126,8 +126,8 @@ export function runDoctor(
       id: 'node-version',
       title: 'Node.js Version',
       status: 'fail',
-      message: `Node ${nodeVersion} detected. MyClaw requires Node 25 or newer.`,
-      nextAction: 'Install Node.js 25+ and run `myclaw doctor` again.',
+      message: `Node ${nodeVersion} detected. Gantry requires Node 25 or newer.`,
+      nextAction: 'Install Node.js 25+ and run `gantry doctor` again.',
     });
   }
 
@@ -145,7 +145,7 @@ export function runDoctor(
       title: 'Runtime Files',
       status: 'fail',
       message: err instanceof Error ? err.message : String(err),
-      nextAction: 'Reinstall MyClaw from npm, then run `myclaw doctor` again.',
+      nextAction: 'Reinstall Gantry from npm, then run `gantry doctor` again.',
     });
   }
 
@@ -178,7 +178,7 @@ export function runDoctor(
       title: 'IPC Layout',
       status: 'pass',
       message:
-        'IPC base directory is writable. Use `myclaw status` for Postgres-backed group counts.',
+        'IPC base directory is writable. Use `gantry status` for Postgres-backed group counts.',
     });
   } catch (err) {
     add(checks, {
@@ -217,7 +217,7 @@ export function runDoctor(
         status: 'fail',
         message:
           'Runtime settings are valid, but no providers are enabled in settings.yaml.',
-        nextAction: `Run ${providers.map((provider) => `\`myclaw provider connect ${provider.id}\``).join(' or ')} to enable a provider.`,
+        nextAction: `Run ${providers.map((provider) => `\`gantry provider connect ${provider.id}\``).join(' or ')} to enable a provider.`,
       });
     }
     const postgresUrlEnv = settings.storage.postgres.urlEnv;
@@ -258,7 +258,7 @@ export function runDoctor(
         message:
           'Use the provided docker-compose.yml, a locally installed Postgres, or hosted Postgres.',
         nextAction:
-          'Start or provision Postgres yourself, then run `myclaw setup` and paste the database URLs.',
+          'Start or provision Postgres yourself, then run `gantry setup` and paste the database URLs.',
       });
     }
     const onecliDatabaseUrlEnv =
@@ -282,7 +282,7 @@ export function runDoctor(
       onecliPersistenceStatus = 'fail';
       onecliPersistenceMessage = `${onecliDatabaseUrlEnv} is missing.`;
       onecliPersistenceNextAction =
-        'Run `myclaw local setup`, or set it to the shared Postgres URL with schema=onecli.';
+        'Run `gantry local setup`, or set it to the shared Postgres URL with schema=onecli.';
     } else {
       const validation = validateOnecliDatabaseUrl({
         postgresUrl: onecliDatabaseUrl,
@@ -324,7 +324,7 @@ export function runDoctor(
   const allEnvPolicyViolations = envViolations.concat(processViolations);
   const runtimeEnvBoundaryNextActions = [
     envViolations.length
-      ? 'Manually move wrong-lane MyClaw .env values to settings.yaml or the selected credential broker.'
+      ? 'Manually move wrong-lane Gantry .env values to settings.yaml or the selected credential broker.'
       : '',
     processViolations.length
       ? 'Unset wrong-lane keys from your shell or service environment.'
@@ -407,7 +407,7 @@ export function runDoctor(
             : provider.id === 'slack' && partialConfigured
               ? 'Slack token setup is incomplete (both bot and app tokens are required).'
               : `${provider.label} credentials are missing in ${envPath}.`,
-        nextAction: `Run \`myclaw provider connect ${provider.id}\` to configure ${provider.label}.`,
+        nextAction: `Run \`gantry provider connect ${provider.id}\` to configure ${provider.label}.`,
       });
     }
   }
@@ -436,7 +436,7 @@ export function runDoctor(
       modelAccessMessage =
         'External credential mode requires credential_broker.external.base_url.';
       modelAccessNextAction =
-        'Set credential_broker.external.base_url to the external credential broker endpoint, then rerun `myclaw doctor`.';
+        'Set credential_broker.external.base_url to the external credential broker endpoint, then rerun `gantry doctor`.';
     } else if (!externalBrokerValidation?.ok) {
       modelAccessStatus = 'fail';
       modelAccessMessage =
@@ -454,7 +454,7 @@ export function runDoctor(
       modelAccessMessage =
         'Model Access is missing. Agent execution and memory LLM extraction require brokered model access.';
       modelAccessNextAction =
-        'Run `myclaw setup` and configure Model Access, then rerun `myclaw doctor`.';
+        'Run `gantry setup` and configure Model Access, then rerun `gantry doctor`.';
     } else if (!onecliUrlValidation?.ok) {
       modelAccessStatus = 'fail';
       modelAccessMessage =
@@ -482,7 +482,7 @@ export function runDoctor(
         : 'systemd user session is not available. Background service will use a nohup fallback.',
       nextAction: hasSystemdUser()
         ? undefined
-        : 'Use `myclaw service install` to create the fallback start script.',
+        : 'Use `gantry service install` to create the fallback start script.',
     });
   } else if (platform === 'windows') {
     add(checks, {
@@ -490,7 +490,7 @@ export function runDoctor(
       title: 'Service Manager',
       status: 'pass',
       message: 'Background service mode is available on Windows.',
-      nextAction: 'Use `myclaw service install` then `myclaw service start`.',
+      nextAction: 'Use `gantry service install` then `gantry service start`.',
     });
   } else if (platform === 'macos') {
     const hasLaunchctl = commandExists('launchctl');
@@ -502,7 +502,7 @@ export function runDoctor(
         ? 'launchd is available.'
         : 'launchctl is unavailable in this shell session.',
       nextAction: hasLaunchctl
-        ? 'Use `myclaw service install` then `myclaw service start`.'
+        ? 'Use `gantry service install` then `gantry service start`.'
         : 'Run from a normal macOS user session and retry.',
     });
   }
@@ -591,11 +591,11 @@ export async function runDoctorWithNetwork(
       postgresUrl: onecliDatabaseUrl,
       schema: settings.credentialBroker.onecli.postgres.schema,
       secretEncryptionKey: onecliSecret,
-      myclawPostgresUrl: resolveRuntimeEnvValue(
+      gantryPostgresUrl: resolveRuntimeEnvValue(
         env,
         settings.storage.postgres.urlEnv,
       ),
-      myclawSchema: settings.storage.postgres.schema,
+      gantrySchema: settings.storage.postgres.schema,
     });
     report = addToReport(report, {
       id: 'onecli-persistence',
@@ -625,7 +625,7 @@ export async function runDoctorWithNetwork(
       nextAction:
         health.nextAction ||
         (health.status === 'fail'
-          ? 'Start Model Access with DATABASE_URL from ONECLI_DATABASE_URL and rerun `myclaw doctor`.'
+          ? 'Start Model Access with DATABASE_URL from ONECLI_DATABASE_URL and rerun `gantry doctor`.'
           : undefined),
     });
   }
@@ -634,7 +634,7 @@ export async function runDoctorWithNetwork(
 
 export function formatDoctorReport(report: DoctorReport): string {
   const lines: string[] = [];
-  lines.push('MyClaw Doctor Report');
+  lines.push('Gantry Doctor Report');
   lines.push('');
   for (const check of report.checks) {
     lines.push(

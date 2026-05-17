@@ -38,7 +38,7 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'capability_status',
-    'Show selected MyClaw admin tool capabilities for this agent and exact request_permission arguments for requestable missing tools.',
+    'Show selected Gantry admin tool capabilities for this agent and exact request_permission arguments for requestable missing tools.',
     {},
     async () => ({
       content: [{ type: 'text' as const, text: capabilityStatusText() }],
@@ -51,7 +51,7 @@ export function registerServiceTools(server: McpServer): void {
     {
       spec: z
         .string()
-        .describe('Provider skill spec, such as clawhub:skill-slug@1.2.3'),
+        .describe('Provider skill spec, such as gantryhub:skill-slug@1.2.3'),
       provider: z.string().optional().describe('Optional skill provider name'),
       slug: z.string().optional().describe('Optional provider skill slug'),
       version: z
@@ -193,7 +193,7 @@ export function registerServiceTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          'Set true when the permission is needed only for the current action or an exploratory one-off. Leave false/omitted only for semantic capabilities, Browser, exact MyClaw admin tools, or persistent scoped Bash rules that are genuinely useful for future turns.',
+          'Set true when the permission is needed only for the current action or an exploratory one-off. Leave false/omitted only for semantic capabilities, Browser, exact Gantry admin tools, or persistent scoped Bash rules that are genuinely useful for future turns.',
         ),
       broadAccess: z
         .boolean()
@@ -478,7 +478,7 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'service_restart',
-    'Restart the MyClaw service with config validation. Requires selected agent tool grant mcp__myclaw__service_restart.',
+    'Restart the Gantry service with config validation. Requires selected agent tool grant mcp__gantry__service_restart.',
     {},
     async () => {
       if (!isAdminMcpToolEnabled('service_restart')) {
@@ -532,7 +532,7 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'register_agent',
-    `Register the current chat/channel agent so MyClaw can respond to messages there. Requires selected agent tool grant mcp__myclaw__register_agent and same-conversation approver approval.
+    `Register the current chat/channel agent so Gantry can respond to messages there. Requires selected agent tool grant mcp__gantry__register_agent and same-conversation approver approval.
 
 The JID must be the current conversation. The folder name must be channel-prefixed: "{channel}_{conversation-name}" (e.g., "telegram_dev-team", "slack_eng", "teams_engineering"). Use lowercase with hyphens for the conversation name part.`,
     {
@@ -616,7 +616,7 @@ function adminToolUnavailable(toolName: AdminMcpToolName): {
   content: { type: 'text'; text: string }[];
   isError: true;
 } {
-  const fullName = `mcp__myclaw__${toolName}`;
+  const fullName = `mcp__gantry__${toolName}`;
   return {
     content: [
       {
@@ -632,7 +632,7 @@ function adminToolUnavailable(toolName: AdminMcpToolName): {
 }
 
 const BROWSER_WRONG_LANE_GUIDANCE = [
-  'Browser control is a built-in MyClaw tool capability, not a skill install or third-party MCP server request.',
+  'Browser control is a built-in Gantry tool capability, not a skill install or third-party MCP server request.',
   'Do not request browser automation through request_skill_install or request_mcp_server.',
   'Ask a configured conversation approver to approve Browser access, then use the compact browser gateway tools.',
 ].join(' ');
@@ -698,9 +698,9 @@ async function submitCapabilityReviewTask(
   writeIpcFile(TASKS_DIR, {
     type: toolName,
     taskId,
-    runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE || undefined,
-    jobId: process.env.MYCLAW_JOB_ID || undefined,
-    runId: process.env.MYCLAW_JOB_RUN_ID || undefined,
+    runHandle: process.env.GANTRY_AGENT_RUN_HANDLE || undefined,
+    jobId: process.env.GANTRY_JOB_ID || undefined,
+    runId: process.env.GANTRY_JOB_RUN_ID || undefined,
     targetJid: chatJid,
     chatJid,
     authThreadId: threadId,

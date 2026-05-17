@@ -145,7 +145,7 @@ export function createSdkSandboxNetworkGate(
       writeEvent({
         decision: 'sdk_network_gate_global_approval_activated',
         reason:
-          'MyClaw activated a short-lived eligible-tools/SDK-API-prompt approval; SDK sandbox network prompts will be suppressed until it expires.',
+          'Gantry activated a short-lived eligible-tools/SDK-API-prompt approval; SDK sandbox network prompts will be suppressed until it expires.',
         tokenCreatedAtMs: now,
         tokenExpiresAtMs: expiresAtMs,
         tokenTtlMs: expiresAtMs - now,
@@ -165,7 +165,7 @@ export function createSdkSandboxNetworkGate(
         writeEvent({
           decision: 'sdk_network_gate_token_rejected',
           reason:
-            'MyClaw did not mint a sandbox network token because principal or tool-use id was missing.',
+            'Gantry did not mint a sandbox network token because principal or tool-use id was missing.',
         });
         return;
       }
@@ -239,8 +239,8 @@ export function createSdkSandboxNetworkGate(
       }
 
       const reason = parentToolUseID
-        ? 'SDK requested sandbox network access for a tool-use id MyClaw did not approve.'
-        : 'SDK requested sandbox network access before any tool call was allowed by MyClaw.';
+        ? 'SDK requested sandbox network access for a tool-use id Gantry did not approve.'
+        : 'SDK requested sandbox network access before any tool call was allowed by Gantry.';
       writeEvent({
         decision: 'sdk_network_gate_denied',
         reason,
@@ -251,7 +251,7 @@ export function createSdkSandboxNetworkGate(
       });
       return {
         behavior: 'deny',
-        message: `${reason} Approve the tool call through MyClaw first.`,
+        message: `${reason} Approve the tool call through Gantry first.`,
         interrupt: false,
       };
     },

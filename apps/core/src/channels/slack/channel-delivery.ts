@@ -463,7 +463,7 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
             type: 'actions',
             elements: permissionDecisionOptions(request).map((mode) => ({
               type: 'button',
-              action_id: 'myclaw_perm_decision',
+              action_id: 'gantry_perm_decision',
               text: {
                 type: 'plain_text',
                 text: permissionButtonLabel(mode, request),

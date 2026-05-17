@@ -3,7 +3,7 @@ import { ChildProcess } from 'child_process';
 import { logger } from '../infrastructure/logging/logger.js';
 
 export const ACTIVE_RUN_STOP_REQUESTED = Symbol.for(
-  'myclaw.activeRunStopRequested',
+  'gantry.activeRunStopRequested',
 );
 
 interface StopActiveGroupRunOptions {

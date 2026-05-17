@@ -8,7 +8,7 @@ const runtimeHomes: string[] = [];
 
 function makeRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'myclaw-config-step-'),
+    path.join(os.tmpdir(), 'gantry-config-step-'),
   );
   runtimeHomes.push(runtimeHome);
   return runtimeHome;
@@ -20,7 +20,7 @@ function makeDraft(runtimeHome: string): any {
     postgresSetupKind: 'local',
     postgresDatabaseUrl: '',
     onecliPostgresDatabaseUrl: '',
-    postgresSchema: 'myclaw',
+    postgresSchema: 'gantry',
     onecliPostgresSchema: 'onecli',
     primaryProvider: 'telegram',
     credentialMode: 'onecli',
@@ -186,19 +186,19 @@ async function loadGroupStep() {
 }
 
 describe('setup config step', () => {
-  it('persists provided MyClaw and OneCLI database URLs without provisioning Docker', async () => {
+  it('persists provided Gantry and OneCLI database URLs without provisioning Docker', async () => {
     const runtimeHome = makeRuntimeHome();
     const { runConfigStep, persistOnboardingConfig } = await loadConfigStep();
     const draft = makeDraft(runtimeHome);
     draft.postgresDatabaseUrl =
-      'postgres://myclaw_app:pass@localhost:15432/myclaw';
+      'postgres://gantry_app:pass@localhost:15432/gantry';
     draft.onecliPostgresDatabaseUrl =
-      'postgres://onecli_app:pass@localhost:15432/myclaw?schema=onecli';
+      'postgres://onecli_app:pass@localhost:15432/gantry?schema=onecli';
 
     const action = await runConfigStep(draft);
 
     expect(action).toEqual({ type: 'next' });
-    expect(draft.postgresDatabaseUrl).toContain('myclaw_app');
+    expect(draft.postgresDatabaseUrl).toContain('gantry_app');
     expect(draft.onecliPostgresDatabaseUrl).toContain('onecli_app');
     expect(persistOnboardingConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -220,7 +220,7 @@ describe('setup config step', () => {
     expect(action).toEqual({ type: 'goto', step: 'storage' });
     expect(persistOnboardingConfig).not.toHaveBeenCalled();
     expect(logError).toHaveBeenCalledWith(
-      expect.stringContaining('MYCLAW_DATABASE_URL'),
+      expect.stringContaining('GANTRY_DATABASE_URL'),
     );
   }, 10_000);
 });

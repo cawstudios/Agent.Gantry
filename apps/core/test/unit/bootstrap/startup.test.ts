@@ -51,7 +51,7 @@ describe('runStartup', () => {
     const runtimeSettings = {
       providers: {},
       storage: {
-        postgres: { urlEnv: 'MYCLAW_DATABASE_URL', schema: 'myclaw' },
+        postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
       },
       memory: {},
     } as any;
@@ -108,7 +108,7 @@ describe('runStartup', () => {
             providers: {},
             agent: { name: 'Default Agent' },
             storage: {
-              postgres: { urlEnv: 'MYCLAW_DATABASE_URL', schema: 'myclaw' },
+              postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
             },
             memory: {},
           }) as any,
@@ -175,7 +175,7 @@ describe('runStartup', () => {
             },
             agent: { name: 'Ravi Agent' },
             storage: {
-              postgres: { urlEnv: 'MYCLAW_DATABASE_URL', schema: 'myclaw' },
+              postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
             },
             memory: {},
           }) as any,
@@ -221,8 +221,8 @@ describe('runStartup', () => {
               providers: {},
               storage: {
                 postgres: {
-                  urlEnv: 'MYCLAW_DATABASE_URL',
-                  schema: 'myclaw',
+                  urlEnv: 'GANTRY_DATABASE_URL',
+                  schema: 'gantry',
                 },
               },
               memory: {},
@@ -279,8 +279,8 @@ describe('runStartup', () => {
               providers: {},
               storage: {
                 postgres: {
-                  urlEnv: 'MYCLAW_DATABASE_URL',
-                  schema: 'myclaw',
+                  urlEnv: 'GANTRY_DATABASE_URL',
+                  schema: 'gantry',
                 },
               },
               memory: {},

@@ -2,7 +2,7 @@
 
 Use `BRIEF.md` for product intent that drives planning and decomposition.
 
-For MyClaw, keep this aligned with:
+For Gantry, keep this aligned with:
 
 - `README.md` user-facing goals
 - `docs/SPEC.md` behavior contract

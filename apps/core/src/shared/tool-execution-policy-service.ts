@@ -100,11 +100,11 @@ export interface ToolPolicyDecision {
 }
 
 const CAPABILITY_REQUEST_TOOLS = new Set([
-  'mcp__myclaw__request_mcp_server',
-  'mcp__myclaw__request_skill_install',
-  'mcp__myclaw__request_skill_proposal',
-  'mcp__myclaw__request_skill_dependency_install',
-  'mcp__myclaw__request_permission',
+  'mcp__gantry__request_mcp_server',
+  'mcp__gantry__request_skill_install',
+  'mcp__gantry__request_skill_proposal',
+  'mcp__gantry__request_skill_dependency_install',
+  'mcp__gantry__request_permission',
 ]);
 
 const FILE_MUTATION_TOOLS = new Set(
@@ -355,7 +355,7 @@ function classifyToolKind(toolName: string): ToolExecutionKind {
   if (toolName === 'Config') return 'config';
   if (FILE_MUTATION_TOOLS.has(toolName) || READ_TOOLS.has(toolName))
     return 'file';
-  if (toolName.startsWith('mcp__myclaw__browser_')) {
+  if (toolName.startsWith('mcp__gantry__browser_')) {
     return 'browser';
   }
   if (toolName.startsWith('mcp__')) return 'mcp';
@@ -414,7 +414,7 @@ function stringField(input: unknown, field: string): string | undefined {
 }
 
 function protectedCapabilityRecovery(): string {
-  return 'Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, or request_permission so the change is reviewed, stored durably, and activated through MyClaw capability flows.';
+  return 'Use request_skill_install, request_skill_proposal, request_skill_dependency_install, request_mcp_server, or request_permission so the change is reviewed, stored durably, and activated through Gantry capability flows.';
 }
 
 function autonomousGrantRecovery(request: ToolExecutionRequest): string {
@@ -445,7 +445,7 @@ function autonomousGrantRecovery(request: ToolExecutionRequest): string {
 function thirdPartyMcpToolServerName(toolName: string): string | undefined {
   const match = /^mcp__([^_][A-Za-z0-9_.-]*)__/.exec(toolName);
   const serverName = match?.[1];
-  if (!serverName || serverName === 'myclaw') return undefined;
+  if (!serverName || serverName === 'gantry') return undefined;
   return serverName;
 }
 

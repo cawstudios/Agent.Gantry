@@ -115,17 +115,17 @@ export function validateLoadedRuntimeSettings(
   if (postgresUrl && onecliDatabaseUrl && credentialMode === 'onecli') {
     try {
       const sharedDatabase = validateSharedPostgresDatabase({
-        myclawPostgresUrl: postgresUrl,
+        gantryPostgresUrl: postgresUrl,
         onecliPostgresUrl: onecliDatabaseUrl,
       });
       if (!sharedDatabase.ok) {
         details.push(sharedDatabase.message);
       }
-      const myclawUser = new URL(postgresUrl).username;
+      const gantryUser = new URL(postgresUrl).username;
       const onecliUser = new URL(onecliDatabaseUrl).username;
-      if (myclawUser && onecliUser && myclawUser === onecliUser) {
+      if (gantryUser && onecliUser && gantryUser === onecliUser) {
         details.push(
-          'MYCLAW_DATABASE_URL and ONECLI_DATABASE_URL must use different Postgres roles.',
+          'GANTRY_DATABASE_URL and ONECLI_DATABASE_URL must use different Postgres roles.',
         );
       }
     } catch {

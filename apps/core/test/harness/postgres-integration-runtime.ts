@@ -22,9 +22,9 @@ import type { StorageRuntime } from '@core/adapters/storage/postgres/factory.js'
 import { PostgresFileArtifactStore } from '@core/adapters/storage/postgres/repositories/file-artifact-repository.postgres.js';
 import { loadSessionAppMemoryItems } from '@core/memory/app-memory-session-hydration.js';
 
-export const POSTGRES_TEST_DATABASE_URL_ENV = 'MYCLAW_TEST_DATABASE_URL';
+export const POSTGRES_TEST_DATABASE_URL_ENV = 'GANTRY_TEST_DATABASE_URL';
 export const hasPostgresIntegrationDatabase = Boolean(
-  process.env.MYCLAW_TEST_DATABASE_URL?.trim(),
+  process.env.GANTRY_TEST_DATABASE_URL?.trim(),
 );
 
 function makeSchemaName(prefix = 'itest'): string {
@@ -54,7 +54,7 @@ export async function createPostgresIntegrationRuntime(options?: {
   schemaPrefix?: string;
   artifactRootPrefix?: string;
 }): Promise<PostgresIntegrationRuntime> {
-  const databaseUrl = process.env.MYCLAW_TEST_DATABASE_URL;
+  const databaseUrl = process.env.GANTRY_TEST_DATABASE_URL;
   if (!databaseUrl?.trim()) {
     throw new Error(`${POSTGRES_TEST_DATABASE_URL_ENV} is required`);
   }
@@ -86,7 +86,7 @@ export async function createPostgresIntegrationRuntime(options?: {
   const artifactRoot = fs.mkdtempSync(
     path.join(
       os.tmpdir(),
-      options?.artifactRootPrefix ?? `myclaw-pg-artifacts-${schemaName}-`,
+      options?.artifactRootPrefix ?? `gantry-pg-artifacts-${schemaName}-`,
     ),
   );
   const fileArtifacts = new PostgresFileArtifactStore(

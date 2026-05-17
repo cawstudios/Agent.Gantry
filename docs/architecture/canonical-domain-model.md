@@ -1,6 +1,6 @@
 # Canonical Domain Model
 
-This document defines the product vocabulary MyClaw code should converge on.
+This document defines the product vocabulary Gantry code should converge on.
 It is intentionally provider-neutral and channel-neutral. Current
 implementation names such as registered group, group folder, JID, and Claude
 session id are implementation details unless they are
@@ -40,7 +40,7 @@ App
 
 Identity rules:
 
-- Domain identity uses MyClaw ids, not provider ids.
+- Domain identity uses Gantry ids, not provider ids.
 - Provider ids are stored as external references on adapter-owned records.
 - Domain records are scoped by `appId` unless explicitly global.
 - Provider-specific payloads must be normalized before they reach application
@@ -161,8 +161,8 @@ collide inside one conversation.
 
 `ProviderSession` stores provider-specific diagnostic or export state for an
 `AgentSession`. Claude session ids, response ids, and transcript pointers are
-not MyClaw runtime continuation handles. Active chat continuation uses the live
-provider stream while it is running; fresh runs restore durable MyClaw memory
+not Gantry runtime continuation handles. Active chat continuation uses the live
+provider stream while it is running; fresh runs restore durable Gantry memory
 only.
 
 `AgentSessionSummary` is historical/observability state when present. It is not
@@ -258,7 +258,7 @@ policy. Browser profile use still requires permission and sandbox checks.
 
 Mapping rules:
 
-- A provider conversation id is never the only MyClaw identity. Store it as an
+- A provider conversation id is never the only Gantry identity. Store it as an
   alias under `ProviderConnection`.
 - Threads are optional. A provider without threads maps all messages directly
   to `Conversation`.

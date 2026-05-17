@@ -37,7 +37,7 @@ function cleanRecallQueryText(input: string | undefined): string {
     .replace(/<\s*\/?\s*messages\b[^>]*>/gi, ' ')
     .replace(/<\s*\/?\s*message\b[^>]*>/gi, ' ')
     .replace(/<\s*\/?\s*quoted_message\b[^>]*>/gi, ' ')
-    .replace(/<\s*\/?\s*myclaw[_a-z0-9-]*\b[^>]*>/gi, ' ')
+    .replace(/<\s*\/?\s*gantry[_a-z0-9-]*\b[^>]*>/gi, ' ')
     .replace(/<\/?[A-Za-z][A-Za-z0-9:_-]*(?:\s+[^<>]{0,500})?>/g, ' ');
   return replaceControlCharacters(withoutMarkup)
     .replace(/\b(?:trust|schema|policy|timezone)\s*=\s*"[^"]*"/gi, ' ')

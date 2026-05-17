@@ -172,7 +172,7 @@ export class OnecliAgentCredentialBroker implements AgentCredentialBroker {
         status: 'fail',
         message: `Could not reach OneCLI at ${endpoint}: ${err instanceof Error ? err.message : String(err)}`,
         nextAction:
-          "Run `myclaw local doctor`. If you use MyClaw's provided local stack, start it from the directory containing the shipped stack file, or pass that stack file explicitly, then retry.",
+          "Run `gantry local doctor`. If you use Gantry's provided local stack, start it from the directory containing the shipped stack file, or pass that stack file explicitly, then retry.",
       };
     }
   }

@@ -1,16 +1,16 @@
 # Capability Management
 
-MyClaw treats every agent-visible extension as an app-scoped and agent-scoped
-capability. A capability can be an SDK tool, a built-in MyClaw MCP tool, a
+Gantry treats every agent-visible extension as an app-scoped and agent-scoped
+capability. A capability can be an SDK tool, a built-in Gantry MCP tool, a
 third-party MCP server, a skill, a browser lifecycle/action capability, or a
 channel-native tool. The common rule is request, review, approval or denial,
 durable audit, new config version, and next-run activation.
 
 Agents must not mutate capability state directly. They must not run dependency
 install commands, edit `.claude/skills`, edit `.mcp.json`, edit Claude
-permission settings, edit MyClaw settings, or change generated runtime config.
+permission settings, edit Gantry settings, or change generated runtime config.
 When a user asks for a new skill, MCP server, dependency, SDK tool, host tool,
-or channel capability, the agent calls the matching MyClaw request tool.
+or channel capability, the agent calls the matching Gantry request tool.
 
 The user-facing permission model is `Agent -> Capability -> Access level`.
 Raw permission ids, command hashes, scoped Bash rules, sandbox profiles, and
@@ -126,7 +126,7 @@ API, CLI, and MCP are adapters over the same application services:
 - Public control API is for owner/admin automation and Web/SDK admin UX.
 - CLI is for local/admin setup, provider connect/validate, service
   start/stop/restart/logs, doctor commands, and local imports.
-- MyClaw MCP tools are for agent-requested reviewed changes and safe runtime
+- Gantry MCP tools are for agent-requested reviewed changes and safe runtime
   interactions. They create reviewable requests rendered through
   `InteractionDescriptor`.
 
@@ -140,7 +140,7 @@ place.
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | `send_message`                     | Progress updates or direct channel messages while the agent is still running.                                                                                                                    | Persistent capability changes.                                                                          |
 | `ask_user_question`                | Structured choices with content, options, single-select, multi-select, preview/details, and channel-native buttons.                                                                              | Open-ended chat or approval of persistent capabilities.                                                 |
-| `request_skill_install`            | Provider-backed skill installs such as `clawhub:<slug>@<version>`.                                                                                                                               | Downloading or installing the skill directly.                                                           |
+| `request_skill_install`            | Provider-backed skill installs such as `gantryhub:<slug>@<version>`.                                                                                                                               | Downloading or installing the skill directly.                                                           |
 | `request_skill_proposal`           | Agent-created or modified `SKILL.md` bundles for review.                                                                                                                                         | Writing directly to `.claude/skills`, `.agents/skills`, or agent-local `skills/`.                       |
 | `request_skill_dependency_install` | npm, brew, go, uv, or download dependencies needed by a reviewed skill.                                                                                                                          | Running dependency commands from the agent.                                                             |
 | `request_mcp_server`               | Third-party MCP server drafts with transport, origin, allowed tool patterns, credential needs, and reason.                                                                                       | Editing `.mcp.json` or Claude `mcpServers`.                                                             |
@@ -149,7 +149,7 @@ place.
 | `request_capability`               | Requests a named semantic capability such as `google.sheets.write` for review and durable agent binding.                                                                                         | Requesting raw provider tokens, broad Bash, or unrelated app access.                                    |
 | `propose_local_cli_capability`     | Requests a reviewed user-defined local CLI capability with pinned executable, command templates, preflight, account label, and protected paths.                                                  | Running the CLI directly or approving `Bash(cli *)`.                                                    |
 | `manage_capability`                | Presents view/change/revoke/test/audit guidance for existing semantic capabilities.                                                                                                              | Silent DB-only edits, raw token inspection, or bypassing settings sync.                                 |
-| `capability_status`                | Lists current tool access, readable configured rules, selected skills, selected MCP servers, default tools, gated tools, semantic capability tools, and unavailable-but-requestable admin tools. | Guessing hidden admin tools or requesting broad MyClaw MCP wildcards.                                   |
+| `capability_status`                | Lists current tool access, readable configured rules, selected skills, selected MCP servers, default tools, gated tools, semantic capability tools, and unavailable-but-requestable admin tools. | Guessing hidden admin tools or requesting broad Gantry MCP wildcards.                                   |
 | `settings_desired_state`           | Selected-capability reading of the current local desired-state settings before proposing a reviewed config change.                                                                               | Unselected access, mutating settings, or exposing raw secrets.                                          |
 | `request_settings_update`          | Selected-capability reviewed host-side edits to non-secret local `settings.yaml` desired state.                                                                                                  | Unselected access, direct file edits, raw provider secrets, skill source injection, or MCP definitions. |
 | `service_restart`                  | Selected-capability restart after approved config or capability changes that require host restart.                                                                                               | Restarting to activate unapproved changes.                                                              |
@@ -163,8 +163,8 @@ place.
 | Skill dependency | Dependency spec, approval decision, execution result, audit.                   | Optional per-skill tools directory or approved host package; never direct agent shell.                                                                   |
 | Third-party MCP  | Definition, reviewed version, credential refs, allowed tool patterns, binding. | SDK `mcpServers` for host-safe stdio transports plus exact allowed MCP tool names. Remote HTTP/SSE requires host DNS-pinned transport before projection. |
 | SDK tool         | Tool catalog entry, risk, permission policy, sandbox profile, binding.         | Exact non-Bash SDK tool names in `allowedTools`; scoped `Bash(<pattern>)` is enforced only in `canUseTool` and never projected as bare `Bash`.           |
-| Host tool        | Built-in MyClaw MCP tool entry, risk, binding, audit behavior.                 | Exact `mcp__myclaw__<tool>` name.                                                                                                                        |
-| Browser tool     | Canonical `Browser` capability and sandbox policy.                             | Gated MyClaw-owned gateway tools with MyClaw-owned schemas.                                                                                              |
+| Host tool        | Built-in Gantry MCP tool entry, risk, binding, audit behavior.                 | Exact `mcp__gantry__<tool>` name.                                                                                                                        |
+| Browser tool     | Canonical `Browser` capability and sandbox policy.                             | Gated Gantry-owned gateway tools with Gantry-owned schemas.                                                                                              |
 | Channel tool     | Provider capability enum, scopes, affected conversations, binding.             | Provider adapter enables only the named Slack/Telegram/Teams/Web capability.                                                                             |
 | Channel binding  | Agent-to-conversation/thread binding and control policy.                       | Message routing, trigger handling, and same-channel approval target.                                                                                     |
 
@@ -185,7 +185,7 @@ Agent-owned persistent tool grants are also mirrored into `settings.yaml` as
 readable `agents.<id>.tools` entries. Prefer semantic capability entries such
 as `capability:google.sheets.write` for app workflows. `request_permission`
 durable fallback is intentionally narrow: canonical `Browser`, exact selected
-MyClaw admin tools, and scoped Bash rules such as `Bash(npm test *)`. Broad
+Gantry admin tools, and scoped Bash rules such as `Bash(npm test *)`. Broad
 exact SDK/native tools such as `Read`, `Write`, `Edit`, `WebFetch`, `LS`, exact
 third-party MCP tools, secret-bearing Bash, shell-control Bash, and
 `SandboxNetworkAccess` are not durable `request_permission` authority. Do not
@@ -235,16 +235,16 @@ MCP server bindings and export the readable projection to `settings.yaml`.
 Tool permission approval can resume the blocked active tool call immediately:
 `Allow once` is current-run only and does not create durable semantic
 authority, while `Always allow` stores either the approved semantic capability,
-canonical `Browser`, exact MyClaw admin tool, or scoped Bash rule for the active
+canonical `Browser`, exact Gantry admin tool, or scoped Bash rule for the active
 run and future runs. New skill or MCP materialization occurs on the next
 scheduled run or a manual rerun. Browser remains a single public `Browser` tool
-capability; projected browser gateway tools and admin MyClaw MCP tools are not
+capability; projected browser gateway tools and admin Gantry MCP tools are not
 job-local grants.
 
 Direct writes to `settings.json`, `settings.local.json`, `.mcp.json`,
 generated provider MCP directories, and skill capability files are protected
 wholesale. Provider settings files are not partially parsed for "safe" keys;
-agents must use reviewed MyClaw request tools because future provider settings
+agents must use reviewed Gantry request tools because future provider settings
 can become execution or permission policy.
 
 Readable skill bytes live outside catalog rows:
@@ -257,7 +257,7 @@ skill-drafts/<request-id>/<skill-slug>/...
 ```
 
 The database stores metadata, source, content hash, provider refs, binding, and
-audit only. Skill files remain readable for review. ClawHub is the default
+audit only. Skill files remain readable for review. GantryHub is the default
 provider-backed skill source. Provider verification improves review context but
 never bypasses approval.
 
@@ -268,22 +268,22 @@ can list/read individual files under `skills:read`.
 
 Claude settings, `CLAUDE_CONFIG_DIR`, MCP handoff files, and FileArtifacts
 are per-run projections. They are compatibility inputs for a provider adapter,
-not durable MyClaw truth.
+not durable Gantry truth.
 
 ## Lifecycle
 
 1. Request: admin API/SDK/CLI or an agent request tool creates a pending request.
-2. Validate: MyClaw checks app scope, agent scope, transport, origin chat,
+2. Validate: Gantry checks app scope, agent scope, transport, origin chat,
    credential refs, sandbox profile, tool patterns, and provider metadata.
 3. Review: same-channel review renders the request, but authority still comes
    from configured admin/control policy.
-4. Decide: the user sees `Allow once`, `Allow 5 min`, `Always allow`, or `Cancel`; Details and audit records carry the durable authority shape, such as a semantic capability, canonical `Browser`, exact `mcp__myclaw__<admin_tool>`, or scoped `Bash(<pattern>)`.
+4. Decide: the user sees `Allow once`, `Allow 5 min`, `Always allow`, or `Cancel`; Details and audit records carry the durable authority shape, such as a semantic capability, canonical `Browser`, exact `mcp__gantry__<admin_tool>`, or scoped `Bash(<pattern>)`.
 5. Bind: approval creates or updates the agent binding and a new config version.
 6. Same-session handoff: approved skill proposals are returned to the running
    agent as reviewed skill files; approved MCP servers are reachable through the
-   MyClaw `mcp_list_tools` / `mcp_call_tool` proxy.
+   Gantry `mcp_list_tools` / `mcp_call_tool` proxy.
 7. Materialize: only approved enabled skill bindings project into future agent
-   runs as native skills. Third-party MCP bindings remain behind the MyClaw MCP
+   runs as native skills. Third-party MCP bindings remain behind the Gantry MCP
    proxy in every run.
 8. Execute: tool use still passes permission and sandbox evaluation.
 9. Disable: disabled capabilities stop future materialization without deleting
@@ -292,9 +292,9 @@ not durable MyClaw truth.
 ## Provider Skill Install
 
 Provider-backed skill install is package retrieval, not dependency execution.
-For ClawHub:
+For GantryHub:
 
-1. Agent calls `request_skill_install` with `clawhub:<slug>@<version>` or an
+1. Agent calls `request_skill_install` with `gantryhub:<slug>@<version>` or an
    equivalent structured provider ref.
 2. Host resolves provider detail, publisher, verification tier, latest version,
    source/provenance metadata, file list, integrity, and compatibility.
@@ -332,7 +332,7 @@ The host validates dependency specs before review:
 
 ## Runtime Projection
 
-The built-in `myclaw` MCP server is host wiring. It is always projected and is
+The built-in `gantry` MCP server is host wiring. It is always projected and is
 not an admin-managed third-party capability. Third-party MCP servers are
 projected only from approved reviewed versions and active bindings. Their
 `allowedToolPatterns` form the enforced tool allowlist. Any
@@ -342,7 +342,7 @@ Skills are projected only when approved and bound. Draft, denied, disabled, or
 unbound skill files are never copied into per-run Claude config.
 
 The `Browser` tool manages the agent conversation's persistent browser profile
-through the projected MyClaw-owned gateway: `browser_status`, `browser_open`,
+through the projected Gantry-owned gateway: `browser_status`, `browser_open`,
 `browser_inspect`, `browser_act`, and `browser_close`. There is no separate
 browser-action run, phrase intent, private browser backend projection, or
 durable per-action browser authority.
@@ -352,12 +352,12 @@ them. `Bash`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `Config` are
 not default capabilities. If approved, they still pass through `canUseTool`,
 `PreToolUse`, sandbox policy, and audit.
 
-The built-in MyClaw MCP server is projected with exact tool names. Wildcards
-such as `mcp__myclaw__*` are not durable authorization. Request tools are safe
+The built-in Gantry MCP server is projected with exact tool names. Wildcards
+such as `mcp__gantry__*` are not durable authorization. Request tools are safe
 to expose because they create drafts or reviews only. Approved skill proposals
 and MCP servers are the exception to "future only": the host returns reviewed
 skill files to the running agent, and approved third-party MCP servers are
-callable through the approved MyClaw MCP proxy tools in both current and future
+callable through the approved Gantry MCP proxy tools in both current and future
 runs. Direct third-party `mcp__server__tool` names are not exposed.
 
 ## Cleanup Rules
@@ -369,7 +369,7 @@ they are clearly historical and not active guidance.
 
 Before calling a cutover complete, run targeted searches for:
 
-- `mcp__myclaw__*`
+- `mcp__gantry__*`
 - obsolete skill draft request tools outside historical notes
 - `.claude/skills` as runtime truth
 - `.mcp.json` mutation instructions

@@ -6,11 +6,11 @@ import {
   type AgentCapabilityProvider,
 } from '@agent-runner-src/agent-capabilities.js';
 import {
-  DEFAULT_MYCLAW_MCP_TOOL_NAMES,
-  myclawMcpFullToolName,
+  DEFAULT_GANTRY_MCP_TOOL_NAMES,
+  gantryMcpFullToolName,
   selectedMemoryIpcActions,
-  selectedMyClawMcpToolNames,
-} from '@agent-runner-src/myclaw-mcp-tool-surface.js';
+  selectedGantryMcpToolNames,
+} from '@agent-runner-src/gantry-mcp-tool-surface.js';
 
 const SAFE_DEFAULT_ALLOWED_TOOLS = [
   'Agent',
@@ -18,7 +18,7 @@ const SAFE_DEFAULT_ALLOWED_TOOLS = [
   'WebFetch',
   'ToolSearch',
   'Skill',
-  ...DEFAULT_MYCLAW_MCP_TOOL_NAMES.map(myclawMcpFullToolName),
+  ...DEFAULT_GANTRY_MCP_TOOL_NAMES.map(gantryMcpFullToolName),
 ] as const;
 
 const DEVELOPER_ALLOWED_TOOLS = [
@@ -30,10 +30,10 @@ const DEVELOPER_ALLOWED_TOOLS = [
 
 const CONFIGURED_ADMIN_ALLOWED_TOOLS = [
   ...DEVELOPER_ALLOWED_TOOLS,
-  'mcp__myclaw__settings_desired_state',
-  'mcp__myclaw__request_settings_update',
-  'mcp__myclaw__service_restart',
-  'mcp__myclaw__register_agent',
+  'mcp__gantry__settings_desired_state',
+  'mcp__gantry__request_settings_update',
+  'mcp__gantry__service_restart',
+  'mcp__gantry__register_agent',
 ] as const;
 
 const DANGEROUS_DEFAULT_TOOLS = [
@@ -48,8 +48,8 @@ const DANGEROUS_DEFAULT_TOOLS = [
   'TaskStop',
   'EnterWorktree',
   'ExitWorktree',
-  'mcp__myclaw__list_models',
-  'mcp__myclaw__*',
+  'mcp__gantry__list_models',
+  'mcp__gantry__*',
 ] as const;
 
 const UNAVAILABLE_DEFAULT_TOOLS = [
@@ -61,8 +61,8 @@ const UNAVAILABLE_DEFAULT_TOOLS = [
   'TaskStop',
   'EnterWorktree',
   'ExitWorktree',
-  'mcp__myclaw__list_models',
-  'mcp__myclaw__*',
+  'mcp__gantry__list_models',
+  'mcp__gantry__*',
 ] as const;
 
 const DEFAULT_AVAILABLE_TOOLS = [
@@ -85,7 +85,7 @@ const DEFAULT_AVAILABLE_TOOLS = [
 const DEVELOPER_AVAILABLE_TOOLS = [...DEFAULT_AVAILABLE_TOOLS] as const;
 
 describe('agent capability composition', () => {
-  it('uses exact safe defaults and myclaw MCP server wiring', () => {
+  it('uses exact safe defaults and gantry MCP server wiring', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       appId: 'app-main',
@@ -121,41 +121,41 @@ describe('agent capability composition', () => {
     for (const tool of DANGEROUS_DEFAULT_TOOLS) {
       expect(profile.allowedTools).not.toContain(tool);
     }
-    expect(profile.allowedTools).toContain('mcp__myclaw__continuity_summary');
+    expect(profile.allowedTools).toContain('mcp__gantry__continuity_summary');
     expect(selectedMemoryIpcActions([])).toContain('continuity_summary');
     for (const tool of UNAVAILABLE_DEFAULT_TOOLS) {
       expect(profile.availableTools).not.toContain(tool);
     }
     expect(profile.permissionMode).toBe('default');
     expect(profile.alwaysAllowedTools).toEqual([]);
-    expect(profile.mcpServers.myclaw).toEqual({
+    expect(profile.mcpServers.gantry).toEqual({
       command: 'node',
       args: ['/tmp/ipc-mcp-stdio.js'],
       env: {
-        MYCLAW_APP_ID: 'app-main',
-        MYCLAW_AGENT_ID: 'agent:telegram_team',
-        MYCLAW_CHAT_JID: 'tg:team',
-        MYCLAW_GROUP_FOLDER: 'telegram_team',
-        MYCLAW_THREAD_ID: 'topic-1',
-        MYCLAW_MEMORY_USER_ID: '5759865942',
-        MYCLAW_MEMORY_DEFAULT_SCOPE: 'group',
-        MYCLAW_MEMORY_REVIEWER_IS_CONTROL_APPROVER: '',
-        MYCLAW_BROWSER_PROFILE_NAME: 'c-team-abc123abc123',
-        MYCLAW_ADMIN_MCP_TOOLS_JSON: '[]',
-        MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON: '[]',
-        MYCLAW_SELECTED_SKILLS_JSON: '[]',
-        MYCLAW_SELECTED_MCP_SERVERS_JSON: '[]',
-        MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify(
-          selectedMyClawMcpToolNames([]),
+        GANTRY_APP_ID: 'app-main',
+        GANTRY_AGENT_ID: 'agent:telegram_team',
+        GANTRY_CHAT_JID: 'tg:team',
+        GANTRY_GROUP_FOLDER: 'telegram_team',
+        GANTRY_THREAD_ID: 'topic-1',
+        GANTRY_MEMORY_USER_ID: '5759865942',
+        GANTRY_MEMORY_DEFAULT_SCOPE: 'group',
+        GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER: '',
+        GANTRY_BROWSER_PROFILE_NAME: 'c-team-abc123abc123',
+        GANTRY_ADMIN_MCP_TOOLS_JSON: '[]',
+        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '[]',
+        GANTRY_SELECTED_SKILLS_JSON: '[]',
+        GANTRY_SELECTED_MCP_SERVERS_JSON: '[]',
+        GANTRY_MCP_TOOL_NAMES_JSON: JSON.stringify(
+          selectedGantryMcpToolNames([]),
         ),
-        MYCLAW_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(
+        GANTRY_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(
           selectedMemoryIpcActions([]),
         ),
-        MYCLAW_IPC_DIR: '/tmp/ipc/team',
-        MYCLAW_IPC_AUTH_TOKEN: 'token',
-        MYCLAW_MEMORY_IPC_AUTH_TOKEN: 'memory-token',
-        MYCLAW_IPC_RESPONSE_VERIFY_KEY: 'verify-key',
-        MYCLAW_IPC_RESPONSE_KEY_ID: 'verify-key-id',
+        GANTRY_IPC_DIR: '/tmp/ipc/team',
+        GANTRY_IPC_AUTH_TOKEN: 'token',
+        GANTRY_MEMORY_IPC_AUTH_TOKEN: 'memory-token',
+        GANTRY_IPC_RESPONSE_VERIFY_KEY: 'verify-key',
+        GANTRY_IPC_RESPONSE_KEY_ID: 'verify-key-id',
         NO_PROXY:
           '127.0.0.1,localhost,::1,github.com,.github.com,api.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com',
         no_proxy:
@@ -170,16 +170,16 @@ describe('agent capability composition', () => {
       chatJid: 'tg:team',
       groupFolder: 'telegram_team',
       browserIpcAuthToken: 'browser-token',
-      configuredAllowedTools: ['mcp__myclaw__browser'],
+      configuredAllowedTools: ['mcp__gantry__browser'],
     });
     expect(
-      withoutBrowser.mcpServers.myclaw?.env?.MYCLAW_BROWSER_IPC_AUTH_TOKEN,
+      withoutBrowser.mcpServers.gantry?.env?.GANTRY_BROWSER_IPC_AUTH_TOKEN,
     ).toBeUndefined();
-    expect(withoutBrowser.allowedTools).not.toContain('mcp__myclaw__browser');
+    expect(withoutBrowser.allowedTools).not.toContain('mcp__gantry__browser');
     expect(
       JSON.parse(
         String(
-          withoutBrowser.mcpServers.myclaw?.env?.MYCLAW_MCP_TOOL_NAMES_JSON,
+          withoutBrowser.mcpServers.gantry?.env?.GANTRY_MCP_TOOL_NAMES_JSON,
         ),
       ),
     ).not.toContain('browser');
@@ -192,7 +192,7 @@ describe('agent capability composition', () => {
       configuredAllowedTools: ['Browser'],
     });
     expect(
-      withBrowser.mcpServers.myclaw?.env?.MYCLAW_BROWSER_IPC_AUTH_TOKEN,
+      withBrowser.mcpServers.gantry?.env?.GANTRY_BROWSER_IPC_AUTH_TOKEN,
     ).toBe('browser-token');
   });
 
@@ -202,22 +202,22 @@ describe('agent capability composition', () => {
       chatJid: 'tg:main',
       groupFolder: 'main_agent',
       configuredAllowedTools: [
-        'mcp__myclaw__settings_desired_state',
-        'mcp__myclaw__request_settings_update',
-        'mcp__myclaw__service_restart',
-        'mcp__myclaw__register_agent',
+        'mcp__gantry__settings_desired_state',
+        'mcp__gantry__request_settings_update',
+        'mcp__gantry__service_restart',
+        'mcp__gantry__register_agent',
       ],
     });
 
     expect(profile.allowedTools).toEqual(CONFIGURED_ADMIN_ALLOWED_TOOLS);
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).toContain(
-      'mcp__myclaw__settings_desired_state',
+      'mcp__gantry__settings_desired_state',
     );
     expect(profile.allowedTools).toContain(
-      'mcp__myclaw__request_settings_update',
+      'mcp__gantry__request_settings_update',
     );
-    expect(profile.mcpServers.myclaw?.env?.MYCLAW_ADMIN_MCP_TOOLS_JSON).toBe(
+    expect(profile.mcpServers.gantry?.env?.GANTRY_ADMIN_MCP_TOOLS_JSON).toBe(
       JSON.stringify([
         'register_agent',
         'request_settings_update',
@@ -225,13 +225,13 @@ describe('agent capability composition', () => {
         'settings_desired_state',
       ]),
     );
-    expect(profile.mcpServers.myclaw?.env?.MYCLAW_MCP_TOOL_NAMES_JSON).toBe(
+    expect(profile.mcpServers.gantry?.env?.GANTRY_MCP_TOOL_NAMES_JSON).toBe(
       JSON.stringify(
-        selectedMyClawMcpToolNames([
-          'mcp__myclaw__settings_desired_state',
-          'mcp__myclaw__request_settings_update',
-          'mcp__myclaw__service_restart',
-          'mcp__myclaw__register_agent',
+        selectedGantryMcpToolNames([
+          'mcp__gantry__settings_desired_state',
+          'mcp__gantry__request_settings_update',
+          'mcp__gantry__service_restart',
+          'mcp__gantry__register_agent',
         ]),
       ),
     );
@@ -248,13 +248,13 @@ describe('agent capability composition', () => {
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).toContain('Agent');
     expect(profile.allowedTools).not.toContain(
-      'mcp__myclaw__settings_desired_state',
+      'mcp__gantry__settings_desired_state',
     );
     expect(profile.allowedTools).not.toContain(
-      'mcp__myclaw__request_settings_update',
+      'mcp__gantry__request_settings_update',
     );
-    expect(profile.allowedTools).not.toContain('mcp__myclaw__service_restart');
-    expect(profile.allowedTools).not.toContain('mcp__myclaw__register_agent');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__service_restart');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__register_agent');
   });
 
   it('defaults missing personas to developer capabilities', () => {
@@ -268,7 +268,7 @@ describe('agent capability composition', () => {
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).toContain('Agent');
     expect(profile.allowedTools).toContain('Read');
-    expect(profile.allowedTools).toContain('mcp__myclaw__memory_search');
+    expect(profile.allowedTools).toContain('mcp__gantry__memory_search');
     expect(profile.allowedTools).not.toContain('Browser');
   });
 
@@ -284,7 +284,7 @@ describe('agent capability composition', () => {
     expect(profile.availableTools).toEqual(DEFAULT_AVAILABLE_TOOLS);
     expect(profile.allowedTools).not.toContain('Read');
     expect(profile.allowedTools).toContain('Agent');
-    expect(profile.allowedTools).toContain('mcp__myclaw__memory_search');
+    expect(profile.allowedTools).toContain('mcp__gantry__memory_search');
     expect(profile.allowedTools).not.toContain('Browser');
   });
 
@@ -304,17 +304,17 @@ describe('agent capability composition', () => {
 
     expect(profile.allowedTools).not.toContain('Browser');
     expect(profile.availableTools).not.toContain('Browser');
-    expect(profile.allowedTools).toContain('mcp__myclaw__memory_search');
-    expect(profile.allowedTools).toContain('mcp__myclaw__memory_save');
-    expect(profile.allowedTools).toContain('mcp__myclaw__procedure_save');
-    expect(profile.allowedTools).toContain('mcp__myclaw__scheduler_list_jobs');
+    expect(profile.allowedTools).toContain('mcp__gantry__memory_search');
+    expect(profile.allowedTools).toContain('mcp__gantry__memory_save');
+    expect(profile.allowedTools).toContain('mcp__gantry__procedure_save');
+    expect(profile.allowedTools).toContain('mcp__gantry__scheduler_list_jobs');
     expect(profile.allowedTools).not.toContain('Read');
     expect(profile.allowedTools).not.toContain('Glob');
     expect(profile.allowedTools).not.toContain('Grep');
     expect(profile.allowedTools).toContain('Agent');
     expect(profile.allowedTools).not.toContain('Bash');
-    expect(profile.allowedTools).not.toContain('mcp__myclaw__service_restart');
-    expect(profile.allowedTools).not.toContain('mcp__myclaw__register_agent');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__service_restart');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__register_agent');
   });
 
   it('exposes memory mutation tools only when explicitly selected', () => {
@@ -324,22 +324,22 @@ describe('agent capability composition', () => {
       groupFolder: 'sales',
       persona: 'sales',
       configuredAllowedTools: [
-        'mcp__myclaw__memory_patch',
-        'mcp__myclaw__memory_demote',
-        'mcp__myclaw__procedure_patch',
+        'mcp__gantry__memory_patch',
+        'mcp__gantry__memory_demote',
+        'mcp__gantry__procedure_patch',
       ],
     });
 
-    expect(profile.allowedTools).toContain('mcp__myclaw__memory_patch');
-    expect(profile.allowedTools).toContain('mcp__myclaw__memory_demote');
-    expect(profile.allowedTools).toContain('mcp__myclaw__procedure_patch');
+    expect(profile.allowedTools).toContain('mcp__gantry__memory_patch');
+    expect(profile.allowedTools).toContain('mcp__gantry__memory_demote');
+    expect(profile.allowedTools).toContain('mcp__gantry__procedure_patch');
     expect(selectedMemoryIpcActions([])).not.toContain('memory_patch');
     expect(selectedMemoryIpcActions([])).not.toContain('memory_demote');
     expect(
       selectedMemoryIpcActions([
-        'mcp__myclaw__memory_patch',
-        'mcp__myclaw__memory_demote',
-        'mcp__myclaw__procedure_patch',
+        'mcp__gantry__memory_patch',
+        'mcp__gantry__memory_demote',
+        'mcp__gantry__procedure_patch',
       ]),
     ).toEqual([
       'memory_search',
@@ -431,10 +431,10 @@ describe('agent capability composition', () => {
         'Edit',
         'MultiEdit',
         'NotebookEdit',
-        'mcp__myclaw__service_restart',
-        'mcp__myclaw__settings_desired_state',
-        'mcp__myclaw__*',
-        'mcp__myclaw__*(service_restart)',
+        'mcp__gantry__service_restart',
+        'mcp__gantry__settings_desired_state',
+        'mcp__gantry__*',
+        'mcp__gantry__*(service_restart)',
         'ToolName(scope-pattern)',
       ],
     });
@@ -442,9 +442,9 @@ describe('agent capability composition', () => {
     expect(profile.allowedTools).toContain('Agent');
     expect(profile.allowedTools).not.toContain('Browser');
     expect(profile.allowedTools).not.toContain('ToolName(scope-pattern)');
-    expect(profile.allowedTools).toContain('mcp__myclaw__service_restart');
+    expect(profile.allowedTools).toContain('mcp__gantry__service_restart');
     expect(profile.allowedTools).toContain(
-      'mcp__myclaw__settings_desired_state',
+      'mcp__gantry__settings_desired_state',
     );
     expect(profile.allowedTools).not.toContain('Bash');
     expect(profile.allowedTools).toContain('Read');
@@ -455,14 +455,14 @@ describe('agent capability composition', () => {
     expect(profile.allowedTools).toContain('Edit');
     expect(profile.allowedTools).toContain('MultiEdit');
     expect(profile.allowedTools).toContain('NotebookEdit');
-    expect(profile.allowedTools).not.toContain('mcp__myclaw__*');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__*');
     expect(profile.allowedTools).not.toContain(
-      'mcp__myclaw__*(service_restart)',
+      'mcp__gantry__*(service_restart)',
     );
-    expect(profile.mcpServers.myclaw?.env?.MYCLAW_ADMIN_MCP_TOOLS_JSON).toBe(
+    expect(profile.mcpServers.gantry?.env?.GANTRY_ADMIN_MCP_TOOLS_JSON).toBe(
       JSON.stringify(['service_restart', 'settings_desired_state']),
     );
-    expect(profile.mcpServers.myclaw?.env?.MYCLAW_SELECTED_SKILLS_JSON).toBe(
+    expect(profile.mcpServers.gantry?.env?.GANTRY_SELECTED_SKILLS_JSON).toBe(
       JSON.stringify([]),
     );
   });
@@ -476,11 +476,11 @@ describe('agent capability composition', () => {
       selectedMcpServerIds: ['mcp:github'],
     });
 
-    expect(profile.mcpServers.myclaw?.env?.MYCLAW_SELECTED_SKILLS_JSON).toBe(
+    expect(profile.mcpServers.gantry?.env?.GANTRY_SELECTED_SKILLS_JSON).toBe(
       JSON.stringify(['skill:release']),
     );
     expect(
-      profile.mcpServers.myclaw?.env?.MYCLAW_SELECTED_MCP_SERVERS_JSON,
+      profile.mcpServers.gantry?.env?.GANTRY_SELECTED_MCP_SERVERS_JSON,
     ).toBe(JSON.stringify(['mcp:github']));
   });
 
@@ -501,9 +501,9 @@ describe('agent capability composition', () => {
       [...BUILTIN_AGENT_CAPABILITY_PROVIDERS, extraProvider],
     );
     expect(profile.allowedTools).toContain('CustomTool');
-    expect(profile.allowedTools).toContain('mcp__myclaw__send_message');
+    expect(profile.allowedTools).toContain('mcp__gantry__send_message');
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
-    expect(profile.allowedTools).not.toContain('mcp__myclaw__*');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__*');
     expect(profile.alwaysAllowedTools).toContain('CustomTool');
   });
 
@@ -525,18 +525,18 @@ describe('agent capability composition', () => {
         'Read',
         'Browser',
         'mcp__browser' + '_' + 'backend' + '__*',
-        'mcp__myclaw__service_restart',
+        'mcp__gantry__service_restart',
         'mcp__github__search_repositories',
         'mcp__github__*',
         'mcp__linear__search',
       ],
       externalMcpAlwaysAllowedTools: [
         'mcp__github__search_repositories',
-        'mcp__myclaw__service_restart',
+        'mcp__gantry__service_restart',
       ],
     });
 
-    expect(profile.mcpServers.myclaw).toMatchObject({
+    expect(profile.mcpServers.gantry).toMatchObject({
       command: 'node',
     });
     expect(profile.mcpServers.github).toEqual({
@@ -555,7 +555,7 @@ describe('agent capability composition', () => {
     expect(profile.allowedTools).not.toContain(
       'mcp__browser' + '_' + 'backend' + '__*',
     );
-    expect(profile.allowedTools).not.toContain('mcp__myclaw__service_restart');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__service_restart');
     expect(profile.allowedTools).not.toContain('mcp__linear__search');
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.alwaysAllowedTools).toEqual([
@@ -621,7 +621,7 @@ describe('agent capability composition', () => {
     expect(profile.mcpServers[hostPrivateServerName]).toBeUndefined();
     expect(profile.mcpServers[hiddenRuntimeServerName]).toBeUndefined();
     expect(profile.mcpServers[hiddenPackageServerName]).toBeUndefined();
-    expect(profile.allowedTools).not.toContain('mcp__myclaw__*');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__*');
     expect(profile.allowedTools).not.toContain(
       'mcp__browser' + '_' + 'backend' + '__*',
     );

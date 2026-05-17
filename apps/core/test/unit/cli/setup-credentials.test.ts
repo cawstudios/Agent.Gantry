@@ -76,9 +76,9 @@ describe('setup credentials step', () => {
     expect(OneCLI).toHaveBeenCalledWith({ url: 'http://localhost:10254' });
     expect(ensureAgent).toHaveBeenCalledWith({
       name: 'Gantry Model Access',
-      identifier: 'myclaw-model-access',
+      identifier: 'gantry-model-access',
     });
-    expect(getContainerConfig).toHaveBeenCalledWith('myclaw-model-access');
+    expect(getContainerConfig).toHaveBeenCalledWith('gantry-model-access');
     expect(spinner.start).toHaveBeenCalledWith('Validating Model Access...');
     expect(note).toHaveBeenCalledWith(
       expect.stringContaining('Model Access URL: http://localhost:10254'),
@@ -100,7 +100,7 @@ describe('setup credentials step', () => {
 
     expect(action).toEqual({ type: 'next' });
     expect(OneCLI).toHaveBeenCalledWith({ url: 'http://localhost:10254' });
-    expect(getContainerConfig).toHaveBeenCalledWith('myclaw-model-access');
+    expect(getContainerConfig).toHaveBeenCalledWith('gantry-model-access');
     expect(spinner.start).toHaveBeenCalledWith('Validating Model Access...');
   });
 
@@ -116,7 +116,7 @@ describe('setup credentials step', () => {
 
     expect(result.ok).toBe(true);
     expect(result.message).toContain('broker-safe');
-    expect(getContainerConfig).toHaveBeenCalledWith('myclaw-model-access');
+    expect(getContainerConfig).toHaveBeenCalledWith('gantry-model-access');
   });
 
   it('fails shared model access when OneCLI returns raw provider credentials', async () => {
@@ -155,6 +155,6 @@ describe('setup credentials step', () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain('gateway unavailable');
     expect(result.nextAction).toContain('Open Model Access');
-    expect(getContainerConfig).toHaveBeenCalledWith('myclaw-model-access');
+    expect(getContainerConfig).toHaveBeenCalledWith('gantry-model-access');
   });
 });

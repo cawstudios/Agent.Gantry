@@ -1,6 +1,6 @@
 -- Runtime Event Exchange clean cut.
 --
--- MyClaw is still pre-production, so this migration intentionally does not
+-- Gantry is still pre-production, so this migration intentionally does not
 -- backfill split historical streams. Any non-empty pre-cutover event table is
 -- operator-owned state and must be exported or deleted explicitly before this
 -- schema cut can run.

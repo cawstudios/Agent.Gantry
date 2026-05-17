@@ -159,8 +159,8 @@ describe('job visibility metadata', () => {
     expect(metadata.toolAccess.effectiveAllowedTools).toEqual(['Browser']);
     expect(metadata.toolAccess.projectedRuntimeTools).toEqual(
       expect.arrayContaining([
-        'mcp__myclaw__browser_act',
-        'mcp__myclaw__browser_inspect',
+        'mcp__gantry__browser_act',
+        'mcp__gantry__browser_inspect',
       ]),
     );
   });
@@ -176,7 +176,7 @@ describe('job visibility metadata', () => {
           makeRun({
             status: 'dead_lettered',
             error_summary:
-              'Tool not on autonomous run allowlist: mcp__myclaw__browser_act. Recovery: request_permission { "toolName": "Browser" }',
+              'Tool not on autonomous run allowlist: mcp__gantry__browser_act. Recovery: request_permission { "toolName": "Browser" }',
             result_summary: null,
           }),
         ]),
@@ -197,7 +197,7 @@ describe('job visibility metadata', () => {
       jobs: [
         makeJob({
           status: 'dead_lettered',
-          pause_reason: 'Needs permission: mcp__myclaw__browser_act',
+          pause_reason: 'Needs permission: mcp__gantry__browser_act',
         }),
       ],
       nowMs: Date.parse('2026-04-24T09:10:00.000Z'),

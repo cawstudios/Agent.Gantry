@@ -1,8 +1,8 @@
-# MyClaw Requirements
+# Gantry Requirements
 
 ## Why This Exists
 
-MyClaw exists to give one person a dependable personal agent runtime without turning the project into a sprawling platform.
+Gantry exists to give one person a dependable personal agent runtime without turning the project into a sprawling platform.
 
 The default experience should stay:
 
@@ -86,6 +86,6 @@ Optional capabilities should land as skills or narrow extensions whenever possib
 
 ## Naming and Documentation Rules
 
-- User-facing docs should refer to the project as `MyClaw`.
+- User-facing docs should refer to the project as `Gantry`.
 - Historical references should be rare and clearly marked when they are needed.
 - Active guidance should describe this repo directly rather than talking about forks or upstreams as the default model.

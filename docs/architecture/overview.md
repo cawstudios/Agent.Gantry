@@ -1,4 +1,4 @@
-# MyClaw Architecture Overview
+# Gantry Architecture Overview
 
 Top-down map for new contributors. Subsystem details live in the docs linked
 from each section; this file is the index that ties them together.
@@ -8,9 +8,9 @@ subsystem doc that matches your task.
 
 ## 1. Context
 
-MyClaw is a single Node.js process that hosts agents around a provider-neutral
+Gantry is a single Node.js process that hosts agents around a provider-neutral
 and channel-neutral capability system. Humans reach it through Slack, Telegram,
-Teams, or web/API surfaces. Backend apps reach it through `@myclaw/sdk`.
+Teams, or web/API surfaces. Backend apps reach it through `@gantry/sdk`.
 External systems reach it through signed `/v1/ingresses/:id/invoke` calls.
 Postgres holds all durable state. OneCLI brokers credentials.
 
@@ -27,16 +27,16 @@ flowchart LR
     HOOK[Outbound webhook<br/>subscribers]
   end
   subgraph "Backend apps"
-    SDK[NestJS / Next.js / Workers<br/>via @myclaw/sdk]
+    SDK[NestJS / Next.js / Workers<br/>via @gantry/sdk]
   end
-  subgraph "MyClaw runtime (Node.js single process)"
+  subgraph "Gantry runtime (Node.js single process)"
     ORCH[Orchestrator + Group queue]
     CTRL[Control server<br/>HTTP / SSE]
     SCHED[Scheduler<br/>pg-boss]
     AGS[Spawned agent runners]
   end
   subgraph "Postgres"
-    PGM[(myclaw schema)]
+    PGM[(gantry schema)]
     PGB[(pgboss schema)]
     PGO[(onecli schema)]
   end
@@ -73,7 +73,7 @@ flowchart TB
   Processor[Group processor<br/>apps/core/src/runtime/group-processing.ts]
   Spawn[Agent spawn<br/>apps/core/src/runtime/agent-spawn.ts]
   Runner[Child runner + IPC<br/>apps/core/src/runner/]
-  Mcp[MyClaw MCP server<br/>apps/core/src/runner/mcp/server.ts]
+  Mcp[Gantry MCP server<br/>apps/core/src/runner/mcp/server.ts]
   Control[Control server + SDK<br/>apps/core/src/control/server/, packages/sdk/]
   Sched[Scheduler<br/>apps/core/src/jobs/, apps/core/src/infrastructure/pgboss/]
   Memory[Memory + dreaming<br/>apps/core/src/memory/]
@@ -112,11 +112,11 @@ Layer-by-layer summary (one sentence each):
 - **Child runner** is the only process that calls the Claude Agent SDK; it
   streams follow-ups into `MessageStream` and routes tool calls through
   `canUseTool`.
-- **MyClaw MCP server** exposes the host-owned tools to the agent over signed
+- **Gantry MCP server** exposes the host-owned tools to the agent over signed
   stdio IPC.
 - **Control server + SDK** speak HTTP/SSE for backend apps and external
   ingresses; the SDK is the supported public client.
-- **Scheduler** owns MyClaw job definitions, triggers, runs, events, and
+- **Scheduler** owns Gantry job definitions, triggers, runs, events, and
   pg-boss dispatch.
 - **Memory + dreaming** stores subject-scoped memory, records evidence, and
   runs auditable dreaming over `memory_candidates` / `memory_items`.
@@ -203,7 +203,7 @@ Cited at:
 - `AgentCapabilityContext` and `AgentCapabilityProfile` —
   `apps/core/src/runner/agent-capabilities.ts:7` and
   `apps/core/src/runner/agent-capabilities.ts:41`.
-- Built-in capability providers (`sdk-tools`, `permissions`, `myclaw-mcp`,
+- Built-in capability providers (`sdk-tools`, `permissions`, `gantry-mcp`,
   `configured-tools`, `configured-mcp`) and `composeAgentCapabilities` —
   `apps/core/src/runner/agent-capabilities.ts:131` and
   `apps/core/src/runner/agent-capabilities.ts:249`.
@@ -214,7 +214,7 @@ Cited at:
   `apps/core/src/adapters/llm/anthropic-claude-agent/claude-skill-materializer.ts:1`,
   imported by `apps/core/src/runtime/agent-spawn.ts:39`.
 
-The MyClaw MCP allowlist composed by the `myclaw-mcp` provider is the
+The Gantry MCP allowlist composed by the `gantry-mcp` provider is the
 agent-visible tool surface (`apps/core/src/runner/agent-capabilities.ts:72`):
 
 ```text
@@ -237,7 +237,7 @@ Selected-capability admin agents add four additional admin tools
 
 ### Subagents
 
-Native Anthropic-SDK subagents inherit the parent run by default. MyClaw
+Native Anthropic-SDK subagents inherit the parent run by default. Gantry
 uses the exact `Agent` capability to gate native subagent delegation. Once
 `Agent` is granted, there is no second `subagent_type` allowlist. The runner
 still rejects cross-provider models and custom tool/MCP/skill input on the
@@ -384,7 +384,7 @@ flowchart LR
 The default-scope toggle ships through the host as
 `memoryDefaultScope: 'user' | 'group'` on the `SessionMemoryCollector` port
 (`apps/core/src/domain/ports/session-memory-collector.ts:2`) and reaches the
-agent through the `myclaw-mcp` provider as `MYCLAW_MEMORY_DEFAULT_SCOPE`
+agent through the `gantry-mcp` provider as `GANTRY_MEMORY_DEFAULT_SCOPE`
 (`apps/core/src/runner/agent-capabilities.ts:166`). The conversation memory
 boundary is annotated at
 `apps/core/src/adapters/storage/postgres/repositories/canonical-binding-repository.postgres.ts:63`
@@ -410,7 +410,7 @@ This section narrates the request half:
 ```mermaid
 sequenceDiagram
   participant Agent as "Claude Agent SDK"
-  participant Mcp as "MyClaw MCP server<br/>request_* tool"
+  participant Mcp as "Gantry MCP server<br/>request_* tool"
   participant Ipc as "Signed IPC dir"
   participant Host as "IPC interaction handler"
   participant Surface as "Channel adapter<br/>InteractionDescriptor"
@@ -453,7 +453,7 @@ Cited at:
 
 ## 8. Scheduler + Job Lifecycle
 
-A MyClaw job is a first-party record (`Job` in
+A Gantry job is a first-party record (`Job` in
 `apps/core/src/domain/types.ts:98`) scoped by `group_scope` and runtime
 `execution_context`/`notification_routes` in Postgres. pg-boss provides
 claim/dispatch and restart-safe scheduling, not the job model.
@@ -574,7 +574,7 @@ outbound webhook.
 ```mermaid
 sequenceDiagram
   participant App as "Backend app"
-  participant SDK as "@myclaw/sdk client"
+  participant SDK as "@gantry/sdk client"
   participant Routes as "control/server/routes/sessions.ts"
   participant Adapter as "session-interaction-adapter.ts"
   participant Module as "SessionInteractionModule"
@@ -679,17 +679,17 @@ CLI surface (the `usage()` block at `apps/core/src/cli/index.ts:41`):
 
 | Operation                   | CLI command                                                                                                 | Audience      |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------- |
-| First-run setup / doctor    | `myclaw setup`, `myclaw doctor`, `myclaw status`                                                            | Owner / admin |
-| Service control             | `myclaw service install`, `myclaw service start`, `myclaw service stop`, `myclaw service restart`           | Owner / admin |
-| Local dev runtime           | `myclaw local setup`, `myclaw local start`, `myclaw local stop`, `myclaw local status`, `myclaw local logs` | Owner / admin |
-| Provider connect            | `myclaw provider list`, `myclaw provider connect`, `myclaw provider doctor`                                 | Owner / admin |
-| Conversation administration | `myclaw conversation info`, `myclaw conversation approvers`                                                 | Owner / admin |
-| Agent administration        | `myclaw agent list`, `myclaw agent info`, `myclaw agent add`, `myclaw agent remove`, `myclaw agent trigger` | Owner / admin |
-| Browser profiles            | `myclaw browser profiles`, `myclaw browser status`                                                          | Owner / admin |
-| Model catalog               | `myclaw model list`, `myclaw model set-default`, `myclaw model doctor`                                      | Owner / admin |
-| Settings drift / export     | `myclaw settings export-current`, `myclaw settings drift`                                                   | Owner / admin |
-| Skill upload                | `myclaw skill draft upload <skill.zip>`                                                                     | Owner / admin |
-| MCP administration          | `myclaw mcp draft`, `myclaw mcp list`, `myclaw mcp approve`, `myclaw mcp reject`, `myclaw mcp bind`         | Owner / admin |
+| First-run setup / doctor    | `gantry setup`, `gantry doctor`, `gantry status`                                                            | Owner / admin |
+| Service control             | `gantry service install`, `gantry service start`, `gantry service stop`, `gantry service restart`           | Owner / admin |
+| Local dev runtime           | `gantry local setup`, `gantry local start`, `gantry local stop`, `gantry local status`, `gantry local logs` | Owner / admin |
+| Provider connect            | `gantry provider list`, `gantry provider connect`, `gantry provider doctor`                                 | Owner / admin |
+| Conversation administration | `gantry conversation info`, `gantry conversation approvers`                                                 | Owner / admin |
+| Agent administration        | `gantry agent list`, `gantry agent info`, `gantry agent add`, `gantry agent remove`, `gantry agent trigger` | Owner / admin |
+| Browser profiles            | `gantry browser profiles`, `gantry browser status`                                                          | Owner / admin |
+| Model catalog               | `gantry model list`, `gantry model set-default`, `gantry model doctor`                                      | Owner / admin |
+| Settings drift / export     | `gantry settings export-current`, `gantry settings drift`                                                   | Owner / admin |
+| Skill upload                | `gantry skill draft upload <skill.zip>`                                                                     | Owner / admin |
+| MCP administration          | `gantry mcp draft`, `gantry mcp list`, `gantry mcp approve`, `gantry mcp reject`, `gantry mcp bind`         | Owner / admin |
 
 Control API surface (scopes from `apps/core/src/control/server/auth.ts:5`):
 
@@ -706,7 +706,7 @@ Control API surface (scopes from `apps/core/src/control/server/auth.ts:5`):
 | Ingresses     | `ingresses:read`, `ingresses:write`                          | `apps/core/src/control/server/routes/external-ingress.ts`             |
 | Memory        | `memory:read`, `memory:admin`                                | memory routes                                                         |
 
-Agent-driven changes go through MyClaw MCP `request_*` tools (§7) and produce
+Agent-driven changes go through Gantry MCP `request_*` tools (§7) and produce
 the same writes after approval. The principle —
 "API, CLI, and MCP are adapters over the same application services" — is
 stated at

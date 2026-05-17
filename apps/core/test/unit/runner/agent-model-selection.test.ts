@@ -55,7 +55,7 @@ describe('Agent model selection', () => {
 
   it('rejects overrides when the parent run model is not cataloged', () => {
     expect(validateAgentModelRequest('sonnet', undefined).message).toContain(
-      'cannot be validated because the parent run model is not in the MyClaw catalog',
+      'cannot be validated because the parent run model is not in the Gantry catalog',
     );
   });
 

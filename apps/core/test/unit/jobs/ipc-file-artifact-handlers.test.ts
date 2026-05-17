@@ -11,7 +11,7 @@ const runtimeHomes: string[] = [];
 
 async function loadFileArtifactHandlers(runtimeHome: string) {
   vi.resetModules();
-  vi.stubEnv('MYCLAW_HOME', runtimeHome);
+  vi.stubEnv('GANTRY_HOME', runtimeHome);
   const ipcAuth = await import('@core/runtime/ipc-auth.js');
   const handlers = await import('@core/jobs/ipc-file-artifact-handlers.js');
   return {
@@ -111,7 +111,7 @@ afterEach(() => {
 describe('file artifact IPC handlers', () => {
   it('preserves explicit write content through the signed IPC response path', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-file-ipc-'),
+      path.join(os.tmpdir(), 'gantry-file-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { fileArtifactTaskHandlers, taskData } =
@@ -157,7 +157,7 @@ describe('file artifact IPC handlers', () => {
 
   it('accepts protected prompt writes approved for the current run', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-file-ipc-'),
+      path.join(os.tmpdir(), 'gantry-file-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { fileArtifactTaskHandlers, taskData } =
@@ -166,7 +166,7 @@ describe('file artifact IPC handlers', () => {
     appendLiveToolRules({
       ipcDir: path.join(ipcBaseDir, 'main_agent'),
       runHandle: 'run_live_1',
-      rules: ['mcp__myclaw__request_settings_update'],
+      rules: ['mcp__gantry__request_settings_update'],
     });
     const writeFileArtifact = vi.fn(async (input) =>
       makeArtifact({
@@ -206,7 +206,7 @@ describe('file artifact IPC handlers', () => {
 
   it('rejects protected prompt writes without admin capability', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-file-ipc-'),
+      path.join(os.tmpdir(), 'gantry-file-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { fileArtifactTaskHandlers, taskData } =

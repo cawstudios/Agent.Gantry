@@ -1,6 +1,6 @@
 # Agent Runtime And SDK Control Plane
 
-This document explains what the agent does and what the surrounding runtime does when an app uses `@myclaw/sdk`.
+This document explains what the agent does and what the surrounding runtime does when an app uses `@gantry/sdk`.
 
 ## Boundary
 
@@ -153,7 +153,7 @@ Sources:
 - `AgentPersona` enum and resolver —
   `apps/core/src/shared/agent-persona.ts:1`.
 - `AgentCapabilityContext`, `AgentCapabilityProfile`, and the five built-in
-  providers (`sdk-tools`, `permissions`, `myclaw-mcp`, `configured-tools`,
+  providers (`sdk-tools`, `permissions`, `gantry-mcp`, `configured-tools`,
   `configured-mcp`) plus `composeAgentCapabilities` —
   `apps/core/src/runner/agent-capabilities.ts:7`,
   `apps/core/src/runner/agent-capabilities.ts:131`,
@@ -167,7 +167,7 @@ Sources:
 
 ### Subagents
 
-Native Anthropic-SDK subagents inherit the parent run by default. MyClaw
+Native Anthropic-SDK subagents inherit the parent run by default. Gantry
 uses the exact `Agent` capability to gate native subagent delegation. Once
 `Agent` is granted, the runtime does not add a second `subagent_type`
 allowlist. It still rejects cross-provider models and custom

@@ -105,7 +105,7 @@ describe('Teams Adaptive Card payloads', () => {
       expect.objectContaining({
         type: 'Action.Execute',
         title: 'Allow once',
-        verb: 'myclaw.permission.allow',
+        verb: 'gantry.permission.allow',
         data: expect.objectContaining({
           requestId: 'perm-1',
           decision: 'allow_once',
@@ -114,7 +114,7 @@ describe('Teams Adaptive Card payloads', () => {
       expect.objectContaining({
         type: 'Action.Execute',
         title: 'Allow 5 min',
-        verb: 'myclaw.permission.allow',
+        verb: 'gantry.permission.allow',
         data: expect.objectContaining({
           requestId: 'perm-1',
           decision: 'allow_timed_grant',
@@ -123,7 +123,7 @@ describe('Teams Adaptive Card payloads', () => {
       expect.objectContaining({
         type: 'Action.Execute',
         title: 'Cancel',
-        verb: 'myclaw.permission.cancel',
+        verb: 'gantry.permission.cancel',
         data: expect.objectContaining({
           requestId: 'perm-1',
           decision: 'cancel',

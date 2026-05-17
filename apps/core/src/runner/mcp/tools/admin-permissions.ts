@@ -19,7 +19,7 @@ export function registerAdminPermissionTools(
 ): void {
   server.tool(
     'admin_permission_list',
-    'List local permission and capability selection signals visible to this runner. Requires selected agent tool grant mcp__myclaw__admin_permission_list.',
+    'List local permission and capability selection signals visible to this runner. Requires selected agent tool grant mcp__gantry__admin_permission_list.',
     {},
     async () => {
       if (!options.isAdminToolEnabled('admin_permission_list')) {
@@ -43,7 +43,7 @@ export function registerAdminPermissionTools(
       tool_name: z
         .string()
         .optional()
-        .describe('Optional public tool rule or mcp__myclaw__ tool name.'),
+        .describe('Optional public tool rule or mcp__gantry__ tool name.'),
       tool_id: z
         .string()
         .optional()
@@ -80,7 +80,7 @@ function formatAdminPermissionList(): string {
       const status = enabledAdminTools.has(toolName)
         ? 'selected'
         : 'not selected';
-      return `- mcp__myclaw__${toolName}: ${status}`;
+      return `- mcp__gantry__${toolName}: ${status}`;
     }),
     '',
     'Configured tool rules:',
@@ -115,7 +115,7 @@ function adminToolUnavailable(toolName: AdminMcpToolName): {
   content: { type: 'text'; text: string }[];
   isError: true;
 } {
-  const fullName = `mcp__myclaw__${toolName}`;
+  const fullName = `mcp__gantry__${toolName}`;
   return {
     content: [
       {

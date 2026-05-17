@@ -13,7 +13,7 @@ afterEach(() => {
 describe('config credential boundary integration', () => {
   it('blocks wrong-lane writes and reports runtime env policy violations', () => {
     const fixture = createRuntimeHomeFixture({
-      prefix: 'myclaw-config-boundary-',
+      prefix: 'gantry-config-boundary-',
     });
 
     expect(
@@ -33,8 +33,8 @@ describe('config credential boundary integration', () => {
     expect(
       runConfigCommand(fixture.runtimeHome, [
         'set',
-        'MYCLAW_DATABASE_URL',
-        'postgres://myclaw:pass@localhost:15432/myclaw',
+        'GANTRY_DATABASE_URL',
+        'postgres://gantry:pass@localhost:15432/gantry',
       ]),
     ).toBe(0);
 
@@ -70,7 +70,7 @@ describe('config credential boundary integration', () => {
 
   it('uses process env values for runtime secrets and ignores ambient raw provider credentials', async () => {
     const fixture = createRuntimeHomeFixture({
-      prefix: 'myclaw-config-boundary-',
+      prefix: 'gantry-config-boundary-',
       mutateSettings(settings) {
         settings.credentialBroker.mode = 'external';
         settings.credentialBroker.onecli.url = '';
@@ -78,13 +78,13 @@ describe('config credential boundary integration', () => {
       },
     });
     fixture.writeEnv({
-      MYCLAW_DATABASE_URL: 'postgres://file:pass@localhost:15432/myclaw',
+      GANTRY_DATABASE_URL: 'postgres://file:pass@localhost:15432/gantry',
       TELEGRAM_BOT_TOKEN: 'runtime-telegram-token',
     });
 
-    vi.stubEnv('MYCLAW_HOME', fixture.runtimeHome);
+    vi.stubEnv('GANTRY_HOME', fixture.runtimeHome);
     vi.stubEnv(
-      'MYCLAW_DATABASE_URL',
+      'GANTRY_DATABASE_URL',
       'postgres://ambient:pass@localhost:15432/ambient',
     );
     vi.stubEnv('TELEGRAM_BOT_TOKEN', 'ambient-telegram-token');
@@ -113,7 +113,7 @@ describe('config credential boundary integration', () => {
     expect(policy.ok).toBe(true);
     expect(readEnvFile(fixture.envPath)).toEqual(
       expect.objectContaining({
-        MYCLAW_DATABASE_URL: 'postgres://file:pass@localhost:15432/myclaw',
+        GANTRY_DATABASE_URL: 'postgres://file:pass@localhost:15432/gantry',
         TELEGRAM_BOT_TOKEN: 'runtime-telegram-token',
       }),
     );

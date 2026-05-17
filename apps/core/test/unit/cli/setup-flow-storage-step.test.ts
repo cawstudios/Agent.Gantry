@@ -8,7 +8,7 @@ const runtimeHomes: string[] = [];
 
 function makeRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'myclaw-storage-step-'),
+    path.join(os.tmpdir(), 'gantry-storage-step-'),
   );
   runtimeHomes.push(runtimeHome);
   return runtimeHome;
@@ -49,10 +49,10 @@ describe('setup storage step', () => {
     const { runStorageStep, restoreDraft, text } =
       await loadStorageStepWithPrompts([
         'local',
-        'postgres://myclaw_app:pass@localhost:5432/myclaw',
-        'myclaw',
+        'postgres://gantry_app:pass@localhost:5432/gantry',
+        'gantry',
         'onecli',
-        'postgres://onecli_app:pass@localhost:5432/myclaw?schema=onecli',
+        'postgres://onecli_app:pass@localhost:5432/gantry?schema=onecli',
       ]);
     const draft = restoreDraft(runtimeHome, null);
 
@@ -61,7 +61,7 @@ describe('setup storage step', () => {
     expect(action).toEqual({ type: 'next' });
     expect(draft.postgresSetupKind).toBe('local');
     expect(draft.postgresDatabaseUrl).toBe(
-      'postgres://myclaw_app:pass@localhost:5432/myclaw',
+      'postgres://gantry_app:pass@localhost:5432/gantry',
     );
     expect(draft.onecliPostgresDatabaseUrl).toContain('onecli_app');
     expect(text).toHaveBeenCalledTimes(4);
@@ -75,7 +75,7 @@ describe('setup storage step', () => {
     const runtimeHome = makeRuntimeHome();
     const { runStorageStep, restoreDraft } = await loadStorageStepWithPrompts([
       'hosted',
-      'postgres://user:pass@db.example.com:5432/myclaw',
+      'postgres://user:pass@db.example.com:5432/gantry',
     ]);
     const draft = restoreDraft(runtimeHome, null);
 
@@ -86,10 +86,10 @@ describe('setup storage step', () => {
     const runtimeHome = makeRuntimeHome();
     const { runStorageStep, restoreDraft } = await loadStorageStepWithPrompts([
       'existing',
-      'postgres://user:pass@localhost:5432/myclaw',
+      'postgres://user:pass@localhost:5432/gantry',
       'custom_schema',
       'agent_vault',
-      'postgres://onecli:pass@localhost:5432/myclaw?schema=agent_vault',
+      'postgres://onecli:pass@localhost:5432/gantry?schema=agent_vault',
     ]);
     const draft = restoreDraft(runtimeHome, null);
 
@@ -98,23 +98,23 @@ describe('setup storage step', () => {
     expect(action).toEqual({ type: 'next' });
     expect(draft.postgresSetupKind).toBe('existing');
     expect(draft.postgresDatabaseUrl).toBe(
-      'postgres://user:pass@localhost:5432/myclaw',
+      'postgres://user:pass@localhost:5432/gantry',
     );
     expect(draft.onecliPostgresDatabaseUrl).toBe(
-      'postgres://onecli:pass@localhost:5432/myclaw?schema=agent_vault',
+      'postgres://onecli:pass@localhost:5432/gantry?schema=agent_vault',
     );
     expect(draft.postgresSchema).toBe('custom_schema');
     expect(draft.onecliPostgresSchema).toBe('agent_vault');
   });
 
-  it('rejects hosted and existing OneCLI URLs that reuse the MyClaw role', async () => {
+  it('rejects hosted and existing OneCLI URLs that reuse the Gantry role', async () => {
     const runtimeHome = makeRuntimeHome();
     const { runStorageStep, restoreDraft } = await loadStorageStepWithPrompts([
       'existing',
-      'postgres://user:pass@localhost:5432/myclaw',
-      'myclaw',
+      'postgres://user:pass@localhost:5432/gantry',
+      'gantry',
       'onecli',
-      'postgres://user:pass@localhost:5432/myclaw?schema=onecli',
+      'postgres://user:pass@localhost:5432/gantry?schema=onecli',
     ]);
     const draft = restoreDraft(runtimeHome, null);
 
@@ -127,8 +127,8 @@ describe('setup storage step', () => {
     const runtimeHome = makeRuntimeHome();
     const { runStorageStep, restoreDraft } = await loadStorageStepWithPrompts([
       'existing',
-      'postgres://myclaw:pass@localhost:5432/myclaw',
-      'myclaw',
+      'postgres://gantry:pass@localhost:5432/gantry',
+      'gantry',
       'onecli',
       'postgres://onecli:pass@localhost:5432/other?schema=onecli',
     ]);

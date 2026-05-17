@@ -1,6 +1,6 @@
 # Postgres Query Policy
 
-MyClaw uses Drizzle as the default interface for repository-owned Postgres data
+Gantry uses Drizzle as the default interface for repository-owned Postgres data
 access. Repositories should define tables in `apps/core/src/adapters/storage/postgres/schema/`
 and use Drizzle inserts, updates, deletes, selects, transactions, and upserts for
 normal CRUD behavior.

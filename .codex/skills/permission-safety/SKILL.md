@@ -1,6 +1,6 @@
 ---
 name: permission-safety
-description: Use for tools, permissions, risky actions, sandbox, browser, and execution safety changes in MyClaw.
+description: Use for tools, permissions, risky actions, sandbox, browser, and execution safety changes in Gantry.
 ---
 
 # Permission Safety

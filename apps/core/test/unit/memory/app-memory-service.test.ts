@@ -712,7 +712,7 @@ describe('app-grade memory boundaries', () => {
       groupId: 'kai',
       kind: 'fact',
       key: 'fact:runtime-home',
-      value: 'Runtime home defaults to ~/myclaw.',
+      value: 'Runtime home defaults to ~/gantry.',
       source: 'dreaming',
       evidenceIds: ['mev-one'],
       dreamingPromotion: {

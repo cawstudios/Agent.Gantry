@@ -1,6 +1,6 @@
 ---
 name: commands
-description: List available MyClaw chat commands and installed skill packs. Use when the user types /commands, asks "what commands are available", or wants to see available skills.
+description: List available Gantry chat commands and installed skill packs. Use when the user types /commands, asks "what commands are available", or wants to see available skills.
 user_invocable: true
 ---
 
@@ -10,34 +10,34 @@ List available commands grouped by category with a one-line description for each
 
 ## Steps
 
-1. Print the MyClaw host-managed session commands.
-2. Print bundled MyClaw skills available in the package/runtime.
+1. Print the Gantry host-managed session commands.
+2. Print bundled Gantry skills available in the package/runtime.
 3. Print approved and enabled skill bindings when the control API exposes them.
 4. Format output for the active channel.
 
-## MyClaw Session Commands
+## Gantry Session Commands
 
-These are handled by the MyClaw host runtime, not by skill files:
+These are handled by the Gantry host runtime, not by skill files:
 
-- `/compact` -- Ask the Claude Agent SDK to compact context, then collect durable MyClaw memory at the compact boundary
+- `/compact` -- Ask the Claude Agent SDK to compact context, then collect durable Gantry memory at the compact boundary
 - `/new` -- Reset the current group session state while preserving durable memory
 - `/model` -- Show the current model selection
 - `/model <value>` -- Set the group model override after validation
 - `/model default` -- Clear the group model override
 
-## Bundled MyClaw Skills
+## Bundled Gantry Skills
 
 - `/commands` -- List available commands and installed skill packs
-- `myclaw-admin` -- Runtime administration reference (non-user-invocable)
+- `gantry-admin` -- Runtime administration reference (non-user-invocable)
 
 ## Runtime Browser Capability
 
 - `Browser` -- Canonical browser capability selected per agent
-- `myclaw-browser` -- Runtime-installed browser gateway guidance
+- `gantry-browser` -- Runtime-installed browser gateway guidance
 
-MyClaw launches the persistent browser profile headed by default. Durable
+Gantry launches the persistent browser profile headed by default. Durable
 authority is the canonical `Browser` capability; runtime projects it to
-MyClaw-owned browser gateway tools. Users do not install or edit browser skills
+Gantry-owned browser gateway tools. Users do not install or edit browser skills
 manually.
 
 ## Semantic Tool Capabilities
@@ -50,7 +50,7 @@ manually.
 Use semantic capability tools before asking for raw scoped Bash fallback for
 app workflows such as Google Sheets, Gmail, or business CLIs. Durable exact
 low-level tool grants are limited to canonical `Browser` and selected
-first-party MyClaw admin tools; broad SDK/native tools and exact third-party
+first-party Gantry admin tools; broad SDK/native tools and exact third-party
 MCP tools are not persistent authority.
 
 ## Built-In Memory Behavior
@@ -62,27 +62,27 @@ Memory and continuity are automatic runtime behavior, not slash commands in this
 - Embeddings are optional. Memory still saves, searches, and injects context when embeddings are disabled.
 - Ask the agent to remember a durable fact only when it should be useful later. Do not ask it to save raw logs or temporary task progress as memory.
 
-## MyClaw CLI Commands
+## Gantry CLI Commands
 
 These run on the host machine:
 
-- `myclaw setup` -- Guided setup wizard
-- `myclaw doctor` -- Runtime diagnostics and dependency checks
-- `myclaw status` -- Show runtime health and configuration
-- `myclaw memory status` -- Show memory/storage/embeddings/dreaming state
-- `myclaw memory embeddings <off|openai>` -- Set embeddings mode
-- `myclaw memory dreaming <on|off>` -- Set dreaming mode
-- `myclaw start` -- Start MyClaw in the foreground
-- `myclaw restart` -- Restart the installed service when available
-- `myclaw telegram connect` -- Connect or reconnect Telegram
-- `myclaw slack connect` -- Connect or reconnect Slack
-- `myclaw service install` -- Install the background service
-- `myclaw service start` -- Start the background service
-- `myclaw service stop` -- Stop the background service
-- `myclaw agent list` -- List registered agents/groups
-- `myclaw agent add <jid|chat-id>` -- Register a new agent/group
-- `myclaw skill draft upload <skill.zip>` -- Upload a skill zip as a draft
-- `myclaw config list` -- List runtime config keys with secrets masked
+- `gantry setup` -- Guided setup wizard
+- `gantry doctor` -- Runtime diagnostics and dependency checks
+- `gantry status` -- Show runtime health and configuration
+- `gantry memory status` -- Show memory/storage/embeddings/dreaming state
+- `gantry memory embeddings <off|openai>` -- Set embeddings mode
+- `gantry memory dreaming <on|off>` -- Set dreaming mode
+- `gantry start` -- Start Gantry in the foreground
+- `gantry restart` -- Restart the installed service when available
+- `gantry telegram connect` -- Connect or reconnect Telegram
+- `gantry slack connect` -- Connect or reconnect Slack
+- `gantry service install` -- Install the background service
+- `gantry service start` -- Start the background service
+- `gantry service stop` -- Stop the background service
+- `gantry agent list` -- List registered agents/groups
+- `gantry agent add <jid|chat-id>` -- Register a new agent/group
+- `gantry skill draft upload <skill.zip>` -- Upload a skill zip as a draft
+- `gantry config list` -- List runtime config keys with secrets masked
 
 ## gstack (If Installed)
 

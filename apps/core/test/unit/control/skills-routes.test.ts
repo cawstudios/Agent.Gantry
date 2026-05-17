@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { syncRuntimeSettingsFromProjection } from '@core/config/index.js';
 
 vi.mock('@core/config/index.js', () => ({
-  MYCLAW_HOME: '/tmp/myclaw-control-test-home',
+  GANTRY_HOME: '/tmp/gantry-control-test-home',
   ONECLI_ALLOWED_ENV_KEYS: [],
   getControlEnvValue: vi.fn((key: string) => process.env[key]?.trim() || ''),
   syncRuntimeSettingsFromProjection: vi.fn(async () => undefined),
@@ -316,7 +316,7 @@ beforeEach(() => {
       },
     ],
   });
-  process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+  process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
     {
       kid: 'k',
       token: 'token-skills',
@@ -327,14 +327,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.MYCLAW_CONTROL_API_KEYS_JSON;
-  delete process.env.MYCLAW_CONTROL_PORT;
+  delete process.env.GANTRY_CONTROL_API_KEYS_JSON;
+  delete process.env.GANTRY_CONTROL_PORT;
 });
 
 describe('control skill routes', () => {
   it('rejects skill binding when agent is outside API key app', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
     });
@@ -361,7 +361,7 @@ describe('control skill routes', () => {
 
   it('rejects skill binding when request appId conflicts with API key app', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
     });
@@ -388,7 +388,7 @@ describe('control skill routes', () => {
 
   it('rejects draft upload when query appId conflicts with API key app', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
     });
@@ -415,7 +415,7 @@ describe('control skill routes', () => {
 
   it('rejects draft upload when agent belongs to another app', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
     });
@@ -442,7 +442,7 @@ describe('control skill routes', () => {
 
   it('persists skill binding lifecycle for in-app agent', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
     });
@@ -494,7 +494,7 @@ describe('control skill routes', () => {
 
   it('requires application/zip for draft uploads', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
     });
@@ -519,7 +519,7 @@ describe('control skill routes', () => {
 
   it('lists and reads readable skill files from artifact storage', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
     const handle = startControlServer({
       app: { queue: { enqueueMessageCheck: vi.fn() } } as never,
     });

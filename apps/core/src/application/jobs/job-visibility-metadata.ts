@@ -349,7 +349,7 @@ function nextJobHealthAction(
 ): string | null {
   if (denial?.recoveryAction) return denial.recoveryAction;
   if (state === 'needs_permission' && denial?.toolName) {
-    if (denial.toolName.startsWith('mcp__myclaw__browser_')) {
+    if (denial.toolName.startsWith('mcp__gantry__browser_')) {
       return 'Approve Browser access, then rerun the job.';
     }
     return `Approve ${denial.toolName} access, then rerun the job.`;

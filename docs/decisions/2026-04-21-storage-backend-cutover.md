@@ -2,7 +2,7 @@
 
 ## Context
 
-MyClaw runtime persistence, memory persistence, jobs, control events, and SDK callbacks need one production storage model. Public settings and docs must present Postgres as the runtime substrate.
+Gantry runtime persistence, memory persistence, jobs, control events, and SDK callbacks need one production storage model. Public settings and docs must present Postgres as the runtime substrate.
 
 We need a single cut to:
 
@@ -33,7 +33,7 @@ We need a single cut to:
 
 ## Consequences
 
-- Runtime requires Postgres through `MYCLAW_DATABASE_URL`.
+- Runtime requires Postgres through `GANTRY_DATABASE_URL`.
 - Health/diagnostics report Postgres capabilities explicitly.
 - Local Dockerized Postgres is documented for development.
 - Memory and session continuity state live in Postgres. Provider transcript

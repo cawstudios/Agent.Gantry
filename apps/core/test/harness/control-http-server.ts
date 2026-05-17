@@ -27,8 +27,8 @@ export async function startTestControlServer(input: {
   runtimeApp?: unknown;
 }) {
   const port = await reserveControlPort();
-  process.env.MYCLAW_CONTROL_PORT = String(port);
-  process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+  process.env.GANTRY_CONTROL_PORT = String(port);
+  process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
     {
       kid: 'test',
       token: input.token,
@@ -48,8 +48,8 @@ export async function startTestControlServer(input: {
     token: input.token,
     async close() {
       await handle.close();
-      delete process.env.MYCLAW_CONTROL_PORT;
-      delete process.env.MYCLAW_CONTROL_API_KEYS_JSON;
+      delete process.env.GANTRY_CONTROL_PORT;
+      delete process.env.GANTRY_CONTROL_API_KEYS_JSON;
     },
   };
 }

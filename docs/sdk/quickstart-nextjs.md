@@ -2,11 +2,11 @@
 
 ```ts
 // app/api/agent/route.ts
-import { createClient } from '@myclaw/sdk';
+import { createClient } from '@gantry/sdk';
 
 const client = createClient({
-  socketPath: process.env.MYCLAW_CONTROL_SOCKET_PATH,
-  apiKey: process.env.MYCLAW_SESSIONS_API_KEY!,
+  socketPath: process.env.GANTRY_CONTROL_SOCKET_PATH,
+  apiKey: process.env.GANTRY_SESSIONS_API_KEY!,
 });
 
 export async function POST(req: Request) {

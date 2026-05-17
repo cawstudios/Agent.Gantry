@@ -58,9 +58,91 @@ function statusLabel(
 }
 
 function compactSummary(summary: string, max = 180): string {
-  const normalized = summary.replace(/\s+/g, ' ').trim();
+  const normalized = humanizeSummary(summary);
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max - 3)}...`;
+}
+
+function humanizeSummary(summary: string): string {
+  const trimmed = stripDiagnosticSuffix(summary).trim();
+  if (!trimmed) return '';
+  const browserAssertionOutcome = humanizeBrowserAssertionFailure(trimmed);
+  if (browserAssertionOutcome) return browserAssertionOutcome;
+  const jsonOutcome = humanizeJsonSummary(trimmed);
+  if (jsonOutcome) return jsonOutcome;
+  return trimmed
+    .replace(/^#+\s*/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\s*[-*]\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
+    .trim();
+}
+
+function stripDiagnosticSuffix(summary: string): string {
+  return summary.replace(/\nDiagnostics:[\s\S]*$/i, '');
+}
+
+function humanizeBrowserAssertionFailure(summary: string): string | null {
+  if (
+    /Required tool assertion Browser was not satisfied/i.test(summary) ||
+    /Browser was available but not used/i.test(summary)
+  ) {
+    return 'Browser access was available, but this job did not use the browser.';
+  }
+  return null;
+}
+
+function humanizeJsonSummary(summary: string): string | null {
+  if (!summary.startsWith('{') && !summary.startsWith('[')) return null;
+  try {
+    const parsed = JSON.parse(summary) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.length === 0
+        ? 'Job returned no items.'
+        : `Job returned ${parsed.length} item${parsed.length === 1 ? '' : 's'}.`;
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (
+      'queued' in record &&
+      'pending' in record &&
+      'deduped' in record &&
+      Object.keys(record).every((key) =>
+        ['queued', 'pending', 'deduped'].includes(key),
+      )
+    ) {
+      return record.deduped
+        ? 'Memory maintenance was already running for this conversation.'
+        : 'Memory maintenance completed.';
+    }
+    const usefulEntries = Object.entries(record).filter(
+      ([, value]) =>
+        value !== null &&
+        value !== undefined &&
+        (typeof value === 'string' ||
+          typeof value === 'number' ||
+          typeof value === 'boolean'),
+    );
+    if (usefulEntries.length === 0) return null;
+    return usefulEntries
+      .slice(0, 6)
+      .map(([key, value]) => `${labelFromKey(key)}: ${String(value)}`)
+      .join(', ');
+  } catch {
+    return null;
+  }
+}
+
+function labelFromKey(key: string): string {
+  return key
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function notificationOutcome(
@@ -69,7 +151,7 @@ function notificationOutcome(
   denial: AutonomousToolDenial | null,
 ): string {
   if (denial) {
-    if (denial.toolName.startsWith('mcp__myclaw__browser_')) {
+    if (denial.toolName.startsWith('mcp__gantry__browser_')) {
       return 'Could not use the browser for this job.';
     }
     return `Missing ${denial.toolName} access for this job.`;
@@ -92,7 +174,7 @@ function notificationAction(
   pauseReason?: string | null,
 ): string | null {
   if (denial) {
-    if (denial.toolName.startsWith('mcp__myclaw__browser_')) {
+    if (denial.toolName.startsWith('mcp__gantry__browser_')) {
       return 'Browser access needs approval.';
     }
     return 'The agent can update this job permission and rerun it.';
@@ -102,6 +184,9 @@ function notificationAction(
   }
   if (status === 'timeout') {
     return 'Rerun with a longer job timeout if this work is expected to take more time.';
+  }
+  if (humanizeBrowserAssertionFailure(summary)) {
+    return 'Update the job so it uses the browser during the run, or remove Browser from required tools if browser use is optional.';
   }
   if (status === 'dead_lettered') {
     return pauseReason
@@ -119,9 +204,22 @@ function nextRunLabel(
   nextRun: string | null,
   status: 'completed' | 'failed' | 'timeout' | 'dead_lettered',
 ): string {
-  if (nextRun) return `Runs again at ${nextRun}.`;
+  if (nextRun) return `Runs again ${formatNextRun(nextRun)}.`;
   if (status === 'completed') return 'No next run.';
   return 'Stopped until the job is fixed or rerun.';
+}
+
+function formatNextRun(nextRun: string): string {
+  const date = new Date(nextRun);
+  if (Number.isNaN(date.getTime())) return 'after the schedule is repaired';
+  return `at ${new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(date)}`;
 }
 
 function hasReportableSummary(summary: string): boolean {

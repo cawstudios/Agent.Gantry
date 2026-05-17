@@ -9,7 +9,7 @@ import {
   hasBashShellControlSyntax,
   validatePersistentBashScope,
 } from './agent-tool-references.js';
-import { isMyClawMcpWildcardRule } from './admin-mcp-tools.js';
+import { isGantryMcpWildcardRule } from './admin-mcp-tools.js';
 import {
   type BashCommandLeaf,
   bashExecutableName,
@@ -97,11 +97,11 @@ export function validateAutonomousToolRule(
   if (isProjectedBrowserMcpToolRule(value)) {
     return { ok: false, reason: BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON };
   }
-  if (isMyClawMcpWildcardRule(value)) {
+  if (isGantryMcpWildcardRule(value)) {
     return {
       ok: false,
       reason:
-        'Persistent MyClaw MCP wildcard grants are not supported; request one exact mcp__myclaw__ tool.',
+        'Persistent Gantry MCP wildcard grants are not supported; request one exact mcp__gantry__ tool.',
     };
   }
   const parsed = parseToolRule(value);

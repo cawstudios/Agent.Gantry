@@ -54,11 +54,11 @@ describe('PostgresRuntimeEventNotifier', () => {
       sessionId: 'session-one' as never,
     });
     await vi.waitFor(() =>
-      expect(first.query).toHaveBeenCalledWith('LISTEN myclaw_runtime_events'),
+      expect(first.query).toHaveBeenCalledWith('LISTEN gantry_runtime_events'),
     );
 
     first.emit('notification', {
-      channel: 'myclaw_runtime_events',
+      channel: 'gantry_runtime_events',
       payload: JSON.stringify({
         eventId: 1,
         appId: 'app-two',
@@ -69,7 +69,7 @@ describe('PostgresRuntimeEventNotifier', () => {
     expect(listener).not.toHaveBeenCalled();
 
     first.emit('notification', {
-      channel: 'myclaw_runtime_events',
+      channel: 'gantry_runtime_events',
       payload: JSON.stringify({
         eventId: 1,
         appId: 'app-one',
@@ -80,7 +80,7 @@ describe('PostgresRuntimeEventNotifier', () => {
     expect(listener).not.toHaveBeenCalled();
 
     first.emit('notification', {
-      channel: 'myclaw_runtime_events',
+      channel: 'gantry_runtime_events',
       payload: JSON.stringify({
         eventId: 2,
         appId: 'app-one',
@@ -92,7 +92,7 @@ describe('PostgresRuntimeEventNotifier', () => {
     expect(listener).not.toHaveBeenCalled();
 
     first.emit('notification', {
-      channel: 'myclaw_runtime_events',
+      channel: 'gantry_runtime_events',
       payload: JSON.stringify({
         eventId: 3,
         appId: 'app-one',
@@ -105,7 +105,7 @@ describe('PostgresRuntimeEventNotifier', () => {
     listener.mockClear();
 
     first.emit('notification', {
-      channel: 'myclaw_runtime_events',
+      channel: 'gantry_runtime_events',
       payload: JSON.stringify({
         eventId: 4,
         appId: 'app-one',
@@ -123,7 +123,7 @@ describe('PostgresRuntimeEventNotifier', () => {
     await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(() => expect(pool.connect).toHaveBeenCalledTimes(2));
     await vi.waitFor(() =>
-      expect(second.query).toHaveBeenCalledWith('LISTEN myclaw_runtime_events'),
+      expect(second.query).toHaveBeenCalledWith('LISTEN gantry_runtime_events'),
     );
 
     await notifier.close();

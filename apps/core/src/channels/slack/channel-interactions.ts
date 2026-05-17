@@ -322,7 +322,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: 'Use `myclaw agent add sl:<channel-id>` to bind additional Slack chats.',
+            text: 'Use `gantry agent add sl:<channel-id>` to bind additional Slack chats.',
           },
         },
       ];
@@ -338,7 +338,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         logger.debug({ err }, 'Failed to publish Slack App Home');
       }
     });
-    this.app.shortcut('myclaw_open_home', async (args: any) => {
+    this.app.shortcut('gantry_open_home', async (args: any) => {
       await args.ack();
       const triggerId = args.shortcut?.trigger_id as string | undefined;
       if (!triggerId) return;
@@ -360,7 +360,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
                 type: 'section',
                 text: {
                   type: 'mrkdwn',
-                  text: 'Use `myclaw agent add sl:<channel-id>` to bind new Slack chats.',
+                  text: 'Use `gantry agent add sl:<channel-id>` to bind new Slack chats.',
                 },
               },
             ],
@@ -370,7 +370,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         logger.debug({ err }, 'Failed to open Slack shortcut modal');
       }
     });
-    this.app.shortcut('myclaw_reply_with_context', async (args: any) => {
+    this.app.shortcut('gantry_reply_with_context', async (args: any) => {
       await args.ack();
       const shortcut = args.shortcut as {
         channel?: { id?: string };
@@ -392,10 +392,12 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         logger.debug({ err }, 'Failed to respond to Slack message shortcut');
       }
     });
-    this.app.action('myclaw_perm_decision', async (args: any) => {
+    this.app.action('gantry_perm_decision', async (args: any) => {
       await args.ack();
       const body = args.body as {
         channel?: { id?: string };
+        container?: { channel_id?: string };
+        message?: { channel?: string };
         user?: { id?: string; name?: string; username?: string };
       };
       const action = args.action as { value?: string };
@@ -423,13 +425,18 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
       if (!permissionDecisionOptions(pending.request).includes(mode)) {
         return;
       }
+      const callbackChannelId =
+        body.channel?.id ||
+        body.container?.channel_id ||
+        body.message?.channel ||
+        '';
       if (
         pending.decisionPolicy === 'same_channel' &&
-        body.channel?.id !== pending.channelId
+        callbackChannelId !== pending.channelId
       ) {
         try {
           await this.app?.client.chat.postEphemeral({
-            channel: body.channel?.id || pending.channelId,
+            channel: callbackChannelId || pending.channelId,
             user: userId,
             text: 'This approval request belongs to a different chat.',
           });
@@ -446,10 +453,9 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
           pending.approvalContextJid || `sl:${pending.channelId}`,
         ))
       ) {
-        const callbackChannelId = body.channel?.id || pending.channelId;
         try {
           await this.app?.client.chat.postEphemeral({
-            channel: callbackChannelId,
+            channel: callbackChannelId || pending.channelId,
             user: userId,
             text: 'You are not allowed to decide this permission request.',
           });
@@ -465,7 +471,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         ...decision,
       });
     });
-    this.app.action('myclaw_userq_select', async (args: any) => {
+    this.app.action('gantry_userq_select', async (args: any) => {
       await args.ack();
       const action = args.action as { value?: string };
       const body = args.body as {
@@ -524,7 +530,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
       }
       await this.refreshUserQuestionPrompt(pending);
     });
-    this.app.action('myclaw_userq_done', async (args: any) => {
+    this.app.action('gantry_userq_done', async (args: any) => {
       await args.ack();
       const action = args.action as { value?: string };
       const body = args.body as {
@@ -576,7 +582,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         answeredBy,
       );
     });
-    this.app.action('myclaw_message_action', async (args: any) => {
+    this.app.action('gantry_message_action', async (args: any) => {
       await args.ack();
       const action = args.action as { value?: string };
       const body = args.body as {

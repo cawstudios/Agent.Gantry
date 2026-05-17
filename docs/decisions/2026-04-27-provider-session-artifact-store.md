@@ -3,7 +3,7 @@
 ## Context
 
 Claude JSONL/session files were being treated as durable local runtime state.
-That couples MyClaw session continuity to one provider, one filesystem layout,
+That couples Gantry session continuity to one provider, one filesystem layout,
 and one machine.
 
 Canonical conversations and messages already live in Postgres. Provider files
@@ -11,7 +11,7 @@ must not be canonical history.
 
 ## Decision
 
-MyClaw stores explicit provider exports and debug artifacts through
+Gantry stores explicit provider exports and debug artifacts through
 `ProviderArtifactStore`.
 
 - `local-filesystem` is supported for single-node production and shared-volume
@@ -34,5 +34,5 @@ Single-node deployments can use local filesystem artifact bytes. Multi-node
 deployments need a shared filesystem or object-store adapter.
 
 Provider artifacts are not a session continuity path. Active chat continuity
-uses the live provider stream, and cold starts hydrate durable MyClaw memory
+uses the live provider stream, and cold starts hydrate durable Gantry memory
 only.

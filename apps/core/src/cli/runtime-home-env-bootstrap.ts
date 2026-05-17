@@ -16,5 +16,5 @@ function readRuntimeHomeArg(argv: readonly string[]): string | undefined {
 
 const runtimeHomeArg = readRuntimeHomeArg(process.argv)?.trim();
 if (runtimeHomeArg) {
-  process.env.MYCLAW_HOME = path.resolve(runtimeHomeArg);
+  process.env.GANTRY_HOME = path.resolve(runtimeHomeArg);
 }

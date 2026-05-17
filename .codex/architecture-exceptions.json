@@ -1281,7 +1281,7 @@
     "maxViolations": 1
   },
   {
-    "file": "apps/core/src/shared/myclaw-home.ts",
+    "file": "apps/core/src/shared/gantry-home.ts",
     "rule": "old_term_groupFolder",
     "reason": "Baseline groupFolder terminology debt pending canonical conversation/workspace rename; capped so new occurrences fail.",
     "removeByPhase": "canonical-boundary-cleanup-phase",

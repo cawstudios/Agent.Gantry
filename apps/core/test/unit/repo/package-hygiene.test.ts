@@ -37,7 +37,7 @@ describe('package hygiene', () => {
     ).toEqual([]);
   }, 30_000);
 
-  it('ships only MyClaw-owned bundled skills', () => {
+  it('ships only Gantry-owned bundled skills', () => {
     const raw = execFileSync('npm', ['pack', '--dry-run', '--json'], {
       encoding: 'utf-8',
     });
@@ -51,7 +51,7 @@ describe('package hygiene', () => {
 
     expect(skillFiles).toEqual([
       '.claude/skills/commands/SKILL.md',
-      '.claude/skills/myclaw-admin/SKILL.md',
+      '.claude/skills/gantry-admin/SKILL.md',
     ]);
   }, 30_000);
 

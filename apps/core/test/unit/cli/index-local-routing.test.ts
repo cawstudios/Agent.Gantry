@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const runtimeHomes: string[] = [];
 
 function makeRuntimeHome(): string {
-  const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-cli-db-'));
+  const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-cli-db-'));
   runtimeHomes.push(runtimeHome);
   return runtimeHome;
 }
@@ -57,7 +57,7 @@ describe('CLI local routing', () => {
     );
   });
 
-  it('does not stop local Docker services from the MyClaw CLI', async () => {
+  it('does not stop local Docker services from the Gantry CLI', async () => {
     const runtimeHome = makeRuntimeHome();
     const note = vi.fn();
     vi.doMock('@clack/prompts', () => ({
@@ -129,8 +129,8 @@ describe('CLI local routing', () => {
       readRuntimeMemorySettingsSnapshot: vi.fn(() => ({
         memoryEnabled: false,
         storage: {
-          postgresUrlEnv: 'MYCLAW_DATABASE_URL',
-          postgresSchema: 'myclaw',
+          postgresUrlEnv: 'GANTRY_DATABASE_URL',
+          postgresSchema: 'gantry',
         },
         embeddings: {
           enabled: false,
@@ -145,8 +145,8 @@ describe('CLI local routing', () => {
         },
       })),
       readRuntimeStorageSettingsSnapshot: vi.fn(() => ({
-        postgresUrlEnv: 'MYCLAW_DATABASE_URL',
-        postgresSchema: 'myclaw',
+        postgresUrlEnv: 'GANTRY_DATABASE_URL',
+        postgresSchema: 'gantry',
       })),
     }));
     vi.doMock('@core/cli/provider.js', () => ({

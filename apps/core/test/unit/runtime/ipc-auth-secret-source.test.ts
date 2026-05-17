@@ -16,18 +16,18 @@ function mockConfigEnvModule(values: Record<string, string> = {}) {
 describe('ipc auth secret source', () => {
   beforeEach(() => {
     vi.resetModules();
-    delete process.env.MYCLAW_IPC_AUTH_SECRET;
+    delete process.env.GANTRY_IPC_AUTH_SECRET;
   });
 
   afterEach(() => {
-    delete process.env.MYCLAW_IPC_AUTH_SECRET;
+    delete process.env.GANTRY_IPC_AUTH_SECRET;
     vi.restoreAllMocks();
   });
 
-  it('loads MYCLAW_IPC_AUTH_SECRET from .env when process env is missing', async () => {
+  it('loads GANTRY_IPC_AUTH_SECRET from .env when process env is missing', async () => {
     vi.doMock('@core/config/env/index.js', () =>
       mockConfigEnvModule({
-        MYCLAW_IPC_AUTH_SECRET: 'env-file-secret',
+        GANTRY_IPC_AUTH_SECRET: 'env-file-secret',
       }),
     );
     vi.doMock('@core/config/settings/runtime-settings.js', () => ({
@@ -44,8 +44,8 @@ describe('ipc auth secret source', () => {
       }),
       readRuntimeMemorySettingsSnapshot: () => ({}),
       readRuntimeStorageSettingsSnapshot: () => ({
-        postgresUrlEnv: 'MYCLAW_DATABASE_URL',
-        postgresSchema: 'myclaw',
+        postgresUrlEnv: 'GANTRY_DATABASE_URL',
+        postgresSchema: 'gantry',
       }),
     }));
     vi.doMock('@core/infrastructure/logging/logger.js', () => ({
@@ -62,11 +62,11 @@ describe('ipc auth secret source', () => {
   });
 
   it('prefers process.env over .env secret when both are present', async () => {
-    process.env.MYCLAW_IPC_AUTH_SECRET = 'process-secret';
+    process.env.GANTRY_IPC_AUTH_SECRET = 'process-secret';
 
     vi.doMock('@core/config/env/index.js', () =>
       mockConfigEnvModule({
-        MYCLAW_IPC_AUTH_SECRET: 'env-file-secret',
+        GANTRY_IPC_AUTH_SECRET: 'env-file-secret',
       }),
     );
     vi.doMock('@core/config/settings/runtime-settings.js', () => ({
@@ -83,8 +83,8 @@ describe('ipc auth secret source', () => {
       }),
       readRuntimeMemorySettingsSnapshot: () => ({}),
       readRuntimeStorageSettingsSnapshot: () => ({
-        postgresUrlEnv: 'MYCLAW_DATABASE_URL',
-        postgresSchema: 'myclaw',
+        postgresUrlEnv: 'GANTRY_DATABASE_URL',
+        postgresSchema: 'gantry',
       }),
     }));
     vi.doMock('@core/infrastructure/logging/logger.js', () => ({

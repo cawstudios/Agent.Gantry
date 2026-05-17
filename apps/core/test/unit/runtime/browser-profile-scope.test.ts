@@ -37,7 +37,7 @@ describe('browser profile scope', () => {
 
   it('falls back to the shared default only when no conversation is known', () => {
     expect(resolveConversationBrowserProfile({ workspaceKey: 'kai' })).toBe(
-      'myclaw',
+      'gantry',
     );
   });
 

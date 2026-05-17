@@ -8,7 +8,7 @@ export function channelProgressStateFilePath(
   channel: string,
   token: string,
 ): string | null {
-  const runtimeHome = process.env.MYCLAW_HOME?.trim();
+  const runtimeHome = process.env.GANTRY_HOME?.trim();
   if (!runtimeHome) return null;
   const tokenHash = createHash('sha256')
     .update(token)

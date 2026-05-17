@@ -209,7 +209,7 @@ export async function runTeamsConnectCommand(
     [
       'Create or reuse a Microsoft Entra app for Teams Graph discovery.',
       'Grant Microsoft Graph application permissions for reading Teams and channels, then complete tenant admin consent.',
-      'This setup registers a Teams channel for MyClaw. Live Teams message transport still requires a TeamsSdkClient adapter.',
+      'This setup registers a Teams channel for Gantry. Live Teams message transport still requires a TeamsSdkClient adapter.',
       'Docs: https://learn.microsoft.com/en-us/graph/teams-concept-overview',
     ].join('\n'),
     'Teams app setup',
@@ -334,7 +334,7 @@ export async function runTeamsConnectCommand(
     p.outro('Teams conversation is configured and ready.');
   } else {
     p.outro(
-      'Teams credentials saved. Next: run `myclaw provider connect teams` to register a conversation.',
+      'Teams credentials saved. Next: run `gantry provider connect teams` to register a conversation.',
     );
   }
   return 0;

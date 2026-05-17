@@ -103,11 +103,11 @@ export interface MemoryReviewDecisionInput extends Partial<MemoryBoundaryContext
 export interface MemoryBoundaryContext {
   /** Application namespace. Personal setup uses the seeded "default" app; SDK apps provide their stable app id. */
   appId: string;
-  /** Agent/runtime owner. For channel agents this is the configured MyClaw agent folder/id. */
+  /** Agent/runtime owner. For channel agents this is the configured Gantry agent folder/id. */
   agentId: string;
   /** Human actor identity when known. */
   userId?: string;
-  /** Logical MyClaw/app group, not a provider-specific Telegram group. */
+  /** Logical Gantry/app group, not a provider-specific Telegram group. */
   groupId?: string;
   /** External provider conversation id: Telegram chat, Slack conversation, Teams channel/chat, or SDK conversation. */
   channelId?: string;

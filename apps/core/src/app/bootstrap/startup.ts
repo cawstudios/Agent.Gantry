@@ -2,7 +2,7 @@ import {
   RuntimeSettings,
   loadRuntimeSettings,
 } from '../../config/settings/runtime-settings.js';
-import { MYCLAW_HOME } from '../../config/index.js';
+import { GANTRY_HOME } from '../../config/index.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import { ensureRuntimeLayoutDirectories } from '../../platform/runtime-layout.js';
 import { restoreRemoteControl } from '../../runtime/remote-control.js';
@@ -47,8 +47,8 @@ export async function runStartup(
     ...deps,
   };
 
-  resolved.ensureRuntimeLayoutDirectories(MYCLAW_HOME);
-  const runtimeSettings = resolved.loadRuntimeSettings(MYCLAW_HOME);
+  resolved.ensureRuntimeLayoutDirectories(GANTRY_HOME);
+  const runtimeSettings = resolved.loadRuntimeSettings(GANTRY_HOME);
   const storage = await resolved.initializeRuntimeStorage({
     loadSessionAppMemoryItems: loadSessionAppMemoryItems,
   });
@@ -56,7 +56,7 @@ export async function runStartup(
   if (
     runtimeSettings.desiredState &&
     runtimeSettings.agents &&
-    process.env.MYCLAW_SKIP_RECONCILE_ON_STARTUP !== '1'
+    process.env.GANTRY_SKIP_RECONCILE_ON_STARTUP !== '1'
   ) {
     const desiredState = new SettingsDesiredStateService({
       ops: storage.ops,
@@ -78,9 +78,9 @@ export async function runStartup(
         'Settings desired state reconciled',
       );
     }
-  } else if (process.env.MYCLAW_SKIP_RECONCILE_ON_STARTUP === '1') {
+  } else if (process.env.GANTRY_SKIP_RECONCILE_ON_STARTUP === '1') {
     resolved.logger.warn(
-      'Skipping settings desired-state startup reconcile because MYCLAW_SKIP_RECONCILE_ON_STARTUP=1',
+      'Skipping settings desired-state startup reconcile because GANTRY_SKIP_RECONCILE_ON_STARTUP=1',
     );
   }
   await app.loadState();

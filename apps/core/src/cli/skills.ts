@@ -13,7 +13,7 @@ type UploadOptions = {
 function usage(): string {
   return [
     'Usage:',
-    '  myclaw skill draft upload <skill.zip> [--agent <agentId>] [--created-by <id>]',
+    '  gantry skill draft upload <skill.zip> [--agent <agentId>] [--created-by <id>]',
   ].join('\n');
 }
 
@@ -68,7 +68,7 @@ function parseUploadArgs(args: string[]): UploadOptions | { error: string } {
   }
   if (!options.zipPath) {
     return {
-      error: 'Missing zip file. Use myclaw skill draft upload <skill.zip>.',
+      error: 'Missing zip file. Use gantry skill draft upload <skill.zip>.',
     };
   }
   if (options.agentId === '') {
@@ -96,7 +96,7 @@ async function uploadSkillDraft(
     body: zip,
     contentType: 'application/zip',
     missingKeyMessage:
-      'MYCLAW_CONTROL_API_KEYS_JSON with at least one complete key record is required for skill upload.',
+      'GANTRY_CONTROL_API_KEYS_JSON with at least one complete key record is required for skill upload.',
   });
   const draft =
     isRecord(response) && isRecord(response.draft) ? response.draft : null;

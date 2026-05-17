@@ -17,11 +17,11 @@ import { nowIso } from '../shared/time/datetime.js';
 function usage(): string {
   return [
     'Usage:',
-    '  myclaw provider connect <telegram|slack|teams>',
-    '  myclaw provider list',
-    '  myclaw provider doctor',
-    '  myclaw conversation info <conversationId>',
-    '  myclaw conversation approvers <conversationId> [--allow <userId,userId>]',
+    '  gantry provider connect <telegram|slack|teams>',
+    '  gantry provider list',
+    '  gantry provider doctor',
+    '  gantry conversation info <conversationId>',
+    '  gantry conversation approvers <conversationId> [--allow <userId,userId>]',
   ].join('\n');
 }
 
@@ -106,7 +106,14 @@ export async function runProviderCommand(
       return 1;
     }
     try {
-      p.note(await formatConversationInfo(providerId), 'Conversation Info');
+      const conversationId = resolveConversationIdArgument(
+        runtimeHome,
+        providerId,
+      );
+      p.note(
+        await withRuntimeStorage(() => formatConversationInfo(conversationId)),
+        'Conversation Info',
+      );
       return 0;
     } catch (error) {
       p.log.error(formatConversationAdminError(error));
@@ -122,13 +129,19 @@ export async function runProviderCommand(
     const allowIndex = args.indexOf('--allow');
     const allowValue = allowIndex >= 0 ? args[allowIndex + 1] || '' : '';
     try {
-      const service = await conversationAdministrationService();
+      const conversationId = resolveConversationIdArgument(
+        runtimeHome,
+        providerId,
+      );
       if (allowIndex >= 0) {
-        const controlAllowlist = await service.replaceControlAllowlist({
-          appId: 'default' as never,
-          conversationId: providerId as never,
-          userIds: parseCsv(allowValue),
-          updatedAt: nowIso(),
+        const controlAllowlist = await withRuntimeStorage(async () => {
+          const service = await conversationAdministrationService();
+          return service.replaceControlAllowlist({
+            appId: 'default' as never,
+            conversationId: conversationId as never,
+            userIds: parseCsv(allowValue),
+            updatedAt: nowIso(),
+          });
         });
         p.note(
           formatUserList(controlAllowlist.userIds),
@@ -136,9 +149,12 @@ export async function runProviderCommand(
         );
         return 0;
       }
-      const summary = await service.getAdminSummary({
-        appId: 'default' as never,
-        conversationId: providerId as never,
+      const summary = await withRuntimeStorage(async () => {
+        const service = await conversationAdministrationService();
+        return service.getAdminSummary({
+          appId: 'default' as never,
+          conversationId: conversationId as never,
+        });
       });
       p.note(
         formatUserList(summary.controlAllowlist.userIds),
@@ -162,7 +178,16 @@ export async function runConversationCommand(
   const [command, conversationId] = args;
   if (command === 'info' && conversationId) {
     try {
-      p.note(await formatConversationInfo(conversationId), 'Conversation Info');
+      const resolvedConversationId = resolveConversationIdArgument(
+        runtimeHome,
+        conversationId,
+      );
+      p.note(
+        await withRuntimeStorage(() =>
+          formatConversationInfo(resolvedConversationId),
+        ),
+        'Conversation Info',
+      );
       return 0;
     } catch (error) {
       p.log.error(formatConversationAdminError(error));
@@ -228,6 +253,40 @@ async function runtimeRepositories() {
   const { getRuntimeStorage } =
     await import('../adapters/storage/postgres/runtime-store.js');
   return getRuntimeStorage().repositories;
+}
+
+function resolveConversationIdArgument(
+  runtimeHome: string,
+  conversationIdOrJid: string,
+): string {
+  const value = conversationIdOrJid.trim();
+  if (value.startsWith('conversation:')) return value;
+  const settings = ensureRuntimeSettings(runtimeHome);
+  const configured = settings?.conversations?.[value];
+  if (configured) {
+    const connection =
+      settings.providerConnections?.[configured.providerConnection];
+    const provider = connection ? getProvider(connection.provider) : undefined;
+    const prefix = provider?.jidPrefix ?? `${connection?.provider ?? ''}:`;
+    const externalId = configured.externalId.trim();
+    const jid = externalId.startsWith(prefix)
+      ? externalId
+      : `${prefix}${externalId}`;
+    return `conversation:${jid}`;
+  }
+  if (/^[a-z][a-z0-9_-]*:/i.test(value)) return `conversation:${value}`;
+  return value;
+}
+
+async function withRuntimeStorage<T>(fn: () => Promise<T>): Promise<T> {
+  const { closeRuntimeStorage, initializeRuntimeStorage } =
+    await import('../adapters/storage/postgres/runtime-store.js');
+  await initializeRuntimeStorage();
+  try {
+    return await fn();
+  } finally {
+    await closeRuntimeStorage();
+  }
 }
 
 function parseCsv(value: string): string[] {

@@ -19,7 +19,7 @@ ACTIVE_DOCS = [
     REPO_ROOT / "docs" / "architecture" / "channel-interactions.md",
     REPO_ROOT / "docs" / "sdk" / "api-reference.md",
     REPO_ROOT / ".claude" / "skills" / "commands" / "SKILL.md",
-    REPO_ROOT / ".claude" / "skills" / "myclaw-admin" / "SKILL.md",
+    REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md",
 ]
 
 CLI_CONTRACT_FILES = [
@@ -50,7 +50,7 @@ STALE_STORAGE_PATTERNS = [
 ]
 
 DISALLOWED_POSTGRES_CLI_PATTERNS = [
-    re.compile(r"\bmyclaw\s+postgres\s+(up|down|status|url)\b", re.IGNORECASE),
+    re.compile(r"\bgantry\s+postgres\s+(up|down|status|url)\b", re.IGNORECASE),
 ]
 
 DISALLOWED_CAPABILITY_GUIDANCE_PATTERNS = [
@@ -74,7 +74,7 @@ REQUIRED_CAPABILITY_DOC_FILES = [
     REPO_ROOT / "docs" / "architecture" / "capability-management.md",
     REPO_ROOT / "docs" / "architecture" / "channel-interactions.md",
     REPO_ROOT / "docs" / "sdk" / "api-reference.md",
-    REPO_ROOT / ".claude" / "skills" / "myclaw-admin" / "SKILL.md",
+    REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md",
     REPO_ROOT / "CLAUDE.md",
 ]
 
@@ -135,13 +135,13 @@ def _check_bundled_skill_claims() -> list[str]:
         REPO_ROOT / ".claude" / "skills" / "commands" / "SKILL.md"
     ).read_text(encoding="utf-8")
 
-    required_readme_skills = ["`/commands`", "`myclaw-admin`"]
+    required_readme_skills = ["`/commands`", "`gantry-admin`"]
     for skill in required_readme_skills:
         if skill not in readme:
             failures.append(f"README.md missing bundled skill entry {skill}")
 
-    if "`myclaw-admin`" not in commands_skill:
-        failures.append(".claude/skills/commands/SKILL.md missing myclaw-admin bundled skill entry")
+    if "`gantry-admin`" not in commands_skill:
+        failures.append(".claude/skills/commands/SKILL.md missing gantry-admin bundled skill entry")
 
     return failures
 

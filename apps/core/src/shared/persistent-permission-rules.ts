@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import {
   isAdminMcpToolFullName,
-  isMyClawMcpWildcardRule,
+  isGantryMcpWildcardRule,
 } from './admin-mcp-tools.js';
 import {
   nonDurableBashLeafReason,
@@ -26,7 +26,7 @@ import {
 } from './sensitive-material.js';
 
 export const PERSISTENT_REQUEST_PERMISSION_RULE_REJECTION_REASON =
-  'Persistent request_permission approvals support semantic capabilities, canonical Browser, scoped Bash(...), or exact MyClaw admin tools; request a semantic capability for app/tool access.';
+  'Persistent request_permission approvals support semantic capabilities, canonical Browser, scoped Bash(...), or exact Gantry admin tools; request a semantic capability for app/tool access.';
 
 export function validatePersistentRequestPermissionRule(
   rule: string,
@@ -38,11 +38,11 @@ export function validatePersistentRequestPermissionRule(
   } = {},
 ): { ok: true } | { ok: false; reason: string } {
   const trimmed = rule.trim();
-  if (isMyClawMcpWildcardRule(trimmed)) {
+  if (isGantryMcpWildcardRule(trimmed)) {
     return {
       ok: false,
       reason:
-        'Persistent MyClaw MCP wildcard grants are not supported; request one exact mcp__myclaw__ tool.',
+        'Persistent Gantry MCP wildcard grants are not supported; request one exact mcp__gantry__ tool.',
     };
   }
 

@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   CreateAgentRequestSchema,
   UpdateAgentRequestSchema,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 
 import { ApplicationError } from '../../../application/common/application-error.js';
 import { AgentCapabilityAdministrationService } from '../../../application/agents/agent-capability-administration-service.js';

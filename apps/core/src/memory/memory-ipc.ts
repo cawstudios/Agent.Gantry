@@ -5,7 +5,7 @@ import {
   MEMORY_IPC_ACTIONS,
   MemoryIpcRequest,
   MemoryIpcResponse,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 
 import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
 import { nowMs } from '../shared/time/datetime.js';

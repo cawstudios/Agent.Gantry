@@ -2,14 +2,14 @@
 
 ## Context
 
-MyClaw must support local personal installs and enterprise deployments with
+Gantry must support local personal installs and enterprise deployments with
 different secret backends. A single global precedence chain across
 `settings.yaml`, `.env`, process env, and credential brokers makes it too easy
 for a misplaced value to silently override the intended architecture.
 
 ## Decision
 
-MyClaw uses lane-specific ownership:
+Gantry uses lane-specific ownership:
 
 - Non-secret configuration belongs in `settings.yaml`.
 - Runtime-owned secrets come from `RuntimeSecretProvider`.

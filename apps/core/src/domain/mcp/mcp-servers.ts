@@ -122,7 +122,7 @@ export interface MaterializedMcpServer {
 }
 
 const MCP_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,62}$/;
-const RESERVED_MCP_NAMES = new Set(['myclaw']);
+const RESERVED_MCP_NAMES = new Set(['gantry']);
 const SECRET_KEY_PATTERN =
   /(token|secret|password|credential|api[_-]?key|authorization|auth|bearer|cookie)/i;
 const SECRET_VALUE_PATTERN =

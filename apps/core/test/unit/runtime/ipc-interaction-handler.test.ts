@@ -178,7 +178,7 @@ describe('ipc-interaction-handler', () => {
     fs.writeFileSync(claimedPath, '{}');
     const toolRepository = {
       getTool: vi.fn(async () => ({
-        id: 'tool:mcp__myclaw__service_restart',
+        id: 'tool:mcp__gantry__service_restart',
         appId: 'app:test',
         status: 'active',
         selectable: true,
@@ -199,7 +199,7 @@ describe('ipc-interaction-handler', () => {
         sourceAgentFolder: 'main_agent',
         runHandle: 'agent-run-1',
         targetJid: 'tg:team',
-        toolName: 'mcp__myclaw__service_restart',
+        toolName: 'mcp__gantry__service_restart',
       },
       sourceAgentFolder: 'main_agent',
       deps: {
@@ -212,7 +212,7 @@ describe('ipc-interaction-handler', () => {
             {
               type: 'addRules',
               behavior: 'allow',
-              rules: [{ toolName: 'mcp__myclaw__service_restart' }],
+              rules: [{ toolName: 'mcp__gantry__service_restart' }],
             },
           ],
         })),
@@ -238,10 +238,10 @@ describe('ipc-interaction-handler', () => {
           'utf-8',
         ),
       ),
-    ).toEqual(['mcp__myclaw__service_restart']);
+    ).toEqual(['mcp__gantry__service_restart']);
     expect(mirrorAgentToolRulesToSettings).toHaveBeenCalledWith(
       'main_agent',
-      ['mcp__myclaw__service_restart'],
+      ['mcp__gantry__service_restart'],
       { appId: 'app:test' },
     );
     expect(sendMessage).toHaveBeenCalledWith(

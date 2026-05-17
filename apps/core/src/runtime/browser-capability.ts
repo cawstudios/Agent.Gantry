@@ -31,7 +31,7 @@ import {
   isPidOwnedVisibleBrowserProfile,
 } from './browser-process.js';
 
-export const DEFAULT_BROWSER_PROFILE_NAME = 'myclaw';
+export const DEFAULT_BROWSER_PROFILE_NAME = 'gantry';
 export type {
   BrowserProfileStatus,
   BrowserSessionStatus,

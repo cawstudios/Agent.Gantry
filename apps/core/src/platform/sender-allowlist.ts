@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-import { MYCLAW_HOME } from '../config/index.js';
+import { GANTRY_HOME } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import '../channels/register-builtins.js';
 import { loadRuntimeSettingsFromPath } from '../config/settings/runtime-settings.js';
@@ -222,7 +222,7 @@ function jidForSettingsConversation(
 export function loadSenderAllowlist(
   settingsPathOverride?: string,
 ): RuntimeSenderAllowlistConfig {
-  const filePath = settingsPathOverride ?? settingsFilePath(MYCLAW_HOME);
+  const filePath = settingsPathOverride ?? settingsFilePath(GANTRY_HOME);
 
   try {
     const { settings, cache } = cachedSettings(filePath);
@@ -245,7 +245,7 @@ export function loadSenderAllowlist(
 export function loadSenderControlAllowlist(
   settingsPathOverride?: string,
 ): RuntimeSenderControlAllowlistConfig {
-  const filePath = settingsPathOverride ?? settingsFilePath(MYCLAW_HOME);
+  const filePath = settingsPathOverride ?? settingsFilePath(GANTRY_HOME);
 
   try {
     const { settings, cache } = cachedSettings(filePath);

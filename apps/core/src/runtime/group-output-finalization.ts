@@ -42,7 +42,7 @@ export async function finalizeGroupAgentUserVisibleOutput(input: {
       const transcriptMessage: NewMessage = {
         id: `streamed-outbound:${randomUUID()}`,
         chat_jid: input.chatJid,
-        sender: 'myclaw',
+        sender: 'gantry',
         sender_name: 'Gantry',
         content: transcriptText,
         timestamp: nowIso(),

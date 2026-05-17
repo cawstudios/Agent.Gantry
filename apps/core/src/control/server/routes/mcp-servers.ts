@@ -6,7 +6,7 @@ import {
   DisableMcpServerRequestSchema,
   RejectMcpServerDraftRequestSchema,
   UpdateAgentMcpServerBindingRequestSchema,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 
 import { McpServerService } from '../../../application/mcp/mcp-server-service.js';
 import { getRuntimeStorage } from '../../../adapters/storage/postgres/runtime-store.js';

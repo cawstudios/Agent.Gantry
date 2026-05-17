@@ -18,7 +18,7 @@ const tempDirs: string[] = [];
 
 function makeRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'myclaw-default-agent-test-'),
+    path.join(os.tmpdir(), 'gantry-default-agent-test-'),
   );
   tempDirs.push(runtimeHome);
   return runtimeHome;

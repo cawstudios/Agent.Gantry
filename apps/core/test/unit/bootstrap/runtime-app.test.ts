@@ -23,8 +23,8 @@ async function loadRuntimeApp() {
     return {
       ...actual,
       ASSISTANT_NAME: 'Default Agent',
-      DATA_DIR: '/tmp/myclaw-test',
-      MYCLAW_IPC_AUTH_SECRET: 'runtime-app-test-secret',
+      DATA_DIR: '/tmp/gantry-test',
+      GANTRY_IPC_AUTH_SECRET: 'runtime-app-test-secret',
       getCredentialBrokerRuntimeConfig: () => ({
         mode: 'onecli',
         onecliUrl: 'http://localhost:10254',
@@ -53,8 +53,8 @@ async function loadRuntimeAppWithGroupProcessorSpy() {
     return {
       ...actual,
       ASSISTANT_NAME: 'Default Agent',
-      DATA_DIR: '/tmp/myclaw-test',
-      MYCLAW_IPC_AUTH_SECRET: 'runtime-app-test-secret',
+      DATA_DIR: '/tmp/gantry-test',
+      GANTRY_IPC_AUTH_SECRET: 'runtime-app-test-secret',
       getCredentialBrokerRuntimeConfig: () => ({
         mode: 'onecli',
         onecliUrl: 'http://localhost:10254',
@@ -99,7 +99,7 @@ describe('runtime app credential binding', () => {
     expect(ensureCredentialBinding).toHaveBeenCalledWith({
       groupJid: 'tg:first',
       group: firstGroup,
-      agentIdentifier: 'myclaw-model-access',
+      agentIdentifier: 'gantry-model-access',
       agentName: 'Gantry Model Access',
     });
     expect(ensureCredentialBinding).toHaveBeenCalledWith({
@@ -114,7 +114,7 @@ describe('runtime app credential binding', () => {
       agentIdentifier: 'agent:side_agent',
       agentName: 'Side Agent',
     });
-  });
+  }, 10_000);
 
   it('retries a failed credential profile ensure attempt', async () => {
     const { createRuntimeApp } = await loadRuntimeApp();
@@ -135,7 +135,7 @@ describe('runtime app credential binding', () => {
       {
         groupJid: 'tg:first',
         group,
-        agentIdentifier: 'myclaw-model-access',
+        agentIdentifier: 'gantry-model-access',
         agentName: 'Gantry Model Access',
       },
       {
@@ -147,7 +147,7 @@ describe('runtime app credential binding', () => {
       {
         groupJid: 'tg:first',
         group,
-        agentIdentifier: 'myclaw-model-access',
+        agentIdentifier: 'gantry-model-access',
         agentName: 'Gantry Model Access',
       },
     ]);

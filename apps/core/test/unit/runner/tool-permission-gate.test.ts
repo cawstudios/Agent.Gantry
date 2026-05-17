@@ -542,7 +542,7 @@ describe('createCanUseToolCallback', () => {
     await expect(
       canUseTool(
         'Bash',
-        { command: 'python3 ~/myclaw/agents/main_agent/scripts/dedup.py' },
+        { command: 'python3 ~/gantry/agents/main_agent/scripts/dedup.py' },
         makePermissionOptions() as never,
       ),
     ).resolves.toEqual(
@@ -561,6 +561,78 @@ describe('createCanUseToolCallback', () => {
       .join('');
     expect(output).toContain('"phase":"permission_denied"');
     expect(output).toContain('"jobId":"job-1"');
+  });
+
+  it('omits timed grants from autonomous job prompts with persistent suggestions', async () => {
+    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
+      approved: true,
+      mode: 'allow_once',
+      updatedPermissions: undefined,
+      decidedBy: 'user',
+    });
+    const canUseTool = makeCallback({
+      agentInput: {
+        runMode: 'normal',
+        isScheduledJob: true,
+        appId: 'default',
+        agentId: 'agent:test',
+        runId: 'run-1',
+        jobId: 'job-1',
+        chatJid: 'tg:test',
+        threadId: undefined,
+        allowedTools: [],
+      } as never,
+    });
+
+    await expect(
+      canUseTool(
+        'Bash',
+        { command: 'npm test' },
+        makePermissionOptions() as never,
+      ),
+    ).resolves.toEqual(expect.objectContaining({ behavior: 'allow' }));
+
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decisionOptions: ['allow_once', 'allow_persistent_rule', 'cancel'],
+      }),
+    );
+  });
+
+  it('omits timed grants from autonomous job prompts without persistent suggestions', async () => {
+    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
+      approved: true,
+      mode: 'allow_once',
+      updatedPermissions: undefined,
+      decidedBy: 'user',
+    });
+    const canUseTool = makeCallback({
+      agentInput: {
+        runMode: 'normal',
+        isScheduledJob: true,
+        appId: 'default',
+        agentId: 'agent:test',
+        runId: 'run-1',
+        jobId: 'job-1',
+        chatJid: 'tg:test',
+        threadId: undefined,
+        allowedTools: [],
+      } as never,
+    });
+
+    await expect(
+      canUseTool(
+        'Read',
+        { file_path: 'package.json' },
+        makePermissionOptions({ displayName: 'Read' }) as never,
+      ),
+    ).resolves.toEqual(expect.objectContaining({ behavior: 'allow' }));
+
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decisionOptions: ['allow_once', 'cancel'],
+      }),
+    );
   });
 
   it('returns ungrantable autonomous Bash denials without pausing the job', async () => {

@@ -23,7 +23,6 @@ import { parseSemanticCapabilityRule } from '../shared/semantic-capability-ids.j
 import {
   firstPersistentRule,
   PERSISTENT_RULE_APPROVAL_MAX_RULES,
-  persistentPermissionUpdates,
   persistentRules,
 } from './permission-decision.js';
 import { formatPermissionToolInputLines } from './permission-tool-input-format.js';
@@ -397,7 +396,7 @@ function permissionAccessLabel(
   const toolName =
     scopedRule?.toolName || requestedToolName || request.toolName;
   if (isCanonicalBrowserCapabilityRule(toolName)) return 'Browser';
-  if (toolName.startsWith('mcp__myclaw__browser_')) return 'Browser';
+  if (toolName.startsWith('mcp__gantry__browser_')) return 'Browser';
   const adminName = adminMcpToolNameFromFullName(toolName);
   if (adminName) return `Gantry ${humanizeIdentifier(adminName)}`;
   if (isThirdPartyMcpToolRule(toolName)) {

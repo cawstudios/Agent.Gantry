@@ -15,19 +15,19 @@ export interface ClassifiedConfigKey {
 }
 
 const CLASSIFIED_KEYS: Record<string, ClassifiedConfigKey> = {
-  MYCLAW_DATABASE_URL: runtimeSecret('MYCLAW_DATABASE_URL'),
+  GANTRY_DATABASE_URL: runtimeSecret('GANTRY_DATABASE_URL'),
   TELEGRAM_BOT_TOKEN: runtimeSecret('TELEGRAM_BOT_TOKEN'),
   SLACK_BOT_TOKEN: runtimeSecret('SLACK_BOT_TOKEN'),
   SLACK_APP_TOKEN: runtimeSecret('SLACK_APP_TOKEN'),
   TEAMS_CLIENT_ID: runtimeSecret('TEAMS_CLIENT_ID'),
   TEAMS_CLIENT_SECRET: runtimeSecret('TEAMS_CLIENT_SECRET'),
   TEAMS_TENANT_ID: runtimeSecret('TEAMS_TENANT_ID'),
-  MYCLAW_IPC_AUTH_SECRET: runtimeSecret('MYCLAW_IPC_AUTH_SECRET'),
+  GANTRY_IPC_AUTH_SECRET: runtimeSecret('GANTRY_IPC_AUTH_SECRET'),
   ONECLI_DATABASE_URL: runtimeSecret('ONECLI_DATABASE_URL'),
   SECRET_ENCRYPTION_KEY: runtimeSecret('SECRET_ENCRYPTION_KEY'),
 
-  MYCLAW_CREDENTIAL_MODE: setting(
-    'MYCLAW_CREDENTIAL_MODE',
+  GANTRY_CREDENTIAL_MODE: setting(
+    'GANTRY_CREDENTIAL_MODE',
     'settings.yaml credential_broker.mode',
   ),
   ONECLI_URL: setting(
@@ -103,7 +103,7 @@ function runtimeSecret(key: string): ClassifiedConfigKey {
     key,
     lane: 'runtime-secret',
     destination: 'RuntimeSecretProvider',
-    message: `${key} is a runtime-owned secret and may be stored in MyClaw .env for local/personal mode.`,
+    message: `${key} is a runtime-owned secret and may be stored in Gantry .env for local/personal mode.`,
   };
 }
 
@@ -112,7 +112,7 @@ function setting(key: string, destination: string): ClassifiedConfigKey {
     key,
     lane: 'non-secret-setting',
     destination,
-    message: `${key} is non-secret configuration and must be configured in ${destination}, not MyClaw .env.`,
+    message: `${key} is non-secret configuration and must be configured in ${destination}, not Gantry .env.`,
   };
 }
 
@@ -121,7 +121,7 @@ function agentCredential(key: string): ClassifiedConfigKey {
     key,
     lane: 'agent-credential',
     destination: 'AgentCredentialBroker',
-    message: `${key} is an agent-accessed credential and must be configured through Model Access or the selected enterprise credential broker, not MyClaw .env.`,
+    message: `${key} is an agent-accessed credential and must be configured through Model Access or the selected enterprise credential broker, not Gantry .env.`,
   };
 }
 
@@ -145,7 +145,7 @@ export function classifyConfigKey(
 
 export function validateRuntimeEnvPolicy(
   env: Partial<Record<string, string | undefined>>,
-  source = 'MyClaw .env',
+  source = 'Gantry .env',
 ): RuntimeEnvPolicyResult {
   const violations: RuntimeEnvPolicyViolation[] = [];
   for (const [key, rawValue] of Object.entries(env)) {
@@ -158,7 +158,7 @@ export function validateRuntimeEnvPolicy(
       violations.push({
         key,
         lane: classified.lane,
-        message: classified.message.replace('MyClaw .env', source),
+        message: classified.message.replace('Gantry .env', source),
         destination: classified.destination,
       });
     }

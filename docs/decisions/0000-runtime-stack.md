@@ -2,9 +2,9 @@
 
 ## Context
 
-MyClaw is becoming a personal and enterprise agent runtime platform. The core runtime must stay easy to embed, ship, and reason about without making enterprise application frameworks part of its internal architecture.
+Gantry is becoming a personal and enterprise agent runtime platform. The core runtime must stay easy to embed, ship, and reason about without making enterprise application frameworks part of its internal architecture.
 
-Enterprise NestJS and NextJS apps may use MyClaw, but they should integrate through the SDK and control API. They should not import runtime internals.
+Enterprise NestJS and NextJS apps may use Gantry, but they should integrate through the SDK and control API. They should not import runtime internals.
 
 ## Decision
 

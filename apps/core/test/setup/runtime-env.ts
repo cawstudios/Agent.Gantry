@@ -7,7 +7,7 @@ import { afterAll } from 'vitest';
 
 const runtimeHome = path.join(
   os.tmpdir(),
-  `myclaw-vitest-runtime-${process.pid}`,
+  `gantry-vitest-runtime-${process.pid}`,
 );
 const settingsPath = path.join(runtimeHome, 'settings.yaml');
 
@@ -32,8 +32,8 @@ const settingsYaml = [
   '      consolidation: claude-sonnet-4-6',
   'storage:',
   '  postgres:',
-  '    url_env: MYCLAW_DATABASE_URL',
-  '    schema: myclaw',
+  '    url_env: GANTRY_DATABASE_URL',
+  '    schema: gantry',
   '',
 ].join('\n');
 
@@ -44,7 +44,7 @@ fs.mkdirSync(path.join(runtimeHome, 'agents'), { recursive: true });
 fs.mkdirSync(path.join(runtimeHome, 'memory'), { recursive: true });
 fs.writeFileSync(settingsPath, settingsYaml, 'utf-8');
 
-process.env.MYCLAW_HOME = runtimeHome;
+process.env.GANTRY_HOME = runtimeHome;
 
 function listOwnedBrowserPids(): number[] {
   if (process.platform === 'win32') return [];
@@ -67,7 +67,7 @@ function listOwnedBrowserPids(): number[] {
       if (!command.includes('--remote-debugging-port')) return [];
       if (
         !command.includes(runtimeHome) &&
-        !command.includes('myclaw-browser-')
+        !command.includes('gantry-browser-')
       ) {
         return [];
       }

@@ -1,10 +1,10 @@
 # Agent Internals For SDK Consumers
 
-This document explains what a backend developer is using when they call `@myclaw/sdk`.
+This document explains what a backend developer is using when they call `@gantry/sdk`.
 
 ## Boundary
 
-The SDK talks to the MyClaw control server. The control server is a host runtime surface, not an agent feature. ACP/ACPS remain harness/runtime concerns and are not part of the public SDK contract.
+The SDK talks to the Gantry control server. The control server is a host runtime surface, not an agent feature. ACP/ACPS remain harness/runtime concerns and are not part of the public SDK contract.
 
 Agents cannot choose callback URLs, API keys, webhook headers, or channel destinations. They can only react to durable inbound messages and emit structured events through host-owned tools.
 
@@ -15,8 +15,8 @@ For contributor-level runtime internals and source-reading paths, see [runtime c
 ```mermaid
 sequenceDiagram
   participant App as Backend App
-  participant SDK as @myclaw/sdk
-  participant Control as MyClaw Control Server
+  participant SDK as @gantry/sdk
+  participant Control as Gantry Control Server
   participant Store as Postgres
   participant Queue as Per-Session Queue
   participant Agent as Host Agent
@@ -49,7 +49,7 @@ sequenceDiagram
 
   App->>SDK: jobs.create({ kind })
   SDK->>Control: POST /v1/jobs
-  Control->>Store: persist MyClaw job definition
+  Control->>Store: persist Gantry job definition
   Control->>Boss: schedule/queue execution
   App->>SDK: jobs.trigger(jobId)
   SDK->>Control: POST /v1/jobs/:id/trigger
@@ -62,7 +62,7 @@ sequenceDiagram
   SDK-->>App: jobs.wait(triggerId)
 ```
 
-The SDK exposes MyClaw jobs, triggers, runs, events, and results. It does not expose raw `pg-boss` concepts. `trigger()` returns `triggerId` immediately; execution later binds a `runId`.
+The SDK exposes Gantry jobs, triggers, runs, events, and results. It does not expose raw `pg-boss` concepts. `trigger()` returns `triggerId` immediately; execution later binds a `runId`.
 
 ## Channel Onboarding Flow
 
@@ -119,7 +119,7 @@ Postgres is the runtime store:
 - `pg-boss` schedules and claims jobs.
 - `pgvector` and embedding cache tables are available for future brokered embedding work, but active memory retrieval is lexical today.
 - Postgres full-text search handles current memory retrieval and filtering.
-- Control events, messages, jobs, runs, triggers, sessions, webhooks, deliveries, and memory records are first-party MyClaw tables.
+- Control events, messages, jobs, runs, triggers, sessions, webhooks, deliveries, and memory records are first-party Gantry tables.
 
 ## Event Contract
 

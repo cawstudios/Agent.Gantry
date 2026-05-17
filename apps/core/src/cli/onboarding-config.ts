@@ -54,12 +54,12 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
   const onecliDatabaseUrl = input.onecliPostgresDatabaseUrl?.trim() || null;
   if (input.postgresDatabaseUrl?.trim() && !onecliDatabaseUrl) {
     throw new Error(
-      'ONECLI_DATABASE_URL is required and must use a Postgres role separate from MYCLAW_DATABASE_URL.',
+      'ONECLI_DATABASE_URL is required and must use a Postgres role separate from GANTRY_DATABASE_URL.',
     );
   }
   if (input.postgresDatabaseUrl?.trim() && onecliDatabaseUrl) {
     const sharedDatabase = validateSharedPostgresDatabase({
-      myclawPostgresUrl: input.postgresDatabaseUrl.trim(),
+      gantryPostgresUrl: input.postgresDatabaseUrl.trim(),
       onecliPostgresUrl: onecliDatabaseUrl,
     });
     if (!sharedDatabase.ok) {
@@ -88,12 +88,12 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
     ANTHROPIC_DEFAULT_OPUS_MODEL: null,
     ANTHROPIC_DEFAULT_SONNET_MODEL: null,
     ANTHROPIC_DEFAULT_HAIKU_MODEL: null,
-    MYCLAW_DATABASE_URL: input.postgresDatabaseUrl?.trim() || null,
+    GANTRY_DATABASE_URL: input.postgresDatabaseUrl?.trim() || null,
     [ONECLI_DATABASE_URL_ENV]: onecliDatabaseUrl,
     [ONECLI_SECRET_ENCRYPTION_KEY_ENV]: onecliDatabaseUrl
       ? onecliSecretEncryptionKey
       : null,
-    MYCLAW_CREDENTIAL_MODE: null,
+    GANTRY_CREDENTIAL_MODE: null,
     ONECLI_URL: null,
     OPENAI_API_KEY: null,
   });
@@ -102,8 +102,8 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
   if (input.agentName?.trim()) {
     settings.agent.name = input.agentName.trim();
   }
-  settings.storage.postgres.urlEnv = 'MYCLAW_DATABASE_URL';
-  settings.storage.postgres.schema = input.postgresSchema?.trim() || 'myclaw';
+  settings.storage.postgres.urlEnv = 'GANTRY_DATABASE_URL';
+  settings.storage.postgres.schema = input.postgresSchema?.trim() || 'gantry';
   settings.agent.defaultModel = normalizeOnboardingModel(input.anthropicModel);
   settings.credentialBroker.mode = input.credentialMode;
   settings.credentialBroker.onecli.url = onecliUrl;

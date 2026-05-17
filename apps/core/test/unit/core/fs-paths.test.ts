@@ -8,7 +8,7 @@ import { writeFileAtomic } from '@core/infrastructure/filesystem/paths.js';
 
 describe('fs-path helpers', () => {
   it('uses restrictive default permissions for atomic writes', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-fs-paths-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-fs-paths-'));
     try {
       const filePath = path.join(tmpDir, 'secret.json');
       writeFileAtomic(filePath, '{"secret":true}');

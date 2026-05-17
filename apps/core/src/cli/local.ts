@@ -15,12 +15,12 @@ const LOCAL_ONECLI_URL = 'http://localhost:10254';
 
 function composeGuidance(): string {
   return [
-    'MyClaw does not create or manage Docker containers.',
+    'Gantry does not create or manage Docker containers.',
     'For a local database and local Model Access, use the root docker-compose.yml yourself:',
     '',
-    '  docker compose --env-file ~/myclaw/.env up -d',
+    '  docker compose --env-file ~/gantry/.env up -d',
     '',
-    'Then run `myclaw setup` and paste the Postgres URLs.',
+    'Then run `gantry setup` and paste the Postgres URLs.',
     `Normal setup uses OneCLI at ${LOCAL_ONECLI_URL}.`,
   ].join('\n');
 }
@@ -30,21 +30,21 @@ function localEnvSummary(runtimeHome: string): string {
   let onecliDatabaseUrlEnv = ONECLI_DATABASE_URL_ENV;
   let onecliUrl = LOCAL_ONECLI_URL;
   let onecliSchema = ONECLI_DEFAULT_SCHEMA;
-  let myclawSchema = 'myclaw';
+  let gantrySchema = 'gantry';
   try {
     const settings = ensureRuntimeSettings(runtimeHome);
     onecliDatabaseUrlEnv = settings.credentialBroker.onecli.postgres.urlEnv;
     onecliUrl = settings.credentialBroker.onecli.url || LOCAL_ONECLI_URL;
     onecliSchema = settings.credentialBroker.onecli.postgres.schema;
-    myclawSchema = settings.storage.postgres.schema;
+    gantrySchema = settings.storage.postgres.schema;
   } catch {
     // local guidance must work before setup creates settings.yaml.
   }
   return [
-    `MYCLAW_DATABASE_URL: ${env.MYCLAW_DATABASE_URL ? 'configured' : 'missing'}`,
+    `GANTRY_DATABASE_URL: ${env.GANTRY_DATABASE_URL ? 'configured' : 'missing'}`,
     `${onecliDatabaseUrlEnv}: ${env[onecliDatabaseUrlEnv] ? 'configured' : 'missing'}`,
     `OneCLI URL: ${onecliUrl} (settings.yaml credential_broker.onecli.url)`,
-    `MyClaw schema: ${myclawSchema}`,
+    `Gantry schema: ${gantrySchema}`,
     `OneCLI schema: ${onecliSchema}`,
   ].join('\n');
 }
@@ -53,12 +53,12 @@ async function runLocalDoctor(runtimeHome: string): Promise<number> {
   const env = readEnvFile(envFilePath(runtimeHome));
   let onecliDatabaseUrlEnv = ONECLI_DATABASE_URL_ENV;
   let onecliSchema = ONECLI_DEFAULT_SCHEMA;
-  let myclawSchema = 'myclaw';
+  let gantrySchema = 'gantry';
   try {
     const settings = ensureRuntimeSettings(runtimeHome);
     onecliDatabaseUrlEnv = settings.credentialBroker.onecli.postgres.urlEnv;
     onecliSchema = settings.credentialBroker.onecli.postgres.schema;
-    myclawSchema = settings.storage.postgres.schema;
+    gantrySchema = settings.storage.postgres.schema;
   } catch {
     // local doctor still reports config/env state before setup is complete.
   }
@@ -68,8 +68,8 @@ async function runLocalDoctor(runtimeHome: string): Promise<number> {
     postgresUrl: env[onecliDatabaseUrlEnv]?.trim() || '',
     schema: onecliSchema,
     secretEncryptionKey: env[ONECLI_SECRET_ENCRYPTION_KEY_ENV]?.trim() || '',
-    myclawPostgresUrl: env.MYCLAW_DATABASE_URL?.trim() || '',
-    myclawSchema,
+    gantryPostgresUrl: env.GANTRY_DATABASE_URL?.trim() || '',
+    gantrySchema,
   });
 
   p.note(
@@ -115,14 +115,14 @@ export async function runLocalCommand(
   }
   if (command === 'stop') {
     p.note(
-      'MyClaw does not stop local databases or OneCLI. Use `docker compose stop` if you started the provided Compose stack.',
+      'Gantry does not stop local databases or OneCLI. Use `docker compose stop` if you started the provided Compose stack.',
       'Local Stop',
     );
     return 0;
   }
   if (command === 'logs') {
     p.note(
-      'MyClaw does not own local service logs. Use `docker compose logs --tail 160` for the provided Compose stack.',
+      'Gantry does not own local service logs. Use `docker compose logs --tail 160` for the provided Compose stack.',
       'Local Logs',
     );
     return 0;

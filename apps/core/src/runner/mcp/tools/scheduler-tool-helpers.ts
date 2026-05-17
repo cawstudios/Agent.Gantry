@@ -17,7 +17,7 @@ const SCHEDULER_WAIT_MIN_TIMEOUT_MS = 1_000;
 const SCHEDULER_WAIT_MAX_TIMEOUT_MS = 300_000;
 export const SCHEDULER_WAIT_RESPONSE_GRACE_MS = 10_000;
 
-const ambientGroupScope = process.env.MYCLAW_GROUP_FOLDER?.trim() ?? '';
+const ambientGroupScope = process.env.GANTRY_GROUP_FOLDER?.trim() ?? '';
 
 export async function requestSchedulerData(
   type: string,

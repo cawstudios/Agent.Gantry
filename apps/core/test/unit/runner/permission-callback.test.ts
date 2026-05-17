@@ -38,13 +38,13 @@ describe('requestPermissionApproval', () => {
     vi.resetModules();
     oldEnv = { ...process.env };
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-permission-'));
-    process.env.MYCLAW_WORKSPACE_GROUP_DIR = path.join(tempDir, 'workspace');
-    process.env.MYCLAW_WORKSPACE_EXTRA_DIR = path.join(tempDir, 'extra');
-    process.env.MYCLAW_IPC_DIR = path.join(tempDir, 'ipc');
-    process.env.MYCLAW_IPC_INPUT_DIR = path.join(tempDir, 'input');
-    process.env.MYCLAW_IPC_RESPONSE_VERIFY_KEY = 'test-key';
-    process.env.MYCLAW_IPC_RESPONSE_KEY_ID = 'test-response-key';
-    process.env.MYCLAW_AGENT_RUN_HANDLE = 'run-handle-1';
+    process.env.GANTRY_WORKSPACE_GROUP_DIR = path.join(tempDir, 'workspace');
+    process.env.GANTRY_WORKSPACE_EXTRA_DIR = path.join(tempDir, 'extra');
+    process.env.GANTRY_IPC_DIR = path.join(tempDir, 'ipc');
+    process.env.GANTRY_IPC_INPUT_DIR = path.join(tempDir, 'input');
+    process.env.GANTRY_IPC_RESPONSE_VERIFY_KEY = 'test-key';
+    process.env.GANTRY_IPC_RESPONSE_KEY_ID = 'test-response-key';
+    process.env.GANTRY_AGENT_RUN_HANDLE = 'run-handle-1';
   });
 
   afterEach(() => {

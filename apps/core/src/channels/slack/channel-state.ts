@@ -191,7 +191,7 @@ export abstract class SlackChannelState {
         );
         return {
           type: 'button',
-          action_id: 'myclaw_userq_select',
+          action_id: 'gantry_userq_select',
           text: {
             type: 'plain_text',
             text: label,
@@ -207,7 +207,7 @@ export abstract class SlackChannelState {
     if (pending.question.multiSelect) {
       elements.push({
         type: 'button',
-        action_id: 'myclaw_userq_done',
+        action_id: 'gantry_userq_done',
         text: {
           type: 'plain_text',
           text: truncateSlackButtonText(

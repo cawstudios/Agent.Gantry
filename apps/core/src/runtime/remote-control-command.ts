@@ -1,4 +1,4 @@
-import { MYCLAW_HOME } from '../config/index.js';
+import { GANTRY_HOME } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { MessageSink, NewMessage, ConversationRoute } from '../domain/types.js';
 import { startRemoteControl, stopRemoteControl } from './remote-control.js';
@@ -21,7 +21,7 @@ export async function handleRemoteControlCommand(
   getGroup: (chatJid: string) => ConversationRoute | undefined,
   findMessageSink: (chatJid: string) => MessageSink | undefined,
   isSenderControlAllowlisted: (msg: NewMessage) => boolean,
-  cwd = MYCLAW_HOME,
+  cwd = GANTRY_HOME,
 ): Promise<void> {
   const group = getGroup(chatJid);
   if (!group) return;

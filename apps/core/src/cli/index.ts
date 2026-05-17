@@ -42,28 +42,28 @@ function usage(): string {
     'Gantry CLI',
     '',
     'Usage:',
-    '  myclaw',
-    '  myclaw setup',
-    '  myclaw doctor',
-    '  myclaw status',
-    '  myclaw start',
-    '  myclaw stop',
-    '  myclaw restart',
-    '  myclaw logs',
-    '  myclaw local setup|start|stop|status|logs|doctor',
-    '  myclaw provider list|connect|doctor',
-    '  myclaw conversation info|approvers  # direct/private and group/channel permission approvers',
-    '  myclaw agent list|info|add|remove|trigger|policy',
-    '  myclaw browser profiles|status',
-    '  myclaw jobs list|show|events',
-    '  myclaw model list|set-default|doctor',
-    '  myclaw settings export-current|drift',
-    '  myclaw service install|start|stop|restart',
-    '  myclaw skill draft upload <skill.zip> [--agent <agentId>] [--created-by <id>]',
-    '  myclaw mcp draft|list|approve|reject|test|disable|bind|unbind|agent',
+    '  gantry',
+    '  gantry setup',
+    '  gantry doctor',
+    '  gantry status',
+    '  gantry start',
+    '  gantry stop',
+    '  gantry restart',
+    '  gantry logs',
+    '  gantry local setup|start|stop|status|logs|doctor',
+    '  gantry provider list|connect|doctor',
+    '  gantry conversation info|approvers  # direct/private and group/channel permission approvers',
+    '  gantry agent list|info|add|remove|trigger|policy',
+    '  gantry browser profiles|status',
+    '  gantry jobs list|show|events',
+    '  gantry model list|set-default|doctor',
+    '  gantry settings export-current|drift',
+    '  gantry service install|start|stop|restart',
+    '  gantry skill draft upload <skill.zip> [--agent <agentId>] [--created-by <id>]',
+    '  gantry mcp draft|list|approve|reject|test|disable|bind|unbind|agent',
     '',
     'Options:',
-    '  --runtime-home <path>   Override runtime home (default: ~/myclaw)',
+    '  --runtime-home <path>   Override runtime home (default: ~/gantry)',
     '  -h, --help              Show help',
   ].join('\n');
 }
@@ -123,9 +123,9 @@ async function runStartCommand(runtimeHome: string): Promise<number> {
     return 1;
   }
 
-  process.env.MYCLAW_HOME = runtimeHome;
+  process.env.GANTRY_HOME = runtimeHome;
   const runtime = await import('../app/index.js');
-  await runtime.startMyClawRuntime({ skipPreflight: true });
+  await runtime.startGantryRuntime({ skipPreflight: true });
   return 0;
 }
 
@@ -384,7 +384,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const [command, ...rest] = parsed.command;
   const subcommand = rest[0];
 
-  // Allow `myclaw doctor` to run even when settings.yaml is malformed so it can
+  // Allow `gantry doctor` to run even when settings.yaml is malformed so it can
   // report actionable recovery guidance instead of failing at top-level parse.
   if (
     command &&
@@ -429,7 +429,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 
   if (command === 'channel') {
-    p.log.error('Use `myclaw provider` or `myclaw conversation`.');
+    p.log.error('Use `gantry provider` or `gantry conversation`.');
     return 1;
   }
 
@@ -439,7 +439,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 
   if (command === 'browser') {
-    process.env.MYCLAW_HOME = runtimeHome;
+    process.env.GANTRY_HOME = runtimeHome;
     const { runBrowserCommand } = await import('./browser.js');
     return runBrowserCommand(runtimeHome, rest);
   }

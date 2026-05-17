@@ -1,6 +1,6 @@
 # Durable State Boundary
 
-MyClaw durable state has two categories.
+Gantry durable state has two categories.
 
 Canonical runtime state lives in Postgres. This includes apps, agents,
 conversations, threads, messages, sessions, provider session metadata, runs,
@@ -35,17 +35,17 @@ provider adapter is executing.
 
 Runtime code must also not treat runtime-home Claude settings, local settings,
 or skills directories as enterprise source of truth. `settings.local.json` is a
-Claude-local concept, not MyClaw policy.
+Claude-local concept, not Gantry policy.
 
-Agent-created capability changes must enter through MyClaw-owned draft/request
+Agent-created capability changes must enter through Gantry-owned draft/request
 flows. The Claude Agent SDK `PreToolUse` hook denies direct writes to skill
 files, MCP configuration, and permission settings so local Claude files cannot
 become hidden durable state. Agents submit skills through
-`mcp__myclaw__request_skill_proposal` and MCP servers through
-`mcp__myclaw__request_mcp_server`; both route to same-channel review before
+`mcp__gantry__request_skill_proposal` and MCP servers through
+`mcp__gantry__request_mcp_server`; both route to same-channel review before
 future-run activation.
 
-MyClaw owns draft artifact durability and local approval state. It does not own
+Gantry owns draft artifact durability and local approval state. It does not own
 hosted skill versioning. Hosted Anthropic skills are provider-managed resources
 addressed by opaque provider refs through the Anthropic SDK adapter.
 

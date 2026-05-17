@@ -178,8 +178,8 @@ export function buildTeamsApprovalAdaptiveCard(
       title: permissionButtonLabel(mode, request),
       verb:
         mode === 'cancel'
-          ? 'myclaw.permission.cancel'
-          : 'myclaw.permission.allow',
+          ? 'gantry.permission.cancel'
+          : 'gantry.permission.allow',
       data: {
         action: 'permission_decision',
         requestId: request.requestId,

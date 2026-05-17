@@ -1,13 +1,13 @@
-import { getMyclawHome } from '../shared/myclaw-home.js';
+import { getGantryHome } from '../shared/gantry-home.js';
 import { envConfig } from './env/index.js';
 import {
   readRuntimeMemorySettingsSnapshot,
   type RuntimeMemorySettingsSnapshot,
 } from './settings/runtime-settings.js';
 
-const MYCLAW_HOME_RAW =
-  process.env.MYCLAW_HOME?.trim() || envConfig.MYCLAW_HOME?.trim() || '';
-export const MEMORY_CONFIG_HOME = getMyclawHome(MYCLAW_HOME_RAW);
+const GANTRY_HOME_RAW =
+  process.env.GANTRY_HOME?.trim() || envConfig.GANTRY_HOME?.trim() || '';
+export const MEMORY_CONFIG_HOME = getGantryHome(GANTRY_HOME_RAW);
 
 export let runtimeMemorySettings: RuntimeMemorySettingsSnapshot = {};
 let runtimeMemorySettingsError: Error | null = null;

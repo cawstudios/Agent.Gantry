@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { materializeClaudeRuntime } from '@core/adapters/llm/anthropic-claude-agent/claude-config-materializer.js';
 import {
   ArtifactClaudeSkillSource,
-  RuntimeInstalledMyClawBrowserSkillSource,
+  RuntimeInstalledGantryBrowserSkillSource,
   materializeClaudeSkills,
   type SkillSource,
 } from '@core/adapters/llm/anthropic-claude-agent/claude-skill-materializer.js';
@@ -44,7 +44,7 @@ describe('Claude config materializer', () => {
   let tempRoot = '';
 
   beforeEach(() => {
-    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-materializer-'));
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-materializer-'));
   });
 
   afterEach(() => {
@@ -159,21 +159,21 @@ describe('Claude config materializer', () => {
     expect(fs.existsSync(path.join(skillsDir, 'invalid'))).toBe(false);
   });
 
-  it('materializes the runtime-installed myclaw-browser skill into the temp skills dir', async () => {
+  it('materializes the runtime-installed gantry-browser skill into the temp skills dir', async () => {
     const skillsDir = path.join(tempRoot, 'skills');
     const materialized = await materializeClaudeSkills({
       skillsDir,
-      skillSource: new RuntimeInstalledMyClawBrowserSkillSource(),
+      skillSource: new RuntimeInstalledGantryBrowserSkillSource(),
     });
 
     expect(materialized).toHaveLength(1);
     expect(materialized[0]).toMatchObject({
-      id: 'myclaw-browser',
+      id: 'gantry-browser',
       sourceType: 'runtime',
       enabled: true,
     });
     const skillText = fs.readFileSync(
-      path.join(skillsDir, 'myclaw-browser', 'SKILL.md'),
+      path.join(skillsDir, 'gantry-browser', 'SKILL.md'),
       'utf-8',
     );
     expect(skillText).toContain(

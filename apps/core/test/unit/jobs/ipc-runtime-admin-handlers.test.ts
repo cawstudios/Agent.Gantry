@@ -15,7 +15,7 @@ const runtimeHomes: string[] = [];
 
 async function loadHandlers(runtimeHome: string) {
   vi.resetModules();
-  vi.stubEnv('MYCLAW_HOME', runtimeHome);
+  vi.stubEnv('GANTRY_HOME', runtimeHome);
   const ipcAuth = await import('@core/runtime/ipc-auth.js');
   const handlers = await import('@core/jobs/ipc-runtime-admin-handlers.js');
   return {
@@ -105,7 +105,7 @@ afterEach(() => {
 describe('runtime admin IPC handlers', () => {
   it('returns a settings revision with full desired state for configured agents', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-ipc-'),
+      path.join(os.tmpdir(), 'gantry-settings-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { settingsDesiredStateHandler, taskData } =
@@ -115,7 +115,7 @@ describe('runtime admin IPC handlers', () => {
       data: taskData('settings-read') as never,
       sourceAgentFolder: 'main_agent',
       deps: depsWithAdminTools([
-        'mcp__myclaw__settings_desired_state',
+        'mcp__gantry__settings_desired_state',
       ]) as never,
       conversationBindings: {},
       sourceAgentFolderJids: ['tg:100'],
@@ -132,7 +132,7 @@ describe('runtime admin IPC handlers', () => {
 
   it('rejects full settings reads without the selected capability', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-ipc-'),
+      path.join(os.tmpdir(), 'gantry-settings-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { settingsDesiredStateHandler, taskData } =
@@ -150,14 +150,14 @@ describe('runtime admin IPC handlers', () => {
       ok: false,
       code: 'missing_capability',
       error: expect.stringContaining(
-        'Ask a configured conversation approver to approve mcp__myclaw__settings_desired_state, then choose Always allow.',
+        'Ask a configured conversation approver to approve mcp__gantry__settings_desired_state, then choose Always allow.',
       ),
     });
   });
 
   it('rejects global settings updates without the selected capability', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-ipc-'),
+      path.join(os.tmpdir(), 'gantry-settings-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { requestSettingsUpdateHandler, taskData } =
@@ -181,14 +181,14 @@ describe('runtime admin IPC handlers', () => {
       ok: false,
       code: 'missing_capability',
       error: expect.stringContaining(
-        'Ask a configured conversation approver to approve mcp__myclaw__request_settings_update, then choose Always allow.',
+        'Ask a configured conversation approver to approve mcp__gantry__request_settings_update, then choose Always allow.',
       ),
     });
   });
 
   it('requires same-channel approval before accepting service restart', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-ipc-'),
+      path.join(os.tmpdir(), 'gantry-settings-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const startService = vi.fn(() => ({ ok: true, message: 'started' }));
@@ -213,7 +213,7 @@ describe('runtime admin IPC handlers', () => {
         payload: { reason: 'test restart' },
       }) as never,
       sourceAgentFolder: 'main_agent',
-      deps: depsWithAdminTools(['mcp__myclaw__service_restart'], {
+      deps: depsWithAdminTools(['mcp__gantry__service_restart'], {
         requestPermissionApproval,
         sendMessage,
       }) as never,
@@ -242,7 +242,7 @@ describe('runtime admin IPC handlers', () => {
 
   it('rejects stale settings updates before approval', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-ipc-'),
+      path.join(os.tmpdir(), 'gantry-settings-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { requestSettingsUpdateHandler, taskData } =
@@ -259,7 +259,7 @@ describe('runtime admin IPC handlers', () => {
       }) as never,
       sourceAgentFolder: 'main_agent',
       deps: depsWithAdminTools([
-        'mcp__myclaw__request_settings_update',
+        'mcp__gantry__request_settings_update',
       ]) as never,
       conversationBindings: {},
       sourceAgentFolderJids: ['tg:100'],
@@ -273,16 +273,16 @@ describe('runtime admin IPC handlers', () => {
 
   it('shows a diff summary for approved settings updates and rejects stale approval windows', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-ipc-'),
+      path.join(os.tmpdir(), 'gantry-settings-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     vi.stubEnv(
-      'MYCLAW_DATABASE_URL',
-      'postgres://myclaw_app:pass@localhost/myclaw',
+      'GANTRY_DATABASE_URL',
+      'postgres://gantry_app:pass@localhost/gantry',
     );
     vi.stubEnv(
       'ONECLI_DATABASE_URL',
-      'postgres://onecli_app:pass@localhost/myclaw?schema=onecli',
+      'postgres://onecli_app:pass@localhost/gantry?schema=onecli',
     );
     vi.stubEnv(
       'SECRET_ENCRYPTION_KEY',
@@ -325,7 +325,7 @@ describe('runtime admin IPC handlers', () => {
       }) as never,
       sourceAgentFolder: 'main_agent',
       deps: {
-        ...depsWithAdminTools(['mcp__myclaw__request_settings_update']),
+        ...depsWithAdminTools(['mcp__gantry__request_settings_update']),
         requestPermissionApproval,
         sendMessage: vi.fn(async () => undefined),
       } as any,
@@ -353,16 +353,16 @@ describe('runtime admin IPC handlers', () => {
 
   it('reconciles approved settings updates immediately and reloads runtime state', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-ipc-'),
+      path.join(os.tmpdir(), 'gantry-settings-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     vi.stubEnv(
-      'MYCLAW_DATABASE_URL',
-      'postgres://myclaw_app:pass@localhost/myclaw',
+      'GANTRY_DATABASE_URL',
+      'postgres://gantry_app:pass@localhost/gantry',
     );
     vi.stubEnv(
       'ONECLI_DATABASE_URL',
-      'postgres://onecli_app:pass@localhost/myclaw?schema=onecli',
+      'postgres://onecli_app:pass@localhost/gantry?schema=onecli',
     );
     vi.stubEnv(
       'SECRET_ENCRYPTION_KEY',
@@ -420,7 +420,7 @@ describe('runtime admin IPC handlers', () => {
       }) as never,
       sourceAgentFolder: 'main_agent',
       deps: {
-        ...depsWithAdminTools(['mcp__myclaw__request_settings_update']),
+        ...depsWithAdminTools(['mcp__gantry__request_settings_update']),
         requestPermissionApproval: vi.fn(async () => ({
           approved: true,
           decidedBy: 'tg:admin',

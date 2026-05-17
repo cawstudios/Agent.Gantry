@@ -5,7 +5,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 function makeTmpRoot(roots: string[]): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-layout-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-layout-'));
   roots.push(root);
   return root;
 }
@@ -98,7 +98,7 @@ describe('resolvePackageRootFromSourceDir', () => {
     fs.mkdirSync(sourceDir, { recursive: true });
     fs.writeFileSync(
       path.join(repoRoot, 'package.json'),
-      '{"name":"@myclaw/core"}',
+      '{"name":"@gantry/core"}',
     );
 
     const { resolvePackageRootFromSourceDir } =
@@ -114,7 +114,7 @@ describe('resolvePackageRootFromSourceDir', () => {
     fs.mkdirSync(distRuntimeDir, { recursive: true });
     fs.writeFileSync(
       path.join(repoRoot, 'package.json'),
-      '{"name":"@myclaw/core"}',
+      '{"name":"@gantry/core"}',
     );
 
     const { resolvePackageRootFromSourceDir } =

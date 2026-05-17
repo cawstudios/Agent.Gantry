@@ -4,7 +4,7 @@ import { createHmac } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-  MyClawClient,
+  GantryClient,
   signIngressRequest,
   verifyIngressSignature,
   verifyWebhookSignature,
@@ -35,7 +35,7 @@ afterEach(async () => {
   });
 });
 
-describe('@myclaw/sdk webhook verification', () => {
+describe('@gantry/sdk webhook verification', () => {
   it('rejects stale signatures by default', () => {
     const timestamp = String(Date.now() - 10 * 60_000);
     const eventId = 'event-1';
@@ -59,7 +59,7 @@ describe('@myclaw/sdk webhook verification', () => {
   });
 });
 
-describe('@myclaw/sdk ingress signature verification', () => {
+describe('@gantry/sdk ingress signature verification', () => {
   it('accepts a valid ingress signature', () => {
     const timestamp = String(Date.now());
     const signature = signIngressRequest({
@@ -136,7 +136,7 @@ describe('@myclaw/sdk ingress signature verification', () => {
   });
 });
 
-describe('@myclaw/sdk transport', () => {
+describe('@gantry/sdk transport', () => {
   it('does not send an undefined content-type header for GET requests', async () => {
     const port = await listen((req, res) => {
       expect(req.method).toBe('GET');
@@ -145,7 +145,7 @@ describe('@myclaw/sdk transport', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok' }));
     });
-    const client = new MyClawClient({
+    const client = new GantryClient({
       apiKey: 'test-key',
       baseUrl: `http://127.0.0.1:${port}`,
     });
@@ -160,7 +160,7 @@ describe('@myclaw/sdk transport', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ sessionId: 'session-1' }));
     });
-    const client = new MyClawClient({
+    const client = new GantryClient({
       apiKey: 'test-key',
       baseUrl: `http://127.0.0.1:${port}`,
     });
@@ -189,7 +189,7 @@ describe('@myclaw/sdk transport', () => {
         res.end(JSON.stringify({ ok: true, ingresses: [] }));
       });
     });
-    const client = new MyClawClient({
+    const client = new GantryClient({
       apiKey: 'test-key',
       baseUrl: `http://127.0.0.1:${port}`,
     });
@@ -271,15 +271,12 @@ describe('@myclaw/sdk transport', () => {
         res.end(JSON.stringify({ ok: true, conversations: [], bindings: [] }));
       });
     });
-    const client = new MyClawClient({
+    const client = new GantryClient({
       apiKey: 'test-key',
       baseUrl: `http://127.0.0.1:${port}`,
     });
 
     await client.settings.get();
-    await client.settings.update({
-      permissions: { egress: { denylist: ['api.linkedin.com'] } },
-    });
     await client.providers.list();
     await client.providerConnections.create({
       appId: 'app-one',
@@ -354,13 +351,6 @@ describe('@myclaw/sdk transport', () => {
 
     expect(seen).toEqual([
       { method: 'GET', url: '/v1/settings', body: null },
-      {
-        method: 'PATCH',
-        url: '/v1/settings',
-        body: {
-          permissions: { egress: { denylist: ['api.linkedin.com'] } },
-        },
-      },
       { method: 'GET', url: '/v1/providers', body: null },
       {
         method: 'POST',

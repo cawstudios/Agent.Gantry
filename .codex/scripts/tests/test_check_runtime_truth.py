@@ -83,9 +83,9 @@ class RuntimeTruthScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("must not render features settings", result.stdout)
 
-    def test_myclaw_admin_documents_capability_request_tools(self) -> None:
+    def test_gantry_admin_documents_capability_request_tools(self) -> None:
         content = (
-            REPO_ROOT / ".claude" / "skills" / "myclaw-admin" / "SKILL.md"
+            REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md"
         ).read_text(encoding="utf-8")
         for tool_name in self.REQUIRED_CAPABILITY_TOOL_NAMES:
             with self.subTest(tool_name=tool_name):
@@ -99,7 +99,7 @@ class RuntimeTruthScriptTests(unittest.TestCase):
                 root,
                 ignore=shutil.ignore_patterns(".git", "node_modules", "dist"),
             )
-            admin_skill = root / ".claude" / "skills" / "myclaw-admin" / "SKILL.md"
+            admin_skill = root / ".claude" / "skills" / "gantry-admin" / "SKILL.md"
             admin_skill.write_text(
                 admin_skill.read_text(encoding="utf-8")
                 + "\nRun `claude mcp add-json github '{\"type\":\"http\"}'` to install MCP servers directly.\n",

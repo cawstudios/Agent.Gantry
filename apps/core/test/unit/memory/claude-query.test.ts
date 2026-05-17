@@ -31,8 +31,8 @@ describe('runClaudeQuery', () => {
         'providers: {}',
         'storage:',
         '  postgres:',
-        '    url_env: MYCLAW_DATABASE_URL',
-        '    schema: myclaw',
+        '    url_env: GANTRY_DATABASE_URL',
+        '    schema: gantry',
         'credential_broker:',
         `  mode: ${mode}`,
         '  onecli:',
@@ -56,10 +56,10 @@ describe('runClaudeQuery', () => {
   beforeEach(() => {
     vi.resetModules();
     runtimeRoot = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-claude-query-'),
+      path.join(os.tmpdir(), 'gantry-claude-query-'),
     );
     writeCredentialSettings('onecli');
-    vi.stubEnv('MYCLAW_HOME', runtimeRoot);
+    vi.stubEnv('GANTRY_HOME', runtimeRoot);
     vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     queryMock.mockReset();
@@ -101,7 +101,7 @@ describe('runClaudeQuery', () => {
     });
 
     expect(queryMock).toHaveBeenCalledTimes(1);
-    expect(getContainerConfigMock).toHaveBeenCalledWith('myclaw-model-access');
+    expect(getContainerConfigMock).toHaveBeenCalledWith('gantry-model-access');
     const call = queryMock.mock.calls[0]?.[0] as
       | {
           prompt?: string;
@@ -210,7 +210,7 @@ describe('runClaudeQuery', () => {
       runtimeRoot,
       'data',
       'onecli',
-      'gateway-ca-72ce4c290ee39d60.pem',
+      'gateway-ca-f0608813027cec0b.pem',
     );
     expect(call?.options?.env).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
@@ -306,7 +306,7 @@ describe('runClaudeQuery', () => {
   it('uses settings before ambient env for memory credential mode and does not read model from env', async () => {
     writeCredentialSettings('external', 'https://broker.local/anthropic');
     vi.resetModules();
-    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'none');
+    vi.stubEnv('GANTRY_CREDENTIAL_MODE', 'none');
     vi.stubEnv('ANTHROPIC_BASE_URL', '');
     vi.stubEnv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001');
     queryMock.mockImplementation(() =>

@@ -99,7 +99,7 @@ describe('OneCLI env policy', () => {
     expect(
       filterTrustedOnecliEnv({
         ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
-        MYCLAW_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'openrouter',
+        GANTRY_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'openrouter',
         ANTHROPIC_AUTH_TOKEN: 'sk-or-v1-test-token',
       }),
     ).toEqual({
@@ -123,7 +123,7 @@ describe('OneCLI env policy', () => {
     expect(() =>
       filterTrustedOnecliEnv({
         ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
-        MYCLAW_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'openrouter',
+        GANTRY_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'openrouter',
         ANTHROPIC_AUTH_TOKEN: 'sk-ant-secret',
       }),
     ).toThrow(
@@ -133,11 +133,11 @@ describe('OneCLI env policy', () => {
     expect(() =>
       filterTrustedOnecliEnv({
         ANTHROPIC_BASE_URL: 'https://broker.example.com',
-        MYCLAW_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'native',
+        GANTRY_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'native',
         ANTHROPIC_AUTH_TOKEN: 'sk-ant-secret',
       }),
     ).toThrow(
-      'forbidden raw credential env value for key: MYCLAW_ANTHROPIC_AUTH_TOKEN_PROVIDER',
+      'forbidden raw credential env value for key: GANTRY_ANTHROPIC_AUTH_TOKEN_PROVIDER',
     );
 
     expect(() =>

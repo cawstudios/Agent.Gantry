@@ -1,4 +1,4 @@
-# MyClaw Documentation
+# Gantry Documentation
 
 This directory holds in-repo product, architecture, factory, and operational docs.
 

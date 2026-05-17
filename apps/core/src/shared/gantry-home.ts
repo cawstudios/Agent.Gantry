@@ -1,7 +1,7 @@
 import os from 'os';
 import path from 'path';
 
-const DEFAULT_MYCLAW_HOME = path.join(os.homedir(), 'myclaw');
+const DEFAULT_GANTRY_HOME = path.join(os.homedir(), 'gantry');
 
 function expandHomePath(input: string): string {
   if (input === '~') return os.homedir();
@@ -11,22 +11,22 @@ function expandHomePath(input: string): string {
   return input;
 }
 
-export function getMyclawHome(raw?: string): string {
+export function getGantryHome(raw?: string): string {
   const source =
-    raw?.trim() || process.env.MYCLAW_HOME?.trim() || DEFAULT_MYCLAW_HOME;
+    raw?.trim() || process.env.GANTRY_HOME?.trim() || DEFAULT_GANTRY_HOME;
   return path.resolve(expandHomePath(source));
 }
 
 export function getIpcDir(
   groupFolder: string,
-  runtimeHome = getMyclawHome(),
+  runtimeHome = getGantryHome(),
 ): string {
   return path.resolve(runtimeHome, 'data', 'ipc', groupFolder);
 }
 
 export function getAgentDir(
   groupFolder: string,
-  runtimeHome = getMyclawHome(),
+  runtimeHome = getGantryHome(),
 ): string {
   return path.resolve(runtimeHome, 'agents', groupFolder);
 }

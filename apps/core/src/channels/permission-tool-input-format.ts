@@ -207,7 +207,7 @@ function formatKnownToolInputFields(
     add('URL', input.url);
     add('Prompt', input.prompt, 300);
   }
-  if (toolName.startsWith('mcp__myclaw__browser_')) {
+  if (toolName.startsWith('mcp__gantry__browser_')) {
     add('URL', input.url);
     add('Selector', input.selector);
     add('Text', input.text);
@@ -215,7 +215,7 @@ function formatKnownToolInputFields(
     add('Key', input.key);
   }
   if (
-    toolName.startsWith('mcp__myclaw__scheduler_') ||
+    toolName.startsWith('mcp__gantry__scheduler_') ||
     toolName.startsWith('scheduler_')
   ) {
     add('Job ID', input.job_id ?? input.jobId);

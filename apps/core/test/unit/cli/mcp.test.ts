@@ -9,7 +9,7 @@ let server: http.Server | null = null;
 const originalEnv = { ...process.env };
 
 function makeTempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-mcp-cli-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-mcp-cli-'));
 }
 
 function listen(handler: http.RequestListener): Promise<number> {
@@ -61,7 +61,7 @@ describe('mcp CLI', () => {
         res.end(JSON.stringify({ server: { id: 'mcp:one', status: 'draft' } }));
       });
     });
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'cli-test',
         token: 'test-key',
@@ -69,7 +69,7 @@ describe('mcp CLI', () => {
         scopes: ['mcp:admin'],
       },
     ]);
-    process.env.MYCLAW_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_PORT = String(port);
 
     const { runMcpCommand } = await import('@core/cli/mcp.js');
     const code = await runMcpCommand(makeTempDir(), [
@@ -128,7 +128,7 @@ describe('mcp CLI', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ servers: [] }));
     });
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'cli-test',
         token: 'test-key',
@@ -136,8 +136,8 @@ describe('mcp CLI', () => {
         scopes: ['mcp:read'],
       },
     ]);
-    process.env.MYCLAW_CONTROL_BASE_URL = `http://127.0.0.1:${port}`;
-    delete process.env.MYCLAW_CONTROL_PORT;
+    process.env.GANTRY_CONTROL_BASE_URL = `http://127.0.0.1:${port}`;
+    delete process.env.GANTRY_CONTROL_PORT;
 
     const { runMcpCommand } = await import('@core/cli/mcp.js');
     const code = await runMcpCommand(makeTempDir(), ['list']);

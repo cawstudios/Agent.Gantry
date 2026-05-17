@@ -156,7 +156,7 @@ function createTestOpts(
         },
       },
       storage: {
-        postgres: { urlEnv: 'MYCLAW_DATABASE_URL', schema: 'myclaw' },
+        postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
       },
       credentialBroker: {
         onecli: {
@@ -291,12 +291,12 @@ async function triggerCallbackQuery(ctx: {
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('TelegramChannel', () => {
-  let savedMyclawHome: string | undefined;
+  let savedGantryHome: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    savedMyclawHome = process.env.MYCLAW_HOME;
-    delete process.env.MYCLAW_HOME;
+    savedGantryHome = process.env.GANTRY_HOME;
+    delete process.env.GANTRY_HOME;
 
     // Mock fs operations used by downloadFile
     vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as any);
@@ -313,8 +313,8 @@ describe('TelegramChannel', () => {
   });
 
   afterEach(() => {
-    if (savedMyclawHome === undefined) delete process.env.MYCLAW_HOME;
-    else process.env.MYCLAW_HOME = savedMyclawHome;
+    if (savedGantryHome === undefined) delete process.env.GANTRY_HOME;
+    else process.env.GANTRY_HOME = savedGantryHome;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -2251,9 +2251,9 @@ describe('TelegramChannel', () => {
     });
 
     it('restores progress handles after process restart', async () => {
-      const runtimeHome = fs.mkdtempSync('/tmp/myclaw-tg-progress-');
-      const savedHome = process.env.MYCLAW_HOME;
-      process.env.MYCLAW_HOME = runtimeHome;
+      const runtimeHome = fs.mkdtempSync('/tmp/gantry-tg-progress-');
+      const savedHome = process.env.GANTRY_HOME;
+      process.env.GANTRY_HOME = runtimeHome;
       try {
         const first = new TelegramChannel('test-token', createTestOpts());
         await first.connect();
@@ -2275,8 +2275,8 @@ describe('TelegramChannel', () => {
           expect.objectContaining({ parse_mode: 'MarkdownV2' }),
         );
       } finally {
-        if (savedHome === undefined) delete process.env.MYCLAW_HOME;
-        else process.env.MYCLAW_HOME = savedHome;
+        if (savedHome === undefined) delete process.env.GANTRY_HOME;
+        else process.env.GANTRY_HOME = savedHome;
         fs.rmSync(runtimeHome, { recursive: true, force: true });
       }
     });

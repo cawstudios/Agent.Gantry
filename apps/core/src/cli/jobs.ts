@@ -80,7 +80,7 @@ export async function runJobsCommand(
     return listJobEvents(runtimeHome, maybeJobId, rest);
   }
   p.log.error(
-    'Usage: myclaw jobs list|show <job_id>|resume <job_id>|events <job_id> [--run <run_id>]',
+    'Usage: gantry jobs list|show <job_id>|resume <job_id>|events <job_id> [--run <run_id>]',
   );
   return 1;
 }

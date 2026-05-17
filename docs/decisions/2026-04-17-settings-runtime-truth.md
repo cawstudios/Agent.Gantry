@@ -2,7 +2,7 @@
 
 ## Context
 
-MyClaw must present one runtime truth across runtime code, CLI, diagnostics, setup, docs, and shipped skills. Runtime behavior settings were previously split between `settings.yaml` and `.env`, which created conflicting states and unclear operator UX.
+Gantry must present one runtime truth across runtime code, CLI, diagnostics, setup, docs, and shipped skills. Runtime behavior settings were previously split between `settings.yaml` and `.env`, which created conflicting states and unclear operator UX.
 
 ## Decision
 
@@ -20,7 +20,7 @@ MyClaw must present one runtime truth across runtime code, CLI, diagnostics, set
    `conversations.*`. Advanced sections such as `provider_connections.*`,
    `storage.*`, `credential_broker.*`, `memory.*`, and
    `desired_state.authoritative` are omitted when they match built-in defaults.
-   There is no versioned settings lane because MyClaw is still early-stage.
+   There is no versioned settings lane because Gantry is still early-stage.
 6. `credential_broker.onecli.postgres.*` declares the OneCLI persistence contract. It stores only the env key and schema name; the URL and encryption key stay in `.env`.
 7. Runtime memory injection is query-scoped: the current message or scheduled
    job prompt drives retrieval, and no memory block is injected when nothing
@@ -39,7 +39,7 @@ MyClaw must present one runtime truth across runtime code, CLI, diagnostics, set
 ## Consequences
 
 - CLI mutation commands update `settings.yaml`.
-- Agent-requested local configuration changes use reviewed MyClaw admin tools.
+- Agent-requested local configuration changes use reviewed Gantry admin tools.
   Only agents with selected admin tool capabilities can use
   `settings_desired_state` to inspect and `request_settings_update` to ask the
   host to validate and write a replacement file after approval. Settings
@@ -48,13 +48,13 @@ MyClaw must present one runtime truth across runtime code, CLI, diagnostics, set
 - Runtime watches `settings.yaml`; valid safe changes reconcile live, while
   storage, credential broker, and channel topology changes are reported as
   restart-required.
-- `myclaw status` and `myclaw doctor` report memory/storage/embeddings/dreaming state from `settings.yaml`.
+- `gantry status` and `gantry doctor` report memory/storage/embeddings/dreaming state from `settings.yaml`.
 - Unsupported runtime and memory env keys are surfaced as warnings in doctor/config surfaces.
 - Direct YAML edits remain first-class with strict validation and actionable path-level errors.
 
 ## Notes
 
-- Runtime storage is Postgres via `MYCLAW_DATABASE_URL`.
+- Runtime storage is Postgres via `GANTRY_DATABASE_URL`.
 - Memory data is stored in Postgres.
 - Session transcript archives are operational artifacts under runtime `data/`,
   not the memory store.

@@ -1,23 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const previousIpcDir = process.env.MYCLAW_IPC_DIR;
+const previousIpcDir = process.env.GANTRY_IPC_DIR;
 
 beforeEach(() => {
-  process.env.MYCLAW_IPC_DIR = '/tmp/myclaw-file-tool-test';
-  process.env.MYCLAW_GROUP_FOLDER = 'test-agent';
-  process.env.MYCLAW_CHAT_JID = 'sl:C123';
+  process.env.GANTRY_IPC_DIR = '/tmp/gantry-file-tool-test';
+  process.env.GANTRY_GROUP_FOLDER = 'test-agent';
+  process.env.GANTRY_CHAT_JID = 'sl:C123';
 });
 
 afterEach(() => {
   vi.resetModules();
   vi.doUnmock('@core/runner/mcp/ipc.js');
-  if (previousIpcDir === undefined) delete process.env.MYCLAW_IPC_DIR;
-  else process.env.MYCLAW_IPC_DIR = previousIpcDir;
-  delete process.env.MYCLAW_GROUP_FOLDER;
-  delete process.env.MYCLAW_CHAT_JID;
+  if (previousIpcDir === undefined) delete process.env.GANTRY_IPC_DIR;
+  else process.env.GANTRY_IPC_DIR = previousIpcDir;
+  delete process.env.GANTRY_GROUP_FOLDER;
+  delete process.env.GANTRY_CHAT_JID;
 });
 
-describe('mcp__myclaw__file', () => {
+describe('mcp__gantry__file', () => {
   it('sends compact FileArtifact requests through signed host IPC', async () => {
     const writeIpcFile = vi.fn();
     const waitForTaskResponse = vi.fn(async () => ({
@@ -56,7 +56,7 @@ describe('mcp__myclaw__file', () => {
     expect(response).toMatchObject({ ok: true });
     expect(response.artifacts[0]).not.toHaveProperty('storageRef');
     expect(writeIpcFile).toHaveBeenCalledWith(
-      '/tmp/myclaw-file-tool-test/tasks',
+      '/tmp/gantry-file-tool-test/tasks',
       expect.objectContaining({
         type: 'file_artifact',
         chatJid: 'sl:C123',

@@ -9,6 +9,7 @@ import {
   getMemoryMaintenanceQueue,
   type MemoryMaintenanceQueueEnqueueResult,
 } from '../memory/maintenance-queue.js';
+import type { DreamingRunStatus } from '../memory/memory-types.js';
 import {
   DEFAULT_MEMORY_APP_ID,
   memoryAgentIdForGroupFolder,
@@ -137,7 +138,7 @@ export async function handleSystemJob(
     userId?: string;
     threadId?: string | null;
   },
-): Promise<unknown> {
+): Promise<string> {
   if (job.prompt === MEMORY_DREAM_SYSTEM_PROMPT) {
     const defaultScope = context.conversationKind === 'dm' ? 'user' : 'group';
     const { subject } = resolveScopedMemorySubject({
@@ -149,10 +150,11 @@ export async function handleSystemJob(
       threadId: context.threadId || undefined,
       defaultScope,
     });
+    let dreamRun: DreamingRunStatus | undefined;
     const queueResult = await memoryMaintenanceQueue.enqueueAndWait(
       context.folder,
       async () => {
-        await AppMemoryService.getInstance().triggerDreaming({
+        dreamRun = await AppMemoryService.getInstance().triggerDreaming({
           ...subject,
           appId: subject.appId,
           agentId: subject.agentId,
@@ -171,13 +173,60 @@ export async function handleSystemJob(
         throw new Error('invalid memory maintenance group');
       }
     }
-    return {
-      queued: queueResult.queued,
-      pending: memoryMaintenanceQueue.getPendingCount(),
-      deduped: queueResult.deduped,
-    };
+    return formatMemoryDreamingOutcome(dreamRun, queueResult);
   }
   throw new Error(`Unknown system job: ${job.prompt}`);
+}
+
+function numericSummaryValue(
+  summary: unknown,
+  key: string,
+): number | undefined {
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) {
+    return undefined;
+  }
+  const value = (summary as Record<string, unknown>)[key];
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.trunc(value))
+    : undefined;
+}
+
+function formatMemoryDreamingOutcome(
+  run: DreamingRunStatus | undefined,
+  queueResult: MemoryMaintenanceQueueEnqueueResult,
+): string {
+  if (queueResult.deduped) {
+    return 'Memory dreaming was already running for this conversation.';
+  }
+  if (!run) {
+    return 'Memory dreaming completed.';
+  }
+  if (run.status === 'failed') {
+    const summary =
+      run.summary && typeof run.summary === 'object'
+        ? (run.summary as Record<string, unknown>)
+        : {};
+    const error = typeof summary.error === 'string' ? summary.error : '';
+    return error
+      ? `Memory dreaming failed: ${error}`
+      : 'Memory dreaming failed.';
+  }
+  const promoted = numericSummaryValue(run.summary, 'promoted') ?? 0;
+  const updated = numericSummaryValue(run.summary, 'updated') ?? 0;
+  const needsReview = numericSummaryValue(run.summary, 'needsReview') ?? 0;
+  const skipped = numericSummaryValue(run.summary, 'skipped') ?? 0;
+  const blocked = numericSummaryValue(run.summary, 'blocked') ?? 0;
+  const changes: string[] = [];
+  if (promoted > 0) changes.push(`${promoted} promoted`);
+  if (updated > 0) changes.push(`${updated} updated`);
+  if (needsReview > 0) changes.push(`${needsReview} sent to review`);
+  if (changes.length > 0) {
+    return `Memory dreaming completed: ${changes.join(', ')}.`;
+  }
+  if (skipped > 0 || blocked > 0) {
+    return `Memory dreaming completed with no memory changes; ${skipped} skipped, ${blocked} blocked.`;
+  }
+  return 'Memory dreaming completed with no memory changes.';
 }
 
 export function resetSystemJobStateForTests(): void {

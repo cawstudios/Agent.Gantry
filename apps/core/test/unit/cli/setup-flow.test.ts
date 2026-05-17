@@ -10,7 +10,7 @@ import { onboardingStatePath } from '@core/config/settings/runtime-home.js';
 const tempRoots: string[] = [];
 
 function makeRuntimeHome(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-setup-flow-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-setup-flow-'));
   tempRoots.push(root);
   return root;
 }
@@ -30,7 +30,7 @@ describe('setup-flow draft restore', () => {
 
     expect(draft.runtimeHome).toBe(runtimeHome);
     expect(draft.postgresSetupKind).toBe('existing');
-    expect(draft.postgresSchema).toBe('myclaw');
+    expect(draft.postgresSchema).toBe('gantry');
     expect(draft.onecliPostgresSchema).toBe('onecli');
     expect(fs.existsSync(settingsPath)).toBe(false);
   });
@@ -40,10 +40,10 @@ describe('setup-flow draft restore', () => {
     const draft = restoreDraft(runtimeHome, null);
     draft.postgresSetupKind = 'hosted';
     draft.postgresDatabaseUrl =
-      'postgres://myclaw:pass@db.example.com:5432/myclaw?sslmode=require';
+      'postgres://gantry:pass@db.example.com:5432/gantry?sslmode=require';
     draft.onecliPostgresDatabaseUrl =
-      'postgres://onecli:pass@db.example.com:5432/myclaw?sslmode=require&schema=agent_vault';
-    draft.postgresSchema = 'hosted_myclaw';
+      'postgres://onecli:pass@db.example.com:5432/gantry?sslmode=require&schema=agent_vault';
+    draft.postgresSchema = 'hosted_gantry';
     draft.onecliPostgresSchema = 'agent_vault';
     draft.primaryProvider = 'slack';
     draft.slackChatJid = 'sl:C123';
@@ -73,7 +73,7 @@ describe('setup-flow draft restore', () => {
     expect(restoredData.onecliPostgresDatabaseUrl).toBeUndefined();
     expect(restored.postgresDatabaseUrl).toBe('');
     expect(restored.onecliPostgresDatabaseUrl).toBe('');
-    expect(restored.postgresSchema).toBe('hosted_myclaw');
+    expect(restored.postgresSchema).toBe('hosted_gantry');
     expect(restored.onecliPostgresSchema).toBe('agent_vault');
     expect(restored.primaryProvider).toBe('slack');
     expect(restored.slackChatJid).toBe('sl:C123');

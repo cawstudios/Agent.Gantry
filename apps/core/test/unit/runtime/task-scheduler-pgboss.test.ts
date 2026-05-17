@@ -96,12 +96,12 @@ describe('PgBossSchedulerEngine', () => {
 
       expect(send).toHaveBeenCalledTimes(1);
       expect(send).toHaveBeenLastCalledWith(
-        'myclaw.jobs',
+        'gantry.jobs',
         { jobId: 'job-1', scheduledFor: '2026-04-24T09:00:00.000Z' },
         expect.objectContaining({
           id: expect.stringMatching(UUID_PATTERN),
           startAfter: '2026-04-24T09:10:10.000Z',
-          group: { id: 'myclaw.group.dGc6dGVhbQ' },
+          group: { id: 'gantry.group.dGc6dGVhbQ' },
         }),
       );
 
@@ -112,7 +112,7 @@ describe('PgBossSchedulerEngine', () => {
 
       expect(send).toHaveBeenCalledTimes(2);
       expect(send).toHaveBeenLastCalledWith(
-        'myclaw.jobs',
+        'gantry.jobs',
         { jobId: 'job-1', scheduledFor: '2026-04-24T09:00:00.000Z' },
         expect.objectContaining({
           id: send.mock.calls[0][2].id,
@@ -303,13 +303,13 @@ describe('PgBossSchedulerEngine', () => {
     ).syncAllJobs();
 
     expect(boss.schedule).toHaveBeenCalledWith(
-      'myclaw.jobs',
+      'gantry.jobs',
       '0 9 * * *',
       { jobId: 'job-1' },
       expect.objectContaining({
-        key: 'myclaw.job.am9iLTE',
-        group: { id: 'myclaw.group.c2w6dGVhbQ' },
-        singletonKey: 'myclaw.job.am9iLTE',
+        key: 'gantry.job.am9iLTE',
+        group: { id: 'gantry.group.c2w6dGVhbQ' },
+        singletonKey: 'gantry.job.am9iLTE',
         retryLimit: 0,
       }),
     );
@@ -398,7 +398,7 @@ describe('PgBossSchedulerEngine', () => {
     );
 
     expect(boss.send).toHaveBeenCalledWith(
-      'myclaw.jobs',
+      'gantry.jobs',
       {
         jobId: 'job-1',
         runId: '55cda2f6-e553-486a-867f-b9c78a742217',
@@ -407,11 +407,11 @@ describe('PgBossSchedulerEngine', () => {
       },
       expect.objectContaining({
         id: expect.stringMatching(UUID_PATTERN),
-        group: { id: 'myclaw.group.dGc6dGVhbQ' },
+        group: { id: 'gantry.group.dGc6dGVhbQ' },
         retryLimit: 0,
       }),
     );
-    expect(boss.send.mock.calls[0][2].id).not.toContain('myclaw.send.');
+    expect(boss.send.mock.calls[0][2].id).not.toContain('gantry.send.');
   });
 
   it('dispatches jobs through a job-scoped scheduler queue key and releases the slot', async () => {

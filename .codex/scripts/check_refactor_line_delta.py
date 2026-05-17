@@ -202,7 +202,7 @@ def check_diff(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Record or enforce MyClaw runtime refactor source line budgets.",
+        description="Record or enforce Gantry runtime refactor source line budgets.",
     )
     parser.add_argument(
         "--baseline",

@@ -902,7 +902,7 @@ describe('createGroupProcessor', () => {
           providerSessionId: 'provider-session:1',
           externalSessionId: 'claude-session-1',
           memoryContextBlock:
-            '<myclaw_memory_context>memory</myclaw_memory_context>',
+            '<gantry_memory_context>memory</gantry_memory_context>',
         });
 
       const { processGroupMessages } = createGroupProcessor(deps);
@@ -917,7 +917,7 @@ describe('createGroupProcessor', () => {
       );
       expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
         memoryContextBlock: expect.stringContaining(
-          '<myclaw_memory_context>memory</myclaw_memory_context>',
+          '<gantry_memory_context>memory</gantry_memory_context>',
         ),
         sessionId: 'claude-session-1',
       });
@@ -2336,7 +2336,7 @@ describe('createGroupProcessor', () => {
           agentId: 'agent:test',
           agentSessionId: 'agent-session:1',
           memoryContextBlock:
-            '<myclaw_memory_context>memory</myclaw_memory_context>',
+            '<gantry_memory_context>memory</gantry_memory_context>',
         });
       (deps.opsRepository as any).createSessionAgentRun = vi
         .fn()
@@ -2361,7 +2361,7 @@ describe('createGroupProcessor', () => {
       expect(deps.opsRepository.storeMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chat_jid: 'group1@g.us',
-          sender: 'myclaw',
+          sender: 'gantry',
           sender_name: 'Gantry',
           content: 'stream text',
           is_from_me: true,
@@ -2995,10 +2995,10 @@ describe('createGroupProcessor', () => {
         requiresTrigger: false,
         conversationKind: 'channel',
       });
-      const longContent = `<myclaw_memory_context>${Array.from(
+      const longContent = `<gantry_memory_context>${Array.from(
         { length: 140 },
         (_, index) => `term${index}`,
-      ).join(' ')}</myclaw_memory_context>`;
+      ).join(' ')}</gantry_memory_context>`;
       const { deps } = setupHappyPath({
         group,
         messages: [makeMessage({ content: longContent })],
@@ -3012,7 +3012,7 @@ describe('createGroupProcessor', () => {
 
       const query = (deps.opsRepository as any).getAgentTurnContext.mock
         .calls[0][0].query;
-      expect(query).not.toContain('myclaw_memory_context');
+      expect(query).not.toContain('gantry_memory_context');
       expect(query.split(/\s+/)).toHaveLength(80);
       expect(query.length).toBeLessThanOrEqual(1200);
     });

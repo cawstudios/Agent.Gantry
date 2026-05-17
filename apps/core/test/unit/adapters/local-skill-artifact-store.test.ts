@@ -13,7 +13,7 @@ describe('LocalSkillArtifactStore', () => {
   let tempRoot = '';
 
   beforeEach(() => {
-    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-skill-store-'));
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-skill-store-'));
   });
 
   afterEach(() => {
@@ -107,7 +107,7 @@ describe('LocalSkillArtifactStore', () => {
       },
     });
     const artifactDir = resolveRef(stored.storageRef);
-    fs.writeFileSync(path.join(artifactDir, '.myclaw-artifact.json'), '{}');
+    fs.writeFileSync(path.join(artifactDir, '.gantry-artifact.json'), '{}');
     fs.mkdirSync(path.join(artifactDir, '.git'), { recursive: true });
     fs.writeFileSync(path.join(artifactDir, '.git', 'config'), 'secret');
 

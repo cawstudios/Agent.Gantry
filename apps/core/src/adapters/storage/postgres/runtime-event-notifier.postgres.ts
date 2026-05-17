@@ -8,7 +8,7 @@ import type {
 import { runtimeEventMatchesFilter } from '../../../domain/events/runtime-event-filter.js';
 import { logger } from '../../../infrastructure/logging/logger.js';
 
-const RUNTIME_EVENTS_CHANNEL = 'myclaw_runtime_events';
+const RUNTIME_EVENTS_CHANNEL = 'gantry_runtime_events';
 const LISTEN_RECONNECT_DELAY_MS = 1_000;
 const PG_NOTIFY_PAYLOAD_SAFE_BYTES = 7_500;
 

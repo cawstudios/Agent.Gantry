@@ -1,6 +1,6 @@
 ALTER TABLE tool_catalog
   ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'host',
-  ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'myclaw',
+  ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'gantry',
   ADD COLUMN IF NOT EXISTS provider_tool_name text,
   ADD COLUMN IF NOT EXISTS display_name text NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT 'admin',
@@ -18,7 +18,7 @@ SET
     ELSE kind
   END,
   provider = CASE
-    WHEN name = 'browser' THEN 'myclaw'
+    WHEN name = 'browser' THEN 'gantry'
     ELSE provider
   END,
   provider_tool_name = CASE

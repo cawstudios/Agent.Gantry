@@ -123,6 +123,131 @@ describe('jobs/execution-notifications', () => {
     );
   });
 
+  it('cleans markdown job reports into readable terminal outcomes', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+
+    await notifySchedulerTerminalRunState({
+      job: makeJob({ name: 'KnackLabs Lead Maintenance' }),
+      runId: 'run-1',
+      runShortId: 4,
+      runStatus: 'completed',
+      summary:
+        '## Final Job Report\n- *Mode*: B (KnackLabs lead finder) — Sun 12:05 IST.\n- *Added*: 2 leads to Bot Recommendation tab (rows 1918-1919), locations written to column K.',
+      nextRun: '2026-05-17T08:35:00.000Z',
+      retryCount: 0,
+      pauseReason: null,
+      sendMessage,
+      durationMs: 382_000,
+    });
+
+    const message = String(sendMessage.mock.calls[0]?.[1]);
+    expect(message).toContain(
+      'Completed: KnackLabs Lead Maintenance (Run #4, 6m 22s)',
+    );
+    expect(message).toContain(
+      'Outcome: Final Job Report Mode: B (KnackLabs lead finder)',
+    );
+    expect(message).toContain('Added: 2 leads');
+    expect(message).not.toContain('##');
+    expect(message).not.toContain('*Mode*');
+    expect(message).not.toContain('T08:35:00.000Z');
+  });
+
+  it('turns queue bookkeeping JSON into a human memory maintenance outcome', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+
+    await notifySchedulerTerminalRunState({
+      job: makeJob({ name: 'Memory Dreaming (main_agent tg:5759865942)' }),
+      runId: 'run-1',
+      runShortId: 6,
+      runStatus: 'completed',
+      summary: '{"queued":true,"pending":0,"deduped":false}',
+      nextRun: '2026-05-15T21:45:00.000Z',
+      retryCount: 0,
+      pauseReason: null,
+      sendMessage,
+      durationMs: 13_000,
+    });
+
+    const message = String(sendMessage.mock.calls[0]?.[1]);
+    expect(message).toContain(
+      'Completed: Memory Dreaming (main_agent tg:5759865942) (Run #6, 13s)',
+    );
+    expect(message).toContain('Outcome: Memory maintenance completed.');
+    expect(message).not.toContain('"queued"');
+    expect(message).not.toContain('deduped');
+  });
+
+  it('hides runner diagnostics from failed job receipts', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+
+    await notifySchedulerTerminalRunState({
+      job: makeJob({ name: 'KnackLabs Lead Maintenance' }),
+      runId: 'run-1',
+      runShortId: 1,
+      runStatus: 'failed',
+      summary:
+        'Browser was available but not used. Required tool assertion Browser was not satisfied by any browser IPC action during this run.\nDiagnostics: lastTool=SandboxNetworkAccess; pendingPermissions=0 (none); totalToolCalls=20; browserActivity=0;',
+      nextRun: '2026-05-17T05:49:52.673Z',
+      retryCount: 1,
+      pauseReason: null,
+      sendMessage,
+      durationMs: 180_000,
+    });
+
+    const message = String(sendMessage.mock.calls[0]?.[1]);
+    expect(message).toContain(
+      'Outcome: Browser access was available, but this job did not use the browser.',
+    );
+    expect(message).toContain(
+      'Action: Update the job so it uses the browser during the run, or remove Browser from required tools if browser use is optional.',
+    );
+    expect(message).not.toContain('Diagnostics:');
+    expect(message).not.toContain('lastTool=');
+    expect(message).not.toContain('pendingPermissions=');
+  });
+
+  it('summarizes JSON arrays without leaking raw payloads', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+
+    await notifySchedulerTerminalRunState({
+      job: makeJob(),
+      runId: 'run-1',
+      runStatus: 'completed',
+      summary: '[{"queued":true},{"queued":false}]',
+      nextRun: null,
+      retryCount: 0,
+      pauseReason: null,
+      sendMessage,
+    });
+
+    const message = String(sendMessage.mock.calls[0]?.[1]);
+    expect(message).toContain('Outcome: Job returned 2 items.');
+    expect(message).not.toContain('[{');
+    expect(message).not.toContain('"queued"');
+  });
+
+  it('does not expose invalid scheduler next-run data in receipts', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+
+    await notifySchedulerTerminalRunState({
+      job: makeJob(),
+      runId: 'run-1',
+      runStatus: 'failed',
+      summary: 'failed',
+      nextRun: 'not-a-date',
+      retryCount: 1,
+      pauseReason: null,
+      sendMessage,
+    });
+
+    const message = String(sendMessage.mock.calls[0]?.[1]);
+    expect(message).toContain(
+      'Next: Runs again after the schedule is repaired.',
+    );
+    expect(message).not.toContain('not-a-date');
+  });
+
   it('sends a user-facing needs-permission receipt without repair commands', async () => {
     const sendMessage = vi.fn(async () => undefined);
 
@@ -131,10 +256,10 @@ describe('jobs/execution-notifications', () => {
       runId: 'run-1',
       runStatus: 'dead_lettered',
       summary:
-        'Tool not on autonomous run allowlist: mcp__myclaw__browser_act. Recovery: request_permission { "toolName": "Browser" }',
+        'Tool not on autonomous run allowlist: mcp__gantry__browser_act. Recovery: request_permission { "toolName": "Browser" }',
       nextRun: null,
       retryCount: 1,
-      pauseReason: 'Needs permission: mcp__myclaw__browser_act',
+      pauseReason: 'Needs permission: mcp__gantry__browser_act',
       sendMessage,
       durationMs: 41_000,
     });

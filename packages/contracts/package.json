@@ -1,8 +1,8 @@
 {
-  "name": "@myclaw/contracts",
+  "name": "@gantry/contracts",
   "version": "3.0.0",
   "type": "module",
-  "description": "Canonical DTO and schema contracts for MyClaw integrations.",
+  "description": "Canonical DTO and schema contracts for Gantry integrations.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

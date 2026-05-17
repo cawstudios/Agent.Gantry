@@ -1,7 +1,7 @@
-# @myclaw/sdk
+# @gantry/sdk
 
-Node.js SDK for the [MyClaw](https://github.com/vrknetha/myclaw) runtime
-control API. Talk to a running MyClaw instance over HTTP or a Unix socket:
+Node.js SDK for the [Gantry](https://github.com/vrknetha/gantry) runtime
+control API. Talk to a running Gantry instance over HTTP or a Unix socket:
 sessions, jobs, agents, memory, webhooks, ingresses, and signing helpers.
 
 > **Node-only.** The SDK uses `node:http`, `node:https`, and `node:crypto`. It
@@ -11,20 +11,20 @@ sessions, jobs, agents, memory, webhooks, ingresses, and signing helpers.
 ## Install
 
 ```bash
-npm i @myclaw/sdk
+npm i @gantry/sdk
 ```
 
-Requires Node.js 24 (matches the MyClaw runtime's supported range).
+Requires Node.js 24 (matches the Gantry runtime's supported range).
 
 ## Quickstart
 
 ```ts
-import { createClient } from '@myclaw/sdk';
+import { createClient } from '@gantry/sdk';
 
 const client = createClient({
-  apiKey: process.env.MYCLAW_API_KEY!,
+  apiKey: process.env.GANTRY_API_KEY!,
   baseUrl: 'http://127.0.0.1:3939', // or omit to use the default
-  // socketPath: '/run/myclaw.sock', // optional Unix socket transport
+  // socketPath: '/run/gantry.sock', // optional Unix socket transport
   // timeoutMs: 60_000,
 });
 
@@ -63,7 +63,7 @@ endpoints on the running runtime:
 - `client.conversations` — `list`, `get`, `messages`, get/set `approvers`
 - `client.webhooks` — `register`, `list`, `update`, `delete`, `test`, `replayDeadLetter`, `purgeDeadLetter`
 - `client.memory` — `save`, `search`, `list`, `patch`, `delete`, plus `dreaming.trigger` / `dreaming.status`
-- `client.settings` — read/update runtime settings
+- `client.settings` — read runtime settings
 - `client.ingresses` — manage external ingress configurations
 
 ### Standalone signing helpers
@@ -73,16 +73,16 @@ import {
   signIngressRequest,
   verifyIngressSignature,
   verifyWebhookSignature,
-} from '@myclaw/sdk';
+} from '@gantry/sdk';
 ```
 
-- `signIngressRequest`, `signIngressSignaturePayload`, `buildIngressSignaturePayload` — HMAC signing for posting external events into MyClaw.
+- `signIngressRequest`, `signIngressSignaturePayload`, `buildIngressSignaturePayload` — HMAC signing for posting external events into Gantry.
 - `verifyIngressSignature` — verify inbound ingress signatures on the runtime side.
 - `verifyWebhookSignature` — verify outbound webhook deliveries on your receiver.
 
 ## Errors
 
-All client methods reject with a `MyClawError` (extends `Error`) carrying
+All client methods reject with a `GantryError` (extends `Error`) carrying
 `code`, optional `details`, `requestId`, `retryable`, `restartRequired`, and
 `nextAction`. Inspect these to drive retry or restart logic.
 

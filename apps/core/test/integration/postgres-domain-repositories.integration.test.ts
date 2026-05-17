@@ -37,7 +37,7 @@ import type {
   ProviderSessionId,
 } from '@core/domain/sessions/sessions.js';
 
-const maybeDescribe = process.env.MYCLAW_TEST_DATABASE_URL
+const maybeDescribe = process.env.GANTRY_TEST_DATABASE_URL
   ? describe
   : describe.skip;
 
@@ -59,7 +59,7 @@ maybeDescribe('Postgres domain repositories', () => {
   beforeAll(async () => {
     schemaName = `repo_test_${process.pid}_${Date.now()}`;
     service = new PostgresStorageService(
-      process.env.MYCLAW_TEST_DATABASE_URL ?? '',
+      process.env.GANTRY_TEST_DATABASE_URL ?? '',
       schemaName,
     );
     await service.migrate();
@@ -402,7 +402,7 @@ maybeDescribe('Postgres domain repositories', () => {
       conversationId,
       threadId,
       direction: 'outbound',
-      senderDisplayName: 'MyClaw',
+      senderDisplayName: 'Gantry',
       trust: 'system',
       createdAt: '2026-04-27T00:01:20.000Z',
       deliveryStatus: 'pending',
@@ -416,7 +416,7 @@ maybeDescribe('Postgres domain repositories', () => {
       threadId,
       externalRef: { kind: 'message', value: '1710000000.200' },
       direction: 'outbound',
-      senderDisplayName: 'MyClaw',
+      senderDisplayName: 'Gantry',
       trust: 'system',
       createdAt: '2026-04-27T00:01:20.000Z',
       deliveryStatus: 'sent',

@@ -1,4 +1,4 @@
-# `.codex/` — MyClaw Agent Harness
+# `.codex/` — Gantry Agent Harness
 
 This directory is the **Codex agent harness**. It is the contract that turns a
 Codex/ACP session (or any compatible runner) into a disciplined factory:
@@ -312,7 +312,7 @@ python3 .codex/scripts/check_factory_scaffold.py
 - **`settings.yaml` is the restart source of truth** for agent identity,
   capabilities, conversations, sender policies, approvers, triggers, and
   bindings. Postgres mirrors. See top-level `AGENTS.md` for the full rule.
-- **Refactors delete legacy** — MyClaw is pre-launch; do not add
+- **Refactors delete legacy** — Gantry is pre-launch; do not add
   compatibility shims, migration commands, or auto-cleanup branches just to
   preserve old local state.
 - **Update the AGENTS.md in the folder you touched** with anything you had to

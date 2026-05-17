@@ -53,16 +53,16 @@ afterEach(() => {
 describe('settings reload watcher', () => {
   it('reloads valid changes and ignores invalid YAML', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-watch-'),
+      path.join(os.tmpdir(), 'gantry-settings-watch-'),
     );
     runtimeHomes.push(runtimeHome);
     vi.stubEnv(
-      'MYCLAW_DATABASE_URL',
-      'postgres://myclaw_app:pass@localhost/myclaw',
+      'GANTRY_DATABASE_URL',
+      'postgres://gantry_app:pass@localhost/gantry',
     );
     vi.stubEnv(
       'ONECLI_DATABASE_URL',
-      'postgres://onecli_app:pass@localhost/myclaw?schema=onecli',
+      'postgres://onecli_app:pass@localhost/gantry?schema=onecli',
     );
     vi.stubEnv(
       'SECRET_ENCRYPTION_KEY',

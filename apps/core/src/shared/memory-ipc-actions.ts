@@ -12,7 +12,7 @@ export const MEMORY_IPC_ACTIONS_BY_TOOL_NAME = {
   procedure_patch: 'procedure_patch',
 } as const;
 
-export type MyClawMemoryIpcAction =
+export type GantryMemoryIpcAction =
   (typeof MEMORY_IPC_ACTIONS_BY_TOOL_NAME)[keyof typeof MEMORY_IPC_ACTIONS_BY_TOOL_NAME];
 
 const MEMORY_IPC_ACTION_ORDER = [
@@ -27,7 +27,7 @@ const MEMORY_IPC_ACTION_ORDER = [
   'memory_review_decision',
   'procedure_save',
   'procedure_patch',
-] as const satisfies readonly MyClawMemoryIpcAction[];
+] as const satisfies readonly GantryMemoryIpcAction[];
 
 const MEMORY_IPC_ACTION_SET = new Set<string>(MEMORY_IPC_ACTION_ORDER);
 const DEFAULT_MEMORY_IPC_ACTIONS = [
@@ -35,16 +35,16 @@ const DEFAULT_MEMORY_IPC_ACTIONS = [
   'memory_save',
   'continuity_summary',
   'procedure_save',
-] as const satisfies readonly MyClawMemoryIpcAction[];
+] as const satisfies readonly GantryMemoryIpcAction[];
 
 export function normalizeMemoryIpcActions(
   actions: readonly string[] | undefined,
-): MyClawMemoryIpcAction[] {
+): GantryMemoryIpcAction[] {
   if (!actions) return [];
   const selected = new Set(
     actions
       .map((action) => action.trim())
-      .filter((action): action is MyClawMemoryIpcAction =>
+      .filter((action): action is GantryMemoryIpcAction =>
         MEMORY_IPC_ACTION_SET.has(action),
       ),
   );
@@ -53,7 +53,7 @@ export function normalizeMemoryIpcActions(
 
 export function memoryIpcActionForToolName(
   toolName: string,
-): MyClawMemoryIpcAction | undefined {
+): GantryMemoryIpcAction | undefined {
   return toolName in MEMORY_IPC_ACTIONS_BY_TOOL_NAME
     ? MEMORY_IPC_ACTIONS_BY_TOOL_NAME[
         toolName as keyof typeof MEMORY_IPC_ACTIONS_BY_TOOL_NAME
@@ -63,12 +63,12 @@ export function memoryIpcActionForToolName(
 
 export function selectedMemoryIpcActionsFromToolRules(
   configuredTools: readonly string[],
-): MyClawMemoryIpcAction[] {
-  const actions: MyClawMemoryIpcAction[] = [...DEFAULT_MEMORY_IPC_ACTIONS];
+): GantryMemoryIpcAction[] {
+  const actions: GantryMemoryIpcAction[] = [...DEFAULT_MEMORY_IPC_ACTIONS];
   for (const rule of configuredTools) {
     const trimmed = rule.trim();
-    if (!trimmed.startsWith('mcp__myclaw__')) continue;
-    const toolName = trimmed.slice('mcp__myclaw__'.length);
+    if (!trimmed.startsWith('mcp__gantry__')) continue;
+    const toolName = trimmed.slice('mcp__gantry__'.length);
     const action = memoryIpcActionForToolName(toolName);
     if (action) actions.push(action);
   }

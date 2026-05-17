@@ -84,7 +84,7 @@ const SECRET_VALUE_PATTERNS: RegExp[] = [
   /\b(PASSWORD\s+)'[^']*'/gi,
   /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+\b/gi,
 ];
-const LOGGER_HANDLER_MARK = Symbol.for('myclaw.logger.handler');
+const LOGGER_HANDLER_MARK = Symbol.for('gantry.logger.handler');
 
 function sanitizeError(err: Error): Record<string, unknown> {
   return {
@@ -222,7 +222,7 @@ export function createLogger(options: CreateLoggerOptions = {}): Logger {
   const clock = options.clock || systemClock;
   const redact = options.redact || defaultRedact;
   const baseContext = options.context;
-  const stderrOnly = process.env.MYCLAW_LOG_STDERR === '1';
+  const stderrOnly = process.env.GANTRY_LOG_STDERR === '1';
   const sink =
     options.sink ||
     (options.format === 'json'

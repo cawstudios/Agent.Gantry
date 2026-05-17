@@ -70,7 +70,7 @@ This slice is docs and verification guardrails only. Runtime/provider/storage im
 | Control API | Read-only/observable | Contracts clarified for SDK/webhook and approval semantics; no route changes. |
 | SDK/contracts | Read-only/observable | Docs align SDK expectations; no contract type edits in this slice. |
 | CLI | Unchanged by design | No CLI behavior or command-surface changes. |
-| MyClaw MCP/admin skill | Unchanged by design | No capability/admin tool behavior changes. |
+| Gantry MCP/admin skill | Unchanged by design | No capability/admin tool behavior changes. |
 | Channel/provider adapters | Read-only/observable | Existing adapter boundaries are documented and verified; no implementation edits here. |
 | Docs/prompts | Changed | New architecture-test slice and verification documentation updates. |
 | Audit/events | Read-only/observable | `partially_sent` and delivery-state semantics are clarified, not changed. |

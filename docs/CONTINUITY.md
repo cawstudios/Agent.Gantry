@@ -1,6 +1,6 @@
 # Agent Continuity
 
-Agent continuity is MyClaw's ability to help the next agent turn understand where the work stands without replaying raw chat history.
+Agent continuity is Gantry's ability to help the next agent turn understand where the work stands without replaying raw chat history.
 
 Continuity is not the same as memory.
 
@@ -22,7 +22,7 @@ The goal is practical continuity, not a fake emotional persona. The agent should
 
 ## Current Runtime Model
 
-MyClaw currently has these layers:
+Gantry currently has these layers:
 
 1. Static prompt profile FileArtifacts
    - `scope: prompt-profile`, `path: <agent-folder>/SOUL.md`
@@ -83,7 +83,7 @@ Save durable, reusable statements:
 - "User prefers direct engineering answers without filler."
 - "Decision: embeddings are optional and provider-based."
 - "Correction: do not store raw logs as memory."
-- "Fact: MyClaw stores runtime and memory state in Postgres."
+- "Fact: Gantry stores runtime and memory state in Postgres."
 - "Procedure: before changing memory, run focused memory tests."
 
 Do not save:
@@ -123,10 +123,10 @@ Dynamic facts, task state, and open loops belong in structured memory and contin
 
 ## Storage Model
 
-MyClaw stores live memory in Postgres.
+Gantry stores live memory in Postgres.
 
-- Runtime database: `MYCLAW_DATABASE_URL`
-- Runtime schema: `storage.postgres.schema` (default `myclaw`)
+- Runtime database: `GANTRY_DATABASE_URL`
+- Runtime schema: `storage.postgres.schema` (default `gantry`)
 - Transcript exports: generated from Postgres messages into `FileArtifact`
 - Provider-session artifact rows and local SDK JSONL transcript files are not
   continuity inputs and are not backfilled into FileArtifacts during the
@@ -137,7 +137,7 @@ MyClaw stores live memory in Postgres.
 
 Continuity must work with embeddings disabled in `settings.yaml memory.embeddings.enabled: false`.
 
-Without embeddings, MyClaw uses:
+Without embeddings, Gantry uses:
 
 - exact text search
 - token matching
@@ -159,8 +159,8 @@ normal turn-time recall.
 
 Current user controls:
 
-- `myclaw status` for runtime state
-- `myclaw doctor` for health checks
+- `gantry status` for runtime state
+- `gantry doctor` for health checks
 - `/new` to reset session state immediately while preserving memory; the
   replaced session's continuation digest is finalized asynchronously
 - `/compact` to ask the Claude Agent SDK to compact active context and collect

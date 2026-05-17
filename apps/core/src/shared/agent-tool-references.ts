@@ -5,7 +5,7 @@ import {
   parseBashCommand,
   wildcardSensitiveBashLeafReason,
 } from './bash-command-parser.js';
-import { isMyClawMcpWildcardRule } from './admin-mcp-tools.js';
+import { isGantryMcpWildcardRule } from './admin-mcp-tools.js';
 import {
   parseSemanticCapabilityRule,
   SEMANTIC_CAPABILITY_RULE_PREFIX,
@@ -23,16 +23,16 @@ const HOST_PRIVATE_BROWSER_BACKEND_MCP_TOOL_PREFIXES =
   HOST_PRIVATE_BROWSER_BACKEND_MCP_SERVER_NAMES.map(
     (serverName) => `mcp__${serverName}__`,
   );
-const MYCLAW_BROWSER_TOOL_PREFIX = 'mcp__myclaw__browser';
+const GANTRY_BROWSER_TOOL_PREFIX = 'mcp__gantry__browser';
 const BROWSER_CANONICAL_TOOL_NAME = 'Browser';
 const BASH_TOOL_NAME = 'Bash';
 export const SDK_SANDBOX_NETWORK_ACCESS_TOOL_NAME = 'SandboxNetworkAccess';
 export const PROJECTED_BROWSER_MCP_TOOL_NAMES = [
-  'mcp__myclaw__browser_status',
-  'mcp__myclaw__browser_open',
-  'mcp__myclaw__browser_inspect',
-  'mcp__myclaw__browser_act',
-  'mcp__myclaw__browser_close',
+  'mcp__gantry__browser_status',
+  'mcp__gantry__browser_open',
+  'mcp__gantry__browser_inspect',
+  'mcp__gantry__browser_act',
+  'mcp__gantry__browser_close',
 ] as const;
 
 const PROJECTED_BROWSER_MCP_TOOL_NAME_SET = new Set<string>(
@@ -42,7 +42,7 @@ const PROJECTED_BROWSER_MCP_TOOL_NAME_SET = new Set<string>(
 export const BROWSER_ACTION_MCP_RULE_REJECTION_REASON =
   'Host-private browser backend tools cannot be persisted as agent tool rules; use the canonical Browser tool capability instead.';
 export const BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON =
-  'MyClaw browser tools are runtime projections, not durable capabilities; persist the canonical Browser tool capability instead.';
+  'Gantry browser tools are runtime projections, not durable capabilities; persist the canonical Browser tool capability instead.';
 export const BASH_SCOPE_REJECTION_REASON =
   'Persistent Bash scope is too broad; include a literal command prefix such as Bash(npm test *).';
 export const SDK_SANDBOX_NETWORK_ACCESS_REJECTION_REASON =
@@ -83,8 +83,8 @@ export function isProjectedBrowserMcpToolRule(value: string): boolean {
   const scoped = parseReadableScopedToolRule(rule);
   const toolName = scoped ? scoped.toolName : rule;
   return (
-    toolName === MYCLAW_BROWSER_TOOL_PREFIX ||
-    toolName.startsWith(`${MYCLAW_BROWSER_TOOL_PREFIX}_`)
+    toolName === GANTRY_BROWSER_TOOL_PREFIX ||
+    toolName.startsWith(`${GANTRY_BROWSER_TOOL_PREFIX}_`)
   );
 }
 
@@ -94,7 +94,7 @@ export function isThirdPartyMcpToolRule(value: string): boolean {
   const toolName = scoped ? scoped.toolName : rule;
   return (
     toolName.startsWith('mcp__') &&
-    !toolName.startsWith('mcp__myclaw__') &&
+    !toolName.startsWith('mcp__gantry__') &&
     !MCP_WILDCARD_RE.test(toolName)
   );
 }
@@ -186,11 +186,11 @@ export function validateReadableAgentToolRule(
       reason: BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON,
     };
   }
-  if (isMyClawMcpWildcardRule(rule)) {
+  if (isGantryMcpWildcardRule(rule)) {
     return {
       ok: false,
       reason:
-        'Persistent MyClaw MCP wildcard grants are not supported; request one exact mcp__myclaw__ tool.',
+        'Persistent Gantry MCP wildcard grants are not supported; request one exact mcp__gantry__ tool.',
     };
   }
   if (isSdkSandboxNetworkAccessToolRule(rule)) {
@@ -263,7 +263,7 @@ export function validatePersistentBashScope(
   }
   const parseableScope = trimmed.endsWith(' *')
     ? trimmed.slice(0, -2).trim()
-    : trimmed.replaceAll(' * ', ' __MYCLAW_ARG_WILDCARD__ ');
+    : trimmed.replaceAll(' * ', ' __GANTRY_ARG_WILDCARD__ ');
   const parsed = parseBashCommand(parseableScope);
   if (!parsed.ok) return { ok: false, reason: parsed.reason };
   if (parsed.leaves.length !== 1) {

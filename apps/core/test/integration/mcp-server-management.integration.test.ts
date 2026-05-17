@@ -7,7 +7,7 @@ import { createClient } from '../../../../packages/sdk/src/index.js';
 import {
   AgentMcpServerBindingResponseSchema,
   McpServerDefinitionResponseSchema,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 import { syncRuntimeSettingsFromProjection } from '@core/config/index.js';
 
 import type { AgentId } from '@core/domain/agent/agent.js';
@@ -204,9 +204,9 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@core/config/index.js', () => ({
-  MYCLAW_HOME: '/tmp/myclaw-mcp-integration-home',
-  DATA_DIR: '/tmp/myclaw-mcp-integration-home/data',
-  MYCLAW_IPC_AUTH_SECRET: 'test-ipc-secret',
+  GANTRY_HOME: '/tmp/gantry-mcp-integration-home',
+  DATA_DIR: '/tmp/gantry-mcp-integration-home/data',
+  GANTRY_IPC_AUTH_SECRET: 'test-ipc-secret',
   ONECLI_ALLOWED_ENV_KEYS: [],
   getControlEnvValue: vi.fn((key: string) => process.env[key]?.trim() || ''),
   syncRuntimeSettingsFromProjection: vi.fn(async () => undefined),
@@ -311,7 +311,7 @@ vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => {
 
 describe('MCP server management integration flow', () => {
   beforeEach(() => {
-    fs.rmSync('/tmp/myclaw-mcp-integration-home', {
+    fs.rmSync('/tmp/gantry-mcp-integration-home', {
       recursive: true,
       force: true,
     });

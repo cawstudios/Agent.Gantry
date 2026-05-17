@@ -1,5 +1,5 @@
 import type { ToolCatalogRepository } from '../../domain/ports/repositories.js';
-import { isMyClawMcpWildcardRule } from '../../shared/admin-mcp-tools.js';
+import { isGantryMcpWildcardRule } from '../../shared/admin-mcp-tools.js';
 import {
   BROWSER_ACTION_MCP_RULE_REJECTION_REASON,
   BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON,
@@ -66,11 +66,11 @@ export function validateAgentToolRuntimeRules(input: {
   if (projectedBrowserRule) {
     fail(projectedBrowserRule, BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON);
   }
-  const myclawWildcardRule = input.rules.find(isMyClawMcpWildcardRule);
-  if (myclawWildcardRule) {
+  const gantryWildcardRule = input.rules.find(isGantryMcpWildcardRule);
+  if (gantryWildcardRule) {
     fail(
-      myclawWildcardRule,
-      'Persistent MyClaw MCP wildcard grants are not supported; request one exact mcp__myclaw__ tool.',
+      gantryWildcardRule,
+      'Persistent Gantry MCP wildcard grants are not supported; request one exact mcp__gantry__ tool.',
     );
   }
   const thirdPartyMcpToolRule = input.rules.find(isThirdPartyMcpToolRule);

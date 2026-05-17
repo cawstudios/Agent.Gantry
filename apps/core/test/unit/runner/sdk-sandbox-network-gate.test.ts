@@ -244,7 +244,7 @@ describe('sdk sandbox network gate', () => {
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
       reason:
-        'SDK requested sandbox network access before any tool call was allowed by MyClaw.',
+        'SDK requested sandbox network access before any tool call was allowed by Gantry.',
       networkToolUseID: 'toolu_network_1',
       hostHash: sha256('api.github.com'),
       expiredTokenCount: 0,
@@ -347,7 +347,7 @@ describe('sdk sandbox network gate', () => {
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
       reason:
-        'SDK requested sandbox network access before any tool call was allowed by MyClaw.',
+        'SDK requested sandbox network access before any tool call was allowed by Gantry.',
       networkToolUseID: 'toolu_network_b',
       hostHash: sha256('registry.npmjs.org'),
       expiredTokenCount: 0,

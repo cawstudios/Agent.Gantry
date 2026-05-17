@@ -39,7 +39,7 @@ async function waitForPermissionRequest(
 const tempRoots: string[] = [];
 
 function makeTempRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-perm-ipc-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-perm-ipc-'));
   tempRoots.push(root);
   return root;
 }
@@ -49,7 +49,7 @@ afterEach(async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
   vi.unstubAllEnvs();
-  vi.stubEnv('MYCLAW_IPC_AUTH_SECRET', 'perm-ipc-secret');
+  vi.stubEnv('GANTRY_IPC_AUTH_SECRET', 'perm-ipc-secret');
   vi.resetModules();
   const { clearConsumedIpcRequestIds } =
     await import('@core/runtime/ipc-auth-validation.js');
@@ -65,11 +65,11 @@ describe('permission approval IPC boundary', () => {
     const permissionRequestsDir = path.join(groupIpcDir, 'permission-requests');
     fs.mkdirSync(permissionRequestsDir, { recursive: true });
 
-    vi.stubEnv('MYCLAW_IPC_AUTH_SECRET', 'perm-ipc-secret');
-    vi.stubEnv('MYCLAW_WORKSPACE_GROUP_DIR', path.join(tempRoot, 'workspace'));
-    vi.stubEnv('MYCLAW_WORKSPACE_EXTRA_DIR', path.join(tempRoot, 'extra'));
-    vi.stubEnv('MYCLAW_IPC_DIR', path.join(tempRoot, 'ipc'));
-    vi.stubEnv('MYCLAW_IPC_INPUT_DIR', path.join(groupIpcDir, 'input'));
+    vi.stubEnv('GANTRY_IPC_AUTH_SECRET', 'perm-ipc-secret');
+    vi.stubEnv('GANTRY_WORKSPACE_GROUP_DIR', path.join(tempRoot, 'workspace'));
+    vi.stubEnv('GANTRY_WORKSPACE_EXTRA_DIR', path.join(tempRoot, 'extra'));
+    vi.stubEnv('GANTRY_IPC_DIR', path.join(tempRoot, 'ipc'));
+    vi.stubEnv('GANTRY_IPC_INPUT_DIR', path.join(groupIpcDir, 'input'));
 
     vi.resetModules();
     const { createIpcAuthEnvelope } = await import('@core/runtime/ipc-auth.js');
@@ -77,11 +77,11 @@ describe('permission approval IPC boundary', () => {
       appId: 'app:team',
       agentId: 'agent:team-main',
     });
-    vi.stubEnv('MYCLAW_IPC_AUTH_TOKEN', envelope.authToken);
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', envelope.responseVerifyKey);
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_KEY_ID', envelope.responseKeyId);
-    vi.stubEnv('MYCLAW_JOB_ID', 'scheduled-job');
-    vi.stubEnv('MYCLAW_AUTONOMOUS_PERMISSION_TIMEOUT_MS', '0');
+    vi.stubEnv('GANTRY_IPC_AUTH_TOKEN', envelope.authToken);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', envelope.responseVerifyKey);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_KEY_ID', envelope.responseKeyId);
+    vi.stubEnv('GANTRY_JOB_ID', 'scheduled-job');
+    vi.stubEnv('GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS', '0');
 
     vi.resetModules();
     const { requestPermissionApproval } =
@@ -137,11 +137,11 @@ describe('permission approval IPC boundary', () => {
     fs.mkdirSync(permissionRequestsDir, { recursive: true });
     fs.mkdirSync(permissionResponsesDir, { recursive: true });
 
-    vi.stubEnv('MYCLAW_IPC_AUTH_SECRET', 'perm-ipc-secret');
-    vi.stubEnv('MYCLAW_WORKSPACE_GROUP_DIR', path.join(tempRoot, 'workspace'));
-    vi.stubEnv('MYCLAW_WORKSPACE_EXTRA_DIR', path.join(tempRoot, 'extra'));
-    vi.stubEnv('MYCLAW_IPC_DIR', path.join(tempRoot, 'ipc'));
-    vi.stubEnv('MYCLAW_IPC_INPUT_DIR', path.join(groupIpcDir, 'input'));
+    vi.stubEnv('GANTRY_IPC_AUTH_SECRET', 'perm-ipc-secret');
+    vi.stubEnv('GANTRY_WORKSPACE_GROUP_DIR', path.join(tempRoot, 'workspace'));
+    vi.stubEnv('GANTRY_WORKSPACE_EXTRA_DIR', path.join(tempRoot, 'extra'));
+    vi.stubEnv('GANTRY_IPC_DIR', path.join(tempRoot, 'ipc'));
+    vi.stubEnv('GANTRY_IPC_INPUT_DIR', path.join(groupIpcDir, 'input'));
 
     vi.resetModules();
     const { createIpcAuthEnvelope, getIpcResponseSigningPrivateKey } =
@@ -157,10 +157,10 @@ describe('permission approval IPC boundary', () => {
     );
     expect(responseSigningKey).toBeTruthy();
 
-    vi.stubEnv('MYCLAW_IPC_AUTH_TOKEN', envelope.authToken);
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', envelope.responseVerifyKey);
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_KEY_ID', envelope.responseKeyId);
-    vi.stubEnv('MYCLAW_PERMISSION_TIMEOUT_MS', '10000');
+    vi.stubEnv('GANTRY_IPC_AUTH_TOKEN', envelope.authToken);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', envelope.responseVerifyKey);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_KEY_ID', envelope.responseKeyId);
+    vi.stubEnv('GANTRY_PERMISSION_TIMEOUT_MS', '10000');
 
     vi.resetModules();
     const { requestPermissionApproval } =
@@ -277,11 +277,11 @@ describe('permission approval IPC boundary', () => {
     fs.mkdirSync(permissionRequestsDir, { recursive: true });
     fs.mkdirSync(permissionResponsesDir, { recursive: true });
 
-    vi.stubEnv('MYCLAW_IPC_AUTH_SECRET', 'perm-ipc-secret');
-    vi.stubEnv('MYCLAW_WORKSPACE_GROUP_DIR', path.join(tempRoot, 'workspace'));
-    vi.stubEnv('MYCLAW_WORKSPACE_EXTRA_DIR', path.join(tempRoot, 'extra'));
-    vi.stubEnv('MYCLAW_IPC_DIR', path.join(tempRoot, 'ipc'));
-    vi.stubEnv('MYCLAW_IPC_INPUT_DIR', path.join(groupIpcDir, 'input'));
+    vi.stubEnv('GANTRY_IPC_AUTH_SECRET', 'perm-ipc-secret');
+    vi.stubEnv('GANTRY_WORKSPACE_GROUP_DIR', path.join(tempRoot, 'workspace'));
+    vi.stubEnv('GANTRY_WORKSPACE_EXTRA_DIR', path.join(tempRoot, 'extra'));
+    vi.stubEnv('GANTRY_IPC_DIR', path.join(tempRoot, 'ipc'));
+    vi.stubEnv('GANTRY_IPC_INPUT_DIR', path.join(groupIpcDir, 'input'));
 
     vi.resetModules();
     const { createIpcAuthEnvelope } = await import('@core/runtime/ipc-auth.js');
@@ -289,10 +289,10 @@ describe('permission approval IPC boundary', () => {
       appId: 'app:team',
       agentId: 'agent:team-main',
     });
-    vi.stubEnv('MYCLAW_IPC_AUTH_TOKEN', envelope.authToken);
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', envelope.responseVerifyKey);
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_KEY_ID', envelope.responseKeyId);
-    vi.stubEnv('MYCLAW_PERMISSION_TIMEOUT_MS', '10000');
+    vi.stubEnv('GANTRY_IPC_AUTH_TOKEN', envelope.authToken);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', envelope.responseVerifyKey);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_KEY_ID', envelope.responseKeyId);
+    vi.stubEnv('GANTRY_PERMISSION_TIMEOUT_MS', '10000');
 
     vi.resetModules();
     const { requestPermissionApproval } =

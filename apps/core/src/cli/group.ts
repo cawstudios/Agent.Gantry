@@ -108,10 +108,10 @@ async function runList(runtimeHome: string): Promise<number> {
     if (groups.length === 0) {
       p.log.warn('No agents are registered in this runtime home.');
       const connectCommands = getProviderIds().map(
-        (channel) => `\`myclaw provider connect ${channel}\``,
+        (channel) => `\`gantry provider connect ${channel}\``,
       );
       p.log.info(
-        `Next action: run \`myclaw agent add <chat-id>\` or ${connectCommands.join(' / ')}.`,
+        `Next action: run \`gantry agent add <chat-id>\` or ${connectCommands.join(' / ')}.`,
       );
       return 0;
     }
@@ -148,7 +148,7 @@ async function runInfo(
   rawSelector?: string,
 ): Promise<number> {
   if (!rawSelector) {
-    p.log.error('Usage: myclaw agent info <jid|folder>');
+    p.log.error('Usage: gantry agent info <jid|folder>');
     return 1;
   }
 
@@ -258,7 +258,7 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
     if (groups[normalized]) {
       p.log.error(`Agent already exists for ${normalized}.`);
       p.log.info(
-        'Next action: run `myclaw agent info <jid>` or `myclaw agent trigger <jid> <word>`.',
+        'Next action: run `gantry agent info <jid>` or `gantry agent trigger <jid> <word>`.',
       );
       return 1;
     }
@@ -272,7 +272,7 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
       if (!token) {
         p.log.error('TELEGRAM_BOT_TOKEN is missing.');
         p.log.info(
-          'Next action: run `myclaw config set TELEGRAM_BOT_TOKEN <token>` first.',
+          'Next action: run `gantry config set TELEGRAM_BOT_TOKEN <token>` first.',
         );
         return 1;
       }
@@ -408,7 +408,7 @@ async function runName(runtimeHome: string, args: string[]): Promise<number> {
       `Default agent name updated from "${previous}" to "${nextName}".`,
     );
     p.log.info(
-      'Restart MyClaw for all running processes to pick up the new identity.',
+      'Restart Gantry for all running processes to pick up the new identity.',
     );
     return 0;
   } catch (err) {

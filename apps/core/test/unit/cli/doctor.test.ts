@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const runtimeHomes: string[] = [];
 
 function makeRuntimeHome(envLines: string[] = []): string {
-  const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-doctor-'));
+  const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-doctor-'));
   runtimeHomes.push(runtimeHome);
   fs.writeFileSync(path.join(runtimeHome, '.env'), `${envLines.join('\n')}\n`);
   fs.writeFileSync(
@@ -20,8 +20,8 @@ function makeRuntimeHome(envLines: string[] = []): string {
       '    enabled: false',
       'storage:',
       '  postgres:',
-      '    url_env: MYCLAW_DATABASE_URL',
-      '    schema: myclaw',
+      '    url_env: GANTRY_DATABASE_URL',
+      '    schema: gantry',
       'credential_broker:',
       '  mode: onecli',
       '  onecli:',
@@ -150,7 +150,7 @@ afterEach(() => {
 describe('doctor', () => {
   it('fails external model access when the broker endpoint is missing', async () => {
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
     ]);
     setCredentialBrokerSettings(runtimeHome, 'external');
     const { runDoctor } = await loadDoctor();
@@ -170,7 +170,7 @@ describe('doctor', () => {
 
   it('prioritizes external broker checks over stale OneCLI URL env', async () => {
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
       'ONECLI_URL=http://localhost:10254',
     ]);
     setCredentialBrokerSettings(runtimeHome, 'external');
@@ -191,7 +191,7 @@ describe('doctor', () => {
 
   it('reports process env wrong-lane keys in the runtime env boundary check', async () => {
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
     ]);
     vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-process');
     const { runDoctor } = await loadDoctor();
@@ -212,7 +212,7 @@ describe('doctor', () => {
 
   it('fails external model access when the broker endpoint URL is unsafe', async () => {
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
     ]);
     setCredentialBrokerSettings(
       runtimeHome,
@@ -234,7 +234,7 @@ describe('doctor', () => {
 
   it('passes external model access when the broker endpoint is safe', async () => {
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
     ]);
     setCredentialBrokerSettings(
       runtimeHome,
@@ -258,7 +258,7 @@ describe('doctor', () => {
       'https://user:pass@ambient-broker.example.com/anthropic',
     );
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
     ]);
     setCredentialBrokerSettings(
       runtimeHome,
@@ -278,7 +278,7 @@ describe('doctor', () => {
 
   it('reports missing OneCLI database configuration with a concrete next action', async () => {
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
     ]);
     const { runDoctor } = await loadDoctor();
 
@@ -296,8 +296,8 @@ describe('doctor', () => {
 
   it('fails reachability when OneCLI returns forbidden database secrets', async () => {
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'ONECLI_DATABASE_URL=postgres://onecli_app:pass@localhost:15432/myclaw?schema=onecli',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
+      'ONECLI_DATABASE_URL=postgres://onecli_app:pass@localhost:15432/gantry?schema=onecli',
       'SECRET_ENCRYPTION_KEY=123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
     ]);
     const { runDoctorWithNetwork } = await loadDoctor({
@@ -320,8 +320,8 @@ describe('doctor', () => {
   it('uses a bounded timeout for OneCLI doctor reachability', async () => {
     const constructedOptions: unknown[] = [];
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'ONECLI_DATABASE_URL=postgres://onecli_app:pass@localhost:15432/myclaw?schema=onecli',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
+      'ONECLI_DATABASE_URL=postgres://onecli_app:pass@localhost:15432/gantry?schema=onecli',
       'SECRET_ENCRYPTION_KEY=123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
     ]);
     const { runDoctorWithNetwork } = await loadDoctor({
@@ -340,7 +340,7 @@ describe('doctor', () => {
 
   it('treats process-env channel credentials as processable group readiness', async () => {
     const runtimeHome = makeRuntimeHome([
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
     ]);
     setCredentialBrokerSettings(runtimeHome, 'none');
     enableChannel(runtimeHome, 'telegram');

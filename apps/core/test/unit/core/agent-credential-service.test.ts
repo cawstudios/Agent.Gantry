@@ -293,7 +293,7 @@ describe('agent credential service', () => {
         message:
           'Could not reach OneCLI at http://localhost:10254: connect ECONNREFUSED 127.0.0.1:10254',
         nextAction:
-          "Run `myclaw local doctor`. If you use MyClaw's provided local stack, start it from the directory containing the shipped stack file, or pass that stack file explicitly, then retry.",
+          "Run `gantry local doctor`. If you use Gantry's provided local stack, start it from the directory containing the shipped stack file, or pass that stack file explicitly, then retry.",
       }),
     });
 
@@ -309,8 +309,8 @@ describe('agent credential service', () => {
         'Credential broker mode is enabled but the credential broker is not reachable for agent agent:main_agent.',
         'Reason: ECONNREFUSED: connect ECONNREFUSED 127.0.0.1:10254.',
         'Broker health: Could not reach OneCLI at http://localhost:10254: connect ECONNREFUSED 127.0.0.1:10254',
-        "Next action: Run `myclaw local doctor`. If you use MyClaw's provided local stack, start it from the directory containing the shipped stack file, or pass that stack file explicitly, then retry.",
-        "Recovery: Run `myclaw doctor` and `myclaw local doctor`. If you use MyClaw's provided local stack, start or recover OneCLI from the directory containing its shipped stack file, or pass that stack file explicitly.",
+        "Next action: Run `gantry local doctor`. If you use Gantry's provided local stack, start it from the directory containing the shipped stack file, or pass that stack file explicitly, then retry.",
+        "Recovery: Run `gantry doctor` and `gantry local doctor`. If you use Gantry's provided local stack, start or recover OneCLI from the directory containing its shipped stack file, or pass that stack file explicitly.",
       ].join(' '),
     );
   });
@@ -347,7 +347,7 @@ describe('agent credential service', () => {
 
     expect(ensureAgent).toHaveBeenCalledWith({
       name: 'Gantry Model Access',
-      identifier: 'myclaw-model-access',
+      identifier: 'gantry-model-access',
     });
   });
 

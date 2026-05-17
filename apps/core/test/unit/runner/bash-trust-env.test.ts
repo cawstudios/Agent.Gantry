@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { applyBashTrustEnv } from '../../../src/runner/claude/bash-trust-env.js';
 
-const CA_PATH = '/tmp/myclaw/onecli-ca.pem';
+const CA_PATH = '/tmp/gantry/onecli-ca.pem';
 const TRUST_PREFIX = [
   'GODEBUG=netdns=go',
   `SSL_CERT_FILE='${CA_PATH}'`,
@@ -63,20 +63,20 @@ describe('applyBashTrustEnv', () => {
     const updated = applyBashTrustEnv(
       'Bash',
       { command: 'curl https://example.test' },
-      { NODE_EXTRA_CA_CERTS: "/tmp/myclaw/gateway ca's.pem" },
+      { NODE_EXTRA_CA_CERTS: "/tmp/gantry/gateway ca's.pem" },
     );
 
     expect(updated).toEqual({
       command:
         'GODEBUG=netdns=go ' +
-        "SSL_CERT_FILE='/tmp/myclaw/gateway ca'\\''s.pem' " +
-        "REQUESTS_CA_BUNDLE='/tmp/myclaw/gateway ca'\\''s.pem' " +
-        "CURL_CA_BUNDLE='/tmp/myclaw/gateway ca'\\''s.pem' " +
-        "GIT_SSL_CAINFO='/tmp/myclaw/gateway ca'\\''s.pem' " +
-        "PIP_CERT='/tmp/myclaw/gateway ca'\\''s.pem' " +
-        "AWS_CA_BUNDLE='/tmp/myclaw/gateway ca'\\''s.pem' " +
-        "CARGO_HTTP_CAINFO='/tmp/myclaw/gateway ca'\\''s.pem' " +
-        "DENO_CERT='/tmp/myclaw/gateway ca'\\''s.pem' " +
+        "SSL_CERT_FILE='/tmp/gantry/gateway ca'\\''s.pem' " +
+        "REQUESTS_CA_BUNDLE='/tmp/gantry/gateway ca'\\''s.pem' " +
+        "CURL_CA_BUNDLE='/tmp/gantry/gateway ca'\\''s.pem' " +
+        "GIT_SSL_CAINFO='/tmp/gantry/gateway ca'\\''s.pem' " +
+        "PIP_CERT='/tmp/gantry/gateway ca'\\''s.pem' " +
+        "AWS_CA_BUNDLE='/tmp/gantry/gateway ca'\\''s.pem' " +
+        "CARGO_HTTP_CAINFO='/tmp/gantry/gateway ca'\\''s.pem' " +
+        "DENO_CERT='/tmp/gantry/gateway ca'\\''s.pem' " +
         'curl https://example.test',
     });
   });

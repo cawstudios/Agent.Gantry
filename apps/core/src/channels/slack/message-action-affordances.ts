@@ -36,7 +36,7 @@ export function slackMessageActionBlocks(
       if (!value) return null;
       return {
         type: 'button',
-        action_id: 'myclaw_message_action',
+        action_id: 'gantry_message_action',
         text: {
           type: 'plain_text',
           text: truncateSlackButtonLabel(action.label),

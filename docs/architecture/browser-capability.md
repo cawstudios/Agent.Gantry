@@ -1,33 +1,33 @@
 # Browser Capability
 
-MyClaw exposes browser control through one durable capability: `Browser`.
+Gantry exposes browser control through one durable capability: `Browser`.
 Durable settings and Postgres bindings store `Browser`, not private browser
 backend names or concrete browser subtool names.
 
-At runtime, `Browser` projects into the compact MyClaw browser gateway:
+At runtime, `Browser` projects into the compact Gantry browser gateway:
 `browser_status`, `browser_open`, `browser_inspect`, `browser_act`, and
 `browser_close`. These tool names are audited as concrete actions, but they are
 runtime projections, not durable authority.
 
-The projected tools use MyClaw-owned schemas. `browser_open` launches or reuses
+The projected tools use Gantry-owned schemas. `browser_open` launches or reuses
 the headed profile and opens a provided URL. Broad discovery should use normal
 search tools first, then open a selected URL in Browser when login-gated,
 visual, or interactive verification is needed. `browser_inspect` returns page
 state and defaults to compact basic output; full output requires a reason.
 `browser_act` handles page interactions after inspection. Long-running tools may
-pass `timeout_ms`; MyClaw clamps it and applies the resulting budget to signed
+pass `timeout_ms`; Gantry clamps it and applies the resulting budget to signed
 IPC and host-owned browser dispatch.
 The host caches browser connections by profile and endpoint, de-dupes
 concurrent connection attempts, and reconnects once when browser handles are
 stale.
 
-MyClaw is an assistive browser controller for an owner-managed Chrome profile,
+Gantry is an assistive browser controller for an owner-managed Chrome profile,
 not an undetectable automation system. Browser launch is visible by default and
-the agent-facing gateway does not expose a headless option. MyClaw does not
+the agent-facing gateway does not expose a headless option. Gantry does not
 override user agent, client hints, `Accept-Language`, or fetch headers as a
 browser hardening feature.
 
-Direct browser navigation does not add an adapter-level URL gate. MyClaw lets
+Direct browser navigation does not add an adapter-level URL gate. Gantry lets
 the owner-managed Chrome profile navigate normally and keeps browser usage
 policy outside the direct Playwright driver.
 
@@ -41,7 +41,7 @@ Downloads are intentionally deferred in this slice. The direct driver does not
 add download tools until download roots, retention, and result disclosure have a
 separate scoped policy and test plan.
 
-Private browser backend tools are not MyClaw browser authority. They must not be
+Private browser backend tools are not Gantry browser authority. They must not be
 persisted, requested, advertised, or projected into the model-facing tool
 surface.
 
@@ -59,7 +59,7 @@ This rule is general, not browser-specific:
   authority.
 - Backend subtools run without per-subaction approval inside the approved
   capability envelope.
-- MyClaw enforces the outer boundary: filesystem, network, credentials,
+- Gantry enforces the outer boundary: filesystem, network, credentials,
   timeout, process, display, redaction, audit, and selected-capability checks.
 - The same durable-vs-projected rule applies to Browser, Bash, third-party CLIs
   invoked by Bash, MCP servers, skills, scheduler tools, and future IDE, DB,
@@ -70,14 +70,14 @@ This rule is general, not browser-specific:
 ```mermaid
 sequenceDiagram
   participant User as "User"
-  participant Host as "MyClaw Host Runtime"
+  participant Host as "Gantry Host Runtime"
   participant Runner as "Claude Child Runner"
   participant Tool as "Browser Gateway"
   participant Browser as "Persistent Chrome Profile"
   participant Driver as "Host-Owned Browser Driver"
 
   User->>Host: Message/job for Browser-selected agent
-  Host->>Runner: Spawn with MyClaw MCP server and host-derived browser context
+  Host->>Runner: Spawn with Gantry MCP server and host-derived browser context
   Runner->>Tool: browser_status
   Tool->>Host: Signed IPC status request
   Host-->>Tool: Sanitized status without launching Chrome
@@ -96,7 +96,7 @@ host-derived profile is CDP-ready. Before action dispatch, the host closes
 internal Chrome targets such as `chrome://new-tab-page` and
 `chrome://omnibox-popup`, activates the real content tab, and rechecks after
 activation so internal tabs do not pollute tab-list output.
-Tab and page-state results are filtered at the projection boundary. MyClaw
+Tab and page-state results are filtered at the projection boundary. Gantry
 removes internal Chrome targets such as `chrome://new-tab-page` and
 `chrome://omnibox-popup`, presents stable model-facing state, and translates
 gateway requests into backend-specific actions internally. Raw backend indices
@@ -149,7 +149,7 @@ the action fails closed before backend dispatch.
 owner enables it, the default rolling-window and per-site concurrency limits are
 the same for every normalized site, and the default policy mode is `audit`
 rather than denial. Owner-defined overrides may target specific site keys, but
-MyClaw ships no preloaded site rules. Override keys are canonicalized to the
+Gantry ships no preloaded site rules. Override keys are canonicalized to the
 same public-suffix-aware registrable site keys used by runtime URL audit, and
 public settings responses redact override site names.
 
@@ -174,7 +174,7 @@ authentication:
 3. Cookies remain in that host-derived profile for later runs and restarts.
 4. Future browser tools reuse the same profile.
 
-MyClaw does not ask users to paste credentials into chat, does not scrape
+Gantry does not ask users to paste credentials into chat, does not scrape
 credentials, and does not bypass site authentication.
 
 ## Permissions

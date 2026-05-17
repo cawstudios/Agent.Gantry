@@ -1,6 +1,6 @@
-# MyClaw SDK Overview
+# Gantry SDK Overview
 
-`@myclaw/sdk` is the server-side integration surface for backend applications that want to treat MyClaw as a sidecar agent runtime.
+`@gantry/sdk` is the server-side integration surface for backend applications that want to treat Gantry as a sidecar agent runtime.
 
 Use it from:
 
@@ -18,14 +18,14 @@ The runtime exposes a small internal control API over:
 - Unix domain socket by default
 - loopback TCP only when explicitly enabled
 
-`@myclaw/contracts` is the shared DTO and schema boundary for the control API,
+`@gantry/contracts` is the shared DTO and schema boundary for the control API,
 the server-side SDK, future Web UI integrations, and framework integrations
 such as NestJS providers or Next.js route handlers. Application code should
-depend on those contracts instead of importing MyClaw runtime internals.
+depend on those contracts instead of importing Gantry runtime internals.
 
 Authentication is bearer-token based and scoped. The runtime reads keys from:
 
-- `MYCLAW_CONTROL_API_KEYS_JSON`, where every key includes `kid`, `token`,
+- `GANTRY_CONTROL_API_KEYS_JSON`, where every key includes `kid`, `token`,
   `appId`, and explicit `scopes`
 
 Production apps should use the narrowest key needed. A typical chat backend
@@ -38,14 +38,14 @@ uses `sessions:read` and `sessions:write`; job dashboards add `jobs:read` and
 
 1. The app calls `sessions.ensure()`.
 2. The app calls `sessions.sendMessage()`.
-3. MyClaw persists the inbound message to the runtime store.
+3. Gantry persists the inbound message to the runtime store.
 4. The message enters the normal group queue.
 5. The agent runs through the normal host runtime.
 6. Outbound replies/progress/streaming are emitted as durable `RuntimeEvent` records in `runtime_events`.
 7. The app consumes those events through `sessions.wait()`, `sessions.stream()`, or signed outbound webhooks.
 
 `appId` is derived from the API key for normal sidecar calls. SDK examples omit
-it. Advanced multi-app callers may pass `appId` as an assertion, but MyClaw
+it. Advanced multi-app callers may pass `appId` as an assertion, but Gantry
 rejects it when it does not match the resolved app scope.
 
 ```mermaid
@@ -89,7 +89,7 @@ Supported target kinds:
 
 - `session_message`: accept a normal user message into a configured or derived session.
 - `job_trigger`: trigger an existing manual, once, or recurring job.
-- `job_template`: invoke a MyClaw-owned one-time job template with variables and metadata only.
+- `job_template`: invoke a Gantry-owned one-time job template with variables and metadata only.
 
 Each ingress record is a scoped capability. Management callers configure
 `metadata.targetPolicy.allowedTargetKinds` and the allowed `sessionIds`,
@@ -119,10 +119,10 @@ Important event types in this cut:
 ## Minimal client setup
 
 ```ts
-import { createClient } from '@myclaw/sdk';
+import { createClient } from '@gantry/sdk';
 
 const client = createClient({
-  socketPath: process.env.MYCLAW_CONTROL_SOCKET_PATH,
-  apiKey: process.env.MYCLAW_SESSIONS_API_KEY!,
+  socketPath: process.env.GANTRY_CONTROL_SOCKET_PATH,
+  apiKey: process.env.GANTRY_SESSIONS_API_KEY!,
 });
 ```

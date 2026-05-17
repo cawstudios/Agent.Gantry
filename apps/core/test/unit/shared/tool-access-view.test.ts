@@ -32,20 +32,20 @@ describe('tool access view', () => {
     ).toHaveLength(1);
     expect(
       buildRequestableBrowserToolAccess({
-        configuredTools: ['mcp__myclaw__browser_act'],
+        configuredTools: ['mcp__gantry__browser_act'],
       }),
     ).toHaveLength(1);
   });
 
-  it('projects canonical Browser grants into MyClaw browser runtime tools for jobs', () => {
+  it('projects canonical Browser grants into Gantry browser runtime tools for jobs', () => {
     expect(
       buildJobToolAccessView({
         effectiveAllowedTools: ['Read', 'Browser'],
       }).projectedRuntimeTools,
     ).toEqual(
       expect.arrayContaining([
-        'mcp__myclaw__browser_act',
-        'mcp__myclaw__browser_act',
+        'mcp__gantry__browser_act',
+        'mcp__gantry__browser_act',
       ]),
     );
   });

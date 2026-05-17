@@ -1,16 +1,16 @@
 {
-  "name": "myclaw",
+  "name": "gantry",
   "version": "1.2.52",
   "description": "Personal AI assistant runtime. Lightweight, secure, customizable.",
-  "author": "MyClaw Contributors",
+  "author": "Gantry Contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vrknetha/myclaw.git"
+    "url": "git+https://github.com/vrknetha/gantry.git"
   },
-  "homepage": "https://github.com/vrknetha/myclaw",
+  "homepage": "https://github.com/vrknetha/gantry",
   "bugs": {
-    "url": "https://github.com/vrknetha/myclaw/issues"
+    "url": "https://github.com/vrknetha/gantry/issues"
   },
   "keywords": [
     "assistant",
@@ -25,7 +25,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "myclaw": "dist/cli/index.js"
+    "gantry": "dist/cli/index.js"
   },
   "files": [
     "dist/",
@@ -41,8 +41,8 @@
     "packages/sdk"
   ],
   "scripts": {
-    "build:contracts": "npm run build --workspace @myclaw/contracts",
-    "build:sdk": "npm run build --workspace @myclaw/sdk",
+    "build:contracts": "npm run build --workspace @gantry/contracts",
+    "build:sdk": "npm run build --workspace @gantry/sdk",
     "clean": "rm -rf dist packages/contracts/dist packages/sdk/dist",
     "build": "npm run clean && npm run build:contracts && npm run build:sdk && tsc && npm run copy:migrations",
     "copy:migrations": "mkdir -p dist/adapters/storage/postgres/schema && cp -R apps/core/src/adapters/storage/postgres/schema/migrations dist/adapters/storage/postgres/schema/",
@@ -74,7 +74,7 @@
     "@grammyjs/auto-retry": "^2.0.2",
     "@grammyjs/stream": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "@myclaw/contracts": "file:packages/contracts",
+    "@gantry/contracts": "file:packages/contracts",
     "@onecli-sh/sdk": "^0.2.0",
     "@slack/bolt": "^4.7.0",
     "cron-parser": "5.5.0",
@@ -90,7 +90,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
-    "@myclaw/sdk": "file:packages/sdk",
+    "@gantry/sdk": "file:packages/sdk",
     "@types/node": "^24.12.2",
     "@types/pg": "^8.15.5",
     "@vitest/coverage-v8": "^4.1.4",

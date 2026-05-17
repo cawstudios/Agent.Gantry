@@ -146,6 +146,19 @@ describe('permission interaction', () => {
     );
   });
 
+  it('keeps scheduled job prompts aligned with the permission vocabulary', () => {
+    const request = {
+      ...requestWithSuggestions([]),
+      jobId: 'job-1',
+      jobName: 'Lead sync',
+    };
+
+    expect(permissionButtonLabel('allow_once', request)).toBe('Allow once');
+    expect(permissionButtonLabel('allow_timed_grant', request)).toBe(
+      'Allow 5 min',
+    );
+  });
+
   it('describes timed grants as eligible-tools/SDK-API-prompt approval decisions', () => {
     const decision = decisionForMode(
       {
@@ -185,6 +198,25 @@ describe('permission interaction', () => {
       reason: 'approval option unavailable',
       decisionClassification: 'user_reject',
     });
+  });
+
+  it('uses explicit request decision options instead of adding timed grants implicitly', () => {
+    const request = {
+      ...requestWithSuggestions([
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [{ toolName: 'Bash', ruleContent: 'npm test *' }],
+        },
+      ]),
+      decisionOptions: ['allow_once', 'allow_persistent_rule', 'cancel'],
+    } satisfies PermissionApprovalRequest;
+
+    expect(permissionDecisionOptions(request)).toEqual([
+      'allow_once',
+      'allow_persistent_rule',
+      'cancel',
+    ]);
   });
 
   it('renders semantic capability prompts before raw implementation details', () => {

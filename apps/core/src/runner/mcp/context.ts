@@ -1,8 +1,8 @@
 import path from 'path';
 import {
-  myclawMcpFullToolName,
-  parseEnabledMyClawMcpToolNames,
-} from '../myclaw-mcp-tool-surface.js';
+  gantryMcpFullToolName,
+  parseEnabledGantryMcpToolNames,
+} from '../gantry-mcp-tool-surface.js';
 import { readLiveToolRules } from '../../shared/live-tool-rules.js';
 import { normalizeMemoryIpcActions } from '../../shared/memory-ipc-actions.js';
 import {
@@ -27,7 +27,7 @@ function requirePathEnv(name: string): string {
   return value;
 }
 
-export const IPC_DIR = requirePathEnv('MYCLAW_IPC_DIR');
+export const IPC_DIR = requirePathEnv('GANTRY_IPC_DIR');
 export const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 export const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 export const MEMORY_REQUESTS_DIR = path.join(IPC_DIR, 'memory-requests');
@@ -35,45 +35,45 @@ export const MEMORY_RESPONSES_DIR = path.join(IPC_DIR, 'memory-responses');
 export const BROWSER_REQUESTS_DIR = path.join(IPC_DIR, 'browser-requests');
 export const BROWSER_RESPONSES_DIR = path.join(IPC_DIR, 'browser-responses');
 export const TASK_RESPONSES_DIR = path.join(IPC_DIR, 'task-responses');
-export const IPC_AUTH_TOKEN = process.env.MYCLAW_IPC_AUTH_TOKEN || '';
+export const IPC_AUTH_TOKEN = process.env.GANTRY_IPC_AUTH_TOKEN || '';
 export const BROWSER_IPC_AUTH_TOKEN =
-  process.env.MYCLAW_BROWSER_IPC_AUTH_TOKEN || IPC_AUTH_TOKEN;
+  process.env.GANTRY_BROWSER_IPC_AUTH_TOKEN || IPC_AUTH_TOKEN;
 export const MEMORY_IPC_AUTH_TOKEN =
-  process.env.MYCLAW_MEMORY_IPC_AUTH_TOKEN || IPC_AUTH_TOKEN;
+  process.env.GANTRY_MEMORY_IPC_AUTH_TOKEN || IPC_AUTH_TOKEN;
 export const IPC_RESPONSE_VERIFY_KEY =
-  process.env.MYCLAW_IPC_RESPONSE_VERIFY_KEY || '';
-export const IPC_RESPONSE_KEY_ID = process.env.MYCLAW_IPC_RESPONSE_KEY_ID || '';
+  process.env.GANTRY_IPC_RESPONSE_VERIFY_KEY || '';
+export const IPC_RESPONSE_KEY_ID = process.env.GANTRY_IPC_RESPONSE_KEY_ID || '';
 
-export const chatJid = process.env.MYCLAW_CHAT_JID!;
-export const groupFolder = process.env.MYCLAW_GROUP_FOLDER!;
-export const appId = process.env.MYCLAW_APP_ID?.trim() || undefined;
-export const agentId = process.env.MYCLAW_AGENT_ID?.trim() || undefined;
-export const threadId = process.env.MYCLAW_THREAD_ID?.trim() || undefined;
+export const chatJid = process.env.GANTRY_CHAT_JID!;
+export const groupFolder = process.env.GANTRY_GROUP_FOLDER!;
+export const appId = process.env.GANTRY_APP_ID?.trim() || undefined;
+export const agentId = process.env.GANTRY_AGENT_ID?.trim() || undefined;
+export const threadId = process.env.GANTRY_THREAD_ID?.trim() || undefined;
 export const memoryUserId =
-  process.env.MYCLAW_MEMORY_USER_ID?.trim() || undefined;
+  process.env.GANTRY_MEMORY_USER_ID?.trim() || undefined;
 export const memoryDefaultScope =
-  process.env.MYCLAW_MEMORY_DEFAULT_SCOPE === 'user' ? 'user' : 'group';
+  process.env.GANTRY_MEMORY_DEFAULT_SCOPE === 'user' ? 'user' : 'group';
 export const memoryReviewerIsControlApprover =
-  process.env.MYCLAW_MEMORY_REVIEWER_IS_CONTROL_APPROVER === '1';
+  process.env.GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER === '1';
 export const memoryIpcAllowedActions = normalizeMemoryIpcActions(
-  parseJsonStringArray(process.env.MYCLAW_MEMORY_IPC_ACTIONS_JSON),
+  parseJsonStringArray(process.env.GANTRY_MEMORY_IPC_ACTIONS_JSON),
 );
 export const browserProfileName =
-  process.env.MYCLAW_BROWSER_PROFILE_NAME?.trim() || undefined;
+  process.env.GANTRY_BROWSER_PROFILE_NAME?.trim() || undefined;
 export const enabledAdminMcpTools = parseEnabledAdminMcpTools(
-  process.env.MYCLAW_ADMIN_MCP_TOOLS_JSON,
+  process.env.GANTRY_ADMIN_MCP_TOOLS_JSON,
 );
-export const enabledMyClawMcpTools = parseEnabledMyClawMcpToolNames(
-  process.env.MYCLAW_MCP_TOOL_NAMES_JSON,
+export const enabledGantryMcpTools = parseEnabledGantryMcpToolNames(
+  process.env.GANTRY_MCP_TOOL_NAMES_JSON,
 );
 export const configuredAllowedTools = parseConfiguredAllowedTools(
-  process.env.MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON,
+  process.env.GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON,
 );
 export const selectedSkillIds = parseJsonStringArray(
-  process.env.MYCLAW_SELECTED_SKILLS_JSON,
+  process.env.GANTRY_SELECTED_SKILLS_JSON,
 );
 export const selectedMcpServerIds = parseJsonStringArray(
-  process.env.MYCLAW_SELECTED_MCP_SERVERS_JSON,
+  process.env.GANTRY_SELECTED_MCP_SERVERS_JSON,
 );
 
 export function isAdminMcpToolEnabled(toolName: AdminMcpToolName): boolean {
@@ -84,7 +84,7 @@ export function currentEnabledAdminMcpTools(): Set<AdminMcpToolName> {
   const enabled = new Set(enabledAdminMcpTools);
   for (const rule of readLiveToolRules({
     ipcDir: IPC_DIR,
-    runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE,
+    runHandle: process.env.GANTRY_AGENT_RUN_HANDLE,
   })) {
     const adminToolName = adminMcpToolNameFromFullName(rule);
     if (adminToolName) enabled.add(adminToolName);
@@ -132,7 +132,7 @@ function parseEnabledAdminMcpTools(
 
 export function capabilityStatusText(): string {
   const currentAdminTools = currentEnabledAdminMcpTools();
-  const availableToolNames = [...enabledMyClawMcpTools].filter(
+  const availableToolNames = [...enabledGantryMcpTools].filter(
     (toolName) => !isAdminMcpToolName(toolName),
   );
   for (const adminToolName of currentAdminTools) {
@@ -142,10 +142,10 @@ export function capabilityStatusText(): string {
     configuredTools: configuredAllowedTools,
   });
   const lines = [
-    'MyClaw MCP tools available in this run:',
+    'Gantry MCP tools available in this run:',
     ...availableToolNames
       .sort()
-      .map((toolName) => `- available: ${myclawMcpFullToolName(toolName)}`),
+      .map((toolName) => `- available: ${gantryMcpFullToolName(toolName)}`),
     '',
     'Semantic capability tools:',
     '- capability_search: find built-in capabilities such as google.sheets.write',
@@ -157,9 +157,9 @@ export function capabilityStatusText(): string {
     '- Use scheduler_get_job, scheduler_list_runs, scheduler_list_events, and scheduler_wait_for_events to inspect or wait for jobs.',
     '- Never request Bash just to sleep, wait, poll, or monitor scheduler job completion.',
     '',
-    'MyClaw admin tool capabilities:',
+    'Gantry admin tool capabilities:',
     ...ADMIN_MCP_TOOL_NAMES.map((toolName) => {
-      const fullName = `mcp__myclaw__${toolName}`;
+      const fullName = `mcp__gantry__${toolName}`;
       if (currentAdminTools.has(toolName)) {
         return `- available: ${fullName}`;
       }
@@ -202,14 +202,14 @@ export function capabilityStatusText(): string {
         ])
       : [
           '- selected: Browser',
-          '  note: Browser exposes MyClaw-owned browser_* tools. Status is read-only; other actions launch the host-derived profile lazily.',
+          '  note: Browser exposes Gantry-owned browser_* tools. Status is read-only; other actions launch the host-derived profile lazily.',
         ]),
   ];
   const view = buildAgentToolAccessView({
     configuredTools: configuredAllowedTools,
     defaultTools: availableToolNames
       .filter((toolName) => !ADMIN_MCP_TOOL_NAMES.includes(toolName as never))
-      .map(myclawMcpFullToolName),
+      .map(gantryMcpFullToolName),
     availableButGatedTools: PERMISSION_GATED_NATIVE_TOOLS.filter(
       (toolName) =>
         !configuredAllowedTools.some(

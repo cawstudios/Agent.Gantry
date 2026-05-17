@@ -1,16 +1,16 @@
 import fs from 'fs';
 import path from 'path';
-import { getMyclawHome } from './myclaw-home.js';
+import { getGantryHome } from './gantry-home.js';
 type PermissionTimeoutContext = 'interactive' | 'autonomous';
 const INTERACTIVE_MIN_MS = 10_000;
 const INTERACTIVE_DEFAULT_MS = 300_000;
 const AUTONOMOUS_DEFAULT_MS = 0;
 const INTERACTIVE_KEYS = [
-  'MYCLAW_INTERACTIVE_PERMISSION_TIMEOUT_MS',
+  'GANTRY_INTERACTIVE_PERMISSION_TIMEOUT_MS',
   'PERMISSION_APPROVAL_TIMEOUT_MS',
-  'MYCLAW_PERMISSION_TIMEOUT_MS',
+  'GANTRY_PERMISSION_TIMEOUT_MS',
 ] as const;
-const AUTONOMOUS_KEYS = ['MYCLAW_AUTONOMOUS_PERMISSION_TIMEOUT_MS'] as const;
+const AUTONOMOUS_KEYS = ['GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS'] as const;
 const RUNTIME_ENV_KEYS = new Set<string>([
   ...INTERACTIVE_KEYS,
   ...AUTONOMOUS_KEYS,
@@ -54,7 +54,7 @@ function runtimeEnv(): Record<string, string | undefined> {
   if (runtimeEnvCache) return runtimeEnvCache;
   try {
     const entries = fs
-      .readFileSync(path.join(getMyclawHome(), '.env'), 'utf8')
+      .readFileSync(path.join(getGantryHome(), '.env'), 'utf8')
       .split(/\r?\n/)
       .flatMap((line) => {
         const match = /^([^#=\s]+)\s*=\s*(.*)$/.exec(line.trim());

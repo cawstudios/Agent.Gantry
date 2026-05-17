@@ -14,24 +14,24 @@ function requirePathEnv(name: string): string {
   return value;
 }
 
-export const WORKSPACE_GROUP_DIR = requirePathEnv('MYCLAW_WORKSPACE_GROUP_DIR');
-export const WORKSPACE_EXTRA_DIR = requirePathEnv('MYCLAW_WORKSPACE_EXTRA_DIR');
-export const IPC_BASE_DIR = requirePathEnv('MYCLAW_IPC_DIR');
-export const IPC_INPUT_DIR = requirePathEnv('MYCLAW_IPC_INPUT_DIR');
+export const WORKSPACE_GROUP_DIR = requirePathEnv('GANTRY_WORKSPACE_GROUP_DIR');
+export const WORKSPACE_EXTRA_DIR = requirePathEnv('GANTRY_WORKSPACE_EXTRA_DIR');
+export const IPC_BASE_DIR = requirePathEnv('GANTRY_IPC_DIR');
+export const IPC_INPUT_DIR = requirePathEnv('GANTRY_IPC_INPUT_DIR');
 export const IPC_INTERACTION_BOUNDARY_DIR = path.join(
   IPC_BASE_DIR,
   'interaction-boundaries',
 );
-export const IPC_AUTH_TOKEN = process.env.MYCLAW_IPC_AUTH_TOKEN || '';
-export const APP_ID = process.env.MYCLAW_APP_ID?.trim() || '';
-export const AGENT_ID = process.env.MYCLAW_AGENT_ID?.trim() || '';
-export const CHAT_JID = process.env.MYCLAW_CHAT_JID?.trim() || '';
-export const JOB_ID = process.env.MYCLAW_JOB_ID?.trim() || '';
-export const JOB_NAME = process.env.MYCLAW_JOB_NAME?.trim() || '';
-export const JOB_RUN_ID = process.env.MYCLAW_JOB_RUN_ID?.trim() || '';
+export const IPC_AUTH_TOKEN = process.env.GANTRY_IPC_AUTH_TOKEN || '';
+export const APP_ID = process.env.GANTRY_APP_ID?.trim() || '';
+export const AGENT_ID = process.env.GANTRY_AGENT_ID?.trim() || '';
+export const CHAT_JID = process.env.GANTRY_CHAT_JID?.trim() || '';
+export const JOB_ID = process.env.GANTRY_JOB_ID?.trim() || '';
+export const JOB_NAME = process.env.GANTRY_JOB_NAME?.trim() || '';
+export const JOB_RUN_ID = process.env.GANTRY_JOB_RUN_ID?.trim() || '';
 export const IPC_RESPONSE_VERIFY_KEY =
-  process.env.MYCLAW_IPC_RESPONSE_VERIFY_KEY || '';
-export const IPC_RESPONSE_KEY_ID = process.env.MYCLAW_IPC_RESPONSE_KEY_ID || '';
+  process.env.GANTRY_IPC_RESPONSE_VERIFY_KEY || '';
+export const IPC_RESPONSE_KEY_ID = process.env.GANTRY_IPC_RESPONSE_KEY_ID || '';
 export const PERMISSION_REQUEST_TIMEOUT_MS = getPermissionTimeoutMs(
   JOB_ID ? 'autonomous' : 'interactive',
 );
@@ -110,18 +110,18 @@ function readModelCredentialEnv(
 }
 
 function validateModelProxyEnv(env: Record<string, string | undefined>): void {
-  const expectedProxy = process.env.MYCLAW_EGRESS_PROXY_URL?.trim() || '';
+  const expectedProxy = process.env.GANTRY_EGRESS_PROXY_URL?.trim() || '';
   for (const key of MODEL_PROXY_ENV_KEYS) {
     const value = env[key];
     if (!value) continue;
     if (!expectedProxy) {
       throw new Error(
-        `modelCredentialEnv.${key} requires MYCLAW_EGRESS_PROXY_URL.`,
+        `modelCredentialEnv.${key} requires GANTRY_EGRESS_PROXY_URL.`,
       );
     }
     if (value !== expectedProxy) {
       throw new Error(
-        `modelCredentialEnv.${key} must match MYCLAW_EGRESS_PROXY_URL.`,
+        `modelCredentialEnv.${key} must match GANTRY_EGRESS_PROXY_URL.`,
       );
     }
   }
@@ -159,12 +159,12 @@ export function buildSdkEnv(
   copyEnv(sdkEnv, ['NO_PROXY', 'no_proxy']);
   stripNonModelProxyEnv(sdkEnv);
   applyAgentEgressNoProxyEnv(sdkEnv);
-  delete sdkEnv.MYCLAW_IPC_AUTH_TOKEN;
-  delete sdkEnv.MYCLAW_IPC_RESPONSE_VERIFY_KEY;
-  delete sdkEnv.MYCLAW_IPC_RESPONSE_KEY_ID;
-  delete sdkEnv.MYCLAW_MCP_CONFIG_FILE;
-  delete sdkEnv.MYCLAW_MCP_SERVERS_JSON;
-  delete sdkEnv.MYCLAW_MCP_ALLOWED_TOOLS_JSON;
+  delete sdkEnv.GANTRY_IPC_AUTH_TOKEN;
+  delete sdkEnv.GANTRY_IPC_RESPONSE_VERIFY_KEY;
+  delete sdkEnv.GANTRY_IPC_RESPONSE_KEY_ID;
+  delete sdkEnv.GANTRY_MCP_CONFIG_FILE;
+  delete sdkEnv.GANTRY_MCP_SERVERS_JSON;
+  delete sdkEnv.GANTRY_MCP_ALLOWED_TOOLS_JSON;
   return sdkEnv;
 }
 

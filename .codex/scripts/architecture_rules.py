@@ -524,14 +524,14 @@ def resolve_import_target(root: Path, source_file: Path, specifier: str) -> str 
         base = (source_file.parent / specifier).resolve()
     elif specifier.startswith(("apps/", "packages/")):
         base = (root / specifier).resolve()
-    elif specifier == "@myclaw/contracts":
+    elif specifier == "@gantry/contracts":
         base = (root / "packages/contracts/src/index.ts").resolve()
-    elif specifier.startswith("@myclaw/contracts/"):
-        base = (root / "packages/contracts/src" / specifier.removeprefix("@myclaw/contracts/")).resolve()
-    elif specifier == "@myclaw/sdk":
+    elif specifier.startswith("@gantry/contracts/"):
+        base = (root / "packages/contracts/src" / specifier.removeprefix("@gantry/contracts/")).resolve()
+    elif specifier == "@gantry/sdk":
         base = (root / "packages/sdk/src/index.ts").resolve()
-    elif specifier.startswith("@myclaw/sdk/"):
-        base = (root / "packages/sdk/src" / specifier.removeprefix("@myclaw/sdk/")).resolve()
+    elif specifier.startswith("@gantry/sdk/"):
+        base = (root / "packages/sdk/src" / specifier.removeprefix("@gantry/sdk/")).resolve()
     else:
         return None
 

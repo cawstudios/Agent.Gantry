@@ -139,7 +139,7 @@ describe('system memory dreaming jobs', () => {
       getPendingCount: vi.fn(() => 0),
     });
 
-    await handleSystemJob(makeJob(), {
+    const result = await handleSystemJob(makeJob(), {
       folder: 'agent-a',
       conversationId: 'sl:C123',
       conversationKind: 'channel',
@@ -156,6 +156,40 @@ describe('system memory dreaming jobs', () => {
         threadId: 'thread-1',
         phase: 'all',
       }),
+    );
+    expect(result).toBe('Memory dreaming completed with no memory changes.');
+  });
+
+  it('returns a user-facing dreaming outcome summary', async () => {
+    const triggerDreaming = vi.fn().mockResolvedValue({
+      runId: 'dream-1',
+      status: 'completed',
+      summary: {
+        promoted: 2,
+        updated: 1,
+        needsReview: 3,
+        skipped: 4,
+        blocked: 5,
+      },
+    });
+    const { _setMemoryMaintenanceQueueForTests, handleSystemJob } =
+      await loadSystemJobs(triggerDreaming);
+    _setMemoryMaintenanceQueueForTests({
+      enqueueAndWait: vi.fn(async (_group, task) => {
+        await task();
+        return { queued: true, deduped: false, reason: 'queued' };
+      }),
+      getPendingCount: vi.fn(() => 0),
+    });
+
+    const result = await handleSystemJob(makeJob(), {
+      folder: 'agent-a',
+      conversationId: 'sl:C123',
+      conversationKind: 'channel',
+    });
+
+    expect(result).toBe(
+      'Memory dreaming completed: 2 promoted, 1 updated, 3 sent to review.',
     );
   });
 

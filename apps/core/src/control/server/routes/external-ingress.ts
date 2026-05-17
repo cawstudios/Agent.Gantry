@@ -238,13 +238,13 @@ function readSignatureHeaders(
   req: IncomingMessage,
   res: ServerResponse,
 ): { timestamp: string; nonce: string; signature: string } | null {
-  const timestamp = header(req, 'x-myclaw-ingress-timestamp');
-  const nonce = header(req, 'x-myclaw-ingress-nonce');
-  const signature = header(req, 'x-myclaw-ingress-signature');
+  const timestamp = header(req, 'x-gantry-ingress-timestamp');
+  const nonce = header(req, 'x-gantry-ingress-nonce');
+  const signature = header(req, 'x-gantry-ingress-signature');
   const missing = [
-    ['x-myclaw-ingress-timestamp', timestamp],
-    ['x-myclaw-ingress-nonce', nonce],
-    ['x-myclaw-ingress-signature', signature],
+    ['x-gantry-ingress-timestamp', timestamp],
+    ['x-gantry-ingress-nonce', nonce],
+    ['x-gantry-ingress-signature', signature],
   ]
     .filter(([, value]) => !value)
     .map(([name]) => name);

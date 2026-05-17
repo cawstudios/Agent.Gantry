@@ -2,20 +2,20 @@
 
 ## Context
 
-MyClaw launches a local Chrome session for agent use. The previous split let
-the host launch the browser while the runner-side MyClaw MCP tool performed an
+Gantry launches a local Chrome session for agent use. The previous split let
+the host launch the browser while the runner-side Gantry MCP tool performed an
 additional loopback CDP health check. That made local browser readiness depend
 on the child runner's provider credential environment. In particular, provider
 proxy variables affected Node loopback HTTP calls when `NODE_USE_ENV_PROXY`
 was enabled.
 
 The reference browser implementation keeps lifecycle/status ownership in a
-browser module and layers action routes on top. MyClaw should adopt that
+browser module and layers action routes on top. Gantry should adopt that
 responsibility boundary without importing a separate browser action stack.
 
 ## Decision
 
-MyClaw's host runtime owns browser lifecycle and CDP readiness. The browser
+Gantry's host runtime owns browser lifecycle and CDP readiness. The browser
 capability is responsible for profile metadata, launch, close, status, CDP
 health checks, stale-session recovery, active-session reuse, and shutdown
 cleanup.
@@ -23,8 +23,8 @@ cleanup.
 The end-to-end runtime flow is documented in
 [browser-capability.md](../architecture/browser-capability.md).
 
-When canonical `Browser` is selected, MyClaw MCP exposes projected
-MyClaw-owned browser tools:
+When canonical `Browser` is selected, Gantry MCP exposes projected
+Gantry-owned browser tools:
 
 - `browser_status`
 - `browser_open`
@@ -42,7 +42,7 @@ are not persisted as durable authority. Durable settings and database bindings
 store only `Browser`; gateway tool names are audited runtime facts.
 
 The default local user experience is visible Chrome with the persistent
-`myclaw` profile. Agent-facing browser tools do not expose a headless launch
+`gantry` profile. Agent-facing browser tools do not expose a headless launch
 option; non-visible modes are internal test harness details only and must not
 become durable settings or model-facing tool choices.
 
@@ -56,7 +56,7 @@ projections. Loopback browser traffic still receives explicit `NO_PROXY` and
 
 - Browser health bugs are diagnosed in the host browser capability, not in the
   runner MCP tool layer.
-- MyClaw presents one stable durable capability even if the private backend or
+- Gantry presents one stable durable capability even if the private backend or
   projected tool surface changes.
 - Future browser action features must be added as projected tools under the
   canonical `Browser` capability boundary.

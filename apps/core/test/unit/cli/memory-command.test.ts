@@ -13,7 +13,7 @@ import type { EmbeddingProvider } from '@core/memory/memory-embeddings.js';
 const runtimeHomes: string[] = [];
 
 function makeRuntimeHome(): string {
-  const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-memory-'));
+  const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-memory-'));
   runtimeHomes.push(runtimeHome);
   return runtimeHome;
 }

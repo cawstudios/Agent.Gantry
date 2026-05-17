@@ -101,7 +101,7 @@ export async function inspectRuntimeStorageReadiness(
       status: 'fail',
       message: 'Cannot connect to postgres for storage readiness checks.',
       details: [message],
-      nextAction: `Verify ${postgresUrlEnv} and database network access. For local personal setup, run \`myclaw local status\` or \`myclaw local setup\`.`,
+      nextAction: `Verify ${postgresUrlEnv} and database network access. For local personal setup, run \`gantry local status\` or \`gantry local setup\`.`,
     };
   } finally {
     await service.close();

@@ -220,14 +220,17 @@ export async function runJob(
   }
   if (!error && currentJob.prompt.startsWith('__system:')) {
     try {
-      const systemResult = await handleSystemJob(currentJob, {
+      const systemResult: unknown = await handleSystemJob(currentJob, {
         folder: execution.group.folder,
         conversationId: execution.executionJid,
         conversationKind: execution.group.conversationKind,
         userId: memoryUserId,
         threadId: execution.threadId,
       });
-      appendResultSummary(JSON.stringify(systemResult));
+      if (typeof systemResult !== 'string') {
+        throw new Error('System job returned a non-displayable result.');
+      }
+      appendResultSummary(systemResult);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
@@ -439,7 +442,7 @@ export async function runJob(
               });
             } else {
               error =
-                'Browser was available but not used. Required tool assertion Browser was not satisfied by any browser IPC action during this run.';
+                'Browser was available but not used. Required tool assertion Browser was not satisfied by any browser IPC action during this run. Browser in required_tools is a must-use assertion, not a permission request; use browser_open, browser_inspect, or browser_act during the run, or update the job to remove Browser from required_tools when browser use is optional.';
               await emitJobEvent(RUNTIME_EVENT_TYPES.JOB_TOOL_ACTIVITY, {
                 phase: 'required_tool_unsatisfied',
                 tool: 'Browser',

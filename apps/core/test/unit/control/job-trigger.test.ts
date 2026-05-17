@@ -3,7 +3,7 @@ import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@core/config/index.js', () => ({
-  MYCLAW_HOME: '/tmp/myclaw-control-test-home',
+  GANTRY_HOME: '/tmp/gantry-control-test-home',
   ONECLI_ALLOWED_ENV_KEYS: [],
   getControlEnvValue: vi.fn((key: string) => process.env[key]?.trim() || ''),
   syncRuntimeSettingsFromProjection: vi.fn(async () => undefined),
@@ -275,8 +275,8 @@ async function requestWithRetry(
 }
 
 afterEach(() => {
-  delete process.env.MYCLAW_CONTROL_PORT;
-  delete process.env.MYCLAW_CONTROL_API_KEYS_JSON;
+  delete process.env.GANTRY_CONTROL_PORT;
+  delete process.env.GANTRY_CONTROL_API_KEYS_JSON;
   vi.clearAllMocks();
 });
 
@@ -343,8 +343,8 @@ describe('control job trigger', () => {
 
   it('creates jobs with an eagerly persisted default model preview', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -430,8 +430,8 @@ describe('control job trigger', () => {
 
   it('creates required Browser jobs as active when the control route sees browser readiness', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -494,8 +494,8 @@ describe('control job trigger', () => {
 
   it('passes control API capability requirements into job creation', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -572,8 +572,8 @@ describe('control job trigger', () => {
 
   it('dry-runs job creation without returning a created job id', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -644,8 +644,8 @@ describe('control job trigger', () => {
 
   it('dry-runs required Browser jobs with setup blockers before persistence', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -717,8 +717,8 @@ describe('control job trigger', () => {
 
   it('rejects raw model fields on job creation', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -766,8 +766,8 @@ describe('control job trigger', () => {
 
   it('rejects job creation without executionContext.sessionId', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -813,8 +813,8 @@ describe('control job trigger', () => {
 
   it('rejects unsupported model selector fields on job updates', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -855,8 +855,8 @@ describe('control job trigger', () => {
 
   it('maps GET job application access errors to HTTP errors', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -890,8 +890,8 @@ describe('control job trigger', () => {
 
   it('lists app-scoped job events through the job diagnostics route', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -947,8 +947,8 @@ describe('control job trigger', () => {
 
   it('updates jobs through the application use case', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1015,8 +1015,8 @@ describe('control job trigger', () => {
 
   it('passes control API capability requirements into job updates', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1075,8 +1075,8 @@ describe('control job trigger', () => {
 
   it('rejects PATCH executionContext retargeting to another app session', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1134,8 +1134,8 @@ describe('control job trigger', () => {
 
   it('rejects conflicting PATCH job model selectors', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1177,8 +1177,8 @@ describe('control job trigger', () => {
 
   it('clears explicit job model selection through PATCH null alias', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1219,8 +1219,8 @@ describe('control job trigger', () => {
 
   it('clears job thread binding through PATCH null threadId', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1274,8 +1274,8 @@ describe('control job trigger', () => {
 
   it('pauses jobs through the application use case', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1310,8 +1310,8 @@ describe('control job trigger', () => {
 
   it('resumes jobs through the application use case', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1355,8 +1355,8 @@ describe('control job trigger', () => {
 
   it('rejects paused recurring jobs before manual trigger enqueue', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1402,8 +1402,8 @@ describe('control job trigger', () => {
 
   it('rejects triggers before scheduler readiness without persisting trigger rows', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1437,8 +1437,8 @@ describe('control job trigger', () => {
 
   it('marks trigger failed when enqueue loses scheduler readiness after persistence', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1477,8 +1477,8 @@ describe('control job trigger', () => {
 
   it('enqueues a trigger without clobbering an active running lease', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1514,8 +1514,8 @@ describe('control job trigger', () => {
 
   it('triggers a legacy sessionless job through its canonical conversation session', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1566,8 +1566,8 @@ describe('control job trigger', () => {
 
   it('rejects a sessionless job when its conversation belongs to another app', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1624,8 +1624,8 @@ describe('control job trigger', () => {
 
   it('lets the default runtime API key trigger a host-owned sessionless job without control session rows', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1677,8 +1677,8 @@ describe('control job trigger', () => {
 
   it('preserves trigger rate-limit wire code', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1712,8 +1712,8 @@ describe('control job trigger', () => {
 
   it('preserves missing trigger wire code', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1742,8 +1742,8 @@ describe('control job trigger', () => {
 
   it('filters mixed-app jobs from app-scoped job listing', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1803,8 +1803,8 @@ describe('control job trigger', () => {
 
   it('returns full job visibility metadata on detail', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1855,8 +1855,8 @@ describe('control job trigger', () => {
 
   it('preserves trigger wait timeout wire code', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',
@@ -1892,8 +1892,8 @@ describe('control job trigger', () => {
 
   it('returns after a successful trigger wait response', async () => {
     const port = await reservePort();
-    process.env.MYCLAW_CONTROL_PORT = String(port);
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
         token: 'token-jobs',

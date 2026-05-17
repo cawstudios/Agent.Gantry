@@ -39,7 +39,7 @@ interface RunnerRecord {
 }
 
 function makeTempRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-runner-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-runner-test-'));
   tempRoots.push(root);
   return root;
 }
@@ -105,8 +105,8 @@ function createRunnerFixture(): {
     path.join(runnerDir, 'agent-capabilities.ts'),
   );
   fs.copyFileSync(
-    path.resolve('apps/core/src/runner/myclaw-mcp-tool-surface.ts'),
-    path.join(runnerDir, 'myclaw-mcp-tool-surface.ts'),
+    path.resolve('apps/core/src/runner/gantry-mcp-tool-surface.ts'),
+    path.join(runnerDir, 'gantry-mcp-tool-surface.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/runner/memory-boundary.ts'),
@@ -229,8 +229,8 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'human-format.ts'),
   );
   fs.copyFileSync(
-    path.resolve('apps/core/src/shared/myclaw-home.ts'),
-    path.join(sharedDir, 'myclaw-home.ts'),
+    path.resolve('apps/core/src/shared/gantry-home.ts'),
+    path.join(sharedDir, 'gantry-home.ts'),
   );
   fs.writeFileSync(
     path.join(sdkDir, 'package.json'),
@@ -261,7 +261,7 @@ function signPayload(payload) {
 }
 
 function writeInput(name, text) {
-  const inputDir = process.env.MYCLAW_IPC_INPUT_DIR;
+  const inputDir = process.env.GANTRY_IPC_INPUT_DIR;
   fs.mkdirSync(inputDir, { recursive: true });
   fs.writeFileSync(
     path.join(inputDir, name),
@@ -304,7 +304,7 @@ export async function* query({ prompt, options }) {
     resumeSessionAt: options?.resumeSessionAt,
     systemPromptAppend: options?.systemPrompt?.append,
     closeExistsAtQueryStart: fs.existsSync(
-      path.join(process.env.MYCLAW_IPC_INPUT_DIR, '_close'),
+      path.join(process.env.GANTRY_IPC_INPUT_DIR, '_close'),
     ),
   };
 
@@ -312,20 +312,20 @@ export async function* query({ prompt, options }) {
     type: 'system',
     subtype: 'init',
     session_id: 'runner-session-1',
-    mcp_servers: [{ name: 'myclaw', status: 'connected' }],
+    mcp_servers: [{ name: 'gantry', status: 'connected' }],
   };
 
   if (process.env.TEST_MEMORY_GUARD_DENIAL) {
     call.permissionDecision = await options.canUseTool(
       'Bash',
-      { cmd: 'rm -rf /tmp/myclaw-poisoned-memory' },
+      { cmd: 'rm -rf /tmp/gantry-poisoned-memory' },
       {
         signal: new AbortController().signal,
         title: 'Run command',
         displayName: 'Bash',
         description: 'Needs shell access',
         decisionReason: 'Agent wants to run command from memory context',
-        blockedPath: process.env.MYCLAW_WORKSPACE_GROUP_DIR,
+        blockedPath: process.env.GANTRY_WORKSPACE_GROUP_DIR,
       },
     );
   }
@@ -354,7 +354,7 @@ export async function* query({ prompt, options }) {
         displayName: process.env.TEST_PERMISSION_TOOL_NAME || 'Bash',
         description: 'Needs shell access',
         decisionReason: 'Agent wants to verify tests',
-        blockedPath: process.env.MYCLAW_WORKSPACE_GROUP_DIR,
+        blockedPath: process.env.GANTRY_WORKSPACE_GROUP_DIR,
       },
     );
   }
@@ -373,7 +373,7 @@ export async function* query({ prompt, options }) {
         displayName: permissionToolName,
         description: 'Needs shell access',
         decisionReason: 'Agent wants to verify tests',
-        blockedPath: process.env.MYCLAW_WORKSPACE_GROUP_DIR,
+        blockedPath: process.env.GANTRY_WORKSPACE_GROUP_DIR,
         ...(process.env.TEST_PERMISSION_SDK_SUGGESTION_TOOL_NAME
           ? {
               suggestions: [
@@ -393,8 +393,8 @@ export async function* query({ prompt, options }) {
           : {}),
       },
     );
-    const requestDir = path.join(process.env.MYCLAW_IPC_DIR, 'permission-requests');
-    const responseDir = path.join(process.env.MYCLAW_IPC_DIR, 'permission-responses');
+    const requestDir = path.join(process.env.GANTRY_IPC_DIR, 'permission-requests');
+    const responseDir = path.join(process.env.GANTRY_IPC_DIR, 'permission-responses');
     const requestPath = await waitForFile(requestDir, 1000);
     const request = JSON.parse(fs.readFileSync(requestPath, 'utf-8'));
     fs.mkdirSync(responseDir, { recursive: true });
@@ -440,7 +440,7 @@ export async function* query({ prompt, options }) {
         displayName: 'Bash',
         description: 'Needs shell access',
         decisionReason: 'Agent wants to run a command',
-        blockedPath: process.env.MYCLAW_WORKSPACE_GROUP_DIR,
+        blockedPath: process.env.GANTRY_WORKSPACE_GROUP_DIR,
         toolUseID: 'toolu_bash_1',
       },
     );
@@ -489,12 +489,12 @@ export async function* query({ prompt, options }) {
         displayName: 'Bash',
         description: 'Needs shell access',
         decisionReason: 'Agent wants to verify tests',
-        blockedPath: process.env.MYCLAW_WORKSPACE_GROUP_DIR,
+        blockedPath: process.env.GANTRY_WORKSPACE_GROUP_DIR,
         toolUseID: 'toolu_prime_bash',
       },
     );
     const browserDecision = await options.canUseTool(
-      'mcp__myclaw__browser_act',
+      'mcp__gantry__browser_act',
       { url: 'https://example.com' },
       {
         signal: new AbortController().signal,
@@ -513,8 +513,8 @@ export async function* query({ prompt, options }) {
 
 	  if (process.env.TEST_TOOL_USE_ONLY) {
 	    if (process.env.TEST_LIVE_TOOL_RULE) {
-	      const runHandle = process.env.MYCLAW_AGENT_RUN_HANDLE;
-	      const liveDir = path.join(process.env.MYCLAW_IPC_DIR, 'live-tool-rules');
+	      const runHandle = process.env.GANTRY_AGENT_RUN_HANDLE;
+	      const liveDir = path.join(process.env.GANTRY_IPC_DIR, 'live-tool-rules');
 	      fs.mkdirSync(liveDir, { recursive: true });
 	      fs.writeFileSync(
 	        path.join(liveDir, runHandle + '.json'),
@@ -530,7 +530,7 @@ export async function* query({ prompt, options }) {
         displayName: process.env.TEST_TOOL_USE_ONLY,
         description: 'Needs tool access',
         decisionReason: 'Agent wants to use a tool',
-        blockedPath: process.env.MYCLAW_WORKSPACE_GROUP_DIR,
+        blockedPath: process.env.GANTRY_WORKSPACE_GROUP_DIR,
       },
     );
   }
@@ -574,15 +574,15 @@ export async function* query({ prompt, options }) {
       appendRecord(call);
       if (process.env.TEST_EXIT_AFTER_QUERY === '1') {
         setTimeout(() => {
-          fs.mkdirSync(process.env.MYCLAW_IPC_INPUT_DIR, { recursive: true });
-          fs.writeFileSync(path.join(process.env.MYCLAW_IPC_INPUT_DIR, '_close'), '');
+          fs.mkdirSync(process.env.GANTRY_IPC_INPUT_DIR, { recursive: true });
+          fs.writeFileSync(path.join(process.env.GANTRY_IPC_INPUT_DIR, '_close'), '');
         }, 20);
       }
       return;
     }
 
     if (process.env.TEST_INTERACTION_BOUNDARY_FILE === '1') {
-      const boundaryDir = path.join(process.env.MYCLAW_IPC_DIR, 'interaction-boundaries');
+      const boundaryDir = path.join(process.env.GANTRY_IPC_DIR, 'interaction-boundaries');
       fs.mkdirSync(boundaryDir, { recursive: true });
       fs.writeFileSync(
         path.join(boundaryDir, 'boundary-1.json'),
@@ -592,7 +592,7 @@ export async function* query({ prompt, options }) {
     }
 
     if (process.env.TEST_CREATE_CLOSE_DURING_QUERY === '1') {
-      fs.writeFileSync(path.join(process.env.MYCLAW_IPC_INPUT_DIR, '_close'), '');
+      fs.writeFileSync(path.join(process.env.GANTRY_IPC_INPUT_DIR, '_close'), '');
       const closed = await nextWithTimeout(iterator, 1500);
       call.streamEnded = Boolean(closed?.done);
     }
@@ -615,8 +615,8 @@ export async function* query({ prompt, options }) {
 
   if (process.env.TEST_EXIT_AFTER_QUERY === '1') {
     setTimeout(() => {
-      fs.mkdirSync(process.env.MYCLAW_IPC_INPUT_DIR, { recursive: true });
-      fs.writeFileSync(path.join(process.env.MYCLAW_IPC_INPUT_DIR, '_close'), '');
+      fs.mkdirSync(process.env.GANTRY_IPC_INPUT_DIR, { recursive: true });
+      fs.writeFileSync(path.join(process.env.GANTRY_IPC_INPUT_DIR, '_close'), '');
     }, 20);
   }
 }
@@ -658,20 +658,20 @@ async function runRunner(
       cwd: fixture.root,
       env: {
         ...process.env,
-        MYCLAW_IPC_DIR: fixture.ipcDir,
-        MYCLAW_IPC_INPUT_DIR: fixture.inputDir,
-        MYCLAW_IPC_AUTH_TOKEN: 'runner-test-token',
-        MYCLAW_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
-        MYCLAW_AGENT_RUN_HANDLE: 'runner-test-run',
+        GANTRY_IPC_DIR: fixture.ipcDir,
+        GANTRY_IPC_INPUT_DIR: fixture.inputDir,
+        GANTRY_IPC_AUTH_TOKEN: 'runner-test-token',
+        GANTRY_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
+        GANTRY_AGENT_RUN_HANDLE: 'runner-test-run',
         TEST_IPC_RESPONSE_SIGNING_KEY: fixture.responseSigningKey,
-        MYCLAW_WORKSPACE_GROUP_DIR: path.join(fixture.root, 'group'),
-        MYCLAW_WORKSPACE_EXTRA_DIR: path.join(fixture.root, 'extra'),
+        GANTRY_WORKSPACE_GROUP_DIR: path.join(fixture.root, 'group'),
+        GANTRY_WORKSPACE_EXTRA_DIR: path.join(fixture.root, 'extra'),
         TEST_SDK_RECORD_PATH: fixture.recordPath,
         ...(typeof input.jobId === 'string'
-          ? { MYCLAW_JOB_ID: input.jobId }
+          ? { GANTRY_JOB_ID: input.jobId }
           : {}),
         ...(typeof input.runId === 'string'
-          ? { MYCLAW_JOB_RUN_ID: input.runId }
+          ? { GANTRY_JOB_RUN_ID: input.runId }
           : {}),
         ...extraEnv,
       },
@@ -716,7 +716,7 @@ function readRecord(recordPath: string): RunnerRecord {
 function readRunnerOutputs(stdout: string): Array<Record<string, unknown>> {
   const matches = [
     ...stdout.matchAll(
-      /---MYCLAW_OUTPUT_START---\n([\s\S]*?)\n---MYCLAW_OUTPUT_END---/g,
+      /---GANTRY_OUTPUT_START---\n([\s\S]*?)\n---GANTRY_OUTPUT_END---/g,
     ),
   ];
   return matches.map((match) => JSON.parse(match[1] ?? '{}'));
@@ -754,9 +754,9 @@ describe('agent-runner IPC lifecycle', () => {
           NO_PROXY: '',
           no_proxy: '',
           NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
-          MYCLAW_IPC_AUTH_TOKEN: 'runner-test-token',
-          MYCLAW_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
-          MYCLAW_EGRESS_PROXY_URL: 'http://127.0.0.1:18080/',
+          GANTRY_IPC_AUTH_TOKEN: 'runner-test-token',
+          GANTRY_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
+          GANTRY_EGRESS_PROXY_URL: 'http://127.0.0.1:18080/',
         },
       );
 
@@ -795,11 +795,11 @@ describe('agent-runner IPC lifecycle', () => {
         ]),
       );
       expect(sdkEnv.no_proxy).toBe(sdkEnv.NO_PROXY);
-      expect(sdkEnv.MYCLAW_IPC_AUTH_TOKEN).toBeUndefined();
-      expect(sdkEnv.MYCLAW_IPC_RESPONSE_VERIFY_KEY).toBeUndefined();
-      expect(sdkEnv.MYCLAW_MCP_CONFIG_FILE).toBeUndefined();
-      expect(sdkEnv.MYCLAW_MCP_SERVERS_JSON).toBeUndefined();
-      expect(sdkEnv.MYCLAW_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+      expect(sdkEnv.GANTRY_IPC_AUTH_TOKEN).toBeUndefined();
+      expect(sdkEnv.GANTRY_IPC_RESPONSE_VERIFY_KEY).toBeUndefined();
+      expect(sdkEnv.GANTRY_MCP_CONFIG_FILE).toBeUndefined();
+      expect(sdkEnv.GANTRY_MCP_SERVERS_JSON).toBeUndefined();
+      expect(sdkEnv.GANTRY_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
@@ -819,13 +819,13 @@ describe('agent-runner IPC lifecycle', () => {
         }),
         {
           TEST_EXIT_AFTER_QUERY: '1',
-          MYCLAW_EGRESS_PROXY_URL: 'http://127.0.0.1:18080/',
+          GANTRY_EGRESS_PROXY_URL: 'http://127.0.0.1:18080/',
         },
       );
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain(
-        'modelCredentialEnv.HTTP_PROXY must match MYCLAW_EGRESS_PROXY_URL.',
+        'modelCredentialEnv.HTTP_PROXY must match GANTRY_EGRESS_PROXY_URL.',
       );
       expect(fs.existsSync(fixture.recordPath)).toBe(false);
     },
@@ -953,7 +953,7 @@ describe('agent-runner IPC lifecycle', () => {
 
       const result = await runRunner(fixture, baseInput(), {
         TEST_EXIT_AFTER_QUERY: '1',
-        MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON: JSON.stringify([
+        GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON: JSON.stringify([
           claudeConfigDir,
           handoffPath,
         ]),
@@ -1028,8 +1028,8 @@ describe('agent-runner IPC lifecycle', () => {
 
       const result = await runRunner(fixture, baseInput(), {
         TEST_EXIT_AFTER_QUERY: '1',
-        MYCLAW_MCP_CONFIG_FILE: mcpConfigPath,
-        MYCLAW_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
+        GANTRY_MCP_CONFIG_FILE: mcpConfigPath,
+        GANTRY_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
           'mcp__browser' + '_' + 'backend' + '__*',
         ]),
       });
@@ -1064,8 +1064,8 @@ describe('agent-runner IPC lifecycle', () => {
 
       const result = await runRunner(fixture, baseInput(), {
         TEST_EXIT_AFTER_QUERY: '1',
-        MYCLAW_MCP_CONFIG_FILE: mcpConfigPath,
-        MYCLAW_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
+        GANTRY_MCP_CONFIG_FILE: mcpConfigPath,
+        GANTRY_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
           'mcp__browser' + '_' + 'backend' + '__click',
         ]),
       });
@@ -1087,8 +1087,8 @@ describe('agent-runner IPC lifecycle', () => {
         TEST_EXIT_AFTER_QUERY: '1',
         ANTHROPIC_API_KEY: 'placeholder',
         CLAUDE_CODE_OAUTH_TOKEN: 'placeholder',
-        MYCLAW_IPC_AUTH_TOKEN: 'runner-test-token',
-        MYCLAW_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
+        GANTRY_IPC_AUTH_TOKEN: 'runner-test-token',
+        GANTRY_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
       });
 
       expect(result.exitCode).toBe(0);
@@ -1254,7 +1254,7 @@ describe('agent-runner IPC lifecycle', () => {
           ],
         }),
         expect.objectContaining({
-          requestedToolName: 'mcp__myclaw__browser_act',
+          requestedToolName: 'mcp__gantry__browser_act',
           toolName: 'Browser',
           suggestions: [
             {
@@ -1369,10 +1369,10 @@ describe('agent-runner IPC lifecycle', () => {
       expect(call?.resume).toBe('stale-sdk-session');
       expect(call?.resumeSessionAt).toBeUndefined();
       expect(
-        (call?.mcpServers?.myclaw as { env?: Record<string, string> })?.env,
+        (call?.mcpServers?.gantry as { env?: Record<string, string> })?.env,
       ).toMatchObject({
-        MYCLAW_APP_ID: 'app-runner-test',
-        MYCLAW_AGENT_ID: 'agent:team',
+        GANTRY_APP_ID: 'app-runner-test',
+        GANTRY_AGENT_ID: 'agent:team',
       });
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
@@ -1538,7 +1538,7 @@ describe('agent-runner IPC lifecycle', () => {
       expect(result.exitCode).toBe(0);
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.streamEnded).toBe(true);
-      expect(result.stdout.match(/---MYCLAW_OUTPUT_START---/g)).toHaveLength(2);
+      expect(result.stdout.match(/---GANTRY_OUTPUT_START---/g)).toHaveLength(2);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
@@ -1583,7 +1583,7 @@ describe('agent-runner IPC lifecycle', () => {
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.systemPromptAppend).toContain('compiled system profile');
       expect(call?.systemPromptAppend).toContain(
-        'MyClaw Durable Memory Boundary',
+        'Gantry Durable Memory Boundary',
       );
       expect(call?.systemPromptAppend).not.toContain('user prefers');
       expect(call?.streamMessages).toHaveLength(1);
@@ -1655,13 +1655,13 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'synthesizes exact persistent permission suggestions for MyClaw admin tools',
+    'synthesizes exact persistent permission suggestions for Gantry admin tools',
     async () => {
       const fixture = createRunnerFixture();
 
       const result = await runRunner(fixture, baseInput(), {
         TEST_PERMISSION_DECISION: 'approve',
-        TEST_PERMISSION_TOOL_NAME: 'mcp__myclaw__service_restart',
+        TEST_PERMISSION_TOOL_NAME: 'mcp__gantry__service_restart',
         TEST_PERMISSION_SCOPE: 'environment:staging',
         TEST_EXIT_AFTER_QUERY: '1',
       });
@@ -1670,13 +1670,13 @@ describe('agent-runner IPC lifecycle', () => {
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.permissionRequest).toEqual(
         expect.objectContaining({
-          toolName: 'mcp__myclaw__service_restart',
+          toolName: 'mcp__gantry__service_restart',
           suggestions: [
             {
               type: 'addRules',
               behavior: 'allow',
               destination: 'session',
-              rules: [{ toolName: 'mcp__myclaw__service_restart' }],
+              rules: [{ toolName: 'mcp__gantry__service_restart' }],
             },
           ],
         }),
@@ -1696,8 +1696,8 @@ describe('agent-runner IPC lifecycle', () => {
 
       const result = await runRunner(fixture, baseInput(), {
         TEST_PERMISSION_DECISION: 'approve',
-        TEST_PERMISSION_TOOL_NAME: 'mcp__myclaw__browser_act',
-        TEST_PERMISSION_SDK_SUGGESTION_TOOL_NAME: 'mcp__myclaw__browser_act',
+        TEST_PERMISSION_TOOL_NAME: 'mcp__gantry__browser_act',
+        TEST_PERMISSION_SDK_SUGGESTION_TOOL_NAME: 'mcp__gantry__browser_act',
         TEST_EXIT_AFTER_QUERY: '1',
       });
 
@@ -1755,7 +1755,7 @@ describe('agent-runner IPC lifecycle', () => {
         fixture,
         baseInput({
           memoryContextBlock:
-            '<myclaw_memory_context trust="untrusted_data_only">[suppressed: instruction-like memory content]</myclaw_memory_context>',
+            '<gantry_memory_context trust="untrusted_data_only">[suppressed: instruction-like memory content]</gantry_memory_context>',
         }),
         {
           TEST_MEMORY_GUARD_DENIAL: '1',
@@ -1921,7 +1921,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'suppresses SDK sandbox network prompts after MyClaw allowed a scoped tool',
+    'suppresses SDK sandbox network prompts after Gantry allowed a scoped tool',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -2014,7 +2014,7 @@ describe('agent-runner IPC lifecycle', () => {
           allowedTools: ['Read'],
         }),
         {
-          MYCLAW_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '5000',
+          GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '5000',
           TEST_PERMISSION_DECISION: 'approve',
           TEST_PERMISSION_TOOL_NAME: 'Bash',
           TEST_EXIT_AFTER_QUERY: '1',
@@ -2058,7 +2058,7 @@ describe('agent-runner IPC lifecycle', () => {
           allowedTools: ['Read'],
         }),
         {
-          MYCLAW_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '5000',
+          GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '5000',
           TEST_PERMISSION_DECISION: 'approve',
           TEST_PERMISSION_MODE: 'allow_persistent_rule',
           TEST_PERMISSION_CLASSIFICATION: 'user_permanent',
@@ -2151,7 +2151,7 @@ describe('agent-runner IPC lifecycle', () => {
           selectedMcpServerIds: ['mcp:github'],
         }),
         {
-          MYCLAW_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
+          GANTRY_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
             'mcp__github__search_repositories',
           ]),
           TEST_TOOL_USE_ONLY: 'mcp__github__search_repositories',

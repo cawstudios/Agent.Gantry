@@ -185,12 +185,12 @@ export async function runBrowserCommand(
     command === 'list' ||
     command === 'status'
   ) {
-    process.env.MYCLAW_HOME = runtimeHome;
+    process.env.GANTRY_HOME = runtimeHome;
     const profiles = await listProfiles(runtimeHome);
     p.note(formatProfiles(profiles), 'Browser profiles');
     return 0;
   }
 
-  p.log.error('Usage: myclaw browser profiles');
+  p.log.error('Usage: gantry browser profiles');
   return 1;
 }

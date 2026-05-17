@@ -216,8 +216,8 @@ describe.runIf(hasPostgresIntegrationDatabase)(
 describe.skipIf(hasPostgresIntegrationDatabase)(
   'MCP server Postgres integration',
   () => {
-    it('skips when MYCLAW_TEST_DATABASE_URL is absent', () => {
-      expect(process.env.MYCLAW_TEST_DATABASE_URL).toBeUndefined();
+    it('skips when GANTRY_TEST_DATABASE_URL is absent', () => {
+      expect(process.env.GANTRY_TEST_DATABASE_URL).toBeUndefined();
     });
   },
 );

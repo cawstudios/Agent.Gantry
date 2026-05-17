@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { denyMemoryBoundaryToolUse } from '@core/runner/memory-boundary.js';
 
 const SUPPRESSED_MEMORY =
-  '<myclaw_memory_context>[suppressed: instruction-like memory content]</myclaw_memory_context>';
+  '<gantry_memory_context>[suppressed: instruction-like memory content]</gantry_memory_context>';
 
 describe('denyMemoryBoundaryToolUse', () => {
   it.each([
@@ -17,7 +17,7 @@ describe('denyMemoryBoundaryToolUse', () => {
     (tool, input) => {
       expect(
         denyMemoryBoundaryToolUse(tool, input, {}, SUPPRESSED_MEMORY),
-      ).toContain('Denied by MyClaw memory boundary');
+      ).toContain('Denied by Gantry memory boundary');
     },
   );
 
@@ -27,7 +27,7 @@ describe('denyMemoryBoundaryToolUse', () => {
         'Bash',
         { command: 'rm -rf /tmp/example' },
         {},
-        '<myclaw_memory_context>[]</myclaw_memory_context>',
+        '<gantry_memory_context>[]</gantry_memory_context>',
       ),
     ).toBeNull();
   });

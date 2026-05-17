@@ -27,7 +27,7 @@ import type { SetupDraft } from './setup-flow-state.js';
 export async function runWelcomeStep(): Promise<FlowAction> {
   p.note(
     [
-      'This setup will connect your first channel and prepare your MyClaw runtime home.',
+      'This setup will connect your first channel and prepare your Gantry runtime home.',
       'You can go Back, Resume Later, or Cancel until the final create-runtime confirmation.',
     ].join('\n'),
     'Welcome',
@@ -42,17 +42,17 @@ export async function runWelcomeStep(): Promise<FlowAction> {
 export async function runRuntimeHomeStep(
   draft: SetupDraft,
 ): Promise<{ action: FlowAction; changedHome?: string }> {
-  const defaultRuntimeHome = draft.runtimeHome || '~/myclaw';
+  const defaultRuntimeHome = draft.runtimeHome || '~/gantry';
   const value = await p.text({
     message:
-      'Where should MyClaw store runtime data? (/back, /resume, /cancel)',
-    placeholder: '~/myclaw',
+      'Where should Gantry store runtime data? (/back, /resume, /cancel)',
+    placeholder: '~/gantry',
     defaultValue: defaultRuntimeHome,
     validate: (input) => {
       const trimmed = String(input ?? '').trim();
       if (isInputFlowControl(trimmed)) return undefined;
       if ((!input || !input.trim()) && !defaultRuntimeHome) {
-        return 'Please enter a path (for example: ~/myclaw).';
+        return 'Please enter a path (for example: ~/gantry).';
       }
       return undefined;
     },
@@ -82,7 +82,7 @@ export async function runRuntimeHomeStep(
   p.note(
     [
       `Runtime home: ${resolved}`,
-      'MyClaw will keep .env, settings.yaml, store/, agents/, data/, logs/, and onboarding state here.',
+      'Gantry will keep .env, settings.yaml, store/, agents/, data/, logs/, and onboarding state here.',
     ].join('\n'),
     'Runtime Home',
   );
@@ -104,14 +104,14 @@ export async function runRuntimeHomeStep(
 export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
   p.note(
     [
-      'MyClaw stores runtime state in Postgres.',
+      'Gantry stores runtime state in Postgres.',
       'Use any Postgres URL: local Docker Compose, a locally installed database, or hosted Postgres such as Supabase/Neon.',
     ].join('\n'),
     'Storage',
   );
 
   const choice = await p.select({
-    message: 'How should MyClaw configure Postgres? (/back, /resume, /cancel)',
+    message: 'How should Gantry configure Postgres? (/back, /resume, /cancel)',
     options: [
       {
         value: 'local',
@@ -141,7 +141,7 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
   if (choice === 'local') {
     p.note(
       [
-        'MyClaw ships a docker-compose.yml for local Postgres + OneCLI if you want a ready local stack.',
+        'Gantry ships a docker-compose.yml for local Postgres + OneCLI if you want a ready local stack.',
         'Setup will not start Docker or create containers. Start your database first, then paste the URLs below.',
       ].join('\n'),
       'Postgres',
@@ -161,7 +161,7 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
 
   p.note(
     [
-      'MyClaw requires Postgres with pgvector, a text-search extension, and pg-boss readiness.',
+      'Gantry requires Postgres with pgvector, a text-search extension, and pg-boss readiness.',
       choice === 'hosted'
         ? 'Paste the hosted connection URL from your provider.'
         : 'Localhost and Docker-local URLs are supported.',
@@ -170,9 +170,9 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
   );
 
   const url = await p.text({
-    message: 'Postgres URL (stored in MYCLAW_DATABASE_URL)',
+    message: 'Postgres URL (stored in GANTRY_DATABASE_URL)',
     placeholder:
-      'postgres://user:pass@db.example.com:5432/myclaw?sslmode=require',
+      'postgres://user:pass@db.example.com:5432/gantry?sslmode=require',
     defaultValue: draft.postgresDatabaseUrl,
     validate: (input) => {
       const trimmed = String(input ?? '').trim();
@@ -200,8 +200,8 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
 
   const schema = await p.text({
     message: 'Postgres schema',
-    placeholder: 'myclaw',
-    defaultValue: draft.postgresSchema || 'myclaw',
+    placeholder: 'gantry',
+    defaultValue: draft.postgresSchema || 'gantry',
     validate: (input) => {
       const trimmed = String(input ?? '').trim();
       if (isInputFlowControl(trimmed)) return undefined;
@@ -227,7 +227,7 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
         return 'Use a lowercase PostgreSQL schema identifier.';
       }
       if (trimmed === draft.postgresSchema) {
-        return 'OneCLI schema must be separate from the MyClaw schema.';
+        return 'OneCLI schema must be separate from the Gantry schema.';
       }
       return undefined;
     },
@@ -244,8 +244,8 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
     placeholder: renderOnecliDatabaseUrl({
       postgresUrl:
         choice === 'hosted'
-          ? 'postgres://onecli_user:pass@db.example.com:5432/myclaw?sslmode=require'
-          : 'postgres://onecli_user:pass@localhost:5432/myclaw',
+          ? 'postgres://onecli_user:pass@db.example.com:5432/gantry?sslmode=require'
+          : 'postgres://onecli_user:pass@localhost:5432/gantry',
       schema: ONECLI_DEFAULT_SCHEMA,
     }),
     defaultValue: defaultOnecliUrl,
@@ -253,7 +253,7 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
       const trimmed = String(input ?? '').trim();
       if (isInputFlowControl(trimmed)) return undefined;
       if (!trimmed) {
-        return 'OneCLI Postgres URL is required and must use a database role separate from MyClaw.';
+        return 'OneCLI Postgres URL is required and must use a database role separate from Gantry.';
       }
       try {
         validatePostgresConnectionUrl(trimmed, {
@@ -267,14 +267,14 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
           return onecliValidation.message;
         }
         const sharedDatabase = validateSharedPostgresDatabase({
-          myclawPostgresUrl: normalizedUrl,
+          gantryPostgresUrl: normalizedUrl,
           onecliPostgresUrl: trimmed,
         });
         if (!sharedDatabase.ok) {
           return sharedDatabase.message;
         }
         if (new URL(trimmed).username === new URL(normalizedUrl).username) {
-          return 'OneCLI and MyClaw must use different Postgres roles.';
+          return 'OneCLI and Gantry must use different Postgres roles.';
         }
       } catch (err) {
         return err instanceof Error ? err.message : String(err);
@@ -297,7 +297,7 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
     throw new Error(onecliValidation.message);
   }
   const sharedDatabase = validateSharedPostgresDatabase({
-    myclawPostgresUrl: normalizedUrl,
+    gantryPostgresUrl: normalizedUrl,
     onecliPostgresUrl: normalizedOnecliUrl,
   });
   if (!sharedDatabase.ok) {
@@ -306,7 +306,7 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
   if (
     new URL(normalizedOnecliUrl).username === new URL(normalizedUrl).username
   ) {
-    throw new Error('OneCLI and MyClaw must use different Postgres roles.');
+    throw new Error('OneCLI and Gantry must use different Postgres roles.');
   }
   draft.onecliPostgresDatabaseUrl = normalizedOnecliUrl;
   return { type: 'next' };
@@ -315,7 +315,7 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
 export async function runPrerequisitesStep(): Promise<FlowAction> {
   p.note(
     [
-      'MyClaw runs as a local host process.',
+      'Gantry runs as a local host process.',
       'Proceed once Node.js and runtime-home checks are passing.',
     ].join('\n'),
     'Runtime Prerequisites',

@@ -12,7 +12,7 @@ function fileMode(filePath: string): number {
 }
 
 function makeTempRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-runner-mcp-ipc-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-runner-mcp-ipc-'));
   tempRoots.push(root);
   return root;
 }
@@ -56,14 +56,14 @@ function signPayloadWithAuthToken(
 
 async function loadIpcModule(tempRoot: string, responseVerifyKey: string) {
   vi.resetModules();
-  vi.stubEnv('MYCLAW_IPC_DIR', tempRoot);
-  vi.stubEnv('MYCLAW_IPC_AUTH_TOKEN', 'mcp-test-auth-token');
-  vi.stubEnv('MYCLAW_BROWSER_IPC_AUTH_TOKEN', 'browser-test-auth-token');
-  vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', responseVerifyKey);
-  vi.stubEnv('MYCLAW_IPC_RESPONSE_KEY_ID', 'mcp-test-response-key-id');
-  vi.stubEnv('MYCLAW_CHAT_JID', 'tg:team');
-  vi.stubEnv('MYCLAW_GROUP_FOLDER', 'team');
-  vi.stubEnv('MYCLAW_ADMIN_MCP_TOOLS_JSON', '[]');
+  vi.stubEnv('GANTRY_IPC_DIR', tempRoot);
+  vi.stubEnv('GANTRY_IPC_AUTH_TOKEN', 'mcp-test-auth-token');
+  vi.stubEnv('GANTRY_BROWSER_IPC_AUTH_TOKEN', 'browser-test-auth-token');
+  vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', responseVerifyKey);
+  vi.stubEnv('GANTRY_IPC_RESPONSE_KEY_ID', 'mcp-test-response-key-id');
+  vi.stubEnv('GANTRY_CHAT_JID', 'tg:team');
+  vi.stubEnv('GANTRY_GROUP_FOLDER', 'team');
+  vi.stubEnv('GANTRY_ADMIN_MCP_TOOLS_JSON', '[]');
   return import('@core/runner/mcp/ipc.js');
 }
 

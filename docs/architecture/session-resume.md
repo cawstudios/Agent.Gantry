@@ -2,17 +2,17 @@
 
 ## Current Contract (Implemented)
 
-Postgres is the source of truth for MyClaw-owned session identity, memory,
+Postgres is the source of truth for Gantry-owned session identity, memory,
 messages, runs, jobs, and runtime events. It is not used to replay full
 transcripts into prompts.
 
-At run start, MyClaw resolves canonical `AgentSession` identity from app, agent,
+At run start, Gantry resolves canonical `AgentSession` identity from app, agent,
 conversation, and optional thread scope, then hydrates continuity context:
 
 1. Recent persisted session digests.
 2. Durable memory scoped to agent/user/conversation/thread.
 
-`<myclaw_memory_context>` is untrusted evidence only. It does not grant
+`<gantry_memory_context>` is untrusted evidence only. It does not grant
 instruction authority, permissions, credentials, or sandbox access.
 
 ## Provider Session Metadata
@@ -93,7 +93,7 @@ fallback, or repair branches for that state.
   reset.
 - Reset preserves canonical `agent_sessions` identity and scoped
   `agent_session_digests`; digest hydration still works after reset.
-- During live runs, MyClaw persists canonical messages, runs, jobs, memory,
+- During live runs, Gantry persists canonical messages, runs, jobs, memory,
   digests, and runtime events. Newly emitted SDK session ids are sensitive
   adapter metadata attached to the canonical session, not standalone continuity
   identity.
@@ -108,9 +108,9 @@ fallback, or repair branches for that state.
   hydration, provider-session backfill, or session repair.
 - Jobs do not use provider resume handles; `jobs.session_id` remains
   app/control correlation metadata.
-- MyClaw does not install provider memory hooks as a second prompt-injection
+- Gantry does not install provider memory hooks as a second prompt-injection
   path.
-- `/compact` remains provider-owned context-window compaction, while MyClaw
+- `/compact` remains provider-owned context-window compaction, while Gantry
   observes `compact_boundary` and captures continuation evidence (`precompact`)
   without replaying transcript summaries into prompts.
 

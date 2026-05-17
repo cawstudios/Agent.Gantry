@@ -296,7 +296,7 @@ export class PermissionManagementService {
     const adminMcpTool = adminMcpToolFullNameFromRule(allowedRule);
     if (adminMcpTool && adminMcpTool !== allowedRule) {
       throw new Error(
-        'Persistent MyClaw admin MCP tool grants must request the exact tool name without a scoped rule.',
+        'Persistent Gantry admin MCP tool grants must request the exact tool name without a scoped rule.',
       );
     }
   }

@@ -4,7 +4,7 @@ import { composeAgentCapabilities } from '@agent-runner-src/agent-capabilities.j
 import { evaluateProtectedCapabilityToolUse } from '@agent-runner-src/claude/protected-capability-hook.js';
 
 describe('tool capability safety', () => {
-  it('does not grant dangerous native tools or wildcard MyClaw MCP tools by default', () => {
+  it('does not grant dangerous native tools or wildcard Gantry MCP tools by default', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'tg:team',
@@ -12,19 +12,19 @@ describe('tool capability safety', () => {
     });
 
     expect(profile.allowedTools).toContain(
-      'mcp__myclaw__request_skill_install',
+      'mcp__gantry__request_skill_install',
     );
-    expect(profile.allowedTools).toContain('mcp__myclaw__request_permission');
+    expect(profile.allowedTools).toContain('mcp__gantry__request_permission');
     expect(profile.allowedTools).not.toContain(
-      'mcp__myclaw__request_settings_update',
+      'mcp__gantry__request_settings_update',
     );
     expect(profile.allowedTools).not.toEqual(
       expect.arrayContaining([
         'Bash',
         'Write',
         'Edit',
-        'mcp__myclaw__list_models',
-        'mcp__myclaw__*',
+        'mcp__gantry__list_models',
+        'mcp__gantry__*',
       ]),
     );
   });
@@ -41,7 +41,7 @@ describe('tool capability safety', () => {
     );
     expect(
       evaluateProtectedCapabilityToolUse(
-        'mcp__myclaw__request_skill_dependency_install',
+        'mcp__gantry__request_skill_dependency_install',
         { manager: 'npm', package: '@example/tool' },
       ),
     ).toBeNull();

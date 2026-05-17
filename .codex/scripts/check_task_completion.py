@@ -199,7 +199,7 @@ def find_direct_durable_provider_artifact_paths(changed: list[str]) -> list[str]
             ".jsonl" in compact
             and (
                 "DATA_DIR" in compact
-                or "MYCLAW_HOME" in compact
+                or "GANTRY_HOME" in compact
                 or "data' , 'sessions" in compact
                 or "data\", \"sessions" in compact
             )
@@ -229,7 +229,7 @@ def find_direct_durable_claude_config_paths(changed: list[str]) -> list[str]:
         if (
             ".claude" in compact
             and (
-                "MYCLAW_HOME" in compact
+                "GANTRY_HOME" in compact
                 or "settings.json" in compact
                 or "settings.local.json" in compact
                 or "skills" in compact

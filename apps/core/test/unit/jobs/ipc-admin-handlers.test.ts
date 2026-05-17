@@ -8,7 +8,7 @@ const runtimeHomes: string[] = [];
 
 async function loadAdminHandlers(runtimeHome: string) {
   vi.resetModules();
-  vi.stubEnv('MYCLAW_HOME', runtimeHome);
+  vi.stubEnv('GANTRY_HOME', runtimeHome);
   const syncRuntimeSettingsFromProjection = vi.fn(async () => undefined);
   vi.doMock('@core/config/index.js', async (importOriginal) => {
     const actual =
@@ -99,7 +99,7 @@ afterEach(() => {
 describe('admin IPC handlers', () => {
   it('requires same-channel approval and syncs settings after register_agent', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, syncRuntimeSettingsFromProjection, taskData } =
@@ -121,7 +121,7 @@ describe('admin IPC handlers', () => {
         payload: { reason: 'bind ops agent' },
       }) as never,
       sourceAgentFolder: 'main_agent',
-      deps: depsWithAdminTools(['mcp__myclaw__register_agent'], {
+      deps: depsWithAdminTools(['mcp__gantry__register_agent'], {
         registerGroup,
         requestPermissionApproval,
       }) as never,
@@ -153,7 +153,7 @@ describe('admin IPC handlers', () => {
 
   it('rejects register_agent when the requested jid is not the originating conversation', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, syncRuntimeSettingsFromProjection, taskData } =
@@ -174,7 +174,7 @@ describe('admin IPC handlers', () => {
         trigger: '@Other',
       }) as never,
       sourceAgentFolder: 'main_agent',
-      deps: depsWithAdminTools(['mcp__myclaw__register_agent'], {
+      deps: depsWithAdminTools(['mcp__gantry__register_agent'], {
         registerGroup,
         requestPermissionApproval,
       }) as never,
@@ -194,7 +194,7 @@ describe('admin IPC handlers', () => {
 
   it('rejects projected browser request_permission before queuing review', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, taskData } =
@@ -210,7 +210,7 @@ describe('admin IPC handlers', () => {
         chatJid: 'sl:C123',
         payload: {
           permissionKind: 'tool',
-          toolName: 'mcp__myclaw__browser_act',
+          toolName: 'mcp__gantry__browser_act',
           temporaryOnly: false,
           reason: 'need browser click',
         },
@@ -235,7 +235,7 @@ describe('admin IPC handlers', () => {
 
   it('rejects a generic capability request when the job declares a local CLI implementation', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, taskData } =
@@ -296,7 +296,7 @@ describe('admin IPC handlers', () => {
 
   it('rejects semantic toolName requests when the job declares a local CLI implementation', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, taskData } =
@@ -357,7 +357,7 @@ describe('admin IPC handlers', () => {
 
   it('rejects semantic toolNames requests when the job declares a local CLI implementation', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, taskData } =
@@ -418,7 +418,7 @@ describe('admin IPC handlers', () => {
 
   it('rejects local CLI semantic proposals for a job until the scoped Bash rule is requested', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, taskData } =
@@ -485,7 +485,7 @@ describe('admin IPC handlers', () => {
 
   it('coalesces duplicate pending request_permission reviews', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, taskData } =
@@ -542,7 +542,7 @@ describe('admin IPC handlers', () => {
 
   it('rejects request_skill_proposal without signed app scope before importing a draft', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, taskData } =
@@ -579,7 +579,7 @@ describe('admin IPC handlers', () => {
 
   it('rejects admin capability when the selected tool belongs to another app', async () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-ipc-'),
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
     const { adminTaskHandlers, taskData } =
@@ -598,13 +598,13 @@ describe('admin IPC handlers', () => {
         trigger: '@Ops',
       }) as never,
       sourceAgentFolder: 'main_agent',
-      deps: depsWithAdminTools(['mcp__myclaw__register_agent'], {
+      deps: depsWithAdminTools(['mcp__gantry__register_agent'], {
         requestPermissionApproval,
         getToolRepository: () => ({
           listAgentToolBindings: async () => [
             {
               status: 'active',
-              toolId: 'tool:mcp__myclaw__register_agent',
+              toolId: 'tool:mcp__gantry__register_agent',
             },
           ],
           getTool: async () => ({

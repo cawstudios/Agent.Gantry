@@ -1,4 +1,4 @@
-# @myclaw/contracts
+# @gantry/contracts
 
 ## 3.0.0
 

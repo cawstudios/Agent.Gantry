@@ -14,7 +14,7 @@ carry separate tool, skill, or MCP capability grants.
 
 Inherited tool grants are semantic capability entries such as
 `capability:google.sheets.write`, canonical `Browser`, selected first-party
-catalog tools, exact MyClaw admin tools, approved third-party MCP server
+catalog tools, exact Gantry admin tools, approved third-party MCP server
 bindings, or scoped Bash rules such as `Bash(npm test *)`. Runtime expands
 semantic capabilities and may still project approved third-party MCP server
 bindings into SDK allowances for that run. Empty rules, global `*`, broad exact
@@ -24,7 +24,7 @@ browser backend rules, and projected browser gateway rules are
 invalid as persistent request_permission authority.
 
 Browser is one durable public capability: `Browser`. A job with an inherited
-`Browser` grant receives the projected MyClaw browser gateway for that run. A job
+`Browser` grant receives the projected Gantry browser gateway for that run. A job
 without that inherited grant must request `Browser` through `request_permission`;
 it must not request or persist private browser backend names or projected
 browser gateway tool names.
@@ -34,7 +34,7 @@ browser gateway tool names.
 Job create/update surfaces accept declared setup requirements:
 
 - `requiredTools`: durable readable tool rules such as `Browser`,
-  `capability:google.sheets.write`, exact first-party MyClaw MCP tools, or
+  `capability:google.sheets.write`, exact first-party Gantry MCP tools, or
   scoped `Bash(...)` rules.
 - `requiredMcpServers`: approved third-party MCP server names or ids expected
   by the job.
@@ -43,11 +43,11 @@ The declarations are UX assertions, not authorization. The runtime still
 enforces actual tool use at the permission boundary, and under-declared jobs
 pause if a run later reaches a denied tool.
 Create/update surfaces validate these assertions up front. Unsupported raw
-browser backend names, projected browser gateway names, MyClaw wildcards, broad
+browser backend names, projected browser gateway names, Gantry wildcards, broad
 or bare Bash, and scoped non-Bash rules fail the request instead of becoming
 compatibility state.
 
-Before activation and immediately before model spawn, MyClaw performs a
+Before activation and immediately before model spawn, Gantry performs a
 best-effort readiness check against durable target-agent capability bindings,
 tool-capability broker health, selected MCP server materialization metadata,
 MCP credential references, and browser profile state. If setup is not ready,
@@ -69,8 +69,8 @@ draft_only
 reduce repeated prompts for the same short run, but neither is durable readiness
 for future recurring runs. Recurring activation requires a persistent
 target-agent capability binding such as `Browser`, `capability:<id>`, an exact
-approved MyClaw admin tool, a scoped Bash rule, or an approved MCP server
-binding. Browser auth remains profile/session based; MyClaw reports that login
+approved Gantry admin tool, a scoped Bash rule, or an approved MCP server
+binding. Browser auth remains profile/session based; Gantry reports that login
 may be required unless the profile already has durable state or auth markers.
 MCP readiness may inspect materialized definitions and broker credential refs,
 but must not start arbitrary MCP servers as a readiness side effect.
@@ -84,7 +84,7 @@ the approval prompt to the job's source conversation/thread or topic and waits
 at the tool boundary. `Allow once` resumes that tool call in the current job
 run, while `Allow 5 min` is temporary. `Always allow` stores a semantic
 `capability:<id>` grant when the request names one; otherwise it may apply
-canonical `Browser`, an exact MyClaw admin tool, or a scoped Bash rule to the
+canonical `Browser`, an exact Gantry admin tool, or a scoped Bash rule to the
 target agent. Broad exact SDK/native tools and exact third-party MCP tool names
 remain one-off only. The grant is mirrored to
 `settings.yaml`, expanded into live runtime rules for the active run, and
@@ -155,7 +155,7 @@ streamed-output size diagnostics.
 
 Jobs use a job-owned `AgentSession` keyed by the target agent, source
 conversation/thread, and `jobId`. That gives each job its own run history,
-session digests, and durable MyClaw evidence without provider resume handles.
+session digests, and durable Gantry evidence without provider resume handles.
 Durable memory sharing is explicit: DM-created jobs extract and hydrate against
 the trusted DM user subject, while channel/group/topic jobs extract and hydrate
 against the trusted
@@ -221,4 +221,4 @@ the authenticated thread, but it never grants job visibility or run authority.
 Admin-wide job visibility and triggering remain on the Control API, SDK, and
 local/admin CLI surfaces. Event inspection is exposed through the scheduler
 MCP event tools, Control API `GET /v1/jobs/:jobId/events`, SDK `jobs.events`,
-and `myclaw jobs events <job_id> [--run <run_id>]`.
+and `gantry jobs events <job_id> [--run <run_id>]`.

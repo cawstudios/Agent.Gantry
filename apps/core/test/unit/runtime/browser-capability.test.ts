@@ -91,11 +91,11 @@ vi.mock('@core/shared/chrome-executable.js', () => ({
 
 vi.mock('@core/runtime/browser-profiles.js', () => ({
   acquireProfileLock: vi.fn(async () => ({ release: mocks.release })),
-  createProfile: vi.fn((name = 'myclaw') => ({
+  createProfile: vi.fn((name = 'gantry') => ({
     name,
-    dir: '/tmp/myclaw-browser-capability-test',
-    userDataDir: '/tmp/myclaw-browser-capability-test',
-    statePath: '/tmp/myclaw-browser-capability-test/state.json',
+    dir: '/tmp/gantry-browser-capability-test',
+    userDataDir: '/tmp/gantry-browser-capability-test',
+    statePath: '/tmp/gantry-browser-capability-test/state.json',
     metadata: {
       created_at: '2026-04-29T00:00:00.000Z',
       last_used: '2026-04-29T00:00:00.000Z',
@@ -198,9 +198,9 @@ describe('browser-capability', () => {
 
   beforeEach(() => {
     vi.resetModules();
-    fs.mkdirSync('/tmp/myclaw-browser-capability-test', { recursive: true });
+    fs.mkdirSync('/tmp/gantry-browser-capability-test', { recursive: true });
     fs.writeFileSync(
-      '/tmp/myclaw-browser-capability-test/DevToolsActivePort',
+      '/tmp/gantry-browser-capability-test/DevToolsActivePort',
       '4567\n/devtools/browser/test\n',
     );
     mocks.processes.clear();
@@ -245,7 +245,7 @@ describe('browser-capability', () => {
     existsSyncSpy.mockRestore();
     rmSyncSpy.mockRestore();
     statSyncSpy.mockRestore();
-    fs.rmSync('/tmp/myclaw-browser-capability-test', {
+    fs.rmSync('/tmp/gantry-browser-capability-test', {
       recursive: true,
       force: true,
     });
@@ -261,7 +261,7 @@ describe('browser-capability', () => {
     const launchStatus = await manager.launchBrowser();
     expect(launchStatus.headless).toBe(false);
     expect(rmSyncSpy).toHaveBeenCalledWith(
-      '/tmp/myclaw-browser-capability-test/DevToolsActivePort',
+      '/tmp/gantry-browser-capability-test/DevToolsActivePort',
       { force: true },
     );
     expect(mocks.spawn.mock.calls[0][1]).toEqual(
@@ -277,8 +277,8 @@ describe('browser-capability', () => {
     const status = await manager.getBrowserStatus();
 
     expect(status).toMatchObject({
-      profile: 'myclaw',
-      profileName: 'myclaw',
+      profile: 'gantry',
+      profileName: 'gantry',
       running: false,
       cdpReady: false,
       profilePersistent: false,
@@ -376,7 +376,7 @@ describe('browser-capability', () => {
 
     await manager.launchBrowser();
     fs.writeFileSync(
-      '/tmp/myclaw-browser-capability-test/DevToolsActivePort',
+      '/tmp/gantry-browser-capability-test/DevToolsActivePort',
       '4568\n/devtools/browser/test\n',
     );
     const relaunched = await manager.launchBrowser();
@@ -511,10 +511,10 @@ describe('browser-capability', () => {
     mocks.processes.set(adopted.pid, adopted);
     mocks.commandLines.set(
       adopted.pid,
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=/tmp/myclaw-browser-capability-test --remote-debugging-port=5678',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=/tmp/gantry-browser-capability-test --remote-debugging-port=5678',
     );
     fs.writeFileSync(
-      '/tmp/myclaw-browser-capability-test/browser-session.json',
+      '/tmp/gantry-browser-capability-test/browser-session.json',
       JSON.stringify({
         pid: adopted.pid,
         port: 5678,
@@ -551,10 +551,10 @@ describe('browser-capability', () => {
     mocks.processes.set(persisted.pid, persisted);
     mocks.commandLines.set(
       persisted.pid,
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --headless=new --user-data-dir=/tmp/myclaw-browser-capability-test --remote-debugging-port=5680',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --headless=new --user-data-dir=/tmp/gantry-browser-capability-test --remote-debugging-port=5680',
     );
     fs.writeFileSync(
-      '/tmp/myclaw-browser-capability-test/browser-session.json',
+      '/tmp/gantry-browser-capability-test/browser-session.json',
       JSON.stringify({
         pid: persisted.pid,
         port: 5680,
@@ -592,10 +592,10 @@ describe('browser-capability', () => {
     mocks.processes.set(orphan.pid, orphan);
     mocks.commandLines.set(
       orphan.pid,
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=/tmp/myclaw-browser-capability-test --remote-debugging-port=5679',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=/tmp/gantry-browser-capability-test --remote-debugging-port=5679',
     );
     fs.writeFileSync(
-      '/tmp/myclaw-browser-capability-test/browser-session.json',
+      '/tmp/gantry-browser-capability-test/browser-session.json',
       JSON.stringify({
         pid: orphan.pid,
         port: 5679,
@@ -632,7 +632,7 @@ describe('browser-capability', () => {
     mocks.processes.set(alien.pid, alien);
     mocks.commandLines.set(alien.pid, '/usr/bin/other-process');
     fs.writeFileSync(
-      '/tmp/myclaw-browser-capability-test/browser-session.json',
+      '/tmp/gantry-browser-capability-test/browser-session.json',
       JSON.stringify({
         pid: alien.pid,
         port: 5680,
@@ -668,10 +668,10 @@ describe('browser-capability', () => {
     mocks.processes.set(adopted.pid, adopted);
     mocks.commandLines.set(
       adopted.pid,
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=/tmp/myclaw-browser-capability-test --remote-debugging-port=5678',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=/tmp/gantry-browser-capability-test --remote-debugging-port=5678',
     );
     fs.writeFileSync(
-      '/tmp/myclaw-browser-capability-test/browser-session.json',
+      '/tmp/gantry-browser-capability-test/browser-session.json',
       JSON.stringify({
         pid: adopted.pid,
         port: 5678,
@@ -689,7 +689,7 @@ describe('browser-capability', () => {
     const profiles = await manager.listBrowserProfiles();
 
     expect(profiles[0]).toMatchObject({
-      name: 'myclaw',
+      name: 'gantry',
       running: true,
       cdpReady: true,
     });
@@ -701,7 +701,7 @@ describe('browser-capability', () => {
 
     await expect(manager.listBrowserProfiles()).resolves.toEqual([
       {
-        name: 'myclaw',
+        name: 'gantry',
         created_at: '2026-04-29T00:00:00.000Z',
         last_used: '2026-04-29T00:00:00.000Z',
         cdp_port: undefined,
@@ -710,7 +710,7 @@ describe('browser-capability', () => {
         authMarkers: ['cookies', 'login-data'],
         hasState: true,
         profilePersistent: true,
-        userDataDir: '/tmp/myclaw-browser-capability-test',
+        userDataDir: '/tmp/gantry-browser-capability-test',
         chromeExecutable:
           '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
         headless: undefined,

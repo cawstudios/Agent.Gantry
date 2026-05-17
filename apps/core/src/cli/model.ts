@@ -10,9 +10,9 @@ import {
 function usage(): string {
   return [
     'Usage:',
-    '  myclaw model list',
-    '  myclaw model set-default chat|one-time|recurring <alias>',
-    '  myclaw model doctor',
+    '  gantry model list',
+    '  gantry model set-default chat|one-time|recurring <alias>',
+    '  gantry model doctor',
   ].join('\n');
 }
 
@@ -122,7 +122,7 @@ export async function runModelCommand(
     );
     lines.push('Kimi availability: cataloged - moonshotai/kimi-k2.6');
     lines.push(
-      `Credential broker: ${settings.credentialBroker.mode} (provider keys must live in the broker, not MyClaw env)`,
+      `Credential broker: ${settings.credentialBroker.mode} (provider keys must live in the broker, not Gantry env)`,
     );
     lines.push(
       `Status: ${failures > 0 ? 'fail' : warnings > 0 ? 'warn' : 'pass'}`,

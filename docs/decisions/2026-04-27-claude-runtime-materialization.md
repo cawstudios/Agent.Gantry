@@ -11,7 +11,7 @@ session files. Previous runtime setup generated shared durable files under
 the runtime-home Claude directory, which made Claude-local files an implicit
 runtime source of truth.
 
-Enterprise MyClaw must instead use canonical app, agent, config, skill refs,
+Enterprise Gantry must instead use canonical app, agent, config, skill refs,
 permission, memory, session, and message state from Postgres, plus provider
 artifacts behind `ProviderArtifactStore` and imported skill source artifacts
 behind `SkillArtifactStore`.
@@ -34,11 +34,11 @@ skill APIs and stores only provider refs.
 
 ## Consequences
 
-- Claude runtime files are scratch files, not durable MyClaw state.
+- Claude runtime files are scratch files, not durable Gantry state.
 - `settings.local.json` is not read in enterprise runtime.
 - Host permission policy remains authoritative.
 - Existing old local `.claude` files are not imported automatically.
 - Local Claude skills remain files copied into per-run scratch config, either
   from bundled/configured folders or from approved bound artifacts.
 - Hosted Anthropic skills are provider-managed resources used through the
-  Anthropic SDK adapter; MyClaw does not own hosted skill version approval.
+  Anthropic SDK adapter; Gantry does not own hosted skill version approval.

@@ -115,7 +115,7 @@ afterEach(() => {
 describe('cli telegram helpers', () => {
   function makeRuntimeHome(): string {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-telegram-test-'),
+      path.join(os.tmpdir(), 'gantry-telegram-test-'),
     );
     const settings = loadRuntimeSettings(runtimeHome);
     saveRuntimeSettings(runtimeHome, settings);
@@ -529,7 +529,7 @@ describe('cli telegram helpers', () => {
       true,
     );
     expect(outro).toHaveBeenCalledWith(
-      'Telegram token saved. Next: run `myclaw provider connect telegram` to register a conversation.',
+      'Telegram token saved. Next: run `gantry provider connect telegram` to register a conversation.',
     );
     expect(text).toHaveBeenCalledTimes(1);
     expect(text).toHaveBeenCalledWith(

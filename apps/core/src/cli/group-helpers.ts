@@ -21,19 +21,19 @@ export function usage(): string {
   const channels = getProviderIds().join('|');
   return [
     'Agent commands:',
-    '  myclaw agent list',
-    '  myclaw agent info <jid|folder>',
-    '  myclaw agent name <name>',
-    '  myclaw agent add <jid|chat-id> [--name <name>] [--folder <folder>] [--trigger <word>] [--requires-trigger true|false] [--test-message|--no-test-message]',
-    '  myclaw agent remove <jid|folder> [--delete-folder] [--yes]',
-    '  myclaw agent trigger <jid|folder> <word>',
-    '  myclaw agent trigger <jid|folder> --off',
-    '  myclaw conversation approvers <conversation-id> [--allow <userId,userId>]',
+    '  gantry agent list',
+    '  gantry agent info <jid|folder>',
+    '  gantry agent name <name>',
+    '  gantry agent add <jid|chat-id> [--name <name>] [--folder <folder>] [--trigger <word>] [--requires-trigger true|false] [--test-message|--no-test-message]',
+    '  gantry agent remove <jid|folder> [--delete-folder] [--yes]',
+    '  gantry agent trigger <jid|folder> <word>',
+    '  gantry agent trigger <jid|folder> --off',
+    '  gantry conversation approvers <conversation-id> [--allow <userId,userId>]',
     '    conversation approvers manage direct/private and group/channel approval policy.',
-    '  myclaw agent policy <jid|folder> --allow <"*"|id1,id2> [--mode trigger|drop]',
-    '  myclaw agent policy <jid|folder> --clear',
-    `  myclaw agent policy-default --channel ${channels} --allow <"*"|id1,id2> [--mode trigger|drop]`,
-    `  myclaw agent policy-show [--channel ${channels}]`,
+    '  gantry agent policy <jid|folder> --allow <"*"|id1,id2> [--mode trigger|drop]',
+    '  gantry agent policy <jid|folder> --clear',
+    `  gantry agent policy-default --channel ${channels} --allow <"*"|id1,id2> [--mode trigger|drop]`,
+    `  gantry agent policy-show [--channel ${channels}]`,
   ].join('\n');
 }
 

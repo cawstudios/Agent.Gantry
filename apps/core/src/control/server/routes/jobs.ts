@@ -4,7 +4,7 @@ import {
   UpdateJobRequestSchema,
   type CreateJobRequest,
   type UpdateJobRequest,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 import type { ZodIssue } from 'zod';
 
 import { ApplicationError } from '../../../application/common/application-error.js';

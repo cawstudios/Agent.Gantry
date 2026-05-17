@@ -23,9 +23,9 @@ import {
 } from '../../shared/scheduler-job-staleness.js';
 import { nowMs as currentTimeMs, toIso } from '../../shared/time/datetime.js';
 
-const SCHEDULER_QUEUE = 'myclaw.jobs';
-const SCHEDULER_QUEUE_DEAD_LETTER = 'myclaw.jobs.dead_letter';
-const PGBOSS_KEY_PREFIX = 'myclaw';
+const SCHEDULER_QUEUE = 'gantry.jobs';
+const SCHEDULER_QUEUE_DEAD_LETTER = 'gantry.jobs.dead_letter';
+const PGBOSS_KEY_PREFIX = 'gantry';
 const STALE_ONCE_REENQUEUE_THROTTLE_MS = 60_000;
 export const SCHEDULER_MAINTENANCE_SYNC_INTERVAL_MS = 60_000;
 
@@ -113,7 +113,7 @@ export class PgBossSchedulerEngine {
       createSchema: true,
       migrate: true,
       schedule: true,
-      application_name: `myclaw-${STORAGE_POSTGRES_SCHEMA}-jobs`,
+      application_name: `gantry-${STORAGE_POSTGRES_SCHEMA}-jobs`,
     });
     boss.on('error', (err) => {
       logger.error({ err }, 'pg-boss scheduler error');

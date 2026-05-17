@@ -21,7 +21,7 @@ vi.mock('@core/config/index.js', async (importOriginal) => {
 });
 
 vi.mock('@core/platform/group-folder.js', () => ({
-  resolveGroupFolderPath: () => '/tmp/myclaw-unit-scheduler-agent',
+  resolveGroupFolderPath: () => '/tmp/gantry-unit-scheduler-agent',
 }));
 
 vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => ({
@@ -43,7 +43,7 @@ vi.mock('@core/jobs/compact-memory.js', () => ({
 
 vi.mock('@core/jobs/system-jobs.js', () => ({
   MEMORY_DREAM_SYSTEM_PROMPT: '__system:memory_dream',
-  handleSystemJob: vi.fn(async () => ({})),
+  handleSystemJob: vi.fn(async () => 'System job completed.'),
 }));
 
 const { runJob } = await import('@core/jobs/execution.js');
@@ -281,7 +281,7 @@ describe('jobs/execution', () => {
     const opsRepository = makeOpsRepository(job);
     const sendMessage = vi.fn(async () => undefined);
     const error =
-      'Tool not on autonomous run allowlist: mcp__myclaw__browser_act. Recovery: request_permission { "toolName": "Browser" }';
+      'Tool not on autonomous run allowlist: mcp__gantry__browser_act. Recovery: request_permission { "toolName": "Browser" }';
 
     await runJob(
       job,
@@ -321,7 +321,7 @@ describe('jobs/execution', () => {
     )?.[0];
     expect(deniedEvent?.payload).toEqual(
       expect.objectContaining({
-        denied_tool: 'mcp__myclaw__browser_act',
+        denied_tool: 'mcp__gantry__browser_act',
         recovery_kind: 'persistent_capability',
         recovery_action: expect.stringContaining('request_permission'),
       }),
@@ -688,7 +688,7 @@ describe('jobs/execution', () => {
         agentId: 'agent:scheduler_agent',
         agentSessionId: 'agent-session:scheduler',
         memoryContextBlock:
-          '<myclaw_memory_context trust="untrusted_data_only">job memory</myclaw_memory_context>',
+          '<gantry_memory_context trust="untrusted_data_only">job memory</gantry_memory_context>',
       })),
     };
     const runAgent = vi.fn(async () => ({
@@ -732,7 +732,7 @@ describe('jobs/execution', () => {
       expect.objectContaining({
         prompt: noisyPrompt,
         memoryContextBlock:
-          '<myclaw_memory_context trust="untrusted_data_only">job memory</myclaw_memory_context>',
+          '<gantry_memory_context trust="untrusted_data_only">job memory</gantry_memory_context>',
       }),
       expect.any(Function),
       expect.any(Function),
@@ -1298,6 +1298,14 @@ describe('jobs/execution', () => {
       'done without browser',
       expect.stringContaining('Browser was available but not used'),
     );
+    expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+      expect.any(String),
+      'failed',
+      'done without browser',
+      expect.stringContaining(
+        'Browser in required_tools is a must-use assertion, not a permission request',
+      ),
+    );
     expect(runtimeStoreMock.publish).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'job.tool_activity',
@@ -1747,7 +1755,7 @@ describe('jobs/execution', () => {
         event_type: 'job.tool_activity',
         payload: JSON.stringify({
           phase: 'permission_allowed',
-          tool: 'mcp__myclaw__browser_act',
+          tool: 'mcp__gantry__browser_act',
           ok: true,
         }),
         created_at: '2026-05-08T00:00:02.000Z',

@@ -19,7 +19,7 @@ import type { IpcDeps } from '@core/runtime/ipc-domain-types.js';
 const tempRoots: string[] = [];
 
 function tempRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-browser-ipc-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-browser-ipc-'));
   tempRoots.push(root);
   return root;
 }

@@ -53,8 +53,8 @@ describe('runner browser MCP gateway tools', () => {
     requestBrowserAction.mockResolvedValueOnce({
       ok: true,
       data: {
-        profile: 'myclaw',
-        profileName: 'myclaw',
+        profile: 'gantry',
+        profileName: 'gantry',
         running: true,
         cdpReady: true,
         port: 4567,
@@ -78,8 +78,8 @@ describe('runner browser MCP gateway tools', () => {
           text: JSON.stringify({
             ok: true,
             data: {
-              profile: 'myclaw',
-              profileName: 'myclaw',
+              profile: 'gantry',
+              profileName: 'gantry',
               running: true,
               cdpReady: true,
               port: 4567,

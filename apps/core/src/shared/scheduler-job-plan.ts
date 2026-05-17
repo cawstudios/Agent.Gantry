@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { isCanonicalBrowserCapabilityRule } from './agent-tool-references.js';
 import { getBuiltinSemanticCapability } from './semantic-capabilities.js';
 
 export interface SchedulerJobPlanInput {
@@ -99,12 +100,22 @@ export function formatSchedulerJobPlan(
     `- Required tools: ${requiredTools}`,
     `- Required MCP servers: ${requiredMcpServers}`,
     '- Tool access: inherited from the target agent capability selection; required tools are assertions only and missing tools will pause the job for permission.',
+    ...formatRequiredToolAssertionGuidance(input.requiredTools),
     '- Network: governed by the same tool permission and sandbox policy as live runs; no standalone scheduler network grant is created.',
     '- Memory: uses the target agent runtime memory settings; no memory schema or store changes are made by this plan.',
     `- Runtime: ${runtime}`,
     `- Confirmation token: ${token}`,
     'Re-run scheduler_upsert_job with confirm=true and confirmation_token set to this token to create or update the job.',
   ].join('\n');
+}
+
+function formatRequiredToolAssertionGuidance(
+  requiredTools: SchedulerJobPlanInput['requiredTools'],
+): string[] {
+  if (!requiredTools?.some(isCanonicalBrowserCapabilityRule)) return [];
+  return [
+    '- Browser assertion: Browser in required_tools means every successful run must perform real browser IPC activity, such as browser_open, browser_inspect, or browser_act. Do not include Browser in required_tools for optional enrichment or fallback use; keep it as an allowed agent capability instead.',
+  ];
 }
 
 function formatExecutionContext(

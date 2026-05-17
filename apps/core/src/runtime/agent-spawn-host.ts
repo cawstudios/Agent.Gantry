@@ -1,5 +1,4 @@
 import fs from 'fs';
-import path from 'path';
 
 import { DATA_DIR, getCredentialBrokerRuntimeConfig } from '../config/index.js';
 import { resolveExternalCredentialBaseUrl } from '../config/credentials/broker-url-policy.js';

@@ -7,7 +7,7 @@ import { nowMs } from '../shared/time/datetime.js';
 import { isPlainObject, toTrimmedString } from '../shared/object.js';
 import {
   normalizeMemoryIpcActions,
-  type MyClawMemoryIpcAction,
+  type GantryMemoryIpcAction,
 } from '../shared/memory-ipc-actions.js';
 import {
   computeBrowserIpcAuthToken,
@@ -32,7 +32,7 @@ interface IpcMemoryBinding extends IpcThreadBinding {
   userId?: string;
   defaultScope?: 'user' | 'group';
   reviewerIsControlApprover?: boolean;
-  allowedActions: readonly MyClawMemoryIpcAction[];
+  allowedActions: readonly GantryMemoryIpcAction[];
 }
 
 const consumedIpcRequestIds = new Map<string, number>();

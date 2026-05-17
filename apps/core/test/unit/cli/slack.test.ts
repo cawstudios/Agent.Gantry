@@ -115,7 +115,7 @@ afterEach(() => {
 describe('cli slack helpers', () => {
   function makeRuntimeHome(): string {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-slack-test-'),
+      path.join(os.tmpdir(), 'gantry-slack-test-'),
     );
     const settings = loadRuntimeSettings(runtimeHome);
     saveRuntimeSettings(runtimeHome, settings);

@@ -9,12 +9,12 @@ export interface RuntimeStorageConfig {
 }
 
 export function resolveRuntimeStorageConfig(
-  myclawHome: string,
+  gantryHome: string,
   _runtimeRoot: string,
 ): RuntimeStorageConfig {
   let settings;
   try {
-    settings = readRuntimeStorageSettingsSnapshot(myclawHome);
+    settings = readRuntimeStorageSettingsSnapshot(gantryHome);
   } catch (err) {
     const storageError = err instanceof Error ? err : new Error(String(err));
     throw new Error(
@@ -22,7 +22,7 @@ export function resolveRuntimeStorageConfig(
       { cause: err },
     );
   }
-  const postgresUrlEnv = settings.postgresUrlEnv || 'MYCLAW_DATABASE_URL';
+  const postgresUrlEnv = settings.postgresUrlEnv || 'GANTRY_DATABASE_URL';
   const postgresUrl = runtimeEnvValueDynamic(postgresUrlEnv).trim() || null;
   if (postgresUrl) {
     try {
@@ -40,6 +40,6 @@ export function resolveRuntimeStorageConfig(
   return {
     postgresUrlEnv,
     postgresUrl,
-    postgresSchema: settings.postgresSchema || 'myclaw',
+    postgresSchema: settings.postgresSchema || 'gantry',
   };
 }

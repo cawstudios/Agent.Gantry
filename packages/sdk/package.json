@@ -1,20 +1,20 @@
 {
-  "name": "@myclaw/sdk",
+  "name": "@gantry/sdk",
   "version": "0.3.0",
-  "description": "Node.js SDK for the MyClaw runtime control API: sessions, jobs, agents, memory, webhooks, and ingress signing.",
-  "author": "MyClaw Contributors",
+  "description": "Node.js SDK for the Gantry runtime control API: sessions, jobs, agents, memory, webhooks, and ingress signing.",
+  "author": "Gantry Contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vrknetha/myclaw.git",
+    "url": "git+https://github.com/vrknetha/gantry.git",
     "directory": "packages/sdk"
   },
-  "homepage": "https://github.com/vrknetha/myclaw/tree/main/packages/sdk",
+  "homepage": "https://github.com/vrknetha/gantry/tree/main/packages/sdk",
   "bugs": {
-    "url": "https://github.com/vrknetha/myclaw/issues"
+    "url": "https://github.com/vrknetha/gantry/issues"
   },
   "keywords": [
-    "myclaw",
+    "gantry",
     "sdk",
     "client",
     "agent",

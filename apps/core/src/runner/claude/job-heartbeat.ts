@@ -135,10 +135,10 @@ function readCurrentRunPermissionRequest(
     if (!payload || typeof payload !== 'object') return undefined;
     const record = payload as Record<string, unknown>;
     const matches =
-      (!process.env.MYCLAW_JOB_ID ||
-        record.jobId === process.env.MYCLAW_JOB_ID) &&
-      (!process.env.MYCLAW_JOB_RUN_ID ||
-        record.runId === process.env.MYCLAW_JOB_RUN_ID);
+      (!process.env.GANTRY_JOB_ID ||
+        record.jobId === process.env.GANTRY_JOB_ID) &&
+      (!process.env.GANTRY_JOB_RUN_ID ||
+        record.runId === process.env.GANTRY_JOB_RUN_ID);
     if (!matches) return undefined;
     return {
       toolName:

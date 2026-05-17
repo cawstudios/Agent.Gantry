@@ -8,7 +8,7 @@ import {
   getRuntimeStorage,
 } from '../adapters/storage/postgres/runtime-store.js';
 import {
-  MYCLAW_HOME,
+  GANTRY_HOME,
   syncRuntimeSettingsFromProjection,
 } from '../config/index.js';
 import { nowIso } from '../shared/time/datetime.js';
@@ -748,7 +748,7 @@ async function completeMcpPermissionReview(
     displayName: `MCP server: ${input.server.name}`,
     title: 'Approve MCP server for this agent',
     description:
-      'Only configured approvers can decide this request. Approving binds this MCP server and exposes it through the MyClaw MCP proxy for current and future runs.',
+      'Only configured approvers can decide this request. Approving binds this MCP server and exposes it through the Gantry MCP proxy for current and future runs.',
     decisionReason: input.reason,
     toolInput: {
       serverId: input.server.id,
@@ -805,8 +805,8 @@ async function completeMcpPermissionReview(
     },
     approvedToolNames: input.requestedToolPatterns,
     currentSessionUsage: {
-      listToolsTool: 'mcp__myclaw__mcp_list_tools',
-      callToolTool: 'mcp__myclaw__mcp_call_tool',
+      listToolsTool: 'mcp__gantry__mcp_list_tools',
+      callToolTool: 'mcp__gantry__mcp_call_tool',
       serverName: input.server.name,
     },
   };
@@ -863,7 +863,7 @@ async function syncApprovedCapabilitySettings(
   appId: import('../domain/app/app.js').AppId,
 ): Promise<void> {
   await syncRuntimeSettingsFromProjection({
-    runtimeHome: MYCLAW_HOME,
+    runtimeHome: GANTRY_HOME,
     ops: getRuntimeRepositories(),
     repositories: getRuntimeStorage().repositories,
     appId,

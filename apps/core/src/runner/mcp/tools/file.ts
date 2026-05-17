@@ -63,7 +63,7 @@ const fileToolSchema = {
 export function registerFileTools(server: McpServer): void {
   server.tool(
     'file',
-    'List, read, write, or promote MyClaw FileArtifacts by virtual scope/path. Descriptors are compact by default; file content is returned only by read. Host filesystem paths and storage refs are never exposed.',
+    'List, read, write, or promote Gantry FileArtifacts by virtual scope/path. Descriptors are compact by default; file content is returned only by read. Host filesystem paths and storage refs are never exposed.',
     fileToolSchema,
     async (args) => {
       const result = await handleFileToolAction(args);

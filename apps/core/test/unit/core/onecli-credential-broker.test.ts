@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const getContainerConfig = vi.hoisted(() => vi.fn());
 const ensureAgent = vi.hoisted(() => vi.fn());
-const MODEL_RUNTIME_CREDENTIAL_IDENTIFIER = 'myclaw-model-access';
-const MODEL_RUNTIME_CA_STEM = 'gateway-ca-72ce4c290ee39d60';
+const MODEL_RUNTIME_CREDENTIAL_IDENTIFIER = 'gantry-model-access';
+const MODEL_RUNTIME_CA_STEM = 'gateway-ca-f0608813027cec0b';
 
 vi.mock('@onecli-sh/sdk', () => ({
   OneCLI: vi.fn(function () {
@@ -24,7 +24,7 @@ afterEach(() => {
 
 describe('OnecliAgentCredentialBroker', () => {
   it('returns broker-safe injection env and materializes certificate refs', async () => {
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-onecli-'));
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-onecli-'));
     getContainerConfig.mockResolvedValue({
       env: {
         ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
@@ -245,7 +245,7 @@ describe('OnecliAgentCredentialBroker', () => {
     getContainerConfig.mockResolvedValue({
       env: {
         ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
-        MYCLAW_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'openrouter',
+        GANTRY_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'openrouter',
         ANTHROPIC_AUTH_TOKEN: 'sk-or-v1-test-token',
       },
     });
@@ -282,7 +282,7 @@ describe('OnecliAgentCredentialBroker', () => {
   it('accepts OpenAI model access only with broker provenance', async () => {
     getContainerConfig.mockResolvedValue({
       env: {
-        MYCLAW_OPENAI_API_KEY_PROVIDER: 'native',
+        GANTRY_OPENAI_API_KEY_PROVIDER: 'native',
         OPENAI_API_KEY: 'sk-test-brokered-openai-key',
       },
     });
@@ -414,7 +414,7 @@ describe('OnecliAgentCredentialBroker', () => {
   });
 
   it('does not rewrite unchanged CA certificate material for the same Model Access profile', async () => {
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-onecli-'));
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-onecli-'));
     getContainerConfig.mockResolvedValue({
       env: {
         ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
@@ -446,7 +446,7 @@ describe('OnecliAgentCredentialBroker', () => {
   it('fails closed when OneCLI returns raw runtime or provider secrets', async () => {
     getContainerConfig.mockResolvedValue({
       env: {
-        MYCLAW_DATABASE_URL: 'postgres://runtime-secret',
+        GANTRY_DATABASE_URL: 'postgres://runtime-secret',
       },
     });
 
@@ -459,7 +459,7 @@ describe('OnecliAgentCredentialBroker', () => {
 
     await expect(
       broker.getInjection({ binding: { profile: 'onecli' } }),
-    ).rejects.toThrow(/MYCLAW_DATABASE_URL/);
+    ).rejects.toThrow(/GANTRY_DATABASE_URL/);
   });
 
   it('fails closed when OneCLI returns a non-local model proxy env', async () => {

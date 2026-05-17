@@ -1,6 +1,6 @@
 # Framework Boundaries
 
-MyClaw keeps the core runtime plain TypeScript and Node.js. Framework dependencies are adapters, not domain architecture.
+Gantry keeps the core runtime plain TypeScript and Node.js. Framework dependencies are adapters, not domain architecture.
 
 ## Allowed Dependencies By Layer
 

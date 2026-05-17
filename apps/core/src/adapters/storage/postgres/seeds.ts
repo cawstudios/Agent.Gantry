@@ -95,7 +95,7 @@ export async function seedDefaultRuntimeData(
         id: DEFAULT_PERMISSION_POLICY_ID,
         appId: DEFAULT_APP_ID,
         name: 'Default personal policy',
-        description: 'Default local development policy seeded by MyClaw.',
+        description: 'Default local development policy seeded by Gantry.',
       })
       .onConflictDoNothing();
 
@@ -227,10 +227,10 @@ const DEFAULT_TOOL_CATALOG = [
     id: 'tool:Browser',
     name: 'Browser',
     kind: 'browser',
-    provider: 'myclaw',
+    provider: 'gantry',
     providerToolName: 'Browser',
     displayName: 'Browser',
-    description: 'Use the shared MyClaw browser capability.',
+    description: 'Use the shared Gantry browser capability.',
     category: 'web',
     risk: 'medium',
   },
@@ -292,7 +292,7 @@ function hostTool(
     id: adminMcpToolIdForFullName(name),
     name,
     kind: 'host',
-    provider: 'myclaw',
+    provider: 'gantry',
     providerToolName: undefined,
     displayName,
     description,
@@ -303,13 +303,13 @@ function hostTool(
 
 function adminToolDisplayName(name: string): string {
   switch (name) {
-    case 'mcp__myclaw__settings_desired_state':
+    case 'mcp__gantry__settings_desired_state':
       return 'Settings desired state';
-    case 'mcp__myclaw__request_settings_update':
+    case 'mcp__gantry__request_settings_update':
       return 'Request settings update';
-    case 'mcp__myclaw__service_restart':
+    case 'mcp__gantry__service_restart':
       return 'Service restart';
-    case 'mcp__myclaw__register_agent':
+    case 'mcp__gantry__register_agent':
       return 'Register agent';
     default:
       return name;
@@ -318,15 +318,15 @@ function adminToolDisplayName(name: string): string {
 
 function adminToolDescription(name: string): string {
   switch (name) {
-    case 'mcp__myclaw__settings_desired_state':
+    case 'mcp__gantry__settings_desired_state':
       return 'Read local desired-state settings before a reviewed settings update.';
-    case 'mcp__myclaw__request_settings_update':
+    case 'mcp__gantry__request_settings_update':
       return 'Request a reviewed local settings.yaml desired-state update.';
-    case 'mcp__myclaw__service_restart':
-      return 'Restart the MyClaw service after validation.';
-    case 'mcp__myclaw__register_agent':
+    case 'mcp__gantry__service_restart':
+      return 'Restart the Gantry service after validation.';
+    case 'mcp__gantry__register_agent':
       return 'Bind a channel conversation to an agent.';
     default:
-      return 'Built-in MyClaw admin MCP tool.';
+      return 'Built-in Gantry admin MCP tool.';
   }
 }

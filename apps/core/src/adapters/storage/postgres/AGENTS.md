@@ -33,3 +33,7 @@
   but nested provider/session `agent-run:*` rows must not copy that `jobId`.
   Keep job-scoped run lists and health metadata tied to the scheduler lifecycle
   run row only.
+- Conversation route projection must preserve the canonical conversation kind:
+  `direct`/`dm` rows return runtime `conversationKind: "dm"` and group/channel
+  rows return `conversationKind: "channel"`. Do not infer DM-vs-group memory
+  scope from trigger settings or binding memory-subject blobs.

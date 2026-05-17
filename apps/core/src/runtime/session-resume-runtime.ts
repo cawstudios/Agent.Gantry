@@ -318,7 +318,7 @@ export async function archiveCurrentRuntimeSession(input: {
   }
   logger.info(
     { group: input.group.name, agentSessionId: turnContext?.agentSessionId },
-    'Archived MyClaw session boundary memory; provider transcripts are not runtime state',
+    'Archived Gantry session boundary memory; provider transcripts are not runtime state',
   );
 }
 
@@ -465,7 +465,7 @@ export async function buildApprovedSkillContextBlock(input: {
   if (skills.length === 0) return '';
   const sections: string[] = [
     '[[APPROVED_SKILLS_AVAILABLE_THIS_SESSION]]',
-    'The following MyClaw-approved skills are available to use in this session. Follow the SKILL.md instructions when relevant. Do not claim these skills are unavailable solely because the provider session was already running.',
+    'The following Gantry-approved skills are available to use in this session. Follow the SKILL.md instructions when relevant. Do not claim these skills are unavailable solely because the provider session was already running.',
   ];
   let remaining = maxChars - sections.join('\n').length;
   for (const skill of skills) {

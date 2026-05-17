@@ -20,7 +20,7 @@ describe('OneCLI persistence contract', () => {
   it('renders a schema-isolated database URL using Prisma schema parameter', () => {
     const url = renderOnecliDatabaseUrl({
       postgresUrl:
-        'postgresql://user:pass@db.example.com:5432/myclaw?sslmode=require',
+        'postgresql://user:pass@db.example.com:5432/gantry?sslmode=require',
       schema: 'onecli',
     });
 
@@ -36,7 +36,7 @@ describe('OneCLI persistence contract', () => {
   it('rejects database URLs without the OneCLI schema parameter', () => {
     const result = validateOnecliDatabaseUrl({
       postgresUrl:
-        'postgresql://user:pass@localhost:5432/myclaw?sslmode=require',
+        'postgresql://user:pass@localhost:5432/gantry?sslmode=require',
       schema: 'onecli',
     });
 
@@ -48,7 +48,7 @@ describe('OneCLI persistence contract', () => {
 
   it('supports custom broker schema names', () => {
     const url = renderOnecliDatabaseUrl({
-      postgresUrl: 'postgresql://user:pass@localhost:5432/myclaw',
+      postgresUrl: 'postgresql://user:pass@localhost:5432/gantry',
       schema: 'agent_vault',
     });
 
@@ -64,7 +64,7 @@ describe('OneCLI persistence contract', () => {
   it('rejects mixed-case broker schema names before rendering the URL', () => {
     expect(() =>
       renderOnecliDatabaseUrl({
-        postgresUrl: 'postgresql://user:pass@localhost:5432/myclaw',
+        postgresUrl: 'postgresql://user:pass@localhost:5432/gantry',
         schema: 'AgentVault',
       }),
     ).toThrow(/lowercase PostgreSQL identifier/);
@@ -73,26 +73,26 @@ describe('OneCLI persistence contract', () => {
   it('normalizes and validates the shared database identity', () => {
     expect(
       getPostgresDatabaseIdentity(
-        'postgresql://myclaw:pass@DB.EXAMPLE.com/myclaw?sslmode=require',
+        'postgresql://gantry:pass@DB.EXAMPLE.com/gantry?sslmode=require',
       ),
     ).toEqual({
       hostname: 'db.example.com',
       port: '5432',
-      database: 'myclaw',
+      database: 'gantry',
     });
 
     expect(
       validateSharedPostgresDatabase({
-        myclawPostgresUrl:
-          'postgresql://myclaw:pass@db.example.com:5432/myclaw?sslmode=require',
+        gantryPostgresUrl:
+          'postgresql://gantry:pass@db.example.com:5432/gantry?sslmode=require',
         onecliPostgresUrl:
-          'postgresql://onecli:pass@db.example.com/myclaw?sslmode=require&schema=onecli',
+          'postgresql://onecli:pass@db.example.com/gantry?sslmode=require&schema=onecli',
       }),
     ).toEqual({ ok: true });
 
     const mismatch = validateSharedPostgresDatabase({
-      myclawPostgresUrl:
-        'postgresql://myclaw:pass@db.example.com:5432/myclaw?sslmode=require',
+      gantryPostgresUrl:
+        'postgresql://gantry:pass@db.example.com:5432/gantry?sslmode=require',
       onecliPostgresUrl:
         'postgresql://onecli:pass@db.example.com:5432/other?sslmode=require&schema=onecli',
     });
@@ -105,7 +105,7 @@ describe('OneCLI persistence contract', () => {
   it('replaces any existing Prisma schema parameter with the configured schema', () => {
     const url = renderOnecliDatabaseUrl({
       postgresUrl:
-        'postgresql://user:pass@localhost:5432/myclaw?schema=public&sslmode=require',
+        'postgresql://user:pass@localhost:5432/gantry?schema=public&sslmode=require',
       schema: 'onecli',
     });
 
@@ -115,7 +115,7 @@ describe('OneCLI persistence contract', () => {
 
   it('requires a stable encryption key before probing the database', async () => {
     const url = renderOnecliDatabaseUrl({
-      postgresUrl: 'postgresql://user:pass@localhost:5432/myclaw',
+      postgresUrl: 'postgresql://user:pass@localhost:5432/gantry',
       schema: 'onecli',
     });
 
@@ -133,7 +133,7 @@ describe('OneCLI persistence contract', () => {
 
   it('rejects weak encryption keys before probing the database', async () => {
     const url = renderOnecliDatabaseUrl({
-      postgresUrl: 'postgresql://onecli:pass@localhost:5432/myclaw',
+      postgresUrl: 'postgresql://onecli:pass@localhost:5432/gantry',
       schema: 'onecli',
     });
 
@@ -167,9 +167,9 @@ describe('OneCLI persistence contract', () => {
     expect(phrase.ok).toBe(false);
   });
 
-  it('rejects shared MyClaw and OneCLI database roles', async () => {
+  it('rejects shared Gantry and OneCLI database roles', async () => {
     const url = renderOnecliDatabaseUrl({
-      postgresUrl: 'postgresql://shared:pass@localhost:5432/myclaw',
+      postgresUrl: 'postgresql://shared:pass@localhost:5432/gantry',
       schema: 'onecli',
     });
 
@@ -178,7 +178,7 @@ describe('OneCLI persistence contract', () => {
         postgresUrl: url,
         schema: 'onecli',
         secretEncryptionKey: 'MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=',
-        myclawPostgresUrl: 'postgresql://shared:pass@localhost:5432/myclaw',
+        gantryPostgresUrl: 'postgresql://shared:pass@localhost:5432/gantry',
       }),
     ).resolves.toMatchObject({
       status: 'fail',
@@ -186,7 +186,7 @@ describe('OneCLI persistence contract', () => {
     });
   });
 
-  it('rejects different MyClaw and OneCLI databases before probing', async () => {
+  it('rejects different Gantry and OneCLI databases before probing', async () => {
     const url = renderOnecliDatabaseUrl({
       postgresUrl: 'postgresql://onecli:pass@localhost:5432/other',
       schema: 'onecli',
@@ -197,7 +197,7 @@ describe('OneCLI persistence contract', () => {
         postgresUrl: url,
         schema: 'onecli',
         secretEncryptionKey: 'MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=',
-        myclawPostgresUrl: 'postgresql://myclaw:pass@localhost:5432/myclaw',
+        gantryPostgresUrl: 'postgresql://gantry:pass@localhost:5432/gantry',
       }),
     ).resolves.toMatchObject({
       status: 'fail',
@@ -205,11 +205,11 @@ describe('OneCLI persistence contract', () => {
     });
   });
 
-  it('fails readiness when the MyClaw role can access the OneCLI schema', async () => {
+  it('fails readiness when the Gantry role can access the OneCLI schema', async () => {
     vi.resetModules();
     const queryByConnection = new Map<string, any[]>([
       [
-        'postgresql://onecli:pass@localhost:5432/myclaw?schema=onecli',
+        'postgresql://onecli:pass@localhost:5432/gantry?schema=onecli',
         [
           { rows: [{ current_user: 'onecli' }] },
           { rows: [{ exists: true }] },
@@ -220,9 +220,9 @@ describe('OneCLI persistence contract', () => {
         ],
       ],
       [
-        'postgresql://myclaw:pass@localhost:5432/myclaw',
+        'postgresql://gantry:pass@localhost:5432/gantry',
         [
-          { rows: [{ current_user: 'myclaw' }] },
+          { rows: [{ current_user: 'gantry' }] },
           { rows: [{ has_access: true }] },
           { rows: [{ has_access: false }] },
         ],
@@ -253,19 +253,19 @@ describe('OneCLI persistence contract', () => {
     await expect(
       inspectReadiness({
         postgresUrl:
-          'postgresql://onecli:pass@localhost:5432/myclaw?schema=onecli',
+          'postgresql://onecli:pass@localhost:5432/gantry?schema=onecli',
         schema: 'onecli',
         secretEncryptionKey: 'MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=',
-        myclawPostgresUrl: 'postgresql://myclaw:pass@localhost:5432/myclaw',
-        myclawSchema: 'myclaw',
+        gantryPostgresUrl: 'postgresql://gantry:pass@localhost:5432/gantry',
+        gantrySchema: 'gantry',
       }),
     ).resolves.toMatchObject({
       status: 'fail',
-      message: expect.stringContaining('MyClaw database role'),
+      message: expect.stringContaining('Gantry database role'),
     });
   });
 
-  it('fails readiness when the OneCLI role can create in the MyClaw schema', async () => {
+  it('fails readiness when the OneCLI role can create in the Gantry schema', async () => {
     vi.resetModules();
     vi.doMock('pg', () => ({
       Pool: class {
@@ -292,10 +292,10 @@ describe('OneCLI persistence contract', () => {
     await expect(
       inspectReadiness({
         postgresUrl:
-          'postgresql://onecli:pass@localhost:5432/myclaw?schema=onecli',
+          'postgresql://onecli:pass@localhost:5432/gantry?schema=onecli',
         schema: 'onecli',
         secretEncryptionKey: 'MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=',
-        myclawSchema: 'myclaw',
+        gantrySchema: 'gantry',
       }),
     ).resolves.toMatchObject({
       status: 'fail',
@@ -328,7 +328,7 @@ describe('OneCLI persistence contract', () => {
     await expect(
       inspectReadiness({
         postgresUrl:
-          'postgresql://onecli:pass@localhost:5432/myclaw?schema=onecli',
+          'postgresql://onecli:pass@localhost:5432/gantry?schema=onecli',
         schema: 'onecli',
         secretEncryptionKey: 'MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=',
       }),
@@ -367,10 +367,10 @@ describe('OneCLI persistence contract', () => {
     await expect(
       inspectReadiness({
         postgresUrl:
-          'postgresql://onecli:pass@localhost:5432/myclaw?schema=onecli',
+          'postgresql://onecli:pass@localhost:5432/gantry?schema=onecli',
         schema: 'onecli',
         secretEncryptionKey: 'MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=',
-        myclawSchema: 'myclaw',
+        gantrySchema: 'gantry',
       }),
     ).resolves.toMatchObject({
       status: 'fail',

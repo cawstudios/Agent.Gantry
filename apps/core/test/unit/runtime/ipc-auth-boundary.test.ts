@@ -753,6 +753,14 @@ describe('validateIpcAuthRequest', () => {
       jobId: 'job-1',
       runId: 'run-1',
       toolName: 'Bash',
+      decisionOptions: [
+        'allow_once',
+        'allow_persistent_rule',
+        'cancel',
+        'allow_timed_grant',
+        'not_real',
+        'allow_once',
+      ],
       closestRule: {
         rule: 'Bash(npm run build)',
         reason: 'Bash leaf npm test did not match any scoped rule.',
@@ -774,6 +782,12 @@ describe('validateIpcAuthRequest', () => {
         runId: 'run-1',
         appId: 'app:one',
         agentId: 'agent:team',
+        decisionOptions: [
+          'allow_once',
+          'allow_persistent_rule',
+          'cancel',
+          'allow_timed_grant',
+        ],
         closestRule: {
           rule: 'Bash(npm run build)',
           reason: 'Bash leaf npm test did not match any scoped rule.',

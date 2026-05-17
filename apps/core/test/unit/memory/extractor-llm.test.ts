@@ -41,8 +41,8 @@ function writeCredentialSettings(mode: 'none' | 'onecli' | 'external'): void {
       'providers: {}',
       'storage:',
       '  postgres:',
-      '    url_env: MYCLAW_DATABASE_URL',
-      '    schema: myclaw',
+      '    url_env: GANTRY_DATABASE_URL',
+      '    schema: gantry',
       'credential_broker:',
       `  mode: ${mode}`,
       '  onecli:',
@@ -84,7 +84,7 @@ function configureClaudeQueryMock(): void {
       {
         method: 'POST',
         headers: env.ANTHROPIC_MODEL
-          ? { 'x-myclaw-model': env.ANTHROPIC_MODEL }
+          ? { 'x-gantry-model': env.ANTHROPIC_MODEL }
           : undefined,
       },
     );
@@ -103,9 +103,9 @@ function configureClaudeQueryMock(): void {
 
 beforeEach(() => {
   vi.resetModules();
-  runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-extractor-llm-'));
+  runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-extractor-llm-'));
   writeCredentialSettings('onecli');
-  vi.stubEnv('MYCLAW_HOME', runtimeRoot);
+  vi.stubEnv('GANTRY_HOME', runtimeRoot);
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
   vi.stubEnv('ANTHROPIC_API_KEY', '');
   getContainerConfigMock.mockReset();
@@ -183,7 +183,7 @@ describe('LlmMemoryExtractionProvider', () => {
     const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = new Headers(requestInit?.headers as HeadersInit);
     expect(fetchSpy.mock.calls[0]?.[0]).toBe('https://broker.local/mock');
-    expect(headers.get('x-myclaw-model')).toBeNull();
+    expect(headers.get('x-gantry-model')).toBeNull();
     expect(headers.get('authorization')).toBeNull();
     expect(headers.get('x-api-key')).toBeNull();
     expect(claudeQueryMock.mock.calls[0]?.[0]).toMatchObject({

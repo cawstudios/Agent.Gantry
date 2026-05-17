@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { CreateSessionRequestSchema } from '@myclaw/contracts';
+import { CreateSessionRequestSchema } from '@gantry/contracts';
 import type { ZodIssue } from 'zod';
 
 import type { RuntimeEvent } from '../../../domain/events/events.js';

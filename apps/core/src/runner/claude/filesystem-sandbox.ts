@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { log } from './logging.js';
 
-const PROTECTED_FILESYSTEM_PATHS_ENV = 'MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON';
+const PROTECTED_FILESYSTEM_PATHS_ENV = 'GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON';
 
 interface BuildSdkFilesystemSandboxOptions {
   platform?: NodeJS.Platform;

@@ -23,7 +23,7 @@ const runtimeHomesToCleanup: string[] = [];
 
 function createRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'myclaw-runtime-group-db-test-'),
+    path.join(os.tmpdir(), 'gantry-runtime-group-db-test-'),
   );
   runtimeHomesToCleanup.push(runtimeHome);
   fs.mkdirSync(path.join(runtimeHome, 'store'), { recursive: true });
@@ -78,7 +78,7 @@ describe('runtime-group-db', () => {
     await groupDb.setConversationRoute('tg:123', {
       name: 'Main',
       folder: 'main',
-      trigger: '@myclaw',
+      trigger: '@gantry',
       added_at: '2026-04-21T00:00:00.000Z',
     });
     await groupDb.close();

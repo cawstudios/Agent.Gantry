@@ -1,11 +1,11 @@
 # Credential Management
 
-MyClaw separates runtime-owned secrets from credentials that agents may access
+Gantry separates runtime-owned secrets from credentials that agents may access
 through a broker.
 
 ## Source Lanes
 
-MyClaw uses three source lanes:
+Gantry uses three source lanes:
 
 - `settings.yaml` stores non-secret configuration, such as credential broker
   mode, broker endpoint URLs, channel enablement, schemas, allowlists, and
@@ -23,11 +23,11 @@ MyClaw uses three source lanes:
 There is no global `.env > broker` precedence. Precedence is lane-specific:
 settings choose behavior, runtime secret providers resolve runtime secrets, and
 agent credentials come only from the selected broker. If a value appears in the
-wrong lane, MyClaw reports it as a configuration error instead of silently
+wrong lane, Gantry reports it as a configuration error instead of silently
 ignoring or overriding it.
 
 Wrong-lane checks apply to both runtime `.env` and the process environment used
-to start MyClaw. Process env may override local `.env` only inside
+to start Gantry. Process env may override local `.env` only inside
 runtime-secret resolution; it is not a supported path for broker mode, broker
 URLs, model settings, Slack approvers, or raw provider credentials.
 
@@ -38,12 +38,12 @@ credentials in the selected broker.
 
 ## Runtime-Owned Secrets
 
-Runtime-owned secrets are needed to start and operate MyClaw or its connected
+Runtime-owned secrets are needed to start and operate Gantry or its connected
 services. They are read through `RuntimeSecretProvider`.
 
 Examples:
 
-- `MYCLAW_DATABASE_URL`
+- `GANTRY_DATABASE_URL`
 - `SLACK_BOT_TOKEN`
 - `SLACK_APP_TOKEN`
 - `TELEGRAM_BOT_TOKEN`
@@ -66,20 +66,20 @@ the action. They include LLM provider access and tool or API credentials, but
 those two categories are not scoped the same way. OneCLI is the preferred local
 broker for personal setups, but it is not mandatory for every tool capability:
 reviewed `local_cli` capability drafts are valid when the CLI already owns its
-own authenticated account state and MyClaw pins the executable, command
+own authenticated account state and Gantry pins the executable, command
 templates, preflight, protected paths, and denied environment overrides. They
 do not become runnable durable authority until runtime enforcement verifies
 those bindings per invocation.
 
-Model-provider access is account-level Model Access. MyClaw always requests it
+Model-provider access is account-level Model Access. Gantry always requests it
 with `purpose=model_runtime` through the reserved broker profile
-`myclaw-model-access`; it is not bound to an individual agent, conversation,
+`gantry-model-access`; it is not bound to an individual agent, conversation,
 memory worker, subagent, or job. Agents, subagents, and jobs select catalog
 model aliases only. Claude and OpenRouter credentials are configured once in
 OneCLI or the selected enterprise broker and then projected to model SDK runs
 according to the selected model provider.
 
-Agents do not receive raw secret values from MyClaw. Runtime code requests an
+Agents do not receive raw secret values from Gantry. Runtime code requests an
 `AgentCredentialInjection` from `AgentCredentialBroker`; the returned injection
 contains only broker-safe environment values and certificate references for the
 provider credential lane. Tool/API credential lanes must use
@@ -87,7 +87,7 @@ provider credential lane. Tool/API credential lanes must use
 never reuse the shared Model Access profile or become runner-wide ambient
 process environment.
 
-For local authenticated CLIs, MyClaw does not copy raw OAuth tokens or broker
+For local authenticated CLIs, Gantry does not copy raw OAuth tokens or broker
 proxies into generic Bash. The approved semantic capability maps to narrow
 scoped command templates and protected credential/config paths. User-defined
 local CLI capabilities are reviewable drafts until runtime enforcement verifies
@@ -100,7 +100,7 @@ behavior.
 
 Raw provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and
 `CLAUDE_CODE_OAUTH_TOKEN` must be configured through OneCLI or the selected
-enterprise credential broker, never in MyClaw `.env` or process env.
+enterprise credential broker, never in Gantry `.env` or process env.
 
 ## Common Key Placement
 
@@ -115,7 +115,7 @@ enterprise credential broker, never in MyClaw `.env` or process env.
 | `defaults.jobs.recurring_model`                               | `settings.yaml`                                         |
 | Conversation approvers                                        | `settings.yaml` and Postgres conversation approver rows |
 | `storage.postgres.url_env`                                    | `settings.yaml` advanced override                       |
-| `MYCLAW_DATABASE_URL`                                         | `RuntimeSecretProvider` / local `.env`                  |
+| `GANTRY_DATABASE_URL`                                         | `RuntimeSecretProvider` / local `.env`                  |
 | `TELEGRAM_BOT_TOKEN`                                          | `RuntimeSecretProvider` / local `.env`                  |
 | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                          | `RuntimeSecretProvider` / local `.env`                  |
 | `ONECLI_DATABASE_URL`, `SECRET_ENCRYPTION_KEY`                | `RuntimeSecretProvider` / local `.env`                  |
@@ -123,7 +123,7 @@ enterprise credential broker, never in MyClaw `.env` or process env.
 | `CLAUDE_CODE_OAUTH_TOKEN`                                     | `AgentCredentialBroker`                                 |
 
 Model env keys such as `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL`, and
-`ANTHROPIC_DEFAULT_*_MODEL` are child-process adapter projections. MyClaw
+`ANTHROPIC_DEFAULT_*_MODEL` are child-process adapter projections. Gantry
 runtime config does not accept them from runtime `.env`; use
 `agent.default_model`, `agent.one_time_job_default_model`,
 `agent.recurring_job_default_model`, and group `/model` overrides for model
@@ -162,16 +162,16 @@ The adapter owns:
 - OneCLI CA certificate materialization for host runners
 - local OneCLI persistence readiness checks
 
-OneCLI model access is resolved through the `myclaw-model-access` profile. Setup
+OneCLI model access is resolved through the `gantry-model-access` profile. Setup
 and runtime startup create that profile directly; there is no fallback to
 `main-agent` or per-agent model credential rows.
 
 OneCLI may return local provider proxy variables such as `HTTP_PROXY`,
-`HTTPS_PROXY`, and `NODE_USE_ENV_PROXY` for the model credential lane. MyClaw
+`HTTPS_PROXY`, and `NODE_USE_ENV_PROXY` for the model credential lane. Gantry
 accepts only broker-shaped local HTTP proxy endpoints, normalizes Docker-only
 loopback aliases such as `host.docker.internal` to `127.0.0.1` for host
-runners, and hides that provider proxy behind the MyClaw-owned egress gateway.
-The Claude SDK process receives the MyClaw loopback gateway URL, not the
+runners, and hides that provider proxy behind the Gantry-owned egress gateway.
+The Claude SDK process receives the Gantry loopback gateway URL, not the
 broker's proxy URL. Egress is default-allow; `permissions.egress.denylist` is an
 optional hostname-glob denylist that returns a 403 JSON body and writes an audit
 event when matched. General runner, scheduled-script, browser, and MCP process
@@ -217,7 +217,7 @@ unsandboxed. Host-owned scheduler scripts are not supported.
 
 The SDK process receives sandbox policy and model credentials as separate
 adapter projections. Protected filesystem paths are passed through
-`MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON` and become Claude SDK
+`GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON` and become Claude SDK
 `sandbox.filesystem.denyWrite` entries; model credentials remain only in the
 private SDK env handoff. Do not use OneCLI, MCP stdio env, browser env, or any
 future scheduler script env to carry sandbox authority or provider credentials.

@@ -1,11 +1,11 @@
 # Conversation Interactions
 
-MyClaw renders one conversation-neutral interaction model across Slack,
+Gantry renders one conversation-neutral interaction model across Slack,
 Telegram, Teams, Web, API sessions, and agent-initiated requests. Provider adapters own
 presentation. Application policy owns authorization.
 
 Agents must not choose provider-specific payloads directly. They choose the
-right MyClaw tool, the host builds an `InteractionDescriptor`, and the provider
+right Gantry tool, the host builds an `InteractionDescriptor`, and the provider
 adapter renders it using the provider's native controls.
 
 ## Conversation Administration Model
@@ -36,7 +36,7 @@ behavior for direct/private and group/channel conversations: same-conversation
 origin check, Conversation approver check, and Conversation sender policy.
 
 Conversation setup should prefer provider discovery and validation. Pasted Slack,
-Teams, or Telegram IDs are accepted as a fallback only after MyClaw verifies
+Teams, or Telegram IDs are accepted as a fallback only after Gantry verifies
 the bot can see the conversation and post or, for Telegram, that the bot is a member
 and forum topics are available when topic sessions are requested.
 
@@ -93,12 +93,12 @@ Use these rules in agent prompts, docs, and admin surfaces:
 | Request semantic capability                                    | `request_capability`                          | Renders `Allow <Capability>?` with account/context, can/cannot scope, preflight, and Details containing the mapped low-level rules.                                                                                                                                                                                             |
 | Propose local CLI capability                                   | `propose_local_cli_capability`                | Renders pinned executable path/version/hash, command templates, auth preflight, protected paths, denied env patterns, account label, and approve/deny for a reviewed draft. Draft approval does not create runnable Bash authority until runtime local-CLI enforcement exists.                                                   |
 | Manage selected capability                                     | `manage_capability`                           | Presents view/change/revoke/test/audit guidance without exposing raw secrets. Durable changes go through settings/API/admin services.                                                                                                                                                                                           |
-| Request SDK, host, or channel permission                       | `request_permission`                          | Renders `Allow <access>?` with source, scope, action preview, and safe Details. Semantic capability requests keep capability/account/can/cannot copy primary; one-off exact tool access, canonical Browser, scoped Bash, and provider capability requests keep raw rules, request id, command hash, sandbox profile, and executable path in Details/audit. `Always allow` remains limited to semantic capabilities, Browser, exact MyClaw admin tools, or scoped Bash. |
-| Inspect selected and requestable MyClaw capabilities           | `capability_status`                           | Lists available MyClaw tools, semantic capability tools, selected skills/MCP servers, and unavailable requestable admin tools with exact request arguments.                                                                                                                                                                     |
-| Inspect local desired-state settings                           | `settings_desired_state`                      | Agents with the selected `mcp__myclaw__settings_desired_state` tool grant can read rendered `settings.yaml` plus its revision for review context; no write occurs. Unselected agents receive `request_permission` guidance.                                                                                                     |
-| Change local desired-state settings                            | `request_settings_update`                     | Agents with the selected `mcp__myclaw__request_settings_update` tool grant can request a complete replacement `settings.yaml` with the expected revision; the host validates it, shows a diff summary for same-channel approval, rechecks the revision/references after approval, writes atomically, then reloads safe changes. |
-| Restart after approved changes                                 | `service_restart`                             | Requires selected `mcp__myclaw__service_restart` tool grant; reports validation and restart status.                                                                                                                                                                                                                             |
-| Bind a channel to an agent                                     | `register_agent`                              | Requires selected `mcp__myclaw__register_agent` tool grant; validates the channel/session target and creates an agent binding.                                                                                                                                                                                                  |
+| Request SDK, host, or channel permission                       | `request_permission`                          | Renders `Allow <access>?` with source, scope, action preview, and safe Details. Semantic capability requests keep capability/account/can/cannot copy primary; one-off exact tool access, canonical Browser, scoped Bash, and provider capability requests keep raw rules, request id, command hash, sandbox profile, and executable path in Details/audit. `Always allow` remains limited to semantic capabilities, Browser, exact Gantry admin tools, or scoped Bash. |
+| Inspect selected and requestable Gantry capabilities           | `capability_status`                           | Lists available Gantry tools, semantic capability tools, selected skills/MCP servers, and unavailable requestable admin tools with exact request arguments.                                                                                                                                                                     |
+| Inspect local desired-state settings                           | `settings_desired_state`                      | Agents with the selected `mcp__gantry__settings_desired_state` tool grant can read rendered `settings.yaml` plus its revision for review context; no write occurs. Unselected agents receive `request_permission` guidance.                                                                                                     |
+| Change local desired-state settings                            | `request_settings_update`                     | Agents with the selected `mcp__gantry__request_settings_update` tool grant can request a complete replacement `settings.yaml` with the expected revision; the host validates it, shows a diff summary for same-channel approval, rechecks the revision/references after approval, writes atomically, then reloads safe changes. |
+| Restart after approved changes                                 | `service_restart`                             | Requires selected `mcp__gantry__service_restart` tool grant; reports validation and restart status.                                                                                                                                                                                                                             |
+| Bind a channel to an agent                                     | `register_agent`                              | Requires selected `mcp__gantry__register_agent` tool grant; validates the channel/session target and creates an agent binding.                                                                                                                                                                                                  |
 
 The agent must never substitute `Bash`, direct config edits, direct SDK calls,
 or provider-specific API writes for these request tools.
@@ -155,7 +155,7 @@ approvals and prompts. Single-select uses action buttons. Multi-select uses
 `Input.ChoiceSet` plus `Done`. Details and files use card updates, show-card
 sections, or dialogs where needed. Final decisions update the original card
 using Teams activity update. Unauthorized users receive targeted/private
-feedback where Teams supports it; otherwise MyClaw sends a non-sensitive denial
+feedback where Teams supports it; otherwise Gantry sends a non-sensitive denial
 update.
 
 Teams details:

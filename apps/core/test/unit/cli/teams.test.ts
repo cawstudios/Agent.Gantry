@@ -52,7 +52,7 @@ afterEach(() => {
 
 function makeRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'myclaw-teams-test-'),
+    path.join(os.tmpdir(), 'gantry-teams-test-'),
   );
   const settings = loadRuntimeSettings(runtimeHome);
   saveRuntimeSettings(runtimeHome, settings);

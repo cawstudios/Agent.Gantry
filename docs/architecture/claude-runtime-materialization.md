@@ -1,14 +1,14 @@
 # Claude Runtime Materialization
 
 Claude provider files are generated per run. They are compatibility inputs for
-the Claude SDK, not MyClaw source of truth.
+the Claude SDK, not Gantry source of truth.
 
 ## Generated Per Run
 
 The Anthropic Claude adapter creates a temporary `CLAUDE_CONFIG_DIR` for each
 run. The directory contains:
 
-- `settings.json` rendered by MyClaw
+- `settings.json` rendered by Gantry
 - `skills/` materialized from the active skill source
 - `projects/<project>/` as an SDK scratch directory for the current run
 
@@ -17,7 +17,7 @@ enabled by the caller.
 
 The Claude Agent SDK v0.2.112 exposes `settingSources`; an empty list loads no
 filesystem settings, while `user`, `project`, and `local` opt into user
-settings, project settings, and `settings.local.json`. MyClaw uses the
+settings, project settings, and `settings.local.json`. Gantry uses the
 generated per-run `CLAUDE_CONFIG_DIR` as the SDK user settings root and does
 not opt into the `local` settings source for enterprise runtime.
 
@@ -36,9 +36,9 @@ Durable state stays outside Claude runtime files:
   credential reference names, and audit events. Claude SDK `mcpServers` is a
   per-run projection, not durable truth.
 - Package or configured local skill folders provide file-based Claude skills.
-- MyClaw may add runtime-installed skills into the generated per-run config
+- Gantry may add runtime-installed skills into the generated per-run config
   when they are part of host-owned capability wiring. The local Claude browser
-  path uses this for `myclaw-browser`.
+  path uses this for `gantry-browser`.
 - Hosted Anthropic managed skills are referenced by provider skill ids and are
   resolved through the Anthropic SDK adapter, not through local files.
 
@@ -51,7 +51,7 @@ agent config, LLM/provider profile, runtime settings, and provider-safe
 adapter options. It must not contain raw provider secrets.
 
 The materialized Claude settings do not install memory hooks. Fresh runs receive
-only durable MyClaw memory as an untrusted first user-message prefix; active
+only durable Gantry memory as an untrusted first user-message prefix; active
 chat continuity comes from the live SDK streaming-input session. Claude hook
 output and provider JSONL transcripts are not runtime state.
 
@@ -62,7 +62,7 @@ authoritative for tool execution. The Claude SDK `PreToolUse` hook and
 not separate policy engines.
 
 `settings.local.json` is ignored in enterprise runtime because local Claude
-settings are not MyClaw policy.
+settings are not Gantry policy.
 
 ## Skills
 
@@ -71,21 +71,21 @@ approved skill artifacts containing `SKILL.md` into the temp `skills/`
 directory for that run, then the Claude Agent SDK loads them from
 `CLAUDE_CONFIG_DIR`.
 
-For each persona with browser capability, MyClaw also materializes a pinned
-runtime-installed `myclaw-browser` skill into that same temp directory. It is not
+For each persona with browser capability, Gantry also materializes a pinned
+runtime-installed `gantry-browser` skill into that same temp directory. It is not
 stored under the repo-bundled `.claude/skills` tree and does not require user
 `.claude` edits. The skill always points the model at the projected public
 Browser gateway tools: `browser_status`, `browser_open`, `browser_inspect`,
 `browser_act`, and `browser_close`. Private browser backend tools must not
 appear in model-visible MCP handoff, requestable capability lists, or persisted
 tool rules; browser actions are handled by the host-owned browser driver behind
-the projected MyClaw gateway.
+the projected Gantry gateway.
 
 Durable user-installed files under the runtime-home Claude skills directory are
 not read or copied by enterprise runtime.
 
-Agent-created or admin-uploaded skills enter MyClaw as zip uploads containing
-`SKILL.md`. MyClaw parses display metadata from that file, stores the normalized
+Agent-created or admin-uploaded skills enter Gantry as zip uploads containing
+`SKILL.md`. Gantry parses display metadata from that file, stores the normalized
 skill files as readable folders, and records draft lifecycle state in Postgres.
 Pending drafts use `skill-drafts/<request-id>/<skill-slug>/...`; approved local
 skills use `skills/<skill-slug>/...`. Drafts survive restart but are not
@@ -96,20 +96,20 @@ The canonical tool execution policy, projected through the Claude Agent SDK
 `PreToolUse` hook, blocks direct agent edits to skill capability files such as
 `SKILL.md`, runtime-home `.claude/skills`, and agent-local `skills/` folders.
 Agents must use
-`mcp__myclaw__request_skill_install` for provider-backed imports or
-`mcp__myclaw__request_skill_proposal` for skill file bundles. Admins/users can
+`mcp__gantry__request_skill_install` for provider-backed imports or
+`mcp__gantry__request_skill_proposal` for skill file bundles. Admins/users can
 also use the zip draft upload API. All paths review and persist the change
 outside temporary Claude config before next-run activation.
 
 Local approval makes the artifact eligible for per-agent binding and per-run
 materialization. Hosted approval uploads the stored files through Anthropic's
 native beta skill APIs behind the Anthropic adapter, then stores only opaque
-provider refs such as Anthropic skill id and version. MyClaw does not recreate
+provider refs such as Anthropic skill id and version. Gantry does not recreate
 hosted skill versioning or add a second skill permission prompt.
 
 ## MCP Servers
 
-The built-in `myclaw` MCP server is internal runtime wiring. It is always
+The built-in `gantry` MCP server is internal runtime wiring. It is always
 included by the runner, cannot be disabled by admin catalog records, and must be
 reported as connected by Claude init before a run is trusted.
 
@@ -120,7 +120,7 @@ into Agent SDK `mcpServers` for the next run. Pending, rejected, disabled,
 cross-app, or unbound MCP definitions are not rendered into Claude settings,
 FileArtifacts, or allowed tools.
 
-Agents can request an MCP server through the built-in MyClaw MCP tool, but that
+Agents can request an MCP server through the built-in Gantry MCP tool, but that
 request only creates a pending draft for admin review. It never approves,
 binds, or activates the server in the current run.
 
@@ -129,7 +129,7 @@ configuration such as `.mcp.json`, MCP server settings, permission settings,
 and `claude mcp add/remove/reset*` shell commands. Bash policy is target-based:
 issue text or command arguments that merely mention protected terms are not
 denied unless the command mutates a protected target. Agent-created MCP
-capabilities must go through `mcp__myclaw__request_mcp_server`,
+capabilities must go through `mcp__gantry__request_mcp_server`,
 same-conversation review, binding, and next-run materialization.
 
 Same-conversation MCP prompts are only a delivery surface. The deciding user
@@ -141,7 +141,7 @@ if that conversation is not registered to the requesting agent folder or if the
 request tries to route approval to another bound conversation.
 
 Remote third-party MCP servers must use HTTPS and cannot target loopback,
-private, link-local, local, or cloud metadata hosts. MyClaw also resolves
+private, link-local, local, or cloud metadata hosts. Gantry also resolves
 remote MCP hostnames during approval, test, and materialization; every returned
 A/AAAA address must be publicly routable so DNS rebinding cannot turn an
 approved endpoint into runtime-local or metadata access. Runtime materialization
@@ -171,8 +171,8 @@ arbitrary broker environment keys.
 
 ## Provider Artifacts
 
-Claude JSONL/session files are not runtime continuation state. MyClaw does not
+Claude JSONL/session files are not runtime continuation state. Gantry does not
 restore provider transcript artifacts before a run and does not capture SDK
 session files after a run. Active chat continuity comes from the live SDK
 streaming-input session while the runner is alive; fresh runs restore only
-durable MyClaw memory.
+durable Gantry memory.

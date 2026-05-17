@@ -5,7 +5,7 @@ import { activeRunStopWasRequested } from '@core/runtime/group-queue-stop.js';
 
 // Mock config for DATA_DIR used by sendMessage/closeStdin helpers.
 vi.mock('@core/config/index.js', () => ({
-  DATA_DIR: '/tmp/myclaw-test-data',
+  DATA_DIR: '/tmp/gantry-test-data',
 }));
 
 // Mock fs operations used by sendMessage/closeStdin

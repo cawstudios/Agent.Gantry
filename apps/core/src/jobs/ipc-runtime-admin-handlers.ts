@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { MYCLAW_HOME } from '../config/index.js';
+import { GANTRY_HOME } from '../config/index.js';
 import {
   getRuntimeSettingsRevision,
   readRuntimeSettingsYaml,
@@ -96,7 +96,7 @@ export const serviceRestartHandler: TaskHandler = async (context) => {
       );
       return;
     }
-    const validation = await validateRuntimePreflightWithStorage(MYCLAW_HOME);
+    const validation = await validateRuntimePreflightWithStorage(GANTRY_HOME);
     if (!validation.ok) {
       reject(
         validation.failure?.summary ||
@@ -124,7 +124,7 @@ export const serviceRestartHandler: TaskHandler = async (context) => {
         'Approving restarts the local Gantry runtime service after runtime preflight passes.',
       decisionReason: reason,
       toolInput: {
-        runtimeHome: MYCLAW_HOME,
+        runtimeHome: GANTRY_HOME,
         activation: 'immediate_service_restart',
       },
     });
@@ -142,7 +142,7 @@ export const serviceRestartHandler: TaskHandler = async (context) => {
     accept('Service restart accepted. Restarting now.');
 
     setTimeout(() => {
-      const restartOutcome = restartServiceForRuntimeHome(MYCLAW_HOME);
+      const restartOutcome = restartServiceForRuntimeHome(GANTRY_HOME);
       if (!restartOutcome.ok) {
         logger.error(
           { sourceAgentFolder, taskId, error: restartOutcome.message },
@@ -190,8 +190,8 @@ export const settingsDesiredStateHandler: TaskHandler = async (context) => {
   }
   try {
     acceptData('Current settings desired state loaded.', {
-      yaml: readRuntimeSettingsYaml(MYCLAW_HOME),
-      revision: getRuntimeSettingsRevision(MYCLAW_HOME),
+      yaml: readRuntimeSettingsYaml(GANTRY_HOME),
+      revision: getRuntimeSettingsRevision(GANTRY_HOME),
     });
   } catch (err) {
     reject(
@@ -236,7 +236,7 @@ export const requestSettingsUpdateHandler: TaskHandler = async (context) => {
     );
     return;
   }
-  const currentRevision = getRuntimeSettingsRevision(MYCLAW_HOME);
+  const currentRevision = getRuntimeSettingsRevision(GANTRY_HOME);
   if (expectedRevision !== currentRevision) {
     reject(
       'settings.yaml changed since it was read. Reload settings_desired_state and retry with the latest revision.',
@@ -244,7 +244,7 @@ export const requestSettingsUpdateHandler: TaskHandler = async (context) => {
     );
     return;
   }
-  const beforeYaml = readRuntimeSettingsYaml(MYCLAW_HOME);
+  const beforeYaml = readRuntimeSettingsYaml(GANTRY_HOME);
   const requestedTargetJid = validateSameChannelApprovalTarget({
     data,
     sourceAgentFolderJids,
@@ -272,7 +272,7 @@ export const requestSettingsUpdateHandler: TaskHandler = async (context) => {
     );
     return;
   }
-  const validation = validateLoadedRuntimeSettings(MYCLAW_HOME, parsed);
+  const validation = validateLoadedRuntimeSettings(GANTRY_HOME, parsed);
   if (!validation.ok) {
     reject(
       validation.failure?.summary || 'settings.yaml validation failed.',
@@ -333,7 +333,7 @@ export const requestSettingsUpdateHandler: TaskHandler = async (context) => {
         );
         return;
       }
-      if (getRuntimeSettingsRevision(MYCLAW_HOME) !== expectedRevision) {
+      if (getRuntimeSettingsRevision(GANTRY_HOME) !== expectedRevision) {
         message =
           'Rejected settings update: settings.yaml changed while approval was pending. Reload settings_desired_state and retry.';
         reject(message, 'stale_settings');
@@ -358,7 +358,7 @@ export const requestSettingsUpdateHandler: TaskHandler = async (context) => {
         return;
       }
       await applyRuntimeSettingsDesiredState({
-        runtimeHome: MYCLAW_HOME,
+        runtimeHome: GANTRY_HOME,
         settings: parsed,
         previousSettings: parseRuntimeSettings(beforeYaml),
         ops: storage.ops,

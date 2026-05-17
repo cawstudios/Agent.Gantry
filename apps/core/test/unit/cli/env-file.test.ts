@@ -27,7 +27,7 @@ describe('cli env-file helpers', () => {
   });
 
   it('upserts env values and removes null keys', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-env-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-env-'));
     const envPath = path.join(tmpDir, '.env');
 
     fs.writeFileSync(envPath, 'A=1\nREMOVE=old\n', 'utf-8');

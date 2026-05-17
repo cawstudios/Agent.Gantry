@@ -1,4 +1,4 @@
-# MyClaw Security Model
+# Gantry Security Model
 
 ## Trust Model
 
@@ -13,7 +13,7 @@
 
 ### 1. Host Runtime Boundary (Primary)
 
-MyClaw currently supports host runtime execution only. The primary boundary is host-level control plus runtime scoping:
+Gantry currently supports host runtime execution only. The primary boundary is host-level control plus runtime scoping:
 
 - per-group working directories
 - per-group session storage
@@ -22,7 +22,7 @@ MyClaw currently supports host runtime execution only. The primary boundary is h
 
 ### 2. Mount and Path Security
 
-**External Allowlist** - Mount permissions are stored at `~/.config/myclaw/mount-allowlist.json`, which is:
+**External Allowlist** - Mount permissions are stored at `~/.config/gantry/mount-allowlist.json`, which is:
 
 - outside project root
 - not writable by runtime agents by default
@@ -85,18 +85,18 @@ Credentials should be provided through OneCLI and runtime environment controls.
 **How it works:**
 
 1. Credentials are registered once with `onecli secrets create`
-2. MyClaw routes outbound calls through configured credential paths
+2. Gantry routes outbound calls through configured credential paths
 3. The gateway matches requests by host/path and injects credentials
 4. Agents do not need raw credentials embedded in project docs or source
 
-MyClaw and OneCLI may share one Postgres database, but they must not share
-tables or database roles. MyClaw owns the `myclaw` schema, OneCLI owns the
+Gantry and OneCLI may share one Postgres database, but they must not share
+tables or database roles. Gantry owns the `gantry` schema, OneCLI owns the
 `onecli` schema, and pg-boss owns the `pgboss` schema.
 `ONECLI_DATABASE_URL` must use a different Postgres user than
-`MYCLAW_DATABASE_URL` and must include `schema=onecli`.
+`GANTRY_DATABASE_URL` and must include `schema=onecli`.
 `SECRET_ENCRYPTION_KEY` must be a stable generated base64-encoded 32-byte deployment
 secret so broker state survives stateless restarts. General agent tool, script,
-browser, and MCP environments do not receive `MYCLAW_DATABASE_URL`,
+browser, and MCP environments do not receive `GANTRY_DATABASE_URL`,
 `ONECLI_DATABASE_URL`, raw provider keys, broker-provided proxy variables, or
 provider credentials. Model broker projection is limited to the model SDK
 credential lane. When that lane includes `NODE_EXTRA_CA_CERTS`, the SDK process

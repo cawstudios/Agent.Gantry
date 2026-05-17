@@ -1,6 +1,6 @@
 # Personal And Enterprise Modes
 
-MyClaw has one canonical runtime model with multiple deployment modes. Personal
+Gantry has one canonical runtime model with multiple deployment modes. Personal
 usage and enterprise usage differ by seeding, providerConnection, policy, user
 surfaces, and operations. They must not become separate product architectures.
 
@@ -184,7 +184,7 @@ Future code movement should keep personal setup as a convenience layer:
   flows.
 - Keep administration behavior explicit in conversation approver policy.
 - Store provider export/debug metadata only when needed; canonical continuity
-  comes from MyClaw sessions, memory, digests, messages, jobs, and events.
+  comes from Gantry sessions, memory, digests, messages, jobs, and events.
 - Route CLI and control HTTP through application use cases.
 
 Do not create a separate personal-only runtime path. Do not create an

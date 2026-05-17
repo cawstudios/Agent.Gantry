@@ -158,7 +158,7 @@ export function parseGroupAddArgs(
 
   if (!options.selector) {
     return {
-      error: 'Missing JID/chat-id. Usage: myclaw agent add <jid|chat-id> ...',
+      error: 'Missing JID/chat-id. Usage: gantry agent add <jid|chat-id> ...',
     };
   }
 
@@ -197,7 +197,7 @@ export function parseGroupRemoveArgs(
   if (!options.selector) {
     return {
       error:
-        'Missing agent selector. Usage: myclaw agent remove <jid|folder> [--delete-folder]',
+        'Missing agent selector. Usage: gantry agent remove <jid|folder> [--delete-folder]',
     };
   }
 
@@ -238,13 +238,13 @@ export function parseGroupTriggerArgs(
   if (!options.selector) {
     return {
       error:
-        'Missing agent selector. Usage: myclaw agent trigger <jid|folder> <word>|--off',
+        'Missing agent selector. Usage: gantry agent trigger <jid|folder> <word>|--off',
     };
   }
   if (!options.disable && !options.trigger) {
     return {
       error:
-        'Missing trigger word. Usage: myclaw agent trigger <jid|folder> <word>',
+        'Missing trigger word. Usage: gantry agent trigger <jid|folder> <word>',
     };
   }
 
@@ -323,7 +323,7 @@ export function parseGroupPolicyArgs(
   if (!options.selector) {
     return {
       error:
-        'Missing agent selector. Usage: myclaw agent policy <jid|folder> --allow <...> [--mode trigger|drop] or --clear',
+        'Missing agent selector. Usage: gantry agent policy <jid|folder> --allow <...> [--mode trigger|drop] or --clear',
     };
   }
   if (

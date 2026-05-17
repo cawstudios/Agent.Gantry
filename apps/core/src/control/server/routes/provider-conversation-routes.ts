@@ -7,7 +7,7 @@ import {
   CreateProviderConnectionRequestSchema,
   DiscoverProviderConnectionRequestSchema,
   UpdateProviderConnectionRequestSchema,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 
 import { EnvRuntimeSecretProvider } from '../../../adapters/credentials/env-runtime-secret-provider.js';
 import { RuntimeSecretConversationMembershipValidator } from '../../../channels/conversation-membership-validation.js';

@@ -75,7 +75,7 @@ function optionalId(value: unknown): string | null {
   return id || null;
 }
 
-const RUNTIME_EVENT_BUS_SOURCE = 'myclaw.runtime_events';
+const RUNTIME_EVENT_BUS_SOURCE = 'gantry.runtime_events';
 const RUNTIME_EVENT_BUS_VERSION = 1;
 
 export class PostgresRuntimeEventRepository implements RuntimeEventRepository {

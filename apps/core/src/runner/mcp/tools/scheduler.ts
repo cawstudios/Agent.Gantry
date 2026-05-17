@@ -192,7 +192,12 @@ export function registerSchedulerTools(server: McpServer): void {
         .describe(
           'Semantic capabilities this job needs, with optional implementation hints. These merge into required_tools as capability:<id> and pause setup if reviewed access is missing.',
         ),
-      required_tools: z.array(z.string()).optional(),
+      required_tools: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Hard run assertions, not permission hints. Missing tools pause setup for user approval; Browser also requires real browser IPC activity in every successful run. Do not include optional or fallback tools.',
+        ),
       required_mcp_servers: z.array(z.string()).optional(),
       silent: z.boolean().optional(),
       cleanup_after_ms: z.number().optional(),
@@ -399,7 +404,12 @@ export function registerSchedulerTools(server: McpServer): void {
         .describe(
           'Semantic capabilities this job needs, with optional implementation hints. These merge into required_tools as capability:<id> and pause setup if reviewed access is missing.',
         ),
-      required_tools: z.array(z.string()).optional(),
+      required_tools: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Hard run assertions, not permission hints. Missing tools pause setup for user approval; Browser also requires real browser IPC activity in every successful run. Do not include optional or fallback tools.',
+        ),
       required_mcp_servers: z.array(z.string()).optional(),
       silent: z.boolean().optional(),
       cleanup_after_ms: z.number().optional(),

@@ -15,6 +15,7 @@ describe('canonical binding repository route projection', () => {
         value: '100',
         jid: 'tg:100',
       }),
+      conversationKind: 'group',
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
@@ -34,6 +35,7 @@ describe('canonical binding repository route projection', () => {
         trigger: '@main',
         added_at: '2026-05-06T00:00:00.000Z',
         requiresTrigger: false,
+        conversationKind: 'channel',
       },
     });
     expect(JSON.parse(row.memorySubjectJson)).not.toHaveProperty('group');
@@ -48,6 +50,7 @@ describe('canonical binding repository route projection', () => {
       threadId: null,
       status: 'active',
       conversationExternalRefJson: JSON.stringify({ jid: 'tg:100' }),
+      conversationKind: 'group',
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
@@ -78,6 +81,7 @@ describe('canonical binding repository route projection', () => {
       threadId: null,
       status: 'active',
       conversationExternalRefJson: JSON.stringify({ jid: 'sl:C123' }),
+      conversationKind: 'group',
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
@@ -101,5 +105,41 @@ describe('canonical binding repository route projection', () => {
       thinking: { mode: 'enabled', effort: 'high' },
       timeout: 120000,
     });
+  });
+
+  it('preserves direct and channel route kind for memory scope after restart', () => {
+    const directRow = {
+      id: 'conversation-route:tg:5759865942',
+      agentId: 'agent:main_agent',
+      conversationId: 'conversation:tg:5759865942',
+      threadId: null,
+      status: 'active',
+      conversationExternalRefJson: JSON.stringify({ jid: 'tg:5759865942' }),
+      conversationKind: 'direct',
+      memorySubjectJson: JSON.stringify({
+        kind: 'conversation',
+        appId: 'default',
+        conversationId: 'conversation:tg:5759865942',
+      }),
+      displayName: 'Main Agent',
+      triggerPattern: '@main',
+      requiresTrigger: false,
+      createdAt: '2026-05-06T00:00:00.000Z',
+    };
+    const channelRow = {
+      ...directRow,
+      id: 'conversation-route:tg:-1003986348737',
+      conversationId: 'conversation:tg:-1003986348737',
+      conversationExternalRefJson: JSON.stringify({
+        jid: 'tg:-1003986348737',
+      }),
+      conversationKind: 'group',
+      displayName: 'Main Agent Telegram Group',
+    };
+
+    expect(bindingRowToGroup(directRow)?.group.conversationKind).toBe('dm');
+    expect(bindingRowToGroup(channelRow)?.group.conversationKind).toBe(
+      'channel',
+    );
   });
 });

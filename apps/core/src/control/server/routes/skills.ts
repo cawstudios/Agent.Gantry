@@ -6,7 +6,7 @@ import {
   RejectSkillDraftRequestSchema,
   UpdateAgentSkillBindingRequestSchema,
   UploadSkillDraftContextSchema,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 
 import { SkillDraftService } from '../../../application/skills/skill-draft-service.js';
 import { getRuntimeStorage } from '../../../adapters/storage/postgres/runtime-store.js';

@@ -4,27 +4,27 @@ import path from 'path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const previousIpcDir = process.env.MYCLAW_IPC_DIR;
-const previousAdminTools = process.env.MYCLAW_ADMIN_MCP_TOOLS_JSON;
-const previousMcpTools = process.env.MYCLAW_MCP_TOOL_NAMES_JSON;
+const previousIpcDir = process.env.GANTRY_IPC_DIR;
+const previousAdminTools = process.env.GANTRY_ADMIN_MCP_TOOLS_JSON;
+const previousMcpTools = process.env.GANTRY_MCP_TOOL_NAMES_JSON;
 const tempRoots: string[] = [];
 
 afterEach(() => {
   vi.resetModules();
   if (previousIpcDir === undefined) {
-    delete process.env.MYCLAW_IPC_DIR;
+    delete process.env.GANTRY_IPC_DIR;
   } else {
-    process.env.MYCLAW_IPC_DIR = previousIpcDir;
+    process.env.GANTRY_IPC_DIR = previousIpcDir;
   }
   if (previousAdminTools === undefined) {
-    delete process.env.MYCLAW_ADMIN_MCP_TOOLS_JSON;
+    delete process.env.GANTRY_ADMIN_MCP_TOOLS_JSON;
   } else {
-    process.env.MYCLAW_ADMIN_MCP_TOOLS_JSON = previousAdminTools;
+    process.env.GANTRY_ADMIN_MCP_TOOLS_JSON = previousAdminTools;
   }
   if (previousMcpTools === undefined) {
-    delete process.env.MYCLAW_MCP_TOOL_NAMES_JSON;
+    delete process.env.GANTRY_MCP_TOOL_NAMES_JSON;
   } else {
-    process.env.MYCLAW_MCP_TOOL_NAMES_JSON = previousMcpTools;
+    process.env.GANTRY_MCP_TOOL_NAMES_JSON = previousMcpTools;
   }
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
@@ -32,9 +32,9 @@ afterEach(() => {
 });
 
 function setIpcDir(): void {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-mcp-parity-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-mcp-parity-'));
   tempRoots.push(root);
-  process.env.MYCLAW_IPC_DIR = root;
+  process.env.GANTRY_IPC_DIR = root;
 }
 
 describe('MCP server registry handler parity', () => {
@@ -70,12 +70,12 @@ describe('MCP server registry handler parity', () => {
 
   it('checks handler parity before returning the MCP server', async () => {
     setIpcDir();
-    process.env.MYCLAW_ADMIN_MCP_TOOLS_JSON = JSON.stringify([
+    process.env.GANTRY_ADMIN_MCP_TOOLS_JSON = JSON.stringify([
       'service_restart',
     ]);
-    const { createMyClawMcpServer } =
+    const { createGantryMcpServer } =
       await import('@core/runner/mcp/server.js');
 
-    expect(() => createMyClawMcpServer()).not.toThrow();
+    expect(() => createGantryMcpServer()).not.toThrow();
   });
 });

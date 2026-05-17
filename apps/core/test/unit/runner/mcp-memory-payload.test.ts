@@ -45,8 +45,8 @@ describe('memory MCP payload helpers', () => {
 describe('memory MCP tool schema', () => {
   it('advertises only canonical memory_save kinds', async () => {
     vi.resetModules();
-    const originalIpcDir = process.env.MYCLAW_IPC_DIR;
-    process.env.MYCLAW_IPC_DIR = '/tmp/myclaw-mcp-memory-schema-test';
+    const originalIpcDir = process.env.GANTRY_IPC_DIR;
+    process.env.GANTRY_IPC_DIR = '/tmp/gantry-mcp-memory-schema-test';
     try {
       const { registerMemoryTools } =
         await import('@core/runner/mcp/tools/memory.js');
@@ -84,9 +84,9 @@ describe('memory MCP tool schema', () => {
       expect(schemas.has('continuity_summary')).toBe(true);
     } finally {
       if (originalIpcDir === undefined) {
-        delete process.env.MYCLAW_IPC_DIR;
+        delete process.env.GANTRY_IPC_DIR;
       } else {
-        process.env.MYCLAW_IPC_DIR = originalIpcDir;
+        process.env.GANTRY_IPC_DIR = originalIpcDir;
       }
       vi.resetModules();
     }

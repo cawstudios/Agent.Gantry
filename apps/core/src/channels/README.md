@@ -1,4 +1,4 @@
-# MyClaw Provider Transport Adapters
+# Gantry Provider Transport Adapters
 
 This directory is still named `channels` for the transport-adapter layer, but
 product and settings code must use the canonical vocabulary:

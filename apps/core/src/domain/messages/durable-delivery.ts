@@ -1,5 +1,5 @@
 const AMBIGUOUS_DURABLE_DELIVERY_BRAND = Symbol(
-  'myclaw.ambiguousDurableDelivery',
+  'gantry.ambiguousDurableDelivery',
 );
 
 type BrandedAmbiguousDurableDeliveryError = Error & {

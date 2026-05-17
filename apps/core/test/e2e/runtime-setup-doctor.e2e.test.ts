@@ -13,7 +13,7 @@ afterEach(() => {
 
 function makeFixture() {
   const fixture = createRuntimeHomeFixture({
-    prefix: 'myclaw-cli-lifecycle-',
+    prefix: 'gantry-cli-lifecycle-',
     mutateSettings(settings) {
       settings.providers.slack = {
         enabled: true,
@@ -32,7 +32,7 @@ function makeFixture() {
         'https://broker.example.com/anthropic';
     },
     env: {
-      MYCLAW_DATABASE_URL: 'postgres://myclaw:pass@localhost:15432/myclaw',
+      GANTRY_DATABASE_URL: 'postgres://gantry:pass@localhost:15432/gantry',
       SLACK_APP_TOKEN: 'xapp-isolated',
       SLACK_BOT_TOKEN: 'xoxb-isolated',
     },
@@ -153,7 +153,7 @@ describe('runtime setup and doctor CLI e2e', () => {
   it('runs doctor against an isolated runtime home without using real credential files', async () => {
     const fixture = makeFixture();
     vi.stubEnv('HOME', `${fixture.runtimeHome}/fake-home`);
-    vi.stubEnv('MYCLAW_HOME', fixture.runtimeHome);
+    vi.stubEnv('GANTRY_HOME', fixture.runtimeHome);
 
     const { main, note } = await loadCliWithBoundaryMocks();
     const code = await main(['--runtime-home', fixture.runtimeHome, 'doctor']);
@@ -169,7 +169,7 @@ describe('runtime setup and doctor CLI e2e', () => {
 
   it('fails wrong-lane process credentials with a plain-English doctor message', async () => {
     const fixture = makeFixture();
-    vi.stubEnv('MYCLAW_HOME', fixture.runtimeHome);
+    vi.stubEnv('GANTRY_HOME', fixture.runtimeHome);
     vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ambient-anthropic');
 
     const { main, note } = await loadCliWithBoundaryMocks();

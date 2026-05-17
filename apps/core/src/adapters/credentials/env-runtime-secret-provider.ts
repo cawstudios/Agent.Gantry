@@ -6,7 +6,7 @@ import type {
   RuntimeSecretProvider,
   RuntimeSecretRef,
 } from '../../domain/ports/runtime-secret-provider.js';
-import { getMyclawHome } from '../../shared/myclaw-home.js';
+import { getGantryHome } from '../../shared/gantry-home.js';
 
 let cachedRuntimeEnv:
   | {
@@ -26,7 +26,7 @@ function isForbiddenRuntimeSecretEnvName(key: string): boolean {
 }
 
 function readRuntimeHomeEnvValues(): Map<string, string> {
-  const envPath = path.join(getMyclawHome(), '.env');
+  const envPath = path.join(getGantryHome(), '.env');
   try {
     const stat = fs.statSync(envPath);
     if (

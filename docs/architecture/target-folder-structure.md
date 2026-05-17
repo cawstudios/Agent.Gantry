@@ -1,6 +1,6 @@
 # Target Folder Structure
 
-This document defines the source layout MyClaw should converge on while moving
+This document defines the source layout Gantry should converge on while moving
 from the current implementation to the canonical platform architecture. It is a
 target for future code movement, not a statement that the repository already
 fully matches the layout.
@@ -176,7 +176,7 @@ runtime-only implementation details.
 
 This package is the integration boundary for control API clients, the
 server-side SDK, Web UI applications, and external NestJS/NextJS integrations.
-Those consumers should import DTOs and schemas from `@myclaw/contracts`, not
+Those consumers should import DTOs and schemas from `@gantry/contracts`, not
 from runtime, adapters, Postgres, channel, or provider-specific source paths.
 
 ### `packages/sdk/`

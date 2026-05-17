@@ -1,6 +1,6 @@
-# Getting Started with MyClaw Factory Mode
+# Getting Started with Gantry Factory Mode
 
-MyClaw factory mode is a doc-driven harness for planning, decomposition, implementation, testing, and review automation inside this repo.
+Gantry factory mode is a doc-driven harness for planning, decomposition, implementation, testing, and review automation inside this repo.
 
 ---
 
@@ -18,10 +18,10 @@ MyClaw factory mode is a doc-driven harness for planning, decomposition, impleme
 
 ## Use In This Repo
 
-You can run factory mode directly from the MyClaw repository root.
+You can run factory mode directly from the Gantry repository root.
 
 ```bash
-cd /path/to/myclaw
+cd /path/to/gantry
 python3 .codex/scripts/stage_orchestrator.py
 ```
 

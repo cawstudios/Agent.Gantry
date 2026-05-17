@@ -1,6 +1,6 @@
 # Memory And Dreaming
 
-MyClaw memory is app-grade runtime state. Personal setup is just the default
+Gantry memory is app-grade runtime state. Personal setup is just the default
 single-app case; SDK and channel usage use the same model.
 
 ## Boundary Model
@@ -15,7 +15,7 @@ Every memory record has:
 Boundary names are provider-neutral:
 
 - `userId` is the human actor when the provider exposes one.
-- `groupId` is the logical MyClaw/app group or configured agent group. It is not
+- `groupId` is the logical Gantry/app group or configured agent group. It is not
   limited to Telegram groups.
 - `channelId` is the external conversation where the bot is present: Telegram
   private/group/supergroup chat, Slack channel/DM/MPIM, Microsoft Teams
@@ -89,7 +89,7 @@ zero vectors.
 `compact_summary` and `PostCompact` behavior are not part of the current
 runtime. `/compact` and observed SDK compact boundaries may capture recent
 digests and stage memory evidence, but they do not directly create active
-durable memories and MyClaw does not persist compact summaries for prompt
+durable memories and Gantry does not persist compact summaries for prompt
 replay.
 
 Embedding work is scoped to dreaming promotion/update workflows. Runtime recall
@@ -236,8 +236,8 @@ admin memory scope.
 | Postgres/runtime projection | Changed | `memory_items` is the canonical durable item table; `memory_review_requests` stores pending review proposals and decisions. |
 | Control API | Changed | Memory save/search/list/patch/delete and dreaming routes operate over the app-bound memory service. |
 | SDK/contracts | Changed | Server-side SDK memory methods are the API-first management surface. |
-| CLI | Read-only/observable | `myclaw memory-status`, `status`, and `doctor` report memory, embeddings, dreaming, and vector inactivity; they do not manage memory items. |
-| MyClaw MCP tools/admin skill | Changed | Agent tools can search, save, request reviewed memory changes, list pending memory reviews, and apply review decisions through host IPC/MCP. |
+| CLI | Read-only/observable | `gantry memory-status`, `status`, and `doctor` report memory, embeddings, dreaming, and vector inactivity; they do not manage memory items. |
+| Gantry MCP tools/admin skill | Changed | Agent tools can search, save, request reviewed memory changes, list pending memory reviews, and apply review decisions through host IPC/MCP. |
 | Channel/provider adapters | Unchanged by design | Channels only provide source identity and conversation scope; memory storage stays channel-neutral. |
 | Docs/prompts | Changed | Active docs must state flattened memory items, lexical retrieval, inactive vector retrieval, and no compact-summary replay. |
 | Audit/events | Changed | Evidence, recall, dream run, dream decision, review proposal, reviewer decision, and apply outcome rows remain audit surfaces for memory lifecycle decisions. |

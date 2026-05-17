@@ -163,7 +163,7 @@ describe('semantic capability catalog validation', () => {
       projectToolCatalogItemToRuntimeRules({
         name: 'capability:acme.invoices.read',
         inputSchema: {
-          format: 'myclaw.semantic-capability.v1',
+          format: 'gantry.semantic-capability.v1',
           schema: capability,
         },
       }),

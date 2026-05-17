@@ -14,8 +14,8 @@ import {
 function usage(): string {
   return [
     'Usage:',
-    '  myclaw settings export-current',
-    '  myclaw settings drift',
+    '  gantry settings export-current',
+    '  gantry settings drift',
     '',
     'Settings are local desired state in settings.yaml. Export before enabling desired_state.authoritative.',
   ].join('\n');

@@ -109,17 +109,17 @@ export function parseControlApiKeysStrict(input: {
     try {
       parsed = JSON.parse(rawJson);
     } catch (err) {
-      throw new Error('MYCLAW_CONTROL_API_KEYS_JSON must be valid JSON.', {
+      throw new Error('GANTRY_CONTROL_API_KEYS_JSON must be valid JSON.', {
         cause: err,
       });
     }
     if (!Array.isArray(parsed)) {
-      throw new Error('MYCLAW_CONTROL_API_KEYS_JSON must be a JSON array.');
+      throw new Error('GANTRY_CONTROL_API_KEYS_JSON must be a JSON array.');
     }
     return parsed.map((entry, index) => {
       if (!isApiKeyJsonEntry(entry)) {
         throw new Error(
-          `MYCLAW_CONTROL_API_KEYS_JSON[${index}] must be an object.`,
+          `GANTRY_CONTROL_API_KEYS_JSON[${index}] must be an object.`,
         );
       }
       const kid = entry.kid?.trim() || '';
@@ -127,22 +127,22 @@ export function parseControlApiKeysStrict(input: {
       const appId = entry.appId?.trim() || '';
       if (!kid) {
         throw new Error(
-          `MYCLAW_CONTROL_API_KEYS_JSON[${index}].kid is required.`,
+          `GANTRY_CONTROL_API_KEYS_JSON[${index}].kid is required.`,
         );
       }
       if (!token) {
         throw new Error(
-          `MYCLAW_CONTROL_API_KEYS_JSON[${index}].token is required.`,
+          `GANTRY_CONTROL_API_KEYS_JSON[${index}].token is required.`,
         );
       }
       if (!isValidControlId(appId)) {
         throw new Error(
-          `MYCLAW_CONTROL_API_KEYS_JSON[${index}].appId must be a valid control id.`,
+          `GANTRY_CONTROL_API_KEYS_JSON[${index}].appId must be a valid control id.`,
         );
       }
       if (!Array.isArray(entry.scopes)) {
         throw new Error(
-          `MYCLAW_CONTROL_API_KEYS_JSON[${index}].scopes must be an array.`,
+          `GANTRY_CONTROL_API_KEYS_JSON[${index}].scopes must be an array.`,
         );
       }
       const invalidScopes = entry.scopes.filter(
@@ -150,7 +150,7 @@ export function parseControlApiKeysStrict(input: {
       );
       if (invalidScopes.length > 0) {
         throw new Error(
-          `MYCLAW_CONTROL_API_KEYS_JSON[${index}].scopes contains unsupported scope ${String(
+          `GANTRY_CONTROL_API_KEYS_JSON[${index}].scopes contains unsupported scope ${String(
             invalidScopes[0],
           )}.`,
         );

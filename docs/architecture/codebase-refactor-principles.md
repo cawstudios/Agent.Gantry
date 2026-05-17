@@ -1,6 +1,6 @@
 # Codebase Refactor Principles
 
-MyClaw is moving from a personal Anthropic/Claude SDK assistant toward a personal and enterprise agent runtime platform. This refactor must be a clean cut, not a gradual compatibility layer.
+Gantry is moving from a personal Anthropic/Claude SDK assistant toward a personal and enterprise agent runtime platform. This refactor must be a clean cut, not a gradual compatibility layer.
 
 ## Product Direction
 

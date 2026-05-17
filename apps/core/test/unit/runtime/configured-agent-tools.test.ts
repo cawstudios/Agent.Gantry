@@ -61,7 +61,7 @@ describe('configured agent tools', () => {
         appId: 'default',
         name: 'capability:acme.invoices.read',
         inputSchema: {
-          format: 'myclaw.semantic-capability.v1',
+          format: 'gantry.semantic-capability.v1',
           schema: {
             capabilityId: 'acme.invoices.read',
             displayName: 'Acme invoices read',
@@ -155,7 +155,7 @@ describe('configured agent tools', () => {
       ],
       getTool: async () => ({
         appId: 'default',
-        name: 'mcp__myclaw__browser_act',
+        name: 'mcp__gantry__browser_act',
       }),
     };
 
@@ -168,17 +168,17 @@ describe('configured agent tools', () => {
     ).rejects.toThrow('runtime projections, not durable capabilities');
   });
 
-  it('fails closed for stale active MyClaw MCP wildcard bindings', async () => {
+  it('fails closed for stale active Gantry MCP wildcard bindings', async () => {
     const repository = {
       listAgentToolBindings: async () => [
         {
           status: 'active',
-          toolId: 'tool:permission-rule:myclaw-wildcard',
+          toolId: 'tool:permission-rule:gantry-wildcard',
         },
       ],
       getTool: async () => ({
         appId: 'default',
-        name: 'mcp__myclaw__*',
+        name: 'mcp__gantry__*',
       }),
     };
 

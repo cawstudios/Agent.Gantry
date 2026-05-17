@@ -5,7 +5,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 function makeTmpRoot(roots: string[]): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-browser-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-browser-'));
   roots.push(root);
   return root;
 }

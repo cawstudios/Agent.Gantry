@@ -1,4 +1,4 @@
-# WORKFLOW.md — MyClaw Codex Factory
+# WORKFLOW.md — Gantry Codex Factory
 
 ## Source of Truth
 

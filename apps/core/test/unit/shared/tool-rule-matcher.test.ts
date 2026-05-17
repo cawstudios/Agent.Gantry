@@ -416,7 +416,7 @@ describe('autonomous tool rule matcher', () => {
     ).toMatchObject({ allowed: false });
   });
 
-  it('rejects browser and MyClaw wildcard rules at the shared matcher boundary', () => {
+  it('rejects browser and Gantry wildcard rules at the shared matcher boundary', () => {
     for (const rule of [
       'mcp__browser' + '_' + 'backend' + '__*',
       'mcp__browser' + '_' + 'backend' + '__navigate',
@@ -425,8 +425,8 @@ describe('autonomous tool rule matcher', () => {
       `${'mcp__agent'}_${'browser'}__*`,
       `mcp__${'play'}${'wright'}__click`,
       `mcp__${'pup'}${'peteer'}__screenshot`,
-      'mcp__myclaw__browser_act',
-      'mcp__myclaw__*',
+      'mcp__gantry__browser_act',
+      'mcp__gantry__*',
     ]) {
       expect(validateAutonomousToolRule(rule).ok).toBe(false);
     }
@@ -443,14 +443,14 @@ describe('autonomous tool rule matcher', () => {
     expect(
       evaluateAutonomousToolUse({
         rules: ['Browser'],
-        toolName: 'mcp__myclaw__browser_act',
+        toolName: 'mcp__gantry__browser_act',
       }),
     ).toMatchObject({ allowed: true, matchedRule: 'Browser' });
 
     expect(
       evaluateAutonomousToolUse({
         rules: ['Browser'],
-        toolName: 'mcp__myclaw__browser_fake',
+        toolName: 'mcp__gantry__browser_fake',
       }),
     ).toMatchObject({
       allowed: false,
@@ -465,7 +465,7 @@ describe('autonomous tool rule matcher', () => {
     expect(validateAutonomousToolRule('Bash(npm test').ok).toBe(false);
     expect(validateAutonomousToolRule('Bash(npm test) extra').ok).toBe(false);
     expect(
-      validateAutonomousToolRule('mcp__myclaw__*(service_restart)').ok,
+      validateAutonomousToolRule('mcp__gantry__*(service_restart)').ok,
     ).toBe(false);
   });
 });

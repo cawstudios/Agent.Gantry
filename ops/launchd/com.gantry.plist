@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.myclaw</string>
+    <string>com.gantry</string>
     <key>ProgramArguments</key>
     <array>
         <string>{{NODE_PATH}}</string>
@@ -17,7 +17,7 @@
     <true/>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>MYCLAW_HOME</key>
+        <key>GANTRY_HOME</key>
         <string>{{RUNTIME_HOME}}</string>
         <key>PATH</key>
         <string>{{HOME}}/.local/bin:{{HOME}}/.npm-global/bin:{{HOME}}/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
@@ -25,8 +25,8 @@
         <string>{{HOME}}</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>{{RUNTIME_HOME}}/logs/myclaw.log</string>
+    <string>{{RUNTIME_HOME}}/logs/gantry.log</string>
     <key>StandardErrorPath</key>
-    <string>{{RUNTIME_HOME}}/logs/myclaw.error.log</string>
+    <string>{{RUNTIME_HOME}}/logs/gantry.error.log</string>
 </dict>
 </plist>

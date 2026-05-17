@@ -4,27 +4,27 @@ import path from 'path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const previousIpcDir = process.env.MYCLAW_IPC_DIR;
-const previousChatJid = process.env.MYCLAW_CHAT_JID;
-const previousGroupFolder = process.env.MYCLAW_GROUP_FOLDER;
+const previousIpcDir = process.env.GANTRY_IPC_DIR;
+const previousChatJid = process.env.GANTRY_CHAT_JID;
+const previousGroupFolder = process.env.GANTRY_GROUP_FOLDER;
 const tempRoots: string[] = [];
 
 afterEach(() => {
   vi.resetModules();
   if (previousIpcDir === undefined) {
-    delete process.env.MYCLAW_IPC_DIR;
+    delete process.env.GANTRY_IPC_DIR;
   } else {
-    process.env.MYCLAW_IPC_DIR = previousIpcDir;
+    process.env.GANTRY_IPC_DIR = previousIpcDir;
   }
   if (previousChatJid === undefined) {
-    delete process.env.MYCLAW_CHAT_JID;
+    delete process.env.GANTRY_CHAT_JID;
   } else {
-    process.env.MYCLAW_CHAT_JID = previousChatJid;
+    process.env.GANTRY_CHAT_JID = previousChatJid;
   }
   if (previousGroupFolder === undefined) {
-    delete process.env.MYCLAW_GROUP_FOLDER;
+    delete process.env.GANTRY_GROUP_FOLDER;
   } else {
-    process.env.MYCLAW_GROUP_FOLDER = previousGroupFolder;
+    process.env.GANTRY_GROUP_FOLDER = previousGroupFolder;
   }
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
@@ -33,9 +33,9 @@ afterEach(() => {
 
 describe('scheduler MCP tools', () => {
   it('exposes supported job model aliases through scheduler_list_models', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-tools-'));
     tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
+    process.env.GANTRY_IPC_DIR = ipcDir;
     const { registerSchedulerTools } =
       await import('../../../../src/runner/mcp/tools/scheduler.js');
     const tools = new Map<
@@ -66,9 +66,9 @@ describe('scheduler MCP tools', () => {
   });
 
   it('delegates scheduler_list_models rendering to the model catalog formatter', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-tools-'));
     tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
+    process.env.GANTRY_IPC_DIR = ipcDir;
     const formatModelCatalog = vi.fn(() => 'mocked model catalog output');
     vi.doMock('../../../../src/shared/model-catalog.js', () => ({
       formatModelCatalog,
@@ -99,9 +99,9 @@ describe('scheduler MCP tools', () => {
   });
 
   it('allows scheduler_update_job to clear explicit model selection', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-tools-'));
     tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
+    process.env.GANTRY_IPC_DIR = ipcDir;
     const { registerSchedulerTools } =
       await import('../../../../src/runner/mcp/tools/scheduler.js');
     const schemas = new Map<
@@ -238,9 +238,9 @@ describe('scheduler MCP tools', () => {
   });
 
   it('writes scheduler capability requirements for update mutations', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-tools-'));
     tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
+    process.env.GANTRY_IPC_DIR = ipcDir;
     const waitForTaskResponse = vi.fn(async () => ({ ok: true }));
     const writeIpcFile = vi.fn();
     vi.doMock('../../../../src/runner/mcp/ipc.js', () => ({
@@ -316,9 +316,9 @@ describe('scheduler MCP tools', () => {
   });
 
   it('passes five-minute scheduler event waits through to host IPC', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-tools-'));
     tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
+    process.env.GANTRY_IPC_DIR = ipcDir;
     const waitForTaskResponse = vi.fn(async () => ({
       ok: true,
       data: { events: [] },
@@ -371,11 +371,11 @@ describe('scheduler MCP tools', () => {
   });
 
   it('returns an explain-before-confirm scheduler upsert plan without writing IPC', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-tools-'));
     tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
-    process.env.MYCLAW_CHAT_JID = 'tg:team';
-    process.env.MYCLAW_GROUP_FOLDER = 'team';
+    process.env.GANTRY_IPC_DIR = ipcDir;
+    process.env.GANTRY_CHAT_JID = 'tg:team';
+    process.env.GANTRY_GROUP_FOLDER = 'team';
     const waitForTaskResponse = vi.fn(async () => ({ ok: true }));
     const writeIpcFile = vi.fn();
     vi.doMock('../../../../src/runner/mcp/ipc.js', () => ({
@@ -432,6 +432,9 @@ describe('scheduler MCP tools', () => {
       '- Required capabilities: Google Sheets write using gog',
     );
     expect(response.content[0].text).toContain('- Required tools: Browser');
+    expect(response.content[0].text).toContain(
+      'Browser in required_tools means every successful run must perform real browser IPC activity',
+    );
     expect(response.content[0].text).toContain('- Network:');
     expect(response.content[0].text).toContain('- Memory:');
     expect(response.content[0].text).toContain('- Runtime:');
@@ -440,11 +443,11 @@ describe('scheduler MCP tools', () => {
   });
 
   it('writes canonical executionContext and notificationRoutes for confirmed target shortcuts', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-tools-'));
     tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
-    process.env.MYCLAW_CHAT_JID = 'tg:team';
-    process.env.MYCLAW_GROUP_FOLDER = 'team';
+    process.env.GANTRY_IPC_DIR = ipcDir;
+    process.env.GANTRY_CHAT_JID = 'tg:team';
+    process.env.GANTRY_GROUP_FOLDER = 'team';
     const waitForTaskResponse = vi.fn(async () => ({ ok: true }));
     const writeIpcFile = vi.fn();
     vi.doMock('../../../../src/runner/mcp/ipc.js', () => ({
@@ -529,9 +532,9 @@ describe('scheduler MCP tools', () => {
   });
 
   it('rejects unsupported scheduler mutation fields before writing IPC tasks', async () => {
-    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-tools-'));
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-tools-'));
     tempRoots.push(ipcDir);
-    process.env.MYCLAW_IPC_DIR = ipcDir;
+    process.env.GANTRY_IPC_DIR = ipcDir;
     const writeIpcFile = vi.fn();
     vi.doMock('../../../../src/runner/mcp/ipc.js', () => ({
       waitForTaskResponse: vi.fn(),
@@ -610,7 +613,7 @@ describe('scheduler MCP tools', () => {
           toolAccess: {
             inheritedAgentTools: ['Browser'],
             effectiveAllowedTools: ['Browser'],
-            projectedRuntimeTools: ['mcp__myclaw__browser_act'],
+            projectedRuntimeTools: ['mcp__gantry__browser_act'],
           },
           health: {
             state: 'needs_permission',

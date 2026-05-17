@@ -45,7 +45,7 @@ Important constraints:
 - First-run channel setup creates one default user-facing agent named by `settings.yaml agent.name`; chat IDs and `main_agent` are internal routing conventions, not privilege surfaces.
 - `/new` clears persisted session state but preserves the group model override.
 - Transcript archive during `/new` is best-effort and must not block reset success.
-- Durable memory lives under the configured memory root; do not load `~/myclaw/agents/<folder>/memory/`.
+- Durable memory lives under the configured memory root; do not load `~/gantry/agents/<folder>/memory/`.
 - Live channel turns must persist the provider SDK session ID as soon as the runner streams it. Do not wait for runner shutdown; launchd restarts can kill an active run before final completion.
 - Progress/status messages for long-lived live runs are per user-visible turn: reset elapsed timers and progress generations when continuation input is piped, and do not send follow-up progress from the polling loop.
 - Scheduler notification routes are lifecycle/outcome routes. Do not stream or fallback-deliver raw assistant output to them; send one concise terminal outcome message unless the job is silent.
@@ -116,21 +116,21 @@ Important constraints:
 - Teams is a first-class channel. Use `teams:` conversation IDs, Teams runtime secrets through `RuntimeSecretProvider`, and Adaptive Card `Action.Execute` approval flows.
 - Runtime bootstrap code must not call `getRuntimeStorage()` while constructing wiring objects before `runStartup()` initializes storage. Pass lazy repository accessors or instantiate storage-backed services inside request handlers after startup.
 - Runtime queue concurrency and retry policy belongs under `runtime.queue` in `settings.yaml` and should be injected into `GroupQueue`; tests should not depend on hard-coded queue timing or concurrency defaults.
-- Agents must use `send_message`, `ask_user_question`, `request_skill_install`, `request_skill_proposal`, `request_skill_dependency_install`, `request_mcp_server`, `capability_search`, `request_capability`, `propose_local_cli_capability`, `manage_capability`, `request_permission`, `service_restart`, and `register_agent` instead of direct installs, config edits, or legacy tool-enable guidance. Permission prompts use the simple user choices `Allow once`, `Allow 5 min`, `Always allow`, and `Cancel`; Details and audit records carry the durable authority shape such as semantic capabilities, canonical `Browser`, exact `mcp__myclaw__<admin_tool>`, or scoped `Bash(<literal command prefix pattern>)`. Broad exact SDK/native tools, exact third-party MCP tools, bare persistent `Bash`, `Bash(*)`, and leading-wildcard Bash scopes are not durable `request_permission` authority. User-defined `local_cli` capabilities are reviewable drafts until runtime enforcement verifies executable identity, preflight, protected paths, and denied environment overrides.
+- Agents must use `send_message`, `ask_user_question`, `request_skill_install`, `request_skill_proposal`, `request_skill_dependency_install`, `request_mcp_server`, `capability_search`, `request_capability`, `propose_local_cli_capability`, `manage_capability`, `request_permission`, `service_restart`, and `register_agent` instead of direct installs, config edits, or legacy tool-enable guidance. Permission prompts use the simple user choices `Allow once`, `Allow 5 min`, `Always allow`, and `Cancel`; Details and audit records carry the durable authority shape such as semantic capabilities, canonical `Browser`, exact `mcp__gantry__<admin_tool>`, or scoped `Bash(<literal command prefix pattern>)`. Broad exact SDK/native tools, exact third-party MCP tools, bare persistent `Bash`, `Bash(*)`, and leading-wildcard Bash scopes are not durable `request_permission` authority. User-defined `local_cli` capabilities are reviewable drafts until runtime enforcement verifies executable identity, preflight, protected paths, and denied environment overrides.
 - Prefer semantic capability requests (`capability_search`, `request_capability`, `propose_local_cli_capability`, and `manage_capability`) for app/tool access such as Google Sheets, Gmail, or business CLIs. Fall back to raw scoped `Bash(...)` only for one-off exact commands or when no reviewed semantic capability exists.
 - Scheduler job `local_cli` requirements must include an absolute `executablePath`; `commandTemplate` and any `authPreflight` must start with that exact executable path. Runtime setup may request the generated scoped Bash rule such as `Bash(/usr/local/bin/gog sheets append *)` for that job, but must not convert it into the generic semantic capability or a broad CLI rule.
 - `SandboxNetworkAccess` is an SDK-internal defense-in-depth prompt, never durable authority. Suppress it only with a short-lived run-local token created by an already-approved tool call with a matching parent tool-use id, or while the same agent/conversation has an active eligible-tools/SDK-API-prompt timed grant; persist only the scoped Bash rule, canonical Browser grant, exact admin MCP tool, or semantic capability instead.
 - `permissions.yolo_mode` is a root settings safety valve for the 5-minute all-tools timed grant. User entries merge with shipped defaults; denylist hits skip timed-grant bypass, write audit, and re-prompt unless `enabled: false`.
 - Egress policy is runtime-owned and provider-neutral. Model credential brokers such as OneCLI may supply an upstream proxy, but the runner should see the Gantry loopback egress gateway; `permissions.egress.denylist` is an optional hostname-glob denylist, default egress is allow, and every CONNECT decision must be audited.
 - Browser grants persist only as canonical `Browser`. Runtime projects that capability into Gantry-owned gateway tools (`browser_status`, `browser_open`, `browser_inspect`, `browser_act`, and `browser_close`) with Gantry-owned schemas. Private browser backend details are internal implementation details. Do not persist or expose per-action browser tool names as durable authority.
-- The control API is part of the runtime process. launchd/systemd service definitions should stay secret-free; `MYCLAW_CONTROL_API_KEYS_JSON`, `MYCLAW_CONTROL_PORT`, and `MYCLAW_CONTROL_SOCKET_PATH` belong in process env or the runtime `.env`. Control API keys must include explicit `kid`, `token`, `appId`, and `scopes`.
+- The control API is part of the runtime process. launchd/systemd service definitions should stay secret-free; `GANTRY_CONTROL_API_KEYS_JSON`, `GANTRY_CONTROL_PORT`, and `GANTRY_CONTROL_SOCKET_PATH` belong in process env or the runtime `.env`. Control API keys must include explicit `kid`, `token`, `appId`, and `scopes`.
 - Don't fight errors! Whenever you encounter the same error twice, research the web and find 3-5 possible ways to fix it. Then choose the most efficient solution and implement it.
 
 ## Docs Rules
 
 - User-facing and project-facing docs must use `Gantry` naming.
 - Existing code identifiers, package names, CLI binaries, environment variables,
-  paths, MCP tool names, and database schema names that still contain `myclaw`
+  paths, MCP tool names, and database schema names that still contain `gantry`
   are literal implementation names until an explicit rename task changes them.
   Do not rewrite those literals casually in docs or tests.
 - Do not reintroduce legacy branding in active docs or instructions.
@@ -145,13 +145,13 @@ Important constraints:
 - Run the smallest relevant checks after each change.
 - Run full checks at the end of a phase.
 - For Postgres-backed verification, use a disposable Docker Postgres container
-  for each task instead of the developer's persistent `~/myclaw/postgres` data.
+  for each task instead of the developer's persistent `~/gantry/postgres` data.
   The disposable database must enable the same bootstrap extensions as local
   Compose before migrations run: `CREATE EXTENSION IF NOT EXISTS vector;` and
   `CREATE EXTENSION IF NOT EXISTS pg_trgm;`. Point tests at it with
-  `MYCLAW_TEST_DATABASE_URL`, then stop/remove the container after the check.
-- Before validating `~/myclaw`, build/restart from this checkout, confirm `myclaw status`, and treat older generated logs/state as stale.
-- Archive stale generated state under `~/myclaw/cleanup-archive/<timestamp>/`; keep secrets, settings, Postgres, OneCLI data, artifacts, and active agent folders unless reset is requested.
+  `GANTRY_TEST_DATABASE_URL`, then stop/remove the container after the check.
+- Before validating `~/gantry`, build/restart from this checkout, confirm `gantry status`, and treat older generated logs/state as stale.
+- Archive stale generated state under `~/gantry/cleanup-archive/<timestamp>/`; keep secrets, settings, Postgres, OneCLI data, artifacts, and active agent folders unless reset is requested.
 - Architecture exceptions must be time-bounded ratchets with max counts; never relax the checker globally to hide new debt.
 - For replacement or cutover work, include a cleanup verification step that searches for stale active references and records the result before final response or PR handoff.
 - Use [docs/architecture/current-verification-commands.md](docs/architecture/current-verification-commands.md) as the command reference.

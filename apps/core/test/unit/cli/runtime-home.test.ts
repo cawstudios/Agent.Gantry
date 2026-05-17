@@ -20,19 +20,19 @@ describe('resolveRuntimeHome', () => {
 
   it('expands "~/" prefixes to a path under home', () => {
     vi.spyOn(os, 'homedir').mockReturnValue('/tmp/test-home');
-    expect(resolveRuntimeHome('~/myclaw')).toBe(
-      path.resolve('/tmp/test-home/myclaw'),
+    expect(resolveRuntimeHome('~/gantry')).toBe(
+      path.resolve('/tmp/test-home/gantry'),
     );
   });
 
   it('preserves non-home-tilde patterns', () => {
     vi.spyOn(os, 'homedir').mockReturnValue('/tmp/test-home');
-    expect(resolveRuntimeHome('~other-user/myclaw')).toBe(
-      path.resolve('~other-user/myclaw'),
+    expect(resolveRuntimeHome('~other-user/gantry')).toBe(
+      path.resolve('~other-user/gantry'),
     );
   });
 
-  it('uses ~/myclaw as the canonical default runtime home', () => {
-    expect(path.basename(DEFAULT_RUNTIME_HOME)).toBe('myclaw');
+  it('uses ~/gantry as the canonical default runtime home', () => {
+    expect(path.basename(DEFAULT_RUNTIME_HOME)).toBe('gantry');
   });
 });

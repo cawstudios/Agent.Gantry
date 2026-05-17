@@ -2,7 +2,7 @@
 
 ## Context
 
-Sidecar systems need to push work into MyClaw without holding a control API key.
+Sidecar systems need to push work into Gantry without holding a control API key.
 The existing `/v1/webhooks` surface already means host-owned outbound callback
 delivery for runtime events.
 
@@ -21,7 +21,7 @@ delivery for runtime events.
    conversations, jobs, or templates.
 7. `/v1/webhooks` remains outbound callback registration, retry, dead-letter,
    replay, and purge only.
-8. Job-template ingress uses MyClaw-owned templates. Callers supply variables and
+8. Job-template ingress uses Gantry-owned templates. Callers supply variables and
    metadata, not arbitrary prompt, model, or schedule.
 
 ## Consequences

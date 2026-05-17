@@ -27,7 +27,7 @@ import { snapshotPage } from '@core/adapters/browser/browser-direct-page-actions
 const tempRoots: string[] = [];
 
 function tempRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-browser-direct-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-browser-direct-'));
   tempRoots.push(root);
   return root;
 }
@@ -219,7 +219,7 @@ describe('browser direct driver', () => {
       tagName: 'BUTTON',
       text: 'Old hidden button',
       rect: { width: 0, height: 0 },
-      attributes: { 'data-myclaw-ref': 'e1' },
+      attributes: { 'data-gantry-ref': 'e1' },
     });
     const newVisible = createDomElement({
       tagName: 'BUTTON',
@@ -233,7 +233,7 @@ describe('browser direct driver', () => {
           title: 'Changed controls',
           body: { innerText: 'New visible button' },
           querySelectorAll: vi.fn((selector: string) =>
-            selector === '[data-myclaw-ref]'
+            selector === '[data-gantry-ref]'
               ? [oldHidden]
               : [oldHidden, newVisible],
           ),
@@ -252,10 +252,10 @@ describe('browser direct driver', () => {
 
     const output = await snapshotPage(page as never, {});
 
-    expect(oldHidden.removeAttribute).toHaveBeenCalledWith('data-myclaw-ref');
-    expect(oldHidden.attributeValue('data-myclaw-ref')).toBeUndefined();
+    expect(oldHidden.removeAttribute).toHaveBeenCalledWith('data-gantry-ref');
+    expect(oldHidden.attributeValue('data-gantry-ref')).toBeUndefined();
     expect(newVisible.setAttribute).toHaveBeenCalledWith(
-      'data-myclaw-ref',
+      'data-gantry-ref',
       'e1',
     );
     expect(output).toContain('- e1: button "New visible button"');

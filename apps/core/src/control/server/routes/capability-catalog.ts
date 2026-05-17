@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { AgentCapabilitiesRequestSchema } from '@myclaw/contracts';
+import { AgentCapabilitiesRequestSchema } from '@gantry/contracts';
 
 import { AgentCapabilityAdministrationService } from '../../../application/agents/agent-capability-administration-service.js';
 import { ApplicationError } from '../../../application/common/application-error.js';

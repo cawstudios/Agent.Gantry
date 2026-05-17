@@ -17,11 +17,11 @@ const PROFILE_CONTEXT_FILENAME = ['CLAU', 'DE.md'].join('');
 const PROMPT_PROFILE_SCOPE = 'prompt-profile';
 const DEFAULT_PROMPT_PROFILE_APP_ID = 'default';
 const SOUL_FILENAME = 'SOUL.md';
-const SOUL_SOURCE = 'myclaw://soul';
-const PERSONA_SOURCE = 'myclaw://persona';
-const CAPABILITY_GUIDANCE_SOURCE = 'myclaw://capability-guidance';
-const OPERATING_GUIDANCE_SOURCE = 'myclaw://operating-guidance';
-const GROUP_CONTEXT_SOURCE = 'myclaw://group-context';
+const SOUL_SOURCE = 'gantry://soul';
+const PERSONA_SOURCE = 'gantry://persona';
+const CAPABILITY_GUIDANCE_SOURCE = 'gantry://capability-guidance';
+const OPERATING_GUIDANCE_SOURCE = 'gantry://operating-guidance';
+const GROUP_CONTEXT_SOURCE = 'gantry://group-context';
 const AGENT_FOLDER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const RESERVED_AGENT_FOLDERS = new Set(['global', 'shared']);
 
@@ -39,11 +39,11 @@ export const DEFAULT_PROMPT_SECTION_BUDGETS: Readonly<
 export const DEFAULT_PROMPT_TOTAL_BUDGET = 26000;
 
 const RUNTIME_RULES_BLOCK = [
-  '# MyClaw Runtime Rules',
-  '- Follow MyClaw safety and execution constraints exactly.',
+  '# Gantry Runtime Rules',
+  '- Follow Gantry safety and execution constraints exactly.',
   '- Keep static profile behavior separate from query-retrieved memory context.',
   '- Treat group boundaries as strict isolation boundaries unless explicitly overridden by host policy.',
-  '- Use MyClaw request tools for capability and settings changes; never install dependencies or edit skills, MCP, settings, or permission config directly.',
+  '- Use Gantry request tools for capability and settings changes; never install dependencies or edit skills, MCP, settings, or permission config directly.',
 ].join('\n');
 
 function personaPrompt(persona: AgentPersona): string {
@@ -96,7 +96,7 @@ function personaPrompt(persona: AgentPersona): string {
 function capabilityGuidancePrompt(persona: AgentPersona): string {
   const baseline = [
     '# Capability guidance',
-    '- Memory is baseline for every persona. Browser control is available only when the canonical Browser capability is selected, through MyClaw-owned browser_* tools.',
+    '- Memory is baseline for every persona. Browser control is available only when the canonical Browser capability is selected, through Gantry-owned browser_* tools.',
     '- Memory tools store durable evidence only; temporary task state does not belong in memory.',
     '- Generic Agent delegation is available for bounded subtasks. Write a clear prompt with goal, context, constraints, and expected output.',
     '- Do not delegate risky execution, secret handling, config edits, permission changes, or work requiring tools the parent run cannot use.',
@@ -274,7 +274,7 @@ export class PromptProfileService {
 
     const runtimeRules = makeSection(
       'RUNTIME_RULES',
-      'myclaw://runtime-rules',
+      'gantry://runtime-rules',
       RUNTIME_RULES_BLOCK,
       this.sectionBudgets.RUNTIME_RULES,
     );

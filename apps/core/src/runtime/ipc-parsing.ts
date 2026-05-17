@@ -1,6 +1,7 @@
-import { MEMORY_IPC_ACTIONS, MemoryIpcAction } from '@myclaw/contracts';
+import { MEMORY_IPC_ACTIONS, MemoryIpcAction } from '@gantry/contracts';
 
 import {
+  PermissionApprovalDecisionMode,
   PermissionApprovalRequest,
   PermissionApprovalUpdate,
   InteractionDescriptor,
@@ -88,6 +89,12 @@ const PERMISSION_BEHAVIORS = new Set<
 const PERMISSION_DESTINATIONS = new Set<
   NonNullable<PermissionApprovalUpdate['destination']>
 >(['userSettings', 'projectSettings', 'localSettings', 'session', 'cliArg']);
+const PERMISSION_DECISION_MODES = new Set<PermissionApprovalDecisionMode>([
+  'allow_once',
+  'allow_persistent_rule',
+  'allow_timed_grant',
+  'cancel',
+]);
 
 function sanitizeToolInputValue(value: unknown, depth: number): unknown {
   if (depth > TOOL_INPUT_MAX_DEPTH) return '[TRUNCATED_DEPTH]';
@@ -220,6 +227,19 @@ function parseClosestPermissionRule(
   const rule = toTrimmedString(raw.rule, { maxLen: 500 });
   const reason = toTrimmedString(raw.reason, { maxLen: 2000 });
   return rule && reason ? { rule, reason } : undefined;
+}
+
+function parsePermissionDecisionOptions(
+  raw: unknown,
+): PermissionApprovalDecisionMode[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const options = raw
+    .slice(0, 8)
+    .map((entry) => toTrimmedString(entry, { maxLen: 64 }))
+    .filter((entry): entry is PermissionApprovalDecisionMode =>
+      PERMISSION_DECISION_MODES.has(entry as PermissionApprovalDecisionMode),
+    );
+  return options.length ? [...new Set(options)] : undefined;
 }
 
 function parseInteractionDetails(
@@ -439,6 +459,7 @@ export function parsePermissionIpcRequest(
   const subagentType = toTrimmedString(raw.subagentType, { maxLen: 200 });
   const toolInput = sanitizeToolInput(raw.toolInput);
   const suggestions = parsePermissionApprovalUpdates(raw.suggestions);
+  const decisionOptions = parsePermissionDecisionOptions(raw.decisionOptions);
   const closestRule = parseClosestPermissionRule(raw.closestRule);
   const interaction = parseInteractionDescriptor(raw.interaction);
 
@@ -466,6 +487,7 @@ export function parsePermissionIpcRequest(
     ...(blockedPath ? { blockedPath } : {}),
     ...(toolInput ? { toolInput } : {}),
     ...(suggestions ? { suggestions } : {}),
+    ...(decisionOptions ? { decisionOptions } : {}),
     ...(interaction ? { interaction } : {}),
   };
 }

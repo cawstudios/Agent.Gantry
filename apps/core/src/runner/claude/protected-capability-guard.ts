@@ -7,5 +7,5 @@ export function denyProtectedCapabilityToolUse(
 ): string | null {
   const decision = evaluateProtectedCapabilityToolUse(toolName, input);
   if (!decision) return null;
-  return `Denied by MyClaw tool execution policy: ${decision.reason} ${decision.recoveryAction}`;
+  return `Denied by Gantry tool execution policy: ${decision.reason} ${decision.recoveryAction}`;
 }

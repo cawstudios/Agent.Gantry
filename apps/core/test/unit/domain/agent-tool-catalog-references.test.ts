@@ -15,7 +15,7 @@ describe('agent tool catalog references', () => {
           selectable: true,
           status: 'active',
           inputSchema: {
-            format: 'myclaw.semantic-capability.v1',
+            format: 'gantry.semantic-capability.v1',
             schema: {
               capabilityId: 'google.sheets.write',
               displayName: 'Google Sheets write',

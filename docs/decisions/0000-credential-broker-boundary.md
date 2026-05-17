@@ -2,7 +2,7 @@
 
 ## Context
 
-MyClaw needs to support personal and enterprise deployments. OneCLI is a good
+Gantry needs to support personal and enterprise deployments. OneCLI is a good
 default credential broker for local and personal mode because it gives agents
 brokered model access without placing raw model-provider credentials in the
 runtime `.env`.

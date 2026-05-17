@@ -13,21 +13,21 @@ createClient({
 
 ## Local Service Transport
 
-The Control API is part of the main MyClaw runtime process. On macOS, the
+The Control API is part of the main Gantry runtime process. On macOS, the
 `launchctl` service starts that runtime, so the API comes up with the same
 LaunchAgent.
 
-Control API settings are read from process env and from `~/myclaw/.env`:
+Control API settings are read from process env and from `~/gantry/.env`:
 
 ```env
-MYCLAW_CONTROL_API_KEYS_JSON=[{"kid":"local-admin","token":"dev-key","appId":"default","scopes":["sessions:read","sessions:write","jobs:read","jobs:write","providers:read","providers:admin","conversations:read","conversations:admin","messages:read","agents:admin","skills:read","skills:admin","mcp:read","mcp:admin","webhooks:read","webhooks:write","ingresses:read","ingresses:write","memory:read","memory:admin"]}]
-MYCLAW_CONTROL_PORT=8787
+GANTRY_CONTROL_API_KEYS_JSON=[{"kid":"local-admin","token":"dev-key","appId":"default","scopes":["sessions:read","sessions:write","jobs:read","jobs:write","providers:read","providers:admin","conversations:read","conversations:admin","messages:read","agents:admin","skills:read","skills:admin","mcp:read","mcp:admin","webhooks:read","webhooks:write","ingresses:read","ingresses:write","memory:read","memory:admin"]}]
+GANTRY_CONTROL_PORT=8787
 ```
 
-`MYCLAW_CONTROL_PORT` is optional. Without it, the local SDK and CLI use the
-Unix socket at `~/myclaw/run/control.sock`. Do not put control API secrets in
-the launchd plist; keep the plist limited to `MYCLAW_HOME`, `HOME`, and `PATH`.
-Every Control API token must be listed in `MYCLAW_CONTROL_API_KEYS_JSON` with
+`GANTRY_CONTROL_PORT` is optional. Without it, the local SDK and CLI use the
+Unix socket at `~/gantry/run/control.sock`. Do not put control API secrets in
+the launchd plist; keep the plist limited to `GANTRY_HOME`, `HOME`, and `PATH`.
+Every Control API token must be listed in `GANTRY_CONTROL_API_KEYS_JSON` with
 an explicit `kid`, `token`, `appId`, and `scopes` array.
 
 ## Settings
@@ -35,7 +35,7 @@ an explicit `kid`, `token`, `appId`, and `scopes` array.
 The typed settings API is diagnostic/read-only for local personal mode. It
 exposes the public non-secret desired-state view but does not accept runtime
 configuration mutations. Human operators may use CLI commands or edit
-`settings.yaml` directly; agents must use selected MyClaw admin tools such as
+`settings.yaml` directly; agents must use selected Gantry admin tools such as
 `settings_desired_state` and `request_settings_update` so changes are reviewed,
 validated, synced, and audited.
 
@@ -47,7 +47,7 @@ client.settings.get();
 
 ## Capability Requests
 
-Agents and SDK clients must use MyClaw request surfaces for capability changes.
+Agents and SDK clients must use Gantry request surfaces for capability changes.
 Do not edit generated Claude config, `.mcp.json`, `.claude/skills`, settings, or
 permission files directly.
 
@@ -86,14 +86,14 @@ agents, sessions, and control approvers. Control approvers must be members of
 the Conversation and are used for both direct/private and group/channel
 approval flows. There is no conversation-scoped tool selection field, and
 Browser is one normal catalog tool.
-Agent-requested changes use MyClaw MCP request tools, not public API request
+Agent-requested changes use Gantry MCP request tools, not public API request
 approval endpoints.
 
 Agent-facing tools:
 
 - `send_message`: progress updates or direct channel messages while the agent is still running.
 - `ask_user_question`: structured choices with options, single-select, multi-select, preview/details, and channel-native buttons.
-- `request_skill_install`: provider skill install requests such as `clawhub:<slug>@<version>`.
+- `request_skill_install`: provider skill install requests such as `gantryhub:<slug>@<version>`.
 - `request_skill_proposal`: agent-created or modified skill file bundles for review.
 - `request_skill_dependency_install`: dependency requests for npm, brew, go, uv, or downloads required by a skill.
 - `request_mcp_server`: third-party MCP server requests with transport, origin, tool patterns, credential needs, and reason.
@@ -105,7 +105,7 @@ Agent-facing tools:
 - `capability_status`: current tool access, semantic capability tools, readable configured rules, selected skills, selected MCP servers, and request arguments for missing admin tools.
 - `settings_desired_state`: selected-capability read of current local desired state.
 - `request_settings_update`: selected-capability reviewed edit to non-secret `settings.yaml` desired state.
-- `mcp_list_tools` / `mcp_call_tool`: list and call approved third-party MCP tools through the MyClaw proxy.
+- `mcp_list_tools` / `mcp_call_tool`: list and call approved third-party MCP tools through the Gantry proxy.
 - `service_restart`: selected-capability restart after approved changes that require host restart.
 - `register_agent`: selected-capability binding of a channel conversation to an agent.
 
@@ -113,7 +113,7 @@ Every persistent capability change follows request, validation, review,
 decision, durable audit, new config version, and next-run activation.
 Persistent agent tool grants are mirrored into `settings.yaml` as readable
 `agents.<id>.tools` entries: semantic capabilities such as
-`capability:google.sheets.write`, canonical `Browser`, exact MyClaw admin
+`capability:google.sheets.write`, canonical `Browser`, exact Gantry admin
 tools, or scoped Bash rules such as `Bash(npm test *)`. Durable
 `request_permission` does not mint broad exact SDK/native tools or exact
 third-party MCP tools; those must be represented by selected semantic
@@ -140,7 +140,7 @@ Capability catalog response:
       "id": "tool:capability:google.sheets.write",
       "name": "capability:google.sheets.write",
       "kind": "host",
-      "provider": "myclaw",
+      "provider": "gantry",
       "displayName": "Google Sheets write",
       "category": "productivity",
       "risk": "high",
@@ -174,9 +174,9 @@ The route validates catalog ownership, mirrors readable entries into
 
 ## Skills
 
-MyClaw exposes the reviewable lifecycle for agent-created skill drafts. The SDK
+Gantry exposes the reviewable lifecycle for agent-created skill drafts. The SDK
 does not expose hosted skill version management; hosted promotion uses the
-Anthropic SDK behind the MyClaw Anthropic adapter and stores only provider refs.
+Anthropic SDK behind the Gantry Anthropic adapter and stores only provider refs.
 
 ```ts
 client.skillDrafts.upload({
@@ -184,9 +184,9 @@ client.skillDrafts.upload({
   createdBy?,
   zip, // Uint8Array containing application/zip bytes
 })
-client.skillProviders.search({ provider: 'clawhub', query?, limit? })
+client.skillProviders.search({ provider: 'gantryhub', query?, limit? })
 client.skillProviders.import({
-  ref: 'clawhub:<slug>@<version>',
+  ref: 'gantryhub:<slug>@<version>',
   agentId?,
   requestedBy?,
 })
@@ -209,7 +209,7 @@ backend. The database stores metadata, source, hashes, provider refs, bindings,
 and audit only. Draft, rejected, and disabled skills are not materialized into
 per-run `CLAUDE_CONFIG_DIR/skills`. Skill name and description are parsed from
 `SKILL.md`; upload requests only carry context such as the proposing agent or
-creator. Provider imports, including ClawHub, still create reviewable drafts;
+creator. Provider imports, including GantryHub, still create reviewable drafts;
 provider verification improves review context but does not bypass approval.
 
 ## MCP Servers
@@ -252,7 +252,7 @@ Agent-requested MCP credential needs are labels, not raw broker ref selectors;
 the host projects them into a server-scoped `MCP_<SERVER>_<NEED>_REF` reference
 before any approved next-run materialization.
 Remote MCP URLs must use HTTPS and cannot target local, private, link-local, or
-metadata hosts. MyClaw resolves remote MCP hostnames during approval, testing,
+metadata hosts. Gantry resolves remote MCP hostnames during approval, testing,
 and each materialization pass and rejects any A/AAAA record in private,
 loopback, link-local, multicast, unspecified, documentation, or metadata ranges.
 Runtime materialization uses a short in-process validation cache for same-batch
@@ -359,7 +359,7 @@ kinds and concrete sessions, conversations, jobs, or templates listed in
 `metadata.targetPolicy`; omitted policy fields deny access by default.
 
 ```ts
-import { signIngressRequest } from '@myclaw/sdk';
+import { signIngressRequest } from '@gantry/sdk';
 
 const path = `/v1/ingresses/${ingressId}/invoke`;
 const rawBody = JSON.stringify({
@@ -598,8 +598,8 @@ POST   /v1/skills/drafts/:id/approve             skills:admin
 POST   /v1/skills/drafts/:id/reject              skills:admin
 GET    /v1/skills/:skillId/files                 skills:read
 GET    /v1/skills/:skillId/files/:path           skills:read
-GET    /v1/skill-providers/clawhub/search        skills:read
-POST   /v1/skill-providers/clawhub/import        skills:admin
+GET    /v1/skill-providers/gantryhub/search        skills:read
+POST   /v1/skill-providers/gantryhub/import        skills:admin
 GET    /v1/agents/:agentId/skills                skills:read
 PUT    /v1/agents/:agentId/skills/:skillId       skills:admin
 DELETE /v1/agents/:agentId/skills/:skillId       skills:admin
@@ -630,7 +630,7 @@ DELETE /v1/agents/:agentId/mcp-servers/:id       mcp:admin + agents:admin
 ```
 
 An enabled MCP binding affects runtime only when the server definition is
-approved. The built-in `myclaw` MCP server is internal and is not managed by
+approved. The built-in `gantry` MCP server is internal and is not managed by
 these routes. Conversation or thread scoped MCP bindings are not part of this
 API version.
 

@@ -62,7 +62,7 @@ Expected cleanup-search interpretation:
   PR bodies.
 - SDK Bash/file/MCP subprocess protection should be visible as
   `sandbox.filesystem.denyWrite` entries sourced from
-  `MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON`; direct scheduler scripts should
+  `GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON`; direct scheduler scripts should
   fail closed until an equivalent OS sandbox runner exists.
 
 Clean-cut session continuity cleanup must also verify that unsupported legacy
@@ -122,13 +122,13 @@ npm run build
 
 `npm test` runs the contracts build, unit tests, and integration tests. `npm run build` cleans generated build output, builds contracts and SDK packages, runs `tsc`, and copies Postgres migrations into `dist/`.
 
-`npm run test:integration` is credential-free and skips Postgres-backed suites when `MYCLAW_TEST_DATABASE_URL` is unset. DB-backed changes must also run against a disposable Docker Postgres container for the current task. Enable `vector` and `pg_trgm` in that disposable database before running migrations:
+`npm run test:integration` is credential-free and skips Postgres-backed suites when `GANTRY_TEST_DATABASE_URL` is unset. DB-backed changes must also run against a disposable Docker Postgres container for the current task. Enable `vector` and `pg_trgm` in that disposable database before running migrations:
 
 ```bash
-MYCLAW_TEST_DATABASE_URL=postgres://user:pass@localhost:5432/myclaw_test npm run test:integration:postgres
+GANTRY_TEST_DATABASE_URL=postgres://user:pass@localhost:5432/gantry_test npm run test:integration:postgres
 ```
 
-`npm run test:integration:postgres` fails loudly when `MYCLAW_TEST_DATABASE_URL` is missing or not a Postgres URL, so a green default test run cannot be mistaken for database-backed evidence. Stop and remove the disposable container after the check; do not run feature verification against persistent developer data under `~/myclaw/postgres`.
+`npm run test:integration:postgres` fails loudly when `GANTRY_TEST_DATABASE_URL` is missing or not a Postgres URL, so a green default test run cannot be mistaken for database-backed evidence. Stop and remove the disposable container after the check; do not run feature verification against persistent developer data under `~/gantry/postgres`.
 
 Architecture exceptions in `.codex/architecture-exceptions.json` are ratchets
 for existing boundary debt. Each exception must stay time-bounded and include a

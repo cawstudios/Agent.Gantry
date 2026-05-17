@@ -1,5 +1,5 @@
 /**
- * Agent runner for MyClaw — host-only execution.
+ * Agent runner for Gantry — host-only execution.
  */
 import { ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -40,7 +40,7 @@ import {
   ArtifactClaudeSkillSource,
   BundledClaudeSkillSource,
   CompositeSkillSource,
-  RuntimeInstalledMyClawBrowserSkillSource,
+  RuntimeInstalledGantryBrowserSkillSource,
   type SkillSource,
 } from '../adapters/llm/anthropic-claude-agent/claude-skill-materializer.js';
 import { ensureGroupIpcLayout } from './agent-spawn-layout.js';
@@ -78,7 +78,7 @@ type RunnerAgentInput = AgentInput & {
   modelCredentialEnv?: Record<string, string>;
 };
 
-const PROTECTED_FILESYSTEM_PATHS_ENV = 'MYCLAW_PROTECTED_FILESYSTEM_PATHS_JSON';
+const PROTECTED_FILESYSTEM_PATHS_ENV = 'GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON';
 const DEFAULT_RUNNER_APP_ID = 'default';
 
 export { writeGroupsSnapshot } from './agent-spawn-snapshots.js';
@@ -140,7 +140,7 @@ export async function spawnAgent(
   fs.mkdirSync(groupDir, { recursive: true });
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const processName = `myclaw-${safeName}-${currentTimeMs()}-${randomUUID().slice(0, 8)}`;
+  const processName = `gantry-${safeName}-${currentTimeMs()}-${randomUUID().slice(0, 8)}`;
   const modelConfig = getEffectiveModelConfig(
     input.isScheduledJob ? undefined : group.agentConfig?.model,
     input.isScheduledJob
@@ -273,7 +273,7 @@ export async function spawnAgent(
       new BundledClaudeSkillSource(packageRoot),
     ];
     if (browserIpcEnabled) {
-      skillSources.push(new RuntimeInstalledMyClawBrowserSkillSource());
+      skillSources.push(new RuntimeInstalledGantryBrowserSkillSource());
     }
     if (
       options?.skillRepository &&
@@ -383,35 +383,35 @@ export async function spawnAgent(
   const env: NodeJS.ProcessEnv = {
     ...pickSafeHostEnv(process.env),
     TZ: TIMEZONE,
-    MYCLAW_WORKSPACE_GROUP_DIR: hostRuntime.groupDir,
-    MYCLAW_WORKSPACE_GLOBAL_DIR: '',
-    MYCLAW_GROUP_FOLDER: group.folder,
-    MYCLAW_APP_ID: runnerAppId,
-    ...(input.agentId ? { MYCLAW_AGENT_ID: input.agentId } : {}),
-    MYCLAW_AGENT_RUN_HANDLE: processName,
-    MYCLAW_WORKSPACE_EXTRA_DIR: path.join(
+    GANTRY_WORKSPACE_GROUP_DIR: hostRuntime.groupDir,
+    GANTRY_WORKSPACE_GLOBAL_DIR: '',
+    GANTRY_GROUP_FOLDER: group.folder,
+    GANTRY_APP_ID: runnerAppId,
+    ...(input.agentId ? { GANTRY_AGENT_ID: input.agentId } : {}),
+    GANTRY_AGENT_RUN_HANDLE: processName,
+    GANTRY_WORKSPACE_EXTRA_DIR: path.join(
       DATA_DIR,
       'sessions',
       group.folder,
       'extra',
     ),
-    MYCLAW_IPC_DIR: hostRuntime.groupIpcDir,
-    MYCLAW_IPC_INPUT_DIR: ipcInputDir,
-    MYCLAW_IPC_AUTH_TOKEN: ipcAuth.authToken,
-    MYCLAW_CHAT_JID: input.chatJid,
-    ...(input.jobId ? { MYCLAW_JOB_ID: input.jobId } : {}),
-    ...(input.jobName ? { MYCLAW_JOB_NAME: input.jobName } : {}),
-    ...(input.runId ? { MYCLAW_JOB_RUN_ID: input.runId } : {}),
+    GANTRY_IPC_DIR: hostRuntime.groupIpcDir,
+    GANTRY_IPC_INPUT_DIR: ipcInputDir,
+    GANTRY_IPC_AUTH_TOKEN: ipcAuth.authToken,
+    GANTRY_CHAT_JID: input.chatJid,
+    ...(input.jobId ? { GANTRY_JOB_ID: input.jobId } : {}),
+    ...(input.jobName ? { GANTRY_JOB_NAME: input.jobName } : {}),
+    ...(input.runId ? { GANTRY_JOB_RUN_ID: input.runId } : {}),
     ...(browserIpcEnabled
       ? {
-          MYCLAW_BROWSER_IPC_AUTH_TOKEN: computeBrowserIpcAuthToken(
+          GANTRY_BROWSER_IPC_AUTH_TOKEN: computeBrowserIpcAuthToken(
             group.folder,
             input.chatJid,
             input.threadId,
           ),
         }
       : {}),
-    MYCLAW_MEMORY_IPC_AUTH_TOKEN: computeMemoryIpcAuthToken(group.folder, {
+    GANTRY_MEMORY_IPC_AUTH_TOKEN: computeMemoryIpcAuthToken(group.folder, {
       chatJid: input.chatJid,
       userId: input.memoryUserId,
       defaultScope: input.memoryDefaultScope || 'group',
@@ -419,19 +419,19 @@ export async function spawnAgent(
       allowedActions: memoryIpcAllowedActions,
       reviewerIsControlApprover: input.memoryReviewerIsControlApprover,
     }),
-    MYCLAW_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(memoryIpcAllowedActions),
-    MYCLAW_IPC_RESPONSE_VERIFY_KEY: ipcAuth.responseVerifyKey,
-    MYCLAW_IPC_RESPONSE_KEY_ID: ipcAuth.responseKeyId,
-    MYCLAW_THREAD_ID: input.threadId || '',
-    MYCLAW_MEMORY_USER_ID: input.memoryUserId || '',
-    MYCLAW_MEMORY_DEFAULT_SCOPE: input.memoryDefaultScope || 'group',
-    MYCLAW_MEMORY_REVIEWER_IS_CONTROL_APPROVER:
+    GANTRY_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(memoryIpcAllowedActions),
+    GANTRY_IPC_RESPONSE_VERIFY_KEY: ipcAuth.responseVerifyKey,
+    GANTRY_IPC_RESPONSE_KEY_ID: ipcAuth.responseKeyId,
+    GANTRY_THREAD_ID: input.threadId || '',
+    GANTRY_MEMORY_USER_ID: input.memoryUserId || '',
+    GANTRY_MEMORY_DEFAULT_SCOPE: input.memoryDefaultScope || 'group',
+    GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER:
       input.memoryReviewerIsControlApprover ? '1' : '',
-    MYCLAW_INTERACTIVE_PERMISSION_TIMEOUT_MS: String(
+    GANTRY_INTERACTIVE_PERMISSION_TIMEOUT_MS: String(
       PERMISSION_APPROVAL_TIMEOUT_MS,
     ),
-    MYCLAW_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
-    MYCLAW_EGRESS_PROXY_URL: egressGateway.proxyUrl,
+    GANTRY_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
+    GANTRY_EGRESS_PROXY_URL: egressGateway.proxyUrl,
     CLAUDE_CONFIG_DIR: claudeConfigDir,
   };
   applyAgentEgressNoProxyEnv(env);
@@ -456,11 +456,11 @@ export async function spawnAgent(
       ? writeRunnerMcpConfigFile(hostRuntime.groupIpcDir, allMcpCapabilities)
       : undefined;
   if (mcpConfigPath) {
-    env.MYCLAW_MCP_CONFIG_FILE = mcpConfigPath;
-    env.MYCLAW_MCP_ALLOWED_TOOLS_JSON = JSON.stringify(
+    env.GANTRY_MCP_CONFIG_FILE = mcpConfigPath;
+    env.GANTRY_MCP_ALLOWED_TOOLS_JSON = JSON.stringify(
       allMcpCapabilities.flatMap((capability) => capability.allowedToolNames),
     );
-    env.MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON = JSON.stringify(
+    env.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON = JSON.stringify(
       allMcpCapabilities.flatMap(
         (capability) => capability.autoApproveToolNames,
       ),

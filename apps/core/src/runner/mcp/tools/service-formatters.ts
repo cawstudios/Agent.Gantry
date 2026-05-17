@@ -16,7 +16,7 @@ export function formatMcpApprovalResponse(
       ? `- Approved raw tool names: ${context.approvedToolNames.join(', ')}`
       : '- No explicit tool names were provided; use mcp_list_tools to inspect approved tools.',
     '',
-    'Future sessions use the same MyClaw proxy tools. Do not call direct third-party MCP tool names.',
+    'Future sessions use the same Gantry proxy tools. Do not call direct third-party MCP tool names.',
   ].join('\n');
 }
 
@@ -108,7 +108,7 @@ export function formatSkillProposalResponse(
       ? `- Package hash: ${context.skill.contentHash}`
       : undefined,
     '',
-    'Use this approved skill immediately in the current session by following its SKILL.md. Future sessions will load it from MyClaw skill storage.',
+    'Use this approved skill immediately in the current session by following its SKILL.md. Future sessions will load it from Gantry skill storage.',
     '',
     'Approved skill files:',
   ].filter((line): line is string => line !== undefined);

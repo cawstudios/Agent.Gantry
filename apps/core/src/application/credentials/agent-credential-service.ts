@@ -57,14 +57,14 @@ function describeBrokerError(err: unknown): string {
 function recoveryHintFor(mode: CredentialBrokerProfile): string {
   if (mode === 'onecli') {
     return [
-      'Run `myclaw doctor` and `myclaw local doctor`.',
-      "If you use MyClaw's provided local stack, start or recover OneCLI from the directory containing its shipped stack file, or pass that stack file explicitly.",
+      'Run `gantry doctor` and `gantry local doctor`.',
+      "If you use Gantry's provided local stack, start or recover OneCLI from the directory containing its shipped stack file, or pass that stack file explicitly.",
     ].join(' ');
   }
   if (mode === 'external') {
-    return 'Run `myclaw doctor` and verify credential_broker.external.base_url points at a reachable broker endpoint.';
+    return 'Run `gantry doctor` and verify credential_broker.external.base_url points at a reachable broker endpoint.';
   }
-  return 'Run `myclaw doctor` and configure credential_broker in settings.yaml if this agent needs brokered credentials.';
+  return 'Run `gantry doctor` and configure credential_broker in settings.yaml if this agent needs brokered credentials.';
 }
 
 export async function getAgentCredentialInjection(

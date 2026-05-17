@@ -1,14 +1,14 @@
 import path from 'path';
 
 import { readEnvFile } from './file.js';
-import { getMyclawHome } from '../../shared/myclaw-home.js';
+import { getGantryHome } from '../../shared/gantry-home.js';
 
 export const CONFIG_ENV_KEYS = [
-  'MYCLAW_HOME',
+  'GANTRY_HOME',
   'ONECLI_DATABASE_URL',
   'SECRET_ENCRYPTION_KEY',
   'TZ',
-  'MYCLAW_IPC_AUTH_SECRET',
+  'GANTRY_IPC_AUTH_SECRET',
   'REMOTE_CONTROL_AUTO_ACCEPT',
   'SSL_CERT_FILE',
   'NODE_EXTRA_CA_CERTS',
@@ -16,17 +16,17 @@ export const CONFIG_ENV_KEYS = [
   'HTTPS_PROXY',
   'NO_PROXY',
   'LOG_LEVEL',
-  'MYCLAW_INTERACTIVE_PERMISSION_TIMEOUT_MS',
-  'MYCLAW_AUTONOMOUS_PERMISSION_TIMEOUT_MS',
+  'GANTRY_INTERACTIVE_PERMISSION_TIMEOUT_MS',
+  'GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS',
   'PERMISSION_APPROVAL_TIMEOUT_MS',
-  'MYCLAW_PERMISSION_TIMEOUT_MS',
+  'GANTRY_PERMISSION_TIMEOUT_MS',
   'TELEGRAM_BOT_TOKEN',
   'SLACK_BOT_TOKEN',
   'SLACK_APP_TOKEN',
 ] as const;
 
 function loadRuntimeEnvConfig(keys: readonly string[]): Record<string, string> {
-  const raw = readEnvFile(path.join(getMyclawHome(), '.env'));
+  const raw = readEnvFile(path.join(getGantryHome(), '.env'));
   const out: Record<string, string> = {};
   for (const key of keys) {
     const value = raw[key]?.trim();
@@ -38,7 +38,7 @@ function loadRuntimeEnvConfig(keys: readonly string[]): Record<string, string> {
 }
 
 export const envConfig = loadRuntimeEnvConfig(CONFIG_ENV_KEYS);
-const runtimeEnvConfig = readEnvFile(path.join(getMyclawHome(), '.env'));
+const runtimeEnvConfig = readEnvFile(path.join(getGantryHome(), '.env'));
 
 export function envValue(key: (typeof CONFIG_ENV_KEYS)[number]): string {
   return process.env[key]?.trim() || envConfig[key]?.trim() || '';

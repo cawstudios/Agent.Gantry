@@ -9,7 +9,7 @@ const originalEnv = { ...process.env };
 const tempDirs: string[] = [];
 
 function makeTempDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-control-cli-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-control-cli-'));
   tempDirs.push(dir);
   return dir;
 }
@@ -51,12 +51,12 @@ afterEach(() => {
 });
 
 describe('control API CLI client auth', () => {
-  it('uses the first configured MYCLAW_CONTROL_API_KEYS_JSON token as the bearer token', async () => {
+  it('uses the first configured GANTRY_CONTROL_API_KEYS_JSON token as the bearer token', async () => {
     const runtimeHome = makeTempDir();
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        `MYCLAW_CONTROL_API_KEYS_JSON=${JSON.stringify([
+        `GANTRY_CONTROL_API_KEYS_JSON=${JSON.stringify([
           {
             kid: 'k1',
             token: 'json-token',
@@ -74,7 +74,7 @@ describe('control API CLI client auth', () => {
         res.end(JSON.stringify({ ok: true }));
       },
       async (baseUrl) => {
-        process.env.MYCLAW_CONTROL_BASE_URL = baseUrl;
+        process.env.GANTRY_CONTROL_BASE_URL = baseUrl;
         const { controlApiRequest } = await import('@core/cli/control-api.js');
 
         await expect(
@@ -87,9 +87,9 @@ describe('control API CLI client auth', () => {
     );
   });
 
-  it('ignores MYCLAW_CONTROL_API_KEY when JSON tokens are present', async () => {
-    process.env.MYCLAW_CONTROL_API_KEY = 'legacy-token';
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+  it('ignores GANTRY_CONTROL_API_KEY when JSON tokens are present', async () => {
+    process.env.GANTRY_CONTROL_API_KEY = 'legacy-token';
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k1',
         token: 'json-token',
@@ -105,7 +105,7 @@ describe('control API CLI client auth', () => {
         res.end(JSON.stringify({ ok: true }));
       },
       async (baseUrl) => {
-        process.env.MYCLAW_CONTROL_BASE_URL = baseUrl;
+        process.env.GANTRY_CONTROL_BASE_URL = baseUrl;
         const { controlApiRequest } = await import('@core/cli/control-api.js');
 
         await expect(
@@ -118,8 +118,8 @@ describe('control API CLI client auth', () => {
     );
   });
 
-  it('does not use legacy MYCLAW_CONTROL_API_KEY as a bearer token source', async () => {
-    process.env.MYCLAW_CONTROL_API_KEY = 'legacy-token';
+  it('does not use legacy GANTRY_CONTROL_API_KEY as a bearer token source', async () => {
+    process.env.GANTRY_CONTROL_API_KEY = 'legacy-token';
 
     const { controlApiRequest } = await import('@core/cli/control-api.js');
 
@@ -129,12 +129,12 @@ describe('control API CLI client auth', () => {
         path: '/v1/mcp-servers',
       }),
     ).rejects.toThrow(
-      'MYCLAW_CONTROL_API_KEYS_JSON with at least one complete key record is required',
+      'GANTRY_CONTROL_API_KEYS_JSON with at least one complete key record is required',
     );
   });
 
   it('does not use incomplete JSON key records as bearer token sources', async () => {
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       { token: 'token-without-scope-or-app' },
       {
         kid: 'missing-scope',
@@ -157,12 +157,12 @@ describe('control API CLI client auth', () => {
         path: '/v1/sessions',
       }),
     ).rejects.toThrow(
-      'MYCLAW_CONTROL_API_KEYS_JSON with at least one complete key record is required',
+      'GANTRY_CONTROL_API_KEYS_JSON with at least one complete key record is required',
     );
   });
 
   it('selects the first JSON token with a valid app id and supported scopes', async () => {
-    process.env.MYCLAW_CONTROL_API_KEYS_JSON = JSON.stringify([
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'unsafe-app',
         token: 'bad-app-token',
@@ -190,7 +190,7 @@ describe('control API CLI client auth', () => {
         res.end(JSON.stringify({ ok: true }));
       },
       async (baseUrl) => {
-        process.env.MYCLAW_CONTROL_BASE_URL = baseUrl;
+        process.env.GANTRY_CONTROL_BASE_URL = baseUrl;
         const { controlApiRequest } = await import('@core/cli/control-api.js');
 
         await expect(

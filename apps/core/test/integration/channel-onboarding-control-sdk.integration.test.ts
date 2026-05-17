@@ -9,7 +9,7 @@ import {
   AgentConversationBindingListResponseSchema,
   ProviderConnectionResponseSchema,
   ProviderListResponseSchema,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 import { syncRuntimeSettingsFromProjection } from '@core/config/index.js';
 
 const state = vi.hoisted(() => ({
@@ -20,7 +20,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@core/config/index.js', () => ({
-  MYCLAW_HOME: '/tmp/myclaw-channel-integration-home',
+  GANTRY_HOME: '/tmp/gantry-channel-integration-home',
   ONECLI_ALLOWED_ENV_KEYS: [],
   getControlEnvValue: vi.fn((key: string) => process.env[key]?.trim() || ''),
   syncRuntimeSettingsFromProjection: vi.fn(async () => undefined),
@@ -244,7 +244,7 @@ vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => {
 
 describe('provider conversation onboarding control SDK integration', () => {
   beforeEach(() => {
-    fs.rmSync('/tmp/myclaw-channel-integration-home', {
+    fs.rmSync('/tmp/gantry-channel-integration-home', {
       recursive: true,
       force: true,
     });

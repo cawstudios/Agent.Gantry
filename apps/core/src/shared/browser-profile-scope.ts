@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-const DEFAULT_BROWSER_PROFILE_NAME = 'myclaw';
+const DEFAULT_BROWSER_PROFILE_NAME = 'gantry';
 
 function compactSegment(value: string): string {
   const compact = value

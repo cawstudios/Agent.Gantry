@@ -1,4 +1,4 @@
-# MyClaw Specification
+# Gantry Specification
 
 A personal Claude assistant with multi-channel support, persistent memory per conversation, scheduled jobs, and host-runtime agent execution.
 
@@ -62,8 +62,8 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 │  │  Default tools (all groups):                                   │    │
 │  │    • Read, Glob, Grep, WebSearch, WebFetch                     │    │
 │  │    • Task, ToolSearch, Skill, worktree lifecycle               │    │
-│  │    • Exact mcp__myclaw__send_message / ask_user_question       │    │
-│  │    • Exact capability request tools via MyClaw MCP             │    │
+│  │    • Exact mcp__gantry__send_message / ask_user_question       │    │
+│  │    • Exact capability request tools via Gantry MCP             │    │
 │  │    • Optional tools only after approved next-run binding       │    │
 │  │                                                                │    │
 │  └──────────────────────────────────────────────────────────────┘    │
@@ -79,7 +79,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 | Message Storage    | Postgres with Drizzle                                             | Store messages, jobs, events, memory, and runtime state               |
 | Runtime Execution  | Host process execution                                            | Agent execution with runtime-home scoped paths                        |
 | Agent              | @anthropic-ai/claude-agent-sdk                                    | Run Claude with tools and MCP servers                                 |
-| Browser Automation | MyClaw Browser capability + Chromium                              | Web interaction and screenshots through the projected Browser gateway |
+| Browser Automation | Gantry Browser capability + Chromium                              | Web interaction and screenshots through the projected Browser gateway |
 | Runtime            | Node.js 25+                                                       | Host process for routing and pg-boss job execution                    |
 
 ---
@@ -220,7 +220,7 @@ folders are not the source of truth for runtime materialization.
 ## Folder Structure
 
 ```
-myclaw/
+gantry/
 ├── CLAUDE.md                      # Project context for Claude Code
 ├── docs/
 │   ├── SPEC.md                    # This specification document
@@ -242,7 +242,7 @@ myclaw/
 │       │   ├── control/           # HTTP/SSE SDK control server
 │       │   ├── domain/            # Pure domain types and repository contracts
 │       │   ├── infrastructure/    # Postgres, pg-boss, IPC, OneCLI, logging, service wrappers
-│       │   ├── jobs/              # MyClaw job lifecycle and scheduler ports
+│       │   ├── jobs/              # Gantry job lifecycle and scheduler ports
 │       │   ├── memory/            # Memory ingestion, retrieval, and storage logic
 │       │   ├── messaging/         # Routing and formatting
 │       │   ├── platform/          # Group folder and sender allowlist helpers
@@ -254,14 +254,14 @@ myclaw/
 ├── ops/
 │   ├── bootstrap.sh              # Local bootstrap script
 │   └── launchd/
-│       └── com.myclaw.plist      # macOS service configuration
+│       └── com.gantry.plist      # macOS service configuration
 │
 ├── dist/                          # Compiled JavaScript (gitignored)
 │
 ├── .claude/
 │   └── skills/
 │       ├── commands/SKILL.md            # /commands - command discovery
-│       └── myclaw-admin/SKILL.md        # Internal runtime administration reference
+│       └── gantry-admin/SKILL.md        # Internal runtime administration reference
 │
 ├── agents/
 │   └── {channel}_{group-name}/    # Per-agent runtime folder
@@ -273,12 +273,12 @@ myclaw/
 │   └── ipc/                       # Runtime IPC (messages/, tasks/)
 │
 ├── logs/                          # Runtime logs (gitignored)
-│   ├── myclaw.log               # Host stdout
-│   └── myclaw.error.log         # Host stderr
+│   ├── gantry.log               # Host stdout
+│   └── gantry.error.log         # Host stderr
 │   # Note: Per-agent logs are in agents/{folder}/logs/
 │
 └── ops/launchd/
-    └── com.myclaw.plist         # macOS service configuration
+    └── com.gantry.plist         # macOS service configuration
 ```
 
 ---
@@ -289,20 +289,20 @@ Configuration constants are in `apps/core/src/config/index.ts`:
 
 ```typescript
 import path from 'path';
-import { getMyclawHome } from './myclaw-home.js';
+import { getGantryHome } from './gantry-home.js';
 import { ensureRuntimeSettings } from './settings/runtime-settings.js';
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
 export const POLL_INTERVAL = 2000;
 
 // Paths are absolute and resolve from the configured runtime home.
-const MYCLAW_HOME = getMyclawHome(process.env.MYCLAW_HOME);
-export const AGENTS_DIR = path.resolve(MYCLAW_HOME, 'agents');
-export const DATA_DIR = path.resolve(MYCLAW_HOME, 'data');
+const GANTRY_HOME = getGantryHome(process.env.GANTRY_HOME);
+export const AGENTS_DIR = path.resolve(GANTRY_HOME, 'agents');
+export const DATA_DIR = path.resolve(GANTRY_HOME, 'data');
 
 // Default model aliases are non-secret configuration in settings.yaml.
 export const getConfiguredDefaultModel = () =>
-  ensureRuntimeSettings(MYCLAW_HOME).agent.defaultModel;
+  ensureRuntimeSettings(GANTRY_HOME).agent.defaultModel;
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep runtime worker alive after last result
 
@@ -355,12 +355,12 @@ Use `/model` in a group session to switch the live model (`/model`, `/model <ali
 
 ### Claude Authentication
 
-MyClaw uses an agent credential broker boundary for agent and memory LLM
+Gantry uses an agent credential broker boundary for agent and memory LLM
 credentials. `credential_broker.mode` in `settings.yaml` supports `onecli`,
 `external`, and `none`.
 OneCLI is the default local/personal broker adapter, but enterprise deployments
 can replace it with an external broker without changing the runtime agent-spawn
-path. Runtime-owned secrets such as `MYCLAW_DATABASE_URL`, channel tokens,
+path. Runtime-owned secrets such as `GANTRY_DATABASE_URL`, channel tokens,
 webhook/control secrets, and OneCLI persistence secrets are read through runtime
 secret configuration, not requested from the agent credential broker.
 
@@ -370,10 +370,10 @@ Runtime `.env` is for runtime-owned secrets only. In `onecli` mode it stores
 or raw Claude credentials. Non-secret broker and model configuration lives in
 `settings.yaml`, for example `credential_broker.onecli.url`,
 `agent.default_model`, or
-`credential_broker.external.base_url`. MyClaw and OneCLI can share one Postgres
-database with separate schemas and roles: `myclaw`, `onecli`, and `pgboss`.
-OneCLI owns its schema and migrations; MyClaw only provisions and verifies the
-schema boundary. `MYCLAW_DATABASE_URL` and `ONECLI_DATABASE_URL` must use
+`credential_broker.external.base_url`. Gantry and OneCLI can share one Postgres
+database with separate schemas and roles: `gantry`, `onecli`, and `pgboss`.
+OneCLI owns its schema and migrations; Gantry only provisions and verifies the
+schema boundary. `GANTRY_DATABASE_URL` and `ONECLI_DATABASE_URL` must use
 different Postgres users.
 
 The model SDK credential lane receives only broker-safe model endpoint settings
@@ -407,8 +407,8 @@ Or edit the default in `apps/core/src/config/index.ts`. This changes:
 
 Files with `{{PLACEHOLDER}}` values need to be configured:
 
-- `{{RUNTIME_ENTRY}}` - Absolute path to the compiled MyClaw runtime entry
-- `{{RUNTIME_HOME}}` - Runtime home, normally `~/myclaw`
+- `{{RUNTIME_ENTRY}}` - Absolute path to the compiled Gantry runtime entry
+- `{{RUNTIME_HOME}}` - Runtime home, normally `~/gantry`
 - `{{NODE_PATH}}` - Path to node binary (detected via `which node`)
 - `{{HOME}}` - User's home directory
 
@@ -416,7 +416,7 @@ Files with `{{PLACEHOLDER}}` values need to be configured:
 
 ## Memory System
 
-MyClaw separates static prompt profile files from structured memory and runtime continuity context.
+Gantry separates static prompt profile files from structured memory and runtime continuity context.
 
 ### Prompt Profile Layer
 
@@ -502,7 +502,7 @@ the primary visibility boundary:
 | Subject   | Meaning                                                             |
 | --------- | ------------------------------------------------------------------- |
 | `user`    | Human actor preferences, corrections, or durable facts              |
-| `group`   | Logical MyClaw/app group or configured agent group                  |
+| `group`   | Logical Gantry/app group or configured agent group                  |
 | `channel` | External provider conversation where the bot is present             |
 | `common`  | App-wide shared memory, write-restricted to admin/service workflows |
 
@@ -511,7 +511,7 @@ Provider ids are stored without changing the boundary meaning:
 - `channelId` is the provider conversation id: Telegram private/group/supergroup
   chat, Slack channel/DM/MPIM, Microsoft Teams channel/chat, or SDK
   conversation.
-- `groupId` is the configured MyClaw/app group, not a Telegram-only group id.
+- `groupId` is the configured Gantry/app group, not a Telegram-only group id.
 - `threadId` is a topic or reply boundary such as Slack `thread_ts`, Telegram
   forum topic id, or Teams reply chain id.
 
@@ -560,10 +560,10 @@ use a `precompact` trigger:
 
 ### Memory Storage
 
-MyClaw memory uses Postgres tables in the configured runtime schema.
+Gantry memory uses Postgres tables in the configured runtime schema.
 
-- Runtime database: `MYCLAW_DATABASE_URL`
-- Runtime schema: `storage.postgres.schema` (default `myclaw`)
+- Runtime database: `GANTRY_DATABASE_URL`
+- Runtime schema: `storage.postgres.schema` (default `gantry`)
 - Lexical search: Postgres full-text search
 - Vector search: inactive until memory item embeddings are fully indexed and
   queried
@@ -577,8 +577,8 @@ continuation state.
 
 | Setting                                     | Default                  | Description                                                     |
 | ------------------------------------------- | ------------------------ | --------------------------------------------------------------- |
-| `storage.postgres.url_env`                  | `MYCLAW_DATABASE_URL`    | Env key for Postgres connection URL                             |
-| `storage.postgres.schema`                   | `myclaw`                 | Postgres schema name                                            |
+| `storage.postgres.url_env`                  | `GANTRY_DATABASE_URL`    | Env key for Postgres connection URL                             |
+| `storage.postgres.schema`                   | `gantry`                 | Postgres schema name                                            |
 | `agent.default_model`                       | empty                    | Default Claude Code model alias/name                            |
 | `agent.one_time_job_default_model`          | empty                    | One-time/manual job model alias; inherits `agent.default_model` |
 | `agent.recurring_job_default_model`         | empty                    | Cron/interval job model alias; inherits `agent.default_model`   |
@@ -603,7 +603,7 @@ continuation state.
 
 ## Session Management
 
-Sessions enable conversation continuity from MyClaw-owned Postgres state.
+Sessions enable conversation continuity from Gantry-owned Postgres state.
 
 ### How Sessions Work
 
@@ -611,7 +611,7 @@ Sessions enable conversation continuity from MyClaw-owned Postgres state.
    `AgentSession` in Postgres.
 2. Runtime hydrates only scoped durable memory for a fresh runner or scheduled
    job.
-3. Claude Agent SDK runs are ephemeral with `persistSession: false`; MyClaw does
+3. Claude Agent SDK runs are ephemeral with `persistSession: false`; Gantry does
    not pass SDK `resume`, `resumeSessionAt`, or `continue` handles.
 4. Active chat follow-ups are streamed into the same live SDK query. Provider
    transcript exports may exist for debugging, but they are not runtime state.
@@ -655,7 +655,7 @@ Sessions enable conversation continuity from MyClaw-owned Postgres state.
    ├── cwd: agents/{group-name}/
    ├── prompt: conversation history + current message
    ├── persistSession: false
-   └── mcpServers: myclaw (runtime tools over IPC)
+   └── mcpServers: gantry (runtime tools over IPC)
    │
    ▼
 9. Child runner invokes Claude Agent SDK:
@@ -670,7 +670,7 @@ Sessions enable conversation continuity from MyClaw-owned Postgres state.
 11. Slack/Telegram send network responses; the app channel writes durable control events
    │
    ▼
-12. Runtime advances cursor and stores MyClaw-owned run/session events in Postgres
+12. Runtime advances cursor and stores Gantry-owned run/session events in Postgres
 ```
 
 ### Trigger Word Matching
@@ -717,7 +717,7 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 ## Scheduled Jobs
 
-MyClaw has a built-in scheduler that runs jobs as full agents in their group's context.
+Gantry has a built-in scheduler that runs jobs as full agents in their group's context.
 Job definitions, job instances/runs, and notification routes are runtime
 Postgres state and are never written to `settings.yaml`.
 
@@ -750,7 +750,7 @@ Postgres state and are never written to `settings.yaml`.
 ```
 User: @Andy remind me every Monday at 9am to review the weekly metrics
 
-Claude: [calls mcp__myclaw__scheduler_upsert_job]
+Claude: [calls mcp__gantry__scheduler_upsert_job]
         {
           "name": "weekly-metrics-reminder",
           "prompt": "Send a reminder to review weekly metrics. Be encouraging!",
@@ -775,7 +775,7 @@ Claude: Done! I'll remind you every Monday at 9am.
 ```
 User: @Andy at 5pm today, send me a summary of today's emails
 
-Claude: [calls mcp__myclaw__scheduler_upsert_job]
+Claude: [calls mcp__gantry__scheduler_upsert_job]
         {
           "name": "today-email-summary",
           "prompt": "Search for today's emails, summarize the important ones, and send the summary to the group.",
@@ -811,9 +811,9 @@ With selected scheduler capability and conversation approval:
 
 ## MCP Servers
 
-### MyClaw MCP (built-in)
+### Gantry MCP (built-in)
 
-The `myclaw` MCP server is created dynamically per agent call with the current group's context.
+The `gantry` MCP server is created dynamically per agent call with the current group's context.
 
 **Available Tools:**
 | Tool | Purpose |
@@ -840,14 +840,14 @@ not grant job visibility or run authority.
 
 ## Deployment
 
-MyClaw runs as one local runtime service. The installer chooses launchd on
+Gantry runs as one local runtime service. The installer chooses launchd on
 macOS, systemd user units on Linux when available, and a nohup/background
 fallback otherwise. Managed local services are started before the runtime when
 they are configured.
 
 ### Startup Sequence
 
-When MyClaw starts, it:
+When Gantry starts, it:
 
 1. Runs runtime preflight for host execution and emits actionable fix steps on failure
 2. Auto-builds runner artifacts from `apps/core/src/runner` and fails startup if build fails
@@ -863,21 +863,21 @@ When MyClaw starts, it:
 
 ### Service Lifecycle
 
-The generated service sets `MYCLAW_HOME`, uses the resolved Node runtime entry,
+The generated service sets `GANTRY_HOME`, uses the resolved Node runtime entry,
 and runs the local dependency prestart command before the main runtime:
 
 ```bash
-myclaw start
-myclaw
+gantry start
+gantry
 ```
 
-On macOS this is written into `com.myclaw.plist` through a shell command. On
+On macOS this is written into `com.gantry.plist` through a shell command. On
 Linux systemd it is represented as `ExecStartPre`. The fallback script performs
 the same prestart step before launching the runtime.
 
 The Control API starts inside this same runtime process. Runtime control
-settings such as `MYCLAW_CONTROL_API_KEYS_JSON`, `MYCLAW_CONTROL_PORT`, and
-`MYCLAW_CONTROL_SOCKET_PATH` are read from process env or `~/myclaw/.env`. Each
+settings such as `GANTRY_CONTROL_API_KEYS_JSON`, `GANTRY_CONTROL_PORT`, and
+`GANTRY_CONTROL_SOCKET_PATH` are read from process env or `~/gantry/.env`. Each
 API key entry must include `kid`, `token`, `appId`, and explicit `scopes`. The
 launchd plist should not contain control API secrets; it only needs enough
 environment to find the runtime home and executable path.
@@ -890,7 +890,7 @@ environment to find the runtime home and executable path.
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.myclaw</string>
+    <string>com.gantry</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
@@ -905,7 +905,7 @@ environment to find the runtime home and executable path.
     <true/>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>MYCLAW_HOME</key>
+        <key>GANTRY_HOME</key>
         <string>{{RUNTIME_HOME}}</string>
         <key>PATH</key>
         <string>{{HOME}}/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
@@ -913,9 +913,9 @@ environment to find the runtime home and executable path.
         <string>{{HOME}}</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>{{RUNTIME_HOME}}/logs/myclaw.log</string>
+    <string>{{RUNTIME_HOME}}/logs/gantry.log</string>
     <key>StandardErrorPath</key>
-    <string>{{RUNTIME_HOME}}/logs/myclaw.error.log</string>
+    <string>{{RUNTIME_HOME}}/logs/gantry.error.log</string>
 </dict>
 </plist>
 ```
@@ -924,21 +924,21 @@ environment to find the runtime home and executable path.
 
 ```bash
 # Start, stop, or restart the whole local runtime stack
-myclaw start
-myclaw stop
-myclaw restart
+gantry start
+gantry stop
+gantry restart
 
 # Install the background service
-myclaw service install
+gantry service install
 
 # Check status
-myclaw status
+gantry status
 
 # View logs
-myclaw logs
+gantry logs
 
 # Manage local Postgres + Model Access together
-myclaw local status
+gantry local status
 docker compose logs --tail 160
 ```
 
@@ -982,7 +982,7 @@ Inbound channel and SDK messages could contain malicious instructions attempting
 The runtime agents and data directories contain personal context and should be protected:
 
 ```bash
-chmod 700 ~/myclaw/agents ~/myclaw/data
+chmod 700 ~/gantry/agents ~/gantry/data
 ```
 
 ---
@@ -993,15 +993,15 @@ chmod 700 ~/myclaw/agents ~/myclaw/data
 
 | Issue                              | Cause                             | Solution                                                          |
 | ---------------------------------- | --------------------------------- | ----------------------------------------------------------------- |
-| No response to messages            | Service not running               | Run `myclaw status` and check the service line                    |
+| No response to messages            | Service not running               | Run `gantry status` and check the service line                    |
 | Startup fails at runtime preflight | Host runtime prerequisites failed | Run `npm run build` and re-check runtime diagnostics              |
-| Session not continuing             | Session state not persisted       | Run `myclaw status` and verify Postgres runtime storage readiness |
+| Session not continuing             | Session state not persisted       | Run `gantry status` and verify Postgres runtime storage readiness |
 | "No groups registered"             | Haven't added groups              | Register a channel group with the current channel setup flow      |
 
 ### Log Location
 
-- `logs/myclaw.log` - stdout
-- `logs/myclaw.error.log` - stderr
+- `logs/gantry.log` - stdout
+- `logs/gantry.error.log` - stderr
 
 ### Debug Mode
 

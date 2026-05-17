@@ -34,7 +34,9 @@ function parseStringArrayValue(
           return validateItem?.(value) ?? value;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          throw new Error(`${pathPrefix}[${index}] ${message}`);
+          throw new Error(`${pathPrefix}[${index}] ${message}`, {
+            cause: err,
+          });
         }
       }),
     ),

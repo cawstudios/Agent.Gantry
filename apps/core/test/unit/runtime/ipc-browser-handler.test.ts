@@ -1577,7 +1577,7 @@ describe('ipc-browser-handler', () => {
       message:
         'Could not reach OneCLI at http://localhost:10254: connect ECONNREFUSED',
       nextAction:
-        "Run `myclaw local doctor`. If you use MyClaw's provided local stack, start it from the directory containing the shipped stack file, or pass that stack file explicitly, then retry.",
+        "Run `gantry local doctor`. If you use Gantry's provided local stack, start it from the directory containing the shipped stack file, or pass that stack file explicitly, then retry.",
     }));
 
     const response = await processBrowserIpcRequest(

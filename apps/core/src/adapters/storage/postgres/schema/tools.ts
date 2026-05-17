@@ -18,7 +18,7 @@ export const toolCatalogPostgres = pgTable(
       .references(() => appsPostgres.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     kind: text('kind').notNull().default('host'),
-    provider: text('provider').notNull().default('myclaw'),
+    provider: text('provider').notNull().default('gantry'),
     providerToolName: text('provider_tool_name'),
     displayName: text('display_name').notNull().default(''),
     description: text('description'),

@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { MemoryIpcAction } from '@myclaw/contracts';
+import type { MemoryIpcAction } from '@gantry/contracts';
 import { z } from 'zod';
 import { groupFolder, memoryDefaultScope, memoryUserId } from '../context.js';
 import { formatMemoryToolResponse } from '../formatting.js';
@@ -36,7 +36,7 @@ async function memoryToolResult(
 export function registerMemoryTools(server: McpServer): void {
   server.tool(
     'memory_search',
-    'Search durable MyClaw memory. Returns real scoped memory statements, procedures, and source snippets with provenance; scores are only ranking metadata.',
+    'Search durable Gantry memory. Returns real scoped memory statements, procedures, and source snippets with provenance; scores are only ranking metadata.',
     {
       query: z.string().describe('Search query'),
       group_folder: z

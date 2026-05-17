@@ -66,7 +66,7 @@ export interface SemanticCapabilityDefinition {
   };
 }
 
-const SEMANTIC_CAPABILITY_SCHEMA_FORMAT = 'myclaw.semantic-capability.v1';
+const SEMANTIC_CAPABILITY_SCHEMA_FORMAT = 'gantry.semantic-capability.v1';
 
 export const DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS = [
   '*TOKEN*',

@@ -76,8 +76,8 @@ export function isProviderSettingsPath(value: string): boolean {
 
 export function isRuntimeSettingsPath(value: string): boolean {
   return [
-    '/myclaw/settings.yaml',
-    '/myclaw/settings.yml',
+    '/gantry/settings.yaml',
+    '/gantry/settings.yml',
     '/settings.yaml',
     '/settings.yml',
   ].some((suffix) => value === suffix || value.endsWith(suffix));

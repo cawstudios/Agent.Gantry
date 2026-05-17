@@ -5,12 +5,11 @@ import path from 'node:path';
 import type { RuntimeApp } from '../../app/bootstrap/runtime-app.js';
 import type { JobManagementServiceDeps } from '../../application/jobs/job-management-types.js';
 import {
-  MYCLAW_HOME,
+  GANTRY_HOME,
   getControlEnvValue,
   getDefaultModelConfig,
   getPublicRuntimeSettings,
   syncRuntimeSettingsFromProjection,
-  updatePublicRuntimeSettings,
 } from '../../config/index.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import {
@@ -172,12 +171,12 @@ export function startControlServer(input: {
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
 }): ControlServerHandle {
   const keys = parseControlApiKeysStrict({
-    rawJson: getControlEnvValue('MYCLAW_CONTROL_API_KEYS_JSON'),
+    rawJson: getControlEnvValue('GANTRY_CONTROL_API_KEYS_JSON'),
   });
   const socketPath =
-    getControlEnvValue('MYCLAW_CONTROL_SOCKET_PATH') ||
-    path.join(MYCLAW_HOME, 'run', 'control.sock');
-  const port = Number(getControlEnvValue('MYCLAW_CONTROL_PORT') || 0);
+    getControlEnvValue('GANTRY_CONTROL_SOCKET_PATH') ||
+    path.join(GANTRY_HOME, 'run', 'control.sock');
+  const port = Number(getControlEnvValue('GANTRY_CONTROL_PORT') || 0);
   const state: ControlServerState = {
     activeStreams: 0,
     activeWaits: 0,
@@ -195,13 +194,11 @@ export function startControlServer(input: {
     state,
     triggerRateLimiter: createRateLimiter(),
     getRuntimeSettings: () => getPublicRuntimeSettings(),
-    updateRuntimeSettings: (patch) =>
-      updatePublicRuntimeSettings(patch as never),
     getDefaultModelConfig,
     getBrowserStatus: input.getBrowserStatus,
     syncSettingsFromProjection: (appId: AppId) =>
       syncRuntimeSettingsFromProjection({
-        runtimeHome: MYCLAW_HOME,
+        runtimeHome: GANTRY_HOME,
         ops: getRuntimeRepositories(),
         repositories: getRuntimeStorage().repositories,
         appId,

@@ -13,7 +13,7 @@ function runCli(args: string[], runtimeHome: string) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      MYCLAW_HOME: runtimeHome,
+      GANTRY_HOME: runtimeHome,
       NODE_ENV: 'test',
     },
     encoding: 'utf-8',
@@ -48,8 +48,8 @@ function writeMinimalRuntime(runtimeHome: string): void {
       '      consolidation: claude-sonnet-4-6',
       'storage:',
       '  postgres:',
-      '    url_env: MYCLAW_DATABASE_URL',
-      '    schema: myclaw',
+      '    url_env: GANTRY_DATABASE_URL',
+      '    schema: gantry',
       '',
     ].join('\n'),
     'utf-8',
@@ -60,7 +60,7 @@ describe('runtime cleanup CLI e2e', () => {
   let runtimeHome = '';
 
   beforeEach(() => {
-    runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-cli-e2e-'));
+    runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-cli-e2e-'));
   });
 
   afterEach(() => {
@@ -74,7 +74,7 @@ describe('runtime cleanup CLI e2e', () => {
     const result = runCli(['--help'], runtimeHome);
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('MyClaw CLI');
+    expect(result.stdout).toContain('Gantry CLI');
     expect(fs.existsSync(path.join(runtimeHome, 'settings.yaml'))).toBe(false);
   }, 20_000);
 
@@ -85,7 +85,7 @@ describe('runtime cleanup CLI e2e', () => {
 
     expect(result.status).toBe(1);
     const output = `${result.stdout}\n${result.stderr}`;
-    expect(output).toContain('myclaw memory status [--json]');
-    expect(output).not.toContain('myclaw memory health journal-status');
+    expect(output).toContain('gantry memory status [--json]');
+    expect(output).not.toContain('gantry memory health journal-status');
   }, 20_000);
 });

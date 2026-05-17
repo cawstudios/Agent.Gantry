@@ -15,8 +15,8 @@ import { activeRunStopWasRequested } from './group-queue-stop.js';
 import { formatDuration } from '../shared/human-format.js';
 import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
-const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = '---GANTRY_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---GANTRY_OUTPUT_END---';
 
 const SENSITIVE_TEXT_PATTERNS: RegExp[] = [
   /\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|AUTH)[A-Z0-9_]*)\s*[:=]\s*([^\s"']+)/gi,
@@ -93,7 +93,7 @@ function runnerContextPayload(input: RunnerProcessSpec['input']) {
 }
 
 function scheduledJobIdleTimeoutMs(): number {
-  const raw = process.env.MYCLAW_SCHEDULED_JOB_IDLE_TIMEOUT_MS;
+  const raw = process.env.GANTRY_SCHEDULED_JOB_IDLE_TIMEOUT_MS;
   if (!raw) return DEFAULT_SCHEDULED_JOB_IDLE_TIMEOUT_MS;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {

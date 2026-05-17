@@ -88,7 +88,7 @@ export async function ensureAgentToolCatalogItem(input: {
     appId: input.appId,
     name: allowedRule,
     kind: 'host',
-    provider: 'myclaw',
+    provider: 'gantry',
     displayName: allowedRule,
     description:
       input.description ??
@@ -127,7 +127,7 @@ async function saveSemanticCapabilityTool(input: {
     provider:
       input.capability.credentialSource === 'local_cli'
         ? 'local_cli'
-        : 'myclaw',
+        : 'gantry',
     displayName: input.capability.displayName,
     description: `${input.capability.can} Cannot: ${input.capability.cannot}`,
     category: 'productivity',

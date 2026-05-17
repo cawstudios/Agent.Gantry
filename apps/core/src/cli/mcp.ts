@@ -21,16 +21,16 @@ type DraftCreateOptions = {
 function usage(): string {
   return [
     'Usage:',
-    '  myclaw mcp draft create --name <name> --transport <http|sse> --url <url> [--tool <name>] [--auto-tool <name>] [--credential <name:env|header:key>]',
-    '  myclaw mcp draft list',
-    '  myclaw mcp approve <serverId> [--by <admin>]',
-    '  myclaw mcp reject <serverId> --reason <text> [--by <admin>]',
-    '  myclaw mcp list [--status <draft|approved|rejected|disabled>]',
-    '  myclaw mcp test <serverId> [--by <admin>]',
-    '  myclaw mcp disable <serverId> [--reason <text>] [--by <admin>]',
-    '  myclaw mcp bind <agentId> <serverId> [--required] [--policy <policyId>]',
-    '  myclaw mcp unbind <agentId> <serverId>',
-    '  myclaw mcp agent list <agentId>',
+    '  gantry mcp draft create --name <name> --transport <http|sse> --url <url> [--tool <name>] [--auto-tool <name>] [--credential <name:env|header:key>]',
+    '  gantry mcp draft list',
+    '  gantry mcp approve <serverId> [--by <admin>]',
+    '  gantry mcp reject <serverId> --reason <text> [--by <admin>]',
+    '  gantry mcp list [--status <draft|approved|rejected|disabled>]',
+    '  gantry mcp test <serverId> [--by <admin>]',
+    '  gantry mcp disable <serverId> [--reason <text>] [--by <admin>]',
+    '  gantry mcp bind <agentId> <serverId> [--required] [--policy <policyId>]',
+    '  gantry mcp unbind <agentId> <serverId>',
+    '  gantry mcp agent list <agentId>',
   ].join('\n');
 }
 
@@ -241,7 +241,7 @@ async function bindServer(
 ): Promise<number> {
   const serverId = args[0] || '';
   if (!agentId || !serverId) {
-    p.log.error('Use myclaw mcp bind <agentId> <serverId>.');
+    p.log.error('Use gantry mcp bind <agentId> <serverId>.');
     return 1;
   }
   const response = await controlApiRequest(runtimeHome, {
@@ -263,7 +263,7 @@ async function unbindServer(
 ): Promise<number> {
   const serverId = args[0] || '';
   if (!agentId || !serverId) {
-    p.log.error('Use myclaw mcp unbind <agentId> <serverId>.');
+    p.log.error('Use gantry mcp unbind <agentId> <serverId>.');
     return 1;
   }
   const response = await controlApiRequest(runtimeHome, {
@@ -279,7 +279,7 @@ async function listAgentBindings(
   agentId = '',
 ): Promise<number> {
   if (!agentId) {
-    p.log.error('Use myclaw mcp agent list <agentId>.');
+    p.log.error('Use gantry mcp agent list <agentId>.');
     return 1;
   }
   return await printList(

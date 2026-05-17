@@ -1,6 +1,6 @@
 ---
 name: architecture-refactor
-description: Use for folder movement, layer boundaries, and domain/application/runtime/adapters refactors in MyClaw.
+description: Use for folder movement, layer boundaries, and domain/application/runtime/adapters refactors in Gantry.
 ---
 
 # Architecture Refactor

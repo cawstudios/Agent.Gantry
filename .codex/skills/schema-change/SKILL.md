@@ -1,6 +1,6 @@
 ---
 name: schema-change
-description: Use for Postgres schema, migrations, persistence repositories, and storage contract changes in MyClaw.
+description: Use for Postgres schema, migrations, persistence repositories, and storage contract changes in Gantry.
 ---
 
 # Schema Change

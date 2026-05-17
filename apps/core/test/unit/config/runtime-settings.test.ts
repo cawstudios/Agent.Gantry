@@ -479,7 +479,7 @@ agents:
     settings.agent.oneTimeJobDefaultModel = 'sonet';
 
     const result = validateLoadedRuntimeSettings(
-      '/tmp/myclaw-missing',
+      '/tmp/gantry-missing',
       settings,
     );
 
@@ -535,7 +535,7 @@ conversations:
     };
 
     const result = validateLoadedRuntimeSettings(
-      '/tmp/myclaw-prefix-validation',
+      '/tmp/gantry-prefix-validation',
       settings,
     );
 
@@ -611,7 +611,7 @@ conversations:
 
   it('mirrors persistent permission grants into readable semantic, Browser, and scoped Bash tools', () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-tools-'),
+      path.join(os.tmpdir(), 'gantry-settings-tools-'),
     );
     try {
       const settings = createDefaultRuntimeSettings();
@@ -620,7 +620,7 @@ conversations:
         folder: 'main_agent',
         bindings: {},
         capabilities: {
-          toolIds: ['mcp__myclaw__service_restart'],
+          toolIds: ['mcp__gantry__service_restart'],
           skillIds: [],
           mcpServerIds: [],
         },
@@ -639,14 +639,14 @@ conversations:
 
       const parsed = loadRuntimeSettings(runtimeHome);
       expect(parsed.agents.main_agent.capabilities.toolIds).toEqual([
-        'mcp__myclaw__service_restart',
+        'mcp__gantry__service_restart',
         'Bash(npm test *)',
         'Browser',
         'capability:google.sheets.write',
       ]);
       const yaml = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
       expect(yaml).toContain(
-        'tools: ["mcp__myclaw__service_restart","Bash(npm test *)","Browser","capability:google.sheets.write"]',
+        'tools: ["mcp__gantry__service_restart","Bash(npm test *)","Browser","capability:google.sheets.write"]',
       );
       expect(yaml).not.toContain('capabilityPolicy');
       expect(yaml).not.toContain('permission-rule:');
@@ -668,7 +668,7 @@ conversations:
       },
     };
 
-    const result = validateLoadedRuntimeSettings('/tmp/myclaw-tools', settings);
+    const result = validateLoadedRuntimeSettings('/tmp/gantry-tools', settings);
 
     expect(result.ok).toBe(false);
     expect(result.failure?.details.join('\n')).toContain(
@@ -697,7 +697,7 @@ conversations:
       };
 
       const result = validateLoadedRuntimeSettings(
-        '/tmp/myclaw-tools',
+        '/tmp/gantry-tools',
         settings,
       );
 
@@ -713,7 +713,7 @@ conversations:
 
   it('fails closed when mirroring persistent tools for a missing settings agent', () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-tools-missing-'),
+      path.join(os.tmpdir(), 'gantry-settings-tools-missing-'),
     );
     try {
       saveRuntimeSettings(runtimeHome, createDefaultRuntimeSettings());
@@ -734,7 +734,7 @@ conversations:
 
   it('rejects raw host-private browser MCP rules before mirroring settings', () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-tools-browser-'),
+      path.join(os.tmpdir(), 'gantry-settings-tools-browser-'),
     );
     try {
       const settings = createDefaultRuntimeSettings();
@@ -766,7 +766,7 @@ conversations:
 
   it('rejects projected browser MCP rules before mirroring settings', () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-tools-browser-projected-'),
+      path.join(os.tmpdir(), 'gantry-settings-tools-browser-projected-'),
     );
     try {
       const settings = createDefaultRuntimeSettings();
@@ -786,7 +786,7 @@ conversations:
         mirrorAgentToolRulesToRuntimeSettings({
           runtimeHome,
           agentFolder: 'main_agent',
-          rules: ['mcp__myclaw__browser_act'],
+          rules: ['mcp__gantry__browser_act'],
         }),
       ).toThrow('runtime projections, not durable capabilities');
       const parsed = loadRuntimeSettings(runtimeHome);
@@ -798,7 +798,7 @@ conversations:
 
   it('rejects non-exact Browser aliases before mirroring settings', () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-tools-browser-alias-'),
+      path.join(os.tmpdir(), 'gantry-settings-tools-browser-alias-'),
     );
     try {
       const settings = createDefaultRuntimeSettings();
@@ -836,7 +836,7 @@ conversations:
 
   it('rejects malformed persistent tool rules before writing settings', () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-tools-invalid-'),
+      path.join(os.tmpdir(), 'gantry-settings-tools-invalid-'),
     );
     try {
       const settings = createDefaultRuntimeSettings();
@@ -856,7 +856,7 @@ conversations:
         mirrorAgentToolRulesToRuntimeSettings({
           runtimeHome,
           agentFolder: 'main_agent',
-          rules: ['mcp__myclaw__service_restart(reason=test)'],
+          rules: ['mcp__gantry__service_restart(reason=test)'],
         }),
       ).toThrow('Only Bash supports persistent scoped tool rules');
       const parsed = loadRuntimeSettings(runtimeHome);
@@ -868,7 +868,7 @@ conversations:
 
   it('rejects wildcard-scoped Bash rules before writing settings', () => {
     const runtimeHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-settings-tools-bash-wildcard-'),
+      path.join(os.tmpdir(), 'gantry-settings-tools-bash-wildcard-'),
     );
     try {
       const settings = createDefaultRuntimeSettings();

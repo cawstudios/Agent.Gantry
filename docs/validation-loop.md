@@ -1,6 +1,6 @@
 # Validation Loop
 
-This is the deterministic validation loop for MyClaw factory mode.
+This is the deterministic validation loop for Gantry factory mode.
 
 ## Phase 1: Structural Integrity
 

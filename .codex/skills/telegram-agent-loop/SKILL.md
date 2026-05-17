@@ -1,19 +1,19 @@
 ---
 name: telegram-agent-loop
-description: Use when Codex must drive a Kai or Telegram-hosted agent test through Chrome, send prompts in a visible Telegram topic, monitor responses like a user, iterate with follow-up instructions, and cross-check MyClaw CLI/runtime evidence until the agent certifies a job or issue as fixed.
+description: Use when Codex must drive a Kai or Telegram-hosted agent test through Chrome, send prompts in a visible Telegram topic, monitor responses like a user, iterate with follow-up instructions, and cross-check Gantry CLI/runtime evidence until the agent certifies a job or issue as fixed.
 ---
 
 # Telegram Agent Loop
 
-Use this skill for operator-style verification loops where a remote agent in Telegram must run or certify a MyClaw job.
+Use this skill for operator-style verification loops where a remote agent in Telegram must run or certify a Gantry job.
 
 ## Ground Rules
 
 - Use the `chrome:Chrome` skill and the existing Chrome/Telegram tab for Telegram only.
-- Do not use Chrome, CDP, or the Telegram browser profile as the MyClaw job Browser. If the tested job needs Browser, instruct the agent to use MyClaw Browser tools and the job's MyClaw profile.
+- Do not use Chrome, CDP, or the Telegram browser profile as the Gantry job Browser. If the tested job needs Browser, instruct the agent to use Gantry Browser tools and the job's Gantry profile.
 - Interact with Telegram like a user: read the visible thread, focus the message box, paste or type the prompt, send it, and watch the visible status.
 - Keep messages concise and action-oriented. Include exact job ids, run ids, expected tools, and acceptance criteria.
-- Treat the Telegram agent's report as a claim. Cross-check it with local MyClaw CLI/runtime evidence before calling the issue fixed.
+- Treat the Telegram agent's report as a claim. Cross-check it with local Gantry CLI/runtime evidence before calling the issue fixed.
 
 ## Loop
 
@@ -37,7 +37,7 @@ Use this skill for operator-style verification loops where a remote agent in Tel
 4. **Intervene only on concrete gaps**
    - If the job is ready but paused, tell the agent to resume and run now.
    - If tool activity is missing, ask the agent to exercise the required tool and report the event id.
-   - If Browser setup is required, tell the agent to use the MyClaw Browser profile shown by readiness, never the Chrome/Telegram tab.
+   - If Browser setup is required, tell the agent to use the Gantry Browser profile shown by readiness, never the Chrome/Telegram tab.
    - If credentials are needed, tell the agent to use the approved credential path without printing secrets.
 
 5. **Certify**
@@ -54,5 +54,5 @@ Current local evidence:
 - Latest event ids: <ids>
 - Missing proof: <gap>
 
-Continue from here. Do not restart from scratch unless the current run is terminal. Use the visible MyClaw/Kai workflow, report exact event ids, and stop only when the job is terminal and certified.
+Continue from here. Do not restart from scratch unless the current run is terminal. Use the visible Gantry/Kai workflow, report exact event ids, and stop only when the job is terminal and certified.
 ```

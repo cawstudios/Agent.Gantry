@@ -80,18 +80,18 @@ describe('job tool policy', () => {
         job: makeJob(),
         appId: 'default',
         agentId: 'agent:team',
-        toolRepository: toolRepositoryFor(['mcp__myclaw__browser_act']),
+        toolRepository: toolRepositoryFor(['mcp__gantry__browser_act']),
       }),
     ).rejects.toThrowError(/runtime projections, not durable capabilities/);
   });
 
-  it('rejects stale inherited MyClaw MCP wildcard rules from agent tool bindings', async () => {
+  it('rejects stale inherited Gantry MCP wildcard rules from agent tool bindings', async () => {
     await expect(
       resolveJobToolPolicy({
         job: makeJob(),
         appId: 'default',
         agentId: 'agent:team',
-        toolRepository: toolRepositoryFor(['mcp__myclaw__*']),
+        toolRepository: toolRepositoryFor(['mcp__gantry__*']),
       }),
     ).rejects.toThrowError(/wildcard grants are not supported/);
   });

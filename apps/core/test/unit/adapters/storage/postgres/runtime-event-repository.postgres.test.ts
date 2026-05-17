@@ -143,7 +143,7 @@ describe('PostgresRuntimeEventRepository', () => {
     expect(db.insertedOutboxEvent).toMatchObject({
       eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_OUTBOUND,
       eventVersion: 1,
-      source: 'myclaw.runtime_events',
+      source: 'gantry.runtime_events',
       appId: 'app:test',
       runtimeEventId: 42,
       status: 'pending',

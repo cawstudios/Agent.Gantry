@@ -9,7 +9,7 @@ import {
 } from '../../config/settings/runtime-home.js';
 import { tryExec } from './platform.js';
 
-const SERVICE_LABEL = 'com.myclaw';
+const SERVICE_LABEL = 'com.gantry';
 
 function escapeXml(value: string): string {
   return value
@@ -61,7 +61,7 @@ export function writeLaunchdPlist(
   <true/>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>MYCLAW_HOME</key>
+    <key>GANTRY_HOME</key>
     <string>${escapeXml(runtimeHome)}</string>
     <key>HOME</key>
     <string>${escapeXml(os.homedir())}</string>
@@ -86,7 +86,7 @@ export function startLaunchdService(): void {
   const uid = process.getuid?.() || 0;
   const target = launchdPlistPath();
   if (!fs.existsSync(target)) {
-    throw new Error('launchd plist is missing. Run `myclaw service install`.');
+    throw new Error('launchd plist is missing. Run `gantry service install`.');
   }
   const serviceTarget = `gui/${uid}/${SERVICE_LABEL}`;
   const status = tryExec('launchctl', ['print', serviceTarget]);

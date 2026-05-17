@@ -314,7 +314,7 @@ describe('job readiness service', () => {
 
   it('turns runtime denied tool use into setup state', () => {
     const setup = setupStateForDeniedTool({
-      toolName: 'mcp__myclaw__service_restart',
+      toolName: 'mcp__gantry__service_restart',
       recoveryAction: 'request_permission ...',
       checkedAt: '2026-05-14T00:00:00.000Z',
     });
@@ -324,7 +324,7 @@ describe('job readiness service', () => {
       blockers: [
         {
           requirementType: 'tool',
-          requirementId: 'mcp__myclaw__service_restart',
+          requirementId: 'mcp__gantry__service_restart',
           nextAction: 'request_permission ...',
         },
       ],
@@ -333,7 +333,7 @@ describe('job readiness service', () => {
 
   it('canonicalizes projected browser tool denials to Browser setup', () => {
     const setup = setupStateForDeniedTool({
-      toolName: 'mcp__myclaw__browser_act',
+      toolName: 'mcp__gantry__browser_act',
       checkedAt: '2026-05-14T00:00:00.000Z',
     });
 

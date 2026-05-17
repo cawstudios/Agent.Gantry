@@ -102,7 +102,7 @@ export async function runEmbeddingsStep(
   }
 
   p.note(
-    'Embeddings improve memory search quality. Default is off; external embedding provider credentials belong in Model Access, not MyClaw .env.',
+    'Embeddings improve memory search quality. Default is off; external embedding provider credentials belong in Model Access, not Gantry .env.',
     'Embeddings',
   );
 
@@ -228,7 +228,7 @@ export async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
   );
   const action = await chooseProgressAction({
     message:
-      'Create this MyClaw runtime now? After this point setup writes config and cannot be cancelled transactionally.',
+      'Create this Gantry runtime now? After this point setup writes config and cannot be cancelled transactionally.',
     continueLabel: 'Create Runtime',
     includeBack: true,
   });
@@ -244,7 +244,7 @@ export async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
       spinner.stop('Database configuration is incomplete');
       p.log.error(
         [
-          'MyClaw requires both MYCLAW_DATABASE_URL and ONECLI_DATABASE_URL before writing runtime config.',
+          'Gantry requires both GANTRY_DATABASE_URL and ONECLI_DATABASE_URL before writing runtime config.',
           'Next action: return to the storage step and provide both database URLs.',
         ].join('\n'),
       );
@@ -351,7 +351,7 @@ export async function runServiceStep(draft: SetupDraft): Promise<FlowAction> {
       {
         value: 'skip',
         label: 'Skip for now (Recommended)',
-        hint: 'You can run MyClaw manually with `myclaw start`.',
+        hint: 'You can run Gantry manually with `gantry start`.',
       },
       {
         value: 'install',
@@ -396,7 +396,7 @@ export async function applyServiceChoice(
   const installOutcome = installService(importMetaUrl, draft.runtimeHome);
   if (!installOutcome.ok) {
     p.log.warn(
-      `Service install failed. Next action: run \`myclaw start\` manually, or use the advanced service command later.\n${installOutcome.message}`,
+      `Service install failed. Next action: run \`gantry start\` manually, or use the advanced service command later.\n${installOutcome.message}`,
     );
     return;
   }
@@ -413,14 +413,14 @@ export async function applyServiceStartChoice(
   );
   if (!validation.ok && validation.failure) {
     p.log.warn(
-      `Service start skipped after verification. Next action: fix runtime preflight and run \`myclaw start\` later.\n${formatRuntimePreflightFailure(validation.failure)}`,
+      `Service start skipped after verification. Next action: fix runtime preflight and run \`gantry start\` later.\n${formatRuntimePreflightFailure(validation.failure)}`,
     );
     return;
   }
   const startOutcome = startService(draft.runtimeHome);
   if (!startOutcome.ok) {
     p.log.warn(
-      `Service start failed. Next action: run \`myclaw start\` later.\n${startOutcome.message}`,
+      `Service start failed. Next action: run \`gantry start\` later.\n${startOutcome.message}`,
     );
   } else {
     draft.serviceStartedAfterSetup = true;
@@ -451,7 +451,7 @@ export async function runVerifyStep(
   }
   if (!hasProcessableGroup) {
     const connectCommands = listConnectableChannelProviders().map(
-      (provider) => `\`myclaw provider connect ${provider.id}\``,
+      (provider) => `\`gantry provider connect ${provider.id}\``,
     );
     p.log.warn(
       `Setup is not complete yet. Next action: ensure one enabled provider has credentials and a registered conversation (${connectCommands.join(' or ')}).`,
@@ -464,7 +464,7 @@ export async function runVerifyStep(
 
   if (!report.ok) {
     p.log.warn(
-      'Verification found blocking issues after runtime creation. Setup is saved but not complete; fix the next actions above, then run `myclaw setup` to continue.',
+      'Verification found blocking issues after runtime creation. Setup is saved but not complete; fix the next actions above, then run `gantry setup` to continue.',
     );
     return { type: 'resume' };
   }

@@ -362,7 +362,7 @@ export async function runSlackStep(draft: SetupDraft): Promise<FlowAction> {
     [
       '1. Create a Slack app from app settings for the target workspace.',
       '2. Add a bot user and bot scopes for posting, conversation discovery, and message events.',
-      '   Minimum practical scopes: chat:write, app_mentions:read, channels:read, groups:read, im:read, mpim:read, plus message history scopes for the conversation types you want MyClaw to read.',
+      '   Minimum practical scopes: chat:write, app_mentions:read, channels:read, groups:read, im:read, mpim:read, plus message history scopes for the conversation types you want Gantry to read.',
       '3. Enable Socket Mode and generate an app-level token with connections:write.',
       '4. Install or reinstall the app to the workspace after scope changes.',
       '5. Invite the app to the target channel or DM it once before discovery.',

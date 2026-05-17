@@ -1,10 +1,10 @@
-# MyClaw Agent Instructions
+# Gantry Agent Instructions
 
 This repository uses `AGENTS.md` as the primary working contract for coding
 agents. Read it first, then follow `WORKFLOW.md`, `docs/FACTORY.md`, and
 `docs/QUALITY.md` for factory phase execution.
 
-MyClaw-owned capability changes must go through reviewed runtime tools rather
+Gantry-owned capability changes must go through reviewed runtime tools rather
 than direct local mutation. Agent-facing capability request and interaction
 tools are:
 

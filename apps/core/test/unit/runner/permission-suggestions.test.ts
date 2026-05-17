@@ -9,13 +9,13 @@ describe('scheduledPermissionSuggestions', () => {
   it('canonicalizes projected browser tool suggestions to Browser', () => {
     expect(
       scheduledPermissionSuggestions(
-        'mcp__myclaw__browser_act',
+        'mcp__gantry__browser_act',
         [
           {
             type: 'addRules',
             behavior: 'allow',
             destination: 'session',
-            rules: [{ toolName: 'mcp__myclaw__browser_act' }],
+            rules: [{ toolName: 'mcp__gantry__browser_act' }],
           },
         ],
         {},

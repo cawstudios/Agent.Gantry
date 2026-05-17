@@ -20,28 +20,28 @@ describe('browser MCP IPC response signatures', () => {
   });
 
   function tempRoot(): string {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-browser-ipc-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-browser-ipc-'));
     tempRoots.push(root);
     return root;
   }
 
   function stubRunnerEnv(root = tempRoot()): void {
-    vi.stubEnv('MYCLAW_IPC_DIR', path.join(root, 'main_agent'));
-    vi.stubEnv('MYCLAW_GROUP_FOLDER', 'main_agent');
-    vi.stubEnv('MYCLAW_CHAT_JID', 'tg:test');
-    vi.stubEnv('MYCLAW_ADMIN_MCP_TOOLS_JSON', '[]');
+    vi.stubEnv('GANTRY_IPC_DIR', path.join(root, 'main_agent'));
+    vi.stubEnv('GANTRY_GROUP_FOLDER', 'main_agent');
+    vi.stubEnv('GANTRY_CHAT_JID', 'tg:test');
+    vi.stubEnv('GANTRY_ADMIN_MCP_TOOLS_JSON', '[]');
   }
 
   it('accepts host-written signed browser lifecycle responses', async () => {
     const root = tempRoot();
     const ipcDir = path.join(root, 'main_agent');
     const keys = createIpcResponseSigningKeyPair();
-    vi.stubEnv('MYCLAW_IPC_DIR', ipcDir);
-    vi.stubEnv('MYCLAW_IPC_AUTH_TOKEN', 'test-token');
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', keys.publicKeyPem);
-    vi.stubEnv('MYCLAW_GROUP_FOLDER', 'main_agent');
-    vi.stubEnv('MYCLAW_CHAT_JID', 'tg:test');
-    vi.stubEnv('MYCLAW_ADMIN_MCP_TOOLS_JSON', '[]');
+    vi.stubEnv('GANTRY_IPC_DIR', ipcDir);
+    vi.stubEnv('GANTRY_IPC_AUTH_TOKEN', 'test-token');
+    vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', keys.publicKeyPem);
+    vi.stubEnv('GANTRY_GROUP_FOLDER', 'main_agent');
+    vi.stubEnv('GANTRY_CHAT_JID', 'tg:test');
+    vi.stubEnv('GANTRY_ADMIN_MCP_TOOLS_JSON', '[]');
 
     const { requestBrowserAction } = await import('@core/runner/mcp/ipc.js');
 
@@ -88,11 +88,11 @@ describe('browser MCP IPC response signatures', () => {
     const root = tempRoot();
     const ipcDir = path.join(root, 'main_agent');
     const keys = createIpcResponseSigningKeyPair();
-    vi.stubEnv('MYCLAW_IPC_DIR', ipcDir);
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', keys.publicKeyPem);
-    vi.stubEnv('MYCLAW_GROUP_FOLDER', 'main_agent');
-    vi.stubEnv('MYCLAW_CHAT_JID', 'tg:test');
-    vi.stubEnv('MYCLAW_ADMIN_MCP_TOOLS_JSON', '[]');
+    vi.stubEnv('GANTRY_IPC_DIR', ipcDir);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', keys.publicKeyPem);
+    vi.stubEnv('GANTRY_GROUP_FOLDER', 'main_agent');
+    vi.stubEnv('GANTRY_CHAT_JID', 'tg:test');
+    vi.stubEnv('GANTRY_ADMIN_MCP_TOOLS_JSON', '[]');
 
     const { hasValidIpcResponseSignature } =
       await import('@core/runner/mcp/ipc.js');
@@ -107,7 +107,7 @@ describe('browser MCP IPC response signatures', () => {
   it('rejects tampered response payloads', async () => {
     const keys = createIpcResponseSigningKeyPair();
     stubRunnerEnv();
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', keys.publicKeyPem);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', keys.publicKeyPem);
     const { hasValidIpcResponseSignature } =
       await import('@core/runner/mcp/ipc.js');
     const signedPayload = { ok: true, requestId: 'browser-1' };
@@ -133,13 +133,13 @@ describe('browser MCP IPC response signatures', () => {
     const signature = signIpcResponsePayload(keys.privateKeyPem, payload);
 
     stubRunnerEnv();
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', keys.publicKeyPem);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', keys.publicKeyPem);
     let ipc = await import('@core/runner/mcp/ipc.js');
     expect(ipc.hasValidIpcResponseSignature(payload, payload)).toBe(false);
 
     vi.resetModules();
     stubRunnerEnv();
-    vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', wrongKeys.publicKeyPem);
+    vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', wrongKeys.publicKeyPem);
     ipc = await import('@core/runner/mcp/ipc.js');
     expect(
       ipc.hasValidIpcResponseSignature({ ...payload, signature }, payload),

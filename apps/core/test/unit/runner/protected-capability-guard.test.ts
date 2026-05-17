@@ -8,7 +8,7 @@ describe('denyProtectedCapabilityToolUse', () => {
       denyProtectedCapabilityToolUse('Config', {
         setting: 'permissions.defaultMode',
       }),
-    ).toContain('Denied by MyClaw tool execution policy');
+    ).toContain('Denied by Gantry tool execution policy');
   });
 
   it.each([
@@ -25,7 +25,7 @@ describe('denyProtectedCapabilityToolUse', () => {
     ['Bash', { command: 'cat > .mcp.json' }],
   ])('denies %s mutations to capability-bearing files', (tool, input) => {
     expect(denyProtectedCapabilityToolUse(tool, input)).toContain(
-      'Denied by MyClaw tool execution policy',
+      'Denied by Gantry tool execution policy',
     );
   });
 

@@ -7,7 +7,7 @@ import { generateKeyPairSync } from 'crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { schedulerJobConfirmationToken } from '@core/jobs/job-plan-formatter.js';
-import { ALL_MYCLAW_MCP_TOOL_NAMES } from '@agent-runner-src/myclaw-mcp-tool-surface.js';
+import { ALL_GANTRY_MCP_TOOL_NAMES } from '@agent-runner-src/gantry-mcp-tool-surface.js';
 
 const tempRoots: string[] = [];
 
@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 function makeTempRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-mcp-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-mcp-test-'));
   tempRoots.push(root);
   return root;
 }
@@ -146,8 +146,8 @@ function createMcpFixture(): {
     path.join(runnerDir, 'memory-timeouts.ts'),
   );
   fs.copyFileSync(
-    path.resolve('apps/core/src/runner/myclaw-mcp-tool-surface.ts'),
-    path.join(runnerDir, 'myclaw-mcp-tool-surface.ts'),
+    path.resolve('apps/core/src/runner/gantry-mcp-tool-surface.ts'),
+    path.join(runnerDir, 'gantry-mcp-tool-surface.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/jobs/job-plan-formatter.ts'),
@@ -175,7 +175,7 @@ function createMcpFixture(): {
   );
   symlinkPackage(root, 'zod', 'node_modules/zod');
   symlinkPackage(root, 'cron-parser', 'node_modules/cron-parser');
-  symlinkPackage(root, '@myclaw/contracts', 'packages/contracts');
+  symlinkPackage(root, '@gantry/contracts', 'packages/contracts');
 
   fs.writeFileSync(
     path.join(sdkRoot, 'package.json'),
@@ -269,7 +269,7 @@ export class McpServer {
     const handler = tools.get(toolName);
     if (!handler) throw new Error('tool not registered: ' + toolName);
     const args = JSON.parse(process.env.TEST_MCP_TOOL_ARGS || '{}');
-    const ipcDir = process.env.MYCLAW_IPC_DIR;
+    const ipcDir = process.env.GANTRY_IPC_DIR;
 
     let observedRequest;
     let observedBoundary;
@@ -374,16 +374,16 @@ async function runMcpFixture(
       cwd: fixture.root,
       env: {
         ...process.env,
-        MYCLAW_IPC_DIR: fixture.ipcDir,
-        MYCLAW_IPC_AUTH_TOKEN: 'mcp-test-token',
-        MYCLAW_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
-        MYCLAW_IPC_RESPONSE_KEY_ID: 'mcp-test-response-key-id',
+        GANTRY_IPC_DIR: fixture.ipcDir,
+        GANTRY_IPC_AUTH_TOKEN: 'mcp-test-token',
+        GANTRY_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
+        GANTRY_IPC_RESPONSE_KEY_ID: 'mcp-test-response-key-id',
         TEST_IPC_RESPONSE_SIGNING_KEY: fixture.responseSigningKey,
-        MYCLAW_CHAT_JID: 'tg:team',
-        MYCLAW_GROUP_FOLDER: 'team',
-        MYCLAW_AGENT_RUN_HANDLE: 'mcp-test-run',
-        MYCLAW_ADMIN_MCP_TOOLS_JSON: '[]',
-        MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify(ALL_MYCLAW_MCP_TOOL_NAMES),
+        GANTRY_CHAT_JID: 'tg:team',
+        GANTRY_GROUP_FOLDER: 'team',
+        GANTRY_AGENT_RUN_HANDLE: 'mcp-test-run',
+        GANTRY_ADMIN_MCP_TOOLS_JSON: '[]',
+        GANTRY_MCP_TOOL_NAMES_JSON: JSON.stringify(ALL_GANTRY_MCP_TOOL_NAMES),
         ...envOverrides,
         TEST_MCP_TOOL_NAME: toolName,
         TEST_MCP_TOOL_ARGS: JSON.stringify(args),
@@ -477,16 +477,16 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     expect(result.exitCode, result.stderr).toBe(0);
     const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
     expect(record.result.content[0].text).toContain(
-      'available: mcp__myclaw__scheduler_list_jobs',
+      'available: mcp__gantry__scheduler_list_jobs',
     );
     expect(record.result.content[0].text).toContain(
-      'requestable: mcp__myclaw__service_restart',
+      'requestable: mcp__gantry__service_restart',
     );
     expect(record.result.content[0].text).toContain(
-      'tool_id: tool:mcp__myclaw__service_restart',
+      'tool_id: tool:mcp__gantry__service_restart',
     );
     expect(record.result.content[0].text).toContain(
-      'request_permission: permissionKind=tool toolName=mcp__myclaw__service_restart temporaryOnly=false',
+      'request_permission: permissionKind=tool toolName=mcp__gantry__service_restart temporaryOnly=false',
     );
     expect(record.result.content[0].text).toContain('requestable: Browser');
     expect(record.result.content[0].text).toContain('tool_id: tool:Browser');
@@ -494,7 +494,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       'request_permission: permissionKind=tool toolName=Browser toolCategory=browser temporaryOnly=false',
     );
     expect(record.result.content[0].text).toContain(
-      'Browser approval exposes MyClaw-owned browser_* tools',
+      'Browser approval exposes Gantry-owned browser_* tools',
     );
   });
 
@@ -506,9 +506,9 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       'capability_status',
       {},
       {
-        MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON: '["Bash(npm test *)"]',
-        MYCLAW_SELECTED_SKILLS_JSON: '["skill:release"]',
-        MYCLAW_SELECTED_MCP_SERVERS_JSON: '["mcp:github"]',
+        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '["Bash(npm test *)"]',
+        GANTRY_SELECTED_SKILLS_JSON: '["skill:release"]',
+        GANTRY_SELECTED_MCP_SERVERS_JSON: '["mcp:github"]',
       },
     );
 
@@ -528,7 +528,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       fixture,
       'service_restart',
       {},
-      { MYCLAW_ADMIN_MCP_TOOLS_JSON: '["service_restart"]' },
+      { GANTRY_ADMIN_MCP_TOOLS_JSON: '["service_restart"]' },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -552,17 +552,17 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       statusFixture,
       'capability_status',
       {},
-      { MYCLAW_ADMIN_MCP_TOOLS_JSON: '["service_restart"]' },
+      { GANTRY_ADMIN_MCP_TOOLS_JSON: '["service_restart"]' },
     );
     expect(statusResult.exitCode, statusResult.stderr).toBe(0);
     const statusRecord = JSON.parse(
       fs.readFileSync(statusFixture.resultPath, 'utf-8'),
     );
     expect(statusRecord.result.content[0].text).toContain(
-      'available: mcp__myclaw__service_restart',
+      'available: mcp__gantry__service_restart',
     );
     expect(statusRecord.result.content[0].text).toContain(
-      'requestable: mcp__myclaw__register_agent',
+      'requestable: mcp__gantry__register_agent',
     );
   }, 40_000);
 
@@ -575,10 +575,10 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
     expect(record.result.isError).toBe(true);
     expect(record.result.content[0].text).toContain(
-      'mcp__myclaw__service_restart is not selected for this agent yet.',
+      'mcp__gantry__service_restart is not selected for this agent yet.',
     );
     expect(record.result.content[0].text).toContain(
-      'Ask a configured conversation approver to approve mcp__myclaw__service_restart, then choose Always allow.',
+      'Ask a configured conversation approver to approve mcp__gantry__service_restart, then choose Always allow.',
     );
     expect(fs.existsSync(path.join(fixture.ipcDir, 'tasks'))).toBe(false);
   });
@@ -591,8 +591,8 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       'admin_permission_list',
       {},
       {
-        MYCLAW_ADMIN_MCP_TOOLS_JSON: '["admin_permission_list"]',
-        MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON: '["Bash(npm test *)"]',
+        GANTRY_ADMIN_MCP_TOOLS_JSON: '["admin_permission_list"]',
+        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '["Bash(npm test *)"]',
       },
     );
 
@@ -602,7 +602,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       'Admin permission inventory (read-only runner view):',
     );
     expect(record.result.content[0].text).toContain(
-      'mcp__myclaw__admin_permission_list: selected',
+      'mcp__gantry__admin_permission_list: selected',
     );
     expect(record.result.content[0].text).toContain('Bash(npm test *)');
     expect(fs.existsSync(path.join(fixture.ipcDir, 'tasks'))).toBe(false);
@@ -615,10 +615,10 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       fixture,
       'admin_permission_revoke',
       {
-        tool_name: 'mcp__myclaw__service_restart',
+        tool_name: 'mcp__gantry__service_restart',
         reason: 'Reduce admin surface',
       },
-      { MYCLAW_ADMIN_MCP_TOOLS_JSON: '["admin_permission_revoke"]' },
+      { GANTRY_ADMIN_MCP_TOOLS_JSON: '["admin_permission_revoke"]' },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -639,7 +639,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     fs.mkdirSync(liveRuleDir, { recursive: true });
     fs.writeFileSync(
       path.join(liveRuleDir, 'mcp-test-run.json'),
-      JSON.stringify(['mcp__myclaw__service_restart']),
+      JSON.stringify(['mcp__gantry__service_restart']),
     );
 
     const statusResult = await runMcpFixture(fixture, 'capability_status', {});
@@ -648,7 +648,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       fs.readFileSync(fixture.resultPath, 'utf-8'),
     );
     expect(statusRecord.result.content[0].text).toContain(
-      'available: mcp__myclaw__service_restart',
+      'available: mcp__gantry__service_restart',
     );
 
     const result = await runMcpFixture(fixture, 'service_restart', {});
@@ -682,7 +682,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       fixture,
       'scheduler_list_models',
       {},
-      { MYCLAW_MCP_TOOL_NAMES_JSON: staleSurface },
+      { GANTRY_MCP_TOOL_NAMES_JSON: staleSurface },
     );
 
     expect(scheduler.exitCode, scheduler.stderr).toBe(0);
@@ -693,7 +693,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       fixture,
       'service_restart',
       {},
-      { MYCLAW_MCP_TOOL_NAMES_JSON: staleSurface },
+      { GANTRY_MCP_TOOL_NAMES_JSON: staleSurface },
     );
     expect(hiddenAdmin.exitCode, hiddenAdmin.stderr).toBe(0);
     const adminRecord = JSON.parse(
@@ -701,7 +701,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     );
     expect(adminRecord.result.isError).toBe(true);
     expect(adminRecord.result.content[0].text).toContain(
-      'mcp__myclaw__service_restart is not selected for this agent yet.',
+      'mcp__gantry__service_restart is not selected for this agent yet.',
     );
   });
 
@@ -712,7 +712,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       fixture,
       'scheduler_list_models',
       {},
-      { MYCLAW_MCP_TOOL_NAMES_JSON: undefined },
+      { GANTRY_MCP_TOOL_NAMES_JSON: undefined },
     );
 
     expect(scheduler.exitCode, scheduler.stderr).toBe(0);
@@ -754,7 +754,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
           createdBy: 'agent',
         }),
       },
-      { MYCLAW_THREAD_ID: 'trusted-thread' },
+      { GANTRY_THREAD_ID: 'trusted-thread' },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -883,15 +883,15 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     [
       'request_skill_install',
       {
-        spec: 'clawhub:release-notes@1.0.0',
-        provider: 'clawhub',
+        spec: 'gantryhub:release-notes@1.0.0',
+        provider: 'gantryhub',
         slug: 'release-notes',
         version: '1.0.0',
         reason: 'Reuse a reviewed release workflow.',
       },
       {
-        spec: 'clawhub:release-notes@1.0.0',
-        provider: 'clawhub',
+        spec: 'gantryhub:release-notes@1.0.0',
+        provider: 'gantryhub',
         slug: 'release-notes',
         version: '1.0.0',
         reason: 'Reuse a reviewed release workflow.',
@@ -989,8 +989,8 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     const fixture = createMcpFixture();
 
     const result = await runMcpFixture(fixture, 'request_skill_install', {
-      spec: 'clawhub:browser@1.0.0',
-      provider: 'clawhub',
+      spec: 'gantryhub:browser@1.0.0',
+      provider: 'gantryhub',
       slug: 'browser',
       reason: 'Install browser automation as a skill.',
     });
@@ -1002,7 +1002,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
     expect(record.result.isError).toBe(true);
     expect(record.result.content[0].text).toContain(
-      'Browser control is a built-in MyClaw tool capability',
+      'Browser control is a built-in Gantry tool capability',
     );
     expect(record.result.content[0].text).toContain(
       'Ask a configured conversation approver to approve Browser access',
@@ -1033,7 +1033,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
     expect(record.result.isError).toBe(true);
     expect(record.result.content[0].text).toContain(
-      'Browser control is a built-in MyClaw tool capability',
+      'Browser control is a built-in Gantry tool capability',
     );
     expect(record.result.content[0].text).toContain(
       'Ask a configured conversation approver to approve Browser access',
@@ -1175,7 +1175,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
         schedule_value: '60000',
         thread_id: 'attacker-thread',
       },
-      { MYCLAW_THREAD_ID: 'trusted-thread' },
+      { GANTRY_THREAD_ID: 'trusted-thread' },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -1200,7 +1200,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
         prompt: 'Updated prompt',
         model_alias: 'sonnet',
       },
-      { MYCLAW_THREAD_ID: 'trusted-thread' },
+      { GANTRY_THREAD_ID: 'trusted-thread' },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -1228,7 +1228,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
         prompt: 'Updated prompt',
         target: 'this_thread',
       },
-      { MYCLAW_THREAD_ID: 'trusted-thread' },
+      { GANTRY_THREAD_ID: 'trusted-thread' },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -1280,7 +1280,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
           },
         ],
       },
-      { MYCLAW_THREAD_ID: 'trusted-thread' },
+      { GANTRY_THREAD_ID: 'trusted-thread' },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -1321,7 +1321,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
         job_id: 'job-1',
         model_alias: null,
       },
-      { MYCLAW_THREAD_ID: 'trusted-thread' },
+      { GANTRY_THREAD_ID: 'trusted-thread' },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -1348,7 +1348,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
         prompt: 'Updated prompt',
         thread_id: 'attacker-thread',
       },
-      { MYCLAW_THREAD_ID: '' },
+      { GANTRY_THREAD_ID: '' },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);

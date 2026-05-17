@@ -316,7 +316,7 @@ export function createChannelWiring(
       id: messageId,
       chat_jid: jid,
       provider: provider,
-      sender: 'myclaw',
+      sender: 'gantry',
       sender_name: 'Gantry',
       content: formatted,
       timestamp: now,

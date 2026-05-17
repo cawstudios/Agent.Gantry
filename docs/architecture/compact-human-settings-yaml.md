@@ -2,7 +2,7 @@
 
 ## Summary
 
-`~/myclaw/settings.yaml` should be the local user's editable desired-state file,
+`~/gantry/settings.yaml` should be the local user's editable desired-state file,
 not a dump of runtime projection details. The compact settings work should make
 the file understandable to a non-technical admin by rendering only values the
 user can reasonably change and by hiding defaults, internal IDs, timestamps, and
@@ -33,7 +33,7 @@ agents:
   kai:
     name: Kai
     skills:
-      - myclaw-admin
+      - gantry-admin
       - browser
 
 conversations:
@@ -156,7 +156,7 @@ debug detail.
 | Control API                 | Changed              | Diagnostic settings reads return compact public shape and effective-source metadata.             |
 | SDK/contracts               | Changed              | Add compact settings and skill alias shapes where public.                                        |
 | CLI                         | Changed              | `settings export-current` writes compact YAML; clear commands delete overrides.                  |
-| MyClaw MCP/admin skill      | Changed              | Settings patch tools use compact fields and skill aliases.                                       |
+| Gantry MCP/admin skill      | Changed              | Settings patch tools use compact fields and skill aliases.                                       |
 | Channel/provider adapters   | Unchanged by design  | Runtime adapter behavior stays the same.                                                         |
 | Docs/prompts                | Changed              | Add settings guide with inherited setting examples and reset behavior.                           |
 | Audit/events                | Read-only/observable | Skill version and artifact history remain in DB/artifact stores.                                 |
@@ -165,7 +165,7 @@ debug detail.
 ## Implementation Notes
 
 - This is the current settings shape, not a versioned compatibility path.
-  MyClaw is still early-stage, so the implementation should make one clean cut
+  Gantry is still early-stage, so the implementation should make one clean cut
   to the compact format.
 - Collapse singular `agent` into `defaults` and actual agents under `agents`.
 - Collapse common one-agent bindings into `conversations.<id>.agent`.
@@ -190,7 +190,7 @@ debug detail.
 
 ## Assumptions
 
-- This is a single clean cut because MyClaw is still early-stage.
+- This is a single clean cut because Gantry is still early-stage.
 - Runtime/audit/history data stays out of `settings.yaml`.
 - Skill aliases are the user-facing contract; IDs and artifact hashes are
   internal.

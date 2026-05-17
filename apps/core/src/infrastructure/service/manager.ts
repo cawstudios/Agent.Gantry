@@ -29,7 +29,7 @@ export interface ServiceOutcome {
 }
 
 const FALLBACK_SERVICE_META = 'service-meta.json';
-const PID_FILE = 'myclaw.pid';
+const PID_FILE = 'gantry.pid';
 
 function resolveServiceKind(): ServiceKind {
   const platform = detectPlatform();
@@ -194,16 +194,16 @@ function systemdQuote(value: string, label: string): string {
 
 function writeSystemdUnit(runtimeHome: string, runtimeEntry: string): string {
   const unitDir = path.join(os.homedir(), '.config', 'systemd', 'user');
-  const unitPath = path.join(unitDir, 'myclaw.service');
+  const unitPath = path.join(unitDir, 'gantry.service');
   fs.mkdirSync(unitDir, { recursive: true });
   const servicePath = buildServicePath(os.homedir());
   const unit = `[Unit]
-Description=MyClaw Personal Assistant
+Description=Gantry Personal Assistant
 After=network-online.target
 
 [Service]
 Type=simple
-Environment=${systemdQuote(`MYCLAW_HOME=${runtimeHome}`, 'MYCLAW_HOME')}
+Environment=${systemdQuote(`GANTRY_HOME=${runtimeHome}`, 'GANTRY_HOME')}
 Environment=${systemdQuote(`HOME=${os.homedir()}`, 'HOME')}
 Environment=${systemdQuote(`PATH=${servicePath}`, 'PATH')}
 ExecStart=${systemdQuote(process.execPath, 'node executable')} ${systemdQuote(runtimeEntry, 'runtime entry')}
@@ -221,7 +221,7 @@ WantedBy=default.target
 }
 
 function writeNohupScript(runtimeHome: string, runtimeEntry: string): string {
-  const scriptPath = path.join(runtimeHome, 'start-myclaw.sh');
+  const scriptPath = path.join(runtimeHome, 'start-gantry.sh');
   const pidPath = fallbackPidPath(runtimeHome);
   const script = `#!/bin/sh
 set -eu
@@ -233,7 +233,7 @@ if [ -f ${JSON.stringify(pidPath)} ]; then
     sleep 1
   fi
 fi
-MYCLAW_HOME=${JSON.stringify(runtimeHome)} nohup ${JSON.stringify(process.execPath)} ${JSON.stringify(runtimeEntry)} \\
+GANTRY_HOME=${JSON.stringify(runtimeHome)} nohup ${JSON.stringify(process.execPath)} ${JSON.stringify(runtimeEntry)} \\
   >> ${JSON.stringify(runtimeLogPath(runtimeHome))} \\
   2>> ${JSON.stringify(runtimeErrorLogPath(runtimeHome))} &
 echo $! > ${JSON.stringify(pidPath)}
@@ -259,7 +259,7 @@ export function installService(
       return {
         ok: true,
         kind,
-        message: `Installed launchd service at ${launchdPlistPath()}. It is not started; run \`myclaw service start\` or \`myclaw restart\`.`,
+        message: `Installed launchd service at ${launchdPlistPath()}. It is not started; run \`gantry service start\` or \`gantry restart\`.`,
       };
     }
 
@@ -271,7 +271,7 @@ export function installService(
           reload.stderr || reload.stdout || 'systemctl daemon-reload failed',
         );
       }
-      const enable = tryExec('systemctl', ['--user', 'enable', 'myclaw']);
+      const enable = tryExec('systemctl', ['--user', 'enable', 'gantry']);
       if (!enable.ok) {
         throw new Error(
           enable.stderr || enable.stdout || 'systemctl enable failed',
@@ -316,7 +316,7 @@ export function startService(runtimeHome: string): ServiceOutcome {
     }
 
     if (kind === 'systemd-user') {
-      const result = tryExec('systemctl', ['--user', 'start', 'myclaw']);
+      const result = tryExec('systemctl', ['--user', 'start', 'gantry']);
       if (!result.ok) {
         throw new Error(
           result.stderr || result.stdout || 'systemctl start failed',
@@ -326,13 +326,13 @@ export function startService(runtimeHome: string): ServiceOutcome {
     }
 
     if (kind === 'nohup') {
-      const scriptPath = path.join(runtimeHome, 'start-myclaw.sh');
+      const scriptPath = path.join(runtimeHome, 'start-gantry.sh');
       if (!fs.existsSync(scriptPath)) {
         return {
           ok: false,
           kind,
           message:
-            'Fallback service script is missing. Run `myclaw service install` first.',
+            'Fallback service script is missing. Run `gantry service install` first.',
         };
       }
       const result = tryExec('sh', [scriptPath]);
@@ -352,7 +352,7 @@ export function startService(runtimeHome: string): ServiceOutcome {
         ok: false,
         kind,
         message:
-          'Background service metadata is missing or invalid. Run `myclaw service install` first.',
+          'Background service metadata is missing or invalid. Run `gantry service install` first.',
       };
     }
 
@@ -363,7 +363,7 @@ export function startService(runtimeHome: string): ServiceOutcome {
         return {
           ok: false,
           kind,
-          message: `Refusing to use PID file because pid ${currentPid} is not a MyClaw process. Fix ${fallbackPidPath(runtimeHome)} manually.`,
+          message: `Refusing to use PID file because pid ${currentPid} is not a Gantry process. Fix ${fallbackPidPath(runtimeHome)} manually.`,
         };
       }
       if (owned === null) {
@@ -392,7 +392,7 @@ export function startService(runtimeHome: string): ServiceOutcome {
         stdio: ['ignore', stdoutFd, stderrFd],
         windowsHide: true,
         env: {
-          MYCLAW_HOME: runtimeHome,
+          GANTRY_HOME: runtimeHome,
           HOME: os.homedir(),
           PATH: buildServicePath(os.homedir()),
           ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
@@ -459,7 +459,7 @@ export function stopService(runtimeHome: string): ServiceOutcome {
     }
 
     if (kind === 'systemd-user') {
-      const result = tryExec('systemctl', ['--user', 'stop', 'myclaw']);
+      const result = tryExec('systemctl', ['--user', 'stop', 'gantry']);
       if (!result.ok) {
         throw new Error(
           result.stderr || result.stdout || 'systemctl stop failed',
@@ -502,7 +502,7 @@ export function stopService(runtimeHome: string): ServiceOutcome {
       return {
         ok: false,
         kind,
-        message: `Refusing to stop pid ${pid} because it is not a MyClaw process.`,
+        message: `Refusing to stop pid ${pid} because it is not a Gantry process.`,
       };
     }
     if (owned === null) {
@@ -536,7 +536,7 @@ export function getServiceStatus(runtimeHome: string): {
   }
 
   if (kind === 'systemd-user') {
-    const active = tryExec('systemctl', ['--user', 'is-active', 'myclaw']);
+    const active = tryExec('systemctl', ['--user', 'is-active', 'gantry']);
     if (active.ok) return { kind, status: active.stdout.trim() || 'active' };
     return { kind, status: 'inactive' };
   }

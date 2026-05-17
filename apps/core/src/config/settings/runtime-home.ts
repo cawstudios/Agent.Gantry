@@ -2,15 +2,15 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { getMyclawHome } from '../../shared/myclaw-home.js';
+import { getGantryHome } from '../../shared/gantry-home.js';
 import { ensureRuntimeLayoutDirectories } from '../../platform/runtime-layout.js';
 
-export const DEFAULT_RUNTIME_HOME = path.join(os.homedir(), 'myclaw');
+export const DEFAULT_RUNTIME_HOME = path.join(os.homedir(), 'gantry');
 
 export function resolveRuntimeHome(raw?: string): string {
   const source =
-    raw?.trim() || process.env.MYCLAW_HOME?.trim() || DEFAULT_RUNTIME_HOME;
-  return getMyclawHome(source);
+    raw?.trim() || process.env.GANTRY_HOME?.trim() || DEFAULT_RUNTIME_HOME;
+  return getGantryHome(source);
 }
 
 export function ensureRuntimeLayout(runtimeHome: string): void {
@@ -35,9 +35,9 @@ export function onboardingStatePath(runtimeHome: string): string {
 }
 
 export function runtimeLogPath(runtimeHome: string): string {
-  return path.join(runtimeHome, 'logs', 'myclaw.log');
+  return path.join(runtimeHome, 'logs', 'gantry.log');
 }
 
 export function runtimeErrorLogPath(runtimeHome: string): string {
-  return path.join(runtimeHome, 'logs', 'myclaw.error.log');
+  return path.join(runtimeHome, 'logs', 'gantry.error.log');
 }

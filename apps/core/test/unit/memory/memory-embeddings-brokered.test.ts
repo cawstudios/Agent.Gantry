@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@core/config/index.js', () => ({
-  DATA_DIR: '/tmp/myclaw-test',
+  DATA_DIR: '/tmp/gantry-test',
   MEMORY_EMBED_BATCH_SIZE: 100,
   MEMORY_EMBED_MODEL: 'text-embedding-test',
   MEMORY_EMBED_PROVIDER: 'openai',

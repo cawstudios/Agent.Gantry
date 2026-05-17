@@ -2,7 +2,7 @@
 
 ## Context
 
-MyClaw is moving from a personal Claude assistant implementation toward a
+Gantry is moving from a personal Claude assistant implementation toward a
 provider-neutral and channel-neutral agent runtime platform. The existing code
 and older docs still expose several implementation concepts as if they were the
 product architecture:
@@ -26,7 +26,7 @@ ACP/ACPX are orchestration integrations, not required runtime assumptions.
 
 ## Decision
 
-MyClaw's canonical product architecture is an agent runtime platform built
+Gantry's canonical product architecture is an agent runtime platform built
 around this model:
 
 ```text
@@ -160,7 +160,7 @@ Replacement direction:
 
 There is no runtime migration in this docs-only decision. Later implementation
 phases should perform clean-cut migrations, not compatibility shims, because
-MyClaw is still early-stage.
+Gantry is still early-stage.
 
 If this decision is replaced, update this ADR and the canonical architecture
 docs before moving source files. Do not introduce new provider- or

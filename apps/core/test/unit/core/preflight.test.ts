@@ -6,13 +6,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 function makeRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'myclaw-preflight-'),
+    path.join(os.tmpdir(), 'gantry-preflight-'),
   );
   fs.writeFileSync(
     path.join(runtimeHome, '.env'),
     [
-      'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
-      'ONECLI_DATABASE_URL=postgres://onecli_app:pass@localhost:15432/myclaw?schema=onecli',
+      'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
+      'ONECLI_DATABASE_URL=postgres://onecli_app:pass@localhost:15432/gantry?schema=onecli',
       'SECRET_ENCRYPTION_KEY=123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
       '',
     ].join('\n'),
@@ -27,8 +27,8 @@ function makeRuntimeHome(): string {
       '    enabled: false',
       'storage:',
       '  postgres:',
-      '    url_env: MYCLAW_DATABASE_URL',
-      '    schema: myclaw',
+      '    url_env: GANTRY_DATABASE_URL',
+      '    schema: gantry',
       'credential_broker:',
       '  mode: onecli',
       '  onecli:',
@@ -122,15 +122,15 @@ describe('runtime preflight', () => {
     const runtimeHome = makeRuntimeHome();
     vi.stubEnv(
       'ONECLI_DATABASE_URL',
-      'postgres://onecli_process:pass@localhost:15432/myclaw?schema=onecli',
+      'postgres://onecli_process:pass@localhost:15432/gantry?schema=onecli',
     );
     vi.stubEnv(
       'SECRET_ENCRYPTION_KEY',
       'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
     );
     vi.stubEnv(
-      'MYCLAW_DATABASE_URL',
-      'postgres://myclaw_process:pass@localhost:15432/myclaw',
+      'GANTRY_DATABASE_URL',
+      'postgres://gantry_process:pass@localhost:15432/gantry',
     );
     const inspectOnecliPersistenceReadiness = vi.fn(async () => ({
       status: 'pass',
@@ -163,10 +163,10 @@ describe('runtime preflight', () => {
     expect(inspectOnecliPersistenceReadiness).toHaveBeenCalledWith(
       expect.objectContaining({
         postgresUrl:
-          'postgres://onecli_process:pass@localhost:15432/myclaw?schema=onecli',
+          'postgres://onecli_process:pass@localhost:15432/gantry?schema=onecli',
         secretEncryptionKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
-        myclawPostgresUrl:
-          'postgres://myclaw_process:pass@localhost:15432/myclaw',
+        gantryPostgresUrl:
+          'postgres://gantry_process:pass@localhost:15432/gantry',
       }),
     );
   });
@@ -224,9 +224,9 @@ describe('runtime preflight', () => {
           inspectOnecliPersistenceReadiness: vi.fn(async () => ({
             status: 'fail',
             message:
-              'OneCLI database role can access the MyClaw runtime schema.',
+              'OneCLI database role can access the Gantry runtime schema.',
             details: ['current_user=onecli_app'],
-            nextAction: 'Revoke MyClaw schema privileges.',
+            nextAction: 'Revoke Gantry schema privileges.',
           })),
         };
       },
@@ -239,7 +239,7 @@ describe('runtime preflight', () => {
     expect(result.ok).toBe(false);
     expect(result.failure?.summary).toContain('OneCLI database role');
     expect(result.failure?.details.join('\n')).toContain(
-      'Revoke MyClaw schema privileges',
+      'Revoke Gantry schema privileges',
     );
   });
 
@@ -248,7 +248,7 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
         '',
       ].join('\n'),
     );
@@ -308,7 +308,7 @@ describe('runtime preflight', () => {
     const runtimeHome = makeRuntimeHome();
     fs.appendFileSync(
       path.join(runtimeHome, '.env'),
-      'MYCLAW_CREDENTIAL_MODE=none\n',
+      'GANTRY_CREDENTIAL_MODE=none\n',
     );
     vi.doMock('@core/adapters/storage/postgres/storage-readiness.js', () => ({
       inspectRuntimeStorageReadiness: vi.fn(async () => ({
@@ -323,7 +323,7 @@ describe('runtime preflight', () => {
 
     expect(result.ok).toBe(false);
     expect(result.failure?.details.join('\n')).toContain(
-      'MYCLAW_CREDENTIAL_MODE is non-secret configuration',
+      'GANTRY_CREDENTIAL_MODE is non-secret configuration',
     );
   });
 
@@ -381,7 +381,7 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
         'ONECLI_DATABASE_URL=not-a-postgres-url',
         'SECRET_ENCRYPTION_KEY=short',
         '',
@@ -414,7 +414,7 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
         '',
       ].join('\n'),
     );
@@ -441,7 +441,7 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
         '',
       ].join('\n'),
     );
@@ -472,7 +472,7 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
         '',
       ].join('\n'),
     );
@@ -503,7 +503,7 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
         '',
       ].join('\n'),
     );
@@ -534,7 +534,7 @@ describe('runtime preflight', () => {
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       [
-        'MYCLAW_DATABASE_URL=postgres://myclaw_app:pass@localhost:15432/myclaw',
+        'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
         '',
       ].join('\n'),
     );
@@ -566,7 +566,7 @@ describe('runtime preflight', () => {
 
   it('fails when process env contains settings-owned credential mode', async () => {
     const runtimeHome = makeRuntimeHome();
-    vi.stubEnv('MYCLAW_CREDENTIAL_MODE', 'none');
+    vi.stubEnv('GANTRY_CREDENTIAL_MODE', 'none');
     const inspectOnecliPersistenceReadiness = vi.fn(async () => ({
       status: 'pass',
       message: 'OneCLI persistence is ready.',
@@ -596,7 +596,7 @@ describe('runtime preflight', () => {
 
     expect(result.ok).toBe(false);
     expect(result.failure?.details.join('\n')).toContain(
-      'MYCLAW_CREDENTIAL_MODE is non-secret configuration',
+      'GANTRY_CREDENTIAL_MODE is non-secret configuration',
     );
     expect(result.failure?.details.join('\n')).toContain(
       'the process environment',

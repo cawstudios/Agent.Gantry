@@ -15,14 +15,14 @@ describe('permission-timeout', () => {
     expect(
       getPermissionTimeoutMs(
         'interactive',
-        { MYCLAW_INTERACTIVE_PERMISSION_TIMEOUT_MS: '20000' },
+        { GANTRY_INTERACTIVE_PERMISSION_TIMEOUT_MS: '20000' },
         {},
       ),
     ).toBe(20_000);
     expect(
       getPermissionTimeoutMs(
         'autonomous',
-        { MYCLAW_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '1000' },
+        { GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '1000' },
         {},
       ),
     ).toBe(1_000);
@@ -33,7 +33,7 @@ describe('permission-timeout', () => {
       getPermissionTimeoutMs(
         'interactive',
         {},
-        { MYCLAW_INTERACTIVE_PERMISSION_TIMEOUT_MS: '17000' },
+        { GANTRY_INTERACTIVE_PERMISSION_TIMEOUT_MS: '17000' },
       ),
     ).toBe(17_000);
   });

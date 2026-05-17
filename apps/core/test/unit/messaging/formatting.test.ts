@@ -226,9 +226,9 @@ describe('TRIGGER_PATTERN', () => {
 
 describe('getTriggerPattern', () => {
   it('uses the configured per-group trigger when provided', () => {
-    const pattern = getTriggerPattern('@Claw');
+    const pattern = getTriggerPattern('@Gantry');
 
-    expect(pattern.test('@Claw hello')).toBe(true);
+    expect(pattern.test('@Gantry hello')).toBe(true);
     expect(pattern.test(`@${ASSISTANT_NAME} hello`)).toBe(false);
   });
 
@@ -431,13 +431,13 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   });
 
   it('uses its per-conversation trigger instead of the default trigger', () => {
-    const msgs = [makeMsg({ content: '@Claw do something' })];
-    expect(shouldProcess(true, '@Claw', msgs)).toBe(true);
+    const msgs = [makeMsg({ content: '@Gantry do something' })];
+    expect(shouldProcess(true, '@Gantry', msgs)).toBe(true);
   });
 
   it('does not process when only the default trigger is present for a custom-trigger conversation', () => {
     const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
-    expect(shouldProcess(true, '@Claw', msgs)).toBe(false);
+    expect(shouldProcess(true, '@Gantry', msgs)).toBe(false);
   });
 
   it('requiresTrigger=false always processes (no trigger needed)', () => {

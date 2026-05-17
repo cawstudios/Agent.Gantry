@@ -226,7 +226,7 @@ Skills, MCP servers, SDK tools, host tools, browser tools, and channel-native to
 
 Capability changes follow a strict lifecycle: **request → review → approval or cancellation → durable audit → new config version → next-run activation**. Tool and channel capability permission prompts use `request_permission` and present simple decisions: `Allow once`, `Allow 5 min`, `Always allow`, or `Cancel`. Details and audit records carry the durable authority shape, such as semantic capabilities, canonical `Browser`, exact Gantry admin tools, or scoped Bash rules. Privileged admin tools such as `service_restart`, `register_agent`, `settings_desired_state`, and `request_settings_update` require exact selected tool capabilities; unselected agents see requestable tool IDs and `request_permission` arguments through `capability_status`.
 
-Persistent agent tool grants are visible in `settings.yaml` under `agents.<id>.tools` as readable rules such as `Bash(git status *)`, `Write(/repo/**)`, or `mcp__gantry__service_restart`. Jobs are scheduled agent runs and inherit the target agent's selected tools, skills, and MCP servers at execution time; job records do not carry a separate tool grant surface. The canonical `toolAccess` view in MCP, CLI, SDK, and Control API responses shows the inherited agent capability projection. Skill source is stored as readable skill folders with `SKILL.md` plus supporting files; Postgres stores metadata, source, hash, provider refs, binding, and audit records. ClawHub is the default provider-backed skill source, but provider verification never bypasses approval.
+Persistent agent tool grants are visible in `settings.yaml` under `agents.<id>.tools` as readable rules such as `Bash(git status *)`, `Write(/repo/**)`, or `mcp__gantry__service_restart`. Jobs are scheduled agent runs and inherit the target agent's selected tools, skills, and MCP servers at execution time; job records do not carry a separate tool grant surface. The canonical `toolAccess` view in MCP, CLI, SDK, and Control API responses shows the inherited agent capability projection. Skill source is stored as readable skill folders with `SKILL.md` plus supporting files; Postgres stores metadata, source, hash, provider refs, binding, and audit records. GantryHub is the default provider-backed skill source, but provider verification never bypasses approval.
 
 `permissions.yolo_mode` controls the denylist applied only to the 5-minute
 all-tools timed grant. Gantry ships defaults for destructive commands such as
@@ -237,8 +237,9 @@ with those shipped defaults. When a denylist rule matches during an active timed
 grant, Gantry skips the bypass, records an audit event, and shows the normal
 permission prompt with the matched rule. Set `enabled: false` only when YOLO
 mode should be total. Edit the value directly in `settings.yaml`, through
-`/v1/settings`, or via the reviewed `settings_desired_state` /
-`request_settings_update` admin tools.
+local CLI settings commands, or via the reviewed `settings_desired_state` /
+`request_settings_update` admin tools. The typed `/v1/settings` API is
+read-only.
 
 ## Design Principles
 

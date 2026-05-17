@@ -24,7 +24,7 @@
   app/control correlation.
 - Scoped Bash approval is argv-leaf based. Parse `&&`, `||`, `;`, pipes, newlines, and subshell leaves; every simple command leaf must match its own durable `Bash(...)` rule. Unsupported shell grammar and destructive redirects fail closed to one-time approval, and persistent suggestions must list separate safe leaf rules instead of the compound command.
 - Native SDK `Agent` and `Task` tool calls are always background work. Force `run_in_background: true` in runner tool input before validation, permission checks, sandbox/network gates, and SDK allow responses; SDK `task_notification` system messages should be emitted as structured runtime events instead of log-only observations.
-- The compact `mcp__myclaw__file` tool is the agent-facing durable-file
+- The compact `mcp__gantry__file` tool is the agent-facing durable-file
   contract. It must talk to the host through signed IPC and use FileArtifact
   virtual paths/artifact refs; do not expose host filesystem paths or add
   separate Gantry MCP tools for each file action.

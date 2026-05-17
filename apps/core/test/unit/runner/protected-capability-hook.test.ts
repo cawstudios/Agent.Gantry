@@ -15,7 +15,7 @@ describe('protected capability SDK hook', () => {
       cwd: '/tmp/work',
       tool_name: 'Write',
       tool_input: {
-        file_path: '/tmp/myclaw/agents/kai_tg_1/skills/linkedin/SKILL.md',
+        file_path: '/tmp/gantry/agents/kai_tg_1/skills/linkedin/SKILL.md',
         content: '# LinkedIn\n',
       },
       tool_use_id: 'toolu_1',
@@ -60,7 +60,7 @@ describe('protected capability SDK hook', () => {
 
   it('blocks risky tool use from the native PreToolUse hook when memory was suppressed', async () => {
     const hook = createSafetyPreToolUseHook(
-      '<myclaw_memory_context trust="untrusted_data_only">[suppressed: instruction-like memory content]</myclaw_memory_context>',
+      '<gantry_memory_context trust="untrusted_data_only">[suppressed: instruction-like memory content]</gantry_memory_context>',
     );
 
     const result = await hook({
@@ -107,7 +107,7 @@ describe('protected capability SDK hook', () => {
     ).toBeNull();
 
     expect(
-      evaluateProtectedCapabilityToolUse('mcp__myclaw__request_mcp_server', {
+      evaluateProtectedCapabilityToolUse('mcp__gantry__request_mcp_server', {
         name: 'github',
         reason: 'Search repository issues',
       }),
@@ -115,7 +115,7 @@ describe('protected capability SDK hook', () => {
 
     expect(
       evaluateProtectedCapabilityToolUse(
-        'mcp__myclaw__request_skill_proposal',
+        'mcp__gantry__request_skill_proposal',
         {
           files: [{ path: 'SKILL.md', content: '# Skill' }],
           reason: 'Reuse workflow',
@@ -124,22 +124,22 @@ describe('protected capability SDK hook', () => {
     ).toBeNull();
 
     expect(
-      evaluateProtectedCapabilityToolUse('mcp__myclaw__request_permission', {
+      evaluateProtectedCapabilityToolUse('mcp__gantry__request_permission', {
         toolName: 'Bash',
         reason: 'Run project tests',
       }),
     ).toBeNull();
 
     expect(
-      evaluateProtectedCapabilityToolUse('mcp__myclaw__request_skill_install', {
-        spec: 'clawhub:some-skill@1.0.0',
+      evaluateProtectedCapabilityToolUse('mcp__gantry__request_skill_install', {
+        spec: 'gantryhub:some-skill@1.0.0',
         reason: 'Install approved shared skill',
       }),
     ).toBeNull();
 
     expect(
       evaluateProtectedCapabilityToolUse(
-        'mcp__myclaw__request_skill_dependency_install',
+        'mcp__gantry__request_skill_dependency_install',
         {
           packages: ['tsx'],
           ecosystem: 'npm',
@@ -149,7 +149,7 @@ describe('protected capability SDK hook', () => {
     ).toBeNull();
 
     expect(
-      evaluateProtectedCapabilityToolUse('mcp__myclaw__request_permission', {
+      evaluateProtectedCapabilityToolUse('mcp__gantry__request_permission', {
         channelTool: 'slack_file_access',
         reason: 'Allow file download support',
       }),

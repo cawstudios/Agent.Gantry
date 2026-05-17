@@ -5,11 +5,11 @@ import {
   parseReadableScopedToolRule,
   validateReadableAgentToolRule,
 } from '../../shared/agent-tool-references.js';
-import { isMyClawMcpWildcardRule } from '../../shared/admin-mcp-tools.js';
+import { isGantryMcpWildcardRule } from '../../shared/admin-mcp-tools.js';
 import { parseSemanticCapabilityRule } from '../../shared/semantic-capability-ids.js';
 import { toolRuleCoversRule } from '../../shared/tool-rule-matcher.js';
 
-const EXACT_MYCLAW_MCP_TOOL_RE = /^mcp__myclaw__[A-Za-z0-9_-]+$/;
+const EXACT_GANTRY_MCP_TOOL_RE = /^mcp__gantry__[A-Za-z0-9_-]+$/;
 
 export interface RequiredToolPreflightResult {
   requiredTools: string[];
@@ -100,11 +100,11 @@ export function validateRequiredToolRule(
 ): { ok: true } | { ok: false; reason: string } {
   const trimmed = rule.trim();
   if (!trimmed) return { ok: false, reason: 'Tool rule cannot be empty.' };
-  if (isMyClawMcpWildcardRule(trimmed)) {
+  if (isGantryMcpWildcardRule(trimmed)) {
     return {
       ok: false,
       reason:
-        'MyClaw MCP wildcard grants are not valid required-tool assertions.',
+        'Gantry MCP wildcard grants are not valid required-tool assertions.',
     };
   }
   const readable = validateReadableAgentToolRule(trimmed);
@@ -121,7 +121,7 @@ export function validateRequiredToolRule(
   if (parseSemanticCapabilityRule(trimmed)) return { ok: true };
   if (isCanonicalBrowserCapabilityRule(trimmed)) return { ok: true };
   if (
-    EXACT_MYCLAW_MCP_TOOL_RE.test(trimmed) &&
+    EXACT_GANTRY_MCP_TOOL_RE.test(trimmed) &&
     !isProjectedBrowserMcpToolRule(trimmed)
   ) {
     return { ok: true };
@@ -129,7 +129,7 @@ export function validateRequiredToolRule(
   return {
     ok: false,
     reason:
-      'Use canonical Browser, capability:<id>, exact mcp__myclaw__ tool names, or scoped Bash(...).',
+      'Use canonical Browser, capability:<id>, exact mcp__gantry__ tool names, or scoped Bash(...).',
   };
 }
 

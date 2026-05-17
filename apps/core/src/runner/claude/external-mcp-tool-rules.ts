@@ -1,11 +1,11 @@
 import { isPublicExternalMcpToolRule } from '../agent-capabilities.js';
 
 export function readExternalMcpAllowedTools(): readonly string[] {
-  return readExternalMcpToolRules('MYCLAW_MCP_ALLOWED_TOOLS_JSON');
+  return readExternalMcpToolRules('GANTRY_MCP_ALLOWED_TOOLS_JSON');
 }
 
 export function readExternalMcpAlwaysAllowedTools(): readonly string[] {
-  return readExternalMcpToolRules('MYCLAW_MCP_ALWAYS_ALLOWED_TOOLS_JSON');
+  return readExternalMcpToolRules('GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON');
 }
 
 function readExternalMcpToolRules(envKey: string): readonly string[] {

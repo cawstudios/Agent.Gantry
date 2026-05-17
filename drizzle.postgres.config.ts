@@ -5,6 +5,6 @@ export default defineConfig({
   schema: './apps/core/src/storage/postgres/schema.ts',
   out: './apps/core/src/storage/postgres/migrations',
   dbCredentials: {
-    url: process.env.MYCLAW_DATABASE_URL || 'postgres://localhost/myclaw',
+    url: process.env.GANTRY_DATABASE_URL || 'postgres://localhost/gantry',
   },
 });

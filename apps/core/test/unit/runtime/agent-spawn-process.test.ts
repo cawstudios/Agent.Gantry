@@ -3,8 +3,8 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
 // Sentinel markers must match runtime agent output framing.
-const OUTPUT_START_MARKER = '---MYCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---MYCLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = '---GANTRY_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---GANTRY_OUTPUT_END---';
 
 /* ------------------------------------------------------------------ */
 /*  Hoisted mock references (accessible inside vi.mock factories)      */

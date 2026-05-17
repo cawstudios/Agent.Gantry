@@ -1,4 +1,4 @@
-import { MemoryIpcAction } from '@myclaw/contracts';
+import { MemoryIpcAction } from '@gantry/contracts';
 import { formatDuration } from '../shared/human-format.js';
 
 export function getMemoryActionTimeoutMs(action: MemoryIpcAction): number {

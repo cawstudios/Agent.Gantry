@@ -19,8 +19,8 @@ import type {
 
 export { DEFAULT_AGENT_NAME } from '../../shared/default-agent.js';
 
-export const DEFAULT_STORAGE_POSTGRES_URL_ENV = 'MYCLAW_DATABASE_URL';
-export const DEFAULT_STORAGE_POSTGRES_SCHEMA = 'myclaw';
+export const DEFAULT_STORAGE_POSTGRES_URL_ENV = 'GANTRY_DATABASE_URL';
+export const DEFAULT_STORAGE_POSTGRES_SCHEMA = 'gantry';
 export const DEFAULT_ONECLI_URL = 'http://localhost:10254';
 export const DEFAULT_ONECLI_DATABASE_URL_ENV = 'ONECLI_DATABASE_URL';
 export const DEFAULT_ONECLI_POSTGRES_SCHEMA = 'onecli';

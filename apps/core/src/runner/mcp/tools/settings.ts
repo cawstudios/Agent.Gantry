@@ -14,7 +14,7 @@ export function registerSettingsTools(
 ): void {
   server.tool(
     'settings_desired_state',
-    'Read the current local settings.yaml desired state before requesting local MyClaw configuration changes. Requires selected agent tool grant mcp__myclaw__settings_desired_state.',
+    'Read the current local settings.yaml desired state before requesting local Gantry configuration changes. Requires selected agent tool grant mcp__gantry__settings_desired_state.',
     {},
     async () => {
       if (!options.isAdminToolEnabled('settings_desired_state')) {
@@ -61,7 +61,7 @@ export function registerSettingsTools(
 
   server.tool(
     'request_settings_update',
-    'Request a reviewed update to local settings.yaml. Requires selected agent tool grant mcp__myclaw__request_settings_update.',
+    'Request a reviewed update to local settings.yaml. Requires selected agent tool grant mcp__gantry__request_settings_update.',
     {
       replacementYaml: z
         .string()
@@ -124,7 +124,7 @@ function adminToolUnavailable(toolName: AdminMcpToolName): {
   content: { type: 'text'; text: string }[];
   isError: true;
 } {
-  const fullName = `mcp__myclaw__${toolName}`;
+  const fullName = `mcp__gantry__${toolName}`;
   return {
     content: [
       {

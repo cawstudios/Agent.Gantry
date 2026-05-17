@@ -48,7 +48,7 @@ tmp-coverage/
 .vscode/
 
 # Skills system (local per-installation state)
-.myclaw/
+.gantry/
 
 agents-sdk-docs
 # CocoIndex Code (ccc)

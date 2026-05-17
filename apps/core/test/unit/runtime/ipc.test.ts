@@ -78,7 +78,7 @@ describe('isTrustedRegisteredIpcFolder', () => {
   });
 
   function tempIpcRoot(): string {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-ipc-root-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-ipc-root-'));
     tempRoots.push(root);
     return root;
   }
@@ -91,7 +91,7 @@ describe('isTrustedRegisteredIpcFolder', () => {
 
   it('rejects registered group roots that are symlinks before processing', () => {
     const ipcRoot = tempIpcRoot();
-    const target = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-ipc-target-'));
+    const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-ipc-target-'));
     tempRoots.push(target);
     fs.symlinkSync(target, path.join(ipcRoot, 'linked_group'), 'dir');
 

@@ -56,7 +56,7 @@ describe('ToolExecutionPolicyService', () => {
   it('allows projected browser tools for autonomous runs with canonical Browser capability', () => {
     const request = classifier.classify({
       origin: 'sdk',
-      toolName: 'mcp__myclaw__browser_status',
+      toolName: 'mcp__gantry__browser_status',
       toolInput: {},
       executionMode: 'autonomous',
     });
@@ -75,7 +75,7 @@ describe('ToolExecutionPolicyService', () => {
   it('recovers projected browser denials through persistent Browser permission', () => {
     const request = classifier.classify({
       origin: 'mcp',
-      toolName: 'mcp__myclaw__browser_act',
+      toolName: 'mcp__gantry__browser_act',
       toolInput: { url: 'https://example.com' },
       executionMode: 'autonomous',
       runContext: { jobId: 'job-1' },
@@ -87,7 +87,7 @@ describe('ToolExecutionPolicyService', () => {
       expect.objectContaining({
         status: 'deny',
         reason: expect.stringContaining(
-          'Tool not on autonomous run allowlist: mcp__myclaw__browser_act.',
+          'Tool not on autonomous run allowlist: mcp__gantry__browser_act.',
         ),
         recoveryAction: expect.stringContaining('"toolName": "Browser"'),
       }),
@@ -101,7 +101,7 @@ describe('ToolExecutionPolicyService', () => {
   it('recovers admin tool denials through request_permission', () => {
     const request = classifier.classify({
       origin: 'mcp',
-      toolName: 'mcp__myclaw__service_restart',
+      toolName: 'mcp__gantry__service_restart',
       toolInput: {},
       executionMode: 'autonomous',
       runContext: { jobId: 'job-1' },
@@ -118,7 +118,7 @@ describe('ToolExecutionPolicyService', () => {
     expect(
       policy.evaluate({ request, autonomousAllowedToolRules: [] })
         .recoveryAction,
-    ).toContain('"toolName": "mcp__myclaw__service_restart"');
+    ).toContain('"toolName": "mcp__gantry__service_restart"');
   });
 
   it('denies protected capability file targets through canonical policy', () => {
@@ -148,8 +148,8 @@ describe('ToolExecutionPolicyService', () => {
       '/repo/.codex/skills/review/references/checklist.md',
       '/repo/.agents/skills/review/scripts/check.js',
       '/repo/.claude/skills/review/assets/template.md',
-      '/tmp/myclaw/agents/kai_tg_1/skills/linkedin/context.md',
-      '/tmp/myclaw/artifacts/skills/default/skill-one/hash/context.md',
+      '/tmp/gantry/agents/kai_tg_1/skills/linkedin/context.md',
+      '/tmp/gantry/artifacts/skills/default/skill-one/hash/context.md',
     ]) {
       const request = classifier.classify({
         origin: 'sdk',
@@ -169,7 +169,7 @@ describe('ToolExecutionPolicyService', () => {
       const request = classifier.classify({
         origin: 'sdk',
         toolName,
-        toolInput: { file_path: '~/myclaw/settings.yaml', content: '{}' },
+        toolInput: { file_path: '~/gantry/settings.yaml', content: '{}' },
       });
 
       expect(policy.evaluate({ request })).toMatchObject({
@@ -218,7 +218,7 @@ describe('ToolExecutionPolicyService', () => {
   it('denies gh payload arguments that pass protected file paths', () => {
     for (const command of [
       'gh issue create --title "x" --body-file ~/.claude/settings.local.json',
-      'gh issue create --title "x" --body-file ~/myclaw/settings.yaml',
+      'gh issue create --title "x" --body-file ~/gantry/settings.yaml',
       'gh pr create --title "x" --template .mcp.json',
       'gh issue create --title "x" -F body=@.mcp.json',
       'gh issue edit .mcp.json --title "x"',
@@ -281,7 +281,7 @@ describe('ToolExecutionPolicyService', () => {
     const request = classifier.classify({
       origin: 'scheduler_script',
       toolName: 'Bash',
-      toolInput: { command: 'cat > ~/myclaw/settings.yaml' },
+      toolInput: { command: 'cat > ~/gantry/settings.yaml' },
       executionMode: 'autonomous',
       runContext: { jobId: 'job-settings' },
     });
@@ -289,7 +289,7 @@ describe('ToolExecutionPolicyService', () => {
     expect(
       policy.evaluate({
         request,
-        autonomousAllowedToolRules: ['Bash(cat > ~/myclaw/settings.yaml)'],
+        autonomousAllowedToolRules: ['Bash(cat > ~/gantry/settings.yaml)'],
       }),
     ).toMatchObject({
       status: 'deny',
@@ -316,7 +316,7 @@ describe('ToolExecutionPolicyService', () => {
     for (const command of [
       'cat > .codex/skills/review/references/checklist.md',
       'tee .agents/skills/review/scripts/check.js',
-      'printf ok > /tmp/myclaw/artifacts/skills/default/skill-one/hash/context.md',
+      'printf ok > /tmp/gantry/artifacts/skills/default/skill-one/hash/context.md',
     ]) {
       expect(
         evaluateProtectedCapabilityToolUse('Bash', { command }),
@@ -348,7 +348,7 @@ describe('ToolExecutionPolicyService', () => {
   });
 
   it('denies file mutation targets that resolve through symlinks to protected paths', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-policy-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-policy-'));
     tempRoots.push(root);
     const protectedDir = path.join(root, '.claude');
     const workspaceDir = path.join(root, 'workspace');

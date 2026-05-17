@@ -2,7 +2,7 @@
 
 ## Context
 
-MyClaw needs model selection to work the same way from chat commands, API/SDK
+Gantry needs model selection to work the same way from chat commands, API/SDK
 job creation, CLI defaults, recurring jobs, one-time jobs, and internal MCP
 scheduler tools. Raw provider model IDs are hard to remember and make provider
 details leak into user workflows.
@@ -19,7 +19,7 @@ context window.
 
 ## Decision
 
-MyClaw owns a provider-neutral catalog in application code. Users select models
+Gantry owns a provider-neutral catalog in application code. Users select models
 through friendly aliases such as `opus`, `sonnet`, `haiku`, and `kimi`; aliases
 are case-insensitive and punctuation-insensitive. Raw provider IDs such as
 `claude-opus-4-7` and `moonshotai/kimi-k2.6` are rejected at user/API/job/MCP
@@ -60,4 +60,4 @@ prompt-cache token fields are normalized.
 - New providers require catalog entries and adapter projection rules before they
   can be selected.
 - Raw provider credentials remain wrong-lane config and must not be accepted
-  from MyClaw `.env` or ambient process env.
+  from Gantry `.env` or ambient process env.

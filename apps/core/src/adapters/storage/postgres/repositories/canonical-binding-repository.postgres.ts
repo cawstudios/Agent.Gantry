@@ -18,6 +18,7 @@ export interface CanonicalBindingRecord {
   threadId: string | null;
   status: string;
   conversationExternalRefJson: string | null;
+  conversationKind: string;
   memorySubjectJson: string;
   displayName: string;
   triggerPattern: string | null;
@@ -57,7 +58,15 @@ export class PostgresCanonicalBindingRepository {
     await this.db.transaction(async (tx) => {
       const conversationId = await this.graph.ensureConversation(
         jid,
-        { name: group.name, isGroup: group.requiresTrigger !== false },
+        {
+          name: group.name,
+          isGroup:
+            group.conversationKind === 'dm'
+              ? false
+              : group.conversationKind === 'channel'
+                ? true
+                : group.requiresTrigger !== false,
+        },
         tx,
       );
       const agentId = await this.graph.ensureAgent(
@@ -126,6 +135,7 @@ export class PostgresCanonicalBindingRepository {
         threadId: b.threadId,
         status: b.status,
         conversationExternalRefJson: c.externalRefJson,
+        conversationKind: c.kind,
         memorySubjectJson: b.memorySubjectJson,
         displayName: b.displayName,
         triggerPattern: b.triggerPattern,
@@ -170,6 +180,10 @@ export function bindingRowToGroup(
     ? row.agentId.slice('agent:'.length)
     : row.agentId;
   const agentConfig = routeSubject.route?.agentConfig;
+  const conversationKind =
+    row.conversationKind === 'direct' || row.conversationKind === 'dm'
+      ? 'dm'
+      : 'channel';
   return {
     jid,
     group: {
@@ -178,6 +192,7 @@ export function bindingRowToGroup(
       trigger: row.triggerPattern || '',
       added_at: row.createdAt,
       requiresTrigger: row.requiresTrigger,
+      conversationKind,
       ...(agentConfig ? { agentConfig } : {}),
     },
   };

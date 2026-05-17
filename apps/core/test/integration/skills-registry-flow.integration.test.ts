@@ -10,7 +10,7 @@ import { makeSkillZip } from '../harness/test-skill-zip.js';
 import {
   SkillCatalogItemResponseSchema,
   type SkillCatalogItemResponse,
-} from '@myclaw/contracts';
+} from '@gantry/contracts';
 import { syncRuntimeSettingsFromProjection } from '@core/config/index.js';
 import { createClient } from '../../../../packages/sdk/src/index.js';
 
@@ -23,9 +23,9 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@core/config/index.js', () => ({
-  MYCLAW_HOME: '/tmp/myclaw-skills-integration-home',
+  GANTRY_HOME: '/tmp/gantry-skills-integration-home',
   ONECLI_ALLOWED_ENV_KEYS: [],
-  MYCLAW_IPC_AUTH_SECRET: 'test-ipc-secret',
+  GANTRY_IPC_AUTH_SECRET: 'test-ipc-secret',
   getControlEnvValue: vi.fn((key: string) => process.env[key]?.trim() || ''),
   syncRuntimeSettingsFromProjection: vi.fn(async () => undefined),
   getDefaultModelConfig: vi.fn(() => ({
@@ -193,11 +193,11 @@ describe('skill registry integration flow', () => {
   let artifactRoot: string;
 
   beforeEach(() => {
-    fs.rmSync('/tmp/myclaw-skills-integration-home', {
+    fs.rmSync('/tmp/gantry-skills-integration-home', {
       recursive: true,
       force: true,
     });
-    artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-skills-'));
+    artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-skills-'));
     state.artifactRoot = artifactRoot;
     state.skills.clear();
     state.bindings.clear();
@@ -507,16 +507,16 @@ describe('skill registry integration flow', () => {
     [
       'request_skill_install',
       {
-        spec: 'clawhub:release-notes@1.0.0',
-        provider: 'clawhub',
+        spec: 'gantryhub:release-notes@1.0.0',
+        provider: 'gantryhub',
         slug: 'release-notes',
         version: '1.0.0',
-        publisher: 'ClawHub',
+        publisher: 'GantryHub',
         reason: 'Reuse a reviewed release workflow.',
       },
       {
-        spec: 'clawhub:release-notes@1.0.0',
-        provider: 'clawhub',
+        spec: 'gantryhub:release-notes@1.0.0',
+        provider: 'gantryhub',
         slug: 'release-notes',
         version: '1.0.0',
         effect: 'review_only_no_direct_install',

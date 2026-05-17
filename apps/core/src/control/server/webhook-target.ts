@@ -19,11 +19,11 @@ export async function validateWebhookTarget(
 ): Promise<ResolvedWebhookTarget> {
   const parsed = new URL(targetUrl);
   const allowInsecure =
-    process.env.MYCLAW_CONTROL_ALLOW_INSECURE_WEBHOOKS === 'true';
+    process.env.GANTRY_CONTROL_ALLOW_INSECURE_WEBHOOKS === 'true';
   const allowPrivate =
-    process.env.MYCLAW_CONTROL_ALLOW_PRIVATE_WEBHOOKS === 'true';
+    process.env.GANTRY_CONTROL_ALLOW_PRIVATE_WEBHOOKS === 'true';
   const allowlist = new Set(
-    (process.env.MYCLAW_CONTROL_WEBHOOK_ALLOWED_HOSTS || '')
+    (process.env.GANTRY_CONTROL_WEBHOOK_ALLOWED_HOSTS || '')
       .split(',')
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean),

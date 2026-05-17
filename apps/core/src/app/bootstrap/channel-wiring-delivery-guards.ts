@@ -4,7 +4,7 @@ import type {
 } from './channel-wiring-types.js';
 
 const RECOVERY_DISPATCH_PERMIT_RUNTIME_BRAND = Symbol(
-  'myclaw.recovery-dispatch-permit',
+  'gantry.recovery-dispatch-permit',
 );
 
 export function sanitizeDeliveryError(err: unknown, provider: string): string {

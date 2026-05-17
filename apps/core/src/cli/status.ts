@@ -213,19 +213,19 @@ export function formatRuntimeStatus(summary: RuntimeStatusSummary): string {
   );
   if (!hasReadyChannel) {
     const connectCommands = summary.channels.map(
-      (channel) => `myclaw provider connect ${channel.id}`,
+      (channel) => `gantry provider connect ${channel.id}`,
     );
     nextActions.push(
       `Run ${connectCommands.map((cmd) => `\`${cmd}\``).join(' or ')} to finish provider/conversation setup.`,
     );
   }
   if (!summary.doctor.ok) {
-    nextActions.push('Run `myclaw doctor` and fix blocking items.');
+    nextActions.push('Run `gantry doctor` and fix blocking items.');
   }
   if (nextActions.length === 0 && isServiceRunning(summary.service.status)) {
     nextActions.push('Gantry is running.');
   } else if (nextActions.length === 0) {
-    nextActions.push('Run `myclaw start` to start the runtime.');
+    nextActions.push('Run `gantry start` to start the runtime.');
   }
 
   lines.push('');

@@ -7,26 +7,26 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { EnvRuntimeSecretProvider } from '@core/adapters/credentials/env-runtime-secret-provider.js';
 
 describe('EnvRuntimeSecretProvider', () => {
-  const originalHome = process.env.MYCLAW_HOME;
+  const originalHome = process.env.GANTRY_HOME;
 
   afterEach(() => {
     if (originalHome === undefined) {
-      delete process.env.MYCLAW_HOME;
+      delete process.env.GANTRY_HOME;
     } else {
-      process.env.MYCLAW_HOME = originalHome;
+      process.env.GANTRY_HOME = originalHome;
     }
     delete process.env.OPENAI_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
   });
 
   it('falls back to runtime .env when using process.env', () => {
-    const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-env-'));
+    const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-env-'));
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       'TELEGRAM_BOT_TOKEN=123456:runtime-token\n',
       'utf8',
     );
-    process.env.MYCLAW_HOME = runtimeHome;
+    process.env.GANTRY_HOME = runtimeHome;
     const provider = new EnvRuntimeSecretProvider();
 
     expect(provider.getOptionalSecret({ env: 'TELEGRAM_BOT_TOKEN' })).toBe(
@@ -43,13 +43,13 @@ describe('EnvRuntimeSecretProvider', () => {
   });
 
   it('refuses wrong-lane provider credentials from process env and runtime .env', () => {
-    const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-env-'));
+    const runtimeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-env-'));
     fs.writeFileSync(
       path.join(runtimeHome, '.env'),
       'ANTHROPIC_API_KEY=sk-ant-runtime\n',
       'utf8',
     );
-    process.env.MYCLAW_HOME = runtimeHome;
+    process.env.GANTRY_HOME = runtimeHome;
     process.env.OPENAI_API_KEY = 'sk-openai-process';
     const provider = new EnvRuntimeSecretProvider();
 

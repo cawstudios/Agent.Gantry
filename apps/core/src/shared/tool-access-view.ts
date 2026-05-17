@@ -44,7 +44,7 @@ export const BROWSER_TOOL_NAME = 'Browser';
 export const BROWSER_REQUEST_PERMISSION_ARGS =
   'permissionKind=tool toolName=Browser toolCategory=browser temporaryOnly=false reason="<why this agent needs Browser>"';
 export const BROWSER_REQUESTABLE_NOTE =
-  'Browser approval exposes MyClaw-owned browser_* tools. Status is read-only; action calls launch the host-derived profile lazily.';
+  'Browser approval exposes Gantry-owned browser_* tools. Status is read-only; action calls launch the host-derived profile lazily.';
 
 export function buildRequestableAdminToolAccess(
   enabledAdminTools: ReadonlySet<AdminMcpToolName | string>,

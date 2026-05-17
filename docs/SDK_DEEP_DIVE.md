@@ -64,7 +64,7 @@ All complex logic — the agent loop, tool execution, background tasks, teammate
 Full `Options` type from the official docs:
 
 This section is a reverse-engineering reference for the upstream SDK surface,
-not active MyClaw configuration guidance. MyClaw must project
+not active Gantry configuration guidance. Gantry must project
 `permissionMode: 'default'`, must never set `bypassPermissions` or
 `allowDangerouslySkipPermissions`, and must keep durable authority in semantic
 capabilities plus deterministic `canUseTool` enforcement.
@@ -306,7 +306,7 @@ Claude responded with text only — it decided it has completed the task. The AP
 
 ## Subagent Execution Contract
 
-MyClaw treats native SDK `Agent` and `Task` tool calls as background-only.
+Gantry treats native SDK `Agent` and `Task` tool calls as background-only.
 The runner coerces their tool input to `run_in_background: true` before model
 validation, permission checks, sandbox/network gates, and SDK allow responses.
 This keeps subagent work from occupying the parent conversation's active turn.

@@ -61,7 +61,7 @@ export interface SetupFlowResult {
 export async function runSetupFlow(
   options: SetupFlowOptions,
 ): Promise<SetupFlowResult> {
-  p.intro(options.title || 'MyClaw Setup');
+  p.intro(options.title || 'Gantry Setup');
 
   let runtimeHome = resolveRuntimeHome(options.runtimeHome);
   const state =
@@ -151,7 +151,7 @@ export async function runSetupFlow(
       state.status = 'in_progress';
       updateStateData(state, draft);
       persistProgress(state, runtimeHome);
-      p.outro('Setup paused. Run `myclaw` or `myclaw setup` to resume.');
+      p.outro('Setup paused. Run `gantry` or `gantry setup` to resume.');
       return { status: 'resumed', runtimeHome, startAfterSetup: false };
     }
 
@@ -182,7 +182,7 @@ export async function runSetupFlow(
   state.currentStep = 'ready';
   updateStateData(state, draft);
   clearOnboardingState(runtimeHome);
-  p.outro('MyClaw is ready.');
+  p.outro('Gantry is ready.');
   return {
     status: 'completed',
     runtimeHome,

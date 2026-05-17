@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   selectedMemoryIpcActions,
-  selectedMyClawMcpToolNames,
-} from '@agent-runner-src/myclaw-mcp-tool-surface.js';
+  selectedGantryMcpToolNames,
+} from '@agent-runner-src/gantry-mcp-tool-surface.js';
 import type { AgentRunnerInput } from '@core/runner/claude/types.js';
 
 const sdkState = vi.hoisted(() => ({
@@ -76,7 +76,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
       session_id: 'claude-session-boundary',
       mcp_servers: [
         {
-          name: 'myclaw',
+          name: 'gantry',
           status: sdkState.mode === 'mcp-failed' ? 'failed' : 'connected',
         },
       ],
@@ -93,7 +93,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     if (sdkState.mode === 'active-followup') {
       const fs = await import('node:fs');
       const path = await import('node:path');
-      const inputDir = process.env.MYCLAW_IPC_INPUT_DIR || '';
+      const inputDir = process.env.GANTRY_IPC_INPUT_DIR || '';
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(
         path.join(inputDir, '001-followup.json'),
@@ -206,7 +206,7 @@ function delay(ms: number): Promise<void> {
 const tempRoots: string[] = [];
 
 function makeTempRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-claude-sdk-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-claude-sdk-'));
   tempRoots.push(root);
   return root;
 }
@@ -223,12 +223,12 @@ function prepareRuntimeEnv(): {
   fs.mkdirSync(groupDir, { recursive: true });
   fs.mkdirSync(extraDir, { recursive: true });
   fs.mkdirSync(inputDir, { recursive: true });
-  vi.stubEnv('MYCLAW_WORKSPACE_GROUP_DIR', groupDir);
-  vi.stubEnv('MYCLAW_WORKSPACE_EXTRA_DIR', extraDir);
-  vi.stubEnv('MYCLAW_IPC_DIR', ipcDir);
-  vi.stubEnv('MYCLAW_IPC_INPUT_DIR', inputDir);
-  vi.stubEnv('MYCLAW_IPC_AUTH_TOKEN', 'runner-ipc-token');
-  vi.stubEnv('MYCLAW_IPC_RESPONSE_VERIFY_KEY', 'runner-response-verify-key');
+  vi.stubEnv('GANTRY_WORKSPACE_GROUP_DIR', groupDir);
+  vi.stubEnv('GANTRY_WORKSPACE_EXTRA_DIR', extraDir);
+  vi.stubEnv('GANTRY_IPC_DIR', ipcDir);
+  vi.stubEnv('GANTRY_IPC_INPUT_DIR', inputDir);
+  vi.stubEnv('GANTRY_IPC_AUTH_TOKEN', 'runner-ipc-token');
+  vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', 'runner-response-verify-key');
   vi.stubEnv('ANTHROPIC_API_KEY', 'raw-provider-key');
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'raw-oauth-token');
   vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude-config'));
@@ -246,7 +246,7 @@ function runnerInput(
     groupFolder: 'group',
     chatJid: 'tg:group',
     threadId: 'thread-1',
-    compiledSystemPrompt: 'compiled MyClaw system profile',
+    compiledSystemPrompt: 'compiled Gantry system profile',
     ...overrides,
   };
 }
@@ -273,7 +273,7 @@ describe('Claude Agent SDK boundary integration', () => {
     const { runQuery } = await importRunQuery();
 
     await runQuery(
-      'hello from MyClaw',
+      'hello from Gantry',
       env.mcpServerPath,
       runnerInput(),
       { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR },
@@ -296,16 +296,16 @@ describe('Claude Agent SDK boundary integration', () => {
     ]);
   });
 
-  it('passes hermetic MyClaw capabilities and settings into the Claude SDK', async () => {
+  it('passes hermetic Gantry capabilities and settings into the Claude SDK', async () => {
     const env = prepareRuntimeEnv();
     const { runQuery } = await importRunQuery();
 
     const result = await runQuery(
-      'hello from MyClaw',
+      'hello from Gantry',
       env.mcpServerPath,
       runnerInput({
         memoryContextBlock:
-          '<myclaw_memory_context trust="untrusted_data_only">prior user preference</myclaw_memory_context>',
+          '<gantry_memory_context trust="untrusted_data_only">prior user preference</gantry_memory_context>',
       }),
       { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR },
       'sonnet',
@@ -327,15 +327,15 @@ describe('Claude Agent SDK boundary integration', () => {
         'Read',
         'Glob',
         'Grep',
-        'mcp__myclaw__send_message',
-        'mcp__myclaw__ask_user_question',
-        'mcp__myclaw__request_skill_install',
-        'mcp__myclaw__request_skill_proposal',
-        'mcp__myclaw__request_skill_dependency_install',
-        'mcp__myclaw__request_mcp_server',
-        'mcp__myclaw__request_permission',
-        'mcp__myclaw__mcp_list_tools',
-        'mcp__myclaw__mcp_call_tool',
+        'mcp__gantry__send_message',
+        'mcp__gantry__ask_user_question',
+        'mcp__gantry__request_skill_install',
+        'mcp__gantry__request_skill_proposal',
+        'mcp__gantry__request_skill_dependency_install',
+        'mcp__gantry__request_mcp_server',
+        'mcp__gantry__request_permission',
+        'mcp__gantry__mcp_list_tools',
+        'mcp__gantry__mcp_call_tool',
         'Agent',
       ]),
     );
@@ -385,37 +385,37 @@ describe('Claude Agent SDK boundary integration', () => {
         'Write',
         'Edit',
         'Config',
-        'mcp__myclaw__list_models',
-        'mcp__myclaw__*',
+        'mcp__gantry__list_models',
+        'mcp__gantry__*',
         'Monitor',
         'AskUserQuestion',
       ]),
     );
     expect(call?.options.agents).toBeUndefined();
-    expect(call?.options.mcpServers.myclaw).toEqual({
+    expect(call?.options.mcpServers.gantry).toEqual({
       command: 'node',
       args: [env.mcpServerPath],
       env: {
-        MYCLAW_CHAT_JID: 'tg:group',
-        MYCLAW_GROUP_FOLDER: 'group',
-        MYCLAW_THREAD_ID: 'thread-1',
-        MYCLAW_MEMORY_USER_ID: '',
-        MYCLAW_MEMORY_REVIEWER_IS_CONTROL_APPROVER: '',
-        MYCLAW_MEMORY_DEFAULT_SCOPE: 'group',
-        MYCLAW_BROWSER_PROFILE_NAME: '',
-        MYCLAW_ADMIN_MCP_TOOLS_JSON: '[]',
-        MYCLAW_CONFIGURED_ALLOWED_TOOLS_JSON: '[]',
-        MYCLAW_SELECTED_SKILLS_JSON: '[]',
-        MYCLAW_SELECTED_MCP_SERVERS_JSON: '[]',
-        MYCLAW_MCP_TOOL_NAMES_JSON: JSON.stringify(
-          selectedMyClawMcpToolNames([]),
+        GANTRY_CHAT_JID: 'tg:group',
+        GANTRY_GROUP_FOLDER: 'group',
+        GANTRY_THREAD_ID: 'thread-1',
+        GANTRY_MEMORY_USER_ID: '',
+        GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER: '',
+        GANTRY_MEMORY_DEFAULT_SCOPE: 'group',
+        GANTRY_BROWSER_PROFILE_NAME: '',
+        GANTRY_ADMIN_MCP_TOOLS_JSON: '[]',
+        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '[]',
+        GANTRY_SELECTED_SKILLS_JSON: '[]',
+        GANTRY_SELECTED_MCP_SERVERS_JSON: '[]',
+        GANTRY_MCP_TOOL_NAMES_JSON: JSON.stringify(
+          selectedGantryMcpToolNames([]),
         ),
-        MYCLAW_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(
+        GANTRY_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(
           selectedMemoryIpcActions([]),
         ),
-        MYCLAW_IPC_DIR: path.join(env.root, 'ipc', 'group'),
-        MYCLAW_IPC_AUTH_TOKEN: 'runner-ipc-token',
-        MYCLAW_IPC_RESPONSE_VERIFY_KEY: 'runner-response-verify-key',
+        GANTRY_IPC_DIR: path.join(env.root, 'ipc', 'group'),
+        GANTRY_IPC_AUTH_TOKEN: 'runner-ipc-token',
+        GANTRY_IPC_RESPONSE_VERIFY_KEY: 'runner-response-verify-key',
         NO_PROXY:
           '127.0.0.1,localhost,::1,github.com,.github.com,api.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com',
         no_proxy:
@@ -426,7 +426,7 @@ describe('Claude Agent SDK boundary integration', () => {
       CLAUDE_CONFIG_DIR: path.join(env.root, 'claude-config'),
     });
     expect(call?.options.env).not.toHaveProperty(
-      'MYCLAW_MEMORY_IPC_ACTIONS_JSON',
+      'GANTRY_MEMORY_IPC_ACTIONS_JSON',
     );
     expect(call?.options.hooks?.PreToolUse).toEqual(
       expect.arrayContaining([
@@ -445,7 +445,7 @@ describe('Claude Agent SDK boundary integration', () => {
       cwd: '/tmp/work',
       tool_name: 'Write',
       tool_input: {
-        file_path: '/tmp/myclaw/agents/kai_tg_1/skills/linkedin/SKILL.md',
+        file_path: '/tmp/gantry/agents/kai_tg_1/skills/linkedin/SKILL.md',
         content: '# LinkedIn\n',
       },
       tool_use_id: 'toolu_1',
@@ -459,19 +459,19 @@ describe('Claude Agent SDK boundary integration', () => {
     expect(call?.streamMessages[0]).toEqual([
       {
         type: 'text',
-        text: '<myclaw_memory_context trust="untrusted_data_only">prior user preference</myclaw_memory_context>',
+        text: '<gantry_memory_context trust="untrusted_data_only">prior user preference</gantry_memory_context>',
       },
-      { type: 'text', text: 'hello from MyClaw' },
+      { type: 'text', text: 'hello from Gantry' },
     ]);
     expect(call?.options.systemPrompt.append).toContain(
-      'MyClaw Durable Memory Boundary',
+      'Gantry Durable Memory Boundary',
     );
     expect(call?.options.systemPrompt.append).not.toContain(
       'prior user preference',
     );
   });
 
-  it('fails closed when Claude init reports the required MyClaw MCP server is unavailable', async () => {
+  it('fails closed when Claude init reports the required Gantry MCP server is unavailable', async () => {
     const env = prepareRuntimeEnv();
     sdkState.mode = 'mcp-failed';
     const { runQuery } = await importRunQuery();
@@ -486,10 +486,10 @@ describe('Claude Agent SDK boundary integration', () => {
         undefined,
         undefined,
       ),
-    ).rejects.toThrow(/Required MyClaw MCP server is not ready/);
+    ).rejects.toThrow(/Required Gantry MCP server is not ready/);
   });
 
-  it('passes memory reviewer authority into the MyClaw MCP server env', async () => {
+  it('passes memory reviewer authority into the Gantry MCP server env', async () => {
     const env = prepareRuntimeEnv();
     const { runQuery } = await importRunQuery();
 
@@ -504,12 +504,12 @@ describe('Claude Agent SDK boundary integration', () => {
     );
 
     expect(
-      sdkState.calls[0]?.options.mcpServers.myclaw?.env
-        ?.MYCLAW_MEMORY_REVIEWER_IS_CONTROL_APPROVER,
+      sdkState.calls[0]?.options.mcpServers.gantry?.env
+        ?.GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER,
     ).toBe('1');
   });
 
-  it('fails closed when Claude init omits the required MyClaw MCP server', async () => {
+  it('fails closed when Claude init omits the required Gantry MCP server', async () => {
     const env = prepareRuntimeEnv();
     sdkState.mode = 'mcp-missing';
     const { runQuery } = await importRunQuery();
@@ -524,7 +524,7 @@ describe('Claude Agent SDK boundary integration', () => {
         undefined,
         undefined,
       ),
-    ).rejects.toThrow(/Required MyClaw MCP server is missing/);
+    ).rejects.toThrow(/Required Gantry MCP server is missing/);
   });
 
   it('fails closed when Claude init omits MCP server status metadata', async () => {
@@ -542,7 +542,7 @@ describe('Claude Agent SDK boundary integration', () => {
         undefined,
         undefined,
       ),
-    ).rejects.toThrow(/Required MyClaw MCP server status is missing/);
+    ).rejects.toThrow(/Required Gantry MCP server status is missing/);
   });
 
   it('pipes active IPC follow-up input into the same Claude SDK stream', async () => {
@@ -578,7 +578,7 @@ describe('Claude Agent SDK boundary integration', () => {
       env.mcpServerPath,
       runnerInput({
         memoryContextBlock:
-          '<myclaw_memory_context trust="untrusted_data_only">[suppressed: instruction-like memory content]</myclaw_memory_context>',
+          '<gantry_memory_context trust="untrusted_data_only">[suppressed: instruction-like memory content]</gantry_memory_context>',
       }),
       {},
       undefined,

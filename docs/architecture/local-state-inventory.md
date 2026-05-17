@@ -23,7 +23,7 @@ This inventory classifies local filesystem state by durability.
 - Per-run Claude `CLAUDE_CONFIG_DIR` directories under the OS temp directory.
   These include generated `settings.json` and materialized `skills/`.
 - Packaged or explicitly configured local skill folders are copied into per-run
-  Claude config as scratch input. They are not mirrored into a MyClaw skill byte
+  Claude config as scratch input. They are not mirrored into a Gantry skill byte
   registry.
 - Approved bound skill artifacts are unpacked into per-run Claude config as
   scratch input. Draft, rejected, and disabled artifacts are never unpacked.
@@ -31,7 +31,7 @@ This inventory classifies local filesystem state by durability.
 - Build, test, coverage, and generated verification artifacts.
 
 Temporary state may be deleted without losing canonical conversation history or
-MyClaw-owned durable state. Active provider continuity is live-process only;
+Gantry-owned durable state. Active provider continuity is live-process only;
 provider SDK files are not resume inputs.
 
 ## Unsupported Local State
@@ -40,18 +40,18 @@ Claude JSONL under runtime-local `.claude` or
 `data/sessions/<group>/.claude` paths is unsupported runtime state. These paths
 are not durable truth and are not a continuation mechanism.
 
-Runtime-home Claude settings and skills are also unsupported as MyClaw
+Runtime-home Claude settings and skills are also unsupported as Gantry
 configuration or skill truth.
 
 No automatic migration is provided for unsupported local Claude files.
 
 ## Safe Cleanup
 
-After building and restarting from the current checkout, confirm `myclaw status`
-before inspecting `~/myclaw`. Stale generated logs, obsolete scratch session/job
+After building and restarting from the current checkout, confirm `gantry status`
+before inspecting `~/gantry`. Stale generated logs, obsolete scratch session/job
 snapshots, old provider transcript exports, and unused local hook/webhook
 scratch files may be archived under
-`~/myclaw/cleanup-archive/<timestamp>/`.
+`~/gantry/cleanup-archive/<timestamp>/`.
 
 Do not move or delete secrets, `settings.yaml`, Postgres data, OneCLI data,
 `artifacts/`, or active agent folders unless a reset was explicitly requested.

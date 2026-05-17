@@ -55,7 +55,7 @@ export async function runReadyStep(
       label: 'Finish setup and exit (Recommended)',
       hint: draft.serviceStartedAfterSetup
         ? 'Background service is already running.'
-        : 'Return to the terminal. Start later with `myclaw start`.',
+        : 'Return to the terminal. Start later with `gantry start`.',
     },
     ...(draft.serviceStartedAfterSetup
       ? []

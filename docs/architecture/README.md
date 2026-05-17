@@ -2,7 +2,7 @@
 
 Store architecture-level design inputs for planning and decomposition here.
 
-For MyClaw, canonical architecture references are:
+For Gantry, canonical architecture references are:
 
 - `docs/architecture/overview.md` — top-down architecture map with diagrams (start here)
 - `docs/architecture/canonical-domain-model.md`

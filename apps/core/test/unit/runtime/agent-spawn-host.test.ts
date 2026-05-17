@@ -11,17 +11,17 @@ const mockLoggerWarn = vi.fn();
 const mockLoggerInfo = vi.fn();
 const mockEnsureGroupIpcLayout = vi.fn();
 const mockGetHostAgentRunnerDistDir = vi.fn(
-  () => '/tmp/myclaw-test/dist/runner',
+  () => '/tmp/gantry-test/dist/runner',
 );
-const MODEL_RUNTIME_CREDENTIAL_IDENTIFIER = 'myclaw-model-access';
-const MODEL_RUNTIME_CA_STEM = 'gateway-ca-72ce4c290ee39d60';
+const MODEL_RUNTIME_CREDENTIAL_IDENTIFIER = 'gantry-model-access';
+const MODEL_RUNTIME_CA_STEM = 'gateway-ca-f0608813027cec0b';
 
 async function loadModule(config: {
   ONECLI_URL?: string;
   DATA_DIR?: string;
   AGENTS_DIR?: string;
-  MYCLAW_HOME?: string;
-  MYCLAW_CREDENTIAL_MODE?: string;
+  GANTRY_HOME?: string;
+  GANTRY_CREDENTIAL_MODE?: string;
 }) {
   vi.resetModules();
 
@@ -66,12 +66,12 @@ async function loadModule(config: {
     ONECLI_URL: config.ONECLI_URL ?? 'http://localhost:10254',
     ONECLI_BROKER_URL: config.ONECLI_URL ?? 'http://localhost:10254',
     EXTERNAL_BROKER_BASE_URL: '',
-    DATA_DIR: config.DATA_DIR ?? '/tmp/myclaw-test/data',
-    AGENTS_DIR: config.AGENTS_DIR ?? '/tmp/myclaw-test/agents',
-    MYCLAW_HOME: config.MYCLAW_HOME ?? '/tmp/myclaw-test/config',
-    MYCLAW_CREDENTIAL_MODE: config.MYCLAW_CREDENTIAL_MODE ?? 'onecli',
+    DATA_DIR: config.DATA_DIR ?? '/tmp/gantry-test/data',
+    AGENTS_DIR: config.AGENTS_DIR ?? '/tmp/gantry-test/agents',
+    GANTRY_HOME: config.GANTRY_HOME ?? '/tmp/gantry-test/config',
+    GANTRY_CREDENTIAL_MODE: config.GANTRY_CREDENTIAL_MODE ?? 'onecli',
     getCredentialBrokerRuntimeConfig: () => ({
-      mode: config.MYCLAW_CREDENTIAL_MODE ?? 'onecli',
+      mode: config.GANTRY_CREDENTIAL_MODE ?? 'onecli',
       onecliUrl: config.ONECLI_URL ?? 'http://localhost:10254',
       externalBrokerBaseUrl: '',
     }),
@@ -80,12 +80,12 @@ async function loadModule(config: {
   vi.doMock('@core/config/env/index.js', () => ({
     envConfig: {
       ONECLI_URL: config.ONECLI_URL ?? 'http://localhost:10254',
-      MYCLAW_CREDENTIAL_MODE: config.MYCLAW_CREDENTIAL_MODE ?? 'onecli',
+      GANTRY_CREDENTIAL_MODE: config.GANTRY_CREDENTIAL_MODE ?? 'onecli',
     },
     envValue: (key: string) =>
       ({
         ONECLI_URL: config.ONECLI_URL ?? 'http://localhost:10254',
-        MYCLAW_CREDENTIAL_MODE: config.MYCLAW_CREDENTIAL_MODE ?? 'onecli',
+        GANTRY_CREDENTIAL_MODE: config.GANTRY_CREDENTIAL_MODE ?? 'onecli',
       })[key] || '',
   }));
 
@@ -151,7 +151,7 @@ describe('getHostRuntimeCredentialEnv', () => {
     mockGetContainerConfig.mockResolvedValue({
       env: {
         ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
-        MYCLAW_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'openrouter',
+        GANTRY_ANTHROPIC_AUTH_TOKEN_PROVIDER: 'openrouter',
         ANTHROPIC_AUTH_TOKEN: 'sk-or-v1-test-token',
       },
     });
@@ -267,20 +267,20 @@ describe('getHostRuntimeCredentialEnv', () => {
     expect(result.brokerApplied).toBe(true);
     expect(result.env).toEqual({
       ANTHROPIC_BASE_URL: 'https://broker.example.com',
-      NODE_EXTRA_CA_CERTS: `/tmp/myclaw-test/data/onecli/${MODEL_RUNTIME_CA_STEM}.pem`,
+      NODE_EXTRA_CA_CERTS: `/tmp/gantry-test/data/onecli/${MODEL_RUNTIME_CA_STEM}.pem`,
     });
-    expect(mockMkdirSync).toHaveBeenCalledWith('/tmp/myclaw-test/data/onecli', {
+    expect(mockMkdirSync).toHaveBeenCalledWith('/tmp/gantry-test/data/onecli', {
       recursive: true,
       mode: 0o700,
     });
     expect(mockChmodSync).toHaveBeenCalledWith(
-      '/tmp/myclaw-test/data/onecli',
+      '/tmp/gantry-test/data/onecli',
       0o700,
     );
     expect(mockWriteFileSync).toHaveBeenCalledWith(
       expect.stringMatching(
         new RegExp(
-          `^/tmp/myclaw-test/data/onecli/${MODEL_RUNTIME_CA_STEM}\\.pem\\.\\d+\\.[0-9a-f-]+\\.tmp$`,
+          `^/tmp/gantry-test/data/onecli/${MODEL_RUNTIME_CA_STEM}\\.pem\\.\\d+\\.[0-9a-f-]+\\.tmp$`,
         ),
       ),
       'cert-data',
@@ -289,15 +289,15 @@ describe('getHostRuntimeCredentialEnv', () => {
     expect(mockRenameSync).toHaveBeenCalledWith(
       expect.stringMatching(
         new RegExp(
-          `^/tmp/myclaw-test/data/onecli/${MODEL_RUNTIME_CA_STEM}\\.pem\\.\\d+\\.[0-9a-f-]+\\.tmp$`,
+          `^/tmp/gantry-test/data/onecli/${MODEL_RUNTIME_CA_STEM}\\.pem\\.\\d+\\.[0-9a-f-]+\\.tmp$`,
         ),
       ),
-      `/tmp/myclaw-test/data/onecli/${MODEL_RUNTIME_CA_STEM}.pem`,
+      `/tmp/gantry-test/data/onecli/${MODEL_RUNTIME_CA_STEM}.pem`,
     );
     expect(mockLoggerInfo).toHaveBeenCalledWith(
       {
         agentIdentifier: MODEL_RUNTIME_CREDENTIAL_IDENTIFIER,
-        caPath: `/tmp/myclaw-test/data/onecli/${MODEL_RUNTIME_CA_STEM}.pem`,
+        caPath: `/tmp/gantry-test/data/onecli/${MODEL_RUNTIME_CA_STEM}.pem`,
       },
       'Applied OneCLI CA certificate for host runner',
     );
@@ -325,22 +325,22 @@ describe('prepareHostRuntimeContext', () => {
 
     const ctx = mod.prepareHostRuntimeContext(fakeGroup);
 
-    expect(ctx.groupDir).toBe('/tmp/myclaw-test/agents/test-group');
-    expect(ctx.groupIpcDir).toBe('/tmp/myclaw-test/data/ipc/test-group');
-    expect(ctx.runnerDistDir).toBe('/tmp/myclaw-test/dist/runner');
+    expect(ctx.groupDir).toBe('/tmp/gantry-test/agents/test-group');
+    expect(ctx.groupIpcDir).toBe('/tmp/gantry-test/data/ipc/test-group');
+    expect(ctx.runnerDistDir).toBe('/tmp/gantry-test/dist/runner');
     expect(mockMkdirSync).toHaveBeenCalledWith(
-      '/tmp/myclaw-test/agents/test-group',
+      '/tmp/gantry-test/agents/test-group',
       { recursive: true },
     );
     expect(mockGetHostAgentRunnerDistDir).toHaveBeenCalled();
     expect(mockEnsureGroupIpcLayout).toHaveBeenCalledWith(
-      '/tmp/myclaw-test/data/ipc/test-group',
+      '/tmp/gantry-test/data/ipc/test-group',
     );
   });
 
   it('does not project agents/shared as a global runtime directory', async () => {
     mockExistsSync.mockImplementation(
-      (value: string) => value === '/tmp/myclaw-test/agents/shared',
+      (value: string) => value === '/tmp/gantry-test/agents/shared',
     );
     const mod = await loadModule({});
 

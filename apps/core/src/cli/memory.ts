@@ -25,11 +25,11 @@ import { resolveModelSelection } from '../shared/model-catalog.js';
 function usage(): string {
   return [
     'Usage:',
-    '  myclaw memory status [--json]',
-    '  myclaw memory embeddings <off|disabled|provider>',
-    '  myclaw memory dreaming <on|off>',
-    '  myclaw memory model set <extractor|dreaming|consolidation> <model>',
-    '  myclaw memory model profile <cheap|balanced|quality>',
+    '  gantry memory status [--json]',
+    '  gantry memory embeddings <off|disabled|provider>',
+    '  gantry memory dreaming <on|off>',
+    '  gantry memory model set <extractor|dreaming|consolidation> <model>',
+    '  gantry memory model profile <cheap|balanced|quality>',
   ].join('\n');
 }
 

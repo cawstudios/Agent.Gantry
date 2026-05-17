@@ -1,6 +1,6 @@
 # Codex Architecture Harness
 
-The Codex harness enforces the target MyClaw architecture before large source refactors land. It is intentionally stricter than the current codebase, and the default exception file is empty so violations are visible instead of hidden by generated baselines.
+The Codex harness enforces the target Gantry architecture before large source refactors land. It is intentionally stricter than the current codebase, and the default exception file is empty so violations are visible instead of hidden by generated baselines.
 
 ## Run The Check
 

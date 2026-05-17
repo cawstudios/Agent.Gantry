@@ -141,7 +141,7 @@ function register(
 ): void {
   server.tool(
     name,
-    `${description} Uses the host-derived MyClaw browser profile. Add timeout_ms only to change the IPC/backend deadline.`,
+    `${description} Uses the host-derived Gantry browser profile. Add timeout_ms only to change the IPC/backend deadline.`,
     { ...schema, timeout_ms: z.number().optional() },
     async (args) => (await handler(args)) as never,
   );

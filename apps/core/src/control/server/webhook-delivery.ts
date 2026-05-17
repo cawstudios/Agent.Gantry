@@ -101,12 +101,12 @@ export async function deliverWebhookDelivery(
       {
         'content-type': 'application/json',
         'content-length': String(Buffer.byteLength(body)),
-        'x-myclaw-webhook-id': String(event.eventId),
-        'x-myclaw-webhook-timestamp': timestamp,
-        'x-myclaw-webhook-event': event.eventType,
-        'x-myclaw-webhook-signature': signature,
+        'x-gantry-webhook-id': String(event.eventId),
+        'x-gantry-webhook-timestamp': timestamp,
+        'x-gantry-webhook-event': event.eventType,
+        'x-gantry-webhook-signature': signature,
         ...(event.correlationId
-          ? { 'x-myclaw-correlation-id': event.correlationId }
+          ? { 'x-gantry-correlation-id': event.correlationId }
           : {}),
       },
       body,

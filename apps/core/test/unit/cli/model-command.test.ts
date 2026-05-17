@@ -14,7 +14,7 @@ const runtimeHomes: string[] = [];
 
 function makeRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'myclaw-model-cli-'),
+    path.join(os.tmpdir(), 'gantry-model-cli-'),
   );
   runtimeHomes.push(runtimeHome);
   return runtimeHome;

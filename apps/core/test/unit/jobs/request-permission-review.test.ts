@@ -248,7 +248,7 @@ describe('request permission review helpers', () => {
           status: 'active',
           selectable: true,
           inputSchema: {
-            format: 'myclaw.semantic-capability.v1',
+            format: 'gantry.semantic-capability.v1',
             schema: {
               capabilityId: 'acme.invoices.read',
               displayName: 'Acme invoices read',
@@ -343,7 +343,7 @@ describe('request permission review helpers', () => {
     };
 
     const ruleContent =
-      'git -C ~/Workdir/myclaw log --format=%s --grep="fix(permissions)"';
+      'git -C ~/Workdir/gantry log --format=%s --grep="fix(permissions)"';
     const persisted = await persistRequestPermissionRules({
       appId: 'app:test' as never,
       agentId: 'agent:test' as never,
@@ -375,11 +375,11 @@ describe('request permission review helpers', () => {
 
   it('binds exact admin MCP tools without creating synthetic wildcard grants', async () => {
     const ipcDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-admin-live-tool-rules-'),
+      path.join(os.tmpdir(), 'gantry-admin-live-tool-rules-'),
     );
     const repository = {
       getTool: vi.fn(async () => ({
-        id: 'tool:mcp__myclaw__service_restart',
+        id: 'tool:mcp__gantry__service_restart',
         appId: 'app:test',
         status: 'active',
         selectable: true,
@@ -401,19 +401,19 @@ describe('request permission review helpers', () => {
         {
           type: 'addRules',
           behavior: 'allow',
-          rules: [{ toolName: 'mcp__myclaw__service_restart' }],
+          rules: [{ toolName: 'mcp__gantry__service_restart' }],
         },
       ],
     });
 
-    expect(persisted).toEqual(['mcp__myclaw__service_restart']);
+    expect(persisted).toEqual(['mcp__gantry__service_restart']);
     expect(repository.getTool).toHaveBeenCalledWith(
-      'tool:mcp__myclaw__service_restart',
+      'tool:mcp__gantry__service_restart',
     );
     expect(repository.saveTool).not.toHaveBeenCalled();
     expect(repository.saveAgentToolBinding).toHaveBeenCalledWith(
       expect.objectContaining({
-        toolId: 'tool:mcp__myclaw__service_restart',
+        toolId: 'tool:mcp__gantry__service_restart',
         status: 'active',
       }),
     );
@@ -424,7 +424,7 @@ describe('request permission review helpers', () => {
           'utf-8',
         ),
       ),
-    ).toEqual(['mcp__myclaw__service_restart']);
+    ).toEqual(['mcp__gantry__service_restart']);
   });
 
   it('binds persistent Browser approvals to the catalog Browser tool and mirrors settings', async () => {
@@ -534,7 +534,7 @@ describe('request permission review helpers', () => {
     expect(
       requestPermissionReviewSuggestions({
         permissionKind: 'tool',
-        toolName: 'mcp__myclaw__browser_act',
+        toolName: 'mcp__gantry__browser_act',
         temporaryOnly: false,
       }),
     ).toEqual([
@@ -603,7 +603,7 @@ describe('request permission review helpers', () => {
   it('does not suggest persistent grants for invalid durable tool rules', () => {
     for (const toolName of [
       'mcp__github__*',
-      'mcp__myclaw__*',
+      'mcp__gantry__*',
       'Bash',
       'Bash(npm test)',
       'Bash(*)',
@@ -878,7 +878,7 @@ describe('request permission review helpers', () => {
           {
             type: 'addRules',
             behavior: 'allow',
-            rules: [{ toolName: 'mcp__myclaw__browser_act' }],
+            rules: [{ toolName: 'mcp__gantry__browser_act' }],
           },
         ],
       }),
@@ -938,7 +938,7 @@ describe('request permission review helpers', () => {
 
   it('writes approved persistent tools to the current run live permission file', async () => {
     const ipcDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-live-tool-rules-'),
+      path.join(os.tmpdir(), 'gantry-live-tool-rules-'),
     );
     const repository = {
       getTool: vi.fn(async () => null),
@@ -977,7 +977,7 @@ describe('request permission review helpers', () => {
 
   it('persists multiple approved rules and mirrors them together', async () => {
     const ipcDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-live-tool-rules-multi-'),
+      path.join(os.tmpdir(), 'gantry-live-tool-rules-multi-'),
     );
     const repository = {
       getTool: vi.fn(async (toolId: string) =>
@@ -1157,7 +1157,7 @@ describe('request permission review helpers', () => {
 
   it('rolls back active bindings when persistent settings mirror fails', async () => {
     const ipcDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-live-tool-rules-rollback-'),
+      path.join(os.tmpdir(), 'gantry-live-tool-rules-rollback-'),
     );
     const repository = {
       getTool: vi.fn(async () => null),
@@ -1204,7 +1204,7 @@ describe('request permission review helpers', () => {
 
   it('rolls back active bindings when one rule write fails before settings mirror', async () => {
     const ipcDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'myclaw-live-tool-rules-write-failure-'),
+      path.join(os.tmpdir(), 'gantry-live-tool-rules-write-failure-'),
     );
     const repository = {
       getTool: vi.fn(async () => null),
@@ -1255,7 +1255,7 @@ describe('request permission review helpers', () => {
     ).toBe(false);
   });
 
-  it('rejects persistent MyClaw MCP wildcard approvals', async () => {
+  it('rejects persistent Gantry MCP wildcard approvals', async () => {
     const repository = {
       getTool: vi.fn(async () => null),
       saveTool: vi.fn(async () => undefined),
@@ -1273,7 +1273,7 @@ describe('request permission review helpers', () => {
           {
             type: 'addRules',
             behavior: 'allow',
-            rules: [{ toolName: 'mcp__myclaw__*' }],
+            rules: [{ toolName: 'mcp__gantry__*' }],
           },
         ],
       }),
@@ -1308,7 +1308,7 @@ describe('request permission review helpers', () => {
     expect(repository.saveAgentToolBinding).not.toHaveBeenCalled();
   });
 
-  it('rejects MyClaw MCP wildcard approvals even when SDK sends rule content', async () => {
+  it('rejects Gantry MCP wildcard approvals even when SDK sends rule content', async () => {
     const repository = {
       getTool: vi.fn(async () => null),
       saveTool: vi.fn(async () => undefined),
@@ -1328,7 +1328,7 @@ describe('request permission review helpers', () => {
             behavior: 'allow',
             rules: [
               {
-                toolName: 'mcp__myclaw__*',
+                toolName: 'mcp__gantry__*',
                 ruleContent: 'service_restart',
               },
             ],
@@ -1342,7 +1342,7 @@ describe('request permission review helpers', () => {
   it('rejects scoped admin MCP tool approvals', async () => {
     const repository = {
       getTool: vi.fn(async () => ({
-        id: 'tool:mcp__myclaw__service_restart',
+        id: 'tool:mcp__gantry__service_restart',
         appId: 'app:test',
         status: 'active',
         selectable: true,
@@ -1365,7 +1365,7 @@ describe('request permission review helpers', () => {
             behavior: 'allow',
             rules: [
               {
-                toolName: 'mcp__myclaw__service_restart',
+                toolName: 'mcp__gantry__service_restart',
                 ruleContent: 'reason=test',
               },
             ],

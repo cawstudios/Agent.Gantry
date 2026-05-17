@@ -1,8 +1,8 @@
 # Outbound Webhooks
 
-MyClaw outbound webhooks are host-owned callback destinations. Agents do not
+Gantry outbound webhooks are host-owned callback destinations. Agents do not
 choose webhook URLs. They deliver durable runtime events to an application after
-MyClaw has accepted work.
+Gantry has accepted work.
 
 Do not use `/v1/webhooks` for inbound authority. Signed inbound systems use
 external ingress records under `/v1/ingresses`.
@@ -17,25 +17,25 @@ external ingress records under `/v1/ingresses`.
 
 ## Headers
 
-- `x-myclaw-webhook-id`
-- `x-myclaw-webhook-timestamp`
-- `x-myclaw-webhook-event`
-- `x-myclaw-webhook-signature`
-- `x-myclaw-correlation-id` when present
+- `x-gantry-webhook-id`
+- `x-gantry-webhook-timestamp`
+- `x-gantry-webhook-event`
+- `x-gantry-webhook-signature`
+- `x-gantry-correlation-id` when present
 
 ## Signature verification
 
 ```ts
-import { verifyWebhookSignature } from '@myclaw/sdk';
+import { verifyWebhookSignature } from '@gantry/sdk';
 
 export async function POST(req: Request) {
   const rawBody = await req.text();
   const ok = verifyWebhookSignature({
-    secret: process.env.MYCLAW_WEBHOOK_SECRET!,
-    timestamp: req.headers.get('x-myclaw-webhook-timestamp')!,
-    eventId: req.headers.get('x-myclaw-webhook-id')!,
-    eventType: req.headers.get('x-myclaw-webhook-event')!,
-    signature: req.headers.get('x-myclaw-webhook-signature')!,
+    secret: process.env.GANTRY_WEBHOOK_SECRET!,
+    timestamp: req.headers.get('x-gantry-webhook-timestamp')!,
+    eventId: req.headers.get('x-gantry-webhook-id')!,
+    eventType: req.headers.get('x-gantry-webhook-event')!,
+    signature: req.headers.get('x-gantry-webhook-signature')!,
     rawBody,
     toleranceMs: 5 * 60_000,
   });
@@ -51,4 +51,4 @@ export async function POST(req: Request) {
 
 ## Replay safety
 
-Deduplicate on `x-myclaw-webhook-id`. The same event may be delivered more than once. The SDK verifier rejects timestamps outside a 5 minute tolerance by default; keep a durable processed-event table for side effects.
+Deduplicate on `x-gantry-webhook-id`. The same event may be delivered more than once. The SDK verifier rejects timestamps outside a 5 minute tolerance by default; keep a durable processed-event table for side effects.

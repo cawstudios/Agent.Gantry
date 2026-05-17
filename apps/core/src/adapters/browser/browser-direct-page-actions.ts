@@ -27,9 +27,9 @@ export async function snapshotPage(
     const doc = (globalThis as any).document;
     const loc = (globalThis as any).location;
     for (const element of Array.from(
-      doc.querySelectorAll('[data-myclaw-ref]'),
+      doc.querySelectorAll('[data-gantry-ref]'),
     ) as any[]) {
-      element.removeAttribute('data-myclaw-ref');
+      element.removeAttribute('data-gantry-ref');
     }
     const candidates = Array.from(
       doc.querySelectorAll(
@@ -43,7 +43,7 @@ export async function snapshotPage(
       .slice(0, 200)
       .map((element, index) => {
         const ref = `e${index + 1}`;
-        element.setAttribute('data-myclaw-ref', ref);
+        element.setAttribute('data-gantry-ref', ref);
         const label =
           element.getAttribute('aria-label') ||
           element.innerText ||
@@ -113,7 +113,7 @@ export async function resolveTargetLocator(
   target: string,
 ): Promise<Locator> {
   if (/^e\d+$/.test(target)) {
-    return page.locator(`[data-myclaw-ref="${target}"]`).first();
+    return page.locator(`[data-gantry-ref="${target}"]`).first();
   }
   const locator = page.locator(target).first();
   const count = await locator.count().catch(() => 0);

@@ -66,7 +66,7 @@
   Duplicate filenames in one request, same-name concurrent requests, and
   existing files under `uploads/` must not overwrite or alias each other.
 - Keep artifact path policy separate from action argument handling. File
-  confinement is MyClaw-owned safety policy; direct browser calls should see
+  confinement is Gantry-owned safety policy; direct browser calls should see
   only already-confined absolute paths.
 - Text-only backend tab lists are not trusted UI state. Tab projection consumes
   adapter-owned structured metadata only; missing metadata fails closed and

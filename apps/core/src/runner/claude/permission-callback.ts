@@ -184,8 +184,8 @@ async function requestPermissionApprovalInner(options: {
       responseNonce,
       sourceAgentFolder: agentFolder,
       ...(targetJid ? { targetJid } : {}),
-      ...(process.env.MYCLAW_AGENT_RUN_HANDLE
-        ? { runHandle: process.env.MYCLAW_AGENT_RUN_HANDLE }
+      ...(process.env.GANTRY_AGENT_RUN_HANDLE
+        ? { runHandle: process.env.GANTRY_AGENT_RUN_HANDLE }
         : {}),
       ...(JOB_ID ? { jobId: JOB_ID } : {}),
       ...(JOB_NAME ? { jobName: JOB_NAME } : {}),

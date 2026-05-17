@@ -85,54 +85,54 @@ export class ArtifactClaudeSkillSource implements SkillSource {
   }
 }
 
-export const RUNTIME_MYCLAW_BROWSER_SKILL_ID = 'myclaw-browser';
-export const RUNTIME_MYCLAW_BROWSER_SKILL_VERSION = 'myclaw-runtime-v1';
+export const RUNTIME_GANTRY_BROWSER_SKILL_ID = 'gantry-browser';
+export const RUNTIME_GANTRY_BROWSER_SKILL_VERSION = 'gantry-runtime-v1';
 
-const RUNTIME_MYCLAW_BROWSER_SKILL = `---
-name: myclaw-browser
-description: Use the MyClaw-managed persistent browser profile for web tasks that require navigation, login state, cookies, or browser actions.
+const RUNTIME_GANTRY_BROWSER_SKILL = `---
+name: gantry-browser
+description: Use the Gantry-managed persistent browser profile for web tasks that require navigation, login state, cookies, or browser actions.
 ---
 
-# MyClaw Browser
+# Gantry Browser
 
 Use this skill when a task needs a real browser session.
 
-MyClaw owns the persistent browser lifecycle and gives each agent conversation its own default profile:
+Gantry owns the persistent browser lifecycle and gives each agent conversation its own default profile:
 
 - Use the compact Browser gateway: \`browser_status\`, \`browser_open\`, \`browser_inspect\`, \`browser_act\`, and \`browser_close\`.
 - Search first when the destination is unknown. Use \`browser_open\` directly only when the user provided a URL or you have selected a search result.
 - Inspect before acting. Use \`browser_inspect\` to understand the current page before each \`browser_act\` interaction.
 - Use basic inspection by default. Request full inspection only with a concise reason when basic output is insufficient.
 - Close the browser with \`browser_close\` after scheduled jobs or other unattended browser work completes.
-- The Browser capability exposes only the MyClaw gateway. Do not request private browser backends or alternate automation tools.
-- MyClaw launches the backing browser lazily when an action needs it; \`browser_status\` is read-only and does not launch Chrome.
+- The Browser capability exposes only the Gantry gateway. Do not request private browser backends or alternate automation tools.
+- Gantry launches the backing browser lazily when an action needs it; \`browser_status\` is read-only and does not launch Chrome.
 - Do not install browser skills or edit user \`.claude/skills\` paths.
 
 If a site requires login, launch the headed browser and ask the user to complete authentication in that persistent profile. Do not scrape credentials or bypass normal site authentication.
 `;
 
-export class RuntimeInstalledMyClawBrowserSkillSource implements SkillSource {
+export class RuntimeInstalledGantryBrowserSkillSource implements SkillSource {
   async listSkills(input?: {
     enabledSkillIds?: string[];
   }): Promise<ClaudeSkillSourceItem[]> {
     const enabled = input?.enabledSkillIds
-      ? input.enabledSkillIds.includes(RUNTIME_MYCLAW_BROWSER_SKILL_ID)
+      ? input.enabledSkillIds.includes(RUNTIME_GANTRY_BROWSER_SKILL_ID)
       : true;
     return [
       {
-        id: RUNTIME_MYCLAW_BROWSER_SKILL_ID,
-        name: RUNTIME_MYCLAW_BROWSER_SKILL_ID,
+        id: RUNTIME_GANTRY_BROWSER_SKILL_ID,
+        name: RUNTIME_GANTRY_BROWSER_SKILL_ID,
         sourceType: 'runtime',
         enabled,
         assets: [
           {
             path: 'SKILL.md',
-            content: Buffer.from(RUNTIME_MYCLAW_BROWSER_SKILL, 'utf-8'),
+            content: Buffer.from(RUNTIME_GANTRY_BROWSER_SKILL, 'utf-8'),
           },
           {
             path: 'VERSION',
             content: Buffer.from(
-              `${RUNTIME_MYCLAW_BROWSER_SKILL_VERSION}\n`,
+              `${RUNTIME_GANTRY_BROWSER_SKILL_VERSION}\n`,
               'utf-8',
             ),
           },

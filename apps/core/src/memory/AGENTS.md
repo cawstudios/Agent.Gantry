@@ -9,7 +9,7 @@
 - Subject resolution for automatic boundary evidence, manual memory/procedure saves, hydration recall scopes, and memory dreaming triggers must use the same scope resolver so channel/group and DM/private boundaries stay consistent.
 - Normal runtime memory search/status hydration must pass the resolved subject type explicitly (`user` for DM/private, `channel` for channel/group) and must not make channel contexts visible to legacy agent-folder `group` rows.
 - `/dream`, scheduled dreaming, `/memory-status`, and `/save-procedure` must use trusted conversation context: DM/private uses the trusted user id and drops thread scope; channel/group uses the trusted conversation id and may retain thread/topic scope.
-- Memory IPC must enforce host-derived allowed actions from the signed runtime context/token. Reviewed actions such as `memory_patch`, `procedure_patch`, `memory_dream`, and `memory_consolidate` must stay denied unless the selected MyClaw MCP capability explicitly enables the matching action.
+- Memory IPC must enforce host-derived allowed actions from the signed runtime context/token. Reviewed actions such as `memory_patch`, `procedure_patch`, `memory_dream`, and `memory_consolidate` must stay denied unless the selected Gantry MCP capability explicitly enables the matching action.
 - Memory IPC may return deadline-based `unavailable` responses for read-only
   work before transport timeouts, but mutating actions must not use
   non-cancelling `Promise.race` wrappers that can return unavailable while the
