@@ -30,7 +30,6 @@ export type ControlRouteContext = {
   state: ControlServerState;
   triggerRateLimiter: RateLimiter;
   getRuntimeSettings: () => RuntimeSettingsResponse['settings'];
-  updateRuntimeSettings: (patch: unknown) => unknown;
   getDefaultModelConfig: (
     kind?: 'interactive' | 'oneTimeJob' | 'recurringJob',
     agentFolder?: string,

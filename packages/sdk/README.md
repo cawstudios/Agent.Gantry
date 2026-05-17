@@ -63,7 +63,7 @@ endpoints on the running runtime:
 - `client.conversations` — `list`, `get`, `messages`, get/set `approvers`
 - `client.webhooks` — `register`, `list`, `update`, `delete`, `test`, `replayDeadLetter`, `purgeDeadLetter`
 - `client.memory` — `save`, `search`, `list`, `patch`, `delete`, plus `dreaming.trigger` / `dreaming.status`
-- `client.settings` — read/update runtime settings
+- `client.settings` — read runtime settings
 - `client.ingresses` — manage external ingress configurations
 
 ### Standalone signing helpers

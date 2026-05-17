@@ -37,8 +37,6 @@ import {
   PageRequestSchema,
   ProviderSessionResponseSchema,
   RuntimeLimitSchema,
-  RuntimeSettingsPatchSchema,
-  RuntimeSettingsUpdateResponseSchema,
   SchemaDescriptorSchema,
   StreamEventSchema,
   UpdateJobRequestSchema,
@@ -215,63 +213,6 @@ describe('contracts package', () => {
       },
       updatedAt: iso,
     });
-
-    expect(
-      RuntimeSettingsPatchSchema.parse({
-        permissions: { egress: { denylist: ['API.LinkedIn.Com.'] } },
-      }),
-    ).toEqual({
-      permissions: { egress: { denylist: ['api.linkedin.com'] } },
-    });
-    expectInvalid(RuntimeSettingsPatchSchema, {
-      permissions: { egress: { denylist: ['https://api.linkedin.com'] } },
-    });
-    expect(
-      RuntimeSettingsUpdateResponseSchema.safeParse({
-        settings: {
-          desiredState: { authoritative: false },
-          agent: {
-            name: 'Default Agent',
-            defaultModel: '',
-            oneTimeJobDefaultModel: '',
-            recurringJobDefaultModel: '',
-          },
-          agents: {},
-          providers: {},
-          providerConnections: {},
-          conversations: {},
-          bindings: {},
-          memory: { enabled: true, dreaming: { enabled: false } },
-          runtime: {
-            queue: {
-              maxMessageRuns: 3,
-              maxJobRuns: 4,
-              maxRetries: 5,
-              baseRetryMs: 5000,
-            },
-          },
-          browser: {
-            usage: {
-              enabled: false,
-              mode: 'audit',
-              windowMs: 60_000,
-              maxActionsPerWindow: 120,
-              maxConcurrentPerSite: 1,
-            },
-          },
-          permissions: {
-            yoloMode: {
-              enabled: true,
-              denylist: ['rm -rf /'],
-              denylistPaths: ['/etc/*'],
-            },
-            egress: { denylist: ['api.linkedin.com'] },
-          },
-        },
-        changed: ['permissions.egress.denylist'],
-        restartRequired: true,
-      }).success,
-    ).toBe(true);
 
     const sdkCreatePayload = {
       name: 'Daily summary',

@@ -1,9 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import {
-  resolveModelAlias,
-  resolveModelSelection,
-} from '../shared/model-catalog.js';
+import { resolveModelAlias } from '../shared/model-catalog.js';
 import {
   envConfig,
   envValue,
@@ -14,21 +11,13 @@ import { parseBooleanEnv } from './env/parse.js';
 import { getMemoryModelConfig } from './memory.js';
 import { getGantryHome } from '../shared/gantry-home.js';
 import { resolveRuntimeStorageConfig } from './settings/storage.js';
-import {
-  ensureRuntimeSettings,
-  saveRuntimeSettings,
-} from './settings/runtime-settings.js';
+import { ensureRuntimeSettings } from './settings/runtime-settings.js';
 import { settingsFilePath } from './settings/runtime-home.js';
 import { DEFAULT_AGENT_NAME } from './settings/runtime-settings-defaults.js';
 import type { RuntimeSettings } from './settings/runtime-settings-types.js';
 import { isValidTimezone } from '../shared/timezone.js';
 import { resolvePermissionApprovalTimeoutMs } from '../shared/permission-timeout.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
-import {
-  normalizeSettingsStringArray,
-  validateRuntimeSettingsPatch,
-} from './runtime-settings-patch-validation.js';
-import { validateEgressDenylistPattern } from '../shared/egress-policy.js';
 export * from './memory.js';
 export { syncRuntimeSettingsFromProjection } from './settings/restart-sync.js';
 export const POLL_INTERVAL = 2000;
@@ -139,163 +128,6 @@ export function getRuntimeQueueConfig() {
     maxRetries: queue.maxRetries,
     baseRetryMs: queue.baseRetryMs,
   };
-}
-export function updatePublicRuntimeSettings(patch: {
-  agent?: {
-    name?: string;
-    defaultModel?: string;
-    oneTimeJobDefaultModel?: string;
-    recurringJobDefaultModel?: string;
-  };
-  memory?: { enabled?: boolean; dreaming?: { enabled?: boolean } };
-  permissions?: {
-    yoloMode?: {
-      enabled?: boolean;
-      denylist?: string[];
-      denylistPaths?: string[];
-    };
-    egress?: {
-      denylist?: string[];
-    };
-  };
-}) {
-  validateRuntimeSettingsPatch(patch);
-  const settings = getRuntimeSettingsForConfig();
-  const nextMemoryEnabled = patch.memory?.enabled ?? settings.memory.enabled;
-  const nextDreamingEnabled =
-    patch.memory?.dreaming?.enabled ?? settings.memory.dreaming.enabled;
-  if (nextDreamingEnabled && !nextMemoryEnabled) {
-    throw Object.assign(
-      new Error('memory.dreaming.enabled requires memory.enabled=true.'),
-      {
-        statusCode: 400,
-        code: 'INVALID_REQUEST',
-      },
-    );
-  }
-  const changed: string[] = [];
-  if (patch.agent?.name !== undefined) {
-    const next = patch.agent.name.trim();
-    if (!next) {
-      throw Object.assign(new Error('agent.name must be a non-empty string.'), {
-        statusCode: 400,
-        code: 'INVALID_REQUEST',
-      });
-    }
-    if (settings.agent.name !== next) {
-      settings.agent.name = next;
-      changed.push('agent.name');
-    }
-  }
-  if (patch.agent?.defaultModel !== undefined) {
-    const next = normalizeSettingsModelPatch(
-      patch.agent.defaultModel,
-      'agent.defaultModel',
-    );
-    if (settings.agent.defaultModel !== next) {
-      settings.agent.defaultModel = next;
-      changed.push('agent.defaultModel');
-    }
-  }
-  if (patch.agent?.oneTimeJobDefaultModel !== undefined) {
-    const next = normalizeSettingsModelPatch(
-      patch.agent.oneTimeJobDefaultModel,
-      'agent.oneTimeJobDefaultModel',
-    );
-    if (settings.agent.oneTimeJobDefaultModel !== next) {
-      settings.agent.oneTimeJobDefaultModel = next;
-      changed.push('agent.oneTimeJobDefaultModel');
-    }
-  }
-  if (patch.agent?.recurringJobDefaultModel !== undefined) {
-    const next = normalizeSettingsModelPatch(
-      patch.agent.recurringJobDefaultModel,
-      'agent.recurringJobDefaultModel',
-    );
-    if (settings.agent.recurringJobDefaultModel !== next) {
-      settings.agent.recurringJobDefaultModel = next;
-      changed.push('agent.recurringJobDefaultModel');
-    }
-  }
-  if (
-    patch.memory?.enabled !== undefined &&
-    settings.memory.enabled !== patch.memory.enabled
-  ) {
-    settings.memory.enabled = patch.memory.enabled;
-    changed.push('memory.enabled');
-  }
-  if (
-    patch.memory?.dreaming?.enabled !== undefined &&
-    settings.memory.dreaming.enabled !== patch.memory.dreaming.enabled
-  ) {
-    settings.memory.dreaming.enabled = patch.memory.dreaming.enabled;
-    changed.push('memory.dreaming.enabled');
-  }
-  const yoloModePatch = patch.permissions?.yoloMode;
-  if (yoloModePatch?.enabled !== undefined) {
-    if (settings.permissions.yoloMode.enabled !== yoloModePatch.enabled) {
-      settings.permissions.yoloMode.enabled = yoloModePatch.enabled;
-      changed.push('permissions.yoloMode.enabled');
-    }
-  }
-  if (yoloModePatch?.denylist !== undefined) {
-    const next = normalizeSettingsStringArray(
-      yoloModePatch.denylist,
-      'permissions.yoloMode.denylist',
-    );
-    if (!arraysEqual(settings.permissions.yoloMode.denylist, next)) {
-      settings.permissions.yoloMode.denylist = next;
-      changed.push('permissions.yoloMode.denylist');
-    }
-  }
-  if (yoloModePatch?.denylistPaths !== undefined) {
-    const next = normalizeSettingsStringArray(
-      yoloModePatch.denylistPaths,
-      'permissions.yoloMode.denylistPaths',
-    );
-    if (!arraysEqual(settings.permissions.yoloMode.denylistPaths, next)) {
-      settings.permissions.yoloMode.denylistPaths = next;
-      changed.push('permissions.yoloMode.denylistPaths');
-    }
-  }
-  const egressPatch = patch.permissions?.egress;
-  if (egressPatch?.denylist !== undefined) {
-    const next = normalizeSettingsStringArray(
-      egressPatch.denylist,
-      'permissions.egress.denylist',
-      validateEgressDenylistPattern,
-    );
-    if (!arraysEqual(settings.permissions.egress.denylist, next)) {
-      settings.permissions.egress.denylist = next;
-      changed.push('permissions.egress.denylist');
-    }
-  }
-  if (changed.length > 0) {
-    saveRuntimeSettings(GANTRY_HOME, settings);
-    runtimeSettingsCache = undefined;
-  }
-  return {
-    settings: getPublicRuntimeSettings(),
-    changed,
-    restartRequired: changed.length > 0,
-  };
-}
-
-function normalizeSettingsModelPatch(value: string, field: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  const resolved = resolveModelSelection(trimmed);
-  if (!resolved.ok) {
-    throw Object.assign(new Error(`${field}: ${resolved.message}`), {
-      statusCode: 400,
-      code: 'INVALID_REQUEST',
-    });
-  }
-  return resolved.alias;
-}
-
-function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 export const STORE_DIR = path.resolve(RUNTIME_ROOT, 'store');

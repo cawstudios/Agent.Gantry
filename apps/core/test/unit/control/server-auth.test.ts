@@ -58,121 +58,6 @@ vi.mock('@core/config/index.js', async () => {
       source: 'system default',
     })),
     getPublicRuntimeSettings: toPublic,
-    updatePublicRuntimeSettings: (patch: any) => {
-      const rejectInvalid = (message: string) => {
-        throw Object.assign(new Error(message), {
-          statusCode: 400,
-          code: 'INVALID_REQUEST',
-        });
-      };
-      const assertOptionalString = (value: unknown, field: string) => {
-        if (value !== undefined && typeof value !== 'string') {
-          rejectInvalid(`${field} must be a string.`);
-        }
-      };
-      const assertOptionalBoolean = (value: unknown, field: string) => {
-        if (value !== undefined && typeof value !== 'boolean') {
-          rejectInvalid(`${field} must be a boolean.`);
-        }
-      };
-      for (const key of Object.keys(patch || {})) {
-        if (!['agent', 'memory', 'permissions'].includes(key)) {
-          rejectInvalid(`settings.${key} is not supported.`);
-        }
-      }
-      assertOptionalString(patch.agent?.name, 'agent.name');
-      assertOptionalString(patch.agent?.defaultModel, 'agent.defaultModel');
-      assertOptionalString(
-        patch.agent?.oneTimeJobDefaultModel,
-        'agent.oneTimeJobDefaultModel',
-      );
-      assertOptionalString(
-        patch.agent?.recurringJobDefaultModel,
-        'agent.recurringJobDefaultModel',
-      );
-      assertOptionalBoolean(patch.memory?.enabled, 'memory.enabled');
-      assertOptionalBoolean(
-        patch.memory?.dreaming?.enabled,
-        'memory.dreaming.enabled',
-      );
-      assertOptionalBoolean(
-        patch.permissions?.yoloMode?.enabled,
-        'permissions.yoloMode.enabled',
-      );
-      if (patch.permissions?.egress?.denylist !== undefined) {
-        if (!Array.isArray(patch.permissions.egress.denylist)) {
-          rejectInvalid('permissions.egress.denylist must be an array.');
-        }
-        patch.permissions.egress.denylist.forEach(
-          (value: unknown, index: number) => {
-            if (typeof value !== 'string' || !value.trim()) {
-              rejectInvalid(
-                `permissions.egress.denylist[${index}] must be a non-empty string.`,
-              );
-            }
-          },
-        );
-      }
-      const settings = settingsModule.loadRuntimeSettings(runtimeHome);
-      const changed: string[] = [];
-      if (patch.agent?.name !== undefined) {
-        if (!patch.agent.name.trim()) {
-          throw Object.assign(
-            new Error('agent.name must be a non-empty string.'),
-            {
-              statusCode: 400,
-              code: 'INVALID_REQUEST',
-            },
-          );
-        }
-        settings.agent.name = patch.agent.name.trim();
-        changed.push('agent.name');
-      }
-      if (patch.agent?.defaultModel !== undefined) {
-        settings.agent.defaultModel = patch.agent.defaultModel.trim();
-        changed.push('agent.defaultModel');
-      }
-      if (patch.agent?.oneTimeJobDefaultModel !== undefined) {
-        settings.agent.oneTimeJobDefaultModel =
-          patch.agent.oneTimeJobDefaultModel.trim();
-        changed.push('agent.oneTimeJobDefaultModel');
-      }
-      if (patch.agent?.recurringJobDefaultModel !== undefined) {
-        settings.agent.recurringJobDefaultModel =
-          patch.agent.recurringJobDefaultModel.trim();
-        changed.push('agent.recurringJobDefaultModel');
-      }
-      if (patch.memory?.dreaming?.enabled !== undefined) {
-        settings.memory.dreaming.enabled = patch.memory.dreaming.enabled;
-        changed.push('memory.dreaming.enabled');
-      }
-      if (patch.permissions?.yoloMode?.denylist !== undefined) {
-        settings.permissions.yoloMode.denylist =
-          patch.permissions.yoloMode.denylist;
-        changed.push('permissions.yoloMode.denylist');
-      }
-      if (patch.permissions?.yoloMode?.denylistPaths !== undefined) {
-        settings.permissions.yoloMode.denylistPaths =
-          patch.permissions.yoloMode.denylistPaths;
-        changed.push('permissions.yoloMode.denylistPaths');
-      }
-      if (patch.permissions?.yoloMode?.enabled !== undefined) {
-        settings.permissions.yoloMode.enabled =
-          patch.permissions.yoloMode.enabled;
-        changed.push('permissions.yoloMode.enabled');
-      }
-      if (patch.permissions?.egress?.denylist !== undefined) {
-        settings.permissions.egress.denylist =
-          patch.permissions.egress.denylist;
-        changed.push('permissions.egress.denylist');
-      }
-      settingsModule.saveRuntimeSettings(runtimeHome, settings);
-      return {
-        settings: toPublic(),
-        changed,
-        restartRequired: changed.length > 0,
-      };
-    },
   };
 });
 
@@ -955,7 +840,7 @@ describe('control server auth key parsing', () => {
 });
 
 describe('control server runtime hardening', () => {
-  it('serves and updates typed runtime settings', async () => {
+  it('serves typed runtime settings to agents admins but keeps them read-only', async () => {
     const runtimeHome = '/tmp/gantry-control-test-home';
     fs.rmSync(runtimeHome, { recursive: true, force: true });
     const port = await reservePort();
@@ -1018,21 +903,11 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(patchResponse.status).toBe(200);
+      expect(patchResponse.status).toBe(409);
+      expect(patchResponse.headers.get('connection')).toBe('close');
       await expect(patchResponse.json()).resolves.toMatchObject({
-        changed: [
-          'permissions.yoloMode.denylist',
-          'permissions.egress.denylist',
-        ],
-        settings: {
-          permissions: {
-            yoloMode: {
-              denylist: expect.arrayContaining(['rm -rf /', 'npm run nuke']),
-            },
-            egress: {
-              denylist: ['api.linkedin.com'],
-            },
-          },
+        error: {
+          code: 'SETTINGS_READ_ONLY',
         },
       });
 
@@ -1040,10 +915,8 @@ describe('control server runtime hardening', () => {
         path.join(runtimeHome, 'settings.yaml'),
         'utf-8',
       );
-      expect(raw).toContain('defaults:');
-      expect(raw).toContain('model: opus');
-      expect(raw).toContain('npm run nuke');
-      expect(raw).toContain('api.linkedin.com');
+      expect(raw).not.toContain('npm run nuke');
+      expect(raw).not.toContain('api.linkedin.com');
 
       const unsupportedResponse = await requestWithRetry(
         `http://127.0.0.1:${port}/v1/settings`,
@@ -1098,7 +971,7 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects arbitrary runtime settings patches', async () => {
+  it('rejects settings patches from non-admin keys before read-only handling', async () => {
     const runtimeHome = '/tmp/gantry-control-test-home';
     fs.rmSync(runtimeHome, { recursive: true, force: true });
     const port = await reservePort();
@@ -1106,8 +979,8 @@ describe('control server runtime hardening', () => {
     process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {
         kid: 'k',
-        token: 'admin-key',
-        scopes: ['agents:admin', 'conversations:admin'],
+        token: 'read-key',
+        scopes: ['sessions:read'],
         appId: 'app-one',
       },
     ]);
@@ -1122,7 +995,7 @@ describe('control server runtime hardening', () => {
     try {
       const response = await requestWithRetry(
         `http://127.0.0.1:${port}/v1/settings`,
-        'admin-key',
+        'read-key',
         {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
@@ -1131,10 +1004,10 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({
         error: {
-          code: 'INVALID_REQUEST',
+          code: 'FORBIDDEN',
         },
       });
     } finally {
@@ -1142,7 +1015,7 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects blank runtime agent names in typed settings patches', async () => {
+  it('keeps typed settings patches read-only before patch validation', async () => {
     const runtimeHome = '/tmp/gantry-control-test-home';
     fs.rmSync(runtimeHome, { recursive: true, force: true });
     const port = await reservePort();
@@ -1174,10 +1047,10 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(409);
       await expect(response.json()).resolves.toMatchObject({
         error: {
-          code: 'INVALID_REQUEST',
+          code: 'SETTINGS_READ_ONLY',
         },
       });
     } finally {
@@ -1185,7 +1058,7 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects malformed typed runtime settings patches', async () => {
+  it('does not parse malformed typed runtime settings patches in read-only mode', async () => {
     const runtimeHome = '/tmp/gantry-control-test-home';
     fs.rmSync(runtimeHome, { recursive: true, force: true });
     const port = await reservePort();
@@ -1220,11 +1093,10 @@ describe('control server runtime hardening', () => {
           }),
         },
       );
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(409);
       await expect(response.json()).resolves.toMatchObject({
         error: {
-          code: 'INVALID_REQUEST',
-          message: 'permissions.egress.denylist[0] must be a non-empty string.',
+          code: 'SETTINGS_READ_ONLY',
         },
       });
     } finally {

@@ -237,8 +237,9 @@ with those shipped defaults. When a denylist rule matches during an active timed
 grant, Gantry skips the bypass, records an audit event, and shows the normal
 permission prompt with the matched rule. Set `enabled: false` only when YOLO
 mode should be total. Edit the value directly in `settings.yaml`, through
-`/v1/settings`, or via the reviewed `settings_desired_state` /
-`request_settings_update` admin tools.
+local CLI settings commands, or via the reviewed `settings_desired_state` /
+`request_settings_update` admin tools. The typed `/v1/settings` API is
+read-only.
 
 ## Design Principles
 

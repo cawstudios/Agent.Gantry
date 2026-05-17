@@ -4,7 +4,7 @@ import {
   authorizeControlRequest,
   type ControlRouteContext,
 } from '../handler-context.js';
-import { readJson, sendError, sendJson } from '../http.js';
+import { sendError, sendJson } from '../http.js';
 
 export async function handleSettingsRoutes(
   req: IncomingMessage,
@@ -26,7 +26,13 @@ export async function handleSettingsRoutes(
     if (!authorizeControlRequest(req, res, ctx.keys, ['agents:admin'])) {
       return true;
     }
-    sendJson(res, 200, ctx.updateRuntimeSettings(await readJson(req)));
+    res.setHeader('connection', 'close');
+    sendError(
+      res,
+      409,
+      'SETTINGS_READ_ONLY',
+      'The typed settings API is read-only. Use CLI settings commands or the reviewed settings_desired_state/request_settings_update admin tools to change settings.',
+    );
     return true;
   }
 

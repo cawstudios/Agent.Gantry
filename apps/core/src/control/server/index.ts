@@ -10,7 +10,6 @@ import {
   getDefaultModelConfig,
   getPublicRuntimeSettings,
   syncRuntimeSettingsFromProjection,
-  updatePublicRuntimeSettings,
 } from '../../config/index.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import {
@@ -195,8 +194,6 @@ export function startControlServer(input: {
     state,
     triggerRateLimiter: createRateLimiter(),
     getRuntimeSettings: () => getPublicRuntimeSettings(),
-    updateRuntimeSettings: (patch) =>
-      updatePublicRuntimeSettings(patch as never),
     getDefaultModelConfig,
     getBrowserStatus: input.getBrowserStatus,
     syncSettingsFromProjection: (appId: AppId) =>
