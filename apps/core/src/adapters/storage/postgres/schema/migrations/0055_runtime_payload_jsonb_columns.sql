@@ -57,9 +57,6 @@ ALTER TABLE memory_items
   ALTER COLUMN source_ref_json SET DEFAULT '{}'::jsonb;
 --> statement-breakpoint
 
-CREATE INDEX IF NOT EXISTS idx_control_http_sessions_external_ref
-  ON control_http_sessions USING gin (external_ref_json);
---> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_control_http_sessions_chat_jid
   ON control_http_sessions ((external_ref_json->>'chatJid'));
 --> statement-breakpoint
@@ -82,7 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_target_thread_normalized_updated
   );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_jobs_target_notification_routes
-  ON jobs USING gin ((coalesce(target_json -> 'notificationRoutes', '[]'::jsonb)));
+  ON jobs USING gin ((coalesce(target_json -> 'notificationRoutes', '[]'::jsonb)) jsonb_path_ops);
 --> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_memory_items_search

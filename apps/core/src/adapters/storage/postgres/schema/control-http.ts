@@ -55,10 +55,6 @@ export const controlHttpSessionsPostgres = pgTable(
     appConversationUnique: unique(
       'control_http_sessions_app_id_external_conversation_id_key',
     ).on(table.appId, table.externalConversationId),
-    externalRefIdx: index('idx_control_http_sessions_external_ref').using(
-      'gin',
-      table.externalRefJson,
-    ),
     chatJidIdx: index('idx_control_http_sessions_chat_jid').on(
       sql`(${table.externalRefJson}->>'chatJid')`,
     ),

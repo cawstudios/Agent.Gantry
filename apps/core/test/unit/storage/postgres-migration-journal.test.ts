@@ -290,6 +290,59 @@ describe('Postgres migration journal', () => {
     expect(migration).toContain('USING gin');
   });
 
+  it('keeps JSONB performance indexes narrow and operator-specific', () => {
+    const journalPath = path.resolve(
+      'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
+    );
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as {
+      entries: Array<{ idx: number; tag: string }>;
+    };
+    const jsonbIndexPerformance = journal.entries.find(
+      (entry) => entry.tag === '0056_jsonb_index_performance',
+    );
+    expect(jsonbIndexPerformance).toMatchObject({ idx: 56 });
+
+    const migration55 = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0055_runtime_payload_jsonb_columns.sql',
+      ),
+      'utf8',
+    );
+    const migration56 = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0056_jsonb_index_performance.sql',
+      ),
+      'utf8',
+    );
+    const controlSchema = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/control-http.ts',
+      ),
+      'utf8',
+    );
+    const jobsSchema = fs.readFileSync(
+      path.resolve('apps/core/src/adapters/storage/postgres/schema/jobs.ts'),
+      'utf8',
+    );
+
+    expect(migration55).not.toContain(
+      'ON control_http_sessions USING gin (external_ref_json)',
+    );
+    expect(migration55).toContain(
+      "ON jobs USING gin ((coalesce(target_json -> 'notificationRoutes', '[]'::jsonb)) jsonb_path_ops)",
+    );
+    expect(migration56).toContain(
+      'DROP INDEX IF EXISTS idx_control_http_sessions_external_ref',
+    );
+    expect(migration56).toContain(
+      "ON jobs USING gin ((coalesce(target_json -> 'notificationRoutes', '[]'::jsonb)) jsonb_path_ops)",
+    );
+    expect(controlSchema).not.toContain(
+      'idx_control_http_sessions_external_ref',
+    );
+    expect(jobsSchema).toContain('jsonb_path_ops');
+  });
+
   it('registers provider session resume lookup index migration and schema', () => {
     const journalPath = path.resolve(
       'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',

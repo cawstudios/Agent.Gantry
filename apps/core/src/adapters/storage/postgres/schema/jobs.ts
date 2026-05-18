@@ -96,7 +96,7 @@ export const canonicalJobsPostgres = pgTable(
       'idx_jobs_target_notification_routes',
     ).using(
       'gin',
-      sql`coalesce(${table.targetJson} -> 'notificationRoutes', '[]'::jsonb)`,
+      sql`(coalesce(${table.targetJson} -> 'notificationRoutes', '[]'::jsonb)) jsonb_path_ops`,
     ),
   }),
 );
