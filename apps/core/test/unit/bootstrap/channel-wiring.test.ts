@@ -1025,6 +1025,38 @@ describe('createChannelWiring', () => {
     expect(outbound.sendMessage).not.toHaveBeenCalled();
   });
 
+  it('preserves leading and trailing whitespace for streaming chunks', async () => {
+    const app = makeApp();
+    const outbound = makeChannel({
+      ownsJid: vi.fn((jid: string) => jid === 'sl:D123'),
+      sendStreamingChunk: vi.fn(async () => true),
+    });
+
+    const wiring = createChannelWiring(app, {
+      providerIds: [
+        makeProvider(
+          'slack',
+          vi.fn(() => outbound),
+          {
+            isGroupJid: () => false,
+          },
+        ),
+      ],
+    });
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: false, slack: true }),
+    );
+
+    const ok = await wiring.sendStreamingChunk('sl:D123', ' leading ');
+
+    expect(ok).toBe(true);
+    expect(outbound.sendStreamingChunk).toHaveBeenCalledWith(
+      'sl:D123',
+      ' leading ',
+      undefined,
+    );
+  });
+
   it('advertises supportsStreaming=true when provider streaming sink exists', async () => {
     const app = makeApp();
     const outbound = makeChannel({
