@@ -26,6 +26,7 @@ import { recordRuntimeModelUsage } from './model-status-output.js';
 import { buildBoundedMemoryRecallQuery } from '../memory/app-memory-recall-query.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { isRuntimeEventType } from '../domain/events/runtime-event-types.js';
+import { DEFAULT_EXECUTION_PROVIDER_ID } from './execution-provider-id.js';
 const DEFAULT_ASSISTANT_NAME = 'Gantry';
 const DEFAULT_MODEL_ALIAS = 'opus';
 const MEMORY_REVIEW_APPROVER_CACHE_TTL_MS = 60_000;
@@ -185,6 +186,7 @@ export function createGroupAgentRunner(input: {
     const streamedResult = createRuntimeResultSummaryAccumulator();
     const turnContext = await ops().getAgentTurnContext?.({
       agentFolder: group.folder,
+      executionProviderId: DEFAULT_EXECUTION_PROVIDER_ID,
       conversationJid: chatJid,
       threadId: sessionThreadId,
       conversationKind: group.conversationKind,
@@ -204,8 +206,25 @@ export function createGroupAgentRunner(input: {
       group.folder,
       options?.memoryContext?.userId,
     );
+    let runId: string | undefined;
     let latestProviderSessionId =
       turnContext?.externalSessionId?.trim() || undefined;
+    const updateRunProviderMetadata = async (input: {
+      providerRunId?: string | null;
+      providerSessionId?: string | null;
+    }): Promise<void> => {
+      if (!runId) return;
+      const repository = ops();
+      if (!repository.updateAgentRunProviderMetadata) return;
+      await repository
+        .updateAgentRunProviderMetadata({ runId, ...input })
+        .catch((err) => {
+          runtimeLogger.warn(
+            { err, group: group.name, runId },
+            'Failed to update runtime run provider metadata',
+          );
+        });
+    };
     const persistProviderSessionFromOutput = async (output: AgentOutput) => {
       if (output.status === 'error') return;
       const nextSessionId = output.newSessionId?.trim();
@@ -222,6 +241,7 @@ export function createGroupAgentRunner(input: {
         nextSessionId,
         sessionThreadId,
         {
+          executionProviderId: DEFAULT_EXECUTION_PROVIDER_ID,
           conversationJid: chatJid,
           conversationKind: group.conversationKind,
           memoryUserId: options?.memoryContext?.userId,
@@ -237,6 +257,7 @@ export function createGroupAgentRunner(input: {
         return;
       }
       latestProviderSessionId = nextSessionId;
+      await updateRunProviderMetadata({ providerSessionId: nextSessionId });
     };
     const wrappedOnOutput = async (output: AgentOutput) => {
       await persistProviderSessionFromOutput(output);
@@ -331,9 +352,11 @@ export function createGroupAgentRunner(input: {
     ]
       .filter((block): block is string => Boolean(block?.trim()))
       .join('\n\n');
-    const runId = turnContext?.agentSessionId
+    runId = turnContext?.agentSessionId
       ? await ops().createSessionAgentRun?.({
           agentSessionId: turnContext.agentSessionId,
+          executionProviderId: DEFAULT_EXECUTION_PROVIDER_ID,
+          providerSessionId: turnContext.providerSessionId,
           cause:
             options?.memoryContext?.source === 'command'
               ? 'control'
@@ -378,7 +401,8 @@ export function createGroupAgentRunner(input: {
               : {}),
             [WORKSPACE_FOLDER_INPUT_KEY]: group.folder,
           } as Parameters<typeof runAgentImpl>[1],
-          (proc, runHandle) =>
+          (proc, runHandle) => {
+            void updateRunProviderMetadata({ providerRunId: runHandle });
             deps.queue.registerProcess(
               queueJid,
               proc,
@@ -386,7 +410,8 @@ export function createGroupAgentRunner(input: {
               group.folder,
               queueJid === chatJid ? undefined : chatJid,
               options?.memoryContext?.threadId,
-            ),
+            );
+          },
           wrappedOnOutput,
           runOptions,
         );

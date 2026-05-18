@@ -35,13 +35,6 @@
     "maxOccurrences": 11
   },
   {
-    "file": "apps/core/src/adapters/storage/postgres/repositories/canonical-session-repository.postgres.ts",
-    "rule": "provider_specific_path",
-    "reason": "Baseline provider/channel terminology debt from provider-neutral refactor; capped so new provider-specific code outside approved adapters fails.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 1
-  },
-  {
     "file": "apps/core/src/adapters/storage/postgres/schema/agents.ts",
     "rule": "provider_specific_path",
     "reason": "Baseline provider/channel terminology debt from provider-neutral refactor; capped so new provider-specific code outside approved adapters fails.",

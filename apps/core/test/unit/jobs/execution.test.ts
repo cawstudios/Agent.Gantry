@@ -117,6 +117,7 @@ function makeOpsRepository(job: Job) {
       status: 'running',
     })),
     claimDueJobRunStart: vi.fn(async () => true),
+    updateAgentRunProviderMetadata: vi.fn(async () => undefined),
     createJobRun: vi.fn(async () => true),
     updateJob: vi.fn(async () => undefined),
     completeJobRun: vi.fn(async () => undefined),
@@ -670,6 +671,61 @@ describe('jobs/execution', () => {
         }),
       }),
     );
+  });
+
+  it('records scheduler provider run handles on outer and session runs', async () => {
+    const job = makeJob();
+    const opsRepository = {
+      ...makeOpsRepository(job),
+      getAgentTurnContext: vi.fn(async () => ({
+        appId: 'default',
+        agentId: 'agent:scheduler_agent',
+        agentSessionId: 'agent-session:scheduler',
+        providerSessionId: 'provider-session:resume',
+        externalSessionId: 'provider-session:resume',
+      })),
+      createSessionAgentRun: vi.fn(async () => 'agent-run:job-1'),
+      completeSessionAgentRun: vi.fn(async () => undefined),
+    };
+    const runAgent = vi.fn(async (_group, _input, onProcess) => {
+      onProcess({} as never, 'provider-run:scheduler-1');
+      return {
+        status: 'success',
+        result: 'runtime flow completed',
+      };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: vi.fn(),
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+    );
+
+    expect(opsRepository.createSessionAgentRun).toHaveBeenCalledWith({
+      agentSessionId: 'agent-session:scheduler',
+      executionProviderId: 'anthropic-claude-agent-sdk',
+      providerSessionId: 'provider-session:resume',
+      cause: 'job',
+    });
+    expect(opsRepository.updateAgentRunProviderMetadata).toHaveBeenCalledWith({
+      runId: expect.any(String),
+      providerSessionId: 'provider-session:resume',
+    });
+    expect(opsRepository.updateAgentRunProviderMetadata).toHaveBeenCalledWith({
+      runId: expect.any(String),
+      providerRunId: 'provider-run:scheduler-1',
+    });
+    expect(opsRepository.updateAgentRunProviderMetadata).toHaveBeenCalledWith({
+      runId: 'agent-run:job-1',
+      providerRunId: 'provider-run:scheduler-1',
+    });
   });
 
   it('hydrates scheduled job memory from the bounded prompt query before running the agent', async () => {

@@ -19,6 +19,7 @@ import {
   PROVIDER_SESSION_HANDLE_START_LIST,
   redactProviderSessionHandlesInText,
 } from '../shared/provider-session-redaction.js';
+import { DEFAULT_EXECUTION_PROVIDER_ID } from './execution-provider-id.js';
 
 export const RUNTIME_RESULT_SUMMARY_MAX_CHARS = 4_000;
 
@@ -285,6 +286,7 @@ export async function archiveCurrentRuntimeSession(input: {
 }): Promise<void> {
   const turnContext = await input.ops.getAgentTurnContext?.({
     agentFolder: input.group.folder,
+    executionProviderId: DEFAULT_EXECUTION_PROVIDER_ID,
     conversationJid: input.chatJid,
     threadId: input.threadId,
     conversationKind: input.group.conversationKind,

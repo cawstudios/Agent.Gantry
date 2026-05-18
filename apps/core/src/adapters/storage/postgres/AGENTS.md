@@ -33,6 +33,10 @@
   but nested provider/session `agent-run:*` rows must not copy that `jobId`.
   Keep job-scoped run lists and health metadata tied to the scheduler lifecycle
   run row only.
+- Run-history schema fields for execution providers are incomplete unless the
+  runtime path that learns the provider run/session handle writes them through
+  the canonical ops repository. Do not add `agent_runs` columns with only direct
+  repository round-trip tests; cover live or scheduler call paths too.
 - Conversation route projection must preserve the canonical conversation kind:
   `direct`/`dm` rows return runtime `conversationKind: "dm"` and group/channel
   rows return `conversationKind: "channel"`. Do not infer DM-vs-group memory

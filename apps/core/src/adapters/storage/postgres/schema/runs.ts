@@ -48,6 +48,15 @@ export const agentRunsPostgres = pgTable(
     llmProfileId: text('llm_profile_id')
       .notNull()
       .references(() => llmProfilesPostgres.id),
+    executionProviderId: text('execution_provider_id').notNull(),
+    providerRunId: text('provider_run_id'),
+    providerSessionId: text('provider_session_id'),
+    workerId: text('worker_id'),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: timestamp('lease_expires_at', {
+      withTimezone: true,
+      mode: 'string',
+    }),
     permissionDecisionIdsJson: text('permission_decision_ids_json')
       .notNull()
       .default('[]'),
@@ -81,6 +90,17 @@ export const agentRunsPostgres = pgTable(
     startedCreatedIdx: index('idx_agent_runs_started_created').on(
       table.startedAt.desc().nullsLast(),
       table.createdAt.desc(),
+    ),
+    executionProviderIdx: index('idx_agent_runs_execution_provider').on(
+      table.executionProviderId,
+    ),
+    providerSessionIdx: index('idx_agent_runs_provider_session').on(
+      table.providerSessionId,
+    ),
+    leaseClaimIdx: index('idx_agent_runs_lease_claim').on(
+      table.status,
+      table.leaseExpiresAt,
+      table.leaseOwner,
     ),
   }),
 );

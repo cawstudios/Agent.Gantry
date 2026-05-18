@@ -24,6 +24,7 @@ import {
   resolveTurnSelectedMcpServerIds,
   resolveTurnSelectedSkillIds,
 } from '../runtime/group-run-context.js';
+import { DEFAULT_EXECUTION_PROVIDER_ID } from '../runtime/execution-provider-id.js';
 import {
   collectCompactBoundaryMemory,
   collectJobCompletionMemory,
@@ -51,13 +52,13 @@ import {
   type NormalizedModelUsage,
 } from './model-resolution.js';
 import {
-  countBrowserActivityForRun,
   createJobRunDiagnostics,
   formatTerminalToolDenial,
   forwardRunnerRuntimeEvents,
   requiredToolsIncludeBrowser,
   terminalDiagnosticsPayload,
 } from './execution-diagnostics.js';
+import { countBrowserActivityForRunBestEffort } from './execution-browser-activity.js';
 import { pauseJobForSetupIfNeeded } from './execution-readiness.js';
 import {
   bindSchedulerRunEventState,
@@ -73,8 +74,6 @@ import type {
   SchedulerDependencies,
   SchedulerDispatchPayload,
 } from './types.js';
-
-const POST_RUN_BROWSER_ACTIVITY_TIMEOUT_MS = 5_000;
 
 export async function runJob(
   job: Job,
@@ -137,6 +136,9 @@ export async function runJob(
   const claimed = await deps.opsRepository.claimDueJobRunStart({
     jobId: currentJob.id,
     runId,
+    executionProviderId: DEFAULT_EXECUTION_PROVIDER_ID,
+    workerId: execution.group.folder,
+    leaseOwner: execution.executionJid,
     scheduledFor,
     startedAt,
     retryCount: currentJob.consecutive_failures,
@@ -241,6 +243,30 @@ export async function runJob(
       let lastStreamingEventMs = 0;
       let turnContext: JobTurnContext | undefined;
       let agentRunId: string | undefined;
+      const updateRunProviderMetadata = async (input: {
+        providerRunId?: string | null;
+        providerSessionId?: string | null;
+      }): Promise<void> => {
+        if (!deps.opsRepository.updateAgentRunProviderMetadata) return;
+        await deps.opsRepository
+          .updateAgentRunProviderMetadata({ runId, ...input })
+          .catch((err) => {
+            logger.warn(
+              { err, jobId: currentJob.id, runId },
+              'Failed to update scheduler run provider metadata',
+            );
+          });
+        if (agentRunId) {
+          await deps.opsRepository
+            .updateAgentRunProviderMetadata({ runId: agentRunId, ...input })
+            .catch((err) => {
+              logger.warn(
+                { err, jobId: currentJob.id, runId: agentRunId },
+                'Failed to update scheduler session run provider metadata',
+              );
+            });
+        }
+      };
       const flushStreamingEvent = (force = false): void => {
         if (bufferedStreamingChars <= 0) return;
         const timestampMs = nowMs();
@@ -256,6 +282,7 @@ export async function runJob(
         turnContext = await deps.opsRepository.getAgentTurnContext?.(
           buildExecutionTurnContextInput({
             agentFolder: execution.group.folder,
+            executionProviderId: DEFAULT_EXECUTION_PROVIDER_ID,
             executionJid: execution.executionJid,
             threadId: execution.threadId,
             conversationKind: execution.group.conversationKind,
@@ -264,6 +291,11 @@ export async function runJob(
             query: currentJob.prompt,
           }),
         );
+        if (turnContext?.providerSessionId) {
+          await updateRunProviderMetadata({
+            providerSessionId: turnContext.providerSessionId,
+          });
+        }
         const executionAppId =
           turnContext?.appId ??
           eventState.eventAppSession?.appId ??
@@ -333,6 +365,8 @@ export async function runJob(
           agentRunId = turnContext?.agentSessionId
             ? await deps.opsRepository.createSessionAgentRun?.({
                 agentSessionId: turnContext.agentSessionId,
+                executionProviderId: DEFAULT_EXECUTION_PROVIDER_ID,
+                providerSessionId: turnContext.providerSessionId,
                 cause: 'job',
               })
             : undefined;
@@ -360,14 +394,16 @@ export async function runJob(
               selectedSkillIds,
               selectedMcpServerIds,
             },
-            (proc, runHandle) =>
+            (proc, runHandle) => {
+              void updateRunProviderMetadata({ providerRunId: runHandle });
               deps.onProcess(
                 queueJid,
                 proc,
                 runHandle,
                 execution.group.folder,
                 execution.stopAliasJids,
-              ),
+              );
+            },
             async (streamedOutput: AgentOutput) => {
               await forwardRunnerRuntimeEvents({
                 events: streamedOutput.runtimeEvents,
@@ -423,6 +459,7 @@ export async function runJob(
                 jobId: currentJob.id,
                 runId,
                 diagnostics,
+                log: logger,
               });
             if (browserActivityCount === null) {
               browserActivityVerificationSkipped = true;
@@ -512,6 +549,7 @@ export async function runJob(
       jobId: currentJob.id,
       runId,
       diagnostics,
+      log: logger,
     });
     if (browserActivityCount !== null) {
       diagnostics.browserActivityCount = browserActivityCount;
@@ -638,51 +676,5 @@ export async function runJob(
   ) {
     await deps.opsRepository.deleteJob(currentJob.id);
     deps.onSchedulerChanged?.(currentJob.id);
-  }
-}
-
-async function countBrowserActivityForRunBestEffort(input: {
-  deps: SchedulerDependencies;
-  jobId: string;
-  runId: string;
-  diagnostics: ReturnType<typeof createJobRunDiagnostics>;
-}): Promise<number | null> {
-  try {
-    return await withTimeout(
-      countBrowserActivityForRun(input),
-      POST_RUN_BROWSER_ACTIVITY_TIMEOUT_MS,
-      'Browser activity verification',
-    );
-  } catch (err) {
-    logger.warn(
-      {
-        err,
-        jobId: input.jobId,
-        runId: input.runId,
-      },
-      'Failed to verify scheduled job browser activity after runner completion',
-    );
-    return null;
-  }
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string,
-): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => {
-          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-        }, timeoutMs);
-        timeout.unref?.();
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
   }
 }

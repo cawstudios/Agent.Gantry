@@ -13,6 +13,7 @@ import {
 } from '../shared/message-cursor.js';
 import { archiveCurrentRuntimeSession } from './session-resume-runtime.js';
 import { saveGroupProcedureMemory } from './group-memory-commands.js';
+import { DEFAULT_EXECUTION_PROVIDER_ID } from './execution-provider-id.js';
 
 type ArchiveSessionInput = Parameters<typeof archiveCurrentRuntimeSession>[0];
 type SenderPolicyGroup = {
@@ -71,6 +72,7 @@ export function createPrepareSessionArchiveHandler(input: {
     const ops = input.ops();
     const turnContext = await ops.getAgentTurnContext?.({
       agentFolder: input.group.folder,
+      executionProviderId: DEFAULT_EXECUTION_PROVIDER_ID,
       conversationJid: input.chatJid,
       threadId: input.threadId,
       conversationKind: input.group.conversationKind,

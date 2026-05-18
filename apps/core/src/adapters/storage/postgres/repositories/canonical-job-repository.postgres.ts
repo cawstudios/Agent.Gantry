@@ -7,18 +7,12 @@ import type { JobListFilters, JobRunListFilters, ReleasedStaleJobLease } from '.
 import { RUNTIME_EVENT_TYPES, type RuntimeEventType } from '../../../../domain/events/runtime-event-types.js';
 import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
-import {
-  CANONICAL_APP_ID,
-  type CanonicalDb,
-  PostgresCanonicalGraphRepository,
-  configVersionIdForAgent,
-  jsonb,
-  jsonText,
-  parseJson,
-} from './canonical-graph-repository.postgres.js';
+// prettier-ignore
+import { CANONICAL_APP_ID, type CanonicalDb, PostgresCanonicalGraphRepository, configVersionIdForAgent, jsonb, jsonText, parseJson } from './canonical-graph-repository.postgres.js';
 // prettier-ignore
 import { releaseInterruptedCanonicalJobLeases, releaseStaleCanonicalJobLeases } from './canonical-job-lease-release.postgres.js';
 import { insertCanonicalJobRun } from './canonical-job-run-insert.postgres.js';
+import { updateCanonicalJobRunProviderMetadata } from './canonical-job-run-provider-metadata.postgres.js';
 
 export interface CanonicalJobRecord {
   id: string;
@@ -66,6 +60,12 @@ export interface CanonicalRunRecord {
   id: string;
   shortId: number | null;
   jobId: string | null;
+  executionProviderId: string;
+  providerRunId: string | null;
+  providerSessionId: string | null;
+  workerId: string | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
   status: string;
   createdAt: string;
   startedAt: string | null;
@@ -386,6 +386,11 @@ export class PostgresCanonicalJobRepository {
       .where(eq(pgSchema.agentRunsPostgres.id, runId));
   }
 
+  // prettier-ignore
+  async updateRunProviderMetadata(runId: string, input: { providerRunId?: string | null; providerSessionId?: string | null }): Promise<void> {
+    await updateCanonicalJobRunProviderMetadata(this.db, runId, input);
+  }
+
   async markRunNotified(runId: string, notifiedAt: string): Promise<void> {
     await this.db
       .update(pgSchema.agentRunsPostgres)
@@ -446,19 +451,8 @@ export class PostgresCanonicalJobRepository {
         ? inArray(pgSchema.agentRunsPostgres.jobId, filters.jobIds)
         : undefined,
     ].filter(Boolean);
-    return this.db
-      .select({
-        id: pgSchema.agentRunsPostgres.id,
-        shortId: pgSchema.agentRunsPostgres.shortId,
-        jobId: pgSchema.agentRunsPostgres.jobId,
-        status: pgSchema.agentRunsPostgres.status,
-        createdAt: pgSchema.agentRunsPostgres.createdAt,
-        startedAt: pgSchema.agentRunsPostgres.startedAt,
-        endedAt: pgSchema.agentRunsPostgres.endedAt,
-        resultSummary: pgSchema.agentRunsPostgres.resultSummary,
-        errorSummary: pgSchema.agentRunsPostgres.errorSummary,
-        notifiedAt: pgSchema.agentRunsPostgres.notifiedAt,
-      })
+    const rows = await this.db
+      .select()
       .from(pgSchema.controlHttpSessionsPostgres)
       .innerJoin(
         pgSchema.canonicalJobsPostgres,
@@ -474,6 +468,7 @@ export class PostgresCanonicalJobRepository {
         desc(pgSchema.agentRunsPostgres.createdAt),
       )
       .limit(limit);
+    return rows.map((row) => row.agent_runs);
   }
 
   async listDeadLetterRuns(limit = 50): Promise<CanonicalRunRecord[]> {

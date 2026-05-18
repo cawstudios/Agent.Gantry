@@ -436,6 +436,7 @@ describe('startRuntimeServices', () => {
     );
     expect(getAgentTurnContext).toHaveBeenCalledWith({
       agentFolder: 'main',
+      executionProviderId: 'anthropic-claude-agent-sdk',
       conversationJid: 'tg:primary',
       threadId: 'topic-42',
       conversationKind: undefined,
