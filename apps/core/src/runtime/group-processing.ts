@@ -642,7 +642,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         pendingOutputVisible.append(raw);
         if (supportsStreamingChunks) {
           const safeDelta = streamSanitizer.append(raw);
-          const text = safeDelta ? formatOutboundForChannel(safeDelta) : '';
+          const text = safeDelta;
           if (text) {
             const settlement = await settleDeliveryAttempt(
               () =>

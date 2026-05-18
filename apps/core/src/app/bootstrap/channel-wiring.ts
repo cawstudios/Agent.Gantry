@@ -601,11 +601,8 @@ export function createChannelWiring(
       return false;
     }
     const provider = providerForJid(jid);
-    const isGroup = provider?.isGroupJid(jid) ?? false;
     if (provider?.canStreamToJid?.(jid) === false) return false;
-    const text = isGroup
-      ? stripInternalTagsPreserveWhitespace(rawText)
-      : formatOutboundForChannel(rawText, provider?.id ?? channel.name);
+    const text = stripInternalTagsPreserveWhitespace(rawText);
     if (!text && !options?.done) return false;
 
     const sink = asStreamingSink(channel);

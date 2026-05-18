@@ -1529,6 +1529,38 @@ describe('createGroupProcessor', () => {
       );
     });
 
+    it('preserves whitespace-only streaming deltas from provider output', async () => {
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          for (const result of ['I', ' ', "can't", ' ', 'check']) {
+            await onOutput?.({ status: 'success', result });
+          }
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      const chunks = (
+        streamingChannel.sendStreamingChunk as ReturnType<typeof vi.fn>
+      ).mock.calls
+        .filter((call) => !call[2]?.done)
+        .map((call) => call[1]);
+      expect(chunks.join('')).toBe("I can't check");
+    });
+
     it('falls back to canonical message delivery when a streaming chunk is rejected as stale', async () => {
       const streamingChannel = makeChannel({
         sendStreamingChunk: vi.fn().mockResolvedValue(false),
@@ -1616,7 +1648,7 @@ describe('createGroupProcessor', () => {
           });
           expect(streamingChannel.sendStreamingChunk).toHaveBeenCalledWith(
             'group1@g.us',
-            'visible',
+            'visible ',
             expect.objectContaining({ done: false }),
           );
           await onOutput?.({
@@ -1636,7 +1668,7 @@ describe('createGroupProcessor', () => {
       ).mock.calls
         .map((call) => call[1])
         .join('');
-      expect(deliveredChunk).toBe('visibledone');
+      expect(deliveredChunk).toBe('visible  done');
       expect(deliveredChunk).not.toContain('hidden');
       expect(deliveredChunk).not.toContain('provider-session:split-handle');
     });
