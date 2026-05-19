@@ -20,7 +20,7 @@ import {
 const maybeDescribe = hasPostgresIntegrationDatabase ? describe : describe.skip;
 const now = '2026-04-28T00:00:00.000Z';
 const TEST_EXECUTION_PROVIDER_ID =
-  'anthropic-claude-agent-sdk' as ExecutionProviderId;
+  'anthropic:claude-agent-sdk' as ExecutionProviderId;
 const TEST_CODEX_PROVIDER_ID = 'codex-sdk' as ExecutionProviderId;
 
 function makeContinuityJob(

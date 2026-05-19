@@ -22,6 +22,7 @@ import {
 
 const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
 const ANTHROPIC_MODEL_ENV = 'ANTHROPIC_MODEL';
+const GANTRY_MCP_SERVER_PATH_ENV = 'GANTRY_MCP_SERVER_PATH';
 
 export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapter {
   readonly id = 'anthropic:claude-agent-sdk' as const;
@@ -76,6 +77,11 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
 
     const env: NodeJS.ProcessEnv = {
       [CLAUDE_CONFIG_DIR_ENV]: materialization.claudeConfigDir,
+      [GANTRY_MCP_SERVER_PATH_ENV]: path.join(
+        input.hostRuntime.runnerDistDir,
+        'mcp',
+        'stdio.js',
+      ),
     };
     if (input.effectiveModel) {
       env[ANTHROPIC_MODEL_ENV] = input.effectiveModel;

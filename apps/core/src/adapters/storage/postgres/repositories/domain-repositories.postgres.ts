@@ -1433,15 +1433,17 @@ export class PostgresAgentRunRepository implements AgentRunRepository {
       providerSessionId: row.providerSessionId ?? undefined,
       workerId: row.workerId ?? undefined,
       leaseOwner: row.leaseOwner ?? undefined,
-      leaseExpiresAt: row.leaseExpiresAt ?? undefined,
+      leaseExpiresAt: row.leaseExpiresAt
+        ? toIsoTimestamp(row.leaseExpiresAt)
+        : undefined,
       permissionDecisionIds: parseJsonArray(row.permissionDecisionIdsJson),
       sandboxLeaseId: row.sandboxLeaseId ?? undefined,
       workspaceSnapshotId: row.workspaceSnapshotId ?? undefined,
       cause: row.cause as AgentRun['cause'],
       status: row.status as AgentRun['status'],
-      createdAt: row.createdAt,
-      startedAt: row.startedAt ?? undefined,
-      endedAt: row.endedAt ?? undefined,
+      createdAt: toIsoTimestamp(row.createdAt),
+      startedAt: row.startedAt ? toIsoTimestamp(row.startedAt) : undefined,
+      endedAt: row.endedAt ? toIsoTimestamp(row.endedAt) : undefined,
       resultSummary: row.resultSummary ?? undefined,
       errorSummary: row.errorSummary ?? undefined,
     } as unknown as AgentRun;

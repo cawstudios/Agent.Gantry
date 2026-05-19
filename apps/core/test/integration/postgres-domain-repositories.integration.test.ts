@@ -44,7 +44,7 @@ const maybeDescribe = process.env.GANTRY_TEST_DATABASE_URL
   ? describe
   : describe.skip;
 const TEST_EXECUTION_PROVIDER_ID =
-  'anthropic-claude-agent-sdk' as ExecutionProviderId;
+  'anthropic:claude-agent-sdk' as ExecutionProviderId;
 const TEST_CODEX_PROVIDER_ID = 'codex-sdk' as ExecutionProviderId;
 
 const appId = DEFAULT_APP_ID as AppId;
@@ -570,7 +570,7 @@ maybeDescribe('Postgres domain repositories', () => {
       externalSessionId: 'older',
       providerRef: {
         kind: 'provider_session',
-        value: 'anthropic-claude-agent-sdk:older',
+        value: 'anthropic:claude-agent-sdk:older',
       },
       metadata: { runtime: 'test' },
       status: 'active',
@@ -585,7 +585,7 @@ maybeDescribe('Postgres domain repositories', () => {
       externalSessionId: 'newer',
       providerRef: {
         kind: 'provider_session',
-        value: 'anthropic-claude-agent-sdk:newer',
+        value: 'anthropic:claude-agent-sdk:newer',
       },
       metadata: { runtime: 'test' },
       status: 'active',
@@ -604,7 +604,7 @@ maybeDescribe('Postgres domain repositories', () => {
       externalSessionId: 'newer',
       providerRef: {
         kind: 'provider_session',
-        value: 'anthropic-claude-agent-sdk:newer',
+        value: 'anthropic:claude-agent-sdk:newer',
       },
       metadata: { runtime: 'test' },
     });
@@ -745,7 +745,7 @@ maybeDescribe('Postgres domain repositories', () => {
       externalSessionId: 'ownership-guard-v1',
       providerRef: {
         kind: 'provider_session',
-        value: 'anthropic-claude-agent-sdk:ownership-guard-v1',
+        value: 'anthropic:claude-agent-sdk:ownership-guard-v1',
       },
       status: 'active',
       createdAt: '2026-04-27T00:04:00.000Z',
@@ -761,7 +761,7 @@ maybeDescribe('Postgres domain repositories', () => {
         externalSessionId: 'ownership-guard-v2',
         providerRef: {
           kind: 'provider_session',
-          value: 'anthropic-claude-agent-sdk:ownership-guard-v2',
+          value: 'anthropic:claude-agent-sdk:ownership-guard-v2',
         },
         status: 'active',
         createdAt: '2026-04-27T00:04:10.000Z',
@@ -809,7 +809,7 @@ maybeDescribe('Postgres domain repositories', () => {
       externalSessionId: 'ownership-identity-v1',
       providerRef: {
         kind: 'provider_session',
-        value: 'anthropic-claude-agent-sdk:ownership-identity-v1',
+        value: 'anthropic:claude-agent-sdk:ownership-identity-v1',
       },
       status: 'active',
       createdAt: '2026-04-27T00:04:00.000Z',
@@ -842,7 +842,7 @@ maybeDescribe('Postgres domain repositories', () => {
         externalSessionId: 'ownership-identity-v2',
         providerRef: {
           kind: 'provider_session',
-          value: 'anthropic-claude-agent-sdk:ownership-identity-v2',
+          value: 'anthropic:claude-agent-sdk:ownership-identity-v2',
         },
         status: 'active',
         createdAt: '2026-04-27T00:04:20.000Z',
@@ -896,7 +896,7 @@ maybeDescribe('Postgres domain repositories', () => {
       externalSessionId: 'shared-external-session',
       providerRef: {
         kind: 'provider_session',
-        value: 'anthropic-claude-agent-sdk:shared-external-session',
+        value: 'anthropic:claude-agent-sdk:shared-external-session',
       },
       status: 'active',
       createdAt: '2026-04-27T00:04:10.000Z',
@@ -910,7 +910,7 @@ maybeDescribe('Postgres domain repositories', () => {
       externalSessionId: 'shared-external-session',
       providerRef: {
         kind: 'provider_session',
-        value: 'anthropic-claude-agent-sdk:shared-external-session',
+        value: 'anthropic:claude-agent-sdk:shared-external-session',
       },
       status: 'active',
       createdAt: '2026-04-27T00:04:20.000Z',

@@ -7,7 +7,7 @@ ALTER TABLE agent_runs
   ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
 
 UPDATE agent_runs
-SET execution_provider_id = 'anthropic-claude-agent-sdk'
+SET execution_provider_id = 'anthropic:claude-agent-sdk'
 WHERE execution_provider_id IS NULL;
 
 ALTER TABLE agent_runs

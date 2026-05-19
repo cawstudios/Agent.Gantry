@@ -780,7 +780,8 @@ describe('agent-runner IPC lifecycle', () => {
       );
 
       expect(result.exitCode, result.stderr).toBe(0);
-      const sdkEnv = readRecord(fixture.recordPath).calls[0]?.sdkEnv || {};
+      const call = readRecord(fixture.recordPath).calls[0];
+      const sdkEnv = call?.sdkEnv || {};
       expect(sdkEnv.ANTHROPIC_BASE_URL).toBe('https://broker.local/anthropic');
       expect(sdkEnv.ANTHROPIC_API_KEY).toBeUndefined();
       expect(sdkEnv.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
@@ -819,6 +820,18 @@ describe('agent-runner IPC lifecycle', () => {
       expect(sdkEnv.GANTRY_MCP_CONFIG_FILE).toBeUndefined();
       expect(sdkEnv.GANTRY_MCP_SERVERS_JSON).toBeUndefined();
       expect(sdkEnv.GANTRY_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
+      const gantryMcpServer = call?.mcpServers?.gantry as
+        | { args?: string[] }
+        | undefined;
+      const gantryMcpServerPath = path.normalize(
+        gantryMcpServer?.args?.[0] ?? '',
+      );
+      expect(gantryMcpServerPath).toContain(
+        path.join('apps', 'core', 'src', 'runner', 'mcp', 'stdio.js'),
+      );
+      expect(gantryMcpServerPath).not.toContain(
+        path.join('adapters', 'llm', 'anthropic-claude-agent', 'mcp'),
+      );
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );

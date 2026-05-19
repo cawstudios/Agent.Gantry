@@ -419,6 +419,38 @@ describe('Postgres migration journal', () => {
     expect(schema).toContain('table.updatedAt.desc()');
   });
 
+  it('registers Anthropic execution provider id cutover for runs and provider sessions', () => {
+    const journalPath = path.resolve(
+      'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
+    );
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as {
+      entries: Array<{ idx: number; tag: string }>;
+    };
+    const providerCutover = journal.entries.find(
+      (entry) => entry.tag === '0058_anthropic_execution_provider_id_cutover',
+    );
+    expect(providerCutover).toMatchObject({ idx: 58 });
+
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0058_anthropic_execution_provider_id_cutover.sql',
+      ),
+      'utf8',
+    );
+    expect(migration).toContain('UPDATE agent_runs');
+    expect(migration).toContain(
+      "execution_provider_id = 'anthropic:claude-agent-sdk'",
+    );
+    expect(migration).toContain('UPDATE provider_sessions');
+    expect(migration).toContain("provider = 'anthropic:claude-agent-sdk'");
+    expect(migration).toContain('provider_ref_json = jsonb_build_object');
+    expect(migration).toContain(
+      "'value', 'anthropic:claude-agent-sdk:' || external_session_id",
+    );
+    expect(migration).toContain("'provider', 'anthropic:claude-agent-sdk'");
+    expect(migration).toContain("'anthropic-claude-agent-sdk'");
+  });
+
   it('registers message attachment message lookup index migration and schema', () => {
     const journalPath = path.resolve(
       'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',

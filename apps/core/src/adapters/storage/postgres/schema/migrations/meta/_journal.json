@@ -400,6 +400,13 @@
       "when": 1777191000000,
       "tag": "0057_agent_run_execution_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1777194600000,
+      "tag": "0058_anthropic_execution_provider_id_cutover",
+      "breakpoints": true
     }
   ]
 }

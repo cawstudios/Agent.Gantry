@@ -169,8 +169,21 @@ export function buildSdkEnv(
 }
 
 export function resolveMcpServerPath(importMetaUrl: string): string {
+  const configuredPath = process.env.GANTRY_MCP_SERVER_PATH?.trim();
+  if (configuredPath) {
+    return configuredPath;
+  }
   const dirname = path.dirname(fileURLToPath(importMetaUrl));
-  return path.join(dirname, '..', 'mcp', 'stdio.js');
+  return path.join(
+    dirname,
+    '..',
+    '..',
+    '..',
+    '..',
+    'runner',
+    'mcp',
+    'stdio.js',
+  );
 }
 
 export function resolveGroupIpcDir(groupFolder: string): string {

@@ -37,6 +37,11 @@
   runtime path that learns the provider run/session handle writes them through
   the canonical ops repository. Do not add `agent_runs` columns with only direct
   repository round-trip tests; cover live or scheduler call paths too.
+- Execution provider id cutovers must update every persisted continuity surface
+  in the same migration: `agent_runs.execution_provider_id`,
+  `provider_sessions.provider`, and `provider_sessions.provider_ref_json`.
+  Leaving provider session rows on the old id breaks live SDK resume even when
+  canonical `AgentSession` rows still exist.
 - Conversation route projection must preserve the canonical conversation kind:
   `direct`/`dm` rows return runtime `conversationKind: "dm"` and group/channel
   rows return `conversationKind: "channel"`. Do not infer DM-vs-group memory

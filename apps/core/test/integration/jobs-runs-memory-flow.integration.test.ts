@@ -488,7 +488,7 @@ maybeDescribe('jobs, runs, memory, and scheduler flow', () => {
     await runtime.ops.createJobRun({
       run_id: 'run:integration:owner-app-one',
       job_id: appOneJob.id,
-      execution_provider_id: 'anthropic-claude-agent-sdk',
+      execution_provider_id: 'anthropic:claude-agent-sdk',
       scheduled_for: '2026-04-28T00:00:01.000Z',
       started_at: '2026-04-28T00:00:01.000Z',
       ended_at: null,
@@ -501,7 +501,7 @@ maybeDescribe('jobs, runs, memory, and scheduler flow', () => {
     await runtime.ops.createJobRun({
       run_id: 'run:integration:owner-app-two',
       job_id: appTwoJob.id,
-      execution_provider_id: 'anthropic-claude-agent-sdk',
+      execution_provider_id: 'anthropic:claude-agent-sdk',
       scheduled_for: '2026-04-28T00:00:02.000Z',
       started_at: '2026-04-28T00:00:02.000Z',
       ended_at: null,
