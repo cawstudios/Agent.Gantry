@@ -365,7 +365,9 @@ Backend apps can use `@caw/gantry-sdk` to ensure a session, send a message, and 
 
 The runtime also serves Swagger docs for the Control API. Use `/docs` for the
 interactive view and `/openapi.json` for the machine-readable spec when the
-control server is exposed over `GANTRY_CONTROL_PORT`.
+control server is exposed over `GANTRY_CONTROL_PORT`. TCP binding defaults to
+loopback; set `GANTRY_CONTROL_HOST=0.0.0.0` only for an authenticated hosted
+deployment such as Render.
 
 External systems that should not hold a control API key use signed external ingress records under `/v1/ingresses`. Ingress supports session messages, existing job triggers, and constrained one-time job templates. Each ingress record has an explicit target policy, so its secret only authorizes configured sessions, conversations, jobs, or templates. `/v1/webhooks` remains outbound callback delivery for runtime events.
 

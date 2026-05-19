@@ -22,6 +22,7 @@ Control API settings are read from process env and from `~/gantry/.env`:
 ```env
 GANTRY_CONTROL_API_KEYS_JSON=[{"kid":"local-admin","token":"dev-key","appId":"default","scopes":["sessions:read","sessions:write","jobs:read","jobs:write","providers:read","providers:admin","conversations:read","conversations:admin","messages:read","agents:admin","skills:read","skills:admin","mcp:read","mcp:admin","webhooks:read","webhooks:write","ingresses:read","ingresses:write","memory:read","memory:admin"]}]
 GANTRY_CONTROL_PORT=8787
+GANTRY_CONTROL_HOST=127.0.0.1
 ```
 
 `GANTRY_CONTROL_PORT` is optional. Without it, the local SDK and CLI use the
@@ -29,6 +30,9 @@ Unix socket at `~/gantry/run/control.sock`. Do not put control API secrets in
 the launchd plist; keep the plist limited to `GANTRY_HOME`, `HOME`, and `PATH`.
 Every Control API token must be listed in `GANTRY_CONTROL_API_KEYS_JSON` with
 an explicit `kid`, `token`, `appId`, and `scopes` array.
+`GANTRY_CONTROL_HOST` defaults to `127.0.0.1`; set it to `0.0.0.0` only for a
+hosted deployment that protects the Control API with bearer tokens and platform
+network controls.
 
 When the control server is reachable over TCP, interactive API documentation is
 available at `GET /docs` and the machine-readable Swagger/OpenAPI document is

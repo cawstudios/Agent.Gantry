@@ -101,7 +101,7 @@ export const GANTRY_OPENAPI_DOCUMENT = {
     {
       url: 'http://127.0.0.1:8787',
       description:
-        'Loopback TCP control server when GANTRY_CONTROL_PORT is set. Local CLI/SDK clients may also use the Unix socket transport.',
+        'TCP control server when GANTRY_CONTROL_PORT is set. Defaults to loopback; set GANTRY_CONTROL_HOST=0.0.0.0 only behind an authenticated deployment boundary.',
     },
   ],
   tags: [

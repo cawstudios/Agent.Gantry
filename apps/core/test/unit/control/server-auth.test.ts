@@ -583,6 +583,7 @@ afterEach(() => {
   delete process.env.GANTRY_CONTROL_API_KEYS_JSON;
   delete process.env.GANTRY_CONTROL_API_KEY;
   delete process.env.GANTRY_CONTROL_APP_ID;
+  delete process.env.GANTRY_CONTROL_HOST;
   delete process.env.GANTRY_CONTROL_PORT;
   delete process.env.GANTRY_CONTROL_SOCKET_PATH;
   delete process.env.GANTRY_CONTROL_ALLOW_PRIVATE_WEBHOOKS;
@@ -692,6 +693,14 @@ describe('control server auth key parsing', () => {
         rawJson: process.env.GANTRY_CONTROL_API_KEYS_JSON,
       }),
     ).toEqual([]);
+  });
+
+  it('defaults TCP control binding to loopback unless explicitly configured', () => {
+    expect(_testControlServer.resolveControlHost()).toBe('127.0.0.1');
+
+    process.env.GANTRY_CONTROL_HOST = '0.0.0.0';
+
+    expect(_testControlServer.resolveControlHost()).toBe('0.0.0.0');
   });
 
   it('rejects legacy single-token auth on protected control routes', async () => {

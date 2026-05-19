@@ -23,6 +23,7 @@ export { syncRuntimeSettingsFromProjection } from './settings/restart-sync.js';
 export const POLL_INTERVAL = 2000;
 export type ControlEnvKey =
   | 'GANTRY_CONTROL_API_KEYS_JSON'
+  | 'GANTRY_CONTROL_HOST'
   | 'GANTRY_CONTROL_PORT'
   | 'GANTRY_CONTROL_SOCKET_PATH';
 export function getControlEnvValue(key: ControlEnvKey): string {
