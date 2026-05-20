@@ -168,9 +168,10 @@ Sources:
 ### Subagents
 
 Native Anthropic-SDK subagents inherit the parent run by default. Gantry
-uses the exact `Agent` capability to gate native subagent delegation. Once
-`Agent` is granted, the runtime does not add a second `subagent_type`
-allowlist. It still rejects cross-provider models and custom
+uses the durable `AgentDelegation` facade to gate subagent delegation; the
+Anthropic adapter projects that facade to the SDK-native `Agent` tool inside a
+single run. Once `AgentDelegation` is granted, the runtime does not add a
+second `subagent_type` allowlist. It still rejects cross-provider models and custom
 `tools`/`mcpServers`/`skills` input on the Agent tool call because those mutate
 the runner projection instead of using the selected parent-agent capabilities.
 See `validateAgentModelRequest` and `validateAgentToolInput` in

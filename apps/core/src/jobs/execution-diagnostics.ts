@@ -28,6 +28,7 @@ export interface JobRunDiagnostics {
   pendingPermissionToolNames: string[];
   totalToolCalls: number;
   browserActivityCount: number;
+  requiredToolMatches: string[];
   transientPermissionApprovals: Array<{ toolName: string; mode: string }>;
   latestStreamedOutputChars: number;
   totalStreamedOutputChars: number;
@@ -50,6 +51,7 @@ export function createJobRunDiagnostics(): JobRunDiagnostics {
     pendingPermissionToolNames: [],
     totalToolCalls: 0,
     browserActivityCount: 0,
+    requiredToolMatches: [],
     transientPermissionApprovals: [],
     latestStreamedOutputChars: 0,
     totalStreamedOutputChars: 0,
@@ -88,6 +90,10 @@ export function updateDiagnosticsFromRuntimeEvent(
   }
   if (isBrowserToolActivity(payload)) {
     diagnostics.browserActivityCount += 1;
+    rememberRequiredToolMatch(diagnostics, 'Browser');
+  }
+  for (const matchedTool of stringArrayValue(payload.matched_required_tools)) {
+    rememberRequiredToolMatch(diagnostics, matchedTool);
   }
   const mode = stringValue(payload.mode);
   const phase = stringValue(payload.phase);
@@ -162,6 +168,7 @@ export function terminalDiagnosticsPayload(
     transient_permission_approvals: diagnostics.transientPermissionApprovals,
     total_tool_calls: diagnostics.totalToolCalls,
     browser_activity_count: diagnostics.browserActivityCount,
+    required_tool_matches: diagnostics.requiredToolMatches,
     latest_streamed_output_chars: diagnostics.latestStreamedOutputChars,
     total_streamed_output_chars: diagnostics.totalStreamedOutputChars,
     last_activity_at: diagnostics.lastActivityAt ?? null,
@@ -180,6 +187,9 @@ export function formatTerminalDiagnostics(
     `pendingPermissions=${diagnostics.pendingPermissionRequests} (${pendingTools})`,
     `totalToolCalls=${diagnostics.totalToolCalls}`,
     `browserActivity=${diagnostics.browserActivityCount}`,
+    diagnostics.requiredToolMatches.length
+      ? `requiredToolMatches=${diagnostics.requiredToolMatches.join(', ')}`
+      : undefined,
     `latestStreamedOutputChars=${diagnostics.latestStreamedOutputChars}`,
     diagnostics.terminalToolDenial
       ? `terminalToolDenial=${diagnostics.terminalToolDenial.toolName}`
@@ -206,27 +216,53 @@ export function requiredToolsIncludeBrowser(
   return requiredTools.some((tool) => isCanonicalBrowserCapabilityRule(tool));
 }
 
-export async function countBrowserActivityForRun(input: {
+export async function requiredToolMatchesForRun(input: {
   deps: SchedulerDependencies;
   jobId: string;
   runId: string;
   diagnostics: JobRunDiagnostics;
-}): Promise<number> {
+}): Promise<string[]> {
+  const matched = new Set(input.diagnostics.requiredToolMatches);
+  let persistedBrowserActivityCount = 0;
   const events = await input.deps.opsRepository.listRecentJobEvents(200, {
     job_id: input.jobId,
     run_id: input.runId,
     event_type: RUNTIME_EVENT_TYPES.JOB_TOOL_ACTIVITY,
   });
-  const persisted = events.filter((event) => {
-    if (!event.payload) return false;
+  for (const event of events) {
+    if (!event.payload) continue;
     try {
       const parsed = JSON.parse(event.payload) as unknown;
-      return isRecord(parsed) && isBrowserToolActivity(parsed);
+      if (!isRecord(parsed)) continue;
+      if (isBrowserToolActivity(parsed)) {
+        persistedBrowserActivityCount += 1;
+        matched.add('Browser');
+      }
+      for (const matchedTool of stringArrayValue(
+        parsed.matched_required_tools,
+      )) {
+        matched.add(matchedTool);
+      }
     } catch {
-      return false;
+      continue;
     }
-  }).length;
-  return Math.max(persisted, input.diagnostics.browserActivityCount);
+  }
+  input.diagnostics.browserActivityCount = Math.max(
+    persistedBrowserActivityCount,
+    input.diagnostics.browserActivityCount,
+  );
+  return [...matched];
+}
+
+function rememberRequiredToolMatch(
+  diagnostics: JobRunDiagnostics,
+  toolRule: string,
+): void {
+  const normalized = toolRule.trim();
+  if (!normalized || diagnostics.requiredToolMatches.includes(normalized)) {
+    return;
+  }
+  diagnostics.requiredToolMatches.push(normalized);
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -291,6 +327,7 @@ const BROWSER_ACT_BACKEND_ACTIONS = new Set([
   'select_option',
   'fill_form',
   'file_upload',
+  'file_attach',
   'handle_dialog',
   'resize',
 ]);

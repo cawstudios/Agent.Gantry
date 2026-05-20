@@ -127,11 +127,11 @@ decision, durable audit, new config version, and next-run activation.
 Persistent agent tool grants are mirrored into `settings.yaml` as readable
 `agents.<id>.tools` entries: semantic capabilities such as
 `capability:google.sheets.write`, canonical `Browser`, exact Gantry admin
-tools, or scoped Bash rules such as `Bash(npm test *)`. Durable
-`request_permission` does not mint broad exact SDK/native tools or exact
-third-party MCP tools; those must be represented by selected semantic
-capabilities or reviewed MCP server bindings. Jobs inherit the target agent's
-tools, skills, and MCP servers at run time;
+tools, exact Gantry file/web facades such as `FileRead`, or scoped command
+rules such as `RunCommand(npm test *)`. Durable `request_permission` does not
+mint broad exact SDK/native tools or exact third-party MCP tools; those must be
+represented by selected semantic capabilities or reviewed MCP server bindings.
+Jobs inherit the target agent's tools, skills, and MCP servers at run time;
 `toolAccess` in job responses reports that inherited effective projection and
 any runtime-only projected tools.
 Agent capability updates are bidirectional: settings-side changes reconcile
@@ -141,7 +141,7 @@ Permission prompts use the simple choices `Allow once`, `Allow 5 min`,
 `Always allow`, or `Cancel`.
 Same-conversation review binds the request to the originating chat or thread;
 it does not bypass the configured conversation approvers. Raw request ids,
-command hashes, scoped Bash rules, executable paths, and sandbox details are
+command hashes, scoped `RunCommand(...)` rules, executable paths, and sandbox details are
 Details/advanced data, not the primary permission prompt.
 
 Capability catalog response:

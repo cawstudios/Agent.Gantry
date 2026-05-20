@@ -12,14 +12,14 @@ describe('job required tools', () => {
         'Browser',
         'mcp__gantry__send_message',
         'capability:google_sheets',
-        'Bash(npm test *)',
+        'RunCommand(npm test *)',
         'Browser',
       ]),
     ).toEqual([
       'Browser',
       'mcp__gantry__send_message',
       'capability:google_sheets',
-      'Bash(npm test *)',
+      'RunCommand(npm test *)',
     ]);
   });
 
@@ -39,7 +39,7 @@ describe('job required tools', () => {
     expect(() => normalizeRequiredTools(['mcp__gantry__browser_act'])).toThrow(
       /canonical Browser/,
     );
-    expect(() => normalizeRequiredTools(['Bash'])).toThrow(/scoped Bash/);
+    expect(() => normalizeRequiredTools(['Bash'])).toThrow(/Provider-native/);
     expect(() => normalizeRequiredTools(['mcp__gantry__*'])).toThrow(
       /wildcard/,
     );
@@ -48,7 +48,7 @@ describe('job required tools', () => {
   it.each([
     [[42], /non-empty strings/],
     [['   '], /non-empty strings/],
-    [['Read(src/index.ts)'], /Only Bash supports persistent scoped/],
+    [['Read(src/index.ts)'], /Only RunCommand supports persistent scoped/],
     [['mcp__thirdparty__tool'], /Use canonical Browser/],
     [['capability:GoogleSheets'], /Capability id must use lowercase/],
   ])('rejects unsupported required tool rule %j', (rules, message) => {
@@ -58,23 +58,23 @@ describe('job required tools', () => {
   it('reports missing required tools without granting permission', () => {
     expect(
       evaluateRequiredTools({
-        requiredTools: ['Browser', 'Bash(npm test *)'],
+        requiredTools: ['Browser', 'RunCommand(npm test *)'],
         effectiveAllowedTools: ['Browser'],
       }),
     ).toEqual({
-      requiredTools: ['Browser', 'Bash(npm test *)'],
-      missingTools: ['Bash(npm test *)'],
+      requiredTools: ['Browser', 'RunCommand(npm test *)'],
+      missingTools: ['RunCommand(npm test *)'],
     });
   });
 
-  it('treats broader scoped Bash grants as satisfying narrower assertions', () => {
+  it('treats broader scoped RunCommand grants as satisfying narrower assertions', () => {
     expect(
       evaluateRequiredTools({
-        requiredTools: ['Bash(npm test *)'],
-        effectiveAllowedTools: ['Bash(npm *)'],
+        requiredTools: ['RunCommand(npm test *)'],
+        effectiveAllowedTools: ['RunCommand(npm *)'],
       }),
     ).toEqual({
-      requiredTools: ['Bash(npm test *)'],
+      requiredTools: ['RunCommand(npm test *)'],
       missingTools: [],
     });
   });

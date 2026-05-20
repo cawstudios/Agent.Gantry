@@ -1,7 +1,26 @@
 -- Irreversible: provider-native SDK tools are adapter projections, not durable
 -- Gantry capabilities. This migration removes their catalog/binding rows and
 -- preserves historical permission decisions with per-app tombstone tool rows.
+-- WebSearch is repurposed as a Gantry-owned facade because the public durable
+-- name intentionally matches the old Anthropic SDK tool string.
 BEGIN;
+
+UPDATE tool_catalog
+SET kind = 'host',
+    provider = 'gantry',
+    provider_tool_name = NULL,
+    display_name = 'Web search',
+    description = 'Search the public web from a query through the selected execution harness.',
+    category = 'web',
+    input_schema_json = '{"format":"json-schema","schema":{"type":"object","additionalProperties":false,"required":["query"],"properties":{"query":{"type":"string","minLength":1},"maxResults":{"type":"integer","minimum":1,"maximum":50}}}}',
+    output_schema_json = '{}',
+    risk = 'low',
+    selectable = true,
+    status = 'active',
+    adapter_ref = 'builtin:WebSearch',
+    updated_at = now()
+WHERE id = 'tool:WebSearch'
+   OR name = 'WebSearch';
 
 CREATE TEMP TABLE provider_native_tool_cleanup_ids (
   id text PRIMARY KEY,
@@ -11,9 +30,12 @@ CREATE TEMP TABLE provider_native_tool_cleanup_ids (
 INSERT INTO provider_native_tool_cleanup_ids (id, app_id)
 SELECT id, app_id
 FROM tool_catalog
-WHERE kind = 'anthropic_sdk'
-   OR provider = 'anthropic'
-   OR id IN (
+WHERE name <> 'WebSearch'
+  AND id <> 'tool:WebSearch'
+  AND (
+    kind = 'anthropic_sdk'
+    OR provider = 'anthropic'
+    OR id IN (
      'tool:Agent',
      'tool:Bash',
      'tool:Edit',
@@ -27,7 +49,6 @@ WHERE kind = 'anthropic_sdk'
      'tool:ToolSearch',
      'tool:Skill',
      'tool:WebFetch',
-     'tool:WebSearch',
      'tool:AskUserQuestion',
      'tool:SendMessage',
      'tool:CronCreate',
@@ -48,7 +69,8 @@ WHERE kind = 'anthropic_sdk'
      'tool:TodoWrite',
      'tool:ListMcpResources',
      'tool:ReadMcpResource'
-   )
+    )
+  )
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO tool_catalog (

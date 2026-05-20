@@ -20,6 +20,7 @@ export const BROWSER_BACKEND_ACTIONS = [
   'wait_for',
   'evaluate',
   'file_upload',
+  'file_attach',
   'handle_dialog',
   'resize',
 ] as const;
@@ -50,6 +51,7 @@ const BROWSER_ACT_BACKEND_ACTIONS = new Set<BrowserBackendAction>([
   'select_option',
   'fill_form',
   'file_upload',
+  'file_attach',
   'handle_dialog',
   'resize',
 ]);

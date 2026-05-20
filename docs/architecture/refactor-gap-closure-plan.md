@@ -84,7 +84,7 @@ Each phase: **goal**, **scope**, **exit criteria**, **deletion target**, **repro
 - Interactive denial message names the missing rule and points to the reviewed
   capability or narrow `request_permission` path. Persistent fallback remains
   limited to semantic capabilities, canonical `Browser`, exact Gantry admin
-  tools, or scoped Bash rules.
+  tools, exact Gantry file/web facades, or scoped `RunCommand(...)` rules.
 - Configurable via env, but defaults are the spec'd values.
 
 **Exit criteria:**

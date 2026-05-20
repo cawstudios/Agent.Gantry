@@ -1,23 +1,23 @@
 import {
-  countBrowserActivityForRun,
   createJobRunDiagnostics,
+  requiredToolMatchesForRun,
 } from './execution-diagnostics.js';
 import type { SchedulerDependencies } from './types.js';
 
-const POST_RUN_BROWSER_ACTIVITY_TIMEOUT_MS = 5_000;
+const POST_RUN_TOOL_ACTIVITY_TIMEOUT_MS = 5_000;
 
-export async function countBrowserActivityForRunBestEffort(input: {
+export async function requiredToolMatchesForRunBestEffort(input: {
   deps: SchedulerDependencies;
   jobId: string;
   runId: string;
   diagnostics: ReturnType<typeof createJobRunDiagnostics>;
   log: { warn: (context: Record<string, unknown>, message: string) => void };
-}): Promise<number | null> {
+}): Promise<string[] | null> {
   try {
     return await withTimeout(
-      countBrowserActivityForRun(input),
-      POST_RUN_BROWSER_ACTIVITY_TIMEOUT_MS,
-      'Browser activity verification',
+      requiredToolMatchesForRun(input),
+      POST_RUN_TOOL_ACTIVITY_TIMEOUT_MS,
+      'Required tool activity verification',
     );
   } catch (err) {
     input.log.warn(
@@ -26,7 +26,7 @@ export async function countBrowserActivityForRunBestEffort(input: {
         jobId: input.jobId,
         runId: input.runId,
       },
-      'Failed to verify scheduled job browser activity after runner completion',
+      'Failed to verify scheduled job required tool activity after runner completion',
     );
     return null;
   }

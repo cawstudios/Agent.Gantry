@@ -1,5 +1,5 @@
 export const REQUEST_TOOL_ENABLE_SCOPE_GUIDANCE =
-  'Access decision ladder: use capability_search first; use request_capability when a reviewed semantic capability fits; use propose_local_cli_capability or manage_capability for durable local CLI access; use request_permission only for one-off exact access, Browser, exact Gantry admin tools, or scoped Bash fallback when no reviewed capability fits.';
+  'Access decision ladder: use capability_search first; use request_capability when a reviewed semantic capability fits; use propose_local_cli_capability or manage_capability for durable local CLI access; use request_permission only for one-off exact access, Browser, exact Gantry admin tools, or scoped RunCommand fallback when no reviewed capability fits.';
 
 export function renderDefaultCapabilityRules(options?: {
   includeSettingsTools?: boolean;

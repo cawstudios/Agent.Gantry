@@ -156,7 +156,7 @@ describe('semantic capability catalog validation', () => {
     });
   });
 
-  it('does not project local CLI drafts to runnable Bash authority', () => {
+  it('does not project local CLI drafts to runnable command-tool authority', () => {
     const capability = localCliCapability();
 
     expect(

@@ -7,6 +7,7 @@ import type {
 } from '../domain/types.js';
 import { nowMs } from '../shared/time/datetime.js';
 import { validatePersistentRequestPermissionRule } from '../shared/persistent-permission-rules.js';
+import { permissionUpdateAllowedToolRules } from '../shared/permission-tool-rules.js';
 
 export const TIMED_GRANT_DURATION_MS = 5 * 60 * 1000;
 export const PERSISTENT_RULE_APPROVAL_MAX_RULES = 5;
@@ -46,9 +47,14 @@ function persistentRuleForSuggestion(
   rule: PermissionApprovalRuleValue,
 ): string | undefined {
   if (!rule?.toolName) return undefined;
-  const persistentRule = rule.ruleContent
-    ? `${rule.toolName}(${rule.ruleContent})`
-    : rule.toolName;
+  const [persistentRule] = permissionUpdateAllowedToolRules([
+    {
+      type: 'addRules',
+      behavior: 'allow',
+      rules: [rule],
+    },
+  ]);
+  if (!persistentRule) return undefined;
   return validatePersistentRequestPermissionRule(persistentRule).ok
     ? persistentRule
     : undefined;

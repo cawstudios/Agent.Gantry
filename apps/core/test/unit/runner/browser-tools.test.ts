@@ -251,12 +251,31 @@ describe('runner browser MCP gateway tools', () => {
       reason: 'Read page title for verification.',
       payload: { function: '() => document.title' },
     });
+    await server.tools.get('browser_act')?.({
+      action: 'file_attach',
+      profile: 'full',
+      reason: 'Attach a generated report to the current upload input.',
+      payload: {
+        target: 'upload-input',
+        source: { type: 'path', path: '/tmp/report.zip' },
+      },
+    });
 
     expect(blocked).toMatchObject({ isError: true });
-    expect(requestBrowserAction).toHaveBeenCalledTimes(1);
-    expect(requestBrowserAction).toHaveBeenCalledWith(
+    expect(requestBrowserAction).toHaveBeenCalledTimes(2);
+    expect(requestBrowserAction).toHaveBeenNthCalledWith(
+      1,
       'evaluate',
       { function: '() => document.title' },
+      { timeoutMs: 120_000, publicToolName: 'browser_act' },
+    );
+    expect(requestBrowserAction).toHaveBeenNthCalledWith(
+      2,
+      'file_attach',
+      {
+        target: 'upload-input',
+        source: { type: 'path', path: '/tmp/report.zip' },
+      },
       { timeoutMs: 120_000, publicToolName: 'browser_act' },
     );
   });
@@ -314,6 +333,17 @@ describe('runner browser MCP gateway tools', () => {
         profile: 'full',
         reason: 'Fill required checkout fields.',
         payload: { fields: [{ target: 'e1', value: 'Ravi' }] },
+      }).success,
+    ).toBe(true);
+    expect(
+      actSchema.safeParse({
+        action: 'file_attach',
+        profile: 'full',
+        reason: 'Upload a generated artifact.',
+        payload: {
+          target: 'file-input',
+          source: { type: 'bytes', name: 'a.txt', content: 'hello' },
+        },
       }).success,
     ).toBe(true);
     expect(openSchema.shape).not.toHaveProperty('headless');

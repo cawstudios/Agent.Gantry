@@ -38,6 +38,9 @@ import {
 import { waitOnlyBashMonitoringDenial } from './wait-only-bash-guard.js';
 import { forceBackgroundNativeAgentInput } from './native-agent-tool-input.js';
 import { denyNonPromptableAutonomousRecovery } from './autonomous-permission-recovery.js';
+import { publicCapabilityAllowedToolRules } from '../../../../shared/agent-tool-references.js';
+import { matchedRequiredToolRules } from './required-tool-matches.js';
+import { stableTimedGrantKey } from './stable-timed-grant-key.js';
 
 type PermissionApprovalInput = Parameters<typeof requestPermissionApproval>[0];
 
@@ -62,21 +65,6 @@ interface CreateCanUseToolCallbackInput {
   getNewSessionId: () => string | undefined;
   emitInteractionBoundary: () => void;
   recordToolActivity: (toolName: string) => void;
-}
-
-function stableTimedGrantKey(value: unknown): string {
-  return JSON.stringify(stableTimedGrantValue(value));
-}
-
-function stableTimedGrantValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stableTimedGrantValue);
-  if (!value || typeof value !== 'object') return value;
-  const record = value as Record<string, unknown>;
-  return Object.fromEntries(
-    Object.keys(record)
-      .sort()
-      .map((key) => [key, stableTimedGrantValue(record[key])]),
-  );
 }
 
 export function createCanUseToolCallback(
@@ -145,7 +133,7 @@ export function createCanUseToolCallback(
 
   const currentAllowedToolRules = (): string[] => [
     ...(input.agentInput.allowedTools ?? []),
-    ...input.capabilities.allowedTools,
+    ...publicCapabilityAllowedToolRules(input.capabilities.allowedTools),
     ...readLiveToolRules({
       ipcDir: process.env.GANTRY_IPC_DIR,
       runHandle: process.env.GANTRY_AGENT_RUN_HANDLE,
@@ -265,6 +253,11 @@ export function createCanUseToolCallback(
         sdkApprovalPrincipal,
       );
     const allowToolUse = (reason = 'allowed') => {
+      const matchedRequiredTools = matchedRequiredToolRules({
+        requiredTools: input.agentInput.requiredTools ?? [],
+        toolName,
+        toolInput,
+      });
       emitJobToolActivity(
         input.agentInput,
         input.getNewSessionId,
@@ -273,6 +266,9 @@ export function createCanUseToolCallback(
         {
           ok: true,
           reason,
+          ...(matchedRequiredTools.length
+            ? { matched_required_tools: matchedRequiredTools }
+            : {}),
         },
       );
       rememberAllowedTool();

@@ -13,7 +13,7 @@ When a user asks for a new skill, MCP server, dependency, SDK tool, host tool,
 or channel capability, the agent calls the matching Gantry request tool.
 
 The user-facing permission model is `Agent -> Capability -> Access level`.
-Raw permission ids, command hashes, scoped Bash rules, sandbox profiles, and
+Raw permission ids, command hashes, scoped `RunCommand(...)` rules, sandbox profiles, and
 executable paths are implementation details that belong in Details/audit
 surfaces. The model is intentionally typed. Skills, MCP servers, semantic tool
 capabilities, SDK tools, host tools, browser tools, provider-native channel
@@ -33,7 +33,7 @@ agents:
     tools:
       - capability:google.sheets.write
       - Browser
-      - Bash(npm test *)
+      - RunCommand(npm test *)
 ```
 
 Each semantic capability record includes:
@@ -43,8 +43,8 @@ Each semantic capability record includes:
 - `can` and `cannot` user-facing scope statements
 - `credentialSource`: implementation metadata such as `configured_access`,
   `onecli`, `external_broker`, `local_cli`, or `none`
-- low-level implementation bindings such as exact tools, scoped
-  `Bash(<template>)`, MCP tools, adapter refs, or local CLI command templates
+- low-level implementation bindings such as exact Gantry tool facades, scoped
+  `RunCommand(<template>)`, MCP tools, adapter refs, or local CLI command templates
 - optional preflight metadata, protected credential/config paths, redaction
   policy, and sandbox needs
 
@@ -65,8 +65,8 @@ semantic capability first.
 `gog`, `gws`, `gh`, `gcloud`, or a company CLI. User-defined local CLI
 capabilities are reviewable drafts until the runtime local-CLI gate can verify
 the pinned executable, version/hash, denied environment overrides, preflight,
-and protected paths at execution time. They must not project to runnable Bash
-authority before that gate exists.
+and protected paths at execution time. They must not project to runnable
+command-tool authority before that gate exists.
 
 A durable local CLI capability must pin:
 
@@ -97,7 +97,7 @@ The reviewed definition pins `/usr/local/bin/acme`, allows only
 `/usr/local/bin/acme auth status` as preflight, protects `~/.config/acme`, and
 shows `Acme invoices read` in prompts and management views. Until runtime
 enforcement exists, approval records the reviewed draft only; it does not create
-durable runnable authority or an SDK `Bash(...)` projection.
+durable runnable authority or a harness command-tool projection.
 
 ## Administration Model
 
@@ -146,8 +146,8 @@ place.
 | `request_mcp_server`               | Third-party MCP server drafts with transport, origin, allowed tool patterns, credential needs, and reason.                                                                                       | Editing `.mcp.json` or Claude `mcpServers`.                                                             |
 | `request_permission`               | SDK, host, browser, scheduler, memory, service, MCP, or provider/channel capability permission requests.                                                                                         | Changing permission settings directly or treating provider SDK permissions as already approved.         |
 | `capability_search`                | Finds built-in semantic capabilities by id, provider/app, risk, or allowed action.                                                                                                               | Guessing raw command rules or provider-specific implementation names.                                   |
-| `request_capability`               | Requests a named semantic capability such as `google.sheets.write` for review and durable agent binding.                                                                                         | Requesting raw provider tokens, broad Bash, or unrelated app access.                                    |
-| `propose_local_cli_capability`     | Requests a reviewed user-defined local CLI capability with pinned executable, command templates, preflight, account label, and protected paths.                                                  | Running the CLI directly or approving `Bash(cli *)`.                                                    |
+| `request_capability`               | Requests a named semantic capability such as `google.sheets.write` for review and durable agent binding.                                                                                         | Requesting raw provider tokens, broad `RunCommand`, or unrelated app access.                            |
+| `propose_local_cli_capability`     | Requests a reviewed user-defined local CLI capability with pinned executable, command templates, preflight, account label, and protected paths.                                                  | Running the CLI directly or approving `RunCommand(cli *)`.                                              |
 | `manage_capability`                | Presents view/change/revoke/test/audit guidance for existing semantic capabilities.                                                                                                              | Silent DB-only edits, raw token inspection, or bypassing settings sync.                                 |
 | `capability_status`                | Lists current tool access, readable configured rules, selected skills, selected MCP servers, default tools, gated tools, semantic capability tools, and unavailable-but-requestable admin tools. | Guessing hidden admin tools or requesting broad Gantry MCP wildcards.                                   |
 | `settings_desired_state`           | Selected-capability reading of the current local desired-state settings before proposing a reviewed config change.                                                                               | Unselected access, mutating settings, or exposing raw secrets.                                          |
@@ -162,7 +162,7 @@ place.
 | Skill            | Skill catalog row, readable files, provider ref, hash, binding.                   | Per-run Claude `skills/<slug>/...` folder and `Skill` tool exposure.                                                                                     |
 | Skill dependency | Dependency spec, approval decision, execution result, audit.                      | Optional per-skill tools directory or approved host package; never direct agent shell.                                                                   |
 | Third-party MCP  | Definition, reviewed version, Gantry Secret refs, allowed tool patterns, binding. | SDK `mcpServers` for host-safe stdio transports plus exact allowed MCP tool names. Remote HTTP/SSE requires host DNS-pinned transport before projection. |
-| SDK tool         | Tool catalog entry, risk, permission policy, sandbox profile, binding.            | Exact non-Bash SDK tool names in `allowedTools`; scoped `Bash(<pattern>)` is enforced only in `canUseTool` and never projected as bare `Bash`.           |
+| SDK tool         | Tool catalog entry, risk, permission policy, sandbox profile, binding.            | Durable grants use Gantry facade names; provider-native SDK names in `allowedTools` are only per-run harness projections, and command access is never projected as bare `Bash`. |
 | Host tool        | Built-in Gantry MCP tool entry, risk, binding, audit behavior.                    | Exact `mcp__gantry__<tool>` name.                                                                                                                        |
 | Browser tool     | Canonical `Browser` capability and sandbox policy.                                | Gated Gantry-owned gateway tools with Gantry-owned schemas.                                                                                              |
 | Channel tool     | Provider capability enum, scopes, affected conversations, binding.                | Provider adapter enables only the named Slack/Telegram/Teams/Web capability.                                                                             |
@@ -185,27 +185,28 @@ Agent-owned persistent tool grants are also mirrored into `settings.yaml` as
 readable `agents.<id>.tools` entries. Prefer semantic capability entries such
 as `capability:google.sheets.write` for app workflows. `request_permission`
 durable fallback is intentionally narrow: canonical `Browser`, exact selected
-Gantry admin tools, and scoped Bash rules such as `Bash(npm test *)`. Broad
+Gantry admin tools, Gantry file/web facades, and scoped command rules such as
+`RunCommand(npm test *)`. Broad
 exact SDK/native tools such as `Read`, `Write`, `Edit`, `WebFetch`, `LS`, exact
-third-party MCP tools, secret-bearing Bash, shell-control Bash, and
+third-party MCP tools, secret-bearing command rules, shell-control command rules, and
 `SandboxNetworkAccess` are not durable `request_permission` authority. Do not
 expose opaque permission-rule hashes in settings. Settings
 reconciliation resolves those readable names back into Postgres tool catalog
 rows and agent bindings
 immediately and after restart.
 
-Scoped Bash rules match parsed argv leaves, not whole shell strings. Compound
+Scoped `RunCommand(...)` rules match parsed argv leaves, not whole shell strings. Compound
 commands require every safe, stateless leaf to match a separate durable rule;
 state-changing leaves such as `cd` are one-time approval only because they
 change the trust context for later leaves. Matching is positional:
-`Bash(curl https://api.example.com/*)` does not cover
+`RunCommand(curl https://api.example.com/*)` does not cover
 `curl -sSf https://api.example.com/x`; approve
-`Bash(curl -sSf https://api.example.com/*)` or an explicit argv wildcard such
-as `Bash(curl * https://api.example.com/*)`. Unsupported shell grammar,
+`RunCommand(curl -sSf https://api.example.com/*)` or an explicit argv wildcard such
+as `RunCommand(curl * https://api.example.com/*)`. Unsupported shell grammar,
 environment assignments, command substitution, background execution, shell
 keywords, meta-executors such as `sh -c`, stateful shell builtins, broad
 interpreter wildcard scopes, and destructive redirects are one-time approval
-only and must not be synthesized as durable Bash rules.
+only and must not be synthesized as durable `RunCommand(...)` rules.
 
 Control API capability replacement and other DB/admin-side capability writes
 must export the readable Postgres projection back into `settings.yaml`, then
@@ -226,7 +227,7 @@ uses the same reviewed request tools as interactive agents:
 
 ```text
 request_capability { "capabilityId": "google.sheets.write", "reason": "This scheduled job writes the weekly status sheet." }
-request_permission { "permissionKind": "tool", "toolName": "Bash", "rule": "npm test *", "temporaryOnly": false, "reason": "This autonomous run needs scoped Bash access." }
+request_permission { "permissionKind": "tool", "toolName": "RunCommand", "rule": "npm test *", "temporaryOnly": false, "reason": "This autonomous run needs scoped command access." }
 request_mcp_server { "name": "github", "transport": "http", "reason": "This autonomous run needs the github MCP server capability." }
 ```
 
@@ -235,7 +236,7 @@ MCP server bindings and export the readable projection to `settings.yaml`.
 Tool permission approval can resume the blocked active tool call immediately:
 `Allow once` is current-run only and does not create durable semantic
 authority, while `Always allow` stores either the approved semantic capability,
-canonical `Browser`, exact Gantry admin tool, or scoped Bash rule for the active
+canonical `Browser`, exact Gantry file/web facade, exact Gantry admin tool, or scoped `RunCommand(...)` rule for the active
 run and future runs. New skill or MCP materialization occurs on the next
 scheduled run or a manual rerun. Browser remains a single public `Browser` tool
 capability; projected browser gateway tools and admin Gantry MCP tools are not
@@ -277,7 +278,7 @@ not durable Gantry truth.
    Gantry Secret refs, sandbox profile, tool patterns, and provider metadata.
 3. Review: same-channel review renders the request, but authority still comes
    from configured admin/control policy.
-4. Decide: the user sees `Allow once`, `Allow 5 min`, `Always allow`, or `Cancel`; Details and audit records carry the durable authority shape, such as a semantic capability, canonical `Browser`, exact `mcp__gantry__<admin_tool>`, or scoped `Bash(<pattern>)`.
+4. Decide: the user sees `Allow once`, `Allow 5 min`, `Always allow`, or `Cancel`; Details and audit records carry the durable authority shape, such as a semantic capability, canonical `Browser`, exact Gantry file/web facade, exact `mcp__gantry__<admin_tool>`, or scoped `RunCommand(<pattern>)`.
 5. Bind: approval creates or updates the agent binding and a new config version.
 6. Same-session handoff: approved skill installs and proposals are returned to the running
    agent as reviewed skill files; approved MCP servers are reachable through the
@@ -357,10 +358,12 @@ through the projected Gantry-owned gateway: `browser_status`, `browser_open`,
 browser-action run, phrase intent, private browser backend projection, or
 durable per-action browser authority.
 
-SDK built-in tools are denied by default unless the profile explicitly grants
-them. `Bash`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `Config` are
-not default capabilities. If approved, they still pass through `canUseTool`,
-`PreToolUse`, sandbox policy, and audit.
+Provider-native SDK built-in tool names are harness projections, not durable
+agent capabilities. Profiles grant Gantry-owned facades such as `FileRead`,
+`FileEdit`, `FileWrite`, `WebRead`, and scoped `RunCommand(...)`; the selected
+harness maps those to internal names such as `Read`, `Edit`, `Write`,
+`WebFetch`, or `Bash` only for that run. If approved, projected tools still pass
+through `canUseTool`, `PreToolUse`, sandbox policy, and audit.
 
 The built-in Gantry MCP server is projected with exact tool names. Wildcards
 such as `mcp__gantry__*` are not durable authorization. Request tools are safe
@@ -395,8 +398,8 @@ Before calling a cutover complete, run targeted searches for:
    category `Google Sheets`, risk `write`, and account label such as
    `ravi@example.com`.
 3. Set narrow command templates such as
-   `/usr/local/bin/gog sheets write *`. Do not approve `Bash(gog *)`,
-   `Bash(gog sheets *)`, or other raw CLI Bash grants as a substitute for a
+   `/usr/local/bin/gog sheets write *`. Do not approve `RunCommand(gog *)`,
+   `RunCommand(gog sheets *)`, or other raw command grants as a substitute for a
    semantic local CLI capability.
 4. Configure auth preflight, for example
    `/usr/local/bin/gog auth status`, and protect credential/config paths such
@@ -420,13 +423,13 @@ reviewed provider-neutral capability. Use `implementation.kind: local_cli` when
 the job must use a specific authenticated local CLI such as `gog`; it must
 include an absolute `executablePath`, a narrow `commandTemplate` that starts
 with that exact executable path, and any `authPreflight` must also start with
-the same path. Runtime setup converts that template into an exact scoped Bash
-rule such as `Bash(/usr/local/bin/gog sheets append *)`. That rule is the
+the same path. Runtime setup converts that template into an exact scoped command
+rule such as `RunCommand(/usr/local/bin/gog sheets append *)`. That rule is the
 durable execution authority for the job today. User-defined semantic
 `local_cli` capability proposals remain review-only drafts until runtime
 local-CLI enforcement can verify executable identity, command templates,
 protected paths, and denied environment overrides. Do not replace the generated
-scoped rule with a broad `Bash(gog *)` grant.
+scoped rule with a broad `RunCommand(gog *)` grant.
 
 Examples:
 
@@ -438,14 +441,14 @@ Examples:
   `implementation.kind: local_cli`, `name: gog`,
   `executablePath: /usr/local/bin/gog`, and a narrow `commandTemplate` such as
   `/usr/local/bin/gog sheets append <sheet_id> ...`. Setup must request the
-  generated scoped command rule `Bash(/usr/local/bin/gog sheets append *)`, not
+  generated scoped command rule `RunCommand(/usr/local/bin/gog sheets append *)`, not
   the generic capability `capability:google.sheets.write`.
 - Reusable user-defined local CLI capability: propose a `local_cli` capability
   with pinned `/usr/local/bin/gog`, command template
   `/usr/local/bin/gog sheets write *`, auth preflight
   `/usr/local/bin/gog auth status`, and protected `~/.config/gog`. This is a
   reviewed draft until the runtime gate can enforce it; do not approve
-  `Bash(gog *)` as a substitute.
+  `RunCommand(gog *)` as a substitute.
 - Unknown business CLI: propose `capabilityId=acme.invoices.read`,
   display name `Acme invoices read`, command template
   `/usr/local/bin/acme invoices read *`, and a non-secret account label.
@@ -454,6 +457,6 @@ Examples:
   replace it with a different account-specific capability, then sync
   `settings.yaml` and the Postgres projection.
 
-Do not use raw token env, `Bash(cli *)`, broad proxy injection, direct
+Do not use raw token env, `RunCommand(cli *)`, broad proxy injection, direct
 credential-store writes, raw provider model credentials, raw browser backend
 tools, or `SandboxNetworkAccess` as durable authority.

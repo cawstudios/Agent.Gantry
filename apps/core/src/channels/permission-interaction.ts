@@ -9,6 +9,8 @@ import {
   isCanonicalBrowserCapabilityRule,
   isThirdPartyMcpToolRule,
   parseReadableScopedToolRule,
+  publicGantryToolNameForSdkTool,
+  RUN_COMMAND_TOOL_NAME,
 } from '../shared/agent-tool-references.js';
 import { formatPersistentPermissionRulesForUser } from '../shared/persistent-permission-rules.js';
 import {
@@ -387,7 +389,8 @@ function permissionAccessLabel(
   if (
     request.toolName === 'Bash' ||
     requestedToolName === 'Bash' ||
-    scopedRule?.toolName === 'Bash'
+    requestedToolName === RUN_COMMAND_TOOL_NAME ||
+    scopedRule?.toolName === RUN_COMMAND_TOOL_NAME
   ) {
     return 'exact command access';
   }
@@ -494,7 +497,8 @@ function formatPermissionReceiptActionSummary(
   request: PermissionApprovalRequest | undefined,
 ): string {
   if (!request) return 'permission request';
-  const tool = request.displayName || request.toolName;
+  const tool =
+    request.displayName || publicGantryToolNameForSdkTool(request.toolName);
   const input = request.toolInput;
   if (!input || typeof input !== 'object') return tool;
   const command = permissionCommand(request);

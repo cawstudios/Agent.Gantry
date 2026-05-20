@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveConfiguredAllowedTools } from '@core/runtime/configured-agent-tools.js';
 
 describe('configured agent tools', () => {
-  it('resolves namespaced permission-rule catalog rows to scoped Bash rules', async () => {
+  it('resolves namespaced permission-rule catalog rows to scoped RunCommand rules', async () => {
     const repository = {
       listAgentToolBindings: async () => [
         {
@@ -13,7 +13,7 @@ describe('configured agent tools', () => {
       ],
       getTool: async () => ({
         appId: 'default',
-        name: 'Bash(npm test *)',
+        name: 'RunCommand(npm test *)',
       }),
     };
 
@@ -23,7 +23,7 @@ describe('configured agent tools', () => {
         appId: 'default',
         agentId: 'agent:one',
       }),
-    ).resolves.toEqual(['Bash(npm test *)']);
+    ).resolves.toEqual(['RunCommand(npm test *)']);
   });
 
   it('keeps provider-neutral semantic capabilities provider-neutral at runtime', async () => {
@@ -49,7 +49,7 @@ describe('configured agent tools', () => {
     ).resolves.toEqual(['capability:google.sheets.write']);
   });
 
-  it('does not expand user-defined local CLI drafts to runnable Bash rules', async () => {
+  it('does not expand user-defined local CLI drafts to runnable command rules', async () => {
     const repository = {
       listAgentToolBindings: async () => [
         {
@@ -214,7 +214,7 @@ describe('configured agent tools', () => {
     ).rejects.toThrow('wildcard grants are not supported');
   });
 
-  it('fails closed for stale active Bash wildcard bindings', async () => {
+  it('fails closed for stale active RunCommand wildcard bindings', async () => {
     const repository = {
       listAgentToolBindings: async () => [
         {
@@ -224,7 +224,7 @@ describe('configured agent tools', () => {
       ],
       getTool: async () => ({
         appId: 'default',
-        name: 'Bash(*)',
+        name: 'RunCommand(*)',
       }),
     };
 
@@ -234,7 +234,7 @@ describe('configured agent tools', () => {
         appId: 'default',
         agentId: 'agent:one',
       }),
-    ).rejects.toThrow('Persistent Bash scope is too broad');
+    ).rejects.toThrow('Persistent RunCommand scope is too broad');
   });
 
   it('fails closed for stale active SDK sandbox network bindings', async () => {

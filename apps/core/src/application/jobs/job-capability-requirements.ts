@@ -5,7 +5,10 @@ import {
   semanticCapabilityRule,
 } from '../../shared/semantic-capability-ids.js';
 import { getBuiltinSemanticCapability } from '../../shared/semantic-capabilities.js';
-import { validateReadableAgentToolRule } from '../../shared/agent-tool-references.js';
+import {
+  RUN_COMMAND_TOOL_NAME,
+  validateReadableAgentToolRule,
+} from '../../shared/agent-tool-references.js';
 import { isAbsoluteFilePath } from '../../shared/path-validation.js';
 
 const IMPLEMENTATION_KINDS = new Set([
@@ -83,7 +86,7 @@ export function capabilityRequirementSetupAction(
         'request_permission',
         JSON.stringify({
           permissionKind: 'tool',
-          toolName: 'Bash',
+          toolName: RUN_COMMAND_TOOL_NAME,
           rule,
           temporaryOnly: false,
           riskClass: 'high',
@@ -122,7 +125,9 @@ export function localCliCommandTemplatePermissionRule(
   if (executablePath?.trim() && executableToken !== executablePath.trim()) {
     return undefined;
   }
-  const validation = validateReadableAgentToolRule(`Bash(${normalized})`);
+  const validation = validateReadableAgentToolRule(
+    `${RUN_COMMAND_TOOL_NAME}(${normalized})`,
+  );
   return validation.ok ? normalized : undefined;
 }
 
@@ -165,7 +170,7 @@ function normalizeImplementation(
     if (!implementation.commandTemplate) {
       throw new ApplicationError(
         'INVALID_REQUEST',
-        'capabilityRequirements local_cli implementation.commandTemplate is required so the runtime can request a scoped Bash permission.',
+        'capabilityRequirements local_cli implementation.commandTemplate is required so the runtime can request a scoped RunCommand permission.',
       );
     }
     const executableToken = implementation.commandTemplate.split(/\s+/)[0];

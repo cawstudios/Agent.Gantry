@@ -352,25 +352,25 @@ describe('agent capability composition', () => {
     ]);
   });
 
-  it('keeps scoped Bash available but does not project it as SDK always-allowed', () => {
+  it('keeps scoped RunCommand available but does not project it as SDK always-allowed', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'tg:team',
       groupFolder: 'telegram_team',
       configuredAllowedTools: [
-        'Bash(npm test *)',
+        'RunCommand(npm test *)',
         'ToolName(scope-pattern)',
-        'Bash(npm test',
+        'RunCommand(npm test',
         'Read(/repo/**)',
       ],
     });
 
     expect(profile.allowedTools).not.toContain('Bash');
-    expect(profile.allowedTools).not.toContain('Bash(npm test *)');
+    expect(profile.allowedTools).not.toContain('RunCommand(npm test *)');
     expect(profile.availableTools).toContain('Bash');
     expect(profile.allowedTools).not.toContain('ToolName(scope-pattern)');
     expect(profile.availableTools).not.toContain('ToolName');
-    expect(profile.allowedTools).not.toContain('Bash(npm test');
+    expect(profile.allowedTools).not.toContain('RunCommand(npm test');
     expect(
       profile.availableTools.filter((tool) => tool === 'Bash'),
     ).toHaveLength(1);
@@ -385,16 +385,16 @@ describe('agent capability composition', () => {
       persona: 'sales',
       isScheduledJob: true,
       configuredAllowedTools: [
-        'Read',
-        'Bash(/usr/local/bin/gog sheets append *)',
-        'Bash(python3 /Users/example/scripts/dedup-append-lead.py)',
+        'FileRead',
+        'RunCommand(/usr/local/bin/gog sheets append *)',
+        'RunCommand(python3 /Users/example/scripts/dedup-append-lead.py)',
       ],
     });
 
     expect(profile.allowedTools).toContain('Read');
     expect(profile.allowedTools).not.toContain('Bash');
     expect(profile.allowedTools).not.toContain(
-      'Bash(/usr/local/bin/gog sheets append *)',
+      'RunCommand(/usr/local/bin/gog sheets append *)',
     );
     expect(profile.availableTools).toEqual(
       expect.arrayContaining([
@@ -413,13 +413,20 @@ describe('agent capability composition', () => {
     expect(profile.availableTools).not.toContain('NotebookEdit');
   });
 
-  it('allows exact selected admin and native tools but filters unsupported wildcard rules for non-developer personas', () => {
+  it('projects selected Gantry facade tools but filters provider-native and unsupported wildcard rules for non-developer personas', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'tg:sales',
       groupFolder: 'sales',
       persona: 'sales',
       configuredAllowedTools: [
+        'AgentDelegation',
+        'WebSearch',
+        'WebRead',
+        'FileRead',
+        'FileSearch',
+        'FileWrite',
+        'FileEdit',
         'Agent',
         'Browser',
         'Bash',
@@ -442,6 +449,11 @@ describe('agent capability composition', () => {
     expect(profile.allowedTools).toContain('Agent');
     expect(profile.allowedTools).not.toContain('Browser');
     expect(profile.allowedTools).not.toContain('ToolName(scope-pattern)');
+    expect(profile.allowedTools).not.toContain('AgentDelegation');
+    expect(profile.allowedTools).not.toContain('FileRead');
+    expect(profile.allowedTools).not.toContain('FileSearch');
+    expect(profile.allowedTools).not.toContain('FileWrite');
+    expect(profile.allowedTools).not.toContain('FileEdit');
     expect(profile.allowedTools).toContain('mcp__gantry__service_restart');
     expect(profile.allowedTools).toContain(
       'mcp__gantry__settings_desired_state',
@@ -450,11 +462,12 @@ describe('agent capability composition', () => {
     expect(profile.allowedTools).toContain('Read');
     expect(profile.allowedTools).toContain('Glob');
     expect(profile.allowedTools).toContain('Grep');
-    expect(profile.allowedTools).toContain('LS');
     expect(profile.allowedTools).toContain('Write');
     expect(profile.allowedTools).toContain('Edit');
     expect(profile.allowedTools).toContain('MultiEdit');
-    expect(profile.allowedTools).toContain('NotebookEdit');
+    expect(profile.allowedTools).toContain('WebFetch');
+    expect(profile.allowedTools).not.toContain('LS');
+    expect(profile.allowedTools).not.toContain('NotebookEdit');
     expect(profile.allowedTools).not.toContain('mcp__gantry__*');
     expect(profile.allowedTools).not.toContain(
       'mcp__gantry__*(service_restart)',

@@ -14,14 +14,15 @@ carry separate tool, skill, or MCP capability grants.
 
 Inherited tool grants are semantic capability entries such as
 `capability:google.sheets.write`, canonical `Browser`, selected first-party
-catalog tools, exact Gantry admin tools, approved third-party MCP server
-bindings, or scoped Bash rules such as `Bash(npm test *)`. Runtime expands
-semantic capabilities and may still project approved third-party MCP server
-bindings into SDK allowances for that run. Empty rules, global `*`, broad exact
-SDK/native request*permission grants, exact third-party MCP tool grants, bare
-`Bash`, `Bash(*)`, leading-wildcard Bash scopes, scoped non-Bash rules, private
-browser backend rules, and projected browser gateway rules are
-invalid as persistent request_permission authority.
+catalog tools, Gantry file/web facades such as `FileRead`, exact Gantry admin
+tools, approved third-party MCP server bindings, or scoped command rules such as
+`RunCommand(npm test *)`. Runtime expands semantic capabilities and may still
+project approved third-party MCP server bindings into SDK allowances for that
+run. Empty rules, global `*`, broad exact SDK/native request_permission grants,
+exact third-party MCP tool grants, bare `Bash`, bare `RunCommand`, `Bash(*)`,
+`RunCommand(*)`, leading-wildcard command scopes, private browser backend rules,
+and projected browser gateway rules are invalid as persistent request_permission
+authority.
 
 Browser is one durable public capability: `Browser`. A job with an inherited
 `Browser` grant receives the projected Gantry browser gateway for that run. A job
@@ -34,8 +35,8 @@ browser gateway tool names.
 Job create/update surfaces accept declared setup requirements:
 
 - `requiredTools`: durable readable tool rules such as `Browser`,
-  `capability:google.sheets.write`, exact first-party Gantry MCP tools, or
-  scoped `Bash(...)` rules.
+  `capability:google.sheets.write`, exact Gantry file/web facades, exact
+  first-party Gantry MCP tools, or scoped `RunCommand(...)` rules.
 - `requiredMcpServers`: approved third-party MCP server names or ids expected
   by the job.
 
@@ -44,8 +45,8 @@ enforces actual tool use at the permission boundary, and under-declared jobs
 pause if a run later reaches a denied tool.
 Create/update surfaces validate these assertions up front. Unsupported raw
 browser backend names, projected browser gateway names, Gantry wildcards, broad
-or bare Bash, and scoped non-Bash rules fail the request instead of becoming
-compatibility state.
+or bare command grants, and unsupported scoped rules fail the request instead of
+becoming compatibility state.
 
 Before activation and immediately before model spawn, Gantry performs a
 best-effort readiness check against durable target-agent capability bindings,
@@ -70,9 +71,10 @@ draft_only
 reduce repeated prompts for the same short run, but neither is durable readiness
 for future recurring runs. Recurring activation requires a persistent
 target-agent capability binding such as `Browser`, `capability:<id>`, an exact
-approved Gantry admin tool, a scoped Bash rule, or an approved MCP server
-binding. Browser auth remains profile/session based; Gantry reports that login
-may be required unless the profile already has durable state or auth markers.
+Gantry file/web facade, an approved Gantry admin tool, a scoped
+`RunCommand(...)` rule, or an approved MCP server binding. Browser auth remains
+profile/session based; Gantry reports that login may be required unless the
+profile already has durable state or auth markers.
 MCP readiness may inspect materialized definitions and Gantry Secret refs, but
 must not start arbitrary MCP servers as a readiness side effect.
 
@@ -85,9 +87,10 @@ the approval prompt to the job's source conversation/thread or topic and waits
 at the tool boundary. `Allow once` resumes that tool call in the current job
 run, while `Allow 5 min` is temporary. `Always allow` stores a semantic
 `capability:<id>` grant when the request names one; otherwise it may apply
-canonical `Browser`, an exact Gantry admin tool, or a scoped Bash rule to the
-target agent. Broad exact SDK/native tools and exact third-party MCP tool names
-remain one-off only. The grant is mirrored to
+canonical `Browser`, an exact Gantry file/web facade, an exact Gantry admin
+tool, or a scoped `RunCommand(...)` rule to the target agent. Broad exact
+SDK/native tools and exact third-party MCP tool names remain one-off only. The
+grant is mirrored to
 `settings.yaml`, expanded into live runtime rules for the active run, and
 resumes the same tool call so recurring jobs do not need the same approval next
 time.
@@ -96,16 +99,17 @@ If the approval surface is unavailable, denied, or times out, the runner fails
 the tool call with recovery guidance such as:
 
 ```text
-Tool not on autonomous run allowlist: Bash.
+Tool not on autonomous run allowlist: RunCommand.
 Recovery: request_capability { "capabilityId": "google.sheets.write", "reason": "This scheduled job writes the weekly status sheet." }
-Recovery: request_permission { "permissionKind": "tool", "toolName": "Bash", "rule": "npm test *", "temporaryOnly": false, "reason": "This autonomous run needs scoped Bash access." }
+Recovery: request_permission { "permissionKind": "tool", "toolName": "RunCommand", "rule": "npm test *", "temporaryOnly": false, "reason": "This autonomous run needs scoped command access." }
 ```
 
 Missing capability recovery uses the same reviewed request tools as interactive
 agents: `capability_search` / `request_capability` for semantic app/tool
 access, `propose_local_cli_capability` for reviewed authenticated CLIs,
-`request_permission` for one-off exact tools, Browser, or scoped Bash fallback,
-`request_skill_install` or `request_skill_proposal` for skills, and
+`request_permission` for one-off Gantry file/web facades, Browser, or scoped
+`RunCommand(...)` fallback, `request_skill_install` or `request_skill_proposal`
+for skills, and
 `request_mcp_server` for third-party MCP servers. Approval updates the target
 agent's durable bindings, exports the readable projection to `settings.yaml`,
 and activates on the next scheduled run or a manual rerun.
@@ -120,10 +124,10 @@ plan shows the required capabilities in human terms, for example
 `Google Sheets write using gog`.
 
 `local_cli` requirements are setup blockers until the generated absolute scoped
-Bash rule is approved for that job or agent. They must declare an absolute
+`RunCommand(...)` rule is approved for that job or agent. They must declare an absolute
 `executablePath`; `commandTemplate` and any `authPreflight` must start with that
 exact path, so readiness never depends on PATH resolution. They do not create or
-imply broad `Bash(cli *)` authority. Reusable user-defined `local_cli` semantic
+imply broad `RunCommand(cli *)` authority. Reusable user-defined `local_cli` semantic
 capabilities stay draft-only until runtime enforcement verifies executable
 identity, command templates, protected paths, preflight behavior, and denied
 environment overrides. Malformed persisted `local_cli` requirements are not
@@ -184,8 +188,8 @@ object:
 ```json
 {
   "toolAccess": {
-    "inheritedAgentTools": ["Read", "Bash(npm test *)"],
-    "effectiveAllowedTools": ["Read", "Bash(npm test *)"],
+    "inheritedAgentTools": ["FileRead", "RunCommand(npm test *)"],
+    "effectiveAllowedTools": ["FileRead", "RunCommand(npm test *)"],
     "projectedRuntimeTools": ["browser_open"],
     "source": "inherited target agent capabilities"
   },

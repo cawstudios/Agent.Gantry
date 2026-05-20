@@ -80,7 +80,7 @@ describe('AgentCapabilityAdministrationService', () => {
         selectedSkillIds: [],
         selectedMcpServerIds: [],
       }),
-    ).rejects.toThrow('Persistent Bash scope is too broad');
+    ).rejects.toThrow('Persistent RunCommand scope is too broad');
 
     expect(state.toolBindings).not.toEqual(
       expect.arrayContaining([
@@ -137,7 +137,7 @@ function createState() {
       {
         id: 'tool:BashWildcard',
         appId: 'app:one',
-        name: 'Bash(*)',
+        name: 'RunCommand(*)',
         kind: 'sdk',
         provider: 'claude',
         displayName: 'Bash wildcard',

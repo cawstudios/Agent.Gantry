@@ -238,10 +238,12 @@ Selected-capability admin agents add four additional admin tools
 ### Subagents
 
 Native Anthropic-SDK subagents inherit the parent run by default. Gantry
-uses the exact `Agent` capability to gate native subagent delegation. Once
-`Agent` is granted, there is no second `subagent_type` allowlist. The runner
-still rejects cross-provider models and custom tool/MCP/skill input on the
-Agent call; see `validateAgentModelRequest` and `validateAgentToolInput` in
+uses the durable `AgentDelegation` facade to gate subagent delegation; the
+Anthropic adapter projects that facade to the SDK-native `Agent` tool inside a
+single run. Once `AgentDelegation` is granted, there is no second
+`subagent_type` allowlist. The runner still rejects cross-provider models and
+custom tool/MCP/skill input on the Agent call; see `validateAgentModelRequest`
+and `validateAgentToolInput` in
 `apps/core/src/adapters/llm/anthropic-claude-agent/runner/agent-model-selection.ts`.
 
 Detail: [agent-runtime.md](./agent-runtime.md).

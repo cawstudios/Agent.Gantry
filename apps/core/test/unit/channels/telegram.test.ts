@@ -2527,7 +2527,7 @@ describe('TelegramChannel', () => {
         '100200300',
         987,
         expect.stringContaining(
-          'Allowed once: exact command access\nFor: Bash',
+          'Allowed once: exact command access\nFor: RunCommand',
         ),
         expect.objectContaining({
           reply_markup: { inline_keyboard: [] },

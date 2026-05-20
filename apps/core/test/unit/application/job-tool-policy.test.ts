@@ -96,15 +96,15 @@ describe('job tool policy', () => {
     ).rejects.toThrowError(/wildcard grants are not supported/);
   });
 
-  it('rejects stale inherited Bash wildcard rules from agent tool bindings', async () => {
+  it('rejects stale inherited RunCommand wildcard rules from agent tool bindings', async () => {
     await expect(
       resolveJobToolPolicy({
         job: makeJob(),
         appId: 'default',
         agentId: 'agent:team',
-        toolRepository: toolRepositoryFor(['Bash(*)']),
+        toolRepository: toolRepositoryFor(['RunCommand(*)']),
       }),
-    ).rejects.toThrowError(/Persistent Bash scope is too broad/);
+    ).rejects.toThrowError(/Persistent RunCommand scope is too broad/);
   });
 
   it('rejects stale inherited third-party MCP wildcard rules from agent tool bindings', async () => {
@@ -133,7 +133,7 @@ describe('job tool policy', () => {
     const repository = toolRepositoryFor([
       'capability:google.sheets.write',
       'Browser',
-      'Bash(npm test *)',
+      'RunCommand(npm test *)',
     ]);
 
     const jobPolicy = await resolveJobToolPolicy({
@@ -152,7 +152,7 @@ describe('job tool policy', () => {
     expect(jobPolicy.effectiveAllowedTools).toEqual([
       'capability:google.sheets.write',
       'Browser',
-      'Bash(npm test *)',
+      'RunCommand(npm test *)',
     ]);
   });
 });

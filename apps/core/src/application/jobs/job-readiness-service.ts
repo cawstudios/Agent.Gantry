@@ -24,6 +24,7 @@ import {
 import {
   isCanonicalBrowserCapabilityRule,
   isProjectedBrowserMcpToolRule,
+  RUN_COMMAND_TOOL_NAME,
 } from '../../shared/agent-tool-references.js';
 import {
   parseSemanticCapabilityRule,
@@ -189,7 +190,10 @@ function capabilityRequirementBlocker(input: {
       nextAction: capabilityRequirementSetupAction(requirement),
     };
   }
-  if (rule && input.effectiveAllowedTools.includes(`Bash(${rule})`)) {
+  if (
+    rule &&
+    input.effectiveAllowedTools.includes(`${RUN_COMMAND_TOOL_NAME}(${rule})`)
+  ) {
     return null;
   }
   return {
@@ -474,7 +478,7 @@ function semanticCapabilityNeedsBroker(
   capability: NonNullable<ReturnType<typeof getBuiltinSemanticCapability>>,
 ): boolean {
   return capability.implementationBindings.some((binding) =>
-    binding.rule?.startsWith('Bash(onecli '),
+    binding.rule?.startsWith(`${RUN_COMMAND_TOOL_NAME}(onecli `),
   );
 }
 

@@ -7,9 +7,10 @@ import {
 } from '@core/shared/tool-rule-matcher.js';
 
 describe('autonomous tool rule matcher', () => {
-  it('supports exact non-Bash tool names and mcp server wildcards', () => {
-    expect(anyToolRuleMatches(['Read'], 'Read')).toBe(true);
-    expect(anyToolRuleMatches(['Read'], 'Bash')).toBe(false);
+  it('supports exact Gantry tool names and mcp server wildcards', () => {
+    expect(anyToolRuleMatches(['FileRead'], 'Read')).toBe(true);
+    expect(anyToolRuleMatches(['Read'], 'Read')).toBe(false);
+    expect(anyToolRuleMatches(['FileRead'], 'Bash')).toBe(false);
     expect(anyToolRuleMatches(['mcp__github__*'], 'mcp__github__search')).toBe(
       true,
     );
@@ -25,13 +26,24 @@ describe('autonomous tool rule matcher', () => {
     expect(validateAutonomousToolRule('mcp__github__*').ok).toBe(true);
   });
 
-  it('allows scoped Bash commands and denies unrelated Bash commands', () => {
-    expect(validateAutonomousToolRule('Bash(dedup-append-lead.py *)')).toEqual({
+  it('rejects provider-native exact names as durable autonomous rules', () => {
+    for (const rule of ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch']) {
+      expect(validateAutonomousToolRule(rule)).toMatchObject({
+        ok: false,
+        reason: expect.stringContaining('Provider-native SDK tools'),
+      });
+    }
+  });
+
+  it('allows scoped RunCommand rules and denies unrelated Bash commands', () => {
+    expect(
+      validateAutonomousToolRule('RunCommand(dedup-append-lead.py *)'),
+    ).toEqual({
       ok: true,
     });
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(dedup-append-lead.py *)'],
+        rules: ['RunCommand(dedup-append-lead.py *)'],
         toolName: 'Bash',
         toolInput: { command: 'dedup-append-lead.py --dry-run' },
       }),
@@ -39,14 +51,14 @@ describe('autonomous tool rule matcher', () => {
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(dedup-append-lead.py *)'],
+        rules: ['RunCommand(dedup-append-lead.py *)'],
         toolName: 'Bash',
         toolInput: { command: 'npm test' },
       }),
     ).toMatchObject({
       allowed: false,
       closestRule: {
-        rule: 'Bash(dedup-append-lead.py *)',
+        rule: 'RunCommand(dedup-append-lead.py *)',
         reason: expect.stringContaining('npm test'),
       },
       reason: expect.stringContaining('did not match'),
@@ -56,7 +68,9 @@ describe('autonomous tool rule matcher', () => {
   it('canonicalizes legacy interpreter script Bash rules while matching', () => {
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(python3 /Users/example/scripts/dedup-append-lead.py)'],
+        rules: [
+          'RunCommand(python3 /Users/example/scripts/dedup-append-lead.py)',
+        ],
         toolName: 'Bash',
         toolInput: {
           command:
@@ -65,23 +79,24 @@ describe('autonomous tool rule matcher', () => {
       }),
     ).toMatchObject({
       allowed: true,
-      matchedRule: 'Bash(python3 /Users/example/scripts/dedup-append-lead.py)',
+      matchedRule:
+        'RunCommand(python3 /Users/example/scripts/dedup-append-lead.py)',
     });
   });
 
-  it('does not let wildcard scoped Bash rules cover extra shell segments', () => {
-    expect(validateAutonomousToolRule('Bash(gog sheets *)')).toEqual({
+  it('does not let wildcard scoped RunCommand rules cover extra shell segments', () => {
+    expect(validateAutonomousToolRule('RunCommand(gog sheets *)')).toEqual({
       ok: true,
     });
     expect(
-      validateAutonomousToolRule('Bash(gog sheets * | python3 *)'),
+      validateAutonomousToolRule('RunCommand(gog sheets * | python3 *)'),
     ).toEqual({
       ok: false,
       reason: expect.stringContaining('exactly one simple command leaf'),
     });
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(gog sheets *)'],
+        rules: ['RunCommand(gog sheets *)'],
         toolName: 'Bash',
         toolInput: { command: 'gog sheets get budget' },
       }),
@@ -94,7 +109,7 @@ describe('autonomous tool rule matcher', () => {
     ]) {
       expect(
         evaluateAutonomousToolUse({
-          rules: ['Bash(gog sheets *)'],
+          rules: ['RunCommand(gog sheets *)'],
           toolName: 'Bash',
           toolInput: { command },
         }),
@@ -110,7 +125,7 @@ describe('autonomous tool rule matcher', () => {
   it('matches Bash rules per parsed argv leaf without shell state changes', () => {
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(git status)', 'Bash(head)'],
+        rules: ['RunCommand(git status)', 'RunCommand(head)'],
         toolName: 'Bash',
         toolInput: { command: 'git status | head' },
       }),
@@ -118,7 +133,7 @@ describe('autonomous tool rule matcher', () => {
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(git status)'],
+        rules: ['RunCommand(git status)'],
         toolName: 'Bash',
         toolInput: { command: 'git status | head' },
       }),
@@ -129,7 +144,7 @@ describe('autonomous tool rule matcher', () => {
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(git status)'],
+        rules: ['RunCommand(git status)'],
         toolName: 'Bash',
         toolInput: { command: 'git status && rm -rf /' },
       }),
@@ -140,23 +155,23 @@ describe('autonomous tool rule matcher', () => {
   });
 
   it('rejects stateful Bash leaves as durable scopes', () => {
-    expect(validateAutonomousToolRule('Bash(cd *)')).toMatchObject({
+    expect(validateAutonomousToolRule('RunCommand(cd *)')).toMatchObject({
       ok: false,
       reason: expect.stringContaining('changes shell state'),
     });
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(cd *)', 'Bash(npm test)'],
+        rules: ['RunCommand(cd *)', 'RunCommand(npm test)'],
         toolName: 'Bash',
         toolInput: { command: 'cd /tmp/evil && npm test' },
       }),
     ).toMatchObject({ allowed: false });
   });
 
-  it('keeps scoped Bash matching positional and argv-explicit', () => {
+  it('keeps scoped RunCommand matching positional and argv-explicit', () => {
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(echo "hello world")'],
+        rules: ['RunCommand(echo "hello world")'],
         toolName: 'Bash',
         toolInput: { command: 'echo "hello world"' },
       }),
@@ -165,7 +180,7 @@ describe('autonomous tool rule matcher', () => {
     expect(
       evaluateAutonomousToolUse({
         rules: [
-          'Bash(curl -H "Accept: application/json" https://api.example.com/*)',
+          'RunCommand(curl -H "Accept: application/json" https://api.example.com/*)',
         ],
         toolName: 'Bash',
         toolInput: {
@@ -177,7 +192,7 @@ describe('autonomous tool rule matcher', () => {
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(echo "hello world")'],
+        rules: ['RunCommand(echo "hello world")'],
         toolName: 'Bash',
         toolInput: { command: 'echo hello world' },
       }),
@@ -185,7 +200,7 @@ describe('autonomous tool rule matcher', () => {
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(curl https://api.example.com/*)'],
+        rules: ['RunCommand(curl https://api.example.com/*)'],
         toolName: 'Bash',
         toolInput: { command: 'curl -sSf https://api.example.com/x' },
       }),
@@ -193,7 +208,7 @@ describe('autonomous tool rule matcher', () => {
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(curl * https://api.example.com/*)'],
+        rules: ['RunCommand(curl * https://api.example.com/*)'],
         toolName: 'Bash',
         toolInput: { command: 'curl -sSf https://api.example.com/x' },
       }),
@@ -201,7 +216,7 @@ describe('autonomous tool rule matcher', () => {
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(npm test *)'],
+        rules: ['RunCommand(npm test *)'],
         toolName: 'Bash',
         toolInput: { command: 'npm testevil -- --runInBand' },
       }),
@@ -226,7 +241,11 @@ describe('autonomous tool rule matcher', () => {
     ]) {
       expect(
         evaluateAutonomousToolUse({
-          rules: ['Bash(npm test *)', 'Bash(echo *)', 'Bash(cat *)'],
+          rules: [
+            'RunCommand(npm test *)',
+            'RunCommand(echo *)',
+            'RunCommand(cat *)',
+          ],
           toolName: 'Bash',
           toolInput: { command },
         }),
@@ -235,7 +254,7 @@ describe('autonomous tool rule matcher', () => {
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(cat *)'],
+        rules: ['RunCommand(cat *)'],
         toolName: 'Bash',
         toolInput: { command: 'cat secrets.env > /etc/passwd' },
       }),
@@ -248,7 +267,7 @@ describe('autonomous tool rule matcher', () => {
   it('allows non-destructive stderr redirection used by common CLI probes', () => {
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(gog sheets get *)'],
+        rules: ['RunCommand(gog sheets get *)'],
         toolName: 'Bash',
         toolInput: {
           command:
@@ -259,7 +278,7 @@ describe('autonomous tool rule matcher', () => {
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(gog sheets get *)'],
+        rules: ['RunCommand(gog sheets get *)'],
         toolName: 'Bash',
         toolInput: {
           command:
@@ -274,15 +293,15 @@ describe('autonomous tool rule matcher', () => {
 
   it('rejects absolute-path Bash meta executors in persistent scopes', () => {
     for (const rule of [
-      'Bash(/bin/sh -c npm)',
-      'Bash(/usr/bin/env npm test)',
-      'Bash(/usr/bin/sudo npm test)',
-      'Bash(/usr/bin/xargs npm)',
-      'Bash(/usr/bin/find . -exec cat)',
-      'Bash(command *)',
-      'Bash(builtin *)',
-      'Bash(timeout *)',
-      'Bash(nohup *)',
+      'RunCommand(/bin/sh -c npm)',
+      'RunCommand(/usr/bin/env npm test)',
+      'RunCommand(/usr/bin/sudo npm test)',
+      'RunCommand(/usr/bin/xargs npm)',
+      'RunCommand(/usr/bin/find . -exec cat)',
+      'RunCommand(command *)',
+      'RunCommand(builtin *)',
+      'RunCommand(timeout *)',
+      'RunCommand(nohup *)',
     ]) {
       expect(validateAutonomousToolRule(rule)).toMatchObject({
         ok: false,
@@ -292,20 +311,20 @@ describe('autonomous tool rule matcher', () => {
   });
 
   it('does not widen interpreter script paths to wildcard durable scopes', () => {
-    expect(validateAutonomousToolRule('Bash(python3 *)')).toMatchObject({
+    expect(validateAutonomousToolRule('RunCommand(python3 *)')).toMatchObject({
       ok: false,
       reason: expect.stringContaining('too broad'),
     });
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(python3 /tmp/check.py)'],
+        rules: ['RunCommand(python3 /tmp/check.py)'],
         toolName: 'Bash',
         toolInput: { command: 'python3 /tmp/check.py' },
       }),
     ).toMatchObject({ allowed: true });
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(python3 /tmp/check.py)'],
+        rules: ['RunCommand(python3 /tmp/check.py)'],
         toolName: 'Bash',
         toolInput: { command: 'python3 -c "print(1)"' },
       }),
@@ -320,19 +339,19 @@ describe('autonomous tool rule matcher', () => {
     ]) {
       expect(
         evaluateAutonomousToolUse({
-          rules: ['Bash(/tmp/dedup-append-lead.py *)'],
+          rules: ['RunCommand(/tmp/dedup-append-lead.py *)'],
           toolName: 'Bash',
           toolInput: { command },
         }),
       ).toMatchObject({
         allowed: true,
-        matchedRule: 'Bash(/tmp/dedup-append-lead.py *)',
+        matchedRule: 'RunCommand(/tmp/dedup-append-lead.py *)',
       });
     }
 
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(/tmp/dedup-append-lead.py *)'],
+        rules: ['RunCommand(/tmp/dedup-append-lead.py *)'],
         toolName: 'Bash',
         toolInput: {
           command: 'python3 -c "print(1)" /tmp/dedup-append-lead.py',
@@ -344,9 +363,17 @@ describe('autonomous tool rule matcher', () => {
   it('rejects exact bare Bash as too broad', () => {
     expect(validateAutonomousToolRule('Bash')).toMatchObject({
       ok: false,
+      reason: expect.stringContaining('provider-native'),
+    });
+    expect(validateAutonomousToolRule('RunCommand')).toMatchObject({
+      ok: false,
       reason: expect.stringContaining('too broad'),
     });
-    for (const rule of ['Bash(*)', 'Bash(**)', 'Bash(* npm test)']) {
+    for (const rule of [
+      'RunCommand(*)',
+      'RunCommand(**)',
+      'RunCommand(* npm test)',
+    ]) {
       expect(validateAutonomousToolRule(rule)).toMatchObject({
         ok: false,
         reason: expect.stringContaining('too broad'),
@@ -354,7 +381,7 @@ describe('autonomous tool rule matcher', () => {
     }
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Bash(*)'],
+        rules: ['RunCommand(*)'],
         toolName: 'Bash',
         toolInput: { command: 'npm test' },
       }),
@@ -368,16 +395,22 @@ describe('autonomous tool rule matcher', () => {
     ).toMatchObject({ allowed: false });
   });
 
-  it('allows exact file, search, web, and MCP tool names without extra scopes', () => {
+  it('maps exact Gantry file, web, and delegation facades to runtime SDK names', () => {
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Read'],
+        rules: ['FileRead'],
         toolName: 'Read',
       }),
     ).toMatchObject({ allowed: true });
     expect(
       evaluateAutonomousToolUse({
-        rules: ['Grep'],
+        rules: ['FileSearch'],
+        toolName: 'Glob',
+      }),
+    ).toMatchObject({ allowed: true });
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['FileSearch'],
         toolName: 'Grep',
       }),
     ).toMatchObject({ allowed: true });
@@ -389,10 +422,37 @@ describe('autonomous tool rule matcher', () => {
     ).toMatchObject({ allowed: true });
     expect(
       evaluateAutonomousToolUse({
-        rules: ['WebFetch'],
+        rules: ['WebRead'],
         toolName: 'WebFetch',
       }),
     ).toMatchObject({ allowed: true });
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['FileEdit'],
+        toolName: 'MultiEdit',
+      }),
+    ).toMatchObject({ allowed: true });
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['FileWrite'],
+        toolName: 'Write',
+      }),
+    ).toMatchObject({ allowed: true });
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['AgentDelegation'],
+        toolName: 'Agent',
+      }),
+    ).toMatchObject({ allowed: true });
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['AgentDelegation'],
+        toolName: 'Task',
+      }),
+    ).toMatchObject({ allowed: false });
+  });
+
+  it('allows exact MCP tool names without extra scopes', () => {
     expect(
       evaluateAutonomousToolUse({
         rules: ['mcp__github__search'],
@@ -461,9 +521,11 @@ describe('autonomous tool rule matcher', () => {
   it('validates malformed scoped and wildcard rules', () => {
     expect(validateAutonomousToolRule('Agent(worker)').ok).toBe(false);
     expect(validateAutonomousToolRule('Read(/repo/**)').ok).toBe(false);
-    expect(validateAutonomousToolRule('Bash()').ok).toBe(false);
-    expect(validateAutonomousToolRule('Bash(npm test').ok).toBe(false);
-    expect(validateAutonomousToolRule('Bash(npm test) extra').ok).toBe(false);
+    expect(validateAutonomousToolRule('RunCommand()').ok).toBe(false);
+    expect(validateAutonomousToolRule('RunCommand(npm test').ok).toBe(false);
+    expect(validateAutonomousToolRule('RunCommand(npm test) extra').ok).toBe(
+      false,
+    );
     expect(
       validateAutonomousToolRule('mcp__gantry__*(service_restart)').ok,
     ).toBe(false);

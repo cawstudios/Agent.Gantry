@@ -762,7 +762,7 @@ describe('validateIpcAuthRequest', () => {
         'allow_once',
       ],
       closestRule: {
-        rule: 'Bash(npm run build)',
+        rule: 'RunCommand(npm run build)',
         reason: 'Bash leaf npm test did not match any scoped rule.',
       },
       context: {
@@ -789,7 +789,7 @@ describe('validateIpcAuthRequest', () => {
           'allow_timed_grant',
         ],
         closestRule: {
-          rule: 'Bash(npm run build)',
+          rule: 'RunCommand(npm run build)',
           reason: 'Bash leaf npm test did not match any scoped rule.',
         },
       }),

@@ -289,7 +289,9 @@ describe('ToolExecutionPolicyService', () => {
     expect(
       policy.evaluate({
         request,
-        autonomousAllowedToolRules: ['Bash(cat > ~/gantry/settings.yaml)'],
+        autonomousAllowedToolRules: [
+          'RunCommand(cat > ~/gantry/settings.yaml)',
+        ],
       }),
     ).toMatchObject({
       status: 'deny',
@@ -383,10 +385,10 @@ describe('ToolExecutionPolicyService', () => {
       expect.objectContaining({
         status: 'deny',
         reason: expect.stringContaining(
-          'Tool not on autonomous run allowlist: Bash.',
+          'Tool not on autonomous run allowlist: RunCommand.',
         ),
         recoveryAction:
-          'request_permission { "permissionKind": "tool", "toolName": "Bash", "rule": "npm test", "temporaryOnly": false, "reason": "This autonomous run needs scoped Bash access." }',
+          'request_permission { "permissionKind": "tool", "toolName": "RunCommand", "rule": "npm test", "temporaryOnly": false, "reason": "This autonomous run needs scoped command access." }',
       }),
     );
     expect(result.recoveryAction).not.toContain('scheduler_grant_tool');
@@ -409,7 +411,7 @@ describe('ToolExecutionPolicyService', () => {
       expect.objectContaining({
         status: 'deny',
         recoveryAction:
-          'request_permission { "permissionKind": "tool", "toolName": "Bash", "rule": "/Users/example/scripts/dedup-append-lead.py *", "temporaryOnly": false, "reason": "This autonomous run needs scoped Bash access." }',
+          'request_permission { "permissionKind": "tool", "toolName": "RunCommand", "rule": "/Users/example/scripts/dedup-append-lead.py *", "temporaryOnly": false, "reason": "This autonomous run needs scoped command access." }',
       }),
     );
   });
@@ -431,7 +433,7 @@ describe('ToolExecutionPolicyService', () => {
       expect.objectContaining({
         status: 'deny',
         recoveryAction:
-          'Update the autonomous run to use a reviewed semantic capability or invoke a scoped Bash(...) command directly. This Bash command cannot be durably approved for autonomous runs.',
+          'Update the autonomous run to use a reviewed semantic capability or invoke a scoped RunCommand(...) command directly. This command cannot be durably approved for autonomous runs.',
       }),
     );
   });
@@ -453,7 +455,7 @@ describe('ToolExecutionPolicyService', () => {
       expect.objectContaining({
         status: 'deny',
         recoveryAction:
-          'Update the autonomous run to use a reviewed semantic capability or invoke a scoped Bash(...) command directly. This Bash command cannot be durably approved for autonomous runs.',
+          'Update the autonomous run to use a reviewed semantic capability or invoke a scoped RunCommand(...) command directly. This command cannot be durably approved for autonomous runs.',
       }),
     );
   });
@@ -475,7 +477,7 @@ describe('ToolExecutionPolicyService', () => {
       expect.objectContaining({
         status: 'deny',
         recoveryAction:
-          'Update the autonomous run to use a reviewed semantic capability or invoke a scoped Bash(...) command directly. This Bash command cannot be durably approved for autonomous runs.',
+          'Update the autonomous run to use a reviewed semantic capability or invoke a scoped RunCommand(...) command directly. This command cannot be durably approved for autonomous runs.',
       }),
     );
   });
@@ -492,13 +494,13 @@ describe('ToolExecutionPolicyService', () => {
     expect(
       policy.evaluate({
         request,
-        autonomousAllowedToolRules: ['Bash(npm run build)'],
+        autonomousAllowedToolRules: ['RunCommand(npm run build)'],
       }),
     ).toMatchObject({
       status: 'deny',
       reason: expect.stringContaining('npm test -- --runInBand'),
       closestRule: {
-        rule: 'Bash(npm run build)',
+        rule: 'RunCommand(npm run build)',
         reason: expect.stringContaining('npm test -- --runInBand'),
       },
     });

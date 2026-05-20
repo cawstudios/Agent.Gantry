@@ -153,7 +153,7 @@ export function capabilityStatusText(): string {
     'Semantic capability tools:',
     '- capability_search: find built-in capabilities such as google.sheets.write',
     '- request_capability: request a named semantic capability for this agent',
-    '- propose_local_cli_capability: review a user-defined authenticated local CLI capability draft; it is not runnable Bash authority until runtime enforcement exists',
+    '- propose_local_cli_capability: review a user-defined authenticated local CLI capability draft; it is not runnable command-tool authority until runtime enforcement exists',
     '- manage_capability: view/change/revoke/test/audit guidance for selected capabilities',
     '',
     'Scheduler monitoring:',

@@ -1,4 +1,8 @@
 import { normalizePersistentBashRuleContent } from './bash-command-parser.js';
+import {
+  publicGantryToolNameForSdkTool,
+  RUN_COMMAND_TOOL_NAME,
+} from './agent-tool-references.js';
 
 export interface PermissionRuleLike {
   toolName?: unknown;
@@ -51,15 +55,16 @@ function permissionRuleAllowedToolRule(rule: unknown): string | null {
   const toolName = trimmedString(rule.toolName, 120);
   if (!toolName) return null;
   if (toolName.includes('(') || toolName.includes(')')) return null;
+  const publicToolName = publicGantryToolNameForSdkTool(toolName);
   const ruleContent = trimmedString(rule.ruleContent, 2048);
   if (ruleContent === null) return null;
   const normalizedRuleContent =
-    toolName === 'Bash' && ruleContent
+    publicToolName === RUN_COMMAND_TOOL_NAME && ruleContent
       ? normalizePersistentBashRuleContent(ruleContent)
       : ruleContent;
   return normalizedRuleContent
-    ? `${toolName}(${normalizedRuleContent})`
-    : toolName;
+    ? `${publicToolName}(${normalizedRuleContent})`
+    : publicToolName;
 }
 
 function isPermissionUpdateLike(value: unknown): value is PermissionUpdateLike {

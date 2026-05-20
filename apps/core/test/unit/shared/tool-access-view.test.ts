@@ -37,15 +37,23 @@ describe('tool access view', () => {
     ).toHaveLength(1);
   });
 
-  it('projects canonical Browser grants into Gantry browser runtime tools for jobs', () => {
+  it('projects canonical Browser and facade grants into runtime tools for jobs', () => {
     expect(
       buildJobToolAccessView({
-        effectiveAllowedTools: ['Read', 'Browser'],
+        effectiveAllowedTools: [
+          'FileRead',
+          'FileSearch',
+          'RunCommand(npm test *)',
+          'Browser',
+        ],
       }).projectedRuntimeTools,
     ).toEqual(
       expect.arrayContaining([
         'mcp__gantry__browser_act',
-        'mcp__gantry__browser_act',
+        'Read',
+        'Glob',
+        'Grep',
+        'Bash',
       ]),
     );
   });

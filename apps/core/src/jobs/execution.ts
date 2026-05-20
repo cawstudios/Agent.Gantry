@@ -55,10 +55,10 @@ import {
   createJobRunDiagnostics,
   formatTerminalToolDenial,
   forwardRunnerRuntimeEvents,
-  requiredToolsIncludeBrowser,
   terminalDiagnosticsPayload,
 } from './execution-diagnostics.js';
-import { countBrowserActivityForRunBestEffort } from './execution-browser-activity.js';
+import { requiredToolMatchesForRunBestEffort } from './execution-browser-activity.js';
+import { verifyRequiredToolUsageAfterRun } from './execution-required-tool-usage.js';
 import { pauseJobForSetupIfNeeded } from './execution-readiness.js';
 import {
   bindSchedulerRunEventState,
@@ -209,7 +209,8 @@ export async function runJob(
     };
     let latestUsage: NormalizedModelUsage | undefined;
     let startNotified = false;
-    let browserActivityVerificationSkipped = false;
+    let requiredToolUsageVerificationSkipped = false;
+    let requiredToolUsageVerified = false;
     try {
       const groupDir = resolveGroupFolderPath(execution.group.folder);
       fs.mkdirSync(groupDir, { recursive: true });
@@ -386,6 +387,7 @@ export async function runJob(
                 assistantName: ASSISTANT_NAME,
                 memoryContextBlock: turnContext?.memoryContextBlock,
                 allowedTools: toolPolicy.effectiveAllowedTools,
+                requiredTools: requiredToolPreflight.requiredTools,
                 selectedSkillIds,
                 selectedMcpServerIds,
               },
@@ -450,45 +452,23 @@ export async function runJob(
             if (!error) {
               error = formatTerminalToolDenial(diagnostics) ?? null;
             }
-            if (
-              !error &&
-              requiredToolsIncludeBrowser(requiredToolPreflight.requiredTools)
-            ) {
-              const browserActivityCount =
-                await countBrowserActivityForRunBestEffort({
-                  deps,
-                  jobId: currentJob.id,
-                  runId,
-                  diagnostics,
-                  log: logger,
-                });
-              if (browserActivityCount === null) {
-                browserActivityVerificationSkipped = true;
-                await emitJobEvent(RUNTIME_EVENT_TYPES.JOB_TOOL_ACTIVITY, {
-                  phase: 'required_tool_verification_skipped',
-                  tool: 'Browser',
-                  ok: true,
-                  reason:
-                    'Browser activity verification timed out after the runner completed.',
-                });
-              } else if (browserActivityCount > 0) {
-                diagnostics.browserActivityCount = browserActivityCount;
-                await emitJobEvent(RUNTIME_EVENT_TYPES.JOB_TOOL_ACTIVITY, {
-                  phase: 'required_tool_satisfied',
-                  tool: 'Browser',
-                  browser_activity_count: diagnostics.browserActivityCount,
-                  ok: true,
-                });
+            if (!error && requiredToolPreflight.requiredTools.length > 0) {
+              const usage = await verifyRequiredToolUsageAfterRun({
+                deps,
+                jobId: currentJob.id,
+                runId,
+                requiredTools: requiredToolPreflight.requiredTools,
+                diagnostics,
+                emitJobEvent,
+                log: logger,
+              });
+              if (usage.status === 'skipped') {
+                requiredToolUsageVerificationSkipped = true;
+              } else if (usage.status === 'verified') {
+                requiredToolUsageVerified = true;
               } else {
-                error =
-                  'Browser was available but not used. Required tool assertion Browser was not satisfied by any browser IPC action during this run. Browser in required_tools is a must-use assertion, not a permission request; use browser_open, browser_inspect, or browser_act during the run, or update the job to remove Browser from required_tools when browser use is optional.';
-                await emitJobEvent(RUNTIME_EVENT_TYPES.JOB_TOOL_ACTIVITY, {
-                  phase: 'required_tool_unsatisfied',
-                  tool: 'Browser',
-                  browser_activity_count: 0,
-                  ok: false,
-                  error,
-                });
+                requiredToolUsageVerified = true;
+                error = usage.error;
               }
             }
             if (!error) {
@@ -543,19 +523,19 @@ export async function runJob(
     }
     if (
       !deletionGuard.deletedDuringRun &&
-      requiredToolsIncludeBrowser(currentJob.required_tools ?? []) &&
-      !browserActivityVerificationSkipped &&
-      diagnostics.browserActivityCount <= 0
+      (currentJob.required_tools ?? []).length > 0 &&
+      !requiredToolUsageVerificationSkipped &&
+      !requiredToolUsageVerified
     ) {
-      const browserActivityCount = await countBrowserActivityForRunBestEffort({
+      const matchedRequiredTools = await requiredToolMatchesForRunBestEffort({
         deps,
         jobId: currentJob.id,
         runId,
         diagnostics,
         log: logger,
       });
-      if (browserActivityCount !== null) {
-        diagnostics.browserActivityCount = browserActivityCount;
+      if (matchedRequiredTools !== null) {
+        diagnostics.requiredToolMatches = matchedRequiredTools;
       }
     }
     const {

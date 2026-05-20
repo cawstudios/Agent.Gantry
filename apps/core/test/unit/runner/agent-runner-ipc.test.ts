@@ -182,6 +182,10 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'agent-tool-references.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/gantry-tool-facades.ts'),
+    path.join(sharedDir, 'gantry-tool-facades.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/bash-command-parser.ts'),
     path.join(sharedDir, 'bash-command-parser.ts'),
   );
@@ -1205,7 +1209,7 @@ describe('agent-runner IPC lifecycle', () => {
         {
           TEST_TOOL_USE_ONLY: 'Bash',
           TEST_TOOL_USE_CMD: 'npm test --runInBand',
-          TEST_LIVE_TOOL_RULE: 'Bash(npm test *)',
+          TEST_LIVE_TOOL_RULE: 'RunCommand(npm test *)',
         },
       );
 
@@ -1269,14 +1273,14 @@ describe('agent-runner IPC lifecycle', () => {
         'permission.requested',
       ]);
       expect(attemptEvents.map((event) => event.payload?.toolName)).toEqual([
-        'Bash',
+        'RunCommand',
         'Browser',
       ]);
 
       const finalOutput = outputs.at(-1);
       expect(finalOutput?.primeToolAttempts).toEqual([
         expect.objectContaining({
-          toolName: 'Bash',
+          toolName: 'RunCommand',
           suggestions: [
             {
               type: 'addRules',
@@ -1284,7 +1288,7 @@ describe('agent-runner IPC lifecycle', () => {
               destination: 'session',
               rules: [
                 {
-                  toolName: 'Bash',
+                  toolName: 'RunCommand',
                   ruleContent: 'npm test --runInBand',
                 },
               ],
@@ -1658,7 +1662,7 @@ describe('agent-runner IPC lifecycle', () => {
         expect.objectContaining({
           sourceAgentFolder: 'team',
           runHandle: 'runner-test-run',
-          toolName: 'Bash',
+          toolName: 'RunCommand',
           signature: expect.any(String),
         }),
       );
@@ -1672,7 +1676,7 @@ describe('agent-runner IPC lifecycle', () => {
           destination: 'session',
           rules: [
             {
-              toolName: 'Bash',
+              toolName: 'RunCommand',
               ruleContent: 'npm test',
             },
           ],
@@ -1831,7 +1835,7 @@ describe('agent-runner IPC lifecycle', () => {
           jobId: 'job-1',
           allowedTools: [
             'Browser',
-            'Bash(/Users/example/runtime/scripts/append-lead.py *)',
+            'RunCommand(/Users/example/runtime/scripts/append-lead.py *)',
           ],
           prompt: 'Find new leads.',
         }),
@@ -1846,7 +1850,7 @@ describe('agent-runner IPC lifecycle', () => {
       expect(prompt).toContain('found, added, skipped, and errors');
       expect(prompt).toContain('Durable tool rules for this autonomous run:');
       expect(prompt).toContain(
-        'Bash(/Users/example/runtime/scripts/append-lead.py *)',
+        'RunCommand(/Users/example/runtime/scripts/append-lead.py *)',
       );
       expect(prompt).toContain('Do not wrap it in python -c');
       expect(prompt).toContain('Find new leads.');
@@ -1855,7 +1859,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'scheduled jobs allow matching scoped Bash without writing permission IPC',
+    'scheduled jobs allow matching scoped RunCommand without writing permission IPC',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1864,7 +1868,7 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({
           isScheduledJob: true,
           jobId: 'job-1',
-          allowedTools: ['Bash(npm test *)'],
+          allowedTools: ['RunCommand(npm test *)'],
         }),
         {
           TEST_TOOL_USE_ONLY: 'Bash',
@@ -1920,7 +1924,7 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({
           isScheduledJob: true,
           jobId: 'job-1',
-          allowedTools: ['Bash(gog sheets *)'],
+          allowedTools: ['RunCommand(gog sheets *)'],
           modelCredentialEnv: {
             NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
           },
@@ -1968,7 +1972,7 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({
           isScheduledJob: true,
           jobId: 'job-1',
-          allowedTools: ['Bash(npm test *)'],
+          allowedTools: ['RunCommand(npm test *)'],
         }),
         {
           TEST_SDK_NETWORK_AFTER_TOOL: '1',
@@ -2013,7 +2017,7 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({
           isScheduledJob: true,
           jobId: 'job-1',
-          allowedTools: ['Bash(npm test *)'],
+          allowedTools: ['RunCommand(npm test *)'],
         }),
         {
           TEST_SDK_NETWORK_AFTER_TOOL: '1',
@@ -2073,7 +2077,7 @@ describe('agent-runner IPC lifecycle', () => {
         expect.objectContaining({
           targetJid: 'tg:team',
           sourceAgentFolder: 'team',
-          toolName: 'Bash',
+          toolName: 'RunCommand',
         }),
       );
       expect(call?.permissionRequest?.context).toEqual(
@@ -2121,7 +2125,7 @@ describe('agent-runner IPC lifecycle', () => {
           destination: 'session',
           rules: [
             {
-              toolName: 'Bash',
+              toolName: 'RunCommand',
               ruleContent: 'npm test',
             },
           ],

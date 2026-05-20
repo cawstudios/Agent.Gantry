@@ -11,6 +11,33 @@ import {
   SEMANTIC_CAPABILITY_RULE_PREFIX,
   semanticCapabilityIdValidationReason,
 } from './semantic-capability-ids.js';
+import {
+  isGantryFacadeExactToolRule,
+  isProviderNativeExactToolRule,
+  providerNativeToolRejectionReason,
+  RUN_COMMAND_TOOL_NAME,
+} from './gantry-tool-facades.js';
+
+export {
+  GANTRY_FACADE_EXACT_TOOL_NAMES,
+  GANTRY_FACADE_INPUT_SCHEMAS,
+  DEFAULT_GANTRY_HARNESS_TOOL_PROJECTION,
+  type GantryFacadeExactToolName,
+  type GantryHarnessToolProjection,
+  isGantryFacadeExactToolName,
+  isGantryFacadeExactToolRule,
+  isProviderNativeExactToolRule,
+  isRunCommandToolRule,
+  projectGantryToolRuleForHarness,
+  publicCapabilityAllowedToolRules,
+  providerNativeToolRejectionReason,
+  providerNativeToolReplacement,
+  PROVIDER_NATIVE_TOOL_REJECTION_REASON,
+  publicGantryToolNameForSdkTool,
+  RUN_COMMAND_TOOL_NAME,
+  sdkToolsForGantryFacadeTool,
+  validateGantryFacadeToolInput,
+} from './gantry-tool-facades.js';
 
 const MCP_WILDCARD_RE = /^mcp__[A-Za-z0-9_-]+__\*$/;
 const HOST_PRIVATE_BROWSER_BACKEND_MCP_SERVER_NAMES = [
@@ -26,41 +53,6 @@ const HOST_PRIVATE_BROWSER_BACKEND_MCP_TOOL_PREFIXES =
 const GANTRY_BROWSER_TOOL_PREFIX = 'mcp__gantry__browser';
 const BROWSER_CANONICAL_TOOL_NAME = 'Browser';
 const BASH_TOOL_NAME = 'Bash';
-const PROVIDER_NATIVE_EXACT_TOOL_NAMES = new Set([
-  'Agent',
-  'AskUserQuestion',
-  'CronCreate',
-  'CronDelete',
-  'Edit',
-  'EnterPlanMode',
-  'EnterWorktree',
-  'ExitPlanMode',
-  'ExitWorktree',
-  'Glob',
-  'Grep',
-  'LS',
-  'ListMcpResources',
-  'MultiEdit',
-  'NotebookEdit',
-  'Monitor',
-  'PushNotification',
-  'Read',
-  'ReadMcpResource',
-  'RemoteTrigger',
-  'ScheduleWakeup',
-  'SendMessage',
-  'Skill',
-  'Task',
-  'TaskOutput',
-  'TaskStop',
-  'TeamCreate',
-  'TeamDelete',
-  'ToolSearch',
-  'TodoWrite',
-  'WebFetch',
-  'WebSearch',
-  'Write',
-]);
 export const SDK_SANDBOX_NETWORK_ACCESS_TOOL_NAME = 'SandboxNetworkAccess';
 export const PROJECTED_BROWSER_MCP_TOOL_NAMES = [
   'mcp__gantry__browser_status',
@@ -79,12 +71,9 @@ export const BROWSER_ACTION_MCP_RULE_REJECTION_REASON =
 export const BROWSER_PROJECTED_MCP_RULE_REJECTION_REASON =
   'Gantry browser tools are runtime projections, not durable capabilities; persist the canonical Browser tool capability instead.';
 export const BASH_SCOPE_REJECTION_REASON =
-  'Persistent Bash scope is too broad; include a literal command prefix such as Bash(npm test *).';
+  'Persistent RunCommand scope is too broad; include a literal argv prefix such as RunCommand(npm test *).';
 export const SDK_SANDBOX_NETWORK_ACCESS_REJECTION_REASON =
-  'SDK sandbox network prompts are internal defense-in-depth callbacks and cannot be persisted as agent tool rules; approve the underlying semantic capability, canonical Browser grant, exact admin MCP tool, MCP server binding, or scoped Bash fallback instead.';
-export const PROVIDER_NATIVE_TOOL_REJECTION_REASON =
-  'Provider-native SDK tools are execution-harness projections and cannot be persisted as Gantry tool rules; select a Gantry capability such as Browser, a semantic capability, an exact Gantry admin MCP tool, or a scoped Bash(...) fallback.';
-
+  'SDK sandbox network prompts are internal defense-in-depth callbacks and cannot be persisted as agent tool rules; approve the underlying semantic capability, canonical Browser grant, exact admin MCP tool, MCP server binding, or scoped RunCommand fallback instead.';
 export function parseReadableScopedToolRule(
   value: string,
 ): { toolName: string; scope: string } | null {
@@ -155,12 +144,6 @@ export function isSdkSandboxNetworkAccessToolRule(value: string): boolean {
   return isSdkSandboxNetworkAccessToolName(toolName);
 }
 
-export function isProviderNativeExactToolRule(value: string): boolean {
-  const rule = value.trim();
-  if (parseReadableScopedToolRule(rule)) return false;
-  return PROVIDER_NATIVE_EXACT_TOOL_NAMES.has(rule);
-}
-
 export function persistentPermissionToolId(
   appId: string,
   allowedRule: string,
@@ -198,7 +181,7 @@ export function validateReadableAgentToolRule(
     return {
       ok: false,
       reason:
-        'Tool rule must be readable; use a tool name or scoped Bash rule, not an internal tool ID.',
+        'Tool rule must be readable; use a tool name or scoped RunCommand rule, not an internal tool ID.',
     };
   }
   if (rule.startsWith(SEMANTIC_CAPABILITY_RULE_PREFIX)) {
@@ -212,6 +195,9 @@ export function validateReadableAgentToolRule(
           ) ?? 'Invalid semantic capability rule.',
       };
     }
+    return { ok: true };
+  }
+  if (isGantryFacadeExactToolRule(rule)) {
     return { ok: true };
   }
   if (rule === '*') {
@@ -247,11 +233,17 @@ export function validateReadableAgentToolRule(
     if (!scoped.scope) {
       return { ok: false, reason: 'Scoped tool rule cannot be empty.' };
     }
-    if (scoped.toolName !== BASH_TOOL_NAME) {
+    if (scoped.toolName === BASH_TOOL_NAME) {
+      return {
+        ok: false,
+        reason: providerNativeToolRejectionReason(BASH_TOOL_NAME),
+      };
+    }
+    if (scoped.toolName !== RUN_COMMAND_TOOL_NAME) {
       return {
         ok: false,
         reason:
-          'Only Bash supports persistent scoped tool rules; use an exact tool name for other tools.',
+          'Only RunCommand supports persistent scoped tool rules; use an exact tool name for other tools.',
       };
     }
     const bashScope = validatePersistentBashScope(scoped.scope);
@@ -267,14 +259,20 @@ export function validateReadableAgentToolRule(
   if (rule === BASH_TOOL_NAME) {
     return {
       ok: false,
+      reason: providerNativeToolRejectionReason(BASH_TOOL_NAME),
+    };
+  }
+  if (rule === RUN_COMMAND_TOOL_NAME) {
+    return {
+      ok: false,
       reason:
-        'Persistent bare Bash grants are too broad; request a scoped Bash(<pattern>) rule.',
+        'Persistent bare RunCommand grants are too broad; request a scoped RunCommand(<argv pattern>) rule.',
     };
   }
   if (isProviderNativeExactToolRule(rule)) {
     return {
       ok: false,
-      reason: PROVIDER_NATIVE_TOOL_REJECTION_REASON,
+      reason: providerNativeToolRejectionReason(rule),
     };
   }
   if (MCP_WILDCARD_RE.test(rule)) {
@@ -319,7 +317,7 @@ export function validatePersistentBashScope(
     return {
       ok: false,
       reason:
-        'Persistent Bash scopes must contain exactly one simple command leaf; request separate scoped commands.',
+        'Persistent RunCommand scopes must contain exactly one simple command leaf; request separate scoped commands.',
     };
   }
   const destructiveRedirect = parsed.leaves[0].redirects.find(
@@ -329,7 +327,7 @@ export function validatePersistentBashScope(
     return {
       ok: false,
       reason:
-        'Persistent Bash rules cannot include destructive redirection; use Allow once.',
+        'Persistent RunCommand rules cannot include destructive redirection; use Allow once.',
     };
   }
   const nonDurableReason = nonDurableBashLeafReason(parsed.leaves[0]);

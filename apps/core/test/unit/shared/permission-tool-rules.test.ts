@@ -15,7 +15,7 @@ describe('permission tool rule extraction', () => {
           ],
         },
       ]),
-    ).toEqual(['Bash(npm test *)', 'Read']);
+    ).toEqual(['RunCommand(npm test *)', 'FileRead']);
   });
 
   it('normalizes safe Python script approvals to script-path wildcard rules', () => {
@@ -38,8 +38,8 @@ describe('permission tool rule extraction', () => {
         },
       ]),
     ).toEqual([
-      'Bash(/tmp/dedup-append-lead.py *)',
-      'Bash(/tmp/other-dedup-append-lead.py *)',
+      'RunCommand(/tmp/dedup-append-lead.py *)',
+      'RunCommand(/tmp/other-dedup-append-lead.py *)',
     ]);
   });
 

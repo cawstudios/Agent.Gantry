@@ -681,7 +681,7 @@ describe('agent-spawn timeout behavior', () => {
     emitOutputMarker(fakeProc, {
       status: 'error',
       result: null,
-      error: 'Permission denied: scoped Bash rule missing',
+      error: 'Permission denied: scoped RunCommand rule missing',
       newSessionId: 'session-denied',
     });
     fakeProc.stderr.push('sdk stack tail should not replace structured error');
@@ -693,13 +693,13 @@ describe('agent-spawn timeout behavior', () => {
     const result = await resultPromise;
     expect(result).toMatchObject({
       status: 'error',
-      error: 'Permission denied: scoped Bash rule missing',
+      error: 'Permission denied: scoped RunCommand rule missing',
       newSessionId: 'session-denied',
     });
     expect(onOutput).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'error',
-        error: 'Permission denied: scoped Bash rule missing',
+        error: 'Permission denied: scoped RunCommand rule missing',
       }),
     );
   });
@@ -1718,11 +1718,7 @@ describe('agent-spawn timeout behavior', () => {
       ['Browser', 'mcp__github__search_repositories'],
       'Third-party MCP tool names are not selected directly',
     ],
-    [
-      'bare Bash',
-      ['Browser', 'Bash'],
-      'Persistent bare Bash grants are too broad',
-    ],
+    ['bare Bash', ['Browser', 'Bash'], 'Provider-native SDK tools'],
   ])(
     'fails closed on stale %s rules during spawn',
     async (_label, rules, reason) => {

@@ -649,7 +649,9 @@ describe('createCanUseToolCallback', () => {
         jobId: 'job-1',
         chatJid: 'tg:test',
         threadId: undefined,
-        allowedTools: ['Bash(/Users/example/runtime/scripts/append-lead.py *)'],
+        allowedTools: [
+          'RunCommand(/Users/example/runtime/scripts/append-lead.py *)',
+        ],
       } as never,
     });
 

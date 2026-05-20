@@ -3,6 +3,7 @@ import {
   isCanonicalBrowserCapabilityRule,
   isProjectedBrowserMcpToolRule,
   parseReadableScopedToolRule,
+  RUN_COMMAND_TOOL_NAME,
   validateReadableAgentToolRule,
 } from '../../shared/agent-tool-references.js';
 import { isGantryMcpWildcardRule } from '../../shared/admin-mcp-tools.js';
@@ -111,11 +112,11 @@ export function validateRequiredToolRule(
   if (!readable.ok) return readable;
   const scoped = parseReadableScopedToolRule(trimmed);
   if (scoped) {
-    return scoped.toolName === 'Bash'
+    return scoped.toolName === RUN_COMMAND_TOOL_NAME
       ? { ok: true }
       : {
           ok: false,
-          reason: 'Only Bash supports scoped required-tool assertions.',
+          reason: 'Only RunCommand supports scoped required-tool assertions.',
         };
   }
   if (parseSemanticCapabilityRule(trimmed)) return { ok: true };
@@ -129,7 +130,7 @@ export function validateRequiredToolRule(
   return {
     ok: false,
     reason:
-      'Use canonical Browser, capability:<id>, exact mcp__gantry__ tool names, or scoped Bash(...).',
+      'Use canonical Browser, capability:<id>, exact mcp__gantry__ tool names, or scoped RunCommand(...).',
   };
 }
 

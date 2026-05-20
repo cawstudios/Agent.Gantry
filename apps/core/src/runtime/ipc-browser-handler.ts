@@ -37,6 +37,7 @@ import {
 import { type IpcDomainContext } from './ipc-domain-types.js';
 import type { CredentialBrokerHealth } from '../domain/models/credentials.js';
 import { memoryAgentIdForGroupFolder } from '../memory/app-memory-boundaries.js';
+import { resolveBrowserFileAttachPayload } from './browser-file-attach-source.js';
 
 interface BrowserRequest {
   requestId: string;
@@ -44,6 +45,8 @@ interface BrowserRequest {
   payload: Record<string, unknown>;
   jobId?: string;
   runId?: string;
+  appId?: string;
+  agentId?: string;
   publicToolName?: string;
 }
 
@@ -60,6 +63,7 @@ type BrowserContext = Pick<
   browserIpcAuthorized?: boolean;
   getCredentialBroker?: IpcDomainContext['deps']['getCredentialBroker'];
   getCredentialBrokerProfile?: IpcDomainContext['deps']['getCredentialBrokerProfile'];
+  getFileArtifactStore?: IpcDomainContext['deps']['getFileArtifactStore'];
   callBrowserTool?: IpcDomainContext['deps']['callBrowserTool'];
   publishBrowserJobActivity?: IpcDomainContext['deps']['publishBrowserJobActivity'];
   closeBrowserToolBackends?: IpcDomainContext['deps']['closeBrowserToolBackends'];
@@ -88,6 +92,7 @@ const POINTER_ACTIONS = new Set<BrowserBackendAction>([
   'drop',
   'select_option',
   'fill_form',
+  'file_attach',
 ]);
 const FOREGROUND_BEFORE_DISPATCH_ACTIONS = new Set<BrowserBackendAction>([
   ...POINTER_ACTIONS,
@@ -480,16 +485,22 @@ async function handleBrowserToolActionInner(
     }
   }
   const backendTimeoutMs = browserBackendTimeoutMs(deadline);
+  const fileAccessRoot = path.join(
+    DATA_DIR,
+    'sessions',
+    context.sourceAgentFolder,
+    'extra',
+  );
+  const backendPayload = await resolveBrowserFileAttachPayload({
+    request,
+    sourceAgentFolder: context.sourceAgentFolder,
+    getFileArtifactStore: context.getFileArtifactStore,
+  });
   const result = await context.callBrowserTool({
     toolName: request.action,
-    arguments: request.payload,
+    arguments: backendPayload,
     session,
-    fileAccessRoot: path.join(
-      DATA_DIR,
-      'sessions',
-      context.sourceAgentFolder,
-      'extra',
-    ),
+    fileAccessRoot,
     timeoutMs: backendTimeoutMs,
   });
   return { ok: true, data: result };

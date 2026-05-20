@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import {
   hasBashShellControlSyntax,
+  RUN_COMMAND_TOOL_NAME,
   validateReadableAgentToolRule,
 } from './agent-tool-references.js';
 import {
@@ -413,7 +414,7 @@ function validateLocalCliCommandTemplate(
       reason: 'Local CLI preflight commands cannot contain wildcards.',
     };
   }
-  const readableRule = `Bash(${trimmed})`;
+  const readableRule = `${RUN_COMMAND_TOOL_NAME}(${trimmed})`;
   const ruleValidation = validateReadableAgentToolRule(readableRule);
   if (!ruleValidation.ok) return ruleValidation;
   return { ok: true };

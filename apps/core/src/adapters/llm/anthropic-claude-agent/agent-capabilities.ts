@@ -20,6 +20,8 @@ import {
   isCanonicalBrowserCapabilityRule,
   isHostPrivateBrowserMcpServerName,
   parseReadableScopedToolRule,
+  RUN_COMMAND_TOOL_NAME,
+  sdkToolsForGantryFacadeTool,
 } from '../../../shared/agent-tool-references.js';
 import {
   AVAILABLE_NATIVE_SDK_TOOLS,
@@ -95,33 +97,34 @@ const DEFAULT_ALLOWED_TOOLS = [
   ...GANTRY_MCP_ALLOWED_TOOLS,
 ] as const;
 
-function sdkToolName(toolRule: string): string {
-  const paren = toolRule.indexOf('(');
-  return (paren === -1 ? toolRule : toolRule.slice(0, paren)).trim();
-}
-
-function configuredToolAllowedForPersona(toolRule: string): boolean {
-  if (toolRule.trim() === 'Bash') return false;
-  if (hasScopeSyntax(toolRule)) return false;
-  if (parseReadableScopedToolRule(toolRule)) return false;
-  if (isGantryMcpWildcardRule(toolRule)) return false;
+function configuredToolAllowedSdkNames(toolRule: string): string[] {
+  const trimmed = toolRule.trim();
+  if (!trimmed || trimmed === 'Bash') return [];
+  if (hasScopeSyntax(trimmed)) return [];
+  if (parseReadableScopedToolRule(trimmed)) return [];
+  if (isGantryMcpWildcardRule(toolRule)) return [];
   const gantryMcpToolName = gantryMcpToolNameFromFullName(toolRule);
-  if (gantryMcpToolName?.startsWith('browser')) return false;
-  if (gantryMcpToolName) return true;
-  const toolName = sdkToolName(toolRule);
-  return CONFIGURABLE_NATIVE_SDK_TOOL_NAMES.has(toolName);
+  if (gantryMcpToolName?.startsWith('browser')) return [];
+  if (gantryMcpToolName) return [trimmed];
+  return sdkToolsForGantryFacadeTool(trimmed).filter((toolName) =>
+    CONFIGURABLE_NATIVE_SDK_TOOL_NAMES.has(toolName),
+  );
 }
 
-function configuredToolAvailableSdkName(toolRule: string): string | null {
+function configuredToolAvailableSdkNames(toolRule: string): string[] {
   const readableScopedRule = parseReadableScopedToolRule(toolRule);
   if (readableScopedRule) {
-    return readableScopedRule.toolName === 'Bash' ? 'Bash' : null;
+    return readableScopedRule.toolName === RUN_COMMAND_TOOL_NAME
+      ? ['Bash']
+      : [];
   }
-  if (toolRule.trim() === 'Bash') return null;
-  if (hasScopeSyntax(toolRule)) return null;
-  if (gantryMcpToolNameFromFullName(toolRule)) return null;
-  const toolName = sdkToolName(toolRule);
-  return CONFIGURABLE_NATIVE_SDK_TOOL_NAMES.has(toolName) ? toolName : null;
+  const trimmed = toolRule.trim();
+  if (trimmed === 'Bash') return [];
+  if (hasScopeSyntax(trimmed)) return [];
+  if (gantryMcpToolNameFromFullName(trimmed)) return [];
+  return sdkToolsForGantryFacadeTool(trimmed).filter((toolName) =>
+    CONFIGURABLE_NATIVE_SDK_TOOL_NAMES.has(toolName),
+  );
 }
 
 function hasScopeSyntax(toolRule: string): boolean {
@@ -286,12 +289,12 @@ const configuredMcpProvider: AgentCapabilityProvider = {
 const configuredToolProvider: AgentCapabilityProvider = {
   id: 'configured-tools',
   provide: (ctx) => {
-    const allowedTools = (ctx.configuredAllowedTools ?? []).filter((toolRule) =>
-      configuredToolAllowedForPersona(toolRule),
+    const allowedTools = (ctx.configuredAllowedTools ?? []).flatMap(
+      configuredToolAllowedSdkNames,
     );
     const availableTools = (ctx.configuredAllowedTools ?? [])
-      .map(configuredToolAvailableSdkName)
-      .filter((toolName): toolName is string => toolName !== null);
+      .flatMap(configuredToolAvailableSdkNames)
+      .filter((toolName) => toolName.length > 0);
     return {
       allowedTools: mergeUnique(
         allowedTools,

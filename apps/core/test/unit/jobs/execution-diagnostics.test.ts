@@ -38,7 +38,7 @@ describe('execution diagnostics', () => {
         tool: 'Bash',
         ok: false,
         reason: 'Denied by operator.',
-        recovery_action: 'request_permission Bash(npm test)',
+        recovery_action: 'request_permission RunCommand(npm test)',
       },
     );
 

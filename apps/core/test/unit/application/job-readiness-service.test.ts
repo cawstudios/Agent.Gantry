@@ -234,7 +234,7 @@ describe('job readiness service', () => {
     expect(result.setupState.blockers[0]?.message).not.toContain('OneCLI');
   });
 
-  it('treats a declared local CLI implementation as ready when its scoped Bash rule is bound', async () => {
+  it('treats a declared local CLI implementation as ready when its scoped RunCommand rule is bound', async () => {
     const result = await evaluateJobReadiness({
       job: makeJob({
         required_tools: ['capability:google.sheets.write'],
@@ -255,7 +255,7 @@ describe('job readiness service', () => {
       appId: 'default',
       toolRepository: toolRepository([
         'capability:google.sheets.write',
-        'Bash(/usr/local/bin/gog sheets append *)',
+        'RunCommand(/usr/local/bin/gog sheets append *)',
       ]),
       clock: { now: () => '2026-05-14T00:00:00.000Z' },
     });
@@ -283,7 +283,7 @@ describe('job readiness service', () => {
       appId: 'default',
       toolRepository: toolRepository([
         'capability:google.sheets.write',
-        'Bash(gog sheets append *)',
+        'RunCommand(gog sheets append *)',
       ]),
       clock: { now: () => '2026-05-14T00:00:00.000Z' },
     });

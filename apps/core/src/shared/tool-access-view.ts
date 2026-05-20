@@ -7,6 +7,9 @@ import {
 import {
   PROJECTED_BROWSER_MCP_TOOL_NAMES,
   isCanonicalBrowserCapabilityRule,
+  parseReadableScopedToolRule,
+  RUN_COMMAND_TOOL_NAME,
+  sdkToolsForGantryFacadeTool,
 } from './agent-tool-references.js';
 
 export interface RequestableAdminToolAccess {
@@ -32,12 +35,9 @@ export interface JobToolAccessView {
 }
 
 export const PERMISSION_GATED_NATIVE_TOOLS = [
-  'Bash',
-  'Edit',
-  'Write',
-  'LS',
-  'MultiEdit',
-  'NotebookEdit',
+  'RunCommand',
+  'FileEdit',
+  'FileWrite',
 ] as const;
 
 export const BROWSER_TOOL_NAME = 'Browser';
@@ -182,7 +182,18 @@ function isBrowserCapabilitySelected(
 }
 
 function projectedRuntimeToolsForRules(rules: readonly string[]): string[] {
-  return isBrowserCapabilitySelected(rules)
-    ? [...PROJECTED_BROWSER_MCP_TOOL_NAMES]
-    : [];
+  const projected = new Set<string>();
+  if (isBrowserCapabilitySelected(rules)) {
+    for (const toolName of PROJECTED_BROWSER_MCP_TOOL_NAMES) {
+      projected.add(toolName);
+    }
+  }
+  for (const rule of rules) {
+    const scoped = parseReadableScopedToolRule(rule);
+    if (scoped?.toolName === RUN_COMMAND_TOOL_NAME) projected.add('Bash');
+    for (const toolName of sdkToolsForGantryFacadeTool(rule)) {
+      projected.add(toolName);
+    }
+  }
+  return [...projected];
 }

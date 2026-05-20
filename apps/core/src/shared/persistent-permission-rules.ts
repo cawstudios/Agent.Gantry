@@ -11,7 +11,9 @@ import {
 } from './bash-command-parser.js';
 import {
   isCanonicalBrowserCapabilityRule,
+  isGantryFacadeExactToolRule,
   parseReadableScopedToolRule,
+  RUN_COMMAND_TOOL_NAME,
   validateReadableAgentToolRule,
 } from './agent-tool-references.js';
 import {
@@ -26,7 +28,7 @@ import {
 } from './sensitive-material.js';
 
 export const PERSISTENT_REQUEST_PERMISSION_RULE_REJECTION_REASON =
-  'Persistent request_permission approvals support semantic capabilities, canonical Browser, scoped Bash(...), or exact Gantry admin tools; request a semantic capability for app/tool access.';
+  'Persistent request_permission approvals support semantic capabilities, canonical Browser, exact Gantry file/web tools, scoped RunCommand(...), or exact Gantry admin tools; request a semantic capability for app/tool access.';
 
 export function validatePersistentRequestPermissionRule(
   rule: string,
@@ -48,21 +50,22 @@ export function validatePersistentRequestPermissionRule(
 
   const readableValidation = validateReadableAgentToolRule(trimmed);
   if (!readableValidation.ok) return readableValidation;
+  if (isGantryFacadeExactToolRule(trimmed)) return { ok: true };
 
   const scoped = parseReadableScopedToolRule(trimmed);
   if (scoped) {
-    if (scoped.toolName !== 'Bash') {
+    if (scoped.toolName !== RUN_COMMAND_TOOL_NAME) {
       return {
         ok: false,
         reason:
-          'Only Bash supports persistent scoped tool rules; use an exact tool name for other tools.',
+          'Only RunCommand supports persistent scoped tool rules; use an exact tool name for other tools.',
       };
     }
     const parsed = parseBashCommand(scoped.scope);
     if (!parsed.ok) {
       return {
         ok: false,
-        reason: `Persistent Bash rule cannot be parsed safely (${parsed.reason}); use Allow once.`,
+        reason: `Persistent RunCommand rule cannot be parsed safely (${parsed.reason}); use Allow once.`,
       };
     }
     const destructiveRedirect = parsed.leaves
@@ -72,7 +75,7 @@ export function validatePersistentRequestPermissionRule(
       return {
         ok: false,
         reason:
-          'Persistent Bash rules cannot include destructive redirection; use Allow once.',
+          'Persistent RunCommand rules cannot include destructive redirection; use Allow once.',
       };
     }
     const nonDurableReason = parsed.leaves
@@ -89,7 +92,7 @@ export function validatePersistentRequestPermissionRule(
     if (secretReason) {
       return {
         ok: false,
-        reason: `Persistent Bash rules cannot include secret-like material (${secretReason}); use Allow once.`,
+        reason: `Persistent RunCommand rules cannot include secret-like material (${secretReason}); use Allow once.`,
       };
     }
     return { ok: true };
@@ -144,8 +147,8 @@ function formatPersistentPermissionRuleForUser(rule: string): string {
   const trimmed = rule.trim();
   const hash = shortRuleHash(trimmed);
   const scoped = parseReadableScopedToolRule(trimmed);
-  if (scoped?.toolName === 'Bash') {
-    return `scoped Bash rule [sha256:${hash}]`;
+  if (scoped?.toolName === RUN_COMMAND_TOOL_NAME) {
+    return `scoped RunCommand rule [sha256:${hash}]`;
   }
   return `${truncate(redactSensitiveText(trimmed), 160)} [sha256:${hash}]`;
 }

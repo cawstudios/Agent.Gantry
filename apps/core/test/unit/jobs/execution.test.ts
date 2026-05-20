@@ -389,7 +389,7 @@ describe('jobs/execution', () => {
         .mockRejectedValue(new Error('session bookkeeping unavailable')),
     };
     const error =
-      'Tool not on autonomous run allowlist: Bash. Recovery: request_permission {"toolName":"Bash"}';
+      'Tool not on autonomous run allowlist: RunCommand. Recovery: request_permission {"toolName":"RunCommand"}';
 
     await runJob(
       job,
@@ -434,7 +434,7 @@ describe('jobs/execution', () => {
     const job = makeJob();
     const opsRepository = makeOpsRepository(job);
     const error =
-      'Tool not on autonomous run allowlist: Bash. Recovery: request_permission {"toolName":"Bash"}';
+      'Tool not on autonomous run allowlist: RunCommand. Recovery: request_permission {"toolName":"RunCommand"}';
 
     await runJob(
       job,
@@ -1402,14 +1402,16 @@ describe('jobs/execution', () => {
       expect.any(String),
       'failed',
       'done without browser',
-      expect.stringContaining('Browser was available but not used'),
+      expect.stringContaining(
+        'Required tools were available but not used: Browser',
+      ),
     );
     expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
       expect.any(String),
       'failed',
       'done without browser',
       expect.stringContaining(
-        'Browser in required_tools is a must-use assertion, not a permission request',
+        'required_tools entries are must-use assertions, not permission requests',
       ),
     );
     expect(runtimeStoreMock.publish).toHaveBeenCalledWith(
@@ -1417,10 +1419,198 @@ describe('jobs/execution', () => {
         eventType: 'job.tool_activity',
         payload: expect.objectContaining({
           phase: 'required_tool_unsatisfied',
-          tool: 'Browser',
+          missing_required_tools: ['Browser'],
           ok: false,
         }),
       }),
+    );
+  });
+
+  it('requires every required RunCommand rule to be exercised', async () => {
+    const job = makeJob({
+      required_tools: [
+        'RunCommand(gog sheets get *)',
+        'RunCommand(gog sheets update *)',
+      ],
+    });
+    const opsRepository = makeOpsRepository(job);
+    const toolRepository = makeToolRepository([
+      'RunCommand(gog sheets get *)',
+      'RunCommand(gog sheets update *)',
+    ]);
+    const runAgent = vi.fn(async (_group, _input, _onProcess, onStream) => {
+      await onStream({
+        status: 'success',
+        result: null,
+        runtimeEvents: [
+          {
+            eventType: 'job.tool_activity',
+            payload: {
+              phase: 'allow',
+              tool: 'RunCommand',
+              ok: true,
+              matched_required_tools: ['RunCommand(gog sheets get *)'],
+            },
+          },
+        ],
+      } as never);
+      return { status: 'success', result: 'partial command work' };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        getToolRepository: () => toolRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+    );
+
+    expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+      expect.any(String),
+      'failed',
+      'partial command work',
+      expect.stringContaining('RunCommand(gog sheets update *)'),
+    );
+  });
+
+  it('completes when every required RunCommand rule is exercised', async () => {
+    const job = makeJob({
+      required_tools: [
+        'RunCommand(gog sheets get *)',
+        'RunCommand(gog sheets update *)',
+      ],
+    });
+    const opsRepository = makeOpsRepository(job);
+    const toolRepository = makeToolRepository([
+      'RunCommand(gog sheets get *)',
+      'RunCommand(gog sheets update *)',
+    ]);
+    const runAgent = vi.fn(async (_group, _input, _onProcess, onStream) => {
+      expect(_input.requiredTools).toEqual(job.required_tools);
+      await onStream({
+        status: 'success',
+        result: null,
+        runtimeEvents: [
+          {
+            eventType: 'job.tool_activity',
+            payload: {
+              phase: 'allow',
+              tool: 'RunCommand',
+              ok: true,
+              matched_required_tools: [
+                'RunCommand(gog sheets get *)',
+                'RunCommand(gog sheets update *)',
+              ],
+            },
+          },
+        ],
+      } as never);
+      return { status: 'success', result: 'all command work done' };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        getToolRepository: () => toolRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+    );
+
+    expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+      expect.any(String),
+      'completed',
+      'all command work done',
+      null,
+    );
+  });
+
+  it('verifies against required tools updated by the agent during the run', async () => {
+    const originalJob = makeJob({
+      required_tools: [
+        'RunCommand(gog sheets get *)',
+        'RunCommand(gog sheets update *)',
+        'RunCommand(gog sheets append *)',
+        'Browser',
+      ],
+    });
+    const updatedJob = {
+      ...originalJob,
+      required_tools: [
+        'RunCommand(gog sheets get *)',
+        'RunCommand(gog sheets update *)',
+        'Browser',
+      ],
+    };
+    let latestJob = originalJob;
+    const opsRepository = makeOpsRepository(originalJob);
+    vi.mocked(opsRepository.getJobById).mockImplementation(
+      async () => latestJob,
+    );
+    const toolRepository = makeToolRepository(originalJob.required_tools ?? []);
+    const runAgent = vi.fn(async (_group, _input, _onProcess, onStream) => {
+      latestJob = updatedJob;
+      await onStream({
+        status: 'success',
+        result: null,
+        runtimeEvents: [
+          {
+            eventType: 'job.tool_activity',
+            payload: {
+              phase: 'allow',
+              tool: 'RunCommand',
+              ok: true,
+              matched_required_tools: [
+                'RunCommand(gog sheets get *)',
+                'RunCommand(gog sheets update *)',
+              ],
+            },
+          },
+          {
+            eventType: 'job.tool_activity',
+            payload: {
+              tool: 'Browser',
+              public_tool: 'browser_open',
+              action: 'navigate',
+              ok: true,
+            },
+          },
+        ],
+      } as never);
+      return { status: 'success', result: 'self-repaired required tools' };
+    });
+
+    await runJob(
+      originalJob,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        getToolRepository: () => toolRepository as never,
+        getBrowserStatus: vi.fn(async () => ({ hasState: true })),
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+    );
+
+    expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+      expect.any(String),
+      'completed',
+      'self-repaired required tools',
+      null,
     );
   });
 
@@ -1439,8 +1629,9 @@ describe('jobs/execution', () => {
               phase: 'permission_wait',
               tool: 'Bash',
               ok: false,
-              reason: 'Tool not on autonomous run allowlist: Bash.',
-              recovery_action: 'request_permission { "toolName": "Bash" }',
+              reason: 'Tool not on autonomous run allowlist: RunCommand.',
+              recovery_action:
+                'request_permission { "toolName": "RunCommand" }',
             },
           },
           {
@@ -1508,9 +1699,9 @@ describe('jobs/execution', () => {
               tool: 'Bash',
               ok: false,
               reason:
-                'Tool not on autonomous run allowlist: Bash. Bash leaf ls scripts did not match any scoped autonomous rule.',
+                'Tool not on autonomous run allowlist: RunCommand. Bash leaf ls scripts did not match any scoped autonomous rule.',
               recovery_action:
-                'request_permission { "permissionKind": "tool", "toolName": "Bash" }',
+                'request_permission { "permissionKind": "tool", "toolName": "RunCommand" }',
             },
           },
           {
@@ -1687,7 +1878,7 @@ describe('jobs/execution', () => {
           eventType: 'job.tool_activity',
           payload: expect.objectContaining({
             phase: 'required_tool_verification_skipped',
-            tool: 'Browser',
+            required_tools: ['Browser'],
             ok: true,
           }),
         }),
@@ -1891,7 +2082,9 @@ describe('jobs/execution', () => {
       expect.any(String),
       'failed',
       'status only',
-      expect.stringContaining('Browser was available but not used'),
+      expect.stringContaining(
+        'Required tools were available but not used: Browser',
+      ),
     );
   });
 
@@ -1936,7 +2129,9 @@ describe('jobs/execution', () => {
       expect.any(String),
       'failed',
       'backend only',
-      expect.stringContaining('Browser was available but not used'),
+      expect.stringContaining(
+        'Required tools were available but not used: Browser',
+      ),
     );
   });
 

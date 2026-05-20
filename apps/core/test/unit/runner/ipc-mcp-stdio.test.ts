@@ -114,6 +114,10 @@ function createMcpFixture(): {
     path.join(sharedDir, 'agent-tool-references.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/gantry-tool-facades.ts'),
+    path.join(sharedDir, 'gantry-tool-facades.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/bash-command-parser.ts'),
     path.join(sharedDir, 'bash-command-parser.ts'),
   );
@@ -510,7 +514,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       'capability_status',
       {},
       {
-        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '["Bash(npm test *)"]',
+        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '["RunCommand(npm test *)"]',
         GANTRY_SELECTED_SKILLS_JSON: '["skill:release"]',
         GANTRY_SELECTED_MCP_SERVERS_JSON: '["mcp:github"]',
       },
@@ -519,7 +523,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     expect(result.exitCode, result.stderr).toBe(0);
     const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
     expect(record.result.content[0].text).toContain(
-      'Configured tools: Bash(npm test *)',
+      'Configured tools: RunCommand(npm test *)',
     );
     expect(record.result.content[0].text).toContain('ready: skill:release');
     expect(record.result.content[0].text).toContain('ready: mcp:github');
@@ -596,7 +600,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       {},
       {
         GANTRY_ADMIN_MCP_TOOLS_JSON: '["admin_permission_list"]',
-        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '["Bash(npm test *)"]',
+        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '["RunCommand(npm test *)"]',
       },
     );
 
@@ -608,7 +612,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     expect(record.result.content[0].text).toContain(
       'mcp__gantry__admin_permission_list: approved',
     );
-    expect(record.result.content[0].text).toContain('Bash(npm test *)');
+    expect(record.result.content[0].text).toContain('RunCommand(npm test *)');
     expect(fs.existsSync(path.join(fixture.ipcDir, 'tasks'))).toBe(false);
   });
 

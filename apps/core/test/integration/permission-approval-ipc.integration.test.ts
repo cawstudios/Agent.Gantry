@@ -96,8 +96,8 @@ describe('permission approval IPC boundary', () => {
         groupFolder,
         toolName: 'Bash',
         closestRule: {
-          rule: 'Bash(/Users/example/bin/post-lead *)',
-          reason: 'Closest scoped Bash rule',
+          rule: 'RunCommand(/Users/example/bin/post-lead *)',
+          reason: 'Closest scoped command rule',
         },
       }),
     ).resolves.toEqual({
@@ -118,8 +118,8 @@ describe('permission approval IPC boundary', () => {
       sourceAgentFolder: groupFolder,
       toolName: 'Bash',
       closestRule: {
-        rule: 'Bash(/Users/example/bin/post-lead *)',
-        reason: 'Closest scoped Bash rule',
+        rule: 'RunCommand(/Users/example/bin/post-lead *)',
+        reason: 'Closest scoped command rule',
       },
     });
   });

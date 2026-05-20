@@ -164,7 +164,7 @@ export function registerServiceTools(server: McpServer): void {
     [
       'Request one reviewed permission or capability change for the current agent.',
       'For app workflows, prefer capability_search/request_capability or propose_local_cli_capability so users approve semantic capabilities.',
-      'Use this directly for one-off exact tool access, provider/channel permissions, internal Browser requests, or scoped Bash fallback rules such as Bash(npm test *) when no reviewed semantic capability fits.',
+      'Use this directly for one-off exact tool access, provider/channel permissions, internal Browser requests, or scoped RunCommand fallback rules such as RunCommand(npm test *) when no reviewed semantic capability fits.',
       'Use request_skill_install/request_skill_proposal for skills and request_mcp_server for third-party MCP server access.',
     ].join(' '),
     {
@@ -178,7 +178,7 @@ export function registerServiceTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          'Single public fallback tool name to enable. Use Bash only with a rule; use exact names such as Edit, Write, WebFetch, Agent, Browser, scheduler_create_job, or an MCP tool name for non-Bash tools.',
+          'Single public fallback tool name to enable. Use RunCommand only with a rule; use exact Gantry names such as FileEdit, FileWrite, WebRead, AgentDelegation, Browser, scheduler_create_job, or an MCP tool name for non-command tools.',
         ),
       toolNames: z
         .array(z.string())
@@ -196,7 +196,7 @@ export function registerServiceTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          'Set true when the permission is needed only for the current action or an exploratory one-off. Leave false/omitted only for semantic capabilities, Browser, exact Gantry admin tools, or persistent scoped Bash rules that are genuinely useful for future turns.',
+          'Set true when the permission is needed only for the current action or an exploratory one-off. Leave false/omitted only for semantic capabilities, Browser, exact Gantry admin tools, or persistent scoped RunCommand rules that are genuinely useful for future turns.',
         ),
       broadAccess: z
         .boolean()

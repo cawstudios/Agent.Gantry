@@ -37,6 +37,19 @@ model-facing result is a compact file reference with path, optional MIME type,
 and size. Screenshot responses must strip inline base64 image data after
 persisting the file, because screenshots can exceed the model context budget.
 
+`browser_act` supports `action: "file_attach"` for upload controls. The action
+requires `profile: "full"` and a reason, then the host resolves the source and
+hands a Gantry-owned staged path to Playwright `setInputFiles`. Supported
+sources are `bytes` (small base64 or UTF-8 content, staged under the run browser
+artifact root), `artifact` (a FileArtifact read through the signed app/agent
+scope and staged under the artifact root), and `path` (regular files only under
+the run browser artifact root or the host temp directory). Paths outside those
+allowlisted roots, symlinks, hidden browser state, settings, credentials, and
+browser IPC directories fail closed before Playwright sees a path. Browser
+activity audit records the public `browser_act` call and backend
+`file_attach` action; durable authority remains the single `Browser`
+capability.
+
 Downloads are intentionally deferred in this slice. The direct driver does not
 add download tools until download roots, retention, and result disclosure have a
 separate scoped policy and test plan.
@@ -51,9 +64,9 @@ This rule is general, not browser-specific:
 
 - Durable authorization stores human-level capabilities: `Browser`, exact
   semantic capability entries such as `capability:google.sheets.write`, exact
-  non-Bash SDK tool names, scoped Bash rules such as `Bash(npm test *)`,
-  approved MCP server ids, skill ids, scheduler grants, and future tool-family
-  grants.
+  Gantry-owned file/web facades such as `FileRead` and `WebRead`, scoped
+  command rules such as `RunCommand(npm test *)`, approved MCP server ids, skill
+  ids, scheduler grants, and future tool-family grants.
 - Runtime projects approved capabilities into concrete tools for that run.
 - Concrete backend tool names are audited but are not persisted as durable
   authority.
@@ -61,9 +74,9 @@ This rule is general, not browser-specific:
   capability envelope.
 - Gantry enforces the outer boundary: filesystem, network, credentials,
   timeout, process, display, redaction, audit, and selected-capability checks.
-- The same durable-vs-projected rule applies to Browser, Bash, third-party CLIs
-  invoked by Bash, MCP servers, skills, scheduler tools, and future IDE, DB,
-  Kubernetes, or document-editor tools.
+- The same durable-vs-projected rule applies to Browser, `RunCommand`,
+  third-party CLIs invoked through harness command tools, MCP servers, skills,
+  scheduler tools, and future IDE, DB, Kubernetes, or document-editor tools.
 
 ## End-To-End Flow
 

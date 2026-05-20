@@ -368,6 +368,75 @@ describe('browser direct driver', () => {
     expect(fs.readFileSync(paths[1]!, 'utf8')).toBe('bytes');
   });
 
+  it('attaches bytes and scoped paths through Playwright file inputs', async () => {
+    const root = tempRoot();
+    const uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantry-upload-'));
+    tempRoots.push(uploadDir);
+    const uploadPath = path.join(uploadDir, 'fixture.zip');
+    fs.writeFileSync(uploadPath, 'zip-bytes');
+    const { page } = createPage({ url: 'https://93.184.216.34/' });
+    const { browser } = createBrowser([page]);
+    browserMocks.connectOverCDP.mockResolvedValue(browser);
+
+    await callBrowserTool({
+      toolName: 'file_attach',
+      arguments: {
+        source: {
+          type: 'bytes',
+          name: 'note.txt',
+          content: Buffer.from('hello').toString('base64'),
+          encoding: 'base64',
+        },
+      },
+      session: session(),
+      fileAccessRoot: root,
+    });
+    await callBrowserTool({
+      toolName: 'file_attach',
+      arguments: {
+        source: { type: 'path', path: uploadPath },
+      },
+      session: session(),
+      fileAccessRoot: root,
+    });
+
+    const inlinePaths = page.setInputFiles.mock.calls[0]?.[1] as string[];
+    expect(fs.readFileSync(inlinePaths[0]!, 'utf8')).toBe('hello');
+    expect(page.setInputFiles.mock.calls[1]?.[1]).toEqual([
+      fs.realpathSync.native(uploadPath),
+    ]);
+
+    await callBrowserTool({
+      toolName: 'file_upload',
+      arguments: {
+        source: { type: 'path', path: uploadPath },
+      },
+      session: session(),
+      fileAccessRoot: root,
+    });
+    expect(page.setInputFiles.mock.calls[2]?.[1]).toEqual([
+      fs.realpathSync.native(uploadPath),
+    ]);
+  });
+
+  it('rejects file_attach path sources outside allowed roots', async () => {
+    const root = tempRoot();
+    const { page } = createPage({ url: 'https://93.184.216.34/' });
+    const { browser } = createBrowser([page]);
+    browserMocks.connectOverCDP.mockResolvedValue(browser);
+
+    await expect(
+      callBrowserTool({
+        toolName: 'file_attach',
+        arguments: {
+          source: { type: 'path', path: path.resolve('package.json') },
+        },
+        session: session(),
+        fileAccessRoot: root,
+      }),
+    ).rejects.toThrow('outside allowed roots');
+  });
+
   it('rejects raw upload paths and output paths outside the artifact root', async () => {
     const root = tempRoot();
     const { page } = createPage({ url: 'https://93.184.216.34/' });

@@ -292,7 +292,7 @@ describe('jobs/execution-notifications', () => {
       runId: 'run-1',
       runStatus: 'failed',
       summary:
-        'Permission denied for Bash. Tool not on autonomous run allowlist: Bash. Recovery: request_permission { "toolName": "Bash" }',
+        'Permission denied for Bash. Tool not on autonomous run allowlist: RunCommand. Recovery: request_permission { "toolName": "RunCommand" }',
       nextRun: null,
       retryCount: 1,
       pauseReason: 'Setup required',

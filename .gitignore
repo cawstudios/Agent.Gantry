@@ -38,6 +38,7 @@ tmp-coverage/
 .factory/*
 !.factory/README.md
 *.tgz
+*.zip
 .wrangler/
 
 # OS

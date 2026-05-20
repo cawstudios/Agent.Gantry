@@ -30,7 +30,7 @@ describe('scheduledPermissionSuggestions', () => {
     ]);
   });
 
-  it('keeps SDK scoped Bash suggestions scoped', () => {
+  it('maps SDK scoped Bash suggestions to scoped RunCommand suggestions', () => {
     expect(
       scheduledPermissionSuggestions(
         'Bash',
@@ -49,12 +49,12 @@ describe('scheduledPermissionSuggestions', () => {
         type: 'addRules',
         behavior: 'allow',
         destination: 'session',
-        rules: [{ toolName: 'Bash', ruleContent: 'npm test' }],
+        rules: [{ toolName: 'RunCommand', ruleContent: 'npm test' }],
       },
     ]);
   });
 
-  it('synthesizes scoped Bash suggestions from parsed command leaves', () => {
+  it('synthesizes scoped RunCommand suggestions from parsed command leaves', () => {
     expect(
       synthesizePermissionSuggestions('Bash', {
         toolInput: { command: 'npm test -- --runInBand' },
@@ -64,7 +64,9 @@ describe('scheduledPermissionSuggestions', () => {
         type: 'addRules',
         behavior: 'allow',
         destination: 'session',
-        rules: [{ toolName: 'Bash', ruleContent: 'npm test -- --runInBand' }],
+        rules: [
+          { toolName: 'RunCommand', ruleContent: 'npm test -- --runInBand' },
+        ],
       },
     ]);
 
@@ -77,7 +79,7 @@ describe('scheduledPermissionSuggestions', () => {
         type: 'addRules',
         behavior: 'allow',
         destination: 'session',
-        rules: [{ toolName: 'Bash', ruleContent: '/tmp/check.py *' }],
+        rules: [{ toolName: 'RunCommand', ruleContent: '/tmp/check.py *' }],
       },
     ]);
 
@@ -90,7 +92,7 @@ describe('scheduledPermissionSuggestions', () => {
         type: 'addRules',
         behavior: 'allow',
         destination: 'session',
-        rules: [{ toolName: 'Bash', ruleContent: '/tmp/check.py *' }],
+        rules: [{ toolName: 'RunCommand', ruleContent: '/tmp/check.py *' }],
       },
     ]);
   });
@@ -102,7 +104,7 @@ describe('scheduledPermissionSuggestions', () => {
         {},
       ),
     ).toBeUndefined();
-    expect(synthesizePermissionSuggestions('Read', {})).toBeUndefined();
+    expect(synthesizePermissionSuggestions('LS', {})).toBeUndefined();
     expect(
       synthesizePermissionSuggestions('mcp__github__search', {}),
     ).toBeUndefined();

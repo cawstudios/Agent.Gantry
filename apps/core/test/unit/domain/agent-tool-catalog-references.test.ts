@@ -27,7 +27,7 @@ describe('agent tool catalog references', () => {
               implementationBindings: [
                 {
                   kind: 'tool_rule',
-                  rule: 'Bash(onecli google sheets write *)',
+                  rule: 'RunCommand(onecli google sheets write *)',
                 },
               ],
             },

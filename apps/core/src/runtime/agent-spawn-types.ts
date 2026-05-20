@@ -34,6 +34,7 @@ export interface AgentInput {
   persona?: AgentPersona;
   browserProfileName?: string;
   allowedTools?: string[];
+  requiredTools?: string[];
   selectedSkillIds?: string[];
   selectedMcpServerIds?: string[];
   isScheduledJob?: boolean;

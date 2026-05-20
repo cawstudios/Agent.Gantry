@@ -32,7 +32,7 @@ describe('permission interaction', () => {
       },
     ]);
 
-    expect(firstPersistentRule(request)).toBe('Bash(npm test *)');
+    expect(firstPersistentRule(request)).toBe('RunCommand(npm test *)');
     expect(permissionDecisionOptions(request)).toContain(
       'allow_persistent_rule',
     );
@@ -106,7 +106,7 @@ describe('permission interaction', () => {
     expect(decision.reason).toBe('approval option unavailable');
   });
 
-  it('does not offer persistent approval for wildcard-scoped Bash suggestions', () => {
+  it('does not offer persistent approval for wildcard-scoped RunCommand suggestions', () => {
     const request = requestWithSuggestions([
       {
         type: 'addRules',
@@ -272,7 +272,7 @@ describe('permission interaction', () => {
     ).toBe('Always allow');
   });
 
-  it('renders scoped Bash setup prompts as command rules even when capability metadata is present', () => {
+  it('renders scoped RunCommand setup prompts as command rules even when capability metadata is present', () => {
     const text = formatPermissionPromptText(
       {
         requestId: 'permission_123',
@@ -306,9 +306,11 @@ describe('permission interaction', () => {
     expect(text).toContain(
       'Request: Permission: Google Sheets write using gog',
     );
-    expect(text).toContain('Details: scoped Bash rule');
+    expect(text).toContain('Details: scoped RunCommand rule');
     expect(text).not.toContain('Always allow grants this capability');
-    expect(text).not.toContain('Bash(/usr/local/bin/gog sheets append *)');
+    expect(text).not.toContain(
+      'RunCommand(/usr/local/bin/gog sheets append *)',
+    );
     expect(text).not.toContain('Configured Google access');
   });
 
@@ -358,9 +360,9 @@ describe('permission interaction', () => {
       {
         ...requestWithSuggestions([]),
         decisionReason:
-          'Tool not on autonomous run allowlist: Bash. Bash leaf npm test did not match any scoped autonomous rule.',
+          'Tool not on autonomous run allowlist: RunCommand. Bash leaf npm test did not match any scoped autonomous rule.',
         closestRule: {
-          rule: 'Bash(npm run build)',
+          rule: 'RunCommand(npm run build)',
           reason:
             'Bash leaf npm test did not match any scoped autonomous rule.',
         },
@@ -369,8 +371,9 @@ describe('permission interaction', () => {
       60_000,
     );
 
+    expect(text).toContain('Closest existing rule: scoped RunCommand rule');
     expect(text).toContain(
-      'Closest existing rule: scoped Bash rule [sha256:ba74d93e8fec4d05] (did not match: Bash leaf npm test did not match any scoped autonomous rule.)',
+      '(did not match: Bash leaf npm test did not match any scoped autonomous rule.)',
     );
   });
 
@@ -430,7 +433,7 @@ describe('permission interaction', () => {
       \`\`\`
       Redirect: > /tmp/leads.json
 
-      Details: scoped Bash rule [sha256:9d6310e5b7e64980], scoped Bash rule [sha256:bbd7e6f7ba4bc0df]
+      Details: scoped RunCommand rule [sha256:651e0a28f1709b35], scoped RunCommand rule [sha256:4c22b27e112603fa]
 
       Scope: this request, a short 5-minute grant, or future matching tool calls.
       Safety: only matching future access is included; unrelated tools, secrets, and settings changes are not included.
@@ -559,7 +562,7 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain('Allowed once: exact command access');
-    expect(receipt).toContain('For: Bash (git status --short)');
+    expect(receipt).toContain('For: RunCommand (git status --short)');
     expect(receipt).toContain('From: agent chat');
     expect(receipt).toContain('Agent: main_agent');
     expect(receipt).not.toContain('Request ID');
@@ -585,7 +588,7 @@ describe('permission interaction', () => {
 
     expect(receipt).toContain('Allowed for 5 minutes: exact command access');
     expect(receipt).toContain('Until:');
-    expect(receipt).toContain('For: Bash (git status --short)');
+    expect(receipt).toContain('For: RunCommand (git status --short)');
     expect(receipt).toContain('From: agent chat');
     expect(receipt).toContain('Agent: main_agent');
     expect(receipt).not.toContain('eligible tools and SDK API/network prompts');
@@ -647,13 +650,13 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain('Always allowed: exact command access');
-    expect(receipt).toContain('Details: scoped Bash rule');
+    expect(receipt).toContain('Details: scoped RunCommand rule');
     expect(receipt).toContain('Browser [sha256:');
-    expect(receipt).not.toContain('Bash(curl https://api.example.com/*)');
-    expect(receipt).not.toContain('Bash(jq *)');
+    expect(receipt).not.toContain('RunCommand(curl https://api.example.com/*)');
+    expect(receipt).not.toContain('RunCommand(jq *)');
     expect(receipt).toContain('Revoke: /permissions remove <rule>');
     expect(receipt).toContain(
-      'For: Bash (curl https://api.example.com/leads > /tmp/out)',
+      'For: RunCommand (curl https://api.example.com/leads > /tmp/out)',
     );
     expect(receipt).not.toContain('Request ID');
     expect(receipt).not.toContain('perm-abc-123');
@@ -679,7 +682,7 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain('Allowed once');
-    expect(receipt).toContain('For: Bash command');
+    expect(receipt).toContain('For: RunCommand command');
     expect(receipt).not.toContain('REDACTED');
     expect(receipt).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
     expect(receipt).not.toContain('Request ID');

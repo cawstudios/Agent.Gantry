@@ -383,7 +383,9 @@ describe('runtime admin IPC handlers', () => {
         mcpServerIds: [],
       },
     };
-    replacement.agents.main_agent.capabilities.toolIds = ['Bash(npm test *)'];
+    replacement.agents.main_agent.capabilities.toolIds = [
+      'RunCommand(npm test *)',
+    ];
     const replacementYaml = renderRuntimeSettingsYaml(replacement);
     const replaceAgentCapabilityBindings = vi.fn(async () => undefined);
     const reloadRuntimeState = vi.fn(async () => undefined);

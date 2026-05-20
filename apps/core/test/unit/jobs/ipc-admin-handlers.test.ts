@@ -290,7 +290,7 @@ describe('admin IPC handlers', () => {
       error: expect.stringContaining('Google Sheets write using gog'),
     });
     expect(readResponse(runtimeHome, 'request-generic-sheets').error).toContain(
-      'Bash(/usr/local/bin/gog sheets append *)',
+      'RunCommand(/usr/local/bin/gog sheets append *)',
     );
     expect(requestPermissionApproval).not.toHaveBeenCalled();
   });
@@ -350,7 +350,7 @@ describe('admin IPC handlers', () => {
       ok: false,
       code: 'wrong_capability_lane',
       error: expect.stringContaining(
-        'Bash(/usr/local/bin/gog sheets append *)',
+        'RunCommand(/usr/local/bin/gog sheets append *)',
       ),
     });
     expect(requestPermissionApproval).not.toHaveBeenCalled();
@@ -411,13 +411,13 @@ describe('admin IPC handlers', () => {
       ok: false,
       code: 'wrong_capability_lane',
       error: expect.stringContaining(
-        'Bash(/usr/local/bin/gog sheets append *)',
+        'RunCommand(/usr/local/bin/gog sheets append *)',
       ),
     });
     expect(requestPermissionApproval).not.toHaveBeenCalled();
   });
 
-  it('rejects local CLI semantic proposals for a job until the scoped Bash rule is requested', async () => {
+  it('rejects local CLI semantic proposals for a job until the scoped RunCommand rule is requested', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
@@ -478,7 +478,7 @@ describe('admin IPC handlers', () => {
       ok: false,
       code: 'wrong_capability_lane',
       error: expect.stringContaining(
-        'Bash(/usr/local/bin/gog sheets append *)',
+        'RunCommand(/usr/local/bin/gog sheets append *)',
       ),
     });
     expect(requestPermissionApproval).not.toHaveBeenCalled();

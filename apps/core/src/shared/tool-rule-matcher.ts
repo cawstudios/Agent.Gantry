@@ -4,9 +4,12 @@ import {
   isBrowserActionMcpToolRule,
   isCanonicalBrowserCapabilityRule,
   isKnownProjectedBrowserMcpToolName,
+  isProviderNativeExactToolRule,
   isProjectedBrowserMcpToolRule,
   parseReadableScopedToolRule,
   hasBashShellControlSyntax,
+  providerNativeToolRejectionReason,
+  RUN_COMMAND_TOOL_NAME,
   validatePersistentBashScope,
 } from './agent-tool-references.js';
 import { isGantryMcpWildcardRule } from './admin-mcp-tools.js';
@@ -27,26 +30,20 @@ interface ScopedToolSpec {
 }
 
 const SCOPED_TOOL_REGISTRY: Record<string, ScopedToolSpec> = {
-  Bash: { fields: ['command', 'cmd'] },
+  [RUN_COMMAND_TOOL_NAME]: { fields: ['command', 'cmd'] },
 };
 
-const REGISTERED_NATIVE_TOOLS = new Set([
-  'Agent',
-  'Bash',
-  'Browser',
-  'Edit',
-  'Glob',
-  'Grep',
-  'LS',
-  'MultiEdit',
-  'NotebookEdit',
-  'Read',
-  'Skill',
-  'ToolSearch',
-  'WebFetch',
-  'WebSearch',
-  'Write',
-]);
+const EXACT_GANTRY_TOOL_RUNTIME_MATCHES: Record<string, readonly string[]> = {
+  WebSearch: ['WebSearch'],
+  WebRead: ['WebFetch'],
+  FileSearch: ['Glob', 'Grep'],
+  FileRead: ['Read'],
+  FileEdit: ['Edit', 'MultiEdit'],
+  FileWrite: ['Write'],
+  AgentDelegation: ['Agent'],
+};
+
+const REGISTERED_DURABLE_EXACT_TOOLS = new Set(['Browser']);
 
 type ParsedToolRule =
   | { kind: 'exact'; toolName: string }
@@ -61,6 +58,7 @@ export interface ToolRuleValidationResult {
 export interface ToolRuleEvaluationResult {
   allowed: boolean;
   matchedRule?: string;
+  matchedRules?: string[];
   closestRule?: {
     rule: string;
     reason: string;
@@ -121,7 +119,7 @@ export function validateAutonomousToolRule(
         reason: `Scoped tool rule uses unsupported tool ${parsed.toolName}.`,
       };
     }
-    if (parsed.toolName === 'Bash') {
+    if (parsed.toolName === RUN_COMMAND_TOOL_NAME) {
       const bashScope = validatePersistentBashScope(parsed.scope);
       if (!bashScope.ok) return bashScope;
     }
@@ -139,10 +137,23 @@ export function validateAutonomousToolRule(
     return {
       ok: false,
       reason:
-        'Persistent bare Bash grants are too broad; request a scoped Bash(<pattern>) rule.',
+        'Persistent bare Bash grants are provider-native; request a scoped RunCommand(<argv pattern>) rule.',
+    };
+  }
+  if (parsed.toolName === RUN_COMMAND_TOOL_NAME) {
+    return {
+      ok: false,
+      reason:
+        'Persistent bare RunCommand grants are too broad; request a scoped RunCommand(<argv pattern>) rule.',
     };
   }
   if (!isRegisteredExactTool(parsed.toolName)) {
+    if (isProviderNativeExactToolRule(parsed.toolName)) {
+      return {
+        ok: false,
+        reason: providerNativeToolRejectionReason(parsed.toolName),
+      };
+    }
     return {
       ok: false,
       reason: `Unsupported autonomous tool rule ${parsed.toolName}.`,
@@ -168,7 +179,7 @@ export function toolRuleMatches(rule: string, toolName: string): boolean {
     return toolName.startsWith(`mcp__${parsed.serverName}__`);
   }
   if (parsed.kind === 'scoped') return false;
-  return parsed.toolName === toolName;
+  return exactToolRuleMatches(parsed.toolName, toolName);
 }
 
 export function anyToolRuleMatches(
@@ -198,13 +209,16 @@ export function toolRuleCoversRule(
     );
   }
   if (allowed.kind === 'exact') {
-    return allowed.toolName === candidate.toolName;
+    return (
+      candidate.kind === 'exact' &&
+      exactToolRuleMatches(allowed.toolName, candidate.toolName)
+    );
   }
   if (candidate.kind !== 'scoped') return false;
   if (allowed.toolName !== candidate.toolName) return false;
   if (allowed.scope === candidate.scope) return true;
   return (
-    allowed.toolName === 'Bash' &&
+    allowed.toolName === RUN_COMMAND_TOOL_NAME &&
     bashScopeCoversScope(allowed.scope, candidate.scope)
   );
 }
@@ -231,7 +245,7 @@ export function evaluateAutonomousToolUse(input: {
       isCanonicalBrowserCapabilityRule(rule) &&
       isKnownProjectedBrowserMcpToolName(toolName)
     ) {
-      return { allowed: true, matchedRule: rule };
+      return { allowed: true, matchedRule: rule, matchedRules: [rule] };
     }
 
     const validation = validateAutonomousToolRule(rule);
@@ -242,22 +256,21 @@ export function evaluateAutonomousToolUse(input: {
 
     const parsed = parseToolRule(rule);
     if (!parsed) continue;
-
     if (parsed.kind === 'mcp-wildcard') {
       if (toolName.startsWith(`mcp__${parsed.serverName}__`)) {
-        return { allowed: true, matchedRule: rule };
+        return { allowed: true, matchedRule: rule, matchedRules: [rule] };
       }
       continue;
     }
 
     if (parsed.kind === 'exact') {
-      if (parsed.toolName === toolName) {
-        return { allowed: true, matchedRule: rule };
+      if (exactToolRuleMatches(parsed.toolName, toolName)) {
+        return { allowed: true, matchedRule: rule, matchedRules: [rule] };
       }
       continue;
     }
 
-    if (parsed.toolName !== toolName) continue;
+    if (!scopedToolRuleMatchesRuntimeTool(parsed.toolName, toolName)) continue;
     const spec = SCOPED_TOOL_REGISTRY[parsed.toolName];
     if (!spec) {
       const reason = `Scoped autonomous tool rule uses unsupported tool ${parsed.toolName}.`;
@@ -304,7 +317,7 @@ function evaluateBashToolUse(input: {
     return {
       allowed: false,
       reason:
-        'Scoped autonomous tool rule cannot be evaluated for Bash; expected one of command, cmd string fields.',
+        'Scoped autonomous tool rule cannot be evaluated for RunCommand; expected one of command, cmd string fields.',
     };
   }
   const parsedCommand = parseBashCommand(command);
@@ -324,7 +337,7 @@ function evaluateBashToolUse(input: {
         parsed: Extract<ParsedToolRule, { kind: 'scoped' }>;
       } =>
         entry.parsed?.kind === 'scoped' &&
-        entry.parsed.toolName === 'Bash' &&
+        entry.parsed.toolName === RUN_COMMAND_TOOL_NAME &&
         validateAutonomousToolRule(entry.rule).ok,
     );
   let firstInvalidRuleReason: string | undefined;
@@ -366,12 +379,14 @@ function evaluateBashToolUse(input: {
   if (matchedRules.size === 0) {
     return {
       allowed: false,
-      reason: firstInvalidRuleReason ?? 'No autonomous tool rule matched Bash.',
+      reason:
+        firstInvalidRuleReason ?? 'No autonomous tool rule matched RunCommand.',
     };
   }
   return {
     allowed: true,
     matchedRule: [...matchedRules].join(', '),
+    matchedRules: [...matchedRules],
   };
 }
 
@@ -393,7 +408,35 @@ function parseToolRule(rule: string): ParsedToolRule | null {
 }
 
 function isRegisteredExactTool(toolName: string): boolean {
-  return REGISTERED_NATIVE_TOOLS.has(toolName) || MCP_EXACT_RE.test(toolName);
+  return (
+    REGISTERED_DURABLE_EXACT_TOOLS.has(toolName) ||
+    hasOwn(EXACT_GANTRY_TOOL_RUNTIME_MATCHES, toolName) ||
+    MCP_EXACT_RE.test(toolName)
+  );
+}
+
+function exactToolRuleMatches(ruleToolName: string, runtimeToolName: string) {
+  if (!isRegisteredExactTool(ruleToolName)) return false;
+  if (ruleToolName === runtimeToolName) return true;
+  return (
+    EXACT_GANTRY_TOOL_RUNTIME_MATCHES[ruleToolName]?.includes(
+      runtimeToolName,
+    ) ?? false
+  );
+}
+
+function scopedToolRuleMatchesRuntimeTool(
+  ruleToolName: string,
+  runtimeToolName: string,
+) {
+  return (
+    ruleToolName === runtimeToolName ||
+    (ruleToolName === RUN_COMMAND_TOOL_NAME && runtimeToolName === 'Bash')
+  );
+}
+
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
 }
 
 function scopedCandidateValues(

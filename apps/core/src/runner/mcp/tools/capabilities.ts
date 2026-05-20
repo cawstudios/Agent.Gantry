@@ -103,7 +103,7 @@ export function registerSemanticCapabilityTools(
 
   server.tool(
     'propose_local_cli_capability',
-    'Propose a reviewed user-defined local CLI semantic capability draft with pinned executable and scoped command templates. Draft approval does not create runnable Bash authority until runtime local-CLI enforcement exists.',
+    'Propose a reviewed user-defined local CLI semantic capability draft with pinned executable and scoped command templates. Draft approval does not create runnable command-tool authority until runtime local-CLI enforcement exists.',
     {
       capabilityId: z
         .string()

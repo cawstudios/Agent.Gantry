@@ -6,7 +6,11 @@ import {
   parseBashCommand,
 } from './bash-command-parser.js';
 import { isAdminMcpToolFullName } from './admin-mcp-tools.js';
-import { isKnownProjectedBrowserMcpToolName } from './agent-tool-references.js';
+import {
+  isKnownProjectedBrowserMcpToolName,
+  publicGantryToolNameForSdkTool,
+  RUN_COMMAND_TOOL_NAME,
+} from './agent-tool-references.js';
 import {
   commandText,
   hasBashMutationVerb,
@@ -338,7 +342,8 @@ function autonomousDenyReason(
   toolName: string,
   mismatchReason: string | undefined,
 ): string {
-  const prefix = `Tool not on autonomous run allowlist: ${toolName}.`;
+  const publicToolName = publicGantryToolNameForSdkTool(toolName);
+  const prefix = `Tool not on autonomous run allowlist: ${publicToolName}.`;
   return mismatchReason ? `${prefix} ${mismatchReason}` : prefix;
 }
 
@@ -425,9 +430,9 @@ function autonomousGrantRecovery(request: ToolExecutionRequest): string {
     const command = commandText(request.input);
     const rule = command ? persistentBashRecoveryRule(command) : undefined;
     if (!rule) {
-      return 'Update the autonomous run to use a reviewed semantic capability or invoke a scoped Bash(...) command directly. This Bash command cannot be durably approved for autonomous runs.';
+      return 'Update the autonomous run to use a reviewed semantic capability or invoke a scoped RunCommand(...) command directly. This command cannot be durably approved for autonomous runs.';
     }
-    return `request_permission { "permissionKind": "tool", "toolName": "Bash"${rule ? `, "rule": "${escapeJson(rule)}"` : ''}, "temporaryOnly": false, "reason": "This autonomous run needs scoped Bash access." }`;
+    return `request_permission { "permissionKind": "tool", "toolName": "${RUN_COMMAND_TOOL_NAME}"${rule ? `, "rule": "${escapeJson(rule)}"` : ''}, "temporaryOnly": false, "reason": "This autonomous run needs scoped command access." }`;
   }
   if (isAdminMcpToolFullName(request.toolName)) {
     return `request_permission { "permissionKind": "tool", "toolName": "${request.toolName}", "temporaryOnly": false, "reason": "This autonomous run needs ${request.toolName} access." }`;
@@ -438,7 +443,7 @@ function autonomousGrantRecovery(request: ToolExecutionRequest): string {
   }
   const toolName = isKnownProjectedBrowserMcpToolName(request.toolName)
     ? 'Browser'
-    : request.toolName;
+    : publicGantryToolNameForSdkTool(request.toolName);
   return `request_permission { "permissionKind": "tool", "toolName": "${escapeJson(toolName)}", "temporaryOnly": false, "reason": "This autonomous run needs ${escapeJson(toolName)} access." }`;
 }
 

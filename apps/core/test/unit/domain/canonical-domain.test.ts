@@ -199,12 +199,13 @@ describe('canonical Postgres persistence cut', () => {
     expect(seed).toContain('tool:Browser');
     expect(seed).not.toContain(['anthropic', 'sdk'].join('_'));
     expect(seed).not.toContain('sdkTool(');
+    expect(seed).toContain('GANTRY_FACADE_EXACT_TOOL_NAMES');
     for (const providerNativeTool of [
       'tool:Agent',
       'tool:Bash',
       'tool:Read',
       'tool:Write',
-      'tool:WebSearch',
+      'tool:WebFetch',
     ]) {
       expect(seed).not.toContain(providerNativeTool);
     }

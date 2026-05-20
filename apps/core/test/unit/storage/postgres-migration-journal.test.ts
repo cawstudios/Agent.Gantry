@@ -789,6 +789,8 @@ describe('Postgres migration journal', () => {
     );
     expect(migration).toContain(`kind = '${['anthropic', 'sdk'].join('_')}'`);
     expect(migration).toContain(`provider = 'anth${'ropic'}'`);
+    expect(migration).toContain("adapter_ref = 'builtin:WebSearch'");
+    expect(migration).toContain("name <> 'WebSearch'");
     expect(migration).toContain("'tool:Read'");
     expect(migration).toContain('BEGIN;');
     expect(migration).toContain(

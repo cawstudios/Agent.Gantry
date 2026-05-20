@@ -1,6 +1,8 @@
 import {
   isKnownProjectedBrowserMcpToolName,
   isSdkSandboxNetworkAccessToolName,
+  publicGantryToolNameForSdkTool,
+  RUN_COMMAND_TOOL_NAME,
 } from '../../../../shared/agent-tool-references.js';
 import {
   normalizeBashLeafRuleContent,
@@ -20,15 +22,17 @@ export function synthesizePermissionSuggestions(
   if (normalizedToolName === 'Browser') {
     return exactToolPermissionSuggestion('Browser');
   }
-  if (normalizedToolName === 'Bash') {
+  if (normalizedToolName === RUN_COMMAND_TOOL_NAME) {
     const commands = inferBashRuleContents(options.toolInput);
     if (!commands.length) return undefined;
-    const rules = commands.map((command) => `Bash(${command})`);
+    const rules = commands.map(
+      (command) => `${RUN_COMMAND_TOOL_NAME}(${command})`,
+    );
     if (rules.some((rule) => !validatePersistentRule(rule))) {
       return undefined;
     }
     return scopedToolPermissionSuggestion(
-      'Bash',
+      RUN_COMMAND_TOOL_NAME,
       commands.map((command) => ({ ruleContent: command })),
     );
   }
@@ -125,7 +129,7 @@ function scopedToolPermissionSuggestion(
 export function permissionRequestToolName(toolName: string): string {
   return isKnownProjectedBrowserMcpToolName(toolName.trim())
     ? 'Browser'
-    : toolName;
+    : publicGantryToolNameForSdkTool(toolName);
 }
 
 function inferBashRuleContents(toolInput: unknown): string[] {

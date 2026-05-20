@@ -387,14 +387,24 @@ async function dispatchBrowserToolInner(input: {
         );
       });
     case 'file_upload':
+    case 'file_attach':
       return await runWithActivePage(input, async (page) => {
         const paths = arrayOfStrings(input.args.paths);
         if (paths.length === 0) {
-          throw new Error('file_upload requires at least one path.');
+          throw new Error(`${input.toolName} requires at least one path.`);
         }
-        await page.setInputFiles('input[type=file]', paths, {
-          timeout: actionOperationTimeout(input.deadline),
-        });
+        const target = stringValue(input.args.target);
+        if (target) {
+          await (
+            await resolveTargetLocator(page, target)
+          ).setInputFiles(paths, {
+            timeout: actionOperationTimeout(input.deadline),
+          });
+        } else {
+          await page.setInputFiles('input[type=file]', paths, {
+            timeout: actionOperationTimeout(input.deadline),
+          });
+        }
         return textResult(`Uploaded ${paths.length} file(s).`);
       });
     case 'handle_dialog':

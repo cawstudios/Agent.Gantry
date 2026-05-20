@@ -609,7 +609,7 @@ conversations:
     });
   });
 
-  it('mirrors persistent permission grants into readable semantic, Browser, and scoped Bash tools', () => {
+  it('mirrors persistent permission grants into readable semantic, Browser, and scoped RunCommand tools', () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-settings-tools-'),
     );
@@ -631,7 +631,7 @@ conversations:
         runtimeHome,
         agentFolder: 'main_agent',
         rules: [
-          'Bash(npm test *)',
+          'RunCommand(npm test *)',
           'Browser',
           'capability:google.sheets.write',
         ],
@@ -640,13 +640,13 @@ conversations:
       const parsed = loadRuntimeSettings(runtimeHome);
       expect(parsed.agents.main_agent.capabilities.toolIds).toEqual([
         'mcp__gantry__service_restart',
-        'Bash(npm test *)',
+        'RunCommand(npm test *)',
         'Browser',
         'capability:google.sheets.write',
       ]);
       const yaml = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
       expect(yaml).toContain(
-        'tools: ["mcp__gantry__service_restart","Bash(npm test *)","Browser","capability:google.sheets.write"]',
+        'tools: ["mcp__gantry__service_restart","RunCommand(npm test *)","Browser","capability:google.sheets.write"]',
       );
       expect(yaml).not.toContain('capabilityPolicy');
       expect(yaml).not.toContain('permission-rule:');
@@ -722,7 +722,7 @@ conversations:
         mirrorAgentToolRulesToRuntimeSettings({
           runtimeHome,
           agentFolder: 'missing_agent',
-          rules: ['Bash(npm test *)'],
+          rules: ['RunCommand(npm test *)'],
         }),
       ).toThrow('missing settings agent');
       const parsed = loadRuntimeSettings(runtimeHome);
@@ -858,7 +858,7 @@ conversations:
           agentFolder: 'main_agent',
           rules: ['mcp__gantry__service_restart(reason=test)'],
         }),
-      ).toThrow('Only Bash supports persistent scoped tool rules');
+      ).toThrow('Only RunCommand supports persistent scoped tool rules');
       const parsed = loadRuntimeSettings(runtimeHome);
       expect(parsed.agents.main_agent.capabilities.toolIds).toEqual([]);
     } finally {
@@ -866,7 +866,7 @@ conversations:
     }
   });
 
-  it('rejects wildcard-scoped Bash rules before writing settings', () => {
+  it('rejects wildcard-scoped RunCommand rules before writing settings', () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-settings-tools-bash-wildcard-'),
     );
@@ -888,9 +888,9 @@ conversations:
         mirrorAgentToolRulesToRuntimeSettings({
           runtimeHome,
           agentFolder: 'main_agent',
-          rules: ['Bash(*)'],
+          rules: ['RunCommand(*)'],
         }),
-      ).toThrow('Persistent Bash scope is too broad');
+      ).toThrow('Persistent RunCommand scope is too broad');
       const parsed = loadRuntimeSettings(runtimeHome);
       expect(parsed.agents.main_agent.capabilities.toolIds).toEqual([]);
     } finally {

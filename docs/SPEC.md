@@ -59,9 +59,9 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 │  │    • temp CLAUDE_CONFIG_DIR for settings, skills, artifacts     │    │
 │  │    • Additional dirs → /workspace/extra/*                      │    │
 │  │                                                                │    │
-│  │  Default tools (all groups):                                   │    │
-│  │    • Read, Glob, Grep, WebSearch, WebFetch                     │    │
-│  │    • Task, ToolSearch, Skill, worktree lifecycle               │    │
+│  │  Default tool authority (all groups):                          │    │
+│  │    • Gantry facades: WebSearch, WebRead, FileSearch, FileRead  │    │
+│  │    • AgentDelegation, ToolSearch, Skill, worktree lifecycle    │    │
 │  │    • Exact mcp__gantry__send_message / ask_user_question       │    │
 │  │    • Exact capability request tools via Gantry MCP             │    │
 │  │    • Optional tools only after approved next-run binding       │    │

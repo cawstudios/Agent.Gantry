@@ -8,6 +8,7 @@ import {
 import {
   persistentPermissionToolId,
   parseReadableScopedToolRule,
+  RUN_COMMAND_TOOL_NAME,
   validateReadableAgentToolRule,
 } from '../../shared/agent-tool-references.js';
 import {
@@ -78,9 +79,9 @@ export async function ensureAgentToolCatalogItem(input: {
     });
   }
   const scoped = parseReadableScopedToolRule(allowedRule);
-  if (!scoped || scoped.toolName !== 'Bash') {
+  if (!scoped || scoped.toolName !== RUN_COMMAND_TOOL_NAME) {
     throw new Error(
-      `Unknown tool capability ${allowedRule}. Select a catalog tool, semantic capability, or scoped Bash(...) rule.`,
+      `Unknown tool capability ${allowedRule}. Select a catalog tool, semantic capability, or scoped RunCommand(...) rule.`,
     );
   }
   const item: ToolCatalogItem = {
@@ -153,7 +154,7 @@ export async function resolveAgentToolReference(input: {
   if (reference.startsWith('tool:')) {
     return {
       error:
-        'Tool rule must be readable; use a tool name or scoped Bash rule, not an internal tool ID.',
+        'Tool rule must be readable; use a tool name or scoped RunCommand rule, not an internal tool ID.',
     };
   }
 
@@ -185,7 +186,7 @@ export async function resolveAgentToolReference(input: {
     };
   }
   const scoped = parseReadableScopedToolRule(reference);
-  if (scoped?.toolName === 'Bash') return {};
+  if (scoped?.toolName === RUN_COMMAND_TOOL_NAME) return {};
   if (reference.startsWith('mcp__')) {
     return {
       error:
@@ -193,7 +194,7 @@ export async function resolveAgentToolReference(input: {
     };
   }
   return {
-    error: `Unknown tool capability ${reference}. Select a catalog tool, semantic capability, or scoped Bash(...) rule.`,
+    error: `Unknown tool capability ${reference}. Select a catalog tool, semantic capability, or scoped RunCommand(...) rule.`,
   };
 }
 

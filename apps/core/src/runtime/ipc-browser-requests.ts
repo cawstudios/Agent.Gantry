@@ -118,6 +118,7 @@ function processOneBrowserRequest(input: {
       browserIpcAuthorized,
       getCredentialBroker: deps.getCredentialBroker,
       getCredentialBrokerProfile: deps.getCredentialBrokerProfile,
+      getFileArtifactStore: deps.getFileArtifactStore,
       callBrowserTool: deps.callBrowserTool,
       publishBrowserJobActivity: deps.publishBrowserJobActivity,
       closeBrowserToolBackends: deps.closeBrowserToolBackends,

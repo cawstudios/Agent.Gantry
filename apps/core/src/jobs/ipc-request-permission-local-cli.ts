@@ -4,6 +4,10 @@ import {
   formatCapabilityRequirement,
   localCliCommandTemplatePermissionRule,
 } from '../application/jobs/job-capability-requirements.js';
+import {
+  publicGantryToolNameForSdkTool,
+  RUN_COMMAND_TOOL_NAME,
+} from '../shared/agent-tool-references.js';
 import { parseSemanticCapabilityRule } from '../shared/semantic-capability-ids.js';
 import { toTrimmedString } from './ipc-shared.js';
 
@@ -43,7 +47,7 @@ export async function jobLocalCliCapabilityConflict(input: {
   return [
     `This job declares ${formatCapabilityRequirement(localCliRequirement)}.`,
     rule
-      ? `Request the scoped command permission Bash(${rule}) instead of the generic capability ${semanticCapabilityName(capabilityId)}.`
+      ? `Request the scoped command permission ${RUN_COMMAND_TOOL_NAME}(${rule}) instead of the generic capability ${semanticCapabilityName(capabilityId)}.`
       : `Request the declared local CLI implementation instead of the generic capability ${semanticCapabilityName(capabilityId)}.`,
   ].join(' ');
 }
@@ -76,9 +80,9 @@ function requestMatchesLocalCliRequirement(
   const toolNames = sanitizedStringList([
     toolInput.toolName,
     ...(Array.isArray(toolInput.toolNames) ? toolInput.toolNames : []),
-  ]);
+  ]).map(publicGantryToolNameForSdkTool);
   const requestedRule = toTrimmedString(toolInput.rule, { maxLen: 2048 });
-  return toolNames.includes('Bash') && requestedRule === rule;
+  return toolNames.includes(RUN_COMMAND_TOOL_NAME) && requestedRule === rule;
 }
 
 function jobCapabilityRequirements(job: unknown): JobCapabilityRequirement[] {
