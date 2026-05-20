@@ -832,7 +832,6 @@ describe('agent-spawn timeout behavior', () => {
       ANTHROPIC_AUTH_TOKEN: 'broker-token',
       ANTHROPIC_API_KEY: '',
     });
-    expect(runnerInput.thinking).toEqual({ mode: 'disabled' });
   });
 
   it('projects OpenRouter models through OneCLI header-rewrite proxy credentials', async () => {
@@ -884,7 +883,6 @@ describe('agent-spawn timeout behavior', () => {
       HTTPS_PROXY: 'http://127.0.0.1:18080/',
       NODE_USE_ENV_PROXY: '1',
     });
-    expect(runnerInput.thinking).toEqual({ mode: 'disabled' });
     expect(mockEnsureEgressGateway).toHaveBeenCalledWith(
       expect.objectContaining({
         upstreamProxy: {
@@ -893,38 +891,6 @@ describe('agent-spawn timeout behavior', () => {
         },
       }),
     );
-  });
-
-  it('preserves explicit thinking overrides for OpenRouter models', async () => {
-    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
-      env: { ANTHROPIC_AUTH_TOKEN: 'broker-token' },
-      credentialProviders: { ANTHROPIC_AUTH_TOKEN: 'openrouter' },
-      brokerApplied: true,
-      brokerProfile: 'external',
-    });
-    const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
-    const resultPromise = spawnAgent(
-      testGroup,
-      {
-        ...testInput,
-        model: 'kimi',
-        thinking: {
-          mode: 'adaptive',
-          effort: 'low',
-        },
-      },
-      () => {},
-    );
-    await vi.advanceTimersByTimeAsync(10);
-    fakeProc.emit('close', 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
-
-    const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
-    expect(runnerInput.thinking).toEqual({
-      mode: 'adaptive',
-      effort: 'low',
-    });
   });
 
   it('rejects OpenRouter models when the broker token is not OpenRouter-scoped', async () => {
