@@ -38,7 +38,8 @@
   ],
   "workspaces": [
     "packages/contracts",
-    "packages/sdk"
+    "packages/sdk",
+    "packages/mcp-shopify"
   ],
   "scripts": {
     "build:contracts": "npm run build --workspace @gantry/contracts",

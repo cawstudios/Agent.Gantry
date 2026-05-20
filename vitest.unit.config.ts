@@ -4,5 +4,7 @@ export default makeVitestConfig({
   include: [
     'apps/core/test/unit/**/*.test.ts',
     'packages/contracts/test/unit/**/*.test.ts',
+    'packages/mcp-shopify/test/unit/**/*.test.ts',
+    'packages/mcp-shopify/test/stories/**/*.test.ts',
   ],
 });

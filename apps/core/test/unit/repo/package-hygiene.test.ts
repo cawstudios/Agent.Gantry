@@ -50,6 +50,7 @@ describe('package hygiene', () => {
       .sort();
 
     expect(skillFiles).toEqual([
+      '.claude/skills/boondi-kb/SKILL.md',
       '.claude/skills/commands/SKILL.md',
       '.claude/skills/gantry-admin/SKILL.md',
     ]);
