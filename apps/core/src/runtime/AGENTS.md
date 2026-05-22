@@ -12,3 +12,7 @@
   action metadata. IPC auth tokens, MCP paths, provider credentials, arbitrary
   caller env, and other authority-bearing env must stay host-owned or in the
   model credential runner-input lane.
+- Egress gateway socket resets are tunnel-level failures, not host-runtime
+  failures. Every accepted client, direct upstream, and upstream-proxy socket
+  must have an error listener before piping so routine `ECONNRESET` events do
+  not escape as uncaught exceptions and trigger launchd restarts.

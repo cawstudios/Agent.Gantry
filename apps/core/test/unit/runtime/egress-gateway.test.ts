@@ -174,6 +174,30 @@ describe('egress gateway', () => {
     await waitForSocketClose(tunnel);
     await target.close();
   });
+
+  it('keeps running when a CONNECT client resets an established tunnel', async () => {
+    const target = await startHoldingTarget();
+    const gateway = await ensureEgressGateway({
+      key: 'test:client-reset-connect',
+      settings: { denylist: [] },
+      principal: { appId: 'default', agentId: 'agent:test' },
+    });
+    const uncaught = vi.fn();
+    process.once('uncaughtException', uncaught);
+
+    try {
+      const tunnel = await openTunnelThroughGateway({
+        gatewayPort: gateway.port,
+        authority: `127.0.0.1:${target.port}`,
+      });
+      tunnel.resetAndDestroy();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(uncaught).not.toHaveBeenCalled();
+    } finally {
+      process.removeListener('uncaughtException', uncaught);
+      await target.close();
+    }
+  });
 });
 
 async function startTargetServer(): Promise<{
