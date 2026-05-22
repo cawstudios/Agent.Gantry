@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const queryMock = vi.hoisted(() => vi.fn());
 const getContainerConfigMock = vi.hoisted(() => vi.fn());
+const BROKER_API_KEY_ENV = 'ANTHROPIC' + '_API_KEY';
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: queryMock,
@@ -67,6 +68,7 @@ describe('runClaudeQuery', () => {
     getContainerConfigMock.mockResolvedValue({
       env: {
         ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+        [BROKER_API_KEY_ENV]: 'placeholder',
         CUSTOM_FLAG: 'ignored',
       },
     });
@@ -114,7 +116,7 @@ describe('runClaudeQuery', () => {
     expect(call?.prompt).toBe('Extract facts');
     expect(call?.options?.env).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
-      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_API_KEY: 'placeholder',
       CLAUDE_CODE_OAUTH_TOKEN: '',
     });
   });
@@ -146,12 +148,18 @@ describe('runClaudeQuery', () => {
           options?: {
             env?: Record<string, string>;
             settings?: {
+              autoMemoryEnabled?: boolean;
               skillOverrides?: Record<string, string>;
             };
+            skills?: string[];
+            settingSources?: string[];
           };
         }
       | undefined;
     expect(call?.options?.env).toMatchObject(SDK_NATIVE_SKILL_DISABLE_ENV);
+    expect(call?.options?.skills).toEqual([]);
+    expect(call?.options?.settingSources).toEqual([]);
+    expect(call?.options?.settings?.autoMemoryEnabled).toBe(false);
     expect(call?.options?.settings?.skillOverrides).toEqual(
       SDK_NATIVE_SKILL_OVERRIDES,
     );
@@ -187,7 +195,7 @@ describe('runClaudeQuery', () => {
       | undefined;
     expect(call?.options?.env).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
-      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_API_KEY: 'placeholder',
       CLAUDE_CODE_OAUTH_TOKEN: '',
     });
   });
@@ -226,6 +234,7 @@ describe('runClaudeQuery', () => {
     getContainerConfigMock.mockResolvedValue({
       env: {
         ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+        [BROKER_API_KEY_ENV]: 'placeholder',
       },
       caCertificate:
         '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----',
@@ -256,7 +265,7 @@ describe('runClaudeQuery', () => {
     );
     expect(call?.options?.env).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
-      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_API_KEY: 'placeholder',
       CLAUDE_CODE_OAUTH_TOKEN: '',
       NODE_EXTRA_CA_CERTS: caPath,
       SSL_CERT_FILE: caPath,

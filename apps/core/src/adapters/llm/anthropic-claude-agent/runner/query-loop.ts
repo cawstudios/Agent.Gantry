@@ -8,6 +8,7 @@ import { composeAgentCapabilities } from '../agent-capabilities.js';
 import {
   SDK_NATIVE_SKILL_DISABLE_ENV,
   SDK_NATIVE_SKILL_OVERRIDES,
+  readClaudeSdkSkillNamesFromEnv,
 } from '../native-sdk-skills.js';
 import { MessageStream } from './message-stream.js';
 import {
@@ -187,6 +188,7 @@ export async function runQuery(
   const extraDirs = discoverAdditionalDirectories();
   const protectedFilesystemPaths = readProtectedFilesystemPaths();
   const workspaceFolder = agentInput.groupFolder;
+  const enabledSdkSkills = readClaudeSdkSkillNamesFromEnv();
   const isolatedSdkEnv = {
     ...sdkEnv,
     ...SDK_NATIVE_SKILL_DISABLE_ENV,
@@ -231,11 +233,13 @@ export async function runQuery(
         : {}),
       systemPrompt,
       settings: {
+        autoMemoryEnabled: false,
         includeGitInstructions: includeGitInstructionsForPersona(
           agentInput.persona,
         ),
         skillOverrides: SDK_NATIVE_SKILL_OVERRIDES,
       },
+      skills: enabledSdkSkills,
       tools: [...capabilities.availableTools],
       allowedTools: [...capabilities.allowedTools],
       disallowedTools: [...capabilities.disallowedTools],

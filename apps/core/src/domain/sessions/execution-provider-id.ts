@@ -1,4 +1,5 @@
 export function isSafeExecutionProviderId(value: string): boolean {
+  if (value.startsWith('unconfigured:')) return false;
   return /^[A-Za-z0-9][A-Za-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value);
 }
 

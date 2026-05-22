@@ -24,7 +24,6 @@ export function createRunProviderMetadataUpdater(input: {
 
   return async (metadata) => {
     const updateMetadata = input.opsRepository.updateAgentRunProviderMetadata;
-    if (!updateMetadata) return;
     if (
       metadata.providerRunId !== undefined &&
       metadata.providerRunId !== persistedProviderRunId
@@ -41,6 +40,14 @@ export function createRunProviderMetadataUpdater(input: {
       pendingProviderRunId === undefined &&
       pendingProviderSessionId === undefined
     ) {
+      return;
+    }
+    if (!updateMetadata) {
+      if (metadata.force) {
+        throw new Error(
+          'Cannot force-persist scheduler run provider metadata: repository does not implement provider metadata updates.',
+        );
+      }
       return;
     }
     const timestampMs = input.nowMs();
@@ -63,23 +70,25 @@ export function createRunProviderMetadataUpdater(input: {
     const runIds = sessionRunId
       ? [input.outerRunId, sessionRunId]
       : [input.outerRunId];
-    await updateMetadata({ runId: input.outerRunId, runIds, ...update })
-      .then(() => {
-        if (pendingProviderRunId !== undefined) {
-          persistedProviderRunId = pendingProviderRunId;
-          pendingProviderRunId = undefined;
-        }
-        if (pendingProviderSessionId !== undefined) {
-          persistedProviderSessionId = pendingProviderSessionId;
-          pendingProviderSessionId = undefined;
-        }
-        lastProviderMetadataUpdateMs = timestampMs;
-      })
-      .catch((err) => {
-        input.logger.warn(
-          { err, jobId: input.jobId, runIds },
-          'Failed to update scheduler run provider metadata',
-        );
-      });
+    try {
+      await updateMetadata({ runId: input.outerRunId, runIds, ...update });
+      if (pendingProviderRunId !== undefined) {
+        persistedProviderRunId = pendingProviderRunId;
+        pendingProviderRunId = undefined;
+      }
+      if (pendingProviderSessionId !== undefined) {
+        persistedProviderSessionId = pendingProviderSessionId;
+        pendingProviderSessionId = undefined;
+      }
+      lastProviderMetadataUpdateMs = timestampMs;
+    } catch (err) {
+      input.logger.warn(
+        { err, jobId: input.jobId, runIds },
+        'Failed to update scheduler run provider metadata',
+      );
+      if (metadata.force) {
+        throw err;
+      }
+    }
   };
 }

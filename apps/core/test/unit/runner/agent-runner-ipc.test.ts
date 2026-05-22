@@ -6,7 +6,10 @@ import { generateKeyPairSync } from 'crypto';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { SDK_NATIVE_SKILL_OVERRIDES } from '@core/adapters/llm/anthropic-claude-agent/native-sdk-skills.js';
+import {
+  GANTRY_CLAUDE_SDK_SKILLS_ENV,
+  SDK_NATIVE_SKILL_OVERRIDES,
+} from '@core/adapters/llm/anthropic-claude-agent/native-sdk-skills.js';
 
 const tempRoots: string[] = [];
 
@@ -33,6 +36,7 @@ interface RunnerRecord {
     sdkEnv?: Record<string, string>;
     mcpServers?: Record<string, unknown>;
     settings?: Record<string, unknown>;
+    skills?: string[];
     sandbox?: Record<string, unknown>;
     persistSession?: boolean;
     resume?: unknown;
@@ -186,6 +190,10 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'agent-persona.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/sdk-native-skill-names.ts'),
+    path.join(sharedDir, 'sdk-native-skill-names.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/admin-mcp-tools.ts'),
     path.join(sharedDir, 'admin-mcp-tools.ts'),
   );
@@ -337,6 +345,7 @@ export async function* query({ prompt, options }) {
     sdkEnv: options?.env,
     mcpServers: options?.mcpServers,
     settings: options?.settings,
+    skills: options?.skills,
     sandbox: options?.sandbox,
     tools: options?.tools,
     allowedTools: options?.allowedTools,
@@ -495,6 +504,7 @@ export async function* query({ prompt, options }) {
         description: 'Allow network connection to registry.npmjs.org?',
         decisionReason: 'Sandboxed tool attempted outbound network access',
         toolUseID: 'toolu_network_1',
+        parentToolUseID: 'toolu_bash_1',
       },
     );
     const secondNetworkDecision =
@@ -510,6 +520,7 @@ export async function* query({ prompt, options }) {
               decisionReason:
                 'Sandboxed tool attempted outbound network access',
               toolUseID: 'toolu_network_2',
+              parentToolUseID: 'toolu_bash_1',
             },
           )
         : undefined;
@@ -1173,6 +1184,11 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({ persona: 'personal_assistant' }),
         {
           TEST_EXIT_AFTER_QUERY: '1',
+          [GANTRY_CLAUDE_SDK_SKILLS_ENV]: JSON.stringify([
+            'gantry-admin',
+            'gantry-browser',
+            'linkedin-posting',
+          ]),
         },
       );
 
@@ -1195,6 +1211,11 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({ persona: 'personal_assistant' }),
         {
           TEST_EXIT_AFTER_QUERY: '1',
+          [GANTRY_CLAUDE_SDK_SKILLS_ENV]: JSON.stringify([
+            'gantry-admin',
+            'gantry-browser',
+            'linkedin-posting',
+          ]),
         },
       );
 
@@ -1204,6 +1225,22 @@ describe('agent-runner IPC lifecycle', () => {
       expect(call?.allowedTools).toContain('Skill');
       expect(call?.settings?.skillOverrides).toEqual(
         SDK_NATIVE_SKILL_OVERRIDES,
+      );
+      expect(call?.skills).toEqual([
+        'gantry-admin',
+        'gantry-browser',
+        'linkedin-posting',
+      ]);
+      expect(call?.skills).not.toEqual(
+        expect.arrayContaining([
+          'commands',
+          'init',
+          'review',
+          'security-review',
+          'update-config',
+          'loop',
+          'schedule',
+        ]),
       );
       expect(call?.sdkEnv?.CLAUDE_CODE_DISABLE_POLICY_SKILLS).toBe('1');
       expect(call?.sdkEnv?.CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL).toBe('1');
@@ -1225,6 +1262,7 @@ describe('agent-runner IPC lifecycle', () => {
       expect(call?.promptKind).toBe('string');
       expect(call?.stringPrompt).toBe('/model');
       expect(call?.allowedTools).toEqual([]);
+      expect(call?.skills).toEqual([]);
       expect(call?.settings?.skillOverrides).toEqual(
         SDK_NATIVE_SKILL_OVERRIDES,
       );

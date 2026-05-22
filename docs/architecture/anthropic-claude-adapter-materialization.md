@@ -16,11 +16,14 @@ run. The directory contains:
 The temp directory is removed after the run unless explicit debug retention is
 enabled by the caller.
 
-The Claude Agent SDK v0.2.112 exposes `settingSources`; an empty list loads no
-filesystem settings, while `user`, `project`, and `local` opt into user
-settings, project settings, and `settings.local.json`. Gantry uses the
-generated per-run `CLAUDE_CONFIG_DIR` as the SDK user settings root and does
-not opt into the `local` settings source for enterprise runtime.
+The Claude Agent SDK exposes `settingSources` and `skills` as separate session
+inputs. An empty `settingSources` list loads no filesystem settings, while
+`user`, `project`, and `local` opt into user settings, project settings, and
+`settings.local.json`. The `skills` option is the live SDK skill allowlist:
+omitting it does not disable skills, `[]` disables all skills, and a string
+array enables only those named skills. Gantry uses the generated per-run
+`CLAUDE_CONFIG_DIR` as the SDK user settings root and does not opt into the
+`local` settings source for enterprise runtime.
 
 ## Durable Sources
 
@@ -69,8 +72,11 @@ settings are not Gantry policy.
 
 Local Claude skills are files. The materializer copies valid skill folders or
 approved skill artifacts containing `SKILL.md` into the temp `skills/`
-directory for that run, then the Claude Agent SDK loads them from
-`CLAUDE_CONFIG_DIR`.
+directory for that run. The adapter then passes the exact materialized skill
+names to `query({ options: { skills } })`. Memory and slash helper queries pass
+`skills: []` so they cannot inherit filesystem or Claude-native skills.
+Filesystem materialization, `skillOverrides`, and SDK native-skill disable
+environment variables are defense in depth, not the authority boundary.
 
 For each persona with browser capability, Gantry also materializes a pinned
 runtime-installed `gantry-browser` skill into that same temp directory. It is not
@@ -84,6 +90,13 @@ the projected Gantry gateway.
 
 Durable user-installed files under the runtime-home Claude skills directory are
 not read or copied by enterprise runtime.
+
+Gantry-owned skill names must not collide with Claude-native reserved names
+such as `commands`, `init`, `review`, `security-review`, `schedule`, `loop`, or
+`update-config`. The materializer rejects those names before writing skill
+files. It also rejects a skill whose `SKILL.md` frontmatter `name:` would
+materialize to a different SDK skill name than the Gantry catalog name; the
+catalog name, temp directory, and declared SDK skill name must agree.
 
 Agent-created or admin-uploaded skills enter Gantry as zip uploads containing
 `SKILL.md`. Gantry parses display metadata from that file, stores the normalized

@@ -191,6 +191,95 @@ describe('Claude config materializer', () => {
     expect(fs.existsSync(path.join(skillsDir, 'invalid'))).toBe(false);
   });
 
+  it('rejects enabled skills that collide with Claude-native skill names', async () => {
+    const skillsDir = path.join(tempRoot, 'skills');
+    await expect(
+      materializeClaudeSkills({
+        skillsDir,
+        skillSource: {
+          listSkills: async () => [
+            {
+              id: 'skill:commands',
+              name: 'commands',
+              enabled: true,
+              assets: [
+                {
+                  path: 'SKILL.md',
+                  content: Buffer.from('# Legacy Commands'),
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow('Claude-native reserved skill name');
+    expect(fs.existsSync(path.join(skillsDir, 'commands'))).toBe(false);
+  });
+
+  it('rejects asset skills that declare a Claude-native skill name in SKILL.md', async () => {
+    const skillsDir = path.join(tempRoot, 'skills');
+    await expect(
+      materializeClaudeSkills({
+        skillsDir,
+        skillSource: {
+          listSkills: async () => [
+            {
+              id: 'skill:linkedin-posting',
+              name: 'LinkedIn Posting',
+              enabled: true,
+              assets: [
+                {
+                  path: 'SKILL.md',
+                  content: Buffer.from(`---
+name: commands
+description: legacy commands
+---
+
+# Legacy Commands`),
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow('declares Claude-native reserved skill name "commands"');
+    expect(fs.existsSync(path.join(skillsDir, 'LinkedIn-Posting'))).toBe(false);
+  });
+
+  it('rejects source skills whose SKILL.md name differs from the materialized skill name', async () => {
+    const skillsDir = path.join(tempRoot, 'skills');
+    const sourceDir = path.join(tempRoot, 'source-skill');
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sourceDir, 'SKILL.md'),
+      `---
+name: other-skill
+description: mismatch
+---
+
+# Other Skill`,
+    );
+
+    await expect(
+      materializeClaudeSkills({
+        skillsDir,
+        skillSource: {
+          listSkills: async () => [
+            {
+              id: 'skill:linkedin-posting',
+              name: 'LinkedIn Posting',
+              enabled: true,
+              sourceDir,
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow(
+      'declares SDK skill name "other-skill" but materializes as "LinkedIn-Posting"',
+    );
+    expect(fs.existsSync(path.join(skillsDir, 'LinkedIn-Posting'))).toBe(false);
+  });
+
   it('materializes the runtime-installed gantry-browser skill into the temp skills dir', async () => {
     const skillsDir = path.join(tempRoot, 'skills');
     const materialized = await materializeClaudeSkills({

@@ -33,6 +33,16 @@ export async function handleCapabilityCatalogRoutes(
   ctx: ControlRouteContext,
   pathname: string,
 ): Promise<boolean> {
+  if (pathname === '/v1/capability-catalog') {
+    sendError(
+      res,
+      410,
+      'GONE',
+      'Capability catalog moved to /v1/inventory and /v1/capabilities.',
+    );
+    return true;
+  }
+
   if (pathname === '/v1/inventory' && req.method === 'GET') {
     const auth = authorizeControlRequest(req, res, ctx.keys, ['agents:admin']);
     if (!auth) return true;

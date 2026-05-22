@@ -76,11 +76,13 @@ export async function runSessionSlashCommand(
         persistSession: false,
         systemPrompt,
         settings: {
+          autoMemoryEnabled: false,
           includeGitInstructions: includeGitInstructionsForPersona(
             opts.persona,
           ),
           skillOverrides: SDK_NATIVE_SKILL_OVERRIDES,
         },
+        skills: [],
         allowedTools: [],
         env: isolatedSdkEnv,
         permissionMode: 'default' as const,

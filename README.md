@@ -439,28 +439,36 @@ npm run test:e2e
 - `npm test` runs contracts build + unit + integration tests.
 - `npm run test:e2e` runs hermetic end-to-end runtime flows without external service credentials.
 
-## Shipped Chat Skills
+## Shipped Chat Surfaces
 
-Skills are agent instructions bundled into the npm package or uploaded as reviewable skill zips. Runtime copies approved skills into a temporary per-run Claude config directory; runtime-home `.claude/skills` is not the durable source of truth.
+Gantry ships host-managed chat commands and in-house skill surfaces. Skills are bundled into the npm package or uploaded as reviewable skill zips. Runtime copies approved skills into a temporary per-run Claude config directory; runtime-home `.claude/skills` is not the durable source of truth.
 
-| Skill          | Purpose                                                               |
+| Surface        | Purpose                                                               |
 | -------------- | --------------------------------------------------------------------- |
-| `/commands`    | List available chat commands and installed skill packs                |
+| `/commands`    | Host-managed command that lists available chat commands               |
 | `gantry-admin` | Internal administration reference used by agents when managing Gantry |
 
 Session commands are handled by the host runtime, not bundled skills:
 
 ```text
 /compact
+/commands
 /new
+/stop
+/dream
+/memory-status
+/save-procedure "<title>"
 /model
 /model <value>
 /models
 /status
 /model default
+/thinking
+/thinking <value>
+/thinking default
 ```
 
-Optional skill packs can be installed for additional capabilities (code review, QA, design review, security audits, and more). Run `/commands` after installing to see what's available.
+Optional skill packs can be installed for additional capabilities through the reviewed skill/capability flow. `/commands` lists host-managed chat commands; installed skills remain governed by agent capability selection.
 
 ## Session Commands
 
@@ -468,7 +476,12 @@ Use these as standalone chat messages:
 
 ```text
 /compact
+/commands
 /new
+/stop
+/dream
+/memory-status
+/save-procedure "<title>"
 /model
 /model opus
 /model sonnet
@@ -476,8 +489,12 @@ Use these as standalone chat messages:
 /models
 /status
 /model default
+/thinking
+/thinking high
+/thinking default
 ```
 
+- `/commands` lists the host-managed commands available in chat. It is direct Gantry runtime behavior, not a Claude SDK skill.
 - `/new` resets the current Gantry session boundary and captures best-effort boundary memory/digests. It preserves durable memory, approved skills, MCP bindings, model choices, and agent configuration; the next user message starts fresh and drives memory retrieval. Transcript export is an explicit debug/export workflow, not provider continuity.
 - `/models` lists the curated model catalog with aliases, provider label, context window, cache support, and default badges.
 - `/model <value>` switches the group model override through the catalog. Friendly aliases are case/punctuation-insensitive; raw provider model IDs are rejected.

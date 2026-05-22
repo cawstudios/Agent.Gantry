@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, lt } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 
 import type { ReleasedStaleJobLease } from '../../../../domain/repositories/ops-repo.js';
 import * as pgSchema from '../schema/schema.js';
@@ -23,6 +23,7 @@ export async function releaseInterruptedCanonicalJobLeases(
     errorSummary: 'Scheduler runtime restarted before completion.',
     reason: 'runtime_restarted',
     staleOnly: false,
+    requireCanonicalLeaseOwner: true,
   });
 }
 
@@ -33,6 +34,7 @@ async function releaseCanonicalJobLeases(
     errorSummary: string;
     reason: ReleasedStaleJobLease['reason'];
     staleOnly: boolean;
+    requireCanonicalLeaseOwner?: boolean;
   },
 ): Promise<ReleasedStaleJobLease[]> {
   return db.transaction(async (tx) => {
@@ -48,11 +50,58 @@ async function releaseCanonicalJobLeases(
       isNotNull(jobs.leaseRunId),
     );
     const predicate = options.staleOnly ? stalePredicate : interruptedPredicate;
-    const staleJobs = await tx
-      .select({ id: jobs.id, leaseRunId: jobs.leaseRunId })
+    const candidateJobs = await tx
+      .select({
+        id: jobs.id,
+        leaseRunId: jobs.leaseRunId,
+        leaseOwner: sql<string>`${jobs.targetJson} #>> '{executionContext,conversationJid}'`,
+      })
       .from(jobs)
       .where(predicate);
+    const candidateRunIds = candidateJobs
+      .map((job) => job.leaseRunId)
+      .filter((runId): runId is string => Boolean(runId));
+    const ownedRunIds =
+      options.requireCanonicalLeaseOwner && candidateRunIds.length > 0
+        ? new Set(
+            (
+              await tx
+                .select({ id: runs.id, leaseOwner: runs.leaseOwner })
+                .from(runs)
+                .where(
+                  and(
+                    inArray(runs.id, candidateRunIds),
+                    isNotNull(runs.leaseOwner),
+                  ),
+                )
+            )
+              .filter((run) =>
+                candidateJobs.some(
+                  (job) =>
+                    job.leaseRunId === run.id &&
+                    job.leaseOwner &&
+                    job.leaseOwner === run.leaseOwner,
+                ),
+              )
+              .map((run) => run.id),
+          )
+        : undefined;
+    const staleJobs = ownedRunIds
+      ? candidateJobs.filter(
+          (job) => job.leaseRunId && ownedRunIds.has(job.leaseRunId),
+        )
+      : candidateJobs;
     if (staleJobs.length === 0) return [];
+    const releasePredicate = and(
+      inArray(
+        jobs.id,
+        staleJobs.map((job) => job.id),
+      ),
+      predicate,
+      ownedRunIds && ownedRunIds.size > 0
+        ? inArray(jobs.leaseRunId, [...ownedRunIds])
+        : undefined,
+    );
     const releasedJobs = await tx
       .update(jobs)
       .set({
@@ -61,15 +110,7 @@ async function releaseCanonicalJobLeases(
         leaseExpiresAt: null,
         updatedAt: nowIso,
       })
-      .where(
-        and(
-          inArray(
-            jobs.id,
-            staleJobs.map((job) => job.id),
-          ),
-          predicate,
-        ),
-      )
+      .where(releasePredicate)
       .returning({ id: jobs.id });
     const releasedJobIds = new Set(releasedJobs.map((job) => job.id));
     const releasedStaleJobs = staleJobs.filter((job) =>

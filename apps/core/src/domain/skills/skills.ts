@@ -16,7 +16,6 @@ export type SkillStatus = 'draft' | 'approved' | 'rejected' | 'disabled';
 export type SkillStorageType = 'local-filesystem' | 'object-store';
 
 export const RESERVED_MATERIALIZED_SKILL_DIRECTORY_NAMES = [
-  'commands',
   'gantry-admin',
   'gantry-browser',
 ] as const;

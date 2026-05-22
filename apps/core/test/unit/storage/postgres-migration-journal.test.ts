@@ -447,11 +447,10 @@ describe('Postgres migration journal', () => {
     );
     expect(runMigration).toContain('agent_runs_execution_provider_id_safe');
     expect(runMigration).toContain(
-      "execution_provider_id text DEFAULT 'anthropic:claude-agent-sdk'",
+      'ADD COLUMN IF NOT EXISTS execution_provider_id text',
     );
-    expect(runMigration).toContain(
-      "ALTER COLUMN execution_provider_id SET DEFAULT 'anthropic:claude-agent-sdk'",
-    );
+    expect(runMigration).toContain("execution_provider_id !~ '^unconfigured:'");
+    expect(runMigration).not.toContain('SET DEFAULT');
 
     const providerMigration = fs.readFileSync(
       path.resolve(
@@ -467,9 +466,7 @@ describe('Postgres migration journal', () => {
     expect(providerMigration).toContain(
       'provider_ref_json = jsonb_build_object',
     );
-    expect(providerMigration).toContain(
-      "'anthropic:claude-agent-sdk:' || regexp_replace",
-    );
+    expect(providerMigration).toContain("'anthropic:claude-agent-sdk:' ||");
     expect(providerMigration).toContain(
       "'provider', 'anthropic:claude-agent-sdk'",
     );
@@ -478,8 +475,10 @@ describe('Postgres migration journal', () => {
       "provider IN ('anthropic', 'anthropic-claude-agent-sdk')",
     );
     expect(providerMigration).toContain(
-      "external_session_id ~ '^(anthropic(-claude-agent-sdk)?:)+'",
+      "external_session_id !~ '^anthropic:claude-agent-sdk:'",
     );
+    expect(providerMigration).toContain('FOR UPDATE SKIP LOCKED');
+    expect(providerMigration).not.toContain('updated_at = now()');
     expect(providerMigration).toContain(
       "provider_ref_json->>'provider' IN ('anthropic', 'anthropic-claude-agent-sdk')",
     );
@@ -765,8 +764,13 @@ describe('Postgres migration journal', () => {
       'ADD COLUMN IF NOT EXISTS action_permissions_json',
     );
     expect(schema).toContain('actionPermissionsJson');
+    expect(migration).toContain('action_permissions_json jsonb');
+    expect(migration).toContain('TYPE jsonb');
+    expect(migration).toContain("SET DEFAULT '[]'::jsonb");
+    expect(migration).toContain('SET NOT NULL');
+    expect(schema).toContain("jsonb('action_permissions_json')");
     expect(repository).toContain(
-      'actionPermissionsJson: encodeJson(item.actionPermissions ?? [])',
+      'actionPermissionsJson: item.actionPermissions ?? []',
     );
     expect(repository).toContain(
       'actionPermissions: parseJsonArray(row.actionPermissionsJson)',
@@ -906,7 +910,7 @@ describe('Postgres migration journal', () => {
     );
     expect(migration).toContain('idx_agent_runs_provider_session');
     expect(migration).toContain('idx_agent_runs_lease_claim');
-    expect(migration).toContain("WHERE status IN ('pending', 'leased')");
+    expect(migration).toContain("WHERE status = 'running'");
     expect(migration).toContain('idx_provider_sessions_agent_provider');
   });
 

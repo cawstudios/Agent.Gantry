@@ -390,7 +390,7 @@ describe('createCanUseToolCallback', () => {
     expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(2);
   });
 
-  it('suppresses parentless SandboxNetworkAccess after an allow-once approved Bash tool call', async () => {
+  it('denies parentless SandboxNetworkAccess after an allow-once approved Bash tool call', async () => {
     permissionMock.requestPermissionApproval.mockResolvedValueOnce({
       approved: true,
       mode: 'allow_once',
@@ -417,9 +417,49 @@ describe('createCanUseToolCallback', () => {
     );
 
     expect(bash.behavior).toBe('allow');
+    expect(network).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('without a parent tool-use id'),
+      }),
+    );
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses SandboxNetworkAccess only when it carries the approved parent tool-use id', async () => {
+    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
+      approved: true,
+      mode: 'allow_once',
+      updatedPermissions: undefined,
+      decidedBy: 'user',
+    });
+
+    const canUseTool = makeCallback();
+    const bash = await canUseTool(
+      'Bash',
+      { command: 'npm install' },
+      makePermissionOptions({
+        toolUseID: 'toolu_bash_1',
+        agentID: 'subagent-a',
+      }) as never,
+    );
+    const network = await canUseTool(
+      'SandboxNetworkAccess',
+      { host: 'registry.npmjs.org', parentToolUseID: 'toolu_bash_1' },
+      makePermissionOptions({
+        toolUseID: 'toolu_network_1',
+        parentToolUseID: 'toolu_bash_1',
+        agentID: 'subagent-a',
+      }) as never,
+    );
+
+    expect(bash.behavior).toBe('allow');
     expect(network).toEqual({
       behavior: 'allow',
-      updatedInput: { host: 'registry.npmjs.org' },
+      updatedInput: {
+        host: 'registry.npmjs.org',
+        parentToolUseID: 'toolu_bash_1',
+      },
     });
     expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
@@ -454,7 +494,7 @@ describe('createCanUseToolCallback', () => {
     expect(network).toEqual(
       expect.objectContaining({
         behavior: 'deny',
-        message: expect.stringContaining('before any tool call was allowed'),
+        message: expect.stringContaining('without a parent tool-use id'),
       }),
     );
     expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);

@@ -260,7 +260,6 @@ gantry/
 │
 ├── .claude/
 │   └── skills/
-│       ├── commands/SKILL.md            # /commands - command discovery
 │       └── gantry-admin/SKILL.md        # Internal runtime administration reference
 │
 ├── agents/

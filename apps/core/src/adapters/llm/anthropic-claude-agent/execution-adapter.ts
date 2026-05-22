@@ -22,6 +22,10 @@ import {
   type SkillSource,
 } from './claude-skill-materializer.js';
 import { skillActionSemanticCapability } from '../../../domain/skills/skill-action-permissions.js';
+import {
+  GANTRY_CLAUDE_SDK_SKILLS_ENV,
+  claudeSdkSkillNamesForMaterializedSkills,
+} from './native-sdk-skills.js';
 
 const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
 const ANTHROPIC_MODEL_ENV = 'ANTHROPIC_MODEL';
@@ -91,6 +95,11 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
 
     const env: NodeJS.ProcessEnv = {
       [CLAUDE_CONFIG_DIR_ENV]: materialization.claudeConfigDir,
+      [GANTRY_CLAUDE_SDK_SKILLS_ENV]: JSON.stringify(
+        claudeSdkSkillNamesForMaterializedSkills(
+          materialization.materializedSkills ?? [],
+        ),
+      ),
       [GANTRY_MCP_SERVER_PATH_ENV]: path.join(
         input.hostRuntime.runnerDistDir,
         'mcp',

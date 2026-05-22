@@ -13,6 +13,8 @@ const capabilityRequirementImplementation = {
     },
     name: { type: 'string' },
     executablePath: { type: 'string' },
+    executableVersion: { type: 'string' },
+    executableHash: { type: 'string' },
     commandTemplate: { type: 'string' },
     authPreflight: { type: 'string' },
     protectedPaths: stringArray,

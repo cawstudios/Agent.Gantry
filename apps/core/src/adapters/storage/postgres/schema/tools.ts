@@ -1,5 +1,6 @@
 import {
   boolean,
+  index,
   pgTable,
   text,
   timestamp,
@@ -105,6 +106,17 @@ export const agentToolSourcesPostgres = pgTable(
       table.sourceId,
       table.kind,
       table.version,
+    ),
+    agentToolSourceAppAgentStatusIdx: index(
+      'idx_agent_tool_sources_app_agent_status',
+    ).on(
+      table.appId,
+      table.agentId,
+      table.status,
+      table.sourceId,
+      table.kind,
+      table.version,
+      table.updatedAt,
     ),
   }),
 );

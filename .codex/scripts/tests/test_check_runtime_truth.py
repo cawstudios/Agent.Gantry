@@ -91,6 +91,32 @@ class RuntimeTruthScriptTests(unittest.TestCase):
             with self.subTest(tool_name=tool_name):
                 self.assertIn(tool_name, content)
 
+    def test_runtime_truth_rejects_legacy_commands_sdk_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            shutil.copytree(
+                REPO_ROOT,
+                root,
+                ignore=shutil.ignore_patterns(".git", "node_modules", "dist"),
+            )
+            commands_skill = root / ".claude" / "skills" / "commands" / "SKILL.md"
+            commands_skill.parent.mkdir(parents=True, exist_ok=True)
+            commands_skill.write_text("# Commands\n", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(root / ".codex" / "scripts" / "check_runtime_truth.py"),
+                ],
+                cwd=root,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(
+                ".claude/skills/commands/SKILL.md must not exist",
+                result.stdout,
+            )
+
     def test_runtime_truth_rejects_direct_capability_mutation_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "repo"

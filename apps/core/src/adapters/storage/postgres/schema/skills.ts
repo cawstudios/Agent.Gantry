@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -30,9 +31,9 @@ export const skillCatalogPostgres = pgTable(
     toolIdsJson: text('tool_ids_json').notNull().default('[]'),
     workflowRefsJson: text('workflow_refs_json').notNull().default('[]'),
     requiredEnvVarsJson: text('required_env_vars_json').notNull().default('[]'),
-    actionPermissionsJson: text('action_permissions_json')
+    actionPermissionsJson: jsonb('action_permissions_json')
       .notNull()
-      .default('[]'),
+      .default(sql`'[]'::jsonb`),
     storageType: text('storage_type'),
     storageRef: text('storage_ref'),
     contentHash: text('content_hash'),

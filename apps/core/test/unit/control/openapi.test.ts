@@ -329,6 +329,28 @@ describe('control OpenAPI documentation', () => {
       'x-gantry-required-scopes': ['sessions:read', 'jobs:read'],
     });
     expect(
+      spec.paths['/v1/capabilities']?.get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/CapabilityListResponse' });
+    expect(
+      spec.paths['/v1/capabilities/{capabilityId}']?.get.responses['200']
+        .content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/CapabilityManifest' });
+    expect(spec.components.schemas.AgentSources.properties.tools.items).toEqual(
+      { $ref: '#/components/schemas/AgentToolSourceSelection' },
+    );
+    expect(
+      spec.components.schemas.AgentSourceSelection.properties,
+    ).not.toHaveProperty('kind');
+    expect(
+      spec.components.schemas.JobCreateRequest.properties.capabilityRequirements
+        .items.properties.implementation.properties,
+    ).toMatchObject({
+      executableVersion: { type: 'string' },
+      executableHash: { type: 'string' },
+    });
+    expect(
       spec.paths['/v1/agents']?.post.requestBody.content['application/json']
         .schema,
     ).toEqual({ $ref: '#/components/schemas/AgentCreateRequest' });
@@ -365,6 +387,25 @@ describe('control OpenAPI documentation', () => {
     expect(spec.paths['/v1/jobs/{jobId}/trigger'].post.operationId).toBe(
       'triggerJob',
     );
+  });
+
+  it('returns gone for the removed capability-catalog route', async () => {
+    const res = responseRecorder();
+
+    const handled = await handleCapabilityCatalogRoutes(
+      request('GET'),
+      res,
+      mockContext(),
+      '/v1/capability-catalog',
+    );
+
+    expect(handled).toBe(true);
+    expect(res.statusCode).toBe(410);
+    expect(JSON.parse(res.body)).toMatchObject({
+      error: {
+        code: 'GONE',
+      },
+    });
   });
 
   it('serves Swagger UI for interactive API exploration', async () => {

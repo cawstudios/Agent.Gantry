@@ -17,6 +17,20 @@ describe('extractSessionCommand', () => {
     });
   });
 
+  it('detects bare /commands', () => {
+    expect(extractSessionCommand('/commands', trigger)).toEqual({
+      kind: 'commands',
+      raw: '/commands',
+    });
+  });
+
+  it('detects /commands with trigger prefix', () => {
+    expect(extractSessionCommand('@Andy /commands', trigger)).toEqual({
+      kind: 'commands',
+      raw: '/commands',
+    });
+  });
+
   it('detects /compact with trigger prefix', () => {
     expect(extractSessionCommand('@Andy /compact', trigger)).toEqual({
       kind: 'compact',
@@ -284,6 +298,28 @@ describe('handleSessionCommand', () => {
       deps,
     });
     expect(result.handled).toBe(false);
+  });
+
+  it('handles authorized /commands without running the agent', async () => {
+    const deps = makeDeps();
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/commands')],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.runAgent).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('/commands - List available chat commands.'),
+    );
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('/model <alias>'),
+    );
+    expect(deps.advanceCursor).toHaveBeenCalledWith(
+      expect.objectContaining({ timestamp: '100' }),
+    );
   });
 
   it('handles authorized /compact in main group', async () => {

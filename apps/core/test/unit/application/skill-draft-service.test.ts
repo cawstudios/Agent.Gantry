@@ -274,12 +274,67 @@ describe('SkillDraftService', () => {
     expect(artifacts.bundles.size).toBe(0);
   });
 
+  it('rejects skill names that collide with SDK-native skills before storing drafts', async () => {
+    const { artifacts, service } = createService();
+
+    await expect(
+      service.importDraft({
+        appId: 'app:one' as never,
+        name: 'Commands',
+        assets: [asset],
+      }),
+    ).rejects.toThrow('reserved SDK-native skill name "commands"');
+    expect(artifacts.bundles.size).toBe(0);
+  });
+
+  it('rejects SKILL.md names that collide with SDK-native skills before storing drafts', async () => {
+    const { artifacts, service } = createService();
+
+    await expect(
+      service.importDraft({
+        appId: 'app:one' as never,
+        name: 'LinkedIn Posting',
+        assets: [
+          {
+            path: 'SKILL.md',
+            content: Buffer.from(
+              '---\nname: security-review\n---\n# Security Review',
+            ),
+            contentType: 'text/markdown',
+          },
+        ],
+      }),
+    ).rejects.toThrow('reserved SDK-native skill name "security-review"');
+    expect(artifacts.bundles.size).toBe(0);
+  });
+
+  it('rejects SKILL.md names that do not align with the Gantry skill name before storing drafts', async () => {
+    const { artifacts, service } = createService();
+
+    await expect(
+      service.importDraft({
+        appId: 'app:one' as never,
+        name: 'LinkedIn Posting',
+        assets: [
+          {
+            path: 'SKILL.md',
+            content: Buffer.from('---\nname: other-skill\n---\n# Other Skill'),
+            contentType: 'text/markdown',
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      'declares SDK skill name "other-skill" but materializes as "LinkedIn-Posting"',
+    );
+    expect(artifacts.bundles.size).toBe(0);
+  });
+
   it('rejects approving existing drafts with reserved materialized names', async () => {
     const { repo, service } = createService();
     const draft: SkillCatalogItem = {
       id: 'skill:reserved' as SkillId,
       appId: 'app:one' as never,
-      name: 'Commands',
+      name: 'Gantry Browser',
       version: 'v1',
       source: 'admin_uploaded',
       status: 'draft',
@@ -302,7 +357,77 @@ describe('SkillDraftService', () => {
         appId: 'app:one' as never,
         skillId: draft.id,
       }),
-    ).rejects.toThrow('reserved Gantry skill directory "commands"');
+    ).rejects.toThrow('reserved Gantry skill directory "gantry-browser"');
+  });
+
+  it('rejects approving existing drafts with SDK-native materialized names', async () => {
+    const { repo, service } = createService();
+    const draft: SkillCatalogItem = {
+      id: 'skill:reserved-native' as SkillId,
+      appId: 'app:one' as never,
+      name: 'Review',
+      version: 'v1',
+      source: 'admin_uploaded',
+      status: 'draft',
+      promptRefs: [],
+      toolIds: [],
+      workflowRefs: [],
+      storage: {
+        storageType: 'local-filesystem',
+        storageRef: 'skills/reserved-native.json',
+        contentHash: 'sha256:reserved-native',
+        sizeBytes: 1,
+      },
+      createdAt: '2026-04-28T00:00:00.000Z' as never,
+      updatedAt: '2026-04-28T00:00:00.000Z' as never,
+    };
+    await repo.saveSkill(draft);
+
+    await expect(
+      service.approveDraft({
+        appId: 'app:one' as never,
+        skillId: draft.id,
+      }),
+    ).rejects.toThrow('reserved SDK-native skill name "review"');
+  });
+
+  it('rejects approving existing drafts whose stored SKILL.md declares an SDK-native name', async () => {
+    const { artifacts, repo, service } = createService();
+    const draft: SkillCatalogItem = {
+      id: 'skill:stored-native' as SkillId,
+      appId: 'app:one' as never,
+      name: 'LinkedIn Posting',
+      version: 'v1',
+      source: 'admin_uploaded',
+      status: 'draft',
+      promptRefs: [],
+      toolIds: [],
+      workflowRefs: [],
+      storage: {
+        storageType: 'local-filesystem',
+        storageRef: 'skills/stored-native.json',
+        contentHash: 'sha256:stored-native',
+        sizeBytes: 1,
+      },
+      createdAt: '2026-04-28T00:00:00.000Z' as never,
+      updatedAt: '2026-04-28T00:00:00.000Z' as never,
+    };
+    artifacts.bundles.set('skills/stored-native.json', {
+      assets: [
+        {
+          path: 'SKILL.md',
+          content: Buffer.from('---\nname: loop\n---\n# Loop'),
+        },
+      ],
+    });
+    await repo.saveSkill(draft);
+
+    await expect(
+      service.approveDraft({
+        appId: 'app:one' as never,
+        skillId: draft.id,
+      }),
+    ).rejects.toThrow('reserved SDK-native skill name "loop"');
   });
 
   it('rejects unsafe skill action manifests', async () => {

@@ -9,6 +9,7 @@ import {
   selectedGantryMcpToolNames,
 } from '@agent-runner-src/gantry-mcp-tool-surface.js';
 import {
+  GANTRY_CLAUDE_SDK_SKILLS_ENV,
   SDK_NATIVE_SKILL_DISABLE_ENV,
   SDK_NATIVE_SKILL_OVERRIDES,
 } from '@core/adapters/llm/anthropic-claude-agent/native-sdk-skills.js';
@@ -269,6 +270,10 @@ function prepareRuntimeEnv(): {
   vi.stubEnv('ANTHROPIC_API_KEY', 'raw-provider-key');
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'raw-oauth-token');
   vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude-config'));
+  vi.stubEnv(
+    GANTRY_CLAUDE_SDK_SKILLS_ENV,
+    JSON.stringify(['gantry-admin', 'gantry-browser', 'linkedin-posting']),
+  );
   return {
     root,
     mcpServerPath: path.join(root, 'mcp', 'stdio.js'),
@@ -357,6 +362,7 @@ describe('Claude Agent SDK boundary integration', () => {
       cwd: path.join(env.root, 'workspace', 'group'),
       permissionMode: 'default',
       settingSources: ['user'],
+      skills: ['gantry-admin', 'gantry-browser', 'linkedin-posting'],
       includePartialMessages: true,
     });
     expect(call?.options.allowedTools).toEqual(
@@ -433,6 +439,7 @@ describe('Claude Agent SDK boundary integration', () => {
     expect(call?.options.settings.skillOverrides).toEqual(
       SDK_NATIVE_SKILL_OVERRIDES,
     );
+    expect(call?.options.settings.autoMemoryEnabled).toBe(false);
     expect(call?.options.mcpServers.gantry).toEqual({
       command: 'node',
       args: [env.mcpServerPath],

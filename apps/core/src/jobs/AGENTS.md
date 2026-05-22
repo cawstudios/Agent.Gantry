@@ -32,6 +32,10 @@
   handle. Preserve the existing rule that streamed job `newSessionId` values are
   not written back into the job-owned session scope unless that product decision
   changes explicitly.
+- Final forced provider metadata persistence is a correctness boundary. If the
+  final flush cannot persist `provider_run_id` or `provider_session_id`, fail
+  the run path loudly instead of logging and continuing with missing resume
+  metadata.
 - `request_permission` tool input is agent-authored and must not register
   arbitrary semantic capability definitions. Selected skill action definitions
   are trusted only when the host runner IPC includes them from materialized,

@@ -111,15 +111,14 @@ SELECT
   now(),
   now()
 FROM (
-  SELECT DISTINCT tc.app_id
+  SELECT DISTINCT pd.app_id
   FROM provider_native_tool_cleanup_ids doomed
   JOIN permission_decisions pd ON pd.tool_id = doomed.id
-  JOIN tool_catalog tc ON tc.id = doomed.id
 ) apps_requiring_tombstones
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE permission_decisions AS pd
-SET tool_id = 'tool:removed-provider-native-sdk:' || md5(doomed.app_id)
+SET tool_id = 'tool:removed-provider-native-sdk:' || md5(pd.app_id)
 FROM provider_native_tool_cleanup_ids doomed
 WHERE pd.tool_id = doomed.id;
 

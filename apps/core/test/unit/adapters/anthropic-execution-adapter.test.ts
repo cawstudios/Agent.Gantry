@@ -80,6 +80,39 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
     );
   });
 
+  it('passes only materialized Gantry skill names to the runner SDK whitelist', async () => {
+    mockMaterializeClaudeRuntime.mockResolvedValueOnce({
+      claudeConfigDir: '/tmp/gantry-runtime/.claude',
+      protectedFilesystemPaths: ['/tmp/gantry-runtime/.claude'],
+      materializedSkills: [
+        { name: 'gantry-admin', materializedName: 'gantry-admin' },
+        { name: 'LinkedIn Posting', materializedName: 'LinkedIn-Posting' },
+      ],
+      cleanup: vi.fn(),
+    });
+    const adapter = new AnthropicClaudeAgentExecutionAdapter();
+
+    const prepared = await adapter.prepare(prepareInput());
+
+    expect(prepared.env.GANTRY_CLAUDE_SDK_SKILLS_JSON).toBe(
+      JSON.stringify(['LinkedIn-Posting', 'gantry-admin']),
+    );
+  });
+
+  it('rejects materialized skill names that collide with Claude-native skills', async () => {
+    mockMaterializeClaudeRuntime.mockResolvedValueOnce({
+      claudeConfigDir: '/tmp/gantry-runtime/.claude',
+      protectedFilesystemPaths: ['/tmp/gantry-runtime/.claude'],
+      materializedSkills: [{ name: 'commands', materializedName: 'commands' }],
+      cleanup: vi.fn(),
+    });
+    const adapter = new AnthropicClaudeAgentExecutionAdapter();
+
+    await expect(adapter.prepare(prepareInput())).rejects.toThrow(
+      'Claude-native reserved names',
+    );
+  });
+
   it('fails when runner files are missing', async () => {
     vi.mocked(fs.existsSync).mockReturnValueOnce(false);
     const adapter = new AnthropicClaudeAgentExecutionAdapter();

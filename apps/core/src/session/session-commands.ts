@@ -22,6 +22,7 @@ import {
   type BrowserStatusSnapshot,
   type MemoryStatusSnapshot,
 } from './session-command-format.js';
+import { formatSessionCommandsHelp } from './session-command-help.js';
 import {
   defaultModelStatusSelection,
   type ModelStatusSelectionUpdate,
@@ -33,6 +34,7 @@ import {
 } from './session-new-archive.js';
 
 export type SessionCommand =
+  | { kind: 'commands'; raw: '/commands' }
   | { kind: 'compact'; raw: '/compact' }
   | { kind: 'new'; raw: '/new' }
   | { kind: 'stop'; raw: '/stop' }
@@ -117,27 +119,22 @@ function parseThinkingCommand(text: string): SessionCommand | null {
   return null;
 }
 
-/**
- * Extract a session slash command from a message, stripping the trigger prefix if present.
- * Returns the parsed command or null if not a session command.
- */
 export function extractSessionCommand(
   content: string,
   triggerPattern: RegExp,
 ): SessionCommand | null {
   let text = content.trim();
   text = text.replace(triggerPattern, '').trim();
+  if (text === '/commands') return { kind: 'commands', raw: '/commands' };
   if (text === '/compact') return { kind: 'compact', raw: '/compact' };
   if (text === '/new') return { kind: 'new', raw: '/new' };
   if (text === '/stop') return { kind: 'stop', raw: '/stop' };
   if (text === '/dream') return { kind: 'dream', raw: '/dream' };
-  if (text === '/memory-status') {
+  if (text === '/memory-status')
     return { kind: 'memory_status', raw: '/memory-status' };
-  }
   if (text === '/models') return { kind: 'models_list', raw: '/models' };
   if (text === '/status') return { kind: 'status', raw: '/status' };
   if (text === '/model') return { kind: 'model_show', raw: '/model' };
-
   const saveProcedureMatch = text.match(
     /^\/save-procedure(?:\s+"([^"\n]{1,80})"|\s+([^\n]{1,80}))(?:\n([\s\S]+))?$/,
   );
@@ -319,6 +316,12 @@ export async function handleSessionCommand(opts: {
     await deps.sendMessage(
       stopped ? 'Stopping current run.' : 'No active run to stop.',
     );
+    return { handled: true, success: true };
+  }
+
+  if (command.kind === 'commands') {
+    deps.advanceCursor(cmdMsg);
+    await deps.sendMessage(formatSessionCommandsHelp());
     return { handled: true, success: true };
   }
 

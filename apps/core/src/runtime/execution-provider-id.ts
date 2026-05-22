@@ -4,6 +4,9 @@ import type { AgentExecutionAdapter } from '../application/agent-execution/agent
 export function resolveRuntimeExecutionProviderId(
   executionAdapter?: Pick<AgentExecutionAdapter, 'id'>,
 ): ExecutionProviderId {
-  return (executionAdapter?.id ??
-    'unconfigured:agent-execution-adapter') as ExecutionProviderId;
+  const id = executionAdapter?.id?.trim();
+  if (!id) {
+    throw new Error('Runtime execution adapter is not configured.');
+  }
+  return id as ExecutionProviderId;
 }

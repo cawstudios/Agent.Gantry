@@ -1544,6 +1544,7 @@ describe('agent-spawn timeout behavior', () => {
               CLAUDE_CONFIG_DIR: '/tmp/adapter-claude',
               [providerModelEnvKey]: 'claude-sonnet-4-6',
               GANTRY_EFFECTIVE_MODEL_SOURCE: 'runtime',
+              GANTRY_CLAUDE_SDK_SKILLS_JSON: '["gantry-admin"]',
               GANTRY_SKILL_ACTIONS_JSON: '[]',
               ARBITRARY_CALLER_ENV: 'must-not-leak',
               OPENAI_API_KEY: 'must-not-leak',
@@ -1574,6 +1575,7 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.CLAUDE_CONFIG_DIR).toBe('/tmp/adapter-claude');
     expect(env[providerModelEnvKey]).toBe('claude-sonnet-4-6');
     expect(env.GANTRY_EFFECTIVE_MODEL_SOURCE).toBe('runtime');
+    expect(env.GANTRY_CLAUDE_SDK_SKILLS_JSON).toBe('["gantry-admin"]');
     expect(env.GANTRY_SKILL_ACTIONS_JSON).toBe('[]');
     expect(env.ARBITRARY_CALLER_ENV).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();

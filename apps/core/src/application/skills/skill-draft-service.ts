@@ -13,6 +13,7 @@ import type { SkillActionPermission } from '../../domain/skills/skill-action-per
 import {
   isSkillMaterializableLocally,
   isSkillUsableForBinding,
+  materializedSkillDirectoryNameFor,
   reservedMaterializedSkillDirectoryNameFor,
 } from '../../domain/skills/skills.js';
 import { parseSkillActionPermissionsFromAssets } from '../../domain/skills/skill-action-permissions.js';
@@ -20,6 +21,7 @@ import {
   assertValidCapabilitySecretName,
   normalizeCapabilitySecretName,
 } from '../../domain/capability-secrets/capability-secrets.js';
+import { reservedSdkNativeSkillNameFor } from '../../shared/sdk-native-skill-names.js';
 import { nowIso } from '../../shared/time/datetime.js';
 
 export class SkillDraftService {
@@ -52,7 +54,10 @@ export class SkillDraftService {
       fallbackName: input.fallbackName,
       requiredEnvVars: input.requiredEnvVars,
     });
-    assertSkillNameDoesNotCollideWithReservedMaterialization(metadata.name);
+    assertSkillMetadataCanBeMaterialized({
+      catalogName: metadata.name,
+      declaredName: metadata.declaredName,
+    });
     const stored = await this.artifacts.putSkillArtifact({
       appId: input.appId,
       skillId,
@@ -113,6 +118,13 @@ export class SkillDraftService {
       throw new Error(`Skill draft has no stored artifact: ${skill.id}`);
     }
     assertSkillNameDoesNotCollideWithReservedMaterialization(skill.name);
+    const bundle = await this.artifacts.getSkillArtifact(
+      skill.storage.storageRef,
+    );
+    assertSkillMetadataCanBeMaterialized({
+      catalogName: skill.name,
+      declaredName: skillDeclaredNameFromAssets(bundle.assets),
+    });
     const now = input.now ?? nowIso();
     const approved: SkillCatalogItem = {
       ...skill,
@@ -277,6 +289,7 @@ function resolveSkillMetadata(input: {
 }): {
   name: string;
   description?: string;
+  declaredName?: string;
   requiredEnvVars: string[];
   actionPermissions: SkillActionPermission[];
 } {
@@ -284,9 +297,10 @@ function resolveSkillMetadata(input: {
   const frontmatter = skillMd
     ? parseSkillFrontmatter(Buffer.from(skillMd.content).toString('utf-8'))
     : {};
+  const declaredName = cleanMetadataText(frontmatter.name);
   const name =
     cleanMetadataText(input.name) ||
-    cleanMetadataText(frontmatter.name) ||
+    declaredName ||
     cleanMetadataText(input.fallbackName) ||
     'uploaded-skill';
   const description =
@@ -299,6 +313,7 @@ function resolveSkillMetadata(input: {
   return {
     name,
     description,
+    declaredName,
     requiredEnvVars: normalizeRequiredEnvVars([
       ...(input.requiredEnvVars ?? []),
       ...frontmatterEnvVars(frontmatter),
@@ -327,14 +342,53 @@ function normalizeRequiredEnvVars(values: string[]): string[] {
   return [...new Set(normalized)];
 }
 
+function skillDeclaredNameFromAssets(
+  assets: Array<{ path: string; content: Uint8Array }>,
+): string | undefined {
+  const skillMd = assets.find((asset) => asset.path === 'SKILL.md');
+  if (!skillMd) return undefined;
+  return cleanMetadataText(
+    parseSkillFrontmatter(Buffer.from(skillMd.content).toString('utf-8')).name,
+  );
+}
+
+function assertSkillMetadataCanBeMaterialized(input: {
+  catalogName: string;
+  declaredName?: string;
+}): void {
+  assertSkillNameDoesNotCollideWithReservedMaterialization(input.catalogName);
+  if (!input.declaredName) return;
+  assertSkillNameDoesNotCollideWithReservedMaterialization(input.declaredName);
+  const catalogDirectory = materializedSkillDirectoryNameFor(
+    input.catalogName,
+  ).toLowerCase();
+  const declaredDirectory = materializedSkillDirectoryNameFor(
+    input.declaredName,
+  ).toLowerCase();
+  if (catalogDirectory !== declaredDirectory) {
+    throw new Error(
+      `Skill "${input.catalogName}" declares SDK skill name "${input.declaredName}" but materializes as "${materializedSkillDirectoryNameFor(
+        input.catalogName,
+      )}". Keep the SKILL.md name aligned with the Gantry skill name.`,
+    );
+  }
+}
+
 function assertSkillNameDoesNotCollideWithReservedMaterialization(
   name: string,
 ): void {
   const reservedName = reservedMaterializedSkillDirectoryNameFor(name);
-  if (!reservedName) return;
-  throw new Error(
-    `Skill name "${name}" materializes to reserved Gantry skill directory "${reservedName}". Choose a different skill name.`,
-  );
+  if (reservedName) {
+    throw new Error(
+      `Skill name "${name}" materializes to reserved Gantry skill directory "${reservedName}". Choose a different skill name.`,
+    );
+  }
+  const reservedNativeName = reservedSdkNativeSkillNameFor(name);
+  if (reservedNativeName) {
+    throw new Error(
+      `Skill name "${name}" materializes to reserved SDK-native skill name "${reservedNativeName}". Choose a different skill name.`,
+    );
+  }
 }
 
 function parseSkillFrontmatter(content: string): Record<string, string> {

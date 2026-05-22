@@ -18,7 +18,6 @@ ACTIVE_DOCS = [
     REPO_ROOT / "docs" / "architecture" / "capability-management.md",
     REPO_ROOT / "docs" / "architecture" / "channel-interactions.md",
     REPO_ROOT / "docs" / "sdk" / "api-reference.md",
-    REPO_ROOT / ".claude" / "skills" / "commands" / "SKILL.md",
     REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md",
 ]
 
@@ -131,8 +130,9 @@ def _check_capability_docs() -> list[str]:
 def _check_bundled_skill_claims() -> list[str]:
     failures: list[str] = []
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    commands_skill = (
-        REPO_ROOT / ".claude" / "skills" / "commands" / "SKILL.md"
+    commands_skill = REPO_ROOT / ".claude" / "skills" / "commands" / "SKILL.md"
+    session_commands = (
+        REPO_ROOT / "apps" / "core" / "src" / "session" / "session-commands.ts"
     ).read_text(encoding="utf-8")
 
     required_readme_skills = ["`/commands`", "`gantry-admin`"]
@@ -140,8 +140,16 @@ def _check_bundled_skill_claims() -> list[str]:
         if skill not in readme:
             failures.append(f"README.md missing bundled skill entry {skill}")
 
-    if "`gantry-admin`" not in commands_skill:
-        failures.append(".claude/skills/commands/SKILL.md missing gantry-admin bundled skill entry")
+    if (
+        "kind: 'commands'" not in session_commands
+        or "formatSessionCommandsHelp" not in session_commands
+    ):
+        failures.append("apps/core/src/session/session-commands.ts missing host-managed /commands support")
+
+    if commands_skill.exists():
+        failures.append(
+            ".claude/skills/commands/SKILL.md must not exist; /commands is host-managed, not a Claude SDK skill"
+        )
 
     return failures
 

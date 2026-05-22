@@ -4,13 +4,14 @@
 -- without coupling that change to data backfills.
 
 DROP INDEX IF EXISTS idx_agent_runs_execution_provider;
+DROP INDEX IF EXISTS idx_agent_runs_lease_claim;
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_provider_session
   ON agent_runs(provider_session_id);
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_lease_claim
   ON agent_runs(status, lease_expires_at, lease_owner)
-  WHERE status IN ('pending', 'leased');
+  WHERE status = 'running';
 
 CREATE INDEX IF NOT EXISTS idx_provider_sessions_agent_provider
   ON provider_sessions(agent_session_id, provider);

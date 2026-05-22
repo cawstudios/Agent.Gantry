@@ -7,10 +7,12 @@
 - SDK model credential env may include broker proxy values only for the Claude SDK process. Bash, browser, hooks, and MCP stdio subprocesses may receive no broker proxies or provider tokens; when `NODE_EXTRA_CA_CERTS` is present, derive only neutral CA aliases (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `PIP_CERT`, `AWS_CA_BUNDLE`, `CARGO_HTTP_CAINFO`, and `DENO_CERT`) from that same path.
 - Keep Claude SDK Bash commands sandboxed with `sandbox.network.allowLocalBinding` so approved CLIs can use the SDK-managed local network proxy instead of bypassing the sandbox. Prefix approved Bash commands with `GODEBUG=netdns=go` so Go CLIs use Go DNS resolution instead of macOS resolver services blocked by the sandbox. On macOS, also enable `sandbox.enableWeakerNetworkIsolation` so Go-based CLIs such as `gh`, `gcloud`, `terraform`, and business CLIs can reach `com.apple.trustd.agent` for TLS certificate verification. These are sandbox transport settings only; they must not grant durable `RunCommand(...)` authority or expose broker proxy/provider credentials to tools.
 - `SandboxNetworkAccess` is a transient SDK callback, not durable capability
-  authority. The runner may suppress repeated SDK network prompts while either
-  a recent approved tool-use token is still unexpired and unambiguous, or a
-  short-lived eligible-tools/SDK-API-prompt timed grant is active for the same principal and
-  conversation. Never log raw hostnames or tool inputs for this gate.
+  authority. The runner may suppress repeated SDK network prompts only when a
+  recent approved tool-use token is still unexpired and the SDK prompt carries
+  that exact parent tool-use id, or while a short-lived
+  eligible-tools/SDK-API-prompt timed grant is active for the same principal and
+  conversation. Parentless SDK network prompts fail closed. Never log raw
+  hostnames or tool inputs for this gate.
 - Permission `Allow 5 min` is intentionally a live-interactive-only short-lived
   yolo grant for every eligible SDK tool call and SDK network/API prompt by the
   same principal in the same conversation. Setup, scheduler, admin, and

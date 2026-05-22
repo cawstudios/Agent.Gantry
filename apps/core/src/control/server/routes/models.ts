@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
+import { ModelDefaultsResponseSchema } from '@gantry/contracts';
+
 import { ApplicationError } from '../../../application/common/application-error.js';
 import {
   DEFAULT_MODEL_PROVIDER_PRESET_ID,
@@ -157,7 +159,7 @@ function modelDefaultsResponse(ctx: ControlRouteContext) {
     defaults.oneTime.modelEntry ??
     defaults.recurring.modelEntry ??
     defaults.memoryExtractor.modelEntry;
-  return {
+  return ModelDefaultsResponseSchema.parse({
     provider: providerModel
       ? {
           id: providerModel.provider,
@@ -183,7 +185,7 @@ function modelDefaultsResponse(ctx: ControlRouteContext) {
       memoryDreaming,
       memoryConsolidation,
     },
-  };
+  });
 }
 
 function providerFromDefaults(

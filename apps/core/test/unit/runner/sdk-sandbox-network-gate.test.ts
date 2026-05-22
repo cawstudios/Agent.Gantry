@@ -172,7 +172,7 @@ describe('sdk sandbox network gate', () => {
     expect(second?.behavior).toBe('allow');
   });
 
-  it('allows parentless SDK network prompts for one unambiguous approved tool', () => {
+  it('denies parentless SDK network prompts after an approved tool', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now);
 
@@ -187,15 +187,15 @@ describe('sdk sandbox network gate', () => {
       { toolUseID: 'toolu_network_1' },
     );
 
-    expect(decision).toEqual({
-      behavior: 'allow',
-      updatedInput: { host: 'registry.npmjs.org' },
-    });
+    expect(decision).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('without a parent tool-use id'),
+      }),
+    );
     expect(latestPayload()).toMatchObject({
-      decision: 'sdk_network_gate_suppressed',
+      decision: 'sdk_network_gate_denied',
       networkToolUseID: 'toolu_network_1',
-      parentToolUseID: 'toolu_bash_1',
-      approvedToolName: 'Bash',
       hostHash: sha256('registry.npmjs.org'),
       expiredTokenCount: 0,
     });
@@ -238,13 +238,13 @@ describe('sdk sandbox network gate', () => {
     expect(decision).toEqual(
       expect.objectContaining({
         behavior: 'deny',
-        message: expect.stringContaining('before any tool call was allowed'),
+        message: expect.stringContaining('without a parent tool-use id'),
       }),
     );
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
       reason:
-        'SDK requested sandbox network access before any tool call was allowed by Gantry.',
+        'SDK requested sandbox network access without a parent tool-use id.',
       networkToolUseID: 'toolu_network_1',
       hostHash: sha256('api.github.com'),
       expiredTokenCount: 0,
@@ -283,7 +283,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('allows parentless SDK network prompts when another principal also has an active token', () => {
+  it('requires a matching parent id even when another principal also has an active token', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now);
 
@@ -300,16 +300,33 @@ describe('sdk sandbox network gate', () => {
       'subagent-b',
     );
 
-    const decision = gate.decide(
+    const parentless = gate.decide(
       'SandboxNetworkAccess',
       { host: 'registry.npmjs.org' },
       { toolUseID: 'toolu_network_a' },
       'subagent-a',
     );
 
-    expect(decision).toEqual({
+    expect(parentless).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('without a parent tool-use id'),
+      }),
+    );
+
+    const matched = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'registry.npmjs.org', parentToolUseID: 'toolu_bash_a' },
+      { toolUseID: 'toolu_network_a' },
+      'subagent-a',
+    );
+
+    expect(matched).toEqual({
       behavior: 'allow',
-      updatedInput: { host: 'registry.npmjs.org' },
+      updatedInput: {
+        host: 'registry.npmjs.org',
+        parentToolUseID: 'toolu_bash_a',
+      },
     });
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_suppressed',
@@ -341,20 +358,20 @@ describe('sdk sandbox network gate', () => {
     expect(decision).toEqual(
       expect.objectContaining({
         behavior: 'deny',
-        message: expect.stringContaining('before any tool call was allowed'),
+        message: expect.stringContaining('without a parent tool-use id'),
       }),
     );
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
       reason:
-        'SDK requested sandbox network access before any tool call was allowed by Gantry.',
+        'SDK requested sandbox network access without a parent tool-use id.',
       networkToolUseID: 'toolu_network_b',
       hostHash: sha256('registry.npmjs.org'),
       expiredTokenCount: 0,
     });
   });
 
-  it('uses the most recent approved tool for parentless network prompts', () => {
+  it('denies parentless prompts instead of guessing the most recent approved tool', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now);
 
@@ -375,14 +392,14 @@ describe('sdk sandbox network gate', () => {
       { host: 'registry.npmjs.org' },
       { toolUseID: 'toolu_network_1' },
     );
-    expect(ambiguous).toEqual({
-      behavior: 'allow',
-      updatedInput: { host: 'registry.npmjs.org' },
-    });
+    expect(ambiguous).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('without a parent tool-use id'),
+      }),
+    );
     expect(latestPayload()).toMatchObject({
-      decision: 'sdk_network_gate_suppressed',
-      parentToolUseID: 'toolu_bash_2',
-      approvedToolName: 'Bash',
+      decision: 'sdk_network_gate_denied',
       networkToolUseID: 'toolu_network_1',
       expiredTokenCount: 0,
     });

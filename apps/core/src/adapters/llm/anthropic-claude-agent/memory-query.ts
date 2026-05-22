@@ -187,8 +187,11 @@ async function runWithOnecli(opts: ClaudeQueryOpts): Promise<string> {
       maxTurns: 1,
       env: sdkEnv,
       settings: {
+        autoMemoryEnabled: false,
         skillOverrides: SDK_NATIVE_SKILL_OVERRIDES,
       },
+      skills: [],
+      settingSources: [],
     },
   }) as AsyncIterable<unknown>;
 

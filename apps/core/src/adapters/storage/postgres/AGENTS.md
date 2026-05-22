@@ -53,6 +53,9 @@
   partially updated belong in native `jsonb`. Pass objects/arrays to Drizzle
   `jsonb` columns, keep canonical route/lease/audit/join fields typed, and do
   not add `::jsonb` casts around columns that are already `jsonb`.
+- Interrupted scheduler lease release must be scoped by the matching
+  `agent_runs.lease_owner`; stale time-based release may reclaim expired leases,
+  but restart cleanup must not release another worker's active run.
 - `tool_catalog` is Gantry durable capability state, not a provider SDK tool
   manifest. Seed only Gantry-owned facade names such as `WebSearch`,
   `WebRead`, `FileSearch`, `FileRead`, `FileEdit`, `FileWrite`, and
