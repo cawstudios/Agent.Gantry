@@ -122,7 +122,17 @@ describe('agent capability composition', () => {
       expect(profile.allowedTools).not.toContain(tool);
     }
     expect(profile.allowedTools).toContain('mcp__gantry__continuity_summary');
+    expect(profile.allowedTools).not.toContain(
+      'mcp__gantry__memory_review_pending',
+    );
+    expect(profile.allowedTools).not.toContain(
+      'mcp__gantry__memory_review_decision',
+    );
     expect(selectedMemoryIpcActions([])).toContain('continuity_summary');
+    expect(selectedMemoryIpcActions([])).not.toContain('memory_review_pending');
+    expect(selectedMemoryIpcActions([])).not.toContain(
+      'memory_review_decision',
+    );
     for (const tool of UNAVAILABLE_DEFAULT_TOOLS) {
       expect(profile.availableTools).not.toContain(tool);
     }
@@ -349,6 +359,62 @@ describe('agent capability composition', () => {
       'continuity_summary',
       'procedure_save',
       'procedure_patch',
+    ]);
+  });
+
+  it('exposes memory review tools only for control-approver reviewers', () => {
+    const profile = composeAgentCapabilities({
+      mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      chatJid: 'tg:sales',
+      groupFolder: 'sales',
+      persona: 'sales',
+      memoryReviewerIsControlApprover: true,
+    });
+
+    expect(profile.allowedTools).toContain(
+      'mcp__gantry__memory_review_pending',
+    );
+    expect(profile.allowedTools).toContain(
+      'mcp__gantry__memory_review_decision',
+    );
+    expect(profile.allowedTools).not.toContain('mcp__gantry__memory_patch');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__memory_demote');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__procedure_patch');
+    expect(profile.mcpServers.gantry?.env).toMatchObject({
+      GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER: '1',
+    });
+
+    expect(
+      JSON.parse(
+        String(profile.mcpServers.gantry?.env?.GANTRY_MCP_TOOL_NAMES_JSON),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        'memory_review_pending',
+        'memory_review_decision',
+      ]),
+    );
+    expect(
+      JSON.parse(
+        String(profile.mcpServers.gantry?.env?.GANTRY_MEMORY_IPC_ACTIONS_JSON),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        'memory_review_pending',
+        'memory_review_decision',
+      ]),
+    );
+    expect(
+      selectedMemoryIpcActions([], {
+        memoryReviewerIsControlApprover: true,
+      }),
+    ).toEqual([
+      'memory_search',
+      'memory_save',
+      'continuity_summary',
+      'memory_review_pending',
+      'memory_review_decision',
+      'procedure_save',
     ]);
   });
 

@@ -484,6 +484,93 @@ describe('Postgres migration journal', () => {
     );
   });
 
+  it('registers LLM profile response family cutover with audit snapshot and validated constraint', () => {
+    const journalPath = path.resolve(
+      'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
+    );
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as {
+      entries: Array<{ idx: number; tag: string }>;
+    };
+    const responseFamilyCutover = journal.entries.find(
+      (entry) => entry.tag === '0064_llm_profile_response_family',
+    );
+    expect(responseFamilyCutover).toMatchObject({ idx: 64 });
+
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0064_llm_profile_response_family.sql',
+      ),
+      'utf8',
+    );
+    expect(migration).toContain('RENAME COLUMN provider TO response_family');
+    expect(migration).toContain('ADD COLUMN response_family text NOT NULL');
+    expect(migration).toContain('ALTER COLUMN response_family SET DEFAULT');
+    expect(migration).toContain('ALTER COLUMN response_family SET NOT NULL');
+    expect(migration).toContain('llm_profiles_response_family_legacy');
+    expect(migration).toContain("WHEN response_family = 'openai'");
+    expect(migration).toContain(
+      'ADD CONSTRAINT llm_profiles_response_family_valid',
+    );
+    expect(migration).toContain('NOT VALID');
+    expect(migration).toContain(
+      'VALIDATE CONSTRAINT llm_profiles_response_family_valid',
+    );
+    expect(migration).not.toContain("SET model_alias = 'opus'");
+  });
+
+  it('registers LLM profile model alias cutover separately with audit snapshot', () => {
+    const journalPath = path.resolve(
+      'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
+    );
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as {
+      entries: Array<{ idx: number; tag: string }>;
+    };
+    const modelAliasCutover = journal.entries.find(
+      (entry) => entry.tag === '0065_llm_profile_model_alias_cutover',
+    );
+    expect(modelAliasCutover).toMatchObject({ idx: 65 });
+
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0065_llm_profile_model_alias_cutover.sql',
+      ),
+      'utf8',
+    );
+    expect(migration).toContain('llm_profiles_model_alias_legacy');
+    expect(migration).toContain(
+      "model_alias IN ('default', 'runtime-default')",
+    );
+    expect(migration).toContain("SET model_alias = 'opus'");
+  });
+
+  it('registers memory conversation-scope cutover migration', () => {
+    const journalPath = path.resolve(
+      'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
+    );
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as {
+      entries: Array<{ idx: number; tag: string }>;
+    };
+    const memoryScopeCutover = journal.entries.find(
+      (entry) => entry.tag === '0066_memory_conversation_scope_cutover',
+    );
+    expect(memoryScopeCutover).toMatchObject({ idx: 66 });
+
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0066_memory_conversation_scope_cutover.sql',
+      ),
+      'utf8',
+    );
+    expect(migration).toContain('SET thread_id = NULL');
+    expect(migration).toContain(
+      'DROP INDEX IF EXISTS memory_items_active_unique',
+    );
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS memory_items_active_unique',
+    );
+    expect(migration).not.toContain("COALESCE(thread_id, '')");
+  });
+
   it('registers message attachment message lookup index migration and schema', () => {
     const journalPath = path.resolve(
       'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',

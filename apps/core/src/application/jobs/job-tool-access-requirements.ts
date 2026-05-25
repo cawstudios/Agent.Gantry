@@ -10,6 +10,11 @@ import {
 import { isGantryMcpWildcardRule } from '../../shared/admin-mcp-tools.js';
 import { parseSemanticCapabilityRule } from '../../shared/semantic-capability-ids.js';
 import { toolRuleCoversRule } from '../../shared/tool-rule-matcher.js';
+import {
+  bashExecutableName,
+  formatBashArgv,
+  parseBashCommand,
+} from '../../shared/bash-command-parser.js';
 
 const EXACT_GANTRY_MCP_TOOL_RE = /^mcp__gantry__[A-Za-z0-9_-]+$/;
 
@@ -146,14 +151,90 @@ export function evaluateToolAccessRequirements(input: {
   const allowed = input.effectiveAllowedTools
     .map((tool) => tool.trim())
     .filter(Boolean);
-  const missingTools = toolAccessRequirements.filter(
-    (required) =>
-      !allowed.some(
-        (allowedRule) =>
-          allowedRule === required || toolRuleCoversRule(allowedRule, required),
-      ),
-  );
-  return { toolAccessRequirements, missingTools };
+  const canonicalRequirements: string[] = [];
+  const missingTools: string[] = [];
+  for (const required of toolAccessRequirements) {
+    const matched = matchingAllowedRule(required, allowed);
+    if (!matched) {
+      missingTools.push(required);
+      canonicalRequirements.push(required);
+      continue;
+    }
+    canonicalRequirements.push(matched.canonicalRule);
+  }
+  return {
+    toolAccessRequirements: dedupePreservingOrder(canonicalRequirements),
+    missingTools,
+  };
+}
+
+function matchingAllowedRule(
+  required: string,
+  allowed: readonly string[],
+): { canonicalRule: string } | undefined {
+  for (const allowedRule of allowed) {
+    if (allowedRule === required || toolRuleCoversRule(allowedRule, required)) {
+      return { canonicalRule: required };
+    }
+    const projectedRequired = absoluteRunCommandRuleForBareExecutableRule(
+      allowedRule,
+      required,
+    );
+    if (projectedRequired) {
+      return { canonicalRule: projectedRequired };
+    }
+  }
+  return undefined;
+}
+
+function absoluteRunCommandRuleForBareExecutableRule(
+  allowedRule: string,
+  requiredRule: string,
+): string | undefined {
+  const allowed = parseReadableScopedToolRule(allowedRule);
+  const required = parseReadableScopedToolRule(requiredRule);
+  if (
+    allowed?.toolName !== RUN_COMMAND_TOOL_NAME ||
+    required?.toolName !== RUN_COMMAND_TOOL_NAME
+  ) {
+    return undefined;
+  }
+  const allowedCommand = parseSingleLeafCommand(allowed.scope);
+  const requiredCommand = parseSingleLeafCommand(required.scope);
+  if (!allowedCommand || !requiredCommand) return undefined;
+  const allowedExecutable = allowedCommand.argv[0] ?? '';
+  const requiredExecutable = requiredCommand.argv[0] ?? '';
+  if (
+    !allowedExecutable.startsWith('/') ||
+    requiredExecutable.includes('/') ||
+    bashExecutableName(allowedExecutable) !== requiredExecutable
+  ) {
+    return undefined;
+  }
+  const projectedRequired = formatRunCommandRequirementArgv([
+    allowedExecutable,
+    ...requiredCommand.argv.slice(1),
+  ]);
+  const projectedRule = `${RUN_COMMAND_TOOL_NAME}(${projectedRequired})`;
+  return toolRuleCoversRule(allowedRule, projectedRule)
+    ? projectedRule
+    : undefined;
+}
+
+function parseSingleLeafCommand(scope: string) {
+  const parsed = parseBashCommand(scope.trim());
+  if (!parsed.ok || parsed.leaves.length !== 1) return undefined;
+  return parsed.leaves[0];
+}
+
+function formatRunCommandRequirementArgv(argv: readonly string[]): string {
+  return argv
+    .map((arg) => (arg === '*' ? '*' : formatBashArgv([arg])))
+    .join(' ');
+}
+
+function dedupePreservingOrder(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 export function toolAccessRequirementRecoveryAction(toolName: string): string {

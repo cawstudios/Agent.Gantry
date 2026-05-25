@@ -2,19 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-import {
-  MEMORY_DREAMING_EMBED_MODEL,
-  MEMORY_DREAMING_EMBED_PROVIDER,
-  MEMORY_DREAMING_EMBEDDINGS_ENABLED,
-  RUNTIME_MEMORY_DREAMING_ENABLED,
-  RUNTIME_MEMORY_ENABLED,
-} from '../config/memory.js';
+import { RUNTIME_MEMORY_ENABLED } from '../config/memory.js';
 import { getRuntimeStorage } from '../adapters/storage/postgres/runtime-store.js';
 import type { PostgresStorageService } from '../adapters/storage/postgres/storage-service.js';
 import * as pgSchema from '../adapters/storage/postgres/schema/schema.js';
 import { ApplicationError } from '../application/common/application-error.js';
 import { classifySensitiveMemoryMaterial } from '../shared/sensitive-material.js';
-import { runAppMemoryDreamPass } from './app-memory-dreaming.js';
 import { normalizeSubject, subjectIdFor } from './app-memory-boundaries.js';
 import {
   clampConfidence,
@@ -28,7 +21,6 @@ import {
 import {
   conversationIdForChannel,
   toEvidence,
-  toRun,
 } from './app-memory-service-record-mappers.js';
 import type {
   AppMemoryItem,
@@ -39,6 +31,7 @@ import type {
   DreamingRunStatus,
   DreamingTriggerInput,
   MemoryReviewDecisionInput,
+  MemoryReviewPage,
   MemoryReviewRecord,
   MemoryBoundaryContext,
   MemoryEvidenceRecord,
@@ -58,20 +51,9 @@ import {
   toAppMemoryItems,
   toAppMemorySearchResults,
 } from './app-memory-recall.js';
-import { summarizeDreamDecisions } from './app-memory-service-dreaming.js';
-import { createEmbeddingProvider } from './memory-embeddings.js';
 import {
-  DREAM_EMBEDDING_DEADLINE_MS,
-  runWithTimeout,
-  storeDreamItemEmbedding,
-} from './app-memory-dream-embeddings.js';
-import {
-  proposeMemoryConsolidationActions,
-  proposeMemoryDreamingActions,
-} from './extractor-llm.js';
-import {
-  createPendingMemoryReview,
   decideMemoryReview,
+  listPendingMemoryReviewPage,
   listPendingMemoryReviews,
 } from './app-memory-review.js';
 import {
@@ -85,6 +67,7 @@ import {
   buildAppMemoryContinuityStatus,
   buildAppMemoryContinuitySummary,
 } from './app-memory-continuity.js';
+import { triggerAppMemoryDreaming } from './app-memory-trigger-dreaming.js';
 
 type Db = NodePgDatabase<typeof pgSchema>;
 const APP_MEMORY_RECALL_DEPS = {
@@ -94,6 +77,7 @@ const APP_MEMORY_RECALL_DEPS = {
   },
   sqlOps: { and, asc, desc, eq, isNull, or, sql },
 } as const;
+
 export class AppMemoryService {
   private static singleton: AppMemoryService | null = null;
 
@@ -153,7 +137,7 @@ export class AppMemoryService {
       userId: subject.userId ?? null,
       groupId: subject.groupId ?? null,
       channelId: subject.channelId ?? null,
-      threadId: subject.threadId ?? null,
+      threadId: null,
       sourceType: input.sourceType,
       sourceId: input.sourceId ?? null,
       actorId: input.actorId ?? null,
@@ -325,7 +309,6 @@ export class AppMemoryService {
       input,
       false,
       APP_MEMORY_RECALL_DEPS,
-      { threadScope: 'exact' },
     );
     return toAppMemoryItems(rows);
   }
@@ -339,7 +322,6 @@ export class AppMemoryService {
       input,
       true,
       APP_MEMORY_RECALL_DEPS,
-      { threadScope: 'exact' },
     );
     return toAppMemorySearchResults(rows);
   }
@@ -476,172 +458,12 @@ export class AppMemoryService {
     input: DreamingTriggerInput = {},
   ): Promise<DreamingRunStatus> {
     this.assertEnabled();
-    if (!RUNTIME_MEMORY_DREAMING_ENABLED) {
-      throw new ApplicationError(
-        'CONFLICT',
-        'memory dreaming is disabled in runtime settings',
-      );
-    }
-    const subject = normalizeSubject(input);
-    const phase = input.phase || 'all';
-    const now = nowIso();
-    const running = await pgSchema.findRunningDreamRun({
+    return triggerAppMemoryDreaming({
       db: this.db,
-      subject,
-      phase,
-      now,
+      triggerInput: input,
+      save: (value) => this.save(value),
+      retire: (value) => this.delete(value),
     });
-    if (running) return toRun(running);
-    await pgSchema.expireStaleDreamRuns({ db: this.db, subject, phase, now });
-    const runningAfterExpiry = await pgSchema.findRunningDreamRun({
-      db: this.db,
-      subject,
-      phase,
-      now,
-    });
-    if (runningAfterExpiry) return toRun(runningAfterExpiry);
-    const runId = `mdr_${randomUUID().replace(/-/g, '')}`;
-    const finalizeRun = async (
-      status: DreamingRunStatus['status'],
-      summary: Record<string, unknown>,
-    ): Promise<DreamingRunStatus> => {
-      const [row] = await this.db
-        .update(pgSchema.memoryDreamRunsPostgres)
-        .set({
-          status,
-          summaryJson: JSON.stringify(summary),
-          completedAt: nowIso(),
-        })
-        .where(eq(pgSchema.memoryDreamRunsPostgres.id, runId))
-        .returning();
-      return toRun(row!);
-    };
-    try {
-      await this.db.insert(pgSchema.memoryDreamRunsPostgres).values({
-        id: runId,
-        appId: subject.appId,
-        agentId: subject.agentId,
-        subjectType: subject.subjectType,
-        subjectId: subject.subjectId,
-        threadId: subject.threadId ?? null,
-        phase,
-        status: 'running',
-        summaryJson: '{}',
-        startedAt: now,
-        leaseExpiresAt: pgSchema.dreamRunLeaseExpiresAt(now),
-      });
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        const conflictNow = nowIso();
-        await pgSchema.expireStaleDreamRuns({
-          db: this.db,
-          subject,
-          phase,
-          now: conflictNow,
-        });
-        const runningAfterConflict = await pgSchema.findRunningDreamRun({
-          db: this.db,
-          subject,
-          phase,
-          now: conflictNow,
-        });
-        if (runningAfterConflict) return toRun(runningAfterConflict);
-      }
-      throw error;
-    }
-    const embeddingsEnabled =
-      MEMORY_DREAMING_EMBEDDINGS_ENABLED &&
-      MEMORY_DREAMING_EMBED_PROVIDER !== 'disabled';
-    const embeddingProvider = embeddingsEnabled
-      ? createEmbeddingProvider(MEMORY_DREAMING_EMBED_PROVIDER, {
-          model: MEMORY_DREAMING_EMBED_MODEL,
-        })
-      : null;
-    if (embeddingProvider) {
-      try {
-        await runWithTimeout(async (signal) => {
-          embeddingProvider.validateConfiguration();
-          await embeddingProvider.validateReady?.({ signal });
-        }, DREAM_EMBEDDING_DEADLINE_MS);
-      } catch (error) {
-        const reason =
-          error instanceof Error ? error.message : 'unknown readiness error';
-        return finalizeRun('failed', {
-          stage: 'embedding_readiness',
-          error: reason,
-          embeddingsEnabled: true,
-          embeddingProvider: MEMORY_DREAMING_EMBED_PROVIDER,
-          embeddingModel: MEMORY_DREAMING_EMBED_MODEL,
-          dryRun: Boolean(input.dryRun),
-        });
-      }
-    }
-    let decisions: Awaited<ReturnType<typeof runAppMemoryDreamPass>>;
-    try {
-      decisions = await runAppMemoryDreamPass({
-        db: this.db,
-        runId,
-        subject,
-        phase,
-        dryRun: Boolean(input.dryRun),
-        listItems: () =>
-          queryAppMemoryItems(
-            this.db,
-            { ...subject, limit: 100 },
-            false,
-            APP_MEMORY_RECALL_DEPS,
-            { threadScope: 'exact' },
-          ),
-        save: (value) => this.save(value),
-        retire: (value) => this.delete(value),
-        storeDreamEmbedding: async (value) => {
-          if (!embeddingProvider) return { status: 'disabled' as const };
-          return storeDreamItemEmbedding({
-            db: this.db,
-            schema: {
-              memoryItemEmbeddingsPostgres:
-                pgSchema.memoryItemEmbeddingsPostgres,
-            },
-            sqlOps: { and, eq },
-            now: nowIso,
-            provider: embeddingProvider,
-            providerName: MEMORY_DREAMING_EMBED_PROVIDER,
-            model: MEMORY_DREAMING_EMBED_MODEL,
-            ...value,
-          });
-        },
-        proposeDreaming: ({ evidence, candidates, activeItems }) =>
-          proposeMemoryDreamingActions({
-            subject,
-            evidence,
-            candidates,
-            activeItems,
-          }),
-        proposeConsolidation: ({ activeItems }) =>
-          proposeMemoryConsolidationActions({
-            subject,
-            activeItems,
-          }),
-        createPendingReview: (proposal, db = this.db) =>
-          createPendingMemoryReview({
-            db,
-            runId,
-            subject,
-            phase,
-            proposal,
-          }),
-      });
-    } catch (error) {
-      const reason =
-        error instanceof Error ? error.message : 'unknown dreaming error';
-      return finalizeRun('failed', {
-        stage: 'dreaming_pass',
-        error: reason,
-        dryRun: Boolean(input.dryRun),
-      });
-    }
-    const summary = summarizeDreamDecisions(decisions, Boolean(input.dryRun));
-    return finalizeRun('completed', summary);
   }
 
   async dreamingStatus(
@@ -672,6 +494,50 @@ export class AppMemoryService {
     });
     options.signal?.throwIfAborted();
     return reviews;
+  }
+
+  async listPendingReviewPage(
+    input: Partial<MemoryBoundaryContext> & {
+      subjectType?: MemorySubjectType;
+      subjectId?: string;
+    } = {},
+    options: {
+      signal?: AbortSignal;
+      statementTimeoutMs?: number;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<MemoryReviewPage> {
+    if (!this.isEnabled()) {
+      const limit =
+        options.limit === undefined || !Number.isFinite(options.limit)
+          ? 20
+          : Math.max(1, Math.min(50, Math.trunc(options.limit)));
+      const offset =
+        options.offset === undefined || !Number.isFinite(options.offset)
+          ? 0
+          : Math.max(0, Math.trunc(options.offset));
+      return {
+        reviews: [],
+        totalCount: 0,
+        returnedCount: 0,
+        remainingCount: 0,
+        limit,
+        offset,
+        nextOffset: null,
+      };
+    }
+    options.signal?.throwIfAborted();
+    const subject = normalizeSubject(input);
+    const page = await listPendingMemoryReviewPage({
+      db: this.db,
+      subject,
+      statementTimeoutMs: options.statementTimeoutMs,
+      limit: options.limit,
+      offset: options.offset,
+    });
+    options.signal?.throwIfAborted();
+    return page;
   }
 
   async decideReview(

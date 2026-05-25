@@ -274,11 +274,16 @@ function projectTestModelCredentialEnv(source: Record<string, string>) {
   );
 }
 
+function applyTestOpenRouterSdkEnv(env: Record<string, string>) {
+  env.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api';
+  env.ANTHROPIC_API_KEY = '';
+}
+
 const testExecutionAdapter: AgentExecutionAdapter = {
   id: 'anthropic:claude-agent-sdk',
   async prepare(input: AgentExecutionAdapterPrepareInput) {
     if (
-      input.effectiveModelEntry?.provider === 'openrouter' &&
+      input.effectiveModelEntry?.modelRoute.id === 'openrouter' &&
       (!input.modelCredentialProjection.env.ANTHROPIC_AUTH_TOKEN ||
         input.modelCredentialProjection.credentialProviders
           .ANTHROPIC_AUTH_TOKEN !== 'openrouter')
@@ -289,7 +294,7 @@ const testExecutionAdapter: AgentExecutionAdapter = {
     }
     if (
       input.effectiveModelEntry &&
-      input.effectiveModelEntry.provider !== 'openrouter' &&
+      input.effectiveModelEntry.modelRoute.id !== 'openrouter' &&
       (input.modelCredentialProjection.credentialProviders
         .ANTHROPIC_AUTH_TOKEN === 'openrouter' ||
         isOpenRouterBaseUrl(
@@ -297,7 +302,7 @@ const testExecutionAdapter: AgentExecutionAdapter = {
         ))
     ) {
       throw new Error(
-        `Model ${input.effectiveModelEntry.displayName} is configured for ${input.effectiveModelEntry.providerLabel}, but AgentCredentialBroker returned OpenRouter-scoped Anthropic SDK credentials. Switch the session/job model to kimi or configure ${input.effectiveModelEntry.providerLabel} credentials for this model.`,
+        `Model ${input.effectiveModelEntry.displayName} is configured for ${input.effectiveModelEntry.modelRoute.label}, but AgentCredentialBroker returned OpenRouter-scoped Anthropic SDK credentials. Switch the session/job model to kimi or configure ${input.effectiveModelEntry.modelRoute.label} credentials for this model.`,
       );
     }
     const runnerPath =
@@ -318,6 +323,9 @@ const testExecutionAdapter: AgentExecutionAdapter = {
     const modelCredentialEnv = projectTestModelCredentialEnv(
       input.modelCredentialProjection.env,
     );
+    if (input.effectiveModelEntry?.modelRoute.id === 'openrouter') {
+      applyTestOpenRouterSdkEnv(modelCredentialEnv);
+    }
     if (input.effectiveModelEntry?.provider === 'openrouter') {
       modelCredentialEnv.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api';
       modelCredentialEnv.ANTHROPIC_API_KEY = '';
@@ -849,6 +857,65 @@ describe('agent-spawn timeout behavior', () => {
     ).toThrow(/Invalid memory IPC signature/);
   });
 
+  it('includes reviewer memory actions in spawned IPC signatures for control approvers', async () => {
+    const input = {
+      ...testInput,
+      chatJid: 'tg:trusted-chat',
+      memoryUserId: 'reviewer-a',
+      memoryReviewerIsControlApprover: true,
+    };
+    const resultPromise = spawnTestAgent(testGroup, input, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER).toBe('1');
+    const allowedActions = JSON.parse(
+      env.GANTRY_MEMORY_IPC_ACTIONS_JSON,
+    ) as string[];
+    expect(allowedActions).toEqual(
+      expect.arrayContaining([
+        'memory_review_pending',
+        'memory_review_decision',
+      ]),
+    );
+    expect(
+      parseMemoryIpcRequest(
+        createSignedIpcRequestEnvelope(env.GANTRY_MEMORY_IPC_AUTH_TOKEN, {
+          requestId: 'mem-spawn-reviewer-scope',
+          action: 'memory_review_pending',
+          payload: { limit: 10 },
+          context: {
+            chatJid: env.GANTRY_CHAT_JID,
+            threadId: env.GANTRY_THREAD_ID,
+            userId: env.GANTRY_MEMORY_USER_ID,
+            defaultScope: env.GANTRY_MEMORY_DEFAULT_SCOPE,
+            allowedActions,
+            reviewerIsControlApprover: true,
+            responseKeyId: env.GANTRY_IPC_RESPONSE_KEY_ID,
+          },
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+        testGroup.folder,
+      ),
+    ).toMatchObject({
+      action: 'memory_review_pending',
+      allowedActions: expect.arrayContaining([
+        'memory_review_pending',
+        'memory_review_decision',
+      ]),
+      context: {
+        userId: 'reviewer-a',
+        reviewerIsControlApprover: true,
+      },
+    });
+  });
+
   it('passes effective model to process env when configured', async () => {
     vi.mocked(getEffectiveModelConfig).mockReturnValue({
       model: 'opus',
@@ -1237,6 +1304,111 @@ describe('agent-spawn timeout behavior', () => {
       https_proxy: 'http://127.0.0.1:18080/',
       NODE_USE_ENV_PROXY: '1',
     });
+  });
+
+  it('does not project local CLI credential env into ordinary agent runs', async () => {
+    process.env.HOME = '/Users/tester';
+    process.env.USER = 'tester';
+    process.env.LOGNAME = 'tester';
+
+    const resultPromise = spawnTestAgent(testGroup, testInput, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.HOME).toBeUndefined();
+    expect(env.USER).toBeUndefined();
+    expect(env.LOGNAME).toBeUndefined();
+  });
+
+  it('does not project local CLI credential identity env to the runner process', async () => {
+    process.env.HOME = '/Users/tester';
+    process.env.USERPROFILE = '/Users/tester';
+    process.env.XDG_CONFIG_HOME = '/Users/tester/.config';
+    process.env.APPDATA = 'C:\\Users\\tester\\AppData\\Roaming';
+    process.env.USER = 'tester';
+    process.env.USERNAME = 'tester';
+    process.env.LOGNAME = 'tester';
+
+    const resultPromise = spawnTestAgent(
+      testGroup,
+      {
+        ...testInput,
+        allowedTools: [
+          'capability:gog.sheets.get',
+          'RunCommand(/opt/homebrew/bin/gog sheets get *)',
+        ],
+        localCliCredentialAccess: true,
+        localCliCredentialPaths: [
+          '${XDG_CONFIG_HOME}/gog',
+          '~/.gog',
+          '%APPDATA%\\gogcli',
+          '${GANTRY_MISSING_CLI_CONFIG}/skip',
+        ],
+      },
+      () => {},
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.HOME).toBeUndefined();
+    expect(env.USERPROFILE).toBeUndefined();
+    expect(env.XDG_CONFIG_HOME).toBeUndefined();
+    expect(env.APPDATA).toBeUndefined();
+    expect(env.USER).toBeUndefined();
+    expect(env.USERNAME).toBeUndefined();
+    expect(env.LOGNAME).toBeUndefined();
+    expect(JSON.parse(env.GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON)).toEqual([
+      '/Users/tester/.config/gog',
+      '/Users/tester/.gog',
+      'C:\\Users\\tester\\AppData\\Roaming\\gogcli',
+    ]);
+  });
+
+  it('keeps credential identity env scoped out of reviewed user-defined CLI runs', async () => {
+    process.env.HOME = '/Users/tester';
+    process.env.USER = 'tester';
+    process.env.LOGNAME = 'tester';
+
+    const resultPromise = spawnTestAgent(
+      testGroup,
+      {
+        ...testInput,
+        allowedTools: [
+          'capability:acme.invoices.read',
+          'RunCommand(/usr/local/bin/acme invoices read *)',
+        ],
+        localCliCredentialAccess: true,
+        localCliCredentialPaths: ['~/.config/acme'],
+      },
+      () => {},
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.HOME).toBeUndefined();
+    expect(env.USER).toBeUndefined();
+    expect(env.LOGNAME).toBeUndefined();
+    expect(JSON.parse(env.GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON)).toEqual([
+      '/Users/tester/.config/acme',
+    ]);
   });
 
   it('materializes approved third-party stdio MCP servers through direct SDK MCP config', async () => {

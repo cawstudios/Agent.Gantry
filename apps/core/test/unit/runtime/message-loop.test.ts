@@ -315,6 +315,56 @@ describe('thread queue routing', () => {
     ]);
   });
 
+  it('passes non-self sender ids with continuation batches', async () => {
+    const first = {
+      id: 1,
+      chat_jid: 'group@g.us',
+      sender: 'sl:UADMIN',
+      content: 'approve 1',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+      message_id: 'msg-1',
+      reply_to_message_id: null,
+      reply_to_content: null,
+      sender_name: 'Admin',
+    };
+    const second = {
+      ...first,
+      id: 2,
+      sender: 'sl:UOTHER',
+      content: 'approve 2',
+      timestamp: '2024-01-01T00:00:02.000Z',
+      message_id: 'msg-2',
+      sender_name: 'Other',
+    };
+    mockGetNewMessages.mockReturnValueOnce({
+      messages: [first, second],
+      newTimestamp: '2024-01-01T00:00:02.000Z',
+    });
+    mockGetMessagesSince.mockReturnValue([first, second]);
+
+    const sendMessage = vi.fn(() => true);
+    const deps = makeDeps({
+      queue: {
+        ...makeDeps().queue,
+        sendMessage,
+      },
+    });
+    const { runMessagePollingTick } =
+      await import('@core/runtime/message-loop.js');
+
+    await runMessagePollingTick(deps);
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      'group@g.us',
+      'formatted messages',
+      {
+        threadId: undefined,
+        senderUserIds: ['sl:UADMIN', 'sl:UOTHER'],
+      },
+    );
+  });
+
   it('passes the exact thread queue key to active control commands', async () => {
     const msg = {
       id: '1',

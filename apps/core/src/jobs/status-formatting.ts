@@ -71,6 +71,7 @@ function statusLabel(
 ): string {
   if (denial) return 'Needs permission';
   if (status === 'completed') {
+    if (hasPendingMemoryReviewSummary(summary)) return 'Needs memory review';
     return hasReportableSummary(summary) ? 'Completed' : 'Completed, no report';
   }
   if (status === 'timeout' && isRestartInterruptedRun(summary)) {
@@ -191,14 +192,14 @@ function notificationAction(
     }
     return 'Approve the missing access, then retry the job.';
   }
+  if (hasPendingMemoryReviewSummary(summary)) {
+    return 'Ask the agent to show pending memory reviews, then approve, reject, or edit by number.';
+  }
   if (status === 'timeout' && isRestartInterruptedRun(summary)) {
     return 'Rerun the job when ready. If this repeats without restarts, increase the job timeout.';
   }
   if (status === 'timeout') {
     return 'Rerun with a longer job timeout if this work is expected to take more time.';
-  }
-  if (status === 'completed' && hasPendingMemoryReviewSummary(summary)) {
-    return 'Review pending memory candidates with memory_review_pending.';
   }
   if (status === 'dead_lettered') {
     return pauseReason
@@ -213,7 +214,12 @@ function isRestartInterruptedRun(summary: string): boolean {
 }
 
 function hasPendingMemoryReviewSummary(summary: string): boolean {
-  return /\b\d+\s+sent to review\b/i.test(summary);
+  return (
+    /\b\d+\s+sent to review\b/i.test(summary) ||
+    /\b\d+\s+(?:pending\s+)?memory reviews?\s+(?:are\s+)?(?:waiting|pending|needs? review)\b/i.test(
+      summary,
+    )
+  );
 }
 
 function nextRunLabel(

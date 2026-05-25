@@ -42,6 +42,10 @@ interface PgBossSchedulerCallbacks {
     releases: readonly ReleasedStaleJobLease[],
     deps: SchedulerDependencies,
   ) => Promise<void>;
+  rehydratePendingRecoveryTurns?: (
+    jobs: readonly Job[],
+    deps: SchedulerDependencies,
+  ) => Promise<void>;
 }
 
 function pgBossKey(kind: string, value: string): string {
@@ -272,6 +276,11 @@ export class PgBossSchedulerEngine {
     const liveJobIds = new Set(jobs.map((job) => job.id));
     for (const job of jobs) {
       await this.syncJob(boss, job);
+    }
+    try {
+      await this.callbacks.rehydratePendingRecoveryTurns?.(jobs, this.deps);
+    } catch (err) {
+      logger.warn({ err }, 'Failed to rehydrate scheduler recovery turns');
     }
     for (const jobId of this.scheduleSignatures.keys()) {
       if (!liveJobIds.has(jobId)) await this.clearDeletedJob(boss, jobId);

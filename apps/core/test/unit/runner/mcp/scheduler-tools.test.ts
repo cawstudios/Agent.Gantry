@@ -63,7 +63,7 @@ describe('scheduler MCP tools', () => {
     expect(text).toContain('opus-4.7 | Opus 4.7');
     expect(text).toContain('Kimi K2.6');
     expect(text).toContain('kimi-2.6 | Kimi K2.6');
-    expect(text).toContain('Provider slug');
+    expect(text).toContain('Response family');
   });
 
   it('delegates scheduler_list_models rendering to the model catalog formatter', async () => {
@@ -447,7 +447,7 @@ describe('scheduler MCP tools', () => {
       '- Tool access requirements: Browser',
     );
     expect(response.content[0].text).toContain(
-      'tool access requirements are preflight checks only',
+      'use capability:<id> for semantic access such as gog.sheets.get',
     );
     expect(response.content[0].text).toContain('- Network:');
     expect(response.content[0].text).toContain('- Memory:');

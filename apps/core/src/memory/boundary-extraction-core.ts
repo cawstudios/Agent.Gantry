@@ -18,8 +18,11 @@ import type {
 } from './extractor-types.js';
 import { nowIso } from '../shared/time/datetime.js';
 import { resolveScopedMemorySubject } from './app-memory-subject-resolver.js';
-import { rawThreadIdFromSession } from './app-memory-session-scope.js';
 import { sanitizeOutboundLlmText } from '../shared/sensitive-material.js';
+import {
+  MEMORY_BOUNDARY_COLLECTION_TIMEOUT_MS,
+  runWithMemoryOperationTimeout,
+} from '../shared/memory-dreaming-timeout.js';
 
 const EXTRACTION_PART_CHAR_BUDGET = 900;
 const EXTRACTION_TURN_CHAR_BUDGET = 2200;
@@ -72,7 +75,6 @@ interface BoundaryMemoryRepositories {
       userId?: string;
       groupId?: string;
       channelId?: string;
-      threadId?: string;
       sourceId: string;
       text: string;
       metadata: Record<string, unknown>;
@@ -96,12 +98,17 @@ export async function collectDurableMemoryFromRepositories(input: {
   defaultScope?: MemoryBoundaryDefaultScope;
   additionalTurns?: MemoryBoundaryTurn[];
   nowIso?: () => string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  statementTimeoutMs?: number;
 }): Promise<{ saved: number }> {
+  input.signal?.throwIfAborted();
   const session = await input.repositories.agentSessions.getAgentSession(
     input.agentSessionId as AgentSession['id'],
   );
   if (!session?.conversationId) return { saved: 0 };
 
+  input.signal?.throwIfAborted();
   const messages = await input.repositories.messages.listRecentMessages({
     conversationId: session.conversationId,
     threadId: session.threadId,
@@ -140,14 +147,32 @@ export async function collectDurableMemoryFromRepositories(input: {
   const turns = promptPayload.turns;
   if (turns.length === 0) return { saved: 0 };
 
-  const extraction = normalizeExtractionResult(
-    await input.extractFacts({
-      turns,
-      trigger: input.trigger,
-      userId: session.userId,
-      retrievedItems: promptPayload.retrievedItems,
-    }),
+  input.signal?.throwIfAborted();
+  const extractionTimeoutMs = Math.max(
+    1,
+    Math.floor(input.timeoutMs ?? MEMORY_BOUNDARY_COLLECTION_TIMEOUT_MS),
   );
+  const extraction = normalizeExtractionResult(
+    await runWithMemoryOperationTimeout(
+      (signal) =>
+        Promise.resolve(
+          input.extractFacts({
+            turns,
+            trigger: input.trigger,
+            userId: session.userId,
+            retrievedItems: promptPayload.retrievedItems,
+            signal,
+            timeoutMs: extractionTimeoutMs,
+          }),
+        ),
+      {
+        timeoutMs: extractionTimeoutMs,
+        label: 'memory boundary extraction',
+        parentSignal: input.signal,
+      },
+    ),
+  );
+  input.signal?.throwIfAborted();
   const facts = extraction.facts;
   const now = (input.nowIso ?? (() => nowIso()))();
   const digestId = `msd_${randomUUID().replace(/-/g, '')}`;
@@ -189,6 +214,7 @@ export async function collectDurableMemoryFromRepositories(input: {
 
   let saved = 0;
   for (const fact of facts) {
+    input.signal?.throwIfAborted();
     const subject = subjectForFact(fact, session, input.defaultScope);
     const candidate = toCandidateMetadata(fact, input.defaultScope);
     const evidenceText = [
@@ -229,17 +255,14 @@ function subjectForFact(
   userId?: string;
   groupId?: string;
   channelId?: string;
-  threadId?: string;
 } {
   const scope = resolveBoundaryScope(defaultScope, fact.scope);
-  const threadId = boundaryEvidenceThreadIdForSession(session);
   const { subject } = resolveScopedMemorySubject({
     appId: session.appId,
     agentId: session.agentId,
     groupId: session.agentId,
     conversationId: session.conversationId ?? undefined,
     userId: session.userId ?? undefined,
-    threadId,
     defaultScope: scope,
     scope,
   });
@@ -258,16 +281,7 @@ function subjectForFact(
     ...(subject.userId ? { userId: subject.userId } : {}),
     ...(subject.groupId ? { groupId: subject.groupId } : {}),
     ...(subject.channelId ? { channelId: subject.channelId } : {}),
-    ...(subject.threadId ? { threadId: subject.threadId } : {}),
   };
-}
-
-function boundaryEvidenceThreadIdForSession(
-  session: AgentSession,
-): string | undefined {
-  return (
-    rawThreadIdFromSession(session) ?? session.threadId?.trim() ?? undefined
-  );
 }
 
 function toCandidateMetadata(

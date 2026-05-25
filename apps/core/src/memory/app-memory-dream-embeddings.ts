@@ -1,38 +1,19 @@
 import type { AppMemoryItem } from './memory-types.js';
 import type { EmbeddingProvider } from './memory-embeddings.js';
+import { runWithMemoryOperationTimeout } from '../shared/memory-dreaming-timeout.js';
 
 export const DREAM_EMBEDDING_DEADLINE_MS = 15_000;
 
 export async function runWithTimeout<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
+  options: { signal?: AbortSignal; label?: string } = {},
 ): Promise<T> {
-  const controller = new AbortController();
-  let timeoutHandle: NodeJS.Timeout | null = null;
-  let timedOut = false;
-  const timeoutPromise = new Promise<T>((_resolve, reject) => {
-    timeoutHandle = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-      reject(
-        new Error(`dream embedding deadline exceeded after ${timeoutMs}ms`),
-      );
-    }, timeoutMs);
+  return runWithMemoryOperationTimeout(operation, {
+    timeoutMs,
+    label: options.label ?? 'dream embedding',
+    parentSignal: options.signal,
   });
-
-  const operationPromise = operation(controller.signal);
-  if (typeof operationPromise.catch === 'function') {
-    operationPromise.catch(() => {
-      // Prevent unhandled rejection noise when the timeout wins.
-    });
-  }
-
-  try {
-    return await Promise.race([operationPromise, timeoutPromise]);
-  } finally {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-    if (!timedOut) controller.abort();
-  }
 }
 
 export async function storeDreamItemEmbedding(input: {
@@ -46,6 +27,7 @@ export async function storeDreamItemEmbedding(input: {
   item: AppMemoryItem;
   contentHash: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<{ status: 'stored' | 'retryable'; reason?: string }> {
   const now = input.now();
   const { schema, sqlOps } = input;
@@ -79,6 +61,7 @@ export async function storeDreamItemEmbedding(input: {
     const embedding = await runWithTimeout(
       (signal) => input.provider.embedOne(embeddingText, { signal }),
       timeoutMs,
+      { signal: input.signal },
     );
     await input.db
       .insert(schema.memoryItemEmbeddingsPostgres)

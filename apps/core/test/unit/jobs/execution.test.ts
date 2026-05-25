@@ -46,6 +46,7 @@ vi.mock('@core/jobs/system-jobs.js', () => ({
   handleSystemJob: vi.fn(async () => 'System job completed.'),
 }));
 
+const systemJobs = await import('@core/jobs/system-jobs.js');
 const { runJob } = await import('@core/jobs/execution.js');
 const { evaluateJobReadiness } =
   await import('@core/application/jobs/job-readiness-service.js');
@@ -55,6 +56,7 @@ const compactMemory = await import('@core/jobs/compact-memory.js');
 const collectJobCompletionMemoryMock = vi.mocked(
   compactMemory.collectJobCompletionMemory,
 );
+const handleSystemJobMock = vi.mocked(systemJobs.handleSystemJob);
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
@@ -148,6 +150,7 @@ function makeToolRepository(toolNames: string[]) {
 describe('jobs/execution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    handleSystemJobMock.mockResolvedValue('System job completed.');
   });
 
   it('records a failed terminal run when execution throws before normal settlement', async () => {
@@ -306,6 +309,110 @@ describe('jobs/execution', () => {
     );
     expect(runCompletedEvent?.payload?.summary).not.toContain('result-inline');
     expect(runCompletedEvent?.payload?.summary).not.toContain('json-result');
+  });
+
+  it('passes an abortable deadline into host-owned system jobs', async () => {
+    const job = makeJob({
+      name: 'Memory Dreaming',
+      prompt: '__system:memory_dream',
+      timeout_ms: 1_260_000,
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      next_run: '2026-05-08T00:00:00.000Z',
+    });
+    const opsRepository = makeOpsRepository(job);
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        runAgent: vi.fn() as never,
+      },
+      'tg:scheduler',
+    );
+
+    expect(handleSystemJobMock).toHaveBeenCalledWith(
+      job,
+      expect.objectContaining({
+        folder: 'scheduler_agent',
+        conversationId: 'tg:scheduler',
+        threadId: 'thread-scheduled',
+      }),
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+        deadlineAtMs: expect.any(Number),
+      }),
+    );
+    const options = handleSystemJobMock.mock.calls[0]?.[2] as
+      | { deadlineAtMs?: number }
+      | undefined;
+    expect(options?.deadlineAtMs).toBeGreaterThan(Date.now() + 1_100_000);
+    expect(options?.deadlineAtMs).toBeLessThanOrEqual(Date.now() + 1_260_000);
+    expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+      expect.any(String),
+      'completed',
+      'System job completed.',
+      null,
+    );
+  });
+
+  it('settles host-owned system job deadline expiry as a scheduler timeout', async () => {
+    vi.useFakeTimers({
+      now: new Date('2026-05-08T00:00:00.000Z'),
+    });
+    try {
+      const job = makeJob({
+        name: 'Memory Dreaming',
+        prompt: '__system:memory_dream',
+        timeout_ms: 30_000,
+        schedule_type: 'interval',
+        schedule_value: '60000',
+        next_run: '2026-05-08T00:00:00.000Z',
+      });
+      const opsRepository = makeOpsRepository(job);
+      handleSystemJobMock.mockImplementation(
+        async (_job, _context, options) =>
+          new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener(
+              'abort',
+              () => reject(options.signal?.reason),
+              { once: true },
+            );
+          }),
+      );
+
+      const run = runJob(
+        job,
+        {
+          conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+          queue: {} as never,
+          onProcess: () => {},
+          sendMessage: vi.fn(async () => undefined) as never,
+          opsRepository: opsRepository as never,
+          runAgent: vi.fn() as never,
+        },
+        'tg:scheduler',
+      );
+      for (let i = 0; i < 10; i += 1) {
+        await Promise.resolve();
+      }
+
+      await vi.advanceTimersByTimeAsync(30_001);
+      await run;
+
+      expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
+        expect.any(String),
+        'timeout',
+        null,
+        expect.stringContaining('System job timed out after 30000ms'),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('pauses policy-denied recurring jobs with structured setup recovery events', async () => {
@@ -1308,6 +1415,81 @@ describe('jobs/execution', () => {
     );
   });
 
+  it('queues a bounded target-agent recovery turn for setup blockers', async () => {
+    let storedJob = makeJob({
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      tool_access_requirements: ['Browser'],
+    });
+    const opsRepository = {
+      ...makeOpsRepository(storedJob),
+      getJobById: vi.fn(async () => storedJob),
+      updateJob: vi.fn(async (_jobId: string, updates: Partial<Job>) => {
+        storedJob = { ...storedJob, ...updates };
+      }),
+      getAgentTurnContext: vi.fn(async () => ({
+        appId: 'default',
+        agentId: 'agent:scheduler_agent',
+        agentSessionId: 'agent-session:scheduler',
+        externalSessionId: 'provider-session:recovery',
+      })),
+      createSessionAgentRun: vi.fn(async () => 'agent-run:recovery-1'),
+      completeSessionAgentRun: vi.fn(async () => undefined),
+    };
+    let recoveryTask: (() => Promise<void>) | undefined;
+    const queue = {
+      enqueueTask: vi.fn((_queueKey, _taskId, fn: () => Promise<void>) => {
+        recoveryTask = fn;
+      }),
+    };
+    const runAgent = vi.fn(async () => ({
+      status: 'success',
+      result: 'Recovery request sent.',
+    }));
+
+    await runJob(
+      storedJob,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: queue as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+    );
+
+    expect(queue.enqueueTask).toHaveBeenCalledWith(
+      'tg:scheduler::thread:thread-scheduled',
+      expect.stringContaining('job-recovery:job-1:'),
+      expect.any(Function),
+    );
+    expect(storedJob.recovery_intent).toMatchObject({
+      state: 'pending',
+      kind: 'missing_capability',
+      requirement_id: 'Browser',
+    });
+
+    await recoveryTask?.();
+
+    expect(runAgent).toHaveBeenCalledTimes(1);
+    const recoveryInput = runAgent.mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(recoveryInput.prompt).toEqual(
+      expect.stringContaining('host-generated recovery turn'),
+    );
+    expect(recoveryInput.isScheduledJob).toBeUndefined();
+    expect(recoveryInput.jobId).toBeUndefined();
+    expect(recoveryInput.sessionId).toBe('provider-session:recovery');
+    expect(storedJob.recovery_intent).toMatchObject({
+      state: 'completed',
+      attempts: 1,
+    });
+  });
+
   it('pauses after claim when final readiness fails before model spawn', async () => {
     const job = makeJob({
       schedule_type: 'interval',
@@ -1488,6 +1670,51 @@ describe('jobs/execution', () => {
       'completed',
       'partial command work',
       null,
+    );
+  });
+
+  it('passes canonical absolute CLI requirements into scheduled runner prompts', async () => {
+    const job = makeJob({
+      tool_access_requirements: ['RunCommand(gog sheets get *)'],
+    });
+    const opsRepository = makeOpsRepository(job);
+    const toolRepository = makeToolRepository([
+      'RunCommand(/opt/homebrew/bin/gog sheets get *)',
+    ]);
+    const runAgent = vi.fn(async (_group, _input) => {
+      expect(_input.toolAccessRequirements).toEqual([
+        'RunCommand(/opt/homebrew/bin/gog sheets get *)',
+      ]);
+      return { status: 'success', result: 'sheet read complete' };
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        getToolRepository: () => toolRepository as never,
+        runAgent: runAgent as never,
+      },
+      'tg:scheduler',
+    );
+
+    expect(runAgent).toHaveBeenCalled();
+    expect(runtimeStoreMock.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'job.tool_activity',
+        payload: expect.objectContaining({
+          phase: 'tool_access_preflight',
+          tool_access_requirements: [
+            'RunCommand(/opt/homebrew/bin/gog sheets get *)',
+          ],
+          missing_tool_access_requirements: [],
+          ok: true,
+        }),
+      }),
     );
   });
 

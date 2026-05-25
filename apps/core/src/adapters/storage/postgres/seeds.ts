@@ -44,8 +44,8 @@ export async function seedDefaultRuntimeData(
         id: DEFAULT_LLM_PROFILE_ID,
         appId: DEFAULT_APP_ID,
         purpose: 'default',
-        provider: 'anthropic',
-        modelAlias: 'default',
+        responseFamily: 'anthropic',
+        modelAlias: 'opus',
         thinkingJson: '{}',
         budgetJson: '{}',
       })

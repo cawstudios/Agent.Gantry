@@ -37,6 +37,11 @@ const DEFAULT_MEMORY_IPC_ACTIONS = [
   'procedure_save',
 ] as const satisfies readonly GantryMemoryIpcAction[];
 
+const REVIEWER_MEMORY_REVIEW_IPC_ACTIONS = [
+  'memory_review_pending',
+  'memory_review_decision',
+] as const satisfies readonly GantryMemoryIpcAction[];
+
 export function normalizeMemoryIpcActions(
   actions: readonly string[] | undefined,
 ): GantryMemoryIpcAction[] {
@@ -61,10 +66,18 @@ export function memoryIpcActionForToolName(
     : undefined;
 }
 
+export interface MemoryIpcActionSelectionOptions {
+  memoryReviewerIsControlApprover?: boolean;
+}
+
 export function selectedMemoryIpcActionsFromToolRules(
   configuredTools: readonly string[],
+  options: MemoryIpcActionSelectionOptions = {},
 ): GantryMemoryIpcAction[] {
   const actions: GantryMemoryIpcAction[] = [...DEFAULT_MEMORY_IPC_ACTIONS];
+  if (options.memoryReviewerIsControlApprover) {
+    actions.push(...REVIEWER_MEMORY_REVIEW_IPC_ACTIONS);
+  }
   for (const rule of configuredTools) {
     const trimmed = rule.trim();
     if (!trimmed.startsWith('mcp__gantry__')) continue;

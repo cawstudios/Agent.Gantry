@@ -24,7 +24,10 @@ import {
   resolveTurnSelectedMcpServerIds,
   resolveTurnSelectedSkillIds,
 } from '../runtime/group-run-context.js';
-import { resolveRuntimeExecutionProviderId } from '../runtime/execution-provider-id.js';
+import {
+  DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID,
+  resolveRuntimeExecutionProviderId,
+} from '../runtime/execution-provider-id.js';
 import {
   collectCompactBoundaryMemory,
   collectJobCompletionMemory,
@@ -41,7 +44,7 @@ import {
   notifySchedulerTerminalRunState,
 } from './execution-notifications.js';
 import { deadLetterUnresolvedExecutionContext } from './execution-dead-letter.js';
-import { handleSystemJob } from './system-jobs.js';
+import { runSystemJobWithDeadline } from './execution-system-job.js';
 import { createJobExecutionDeletionGuard } from './execution-deletion-guard.js';
 import { runtimeEventTypeForRunStatus } from './run-status-event.js';
 import {
@@ -128,14 +131,17 @@ export async function runJob(
     executionAgentFolder: execution.group.folder,
     runtimeAppId,
     appSession: preflightAppSession,
+    source: 'preflight_setup',
+    runId,
     publishRuntimeEvent: async (event) => {
       await getRuntimeEventExchange().publish(event);
     },
   });
   if (pausedForSetup) return;
-  const executionProviderId = resolveRuntimeExecutionProviderId(
-    deps.executionAdapter,
-  );
+  const executionProviderId =
+    deps.executionAdapter || !deps.runAgent
+      ? resolveRuntimeExecutionProviderId(deps.executionAdapter)
+      : DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID;
   const claimed = await deps.opsRepository.claimDueJobRunStart({
     jobId: currentJob.id,
     runId,
@@ -228,12 +234,18 @@ export async function runJob(
     }
     if (!error && currentJob.prompt.startsWith('__system:')) {
       try {
-        const systemResult: unknown = await handleSystemJob(currentJob, {
-          folder: execution.group.folder,
-          conversationId: execution.executionJid,
-          conversationKind: execution.group.conversationKind,
-          userId: memoryUserId,
-          threadId: execution.threadId,
+        const systemResult: unknown = await runSystemJobWithDeadline({
+          currentJob,
+          startedAtMs,
+          timeoutMs,
+          logger,
+          context: {
+            folder: execution.group.folder,
+            conversationId: execution.executionJid,
+            conversationKind: execution.group.conversationKind,
+            userId: memoryUserId,
+            threadId: execution.threadId,
+          },
         });
         if (typeof systemResult !== 'string') {
           throw new Error('System job returned a non-displayable result.');
@@ -329,6 +341,8 @@ export async function runJob(
             runtimeAppId,
             appSession: eventState.eventAppSession ?? preflightAppSession,
             agentId: executionAgentId,
+            source: 'final_setup',
+            runId,
             publishRuntimeEvent: async (event) => {
               await getRuntimeEventExchange().publish(event);
             },
@@ -387,6 +401,9 @@ export async function runJob(
                 allowedTools: toolPolicy.effectiveAllowedTools,
                 toolAccessRequirements:
                   toolAccessRequirementPreflight.toolAccessRequirements,
+                localCliCredentialAccess: toolPolicy.localCliCredentialAccess,
+                localCliCredentialPaths: toolPolicy.localCliCredentialPaths,
+                localCliNetworkHosts: toolPolicy.localCliNetworkHosts,
                 selectedSkillIds,
                 selectedMcpServerIds,
               },
@@ -518,6 +535,7 @@ export async function runJob(
       pausedForSetupDuringRun,
       deletedDuringRun: deletionGuard.deletedDuringRun,
       runtimeAppId,
+      runId,
       appSession: eventState.eventAppSession ?? preflightAppSession,
       publishRuntimeEvent: async (event) => {
         await getRuntimeEventExchange().publish(event);

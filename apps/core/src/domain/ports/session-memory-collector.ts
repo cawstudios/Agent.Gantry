@@ -11,4 +11,7 @@ export type SessionMemoryCollector = (input: {
   trigger: MemoryBoundaryTrigger;
   defaultScope?: MemoryBoundaryDefaultScope;
   additionalTurns?: MemoryBoundaryTurn[];
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  statementTimeoutMs?: number;
 }) => Promise<{ saved: number }>;

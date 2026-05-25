@@ -47,6 +47,9 @@ export interface AgentInput {
   thinking?: ThinkingOverride;
   memoryContextBlock?: string;
   yoloMode?: YoloModeSettings;
+  localCliCredentialAccess?: boolean;
+  localCliCredentialPaths?: string[];
+  localCliNetworkHosts?: string[];
 }
 
 export interface AgentOutput {

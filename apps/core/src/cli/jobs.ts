@@ -25,6 +25,11 @@ interface JobRecord {
     threadId?: string | null;
     sessionId?: string | null;
   };
+  notificationRoutes?: Array<{
+    conversationJid?: string;
+    threadId?: string | null;
+    label?: string;
+  }>;
   nextRun: string | null;
   lastRun: string | null;
   modelAlias: string | null;
@@ -42,6 +47,15 @@ interface JobRecord {
       message?: string;
       nextAction?: string;
     }>;
+  };
+  recovery?: {
+    state?: string;
+    kind?: string | null;
+    attempts?: number;
+    requirementType?: string | null;
+    requirementId?: string | null;
+    nextAction?: string | null;
+    lastError?: string | null;
   };
   prompt?: string;
   promptPreview?: string;
@@ -84,11 +98,17 @@ export async function runJobsCommand(
   if (action === 'resume' && maybeJobId) {
     return resumeJob(runtimeHome, maybeJobId);
   }
+  if (action === 'trigger' && maybeJobId) {
+    return triggerJob(runtimeHome, maybeJobId);
+  }
+  if (action === 'set-route' && maybeJobId) {
+    return setJobRoute(runtimeHome, maybeJobId, rest);
+  }
   if (action === 'events' && maybeJobId) {
     return listJobEvents(runtimeHome, maybeJobId, rest);
   }
   p.log.error(
-    'Usage: gantry jobs list|show <job_id>|resume <job_id>|events <job_id> [--run <run_id>]',
+    'Usage: gantry jobs list|show <job_id>|resume <job_id>|trigger <job_id>|set-route <job_id> --conversation <jid> --thread <id|null>|events <job_id> [--run <run_id>] [--full|--json]',
   );
   return 1;
 }
@@ -167,12 +187,74 @@ async function resumeJob(runtimeHome: string, jobId: string): Promise<number> {
   return 0;
 }
 
+async function triggerJob(runtimeHome: string, jobId: string): Promise<number> {
+  const response = (await controlApiRequest(runtimeHome, {
+    method: 'POST',
+    path: `/v1/jobs/${encodeURIComponent(jobId)}/trigger`,
+  })) as { triggerId?: string };
+  p.note(
+    [`Trigger ID: ${response.triggerId ?? '(unknown)'}`].join('\n'),
+    `Job ${jobId} queued`,
+  );
+  return 0;
+}
+
+async function setJobRoute(
+  runtimeHome: string,
+  jobId: string,
+  args: string[],
+): Promise<number> {
+  const parsed = parseSetRouteArgs(args);
+  if (!parsed) {
+    p.log.error(
+      'Usage: gantry jobs set-route <job_id> --conversation <jid> --thread <id|null> [--label <label>] [--group <group_scope>]',
+    );
+    return 1;
+  }
+  const current = (await controlApiRequest(runtimeHome, {
+    method: 'GET',
+    path: `/v1/jobs/${encodeURIComponent(jobId)}`,
+  })) as JobRecord;
+  const sessionId = current.executionContext?.sessionId ?? undefined;
+  const body = {
+    ...(sessionId
+      ? {
+          executionContext: {
+            conversationJid: parsed.conversationJid,
+            threadId: parsed.threadId,
+            groupScope:
+              parsed.groupScope ??
+              current.executionContext?.groupScope ??
+              current.groupScope,
+            sessionId,
+          },
+        }
+      : {}),
+    notificationRoutes: [
+      {
+        conversationJid: parsed.conversationJid,
+        threadId: parsed.threadId,
+        label: parsed.label,
+      },
+    ],
+  };
+  const updated = (await controlApiRequest(runtimeHome, {
+    method: 'PATCH',
+    path: `/v1/jobs/${encodeURIComponent(jobId)}`,
+    body,
+  })) as JobRecord;
+  p.note(formatJobRoutes(updated), `Job ${jobId} route updated`);
+  return 0;
+}
+
 async function listJobEvents(
   runtimeHome: string,
   jobId: string,
   args: string[],
 ): Promise<number> {
   const params = new URLSearchParams();
+  let full = false;
+  let json = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     const next = args[index + 1];
@@ -188,6 +270,10 @@ async function listJobEvents(
     } else if (arg === '--limit' && next) {
       params.set('limit', next);
       index += 1;
+    } else if (arg === '--full') {
+      full = true;
+    } else if (arg === '--json') {
+      json = true;
     }
   }
   const response = (await controlApiRequest(runtimeHome, {
@@ -197,11 +283,15 @@ async function listJobEvents(
     }`,
   })) as { events?: JobEventRecord[] };
   const events = response.events ?? [];
+  if (json) {
+    console.log(JSON.stringify({ events }, null, 2));
+    return 0;
+  }
   if (events.length === 0) {
     p.note('No job events found.', `Job ${jobId} Events`);
     return 0;
   }
-  p.note(formatJobEvents(events), `Job ${jobId} Events`);
+  p.note(formatJobEvents(events, { full }), `Job ${jobId} Events`);
   return 0;
 }
 
@@ -211,7 +301,9 @@ function formatJobTable(jobs: JobRecord[]): string {
     job.kind,
     job.setup?.state && job.setup.state !== 'ready'
       ? job.setup.state
-      : (job.health?.state ?? job.status),
+      : job.recovery?.state && job.recovery.state !== 'none'
+        ? `recovery:${job.recovery.state}`
+        : (job.health?.state ?? job.status),
     job.groupScope,
     jobThreadId(job) ?? '',
     job.nextRun ?? '',
@@ -255,8 +347,10 @@ function formatJobDetail(job: JobRecord): string {
     `Status: ${job.status}`,
     `Health: ${job.health?.state ?? job.status}`,
     `Setup: ${job.setup?.state ?? 'ready'}`,
+    `Recovery: ${formatJobRecovery(job.recovery)}`,
     `Group: ${job.groupScope}`,
     `Thread: ${jobThreadId(job) ?? '(none)'}`,
+    `Notifications: ${formatJobRoutes(job)}`,
     `Next Run: ${job.nextRun ?? '(none)'}`,
     `Last Run: ${job.lastRun ?? '(none)'}`,
     `Model: ${job.modelAlias ?? '(default)'}`,
@@ -269,7 +363,8 @@ function formatJobDetail(job: JobRecord): string {
   if (job.promptPreview || job.prompt) {
     lines.push('', `Prompt: ${job.promptPreview ?? job.prompt}`);
   }
-  const nextAction = job.setup?.nextAction ?? job.health?.nextAction;
+  const nextAction =
+    job.setup?.nextAction ?? job.recovery?.nextAction ?? job.health?.nextAction;
   if (nextAction) {
     lines.push(
       '',
@@ -286,6 +381,9 @@ function formatJobDetail(job: JobRecord): string {
       ),
     );
   }
+  if (job.recovery?.lastError) {
+    lines.push('', `Recovery Error: ${job.recovery.lastError}`);
+  }
   if (job.recentRunErrors?.length) {
     lines.push(
       '',
@@ -296,6 +394,17 @@ function formatJobDetail(job: JobRecord): string {
     );
   }
   return lines.join('\n');
+}
+
+function formatJobRecovery(recovery?: JobRecord['recovery']): string {
+  if (!recovery || !recovery.state || recovery.state === 'none') {
+    return 'none';
+  }
+  const target =
+    recovery.requirementType && recovery.requirementId
+      ? ` ${recovery.requirementType}:${recovery.requirementId}`
+      : '';
+  return `${recovery.state}${recovery.kind ? ` (${recovery.kind})` : ''}${target} attempts=${recovery.attempts ?? 0}`;
 }
 
 function formatJobNextAction(
@@ -310,13 +419,16 @@ function formatJobNextAction(
   );
 }
 
-function formatJobEvents(events: JobEventRecord[]): string {
+function formatJobEvents(
+  events: JobEventRecord[],
+  options: { full?: boolean } = {},
+): string {
   const rows = events.map((event) => [
     String(event.id),
     event.created_at,
     event.run_id ?? '',
     event.event_type,
-    formatEventPayload(event.payload),
+    formatEventPayload(event.payload, options),
   ]);
   const headers = ['ID', 'Created', 'Run', 'Type', 'Payload'];
   const widths = headers.map((header, index) =>
@@ -336,9 +448,56 @@ function jobThreadId(job: JobRecord): string | null {
   return job.executionContext?.threadId ?? job.threadId ?? null;
 }
 
-function formatEventPayload(payload: string | null): string {
+function formatJobRoutes(job: JobRecord): string {
+  const routes = job.notificationRoutes ?? [];
+  if (routes.length === 0) return '(none)';
+  return routes
+    .map((route) => {
+      const label = route.label ? `${route.label}:` : '';
+      return `${label}${route.conversationJid ?? '(unknown)'}${route.threadId ? `/${route.threadId}` : ''}`;
+    })
+    .join(', ');
+}
+
+function parseSetRouteArgs(args: string[]): {
+  conversationJid: string;
+  threadId: string | null;
+  label: string;
+  groupScope?: string;
+} | null {
+  let conversationJid = '';
+  let threadId: string | null | undefined;
+  let label = 'primary';
+  let groupScope: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    const next = args[index + 1];
+    if (arg === '--conversation' && next) {
+      conversationJid = next.trim();
+      index += 1;
+    } else if (arg === '--thread' && next) {
+      const raw = next.trim();
+      threadId = raw === 'null' || raw === 'none' || raw === '-' ? null : raw;
+      index += 1;
+    } else if (arg === '--label' && next) {
+      label = next.trim() || label;
+      index += 1;
+    } else if (arg === '--group' && next) {
+      groupScope = next.trim() || undefined;
+      index += 1;
+    }
+  }
+  if (!conversationJid || threadId === undefined) return null;
+  return { conversationJid, threadId, label, groupScope };
+}
+
+function formatEventPayload(
+  payload: string | null,
+  options: { full?: boolean } = {},
+): string {
   if (!payload) return '';
   const singleLine = payload.replace(/\s+/g, ' ').trim();
+  if (options.full) return singleLine;
   return singleLine.length > 160
     ? `${singleLine.slice(0, 157)}...`
     : singleLine;

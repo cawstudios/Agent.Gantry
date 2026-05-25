@@ -13,6 +13,7 @@ import {
   pauseJobForSetup,
   setupBlockerDetails,
 } from './job-management-readiness.js';
+import { SETUP_REQUIRED_PAUSE_REASON } from './job-readiness-service.js';
 import { agentIdForJobGroupScope } from './job-tool-policy.js';
 
 function requireControl(deps: JobManagementServiceDeps): JobControlPort {
@@ -63,7 +64,9 @@ export async function runSchedulerJobNowFromMcp(
   const job = await deps.ops.getJobById(input.jobId);
   if (!job) throw new ApplicationError('NOT_FOUND', 'Job not found');
   assertSchedulerJobAccess(job, input.access);
-  if (job.status !== 'active') {
+  const canRecheckSetupPausedJob =
+    job.status === 'paused' && job.pause_reason === SETUP_REQUIRED_PAUSE_REASON;
+  if (job.status !== 'active' && !canRecheckSetupPausedJob) {
     throw new ApplicationError(
       'CONFLICT',
       `scheduler_run_now requires an active job; current status is ${job.status}.`,
@@ -88,6 +91,18 @@ export async function runSchedulerJobNowFromMcp(
       'scheduler_run_now requires setup before the job can be queued.',
       { details: setupBlockerDetails(readiness.setupState) },
     );
+  }
+  if (canRecheckSetupPausedJob) {
+    await deps.ops.updateJob(job.id, {
+      status: 'active',
+      pause_reason: null,
+      next_run: null,
+      setup_state: readiness.setupState,
+      recovery_intent: null,
+      lease_run_id: null,
+      lease_expires_at: null,
+    });
+    deps.scheduler.requestSchedulerSync(job.id);
   }
   if (!triggerQueue.isReady()) {
     throw new ApplicationError(

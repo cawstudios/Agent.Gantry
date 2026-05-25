@@ -307,9 +307,14 @@ export class PostgresCanonicalJobRepository {
         .for('update')
         .limit(1);
       const job = rows[0];
+      if (!job) return false;
+      const target = parseJson<{ recoveryIntent?: { state?: unknown } }>(
+        job.targetJson,
+        {},
+      );
       if (
-        !job ||
         job.status !== 'active' ||
+        target.recoveryIntent?.state === 'running' ||
         (input.requireNextRun !== false &&
           job.nextRunAt !== input.run.scheduled_for)
       ) {

@@ -29,7 +29,6 @@ import {
   parseDemoteMemoryInput,
   parsePatchMemoryInput,
   parsePatchProcedureInput,
-  parseReviewDecisionInput,
   parseSaveMemoryInput,
   parseSaveProcedureInput,
 } from './memory-ipc-parsing.js';
@@ -49,6 +48,10 @@ import {
   SaveMemoryInput,
   SaveProcedureInput,
 } from './memory-types.js';
+import {
+  processMemoryReviewDecisionRequest,
+  processPendingMemoryReviewRequest,
+} from './memory-review-ipc.js';
 
 const MEMORY_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 
@@ -174,7 +177,6 @@ export function resolveTrustedMemorySubject(
     groupId: sourceAgentFolder,
     conversationId: canonicalConversationIdForMemory(context?.chatJid),
     userId: context?.userId,
-    threadId: context?.threadId,
     defaultScope: context?.defaultScope,
     ...(scope ? { scope } : {}),
   }).subject;
@@ -287,12 +289,7 @@ export async function processMemoryRequest(
         };
       }
       case 'memory_save': {
-        const input = {
-          ...parseSaveMemoryInput(request.payload),
-          ...(request.context?.threadId
-            ? { topic_id: request.context.threadId }
-            : {}),
-        };
+        const input = parseSaveMemoryInput(request.payload);
         const subject = resolveTrustedMemorySubject(
           sourceAgentFolder,
           request.context,
@@ -493,82 +490,17 @@ export async function processMemoryRequest(
           sourceAgentFolder,
           request.context,
         );
-        if (!hasEnoughMemoryBudget(request, nowMs)) {
-          provider = 'postgres';
-          return deadlineUnavailableResponse(request, provider);
-        }
-        const reviewsOutcome = await runWithinMemoryDeadline(
-          request,
-          (signal, statementTimeoutMs) =>
-            getMemory().listPendingReviews(
-              {
-                ...subject,
-                appId: subject.appId,
-                agentId: subject.agentId,
-                subjectType: subject.subjectType,
-                subjectId: subject.subjectId,
-              },
-              { signal, statementTimeoutMs },
-            ),
-          nowMs,
-        );
-        if (reviewsOutcome.status === 'deadline_exceeded') {
-          return deadlineUnavailableResponse(request, provider);
-        }
-        const reviews = reviewsOutcome.value;
-        return {
-          ok: true,
-          requestId: request.requestId,
-          provider,
-          data: { reviews },
-        };
+        return await processPendingMemoryReviewRequest({ request, subject });
       }
       case 'memory_review_decision': {
-        const input = parseReviewDecisionInput(request.payload);
         const subject = resolveTrustedMemorySubject(
           sourceAgentFolder,
           request.context,
         );
-        if (!request.context?.userId) {
-          throw new Error(
-            'memory_review_decision requires a trusted reviewer user id',
-          );
-        }
-        if (!request.context.reviewerIsControlApprover) {
-          throw new Error(
-            'memory_review_decision requires a conversation control approver',
-          );
-        }
-        const reviewerId = request.context.userId;
-        if (!hasEnoughMemoryBudget(request, nowMs)) {
-          provider = 'postgres';
-          return deadlineUnavailableResponse(request, provider);
-        }
-        const review = await runMemoryMutation(request, () =>
-          getMemory().decideReview({
-            ...subject,
-            appId: subject.appId,
-            agentId: subject.agentId,
-            subjectType: subject.subjectType,
-            subjectId: subject.subjectId,
-            ...input,
-            reviewerId,
-          }),
-        );
-        return {
-          ok: true,
-          requestId: request.requestId,
-          provider,
-          data: { review },
-        };
+        return await processMemoryReviewDecisionRequest({ request, subject });
       }
       case 'procedure_save': {
-        const input = {
-          ...parseSaveProcedureInput(request.payload),
-          ...(request.context?.threadId
-            ? { topic_id: request.context.threadId }
-            : {}),
-        };
+        const input = parseSaveProcedureInput(request.payload);
         const subject = resolveTrustedMemorySubject(
           sourceAgentFolder,
           request.context,
@@ -622,8 +554,8 @@ export async function processMemoryRequest(
             subjectId: subject.subjectId,
             key: input.title ? `procedure:${input.title}` : undefined,
             value: input.body,
-            why: input.trigger === null ? null : input.trigger,
             confidence: input.confidence,
+            why: input.trigger === null ? null : input.trigger,
             expectedVersion: input.expected_version,
             isAdminWrite: false,
           }),
@@ -636,16 +568,14 @@ export async function processMemoryRequest(
         };
       }
       default:
-        throw new Error(
-          `Unsupported memory action: ${(request as { action?: string }).action || 'unknown'}`,
-        );
+        throw new Error(`Unsupported memory action: ${request.action}`);
     }
-  } catch (err) {
+  } catch (error) {
     return {
       ok: false,
       requestId: request.requestId,
       provider,
-      error: err instanceof Error ? err.message : String(err),
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }

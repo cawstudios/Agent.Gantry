@@ -64,7 +64,9 @@ export function parseSkillActionPermissionsFromAssets(input: {
   try {
     parsed = JSON.parse(Buffer.from(manifest.content).toString('utf-8'));
   } catch (error) {
-    throw new Error(`${SKILL_ACTION_MANIFEST_FILE} must contain valid JSON.`);
+    throw new Error(`${SKILL_ACTION_MANIFEST_FILE} must contain valid JSON.`, {
+      cause: error,
+    });
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.actions)) {
     throw new Error(`${SKILL_ACTION_MANIFEST_FILE} requires an actions array.`);

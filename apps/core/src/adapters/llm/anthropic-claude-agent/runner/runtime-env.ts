@@ -88,7 +88,6 @@ const MODEL_PROXY_ENV_KEYS = [
   'http_proxy',
   'https_proxy',
 ] as const;
-
 function readModelCredentialEnv(
   source: Record<string, unknown> | undefined,
 ): Record<string, string | undefined> {

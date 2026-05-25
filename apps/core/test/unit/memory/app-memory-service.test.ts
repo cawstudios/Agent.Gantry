@@ -107,8 +107,8 @@ describe('app-grade memory boundaries', () => {
       userId: 'user-1',
       groupId: 'workspace-1',
       channelId: 'sl:C123',
-      threadId: 'thread-1',
     });
+    expect(context).not.toHaveProperty('threadId');
   });
 
   it('does not treat thread ids as top-level scope for user memory subjects', () => {
@@ -134,6 +134,9 @@ describe('app-grade memory boundaries', () => {
     expect(_testAppMemory.conversationIdForChannel('sl:C123')).toBe(
       'conversation:sl:C123',
     );
+    expect(
+      _testAppMemory.conversationIdForChannel('conversation:sl:C123'),
+    ).toBe('conversation:sl:C123');
     expect(_testAppMemory.conversationIdForChannel(undefined)).toBeNull();
   });
 
@@ -222,7 +225,7 @@ describe('app-grade memory boundaries', () => {
     ).toBe(false);
   });
 
-  it('allows broad memories in threaded contexts but blocks threaded rows from broad patch/delete contexts', () => {
+  it('matches memory rows by whole group/channel without thread narrowing', () => {
     const threadedContext = _testAppMemory.normalizeSubject({
       appId: 'app-a',
       agentId: 'agent-a',
@@ -253,7 +256,7 @@ describe('app-grade memory boundaries', () => {
     ).toBe(true);
     expect(
       _testAppMemory.itemMatchesSubjectBoundary(threadedRow, broadContext),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('rejects non-admin patches to common memory', async () => {
@@ -1048,7 +1051,7 @@ describe('app-grade memory boundaries', () => {
     expect(results).toHaveLength(0);
   });
 
-  it('uses thread scope in upsert identity so same key can exist in distinct threads', async () => {
+  it('ignores thread scope in upsert identity for whole-conversation memory', async () => {
     const whereParams: unknown[][] = [];
     const insertedRows: any[] = [];
     const db = {
@@ -1083,7 +1086,7 @@ describe('app-grade memory boundaries', () => {
       groupId: 'kai',
       threadId: 'thread-1',
       key: 'decision:queue-policy',
-      value: 'Use scoped queues per thread.',
+      value: 'Use scoped queues for the whole conversation.',
     });
     await service.save({
       appId: 'default',
@@ -1091,21 +1094,21 @@ describe('app-grade memory boundaries', () => {
       groupId: 'kai',
       threadId: 'thread-2',
       key: 'decision:queue-policy',
-      value: 'Use scoped queues per thread.',
+      value: 'Use scoped queues for the whole conversation.',
     });
 
     expect(whereParams.some((params) => params.includes('thread-1'))).toBe(
-      true,
+      false,
     );
     expect(whereParams.some((params) => params.includes('thread-2'))).toBe(
-      true,
+      false,
     );
     expect(insertedRows).toHaveLength(2);
-    expect(insertedRows[0]?.threadId).toBe('thread-1');
-    expect(insertedRows[1]?.threadId).toBe('thread-2');
+    expect(insertedRows[0]?.threadId).toBeNull();
+    expect(insertedRows[1]?.threadId).toBeNull();
   });
 
-  it('filters dreaming status by exact resolved subject and thread identity', async () => {
+  it('filters dreaming status by resolved subject without thread narrowing', async () => {
     const rows = [
       {
         id: 'mdr-channel-thread-1',
@@ -1162,9 +1165,7 @@ describe('app-grade memory boundaries', () => {
                     params.includes(row.appId) &&
                     params.includes(row.agentId) &&
                     params.includes(row.subjectType) &&
-                    params.includes(row.subjectId) &&
-                    (!params.includes('thread-1') ||
-                      row.threadId === 'thread-1'),
+                    params.includes(row.subjectId),
                 )
               : rows;
             return {
@@ -1185,16 +1186,19 @@ describe('app-grade memory boundaries', () => {
       threadId: 'thread-1',
     });
 
-    expect(scoped.map((run) => run.runId)).toEqual(['mdr-channel-thread-1']);
+    expect(scoped.map((run) => run.runId)).toEqual([
+      'mdr-channel-thread-1',
+      'mdr-channel-thread-2',
+    ]);
     expect(whereParams[0]).toEqual(
       expect.arrayContaining([
         'app-a',
         'agent-a',
         'channel',
         'conversation:sl:C123',
-        'thread-1',
       ]),
     );
+    expect(whereParams[0]).not.toContain('thread-1');
 
     const appWide = await service.dreamingStatus({
       appId: 'app-a',
@@ -1214,7 +1218,8 @@ describe('app memory dreaming settings', () => {
   function createDreamingDb() {
     const inserted: any[] = [];
     const updated: any[] = [];
-    const db = {
+    const db: any = {};
+    Object.assign(db, {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => {
@@ -1255,7 +1260,10 @@ describe('app memory dreaming settings', () => {
           };
         }),
       })),
-    };
+      transaction: vi.fn(async (work: (tx: any) => Promise<unknown>) =>
+        work({ ...db, execute: vi.fn(async () => undefined) }),
+      ),
+    });
     return { db, inserted, updated };
   }
 
@@ -1458,6 +1466,160 @@ describe('app memory dreaming settings', () => {
     vi.doUnmock('@core/memory/app-memory-dreaming.js');
   });
 
+  it('uses the requested dreaming timeout for the run lease and pass deadline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-08T00:00:00.000Z'));
+    vi.resetModules();
+    const runAppMemoryDreamPass = vi.fn(async (input: any) => {
+      expect(input.signal).toEqual(expect.any(AbortSignal));
+      expect(input.remainingTimeoutMs()).toBeGreaterThan(0);
+      expect(input.remainingTimeoutMs()).toBeLessThanOrEqual(90_000);
+      return [];
+    });
+    vi.doMock('@core/config/memory.js', () => ({
+      RUNTIME_MEMORY_ENABLED: true,
+      RUNTIME_MEMORY_DREAMING_ENABLED: true,
+      MEMORY_DREAMING_EMBEDDINGS_ENABLED: false,
+      MEMORY_DREAMING_EMBED_PROVIDER: 'disabled',
+      MEMORY_DREAMING_EMBED_MODEL: 'text-embedding-3-large',
+    }));
+    vi.doMock('@core/memory/app-memory-dreaming.js', () => ({
+      runAppMemoryDreamPass,
+    }));
+    try {
+      const { AppMemoryService: MockedAppMemoryService } =
+        await import('@core/memory/app-memory-service.js');
+      const { db, inserted } = createDreamingDb();
+      const service = new MockedAppMemoryService(db as any);
+
+      await expect(
+        service.triggerDreaming({
+          appId: 'app-a',
+          agentId: 'agent-a',
+          groupId: 'group-a',
+          timeoutMs: 90_000,
+        }),
+      ).resolves.toMatchObject({
+        status: 'completed',
+      });
+
+      expect(inserted).toContainEqual(
+        expect.objectContaining({
+          status: 'running',
+          leaseExpiresAt: '2026-05-08T00:01:30.000Z',
+        }),
+      );
+    } finally {
+      vi.doUnmock('@core/config/memory.js');
+      vi.doUnmock('@core/memory/app-memory-dreaming.js');
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds requested dreaming timeout by the scheduler work deadline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-08T00:00:00.000Z'));
+    vi.resetModules();
+    const runAppMemoryDreamPass = vi.fn(async (input: any) => {
+      expect(input.signal).toEqual(expect.any(AbortSignal));
+      expect(input.remainingTimeoutMs()).toBeGreaterThan(0);
+      expect(input.remainingTimeoutMs()).toBeLessThanOrEqual(30_000);
+      return [];
+    });
+    vi.doMock('@core/config/memory.js', () => ({
+      RUNTIME_MEMORY_ENABLED: true,
+      RUNTIME_MEMORY_DREAMING_ENABLED: true,
+      MEMORY_DREAMING_EMBEDDINGS_ENABLED: false,
+      MEMORY_DREAMING_EMBED_PROVIDER: 'disabled',
+      MEMORY_DREAMING_EMBED_MODEL: 'text-embedding-3-large',
+    }));
+    vi.doMock('@core/memory/app-memory-dreaming.js', () => ({
+      runAppMemoryDreamPass,
+    }));
+    try {
+      const { AppMemoryService: MockedAppMemoryService } =
+        await import('@core/memory/app-memory-service.js');
+      const { db, inserted } = createDreamingDb();
+      const service = new MockedAppMemoryService(db as any);
+
+      await expect(
+        service.triggerDreaming({
+          appId: 'app-a',
+          agentId: 'agent-a',
+          groupId: 'group-a',
+          timeoutMs: 90_000,
+          deadlineAtMs: Date.now() + 30_000,
+        }),
+      ).resolves.toMatchObject({
+        status: 'completed',
+      });
+
+      expect(inserted).toContainEqual(
+        expect.objectContaining({
+          status: 'running',
+          leaseExpiresAt: '2026-05-08T00:00:30.000Z',
+        }),
+      );
+    } finally {
+      vi.doUnmock('@core/config/memory.js');
+      vi.doUnmock('@core/memory/app-memory-dreaming.js');
+      vi.useRealTimers();
+    }
+  });
+
+  it('finalizes and rethrows overall dreaming deadline expiry', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-08T00:00:00.000Z'));
+    vi.resetModules();
+    const runAppMemoryDreamPass = vi.fn(
+      async (input: { signal: AbortSignal }) =>
+        new Promise<never>((_resolve, reject) => {
+          input.signal.addEventListener(
+            'abort',
+            () => reject(input.signal.reason),
+            { once: true },
+          );
+        }),
+    );
+    vi.doMock('@core/config/memory.js', () => ({
+      RUNTIME_MEMORY_ENABLED: true,
+      RUNTIME_MEMORY_DREAMING_ENABLED: true,
+      MEMORY_DREAMING_EMBEDDINGS_ENABLED: false,
+      MEMORY_DREAMING_EMBED_PROVIDER: 'disabled',
+      MEMORY_DREAMING_EMBED_MODEL: 'text-embedding-3-large',
+    }));
+    vi.doMock('@core/memory/app-memory-dreaming.js', () => ({
+      runAppMemoryDreamPass,
+    }));
+    try {
+      const { AppMemoryService: MockedAppMemoryService } =
+        await import('@core/memory/app-memory-service.js');
+      const { db, updated } = createDreamingDb();
+      const service = new MockedAppMemoryService(db as any);
+
+      const expectation = expect(
+        service.triggerDreaming({
+          appId: 'app-a',
+          agentId: 'agent-a',
+          groupId: 'group-a',
+          timeoutMs: 5_000,
+        }),
+      ).rejects.toThrow('memory dreaming deadline exceeded after 5000ms');
+      await vi.advanceTimersByTimeAsync(5_001);
+      await expectation;
+      expect(updated).toContainEqual(
+        expect.objectContaining({
+          status: 'failed',
+          summaryJson: expect.stringContaining('dreaming_timeout'),
+        }),
+      );
+    } finally {
+      vi.doUnmock('@core/config/memory.js');
+      vi.doUnmock('@core/memory/app-memory-dreaming.js');
+      vi.useRealTimers();
+    }
+  });
+
   it('dedupes concurrent dreaming by returning the running run for the same subject and phase', async () => {
     vi.resetModules();
     vi.doMock('@core/config/memory.js', () => ({
@@ -1510,8 +1672,8 @@ describe('app memory dreaming settings', () => {
         runId: 'mdr-running',
         status: 'running',
         phase: 'deep',
-        threadId: 'thread-1',
       });
+      expect(run).not.toHaveProperty('threadId');
       expect(db.insert).not.toHaveBeenCalled();
       expect(db.update).not.toHaveBeenCalled();
     } finally {

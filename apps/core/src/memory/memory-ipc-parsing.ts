@@ -1,6 +1,9 @@
 import { isPlainObject } from '../shared/object.js';
 import {
   isDirectSaveMemoryKind,
+  MemoryReviewDecision,
+  MemoryReviewPageContext,
+  MemorySubjectType,
   PatchMemoryInput,
   PatchProcedureInput,
   SaveMemoryInput,
@@ -8,6 +11,27 @@ import {
 } from './memory-types.js';
 
 type Obj = Record<string, unknown>;
+export type ParsedReviewDecisionRequest =
+  | {
+      kind: 'single';
+      reviewId: string;
+      decision: MemoryReviewDecision;
+      editedValue?: string;
+      editedReason?: string;
+    }
+  | {
+      kind: 'batch';
+      pageContext: MemoryReviewPageContext;
+      decisions: ParsedReviewBatchDecision[];
+    };
+
+export interface ParsedReviewBatchDecision {
+  number?: number;
+  reviewId?: string;
+  decision: MemoryReviewDecision;
+  editedValue?: string;
+  editedReason?: string;
+}
 
 export function parseOptionalString(
   value: unknown,
@@ -86,13 +110,17 @@ export function parseDemoteMemoryInput(payload: unknown): {
   });
 }
 
-export function parseReviewDecisionInput(payload: unknown): {
-  reviewId: string;
-  decision: 'approve' | 'reject' | 'edit_approve';
-  editedValue?: string;
-  editedReason?: string;
-} {
+export function parseReviewDecisionRequest(
+  payload: unknown,
+): ParsedReviewDecisionRequest {
   const input = objectPayload(payload, 'memory_review_decision');
+  if (Array.isArray(input.decisions)) {
+    return {
+      kind: 'batch',
+      pageContext: parseReviewPageContext(input),
+      decisions: parseReviewBatchDecisions(input.decisions),
+    };
+  }
   const reviewId = str(input, 'review_id', 128) || str(input, 'reviewId', 128);
   const decision = str(input, 'decision', 32);
   if (!reviewId) throw new Error('memory_review_decision requires review_id');
@@ -102,11 +130,12 @@ export function parseReviewDecisionInput(payload: unknown): {
     );
   }
   return omitUndefined({
+    kind: 'single',
     reviewId,
     decision,
     editedValue: str(input, 'edited_value', 10_000),
     editedReason: str(input, 'edited_reason', 500),
-  });
+  }) as ParsedReviewDecisionRequest;
 }
 
 export function parseSaveProcedureInput(payload: unknown): SaveProcedureInput {
@@ -172,6 +201,111 @@ function num(
 
 function bool(input: Obj, key: string): boolean | undefined {
   return typeof input[key] === 'boolean' ? input[key] : undefined;
+}
+
+function parseReviewBatchDecisions(
+  value: unknown[],
+): ParsedReviewBatchDecision[] {
+  if (!value.length) {
+    throw new Error('memory_review_decision.decisions must not be empty');
+  }
+  return value.map((item, index) => {
+    if (!isPlainObject(item)) {
+      throw new Error(
+        `memory_review_decision.decisions[${index}] must be an object`,
+      );
+    }
+    const decision = str(item, 'decision', 32);
+    if (!isReviewDecision(decision)) {
+      throw new Error(
+        `memory_review_decision.decisions[${index}].decision must be approve, reject, or edit_approve`,
+      );
+    }
+    const reviewId = str(item, 'review_id', 128) || str(item, 'reviewId', 128);
+    const number = parseReviewDecisionNumber(item.number, index);
+    if (!reviewId && number === undefined) {
+      throw new Error(
+        `memory_review_decision.decisions[${index}] requires number or review_id`,
+      );
+    }
+    return omitUndefined({
+      number,
+      reviewId,
+      decision,
+      editedValue: str(item, 'edited_value', 10_000),
+      editedReason: str(item, 'edited_reason', 500),
+    });
+  });
+}
+
+function parseReviewDecisionNumber(
+  value: unknown,
+  index: number,
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `memory_review_decision.decisions[${index}].number must be a positive integer`,
+    );
+  }
+  return value;
+}
+
+function parseReviewPageContext(input: Obj): MemoryReviewPageContext {
+  const value = input.page_context || input.pageContext;
+  if (!isPlainObject(value)) {
+    throw new Error('memory_review_decision batch requires page_context');
+  }
+  const reviewIds = stringList(value.review_ids || value.reviewIds, 128);
+  if (!reviewIds?.length) {
+    throw new Error('memory_review_decision.page_context requires review_ids');
+  }
+  const subject = parseReviewPageContextSubject(value.subject);
+  const limit = num(value, 'limit', { min: 1, max: 50 }) ?? reviewIds.length;
+  const offset = num(value, 'offset', { min: 0 }) ?? 0;
+  return {
+    subject,
+    limit: Math.trunc(limit),
+    offset: Math.trunc(offset),
+    reviewIds,
+  };
+}
+
+function parseReviewPageContextSubject(
+  value: unknown,
+): MemoryReviewPageContext['subject'] {
+  if (!isPlainObject(value)) {
+    throw new Error('memory_review_decision.page_context requires subject');
+  }
+  const appId = str(value, 'app_id', 128) || str(value, 'appId', 128);
+  const agentId = str(value, 'agent_id', 128) || str(value, 'agentId', 128);
+  const subjectType = parseSubjectType(
+    str(value, 'subject_type', 32) || str(value, 'subjectType', 32),
+  );
+  const subjectId =
+    str(value, 'subject_id', 512) || str(value, 'subjectId', 512);
+  if (!appId || !agentId || !subjectType || !subjectId) {
+    throw new Error(
+      'memory_review_decision.page_context.subject requires app_id, agent_id, subject_type, and subject_id',
+    );
+  }
+  return omitUndefined({
+    appId,
+    agentId,
+    subjectType,
+    subjectId,
+  });
+}
+
+function parseSubjectType(
+  value: string | undefined,
+): MemorySubjectType | undefined {
+  return value === 'user' ||
+    value === 'group' ||
+    value === 'channel' ||
+    value === 'common'
+    ? value
+    : undefined;
 }
 
 function stringList(

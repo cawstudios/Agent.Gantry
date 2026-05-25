@@ -1639,6 +1639,21 @@ describe('skill registry integration flow', () => {
       timeoutMs: 3000,
     });
     const reservedSkillId = 'skill:release/slash';
+    const storage = await new LocalSkillArtifactStore(
+      artifactRoot,
+    ).putSkillArtifact({
+      appId: 'app-one',
+      skillId: reservedSkillId,
+      bundle: {
+        assets: [
+          {
+            path: 'SKILL.md',
+            contentType: 'text/markdown',
+            content: Buffer.from('---\nname: Slash Skill\n---\n# Slash Skill'),
+          },
+        ],
+      },
+    });
 
     state.skills.set(reservedSkillId, {
       id: reservedSkillId,
@@ -1651,12 +1666,7 @@ describe('skill registry integration flow', () => {
       promptRefs: [],
       toolIds: [],
       workflowRefs: [],
-      storage: {
-        storageType: 'local-filesystem',
-        storageRef: 'skills/slash-skill',
-        contentHash: 'sha256:slash',
-        sizeBytes: 42,
-      },
+      storage,
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
     });

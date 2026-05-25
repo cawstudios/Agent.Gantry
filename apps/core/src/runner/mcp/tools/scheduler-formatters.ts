@@ -52,6 +52,10 @@ export function schedulerJobSummary(job: unknown): string {
     typeof visibility.setup === 'object' && visibility.setup !== null
       ? (visibility.setup as Record<string, any>)
       : {};
+  const recovery =
+    typeof visibility.recovery === 'object' && visibility.recovery !== null
+      ? (visibility.recovery as Record<string, any>)
+      : {};
   const toolAccessLine = toolAccess.present
     ? `Tool access: inherited ${formatTools(toolAccess.inheritedAgentTools)}, effective ${formatTools(toolAccess.effectiveAllowedTools)}, projected ${formatTools(toolAccess.projectedRuntimeTools)}`
     : 'Tool access: missing canonical toolAccess';
@@ -64,6 +68,7 @@ export function schedulerJobSummary(job: unknown): string {
     `Job: ${String(record.name ?? record.id ?? 'unknown')}`,
     `Health: ${String(health.state ?? 'unknown')} | latest ${String(health.latestRunStatus ?? 'none')} | action ${nextAction}`,
     `Setup: ${String(setup.state ?? 'ready')} | action ${setupAction}`,
+    `Recovery: ${recoverySummary(recovery)}`,
     `Target: ${String(target.agentId ?? record.group_scope ?? 'unknown')} in ${String(target.conversationJids?.[0] ?? 'no conversation')}`,
     `Execution context: ${String(executionContext.conversationJid ?? 'unknown')} | thread ${String(executionContext.threadId ?? 'none')} | group ${String(executionContext.groupScope ?? record.group_scope ?? 'unknown')}`,
     `Notification routes: ${notificationRoutes.length}`,
@@ -131,10 +136,14 @@ export function schedulerJobsSummary(jobs: unknown[]): string {
       typeof visibility.setup === 'object' && visibility.setup !== null
         ? (visibility.setup as Record<string, any>)
         : {};
+    const recovery =
+      typeof visibility.recovery === 'object' && visibility.recovery !== null
+        ? (visibility.recovery as Record<string, any>)
+        : {};
     const toolsLabel = toolAccess.present
       ? formatTools(toolAccess.effectiveAllowedTools)
       : '(missing toolAccess)';
-    return `- ${String(record.id ?? 'unknown')} | ${String(record.name ?? '')} | ${String(setup.state !== 'ready' ? setup.state : (health.state ?? record.status ?? ''))} | ${String(executionContext.conversationJid ?? target.conversationJids?.[0] ?? '')} | capabilities: ${formatTools(capabilityRequirements)} | access: ${formatTools(toolAccessRequirements)} | mcp: ${formatTools(requiredMcpServers)} | tools: ${toolsLabel}`;
+    return `- ${String(record.id ?? 'unknown')} | ${String(record.name ?? '')} | ${String(setup.state !== 'ready' ? setup.state : (health.state ?? record.status ?? ''))} | recovery: ${recovery.state ?? 'none'} | ${String(executionContext.conversationJid ?? target.conversationJids?.[0] ?? '')} | capabilities: ${formatTools(capabilityRequirements)} | access: ${formatTools(toolAccessRequirements)} | mcp: ${formatTools(requiredMcpServers)} | tools: ${toolsLabel}`;
   });
   return [
     `Scheduler jobs (${jobs.length})`,
@@ -143,6 +152,20 @@ export function schedulerJobsSummary(jobs: unknown[]): string {
     'Structured JSON:',
     JSON.stringify(jobs, null, 2),
   ].join('\n');
+}
+
+function recoverySummary(recovery: Record<string, any>): string {
+  const state = String(recovery.state ?? 'none');
+  if (state === 'none') return 'none';
+  const target =
+    recovery.requirementType && recovery.requirementId
+      ? ` ${String(recovery.requirementType)}:${String(recovery.requirementId)}`
+      : '';
+  const nextAction =
+    typeof recovery.nextAction === 'string' && recovery.nextAction.trim()
+      ? ` | action ${setupActionLabelFromNextAction(recovery.nextAction, 'review setup')}`
+      : '';
+  return `${state}${recovery.kind ? ` (${String(recovery.kind)})` : ''}${target} attempts=${String(recovery.attempts ?? 0)}${nextAction}`;
 }
 
 export function schedulerEventsSummary(events: unknown[]): string {

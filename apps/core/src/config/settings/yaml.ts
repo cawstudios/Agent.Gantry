@@ -126,7 +126,7 @@ export function parseSimpleYamlObject(raw: string): Record<string, unknown> {
     while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
       stack.pop();
     }
-    let parentEntry = stack[stack.length - 1];
+    const parentEntry = stack[stack.length - 1];
     let parent = parentEntry?.value;
     if (!parentEntry || !parent) {
       throw new Error(`invalid indentation nesting (line ${lineNo + 1})`);

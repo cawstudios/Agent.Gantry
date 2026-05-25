@@ -69,6 +69,7 @@ export function jsonb(value: unknown): unknown {
   } catch (err) {
     throw new Error(
       `Invalid JSON string passed to jsonb column writer: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 }
@@ -107,7 +108,8 @@ export class PostgresCanonicalGraphRepository {
         id: DEFAULT_LLM_PROFILE_ID,
         appId: CANONICAL_APP_ID,
         purpose: 'default',
-        modelAlias: 'default',
+        responseFamily: 'anthropic',
+        modelAlias: 'opus',
       })
       .onConflictDoNothing();
   }

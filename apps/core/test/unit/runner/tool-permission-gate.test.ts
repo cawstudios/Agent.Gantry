@@ -500,6 +500,56 @@ describe('createCanUseToolCallback', () => {
     expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 
+  it('does not suppress parentless SandboxNetworkAccess from local CLI host hints alone', async () => {
+    const canUseTool = makeCallback({
+      agentInput: {
+        runMode: 'normal',
+        isScheduledJob: true,
+        appId: 'default',
+        agentId: 'agent:test',
+        runId: 'run-1',
+        jobId: 'job-1',
+        chatJid: 'tg:test',
+        threadId: undefined,
+        localCliNetworkHosts: ['oauth2.googleapis.com'],
+        allowedTools: ['RunCommand(/opt/homebrew/bin/gog sheets get *)'],
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+      } as never,
+    });
+    const bash = await canUseTool(
+      'Bash',
+      {
+        command:
+          '/opt/homebrew/bin/gog sheets get 12s6uzwLDLV-DVcTH6XBa5vV3FZJUo04fLm0npfgACb4 "Bot Recommendation!A1:Z1" --json --account ravi@knacklabs.ai',
+      },
+      makePermissionOptions({
+        toolUseID: 'toolu_bash_1',
+        agentID: 'agent:test',
+      }) as never,
+    );
+    const network = await canUseTool(
+      'SandboxNetworkAccess',
+      { host: 'oauth2.googleapis.com' },
+      makePermissionOptions({
+        toolUseID: 'toolu_network_1',
+        agentID: 'agent:test',
+      }) as never,
+    );
+
+    expect(bash.behavior).toBe('allow');
+    expect(network).toEqual({
+      behavior: 'deny',
+      interrupt: false,
+      message:
+        'SDK requested sandbox network access without a parent tool-use id. Approve the tool call through Gantry first.',
+    });
+    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
+  });
+
   it('passes the runner conversation as the interactive permission target', async () => {
     permissionMock.requestPermissionApproval.mockResolvedValueOnce({
       approved: true,

@@ -71,11 +71,88 @@ export interface MemoryLifecycleProposal {
   evidenceIds: string[];
 }
 
+export interface MemoryReviewReadableItem {
+  itemId: string;
+  kind?: MemoryKind | string;
+  key?: string;
+  value?: string;
+}
+
+export interface MemoryReviewProposedChange {
+  action: MemoryProposalAction;
+  summary: string;
+  before?: MemoryReviewReadableItem | null;
+  after?: {
+    kind?: MemoryKind | string;
+    key?: string;
+    value?: string;
+  } | null;
+  target?: MemoryReviewReadableItem | null;
+  retiring?: MemoryReviewReadableItem[];
+  reason: string;
+  confidence: number;
+  evidenceIds: string[];
+}
+
+export interface MemoryReviewEvidenceSnippet {
+  evidenceId: string;
+  sourceType: MemoryEvidenceSource | string;
+  sourceId?: string | null;
+  snippet: string;
+  createdAt: string;
+}
+
+export interface MemoryReviewPageSubject {
+  appId: string;
+  agentId: string;
+  subjectType: MemorySubjectType;
+  subjectId: string;
+}
+
+export interface MemoryReviewPageContext {
+  subject: MemoryReviewPageSubject;
+  limit: number;
+  offset: number;
+  reviewIds: string[];
+}
+
+export interface MemoryReviewPageItem {
+  number: number;
+  reviewId: string;
+  action: MemoryProposalAction;
+  summary: string;
+  before?: MemoryReviewReadableItem | null;
+  after?: {
+    kind?: MemoryKind | string;
+    key?: string;
+    value?: string;
+  } | null;
+  target?: MemoryReviewReadableItem | null;
+  retiring?: MemoryReviewReadableItem[];
+  reason: string;
+  confidence: number;
+  evidenceIds: string[];
+  evidence: MemoryReviewEvidenceSnippet[];
+  decisionOptions: MemoryReviewDecision[];
+}
+
+export interface MemoryReviewDisplayPage {
+  items: MemoryReviewPageItem[];
+  pageContext: MemoryReviewPageContext;
+  totalCount: number;
+  returnedCount: number;
+  remainingCount: number;
+  limit: number;
+  offset: number;
+  nextOffset: number | null;
+}
+
 export interface MemoryReviewRecord extends NormalizedMemorySubject {
   id: string;
   runId: string;
   phase: DreamPhase;
   proposal: MemoryLifecycleProposal;
+  proposedChange?: MemoryReviewProposedChange;
   status: 'pending_review' | 'approved' | 'rejected' | 'applied' | 'failed';
   itemVersions: Record<string, number>;
   candidateVersions: Record<string, string>;
@@ -88,6 +165,17 @@ export interface MemoryReviewRecord extends NormalizedMemorySubject {
   createdAt: string;
   updatedAt: string;
   decidedAt?: string | null;
+}
+
+export interface MemoryReviewPage {
+  reviews: MemoryReviewRecord[];
+  reviewPage?: MemoryReviewDisplayPage;
+  totalCount: number;
+  returnedCount: number;
+  remainingCount: number;
+  limit: number;
+  offset: number;
+  nextOffset: number | null;
 }
 
 export interface MemoryReviewDecisionInput extends Partial<MemoryBoundaryContext> {
@@ -111,7 +199,7 @@ export interface MemoryBoundaryContext {
   groupId?: string;
   /** External provider conversation id: Telegram chat, Slack conversation, Teams channel/chat, or SDK conversation. */
   channelId?: string;
-  /** Provider thread/topic/reply-chain id, such as Slack thread_ts, Telegram forum topic, or Teams reply chain. */
+  /** Runtime routing thread/topic id. Memory subject resolution intentionally ignores this. */
   threadId?: string;
 }
 
@@ -218,6 +306,9 @@ export interface DreamingTriggerInput extends Partial<MemoryBoundaryContext> {
   subjectId?: string;
   phase?: DreamPhase;
   dryRun?: boolean;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  deadlineAtMs?: number;
 }
 
 export interface DreamingRunStatus {
@@ -226,7 +317,6 @@ export interface DreamingRunStatus {
   agentId: string;
   subjectType: MemorySubjectType;
   subjectId: string;
-  threadId?: string;
   phase: DreamPhase;
   status: 'running' | 'completed' | 'failed';
   summary: Record<string, unknown>;
@@ -247,7 +337,6 @@ export interface MemoryItem {
   scope: MemoryScope;
   group_folder: string;
   user_id: string | null;
-  topic_id?: string | null;
   kind: MemoryKind;
   key: string;
   value: string;
@@ -285,7 +374,6 @@ export interface MemoryProcedure {
   id: string;
   scope: MemoryScope;
   group_folder: string;
-  topic_id?: string | null;
   title: string;
   body: string;
   tags: string[];
@@ -308,7 +396,6 @@ export interface MemoryChunk {
   source_path: string;
   scope: MemoryScope;
   group_folder: string;
-  topic_id?: string | null;
   kind: string;
   chunk_hash: string;
   text: string;
@@ -347,7 +434,6 @@ export interface SaveMemoryInput {
   scope?: MemoryScope;
   group_folder?: string;
   user_id?: string;
-  topic_id?: string;
   kind?: MemoryKind;
   key: string;
   value: string;
@@ -373,7 +459,6 @@ export interface SaveProcedureInput {
   scope?: MemoryScope;
   group_folder?: string;
   user_id?: string;
-  topic_id?: string;
   title: string;
   body: string;
   tags?: string[];
@@ -391,11 +476,4 @@ export interface PatchProcedureInput {
   tags?: string[];
   trigger?: string | null;
   confidence?: number;
-}
-
-export function normalizeMemoryTopicId(
-  value: string | undefined,
-): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed.slice(0, 255) : undefined;
 }

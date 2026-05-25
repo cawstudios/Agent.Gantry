@@ -157,6 +157,61 @@ describe('CanonicalJobOpsService', () => {
     });
   });
 
+  it('round-trips job recovery intent through target metadata', async () => {
+    const repository = {
+      findJobById: vi.fn(async () => null),
+      upsertJob: vi.fn(async () => undefined),
+    } as unknown as PostgresCanonicalJobRepository;
+    const service = new CanonicalJobOpsService(repository);
+
+    await service.upsertJob({
+      id: 'job-1',
+      name: 'Job',
+      prompt: 'Run',
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      execution_context: {
+        conversationJid: 'tg:1',
+        threadId: null,
+        groupScope: 'agent_one',
+      },
+      notification_routes: [
+        {
+          conversationJid: 'tg:1',
+          threadId: null,
+          label: 'Primary',
+        },
+      ],
+      group_scope: 'agent_one',
+      recovery_intent: {
+        kind: 'permission_denied',
+        state: 'pending',
+        dedupe_key: 'dedupe-1',
+        created_at: '2026-04-24T00:00:00.000Z',
+        updated_at: '2026-04-24T00:00:01.000Z',
+        source_run_id: 'run-1',
+        setup_fingerprint: 'fingerprint-1',
+        requirement_type: 'tool',
+        requirement_id: 'RunCommand',
+        next_action: 'request_permission {"toolName":"RunCommand"}',
+        attempts: 0,
+        last_error: null,
+      },
+    });
+
+    const stored = vi.mocked(repository.upsertJob).mock.calls[0]?.[0] as {
+      targetJson: string;
+    };
+    expect(JSON.parse(stored.targetJson)).toMatchObject({
+      recoveryIntent: {
+        kind: 'permission_denied',
+        state: 'pending',
+        dedupe_key: 'dedupe-1',
+        requirement_id: 'RunCommand',
+      },
+    });
+  });
+
   it('uses the runtime event app id for run-scoped event queries', async () => {
     const repository = {
       findRuntimeEventAppIdForRun: vi.fn(async () => 'app-two'),

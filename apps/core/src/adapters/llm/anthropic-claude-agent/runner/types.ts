@@ -32,6 +32,7 @@ export interface AgentRunnerInput {
   memoryContextBlock?: string;
   yoloMode?: YoloModeSettings;
   modelCredentialEnv?: Record<string, string>;
+  localCliNetworkHosts?: string[];
   thinking?: {
     mode: 'adaptive' | 'enabled' | 'disabled';
     effort?: EffortLevel;

@@ -59,4 +59,27 @@ describe('Anthropic runner runtime env', () => {
     expect(sdkEnv.CLAUDE_CODE_DISABLE_POLICY_SKILLS).toBe('1');
     expect(sdkEnv.CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL).toBe('1');
   });
+
+  it('does not pass local CLI credential identity env to the SDK runner', async () => {
+    process.env.HOME = '/Users/tester';
+    process.env.USERPROFILE = '/Users/tester';
+    process.env.XDG_CONFIG_HOME = '/Users/tester/.config';
+    process.env.APPDATA = 'C:\\Users\\tester\\AppData\\Roaming';
+    process.env.LOCALAPPDATA = 'C:\\Users\\tester\\AppData\\Local';
+    process.env.USER = 'tester';
+    process.env.USERNAME = 'tester';
+    process.env.LOGNAME = 'tester';
+    const { buildSdkEnv } = await loadRuntimeEnv();
+
+    const sdkEnv = buildSdkEnv();
+
+    expect(sdkEnv.HOME).toBeUndefined();
+    expect(sdkEnv.USERPROFILE).toBeUndefined();
+    expect(sdkEnv.XDG_CONFIG_HOME).toBeUndefined();
+    expect(sdkEnv.APPDATA).toBeUndefined();
+    expect(sdkEnv.LOCALAPPDATA).toBeUndefined();
+    expect(sdkEnv.USER).toBeUndefined();
+    expect(sdkEnv.USERNAME).toBeUndefined();
+    expect(sdkEnv.LOGNAME).toBeUndefined();
+  });
 });

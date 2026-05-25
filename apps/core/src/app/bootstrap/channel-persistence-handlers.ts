@@ -1,4 +1,3 @@
-import type { ChannelAdapter } from '../../channels/channel-provider.js';
 import type { NewMessage } from '../../domain/types.js';
 import type {
   RuntimeChatMetadataRepository,
@@ -15,7 +14,6 @@ interface ChannelPersistenceHandlerDeps {
   app: RuntimeApp;
   resolved: ChannelWiringDeps;
   ops: () => ChannelPersistenceRepository;
-  findBoundChannel: (jid: string) => ChannelAdapter | undefined;
   persistenceQueue: AsyncTaskQueue;
 }
 
@@ -50,7 +48,6 @@ export function createChannelPersistenceHandlers({
   app,
   resolved,
   ops,
-  findBoundChannel,
   persistenceQueue,
 }: ChannelPersistenceHandlerDeps) {
   const chatIsGroup = new Map<string, boolean>();

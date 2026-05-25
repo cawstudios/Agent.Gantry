@@ -32,8 +32,11 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function makeGate(nowRef: { value: number }): SdkSandboxNetworkGate {
-  return createSdkSandboxNetworkGate(runnerInput, {
+function makeGate(
+  nowRef: { value: number },
+  input: AgentRunnerInput = runnerInput,
+): SdkSandboxNetworkGate {
+  return createSdkSandboxNetworkGate(input, {
     ttlMs: 300_000,
     nowMs: () => nowRef.value,
   });
@@ -72,11 +75,35 @@ describe('sdk sandbox network gate', () => {
     });
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_suppressed',
-      networkToolUseID: 'toolu_network_1',
-      parentToolUseID: 'toolu_mcp_1',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      parentToolUseIDHash: sha256('toolu_mcp_1'),
       approvedToolName: 'mcp__github__create_issue',
       hostHash: sha256('api.github.com'),
       inputHash: sha256('{"owner":"acme","repo":"roadmap"}'),
+      tokenCreatedAtMs: 1_000,
+      tokenExpiresAtMs: 301_000,
+      tokenTtlMs: 300_000,
+    });
+  });
+
+  it('emits an audit event when minting a network token', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now);
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'curl https://api.github.com/repos/acme/roadmap' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_token_minted',
+      parentToolUseIDHash: sha256('toolu_bash_1'),
+      approvedToolName: 'Bash',
+      inputHash: sha256(
+        '{"command":"curl https://api.github.com/repos/acme/roadmap"}',
+      ),
+      approvedHostHashes: [sha256('api.github.com')],
       tokenCreatedAtMs: 1_000,
       tokenExpiresAtMs: 301_000,
       tokenTtlMs: 300_000,
@@ -100,7 +127,7 @@ describe('sdk sandbox network gate', () => {
     });
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_global_approval_suppressed',
-      networkToolUseID: 'toolu_network_1',
+      networkToolUseIDHash: sha256('toolu_network_1'),
       hostHash: sha256('api.linkedin.com'),
       tokenCreatedAtMs: 1_000,
       tokenExpiresAtMs: 301_000,
@@ -123,7 +150,7 @@ describe('sdk sandbox network gate', () => {
     expect(decision?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
-      networkToolUseID: 'toolu_network_1',
+      networkToolUseIDHash: sha256('toolu_network_1'),
       hostHash: sha256('api.linkedin.com'),
     });
   });
@@ -143,7 +170,7 @@ describe('sdk sandbox network gate', () => {
     expect(decision?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
-      networkToolUseID: 'toolu_network_1',
+      networkToolUseIDHash: sha256('toolu_network_1'),
       hostHash: sha256('api.linkedin.com'),
     });
   });
@@ -195,9 +222,201 @@ describe('sdk sandbox network gate', () => {
     );
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
-      networkToolUseID: 'toolu_network_1',
+      networkToolUseIDHash: sha256('toolu_network_1'),
       hostHash: sha256('registry.npmjs.org'),
       expiredTokenCount: 0,
+    });
+  });
+
+  it('allows one parentless scheduled job network prompt after an approved command', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'curl https://api.github.com/repos/acme/roadmap' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'api.github.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision).toEqual({
+      behavior: 'allow',
+      updatedInput: { host: 'api.github.com' },
+    });
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_suppressed_parentless_recent_tool',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      parentToolUseIDHash: sha256('toolu_bash_1'),
+      approvedToolName: 'Bash',
+      hostHash: sha256('api.github.com'),
+      approvedHostHashes: [sha256('api.github.com')],
+      expiredTokenCount: 0,
+    });
+  });
+
+  it('allows one parentless scheduled job network prompt from curl --url argv', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      {
+        command:
+          'curl --silent --url https://api.github.com/repos/acme/roadmap',
+      },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'api.github.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('allow');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_suppressed_parentless_recent_tool',
+      approvedHostHashes: [sha256('api.github.com')],
+    });
+  });
+
+  it('does not bind parentless network approval to inert URLs in Bash text', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'echo https://api.github.com/repos/acme/roadmap' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'api.github.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('deny');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      hostHash: sha256('api.github.com'),
+    });
+  });
+
+  it('denies parentless scheduled job network prompts for a different host', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'curl https://api.github.com/repos/acme/roadmap' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'registry.npmjs.org' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('without a parent tool-use id'),
+      }),
+    );
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      hostHash: sha256('registry.npmjs.org'),
+      expiredTokenCount: 0,
+    });
+  });
+
+  it('does not reuse a parentless scheduled job network token', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'curl https://api.github.com/repos/acme/roadmap' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const first = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'api.github.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+    const second = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'api.github.com' },
+      { toolUseID: 'toolu_network_2' },
+    );
+
+    expect(first?.behavior).toBe('allow');
+    expect(second).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('without a parent tool-use id'),
+      }),
+    );
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_2'),
+      hostHash: sha256('api.github.com'),
+      expiredTokenCount: 0,
+    });
+  });
+
+  it('denies parentless scheduled job network prompts when the approved command has no host binding', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'gog sheets get leads --json' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'sheets.googleapis.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('deny');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      hostHash: sha256('sheets.googleapis.com'),
+    });
+  });
+
+  it('does not widen parentless scheduled approvals with reviewed local CLI host hints', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, {
+      ...runnerInput,
+      isScheduledJob: true,
+      localCliNetworkHosts: ['sheets.googleapis.com'],
+    });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'gog sheets get leads --json' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'sheets.googleapis.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('deny');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      hostHash: sha256('sheets.googleapis.com'),
     });
   });
 
@@ -215,7 +434,7 @@ describe('sdk sandbox network gate', () => {
     expect(decision?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
-      networkToolUseID: 'toolu_network_1',
+      networkToolUseIDHash: sha256('toolu_network_1'),
       expiredTokenCount: 0,
     });
   });
@@ -245,7 +464,7 @@ describe('sdk sandbox network gate', () => {
       decision: 'sdk_network_gate_denied',
       reason:
         'SDK requested sandbox network access without a parent tool-use id.',
-      networkToolUseID: 'toolu_network_1',
+      networkToolUseIDHash: sha256('toolu_network_1'),
       hostHash: sha256('api.github.com'),
       expiredTokenCount: 0,
     });
@@ -276,8 +495,8 @@ describe('sdk sandbox network gate', () => {
     );
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
-      parentToolUseID: 'toolu_mcp_1',
-      networkToolUseID: 'toolu_network_1',
+      parentToolUseIDHash: sha256('toolu_mcp_1'),
+      networkToolUseIDHash: sha256('toolu_network_1'),
       hostHash: sha256('api.github.com'),
       expiredTokenCount: 0,
     });
@@ -330,9 +549,9 @@ describe('sdk sandbox network gate', () => {
     });
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_suppressed',
-      parentToolUseID: 'toolu_bash_a',
+      parentToolUseIDHash: sha256('toolu_bash_a'),
       approvedToolName: 'Bash',
-      networkToolUseID: 'toolu_network_a',
+      networkToolUseIDHash: sha256('toolu_network_a'),
       hostHash: sha256('registry.npmjs.org'),
     });
   });
@@ -365,7 +584,7 @@ describe('sdk sandbox network gate', () => {
       decision: 'sdk_network_gate_denied',
       reason:
         'SDK requested sandbox network access without a parent tool-use id.',
-      networkToolUseID: 'toolu_network_b',
+      networkToolUseIDHash: sha256('toolu_network_b'),
       hostHash: sha256('registry.npmjs.org'),
       expiredTokenCount: 0,
     });
@@ -400,7 +619,7 @@ describe('sdk sandbox network gate', () => {
     );
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
-      networkToolUseID: 'toolu_network_1',
+      networkToolUseIDHash: sha256('toolu_network_1'),
       expiredTokenCount: 0,
     });
 
@@ -418,9 +637,9 @@ describe('sdk sandbox network gate', () => {
     });
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_suppressed',
-      parentToolUseID: 'toolu_bash_2',
+      parentToolUseIDHash: sha256('toolu_bash_2'),
       approvedToolName: 'Bash',
-      networkToolUseID: 'toolu_network_2',
+      networkToolUseIDHash: sha256('toolu_network_2'),
     });
   });
 
@@ -443,7 +662,7 @@ describe('sdk sandbox network gate', () => {
     expect(decision?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
-      networkToolUseID: 'toolu_network_1',
+      networkToolUseIDHash: sha256('toolu_network_1'),
       expiredTokenCount: 1,
     });
   });
@@ -472,7 +691,7 @@ describe('sdk sandbox network gate', () => {
     expect(decision?.behavior).toBe('allow');
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_suppressed',
-      parentToolUseID: 'toolu_bash_active',
+      parentToolUseIDHash: sha256('toolu_bash_active'),
       approvedToolName: 'Bash',
       inputHash: sha256('{"command":"npm test second"}'),
       expiredTokenCount: 1,
@@ -498,7 +717,11 @@ describe('sdk sandbox network gate', () => {
     const outputText = JSON.stringify(vi.mocked(writeOutput).mock.calls);
     expect(logText).not.toContain('secret-host.example');
     expect(logText).not.toContain('curl https://secret-host.example');
+    expect(logText).not.toContain('toolu_bash_1');
+    expect(logText).not.toContain('toolu_network_1');
     expect(outputText).not.toContain('secret-host.example');
     expect(outputText).not.toContain('curl https://secret-host.example');
+    expect(outputText).not.toContain('toolu_bash_1');
+    expect(outputText).not.toContain('toolu_network_1');
   });
 });

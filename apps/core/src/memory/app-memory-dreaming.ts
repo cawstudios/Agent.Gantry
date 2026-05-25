@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as pgSchema from '../adapters/storage/postgres/schema/schema.js';
 import type {
@@ -19,6 +19,11 @@ import {
   parseStructuredEvidenceCandidate,
   validatePromotableCandidate,
 } from './app-memory-dreaming-candidate-guardrails.js';
+import {
+  isUnsafeEvidence,
+  parseJsonArray,
+  parseJsonObject,
+} from './app-memory-dreaming-evidence.js';
 import { nowIso as currentIso } from '../shared/time/datetime.js';
 type Db = NodePgDatabase<typeof pgSchema>;
 type MemoryItemRow = typeof pgSchema.memoryItemsPostgres.$inferSelect;
@@ -28,48 +33,6 @@ type CreatePendingReview = (p: MemoryLifecycleProposal, db?: Db) => Promise<stri
 type DreamEmbeddingResult = { status: 'stored' | 'disabled' | 'retryable'; reason?: string };
 function nowIso(): string {
   return currentIso();
-}
-function parseJsonArray(value: string | null | undefined): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((entry): entry is string => typeof entry === 'string')
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseJsonObject(value: unknown): Record<string, unknown> {
-  if (!value) return {};
-  if (typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  if (typeof value !== 'string') return {};
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-function isUnsafeEvidence(
-  evidence: typeof pgSchema.memoryEvidencePostgres.$inferSelect,
-): boolean {
-  const metadata = parseJsonObject(evidence.metadataJson);
-  return (
-    metadata.unsafeSource === true ||
-    metadata.quarantined === true ||
-    metadata.promptInjection === true ||
-    metadata.safety === 'unsafe' ||
-    metadata.safety === 'quarantined'
-  );
-}
-function sqlThreadScopeFilter(column: any, threadId: string | undefined) {
-  return threadId ? eq(column, threadId) : isNull(column);
 }
 async function setCandidateStatus(db: Db, id: string, status: string) {
   await db
@@ -93,7 +56,7 @@ async function recordDreamDecision(input: {
     runId: input.runId,
     appId: input.subject.appId,
     agentId: input.subject.agentId,
-    threadId: input.subject.threadId ?? null,
+    threadId: null,
     itemId: input.itemId ?? null,
     candidateId: input.candidateId ?? null,
     action: input.action,
@@ -200,6 +163,8 @@ export async function runAppMemoryDreamPass(input: {
   subject: NormalizedMemorySubject;
   phase: DreamingRunStatus['phase'];
   dryRun: boolean;
+  signal?: AbortSignal;
+  remainingTimeoutMs?: () => number | undefined;
   listItems: () => Promise<Array<{ row: MemoryItemRow }>>;
   save: (value: SaveAppMemoryInput) => Promise<AppMemoryItem>;
   retire: (
@@ -223,6 +188,7 @@ export async function runAppMemoryDreamPass(input: {
   createPendingReview?: CreatePendingReview;
 }): Promise<Array<{ action: DreamDecisionAction }>> {
   const { db, runId, subject, phase, dryRun } = input;
+  input.signal?.throwIfAborted();
   const decisions: Array<{ action: DreamDecisionAction }> = [];
   const recentEvidence = await db
     .select()
@@ -233,14 +199,11 @@ export async function runAppMemoryDreamPass(input: {
         eq(pgSchema.memoryEvidencePostgres.agentId, subject.agentId),
         eq(pgSchema.memoryEvidencePostgres.subjectType, subject.subjectType),
         eq(pgSchema.memoryEvidencePostgres.subjectId, subject.subjectId),
-        sqlThreadScopeFilter(
-          pgSchema.memoryEvidencePostgres.threadId,
-          subject.threadId,
-        ),
       ),
     )
     .orderBy(desc(pgSchema.memoryEvidencePostgres.createdAt))
     .limit(25);
+  input.signal?.throwIfAborted();
   const unsafeEvidenceIds = new Set(
     recentEvidence.filter(isUnsafeEvidence).map((evidence) => evidence.id),
   );
@@ -249,6 +212,7 @@ export async function runAppMemoryDreamPass(input: {
   );
   if (phase === 'light' || phase === 'all') {
     for (const evidence of safeRecentEvidence.slice(0, 10)) {
+      input.signal?.throwIfAborted();
       const parsed = parseStructuredEvidenceCandidate(evidence, subject);
       if (!parsed.candidate) {
         await recordDreamDecision({
@@ -264,7 +228,7 @@ export async function runAppMemoryDreamPass(input: {
         continue;
       }
       const candidate = parsed.candidate;
-      const candidateId = `mca_${hashText(`${subject.appId}:${subject.agentId}:${subject.subjectType}:${subject.subjectId}:${subject.threadId ?? ''}:${candidate.kind}:${candidate.key}:${candidate.value}`).slice(0, 32)}`;
+      const candidateId = `mca_${hashText(`${subject.appId}:${subject.agentId}:${subject.subjectType}:${subject.subjectId}:${candidate.kind}:${candidate.key}:${candidate.value}`).slice(0, 32)}`;
       if (!dryRun) {
         await db
           .insert(pgSchema.memoryCandidatesPostgres)
@@ -274,7 +238,7 @@ export async function runAppMemoryDreamPass(input: {
             agentId: subject.agentId,
             subjectType: subject.subjectType,
             subjectId: subject.subjectId,
-            threadId: subject.threadId ?? null,
+            threadId: null,
             kind: candidate.kind,
             key: candidate.key,
             value: candidate.value,
@@ -309,8 +273,10 @@ export async function runAppMemoryDreamPass(input: {
     }
   }
   if (phase === 'rem' || phase === 'all') {
+    input.signal?.throwIfAborted();
     const items = await input.listItems();
     for (const item of items) {
+      input.signal?.throwIfAborted();
       const payload = parseJsonObject(item.row.valueJson);
       const value =
         typeof payload.value === 'string' ? payload.value.toLowerCase() : '';
@@ -343,6 +309,7 @@ export async function runAppMemoryDreamPass(input: {
     }
   }
   if (phase === 'deep' || phase === 'all') {
+    input.signal?.throwIfAborted();
     const activeItems = await input.listItems();
     const activeByKey = new Map<
       string,
@@ -370,29 +337,29 @@ export async function runAppMemoryDreamPass(input: {
             subject.subjectType,
           ),
           eq(pgSchema.memoryCandidatesPostgres.subjectId, subject.subjectId),
-          sqlThreadScopeFilter(
-            pgSchema.memoryCandidatesPostgres.threadId,
-            subject.threadId,
-          ),
           eq(pgSchema.memoryCandidatesPostgres.status, 'staged'),
         ),
       )
       .orderBy(desc(pgSchema.memoryCandidatesPostgres.confidence))
       .limit(10);
+    input.signal?.throwIfAborted();
     const llmDreamingProposals =
       (await input.proposeDreaming?.({
         evidence: safeRecentEvidence,
         candidates,
         activeItems: activeItems.map((item) => item.row),
       })) || [];
+    input.signal?.throwIfAborted();
     const llmConsolidationProposals =
       (await input.proposeConsolidation?.({
         activeItems: activeItems.map((item) => item.row),
       })) || [];
+    input.signal?.throwIfAborted();
     for (const proposal of [
       ...llmDreamingProposals,
       ...llmConsolidationProposals,
     ]) {
+      input.signal?.throwIfAborted();
       if (
         proposal.action === 'retire' ||
         proposal.action === 'rewrite' ||
@@ -417,6 +384,7 @@ export async function runAppMemoryDreamPass(input: {
       }
     }
     for (const candidate of candidates) {
+      input.signal?.throwIfAborted();
       const evidenceIds = parseJsonArray(candidate.evidenceIdsJson);
       if (
         evidenceIds.some((id) => unsafeEvidenceIds.has(id)) ||
@@ -624,7 +592,6 @@ export async function runAppMemoryDreamPass(input: {
         userId: subject.userId,
         groupId: subject.groupId,
         channelId: subject.channelId,
-        threadId: subject.threadId,
         kind: candidate.kind as MemoryKind,
         key: candidate.key,
         value: candidate.value,

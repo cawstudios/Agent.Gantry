@@ -117,8 +117,21 @@ access and new reviewed capabilities including authenticated CLIs,
 for skills, and
 `request_mcp_server` for third-party MCP servers. Approval updates the target
 agent's durable `capabilities` list or attached `sources`, exports the readable
-projection to `settings.yaml`, and activates on the next scheduled run or a
-manual rerun.
+projection to `settings.yaml`, and activates for future runs. When a persistent
+tool approval matches paused jobs in `Setup required`, Gantry immediately
+re-runs shared setup readiness for those jobs. Jobs are reactivated and queued
+only after readiness passes; otherwise they stay paused with the refreshed setup
+blocker and next action visible in the approval receipt and job status.
+
+When deterministic setup or permission blockers pause a job, Gantry also writes
+one deduped `recovery_intent` on the job target metadata and queues a bounded
+target-agent recovery turn in the job's execution conversation/thread. The
+recovery turn is not raw job output and not a user-authored message; it prompts
+the target agent to use the normal request tools above, ask the user or control
+approver for one clear action, retry/resume the job after readiness is present,
+or correct an invalid job requirement. Generic job failures do not create
+recovery turns unless they include structured setup or permission recovery
+metadata.
 
 Job creation can declare `capability_requirements` on `scheduler_upsert_job`
 instead of embedding provider-specific shell commands in the prompt. Each

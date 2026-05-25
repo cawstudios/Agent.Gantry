@@ -4,11 +4,17 @@ import type {
   ToolCatalogRepository,
 } from '../../domain/ports/repositories.js';
 import { ApplicationError } from '../common/application-error.js';
-import { resolveAgentToolRuntimeRules } from '../agents/agent-tool-runtime-rules.js';
+import {
+  resolveAgentToolRuntimePolicy,
+  resolveAgentToolRuntimeRules,
+} from '../agents/agent-tool-runtime-rules.js';
 
 export interface JobToolPolicyResolution {
   inheritedTools: string[];
   effectiveAllowedTools: string[];
+  localCliCredentialAccess: boolean;
+  localCliCredentialPaths: string[];
+  localCliNetworkHosts: string[];
 }
 
 export function agentIdForJobGroupScope(groupScope: string): string {
@@ -25,16 +31,24 @@ export async function resolveJobToolPolicy(input: {
 }): Promise<JobToolPolicyResolution> {
   const inheritedTools =
     input.appId && input.agentId
-      ? await resolveAgentToolBindings({
+      ? await resolveAgentToolBindingPolicy({
           repository: input.toolRepository,
           appId: input.appId,
           agentId: input.agentId,
           skillRepository: input.skillRepository,
         })
-      : [];
+      : {
+          rules: [],
+          localCliCredentialAccess: false,
+          localCliCredentialPaths: [],
+          localCliNetworkHosts: [],
+        };
   return {
-    inheritedTools,
-    effectiveAllowedTools: mergeUnique(inheritedTools),
+    inheritedTools: inheritedTools.rules,
+    effectiveAllowedTools: mergeUnique(inheritedTools.rules),
+    localCliCredentialAccess: inheritedTools.localCliCredentialAccess,
+    localCliCredentialPaths: inheritedTools.localCliCredentialPaths,
+    localCliNetworkHosts: inheritedTools.localCliNetworkHosts,
   };
 }
 
@@ -53,6 +67,41 @@ export async function resolveAgentToolBindings(input: {
     skillRepository: input.skillRepository,
     makeError: (message) => new ApplicationError('FORBIDDEN', message),
   });
+}
+
+export async function resolveAgentToolBindingPolicy(input: {
+  repository?: ToolCatalogRepository;
+  skillRepository?: SkillCatalogRepository;
+  appId: string;
+  agentId: string;
+}): Promise<{
+  rules: string[];
+  localCliCredentialAccess: boolean;
+  localCliCredentialPaths: string[];
+  localCliNetworkHosts: string[];
+}> {
+  if (!input.repository) {
+    return {
+      rules: [],
+      localCliCredentialAccess: false,
+      localCliCredentialPaths: [],
+      localCliNetworkHosts: [],
+    };
+  }
+  const policy = await resolveAgentToolRuntimePolicy({
+    repository: input.repository,
+    appId: input.appId,
+    agentId: input.agentId,
+    errorSubject: 'Inherited agent tool',
+    skillRepository: input.skillRepository,
+    makeError: (message) => new ApplicationError('FORBIDDEN', message),
+  });
+  return {
+    rules: policy.rules,
+    localCliCredentialAccess: policy.localCliCredentialAccess,
+    localCliCredentialPaths: policy.localCliCredentialPaths,
+    localCliNetworkHosts: policy.localCliNetworkHosts,
+  };
 }
 
 function mergeUnique(base: readonly string[]): string[] {

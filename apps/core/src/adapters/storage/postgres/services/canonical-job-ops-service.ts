@@ -19,6 +19,10 @@ import type { ExecutionProviderId } from '../../../../domain/sessions/sessions.j
 // prettier-ignore
 import type { CanonicalJobEventRecord, CanonicalJobRecord, CanonicalRunRecord, JobRecordInput, PostgresCanonicalJobRepository } from '../repositories/canonical-job-repository.postgres.js';
 import { redactProviderSessionHandlesInText } from '../../../../shared/provider-session-redaction.js';
+import {
+  parseRecoveryIntent,
+  parseSetupState,
+} from './canonical-job-target-state.js';
 
 type JobRecordSource = Omit<JobUpsertInput, 'id'> | JobUpsertInput | Job;
 type CanonicalExecutionContext = NonNullable<Job['execution_context']>;
@@ -66,6 +70,7 @@ export class CanonicalJobOpsService {
         required_mcp_servers: job.required_mcp_servers,
         capability_requirements: job.capability_requirements,
         setup_state: job.setup_state,
+        recovery_intent: job.recovery_intent,
         created_at: job.created_at || now,
         updated_at: job.updated_at || now,
       }),
@@ -309,6 +314,7 @@ export class CanonicalJobOpsService {
       target.capabilityRequirements,
     );
     const setupState = parseSetupState(target.setupState);
+    const recoveryIntent = parseRecoveryIntent(target.recoveryIntent);
     return {
       id: row.id,
       name: row.name,
@@ -341,6 +347,7 @@ export class CanonicalJobOpsService {
       tool_access_requirements: toolAccessRequirements,
       required_mcp_servers: requiredMcpServers,
       setup_state: setupState,
+      recovery_intent: recoveryIntent,
     };
   }
 
@@ -384,6 +391,7 @@ export class CanonicalJobOpsService {
           job.required_mcp_servers,
         ),
         setupState: parseSetupState(job.setup_state),
+        recoveryIntent: parseRecoveryIntent(job.recovery_intent),
       }),
       silent: Boolean(job.silent),
       timeoutMs: job.timeout_ms ?? 300000,
@@ -551,75 +559,6 @@ function parseCapabilityImplementation(
   );
   if (protectedPaths.length > 0) implementation.protectedPaths = protectedPaths;
   return implementation;
-}
-
-function parseSetupState(input: unknown): Job['setup_state'] {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return undefined;
-  }
-  const record = input as Record<string, unknown>;
-  const state = normalizeString(record.state);
-  if (
-    state !== 'ready' &&
-    state !== 'missing_capability' &&
-    state !== 'broker_unreachable' &&
-    state !== 'credential_unknown' &&
-    state !== 'browser_login_may_be_required' &&
-    state !== 'mcp_missing_credential' &&
-    state !== 'draft_only'
-  ) {
-    return undefined;
-  }
-  const checkedAt = normalizeString(record.checked_at ?? record.checkedAt);
-  const fingerprint = normalizeString(record.fingerprint);
-  if (!checkedAt || !fingerprint) return undefined;
-  const blockers = Array.isArray(record.blockers)
-    ? record.blockers.flatMap((item) => parseSetupBlocker(item))
-    : [];
-  return {
-    state,
-    checked_at: checkedAt,
-    fingerprint,
-    blockers,
-    notified_fingerprint:
-      normalizeString(
-        record.notified_fingerprint ?? record.notifiedFingerprint,
-      ) ?? null,
-  };
-}
-
-function parseSetupBlocker(
-  input: unknown,
-): NonNullable<Job['setup_state']>['blockers'] {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return [];
-  const record = input as Record<string, unknown>;
-  const state = normalizeString(record.state);
-  if (
-    state !== 'missing_capability' &&
-    state !== 'broker_unreachable' &&
-    state !== 'credential_unknown' &&
-    state !== 'browser_login_may_be_required' &&
-    state !== 'mcp_missing_credential' &&
-    state !== 'draft_only'
-  ) {
-    return [];
-  }
-  const requirementType = normalizeString(record.requirementType);
-  if (
-    requirementType !== 'tool' &&
-    requirementType !== 'semantic_capability' &&
-    requirementType !== 'browser' &&
-    requirementType !== 'mcp_server' &&
-    requirementType !== 'credential' &&
-    requirementType !== 'local_cli'
-  ) {
-    return [];
-  }
-  const message = normalizeString(record.message);
-  const nextAction = normalizeString(record.nextAction);
-  const requirementId = normalizeString(record.requirementId);
-  if (!message || !nextAction || !requirementId) return [];
-  return [{ state, requirementType, requirementId, message, nextAction }];
 }
 
 function resolveExecutionContext(

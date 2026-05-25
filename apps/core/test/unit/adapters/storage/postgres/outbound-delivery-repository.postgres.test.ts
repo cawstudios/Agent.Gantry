@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { PostgresOutboundDeliveryRepository } from '@core/adapters/storage/postgres/repositories/outbound-delivery-repository.postgres.js';
+import {
+  canonicalProviderThreadForDelivery,
+  PostgresOutboundDeliveryRepository,
+} from '@core/adapters/storage/postgres/repositories/outbound-delivery-repository.postgres.js';
 import { deriveOutboundDeliveryStatus } from '@core/adapters/storage/postgres/repositories/outbound-delivery-repository.postgres.helpers.js';
 import {
   OutboundDeliveryIdempotencyConflictError,
@@ -88,6 +91,37 @@ function createInput(fingerprint = 'fp:test') {
 }
 
 describe('PostgresOutboundDeliveryRepository', () => {
+  describe('canonicalProviderThreadForDelivery', () => {
+    it('derives a canonical thread row for provider-owned outbound topic routes', () => {
+      const thread = canonicalProviderThreadForDelivery({
+        appId: 'default' as never,
+        conversationId: 'conversation:tg:-1003986348737' as never,
+        threadId: 'thread:tg:-1003986348737:3986348737' as never,
+      });
+
+      expect(thread).toMatchObject({
+        id: 'thread:tg:-1003986348737:3986348737',
+        appId: 'default',
+        conversationId: 'conversation:tg:-1003986348737',
+      });
+      expect(JSON.parse(thread?.externalRefJson ?? '{}')).toMatchObject({
+        kind: 'conversation_thread',
+        jid: 'tg:-1003986348737',
+        threadId: '3986348737',
+      });
+    });
+
+    it('does not synthesize threads for mismatched canonical ids', () => {
+      expect(
+        canonicalProviderThreadForDelivery({
+          appId: 'default' as never,
+          conversationId: 'conversation:tg:-1003986348737' as never,
+          threadId: 'thread:tg:-1000000000000:3986348737' as never,
+        }),
+      ).toBeNull();
+    });
+  });
+
   describe('deriveOutboundDeliveryStatus', () => {
     it('treats earliest terminal unsent failure as terminal even with later pending segments', () => {
       const status = deriveOutboundDeliveryStatus({

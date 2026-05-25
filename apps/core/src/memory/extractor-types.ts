@@ -6,6 +6,8 @@ export interface ArcExtractionInput {
   userId?: string;
   retrievedItems?: Array<{ id: string; key: string; value: string }>;
   onUsage?: (usage: MemoryExtractorUsage) => void;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 export interface MemoryExtractorUsage {

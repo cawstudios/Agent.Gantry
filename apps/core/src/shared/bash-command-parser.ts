@@ -153,6 +153,10 @@ export function bashExecutableName(command: string): string {
   return executableName(command);
 }
 
+export function formatBashArgv(argv: readonly string[]): string {
+  return argv.map(quoteBashArg).join(' ');
+}
+
 function parseSegment(command: string): BashCommandParseResult {
   const leaves: BashCommandLeaf[] = [];
   let tokens: string[] = [];
@@ -479,6 +483,11 @@ function normalizeBashArg(arg: string): string {
   if (url) return url;
   if (isVolatileGitRef(arg)) return '*';
   return arg;
+}
+
+function quoteBashArg(arg: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(arg)) return arg;
+  return `'${arg.replaceAll("'", "'\\''")}'`;
 }
 
 function normalizeScriptLeafRuleContent(

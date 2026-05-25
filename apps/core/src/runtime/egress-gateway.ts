@@ -156,6 +156,13 @@ function createEgressGatewayServer(key: string): http.Server {
     const state = gateways.get(key);
     if (state) trackGatewaySocket(state, socket);
   });
+  server.on('clientError', (err, socket) => {
+    logger.debug({ err, key }, 'Egress gateway client socket error');
+    socket.destroy();
+  });
+  server.on('error', (err) => {
+    logger.warn({ err, key }, 'Egress gateway server error');
+  });
   return server;
 }
 
@@ -384,9 +391,18 @@ async function tunnelViaUpstreamProxy(
 }
 
 function trackGatewaySocket(state: EgressGatewayState, socket: Duplex): void {
+  if (state.sockets.has(socket)) return;
   state.sockets.add(socket);
+  const onError = (err: Error) => {
+    logger.debug(
+      { err, key: state.key, port: state.port },
+      'Egress gateway socket error',
+    );
+  };
+  socket.on('error', onError);
   socket.once('close', () => {
     state.sockets.delete(socket);
+    socket.off('error', onError);
   });
 }
 

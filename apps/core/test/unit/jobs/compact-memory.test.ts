@@ -21,6 +21,9 @@ describe('collectCompactBoundaryMemory', () => {
     expect(collectMemory).toHaveBeenCalledWith({
       agentSessionId: 'agent-session:job',
       trigger: 'precompact',
+      signal: expect.any(AbortSignal),
+      timeoutMs: 30_000,
+      statementTimeoutMs: 30_000,
     });
     expect(logger.info).toHaveBeenCalledWith(
       {
@@ -49,6 +52,9 @@ describe('collectCompactBoundaryMemory', () => {
       agentSessionId: 'agent-session:dm',
       trigger: 'precompact',
       defaultScope: 'user',
+      signal: expect.any(AbortSignal),
+      timeoutMs: 30_000,
+      statementTimeoutMs: 30_000,
     });
   });
 
@@ -93,7 +99,7 @@ describe('collectCompactBoundaryMemory', () => {
         logger,
         context: { jobId: 'job-1', runId: 'run-1' },
       });
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(30_000);
       await done;
 
       expect(logger.info).not.toHaveBeenCalled();
@@ -138,6 +144,9 @@ describe('collectJobCompletionMemory', () => {
           text: 'Confirmed the deployment approval process.',
         },
       ],
+      signal: expect.any(AbortSignal),
+      timeoutMs: 30_000,
+      statementTimeoutMs: 30_000,
     });
     expect(logger.info).toHaveBeenCalledWith(
       {
@@ -169,6 +178,9 @@ describe('collectJobCompletionMemory', () => {
       additionalTurns: [
         { role: 'user', text: 'Remember the channel release rule.' },
       ],
+      signal: expect.any(AbortSignal),
+      timeoutMs: 30_000,
+      statementTimeoutMs: 30_000,
     });
   });
 
@@ -214,7 +226,7 @@ describe('collectJobCompletionMemory', () => {
         logger,
         context: { jobId: 'job-1', runId: 'run-1' },
       });
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(30_000);
       await done;
 
       expect(logger.info).not.toHaveBeenCalled();

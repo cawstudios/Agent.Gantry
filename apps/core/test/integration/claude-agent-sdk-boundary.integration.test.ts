@@ -556,6 +556,32 @@ describe('Claude Agent SDK boundary integration', () => {
       sdkState.calls[0]?.options.mcpServers.gantry?.env
         ?.GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER,
     ).toBe('1');
+    expect(
+      sdkState.calls[0]?.options.mcpServers.gantry?.env
+        ?.GANTRY_MCP_TOOL_NAMES_JSON,
+    ).toBe(
+      JSON.stringify(
+        selectedGantryMcpToolNames([], {
+          memoryReviewerIsControlApprover: true,
+        }),
+      ),
+    );
+    expect(
+      sdkState.calls[0]?.options.mcpServers.gantry?.env
+        ?.GANTRY_MEMORY_IPC_ACTIONS_JSON,
+    ).toBe(
+      JSON.stringify(
+        selectedMemoryIpcActions([], {
+          memoryReviewerIsControlApprover: true,
+        }),
+      ),
+    );
+    expect(sdkState.calls[0]?.options.allowedTools).toEqual(
+      expect.arrayContaining([
+        'mcp__gantry__memory_review_pending',
+        'mcp__gantry__memory_review_decision',
+      ]),
+    );
   });
 
   it('fails closed when Claude init omits the required Gantry MCP server', async () => {

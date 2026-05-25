@@ -35,31 +35,71 @@ describe('memory LLM proposal model selection', () => {
 
   it('uses the configured dreaming model for dreaming proposals', async () => {
     const { proposeMemoryDreamingActions } =
-      await import('@core/memory/extractor-llm.js');
+      await import('@core/memory/memory-llm-proposals.js');
+    const controller = new AbortController();
 
     await proposeMemoryDreamingActions({
       subject,
       evidence: [],
       candidates: [],
       activeItems: [],
+      signal: controller.signal,
+      timeoutMs: 42_000,
     });
 
     expect(memoryLlmQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'claude-sonnet-dreaming-test' }),
+      expect.objectContaining({
+        model: 'claude-sonnet-dreaming-test',
+        signal: controller.signal,
+        timeoutMs: 42_000,
+      }),
     );
   });
 
   it('uses the configured consolidation model for consolidation proposals', async () => {
     const { proposeMemoryConsolidationActions } =
-      await import('@core/memory/extractor-llm.js');
+      await import('@core/memory/memory-llm-proposals.js');
+    const controller = new AbortController();
 
     await proposeMemoryConsolidationActions({
       subject,
       activeItems: [],
+      signal: controller.signal,
+      timeoutMs: 84_000,
     });
 
     expect(memoryLlmQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'claude-sonnet-consolidation-test' }),
+      expect.objectContaining({
+        model: 'claude-sonnet-consolidation-test',
+        signal: controller.signal,
+        timeoutMs: 84_000,
+      }),
     );
+  });
+
+  it('rethrows aborted dreaming proposal calls instead of swallowing them', async () => {
+    const { proposeMemoryDreamingActions } =
+      await import('@core/memory/memory-llm-proposals.js');
+    const controller = new AbortController();
+    const deadline = new Error(
+      'memory dreaming deadline exceeded after 5000ms',
+    );
+    memoryLlmQuery.mockImplementation(
+      async (input: { signal?: AbortSignal }) => {
+        expect(input.signal).toBe(controller.signal);
+        controller.abort(deadline);
+        throw deadline;
+      },
+    );
+
+    await expect(
+      proposeMemoryDreamingActions({
+        subject,
+        evidence: [],
+        candidates: [],
+        activeItems: [],
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('memory dreaming deadline exceeded after 5000ms');
   });
 });

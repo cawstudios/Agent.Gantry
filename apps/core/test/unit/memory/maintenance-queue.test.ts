@@ -62,4 +62,37 @@ describe('MemoryMaintenanceQueue', () => {
     await runPromise;
     expect(queue.isRunningForGroup('team')).toBe(false);
   });
+
+  it('removes a waiting task when its signal is aborted', async () => {
+    const queue = new MemoryMaintenanceQueue({ maxPending: 10 });
+    let unblock: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    const controller = new AbortController();
+    const waitingTask = async () => {
+      throw new Error('aborted queued task should not run');
+    };
+
+    const running = queue.enqueueAndWait(
+      'team',
+      async () => {
+        await gate;
+      },
+      'dream:team',
+    );
+    const waiting = queue.enqueueAndWait('team', waitingTask, 'cleanup:team', {
+      signal: controller.signal,
+    });
+
+    expect(queue.getPendingCount()).toBe(1);
+    controller.abort(new Error('memory dreaming job deadline exceeded'));
+    await expect(waiting).rejects.toThrow(
+      'memory dreaming job deadline exceeded',
+    );
+    expect(queue.getPendingCount()).toBe(0);
+
+    unblock?.();
+    await running;
+  });
 });

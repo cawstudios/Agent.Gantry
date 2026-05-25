@@ -35,6 +35,7 @@ __pycache__/
 *.pyd
 cov-tmp/
 tmp-coverage/
+.gstack-review-*.md
 .factory/*
 !.factory/README.md
 *.tgz

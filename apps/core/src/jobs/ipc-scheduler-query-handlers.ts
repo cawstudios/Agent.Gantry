@@ -196,6 +196,7 @@ function publicJobVisibility(metadata: JobVisibilityMetadata) {
     toolAccessRequirements: metadata.toolAccessRequirements,
     requiredMcpServers: metadata.requiredMcpServers,
     setup: metadata.setup,
+    recovery: metadata.recovery,
     health: metadata.health,
     recentRunErrors: metadata.recentRunErrors,
     staleness: metadata.staleness,

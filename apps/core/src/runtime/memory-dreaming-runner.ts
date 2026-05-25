@@ -11,11 +11,8 @@ const memoryMaintenanceQueue = getMemoryMaintenanceQueue();
 function dreamingDedupeKey(input: {
   subjectType: string;
   subjectId: string;
-  activeThreadId?: string;
 }): string {
-  const base = `dream:${input.subjectType}:${input.subjectId}`;
-  if (!input.activeThreadId) return base;
-  return `${base}:thread:${input.activeThreadId}`;
+  return `dream:${input.subjectType}:${input.subjectId}`;
 }
 
 export async function runDreamingForGroup(input: {
@@ -24,6 +21,8 @@ export async function runDreamingForGroup(input: {
   userId?: string;
   defaultScope?: 'user' | 'group';
   activeThreadId?: string;
+  signal?: AbortSignal;
+  deadlineAtMs?: number;
 }) {
   const { subject } = resolveScopedMemorySubject({
     appId: DEFAULT_MEMORY_APP_ID,
@@ -44,13 +43,15 @@ export async function runDreamingForGroup(input: {
         subjectType: subject.subjectType,
         subjectId: subject.subjectId,
         phase: 'all',
+        signal: input.signal,
+        deadlineAtMs: input.deadlineAtMs,
       });
     },
     dreamingDedupeKey({
       subjectType: subject.subjectType,
       subjectId: subject.subjectId,
-      activeThreadId: subject.threadId,
     }),
+    { signal: input.signal },
   );
   if (!result.queued) {
     if (result.reason === 'full')

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
   boolean,
@@ -12,6 +12,11 @@ import {
   uniqueIndex,
   vector,
 } from 'drizzle-orm/pg-core';
+
+import {
+  MEMORY_DREAM_RUN_TIMEOUT_MS,
+  memoryDreamRunLeaseExpiresAt,
+} from '../../../../shared/memory-dreaming-timeout.js';
 
 export * from './index.js';
 
@@ -56,7 +61,6 @@ export const memoryEvidencePostgres = pgTable(
       table.agentId,
       table.subjectType,
       table.subjectId,
-      table.threadId,
       table.createdAt,
     ),
     searchIdx: index('idx_memory_evidence_search').using(
@@ -98,7 +102,6 @@ export const memoryCandidatesPostgres = pgTable(
       table.agentId,
       table.subjectType,
       table.subjectId,
-      table.threadId,
       table.status,
       table.confidence,
       table.updatedAt,
@@ -165,7 +168,6 @@ export const memoryDreamRunsPostgres = pgTable(
       table.agentId,
       table.subjectType,
       table.subjectId,
-      table.threadId,
       table.startedAt,
     ),
     runningLightUniqueIdx: uniqueIndex(
@@ -176,7 +178,6 @@ export const memoryDreamRunsPostgres = pgTable(
         table.agentId,
         table.subjectType,
         table.subjectId,
-        sql`coalesce(${table.threadId}, '')`,
         sql`'light'::text`,
       )
       .where(
@@ -188,7 +189,6 @@ export const memoryDreamRunsPostgres = pgTable(
         table.agentId,
         table.subjectType,
         table.subjectId,
-        sql`coalesce(${table.threadId}, '')`,
         sql`'rem'::text`,
       )
       .where(
@@ -202,7 +202,6 @@ export const memoryDreamRunsPostgres = pgTable(
         table.agentId,
         table.subjectType,
         table.subjectId,
-        sql`coalesce(${table.threadId}, '')`,
         sql`'deep'::text`,
       )
       .where(
@@ -282,7 +281,6 @@ export const memoryReviewRequestsPostgres = pgTable(
       table.agentId,
       table.subjectType,
       table.subjectId,
-      table.threadId,
       table.status,
       table.createdAt,
     ),
@@ -351,30 +349,22 @@ type DreamSubject = {
   agentId: string;
   subjectType: string;
   subjectId: string;
-  threadId?: string;
 };
 
-const DREAM_RUN_LEASE_MS = 20 * 60 * 1000;
 const CONCRETE_DREAM_PHASES = ['light', 'rem', 'deep'] as const;
 
-export function dreamRunLeaseExpiresAt(startedAt: string): string {
-  return new Date(
-    new Date(startedAt).getTime() + DREAM_RUN_LEASE_MS,
-  ).toISOString();
+export { MEMORY_DREAM_RUN_TIMEOUT_MS };
+
+export function dreamRunLeaseExpiresAt(
+  startedAt: string,
+  deadlineAtMs?: number,
+): string {
+  return memoryDreamRunLeaseExpiresAt(startedAt, deadlineAtMs);
 }
 
 export function conflictingDreamPhases(phase: DreamPhase): DreamPhase[] {
   if (phase === 'all') return ['all', ...CONCRETE_DREAM_PHASES];
   return [phase, 'all'];
-}
-
-function dreamThreadIdentityFilter(
-  row: { threadId: unknown },
-  threadId: string | undefined,
-) {
-  return threadId
-    ? eq(row.threadId as any, threadId)
-    : isNull(row.threadId as any);
 }
 
 export async function findRunningDreamRun(input: {
@@ -393,7 +383,6 @@ export async function findRunningDreamRun(input: {
         eq(memoryDreamRunsPostgres.agentId, subject.agentId),
         eq(memoryDreamRunsPostgres.subjectType, subject.subjectType),
         eq(memoryDreamRunsPostgres.subjectId, subject.subjectId),
-        dreamThreadIdentityFilter(memoryDreamRunsPostgres, subject.threadId),
         inArray(memoryDreamRunsPostgres.phase, conflictingDreamPhases(phase)),
         eq(memoryDreamRunsPostgres.status, 'running'),
         sql`${memoryDreamRunsPostgres.leaseExpiresAt} > ${now}`,
@@ -429,7 +418,6 @@ export async function expireStaleDreamRuns(input: {
         eq(memoryDreamRunsPostgres.agentId, subject.agentId),
         eq(memoryDreamRunsPostgres.subjectType, subject.subjectType),
         eq(memoryDreamRunsPostgres.subjectId, subject.subjectId),
-        dreamThreadIdentityFilter(memoryDreamRunsPostgres, subject.threadId),
         inArray(memoryDreamRunsPostgres.phase, conflictingDreamPhases(phase)),
         eq(memoryDreamRunsPostgres.status, 'running'),
         sql`${memoryDreamRunsPostgres.leaseExpiresAt} <= ${now}`,

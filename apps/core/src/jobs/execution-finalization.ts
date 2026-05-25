@@ -44,6 +44,7 @@ export async function finalizeSchedulerJobRun(input: {
   pausedForSetupDuringRun: boolean;
   deletedDuringRun: boolean;
   runtimeAppId: string;
+  runId: string;
   appSession?: SchedulerEventAppSession;
   publishRuntimeEvent: (event: RuntimeEventPublishInput) => Promise<unknown>;
 }): Promise<FinalizedJobRunState> {
@@ -95,7 +96,9 @@ export async function finalizeSchedulerJobRun(input: {
       });
     } else {
       retryCount += 1;
-      runStatus = /timed out/i.test(input.error) ? 'timeout' : 'failed';
+      runStatus = /timed out|deadline exceeded/i.test(input.error)
+        ? 'timeout'
+        : 'failed';
     }
     if (!pausedForSetupDuringRun && toolDenial) {
       runStatus = 'failed';
@@ -121,6 +124,13 @@ export async function finalizeSchedulerJobRun(input: {
         runtimeAppId,
         appSession,
         setupState,
+        source: isPermissionTimeout(
+          safePrimaryErrorSummary,
+          diagnostics.terminalToolDenial?.reason,
+        )
+          ? 'permission_timeout'
+          : 'permission_denied',
+        runId: input.runId,
         publishRuntimeEvent: input.publishRuntimeEvent,
       });
       nextRun = null;
@@ -203,6 +213,8 @@ export async function finalizeSchedulerJobRun(input: {
       runtimeAppId,
       appSession,
       setupState,
+      source: 'transient_permission',
+      runId: input.runId,
       publishRuntimeEvent: input.publishRuntimeEvent,
     });
   } else {
@@ -239,4 +251,13 @@ function retryBackoffMs(job: Job, retryCount: number): number {
   return Number.isFinite(rawDelay)
     ? Math.min(rawDelay, MAX_RETRY_BACKOFF_MS)
     : MAX_RETRY_BACKOFF_MS;
+}
+
+function isPermissionTimeout(
+  errorSummary: string | null,
+  denialReason?: string,
+): boolean {
+  return /timed out waiting|permission approval.*timed out|approval timeout/i.test(
+    [errorSummary, denialReason].filter(Boolean).join(' '),
+  );
 }

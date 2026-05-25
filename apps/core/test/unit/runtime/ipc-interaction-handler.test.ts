@@ -21,6 +21,14 @@ function fileMode(filePath: string): number {
   return fs.statSync(filePath).mode & 0o777;
 }
 
+function createEmptyJobRepository() {
+  return {
+    listJobs: vi.fn(async () => []),
+    getJobById: vi.fn(async () => null),
+    updateJob: vi.fn(async () => null),
+  };
+}
+
 describe('ipc-interaction-handler', () => {
   let tempDir: string;
 
@@ -217,6 +225,7 @@ describe('ipc-interaction-handler', () => {
           ],
         })),
         sendMessage,
+        opsRepository: createEmptyJobRepository() as never,
         getToolRepository: () => toolRepository as never,
         mirrorAgentToolRulesToSettings,
       },
@@ -322,6 +331,7 @@ describe('ipc-interaction-handler', () => {
             },
           ],
         })),
+        opsRepository: createEmptyJobRepository() as never,
         getToolRepository: () => toolRepository as never,
         mirrorAgentToolRulesToSettings,
       },

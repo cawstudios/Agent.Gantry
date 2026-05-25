@@ -28,6 +28,22 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn("Which edge cases did you check?", prompt)
         self.assertIn("regression test", prompt)
 
+    def test_planner_requires_surface_impact_matrix(self) -> None:
+        prompt = read_text("prompts/planner.md")
+        agent_contract = read_text("agents/planner-high.toml")
+        for text in (prompt, agent_contract):
+            self.assertIn("Surface Impact Matrix", text)
+            self.assertIn("settings.yaml", text)
+            self.assertIn("Postgres/runtime projection", text)
+            self.assertIn("Gantry MCP tools/admin skill", text)
+            self.assertIn("Unchanged by design", text)
+
+    def test_self_check_requires_matrix_and_cleanup_accounting(self) -> None:
+        prompt = read_text("prompts/self-check.md")
+        self.assertIn("Surface Impact Matrix", prompt)
+        self.assertIn("cleanup search", prompt)
+        self.assertIn("no-legacy", prompt)
+
     def test_automated_tester_prompt_requires_regression_and_edge_cases(self) -> None:
         prompt = read_text("prompts/tester-automated.md")
         self.assertIn("regression coverage for bug fixes", prompt)
@@ -45,6 +61,7 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn("changed-behavior tests, regression coverage, edge-case review, and bug finding", guidance)
         self.assertIn("Keep hook behavior adaptive for local work", guidance)
         self.assertIn("add or update tests under `.codex/scripts/tests/`", guidance)
+        self.assertIn("Convert repeated corrections into compact skills", guidance)
 
     def test_prompt_policy_rejects_blanket_coverage_targets(self) -> None:
         implementer = read_text("prompts/implementer.md")
@@ -79,6 +96,20 @@ class PromptContractTests(unittest.TestCase):
             self.assertIn("literal user request", prompt, relative_path)
             self.assertIn("provider boundaries", prompt, relative_path)
             self.assertIn("configuration ownership", prompt, relative_path)
+
+    def test_surface_impact_reviewer_checks_matrix_and_cleanup(self) -> None:
+        prompt = read_text("agents/surface-impact-reviewer.toml")
+        self.assertIn("Surface Impact Matrix", prompt)
+        self.assertIn("source-of-truth", prompt)
+        self.assertIn("no-legacy cleanup evidence", prompt)
+        self.assertIn("verification commands", prompt)
+
+    def test_memory_lessons_curator_stays_read_only_and_checks_staleness(self) -> None:
+        prompt = read_text("agents/memory-lessons-curator.toml")
+        self.assertIn("Stay read-only", prompt)
+        self.assertIn("Do not edit memory files", prompt)
+        self.assertIn("may be stale", prompt)
+        self.assertIn("over-fragmentation risk", prompt)
 
     def test_pr_ready_prompt_allows_new_scope_handoff(self) -> None:
         prompt = read_text("prompts/pr-ready.md")

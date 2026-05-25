@@ -94,6 +94,13 @@ export async function updateManagedJob(
     patch.notificationRoutes === undefined
       ? undefined
       : normalizeNotificationRoutes(patch.notificationRoutes);
+  const routeAuthorizationContext =
+    authenticatedContext ??
+    defaultRuntimeSameConversationRouteContext({
+      appId: input.appId,
+      job,
+      routes: normalizedNotificationRoutes,
+    });
   const normalizedToolAccessRequirements = normalizeToolAccessRequirementsInput(
     patch.toolAccessRequirements,
     'toolAccessRequirements',
@@ -124,7 +131,7 @@ export async function updateManagedJob(
   );
 
   if (normalizedNotificationRoutes) {
-    if (!authenticatedContext) {
+    if (!routeAuthorizationContext) {
       throw new ApplicationError(
         'FORBIDDEN',
         'Cannot authorize notification route changes without authenticated job context.',
@@ -136,14 +143,14 @@ export async function updateManagedJob(
         operation: 'update',
         jobId: job.id,
         jobName: patch.name ?? job.name,
-        authenticatedContext,
+        authenticatedContext: routeAuthorizationContext,
         requestedRoutes: normalizedNotificationRoutes,
         existingRoutes: normalizeStoredNotificationRoutes(
           job.notification_routes,
         ),
         routesBeyondContext: routesBeyondAuthenticatedContext({
           routes: normalizedNotificationRoutes,
-          authenticatedContext,
+          authenticatedContext: routeAuthorizationContext,
         }),
       },
     });
@@ -208,6 +215,41 @@ export async function updateManagedJob(
   }
   deps.scheduler.requestSchedulerSync(job.id);
   return { job: { ...job, ...updates } };
+}
+
+function defaultRuntimeSameConversationRouteContext(input: {
+  appId?: string;
+  job: Job;
+  routes: ReturnType<typeof normalizeNotificationRoutes> | undefined;
+}): {
+  conversationJid: string;
+  threadId: string | null;
+  groupScope: string;
+} | null {
+  if (input.appId !== 'default' || !input.routes?.length) return null;
+  const existingConversationJid =
+    input.job.execution_context?.conversationJid ??
+    input.job.notification_routes?.[0]?.conversationJid;
+  if (!existingConversationJid) return null;
+  if (
+    input.routes.some(
+      (route) => route.conversationJid !== existingConversationJid,
+    )
+  ) {
+    return null;
+  }
+  const targetThreadId =
+    input.routes.length === 1 ? (input.routes[0]?.threadId ?? null) : null;
+  if (
+    input.routes.some((route) => (route.threadId ?? null) !== targetThreadId)
+  ) {
+    return null;
+  }
+  return {
+    conversationJid: existingConversationJid,
+    threadId: targetThreadId,
+    groupScope: input.job.group_scope,
+  };
 }
 
 async function requireJob(

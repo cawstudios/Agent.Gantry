@@ -41,6 +41,7 @@ export interface JobUpsertInput {
   tool_access_requirements?: string[];
   required_mcp_servers?: string[];
   setup_state?: Job['setup_state'];
+  recovery_intent?: Job['recovery_intent'];
 }
 
 export interface JobListFilters {

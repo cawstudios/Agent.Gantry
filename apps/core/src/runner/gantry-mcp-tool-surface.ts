@@ -2,6 +2,7 @@ import { ADMIN_MCP_TOOL_NAMES } from '../shared/admin-mcp-tools.js';
 import {
   selectedMemoryIpcActionsFromToolRules,
   type GantryMemoryIpcAction,
+  type MemoryIpcActionSelectionOptions,
 } from '../shared/memory-ipc-actions.js';
 import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-references.js';
 
@@ -53,6 +54,11 @@ export const REVIEWED_GANTRY_MCP_TOOL_NAMES = [
   'memory_review_decision',
 ] as const;
 
+const REVIEWER_MEMORY_REVIEW_GANTRY_MCP_TOOL_NAMES = [
+  'memory_review_pending',
+  'memory_review_decision',
+] as const;
+
 export const GATED_GANTRY_MCP_TOOL_NAMES = [
   'browser_status',
   'browser_open',
@@ -75,6 +81,8 @@ export const ALL_GANTRY_MCP_TOOL_NAMES = [
 
 const ALL_GANTRY_MCP_TOOL_NAME_SET = new Set<string>(ALL_GANTRY_MCP_TOOL_NAMES);
 
+export type GantryMcpToolSelectionOptions = MemoryIpcActionSelectionOptions;
+
 export function gantryMcpFullToolName(toolName: string): string {
   return `mcp__gantry__${toolName}`;
 }
@@ -88,10 +96,16 @@ export function gantryMcpToolNameFromFullName(value: string): string | null {
 
 export function selectedGantryMcpToolNames(
   configuredTools: readonly string[],
+  options: GantryMcpToolSelectionOptions = {},
 ): string[] {
   const names = new Set<string>(DEFAULT_GANTRY_MCP_TOOL_NAMES);
   if (isBrowserSelected(configuredTools)) {
     for (const toolName of GATED_GANTRY_MCP_TOOL_NAMES) names.add(toolName);
+  }
+  if (options.memoryReviewerIsControlApprover) {
+    for (const toolName of REVIEWER_MEMORY_REVIEW_GANTRY_MCP_TOOL_NAMES) {
+      names.add(toolName);
+    }
   }
   for (const configuredTool of configuredTools) {
     const name = gantryMcpToolNameFromFullName(configuredTool);
@@ -111,8 +125,11 @@ function isBrowserSelected(configuredTools: readonly string[]): boolean {
 
 export function selectedGantryMcpFullToolNames(
   configuredTools: readonly string[],
+  options: GantryMcpToolSelectionOptions = {},
 ): string[] {
-  return selectedGantryMcpToolNames(configuredTools).map(gantryMcpFullToolName);
+  return selectedGantryMcpToolNames(configuredTools, options).map(
+    gantryMcpFullToolName,
+  );
 }
 
 export function parseEnabledGantryMcpToolNames(
@@ -139,6 +156,7 @@ export function parseEnabledGantryMcpToolNames(
 
 export function selectedMemoryIpcActions(
   configuredTools: readonly string[],
+  options: MemoryIpcActionSelectionOptions = {},
 ): GantryMemoryIpcAction[] {
-  return selectedMemoryIpcActionsFromToolRules(configuredTools);
+  return selectedMemoryIpcActionsFromToolRules(configuredTools, options);
 }

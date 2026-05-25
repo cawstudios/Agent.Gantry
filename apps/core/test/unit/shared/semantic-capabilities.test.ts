@@ -152,8 +152,24 @@ describe('semantic capability catalog validation', () => {
       ),
     ).toEqual({
       ok: false,
-      reason: 'Protected paths must be absolute paths or home-relative paths.',
+      reason:
+        'Protected paths must be absolute, home-relative, or env-rooted paths.',
     });
+  });
+
+  it('accepts OS-neutral protected credential path hints', () => {
+    expect(
+      validateSemanticCapabilityDefinition(
+        localCliCapability({
+          protectedPaths: [
+            '${XDG_CONFIG_HOME}/acme',
+            '$HOME/.config/acme',
+            '%APPDATA%\\Acme',
+            '~',
+          ],
+        }),
+      ),
+    ).toEqual({ ok: true });
   });
 
   it('projects reviewed local CLI capabilities to scoped command-tool authority', () => {

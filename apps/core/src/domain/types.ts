@@ -154,6 +154,34 @@ export interface JobSetupState {
   notified_fingerprint?: string | null;
 }
 
+export type JobRecoveryIntentKind =
+  | 'setup_required'
+  | 'missing_capability'
+  | 'permission_denied'
+  | 'permission_timeout';
+
+export type JobRecoveryIntentState =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'suppressed';
+
+export interface JobRecoveryIntent {
+  kind: JobRecoveryIntentKind;
+  state: JobRecoveryIntentState;
+  dedupe_key: string;
+  created_at: string;
+  updated_at: string;
+  source_run_id?: string | null;
+  setup_fingerprint?: string | null;
+  requirement_type?: JobSetupBlocker['requirementType'] | null;
+  requirement_id?: string | null;
+  next_action?: string | null;
+  attempts: number;
+  last_error?: string | null;
+}
+
 export interface Job {
   id: string;
   name: string;
@@ -186,6 +214,7 @@ export interface Job {
   tool_access_requirements?: string[];
   required_mcp_servers?: string[];
   setup_state?: JobSetupState;
+  recovery_intent?: JobRecoveryIntent | null;
 }
 
 export type JobRunStatus =

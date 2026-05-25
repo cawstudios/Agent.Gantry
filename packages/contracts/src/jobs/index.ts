@@ -38,13 +38,21 @@ export const JobModelSourceSchema = z.union([
 ]);
 export type JobModelSource = z.infer<typeof JobModelSourceSchema>;
 
-export const JobModelPreviewSchema = z.object({
-  displayName: z.string(),
-  provider: z.string(),
-  contextWindowTokens: z.number().int().nonnegative(),
-  maxOutputTokens: z.number().int().nonnegative(),
-  cachePolicy: z.string(),
-});
+export const JobModelPreviewSchema = z
+  .object({
+    displayName: z.string(),
+    responseFamily: z.enum(['anthropic', 'openai']),
+    modelRoute: z
+      .object({
+        id: z.enum(['anthropic', 'openrouter']),
+        label: z.string(),
+      })
+      .strict(),
+    contextWindowTokens: z.number().int().nonnegative(),
+    maxOutputTokens: z.number().int().nonnegative(),
+    cachePolicy: z.string(),
+  })
+  .strict();
 export type JobModelPreview = z.infer<typeof JobModelPreviewSchema>;
 
 export const JobModelSelectionSchema = z
@@ -162,6 +170,34 @@ export const JobHealthSchema = z
   })
   .strict();
 export type JobHealth = z.infer<typeof JobHealthSchema>;
+
+export const JobRecoveryMetadataSchema = z
+  .object({
+    state: z.enum([
+      'none',
+      'pending',
+      'running',
+      'completed',
+      'failed',
+      'suppressed',
+    ]),
+    kind: z
+      .enum([
+        'setup_required',
+        'missing_capability',
+        'permission_denied',
+        'permission_timeout',
+      ])
+      .nullable(),
+    updatedAt: IsoDateTimeSchema.nullable(),
+    attempts: z.number().int().nonnegative(),
+    requirementType: z.string().nullable(),
+    requirementId: z.string().nullable(),
+    nextAction: z.string().nullable(),
+    lastError: z.string().nullable(),
+  })
+  .strict();
+export type JobRecoveryMetadata = z.infer<typeof JobRecoveryMetadataSchema>;
 
 export const JobSetupSchema = z
   .object({
@@ -317,6 +353,7 @@ export const JobResponseSchema = z
     lastRun: IsoDateTimeSchema.nullable(),
     staleness: JobStalenessSchema.nullable().optional(),
     health: JobHealthSchema.optional(),
+    recovery: JobRecoveryMetadataSchema.optional(),
     modelAlias: z.string().nullable().optional(),
     modelSelection: JobModelSelectionSchema.optional(),
     model: JobModelPreviewSchema.nullable().optional(),
@@ -348,10 +385,32 @@ export const ModelRecordSchema = z.object({
   displayName: z.string(),
   aliases: z.array(z.string()),
   recommendedAlias: z.string(),
-  provider: z.string(),
-  providerId: z.enum(['anthropic', 'openrouter']),
-  providerLabel: z.string(),
-  providerSlug: z.string(),
+  responseFamily: z.enum(['anthropic', 'openai']),
+  executionProviderId: z.string(),
+  credentialProfileRef: z.string(),
+  modelRoute: z.object({
+    id: z.enum(['anthropic', 'openrouter']),
+    label: z.string(),
+    metadata: z
+      .object({
+        providerModelId: z.string(),
+      })
+      .strict(),
+  }),
+  capabilities: z
+    .object({
+      streaming: z.boolean(),
+      toolUse: z.boolean(),
+      mcpProjection: z.boolean(),
+      browserProjection: z.boolean(),
+      sandboxProjection: z.boolean(),
+      providerSessionResume: z.boolean(),
+      thinking: z.boolean(),
+      tokenAccounting: z.boolean(),
+      cacheAccounting: z.boolean(),
+      structuredOutput: z.boolean(),
+    })
+    .strict(),
   supportedWorkloads: z.array(
     z.enum([
       'chat',
@@ -382,8 +441,8 @@ export const ListModelsResponseSchema = z.object({
 });
 export type ListModelsResponse = z.infer<typeof ListModelsResponseSchema>;
 
-export const ModelProviderPresetSchema = z.enum(['anthropic', 'openrouter']);
-export type ModelProviderPreset = z.infer<typeof ModelProviderPresetSchema>;
+export const ModelPresetSchema = z.enum(['anthropic', 'openrouter']);
+export type ModelPreset = z.infer<typeof ModelPresetSchema>;
 
 export const ModelWorkloadSchema = z.enum([
   'chat',
@@ -406,9 +465,9 @@ export const ModelDefaultSlotSchema = z.object({
 export type ModelDefaultSlot = z.infer<typeof ModelDefaultSlotSchema>;
 
 export const ModelDefaultsResponseSchema = z.object({
-  provider: z
+  preset: z
     .object({
-      id: ModelProviderPresetSchema,
+      id: ModelPresetSchema,
       label: z.string(),
     })
     .nullable(),
@@ -418,7 +477,7 @@ export const ModelDefaultsResponseSchema = z.object({
     recurring: ModelDefaultSlotSchema,
   }),
   memory: z.object({
-    mode: z.literal('provider-managed'),
+    mode: z.literal('preset-managed'),
     extractor: ModelDefaultSlotSchema,
     dreaming: ModelDefaultSlotSchema,
     consolidation: ModelDefaultSlotSchema,
@@ -436,13 +495,13 @@ export type ModelDefaultsResponse = z.infer<typeof ModelDefaultsResponseSchema>;
 
 export const ModelDefaultsPatchRequestSchema = z
   .object({
-    provider: ModelProviderPresetSchema.optional(),
+    preset: ModelPresetSchema.optional(),
     chat: z.string().nullable().optional(),
     jobs: z.union([z.string(), z.null()]).optional(),
     oneTime: z.union([z.string(), z.null()]).optional(),
     recurring: z.union([z.string(), z.null()]).optional(),
     memory: z
-      .union([z.literal('reset'), z.literal('provider-managed'), z.null()])
+      .union([z.literal('reset'), z.literal('preset-managed'), z.null()])
       .optional(),
   })
   .strict();

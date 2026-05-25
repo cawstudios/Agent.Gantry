@@ -4,10 +4,12 @@ import {
   getRuntimeEventExchange,
   getRuntimeRepositories,
 } from '../adapters/storage/postgres/runtime-store.js';
+import { DEFAULT_JOB_RUNTIME_APP_ID } from '../application/jobs/job-access.js';
 import { PgBossSchedulerEngine } from '../infrastructure/pgboss/scheduler-engine.js';
 import { resetSchedulerRunSlots } from './concurrency.js';
 import { sweepCompletedOneTimeJobs } from './cleanup.js';
 import { runJob } from './execution.js';
+import { rehydratePendingJobRecoveryTurns } from './recovery.js';
 import { computeNextJobRun } from './schedule-math.js';
 import { runtimeJobSchedulePlanner } from './job-schedule-planner.js';
 import { notifyReleasedStaleJobLeases } from './stale-lease-terminal.js';
@@ -69,6 +71,19 @@ export async function startSchedulerLoop(
     registerSystemJobs,
     runJob,
     sweepCompletedOneTimeJobs,
+    rehydratePendingRecoveryTurns: async (jobs, callbackDeps) => {
+      const summary = await rehydratePendingJobRecoveryTurns({
+        jobs,
+        deps: callbackDeps,
+        runtimeAppId: DEFAULT_JOB_RUNTIME_APP_ID,
+        publishRuntimeEvent: async (event) => {
+          await getRuntimeEventExchange().publish(event);
+        },
+      });
+      if (summary.checked > 0) {
+        logger.info(summary, 'Rehydrated pending scheduler recovery turns');
+      }
+    },
     handleReleasedStaleLeases: (releases, callbackDeps) =>
       notifyReleasedStaleJobLeases({
         releases,

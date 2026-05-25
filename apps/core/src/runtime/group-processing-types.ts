@@ -99,6 +99,7 @@ export interface GroupProcessingDeps {
       groupFolder?: string,
       stopAliasJids?: string | string[],
       threadId?: string | null,
+      options?: { requiredContinuationUserId?: string | null },
     ) => void;
     registerContinuationHandler?: (
       groupJid: string,

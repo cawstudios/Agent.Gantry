@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveConfiguredAllowedTools } from '@core/runtime/configured-agent-tools.js';
+import {
+  resolveConfiguredAllowedTools,
+  resolveConfiguredToolPolicy,
+} from '@core/runtime/configured-agent-tools.js';
 
 describe('configured agent tools', () => {
   it('resolves namespaced permission-rule catalog rows to scoped RunCommand rules', async () => {
@@ -178,6 +181,7 @@ describe('configured agent tools', () => {
               },
             ],
             protectedPaths: ['~/.config/acme'],
+            networkHosts: ['api.acme.test'],
           },
         },
       }),
@@ -193,6 +197,61 @@ describe('configured agent tools', () => {
       'capability:acme.invoices.read',
       'RunCommand(/usr/local/bin/acme invoices read *)',
     ]);
+  });
+
+  it('marks reviewed user-defined local CLI capabilities for credential env projection', async () => {
+    const repository = {
+      listAgentToolBindings: async () => [
+        {
+          status: 'active',
+          toolId: 'tool:capability:acme.invoices.read',
+        },
+      ],
+      getTool: async () => ({
+        appId: 'default',
+        name: 'capability:acme.invoices.read',
+        inputSchema: {
+          format: 'gantry.semantic-capability.v1',
+          schema: {
+            capabilityId: 'acme.invoices.read',
+            displayName: 'Acme invoices read',
+            category: 'Acme',
+            risk: 'read',
+            can: 'Read invoice records.',
+            cannot: 'Write invoices or export tokens.',
+            credentialSource: 'local_cli',
+            implementationBindings: [
+              {
+                kind: 'local_cli',
+                executablePath: '/usr/local/bin/acme',
+                executableVersion: '1.2.3',
+                executableHash: 'sha256:abc123',
+                commandTemplates: ['/usr/local/bin/acme invoices read *'],
+                authPreflightCommand: '/usr/local/bin/acme auth status',
+              },
+            ],
+            protectedPaths: ['~/.config/acme'],
+            networkHosts: ['api.acme.test'],
+          },
+        },
+      }),
+    };
+
+    await expect(
+      resolveConfiguredToolPolicy({
+        repository: repository as never,
+        appId: 'default',
+        agentId: 'agent:one',
+      }),
+    ).resolves.toEqual({
+      allowedTools: [
+        'capability:acme.invoices.read',
+        'RunCommand(/usr/local/bin/acme invoices read *)',
+      ],
+      localCliCredentialAccess: true,
+      localCliCredentialPaths: ['~/.config/acme'],
+      localCliNetworkHosts: ['api.acme.test'],
+    });
   });
 
   it('drops stale active bindings when the catalog row is unavailable', async () => {

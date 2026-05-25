@@ -49,6 +49,7 @@ export class PostgresOutboundDeliveryRepository implements OutboundDeliveryRepos
     items: OutboundDeliveryItem[];
   }): Promise<{ created: boolean; delivery: OutboundDelivery }> {
     return this.db.transaction(async (tx) => {
+      await this.ensureCanonicalProviderThread(tx, input.delivery);
       await this.assertOwnedConversationThread(tx, {
         appId: input.delivery.appId,
         conversationId: input.delivery.conversationId,
@@ -519,6 +520,28 @@ export class PostgresOutboundDeliveryRepository implements OutboundDeliveryRepos
       `Conflict for app ${requested.appId} idempotency key ${requested.idempotencyKey}`,
     );
   }
+  private async ensureCanonicalProviderThread(
+    tx: CanonicalExecutor,
+    delivery: OutboundDelivery,
+  ): Promise<void> {
+    if (!delivery.threadId) return;
+    const thread = canonicalProviderThreadForDelivery({
+      appId: delivery.appId,
+      conversationId: delivery.conversationId,
+      threadId: delivery.threadId,
+    });
+    if (!thread) return;
+    await tx
+      .insert(pgSchema.conversationThreadsPostgres)
+      .values({
+        id: thread.id,
+        appId: thread.appId,
+        conversationId: thread.conversationId,
+        externalRefJson: thread.externalRefJson,
+        updatedAt: currentIso(),
+      })
+      .onConflictDoNothing();
+  }
   private async getDeliveryById(
     db: CanonicalExecutor,
     id: OutboundDeliveryId,
@@ -634,4 +657,39 @@ export class PostgresOutboundDeliveryRepository implements OutboundDeliveryRepos
       getDeliveryById: (db, id) => this.getDeliveryById(db, id),
     });
   }
+}
+
+export function canonicalProviderThreadForDelivery(input: {
+  appId: OutboundDelivery['appId'];
+  conversationId: OutboundDelivery['conversationId'];
+  threadId?: OutboundDelivery['threadId'];
+}): {
+  id: string;
+  appId: OutboundDelivery['appId'];
+  conversationId: OutboundDelivery['conversationId'];
+  externalRefJson: string;
+} | null {
+  if (!input.threadId) return null;
+  const conversationPrefix = 'conversation:';
+  if (!input.conversationId.startsWith(conversationPrefix)) return null;
+  const providerJid = input.conversationId
+    .slice(conversationPrefix.length)
+    .trim();
+  if (!providerJid) return null;
+  const threadPrefix = `thread:${providerJid}:`;
+  if (!input.threadId.startsWith(threadPrefix)) return null;
+  const externalThreadId = input.threadId.slice(threadPrefix.length);
+  if (!externalThreadId) return null;
+  return {
+    id: input.threadId,
+    appId: input.appId,
+    conversationId: input.conversationId,
+    externalRefJson: JSON.stringify({
+      kind: 'conversation_thread',
+      value: externalThreadId,
+      jid: providerJid,
+      threadId: externalThreadId,
+      externalThreadId,
+    }),
+  };
 }

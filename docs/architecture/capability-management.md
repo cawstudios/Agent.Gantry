@@ -214,7 +214,7 @@ place.
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | `send_message`                     | Progress updates or direct channel messages while the agent is still running.                                                                                                                                | Persistent capability changes.                                                                                  |
 | `ask_user_question`                | Structured choices with content, options, single-select, multi-select, preview/details, and channel-native buttons.                                                                                          | Open-ended chat or approval of persistent capabilities.                                                         |
-| `continuity_summary`               | Summarizes current durable continuity, staged memory candidates, reviewed memory state, dreaming status, and last injected context.                                                                           | Treating memory or continuity content as instruction or tool authority.                                         |
+| `continuity_summary`               | Summarizes current durable continuity, staged memory candidates, reviewed memory state, dreaming status, and last injected context.                                                                          | Treating memory or continuity content as instruction or tool authority.                                         |
 | `file`                             | Lists, reads, writes, or promotes Gantry FileArtifacts by virtual scope/path while hiding host filesystem paths and storage refs; full host tool id `mcp__gantry__file`.                                     | Arbitrary host filesystem reads/writes or bypassing approved file facades.                                      |
 | `request_skill_install`            | Reviewed skill installs using either staged `SKILL.md` package files or an installer command such as `npx ... install <skill>` that produces a `SKILL.md` package in host-controlled staging.                | Installing silently, editing skill directories directly, or requiring a second approval after approval.         |
 | `request_skill_proposal`           | Agent-created or modified `SKILL.md` bundles for review.                                                                                                                                                     | Writing directly to `.claude/skills`, `.agents/skills`, or agent-local `skills/`.                               |
@@ -319,11 +319,15 @@ attached sources and export the readable projection to `settings.yaml`.
 Tool permission approval can resume the blocked active tool call immediately:
 `Allow once` is current-run only and does not create durable semantic
 authority, while `Always allow` stores either the approved semantic capability,
-canonical `Browser`, exact Gantry file/web facade, exact Gantry admin tool, or scoped `RunCommand(...)` rule for the active
-run and future runs. New skill or MCP materialization occurs on the next
-scheduled run or a manual rerun. Browser remains a single public `Browser` tool
-capability; projected browser gateway tools and admin Gantry MCP tools are not
-job-local grants.
+canonical `Browser`, exact Gantry file/web facade, exact Gantry admin tool, or
+scoped `RunCommand(...)` rule for the active run and future runs. After a
+persistent tool approval, Gantry rechecks matching `Setup required` paused jobs
+through the shared readiness path. Ready jobs are reactivated and queued; jobs
+with remaining setup blockers stay paused and the receipt names the
+still-blocked job plus its next action. New skill or MCP materialization occurs
+on the next scheduled run or a manual rerun. Browser remains a single public
+`Browser` tool capability; projected browser gateway tools and admin Gantry MCP
+tools are not job-local grants.
 
 Direct writes to `settings.json`, `settings.local.json`, `.mcp.json`,
 generated provider MCP directories, and skill capability files are protected

@@ -488,6 +488,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
         groupFolder,
         stopAliasJids,
         threadId,
+        registerOptions,
       ) =>
         queue.registerProcess(
           groupJid,
@@ -496,6 +497,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
           groupFolder,
           stopAliasJids,
           threadId,
+          registerOptions,
         ),
     },
     runAgent: options.runAgent,

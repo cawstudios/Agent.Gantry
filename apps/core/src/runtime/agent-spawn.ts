@@ -15,11 +15,10 @@ import {
 } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { ConversationRoute } from '../domain/types.js';
-import {
-  findModelByRunnerModel,
-  resolveModelSelectionForWorkload,
-  resolveRunnerModel,
-} from '../shared/model-catalog.js';
+import { MODEL_RUNTIME_CREDENTIAL_IDENTIFIER } from '../domain/models/credentials.js';
+import { LlmProfileResolutionService } from '../application/model-resolution/llm-profile-resolution-service.js';
+import type { LlmProfile } from '../domain/agent/agent.js';
+import { DEFAULT_SETUP_MODEL_ALIAS } from '../shared/model-catalog.js';
 import { resolveGroupFolderPath } from '../platform/group-folder.js';
 import {
   getHostRuntimeCredentialEnv,
@@ -58,7 +57,7 @@ import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-reference
 import { validateAgentToolRuntimeRules } from '../application/agents/agent-tool-runtime-rules.js';
 import { resolveMcpCredentialEnvForAgent } from '../application/capability-secrets/mcp-secret-projection.js';
 import { resolveSelectedSkillEnvForAgent } from '../application/capability-secrets/skill-secret-projection.js';
-import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
+import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { getRuntimeFileArtifactStore } from '../adapters/storage/postgres/runtime-store.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 
@@ -67,6 +66,7 @@ type RunnerAgentInput = AgentInput & {
 };
 
 const PROTECTED_FILESYSTEM_PATHS_ENV = 'GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON';
+const LOCAL_CLI_CREDENTIAL_DIRS_ENV = 'GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON';
 const DEFAULT_RUNNER_APP_ID = 'default';
 
 export { writeGroupsSnapshot } from './agent-spawn-snapshots.js';
@@ -91,7 +91,6 @@ const SAFE_HOST_ENV_KEYS = [
   'NO_PROXY',
   'no_proxy',
 ] as const;
-
 const PREPARED_EXECUTION_ENV_DENYLIST = new Set([
   'PATH',
   'NODE_OPTIONS',
@@ -127,6 +126,53 @@ function pickSafeHostEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     }
   }
   return env;
+}
+
+function resolveHomeRelativePaths(
+  values: readonly string[],
+  source: NodeJS.ProcessEnv,
+): string[] {
+  const home = source.HOME ?? source.USERPROFILE;
+  const out = new Set<string>();
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    if (trimmed === '~') {
+      if (home) out.add(home);
+      continue;
+    }
+    if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+      if (home) out.add(path.join(home, trimmed.slice(2)));
+      continue;
+    }
+    const expanded = expandCredentialPathTemplate(trimmed, source);
+    if (expanded) out.add(expanded);
+  }
+  return [...out];
+}
+
+function expandCredentialPathTemplate(
+  value: string,
+  source: NodeJS.ProcessEnv,
+): string | null {
+  let missing = false;
+  const expanded = value
+    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, key: string) => {
+      const envValue = source[key];
+      if (!envValue) missing = true;
+      return envValue ?? '';
+    })
+    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, key: string) => {
+      const envValue = source[key];
+      if (!envValue) missing = true;
+      return envValue ?? '';
+    })
+    .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (_match, key: string) => {
+      const envValue = source[key];
+      if (!envValue) missing = true;
+      return envValue ?? '';
+    });
+  return missing ? null : expanded;
 }
 
 function pickPreparedExecutionEnv(
@@ -194,22 +240,31 @@ export async function spawnAgent(
       ? 'one_time_job'
       : 'recurring_job'
     : 'chat';
-  const resolvedModel = requestedModel
-    ? resolveModelSelectionForWorkload(requestedModel, modelWorkload)
-    : undefined;
-  if (resolvedModel && !resolvedModel.ok) {
+  const llmProfileResolutionService = new LlmProfileResolutionService();
+  const profileTimestamp = nowIso();
+  const runtimeLlmProfile: LlmProfile = {
+    id: `transient-runtime-profile:${group.folder}:${modelWorkload}` as never,
+    appId: (input.appId || DEFAULT_RUNNER_APP_ID) as never,
+    purpose: input.isScheduledJob ? 'coding' : 'chat',
+    modelAlias:
+      requestedModel || modelConfig.model || DEFAULT_SETUP_MODEL_ALIAS,
+    credentialProfileRef: MODEL_RUNTIME_CREDENTIAL_IDENTIFIER,
+    createdAt: profileTimestamp as never,
+    updatedAt: profileTimestamp as never,
+  };
+  const resolvedModel = llmProfileResolutionService.resolve({
+    profile: runtimeLlmProfile,
+    workload: modelWorkload,
+  });
+  if (!resolvedModel.ok) {
     return {
       status: 'error',
       result: null,
       error: resolvedModel.message,
     };
   }
-  const effectiveModel = resolvedModel?.ok
-    ? resolvedModel.runnerModel
-    : resolveRunnerModel(modelConfig.model);
-  const effectiveModelEntry =
-    (resolvedModel?.ok ? resolvedModel.entry : undefined) ??
-    findModelByRunnerModel(effectiveModel);
+  const effectiveModel = resolvedModel.value.runnerModel;
+  const effectiveModelEntry = resolvedModel.value.modelEntry;
   const allowedToolValidationError = validateRunnerAllowedTools(
     input.allowedTools ?? [],
   );
@@ -352,6 +407,9 @@ export async function spawnAgent(
         : [];
     const memoryIpcAllowedActions = selectedMemoryIpcActionsFromToolRules(
       trustedAllowedTools ?? [],
+      {
+        memoryReviewerIsControlApprover: input.memoryReviewerIsControlApprover,
+      },
     );
     const upstreamProxyUrl =
       hostCredentials.proxy?.https || hostCredentials.proxy?.http;
@@ -386,6 +444,13 @@ export async function spawnAgent(
     runnerInputPatch.modelCredentialEnv.https_proxy = egressGateway.proxyUrl;
     runnerInputPatch.modelCredentialEnv.NODE_USE_ENV_PROXY = '1';
     runnerInput.modelCredentialEnv = runnerInputPatch.modelCredentialEnv;
+    const localCliCredentialAccess = input.localCliCredentialAccess === true;
+    const localCliCredentialPaths = localCliCredentialAccess
+      ? resolveHomeRelativePaths(
+          input.localCliCredentialPaths ?? [],
+          process.env,
+        )
+      : [];
     const env: NodeJS.ProcessEnv = {
       ...pickSafeHostEnv(process.env),
       ...pickPreparedExecutionEnv(preparedExecution.env),
@@ -516,11 +581,16 @@ export async function spawnAgent(
         ),
       );
     }
-    env[PROTECTED_FILESYSTEM_PATHS_ENV] = JSON.stringify(
-      mcpConfigPath
-        ? [...preparedExecution.protectedFilesystemPaths, mcpConfigPath]
-        : preparedExecution.protectedFilesystemPaths,
-    );
+    env[PROTECTED_FILESYSTEM_PATHS_ENV] = JSON.stringify([
+      ...preparedExecution.protectedFilesystemPaths,
+      ...localCliCredentialPaths,
+      ...(mcpConfigPath ? [mcpConfigPath] : []),
+    ]);
+    if (localCliCredentialPaths.length > 0) {
+      env[LOCAL_CLI_CREDENTIAL_DIRS_ENV] = JSON.stringify(
+        localCliCredentialPaths,
+      );
+    }
     if (browserIpcEnabled) {
       registerBrowserIpcAuthorization({
         workspaceKey: group.folder,

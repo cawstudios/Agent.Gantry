@@ -138,6 +138,7 @@ export function mapManualJobToStored(
     toolAccessRequirements: job.tool_access_requirements ?? [],
     requiredMcpServers: job.required_mcp_servers ?? [],
     setup: metadata.setup,
+    recovery: metadata.recovery,
     nextRun: job.next_run,
     lastRun: job.last_run,
     staleness: metadata.staleness,
@@ -151,7 +152,11 @@ export function mapManualJobToStored(
     model: resolvedModel.entry
       ? {
           displayName: resolvedModel.entry.displayName,
-          provider: resolvedModel.entry.providerLabel,
+          responseFamily: resolvedModel.entry.responseFamily,
+          modelRoute: {
+            id: resolvedModel.entry.modelRoute.id,
+            label: resolvedModel.entry.modelRoute.label,
+          },
           contextWindowTokens: resolvedModel.entry.contextWindowTokens,
           maxOutputTokens: resolvedModel.entry.maxOutputTokens,
           cachePolicy: resolvedModel.entry.cacheMode,

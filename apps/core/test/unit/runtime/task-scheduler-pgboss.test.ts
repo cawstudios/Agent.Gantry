@@ -168,6 +168,69 @@ describe('PgBossSchedulerEngine', () => {
     );
   });
 
+  it('rehydrates pending recovery turns during full scheduler sync', async () => {
+    const job = createJob({
+      status: 'paused',
+      next_run: null,
+      pause_reason: 'Setup required',
+      execution_context: {
+        conversationJid: 'tg:team',
+        threadId: 'topic-1',
+        groupScope: 'main_agent',
+      },
+      setup_state: {
+        state: 'missing_capability',
+        checked_at: '2026-04-24T08:00:00.000Z',
+        fingerprint: 'setup-browser',
+        blockers: [],
+      },
+      recovery_intent: {
+        kind: 'missing_capability',
+        state: 'pending',
+        dedupe_key: 'dedupe-1',
+        created_at: '2026-04-24T08:00:00.000Z',
+        updated_at: '2026-04-24T08:00:00.000Z',
+        source_run_id: null,
+        setup_fingerprint: 'setup-browser',
+        requirement_type: 'browser',
+        requirement_id: 'Browser',
+        next_action: 'request_permission',
+        attempts: 0,
+        last_error: null,
+      },
+    });
+    const boss = {
+      send: vi.fn().mockResolvedValue(undefined),
+      schedule: vi.fn().mockResolvedValue(undefined),
+      unschedule: vi.fn().mockResolvedValue(undefined),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    };
+    const rehydratePendingRecoveryTurns = vi.fn().mockResolvedValue(undefined);
+    const deps = {
+      conversationRoutes: () => ({}),
+      queue: {} as never,
+      onProcess: vi.fn(),
+      sendMessage: vi.fn(),
+      opsRepository: {
+        releaseStaleJobLeases: vi.fn().mockResolvedValue([]),
+        getAllJobs: vi.fn().mockResolvedValue([job]),
+      } as never,
+    };
+    const engine = new PgBossSchedulerEngine(deps, {
+      registerSystemJobs: vi.fn().mockResolvedValue(undefined),
+      runJob: vi.fn().mockResolvedValue(undefined),
+      sweepCompletedOneTimeJobs: vi.fn().mockResolvedValue(false),
+      rehydratePendingRecoveryTurns,
+    });
+    (engine as unknown as { boss: typeof boss }).boss = boss;
+
+    await (
+      engine as unknown as { syncAllJobs: () => Promise<void> }
+    ).syncAllJobs();
+
+    expect(rehydratePendingRecoveryTurns).toHaveBeenCalledWith([job], deps);
+  });
+
   it('dead-letters active once jobs with invalid persisted next_run', async () => {
     const job = createJob({
       next_run: 'not a timestamp',

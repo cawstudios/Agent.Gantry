@@ -27,9 +27,22 @@ export interface AgentToolRuntimeRuleResolutionInput {
   makeError?: (message: string) => Error;
 }
 
+export interface AgentToolRuntimePolicy {
+  rules: string[];
+  localCliCredentialAccess: boolean;
+  localCliCredentialPaths: string[];
+  localCliNetworkHosts: string[];
+}
+
 export async function resolveAgentToolRuntimeRules(
   input: AgentToolRuntimeRuleResolutionInput,
 ): Promise<string[]> {
+  return (await resolveAgentToolRuntimePolicy(input)).rules;
+}
+
+export async function resolveAgentToolRuntimePolicy(
+  input: AgentToolRuntimeRuleResolutionInput,
+): Promise<AgentToolRuntimePolicy> {
   const bindings = await input.repository.listAgentToolBindings({
     appId: input.appId as never,
     agentId: input.agentId as never,
@@ -41,6 +54,9 @@ export async function resolveAgentToolRuntimeRules(
     activeBindings.map((binding) => input.repository.getTool(binding.toolId)),
   );
   const activeSkillActionKeys = await activeSkillActionProjectionKeys(input);
+  let localCliCredentialAccess = false;
+  const localCliCredentialPaths = new Set<string>();
+  const localCliNetworkHosts = new Set<string>();
   const rules = tools.flatMap((tool) => {
     if (tool?.appId && tool.appId !== input.appId) return [];
     const name = tool?.name?.trim();
@@ -63,6 +79,17 @@ export async function resolveAgentToolRuntimeRules(
     ) {
       return [];
     }
+    if (capability?.credentialSource === 'local_cli') {
+      localCliCredentialAccess = true;
+      for (const protectedPath of capability.protectedPaths ?? []) {
+        const trimmed = protectedPath.trim();
+        if (trimmed) localCliCredentialPaths.add(trimmed);
+      }
+      for (const host of capability.networkHosts ?? []) {
+        const trimmed = host.trim().toLowerCase();
+        if (trimmed) localCliNetworkHosts.add(trimmed);
+      }
+    }
     return name
       ? projectToolCatalogItemToRuntimeRules({
           name,
@@ -76,7 +103,12 @@ export async function resolveAgentToolRuntimeRules(
     allowProjectedThirdPartyMcpTools: true,
     makeError: input.makeError,
   });
-  return rules;
+  return {
+    rules,
+    localCliCredentialAccess,
+    localCliCredentialPaths: [...localCliCredentialPaths],
+    localCliNetworkHosts: [...localCliNetworkHosts],
+  };
 }
 
 async function activeSkillActionProjectionKeys(

@@ -821,6 +821,16 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  it('returns false when a task is enqueued after shutdown starts', async () => {
+    await queue.shutdown(0);
+
+    const taskFn = vi.fn(async () => {});
+    const accepted = queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+
+    expect(accepted).toBe(false);
+    expect(taskFn).not.toHaveBeenCalled();
+  });
+
   // --- Coverage for sendMessage returning false when not active ---
 
   it('sendMessage returns false when no agent run is active for the group', () => {
@@ -1108,6 +1118,57 @@ describe('GroupQueue', () => {
         threadId: 'thread-b',
       }),
     ).toBe(false);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('requires the same sender for reviewer-authorized continuations', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'run-1',
+      'test-group',
+      undefined,
+      null,
+      { requiredContinuationUserId: 'sl:UADMIN' },
+    );
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    expect(
+      queue.sendMessage('group1@g.us', 'approve 1', {
+        senderUserIds: ['sl:UADMIN'],
+      }),
+    ).toBe(true);
+    expect(
+      queue.sendMessage('group1@g.us', 'approve 2', {
+        senderUserIds: ['sl:UOTHER'],
+      }),
+    ).toBe(false);
+    expect(
+      queue.sendMessage('group1@g.us', 'approve 3', {
+        senderUserIds: ['sl:UADMIN', 'sl:UOTHER'],
+      }),
+    ).toBe(false);
+    expect(queue.sendMessage('group1@g.us', 'approve 4')).toBe(false);
+
+    expect(writeFileSync).toHaveBeenCalledTimes(1);
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);

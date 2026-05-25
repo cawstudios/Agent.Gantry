@@ -11,6 +11,7 @@ Focus on:
 - clarifying vague requirements into concrete acceptance criteria
 - reconciling architecture and decision docs
 - producing a decision-complete implementation plan
+- including a Surface Impact Matrix for meaningful changes
 - identifying risks, sequencing, and verification strategy
 
 Do not start implementation.
@@ -24,4 +25,13 @@ Output these sections exactly:
 - Task Decomposition
 - Risks
 - Verify Plan
+
+For meaningful feature, fix, refactor, replacement, settings, permission,
+capability, persistence, API, CLI, MCP, docs/prompt, or runtime behavior changes,
+Technical Approach must include a Surface Impact Matrix that classifies runtime
+behavior, settings.yaml, Postgres/runtime projection, control API, SDK/contracts,
+CLI, Gantry MCP tools/admin skill, channel/provider adapters, docs/prompts,
+audit/events, and tests/verification as Changed, Read-only/observable,
+Unchanged by design, Deferred, or Not applicable. Give a short reason for every
+Deferred or Unchanged by design entry.
 """

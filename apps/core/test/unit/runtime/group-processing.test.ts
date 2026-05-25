@@ -1154,6 +1154,20 @@ describe('createGroupProcessor', () => {
       const isControlApproverAllowed = vi.fn(async () => true);
       const { deps } = setupHappyPath({ group, messages });
       deps.channelRuntime.isControlApproverAllowed = isControlApproverAllowed;
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          onProc: (proc: ChildProcess, runHandle: string) => void,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          onProc({} as ChildProcess, 'provider-run:review-1');
+          if (onOutput) {
+            await onOutput({ status: 'success', result: 'Agent reply text' });
+          }
+          return { status: 'success', result: 'Agent reply text' };
+        },
+      );
 
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('sl:D123');
@@ -1167,7 +1181,38 @@ describe('createGroupProcessor', () => {
       expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
         memoryReviewerIsControlApprover: true,
       });
+      expect(deps.queue.registerProcess).toHaveBeenCalledWith(
+        'sl:D123',
+        expect.anything(),
+        'provider-run:review-1',
+        group.folder,
+        undefined,
+        undefined,
+        { requiredContinuationUserId: 'sl:UADMIN' },
+      );
       expect(mockIsSenderControlAllowed).not.toHaveBeenCalled();
+    });
+
+    it('does not expose memory review authority for mixed-sender turns', async () => {
+      const group = makeGroup({
+        requiresTrigger: false,
+        conversationKind: 'channel',
+      });
+      const messages = [
+        makeMessage({ sender: 'sl:UOTHER', content: 'approve 1' }),
+        makeMessage({ sender: 'sl:UADMIN', content: 'yes' }),
+      ];
+      const isControlApproverAllowed = vi.fn(async () => true);
+      const { deps } = setupHappyPath({ group, messages });
+      deps.channelRuntime.isControlApproverAllowed = isControlApproverAllowed;
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('sl:C123');
+
+      expect(isControlApproverAllowed).not.toHaveBeenCalled();
+      expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
+        memoryReviewerIsControlApprover: false,
+      });
     });
 
     it('fails memory review approver status closed when canonical lookup is unavailable', async () => {
@@ -2094,11 +2139,16 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.collectSessionMemory).toHaveBeenCalledWith({
-        agentSessionId: 'agent-session:1',
-        trigger: 'precompact',
-        defaultScope: 'group',
-      });
+      expect(deps.collectSessionMemory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentSessionId: 'agent-session:1',
+          trigger: 'precompact',
+          defaultScope: 'group',
+          signal: expect.any(AbortSignal),
+          timeoutMs: 30_000,
+          statementTimeoutMs: 30_000,
+        }),
+      );
       expect(deps.queue.notifyIdle).not.toHaveBeenCalled();
     });
 
@@ -3324,7 +3374,7 @@ describe('createGroupProcessor', () => {
       );
     });
 
-    it('saveProcedure carries active thread scope into memory writes', async () => {
+    it('saveProcedure writes to the whole channel even when a thread is active', async () => {
       const { capturedDeps } = await captureSessionDeps({
         messages: [
           makeMessage({
@@ -3345,10 +3395,12 @@ describe('createGroupProcessor', () => {
         expect.objectContaining({
           subjectType: 'channel',
           channelId: 'conversation:group1@g.us',
-          threadId: 'thread-procedure',
           key: 'procedure:Deploy flow',
           value: '1. Build\n2. Ship',
         }),
+      );
+      expect(mockSaveProcedure.mock.calls[0]?.[0]).not.toHaveProperty(
+        'threadId',
       );
     });
 
@@ -3387,7 +3439,7 @@ describe('createGroupProcessor', () => {
       );
     });
 
-    it('runMemoryDreaming carries active thread scope into triggerDreaming', async () => {
+    it('runMemoryDreaming runs on the whole channel even when a thread is active', async () => {
       const { capturedDeps, group } = await captureSessionDeps({
         group: makeGroup({ folder: 'threaded-group' }),
         messages: [
@@ -3411,9 +3463,11 @@ describe('createGroupProcessor', () => {
           subjectType: 'channel',
           subjectId: 'conversation:group1@g.us',
           channelId: 'conversation:group1@g.us',
-          threadId: 'thread-dreaming',
           phase: 'all',
         }),
+      );
+      expect(mockRunDreamingSweep.mock.calls[0]?.[0]).not.toHaveProperty(
+        'threadId',
       );
     });
 
@@ -3773,11 +3827,16 @@ describe('createGroupProcessor', () => {
 
       await capturedRunAgent!('test prompt', vi.fn());
 
-      expect(deps.collectSessionMemory).toHaveBeenCalledWith({
-        agentSessionId: 'agent-session:test',
-        trigger: 'precompact',
-        defaultScope: 'group',
-      });
+      expect(deps.collectSessionMemory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentSessionId: 'agent-session:test',
+          trigger: 'precompact',
+          defaultScope: 'group',
+          signal: expect.any(AbortSignal),
+          timeoutMs: 30_000,
+          statementTimeoutMs: 30_000,
+        }),
+      );
     });
   });
 

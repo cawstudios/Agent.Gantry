@@ -96,6 +96,8 @@ reasoning effort, sandbox mode, and the developer instructions it must obey.
 | `performance-reviewer`  | `read-only`      | `reviewing` (parallel)   | JSON review                                 |
 | `security-reviewer`     | `read-only`      | `reviewing` (parallel)   | JSON review                                 |
 | `functional-checker`    | `workspace-write`| `functional-check`       | JSON functional report                      |
+| `surface-impact-reviewer` | `read-only`    | ad hoc plan/diff review   | Matrix/source-of-truth findings             |
+| `memory-lessons-curator` | `read-only`     | ad hoc lesson curation    | Proposed skill/prompt/AGENTS updates        |
 
 Output contracts are mirrored in `prompts/*.md` and validated in
 `scripts/factory_gates.py`. Reviewers are spawned **in parallel** per
@@ -269,6 +271,12 @@ commands for a class of change.
 | `permission-safety`     | Tool execution, sandbox, browser, IPC permission flows            |
 | `provider-adapter`      | LLM / channel / browser / sandbox provider integrations           |
 | `schema-change`         | Postgres schema, migrations, repository contracts                 |
+| `gantry-change-contract` | Surface Impact Matrix, cleanup evidence, verification selection  |
+| `settings-control-plane` | `settings.yaml`, desired state, projection, admin mutation paths |
+| `capability-lifecycle`  | Sources, capabilities, inventory, Browser, local CLI capabilities |
+| `scheduler-job-lifecycle` | Job execution, recovery, notification, terminal evidence        |
+| `memory-architecture-contract` | Memory digest, compaction, dreaming, retrieval, source ingestion |
+| `runtime-ops-verification` | Build/restart/status, launchd, disposable Postgres verification |
 
 Each skill's "Required Workflow" lists the docs to read and the gate scripts
 to run before handoff. Don't skip them — they exist because we got burned.

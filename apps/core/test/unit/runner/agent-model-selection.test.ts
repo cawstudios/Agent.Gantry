@@ -26,7 +26,7 @@ describe('Agent model selection', () => {
       'Did you mean "sonnet"',
     );
     expect(validateAgentModelRequest('kimi', sonnet).message).toContain(
-      'Cross-provider subagents are not supported',
+      'Cross-route subagents are not supported',
     );
     expect(
       validateAgentModelRequest('claude-sonnet-4-6', sonnet).message,
@@ -56,6 +56,14 @@ describe('Agent model selection', () => {
   it('rejects overrides when the parent run model is not cataloged', () => {
     expect(validateAgentModelRequest('sonnet', undefined).message).toContain(
       'cannot be validated because the parent run model is not in the Gantry catalog',
+    );
+  });
+
+  it('rejects native Agent overrides that cross model routes', () => {
+    const kimi = findModelByRunnerModel('moonshotai/kimi-k2.6');
+
+    expect(validateAgentModelRequest('opus', kimi).message).toContain(
+      'Cross-route subagents are not supported',
     );
   });
 

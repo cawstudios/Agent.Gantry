@@ -47,6 +47,7 @@ export interface JobVisibilityMetadata {
   requiredMcpServers: string[];
   toolAccess: JobToolAccessView;
   setup: JobSetupMetadata;
+  recovery: JobRecoveryMetadata;
   health: JobHealthMetadata;
   recentRunErrors: Array<{
     runId: string;
@@ -97,6 +98,17 @@ export interface JobSetupMetadata {
   nextAction: string | null;
 }
 
+export interface JobRecoveryMetadata {
+  state: NonNullable<Job['recovery_intent']>['state'] | 'none';
+  kind: NonNullable<Job['recovery_intent']>['kind'] | null;
+  updatedAt: string | null;
+  attempts: number;
+  requirementType: string | null;
+  requirementId: string | null;
+  nextAction: string | null;
+  lastError: string | null;
+}
+
 export async function buildJobVisibilityMetadata(input: {
   job: Job;
   ops: Pick<RuntimeJobRepository, 'listJobRuns'>;
@@ -133,6 +145,7 @@ export async function buildJobVisibilityMetadata(input: {
     nowMs,
   });
   const setup = setupMetadataForJob(input.job);
+  const recovery = recoveryMetadataForJob(input.job);
   return {
     executionContext,
     notificationRoutes,
@@ -155,6 +168,7 @@ export async function buildJobVisibilityMetadata(input: {
       effectiveAllowedTools: policy.effectiveAllowedTools,
     }),
     setup,
+    recovery,
     health,
     staleness,
     recentRunErrors: runs
@@ -229,6 +243,7 @@ export async function buildJobListVisibilityMetadata(input: {
             effectiveAllowedTools,
           }),
           setup: setupMetadataForJob(job),
+          recovery: recoveryMetadataForJob(job),
           health: buildJobHealth({
             job,
             runs,
@@ -342,6 +357,20 @@ function setupMetadataForJob(job: Job): JobSetupMetadata {
       requirementId: blocker.requirementId,
     })),
     nextAction: blockers[0]?.nextAction ?? null,
+  };
+}
+
+function recoveryMetadataForJob(job: Job): JobRecoveryMetadata {
+  const recovery = job.recovery_intent;
+  return {
+    state: recovery?.state ?? 'none',
+    kind: recovery?.kind ?? null,
+    updatedAt: recovery?.updated_at ?? null,
+    attempts: recovery?.attempts ?? 0,
+    requirementType: recovery?.requirement_type ?? null,
+    requirementId: recovery?.requirement_id ?? null,
+    nextAction: recovery?.next_action ?? null,
+    lastError: recovery?.last_error ?? null,
   };
 }
 

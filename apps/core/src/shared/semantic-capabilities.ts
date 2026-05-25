@@ -58,6 +58,7 @@ export interface SemanticCapabilityDefinition {
     message?: string;
   };
   protectedPaths?: string[];
+  networkHosts?: string[];
   redactionPolicy?: {
     fields?: string[];
     env?: string[];
@@ -92,6 +93,63 @@ const GOG_EXECUTABLE_PATH = '/opt/homebrew/bin/gog';
 const GOG_EXECUTABLE_VERSION = 'v0.9.0';
 const GOG_EXECUTABLE_HASH =
   'sha256:011a66fc2701d74a9009ce0b5c022f2360872326a138531c3ff674a1837f5738';
+const GOG_PROTECTED_PATHS = [
+  '${XDG_CONFIG_HOME}/gog',
+  '~/.config/gog',
+  '~/.gog',
+  '%APPDATA%\\gogcli',
+  '%LOCALAPPDATA%\\gogcli',
+  '~/Library/Application Support/gogcli',
+];
+const GOG_NETWORK_HOSTS = ['oauth2.googleapis.com', 'sheets.googleapis.com'];
+
+function gogSheetsCapability(input: {
+  capabilityId: string;
+  displayName: string;
+  risk: SemanticCapabilityRisk;
+  action: 'get' | 'update' | 'append';
+  can: string;
+  cannot: string;
+}): SemanticCapabilityDefinition {
+  return {
+    capabilityId: input.capabilityId,
+    version: '1',
+    displayName: input.displayName,
+    category: 'Google Sheets',
+    risk: input.risk,
+    accountLabel: 'Configured gog CLI account',
+    can: input.can,
+    cannot: input.cannot,
+    credentialSource: 'local_cli',
+    implementationBindings: [
+      {
+        kind: 'local_cli',
+        executablePath: GOG_EXECUTABLE_PATH,
+        executableVersion: GOG_EXECUTABLE_VERSION,
+        executableHash: GOG_EXECUTABLE_HASH,
+        commandTemplates: [`${GOG_EXECUTABLE_PATH} sheets ${input.action} *`],
+        authPreflightCommand: `${GOG_EXECUTABLE_PATH} auth status`,
+        deniedEnvPatterns: [...DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS],
+      },
+    ],
+    preflight: {
+      kind: 'command',
+      command: `${GOG_EXECUTABLE_PATH} auth status`,
+    },
+    protectedPaths: GOG_PROTECTED_PATHS,
+    networkHosts: GOG_NETWORK_HOSTS,
+    sandboxProfile: { network: 'required', filesystem: 'credential_read' },
+    redactionPolicy: {
+      env: [...DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS],
+      commandParts: ['token', 'secret', 'password'],
+    },
+    source: {
+      source: 'local_cli',
+      executablePath: GOG_EXECUTABLE_PATH,
+      executableHash: GOG_EXECUTABLE_HASH,
+    },
+  };
+}
 
 const BUILTIN_SEMANTIC_CAPABILITIES = [
   {
@@ -142,120 +200,33 @@ const BUILTIN_SEMANTIC_CAPABILITIES = [
     preflight: { kind: 'none' },
     sandboxProfile: { network: 'required', filesystem: 'read_only' },
   },
-  {
+  gogSheetsCapability({
     capabilityId: 'gog.sheets.get',
-    version: '1',
     displayName: 'Gog Sheets get',
-    category: 'Google Sheets',
     risk: 'read',
-    accountLabel: 'Configured gog CLI account',
+    action: 'get',
     can: 'Read spreadsheet values through the pinned gog CLI.',
     cannot:
       'Edit spreadsheets, change sharing, access Gmail, or receive raw Google credentials.',
-    credentialSource: 'local_cli',
-    implementationBindings: [
-      {
-        kind: 'local_cli',
-        executablePath: GOG_EXECUTABLE_PATH,
-        executableVersion: GOG_EXECUTABLE_VERSION,
-        executableHash: GOG_EXECUTABLE_HASH,
-        commandTemplates: [`${GOG_EXECUTABLE_PATH} sheets get *`],
-        authPreflightCommand: `${GOG_EXECUTABLE_PATH} auth status`,
-        deniedEnvPatterns: [...DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS],
-      },
-    ],
-    preflight: {
-      kind: 'command',
-      command: `${GOG_EXECUTABLE_PATH} auth status`,
-    },
-    protectedPaths: ['~/.config/gog', '~/.gog'],
-    sandboxProfile: { network: 'required', filesystem: 'credential_read' },
-    redactionPolicy: {
-      env: [...DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS],
-      commandParts: ['token', 'secret', 'password'],
-    },
-    source: {
-      source: 'local_cli',
-      executablePath: GOG_EXECUTABLE_PATH,
-      executableHash: GOG_EXECUTABLE_HASH,
-    },
-  },
-  {
+  }),
+  gogSheetsCapability({
     capabilityId: 'gog.sheets.update',
-    version: '1',
     displayName: 'Gog Sheets update',
-    category: 'Google Sheets',
     risk: 'write',
-    accountLabel: 'Configured gog CLI account',
+    action: 'update',
     can: 'Update spreadsheet values through the pinned gog CLI.',
     cannot:
       'Change sharing, manage Drive files outside Sheets operations, access Gmail, or receive raw Google credentials.',
-    credentialSource: 'local_cli',
-    implementationBindings: [
-      {
-        kind: 'local_cli',
-        executablePath: GOG_EXECUTABLE_PATH,
-        executableVersion: GOG_EXECUTABLE_VERSION,
-        executableHash: GOG_EXECUTABLE_HASH,
-        commandTemplates: [`${GOG_EXECUTABLE_PATH} sheets update *`],
-        authPreflightCommand: `${GOG_EXECUTABLE_PATH} auth status`,
-        deniedEnvPatterns: [...DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS],
-      },
-    ],
-    preflight: {
-      kind: 'command',
-      command: `${GOG_EXECUTABLE_PATH} auth status`,
-    },
-    protectedPaths: ['~/.config/gog', '~/.gog'],
-    sandboxProfile: { network: 'required', filesystem: 'credential_read' },
-    redactionPolicy: {
-      env: [...DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS],
-      commandParts: ['token', 'secret', 'password'],
-    },
-    source: {
-      source: 'local_cli',
-      executablePath: GOG_EXECUTABLE_PATH,
-      executableHash: GOG_EXECUTABLE_HASH,
-    },
-  },
-  {
+  }),
+  gogSheetsCapability({
     capabilityId: 'gog.sheets.append',
-    version: '1',
     displayName: 'Gog Sheets append',
-    category: 'Google Sheets',
     risk: 'write',
-    accountLabel: 'Configured gog CLI account',
+    action: 'append',
     can: 'Append spreadsheet values through the pinned gog CLI.',
     cannot:
       'Change sharing, manage Drive files outside Sheets operations, access Gmail, or receive raw Google credentials.',
-    credentialSource: 'local_cli',
-    implementationBindings: [
-      {
-        kind: 'local_cli',
-        executablePath: GOG_EXECUTABLE_PATH,
-        executableVersion: GOG_EXECUTABLE_VERSION,
-        executableHash: GOG_EXECUTABLE_HASH,
-        commandTemplates: [`${GOG_EXECUTABLE_PATH} sheets append *`],
-        authPreflightCommand: `${GOG_EXECUTABLE_PATH} auth status`,
-        deniedEnvPatterns: [...DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS],
-      },
-    ],
-    preflight: {
-      kind: 'command',
-      command: `${GOG_EXECUTABLE_PATH} auth status`,
-    },
-    protectedPaths: ['~/.config/gog', '~/.gog'],
-    sandboxProfile: { network: 'required', filesystem: 'credential_read' },
-    redactionPolicy: {
-      env: [...DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS],
-      commandParts: ['token', 'secret', 'password'],
-    },
-    source: {
-      source: 'local_cli',
-      executablePath: GOG_EXECUTABLE_PATH,
-      executableHash: GOG_EXECUTABLE_HASH,
-    },
-  },
+  }),
 ] as const satisfies readonly SemanticCapabilityDefinition[];
 
 export function listBuiltinSemanticCapabilities(): SemanticCapabilityDefinition[] {
@@ -392,11 +363,16 @@ export function validateSemanticCapabilityDefinition(
     if (!trimmedPath) {
       return { ok: false, reason: 'Protected paths cannot be empty.' };
     }
-    if (!path.isAbsolute(trimmedPath) && !trimmedPath.startsWith('~/')) {
+    const validPathHint =
+      path.isAbsolute(trimmedPath) ||
+      /^(~|\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%)(?:[/\\]|$)/.test(
+        trimmedPath,
+      );
+    if (!validPathHint) {
       return {
         ok: false,
         reason:
-          'Protected paths must be absolute paths or home-relative paths.',
+          'Protected paths must be absolute, home-relative, or env-rooted paths.',
       };
     }
   }
@@ -417,6 +393,7 @@ export function buildLocalCliSemanticCapability(input: {
   commandTemplates: string[];
   authPreflightCommand?: string;
   protectedPaths?: string[];
+  networkHosts?: string[];
   deniedEnvPatterns?: string[];
 }): SemanticCapabilityDefinition {
   return {
@@ -448,6 +425,7 @@ export function buildLocalCliSemanticCapability(input: {
       ? { kind: 'command', command: input.authPreflightCommand.trim() }
       : { kind: 'command', status: 'unknown' },
     protectedPaths: input.protectedPaths,
+    networkHosts: input.networkHosts,
     sandboxProfile: { network: 'required', filesystem: 'credential_read' },
     redactionPolicy: {
       env: [...DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS],

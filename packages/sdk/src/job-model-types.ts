@@ -109,6 +109,22 @@ export interface JobCapabilityRequirement {
   implementation?: JobCapabilityRequirementImplementation;
 }
 
+export interface JobRecoveryMetadata {
+  state: 'none' | 'pending' | 'running' | 'completed' | 'failed' | 'suppressed';
+  kind:
+    | 'setup_required'
+    | 'missing_capability'
+    | 'permission_denied'
+    | 'permission_timeout'
+    | null;
+  updatedAt: string | null;
+  attempts: number;
+  requirementType: string | null;
+  requirementId: string | null;
+  nextAction: string | null;
+  lastError: string | null;
+}
+
 export interface JobRecord {
   jobId: string;
   name: string;
@@ -131,6 +147,7 @@ export interface JobRecord {
   lastRun: string | null;
   staleness?: JobStaleness | null;
   health?: JobHealth;
+  recovery?: JobRecoveryMetadata;
   modelAlias: string | null;
   modelSelection?: {
     alias: string | null;
@@ -171,10 +188,28 @@ export interface ModelRecord {
   displayName: string;
   aliases: string[];
   recommendedAlias: string;
-  provider: string;
-  providerId: 'anthropic' | 'openrouter';
-  providerLabel: string;
-  providerSlug: string;
+  responseFamily: 'anthropic' | 'openai';
+  executionProviderId: string;
+  credentialProfileRef: string;
+  modelRoute: {
+    id: 'anthropic' | 'openrouter';
+    label: string;
+    metadata: {
+      providerModelId: string;
+    };
+  };
+  capabilities: {
+    streaming: boolean;
+    toolUse: boolean;
+    mcpProjection: boolean;
+    browserProjection: boolean;
+    sandboxProjection: boolean;
+    providerSessionResume: boolean;
+    thinking: boolean;
+    tokenAccounting: boolean;
+    cacheAccounting: boolean;
+    structuredOutput: boolean;
+  };
   supportedWorkloads: ModelWorkload[];
   contextWindowTokens: number;
   maxOutputTokens: number;
@@ -190,7 +225,7 @@ export interface ModelRecord {
   experimental: boolean;
 }
 
-export type ModelProviderPreset = 'anthropic' | 'openrouter';
+export type ModelPreset = 'anthropic' | 'openrouter';
 export type ModelWorkload =
   | 'chat'
   | 'one_time_job'
@@ -209,8 +244,8 @@ export interface ModelDefaultSlot {
 }
 
 export interface ModelDefaultsResponse {
-  provider: {
-    id: ModelProviderPreset;
+  preset: {
+    id: ModelPreset;
     label: string;
   } | null;
   chat: ModelDefaultSlot;
@@ -219,7 +254,7 @@ export interface ModelDefaultsResponse {
     recurring: ModelDefaultSlot;
   };
   memory: {
-    mode: 'provider-managed';
+    mode: 'preset-managed';
     extractor: ModelDefaultSlot;
     dreaming: ModelDefaultSlot;
     consolidation: ModelDefaultSlot;
@@ -235,12 +270,12 @@ export interface ModelDefaultsResponse {
 }
 
 export interface ModelDefaultsPatchRequest {
-  provider?: ModelProviderPreset;
+  preset?: ModelPreset;
   chat?: string | null;
   jobs?: string | null;
   oneTime?: string | null;
   recurring?: string | null;
-  memory?: 'reset' | 'provider-managed' | null;
+  memory?: 'reset' | 'preset-managed' | null;
 }
 
 export type ModelPreviewTarget = 'chat' | 'jobs' | 'job' | 'memory';
@@ -351,7 +386,11 @@ export type JobModelSource =
 
 export interface JobModelPreview {
   displayName: string;
-  provider: string;
+  responseFamily: 'anthropic' | 'openai';
+  modelRoute: {
+    id: 'anthropic' | 'openrouter';
+    label: string;
+  };
   contextWindowTokens: number;
   maxOutputTokens: number;
   cachePolicy: string;

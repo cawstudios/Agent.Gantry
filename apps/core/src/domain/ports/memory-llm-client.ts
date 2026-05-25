@@ -1,8 +1,9 @@
 export interface MemoryLlmModelProfile {
   alias: string;
   runnerModel: string;
-  provider: string;
-  providerLabel: string;
+  responseFamily: string;
+  modelRoute: string;
+  modelRouteLabel: string;
   displayName: string;
 }
 
@@ -15,6 +16,8 @@ export interface MemoryLlmQueryOpts {
     text: string;
     cacheStatic?: boolean;
   }>;
+  signal?: AbortSignal;
+  timeoutMs?: number;
   onUsage?: (usage: MemoryLlmUsage) => void;
 }
 

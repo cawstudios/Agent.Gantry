@@ -21,6 +21,7 @@ import { log } from './logging.js';
 import { writeOutput } from './output.js';
 import {
   buildSdkFilesystemSandbox,
+  readLocalCliCredentialDirectories,
   readProtectedFilesystemPaths,
 } from './filesystem-sandbox.js';
 import { createSafetyPreToolUseHook } from './protected-capability-hook.js';
@@ -185,8 +186,12 @@ export async function runQuery(
     getSessionId: () => newSessionId,
   });
   const systemPrompt = buildRunnerSystemPrompt(agentInput, memoryBlock);
+  const localCliCredentialDirectories = readLocalCliCredentialDirectories();
   const extraDirs = discoverAdditionalDirectories();
-  const protectedFilesystemPaths = readProtectedFilesystemPaths();
+  const protectedFilesystemPaths = [
+    ...readProtectedFilesystemPaths(),
+    ...localCliCredentialDirectories,
+  ];
   const workspaceFolder = agentInput.groupFolder;
   const enabledSdkSkills = readClaudeSdkSkillNamesFromEnv();
   const isolatedSdkEnv = {

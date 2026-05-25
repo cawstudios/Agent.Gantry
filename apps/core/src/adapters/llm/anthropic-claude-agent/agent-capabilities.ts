@@ -185,10 +185,14 @@ const gantryMcpProvider: AgentCapabilityProvider = {
         ctx.selectedMcpServerIds ?? [],
       ),
       GANTRY_MCP_TOOL_NAMES_JSON: JSON.stringify(
-        selectedGantryMcpToolNames(ctx.configuredAllowedTools ?? []),
+        selectedGantryMcpToolNames(ctx.configuredAllowedTools ?? [], {
+          memoryReviewerIsControlApprover: ctx.memoryReviewerIsControlApprover,
+        }),
       ),
       GANTRY_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(
-        selectedMemoryIpcActions(ctx.configuredAllowedTools ?? []),
+        selectedMemoryIpcActions(ctx.configuredAllowedTools ?? [], {
+          memoryReviewerIsControlApprover: ctx.memoryReviewerIsControlApprover,
+        }),
       ),
       ...(ctx.ipcDir ? { GANTRY_IPC_DIR: ctx.ipcDir } : {}),
       ...(ctx.ipcAuthToken ? { GANTRY_IPC_AUTH_TOKEN: ctx.ipcAuthToken } : {}),
@@ -298,7 +302,9 @@ const configuredToolProvider: AgentCapabilityProvider = {
     return {
       allowedTools: mergeUnique(
         allowedTools,
-        selectedGantryMcpFullToolNames(ctx.configuredAllowedTools ?? []),
+        selectedGantryMcpFullToolNames(ctx.configuredAllowedTools ?? [], {
+          memoryReviewerIsControlApprover: ctx.memoryReviewerIsControlApprover,
+        }),
       ),
       availableTools,
     };

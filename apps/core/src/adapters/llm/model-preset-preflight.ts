@@ -4,20 +4,20 @@ import path from 'node:path';
 import { getAgentCredentialInjection } from '../../application/credentials/agent-credential-service.js';
 import { createAgentCredentialBroker } from '../credentials/agent-credential-broker-factory.js';
 import {
-  getModelProviderPreset,
+  getModelPreset,
   resolveModelSelectionForWorkload,
-  type ModelProviderId,
+  type ModelPresetId,
 } from '../../shared/model-catalog.js';
 import { validateModelCredentialProjectionForEntry } from './anthropic-claude-agent/model-provider-credential-validation.js';
 import { createExternalAgentCredentialInjection } from './external-credential-injection.js';
 
-export interface ProviderPreflightResult {
+export interface ModelPresetPreflightResult {
   ok: boolean;
   status: 'pass' | 'fail' | 'skipped';
   message: string;
 }
 
-export interface ModelProviderPreflightSettings {
+export interface ModelPresetPreflightSettings {
   credentialBroker: {
     mode: 'none' | 'onecli' | 'external';
     onecli: { url: string };
@@ -25,13 +25,13 @@ export interface ModelProviderPreflightSettings {
   };
 }
 
-export async function preflightModelProvider(input: {
+export async function preflightModelPreset(input: {
   runtimeHome: string;
-  provider: ModelProviderId;
-  settings: ModelProviderPreflightSettings;
-}): Promise<ProviderPreflightResult> {
-  const { runtimeHome, provider, settings } = input;
-  const preset = getModelProviderPreset(provider);
+  preset: ModelPresetId;
+  settings: ModelPresetPreflightSettings;
+}): Promise<ModelPresetPreflightResult> {
+  const { runtimeHome, preset: presetId, settings } = input;
+  const preset = getModelPreset(presetId);
   const model = resolveModelSelectionForWorkload(preset.chatDefault, 'chat');
   if (!model.ok) return { ok: false, status: 'fail', message: model.message };
   if (settings.credentialBroker.mode === 'external') {
@@ -85,7 +85,7 @@ export async function preflightModelProvider(input: {
         brokerProfile: injection.brokerProfile,
       },
     });
-    if (provider === 'anthropic') {
+    if (model.entry.modelRoute.id === 'anthropic') {
       await assertOnecliAnthropicSecretConfigured(
         settings.credentialBroker.onecli.url,
       );
@@ -94,7 +94,7 @@ export async function preflightModelProvider(input: {
       ok: true,
       status: 'pass',
       message:
-        provider === 'openrouter'
+        model.entry.modelRoute.id === 'openrouter'
           ? 'OpenRouter-scoped Model Access credential is available.'
           : `${preset.label} Model Access credential is available.`,
     };
@@ -111,7 +111,7 @@ async function assertOnecliAnthropicSecretConfigured(
   rawOnecliUrl: string,
 ): Promise<void> {
   const validation = validateOnecliLocalUrl(rawOnecliUrl);
-  const response = await fetch(new URL('/api/secrets', validation).toString());
+  const response = await fetch(onecliApiUrl(validation, 'api/secrets'));
   if (!response.ok) {
     throw new Error(
       `Could not verify Anthropic Model Access credentials: OneCLI returned ${response.status}.`,
@@ -154,6 +154,16 @@ function validateOnecliLocalUrl(rawOnecliUrl: string): string {
   return parsed.toString().replace(/\/$/, '');
 }
 
+export function onecliApiUrl(rawOnecliUrl: string, apiPath: string): string {
+  const parsed = new URL(rawOnecliUrl);
+  const basePath = parsed.pathname.replace(/\/+$/, '');
+  const relativePath = apiPath.replace(/^\/+/, '');
+  parsed.pathname = `${basePath}/${relativePath}`;
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString();
+}
+
 function resolveExternalModelBrokerBaseUrl(rawBrokerUrl: string): string {
   const label = 'credential_broker.external.base_url';
   const input = rawBrokerUrl.trim();
@@ -161,8 +171,8 @@ function resolveExternalModelBrokerBaseUrl(rawBrokerUrl: string): string {
   let parsed: URL;
   try {
     parsed = new URL(input);
-  } catch {
-    throw new Error(`${label} must be a valid URL.`);
+  } catch (error) {
+    throw new Error(`${label} must be a valid URL.`, { cause: error });
   }
   if (parsed.username || parsed.password) {
     throw new Error(`${label} must not contain embedded credentials.`);
