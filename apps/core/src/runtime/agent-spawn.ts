@@ -429,6 +429,9 @@ export async function spawnAgent(
         : [];
     const memoryIpcAllowedActions = selectedMemoryIpcActionsFromToolRules(
       trustedAllowedTools ?? [],
+      {
+        memoryReviewerIsControlApprover: input.memoryReviewerIsControlApprover,
+      },
     );
     const upstreamProxyUrl =
       hostCredentials.proxy?.https || hostCredentials.proxy?.http;

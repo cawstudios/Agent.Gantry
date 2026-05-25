@@ -178,6 +178,81 @@ describe('jobs/execution-notifications', () => {
     expect(message).not.toContain('deduped');
   });
 
+  it('sends pending memory review guidance through scheduler notification routes', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+
+    await notifySchedulerTerminalRunState({
+      job: makeJob({ name: 'Memory Dreaming (main_agent tg:5759865942)' }),
+      runId: 'run-1',
+      runShortId: 7,
+      runStatus: 'completed',
+      summary: 'Memory dreaming completed: 3 promoted, 4 sent to review.',
+      nextRun: '2026-05-15T21:45:00.000Z',
+      retryCount: 0,
+      pauseReason: null,
+      sendMessage,
+      durationMs: 14_000,
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      'tg:scheduler',
+      expect.stringContaining(
+        'Needs memory review: Memory Dreaming (main_agent tg:5759865942)',
+      ),
+      { threadId: 'thread-1' },
+    );
+    const message = String(sendMessage.mock.calls[0]?.[1]);
+    expect(message).toContain(
+      'Outcome: Memory dreaming completed: 3 promoted, 4 sent to review.',
+    );
+    expect(message).toContain(
+      'Action: Ask the agent to show pending memory reviews, then approve, reject, or edit by number.',
+    );
+    expect(message).not.toContain('memory_review_pending');
+  });
+
+  it('keeps pending memory review guidance in lifecycle update summaries', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+    const updateLifecycleNotification = vi.fn(async () => 'updated' as const);
+
+    const notified = await notifySchedulerTerminalRunState({
+      job: makeJob({ name: 'Memory Dreaming (main_agent tg:5759865942)' }),
+      runId: 'run-1',
+      runShortId: 8,
+      runStatus: 'completed',
+      summary:
+        'Memory dreaming completed with no memory changes. 7 pending memory reviews need review.',
+      nextRun: null,
+      retryCount: 0,
+      pauseReason: null,
+      sendMessage,
+      updateLifecycleNotification,
+      durationMs: 15_000,
+    });
+
+    expect(notified).toBe(true);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(updateLifecycleNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runStatus: 'completed',
+        summaryMessage: expect.stringContaining(
+          'Needs memory review: Memory Dreaming (main_agent tg:5759865942)',
+        ),
+      }),
+    );
+    const summaryMessage = String(
+      updateLifecycleNotification.mock.calls[0]?.[0].summaryMessage,
+    );
+    expect(summaryMessage).toContain(
+      'Outcome: Memory dreaming completed with no memory changes. 7 pending memory reviews need review.',
+    );
+    expect(summaryMessage).toContain(
+      'Action: Ask the agent to show pending memory reviews, then approve, reject, or edit by number.',
+    );
+    expect(summaryMessage).not.toContain('memory_review_pending');
+  });
+
   it('hides runner diagnostics from failed job receipts', async () => {
     const sendMessage = vi.fn(async () => undefined);
 

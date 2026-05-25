@@ -9,7 +9,13 @@ import { stopActiveGroupRun } from './group-queue-stop.js';
 import { normalizeThreadQueueId } from './thread-queue-key.js';
 
 type QueueKind = 'message' | 'task';
-type ContinuationOptions = { threadId?: string | null };
+type ContinuationOptions = {
+  threadId?: string | null;
+  senderUserIds?: readonly string[] | null;
+};
+type RegisterProcessOptions = {
+  requiredContinuationUserId?: string | null;
+};
 type ContinuationHandler = () => void;
 
 interface QueuedTask {
@@ -50,6 +56,7 @@ interface GroupState {
   runHandle: string | null;
   groupFolder: string | null;
   threadId: string | null;
+  requiredContinuationUserId: string | null;
   retryCount: number;
   continuationHandler: ContinuationHandler | null;
 }
@@ -103,6 +110,7 @@ export class GroupQueue {
         runHandle: null,
         groupFolder: null,
         threadId: null,
+        requiredContinuationUserId: null,
         retryCount: 0,
         continuationHandler: null,
       };
@@ -303,12 +311,15 @@ export class GroupQueue {
     groupFolder?: string,
     stopAliasJids?: string | string[],
     threadId?: string | null,
+    options: RegisterProcessOptions = {},
   ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.runHandle = runHandle;
     if (groupFolder) state.groupFolder = groupFolder;
     state.threadId = normalizeThreadQueueId(threadId) || null;
+    state.requiredContinuationUserId =
+      options.requiredContinuationUserId?.trim() || null;
     const aliases = Array.isArray(stopAliasJids)
       ? stopAliasJids
       : stopAliasJids
@@ -352,6 +363,15 @@ export class GroupQueue {
     if (!state.active || !state.groupFolder || state.isTaskRun) return false;
     const incomingThreadId = normalizeThreadQueueId(options.threadId) || null;
     if (state.threadId !== incomingThreadId) return false;
+    if (
+      state.requiredContinuationUserId &&
+      !continuationSenderMatchesRequiredUser(
+        options.senderUserIds,
+        state.requiredContinuationUserId,
+      )
+    ) {
+      return false;
+    }
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
     try {
       writeContinuationInput(
@@ -452,6 +472,7 @@ export class GroupQueue {
       state.runHandle = null;
       state.groupFolder = null;
       state.threadId = null;
+      state.requiredContinuationUserId = null;
       state.continuationHandler = null;
       this.activeMessageCount--;
       this.removeStopAliasForQueueJid(groupJid);
@@ -490,6 +511,7 @@ export class GroupQueue {
       state.runHandle = null;
       state.groupFolder = null;
       state.threadId = null;
+      state.requiredContinuationUserId = null;
       this.activeTaskCount--;
       this.removeStopAliasForQueueJid(groupJid);
       this.drainGroup(groupJid);
@@ -646,4 +668,18 @@ function normalizeNonNegativeInteger(
   return typeof value === 'number' && Number.isInteger(value) && value >= 0
     ? value
     : fallback;
+}
+
+function continuationSenderMatchesRequiredUser(
+  senderUserIds: readonly string[] | null | undefined,
+  requiredUserId: string,
+): boolean {
+  const normalizedSenderIds = new Set<string>();
+  for (const senderUserId of senderUserIds ?? []) {
+    const normalized = senderUserId.trim();
+    if (normalized) normalizedSenderIds.add(normalized);
+  }
+  return (
+    normalizedSenderIds.size === 1 && normalizedSenderIds.has(requiredUserId)
+  );
 }

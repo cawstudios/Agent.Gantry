@@ -14,6 +14,7 @@ import {
   resolveTurnSelectedSkillIds,
 } from './group-run-context.js';
 import {
+  resolveSingleNonSelfSenderId,
   buildApprovedSkillContextBlock,
   buildRuntimeRunOptions,
   completeFailedRuntimeSessionRun,
@@ -175,7 +176,11 @@ export function createGroupAgentRunner(input: {
         threadId?: string;
         recallQuery?: string;
       };
-      turnMessages?: readonly { content?: string | null }[];
+      turnMessages?: readonly {
+        content?: string | null;
+        sender?: string | null;
+        is_from_me?: boolean | null;
+      }[];
     },
   ): Promise<'success' | 'error'> {
     const executionProviderId = resolveRuntimeExecutionProviderId(
@@ -203,11 +208,14 @@ export function createGroupAgentRunner(input: {
     const defaultMemoryScope = memoryScopeForConversationKind(
       group.conversationKind,
     );
+    const memoryReviewerUserId = resolveSingleNonSelfSenderId(
+      options?.turnMessages ?? [],
+    );
     const memoryReviewerIsControlApprover = await memoryReviewerApproverAllowed(
       deps,
       chatJid,
       group.folder,
-      options?.memoryContext?.userId,
+      memoryReviewerUserId,
     );
     const runState: { runId?: string } = {};
     let latestProviderSessionId =
@@ -415,6 +423,22 @@ export function createGroupAgentRunner(input: {
           } as Parameters<typeof runAgentImpl>[1],
           (proc, runHandle) => {
             void updateRunProviderMetadata({ providerRunId: runHandle });
+            const registerOptions =
+              memoryReviewerIsControlApprover && memoryReviewerUserId
+                ? { requiredContinuationUserId: memoryReviewerUserId }
+                : undefined;
+            if (registerOptions) {
+              deps.queue.registerProcess(
+                queueJid,
+                proc,
+                runHandle,
+                group.folder,
+                queueJid === chatJid ? undefined : chatJid,
+                options?.memoryContext?.threadId,
+                registerOptions,
+              );
+              return;
+            }
             deps.queue.registerProcess(
               queueJid,
               proc,

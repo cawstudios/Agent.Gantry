@@ -857,6 +857,65 @@ describe('agent-spawn timeout behavior', () => {
     ).toThrow(/Invalid memory IPC signature/);
   });
 
+  it('includes reviewer memory actions in spawned IPC signatures for control approvers', async () => {
+    const input = {
+      ...testInput,
+      chatJid: 'tg:trusted-chat',
+      memoryUserId: 'reviewer-a',
+      memoryReviewerIsControlApprover: true,
+    };
+    const resultPromise = spawnTestAgent(testGroup, input, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER).toBe('1');
+    const allowedActions = JSON.parse(
+      env.GANTRY_MEMORY_IPC_ACTIONS_JSON,
+    ) as string[];
+    expect(allowedActions).toEqual(
+      expect.arrayContaining([
+        'memory_review_pending',
+        'memory_review_decision',
+      ]),
+    );
+    expect(
+      parseMemoryIpcRequest(
+        createSignedIpcRequestEnvelope(env.GANTRY_MEMORY_IPC_AUTH_TOKEN, {
+          requestId: 'mem-spawn-reviewer-scope',
+          action: 'memory_review_pending',
+          payload: { limit: 10 },
+          context: {
+            chatJid: env.GANTRY_CHAT_JID,
+            threadId: env.GANTRY_THREAD_ID,
+            userId: env.GANTRY_MEMORY_USER_ID,
+            defaultScope: env.GANTRY_MEMORY_DEFAULT_SCOPE,
+            allowedActions,
+            reviewerIsControlApprover: true,
+            responseKeyId: env.GANTRY_IPC_RESPONSE_KEY_ID,
+          },
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+        testGroup.folder,
+      ),
+    ).toMatchObject({
+      action: 'memory_review_pending',
+      allowedActions: expect.arrayContaining([
+        'memory_review_pending',
+        'memory_review_decision',
+      ]),
+      context: {
+        userId: 'reviewer-a',
+        reviewerIsControlApprover: true,
+      },
+    });
+  });
+
   it('passes effective model to process env when configured', async () => {
     vi.mocked(getEffectiveModelConfig).mockReturnValue({
       model: 'opus',

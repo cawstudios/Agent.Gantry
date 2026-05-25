@@ -286,7 +286,10 @@ export async function startRuntimeServices(
         : undefined;
 
     if (command.kind === 'compact') {
-      const sent = app.queue.sendMessage(queueJid, '/compact', { threadId });
+      const sent = app.queue.sendMessage(queueJid, '/compact', {
+        threadId,
+        senderUserIds: message.sender ? [message.sender] : [],
+      });
       if (!sent) return false;
       app.setAgentCursor(
         makeThreadQueueKey(chatJid, threadId),

@@ -529,3 +529,22 @@ export function resolveMemoryUserId(
   }
   return messages[messages.length - 1]?.sender?.trim() || undefined;
 }
+
+export function resolveNonSelfSenderIds(
+  messages: readonly { sender?: string | null; is_from_me?: boolean | null }[],
+): string[] {
+  const senderIds = new Set<string>();
+  for (const message of messages) {
+    if (message.is_from_me) continue;
+    const sender = message.sender?.trim();
+    if (sender) senderIds.add(sender);
+  }
+  return [...senderIds];
+}
+
+export function resolveSingleNonSelfSenderId(
+  messages: readonly { sender?: string | null; is_from_me?: boolean | null }[],
+): string | undefined {
+  const senderIds = resolveNonSelfSenderIds(messages);
+  return senderIds.length === 1 ? senderIds[0] : undefined;
+}

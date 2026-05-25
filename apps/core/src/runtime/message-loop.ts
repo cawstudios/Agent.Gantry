@@ -28,6 +28,7 @@ import {
 } from '../session/session-commands.js';
 import type { SessionCommand } from '../session/session-commands.js';
 import { makeThreadQueueKey, parseThreadQueueKey } from './thread-queue-key.js';
+import { resolveNonSelfSenderIds } from './session-resume-runtime.js';
 
 export interface MessageLoopDeps {
   getConversationRoutes: () => Record<string, ConversationRoute>;
@@ -47,7 +48,10 @@ export interface MessageLoopDeps {
     sendMessage: (
       chatJid: string,
       text: string,
-      options?: { threadId?: string | null },
+      options?: {
+        threadId?: string | null;
+        senderUserIds?: readonly string[] | null;
+      },
     ) => boolean;
     enqueueMessageCheck: (chatJid: string) => void;
     closeStdin: (chatJid: string) => void;
@@ -202,8 +206,14 @@ export async function runMessagePollingTick(
         while (nextBatch && nextBatch.length > 0) {
           const messagesToSend = nextBatch;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
+          const senderUserIds = resolveNonSelfSenderIds(messagesToSend);
 
-          if (!deps.queue.sendMessage(queueJid, formatted, { threadId })) {
+          if (
+            !deps.queue.sendMessage(queueJid, formatted, {
+              threadId,
+              senderUserIds,
+            })
+          ) {
             shouldEnqueueMessageCheck = true;
             break;
           }
