@@ -30,6 +30,9 @@ describe('Claude SDK filesystem sandbox settings', () => {
       network: { allowLocalBinding: true },
       enableWeakerNetworkIsolation: true,
       filesystem: {
+        denyRead: expect.arrayContaining([
+          expect.stringMatching(/\/tmp\/protected$/),
+        ]),
         denyWrite: expect.arrayContaining([
           expect.stringMatching(/\/tmp\/protected$/),
         ]),

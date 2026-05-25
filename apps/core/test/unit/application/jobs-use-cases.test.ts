@@ -271,6 +271,107 @@ describe('job application use cases', () => {
     expect(scheduler.requestSchedulerSync).toHaveBeenCalledWith('job-browser');
   });
 
+  it('does not requeue a direct job id outside the permission grant scope', async () => {
+    const foreignJob = makeJob({
+      id: 'job-foreign',
+      name: 'Foreign job',
+      group_scope: 'other-team',
+      status: 'paused',
+      pause_reason: 'Setup required',
+      execution_context: {
+        conversationJid: 'tg:other',
+        threadId: null,
+        groupScope: 'other-team',
+      },
+      setup_state: {
+        state: 'missing_capability',
+        checked_at: '2026-05-14T00:00:00.000Z',
+        fingerprint: 'old',
+        blockers: [],
+      },
+    });
+    const updateJob = vi.fn();
+    const scheduler = { requestSchedulerSync: vi.fn() };
+
+    const result = await recheckSetupPausedJobsAfterPermissionGrant({
+      appId: 'default',
+      sourceAgentFolder: 'team',
+      conversationJid: 'tg:team',
+      jobId: 'job-foreign',
+      opsRepository: {
+        listJobs: vi.fn(),
+        getJobById: vi.fn(async () => foreignJob),
+        updateJob,
+      } as unknown as RuntimeJobRepository,
+      scheduler,
+      clock: { now: () => '2026-05-14T00:05:00.000Z' },
+    });
+
+    expect(result).toEqual({ checked: 0, queued: [], stillBlocked: [] });
+    expect(updateJob).not.toHaveBeenCalled();
+    expect(scheduler.requestSchedulerSync).not.toHaveBeenCalled();
+  });
+
+  it('does not clear a running recovery intent while rechecking permissions', async () => {
+    const job = makeJob({
+      id: 'job-recovering',
+      name: 'Recovering job',
+      group_scope: 'team',
+      status: 'paused',
+      pause_reason: 'Setup required',
+      execution_context: {
+        conversationJid: 'tg:team',
+        threadId: null,
+        groupScope: 'team',
+      },
+      setup_state: {
+        state: 'missing_capability',
+        checked_at: '2026-05-14T00:00:00.000Z',
+        fingerprint: 'old',
+        blockers: [],
+      },
+      recovery_intent: {
+        state: 'running',
+        kind: 'missing_capability',
+        requirement_type: 'browser',
+        requirement_id: 'Browser',
+        dedupe_key: 'setup:browser:Browser',
+        attempts: 1,
+        source_run_id: 'run-1',
+        created_at: '2026-05-14T00:00:00.000Z',
+        updated_at: '2026-05-14T00:01:00.000Z',
+        last_error: null,
+      },
+    });
+    const updateJob = vi.fn();
+
+    const result = await recheckSetupPausedJobsAfterPermissionGrant({
+      appId: 'default',
+      sourceAgentFolder: 'team',
+      conversationJid: 'tg:team',
+      opsRepository: {
+        listJobs: vi.fn(async () => [job]),
+        getJobById: vi.fn(),
+        updateJob,
+      } as unknown as RuntimeJobRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      clock: { now: () => '2026-05-14T00:05:00.000Z' },
+    });
+
+    expect(result).toMatchObject({
+      checked: 1,
+      queued: [],
+      stillBlocked: [
+        {
+          jobId: 'job-recovering',
+          state: 'still_blocked',
+          nextAction: 'Recovery is already running for this job.',
+        },
+      ],
+    });
+    expect(updateJob).not.toHaveBeenCalled();
+  });
+
   it('derives semantic tool access requirements from job capability requirements', async () => {
     const upsertJob = vi.fn(async () => ({ created: true }));
     const runtimeEvents = { publish: vi.fn(async () => undefined) };

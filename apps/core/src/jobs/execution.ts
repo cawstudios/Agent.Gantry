@@ -238,6 +238,7 @@ export async function runJob(
           currentJob,
           startedAtMs,
           timeoutMs,
+          logger,
           context: {
             folder: execution.group.folder,
             conversationId: execution.executionJid,

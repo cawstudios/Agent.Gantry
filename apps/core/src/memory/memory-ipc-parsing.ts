@@ -110,21 +110,6 @@ export function parseDemoteMemoryInput(payload: unknown): {
   });
 }
 
-export function parseReviewDecisionInput(payload: unknown): {
-  reviewId: string;
-  decision: MemoryReviewDecision;
-  editedValue?: string;
-  editedReason?: string;
-} {
-  const parsed = parseReviewDecisionRequest(payload);
-  if (parsed.kind !== 'single') {
-    throw new Error(
-      'memory_review_decision requires review_id for single decisions',
-    );
-  }
-  return parsed;
-}
-
 export function parseReviewDecisionRequest(
   payload: unknown,
 ): ParsedReviewDecisionRequest {

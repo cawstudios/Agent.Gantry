@@ -109,6 +109,22 @@ export interface JobCapabilityRequirement {
   implementation?: JobCapabilityRequirementImplementation;
 }
 
+export interface JobRecoveryMetadata {
+  state: 'none' | 'pending' | 'running' | 'completed' | 'failed' | 'suppressed';
+  kind:
+    | 'setup_required'
+    | 'missing_capability'
+    | 'permission_denied'
+    | 'permission_timeout'
+    | null;
+  updatedAt: string | null;
+  attempts: number;
+  requirementType: string | null;
+  requirementId: string | null;
+  nextAction: string | null;
+  lastError: string | null;
+}
+
 export interface JobRecord {
   jobId: string;
   name: string;
@@ -131,6 +147,7 @@ export interface JobRecord {
   lastRun: string | null;
   staleness?: JobStaleness | null;
   health?: JobHealth;
+  recovery?: JobRecoveryMetadata;
   modelAlias: string | null;
   modelSelection?: {
     alias: string | null;

@@ -45,14 +45,9 @@ type MemoryReviewRow =
 type MemoryItemRow = typeof pgSchema.memoryItemsPostgres.$inferSelect;
 type MemoryEvidenceRow = typeof pgSchema.memoryEvidencePostgres.$inferSelect;
 const sqlThreadIdentityFilter = createSqlThreadIdentityFilter({ eq, isNull });
-const REVIEW_APPLYABLE_ACTIONS = new Set([
-  'promote',
-  'retire',
-  'rewrite',
-  'merge',
-  'needs_review',
-]);
-
+const REVIEW_APPLYABLE_ACTIONS = new Set(
+  'promote retire rewrite merge needs_review'.split(' '),
+);
 function pendingMemoryReviewFilter(subject: NormalizedMemorySubject) {
   return and(
     eq(pgSchema.memoryReviewRequestsPostgres.appId, subject.appId),
@@ -66,7 +61,6 @@ function pendingMemoryReviewFilter(subject: NormalizedMemorySubject) {
     eq(pgSchema.memoryReviewRequestsPostgres.status, 'pending_review'),
   );
 }
-
 async function itemMapForReviews(
   db: Db,
   reviews: MemoryReviewRecord[],
@@ -89,7 +83,6 @@ async function itemMapForReviews(
   )) as MemoryItemRow[];
   return new Map(rows.map((row) => [row.id, toReadableReviewItem(row)]));
 }
-
 async function evidenceMapForReviews(
   db: Db,
   subject: NormalizedMemorySubject,
@@ -128,7 +121,6 @@ async function evidenceMapForReviews(
     rows.map((row) => [row.id, toMemoryReviewEvidenceSnippet(row)]),
   );
 }
-
 export async function countPendingMemoryReviews(input: {
   db: Db;
   subject: NormalizedMemorySubject;
@@ -149,7 +141,6 @@ export async function countPendingMemoryReviews(input: {
   const count = Number(rows[0]?.count ?? 0);
   return Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0;
 }
-
 export async function listPendingMemoryReviews(input: {
   db: Db;
   subject: NormalizedMemorySubject;
@@ -182,7 +173,6 @@ export async function listPendingMemoryReviews(input: {
   );
   return withProposedChanges(reviews, itemsById);
 }
-
 export async function listPendingMemoryReviewPage(input: {
   db: Db;
   subject: NormalizedMemorySubject;
@@ -233,7 +223,6 @@ export async function listPendingMemoryReviewPage(input: {
     nextOffset: nextOffset < totalCount ? nextOffset : null,
   };
 }
-
 export async function createPendingMemoryReview(input: {
   db: Db;
   runId: string;
@@ -276,44 +265,49 @@ export async function decideMemoryReview(input: {
   patch: (value: PatchAppMemoryInput) => Promise<AppMemoryItem>;
   delete: (value: DeleteAppMemoryInput) => Promise<{ deleted: boolean }>;
 }): Promise<MemoryReviewRecord> {
-  const rows = await input.db
-    .select()
-    .from(pgSchema.memoryReviewRequestsPostgres)
-    .where(
-      and(
-        eq(pgSchema.memoryReviewRequestsPostgres.id, input.decision.reviewId),
-        eq(pgSchema.memoryReviewRequestsPostgres.status, 'pending_review'),
-        eq(pgSchema.memoryReviewRequestsPostgres.appId, input.subject.appId),
-      ),
-    )
-    .limit(1);
-  const row = rows[0];
-  if (!row) throw new Error('pending memory review not found');
-  const review = toMemoryReview(row);
-  if (
-    review.agentId !== input.subject.agentId ||
-    review.subjectType !== input.subject.subjectType ||
-    review.subjectId !== input.subject.subjectId ||
-    (review.threadId || undefined) !== (input.subject.threadId || undefined)
-  ) {
-    throw new Error('memory review is outside trusted subject scope');
-  }
   const now = nowIso();
+  const reviewerFields = {
+    decision: input.decision.decision,
+    reviewerId: input.decision.reviewerId ?? null,
+    editedValue: input.decision.editedValue ?? null,
+    editedReason: input.decision.editedReason ?? null,
+    updatedAt: now,
+    decidedAt: now,
+  };
   if (input.decision.decision === 'reject') {
     const [updated] = await input.db
       .update(pgSchema.memoryReviewRequestsPostgres)
       .set({
         status: 'rejected',
-        decision: 'reject',
-        reviewerId: input.decision.reviewerId ?? null,
+        ...reviewerFields,
         applyOutcome: 'rejected by reviewer',
-        updatedAt: now,
-        decidedAt: now,
       })
-      .where(eq(pgSchema.memoryReviewRequestsPostgres.id, review.id))
+      .where(
+        and(
+          eq(pgSchema.memoryReviewRequestsPostgres.id, input.decision.reviewId),
+          pendingMemoryReviewFilter(input.subject),
+        ),
+      )
       .returning();
-    return toMemoryReview(updated!);
+    if (!updated) throw new Error('pending memory review not found');
+    return toMemoryReview(updated);
   }
+  const [claimed] = await input.db
+    .update(pgSchema.memoryReviewRequestsPostgres)
+    .set({
+      status: 'approved',
+      ...reviewerFields,
+      applyOutcome: 'review decision claimed for application',
+    })
+    .where(
+      and(
+        eq(pgSchema.memoryReviewRequestsPostgres.id, input.decision.reviewId),
+        pendingMemoryReviewFilter(input.subject),
+      ),
+    )
+    .returning();
+  if (!claimed) throw new Error('pending memory review not found');
+  const review = toMemoryReview(claimed);
   const proposal: MemoryLifecycleProposal = {
     ...review.proposal,
     ...(input.decision.decision === 'edit_approve' &&
@@ -345,9 +339,15 @@ export async function decideMemoryReview(input: {
         updatedAt: now,
         decidedAt: now,
       })
-      .where(eq(pgSchema.memoryReviewRequestsPostgres.id, review.id))
+      .where(
+        and(
+          eq(pgSchema.memoryReviewRequestsPostgres.id, review.id),
+          eq(pgSchema.memoryReviewRequestsPostgres.status, 'approved'),
+        ),
+      )
       .returning();
-    return toMemoryReview(updated!);
+    if (!updated) throw new Error('memory review decision claim was lost');
+    return toMemoryReview(updated);
   }
   const outcome = await applyMemoryReviewProposal({
     db: input.db,
@@ -370,9 +370,15 @@ export async function decideMemoryReview(input: {
       updatedAt: now,
       decidedAt: now,
     })
-    .where(eq(pgSchema.memoryReviewRequestsPostgres.id, review.id))
+    .where(
+      and(
+        eq(pgSchema.memoryReviewRequestsPostgres.id, review.id),
+        eq(pgSchema.memoryReviewRequestsPostgres.status, 'approved'),
+      ),
+    )
     .returning();
-  return toMemoryReview(updated!);
+  if (!updated) throw new Error('memory review decision claim was lost');
+  return toMemoryReview(updated);
 }
 async function validateMemoryReviewProposal(input: {
   db: Db;
@@ -688,10 +694,5 @@ function failure(reason: string): {
   itemVersions: Record<string, number>;
   candidateVersions: Record<string, string>;
 } {
-  return {
-    ok: false,
-    reason,
-    itemVersions: {},
-    candidateVersions: {},
-  };
+  return { ok: false, reason, itemVersions: {}, candidateVersions: {} };
 }

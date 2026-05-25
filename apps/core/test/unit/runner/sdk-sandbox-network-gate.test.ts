@@ -258,6 +258,54 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
+  it('allows one parentless scheduled job network prompt from curl --url argv', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      {
+        command:
+          'curl --silent --url https://api.github.com/repos/acme/roadmap',
+      },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'api.github.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('allow');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_suppressed_parentless_recent_tool',
+      approvedHostHashes: [sha256('api.github.com')],
+    });
+  });
+
+  it('does not bind parentless network approval to inert URLs in Bash text', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'echo https://api.github.com/repos/acme/roadmap' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'api.github.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('deny');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      hostHash: sha256('api.github.com'),
+    });
+  });
+
   it('denies parentless scheduled job network prompts for a different host', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
@@ -345,7 +393,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('uses reviewed local CLI network host hints for scheduled commands', () => {
+  it('does not widen parentless scheduled approvals with reviewed local CLI host hints', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, {
       ...runnerInput,
@@ -364,12 +412,11 @@ describe('sdk sandbox network gate', () => {
       { toolUseID: 'toolu_network_1' },
     );
 
-    expect(decision?.behavior).toBe('allow');
+    expect(decision?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
-      decision: 'sdk_network_gate_suppressed_parentless_recent_tool',
+      decision: 'sdk_network_gate_denied',
       networkToolUseIDHash: sha256('toolu_network_1'),
-      parentToolUseIDHash: sha256('toolu_bash_1'),
-      approvedHostHashes: [sha256('sheets.googleapis.com')],
+      hostHash: sha256('sheets.googleapis.com'),
     });
   });
 

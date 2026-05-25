@@ -500,7 +500,7 @@ describe('createCanUseToolCallback', () => {
     expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 
-  it('suppresses parentless SandboxNetworkAccess immediately after a scheduled scoped RunCommand allow', async () => {
+  it('does not suppress parentless SandboxNetworkAccess from local CLI host hints alone', async () => {
     const canUseTool = makeCallback({
       agentInput: {
         runMode: 'normal',
@@ -542,8 +542,10 @@ describe('createCanUseToolCallback', () => {
 
     expect(bash.behavior).toBe('allow');
     expect(network).toEqual({
-      behavior: 'allow',
-      updatedInput: { host: 'oauth2.googleapis.com' },
+      behavior: 'deny',
+      interrupt: false,
+      message:
+        'SDK requested sandbox network access without a parent tool-use id. Approve the tool call through Gantry first.',
     });
     expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
   });

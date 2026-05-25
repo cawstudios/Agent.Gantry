@@ -7,6 +7,10 @@ import { nowMs } from '../shared/time/datetime.js';
 import { handleSystemJob, MEMORY_DREAM_SYSTEM_PROMPT } from './system-jobs.js';
 
 type SystemJobContext = Parameters<typeof handleSystemJob>[1];
+type SystemJobLogger = {
+  warn: (context: Record<string, unknown>, message: string) => void;
+};
+const NOOP_LOGGER: SystemJobLogger = { warn: () => undefined };
 
 function systemJobWorkDeadlineAtMs(input: {
   job: Job;
@@ -25,7 +29,9 @@ export async function runSystemJobWithDeadline(input: {
   context: SystemJobContext;
   startedAtMs: number;
   timeoutMs: number;
+  logger?: SystemJobLogger;
 }): Promise<unknown> {
+  const log = input.logger ?? NOOP_LOGGER;
   const controller = new AbortController();
   const timeoutAtMs = input.startedAtMs + input.timeoutMs;
   const timeoutHandle = setTimeout(
@@ -37,6 +43,7 @@ export async function runSystemJobWithDeadline(input: {
     Math.max(1, timeoutAtMs - nowMs()),
   );
   timeoutHandle.unref?.();
+  let timedOut = false;
   const work = handleSystemJob(input.currentJob, input.context, {
     signal: controller.signal,
     deadlineAtMs: systemJobWorkDeadlineAtMs({
@@ -45,12 +52,32 @@ export async function runSystemJobWithDeadline(input: {
       timeoutMs: input.timeoutMs,
     }),
   });
-  work.catch(() => {
-    // Avoid unhandled rejection noise when the scheduler deadline wins first.
-  });
+  const observedWork = work.then(
+    (result) => {
+      if (timedOut) {
+        log.warn(
+          { jobId: input.currentJob.id },
+          'System job work completed after scheduler deadline',
+        );
+      }
+      return result;
+    },
+    (error) => {
+      if (timedOut) {
+        log.warn(
+          { err: error, jobId: input.currentJob.id },
+          'System job work failed after scheduler deadline',
+        );
+      }
+      throw error;
+    },
+  );
   let onAbort: (() => void) | undefined;
   const abort = new Promise<unknown>((_, reject) => {
-    onAbort = () => reject(abortReason(controller.signal));
+    onAbort = () => {
+      timedOut = true;
+      reject(abortReason(controller.signal));
+    };
     if (controller.signal.aborted) {
       onAbort();
       return;
@@ -58,9 +85,23 @@ export async function runSystemJobWithDeadline(input: {
     controller.signal.addEventListener('abort', onAbort, { once: true });
   });
   try {
-    return await Promise.race([work, abort]);
+    return await Promise.race([observedWork, abort]);
   } finally {
     clearTimeout(timeoutHandle);
     if (onAbort) controller.signal.removeEventListener('abort', onAbort);
+    if (timedOut) await observePostTimeoutWork(observedWork);
   }
+}
+
+async function observePostTimeoutWork(work: Promise<unknown>): Promise<void> {
+  await Promise.race([
+    work.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => {
+      const handle = setImmediate(resolve);
+      handle.unref?.();
+    }),
+  ]);
 }

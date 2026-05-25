@@ -46,7 +46,10 @@ export function buildSdkFilesystemSandbox(
     allowUnsandboxedCommands: false,
     network: { allowLocalBinding: true },
     ...(platform === 'darwin' ? { enableWeakerNetworkIsolation: true } : {}),
-    filesystem: { denyWrite: normalizeProtectedPaths(paths) },
+    filesystem: {
+      denyRead: normalizeProtectedPaths(paths),
+      denyWrite: normalizeProtectedPaths(paths),
+    },
   };
 }
 

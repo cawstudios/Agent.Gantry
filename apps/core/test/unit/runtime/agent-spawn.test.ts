@@ -1326,7 +1326,7 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.LOGNAME).toBeUndefined();
   });
 
-  it('projects local CLI credential env from resolved reviewed local CLI policy', async () => {
+  it('does not project local CLI credential identity env to the runner process', async () => {
     process.env.HOME = '/Users/tester';
     process.env.USERPROFILE = '/Users/tester';
     process.env.XDG_CONFIG_HOME = '/Users/tester/.config';
@@ -1362,13 +1362,13 @@ describe('agent-spawn timeout behavior', () => {
       string,
       string
     >;
-    expect(env.HOME).toBe('/Users/tester');
-    expect(env.USERPROFILE).toBe('/Users/tester');
-    expect(env.XDG_CONFIG_HOME).toBe('/Users/tester/.config');
-    expect(env.APPDATA).toBe('C:\\Users\\tester\\AppData\\Roaming');
-    expect(env.USER).toBe('tester');
-    expect(env.USERNAME).toBe('tester');
-    expect(env.LOGNAME).toBe('tester');
+    expect(env.HOME).toBeUndefined();
+    expect(env.USERPROFILE).toBeUndefined();
+    expect(env.XDG_CONFIG_HOME).toBeUndefined();
+    expect(env.APPDATA).toBeUndefined();
+    expect(env.USER).toBeUndefined();
+    expect(env.USERNAME).toBeUndefined();
+    expect(env.LOGNAME).toBeUndefined();
     expect(JSON.parse(env.GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON)).toEqual([
       '/Users/tester/.config/gog',
       '/Users/tester/.gog',
@@ -1376,7 +1376,7 @@ describe('agent-spawn timeout behavior', () => {
     ]);
   });
 
-  it('projects local CLI credential env when catalog policy marks a reviewed user-defined CLI capability', async () => {
+  it('keeps credential identity env scoped out of reviewed user-defined CLI runs', async () => {
     process.env.HOME = '/Users/tester';
     process.env.USER = 'tester';
     process.env.LOGNAME = 'tester';
@@ -1403,9 +1403,9 @@ describe('agent-spawn timeout behavior', () => {
       string,
       string
     >;
-    expect(env.HOME).toBe('/Users/tester');
-    expect(env.USER).toBe('tester');
-    expect(env.LOGNAME).toBe('tester');
+    expect(env.HOME).toBeUndefined();
+    expect(env.USER).toBeUndefined();
+    expect(env.LOGNAME).toBeUndefined();
     expect(JSON.parse(env.GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON)).toEqual([
       '/Users/tester/.config/acme',
     ]);

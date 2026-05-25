@@ -62,11 +62,12 @@ export async function queueJobRecoveryTurn(input: {
     opsRepository: input.deps.opsRepository,
   });
   if (!created) return;
+  const intentJob: Job = { ...input.currentJob, recovery_intent: intent };
 
   const enqueueTask = input.deps.queue?.enqueueTask?.bind(input.deps.queue);
   if (!enqueueTask) {
     await transitionJobRecoveryIntent({
-      job: input.currentJob,
+      job: intentJob,
       dedupeKey: intent.dedupe_key,
       state: 'failed',
       error: 'Scheduler queue unavailable for recovery turn.',
@@ -86,16 +87,49 @@ export async function queueJobRecoveryTurn(input: {
     recovery_state: intent.state,
     dedupe_key: intent.dedupe_key,
   });
-  enqueueTask(queueKey, taskId, async () => {
-    await runQueuedJobRecoveryTurn({
-      jobId: input.currentJob.id,
-      dedupeKey: intent.dedupe_key,
-      deps: input.deps,
-      execution: input.execution,
-      runtimeAppId: input.runtimeAppId,
-      publishRuntimeEvent: input.publishRuntimeEvent,
+  try {
+    enqueueTask(queueKey, taskId, async () => {
+      try {
+        await runQueuedJobRecoveryTurn({
+          jobId: input.currentJob.id,
+          dedupeKey: intent.dedupe_key,
+          deps: input.deps,
+          execution: input.execution,
+          runtimeAppId: input.runtimeAppId,
+          publishRuntimeEvent: input.publishRuntimeEvent,
+        });
+      } catch (err) {
+        const failedJob =
+          (await input.deps.opsRepository.getJobById(input.currentJob.id)) ??
+          intentJob;
+        await transitionJobRecoveryIntent({
+          job: failedJob,
+          dedupeKey: intent.dedupe_key,
+          state: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+          opsRepository: input.deps.opsRepository,
+        });
+        await publishRecoveryEvent(input, failedJob, {
+          phase: 'recovery_failed',
+          dedupe_key: intent.dedupe_key,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     });
-  });
+  } catch (err) {
+    await transitionJobRecoveryIntent({
+      job: intentJob,
+      dedupeKey: intent.dedupe_key,
+      state: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+      opsRepository: input.deps.opsRepository,
+    });
+    await publishRecoveryEvent(input, intentJob, {
+      phase: 'recovery_failed',
+      dedupe_key: intent.dedupe_key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 type JobExecutionGroup = Parameters<typeof spawnAgent>[0];
@@ -426,23 +460,30 @@ function buildJobRecoveryPrompt(job: Job): string {
     '- If setup already looks ready, use scheduler_run_now or the scheduler tools to retry/resume the job.',
     '- If the job requirements are wrong, use scheduler update tools to correct the job requirement, then explain the change.',
     '',
-    `Job id: ${job.id}`,
-    `Job name: ${job.name}`,
-    `Recovery kind: ${intent?.kind ?? 'setup_required'}`,
-    `Recovery state: ${intent?.state ?? 'pending'}`,
-    `Source run id: ${intent?.source_run_id ?? 'none'}`,
-    `Setup state: ${setupState?.state ?? 'unknown'}`,
-    `Setup fingerprint: ${setupState?.fingerprint ?? 'unknown'}`,
+    `Job id: ${escapeRecoveryPromptText(job.id)}`,
+    `Job name: ${escapeRecoveryPromptText(job.name)}`,
+    `Recovery kind: ${escapeRecoveryPromptText(intent?.kind ?? 'setup_required')}`,
+    `Recovery state: ${escapeRecoveryPromptText(intent?.state ?? 'pending')}`,
+    `Source run id: ${escapeRecoveryPromptText(intent?.source_run_id ?? 'none')}`,
+    `Setup state: ${escapeRecoveryPromptText(setupState?.state ?? 'unknown')}`,
+    `Setup fingerprint: ${escapeRecoveryPromptText(setupState?.fingerprint ?? 'unknown')}`,
     blockers.length > 0 ? 'Blockers:' : 'Blockers: none',
     ...blockers.map(
       (blocker) =>
-        `- ${blocker.requirementType}:${blocker.requirementId} | ${blocker.message} | next: ${blocker.nextAction}`,
+        `- ${escapeRecoveryPromptText(blocker.requirementType)}:${escapeRecoveryPromptText(blocker.requirementId)} | ${escapeRecoveryPromptText(blocker.message)} | next: ${escapeRecoveryPromptText(blocker.nextAction)}`,
     ),
     '',
     'Original job prompt preview:',
-    truncateForPrompt(job.prompt, 1200),
+    escapeRecoveryPromptText(truncateForPrompt(job.prompt, 1200)),
     '</gantry_scheduler_job_recovery>',
   ].join('\n');
+}
+
+function escapeRecoveryPromptText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function truncateForPrompt(value: string, maxChars: number): string {

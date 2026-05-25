@@ -187,10 +187,7 @@ export async function runQuery(
   });
   const systemPrompt = buildRunnerSystemPrompt(agentInput, memoryBlock);
   const localCliCredentialDirectories = readLocalCliCredentialDirectories();
-  const extraDirs = [
-    ...discoverAdditionalDirectories(),
-    ...localCliCredentialDirectories,
-  ];
+  const extraDirs = discoverAdditionalDirectories();
   const protectedFilesystemPaths = [
     ...readProtectedFilesystemPaths(),
     ...localCliCredentialDirectories,

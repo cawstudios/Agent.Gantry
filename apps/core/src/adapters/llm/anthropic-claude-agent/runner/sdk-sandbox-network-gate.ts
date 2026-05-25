@@ -4,6 +4,10 @@ import {
   SDK_SANDBOX_NETWORK_ACCESS_TOOL_NAME,
   isSdkSandboxNetworkAccessToolName,
 } from '../../../../shared/agent-tool-references.js';
+import {
+  bashExecutableName,
+  parseBashCommand,
+} from '../../../../shared/bash-command-parser.js';
 import { log } from './logging.js';
 import { writeOutput } from './output.js';
 import { sandboxBlockedRuntimeEvents } from './sandbox-events.js';
@@ -63,6 +67,7 @@ const LOCAL_ONLY_SDK_TOOLS = new Set([
   'Grep',
   'TodoWrite',
 ]);
+const NETWORK_CLIENTS_WITH_URL_TARGETS = new Set(['curl', 'wget']);
 
 export function createSdkSandboxNetworkGate(
   agentInput: AgentRunnerInput,
@@ -190,7 +195,7 @@ export function createSdkSandboxNetworkGate(
       }
       const createdAtMs = nowMs();
       const inputHash = hashString(stableJson(input));
-      const approvedHostHashes = approvedToolInputHostHashes(input, agentInput);
+      const approvedHostHashes = approvedToolInputHostHashes(toolName, input);
       const token: SdkSandboxNetworkApprovalToken = {
         principal: normalizedPrincipal,
         parentToolUseID,
@@ -351,74 +356,69 @@ function hashString(value: string): string {
 }
 
 function approvedToolInputHostHashes(
+  toolName: string,
   input: unknown,
-  agentInput: AgentRunnerInput,
 ): readonly string[] {
   const hosts = new Set<string>();
-  collectApprovedToolInputHosts(input, hosts);
-  if (agentInput.isScheduledJob) {
-    for (const host of agentInput.localCliNetworkHosts ?? []) {
-      const normalized = normalizeNetworkHost(host);
-      if (normalized) hosts.add(normalized);
-    }
+  if (toolName === 'Bash') {
+    collectApprovedBashTargetHosts(input, hosts);
   }
   return [...hosts].sort().map(hashString);
 }
 
-function collectApprovedToolInputHosts(
-  value: unknown,
+function collectApprovedBashTargetHosts(
+  input: unknown,
   hosts: Set<string>,
-  key?: string,
 ): void {
-  if (typeof value === 'string') {
-    for (const host of networkHostsFromString(value, key)) hosts.add(host);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectApprovedToolInputHosts(item, hosts);
-    return;
-  }
-  if (!value || typeof value !== 'object') return;
-  for (const [childKey, childValue] of Object.entries(
-    value as Record<string, unknown>,
-  )) {
-    collectApprovedToolInputHosts(childValue, hosts, childKey);
+  if (!input || typeof input !== 'object') return;
+  const record = input as Record<string, unknown>;
+  const command =
+    typeof record.command === 'string'
+      ? record.command
+      : typeof record.cmd === 'string'
+        ? record.cmd
+        : '';
+  if (!command.trim()) return;
+  const parsed = parseBashCommand(command);
+  if (!parsed.ok) return;
+  for (const leaf of parsed.leaves) {
+    const executable = bashExecutableName(leaf.argv[0] ?? '');
+    if (!NETWORK_CLIENTS_WITH_URL_TARGETS.has(executable)) continue;
+    for (const host of networkHostsFromNetworkClientArgv(leaf.argv)) {
+      hosts.add(host);
+    }
   }
 }
 
-function networkHostsFromString(
-  value: string,
-  key?: string,
-): readonly string[] {
+function networkHostsFromNetworkClientArgv(argv: readonly string[]): string[] {
   const hosts = new Set<string>();
-  const trimmed = value.trim();
-  if (!trimmed) return [];
-
-  if (key && /(?:^|[_-])(host|hostname|domain)(?:$|[_-])/i.test(key)) {
-    const host = normalizeNetworkHost(trimmed);
+  for (let index = 1; index < argv.length; index += 1) {
+    const arg = argv[index] ?? '';
+    if (arg === '--url') {
+      const host = hostFromHttpUrl(argv[index + 1] ?? '');
+      if (host) hosts.add(host);
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--url=')) {
+      const host = hostFromHttpUrl(arg.slice('--url='.length));
+      if (host) hosts.add(host);
+      continue;
+    }
+    const host = hostFromHttpUrl(arg);
     if (host) hosts.add(host);
   }
-
-  for (const match of trimmed.matchAll(/\bhttps?:\/\/[^\s'"<>()]+/gi)) {
-    const rawUrl = match[0];
-    try {
-      const host = normalizeNetworkHost(new URL(rawUrl).hostname);
-      if (host) hosts.add(host);
-    } catch {
-      // Ignore malformed substrings; missing host bindings fail closed later.
-    }
-  }
-
-  if (key && /(?:url|uri|endpoint|base[_-]?url)$/i.test(key)) {
-    try {
-      const host = normalizeNetworkHost(new URL(trimmed).hostname);
-      if (host) hosts.add(host);
-    } catch {
-      // Non-URL labels are not enough to bind parentless network prompts.
-    }
-  }
-
   return [...hosts];
+}
+
+function hostFromHttpUrl(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return undefined;
+  try {
+    return normalizeNetworkHost(new URL(trimmed).hostname);
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeNetworkHost(value: string): string | undefined {

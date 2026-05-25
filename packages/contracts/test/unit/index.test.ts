@@ -749,6 +749,16 @@ describe('contracts package', () => {
           leaseExpiresAt: null,
           nextAction: 'Approve Browser access, then rerun the job.',
         },
+        recovery: {
+          state: 'running',
+          kind: 'permission_denied',
+          updatedAt: iso,
+          attempts: 1,
+          requirementType: 'tool',
+          requirementId: 'Browser',
+          nextAction: 'Approve Browser access.',
+          lastError: null,
+        },
         modelAlias: null,
         model: null,
         groupScope: 'app:app-one:session-1',
@@ -764,6 +774,7 @@ describe('contracts package', () => {
       staleness: 'missed_window',
       capabilityRequirements: [{ capabilityId: 'google.sheets.write' }],
       health: { state: 'needs_permission' },
+      recovery: { state: 'running', kind: 'permission_denied' },
     });
     expectInvalid(JobResponseSchema, {
       jobId: 'job-1',

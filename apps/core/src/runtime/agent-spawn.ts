@@ -15,6 +15,7 @@ import {
 } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { ConversationRoute } from '../domain/types.js';
+import { MODEL_RUNTIME_CREDENTIAL_IDENTIFIER } from '../domain/models/credentials.js';
 import { LlmProfileResolutionService } from '../application/model-resolution/llm-profile-resolution-service.js';
 import type { LlmProfile } from '../domain/agent/agent.js';
 import { DEFAULT_SETUP_MODEL_ALIAS } from '../shared/model-catalog.js';
@@ -90,18 +91,6 @@ const SAFE_HOST_ENV_KEYS = [
   'NO_PROXY',
   'no_proxy',
 ] as const;
-const LOCAL_CLI_CREDENTIAL_ENV_KEYS = [
-  'HOME',
-  'USERPROFILE',
-  'APPDATA',
-  'LOCALAPPDATA',
-  'XDG_CONFIG_HOME',
-  'XDG_DATA_HOME',
-  'USER',
-  'USERNAME',
-  'LOGNAME',
-] as const;
-
 const PREPARED_EXECUTION_ENV_DENYLIST = new Set([
   'PATH',
   'NODE_OPTIONS',
@@ -135,17 +124,6 @@ function pickSafeHostEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     if (typeof value === 'string' && value.length > 0) {
       env[key] = value;
     }
-  }
-  return env;
-}
-
-function pickLocalCliCredentialEnv(
-  source: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of LOCAL_CLI_CREDENTIAL_ENV_KEYS) {
-    const value = source[key];
-    if (typeof value === 'string' && value.length > 0) env[key] = value;
   }
   return env;
 }
@@ -265,12 +243,12 @@ export async function spawnAgent(
   const llmProfileResolutionService = new LlmProfileResolutionService();
   const profileTimestamp = nowIso();
   const runtimeLlmProfile: LlmProfile = {
-    id: `runtime:${group.folder}:${modelWorkload}` as never,
+    id: `transient-runtime-profile:${group.folder}:${modelWorkload}` as never,
     appId: (input.appId || DEFAULT_RUNNER_APP_ID) as never,
     purpose: input.isScheduledJob ? 'coding' : 'chat',
     modelAlias:
       requestedModel || modelConfig.model || DEFAULT_SETUP_MODEL_ALIAS,
-    credentialProfileRef: 'gantry-model-access',
+    credentialProfileRef: MODEL_RUNTIME_CREDENTIAL_IDENTIFIER,
     createdAt: profileTimestamp as never,
     updatedAt: profileTimestamp as never,
   };
@@ -475,9 +453,6 @@ export async function spawnAgent(
       : [];
     const env: NodeJS.ProcessEnv = {
       ...pickSafeHostEnv(process.env),
-      ...(localCliCredentialAccess
-        ? pickLocalCliCredentialEnv(process.env)
-        : {}),
       ...pickPreparedExecutionEnv(preparedExecution.env),
       TZ: TIMEZONE,
       GANTRY_MCP_SERVER_PATH: mcpServerPath,

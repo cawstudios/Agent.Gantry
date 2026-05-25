@@ -64,6 +64,16 @@ export async function recheckSetupPausedJobsAfterPermissionGrant(
   const stillBlocked: RecheckedPermissionJob[] = [];
   for (const job of candidates) {
     if (!isSetupPausedJob(job)) continue;
+    if (job.recovery_intent?.state === 'running') {
+      stillBlocked.push({
+        jobId: job.id,
+        name: job.name,
+        state: 'still_blocked',
+        nextAction: 'Recovery is already running for this job.',
+      });
+      await publishRecheckEvent(input, job, 'still_blocked', job.setup_state);
+      continue;
+    }
     const readiness = await evaluateJobReadiness({
       job,
       appId: input.appId,
@@ -124,7 +134,7 @@ async function listCandidateJobs(
 ): Promise<Job[]> {
   if (input.jobId) {
     const job = await input.opsRepository.getJobById(input.jobId);
-    return job ? [job] : [];
+    return job && jobMatchesPermissionRecoveryScope(job, input) ? [job] : [];
   }
   const filters: JobListFilters = {
     statuses: ['paused'],
@@ -133,6 +143,22 @@ async function listCandidateJobs(
   };
   if (input.conversationJid) filters.conversationJid = input.conversationJid;
   return input.opsRepository.listJobs(filters);
+}
+
+function jobMatchesPermissionRecoveryScope(
+  job: Job,
+  input: RecheckJobsAfterPermissionGrantInput,
+): boolean {
+  if (job.group_scope !== input.sourceAgentFolder) return false;
+  const executionContext = job.execution_context;
+  if (
+    executionContext?.groupScope &&
+    executionContext.groupScope !== input.sourceAgentFolder
+  ) {
+    return false;
+  }
+  if (!input.conversationJid) return true;
+  return executionContext?.conversationJid === input.conversationJid;
 }
 
 function isSetupPausedJob(job: Job): boolean {

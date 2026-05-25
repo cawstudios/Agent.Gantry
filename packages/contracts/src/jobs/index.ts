@@ -171,6 +171,34 @@ export const JobHealthSchema = z
   .strict();
 export type JobHealth = z.infer<typeof JobHealthSchema>;
 
+export const JobRecoveryMetadataSchema = z
+  .object({
+    state: z.enum([
+      'none',
+      'pending',
+      'running',
+      'completed',
+      'failed',
+      'suppressed',
+    ]),
+    kind: z
+      .enum([
+        'setup_required',
+        'missing_capability',
+        'permission_denied',
+        'permission_timeout',
+      ])
+      .nullable(),
+    updatedAt: IsoDateTimeSchema.nullable(),
+    attempts: z.number().int().nonnegative(),
+    requirementType: z.string().nullable(),
+    requirementId: z.string().nullable(),
+    nextAction: z.string().nullable(),
+    lastError: z.string().nullable(),
+  })
+  .strict();
+export type JobRecoveryMetadata = z.infer<typeof JobRecoveryMetadataSchema>;
+
 export const JobSetupSchema = z
   .object({
     state: z.enum([
@@ -325,6 +353,7 @@ export const JobResponseSchema = z
     lastRun: IsoDateTimeSchema.nullable(),
     staleness: JobStalenessSchema.nullable().optional(),
     health: JobHealthSchema.optional(),
+    recovery: JobRecoveryMetadataSchema.optional(),
     modelAlias: z.string().nullable().optional(),
     modelSelection: JobModelSelectionSchema.optional(),
     model: JobModelPreviewSchema.nullable().optional(),
