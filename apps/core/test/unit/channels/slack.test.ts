@@ -961,7 +961,9 @@ describe('Slack channel', () => {
       .mocked(appRef.current.client.chat.postMessage)
       .mock.calls.at(-1)?.[0];
     expect(postCall?.thread_ts).toBe('1711111111.000100');
-    expect(postCall?.text).toContain('Thread: 1711111111.000100');
+    expect(postCall?.text).toContain(
+      'Route: shown in this topic/thread; approval applies to the parent conversation.',
+    );
     expect(postCall?.text).toContain('Command:\n```\ngit status --short\n```');
 
     const actionHandler = appRef.current.actionHandlers.get(

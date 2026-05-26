@@ -11,6 +11,10 @@ import {
   RUN_COMMAND_TOOL_NAME,
   sdkToolsForGantryFacadeTool,
 } from './agent-tool-references.js';
+import {
+  canonicalizeGeneratedRuntimeSkillPaths,
+  generatedRuntimeSkillPathDisplay,
+} from './generated-runtime-paths.js';
 
 export interface RequestableAdminToolAccess {
   tool: string;
@@ -87,7 +91,7 @@ export function buildAgentToolAccessView(input: {
   source: string;
 }): AgentToolAccessView {
   return {
-    configuredTools: uniqueStrings(input.configuredTools ?? []),
+    configuredTools: uniqueDisplayRules(input.configuredTools ?? []),
     defaultTools: uniqueStrings(input.defaultTools ?? []),
     availableButGatedTools: uniqueStrings(input.availableButGatedTools ?? []),
     requestableAdminTools: uniqueRequestableAdminTools(
@@ -107,8 +111,8 @@ export function buildJobToolAccessView(input: {
     input.effectiveAllowedTools ?? [],
   );
   return {
-    inheritedAgentTools: uniqueStrings(input.inheritedAgentTools ?? []),
-    effectiveAllowedTools,
+    inheritedAgentTools: uniqueDisplayRules(input.inheritedAgentTools ?? []),
+    effectiveAllowedTools: uniqueDisplayRules(effectiveAllowedTools),
     projectedRuntimeTools: uniqueStrings(
       input.projectedRuntimeTools ??
         projectedRuntimeToolsForRules(effectiveAllowedTools),
@@ -162,6 +166,24 @@ function uniqueStrings(values: readonly string[]): string[] {
     if (trimmed) out.add(trimmed);
   }
   return [...out];
+}
+
+function uniqueDisplayRules(values: readonly string[]): string[] {
+  return uniqueStrings(values.map(formatToolRuleForUser));
+}
+
+function formatToolRuleForUser(value: string): string {
+  const generatedSkillPath = generatedRuntimeSkillPathDisplay(value);
+  if (!generatedSkillPath) return value;
+  const canonical = canonicalizeGeneratedRuntimeSkillPaths(value);
+  const scoped = parseReadableScopedToolRule(canonical);
+  if (
+    scoped?.toolName === RUN_COMMAND_TOOL_NAME &&
+    /^chmod\s+\+x\s+/.test(scoped.scope)
+  ) {
+    return `Generated skill action setup (${generatedSkillPath})`;
+  }
+  return `Generated skill action (${generatedSkillPath})`;
 }
 
 function uniqueRequestableAdminTools(

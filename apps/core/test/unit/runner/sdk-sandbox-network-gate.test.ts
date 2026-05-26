@@ -86,7 +86,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('emits an audit event when minting a network token', () => {
+  it('does not infer parentless host authority from raw curl commands when minting a network token', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now);
 
@@ -96,18 +96,19 @@ describe('sdk sandbox network gate', () => {
       { toolUseID: 'toolu_bash_1' },
     );
 
-    expect(latestPayload()).toMatchObject({
+    const payload = latestPayload();
+    expect(payload).toMatchObject({
       decision: 'sdk_network_gate_token_minted',
       parentToolUseIDHash: sha256('toolu_bash_1'),
       approvedToolName: 'Bash',
       inputHash: sha256(
         '{"command":"curl https://api.github.com/repos/acme/roadmap"}',
       ),
-      approvedHostHashes: [sha256('api.github.com')],
       tokenCreatedAtMs: 1_000,
       tokenExpiresAtMs: 301_000,
       tokenTtlMs: 300_000,
     });
+    expect(payload).not.toHaveProperty('approvedHostHashes');
   });
 
   it('suppresses SDK network prompts during a global approval window', () => {
@@ -228,7 +229,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('allows one parentless scheduled job network prompt after an approved command', () => {
+  it('denies parentless scheduled job network prompts after an approved curl command without a local CLI binding', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
 
@@ -243,22 +244,16 @@ describe('sdk sandbox network gate', () => {
       { toolUseID: 'toolu_network_1' },
     );
 
-    expect(decision).toEqual({
-      behavior: 'allow',
-      updatedInput: { host: 'api.github.com' },
-    });
+    expect(decision?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
-      decision: 'sdk_network_gate_suppressed_parentless_recent_tool',
+      decision: 'sdk_network_gate_denied',
       networkToolUseIDHash: sha256('toolu_network_1'),
-      parentToolUseIDHash: sha256('toolu_bash_1'),
-      approvedToolName: 'Bash',
       hostHash: sha256('api.github.com'),
-      approvedHostHashes: [sha256('api.github.com')],
       expiredTokenCount: 0,
     });
   });
 
-  it('allows one parentless scheduled job network prompt from curl --url argv', () => {
+  it('denies parentless scheduled job network prompts from curl --url argv without a local CLI binding', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
 
@@ -276,10 +271,11 @@ describe('sdk sandbox network gate', () => {
       { toolUseID: 'toolu_network_1' },
     );
 
-    expect(decision?.behavior).toBe('allow');
+    expect(decision?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
-      decision: 'sdk_network_gate_suppressed_parentless_recent_tool',
-      approvedHostHashes: [sha256('api.github.com')],
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      hostHash: sha256('api.github.com'),
     });
   });
 
@@ -308,11 +304,20 @@ describe('sdk sandbox network gate', () => {
 
   it('denies parentless scheduled job network prompts for a different host', () => {
     const now = { value: 1_000 };
-    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+    const gate = makeGate(now, {
+      ...runnerInput,
+      isScheduledJob: true,
+      localCliNetworkBindings: [
+        {
+          commandRules: ['RunCommand(gog sheets get *)'],
+          hosts: ['sheets.googleapis.com'],
+        },
+      ],
+    });
 
     gate.rememberAllowedTool(
       'Bash',
-      { command: 'curl https://api.github.com/repos/acme/roadmap' },
+      { command: 'gog sheets get leads --json' },
       { toolUseID: 'toolu_bash_1' },
     );
     const decision = gate.decide(
@@ -337,21 +342,30 @@ describe('sdk sandbox network gate', () => {
 
   it('does not reuse a parentless scheduled job network token', () => {
     const now = { value: 1_000 };
-    const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
+    const gate = makeGate(now, {
+      ...runnerInput,
+      isScheduledJob: true,
+      localCliNetworkBindings: [
+        {
+          commandRules: ['RunCommand(gog sheets get *)'],
+          hosts: ['sheets.googleapis.com'],
+        },
+      ],
+    });
 
     gate.rememberAllowedTool(
       'Bash',
-      { command: 'curl https://api.github.com/repos/acme/roadmap' },
+      { command: 'gog sheets get leads --json' },
       { toolUseID: 'toolu_bash_1' },
     );
     const first = gate.decide(
       'SandboxNetworkAccess',
-      { host: 'api.github.com' },
+      { host: 'sheets.googleapis.com' },
       { toolUseID: 'toolu_network_1' },
     );
     const second = gate.decide(
       'SandboxNetworkAccess',
-      { host: 'api.github.com' },
+      { host: 'sheets.googleapis.com' },
       { toolUseID: 'toolu_network_2' },
     );
 
@@ -365,7 +379,7 @@ describe('sdk sandbox network gate', () => {
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
       networkToolUseIDHash: sha256('toolu_network_2'),
-      hostHash: sha256('api.github.com'),
+      hostHash: sha256('sheets.googleapis.com'),
       expiredTokenCount: 0,
     });
   });
@@ -393,12 +407,153 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('does not widen parentless scheduled approvals with reviewed local CLI host hints', () => {
+  it('suppresses parentless scheduled prompts for reviewed local CLI command-bound hosts', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, {
       ...runnerInput,
       isScheduledJob: true,
-      localCliNetworkHosts: ['sheets.googleapis.com'],
+      localCliNetworkBindings: [
+        {
+          commandRules: ['RunCommand(gog sheets get *)'],
+          hosts: ['sheets.googleapis.com'],
+        },
+      ],
+    });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'gog sheets get leads --json' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'sheets.googleapis.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision).toEqual({
+      behavior: 'allow',
+      updatedInput: { host: 'sheets.googleapis.com' },
+    });
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_suppressed_parentless_recent_tool',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      parentToolUseIDHash: sha256('toolu_bash_1'),
+      hostHash: sha256('sheets.googleapis.com'),
+      approvedHostHashes: [sha256('sheets.googleapis.com')],
+    });
+  });
+
+  it('denies parentless scheduled prompts when the local CLI command binding does not match', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, {
+      ...runnerInput,
+      isScheduledJob: true,
+      localCliNetworkBindings: [
+        {
+          commandRules: ['RunCommand(gog sheets get *)'],
+          hosts: ['sheets.googleapis.com'],
+        },
+      ],
+    });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'gog drive get leads --json' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'sheets.googleapis.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('deny');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      hostHash: sha256('sheets.googleapis.com'),
+    });
+  });
+
+  it('denies parentless scheduled prompts when a matching local CLI command is combined with another command', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, {
+      ...runnerInput,
+      isScheduledJob: true,
+      localCliNetworkBindings: [
+        {
+          commandRules: ['RunCommand(gog sheets get *)'],
+          hosts: ['sheets.googleapis.com'],
+        },
+      ],
+    });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      {
+        command:
+          'gog sheets get leads --json && curl https://sheets.googleapis.com',
+      },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'sheets.googleapis.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('deny');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      hostHash: sha256('sheets.googleapis.com'),
+    });
+  });
+
+  it('denies parentless scheduled prompts when the local CLI host binding does not match', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, {
+      ...runnerInput,
+      isScheduledJob: true,
+      localCliNetworkBindings: [
+        {
+          commandRules: ['RunCommand(gog sheets get *)'],
+          hosts: ['sheets.googleapis.com'],
+        },
+      ],
+    });
+
+    gate.rememberAllowedTool(
+      'Bash',
+      { command: 'gog sheets get leads --json' },
+      { toolUseID: 'toolu_bash_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'oauth2.googleapis.com' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('deny');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      hostHash: sha256('oauth2.googleapis.com'),
+    });
+  });
+
+  it('denies interactive parentless prompts even for reviewed local CLI command-bound hosts', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, {
+      ...runnerInput,
+      isScheduledJob: false,
+      localCliNetworkBindings: [
+        {
+          commandRules: ['RunCommand(gog sheets get *)'],
+          hosts: ['sheets.googleapis.com'],
+        },
+      ],
     });
 
     gate.rememberAllowedTool(

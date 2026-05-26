@@ -17,6 +17,10 @@ import {
   validateReadableAgentToolRule,
 } from './agent-tool-references.js';
 import {
+  containsGeneratedRuntimeSkillPath,
+  GENERATED_RUNTIME_SKILL_PATH_DURABLE_REJECTION_REASON,
+} from './generated-runtime-paths.js';
+import {
   getBuiltinSemanticCapability,
   type SemanticCapabilityDefinition,
 } from './semantic-capabilities.js';
@@ -60,6 +64,12 @@ export function validatePersistentRequestPermissionRule(
         ok: false,
         reason:
           'Only RunCommand supports persistent scoped tool rules; use an exact tool name for other tools.',
+      };
+    }
+    if (containsGeneratedRuntimeSkillPath(scoped.scope)) {
+      return {
+        ok: false,
+        reason: GENERATED_RUNTIME_SKILL_PATH_DURABLE_REJECTION_REASON,
       };
     }
     const parsed = parseBashCommand(scoped.scope);

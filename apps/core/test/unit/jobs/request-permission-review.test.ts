@@ -414,6 +414,47 @@ describe('request permission review helpers', () => {
     );
   });
 
+  it('records request_permission persistent grants at parent conversation scope', async () => {
+    const saveDecision = vi.fn(async () => undefined);
+    const repository = {
+      getTool: vi.fn(async () => null),
+      listTools: vi.fn(async () => []),
+      saveTool: vi.fn(async () => undefined),
+      saveAgentToolBinding: vi.fn(async () => undefined),
+      disableAgentToolBinding: vi.fn(async () => null),
+    };
+
+    await persistRequestPermissionRules({
+      appId: 'app:test' as never,
+      agentId: 'agent:test' as never,
+      deps: {
+        getToolRepository: () => repository as never,
+        getPermissionRepository: () =>
+          ({
+            saveDecision,
+          }) as never,
+        mirrorAgentToolRulesToSettings: vi.fn(async () => undefined),
+      },
+      sourceAgentFolder: 'main_agent',
+      conversationId: 'tg:team',
+      threadId: 'topic-7',
+      updates: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [{ toolName: 'Bash', ruleContent: 'npm test *' }],
+        },
+      ],
+    });
+
+    const savedDecision = saveDecision.mock.calls[0]?.[0];
+    expect(savedDecision.actorContext).toMatchObject({
+      conversationId: 'tg:team',
+      mode: 'allow_persistent_rule',
+    });
+    expect(savedDecision.actorContext).not.toHaveProperty('threadId');
+  });
+
   it('persists scoped RunCommand permission when SDK command content contains parentheses', async () => {
     const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
     const repository = {

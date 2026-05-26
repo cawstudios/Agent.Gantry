@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildLocalCliSemanticCapability,
   projectToolCatalogItemToRuntimeRules,
+  semanticCapabilityRuntimeRules,
   validateSemanticCapabilityDefinition,
 } from '@core/shared/semantic-capabilities.js';
 
@@ -67,6 +68,71 @@ describe('semantic capability catalog validation', () => {
     ).toEqual({
       ok: false,
       reason: 'Local CLI capabilities require an executable hash.',
+    });
+  });
+
+  it('rejects mismatched local CLI credential source and implementation bindings', () => {
+    expect(
+      validateSemanticCapabilityDefinition({
+        ...localCliCapability(),
+        credentialSource: 'configured_access',
+      }),
+    ).toEqual({
+      ok: false,
+      reason: 'Local CLI bindings require credentialSource local_cli.',
+    });
+
+    expect(
+      validateSemanticCapabilityDefinition({
+        ...localCliCapability(),
+        implementationBindings: [
+          { kind: 'adapter', adapterRef: 'configured.acme.invoices.read' },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      reason:
+        'Local CLI capabilities require a local_cli implementation binding.',
+    });
+  });
+
+  it('rejects local CLI-only credential and network fields on other capability types', () => {
+    expect(
+      validateSemanticCapabilityDefinition({
+        capabilityId: 'acme.invoices.read',
+        displayName: 'Acme invoices read',
+        category: 'Acme',
+        risk: 'read',
+        can: 'Read invoice records.',
+        cannot: 'Write invoices or export tokens.',
+        credentialSource: 'configured_access',
+        implementationBindings: [
+          { kind: 'adapter', adapterRef: 'configured.acme.invoices.read' },
+        ],
+        networkHosts: ['api.acme.test'],
+      }),
+    ).toEqual({
+      ok: false,
+      reason: 'networkHosts are only supported for local_cli capabilities.',
+    });
+
+    expect(
+      validateSemanticCapabilityDefinition({
+        capabilityId: 'acme.invoices.read',
+        displayName: 'Acme invoices read',
+        category: 'Acme',
+        risk: 'read',
+        can: 'Read invoice records.',
+        cannot: 'Write invoices or export tokens.',
+        credentialSource: 'configured_access',
+        implementationBindings: [
+          { kind: 'adapter', adapterRef: 'configured.acme.invoices.read' },
+        ],
+        protectedPaths: ['~/.config/acme'],
+      }),
+    ).toEqual({
+      ok: false,
+      reason: 'protectedPaths are only supported for local_cli capabilities.',
     });
   });
 
@@ -187,5 +253,14 @@ describe('semantic capability catalog validation', () => {
       'capability:acme.invoices.read',
       'RunCommand(/usr/local/bin/acme invoices read *)',
     ]);
+  });
+
+  it('does not project local CLI command rules from malformed non-local capability objects', () => {
+    expect(
+      semanticCapabilityRuntimeRules({
+        ...localCliCapability(),
+        credentialSource: 'configured_access',
+      }),
+    ).toEqual([]);
   });
 });

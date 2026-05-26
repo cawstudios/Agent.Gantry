@@ -108,6 +108,8 @@ export interface PreparedAgentExecution {
   };
   env: NodeJS.ProcessEnv;
   protectedFilesystemPaths: string[];
+  protectedFilesystemDenyReadPaths?: string[];
+  protectedFilesystemDenyWritePaths?: string[];
   runtimeDetails: string[];
   cleanup: () => void;
 }

@@ -1,5 +1,6 @@
 import type { PermissionApprovalRequest } from '../domain/types.js';
 import { firstDestructiveRedirectTarget } from '../shared/bash-command-parser.js';
+import { generatedRuntimeSkillPathDisplay } from '../shared/generated-runtime-paths.js';
 
 const PERMISSION_JSON_MAX_DEPTH = 2;
 const PERMISSION_JSON_MAX_KEYS = 12;
@@ -27,6 +28,17 @@ export function formatPermissionToolInputLines(
     typeof input.command === 'string' &&
     input.command.trim()
   ) {
+    const generatedSkillPath = generatedRuntimeSkillPathDisplay(
+      input.command.trim(),
+    );
+    if (generatedSkillPath) {
+      const redirectTarget = firstDestructiveRedirectTarget(input.command);
+      return [
+        'Command: generated skill action command; runtime path hidden.',
+        `Action: ${sanitizePermissionText(generatedSkillPath, 180, 80)}`,
+        ...(redirectTarget ? [`Redirect: ${redirectTarget}`] : []),
+      ];
+    }
     const command = (options.sanitizeCommandText ?? sanitizePermissionText)(
       input.command.trim(),
       900,

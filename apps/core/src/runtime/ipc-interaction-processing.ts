@@ -160,6 +160,9 @@ export async function processPermissionInteractionIpc(input: {
       decision.decisionClassification === 'user_permanent' &&
       (decision.updatedPermissions?.length ?? 0) > 0
     ) {
+      const persistentScopeRequest = persistentPermissionScopeRequest(
+        input.request,
+      );
       const updatedPermissions = decision.updatedPermissions ?? [];
       const toolRepository = input.deps.getToolRepository?.();
       const mirrorAgentToolRulesToSettings =
@@ -184,21 +187,24 @@ export async function processPermissionInteractionIpc(input: {
         runHandle: input.request.runHandle,
         requestId: input.request.requestId,
         actor: decision.decidedBy,
-        conversationId: input.request.targetJid,
-        threadId: input.request.threadId,
+        conversationId: persistentScopeRequest.targetJid,
+        threadId: persistentScopeRequest.threadId,
         runId: input.request.runId,
         jobId: input.request.jobId,
         reason: decision.reason,
       });
-      const persistedContext = permissionTelemetryContext(input.request, {
-        sourceAgentFolder: input.sourceAgentFolder,
-        decision: 'persisted',
-        persistedRules: permissionUpdateAllowedToolRules(
-          decision.updatedPermissions,
-        ).map(formatPersistentPermissionRuleForEvent),
-      });
+      const persistedContext = permissionTelemetryContext(
+        persistentScopeRequest,
+        {
+          sourceAgentFolder: input.sourceAgentFolder,
+          decision: 'persisted',
+          persistedRules: permissionUpdateAllowedToolRules(
+            decision.updatedPermissions,
+          ).map(formatPersistentPermissionRuleForEvent),
+        },
+      );
       input.logger.info?.(persistedContext, 'Permission persisted');
-      await publishPermissionRuntimeEvent(input.deps, input.request, {
+      await publishPermissionRuntimeEvent(input.deps, persistentScopeRequest, {
         eventType: RUNTIME_EVENT_TYPES.PERMISSION_PERSISTED,
         payload: persistedContext,
       });
@@ -329,6 +335,14 @@ export async function processPermissionInteractionIpc(input: {
       input.claimedPath,
     );
   }
+}
+
+function persistentPermissionScopeRequest(
+  request: PermissionApprovalRequest,
+): PermissionApprovalRequest {
+  if (!request.threadId) return request;
+  const { threadId: _routingThreadId, ...parentConversationRequest } = request;
+  return parentConversationRequest;
 }
 
 function formatPersistentPermissionOutcome(input: {

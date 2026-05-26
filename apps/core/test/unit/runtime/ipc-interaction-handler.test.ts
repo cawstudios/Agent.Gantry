@@ -260,6 +260,95 @@ describe('ipc-interaction-handler', () => {
     );
   });
 
+  it('records persistent approvals at parent conversation scope while routing the receipt to the thread', async () => {
+    const claimedPath = path.join(tempDir, 'claimed-thread-permission.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const saveDecision = vi.fn(async () => undefined);
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+    const sendMessage = vi.fn(async () => undefined);
+    const toolRepository = {
+      getTool: vi.fn(async () => ({
+        id: 'tool:mcp__gantry__service_restart',
+        appId: 'app:test',
+        status: 'active',
+        selectable: true,
+      })),
+      listTools: vi.fn(async () => []),
+      saveAgentToolBinding: vi.fn(async () => undefined),
+      disableAgentToolBinding: vi.fn(async () => null),
+    };
+
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-thread-admin',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        responseNonce: 'nonce',
+        sourceAgentFolder: 'main_agent',
+        runHandle: 'agent-run-thread',
+        targetJid: 'tg:team',
+        threadId: 'topic-7',
+        toolName: 'mcp__gantry__service_restart',
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        requestPermissionApproval: vi.fn(async () => ({
+          approved: true,
+          mode: 'allow_persistent_rule',
+          decidedBy: 'owner',
+          reason: 'persistent tool allowed',
+          decisionClassification: 'user_permanent',
+          updatedPermissions: [
+            {
+              type: 'addRules',
+              behavior: 'allow',
+              rules: [{ toolName: 'mcp__gantry__service_restart' }],
+            },
+          ],
+        })),
+        sendMessage,
+        publishRuntimeEvent,
+        opsRepository: createEmptyJobRepository() as never,
+        getToolRepository: () => toolRepository as never,
+        getPermissionRepository: () =>
+          ({
+            savePolicy: vi.fn(),
+            saveRule: vi.fn(),
+            saveDecision,
+            getDecision: vi.fn(),
+          }) as never,
+        mirrorAgentToolRulesToSettings: vi.fn(async () => undefined),
+      },
+      ipcBaseDir: tempDir,
+      file: 'claimed-thread-permission.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    const savedDecision = saveDecision.mock.calls[0]?.[0];
+    expect(savedDecision.actorContext).toMatchObject({
+      requestId: 'perm-thread-admin',
+      conversationId: 'tg:team',
+      mode: 'allow_persistent_rule',
+      classification: 'user_permanent',
+    });
+    expect(savedDecision.actorContext).not.toHaveProperty('threadId');
+    const persistedEvent = publishRuntimeEvent.mock.calls
+      .map((call) => call[0])
+      .find((event) => event.eventType === 'permission.persisted');
+    expect(persistedEvent).toEqual(
+      expect.objectContaining({
+        conversationId: 'tg:team',
+        threadId: undefined,
+      }),
+    );
+    expect(sendMessage).toHaveBeenCalledWith(
+      'tg:team',
+      expect.stringContaining('Always allowed:'),
+      { threadId: 'topic-7' },
+    );
+  });
+
   it('persists skill action capability approvals and appends runtime command rules', async () => {
     const claimedPath = path.join(tempDir, 'claimed-skill-action.json');
     fs.writeFileSync(claimedPath, '{}');

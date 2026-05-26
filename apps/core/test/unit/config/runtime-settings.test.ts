@@ -657,6 +657,61 @@ conversations:
     }
   });
 
+  it('drops generated runtime skill paths before mirroring settings', () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-settings-generated-runtime-'),
+    );
+    try {
+      const settings = createDefaultRuntimeSettings();
+      settings.agents.main_agent = {
+        name: 'Main',
+        folder: 'main_agent',
+        bindings: {},
+        sources: emptySources(),
+        capabilities: [],
+      };
+      saveRuntimeSettings(runtimeHome, settings);
+
+      mirrorAgentToolRulesToRuntimeSettings({
+        runtimeHome,
+        agentFolder: 'main_agent',
+        rules: [
+          'RunCommand(/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+        ],
+      });
+      const parsed = loadRuntimeSettings(runtimeHome);
+      expect(parsed.agents.main_agent.capabilities).toEqual([]);
+    } finally {
+      fs.rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects generated runtime skill paths in settings validation', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agents.main_agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [
+        {
+          id: 'RunCommand(/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+          version: 'builtin',
+        },
+      ],
+    };
+
+    const result = validateLoadedRuntimeSettings(
+      '/tmp/gantry-generated-runtime',
+      settings,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.failure?.details.join('\n')).toContain(
+      'Persistent RunCommand rules cannot reference generated runtime skill paths',
+    );
+  });
+
   it('rejects internal tool ids in settings agent tools', () => {
     const settings = createDefaultRuntimeSettings();
     settings.agents.main_agent = {

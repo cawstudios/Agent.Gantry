@@ -57,6 +57,23 @@ describe('PermissionBatchCoalescer', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('coalesces topic/thread requests for the same parent conversation', () => {
+    vi.useFakeTimers();
+    const flushed: PermissionApprovalRequest[][] = [];
+    const coalescer = new PermissionBatchCoalescer({
+      onFlush: (batch) => flushed.push(batch.requests),
+    });
+    const first = request('permission-1', { threadId: 'thread-a' });
+    const second = request('permission-2', { threadId: 'thread-b' });
+
+    coalescer.enqueue(first);
+    coalescer.enqueue(second);
+    vi.advanceTimersByTime(DEFAULT_PERMISSION_BATCH_WINDOW_MS);
+
+    expect(flushed).toEqual([[first, second]]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('separates requests with mismatched batch identity fields', () => {
     vi.useFakeTimers();
     const flushed: PermissionApprovalRequest[][] = [];
@@ -67,7 +84,6 @@ describe('PermissionBatchCoalescer', () => {
     const mismatches = [
       request('source', { sourceAgentFolder: 'other_agent' }),
       request('target', { targetJid: 'tg:other' }),
-      request('thread', { threadId: 'thread-2' }),
       request('run', { runId: 'run-2' }),
       request('policy', { decisionPolicy: 'control_allowlist' }),
     ];
@@ -78,14 +94,7 @@ describe('PermissionBatchCoalescer', () => {
 
     expect(
       flushed.map((batch) => batch.map((entry) => entry.requestId)),
-    ).toEqual([
-      ['base'],
-      ['source'],
-      ['target'],
-      ['thread'],
-      ['run'],
-      ['policy'],
-    ]);
+    ).toEqual([['base'], ['source'], ['target'], ['run'], ['policy']]);
     expect(vi.getTimerCount()).toBe(0);
   });
 

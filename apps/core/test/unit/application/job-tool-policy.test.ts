@@ -58,9 +58,10 @@ describe('job tool policy', () => {
     ).resolves.toEqual({
       inheritedTools: ['Browser'],
       effectiveAllowedTools: ['Browser'],
+      runtimeAccess: [],
       localCliCredentialAccess: false,
       localCliCredentialPaths: [],
-      localCliNetworkHosts: [],
+      localCliNetworkBindings: [],
     });
   });
 

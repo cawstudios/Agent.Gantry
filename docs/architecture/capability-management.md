@@ -68,6 +68,14 @@ primary. For example, `capability:google.sheets.write` may project to a
 provider-neutral configured-access adapter while the approval prompt says
 `Allow Google Sheets write?`.
 
+Internally, that expansion produces typed `CapabilityRuntimeAccess` entries:
+`local_cli`, `skill_action`, `mcp_server`, `builtin_tool`, and
+`configured_adapter`. The same selected capability projects the same access for
+DM/private runs, group/channel runs, Slack/Teams threads, Telegram topics,
+recurring jobs, one-time jobs, and manually triggered jobs. Threads and topics
+select routing, approval delivery, and audit metadata only; they do not create a
+second durable permission scope.
+
 Built-ins cover common brokered app capabilities such as Google Sheets read,
 Google Sheets write, and Gmail read. Unknown business tools are not accepted as
 ad hoc raw commands. They must be promoted through a reviewed user-defined
@@ -100,10 +108,11 @@ Example:
 }
 ```
 
-Runtime normalizes `${skillRoot}` to the materialized readable skill directory,
-for example `skills/linkedin-posting`, rejects shell environment assignments
-and secret-like command parts, and records the approved skill id plus content
-hash on the semantic capability definition. A persistent approval stores
+Runtime normalizes `${skillRoot}` to the stable readable skill directory,
+for example `skills/linkedin-posting`, rejects generated runtime paths such as
+`.llm-runtime/claude/skills/...`, rejects shell environment assignments and
+secret-like command parts, and records the approved skill id plus content hash
+on the semantic capability definition. A persistent approval stores
 `capability:skill.linkedin-posting.publish` on the agent and projects the
 underlying scoped `RunCommand(...)` only for the current/future run after the
 selected skill hash still matches. If the approved skill package changes, the
@@ -132,7 +141,8 @@ A durable local CLI capability must pin:
 - denied environment override patterns for token, credential, config, proxy,
   keychain/keyring, CA, and authority variables
 - auth/preflight command and non-secret account label
-- protected credential/config paths that agents cannot write
+- protected credential/config paths that approved CLIs can read and agents
+  cannot write
 - safe command preview/hash rules and mapped scoped enforcement rules
 
 Default-denied environment overrides include token and secret keys, credential
@@ -157,8 +167,11 @@ The reviewed definition pins `/usr/local/bin/acme`, allows only
 `/usr/local/bin/acme invoices read *`, runs
 `/usr/local/bin/acme auth status` as preflight, protects `~/.config/acme`, and
 shows `Acme invoices read` in prompts and management views. Until runtime
-enforcement exists, approval records the reviewed draft only; it does not create
-durable runnable authority or a harness command-tool projection.
+enforcement verifies the definition, the draft is not runnable. Once selected,
+runtime projects only the reviewed scoped command rules, mounts declared
+credential directories as readable SDK additional directories, keeps those
+directories write-denied, and records command-bound network host bindings for
+scheduled-job SDK network prompt correlation.
 
 ## Administration Model
 
@@ -329,6 +342,12 @@ on the next scheduled run or a manual rerun. Browser remains a single public
 `Browser` tool capability; projected browser gateway tools and admin Gantry MCP
 tools are not job-local grants.
 
+Conversation threads and provider topics are routing details, not separate
+permission boundaries. Permission prompts may be delivered in a Slack thread,
+Teams reply chain, or Telegram topic, but `Allow 5 min` and `Always allow`
+scope to the parent conversation and selected agent capability set. Thread or
+topic ids may appear in audit/routing metadata only.
+
 Direct writes to `settings.json`, `settings.local.json`, `.mcp.json`,
 generated provider MCP directories, and skill capability files are protected
 wholesale. Provider settings files are not partially parsed for "safe" keys;
@@ -490,12 +509,13 @@ Before calling a cutover complete, run targeted searches for:
    semantic local CLI capability.
 4. Configure auth preflight, for example
    `/usr/local/bin/gog auth status`, and protect credential/config paths such
-   as `~/.config/gog` from writes.
+   as `~/.config/gog` from writes. The reviewed executable must still be able
+   to read those credential files during approved commands.
 5. Submit `propose_capability` with `source: local_cli`, the definition, and
    reason.
-6. After review, run `capability_status` to confirm the draft is visible. Do
-   not enable recurring-job reuse until runtime local-CLI enforcement verifies
-   executable identity, preflight, protected paths, and denied env overrides.
+6. After review, run `capability_status` to confirm the draft is visible and
+   selected for the target agent. Recurring jobs inherit that agent capability;
+   they must not create job-local grants.
 
 ## Scheduler Capability Requirements
 
@@ -535,8 +555,8 @@ Examples:
 - Reusable user-defined local CLI capability: propose a `local_cli` capability
   with pinned `/usr/local/bin/gog`, command template
   `/usr/local/bin/gog sheets write *`, auth preflight
-  `/usr/local/bin/gog auth status`, and protected `~/.config/gog`. This is a
-  reviewed draft until the runtime gate can enforce it; do not approve
+  `/usr/local/bin/gog auth status`, and protected `~/.config/gog`. Runtime
+  enforces it through the selected semantic capability; do not approve
   `RunCommand(gog *)` as a substitute.
 - Unknown business CLI: propose `capabilityId=acme.invoices.read`,
   display name `Acme invoices read`, command template

@@ -42,6 +42,7 @@ interface RunnerRecord {
     settings?: Record<string, unknown>;
     skills?: string[];
     sandbox?: Record<string, unknown>;
+    additionalDirectories?: string[];
     persistSession?: boolean;
     resume?: unknown;
     resumeSessionAt?: unknown;
@@ -214,12 +215,20 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'bash-command-parser.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/generated-runtime-paths.ts'),
+    path.join(sharedDir, 'generated-runtime-paths.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/semantic-capability-ids.ts'),
     path.join(sharedDir, 'semantic-capability-ids.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/semantic-capabilities.ts'),
     path.join(sharedDir, 'semantic-capabilities.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/capability-runtime-access.ts'),
+    path.join(sharedDir, 'capability-runtime-access.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/memory-ipc-actions.ts'),
@@ -351,6 +360,7 @@ export async function* query({ prompt, options }) {
     settings: options?.settings,
     skills: options?.skills,
     sandbox: options?.sandbox,
+    additionalDirectories: options?.additionalDirectories,
     tools: options?.tools,
     allowedTools: options?.allowedTools,
     persistSession: options?.persistSession,
@@ -1052,6 +1062,83 @@ describe('agent-runner IPC lifecycle', () => {
           ]),
         },
       });
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'keeps reviewed local CLI credential paths readable but write-protected in the SDK sandbox',
+    async () => {
+      const fixture = createRunnerFixture();
+      const protectedSettingsPath = path.join(
+        fixture.root,
+        'runtime',
+        'settings.json',
+      );
+      const runtimeProjectionDir = path.join(fixture.root, 'runtime');
+      const localCliCredentialDir = path.join(
+        fixture.root,
+        'credentials',
+        'gog',
+      );
+      fs.mkdirSync(runtimeProjectionDir, { recursive: true });
+      fs.mkdirSync(localCliCredentialDir, { recursive: true });
+
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_EXIT_AFTER_QUERY: '1',
+        GANTRY_PROTECTED_FILESYSTEM_DENY_READ_PATHS_JSON: JSON.stringify([
+          protectedSettingsPath,
+        ]),
+        GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON: JSON.stringify([
+          runtimeProjectionDir,
+        ]),
+        GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON: JSON.stringify([
+          localCliCredentialDir,
+        ]),
+      });
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      const call = readRecord(fixture.recordPath).calls[0];
+      const sandboxFilesystem = call?.sandbox?.filesystem as
+        | { denyRead?: string[]; denyWrite?: string[] }
+        | undefined;
+
+      expect(sandboxFilesystem?.denyRead).toEqual(
+        expect.arrayContaining([
+          path.join(
+            fs.realpathSync.native(path.dirname(protectedSettingsPath)),
+            path.basename(protectedSettingsPath),
+          ),
+        ]),
+      );
+      expect(sandboxFilesystem?.denyRead).not.toEqual(
+        expect.arrayContaining([
+          path.join(
+            fs.realpathSync.native(path.dirname(localCliCredentialDir)),
+            path.basename(localCliCredentialDir),
+          ),
+        ]),
+      );
+      expect(call?.additionalDirectories).toEqual(
+        expect.arrayContaining([
+          path.join(
+            fs.realpathSync.native(path.dirname(localCliCredentialDir)),
+            path.basename(localCliCredentialDir),
+          ),
+        ]),
+      );
+      expect(sandboxFilesystem?.denyWrite).toEqual(
+        expect.arrayContaining([
+          path.join(
+            fs.realpathSync.native(path.dirname(runtimeProjectionDir)),
+            path.basename(runtimeProjectionDir),
+          ),
+          path.join(
+            fs.realpathSync.native(path.dirname(localCliCredentialDir)),
+            path.basename(localCliCredentialDir),
+          ),
+        ]),
+      );
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );

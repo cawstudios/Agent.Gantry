@@ -37,9 +37,14 @@ import {
   PERMISSION_GATED_NATIVE_TOOLS,
   type AgentToolAccessView,
 } from '../../shared/tool-access-view.js';
-import { semanticCapabilityFromToolCatalogItem } from '../../shared/semantic-capabilities.js';
 import { adminMcpToolNameFromFullName } from '../../shared/admin-mcp-tools.js';
 import { nowIso } from '../../shared/time/datetime.js';
+import {
+  canonicalToolReferenceForView,
+  capabilityFromCanonicalToolReference,
+  skillActionDefinitionsForAgent,
+  skillActionDefinitionsForBindings,
+} from './agent-capability-skill-actions.js';
 
 export interface CapabilityCatalogView {
   tools: ToolCatalogItem[];
@@ -135,8 +140,16 @@ export class AgentCapabilityAdministrationService {
           : [];
       },
     );
-    const configuredTools = configuredToolEntries.map(
-      (entry) => entry.reference,
+    const semanticCapabilityDefinitions =
+      await skillActionDefinitionsForBindings({
+        appId: input.appId,
+        skillBindings,
+        skillRepository: this.repositories.skills,
+      });
+    const configuredTools = configuredToolEntries.flatMap((entry) =>
+      canonicalToolReferenceForView(entry.reference, {
+        semanticCapabilityDefinitions,
+      }),
     );
     const enabledAdminTools = selectedAdminToolNames(configuredTools);
     return {
@@ -156,8 +169,12 @@ export class AgentCapabilityAdministrationService {
           })),
         tools: readableToolSources(toolSources),
       },
-      capabilities: configuredToolEntries.map((entry) =>
-        toolReferenceToCapability(entry.reference, entry.tool),
+      capabilities: configuredToolEntries.flatMap((entry) =>
+        capabilityFromCanonicalToolReference(
+          entry.reference,
+          entry.tool,
+          semanticCapabilityDefinitions,
+        ),
       ),
       toolAccess: buildAgentToolAccessView({
         configuredTools,
@@ -191,9 +208,17 @@ export class AgentCapabilityAdministrationService {
       );
     }
     const now = this.clock.now();
+    const semanticCapabilityDefinitions = await skillActionDefinitionsForAgent({
+      appId: input.appId,
+      agentId: input.agentId,
+      skillRepository: this.repositories.skills,
+    });
     const selectedToolReferences = unique(
-      input.capabilities.map((capability) =>
-        capabilitySelectionToToolReference(capability.id),
+      input.capabilities.flatMap((capability) =>
+        canonicalToolReferenceForView(
+          capabilitySelectionToToolReference(capability.id),
+          { semanticCapabilityDefinitions },
+        ),
       ),
     );
 
@@ -204,6 +229,7 @@ export class AgentCapabilityAdministrationService {
           appId: input.appId,
           reference,
           now,
+          semanticCapabilityDefinitions,
         });
         return tool.id;
       }),
@@ -271,8 +297,10 @@ export class AgentCapabilityAdministrationService {
       }
       return { reference: displayToolReference({ toolId, tool }), tool };
     });
-    const configuredTools = configuredToolEntries.map(
-      (entry) => entry.reference,
+    const configuredTools = configuredToolEntries.flatMap((entry) =>
+      canonicalToolReferenceForView(entry.reference, {
+        semanticCapabilityDefinitions,
+      }),
     );
     return {
       agentId: input.agentId,
@@ -291,8 +319,12 @@ export class AgentCapabilityAdministrationService {
           })),
         tools: readableToolSources(toolSources),
       },
-      capabilities: configuredToolEntries.map((entry) =>
-        toolReferenceToCapability(entry.reference, entry.tool),
+      capabilities: configuredToolEntries.flatMap((entry) =>
+        capabilityFromCanonicalToolReference(
+          entry.reference,
+          entry.tool,
+          semanticCapabilityDefinitions,
+        ),
       ),
       toolAccess: buildAgentToolAccessView({
         configuredTools,
@@ -590,29 +622,6 @@ function capabilitySelectionToToolReference(capabilityId: string): string {
   if (id === 'browser.use') return 'Browser';
   if (id.startsWith('RunCommand(')) return id;
   return `capability:${id}`;
-}
-
-function toolReferenceToCapability(
-  reference: string,
-  tool?: ToolCatalogItem,
-): {
-  id: string;
-  version: string;
-} {
-  if (reference === 'Browser') return { id: 'browser.use', version: 'builtin' };
-  if (reference.startsWith('capability:')) {
-    const semanticCapability = tool
-      ? semanticCapabilityFromToolCatalogItem({
-          name: tool.name,
-          inputSchema: tool.inputSchema,
-        })
-      : undefined;
-    return {
-      id: reference.slice('capability:'.length),
-      version: semanticCapability?.version ?? 'builtin',
-    };
-  }
-  return { id: reference, version: 'builtin' };
 }
 
 function selectedAdminToolNames(tools: readonly string[]): Set<string> {

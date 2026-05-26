@@ -8,13 +8,18 @@ import {
   resolveAgentToolRuntimePolicy,
   resolveAgentToolRuntimeRules,
 } from '../agents/agent-tool-runtime-rules.js';
+import type {
+  CapabilityRuntimeAccess,
+  LocalCliNetworkBinding,
+} from '../../shared/capability-runtime-access.js';
 
 export interface JobToolPolicyResolution {
   inheritedTools: string[];
   effectiveAllowedTools: string[];
+  runtimeAccess: CapabilityRuntimeAccess[];
   localCliCredentialAccess: boolean;
   localCliCredentialPaths: string[];
-  localCliNetworkHosts: string[];
+  localCliNetworkBindings: LocalCliNetworkBinding[];
 }
 
 export function agentIdForJobGroupScope(groupScope: string): string {
@@ -39,16 +44,18 @@ export async function resolveJobToolPolicy(input: {
         })
       : {
           rules: [],
+          runtimeAccess: [],
           localCliCredentialAccess: false,
           localCliCredentialPaths: [],
-          localCliNetworkHosts: [],
+          localCliNetworkBindings: [],
         };
   return {
     inheritedTools: inheritedTools.rules,
     effectiveAllowedTools: mergeUnique(inheritedTools.rules),
+    runtimeAccess: inheritedTools.runtimeAccess,
     localCliCredentialAccess: inheritedTools.localCliCredentialAccess,
     localCliCredentialPaths: inheritedTools.localCliCredentialPaths,
-    localCliNetworkHosts: inheritedTools.localCliNetworkHosts,
+    localCliNetworkBindings: inheritedTools.localCliNetworkBindings,
   };
 }
 
@@ -76,16 +83,18 @@ export async function resolveAgentToolBindingPolicy(input: {
   agentId: string;
 }): Promise<{
   rules: string[];
+  runtimeAccess: CapabilityRuntimeAccess[];
   localCliCredentialAccess: boolean;
   localCliCredentialPaths: string[];
-  localCliNetworkHosts: string[];
+  localCliNetworkBindings: LocalCliNetworkBinding[];
 }> {
   if (!input.repository) {
     return {
       rules: [],
+      runtimeAccess: [],
       localCliCredentialAccess: false,
       localCliCredentialPaths: [],
-      localCliNetworkHosts: [],
+      localCliNetworkBindings: [],
     };
   }
   const policy = await resolveAgentToolRuntimePolicy({
@@ -98,9 +107,10 @@ export async function resolveAgentToolBindingPolicy(input: {
   });
   return {
     rules: policy.rules,
+    runtimeAccess: policy.runtimeAccess,
     localCliCredentialAccess: policy.localCliCredentialAccess,
     localCliCredentialPaths: policy.localCliCredentialPaths,
-    localCliNetworkHosts: policy.localCliNetworkHosts,
+    localCliNetworkBindings: policy.localCliNetworkBindings,
   };
 }
 

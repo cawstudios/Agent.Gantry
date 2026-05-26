@@ -47,6 +47,7 @@ import {
   validatePersistentRequestPermissionRule,
 } from '../../shared/persistent-permission-rules.js';
 import { permissionUpdateAllowedToolRules } from '../../shared/permission-tool-rules.js';
+import { canonicalizeDurableSkillActionToolRule } from '../../shared/skill-action-capability-rules.js';
 import { stableSha256Json } from '../../shared/stable-hash.js';
 import { nowIso } from '../../shared/time/datetime.js';
 
@@ -121,6 +122,7 @@ export class PermissionManagementService {
   ): Promise<string[]> {
     const allowedRules = canonicalPersistentPermissionRules(
       permissionUpdateAllowedToolRules(input.updates),
+      input.semanticCapabilityDefinitions,
     );
     if (allowedRules.length === 0) return [];
     for (const allowedRule of allowedRules) {
@@ -462,8 +464,19 @@ function permissionDecisionExpiresAt(
 
 function canonicalPersistentPermissionRules(
   rules: readonly string[],
+  semanticCapabilityDefinitions?: Record<string, SemanticCapabilityDefinition>,
 ): string[] {
-  return [...new Set(rules)];
+  return [
+    ...new Set(
+      rules.flatMap((rule) => {
+        const canonical = canonicalizeDurableSkillActionToolRule(rule, {
+          semanticCapabilityDefinitions,
+          dropGeneratedWithoutMatch: true,
+        });
+        return canonical ? [canonical] : [];
+      }),
+    ),
+  ];
 }
 
 function persistentPermissionRuleAuditPreviewForRules(

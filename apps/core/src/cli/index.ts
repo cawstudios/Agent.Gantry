@@ -25,10 +25,6 @@ import {
   startService,
   stopService,
 } from '../infrastructure/service/manager.js';
-import {
-  formatRuntimePreflightFailure,
-  validateRuntimePreflightWithStorage,
-} from '../config/preflight.js';
 import { ensureRuntimeSettings } from '../config/settings/runtime-settings.js';
 
 interface ParsedArgs {
@@ -117,10 +113,25 @@ async function runStatusCommand(
   return summary.doctor.ok ? 0 : 1;
 }
 
-async function runStartCommand(runtimeHome: string): Promise<number> {
+function loadRuntimePreflightModule() {
+  return import('../config/preflight.js');
+}
+
+async function validateRuntimePreflightForCommand(
+  runtimeHome: string,
+): Promise<boolean> {
+  const { formatRuntimePreflightFailure, validateRuntimePreflightWithStorage } =
+    await loadRuntimePreflightModule();
   const validation = await validateRuntimePreflightWithStorage(runtimeHome);
   if (!validation.ok && validation.failure) {
     p.log.error(formatRuntimePreflightFailure(validation.failure));
+    return false;
+  }
+  return true;
+}
+
+async function runStartCommand(runtimeHome: string): Promise<number> {
+  if (!(await validateRuntimePreflightForCommand(runtimeHome))) {
     return 1;
   }
 
@@ -196,9 +207,7 @@ function restartService(runtimeHome: string): ReturnType<typeof stopService> {
 }
 
 async function runRestartCommand(runtimeHome: string): Promise<number> {
-  const validation = await validateRuntimePreflightWithStorage(runtimeHome);
-  if (!validation.ok && validation.failure) {
-    p.log.error(formatRuntimePreflightFailure(validation.failure));
+  if (!(await validateRuntimePreflightForCommand(runtimeHome))) {
     return 1;
   }
   const outcome = restartService(runtimeHome);
@@ -226,9 +235,7 @@ async function runServiceCommand(
   }
 
   if (action === 'start') {
-    const validation = await validateRuntimePreflightWithStorage(runtimeHome);
-    if (!validation.ok && validation.failure) {
-      p.log.error(formatRuntimePreflightFailure(validation.failure));
+    if (!(await validateRuntimePreflightForCommand(runtimeHome))) {
       return 1;
     }
     const outcome = startService(runtimeHome);
@@ -251,9 +258,7 @@ async function runServiceCommand(
   }
 
   if (action === 'restart') {
-    const validation = await validateRuntimePreflightWithStorage(runtimeHome);
-    if (!validation.ok && validation.failure) {
-      p.log.error(formatRuntimePreflightFailure(validation.failure));
+    if (!(await validateRuntimePreflightForCommand(runtimeHome))) {
       return 1;
     }
     const outcome = restartService(runtimeHome);
@@ -355,6 +360,8 @@ async function runSmartEntrypoint(runtimeHome: string): Promise<number> {
     return runSetupCommand(runtimeHome);
   }
 
+  const { validateRuntimePreflightWithStorage } =
+    await loadRuntimePreflightModule();
   const validation = await validateRuntimePreflightWithStorage(runtimeHome);
   const { hasProcessableGroupForConfiguredChannel, hasRuntimeConfig } =
     await import('./doctor.js');

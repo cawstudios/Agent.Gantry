@@ -248,10 +248,79 @@ describe('configured agent tools', () => {
         'capability:acme.invoices.read',
         'RunCommand(/usr/local/bin/acme invoices read *)',
       ],
+      runtimeAccess: [
+        {
+          selectedCapabilityId: 'acme.invoices.read',
+          sourceType: 'local_cli',
+          auditLabel: 'Acme invoices read',
+          commandRules: ['RunCommand(/usr/local/bin/acme invoices read *)'],
+          credentialDirs: ['~/.config/acme'],
+          networkBindings: [
+            {
+              commandRules: ['RunCommand(/usr/local/bin/acme invoices read *)'],
+              hosts: ['api.acme.test'],
+            },
+          ],
+        },
+      ],
       localCliCredentialAccess: true,
       localCliCredentialPaths: ['~/.config/acme'],
-      localCliNetworkHosts: ['api.acme.test'],
+      localCliNetworkBindings: [
+        {
+          commandRules: ['RunCommand(/usr/local/bin/acme invoices read *)'],
+          hosts: ['api.acme.test'],
+        },
+      ],
     });
+  });
+
+  it('rejects custom semantic capability rows with invalid reviewed schema', async () => {
+    const repository = {
+      listAgentToolBindings: async () => [
+        {
+          status: 'active',
+          toolId: 'tool:capability:acme.invoices.read',
+        },
+      ],
+      getTool: async () => ({
+        appId: 'default',
+        name: 'capability:acme.invoices.read',
+        inputSchema: {
+          format: 'gantry.semantic-capability.v1',
+          schema: {
+            capabilityId: 'acme.invoices.read',
+            displayName: 'Acme invoices read',
+            category: 'Acme',
+            risk: 'read',
+            can: 'Read invoice records.',
+            cannot: 'Write invoices or export tokens.',
+            credentialSource: 'configured_access',
+            implementationBindings: [
+              {
+                kind: 'local_cli',
+                executablePath: '/usr/local/bin/acme',
+                executableVersion: '1.2.3',
+                executableHash: 'sha256:abc123',
+                commandTemplates: ['/usr/local/bin/acme invoices read *'],
+                authPreflightCommand: '/usr/local/bin/acme auth status',
+              },
+            ],
+            protectedPaths: ['~/.config/acme'],
+            networkHosts: ['api.acme.test'],
+          },
+        },
+      }),
+    };
+
+    await expect(
+      resolveConfiguredToolPolicy({
+        repository: repository as never,
+        appId: 'default',
+        agentId: 'agent:one',
+      }),
+    ).rejects.toThrow(
+      'Semantic capability rules must resolve to a reviewed capability definition.',
+    );
   });
 
   it('drops stale active bindings when the catalog row is unavailable', async () => {

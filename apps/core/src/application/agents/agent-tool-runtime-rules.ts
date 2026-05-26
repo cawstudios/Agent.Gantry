@@ -17,6 +17,12 @@ import {
   semanticCapabilityFromToolCatalogItem,
   type SemanticCapabilityDefinition,
 } from '../../shared/semantic-capabilities.js';
+import { parseSemanticCapabilityRule } from '../../shared/semantic-capability-ids.js';
+import type {
+  CapabilityRuntimeAccess,
+  LocalCliCapabilityRuntimeAccess,
+  LocalCliNetworkBinding,
+} from '../../shared/capability-runtime-access.js';
 
 export interface AgentToolRuntimeRuleResolutionInput {
   repository: ToolCatalogRepository;
@@ -29,9 +35,10 @@ export interface AgentToolRuntimeRuleResolutionInput {
 
 export interface AgentToolRuntimePolicy {
   rules: string[];
+  runtimeAccess: CapabilityRuntimeAccess[];
   localCliCredentialAccess: boolean;
   localCliCredentialPaths: string[];
-  localCliNetworkHosts: string[];
+  localCliNetworkBindings: LocalCliNetworkBinding[];
 }
 
 export async function resolveAgentToolRuntimeRules(
@@ -55,8 +62,12 @@ export async function resolveAgentToolRuntimePolicy(
   );
   const activeSkillActionKeys = await activeSkillActionProjectionKeys(input);
   let localCliCredentialAccess = false;
+  const runtimeAccess: CapabilityRuntimeAccess[] = [];
   const localCliCredentialPaths = new Set<string>();
-  const localCliNetworkHosts = new Set<string>();
+  const localCliNetworkBindings = new Map<
+    string,
+    { commandRules: string[]; hosts: Set<string> }
+  >();
   const rules = tools.flatMap((tool) => {
     if (tool?.appId && tool.appId !== input.appId) return [];
     const name = tool?.name?.trim();
@@ -64,6 +75,15 @@ export async function resolveAgentToolRuntimePolicy(
       name,
       inputSchema: tool?.inputSchema,
     });
+    if (name && parseSemanticCapabilityRule(name) && !capability) {
+      throw input.makeError
+        ? input.makeError(
+            `${input.errorSubject} ${name} is invalid. Semantic capability rules must resolve to a reviewed capability definition.`,
+          )
+        : new Error(
+            `${input.errorSubject} ${name} is invalid. Semantic capability rules must resolve to a reviewed capability definition.`,
+          );
+    }
     if (name && isThirdPartyMcpToolRule(name) && !capability) {
       throw input.makeError
         ? input.makeError(
@@ -81,13 +101,17 @@ export async function resolveAgentToolRuntimePolicy(
     }
     if (capability?.credentialSource === 'local_cli') {
       localCliCredentialAccess = true;
-      for (const protectedPath of capability.protectedPaths ?? []) {
-        const trimmed = protectedPath.trim();
-        if (trimmed) localCliCredentialPaths.add(trimmed);
-      }
-      for (const host of capability.networkHosts ?? []) {
-        const trimmed = host.trim().toLowerCase();
-        if (trimmed) localCliNetworkHosts.add(trimmed);
+    }
+    if (capability) {
+      const accessEntries = projectCapabilityRuntimeAccess(capability);
+      runtimeAccess.push(...accessEntries);
+      for (const entry of accessEntries) {
+        if (entry.sourceType !== 'local_cli') continue;
+        collectLocalCliRuntimeAccess({
+          access: entry,
+          credentialPaths: localCliCredentialPaths,
+          networkBindings: localCliNetworkBindings,
+        });
       }
     }
     return name
@@ -105,10 +129,166 @@ export async function resolveAgentToolRuntimePolicy(
   });
   return {
     rules,
+    runtimeAccess,
     localCliCredentialAccess,
     localCliCredentialPaths: [...localCliCredentialPaths],
-    localCliNetworkHosts: [...localCliNetworkHosts],
+    localCliNetworkBindings: [...localCliNetworkBindings.values()].map(
+      (binding) => ({
+        commandRules: binding.commandRules,
+        hosts: [...binding.hosts],
+      }),
+    ),
   };
+}
+
+function projectCapabilityRuntimeAccess(
+  capability: SemanticCapabilityDefinition,
+): CapabilityRuntimeAccess[] {
+  const source = skillActionSource(capability);
+  const common = {
+    selectedCapabilityId: capability.capabilityId,
+    auditLabel: capability.displayName || capability.capabilityId,
+  };
+  const commandRules = commandRulesFromCapability(capability);
+  if (source) {
+    return [
+      {
+        ...common,
+        sourceType: 'skill_action',
+        skillId: source.skillId,
+        selectedAction: source.actionId,
+        declaredEnvRefs: stringList(capability.redactionPolicy?.env),
+        commandRules,
+      },
+    ];
+  }
+  const access: CapabilityRuntimeAccess[] = [];
+  const localCliCommandRules = localCliCommandRulesFromCapability(capability);
+  if (
+    capability.credentialSource === 'local_cli' &&
+    localCliCommandRules.length > 0
+  ) {
+    const hosts = normalizedHosts(capability.networkHosts);
+    access.push({
+      ...common,
+      sourceType: 'local_cli',
+      commandRules: localCliCommandRules,
+      credentialDirs: stringList(capability.protectedPaths),
+      networkBindings:
+        hosts.length > 0 ? [{ commandRules: localCliCommandRules, hosts }] : [],
+    });
+  }
+  for (const binding of capability.implementationBindings) {
+    if (binding.kind === 'adapter' && binding.adapterRef?.trim()) {
+      access.push({
+        ...common,
+        sourceType: 'configured_adapter',
+        adapterRef: binding.adapterRef.trim(),
+      });
+      continue;
+    }
+    if (binding.kind === 'mcp_tool' && binding.mcpTool?.trim()) {
+      access.push({
+        ...common,
+        sourceType: 'mcp_server',
+        reviewedServerId: mcpServerIdFromTool(binding.mcpTool) ?? 'unknown',
+        allowedTools: [binding.mcpTool.trim()],
+        credentialRefs: [],
+      });
+      continue;
+    }
+    if (binding.kind === 'tool_rule' && binding.rule?.trim()) {
+      access.push({
+        ...common,
+        sourceType: 'builtin_tool',
+        runtimeToolRules: [binding.rule.trim()],
+      });
+    }
+  }
+  return access;
+}
+
+function collectLocalCliRuntimeAccess(input: {
+  access: LocalCliCapabilityRuntimeAccess;
+  credentialPaths: Set<string>;
+  networkBindings: Map<string, { commandRules: string[]; hosts: Set<string> }>;
+}): void {
+  for (const credentialDir of input.access.credentialDirs) {
+    input.credentialPaths.add(credentialDir);
+  }
+  for (const binding of input.access.networkBindings) {
+    const commandRules = stringList(binding.commandRules);
+    if (commandRules.length === 0) continue;
+    const hosts = normalizedHosts(binding.hosts);
+    if (hosts.length === 0) continue;
+    const key = commandRules.join('\0');
+    const existing = input.networkBindings.get(key);
+    if (existing) {
+      for (const host of hosts) existing.hosts.add(host);
+    } else {
+      input.networkBindings.set(key, {
+        commandRules,
+        hosts: new Set(hosts),
+      });
+    }
+  }
+}
+
+function commandRulesFromCapability(
+  capability: SemanticCapabilityDefinition,
+): string[] {
+  const out = new Set<string>();
+  for (const binding of capability.implementationBindings) {
+    if (binding.kind === 'tool_rule' && binding.rule?.trim()) {
+      out.add(binding.rule.trim());
+    }
+    if (binding.kind === 'local_cli') {
+      if (capability.credentialSource !== 'local_cli') continue;
+      for (const rule of commandRulesFromTemplates(binding.commandTemplates)) {
+        out.add(rule);
+      }
+    }
+  }
+  return [...out];
+}
+
+function localCliCommandRulesFromCapability(
+  capability: SemanticCapabilityDefinition,
+): string[] {
+  const out = new Set<string>();
+  for (const binding of capability.implementationBindings) {
+    if (capability.credentialSource !== 'local_cli') continue;
+    if (binding.kind !== 'local_cli') continue;
+    for (const rule of commandRulesFromTemplates(binding.commandTemplates)) {
+      out.add(rule);
+    }
+  }
+  return [...out];
+}
+
+function commandRulesFromTemplates(
+  templates: readonly string[] | undefined,
+): string[] {
+  return stringList(templates).map((template) => `RunCommand(${template})`);
+}
+
+function normalizedHosts(values: readonly string[] | undefined): string[] {
+  return stringList(values).map((host) => host.toLowerCase());
+}
+
+function stringList(values: readonly string[] | undefined): string[] {
+  if (!values) return [];
+  const out = new Set<string>();
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed) out.add(trimmed);
+  }
+  return [...out];
+}
+
+function mcpServerIdFromTool(toolName: string): string | undefined {
+  const match = /^mcp__([A-Za-z0-9_-]+)__/.exec(toolName.trim());
+  return match?.[1];
 }
 
 async function activeSkillActionProjectionKeys(

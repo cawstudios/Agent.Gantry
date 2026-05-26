@@ -336,6 +336,94 @@ describe('permission interaction', () => {
     expect(receipt).toContain('Details: LinkedIn posting [sha256:');
   });
 
+  it('hides generated runtime skill paths in command prompts and receipts', () => {
+    const request = {
+      requestId: 'permission_123',
+      sourceAgentFolder: 'Main Agent',
+      toolName: 'Bash',
+      toolInput: {
+        command:
+          'python3 /tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py --file /tmp/post.md',
+      },
+      suggestions: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [
+            {
+              toolName: 'RunCommand',
+              ruleContent: 'skills/linkedin-posting/post.py *',
+            },
+          ],
+        },
+      ],
+    } satisfies PermissionApprovalRequest;
+
+    const text = formatPermissionPromptText(request, 60_000);
+    expect(text).toContain(
+      'Command: generated skill action command; runtime path hidden.',
+    );
+    expect(text).toContain('Action: skills/linkedin-posting/post.py');
+    expect(text).not.toContain('.llm-runtime');
+
+    const receipt = formatPermissionReceiptText('permission_123', request, {
+      approved: true,
+      mode: 'allow_once',
+      decidedBy: 'ravi',
+    });
+    expect(receipt).toContain(
+      'For: RunCommand (generated skill action: skills/linkedin-posting/post.py)',
+    );
+    expect(receipt).not.toContain('.llm-runtime');
+  });
+
+  it('treats thread ids as prompt routing, not separate permission scope', () => {
+    const request = {
+      requestId: 'permission_123',
+      sourceAgentFolder: 'Main Agent',
+      targetJid: 'tg:-1003986348737',
+      threadId: '2771',
+      toolName: 'Bash',
+      toolInput: {
+        command: 'gog sheets append sheet-id A1:B2',
+      },
+      suggestions: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [
+            {
+              toolName: 'RunCommand',
+              ruleContent: 'gog sheets append *',
+            },
+          ],
+        },
+      ],
+    } satisfies PermissionApprovalRequest;
+
+    const text = formatPermissionPromptText(request, 60_000);
+    expect(text).toContain(
+      'Route: shown in this topic/thread; approval applies to the parent conversation.',
+    );
+    expect(text).toContain(
+      'Scope: this request, a short 5-minute grant, or always allow future matching tool calls in the parent conversation.',
+    );
+    expect(text).not.toContain('Thread: 2771');
+
+    const receipt = formatPermissionReceiptText('permission_123', request, {
+      approved: true,
+      mode: 'allow_timed_grant',
+      decidedBy: 'ravi',
+      timedGrantExpiresAtMs: Date.now() + 60_000,
+    });
+    expect(receipt).toContain(
+      'Allowed for 5 minutes in parent conversation: exact command access',
+    );
+    expect(receipt).toContain(
+      'Route: shown in this topic/thread; approval applies to the parent conversation.',
+    );
+  });
+
   it('renders scoped RunCommand setup prompts as command rules even when capability metadata is present', () => {
     const text = formatPermissionPromptText(
       {
@@ -740,6 +828,46 @@ describe('permission interaction', () => {
     expect(receipt).not.toContain('eligible tools and SDK API/network prompts');
     expect(receipt).not.toContain('Request ID');
     expect(receipt).not.toContain('perm-abc-123');
+  });
+
+  it('clarifies thread-scoped timed and parent-conversation persistent grants from a routed thread', () => {
+    const request = {
+      ...requestWithSuggestions([
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [{ toolName: 'Bash', ruleContent: 'npm test *' }],
+        },
+      ]),
+      threadId: 'topic-7',
+      toolInput: { command: 'npm test' },
+    } satisfies PermissionApprovalRequest;
+
+    const prompt = formatPermissionPromptText(request, 60_000);
+    expect(prompt).toContain(
+      'Scope: this request, a short 5-minute grant, or always allow future matching tool calls in the parent conversation.',
+    );
+
+    const timedReceipt = formatPermissionReceiptText('perm-abc-123', request, {
+      approved: true,
+      mode: 'allow_timed_grant',
+      timedGrantExpiresAtMs: Date.parse('2026-05-15T12:05:00Z'),
+    });
+    expect(timedReceipt).toContain(
+      'Allowed for 5 minutes in parent conversation: exact command access',
+    );
+
+    const persistentReceipt = formatPermissionReceiptText(
+      'perm-abc-123',
+      request,
+      {
+        approved: true,
+        mode: 'allow_persistent_rule',
+      },
+    );
+    expect(persistentReceipt).toContain(
+      'Always allowed in parent conversation: exact command access',
+    );
   });
 
   it('marks scheduled-job receipts without exposing job ids', () => {

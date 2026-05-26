@@ -18,6 +18,10 @@ import {
   type ModelWorkload,
 } from '../../shared/model-catalog.js';
 import { validateReadableAgentToolRule } from '../../shared/agent-tool-references.js';
+import {
+  containsGeneratedRuntimeSkillPath,
+  GENERATED_RUNTIME_SKILL_PATH_DURABLE_REJECTION_REASON,
+} from '../../shared/generated-runtime-paths.js';
 import { envFilePath, settingsFilePath } from './runtime-home.js';
 import type {
   RuntimeSettings,
@@ -276,6 +280,10 @@ export function validateLoadedRuntimeSettings(
       if (!validation.ok) {
         details.push(
           `agents.${agentId}.capabilities contains invalid capability "${capability.id}": ${validation.reason}`,
+        );
+      } else if (containsGeneratedRuntimeSkillPath(toolRule)) {
+        details.push(
+          `agents.${agentId}.capabilities contains invalid capability "${capability.id}": ${GENERATED_RUNTIME_SKILL_PATH_DURABLE_REJECTION_REASON}`,
         );
       }
     }

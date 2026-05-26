@@ -18,6 +18,10 @@ import {
   type SemanticCapabilityDefinition,
   validateSemanticCapabilityDefinition,
 } from '../../../../shared/semantic-capabilities.js';
+import {
+  canonicalizeGeneratedRuntimeSkillPaths,
+  containsGeneratedRuntimeSkillPath,
+} from '../../../../shared/generated-runtime-paths.js';
 import { semanticCapabilityRule } from '../../../../shared/semantic-capability-ids.js';
 import { evaluateAutonomousToolUse } from '../../../../shared/tool-rule-matcher.js';
 
@@ -153,7 +157,13 @@ export function readRunnerSkillActionCapabilities(): SemanticCapabilityDefinitio
 function normalizePermissionSuggestions(
   sdkSuggestions: readonly unknown[] | undefined,
 ): unknown[] | undefined {
-  const allowedRules = permissionUpdateAllowedToolRules(sdkSuggestions);
+  const rawAllowedRules = permissionUpdateAllowedToolRules(sdkSuggestions);
+  if (rawAllowedRules.some(containsGeneratedRuntimeSkillPath)) {
+    return undefined;
+  }
+  const allowedRules = rawAllowedRules.map(
+    canonicalizeGeneratedRuntimeSkillPaths,
+  );
   if (allowedRules.length === 0) return undefined;
   if (allowedRules.some((rule) => !validatePersistentRule(rule))) {
     return undefined;
@@ -231,7 +241,9 @@ function inferBashRuleContents(toolInput: unknown): string[] {
   const input = toolInput as Record<string, unknown>;
   const command = input.command ?? input.cmd;
   if (typeof command !== 'string') return [];
-  const trimmed = command.trim();
+  const rawCommand = command.trim();
+  if (containsGeneratedRuntimeSkillPath(rawCommand)) return [];
+  const trimmed = canonicalizeGeneratedRuntimeSkillPaths(rawCommand);
   if (!trimmed || trimmed.length > 2048) return [];
   const parsed = parseBashCommand(trimmed);
   if (!parsed.ok) return [];
@@ -311,11 +323,30 @@ function skillActionDefinitionMatchesToolInput(
     return scoped?.toolName === RUN_COMMAND_TOOL_NAME;
   });
   if (rules.length === 0) return false;
+  const normalizedToolInput =
+    canonicalizeToolInputGeneratedRuntimePaths(toolInput);
   return evaluateAutonomousToolUse({
     rules,
     toolName: 'Bash',
-    toolInput,
+    toolInput: normalizedToolInput,
   }).allowed;
+}
+
+function canonicalizeToolInputGeneratedRuntimePaths(
+  toolInput: unknown,
+): unknown {
+  if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) {
+    return toolInput;
+  }
+  const input = toolInput as Record<string, unknown>;
+  const next = { ...input };
+  if (typeof next.command === 'string') {
+    next.command = canonicalizeGeneratedRuntimeSkillPaths(next.command);
+  }
+  if (typeof next.cmd === 'string') {
+    next.cmd = canonicalizeGeneratedRuntimeSkillPaths(next.cmd);
+  }
+  return next;
 }
 
 function splitReadableToolRule(rule: string): [string, string | undefined] {

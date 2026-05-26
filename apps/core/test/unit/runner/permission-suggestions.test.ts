@@ -108,6 +108,30 @@ describe('scheduledPermissionSuggestions', () => {
     ]);
   });
 
+  it('maps generated runtime skill paths to selected skill action capabilities', () => {
+    expect(
+      scheduledPermissionSuggestionPlan('Bash', undefined, {
+        toolInput: {
+          command:
+            'python3 /tmp/run/.llm-runtime/claude/skills/linkedin-posting/publish --draft post.md',
+        },
+        semanticCapabilityDefinitions: [linkedInPostingCapability],
+      }),
+    ).toEqual({
+      suggestions: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          destination: 'session',
+          rules: [{ toolName: 'capability:skill.linkedin-posting.publish' }],
+        },
+      ],
+      semanticCapabilityDefinitions: {
+        'skill.linkedin-posting.publish': linkedInPostingCapability,
+      },
+    });
+  });
+
   it('synthesizes scoped RunCommand suggestions from parsed command leaves', () => {
     expect(
       synthesizePermissionSuggestions('Bash', {
@@ -149,6 +173,15 @@ describe('scheduledPermissionSuggestions', () => {
         rules: [{ toolName: 'RunCommand', ruleContent: '/tmp/check.py *' }],
       },
     ]);
+
+    expect(
+      synthesizePermissionSuggestions('Bash', {
+        toolInput: {
+          command:
+            'python3 /tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py --file /tmp/post.md',
+        },
+      }),
+    ).toBeUndefined();
   });
 
   it('suggests a selected skill action capability for matching Bash commands', () => {
@@ -296,6 +329,26 @@ describe('scheduledPermissionSuggestions', () => {
           },
         ],
         { toolInput: { host: 'registry.npmjs.org' } },
+      ),
+    ).toBeUndefined();
+    expect(
+      scheduledPermissionSuggestions(
+        'Bash',
+        [
+          {
+            type: 'addRules',
+            behavior: 'allow',
+            destination: 'session',
+            rules: [
+              {
+                toolName: 'Bash',
+                ruleContent:
+                  '/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *',
+              },
+            ],
+          },
+        ],
+        {},
       ),
     ).toBeUndefined();
   });

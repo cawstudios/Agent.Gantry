@@ -360,6 +360,52 @@ describe('autonomous tool rule matcher', () => {
     ).toMatchObject({ allowed: false });
   });
 
+  it('matches generated runtime skill executions through stable skill paths', () => {
+    for (const command of [
+      'python3 /Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py --file /tmp/post.md',
+      '/Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py --file /tmp/post.md',
+    ]) {
+      expect(
+        evaluateAutonomousToolUse({
+          rules: ['RunCommand(skills/linkedin-posting/post.py *)'],
+          toolName: 'Bash',
+          toolInput: { command },
+        }),
+      ).toMatchObject({
+        allowed: true,
+        matchedRule: 'RunCommand(skills/linkedin-posting/post.py *)',
+      });
+    }
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['RunCommand(skills/linkedin-posting/post.py *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            'python3 /Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/other/post.py --file /tmp/post.md',
+        },
+      }),
+    ).toMatchObject({ allowed: false });
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: [
+          'RunCommand(/Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+        ],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            'python3 /Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py --file /tmp/post.md',
+        },
+      }),
+    ).toMatchObject({
+      allowed: true,
+      matchedRule:
+        'RunCommand(/Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+    });
+  });
+
   it('rejects exact bare Bash as too broad', () => {
     expect(validateAutonomousToolRule('Bash')).toMatchObject({
       ok: false,

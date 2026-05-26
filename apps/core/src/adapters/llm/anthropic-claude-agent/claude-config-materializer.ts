@@ -40,6 +40,8 @@ export interface ClaudeRuntimeMaterialization extends RuntimeMaterialization {
   providerSessionRestoreDir: string;
   projectDir: string;
   protectedFilesystemPaths: string[];
+  protectedFilesystemDenyReadPaths: string[];
+  protectedFilesystemDenyWritePaths: string[];
   materializedSkills: ClaudeSkillSourceItem[];
 }
 
@@ -96,12 +98,13 @@ export async function materializeClaudeRuntime(
     getClaudeProjectDirName(input.groupDir),
   );
   let materializedSkills: ClaudeSkillSourceItem[] = [];
+  const claudeSettingsPath = path.join(claudeConfigDir, 'settings.json');
 
   try {
     fs.mkdirSync(projectDir, { recursive: true, mode: 0o700 });
     fs.rmSync(skillsDir, { recursive: true, force: true });
     fs.writeFileSync(
-      path.join(claudeConfigDir, 'settings.json'),
+      claudeSettingsPath,
       stringifyClaudeSettings(
         renderClaudeSettings({
           cliEntryPoint: input.cliEntryPoint,
@@ -123,6 +126,27 @@ export async function materializeClaudeRuntime(
     throw err;
   }
 
+  const protectedFilesystemDenyReadPaths = resolveProtectedFilesystemPaths([
+    claudeSettingsPath,
+    input.runtimeSettingsPath,
+    ...workspaceProtectedPaths(input.groupDir),
+    ...(input.globalDir ? workspaceProtectedPaths(input.globalDir) : []),
+    path.join(input.packageRoot, '.claude', 'skills'),
+    path.join(input.packageRoot, '.codex', 'skills'),
+    path.join(input.packageRoot, '.agents', 'skills'),
+    ...(input.managedSkillArtifactRoots ?? []),
+  ]);
+  const protectedFilesystemDenyWritePaths = resolveProtectedFilesystemPaths([
+    claudeConfigDir,
+    input.runtimeSettingsPath,
+    ...workspaceProtectedPaths(input.groupDir),
+    ...(input.globalDir ? workspaceProtectedPaths(input.globalDir) : []),
+    path.join(input.packageRoot, '.claude', 'skills'),
+    path.join(input.packageRoot, '.codex', 'skills'),
+    path.join(input.packageRoot, '.agents', 'skills'),
+    ...(input.managedSkillArtifactRoots ?? []),
+  ]);
+
   return {
     runId,
     baseTempDir,
@@ -130,16 +154,9 @@ export async function materializeClaudeRuntime(
     skillsDir,
     providerSessionRestoreDir: projectDir,
     projectDir,
-    protectedFilesystemPaths: resolveProtectedFilesystemPaths([
-      claudeConfigDir,
-      input.runtimeSettingsPath,
-      ...workspaceProtectedPaths(input.groupDir),
-      ...(input.globalDir ? workspaceProtectedPaths(input.globalDir) : []),
-      path.join(input.packageRoot, '.claude', 'skills'),
-      path.join(input.packageRoot, '.codex', 'skills'),
-      path.join(input.packageRoot, '.agents', 'skills'),
-      ...(input.managedSkillArtifactRoots ?? []),
-    ]),
+    protectedFilesystemPaths: protectedFilesystemDenyWritePaths,
+    protectedFilesystemDenyReadPaths,
+    protectedFilesystemDenyWritePaths,
     materializedSkills,
     cleanupPolicy,
     cleanup: () => {

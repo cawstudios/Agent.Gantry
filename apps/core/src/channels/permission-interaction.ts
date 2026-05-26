@@ -17,6 +17,7 @@ import {
   redactSensitiveText,
   sanitizeOutboundLlmText,
 } from '../shared/sensitive-material.js';
+import { generatedRuntimeSkillPathDisplay } from '../shared/generated-runtime-paths.js';
 import {
   getBuiltinSemanticCapability,
   skillActionCapabilityDisplayName,
@@ -134,6 +135,7 @@ export function formatPermissionPromptText(
     `Allow ${label}?`,
     '',
     ...formatPermissionOriginLines(request),
+    ...formatPermissionRoutingLines(request),
   ];
   if (requestLabel) {
     lines.push(`Request: ${sanitizePermissionText(requestLabel, 160, 40)}`);
@@ -143,8 +145,6 @@ export function formatPermissionPromptText(
       `Delegated Agent: ${request.subagentType || 'generic'}${request.agentID ? ` (${request.agentID})` : ''}`,
     );
   }
-  if (request.threadId)
-    lines.push(`Thread: ${sanitizePermissionText(request.threadId, 60, 20)}`);
   const inputLines = formatPermissionToolInputLines(
     request,
     sanitizePermissionText,
@@ -191,6 +191,7 @@ export function formatPermissionReceiptText(
       [
         `Canceled: ${label}. No permission changed.`,
         ...formatPermissionOriginLines(request),
+        ...formatPermissionRoutingLines(request),
         `By: ${sanitizePermissionText(actor, 120, 40)}`,
       ].join('\n'),
     );
@@ -203,19 +204,26 @@ export function formatPermissionReceiptText(
           minute: '2-digit',
         })
       : 'soon';
+    const scope = requestHasThreadRoute(request)
+      ? ' in parent conversation'
+      : '';
     return limitPermissionMessage(
       [
-        `Allowed for 5 minutes: ${label}`,
+        `Allowed for 5 minutes${scope}: ${label}`,
         `Until: ${expiresLabel}`,
         `For: ${formatPermissionReceiptActionSummary(request)}`,
         ...formatPermissionOriginLines(request),
+        ...formatPermissionRoutingLines(request),
         `By: ${sanitizePermissionText(actor, 120, 40)}`,
       ].join('\n'),
     );
   }
   if (decision.mode === 'allow_persistent_rule') {
     const rules = request ? persistentRules(request) : [];
-    const lines = [`Always allowed: ${label}`];
+    const scope = requestHasThreadRoute(request)
+      ? ' in parent conversation'
+      : '';
+    const lines = [`Always allowed${scope}: ${label}`];
     if (rules.length > 0) {
       lines.push(
         `Details: ${formatPersistentPermissionRulesForUser(rules, {
@@ -225,6 +233,7 @@ export function formatPermissionReceiptText(
     }
     lines.push(`For: ${formatPermissionReceiptActionSummary(request)}`);
     lines.push(...formatPermissionOriginLines(request));
+    lines.push(...formatPermissionRoutingLines(request));
     lines.push(`By: ${sanitizePermissionText(actor, 120, 40)}`);
     lines.push('Revoke: /permissions remove <rule>');
     return limitPermissionMessage(lines.join('\n'));
@@ -234,6 +243,7 @@ export function formatPermissionReceiptText(
       `Allowed once: ${label}`,
       `For: ${formatPermissionReceiptActionSummary(request)}`,
       ...formatPermissionOriginLines(request),
+      ...formatPermissionRoutingLines(request),
       `By: ${sanitizePermissionText(actor, 120, 40)}`,
     ].join('\n'),
   );
@@ -286,6 +296,16 @@ function formatPermissionOriginLines(
   ];
 }
 
+function formatPermissionRoutingLines(
+  request: PermissionApprovalRequest | undefined,
+): string[] {
+  return requestHasThreadRoute(request)
+    ? [
+        'Route: shown in this topic/thread; approval applies to the parent conversation.',
+      ]
+    : [];
+}
+
 function formatInteractionPermissionPrompt(
   request: PermissionApprovalRequest,
   timeoutMinutes: number,
@@ -294,7 +314,11 @@ function formatInteractionPermissionPrompt(
   const rule = firstPersistentRule(request);
   const capabilityName = semanticCapabilityName(request, rule);
   const title = `Allow ${capabilityName ?? permissionAccessLabel(request)}?`;
-  const lines = [title, ...formatPermissionOriginLines(request)];
+  const lines = [
+    title,
+    ...formatPermissionOriginLines(request),
+    ...formatPermissionRoutingLines(request),
+  ];
   const accountLabel = request.toolInput?.accountLabel;
   if (typeof accountLabel === 'string' && accountLabel.trim()) {
     lines.push(
@@ -327,6 +351,7 @@ function formatSemanticPermissionPrompt(
   const lines = [
     `Allow ${capabilityName}?`,
     ...formatPermissionOriginLines(request),
+    ...formatPermissionRoutingLines(request),
   ];
   const capabilityId =
     definition?.capabilityId ?? semanticCapabilityId(request, rule);
@@ -371,22 +396,49 @@ function formatPermissionBoundaryLines(
 ): string[] {
   const rule = firstPersistentRule(request);
   const capabilityName = semanticCapabilityName(request, rule);
+  const hasThreadRoute = requestHasThreadRoute(request);
   if (!rule) {
+    if (hasThreadRoute) {
+      return [
+        'Scope: this request or a short 5-minute grant in the parent conversation.',
+        'Safety: unrelated tools, secrets, settings changes, and protected paths are not included.',
+      ];
+    }
     return [
       'Scope: this request or a short 5-minute grant.',
       'Safety: unrelated tools, secrets, settings changes, and protected paths are not included.',
     ];
   }
   if (capabilityName) {
+    if (hasThreadRoute) {
+      return [
+        'Scope: this request, a short 5-minute grant, or always allow future matching runs in the parent conversation.',
+        'Safety: unrelated apps, credentials, settings changes, and broader access are not included.',
+      ];
+    }
     return [
       'Scope: this request, a short 5-minute grant, or future matching runs.',
       'Safety: unrelated apps, credentials, settings changes, and broader access are not included.',
+    ];
+  }
+  if (hasThreadRoute) {
+    return [
+      'Scope: this request, a short 5-minute grant, or always allow future matching tool calls in the parent conversation.',
+      'Safety: only matching future access is included; unrelated tools, secrets, and settings changes are not included.',
     ];
   }
   return [
     'Scope: this request, a short 5-minute grant, or future matching tool calls.',
     'Safety: only matching future access is included; unrelated tools, secrets, and settings changes are not included.',
   ];
+}
+
+function requestHasThreadRoute(
+  request: PermissionApprovalRequest | undefined,
+): boolean {
+  return (
+    typeof request?.threadId === 'string' && request.threadId.trim() !== ''
+  );
 }
 
 function permissionAccessLabel(
@@ -527,6 +579,10 @@ function formatPermissionReceiptActionSummary(
   if (!input || typeof input !== 'object') return tool;
   const command = permissionCommand(request);
   if (command) {
+    const generatedSkillPath = generatedRuntimeSkillPathDisplay(command);
+    if (generatedSkillPath) {
+      return `${tool} (generated skill action: ${generatedSkillPath})`;
+    }
     const safeCommand = sanitizeReceiptDetail(command);
     return safeCommand ? `${tool} (${safeCommand})` : `${tool} command`;
   }

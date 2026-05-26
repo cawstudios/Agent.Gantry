@@ -156,6 +156,10 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
       runnerInputPatch,
       env,
       protectedFilesystemPaths: materialization.protectedFilesystemPaths,
+      protectedFilesystemDenyReadPaths:
+        materialization.protectedFilesystemDenyReadPaths,
+      protectedFilesystemDenyWritePaths:
+        materialization.protectedFilesystemDenyWritePaths,
       runtimeDetails: [
         `executionProvider=${this.id}`,
         `runner=${runnerPath}`,

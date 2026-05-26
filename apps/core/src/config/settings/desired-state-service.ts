@@ -17,6 +17,12 @@ import {
 } from './desired-state-capability-reconcile.js';
 import { exportCurrentDesiredState } from './desired-state-current-export.js';
 import {
+  cleanupGeneratedRuntimeCapabilities,
+  cleanupGeneratedRuntimeCapabilitiesInSettings,
+  semanticCapabilityDefinitionsById,
+  skillActionDefinitionsForSkills,
+} from './generated-runtime-capability-cleanup.js';
+import {
   configuredConversationKind,
   jidForConfiguredConversation,
   stripProviderPrefix,
@@ -75,9 +81,20 @@ export class SettingsDesiredStateService {
       settings,
     });
   }
+
+  async cleanupGeneratedRuntimeCapabilities(settings: RuntimeSettings) {
+    return cleanupGeneratedRuntimeCapabilitiesInSettings({
+      settings,
+      repositories: this.deps.repositories,
+      appId: this.appId,
+    });
+  }
+
   async drift(
     settings: RuntimeSettings,
   ): Promise<SettingsDesiredStateDriftReport> {
+    settings = (await this.cleanupGeneratedRuntimeCapabilities(settings))
+      .settings;
     const groups = await this.deps.ops.getAllConversationRoutes();
     const configuredFolders = new Set(Object.keys(settings.agents));
     const configuredJids = new Set(
@@ -99,6 +116,16 @@ export class SettingsDesiredStateService {
   }
 
   async reconcile(settings: RuntimeSettings): Promise<SettingsReconcileResult> {
+    const cleanup = await cleanupGeneratedRuntimeCapabilitiesInSettings({
+      settings,
+      repositories: this.deps.repositories,
+      appId: this.appId,
+    });
+    settings = cleanup.settings;
+    const generatedCapabilityCleanupFolders = new Set([
+      ...cleanup.converted.map((item) => item.agentFolder),
+      ...cleanup.dropped.map((item) => item.agentFolder),
+    ]);
     const invalidReferences = await this.validateCapabilityReferences(settings);
     if (invalidReferences.length > 0) {
       return { applied: [], skipped: [], invalidReferences };
@@ -145,7 +172,11 @@ export class SettingsDesiredStateService {
         applied.push(`binding:${binding.jid}`);
       }
 
-      if (settings.desiredState.authoritative || hasAnyCapability(agent)) {
+      if (
+        settings.desiredState.authoritative ||
+        hasAnyCapability(agent) ||
+        generatedCapabilityCleanupFolders.has(folder)
+      ) {
         await this.replaceCapabilities(agentId, agent, now);
         applied.push(`capabilities:${folder}`);
       } else {
@@ -440,8 +471,24 @@ export class SettingsDesiredStateService {
       [...serverIds],
     );
     for (const [folder, agent] of Object.entries(settings.agents)) {
+      const resolvedSkills = await resolveConfiguredSkillReferences({
+        repository: this.deps.repositories.skills,
+        appId: this.appId,
+        agentId: agentIdForFolder(folder),
+        references: agent.sources.skills.map((source) => source.id),
+      });
+      const skillActionDefinitionsForAgent = skillActionDefinitionsForSkills([
+        ...resolvedSkills.skills.values(),
+      ]);
+      const skillActionDefinitions = semanticCapabilityDefinitionsById(
+        skillActionDefinitionsForAgent,
+      );
+      const cleanedCapabilities = cleanupGeneratedRuntimeCapabilities({
+        capabilities: agent.capabilities,
+        skillActionDefinitions: skillActionDefinitionsForAgent,
+      }).capabilities;
       for (const capability of [
-        ...new Set(agent.capabilities.map((item) => item.id)),
+        ...new Set(cleanedCapabilities.map((item) => item.id)),
       ]) {
         const toolReference = settingsCapabilityToToolReference({
           id: capability,
@@ -451,6 +498,7 @@ export class SettingsDesiredStateService {
           repository: this.deps.repositories.tools,
           appId: this.appId,
           reference: toolReference,
+          semanticCapabilityDefinitions: skillActionDefinitions,
         });
         if (resolved.error) {
           errors.push(
@@ -458,12 +506,6 @@ export class SettingsDesiredStateService {
           );
         }
       }
-      const resolvedSkills = await resolveConfiguredSkillReferences({
-        repository: this.deps.repositories.skills,
-        appId: this.appId,
-        agentId: agentIdForFolder(folder),
-        references: agent.sources.skills.map((source) => source.id),
-      });
       for (const skillId of [
         ...new Set(agent.sources.skills.map((source) => source.id)),
       ]) {

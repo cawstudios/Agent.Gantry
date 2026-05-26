@@ -136,6 +136,16 @@ token, credential file, config directory, proxy, keychain/keyring, CA, or
 authority environment keys unless a future capability explicitly models that
 behavior.
 
+Selected `local_cli` capabilities project credential paths and network host
+metadata only through typed runtime access. Credential directories are mounted
+into the SDK as additional readable directories and are also added to
+`sandbox.filesystem.denyWrite`; they are intentionally not added to
+`denyRead`. Declared network hosts are not durable `SandboxNetworkAccess`
+authority. For scheduled jobs, Gantry may suppress a parentless SDK network
+prompt only when it arrives immediately after the same principal's approved
+Bash invocation, that command matches the reviewed local CLI command template,
+and the requested host matches the capability's declared host list.
+
 Raw provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and
 `CLAUDE_CODE_OAUTH_TOKEN` must be configured through OneCLI or the selected
 enterprise credential broker, never in Gantry `.env` or process env.
@@ -257,10 +267,14 @@ unsandboxed. Host-owned scheduler scripts are not supported.
 
 The SDK process receives sandbox policy and model credentials as separate
 adapter projections. Protected filesystem paths are passed through
-`GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON` and become Claude SDK
-`sandbox.filesystem.denyWrite` entries; model credentials remain only in the
-private SDK env handoff. Do not use OneCLI, MCP stdio env, browser env, or any
-future scheduler script env to carry sandbox authority or provider credentials.
+`GANTRY_PROTECTED_FILESYSTEM_DENY_READ_PATHS_JSON` and
+`GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON` and become Claude SDK
+`sandbox.filesystem.denyRead` and `sandbox.filesystem.denyWrite` entries;
+reviewed local CLI credential directories are also passed through
+`GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON` so the SDK can mount them for reads
+while still denying writes. Model credentials remain only in the private SDK env
+handoff. Do not use OneCLI, MCP stdio env, browser env, or any future scheduler
+script env to carry sandbox authority or provider credentials.
 
 ## Permission Boundary
 

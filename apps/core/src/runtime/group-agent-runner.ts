@@ -410,7 +410,8 @@ export function createGroupAgentRunner(input: {
               configuredToolPolicy.localCliCredentialAccess,
             localCliCredentialPaths:
               configuredToolPolicy.localCliCredentialPaths,
-            localCliNetworkHosts: configuredToolPolicy.localCliNetworkHosts,
+            localCliNetworkBindings:
+              configuredToolPolicy.localCliNetworkBindings,
             selectedSkillIds,
             selectedMcpServerIds,
             assistantName: group.trigger || DEFAULT_ASSISTANT_NAME,

@@ -224,6 +224,10 @@ export async function exportCurrentDesiredState(input: {
       capabilities: readableActiveCapabilities(
         toolBindingsByAgent.get(agent.id) ?? [],
         toolCatalogById,
+        {
+          skillBindings: skillBindingsByAgent.get(agent.id) ?? [],
+          skillCatalogById,
+        },
       ),
     };
   }
@@ -407,7 +411,10 @@ export async function exportCurrentDesiredState(input: {
         skillCatalogById,
         toolSources,
       ),
-      capabilities: readableActiveCapabilities(toolBindings, toolCatalogById),
+      capabilities: readableActiveCapabilities(toolBindings, toolCatalogById, {
+        skillBindings,
+        skillCatalogById,
+      }),
     };
   }
 

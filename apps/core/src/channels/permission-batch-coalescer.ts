@@ -113,13 +113,13 @@ export class PermissionBatchCoalescer {
 export function permissionBatchKey(
   request: Pick<
     PermissionApprovalRequest,
-    'sourceAgentFolder' | 'targetJid' | 'threadId' | 'runId' | 'decisionPolicy'
+    'sourceAgentFolder' | 'targetJid' | 'runId' | 'decisionPolicy'
   >,
 ): string {
+  // Topic/thread ids only route the prompt; approval batching follows the parent conversation.
   return JSON.stringify([
     request.sourceAgentFolder,
     request.targetJid ?? '',
-    request.threadId ?? '',
     request.runId ?? '',
     request.decisionPolicy ?? '',
   ]);

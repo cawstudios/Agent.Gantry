@@ -60,12 +60,17 @@ import { resolveSelectedSkillEnvForAgent } from '../application/capability-secre
 import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { getRuntimeFileArtifactStore } from '../adapters/storage/postgres/runtime-store.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
+import { formatGeneratedRuntimePathPermissionError } from './generated-runtime-path-error.js';
 
 type RunnerAgentInput = AgentInput & {
   modelCredentialEnv?: Record<string, string>;
 };
 
 const PROTECTED_FILESYSTEM_PATHS_ENV = 'GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON';
+const PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV =
+  'GANTRY_PROTECTED_FILESYSTEM_DENY_READ_PATHS_JSON';
+const PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV =
+  'GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON';
 const LOCAL_CLI_CREDENTIAL_DIRS_ENV = 'GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON';
 const DEFAULT_RUNNER_APP_ID = 'default';
 
@@ -355,10 +360,17 @@ export async function spawnAgent(
       options,
     });
   } catch (err) {
+    const errorText = err instanceof Error ? err.message : String(err);
+    const generatedRuntimeError = formatGeneratedRuntimePathPermissionError({
+      runnerLabel: 'LLM runtime materialization',
+      errorText,
+    });
     return {
       status: 'error',
       result: null,
-      error: `LLM runtime materialization failed: ${err instanceof Error ? err.message : String(err)}`,
+      error:
+        generatedRuntimeError ??
+        `LLM runtime materialization failed: ${errorText}`,
     };
   }
 
@@ -581,11 +593,26 @@ export async function spawnAgent(
         ),
       );
     }
-    env[PROTECTED_FILESYSTEM_PATHS_ENV] = JSON.stringify([
-      ...preparedExecution.protectedFilesystemPaths,
+    const protectedFilesystemDenyReadPaths = [
+      ...(preparedExecution.protectedFilesystemDenyReadPaths ??
+        preparedExecution.protectedFilesystemPaths),
+      ...(mcpConfigPath ? [mcpConfigPath] : []),
+    ];
+    const protectedFilesystemDenyWritePaths = [
+      ...(preparedExecution.protectedFilesystemDenyWritePaths ??
+        preparedExecution.protectedFilesystemPaths),
       ...localCliCredentialPaths,
       ...(mcpConfigPath ? [mcpConfigPath] : []),
-    ]);
+    ];
+    env[PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV] = JSON.stringify(
+      protectedFilesystemDenyReadPaths,
+    );
+    env[PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV] = JSON.stringify(
+      protectedFilesystemDenyWritePaths,
+    );
+    env[PROTECTED_FILESYSTEM_PATHS_ENV] = JSON.stringify(
+      protectedFilesystemDenyWritePaths,
+    );
     if (localCliCredentialPaths.length > 0) {
       env[LOCAL_CLI_CREDENTIAL_DIRS_ENV] = JSON.stringify(
         localCliCredentialPaths,

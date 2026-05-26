@@ -62,10 +62,20 @@ function makeCallback(
   });
 }
 
+function combinedConsoleOutput(): string {
+  return [
+    ...vi.mocked(console.log).mock.calls,
+    ...vi.mocked(console.error).mock.calls,
+  ]
+    .map((call) => String(call[0]))
+    .join('');
+}
+
 describe('createCanUseToolCallback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -189,10 +199,7 @@ describe('createCanUseToolCallback', () => {
         ),
       }),
     );
-    const output = vi
-      .mocked(console.log)
-      .mock.calls.map((call) => String(call[0]))
-      .join('');
+    const output = combinedConsoleOutput();
     expect(output).toContain('permission.yolo_denylist_hit');
     expect(output).toContain('"matchedPattern":"rm -rf /"');
     expect(output).toContain('"principal":"agent:test"');
@@ -222,6 +229,53 @@ describe('createCanUseToolCallback', () => {
 
     expect(first.behavior).toBe('allow');
     expect(second.behavior).toBe('allow');
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes timed-grant prompts to the active thread while scoping grants to the conversation', async () => {
+    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
+      approved: true,
+      mode: 'allow_timed_grant',
+      timedGrantExpiresAtMs: Date.now() + 60_000,
+      updatedPermissions: undefined,
+      decidedBy: 'user',
+    });
+
+    const canUseTool = makeCallback({
+      agentInput: {
+        runMode: 'normal',
+        isScheduledJob: false,
+        appId: 'default',
+        agentId: 'agent:test',
+        runId: 'run-1',
+        jobId: undefined,
+        chatJid: 'tg:test',
+        threadId: 'topic-7',
+        allowedTools: [],
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+      } as never,
+    });
+    await canUseTool(
+      'Bash',
+      { command: 'npm test' },
+      makePermissionOptions() as never,
+    );
+    await canUseTool(
+      'Read',
+      { file_path: 'package.json' },
+      makePermissionOptions() as never,
+    );
+
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: 'topic-7' }),
+    );
+    const output = combinedConsoleOutput();
+    expect(output).toContain('conversationJid=tg:test');
+    expect(output).not.toContain('threadId=topic-7');
     expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 
@@ -500,7 +554,7 @@ describe('createCanUseToolCallback', () => {
     expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 
-  it('does not suppress parentless SandboxNetworkAccess from local CLI host hints alone', async () => {
+  it('suppresses parentless scheduled SandboxNetworkAccess for reviewed local CLI command bindings', async () => {
     const canUseTool = makeCallback({
       agentInput: {
         runMode: 'normal',
@@ -511,7 +565,12 @@ describe('createCanUseToolCallback', () => {
         jobId: 'job-1',
         chatJid: 'tg:test',
         threadId: undefined,
-        localCliNetworkHosts: ['oauth2.googleapis.com'],
+        localCliNetworkBindings: [
+          {
+            commandRules: ['RunCommand(/opt/homebrew/bin/gog sheets get *)'],
+            hosts: ['oauth2.googleapis.com'],
+          },
+        ],
         allowedTools: ['RunCommand(/opt/homebrew/bin/gog sheets get *)'],
         yoloMode: {
           enabled: true,
@@ -542,10 +601,8 @@ describe('createCanUseToolCallback', () => {
 
     expect(bash.behavior).toBe('allow');
     expect(network).toEqual({
-      behavior: 'deny',
-      interrupt: false,
-      message:
-        'SDK requested sandbox network access without a parent tool-use id. Approve the tool call through Gantry first.',
+      behavior: 'allow',
+      updatedInput: { host: 'oauth2.googleapis.com' },
     });
     expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
   });

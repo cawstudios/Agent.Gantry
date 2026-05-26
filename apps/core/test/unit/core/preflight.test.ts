@@ -118,6 +118,65 @@ describe('runtime preflight', () => {
     });
   });
 
+  it('cleans generated runtime skill grants before restart preflight validation', async () => {
+    const runtimeHome = makeRuntimeHome();
+    const {
+      createDefaultRuntimeSettings,
+      loadRuntimeSettings,
+      saveRuntimeSettings,
+    } = await import('@core/config/settings/runtime-settings.js');
+    const settings = createDefaultRuntimeSettings();
+    settings.credentialBroker.mode = 'none';
+    settings.agents.main_agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [
+        {
+          id: 'RunCommand(/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+          version: 'builtin',
+        },
+      ],
+    };
+    saveRuntimeSettings(runtimeHome, settings);
+    vi.doMock('@core/adapters/storage/postgres/storage-readiness.js', () => ({
+      inspectRuntimeStorageReadiness: vi.fn(async () => ({
+        status: 'pass',
+        message: 'Postgres is ready.',
+      })),
+    }));
+    const replaceAgentCapabilityBindings = vi.fn(async () => undefined);
+    const cleanupGeneratedRuntimeSettings = vi.fn(async () => {
+      const next = loadRuntimeSettings(runtimeHome);
+      next.agents.main_agent.capabilities = [];
+      saveRuntimeSettings(runtimeHome, next);
+      await replaceAgentCapabilityBindings({
+        agentId: 'agent:main_agent',
+        toolBindings: [],
+      });
+      return { ok: true as const };
+    });
+
+    const { validateRuntimePreflightWithStorage } =
+      await import('@core/config/preflight.js');
+    const result = await validateRuntimePreflightWithStorage(runtimeHome, {
+      cleanupGeneratedRuntimeSettings,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(
+      loadRuntimeSettings(runtimeHome).agents.main_agent.capabilities,
+    ).toEqual([]);
+    expect(replaceAgentCapabilityBindings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agent:main_agent',
+        toolBindings: [],
+      }),
+    );
+    expect(cleanupGeneratedRuntimeSettings).toHaveBeenCalledWith(runtimeHome);
+  });
+
   it('uses process env before runtime .env for runtime-owned secrets', async () => {
     const runtimeHome = makeRuntimeHome();
     vi.stubEnv(

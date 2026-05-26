@@ -403,7 +403,7 @@ export async function runJob(
                   toolAccessRequirementPreflight.toolAccessRequirements,
                 localCliCredentialAccess: toolPolicy.localCliCredentialAccess,
                 localCliCredentialPaths: toolPolicy.localCliCredentialPaths,
-                localCliNetworkHosts: toolPolicy.localCliNetworkHosts,
+                localCliNetworkBindings: toolPolicy.localCliNetworkBindings,
                 selectedSkillIds,
                 selectedMcpServerIds,
               },

@@ -36,15 +36,14 @@ function timedGrantBatchKey(input: {
   agentId?: string;
   targetJid?: string;
   agentFolder: string;
-  threadId?: string;
   requestFingerprint: string;
 }): string {
+  // Topic/thread ids route the prompt; approval authority is the parent chat.
   return JSON.stringify([
     input.appId,
     input.agentId ?? '',
     input.targetJid ?? '',
     input.agentFolder,
-    input.threadId ?? '',
     JOB_ID,
     JOB_RUN_ID,
     input.requestFingerprint,
@@ -115,7 +114,6 @@ export async function requestPermissionApproval(options: {
       agentId,
       targetJid,
       agentFolder,
-      threadId: options.threadId,
       requestFingerprint,
     });
     const existingRequest = inFlightTimedGrantRequests.get(batchKey);

@@ -65,6 +65,7 @@ describe('requestPermissionApproval', () => {
       agentId: 'agent:main_agent',
       groupFolder: 'main_agent',
       targetJid: 'tg:test',
+      threadId: 'topic-1',
       toolName: 'Bash',
       toolInput: { command: 'find ~/persona -type f' },
     });
@@ -73,6 +74,7 @@ describe('requestPermissionApproval', () => {
       agentId: 'agent:main_agent',
       groupFolder: 'main_agent',
       targetJid: 'tg:test',
+      threadId: 'topic-2',
       toolName: 'Bash',
       toolInput: { command: 'find ~/persona -type f' },
     });

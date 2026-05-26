@@ -194,6 +194,102 @@ describe('PermissionManagementService', () => {
     ).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 
+  it('canonicalizes generated skill runtime RunCommand grants to trusted skill action capabilities', async () => {
+    const service = new PermissionManagementService({
+      now: () => '2026-05-15T12:00:00.000Z',
+    });
+    const saveTool = vi.fn(async () => undefined);
+    const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
+
+    const persisted = await service.applyPersistentToolRuleGrant({
+      appId: 'app:test' as never,
+      agentId: 'agent:test' as never,
+      sourceAgentFolder: 'main_agent',
+      requestId: 'permission_skill_action_generated_path',
+      updates: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [
+            {
+              toolName: 'RunCommand',
+              ruleContent:
+                '/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *',
+            },
+          ],
+        },
+      ],
+      toolRepository: {
+        getTool: vi.fn(async () => null),
+        listTools: vi.fn(async () => []),
+        saveTool,
+        saveAgentToolBinding: vi.fn(async () => undefined),
+        disableAgentToolBinding: vi.fn(async () => null),
+        listAgentToolBindings: vi.fn(async () => []),
+        listAgentToolBindingsForAgents: vi.fn(),
+      },
+      mirrorAgentToolRulesToSettings,
+      semanticCapabilityDefinitions: {
+        'skill.linkedin-posting.publish': skillActionCapability(),
+      },
+    });
+
+    expect(persisted).toEqual(['capability:skill.linkedin-posting.publish']);
+    expect(saveTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'tool:capability:skill.linkedin-posting.publish',
+      }),
+    );
+    expect(mirrorAgentToolRulesToSettings).toHaveBeenCalledWith(
+      'main_agent',
+      ['capability:skill.linkedin-posting.publish'],
+      { appId: 'app:test' },
+    );
+  });
+
+  it('drops generated skill runtime RunCommand grants when no trusted skill action matches', async () => {
+    const service = new PermissionManagementService({
+      now: () => '2026-05-15T12:00:00.000Z',
+    });
+    const saveTool = vi.fn(async () => undefined);
+    const saveAgentToolBinding = vi.fn(async () => undefined);
+    const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
+
+    const persisted = await service.applyPersistentToolRuleGrant({
+      appId: 'app:test' as never,
+      agentId: 'agent:test' as never,
+      sourceAgentFolder: 'main_agent',
+      updates: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [
+            {
+              toolName: 'RunCommand',
+              ruleContent:
+                '/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *',
+            },
+          ],
+        },
+      ],
+      toolRepository: {
+        getTool: vi.fn(async () => null),
+        listTools: vi.fn(async () => []),
+        saveTool,
+        saveAgentToolBinding,
+        disableAgentToolBinding: vi.fn(async () => null),
+        listAgentToolBindings: vi.fn(async () => []),
+        listAgentToolBindingsForAgents: vi.fn(),
+      },
+      mirrorAgentToolRulesToSettings,
+    });
+
+    expect(persisted).toEqual([]);
+    expect(saveTool).not.toHaveBeenCalled();
+    expect(saveAgentToolBinding).not.toHaveBeenCalled();
+    expect(mirrorAgentToolRulesToSettings).not.toHaveBeenCalled();
+  });
+
   it('revokes a current-agent persistent tool grant and mirrors settings removal', async () => {
     const { repository, saveDecision } = permissionRepository();
     const service = new PermissionManagementService({

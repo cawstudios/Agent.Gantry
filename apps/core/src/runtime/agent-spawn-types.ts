@@ -16,6 +16,7 @@ import type {
 } from '../shared/model-catalog.js';
 import type { AgentPersona } from '../shared/agent-persona.js';
 import type { YoloModeSettings } from '../shared/yolo-mode-policy.js';
+import type { LocalCliNetworkBinding } from '../shared/capability-runtime-access.js';
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
 import type { AgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter.js';
 
@@ -49,7 +50,7 @@ export interface AgentInput {
   yoloMode?: YoloModeSettings;
   localCliCredentialAccess?: boolean;
   localCliCredentialPaths?: string[];
-  localCliNetworkHosts?: string[];
+  localCliNetworkBindings?: LocalCliNetworkBinding[];
 }
 
 export interface AgentOutput {

@@ -2451,7 +2451,9 @@ describe('TelegramChannel', () => {
 
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
-        expect.stringContaining('Thread: 42'),
+        expect.stringContaining(
+          'Route: shown in this topic/thread; approval applies to the parent conversation.',
+        ),
         expect.objectContaining({ message_thread_id: 42 }),
       );
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(

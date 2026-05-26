@@ -127,6 +127,96 @@ describe('AgentCapabilityAdministrationService', () => {
     ]);
   });
 
+  it('reports old generated skill command grants as selected skill action capabilities', async () => {
+    const state = createState();
+    state.tools.set('tool:generated-skill-command', {
+      id: 'tool:generated-skill-command',
+      appId: 'app:one',
+      name: 'RunCommand(/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+      kind: 'host',
+      provider: 'gantry',
+      displayName: 'Generated skill command',
+      category: 'admin',
+      risk: 'high',
+      selectable: true,
+      status: 'active',
+      adapterRef: 'permission/request_permission',
+      createdAt: '2026-04-30T00:00:00.000Z',
+      updatedAt: '2026-04-30T00:00:00.000Z',
+    });
+    state.skills.set('skill:linkedin-posting', {
+      id: 'skill:linkedin-posting',
+      appId: 'app:one',
+      name: 'linkedin-posting',
+      version: '1',
+      source: 'admin_uploaded',
+      status: 'approved',
+      promptRefs: [],
+      toolIds: [],
+      workflowRefs: [],
+      actionPermissions: [
+        {
+          id: 'publish',
+          capabilityId: 'skill.linkedin-posting.publish',
+          displayName: 'LinkedIn posting',
+          risk: 'write',
+          can: 'Publish a prepared LinkedIn post through the approved script.',
+          cannot:
+            'Use unrelated skills, credentials, settings, or broader commands.',
+          requiredEnvVars: [],
+          commandTemplates: ['skills/linkedin-posting/post.py *'],
+        },
+      ],
+      storage: {
+        storageType: 'local-filesystem',
+        storageRef: 'skills/linkedin-posting',
+        contentHash: 'sha256:linkedin',
+        sizeBytes: 1,
+      },
+      createdAt: '2026-04-30T00:00:00.000Z',
+      updatedAt: '2026-04-30T00:00:00.000Z',
+    });
+    state.toolBindings.push({
+      id: 'agent-tool-binding:generated-skill-command',
+      appId: 'app:one',
+      agentId: 'agent:one',
+      toolId: 'tool:generated-skill-command',
+      status: 'active',
+      createdAt: '2026-04-30T00:00:00.000Z',
+      updatedAt: '2026-04-30T00:00:00.000Z',
+    });
+    state.skillBindings.push({
+      id: 'agent-skill-binding:linkedin-posting',
+      appId: 'app:one',
+      agentId: 'agent:one',
+      skillId: 'skill:linkedin-posting',
+      status: 'active',
+      createdAt: '2026-04-30T00:00:00.000Z',
+      updatedAt: '2026-04-30T00:00:00.000Z',
+    });
+    const service = new AgentCapabilityAdministrationService(
+      state.repositories,
+      { now: () => '2026-05-01T00:00:00.000Z' },
+    );
+
+    const response = await service.getCapabilities({
+      appId: 'app:one' as never,
+      agentId: 'agent:one' as never,
+    });
+
+    expect(response.capabilities).toContainEqual({
+      id: 'skill.linkedin-posting.publish',
+      version: 'builtin',
+    });
+    expect(response.capabilities).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: expect.stringContaining('.llm-runtime'),
+        }),
+      ]),
+    );
+  });
+
   it('rejects selectable catalog rows whose names are invalid durable tool rules', async () => {
     const state = createState();
     const service = new AgentCapabilityAdministrationService(
@@ -303,6 +393,8 @@ function createState() {
     },
   ];
   return {
+    tools,
+    skills,
     toolBindings,
     toolSources,
     skillBindings,

@@ -20,6 +20,7 @@ import {
   normalizePersistentBashRuleContent,
   parseBashCommand,
 } from './bash-command-parser.js';
+import { canonicalizeGeneratedRuntimeSkillPaths } from './generated-runtime-paths.js';
 
 const MCP_WILDCARD_RE = /^mcp__([A-Za-z0-9_-]+)__\*$/;
 const MCP_EXACT_RE = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/;
@@ -320,7 +321,9 @@ function evaluateBashToolUse(input: {
         'Scoped autonomous tool rule cannot be evaluated for RunCommand; expected one of command, cmd string fields.',
     };
   }
-  const parsedCommand = parseBashCommand(command);
+  const parsedCommand = parseBashCommand(
+    canonicalizeGeneratedRuntimeSkillPaths(command),
+  );
   if (!parsedCommand.ok) {
     return {
       allowed: false,
@@ -466,7 +469,9 @@ function scopePatternMatches(scope: string, candidate: string): boolean {
 }
 
 function bashScopeMatchesLeaf(scope: string, leaf: BashCommandLeaf): boolean {
-  const normalizedScope = normalizePersistentBashRuleContent(scope.trim());
+  const normalizedScope = normalizePersistentBashRuleContent(
+    canonicalizeGeneratedRuntimeSkillPaths(scope.trim()),
+  );
   const parsedScope = parseBashCommand(normalizedScope);
   if (!parsedScope.ok || parsedScope.leaves.length !== 1) return false;
   const patternArgs = parsedScope.leaves[0]?.argv ?? [];

@@ -89,4 +89,16 @@ describe('persistent permission rules', () => {
       validatePersistentRequestPermissionRule('capability:google.sheets.write'),
     ).toEqual({ ok: true });
   });
+
+  it('rejects generated runtime skill paths as persistent RunCommand authority', () => {
+    expect(
+      validatePersistentRequestPermissionRule(
+        'RunCommand(/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+      ),
+    ).toEqual({
+      ok: false,
+      reason:
+        'Persistent RunCommand rules cannot reference generated runtime skill paths; approve the selected skill action capability or a stable reviewed command wrapper instead.',
+    });
+  });
 });

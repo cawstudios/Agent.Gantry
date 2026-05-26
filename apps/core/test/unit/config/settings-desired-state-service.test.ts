@@ -11,6 +11,42 @@ function emptySources() {
   return { skills: [], mcpServers: [], tools: [] };
 }
 
+function linkedinPostingSkill() {
+  return {
+    id: 'skill:linkedin-posting',
+    appId: 'default',
+    name: 'linkedin-posting',
+    description: 'LinkedIn posting',
+    version: 'v1',
+    source: 'admin_uploaded',
+    status: 'approved',
+    promptRefs: [],
+    toolIds: [],
+    workflowRefs: [],
+    requiredEnvVars: ['LINKEDIN_ACCESS_TOKEN'],
+    actionPermissions: [
+      {
+        id: 'publish',
+        capabilityId: 'skill.linkedin-posting.publish',
+        displayName: 'LinkedIn posting',
+        risk: 'write',
+        can: 'Publish a prepared LinkedIn post through the approved script.',
+        cannot: 'Read unrelated accounts or receive raw credentials.',
+        requiredEnvVars: ['LINKEDIN_ACCESS_TOKEN'],
+        commandTemplates: ['skills/linkedin-posting/post.py *'],
+      },
+    ],
+    storage: {
+      storageType: 'local-filesystem',
+      storageRef: 'skills/linkedin-posting',
+      contentHash: 'sha256:linkedin-v1',
+      sizeBytes: 128,
+    },
+    createdAt: '2026-05-21T00:00:00.000Z',
+    updatedAt: '2026-05-21T00:00:00.000Z',
+  };
+}
+
 function makeRepositories(overrides: Record<string, unknown> = {}) {
   return {
     agents: {
@@ -304,6 +340,113 @@ describe('SettingsDesiredStateService', () => {
             toolId: expect.stringContaining('tool:permission-rule:'),
           }),
         ],
+      }),
+    );
+  });
+
+  it('converts generated runtime skill grants to selected skill action capabilities during reconciliation', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agents.main_agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      bindings: {},
+      sources: {
+        skills: [{ id: 'linkedin-posting', version: 'approved' }],
+        mcpServers: [],
+        tools: [],
+      },
+      capabilities: [
+        {
+          id: 'RunCommand(/Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+          version: 'builtin',
+        },
+      ],
+    };
+    const skill = linkedinPostingSkill();
+    const repositories = makeRepositories({
+      skills: {
+        ...makeRepositories().skills,
+        getSkill: vi.fn(async (id: string) => (id === skill.id ? skill : null)),
+        listSkills: vi.fn(async () => [skill]),
+      },
+    });
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+    });
+
+    const result = await service.reconcile(settings);
+
+    expect(result.invalidReferences).toEqual([]);
+    expect(repositories.tools.saveTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'tool:capability:skill.linkedin-posting.publish',
+        name: 'capability:skill.linkedin-posting.publish',
+        displayName: 'LinkedIn posting',
+        inputSchema: expect.objectContaining({
+          schema: expect.objectContaining({
+            capabilityId: 'skill.linkedin-posting.publish',
+            source: expect.objectContaining({
+              kind: 'skill_action',
+              skillId: 'skill:linkedin-posting',
+              skillContentHash: 'sha256:linkedin-v1',
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(repositories.tools.saveTool).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: expect.stringContaining('.llm-runtime'),
+      }),
+    );
+    expect(
+      repositories.agents.replaceAgentCapabilityBindings,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolBindings: [
+          expect.objectContaining({
+            toolId: 'tool:capability:skill.linkedin-posting.publish',
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('drops generated runtime skill grants without trusted selected skill action metadata', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agents.main_agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [
+        {
+          id: 'RunCommand(/Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+          version: 'builtin',
+        },
+      ],
+    };
+    const repositories = makeRepositories();
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+    });
+
+    const result = await service.reconcile(settings);
+
+    expect(result.invalidReferences).toEqual([]);
+    expect(repositories.tools.saveTool).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: expect.stringContaining('.llm-runtime'),
+      }),
+    );
+    expect(
+      repositories.agents.replaceAgentCapabilityBindings,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agent:main_agent',
+        toolBindings: [],
       }),
     );
   });
@@ -1705,6 +1848,158 @@ describe('SettingsDesiredStateService', () => {
       }),
     );
     expect(exported.bindings.stale).toBeUndefined();
+  });
+
+  it('exports generated runtime skill command grants as selected skill action capabilities', async () => {
+    const settings = createDefaultRuntimeSettings();
+    const skill = {
+      id: 'skill:linkedin',
+      appId: 'default',
+      name: 'linkedin-posting',
+      version: '3',
+      status: 'approved',
+      source: 'admin_uploaded',
+      promptRefs: [],
+      toolIds: [],
+      workflowRefs: [],
+      storage: {
+        storageType: 'local-filesystem',
+        storageRef: '/skills/linkedin-posting',
+        contentHash: 'sha256:linkedin-posting-v3',
+        sizeBytes: 10,
+      },
+      actionPermissions: [
+        {
+          id: 'publish',
+          capabilityId: 'skill.linkedin-posting.publish',
+          displayName: 'LinkedIn posting',
+          risk: 'write',
+          can: 'Publish a prepared LinkedIn post through the approved script.',
+          cannot:
+            'Read unrelated accounts or receive raw LinkedIn credentials.',
+          requiredEnvVars: ['LINKEDIN_ACCESS_TOKEN'],
+          commandTemplates: ['skills/linkedin-posting/post.py *'],
+        },
+      ],
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    };
+    const repositories = makeRepositories({
+      agents: {
+        ...makeRepositories().agents,
+        listAgents: vi.fn(async () => [
+          {
+            id: 'agent:main_agent',
+            appId: 'default',
+            name: 'Main',
+            status: 'active',
+            createdAt: '2026-05-01T00:00:00.000Z',
+            updatedAt: '2026-05-01T00:00:00.000Z',
+          },
+        ]),
+      },
+      tools: {
+        ...makeRepositories().tools,
+        listTools: vi.fn(async () => [
+          {
+            id: 'tool:generated-skill-command',
+            appId: 'default',
+            name: 'RunCommand(/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+            status: 'active',
+            selectable: true,
+          },
+        ]),
+        listAgentToolBindingsForAgents: vi.fn(async () => [
+          {
+            id: 'agent-tool-binding:generated-skill-command',
+            appId: 'default',
+            agentId: 'agent:main_agent',
+            toolId: 'tool:generated-skill-command',
+            status: 'active',
+            createdAt: '2026-05-01T00:00:00.000Z',
+            updatedAt: '2026-05-01T00:00:00.000Z',
+          },
+        ]),
+      },
+      skills: {
+        ...makeRepositories().skills,
+        listSkills: vi.fn(async () => [skill]),
+        listAgentSkillBindingsForAgents: vi.fn(async () => [
+          {
+            id: 'agent-skill-binding:linkedin',
+            appId: 'default',
+            agentId: 'agent:main_agent',
+            skillId: 'skill:linkedin',
+            status: 'active',
+            createdAt: '2026-05-01T00:00:00.000Z',
+            updatedAt: '2026-05-01T00:00:00.000Z',
+          },
+        ]),
+      },
+    });
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+    });
+
+    const exported = await service.exportCurrent(settings);
+
+    expect(exported.agents.main_agent.sources.skills).toEqual([
+      { id: 'linkedin-posting', version: 'approved' },
+    ]);
+    expect(exported.agents.main_agent.capabilities).toEqual([
+      { id: 'skill.linkedin-posting.publish', version: 'builtin' },
+    ]);
+  });
+
+  it('drops generated runtime skill command grants without selected action metadata', async () => {
+    const settings = createDefaultRuntimeSettings();
+    const repositories = makeRepositories({
+      agents: {
+        ...makeRepositories().agents,
+        listAgents: vi.fn(async () => [
+          {
+            id: 'agent:main_agent',
+            appId: 'default',
+            name: 'Main',
+            status: 'active',
+            createdAt: '2026-05-01T00:00:00.000Z',
+            updatedAt: '2026-05-01T00:00:00.000Z',
+          },
+        ]),
+      },
+      tools: {
+        ...makeRepositories().tools,
+        listTools: vi.fn(async () => [
+          {
+            id: 'tool:generated-skill-command',
+            appId: 'default',
+            name: 'RunCommand(/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+            status: 'active',
+            selectable: true,
+          },
+        ]),
+        listAgentToolBindingsForAgents: vi.fn(async () => [
+          {
+            id: 'agent-tool-binding:generated-skill-command',
+            appId: 'default',
+            agentId: 'agent:main_agent',
+            toolId: 'tool:generated-skill-command',
+            status: 'active',
+            createdAt: '2026-05-01T00:00:00.000Z',
+            updatedAt: '2026-05-01T00:00:00.000Z',
+          },
+        ]),
+      },
+    });
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+    });
+
+    const exported = await service.exportCurrent(settings);
+
+    expect(exported.agents.main_agent.capabilities).toEqual([]);
   });
 
   it('disables DB-only agents and clears their policies in authoritative mode', async () => {

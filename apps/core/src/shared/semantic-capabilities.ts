@@ -72,6 +72,14 @@ export interface SemanticCapabilityDefinition {
 }
 
 const SEMANTIC_CAPABILITY_SCHEMA_FORMAT = 'gantry.semantic-capability.v1';
+const LOCAL_CLI_MISSING_BINDING_REASON =
+  'Local CLI capabilities require a local_cli implementation binding.';
+const LOCAL_CLI_BINDING_SOURCE_REASON =
+  'Local CLI bindings require credentialSource local_cli.';
+const LOCAL_CLI_NETWORK_HOSTS_REASON =
+  'networkHosts are only supported for local_cli capabilities.';
+const LOCAL_CLI_PROTECTED_PATHS_REASON =
+  'protectedPaths are only supported for local_cli capabilities.';
 
 export const DEFAULT_LOCAL_CLI_DENIED_ENV_PATTERNS = [
   '*TOKEN*',
@@ -285,7 +293,10 @@ export function semanticCapabilityRuntimeRules(
   const rules = capability.implementationBindings.flatMap((binding) => {
     if (binding.rule) return [binding.rule.trim()];
     if (binding.mcpTool) return [binding.mcpTool.trim()];
-    if (binding.kind === 'local_cli') {
+    if (
+      binding.kind === 'local_cli' &&
+      capability.credentialSource === 'local_cli'
+    ) {
       return (binding.commandTemplates ?? []).map(
         (template) => `${RUN_COMMAND_TOOL_NAME}(${template.trim()})`,
       );
@@ -353,6 +364,22 @@ export function validateSemanticCapabilityDefinition(
       ok: false,
       reason: 'Capability must include at least one implementation binding.',
     };
+  }
+  const hasLocalCliBinding = capability.implementationBindings.some(
+    (binding) => binding.kind === 'local_cli',
+  );
+  if (capability.credentialSource === 'local_cli' && !hasLocalCliBinding) {
+    return { ok: false, reason: LOCAL_CLI_MISSING_BINDING_REASON };
+  }
+  if (capability.credentialSource !== 'local_cli') {
+    if (hasLocalCliBinding)
+      return { ok: false, reason: LOCAL_CLI_BINDING_SOURCE_REASON };
+    if ((capability.networkHosts ?? []).some((host) => host.trim())) {
+      return { ok: false, reason: LOCAL_CLI_NETWORK_HOSTS_REASON };
+    }
+    if ((capability.protectedPaths ?? []).some((item) => item.trim())) {
+      return { ok: false, reason: LOCAL_CLI_PROTECTED_PATHS_REASON };
+    }
   }
   for (const binding of capability.implementationBindings) {
     const validation = validateSemanticCapabilityBinding(binding);

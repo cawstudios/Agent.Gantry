@@ -42,6 +42,14 @@ export interface SkillActionSourceMetadata {
   actionId: string;
 }
 
+export interface SkillActionCapabilitySourceSkill {
+  id: string;
+  name: string;
+  version: string;
+  storage?: { contentHash?: string };
+  actionPermissions?: SkillActionPermission[];
+}
+
 export function sanitizeSkillDirectoryName(value: string): string {
   const safe = value
     .trim()
@@ -152,6 +160,27 @@ export function skillActionSource(
     skillContentHash,
     actionId,
   };
+}
+
+export function skillActionSemanticCapabilitiesForSkills(
+  skills: Iterable<SkillActionCapabilitySourceSkill>,
+): Record<string, SemanticCapabilityDefinition> {
+  const definitions: Record<string, SemanticCapabilityDefinition> = {};
+  for (const skill of skills) {
+    const skillContentHash = skill.storage?.contentHash;
+    if (!skill.version || !skillContentHash) continue;
+    for (const action of skill.actionPermissions ?? []) {
+      const capability = skillActionSemanticCapability({
+        skillId: String(skill.id),
+        skillName: skill.name,
+        skillVersion: skill.version,
+        skillContentHash,
+        action,
+      });
+      definitions[capability.capabilityId] = capability;
+    }
+  }
+  return definitions;
 }
 
 function parseSkillActionPermission(

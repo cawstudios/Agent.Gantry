@@ -14,6 +14,7 @@ import { AgentOutput, RunnerProcessSpec } from './agent-spawn-types.js';
 import { activeRunStopWasRequested } from './group-queue-stop.js';
 import { formatDuration } from '../shared/human-format.js';
 import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
+import { formatRunnerProcessExitError } from './generated-runtime-path-error.js';
 
 const OUTPUT_START_MARKER = '---GANTRY_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---GANTRY_OUTPUT_END---';
@@ -612,20 +613,17 @@ export function executeRunnerProcess(
           `${runnerLabel} exited with error`,
         );
 
-        if (structuredError) {
-          outputChain.then(() => {
-            resolve({
-              ...structuredError,
-              newSessionId: structuredError?.newSessionId ?? newSessionId,
-            });
-          });
-        } else {
-          resolve({
-            status: 'error',
-            result: null,
-            error: `${runnerLabel} exited with code ${code}: ${sanitizeLogText(stderr.slice(-200), 200)}`,
-          });
-        }
+        const processError = formatRunnerProcessExitError({
+          runnerLabel,
+          code,
+          stdout,
+          stderr,
+          structuredError,
+          newSessionId,
+          fallbackStderr: sanitizeLogText(stderr.slice(-200), 200),
+        });
+        if (structuredError) outputChain.then(() => resolve(processError));
+        else resolve(processError);
         return;
       }
 

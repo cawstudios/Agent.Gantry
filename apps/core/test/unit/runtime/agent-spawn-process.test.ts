@@ -191,6 +191,25 @@ describe('executeRunnerProcess', () => {
       expect(result.error).toContain('something went wrong');
     });
 
+    it('surfaces generated .llm-runtime permission failures with actionable copy', async () => {
+      const spec = makeSpec();
+      const resultP = executeRunnerProcess(spec);
+
+      fakeProc.stderr.push(
+        "Error: EACCES: permission denied, open '/tmp/gantry/agents/main/.llm-runtime/claude/settings.json'\n",
+      );
+      fakeProc.emit('close', 1);
+
+      await vi.advanceTimersByTimeAsync(10);
+
+      const result = await resultP;
+      expect(result.status).toBe('error');
+      expect(result.error).toContain('Gantry-generated .llm-runtime files');
+      expect(result.error).toContain('readable/executable');
+      expect(result.error).toContain('.llm-runtime');
+      expect(result.error).not.toContain('exited with code 1');
+    });
+
     it('truncates stderr in error message to last 200 chars', async () => {
       const spec = makeSpec();
       const resultP = executeRunnerProcess(spec);

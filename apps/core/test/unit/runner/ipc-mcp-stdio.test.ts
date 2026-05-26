@@ -174,6 +174,10 @@ function createMcpFixture(): {
     path.join(sharedDir, 'tool-access-view.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/generated-runtime-paths.ts'),
+    path.join(sharedDir, 'generated-runtime-paths.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/tool-rule-matcher.ts'),
     path.join(sharedDir, 'tool-rule-matcher.ts'),
   );

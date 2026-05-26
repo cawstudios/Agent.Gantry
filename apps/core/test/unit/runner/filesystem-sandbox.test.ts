@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildSdkFilesystemSandbox,
   readLocalCliCredentialDirectories,
+  readProtectedFilesystemSandboxPaths,
 } from '@core/adapters/llm/anthropic-claude-agent/runner/filesystem-sandbox.js';
 
 describe('Claude SDK filesystem sandbox settings', () => {
@@ -15,6 +16,9 @@ describe('Claude SDK filesystem sandbox settings', () => {
     if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
     delete process.env.GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON;
+    delete process.env.GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON;
+    delete process.env.GANTRY_PROTECTED_FILESYSTEM_DENY_READ_PATHS_JSON;
+    delete process.env.GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON;
   });
 
   it('keeps Bash sandboxed and enables macOS trustd lookup for approved CLI TLS', () => {
@@ -44,6 +48,45 @@ describe('Claude SDK filesystem sandbox settings', () => {
     expect(
       buildSdkFilesystemSandbox(['/tmp/protected'], { platform: 'linux' }),
     ).not.toHaveProperty('enableWeakerNetworkIsolation');
+  });
+
+  it('supports separate read and write sandbox protections', () => {
+    const sandbox = buildSdkFilesystemSandbox([], {
+      platform: 'linux',
+      denyReadPaths: ['/tmp/runtime/settings.json'],
+      denyWritePaths: ['/tmp/runtime/skills', '/tmp/credentials'],
+    });
+
+    expect(sandbox.filesystem?.denyRead).toEqual([
+      expect.stringMatching(/\/tmp\/runtime\/settings\.json$/),
+    ]);
+    expect(sandbox.filesystem?.denyWrite).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/\/tmp\/runtime\/skills$/),
+        expect.stringMatching(/\/tmp\/credentials$/),
+      ]),
+    );
+    expect(sandbox.filesystem?.denyRead).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/\/tmp\/credentials$/)]),
+    );
+  });
+
+  it('reads split protected filesystem path projections from runner env', () => {
+    process.env.GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON = JSON.stringify([
+      '/tmp/fallback',
+    ]);
+    process.env.GANTRY_PROTECTED_FILESYSTEM_DENY_READ_PATHS_JSON =
+      JSON.stringify(['/tmp/settings.json']);
+    process.env.GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON =
+      JSON.stringify(['/tmp/runtime', '/tmp/credentials']);
+
+    expect(readProtectedFilesystemSandboxPaths()).toEqual({
+      denyRead: [expect.stringMatching(/\/tmp\/settings\.json$/)],
+      denyWrite: expect.arrayContaining([
+        expect.stringMatching(/\/tmp\/runtime$/),
+        expect.stringMatching(/\/tmp\/credentials$/),
+      ]),
+    });
   });
 
   it('resolves reviewed local CLI credential directories from the host projection', () => {

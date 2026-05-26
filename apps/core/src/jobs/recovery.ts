@@ -414,7 +414,7 @@ async function runJobRecoveryAgentTurn(input: {
     allowedTools: toolPolicy.effectiveAllowedTools,
     localCliCredentialAccess: toolPolicy.localCliCredentialAccess,
     localCliCredentialPaths: toolPolicy.localCliCredentialPaths,
-    localCliNetworkHosts: toolPolicy.localCliNetworkHosts,
+    localCliNetworkBindings: toolPolicy.localCliNetworkBindings,
     selectedSkillIds,
     selectedMcpServerIds,
     ...(turnContext?.externalSessionId

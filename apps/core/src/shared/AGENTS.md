@@ -12,6 +12,17 @@
   selected-skill action definitions. Do not treat agent-authored tool input,
   request labels, or embedded semantic definitions as authority for skill
   actions.
+- Generated `.llm-runtime/claude/skills/...` paths are runner projections, not
+  durable command authority. Permission UX and persistent suggestions must
+  canonicalize them to selected skill action capabilities or stable
+  `skills/<skill>/...` reviewed command wrappers, and persistent validation must
+  reject raw generated runtime paths.
+- Semantic `local_cli` protected paths are credential-read boundaries: they
+  should be readable by the reviewed executable and write-protected from the
+  agent/runtime sandbox. Do not model them as deny-read secrets.
+- `CapabilityRuntimeAccess` is the typed internal projection contract. Add new
+  capability access types there instead of passing untyped host/path/tool
+  authority across runtime boundaries.
 - The model catalog is the only shared selectable-model source. User/API/job/MCP
   inputs must resolve friendly aliases through it; raw provider slugs are
   display/source metadata only unless explicitly registered as aliases.

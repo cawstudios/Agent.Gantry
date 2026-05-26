@@ -116,7 +116,7 @@ export async function persistRequestPermissionRules(input: {
     requestId: input.requestId,
     actor: input.actor,
     conversationId: input.conversationId,
-    threadId: input.threadId,
+    // Thread/topic ids route setup prompts; persistent grants bind to the parent conversation.
     runId: input.runId,
     jobId: input.jobId,
     reason: input.reason,

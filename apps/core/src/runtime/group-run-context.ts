@@ -18,9 +18,10 @@ export async function resolveTurnToolPolicy(
   if (!turnContext) {
     return {
       allowedTools: undefined,
+      runtimeAccess: [],
       localCliCredentialAccess: false,
       localCliCredentialPaths: [],
-      localCliNetworkHosts: [],
+      localCliNetworkBindings: [],
     };
   }
   return resolveConfiguredToolPolicy({

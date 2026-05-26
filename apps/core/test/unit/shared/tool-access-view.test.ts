@@ -57,4 +57,25 @@ describe('tool access view', () => {
       ]),
     );
   });
+
+  it('hides generated runtime skill implementation paths in job tool access', () => {
+    const view = buildJobToolAccessView({
+      inheritedAgentTools: [
+        'RunCommand(/Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+        'RunCommand(chmod +x /Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py)',
+      ],
+      effectiveAllowedTools: [
+        'RunCommand(/Users/tester/gantry/agents/main_agent/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+      ],
+    });
+
+    expect(view.inheritedAgentTools).toEqual([
+      'Generated skill action (skills/linkedin-posting/post.py)',
+      'Generated skill action setup (skills/linkedin-posting/post.py)',
+    ]);
+    expect(view.effectiveAllowedTools).toEqual([
+      'Generated skill action (skills/linkedin-posting/post.py)',
+    ]);
+    expect(view.projectedRuntimeTools).toContain('Bash');
+  });
 });

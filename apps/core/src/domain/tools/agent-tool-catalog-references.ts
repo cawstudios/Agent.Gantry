@@ -12,6 +12,10 @@ import {
   validateReadableAgentToolRule,
 } from '../../shared/agent-tool-references.js';
 import {
+  containsGeneratedRuntimeSkillPath,
+  GENERATED_RUNTIME_SKILL_PATH_DURABLE_REJECTION_REASON,
+} from '../../shared/generated-runtime-paths.js';
+import {
   getBuiltinSemanticCapability,
   semanticCapabilityInputSchema,
   type SemanticCapabilityDefinition,
@@ -148,6 +152,7 @@ export async function resolveAgentToolReference(input: {
   repository: ToolCatalogRepository;
   appId: AppId;
   reference: string;
+  semanticCapabilityDefinitions?: Record<string, SemanticCapabilityDefinition>;
 }): Promise<{ tool?: ToolCatalogItem; error?: string }> {
   const reference = input.reference.trim();
   if (!reference) return { error: 'Tool rule cannot be empty.' };
@@ -156,6 +161,9 @@ export async function resolveAgentToolReference(input: {
       error:
         'Tool rule must be readable; use a tool name or scoped RunCommand rule, not an internal tool ID.',
     };
+  }
+  if (containsGeneratedRuntimeSkillPath(reference)) {
+    return { error: GENERATED_RUNTIME_SKILL_PATH_DURABLE_REJECTION_REASON };
   }
 
   const activeTools = await input.repository.listTools({
@@ -180,7 +188,12 @@ export async function resolveAgentToolReference(input: {
   if (!validation.ok) return { error: validation.reason };
   const semanticCapabilityId = parseSemanticCapabilityRule(reference);
   if (semanticCapabilityId) {
-    if (getBuiltinSemanticCapability(semanticCapabilityId)) return {};
+    if (
+      getBuiltinSemanticCapability(semanticCapabilityId) ||
+      input.semanticCapabilityDefinitions?.[semanticCapabilityId]
+    ) {
+      return {};
+    }
     return {
       error: `Unknown semantic capability ${semanticCapabilityId}. Review and register a user-defined capability before selecting it.`,
     };
