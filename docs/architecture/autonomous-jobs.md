@@ -54,8 +54,8 @@ becoming compatibility state.
 
 Before activation and immediately before model spawn, Gantry performs a
 best-effort readiness check against durable target-agent capability bindings,
-tool-capability broker health, selected MCP server materialization metadata,
-MCP Gantry Secret references, and browser profile state. If setup is not ready,
+capability credential/preflight status, selected MCP server materialization
+metadata, MCP Gantry Credential references, and browser profile state. If setup is not ready,
 the job is stored as `paused` with the short redacted `pause_reason`
 `Setup required`, `next_run=null`, and structured `setup` metadata. User-facing
 notifications render this as `Setup needed` with a short reason and one action.
@@ -80,7 +80,7 @@ Gantry file/web facade, an approved Gantry admin tool, a scoped
 `RunCommand(...)` rule, or an approved MCP server binding. Browser auth remains
 profile/session based; Gantry reports that login may be required unless the
 profile already has durable state or auth markers.
-MCP readiness may inspect materialized definitions and Gantry Secret refs, but
+MCP readiness may inspect materialized definitions and Gantry Credential refs, but
 must not start arbitrary MCP servers as a readiness side effect.
 
 ## Execution

@@ -36,6 +36,7 @@ import { sendError } from './http.js';
 import { createRateLimiter } from './rate-limit.js';
 import { handleAgentRoutes } from './routes/agents.js';
 import { handleCapabilityCatalogRoutes } from './routes/capability-catalog.js';
+import { handleCredentialRoutes } from './routes/credentials.js';
 import { handleProviderConversationRoutes } from './routes/provider-conversation-routes.js';
 import { handleExternalIngressRoutes } from './routes/external-ingress.js';
 import { handleJobRoutes } from './routes/jobs.js';
@@ -129,6 +130,7 @@ function createControlRequestHandler(ctx: ControlRouteContext) {
       if (await handleProviderConversationRoutes(req, res, ctx, url, pathname))
         return;
       if (await handleMemoryRoutes(req, res, ctx, url, pathname)) return;
+      if (await handleCredentialRoutes(req, res, ctx, pathname)) return;
       if (await handleModelRoutes(req, res, ctx, pathname)) return;
       if (await handleJobRoutes(req, res, ctx, url, pathname)) return;
       if (await handleExternalIngressRoutes(req, res, ctx, pathname)) return;
@@ -205,11 +207,12 @@ export function startControlServer(input: {
     getDefaultModelConfig,
     getModelDefaults: getRuntimeModelDefaults,
     patchModelDefaults: patchRuntimeModelDefaults,
-    preflightModelPreset: (preset) =>
+    preflightModelPreset: (preset, appId) =>
       preflightModelPreset({
         runtimeHome: GANTRY_HOME,
         preset,
         settings: getRuntimeSettingsForConfig(),
+        appId,
       }),
     getBrowserStatus: input.getBrowserStatus,
     syncSettingsFromProjection: (appId: AppId) =>

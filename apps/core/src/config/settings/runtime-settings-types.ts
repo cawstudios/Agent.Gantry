@@ -144,19 +144,12 @@ export interface RuntimeDesiredStateSettings {
   authoritative: boolean;
 }
 
-export type RuntimeCredentialBrokerMode = 'none' | 'onecli' | 'external';
+export type RuntimeCredentialBrokerMode = 'none' | 'gantry';
 
 export interface RuntimeCredentialBrokerSettings {
   mode: RuntimeCredentialBrokerMode;
-  onecli: {
-    url: string;
-    postgres: {
-      urlEnv: string;
-      schema: string;
-    };
-  };
-  external: {
-    baseUrl: string;
+  gateway: {
+    bindHost: string;
   };
 }
 

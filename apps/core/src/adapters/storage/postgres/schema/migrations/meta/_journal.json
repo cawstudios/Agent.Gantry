@@ -463,6 +463,13 @@
       "when": 1777223400000,
       "tag": "0066_memory_conversation_scope_cutover",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1777227000000,
+      "tag": "0067_model_credentials",
+      "breakpoints": true
     }
   ]
 }

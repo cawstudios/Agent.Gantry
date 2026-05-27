@@ -291,7 +291,7 @@ describe('job readiness service', () => {
     });
   });
 
-  it('does not require the OneCLI broker for provider-neutral configured capabilities', async () => {
+  it('does not require the Gantry Model Gateway broker for provider-neutral configured capabilities', async () => {
     const result = await evaluateJobReadiness({
       job: makeJob({
         tool_access_requirements: ['capability:google.sheets.write'],
@@ -352,7 +352,9 @@ describe('job readiness service', () => {
     expect(result.setupState.blockers[0]?.nextAction).toContain(
       '"networkHosts":["oauth2.googleapis.com","sheets.googleapis.com"]',
     );
-    expect(result.setupState.blockers[0]?.message).not.toContain('OneCLI');
+    expect(result.setupState.blockers[0]?.message).not.toContain(
+      'Gantry Model Gateway',
+    );
   });
 
   it('treats a declared local CLI implementation as ready when its scoped RunCommand rule is bound', async () => {
@@ -500,7 +502,7 @@ describe('job readiness service', () => {
     });
   });
 
-  it('accepts required MCP server credentials from Gantry Secrets', async () => {
+  it('accepts required MCP server credentials from Gantry Credentials', async () => {
     const repository = {
       listMaterializedServersForAgent: vi.fn(async () => [
         {

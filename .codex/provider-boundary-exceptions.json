@@ -3,31 +3,6 @@
   "cleanupPlanId": "myclaw-architecture-gates-20260517-provider-boundary-sentinels",
   "exceptions": [
     {
-      "file": "apps/core/src/adapters/credentials/onecli/broker.ts",
-      "matches": {
-        "ANTHROPIC_": 1
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
-      "file": "apps/core/src/adapters/credentials/onecli/env-policy.ts",
-      "matches": {
-        "ANTHROPIC_": 6,
-        "CLAUDE_CODE_OAUTH_TOKEN": 2
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
-      "file": "apps/core/src/adapters/llm/external-credential-injection.ts",
-      "matches": {
-        "ANTHROPIC_": 1
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
       "file": "apps/core/src/adapters/storage/postgres/schema/agents.ts",
       "matches": {
         "default('anthropic')": 1
@@ -45,17 +20,9 @@
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
     },
     {
-      "file": "apps/core/src/config/credentials/broker-url-policy.ts",
-      "matches": {
-        "ANTHROPIC_": 1
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
       "file": "apps/core/src/config/index.ts",
       "matches": {
-        "ANTHROPIC_": 8
+        "ANTHROPIC_": 7
       },
       "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
@@ -63,7 +30,7 @@
     {
       "file": "apps/core/src/config/source-classification.ts",
       "matches": {
-        "ANTHROPIC_": 14,
+        "ANTHROPIC_": 12,
         "CLAUDE_CODE_OAUTH_TOKEN": 2
       },
       "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
@@ -89,15 +56,6 @@
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
     },
     {
-      "file": "apps/core/test/integration/config-credential-boundary.integration.test.ts",
-      "matches": {
-        "ANTHROPIC_": 3,
-        "CLAUDE_CODE_OAUTH_TOKEN": 1
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
       "file": "apps/core/test/integration/runtime-host-child-process.integration.test.ts",
       "matches": {
         "ANTHROPIC_": 3
@@ -116,7 +74,7 @@
     {
       "file": "apps/core/test/unit/adapters/anthropic-execution-adapter.test.ts",
       "matches": {
-        "ANTHROPIC_": 1
+        "ANTHROPIC_": 5
       },
       "reason": "Anthropic execution adapter tests exercise provider-specific credential rejection behavior while the provider-boundary test layout cleanup is still tracked by the ratchet plan.",
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
@@ -155,103 +113,35 @@
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
     },
     {
-      "file": "apps/core/test/unit/cli/doctor.test.ts",
-      "matches": {
-        "ANTHROPIC_": 2
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
-      "file": "apps/core/test/unit/cli/group.test.ts",
-      "matches": {
-        "ANTHROPIC_": 1
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
-      "file": "apps/core/test/unit/cli/onboarding-config.test.ts",
-      "matches": {
-        "ANTHROPIC_": 5,
-        "CLAUDE_CODE_OAUTH_TOKEN": 2
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
-      "file": "apps/core/test/unit/cli/setup-credentials.test.ts",
-      "matches": {
-        "ANTHROPIC_": 3
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
       "file": "apps/core/test/unit/core/agent-credential-service.test.ts",
       "matches": {
-        "ANTHROPIC_": 8
+        "ANTHROPIC_": 7
       },
       "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
     },
     {
-      "file": "apps/core/test/unit/core/config-credential-auth.test.ts",
+      "file": "apps/core/test/unit/adapters/model-preset-preflight.test.ts",
       "matches": {
-        "ANTHROPIC_": 4
+        "ANTHROPIC_": 7
       },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
+      "reason": "Model gateway preflight tests assert the Anthropic-compatible SDK projection while the provider-boundary test layout cleanup is still tracked by the ratchet plan.",
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
     },
     {
-      "file": "apps/core/test/unit/core/onecli-credential-broker.test.ts",
+      "file": "apps/core/test/unit/core/gantry-model-gateway.test.ts",
       "matches": {
-        "ANTHROPIC_": 21
+        "ANTHROPIC_": 16
       },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
+      "reason": "Model gateway tests assert the run-scoped Anthropic-compatible SDK environment, revocation, streaming proxy behavior, and OpenAI gateway coverage without exposing provider credentials.",
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
     },
     {
-      "file": "apps/core/test/unit/core/onecli-env-policy.test.ts",
+      "file": "apps/core/src/shared/model-provider-registry.ts",
       "matches": {
-        "ANTHROPIC_": 36,
-        "CLAUDE_CODE_OAUTH_TOKEN": 4
+        "ANTHROPIC_": 7
       },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
-      "file": "apps/core/test/unit/core/onecli-policy.test.ts",
-      "matches": {
-        "ANTHROPIC_": 6
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
-      "file": "apps/core/test/unit/core/preflight.test.ts",
-      "matches": {
-        "ANTHROPIC_": 4
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
-      "file": "apps/core/test/unit/adapters/anthropic-memory-query.test.ts",
-      "matches": {
-        "@anthropic-ai/claude-agent-sdk": 1,
-        "ANTHROPIC_": 21,
-        "CLAUDE_CODE_OAUTH_TOKEN": 7
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
-      "file": "apps/core/test/unit/memory/memory-embeddings-brokered.test.ts",
-      "matches": {
-        "ANTHROPIC_": 1
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
+      "reason": "The provider registry is the intentional source of truth for SDK projection env names while model runners still use the Anthropic-compatible execution adapter.",
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
     },
     {
@@ -280,21 +170,13 @@
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
     },
     {
-      "file": "apps/core/test/unit/runtime/agent-spawn-host.test.ts",
-      "matches": {
-        "ANTHROPIC_": 23
-      },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
-      "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
-    },
-    {
       "file": "apps/core/test/unit/runtime/agent-spawn.test.ts",
       "matches": {
-        "ANTHROPIC_": 35,
+        "ANTHROPIC_": 47,
         "CLAUDE_CONFIG_DIR": 6,
         "CLAUDE_CODE_OAUTH_TOKEN": 2
       },
-      "reason": "Existing Anthropic/Claude provider-boundary debt; this gate is count-exact so new leakage fails before the provider extraction cleanup.",
+      "reason": "Runtime spawn tests assert the Anthropic-compatible SDK projection uses only loopback Gantry gateway URLs and gtw_ run tokens; this gate is count-exact so new provider credential leakage fails.",
       "removeByPlan": "myclaw-architecture-gates-20260517-provider-boundary-sentinels"
     },
     {

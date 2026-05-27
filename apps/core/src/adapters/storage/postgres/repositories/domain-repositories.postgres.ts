@@ -48,6 +48,7 @@ import type {
   AgentSessionSummaryRepository,
   AppRepository,
   CapabilitySecretRepository,
+  ModelCredentialRepository,
   ProviderConnectionRepository,
   ConversationRepository,
   MessageRepository,
@@ -86,6 +87,7 @@ import { PostgresToolCatalogRepository } from './tool-repository.postgres.js';
 import { PostgresAgentRepository } from './agent-repository.postgres.js';
 import { PostgresOutboundDeliveryRepository } from './outbound-delivery-repository.postgres.js';
 import { PostgresCapabilitySecretRepository } from './capability-secret-repository.postgres.js';
+import { PostgresModelCredentialRepository } from './model-credential-repository.postgres.js';
 export interface PostgresDomainRepositoryBundle {
   apps: AppRepository;
   agents: AgentRepository;
@@ -102,6 +104,7 @@ export interface PostgresDomainRepositoryBundle {
   tools: ToolCatalogRepository;
   skills: SkillCatalogRepository;
   capabilitySecrets: CapabilitySecretRepository;
+  modelCredentials: ModelCredentialRepository;
   mcpServers: McpServerRepository;
   permissions: PermissionRepository;
   sandboxes: SandboxRepository;
@@ -1660,6 +1663,7 @@ export function createPostgresDomainRepositories(
     tools: new PostgresToolCatalogRepository(db),
     skills: new PostgresSkillCatalogRepository(db),
     capabilitySecrets: new PostgresCapabilitySecretRepository(db),
+    modelCredentials: new PostgresModelCredentialRepository(db),
     mcpServers: new PostgresMcpServerRepository(db),
     permissions: new PostgresPermissionRepository(db),
     sandboxes: new PostgresSandboxRepository(db),

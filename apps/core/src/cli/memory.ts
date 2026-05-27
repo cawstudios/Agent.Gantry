@@ -71,12 +71,7 @@ function formatMemoryStatus(runtimeHome: string): string {
     globalModel,
     hardDefaults.consolidation,
   );
-  const brokerConfigured =
-    settings.credentialBroker.mode === 'onecli'
-      ? Boolean(settings.credentialBroker.onecli.url.trim())
-      : settings.credentialBroker.mode === 'external'
-        ? Boolean(settings.credentialBroker.external.baseUrl.trim())
-        : false;
+  const brokerConfigured = settings.credentialBroker.mode === 'gantry';
   return [
     'Gantry Memory',
     '',
@@ -88,7 +83,7 @@ function formatMemoryStatus(runtimeHome: string): string {
     `Embedding provider: ${health.embeddingProvider} (${health.embeddingCheck.status}, source: ${health.embeddingProviderSource})`,
     `Embedding model: ${health.embeddingModel} (source: ${health.embeddingModelSource})`,
     `Dreaming: ${health.dreamingEnabled ? 'on' : 'off'} (source: ${health.dreamingSource})`,
-    `Model Access: ${brokerConfigured ? 'configured' : 'missing'} (settings.yaml credential_broker)`,
+    `Model Access: ${brokerConfigured ? 'configured' : 'missing'} (settings.yaml model_access)`,
     `Model extractor: ${extractorModel.model} (source: ${extractorModel.source})`,
     `Model dreaming: ${dreamingModel.model} (source: ${dreamingModel.source})`,
     `Model consolidation: ${consolidationModel.model} (source: ${consolidationModel.source})`,

@@ -51,7 +51,7 @@ Then follow this order:
 2. Choose `Use local Postgres URL` if you started the provided Compose stack, or choose hosted/existing Postgres and paste those URLs.
 3. Choose your first channel: `Telegram` or `Slack`.
 4. Follow the in-CLI channel guide, choose the default agent name, paste channel credentials, and pick a discovered chat/channel (or enter an ID manually). Setup binds that conversation to the default agent; channel IDs and runtime folders stay internal.
-5. Connect Model Access once for all agent, subagent, memory, and scheduled job model calls. Gantry uses the reserved `gantry-model-access` OneCLI profile for Anthropic/OpenRouter credentials; agents only select catalog model aliases and never receive database URLs or raw provider credentials.
+5. Connect Model Access once for all agent, subagent, memory, and scheduled job model calls. Gantry stores provider keys in encrypted Postgres rows and projects only loopback gateway tokens to the model SDK; agents select catalog model aliases and never receive database URLs or raw provider credentials.
 6. Choose a provider, then a main model alias. Anthropic defaults to `opus`; OpenRouter defaults to `kimi`.
 7. Confirm memory settings. Memory model defaults are preset-managed.
 8. Choose whether to install/start a background service.
@@ -81,10 +81,9 @@ gantry model reset chat|jobs|memory
 gantry model why chat [group-scope|conversation-id]
 gantry model why jobs|memory|job <id>
 gantry model doctor
-gantry secrets list
-gantry secrets set <NAME> [--allow <capabilityId>]
-gantry secrets import-env <NAME> [--allow <capabilityId>]
-gantry secrets unset <NAME>
+gantry credentials model status|set|rotate|disable|doctor
+gantry credentials capability list|set|import-env|unset
+gantry credentials browser status
 gantry provider connect telegram
 gantry provider connect slack
 gantry provider connect teams
@@ -192,7 +191,7 @@ conversations:
 
 Advanced storage and credential broker overrides stay supported, but setup keeps them out of `settings.yaml` unless you change them from defaults.
 
-Gantry uses Postgres for runtime state, jobs, events, memory, semantic search, and lexical search. Runtime readiness expects `pgvector`, `pg_trgm`, and `pg-boss` schema readiness. The supported deployment model is one database with separate schemas and roles: `gantry` for runtime state, `onecli` for broker state, and `pgboss` for job queue internals. `GANTRY_DATABASE_URL` and `ONECLI_DATABASE_URL` must use different Postgres users.
+Gantry uses Postgres for runtime state, jobs, events, memory, semantic search, lexical search, and encrypted model credentials. Runtime readiness expects `pgvector`, `pg_trgm`, and `pg-boss` schema readiness. The supported deployment model is one database role and schema for Gantry runtime state, plus pg-boss internals.
 
 No Postgres or Model Access service installed? Use the provided Compose file, then paste the resulting URLs during setup:
 
@@ -221,16 +220,14 @@ Then keep the runtime URLs pointed at the default host port:
 
 ```env
 GANTRY_DATABASE_URL=postgresql://gantry_app:gantry_app_password@127.0.0.1:5432/gantry?schema=gantry
-ONECLI_DATABASE_URL=postgresql://onecli_app:onecli_app_password@127.0.0.1:5432/gantry?schema=onecli
+SECRET_ENCRYPTION_KEY=<base64-encoded-32-byte-secret>
 ```
 
-The Compose file hardcodes the local ports, schema names, and non-secret role names. `~/gantry/.env` only needs local passwords, `SECRET_ENCRYPTION_KEY`, and the runtime connection URLs. Gantry setup does not start Docker or create containers; it asks for `GANTRY_DATABASE_URL` and `ONECLI_DATABASE_URL`, creates the `gantry-model-access` Model Access profile, then writes the non-secret OneCLI gateway URL to `settings.yaml` as `credential_broker.onecli.url`.
-
-If an older local `.env` still contains settings-owned keys such as `GANTRY_CREDENTIAL_MODE`, `ONECLI_URL`, `ANTHROPIC_MODEL`, or `SLACK_PERMISSION_APPROVER_IDS`, move those values into `settings.yaml` and remove them from `.env` before starting the runtime.
+The Compose file hardcodes the local ports, schema names, and non-secret role names. `~/gantry/.env` only needs local passwords, `SECRET_ENCRYPTION_KEY`, and the runtime connection URL. Gantry setup does not start Docker or create containers; it asks for `GANTRY_DATABASE_URL`, enables `model_access`, and uses encrypted Postgres model credential rows for Model Access.
 
 Gantry intentionally does not expose a destructive database-reset command in the runtime CLI. If you need to start over during development, stop Gantry, reset your local Postgres outside the agent-facing CLI, then run `gantry provider connect telegram` or `gantry provider connect slack` to re-register chats.
 
-For hosted Postgres, use Neon, Supabase, or another provider that supports `vector` and `pg_trgm`, then paste two URLs during setup: one Gantry-role URL with `sslmode=require`, and one OneCLI-role URL for the same database with `sslmode=require` and `schema=onecli`.
+For hosted Postgres, use Neon, Supabase, or another provider that supports `vector` and `pg_trgm`, then paste the Gantry-role URL with `sslmode=require` during setup.
 
 ### Provider And Conversation Setup
 
@@ -289,7 +286,7 @@ Browser authority is selected in `settings.yaml` and the public capabilities API
 
 Jobs are scheduled agent runs and inherit the target agent's selected capabilities and attached sources at execution time. Job `capabilityRequirements`, `toolAccessRequirements`, and `requiredMcpServers` are readiness and preflight assertions, not job-local grants. The canonical `toolAccess` view in MCP, CLI, SDK, and Control API responses shows the inherited agent capability projection. Skill source is stored as readable skill folders with `SKILL.md` plus supporting files; Postgres stores metadata, source type, hash, binding, and audit records. Skills installed from catalogs, URLs, CLI commands, or uploads all become the same reviewed local skill package after approval.
 
-Capability-owned secrets for selected skills and MCP servers use Gantry Secrets rather than runtime `.env` or model broker profiles. Use `gantry secrets set <NAME>`, `gantry secrets import-env <NAME>`, `gantry secrets list`, and `gantry secrets unset <NAME>`; add `--allow <capabilityId>` to scope a secret to a specific MCP definition, `mcp:<name>`, skill id, or `skill:<name>`.
+Capability-owned secrets for selected skills and MCP servers use Gantry Credential Center rather than runtime `.env` or model credentials. Use `gantry credentials capability set <NAME>`, `gantry credentials capability import-env <NAME>`, `gantry credentials capability list`, and `gantry credentials capability unset <NAME>`; add `--allow <capabilityId>` to scope a secret to a specific MCP definition, `mcp:<name>`, skill id, or `skill:<name>`.
 
 `permissions.yolo_mode` controls the denylist applied only to the 5-minute
 all-tools timed grant. Gantry ships defaults for destructive commands such as
@@ -551,8 +548,7 @@ Key paths:
 - Prompt FileArtifact path `<agent-folder>/SOUL` plus `.md` suffix — per-agent personality prompt
 - Prompt FileArtifact path `<agent-folder>/CLAUDE` plus `.md` suffix — stable agent-specific prompt guidance
 - `GANTRY_DATABASE_URL` — Postgres runtime and memory database
-- `ONECLI_DATABASE_URL` — same Postgres database with a separate OneCLI role and `schema=onecli` for broker persistence
-- `SECRET_ENCRYPTION_KEY` — stable generated base64-encoded 32-byte deployment secret for OneCLI broker state and Gantry Secrets encryption
+- `SECRET_ENCRYPTION_KEY` — stable generated base64-encoded 32-byte deployment secret for Gantry credential encryption
 
 ## Factory Mode
 

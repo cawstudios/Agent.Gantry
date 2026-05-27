@@ -328,7 +328,7 @@ client.agents.mcpServers.update(agentId, serverId, { required?, permissionPolicy
 client.agents.mcpServers.disable(agentId, serverId)
 ```
 
-MCP definitions store Gantry Secret reference names only. Resolved values are
+MCP definitions store Gantry Credential reference names only. Resolved values are
 projected into a private per-run config file with `0600` permissions and
 deleted by the runner after startup and by the host on early spawn failures;
 they are not saved in Claude config, FileArtifacts, or MCP definition rows.
@@ -336,7 +336,7 @@ they are not saved in Claude config, FileArtifacts, or MCP definition rows.
 names. `autoApproveToolPatterns` is session auto-allow scope and must be a
 subset of `allowedToolPatterns` when an explicit allowlist is present.
 Agent-requested MCP credential needs are labels, not raw secret values. The host
-normalizes them to Gantry Secret env names such as `GITHUB_TOKEN` before any
+normalizes them to Gantry Credential env names such as `GITHUB_TOKEN` before any
 approved current-run or next-run materialization.
 Remote MCP URLs must use HTTPS and cannot target local, private, link-local, or
 metadata hosts. Gantry resolves remote MCP hostnames during approval, testing,
@@ -642,6 +642,9 @@ GET    /v1/models                                  sessions:read
 GET    /v1/models/defaults                         sessions:read
 POST   /v1/models/preview                          sessions:read or jobs:read; stored job previews require jobs:read
 PATCH  /v1/models/defaults                         agents:admin
+GET    /v1/credentials/models                      agents:admin
+PUT    /v1/credentials/models/:providerId          agents:admin
+DELETE /v1/credentials/models/:providerId          agents:admin
 
 GET    /v1/agents                                  agents:admin
 POST   /v1/agents                                  agents:admin

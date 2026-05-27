@@ -19,6 +19,7 @@ import type { YoloModeSettings } from '../shared/yolo-mode-policy.js';
 import type { CapabilityRuntimeAccess } from '../shared/capability-runtime-access.js';
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
 import type { AgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter.js';
+import type { AgentExecutionAdapterRegistry } from '../application/agent-execution/agent-execution-adapter-registry.js';
 
 export interface AgentInput {
   prompt: string;
@@ -100,6 +101,7 @@ export interface RunAgentOptions {
     event: RuntimeEventPublishInput,
   ) => Promise<unknown> | unknown;
   executionAdapter?: AgentExecutionAdapter;
+  executionAdapters?: AgentExecutionAdapterRegistry;
 }
 
 export interface HostRuntimeContext {

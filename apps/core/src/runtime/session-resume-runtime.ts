@@ -338,6 +338,7 @@ export function buildRuntimeRunOptions(input: {
   mcpDnsValidationCache?: RemoteMcpDnsValidationCache;
   publishRuntimeEvent?: RunAgentOptions['publishRuntimeEvent'];
   executionAdapter?: RunAgentOptions['executionAdapter'];
+  executionAdapters?: RunAgentOptions['executionAdapters'];
   skillContext?: {
     appId: string;
     agentId: string;
@@ -392,6 +393,9 @@ export function buildRuntimeRunOptions(input: {
       : {}),
     ...(input.executionAdapter
       ? { executionAdapter: input.executionAdapter }
+      : {}),
+    ...(input.executionAdapters
+      ? { executionAdapters: input.executionAdapters }
       : {}),
   };
   return Object.keys(options).length > 0 ? options : undefined;

@@ -247,7 +247,7 @@ export function parseRuntimeStorageSnapshotFromRoot(
     'agents',
     'storage',
     'agent',
-    'credential_broker',
+    'model_access',
     'memory',
     'runtime',
     'browser',
@@ -256,7 +256,7 @@ export function parseRuntimeStorageSnapshotFromRoot(
   for (const key of Object.keys(root)) {
     if (!supportedRootKeys.has(key)) {
       throw new Error(
-        `${key} is not supported. Supported root keys are defaults, desired_state, providers, provider_connections, conversations, bindings, agents, storage, credential_broker, memory, runtime, browser, and permissions.`,
+        `${key} is not supported. Supported root keys are defaults, desired_state, providers, provider_connections, conversations, bindings, agents, storage, model_access, memory, runtime, browser, and permissions.`,
       );
     }
   }

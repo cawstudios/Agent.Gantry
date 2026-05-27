@@ -71,7 +71,7 @@ describe('scheduler MCP tools', () => {
     tempRoots.push(ipcDir);
     process.env.GANTRY_IPC_DIR = ipcDir;
     const formatModelCatalog = vi.fn(() => 'mocked model catalog output');
-    vi.doMock('../../../../src/shared/model-catalog.js', () => ({
+    vi.doMock('../../../../src/shared/model-catalog-format.js', () => ({
       formatModelCatalog,
     }));
     const { registerSchedulerTools } =

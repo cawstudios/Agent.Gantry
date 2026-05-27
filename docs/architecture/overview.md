@@ -12,7 +12,7 @@ Gantry is a single Node.js process that hosts agents around a provider-neutral
 and channel-neutral capability system. Humans reach it through Slack, Telegram,
 Teams, or web/API surfaces. Backend apps reach it through `@gantry/sdk`.
 External systems reach it through signed `/v1/ingresses/:id/invoke` calls.
-Postgres holds all durable state. OneCLI brokers credentials.
+Postgres holds all durable state. Gantry Model Gateway brokers model credentials.
 
 ```mermaid
 flowchart LR
@@ -38,9 +38,9 @@ flowchart LR
   subgraph "Postgres"
     PGM[(gantry schema)]
     PGB[(pgboss schema)]
-    PGO[(onecli schema)]
+    CRED[(model credentials)]
   end
-  ONE[OneCLI broker]
+  MGW[Model Gateway]
 
   SL --> ORCH
   TG --> ORCH
@@ -48,14 +48,14 @@ flowchart LR
   WB --> CTRL
   SDK --> CTRL
   EXT --> CTRL
+  AGS --> MGW
+  MGW --> CRED
   ORCH --> AGS
   AGS -->|signed IPC| ORCH
   ORCH --> PGM
   CTRL --> PGM
   SCHED --> PGB
   SCHED --> ORCH
-  AGS --> ONE
-  ONE --> PGO
   CTRL --> HOOK
 ```
 

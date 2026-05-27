@@ -1,5 +1,3 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-
 import { and, desc, eq } from 'drizzle-orm';
 
 import { EnvRuntimeSecretProvider } from '../../../credentials/env-runtime-secret-provider.js';
@@ -17,9 +15,10 @@ import {
 import { nowIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
 import type { CanonicalDb } from './canonical-graph-repository.postgres.js';
-
-const SECRET_ENCRYPTION_KEY_ENV = 'SECRET_ENCRYPTION_KEY';
-const CAPABILITY_SECRET_PREFIX = 'enc:v1:';
+import {
+  decryptCredentialSecretValue,
+  encryptCredentialSecretValue,
+} from './credential-secret-crypto.js';
 
 export class PostgresCapabilitySecretRepository implements CapabilitySecretRepository {
   constructor(
@@ -188,67 +187,16 @@ function toIsoTimestamp(value: string): string {
   return Number.isFinite(ms) ? new Date(ms).toISOString() : value;
 }
 
-function resolveCapabilitySecretKey(
-  runtimeSecrets: RuntimeSecretProvider,
-): Buffer {
-  const raw = runtimeSecrets
-    .getOptionalSecret({ env: SECRET_ENCRYPTION_KEY_ENV })
-    ?.trim();
-  if (!raw) {
-    throw new Error(
-      `${SECRET_ENCRYPTION_KEY_ENV} is required for Gantry Secrets encryption.`,
-    );
-  }
-  const decoded = Buffer.from(raw, 'base64');
-  if (decoded.length === 32) return decoded;
-  throw new Error(
-    `${SECRET_ENCRYPTION_KEY_ENV} must be a base64-encoded 32-byte secret for Gantry Secrets encryption.`,
-  );
-}
-
 export function encryptCapabilitySecretValue(
   value: string,
   runtimeSecrets: RuntimeSecretProvider,
 ): string {
-  if (value.startsWith(CAPABILITY_SECRET_PREFIX)) return value;
-  const iv = randomBytes(12);
-  const cipher = createCipheriv(
-    'aes-256-gcm',
-    resolveCapabilitySecretKey(runtimeSecrets),
-    iv,
-  );
-  const ciphertext = Buffer.concat([
-    cipher.update(value, 'utf8'),
-    cipher.final(),
-  ]);
-  const tag = cipher.getAuthTag();
-  return [
-    CAPABILITY_SECRET_PREFIX.slice(0, -1),
-    iv.toString('base64url'),
-    tag.toString('base64url'),
-    ciphertext.toString('base64url'),
-  ].join(':');
+  return encryptCredentialSecretValue(value, runtimeSecrets);
 }
 
 export function decryptCapabilitySecretValue(
   stored: string,
   runtimeSecrets: RuntimeSecretProvider,
 ): string {
-  if (!stored.startsWith(CAPABILITY_SECRET_PREFIX)) {
-    throw new Error('Gantry Secret is not encrypted. Rotate it before use.');
-  }
-  const [_enc, _v1, ivRaw, tagRaw, ciphertextRaw] = stored.split(':');
-  if (!ivRaw || !tagRaw || !ciphertextRaw) {
-    throw new Error('Gantry Secret ciphertext is malformed.');
-  }
-  const decipher = createDecipheriv(
-    'aes-256-gcm',
-    resolveCapabilitySecretKey(runtimeSecrets),
-    Buffer.from(ivRaw, 'base64url'),
-  );
-  decipher.setAuthTag(Buffer.from(tagRaw, 'base64url'));
-  return Buffer.concat([
-    decipher.update(Buffer.from(ciphertextRaw, 'base64url')),
-    decipher.final(),
-  ]).toString('utf8');
+  return decryptCredentialSecretValue(stored, runtimeSecrets);
 }

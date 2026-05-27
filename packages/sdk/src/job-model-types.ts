@@ -188,11 +188,11 @@ export interface ModelRecord {
   displayName: string;
   aliases: string[];
   recommendedAlias: string;
-  responseFamily: 'anthropic' | 'openai';
+  responseFamily: string;
   executionProviderId: string;
   credentialProfileRef: string;
   modelRoute: {
-    id: 'anthropic' | 'openrouter';
+    id: string;
     label: string;
     metadata: {
       providerModelId: string;
@@ -215,6 +215,35 @@ export interface ModelRecord {
   maxOutputTokens: number;
   cacheMode: string;
   cacheTokenFields: string[];
+  cacheSupport: {
+    providerId: string;
+    providerLabel: string;
+    cacheProvider: string;
+    statusLabel: string;
+    prompt: {
+      mode: string;
+      automatic: boolean;
+      requestControl: string;
+      ttlOptions: string[];
+      minimumTokenThresholds: Array<{
+        modelFamily: string;
+        tokens: number;
+      }>;
+      usageFields: Record<string, unknown>;
+      supported: boolean;
+      accounted: boolean;
+    };
+    response: {
+      mode: string;
+      enabledByDefault: boolean;
+      requestControl: string;
+      requestHeaders: string[];
+      responseHeaders: string[];
+      usageBehavior: string;
+      available: boolean;
+    };
+    tokenFields: string[];
+  };
   supportsThinking: boolean;
   supportsTools: boolean;
   source: {
@@ -225,7 +254,7 @@ export interface ModelRecord {
   experimental: boolean;
 }
 
-export type ModelPreset = 'anthropic' | 'openrouter';
+export type ModelPreset = string;
 export type ModelWorkload =
   | 'chat'
   | 'one_time_job'
@@ -386,9 +415,9 @@ export type JobModelSource =
 
 export interface JobModelPreview {
   displayName: string;
-  responseFamily: 'anthropic' | 'openai';
+  responseFamily: string;
   modelRoute: {
-    id: 'anthropic' | 'openrouter';
+    id: string;
     label: string;
   };
   contextWindowTokens: number;

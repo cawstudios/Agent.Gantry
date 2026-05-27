@@ -24,9 +24,7 @@ export { DEFAULT_AGENT_NAME } from '../../shared/default-agent.js';
 
 export const DEFAULT_STORAGE_POSTGRES_URL_ENV = 'GANTRY_DATABASE_URL';
 export const DEFAULT_STORAGE_POSTGRES_SCHEMA = 'gantry';
-export const DEFAULT_ONECLI_URL = 'http://localhost:10254';
-export const DEFAULT_ONECLI_DATABASE_URL_ENV = 'ONECLI_DATABASE_URL';
-export const DEFAULT_ONECLI_POSTGRES_SCHEMA = 'onecli';
+export const DEFAULT_MODEL_GATEWAY_BIND_HOST = '127.0.0.1';
 export const DEFAULT_EMBED_MODEL = 'text-embedding-3-large';
 export const DEFAULT_OPENAI_DAILY_EMBED_LIMIT = 500;
 export const DEFAULT_MEMORY_EXTRACTOR_MAX_FACTS = 8;
@@ -71,16 +69,9 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
     },
   };
   const credentialBroker: RuntimeCredentialBrokerSettings = {
-    mode: 'onecli',
-    onecli: {
-      url: DEFAULT_ONECLI_URL,
-      postgres: {
-        urlEnv: DEFAULT_ONECLI_DATABASE_URL_ENV,
-        schema: DEFAULT_ONECLI_POSTGRES_SCHEMA,
-      },
-    },
-    external: {
-      baseUrl: '',
+    mode: 'gantry',
+    gateway: {
+      bindHost: DEFAULT_MODEL_GATEWAY_BIND_HOST,
     },
   };
   const memory: RuntimeMemorySettings = {

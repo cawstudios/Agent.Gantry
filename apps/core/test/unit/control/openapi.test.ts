@@ -6,6 +6,7 @@ import type { ControlRouteContext } from '@core/control/server/handler-context.j
 import { getGantryOpenApiDocument } from '@core/control/server/openapi.js';
 import { handleAgentRoutes } from '@core/control/server/routes/agents.js';
 import { handleCapabilityCatalogRoutes } from '@core/control/server/routes/capability-catalog.js';
+import { handleCredentialRoutes } from '@core/control/server/routes/credentials.js';
 import { handleExternalIngressRoutes } from '@core/control/server/routes/external-ingress.js';
 import { handleJobRoutes } from '@core/control/server/routes/jobs.js';
 import { handleMemoryRoutes } from '@core/control/server/routes/memory.js';
@@ -49,6 +50,9 @@ const expectedControlRoutes = [
   'PUT /v1/conversations/{conversationId}/approvers',
   'GET /v1/conversations/{conversationId}/messages',
   'GET /v1/conversations/{conversationId}/threads',
+  'GET /v1/credentials/models',
+  'DELETE /v1/credentials/models/{providerId}',
+  'PUT /v1/credentials/models/{providerId}',
   'GET /v1/doctor',
   'GET /v1/health',
   'GET /v1/inventory',
@@ -248,6 +252,7 @@ async function isRecognizedByRuntime(method: string, pathname: string) {
     () => handleProviderConversationRoutes(req, res, ctx, url, pathname),
     () => handleMemoryRoutes(req, res, ctx, url, pathname),
     () => handleModelRoutes(req, res, ctx, pathname),
+    () => handleCredentialRoutes(req, res, ctx, pathname),
     () => handleJobRoutes(req, res, ctx, url, pathname),
     () => handleExternalIngressRoutes(req, res, ctx, pathname),
     () => handleRunRoutes(req, res, ctx, url, pathname),
@@ -302,7 +307,7 @@ describe('control OpenAPI documentation', () => {
     });
     expect(spec.components.schemas.Model).toMatchObject({
       properties: expect.objectContaining({
-        responseFamily: { type: 'string', enum: ['anthropic', 'openai'] },
+        responseFamily: { type: 'string' },
         executionProviderId: { type: 'string' },
         credentialProfileRef: { type: 'string' },
         modelRoute: expect.objectContaining({
@@ -321,6 +326,7 @@ describe('control OpenAPI documentation', () => {
         supportedWorkloads: expect.any(Object),
         cacheMode: { type: 'string' },
         cacheTokenFields: expect.any(Object),
+        cacheSupport: expect.objectContaining({ type: 'object' }),
       }),
     });
     expect(

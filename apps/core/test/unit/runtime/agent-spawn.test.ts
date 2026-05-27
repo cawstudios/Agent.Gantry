@@ -28,7 +28,7 @@ vi.mock('@core/config/index.js', () => ({
   GANTRY_HOME: '/tmp/gantry-config',
   GANTRY_HOME: '/tmp/gantry-config',
   RUNTIME_SETTINGS_PATH: '/tmp/gantry-config/settings.yaml',
-  ONECLI_URL: 'http://localhost:10254',
+  GANTRY_MODEL_GATEWAY_URL: 'http://localhost:10254',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
   TIMEZONE: 'America/Los_Angeles',
   LOG_LEVEL: 'info',
@@ -85,10 +85,13 @@ vi.mock('fs', async () => {
 // Mock agent-spawn-host to avoid real filesystem operations
 vi.mock('@core/runtime/agent-spawn-host.js', () => ({
   getHostRuntimeCredentialEnv: vi.fn().mockResolvedValue({
-    env: {},
+    env: {
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
+      ANTHROPIC_API_KEY: 'gtw_default',
+    },
     credentialProviders: {},
-    brokerApplied: false,
-    brokerProfile: 'none',
+    brokerApplied: true,
+    brokerProfile: 'gantry',
   }),
   prepareHostRuntimeContext: vi.fn(() => ({
     groupDir: '/tmp/gantry-test-data/agents/test-group',
@@ -100,10 +103,6 @@ vi.mock('@core/runtime/agent-spawn-host.js', () => ({
 vi.mock(
   '@core/adapters/llm/anthropic-claude-agent/claude-config-materializer.js',
   () => ({
-    applyOpenRouterSdkEnv: (env: NodeJS.ProcessEnv) => {
-      env.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api';
-      env.ANTHROPIC_API_KEY = '';
-    },
     materializeClaudeRuntime: mockMaterializeClaudeRuntime,
     projectClaudeModelCredentialEnv: (source: NodeJS.ProcessEnv) => {
       const allowedKeys = new Set([
@@ -246,11 +245,14 @@ const testInput = {
   chatJid: 'test@g.us',
 };
 
-function isOpenRouterBaseUrl(value?: string): boolean {
+function isLoopbackGatewayUrl(value?: string): boolean {
   if (!value) return false;
   try {
-    const hostname = new URL(value).hostname.toLowerCase();
-    return hostname === 'openrouter.ai' || hostname.endsWith('.openrouter.ai');
+    const url = new URL(value);
+    return (
+      url.protocol === 'http:' &&
+      (url.hostname === '127.0.0.1' || url.hostname === 'localhost')
+    );
   } catch {
     return false;
   }
@@ -274,40 +276,40 @@ function projectTestModelCredentialEnv(source: Record<string, string>) {
   );
 }
 
-function applyTestOpenRouterSdkEnv(env: Record<string, string>) {
-  env.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api';
-  env.ANTHROPIC_API_KEY = '';
-}
-
 const testExecutionAdapter: AgentExecutionAdapter = {
   id: 'anthropic:claude-agent-sdk',
   async prepare(input: AgentExecutionAdapterPrepareInput) {
-    if (
-      input.effectiveModelEntry?.modelRoute.id === 'openrouter' &&
-      (!input.modelCredentialProjection.env.ANTHROPIC_AUTH_TOKEN ||
-        input.modelCredentialProjection.credentialProviders
-          .ANTHROPIC_AUTH_TOKEN !== 'openrouter')
-    ) {
-      throw new Error(
-        `OpenRouter model ${input.effectiveModelEntry.displayName} requires an OpenRouter-scoped credential from Model Access. Configure Model Access/OpenRouter credentials before selecting this model.`,
-      );
-    }
-    if (
-      input.effectiveModelEntry &&
-      input.effectiveModelEntry.modelRoute.id !== 'openrouter' &&
-      (input.modelCredentialProjection.credentialProviders
-        .ANTHROPIC_AUTH_TOKEN === 'openrouter' ||
-        isOpenRouterBaseUrl(
-          input.modelCredentialProjection.env.ANTHROPIC_BASE_URL,
-        ))
-    ) {
-      throw new Error(
-        `Model ${input.effectiveModelEntry.displayName} is configured for ${input.effectiveModelEntry.modelRoute.label}, but AgentCredentialBroker returned OpenRouter-scoped Anthropic SDK credentials. Switch the session/job model to kimi or configure ${input.effectiveModelEntry.modelRoute.label} credentials for this model.`,
-      );
-    }
     const runnerPath =
       '/tmp/gantry-home/dist/adapters/llm/anthropic-claude-agent/runner/index.js';
     const packageRoot = input.packageRootFromRunner(runnerPath);
+    const modelCredentialEnv = projectTestModelCredentialEnv(
+      input.modelCredentialProjection.env,
+    );
+    if (input.effectiveModelEntry) {
+      if (input.modelCredentialProjection.brokerProfile !== 'gantry') {
+        throw new Error(
+          `Model ${input.effectiveModelEntry.displayName} requires Gantry Model Gateway credentials from Model Access.`,
+        );
+      }
+      if (!isLoopbackGatewayUrl(modelCredentialEnv.ANTHROPIC_BASE_URL)) {
+        throw new Error(
+          `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must use a loopback ANTHROPIC_BASE_URL.`,
+        );
+      }
+      if (!modelCredentialEnv.ANTHROPIC_API_KEY?.startsWith('gtw_')) {
+        throw new Error(
+          `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must use a run-scoped gateway token.`,
+        );
+      }
+      if (
+        modelCredentialEnv.ANTHROPIC_AUTH_TOKEN &&
+        !modelCredentialEnv.ANTHROPIC_AUTH_TOKEN.startsWith('gtw_')
+      ) {
+        throw new Error(
+          `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must not expose provider auth tokens.`,
+        );
+      }
+    }
     const materialization = await mockMaterializeClaudeRuntime({
       groupDir: input.groupDir,
       baseTempDir: `${input.groupDir}/.llm-runtime`,
@@ -320,16 +322,6 @@ const testExecutionAdapter: AgentExecutionAdapter = {
         model: input.effectiveModel,
       },
     });
-    const modelCredentialEnv = projectTestModelCredentialEnv(
-      input.modelCredentialProjection.env,
-    );
-    if (input.effectiveModelEntry?.modelRoute.id === 'openrouter') {
-      applyTestOpenRouterSdkEnv(modelCredentialEnv);
-    }
-    if (input.effectiveModelEntry?.provider === 'openrouter') {
-      modelCredentialEnv.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api';
-      modelCredentialEnv.ANTHROPIC_API_KEY = '';
-    }
     return {
       providerId: 'anthropic:claude-agent-sdk' as const,
       runnerPath,
@@ -555,10 +547,13 @@ describe('agent-spawn timeout behavior', () => {
     vi.mocked(getEffectiveModelConfig).mockClear();
     vi.mocked(getHostRuntimeCredentialEnv).mockReset();
     vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValue({
-      env: {},
+      env: {
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
+        ANTHROPIC_API_KEY: 'gtw_default',
+      },
       credentialProviders: {},
-      brokerApplied: false,
-      brokerProfile: 'none',
+      brokerApplied: true,
+      brokerProfile: 'gantry',
     });
     mockEnsureGroupIpcLayout.mockClear();
     mockEnsureEgressGateway.mockClear();
@@ -1032,12 +1027,16 @@ describe('agent-spawn timeout behavior', () => {
     );
   });
 
-  it('projects OpenRouter models through Anthropic SDK env only when broker supplies a token', async () => {
+  it('projects provider models through Gantry gateway env only when broker supplies a run token', async () => {
     vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
-      env: { ANTHROPIC_AUTH_TOKEN: 'broker-token' },
-      credentialProviders: { ANTHROPIC_AUTH_TOKEN: 'openrouter' },
+      env: {
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/openrouter',
+        ANTHROPIC_API_KEY: 'gtw_test',
+        ANTHROPIC_AUTH_TOKEN: 'gtw_test',
+      },
+      credentialProviders: {},
       brokerApplied: true,
-      brokerProfile: 'external',
+      brokerProfile: 'gantry',
     });
     const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
     const resultPromise = spawnTestAgent(
@@ -1061,54 +1060,65 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
     expect(runnerInput.modelCredentialEnv).toMatchObject({
-      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
-      ANTHROPIC_AUTH_TOKEN: 'broker-token',
-      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/openrouter',
+      ANTHROPIC_API_KEY: 'gtw_test',
+      ANTHROPIC_AUTH_TOKEN: 'gtw_test',
     });
   });
 
-  it('rejects OpenRouter models when the broker token is not OpenRouter-scoped', async () => {
-    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
-      env: { ANTHROPIC_AUTH_TOKEN: 'anthropic-token' },
-      credentialProviders: { ANTHROPIC_AUTH_TOKEN: 'native' },
-      brokerApplied: true,
-      brokerProfile: 'external',
-    });
-
-    const result = await spawnTestAgent(
-      testGroup,
-      { ...testInput, model: 'kimi' },
-      () => {},
-    );
-
-    expect(result.status).toBe('error');
-    expect(result.error).toContain('OpenRouter-scoped credential');
-    expect(mockMaterializeClaudeRuntime).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it('rejects OpenRouter models when the credential broker cannot provide a token', async () => {
-    const result = await spawnTestAgent(
-      testGroup,
-      { ...testInput, model: 'kimi' },
-      () => {},
-    );
-
-    expect(result.status).toBe('error');
-    expect(result.error).toContain('requires an OpenRouter-scoped credential');
-    expect(mockMaterializeClaudeRuntime).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it('rejects native Anthropic models with OpenRouter-scoped broker credentials', async () => {
+  it('rejects provider models when the broker token is not run-scoped', async () => {
     vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
       env: {
-        ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
-        ANTHROPIC_AUTH_TOKEN: 'broker-token',
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/openrouter',
+        ANTHROPIC_API_KEY: 'provider-token',
       },
-      credentialProviders: { ANTHROPIC_AUTH_TOKEN: 'openrouter' },
+      credentialProviders: {},
       brokerApplied: true,
-      brokerProfile: 'onecli',
+      brokerProfile: 'gantry',
+    });
+
+    const result = await spawnTestAgent(
+      testGroup,
+      { ...testInput, model: 'kimi' },
+      () => {},
+    );
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('run-scoped gateway token');
+    expect(mockMaterializeClaudeRuntime).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects provider models when the credential broker cannot provide a gateway projection', async () => {
+    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
+      env: {},
+      credentialProviders: {},
+      brokerApplied: false,
+      brokerProfile: 'none',
+    });
+
+    const result = await spawnTestAgent(
+      testGroup,
+      { ...testInput, model: 'kimi' },
+      () => {},
+    );
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('requires Gantry Model Gateway credentials');
+    expect(mockMaterializeClaudeRuntime).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects native Anthropic models with non-loopback broker credentials', async () => {
+    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
+      env: {
+        // Negative fixture: direct provider URLs must be rejected in runner env.
+        ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+        ANTHROPIC_API_KEY: 'gtw_test',
+      },
+      credentialProviders: {},
+      brokerApplied: true,
+      brokerProfile: 'gantry',
     });
 
     const result = await spawnTestAgent(
@@ -1118,7 +1128,7 @@ describe('agent-spawn timeout behavior', () => {
     );
 
     expect(result.status).toBe('error');
-    expect(result.error).toContain('OpenRouter-scoped');
+    expect(result.error).toContain('loopback ANTHROPIC_BASE_URL');
     expect(mockMaterializeClaudeRuntime).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
   });
@@ -1232,13 +1242,14 @@ describe('agent-spawn timeout behavior', () => {
   it('keeps broker proxy credentials out of the general runner env', async () => {
     vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
       env: {
-        ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
+        ANTHROPIC_API_KEY: 'gtw_proxy',
         HTTP_PROXY: 'http://x:aoc_1234567890abcdef@127.0.0.1:10255/',
         HTTPS_PROXY: 'http://x:aoc_1234567890abcdef@127.0.0.1:10255/',
         http_proxy: 'http://x:aoc_lowercase@127.0.0.1:10255/',
         https_proxy: 'http://x:aoc_lowercase@127.0.0.1:10255/',
         NODE_USE_ENV_PROXY: '1',
-        NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
+        NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
       },
       credentialProviders: {},
       proxy: {
@@ -1246,7 +1257,7 @@ describe('agent-spawn timeout behavior', () => {
         https: 'http://x:aoc_1234567890abcdef@127.0.0.1:10255/',
       },
       brokerApplied: true,
-      brokerProfile: 'onecli',
+      brokerProfile: 'gantry',
     });
     const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
 
@@ -1267,18 +1278,19 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.GANTRY_MODEL_CREDENTIAL_ENV_JSON).toBeUndefined();
     const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
     expect(runnerInput.modelCredentialEnv).toMatchObject({
-      ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
+      ANTHROPIC_API_KEY: 'gtw_proxy',
       HTTP_PROXY: 'http://127.0.0.1:18080/',
       HTTPS_PROXY: 'http://127.0.0.1:18080/',
       http_proxy: 'http://127.0.0.1:18080/',
       https_proxy: 'http://127.0.0.1:18080/',
       NODE_USE_ENV_PROXY: '1',
-      NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
+      NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
     });
     expect(mockEnsureEgressGateway).toHaveBeenCalledWith(
       expect.objectContaining({
         upstreamProxy: {
-          provider: 'onecli',
+          provider: 'gantry',
           url: 'http://x:aoc_1234567890abcdef@127.0.0.1:10255/',
         },
       }),
@@ -1303,13 +1315,15 @@ describe('agent-spawn timeout behavior', () => {
   it('keeps host-only brokered OpenAI embedding credentials out of the Claude runner input', async () => {
     vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
       env: {
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
+        ANTHROPIC_API_KEY: 'gtw_embedding',
         OPENAI_API_KEY: 'brokered-openai-key',
       },
       credentialProviders: {
         OPENAI_API_KEY: 'native',
       },
       brokerApplied: true,
-      brokerProfile: 'onecli',
+      brokerProfile: 'gantry',
     });
     const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
 
@@ -1325,12 +1339,9 @@ describe('agent-spawn timeout behavior', () => {
     >;
     expect(env.OPENAI_API_KEY).toBeUndefined();
     const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
-    expect(runnerInput.modelCredentialEnv).toEqual({
-      HTTP_PROXY: 'http://127.0.0.1:18080/',
-      HTTPS_PROXY: 'http://127.0.0.1:18080/',
-      http_proxy: 'http://127.0.0.1:18080/',
-      https_proxy: 'http://127.0.0.1:18080/',
-      NODE_USE_ENV_PROXY: '1',
+    expect(runnerInput.modelCredentialEnv).toMatchObject({
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
+      ANTHROPIC_API_KEY: 'gtw_embedding',
     });
   });
 
@@ -1531,12 +1542,27 @@ describe('agent-spawn timeout behavior', () => {
       .mockImplementation(() => undefined);
     const { getHostRuntimeCredentialEnv } =
       await import('@core/runtime/agent-spawn-host.js');
-    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValue({
-      env: { GITHUB_TOKEN: 'broker-token' },
-      credentialProviders: {},
-      brokerApplied: true,
-      brokerProfile: 'test',
-    });
+    vi.mocked(getHostRuntimeCredentialEnv).mockImplementation(
+      async (_agentFolder, _agentIdentifier, options) => {
+        if (options?.purpose === 'tool_capability') {
+          return {
+            env: { GITHUB_TOKEN: 'broker-token' },
+            credentialProviders: {},
+            brokerApplied: true,
+            brokerProfile: 'gantry',
+          };
+        }
+        return {
+          env: {
+            ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
+            ANTHROPIC_API_KEY: 'gtw_default',
+          },
+          credentialProviders: {},
+          brokerApplied: true,
+          brokerProfile: 'gantry',
+        };
+      },
+    );
     const repository = new SpawnMcpRepository([mcpRecord()]);
     const secrets = new SpawnCapabilitySecretRepository({
       GITHUB_TOKEN: 'gantry-secret-token',
@@ -1702,12 +1728,27 @@ describe('agent-spawn timeout behavior', () => {
 
   it('does not materialize MCP bindings when no MCP servers are selected for the run', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValue({
-      env: { GITHUB_TOKEN: 'broker-token' },
-      credentialProviders: {},
-      brokerApplied: true,
-      brokerProfile: 'test',
-    });
+    vi.mocked(getHostRuntimeCredentialEnv).mockImplementation(
+      async (_agentFolder, _agentIdentifier, options) => {
+        if (options?.purpose === 'tool_capability') {
+          return {
+            env: { GITHUB_TOKEN: 'broker-token' },
+            credentialProviders: {},
+            brokerApplied: true,
+            brokerProfile: 'gantry',
+          };
+        }
+        return {
+          env: {
+            ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
+            ANTHROPIC_API_KEY: 'gtw_default',
+          },
+          credentialProviders: {},
+          brokerApplied: true,
+          brokerProfile: 'gantry',
+        };
+      },
+    );
     const repository = new SpawnMcpRepository([mcpRecord()]);
 
     const resultPromise = spawnTestAgent(
@@ -1747,12 +1788,27 @@ describe('agent-spawn timeout behavior', () => {
     vi.mocked(fs.writeFileSync).mockClear();
     const { getHostRuntimeCredentialEnv } =
       await import('@core/runtime/agent-spawn-host.js');
-    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
-      env: { GITHUB_TOKEN: 'broker-token' },
-      credentialProviders: {},
-      brokerApplied: true,
-      brokerProfile: 'test',
-    });
+    vi.mocked(getHostRuntimeCredentialEnv).mockImplementation(
+      async (_agentFolder, _agentIdentifier, options) => {
+        if (options?.purpose === 'tool_capability') {
+          return {
+            env: { GITHUB_TOKEN: 'broker-token' },
+            credentialProviders: {},
+            brokerApplied: true,
+            brokerProfile: 'gantry',
+          };
+        }
+        return {
+          env: {
+            ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
+            ANTHROPIC_API_KEY: 'gtw_default',
+          },
+          credentialProviders: {},
+          brokerApplied: true,
+          brokerProfile: 'gantry',
+        };
+      },
+    );
     const repository = new SpawnMcpRepository([mcpRecord()]);
 
     const result = await spawnTestAgent(
@@ -1950,7 +2006,13 @@ describe('agent-spawn timeout behavior', () => {
     expect(getHostRuntimeCredentialEnv).toHaveBeenCalledWith(
       'main-agent',
       undefined,
-      { purpose: 'model_runtime' },
+      {
+        purpose: 'model_runtime',
+        runContext: expect.objectContaining({
+          chatJid: 'test@g.us',
+        }),
+        modelRouteId: 'anthropic',
+      },
     );
   });
 
@@ -2219,7 +2281,7 @@ describe('agent-spawn timeout behavior', () => {
 
     expect(result).toMatchObject({
       status: 'error',
-      error: expect.stringContaining('No LLM execution adapter configured'),
+      error: expect.stringContaining('Unsupported model execution provider'),
     });
     expect(spawn).not.toHaveBeenCalled();
   });

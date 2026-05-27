@@ -28,7 +28,7 @@ vi.mock('@core/adapters/llm/model-preset-preflight.js', () => ({
   preflightModelPreset: vi.fn(async () => ({
     ok: true,
     status: 'pass',
-    message: 'OpenRouter-scoped Model Access credential is available.',
+    message: 'OpenRouter Model Access credential is available.',
   })),
 }));
 
@@ -460,7 +460,7 @@ beforeEach(() => {
   mockedPreflightModelPreset.mockResolvedValue({
     ok: true,
     status: 'pass',
-    message: 'OpenRouter-scoped Model Access credential is available.',
+    message: 'OpenRouter Model Access credential is available.',
   });
   controlRepo.listDueWebhookDeliveries.mockResolvedValue([]);
   controlRepo.claimDueWebhookDeliveries.mockResolvedValue([]);
@@ -1213,7 +1213,7 @@ describe('control server runtime hardening', () => {
     mockedPreflightModelPreset.mockResolvedValueOnce({
       ok: false,
       status: 'fail',
-      message: 'OpenRouter-scoped Model Access credential is missing.',
+      message: 'OpenRouter Model Access credential is missing.',
     });
 
     const handle = startControlServer({
@@ -1267,7 +1267,7 @@ describe('control server runtime hardening', () => {
     mockedPreflightModelPreset.mockResolvedValueOnce({
       ok: false,
       status: 'fail',
-      message: 'OpenRouter-scoped Model Access credential is missing.',
+      message: 'OpenRouter Model Access credential is missing.',
     });
 
     const handle = startControlServer({

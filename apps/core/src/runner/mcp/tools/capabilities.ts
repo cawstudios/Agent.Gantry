@@ -29,8 +29,6 @@ const CAPABILITY_SOURCES = [
 
 const CAPABILITY_CREDENTIAL_SOURCES = [
   'none',
-  'onecli',
-  'external_broker',
   'configured_access',
   'skill',
   'mcp',

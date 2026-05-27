@@ -254,6 +254,49 @@ describe('contracts package', () => {
               maxOutputTokens: 64000,
               cacheMode: 'openrouter-provider-prompt',
               cacheTokenFields: [],
+              cacheSupport: {
+                providerId: 'openrouter',
+                providerLabel: 'OpenRouter',
+                cacheProvider: 'openrouter-provider',
+                statusLabel:
+                  'prompt cache supported/accounted; response cache available but disabled',
+                prompt: {
+                  mode: 'openrouter_anthropic_cache_control',
+                  automatic: false,
+                  requestControl: 'cache_control_blocks',
+                  ttlOptions: ['5m', '1h'],
+                  minimumTokenThresholds: [
+                    {
+                      modelFamily: 'anthropic-compatible',
+                      tokens: 2048,
+                    },
+                  ],
+                  usageFields: {
+                    readTokens: 'prompt_tokens_details.cached_tokens',
+                    writeTokens: 'prompt_tokens_details.cache_write_tokens',
+                  },
+                  supported: true,
+                  accounted: true,
+                },
+                response: {
+                  mode: 'openrouter_response_cache',
+                  enabledByDefault: false,
+                  requestControl: 'request_header',
+                  requestHeaders: [
+                    'X-OpenRouter-Cache',
+                    'X-OpenRouter-Cache-TTL',
+                    'X-OpenRouter-Cache-Clear',
+                  ],
+                  responseHeaders: [
+                    'X-OpenRouter-Cache-Status',
+                    'X-OpenRouter-Cache-Age',
+                    'X-OpenRouter-Cache-TTL',
+                  ],
+                  usageBehavior: 'zero_usage_on_hit',
+                  available: true,
+                },
+                tokenFields: [],
+              },
               supportsThinking: true,
               supportsTools: true,
               source: {
@@ -369,6 +412,19 @@ describe('contracts package', () => {
     expect(JobModelPreviewSchema.parse(jobModelPreview)).toEqual(
       jobModelPreview,
     );
+    expect(
+      JobModelPreviewSchema.parse({
+        ...jobModelPreview,
+        responseFamily: 'gemini',
+        modelRoute: {
+          id: 'gemini',
+          label: 'Gemini',
+        },
+      }),
+    ).toMatchObject({
+      responseFamily: 'gemini',
+      modelRoute: { id: 'gemini' },
+    });
     expectInvalid(JobModelPreviewSchema, {
       ...jobModelPreview,
       providerSlug: 'anthropic',

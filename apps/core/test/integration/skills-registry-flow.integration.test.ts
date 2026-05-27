@@ -25,7 +25,6 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@core/config/index.js', () => ({
   GANTRY_HOME: '/tmp/gantry-skills-integration-home',
-  ONECLI_ALLOWED_ENV_KEYS: [],
   GANTRY_IPC_AUTH_SECRET: 'test-ipc-secret',
   getControlEnvValue: vi.fn((key: string) => process.env[key]?.trim() || ''),
   syncRuntimeSettingsFromProjection: vi.fn(async () => undefined),
@@ -980,7 +979,9 @@ describe('skill registry integration flow', () => {
     });
     expect(
       sendMessage.mock.calls.some((call) =>
-        String(call[1]).includes('gantry secrets set LINKEDIN_ACCESS_TOKEN'),
+        String(call[1]).includes(
+          'gantry credentials capability set LINKEDIN_ACCESS_TOKEN',
+        ),
       ),
     ).toBe(true);
     const approved = [...state.skills.values()].filter(

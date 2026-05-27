@@ -11,7 +11,6 @@ const configMocks = vi.hoisted(() => ({
 
 vi.mock('@core/config/index.js', () => ({
   GANTRY_HOME: '/tmp/gantry-control-test-home',
-  ONECLI_ALLOWED_ENV_KEYS: [],
   getControlEnvValue: vi.fn((key: string) => process.env[key]?.trim() || ''),
   syncRuntimeSettingsFromProjection: vi.fn(async () => undefined),
   getDefaultModelConfig: configMocks.getDefaultModelConfig,

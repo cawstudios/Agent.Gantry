@@ -14,9 +14,7 @@ import {
   DEFAULT_MEMORY_EXTRACTOR_MAX_FACTS,
   DEFAULT_MEMORY_EXTRACTOR_MIN_CONFIDENCE,
   DEFAULT_MEMORY_MAINTENANCE_MAX_PENDING,
-  DEFAULT_ONECLI_DATABASE_URL_ENV,
-  DEFAULT_ONECLI_POSTGRES_SCHEMA,
-  DEFAULT_ONECLI_URL,
+  DEFAULT_MODEL_GATEWAY_BIND_HOST,
   DEFAULT_OPENAI_DAILY_EMBED_LIMIT,
   DEFAULT_STORAGE_POSTGRES_SCHEMA,
   DEFAULT_STORAGE_POSTGRES_URL_ENV,
@@ -411,20 +409,15 @@ function bindingsByConversation(
   return grouped;
 }
 
-function renderCredentialBrokerSettingsYaml(
+function renderModelAccessSettingsYaml(
   lines: string[],
   credentialBroker: RuntimeCredentialBrokerSettings,
 ): void {
   lines.push(
-    'credential_broker:',
-    `  mode: ${quoteYamlString(credentialBroker.mode)}`,
-    '  onecli:',
-    `    url: ${quoteYamlString(credentialBroker.onecli.url)}`,
-    '    postgres:',
-    `      url_env: ${quoteYamlString(credentialBroker.onecli.postgres.urlEnv)}`,
-    `      schema: ${quoteYamlString(credentialBroker.onecli.postgres.schema)}`,
-    '  external:',
-    `    base_url: ${quoteYamlString(credentialBroker.external.baseUrl)}`,
+    'model_access:',
+    `  enabled: ${credentialBroker.mode === 'gantry' ? 'true' : 'false'}`,
+    '  gateway:',
+    `    bind_host: ${quoteYamlString(credentialBroker.gateway.bindHost)}`,
     '',
   );
 }
@@ -440,13 +433,8 @@ function isDefaultCredentialBroker(
   credentialBroker: RuntimeCredentialBrokerSettings,
 ): boolean {
   return (
-    credentialBroker.mode === 'onecli' &&
-    credentialBroker.onecli.url === DEFAULT_ONECLI_URL &&
-    credentialBroker.onecli.postgres.urlEnv ===
-      DEFAULT_ONECLI_DATABASE_URL_ENV &&
-    credentialBroker.onecli.postgres.schema ===
-      DEFAULT_ONECLI_POSTGRES_SCHEMA &&
-    credentialBroker.external.baseUrl === ''
+    credentialBroker.mode === 'gantry' &&
+    credentialBroker.gateway.bindHost === DEFAULT_MODEL_GATEWAY_BIND_HOST
   );
 }
 
@@ -639,7 +627,7 @@ export function renderRuntimeSettingsYaml(settings: RuntimeSettings): string {
     renderStorageSettingsYaml(lines, settings.storage);
   }
   if (!isDefaultCredentialBroker(settings.credentialBroker)) {
-    renderCredentialBrokerSettingsYaml(lines, settings.credentialBroker);
+    renderModelAccessSettingsYaml(lines, settings.credentialBroker);
   }
   if (!isDefaultMemory(settings.memory)) {
     renderMemorySettingsYaml(lines, settings.memory);

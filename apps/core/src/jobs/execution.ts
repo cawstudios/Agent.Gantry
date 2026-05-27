@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import { ASSISTANT_NAME, getEffectiveModelConfig } from '../config/index.js';
 import type { Job } from '../domain/types.js';
+import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import {
   getRuntimeControlRepository,
@@ -138,10 +139,10 @@ export async function runJob(
     },
   });
   if (pausedForSetup) return;
-  const executionProviderId =
-    deps.executionAdapter || !deps.runAgent
+  const executionProviderId = (resolvedModel.entry?.executionProviderId ??
+    (deps.executionAdapter || !deps.runAgent
       ? resolveRuntimeExecutionProviderId(deps.executionAdapter)
-      : DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID;
+      : DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID)) as ExecutionProviderId;
   const claimed = await deps.opsRepository.claimDueJobRunStart({
     jobId: currentJob.id,
     runId,
@@ -365,6 +366,7 @@ export async function runJob(
                 await getRuntimeEventExchange().publish(event);
               },
               executionAdapter: deps.executionAdapter,
+              executionAdapters: deps.executionAdapters,
               skillContext: {
                 appId: executionAppId,
                 agentId: executionAgentId,

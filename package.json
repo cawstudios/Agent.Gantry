@@ -75,7 +75,6 @@
     "@grammyjs/auto-retry": "^2.0.2",
     "@grammyjs/stream": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@onecli-sh/sdk": "^0.2.0",
     "@slack/bolt": "^4.7.0",
     "cron-parser": "5.5.0",
     "dayjs": "^1.11.20",

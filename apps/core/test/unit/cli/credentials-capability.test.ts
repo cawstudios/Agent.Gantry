@@ -41,14 +41,16 @@ afterEach(() => {
   vi.resetModules();
   vi.doUnmock('@clack/prompts');
   vi.doUnmock('@core/adapters/storage/postgres/factory.js');
+  vi.doUnmock('@core/cli/browser.js');
   process.env = { ...originalEnv };
 });
 
-describe('secrets CLI', () => {
-  it('imports shell secrets into Gantry Secrets without printing values', async () => {
+describe('credentials capability CLI', () => {
+  it('imports shell secrets into Gantry Credentials without printing values', async () => {
     const { repository, upsertSecret } = makeSecretRepository();
     const success = vi.fn();
     const note = vi.fn();
+    const publish = vi.fn(async () => undefined);
     vi.doMock('@clack/prompts', () => ({
       note,
       isCancel: vi.fn(() => false),
@@ -63,15 +65,17 @@ describe('secrets CLI', () => {
           close: vi.fn(async () => undefined),
         },
         runtimeEventNotifier: { close: vi.fn(async () => undefined) },
-        repositories: { capabilitySecrets: repository },
+        runtimeEvents: { publish },
+        repositories: { capabilitySecrets: repository, modelCredentials: {} },
       }),
     }));
     process.env.GITHUB_TOKEN = 'secret-token-value';
 
-    const { runSecretsCommand } = await import('@core/cli/secrets.js');
+    const { runCredentialsCommand } = await import('@core/cli/credentials.js');
 
     await expect(
-      runSecretsCommand('/tmp/gantry-secrets-test', [
+      runCredentialsCommand('/tmp/gantry-credentials-test', [
+        'capability',
         'import-env',
         'github_token',
         '--allow',
@@ -91,6 +95,57 @@ describe('secrets CLI', () => {
     expect(success).toHaveBeenCalledWith('Imported GITHUB_TOKEN.');
     expect(note.mock.calls.flat().join('\n')).not.toContain(
       'secret-token-value',
+    );
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'default',
+        actor: 'cli',
+        eventType: 'credential.capability.updated',
+        payload: expect.objectContaining({
+          name: 'GITHUB_TOKEN',
+          allowedCapabilityIds: ['mcp:github'],
+        }),
+      }),
+    );
+    expect(JSON.stringify(publish.mock.calls)).not.toContain(
+      'secret-token-value',
+    );
+  });
+
+  it('keeps browser credential namespace limited to status', async () => {
+    const error = vi.fn();
+    const runBrowserCommand = vi.fn(async () => 0);
+    vi.doMock('@clack/prompts', () => ({
+      note: vi.fn(),
+      isCancel: vi.fn(() => false),
+      password: vi.fn(),
+      outro: vi.fn(),
+      log: { error, info: vi.fn(), success: vi.fn(), warn: vi.fn() },
+    }));
+    vi.doMock('@core/cli/browser.js', () => ({ runBrowserCommand }));
+
+    const { runCredentialsCommand } = await import('@core/cli/credentials.js');
+
+    await expect(
+      runCredentialsCommand('/tmp/gantry-credentials-test', [
+        'browser',
+        'profiles',
+      ]),
+    ).resolves.toBe(1);
+    expect(error).toHaveBeenCalledWith(
+      'Browser credentials only report profile/session status. Use `gantry credentials browser status`.',
+    );
+    expect(runBrowserCommand).not.toHaveBeenCalled();
+
+    await expect(
+      runCredentialsCommand('/tmp/gantry-credentials-test', [
+        'browser',
+        'status',
+      ]),
+    ).resolves.toBe(0);
+    expect(runBrowserCommand).toHaveBeenCalledWith(
+      '/tmp/gantry-credentials-test',
+      ['status'],
     );
   });
 });

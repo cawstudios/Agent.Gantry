@@ -159,8 +159,11 @@ function createTestOpts(
         postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
       },
       credentialBroker: {
-        onecli: {
-          postgres: { urlEnv: 'ONECLI_DATABASE_URL', schema: 'onecli' },
+        model_gateway: {
+          postgres: {
+            urlEnv: 'GANTRY_MODEL_GATEWAY_DATABASE_URL',
+            schema: 'model_gateway',
+          },
         },
       },
       memory: {

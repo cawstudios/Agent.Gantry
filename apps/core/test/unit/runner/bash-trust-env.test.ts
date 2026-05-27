@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { applyBashTrustEnv } from '../../../src/adapters/llm/anthropic-claude-agent/runner/bash-trust-env.js';
 
-const CA_PATH = '/tmp/gantry/onecli-ca.pem';
+const CA_PATH = '/tmp/gantry/model_gateway-ca.pem';
 const TRUST_PREFIX = [
   'GODEBUG=netdns=go',
   `SSL_CERT_FILE='${CA_PATH}'`,

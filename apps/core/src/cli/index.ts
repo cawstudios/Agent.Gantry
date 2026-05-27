@@ -53,7 +53,7 @@ function usage(): string {
     '  gantry browser profiles|status',
     '  gantry jobs list|show|resume|trigger|set-route|events [--full|--json]',
     '  gantry model status|list|set|reset|why|use-preset|doctor',
-    '  gantry secrets list|set|import-env|unset',
+    '  gantry credentials model|capability|browser ...',
     '  gantry settings export-current|drift',
     '  gantry service install|start|stop|restart',
     '  gantry skill draft upload <skill.zip> [--agent <agentId>] [--created-by <id>]',
@@ -467,10 +467,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return runSettingsCommand(runtimeHome, rest);
   }
 
-  if (command === 'secrets') {
+  if (command === 'credentials') {
     process.env.GANTRY_HOME = runtimeHome;
-    const { runSecretsCommand } = await import('./secrets.js');
-    return runSecretsCommand(runtimeHome, rest);
+    const { runCredentialsCommand } = await import('./credentials.js');
+    return runCredentialsCommand(runtimeHome, rest);
   }
 
   if (command === 'skill') {

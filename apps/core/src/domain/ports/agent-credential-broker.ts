@@ -23,6 +23,7 @@ export interface AgentCredentialBroker {
   getInjection(
     input: AgentCredentialBrokerInput,
   ): Promise<AgentCredentialInjection>;
+  revokeInjection?(input: AgentCredentialBrokerInput): Promise<void>;
   healthCheck(
     input?: AgentCredentialBrokerInput,
   ): Promise<CredentialBrokerHealth>;

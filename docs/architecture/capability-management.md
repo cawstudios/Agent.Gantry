@@ -33,7 +33,7 @@ agents:
     sources:
       skills:
         - name: linkedin-posting
-          id: "skill:266c421f-a072-44f7-9cb0-43c52eba8ad9"
+          id: 'skill:266c421f-a072-44f7-9cb0-43c52eba8ad9'
           version: approved
       mcp_servers:
         - id: linkedin
@@ -57,7 +57,7 @@ Each semantic capability record includes:
   `accountLabel`
 - `can` and `cannot` user-facing scope statements
 - `credentialSource`: implementation metadata such as `configured_access`,
-  `onecli`, `external_broker`, `local_cli`, or `none`
+  `local_cli`, or `none`
 - low-level implementation bindings such as exact Gantry tool facades, scoped
   `RunCommand(<template>)`, MCP tools, adapter refs, or local CLI command templates
 - optional preflight metadata, protected credential/config paths, redaction
@@ -258,7 +258,7 @@ and replaced rather than edited in place.
 | ---------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Skill            | Skill catalog row, readable files, provider ref, hash, binding.                   | Per-run Claude `skills/<slug>/...` folder and `Skill` tool exposure.                                                                                                            |
 | Skill dependency | Dependency spec, approval decision, execution result, audit.                      | Optional per-skill tools directory or approved host package; never direct agent shell.                                                                                          |
-| Third-party MCP  | Definition, reviewed version, Gantry Secret refs, allowed tool patterns, binding. | SDK `mcpServers` for host-safe stdio transports plus exact allowed MCP tool names. Remote HTTP/SSE requires host DNS-pinned transport before projection.                        |
+| Third-party MCP  | Definition, reviewed version, Gantry Credential refs, allowed tool patterns, binding. | SDK `mcpServers` for host-safe stdio transports plus exact allowed MCP tool names. Remote HTTP/SSE requires host DNS-pinned transport before projection.                        |
 | SDK tool         | Tool catalog entry, risk, permission policy, sandbox profile, binding.            | Durable grants use Gantry facade names; provider-native SDK names in `allowedTools` are only per-run harness projections, and command access is never projected as bare `Bash`. |
 | Host tool        | Built-in Gantry MCP tool entry, risk, binding, audit behavior.                    | Exact `mcp__gantry__<tool>` name.                                                                                                                                               |
 | Browser tool     | Canonical `Browser` capability and sandbox policy.                                | Gated Gantry-owned gateway tools with Gantry-owned schemas.                                                                                                                     |
@@ -275,7 +275,7 @@ they do not rely only on the file watcher.
 
 Postgres is the runtime capability projection and catalog store. It owns
 definitions, reviewed versions, agent bindings, config-version links,
-Gantry Secret reference names, encrypted capability secret values, permission
+Gantry Credential reference names, encrypted capability secret values, permission
 decisions, audit events, and disablement state.
 
 Agent-owned persistent grants are mirrored into `settings.yaml` as readable
@@ -386,7 +386,7 @@ not durable Gantry truth.
 
 1. Request: admin API/SDK/CLI or an agent request tool creates a pending request.
 2. Validate: Gantry checks app scope, agent scope, transport, origin chat,
-   Gantry Secret refs, sandbox profile, tool patterns, and provider metadata.
+   Gantry Credential refs, sandbox profile, tool patterns, and provider metadata.
 3. Review: same-channel review renders the request, but authority still comes
    from configured admin/control policy.
 4. Decide: setup, scheduler, admin, and capability flows show `Allow once`, `Always allow`, or `Cancel`; live interactive SDK prompts may also show `Allow 5 min`. Details and audit records carry the durable authority shape, such as a semantic capability, canonical `Browser`, exact Gantry file/web facade, exact `mcp__gantry__<admin_tool>`, or scoped `RunCommand(<pattern>)`.
@@ -417,15 +417,16 @@ Skill install is package approval and binding, not dependency execution.
    materializes it for future runs. There is no second approval after the user
    approves the install request. Installer-command requests run the exact argv
    in a temporary host-controlled staging directory with a scrubbed environment
-   plus any named `requiredEnvVars` resolved from Gantry Secrets, then import
+   plus any named `requiredEnvVars` resolved from capability credentials, then import
    and approve the produced `SKILL.md` package through the same path.
 
 If the skill declares npm, brew, go, uv, or download dependencies, those are
 separate dependency requests. The skill approval does not run them.
 
-Skill and MCP capability credentials use Gantry Secrets, not runtime `.env` or
-model broker profiles. Operators set them with `gantry secrets set <NAME>` or
-`gantry secrets import-env <NAME>`, optionally adding repeated
+Skill and MCP capability credentials use Gantry Credential Center, not runtime
+`.env` or model credentials. Operators set them with
+`gantry credentials capability set <NAME>` or
+`gantry credentials capability import-env <NAME>`, optionally adding repeated
 `--allow <capabilityId>` scopes such as `mcp:github`, a concrete MCP definition
 id, a concrete skill id, or `skill:<name>`. Secret values are encrypted in
 Postgres and only projected into the current runner or MCP subprocess when an
@@ -547,7 +548,7 @@ Examples:
 
 - Google Sheets through configured access: request `propose_capability` with
   `capabilityId=google.sheets.write`. The prompt shows `Google Sheets write`;
-  concrete implementation details such as OneCLI, `gog`, command rules, and
+  concrete implementation details such as credential stores, `gog`, command rules, and
   hashes stay out of the primary prompt and belong in audit/details surfaces.
 - Google Sheets through `gog` for a scheduler job: declare
   `implementation.kind: local_cli`, `name: gog`,

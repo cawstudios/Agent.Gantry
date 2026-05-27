@@ -54,5 +54,5 @@ snapshots, old provider transcript exports, and unused local hook/webhook
 scratch files may be archived under
 `~/gantry/cleanup-archive/<timestamp>/`.
 
-Do not move or delete secrets, `settings.yaml`, Postgres data, OneCLI data,
+Do not move or delete secrets, `settings.yaml`, Postgres data,
 `artifacts/`, or active agent folders unless a reset was explicitly requested.

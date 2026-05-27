@@ -1,12 +1,15 @@
 import type { ThinkingOverride } from '../domain/types.js';
 import {
   findModelByRunnerModel,
-  formatModelCatalog,
-  formatModelDisplay,
-  formatTokenCount,
   type ModelDefaultAliases,
   type NormalizedModelUsage,
 } from '../shared/model-catalog.js';
+import {
+  formatModelCatalog,
+  formatModelDisplay,
+  formatTokenCount,
+} from '../shared/model-catalog-format.js';
+import { resolveModelCacheSupport } from '../shared/model-cache-support.js';
 import type { RuntimeModelStatusSnapshot } from '../runtime/model-status-store.js';
 
 export interface MemoryStatusSnapshot {
@@ -276,7 +279,7 @@ export function formatModelStatus(
     lines.push(
       formatContextLine(snapshot, entry.contextWindowTokens),
       `Max output: ${formatTokenCount(entry.maxOutputTokens)} tokens`,
-      `Cache: ${entry.cacheMode}`,
+      `Cache: ${resolveModelCacheSupport(entry).statusLabel}`,
     );
   } else {
     lines.push(

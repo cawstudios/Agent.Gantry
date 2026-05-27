@@ -1,21 +1,60 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  onecliApiUrl,
-  preflightModelPreset,
-} from '@core/adapters/llm/model-preset-preflight.js';
+import type { AgentCredentialBroker } from '@core/domain/ports/agent-credential-broker.js';
 import type { ModelPresetId } from '@core/shared/model-catalog.js';
 
 const anthropicProvider = (): ModelPresetId => 'anthropic' as ModelPresetId;
 
-describe('model provider preflight', () => {
-  it('preserves OneCLI base paths when building API URLs', () => {
-    expect(
-      onecliApiUrl('http://127.0.0.1:7331/model-access', '/api/secrets'),
-    ).toBe('http://127.0.0.1:7331/model-access/api/secrets');
-  });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.resetModules();
+});
 
-  it('fails Anthropic preflight without a credential broker', async () => {
+async function loadPreflight(broker: AgentCredentialBroker | undefined) {
+  vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
+    getRuntimeStorage: () => ({
+      repositories: {
+        modelCredentials: {},
+      },
+    }),
+  }));
+  vi.doMock(
+    '@core/adapters/credentials/agent-credential-broker-factory.js',
+    () => ({
+      createAgentCredentialBroker: vi.fn(async () => broker),
+    }),
+  );
+  return import('@core/adapters/llm/model-preset-preflight.js');
+}
+
+function gatewayBroker(env: Record<string, string>): AgentCredentialBroker {
+  return {
+    getInjection: vi.fn(async () => ({
+      env,
+      credentialProviders: { ANTHROPIC_API_KEY: 'native' },
+      applied: true,
+      brokerProfile: 'gantry',
+    })),
+    healthCheck: vi.fn(async () => ({
+      status: 'pass',
+      message: 'ready',
+    })),
+    getCapabilities: () => ({
+      profile: 'gantry',
+      supportsAgentBinding: false,
+      supportsModelRuntimeProfile: true,
+      modelRuntimeProfileIdentifier: 'gantry-model-access',
+      returnsRawSecrets: false,
+      projectsProviderTokens: false,
+      projectedSecretEnvKeys: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY'],
+    }),
+  };
+}
+
+describe('model provider preflight', () => {
+  it('fails Anthropic preflight without Gantry Model Gateway', async () => {
+    const { preflightModelPreset } = await loadPreflight(undefined);
+
     await expect(
       preflightModelPreset({
         runtimeHome: '/tmp/gantry-model-preflight-test',
@@ -23,28 +62,31 @@ describe('model provider preflight', () => {
         settings: {
           credentialBroker: {
             mode: 'none',
-            onecli: { url: '' },
           },
         },
       }),
     ).resolves.toMatchObject({
       ok: false,
       status: 'fail',
-      message:
-        'Anthropic requires Model Access with a configured credential broker.',
+      message: 'Anthropic requires Gantry Model Gateway credentials.',
     });
   });
 
-  it('allows Anthropic preflight to use external credential brokers', async () => {
+  it('passes when the gateway projects only loopback auth', async () => {
+    const { preflightModelPreset } = await loadPreflight(
+      gatewayBroker({
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:49231/anthropic',
+        ANTHROPIC_API_KEY: 'gtw_test',
+      }),
+    );
+
     await expect(
       preflightModelPreset({
         runtimeHome: '/tmp/gantry-model-preflight-test',
         preset: anthropicProvider(),
         settings: {
           credentialBroker: {
-            mode: 'external',
-            onecli: { url: '' },
-            external: { baseUrl: 'https://broker.example.com' },
+            mode: 'gantry',
           },
         },
       }),
@@ -54,22 +96,27 @@ describe('model provider preflight', () => {
     });
   });
 
-  it('allows OpenRouter preflight to use external credential brokers', async () => {
+  it('fails if gateway projection contains a raw provider key', async () => {
+    const { preflightModelPreset } = await loadPreflight(
+      gatewayBroker({
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:49231/anthropic',
+        ANTHROPIC_API_KEY: 'sk-ant-raw',
+      }),
+    );
+
     await expect(
       preflightModelPreset({
         runtimeHome: '/tmp/gantry-model-preflight-test',
-        preset: 'openrouter',
+        preset: anthropicProvider(),
         settings: {
           credentialBroker: {
-            mode: 'external',
-            onecli: { url: '' },
-            external: { baseUrl: 'https://broker.example.com' },
+            mode: 'gantry',
           },
         },
       }),
     ).resolves.toMatchObject({
-      ok: true,
-      status: 'pass',
+      ok: false,
+      status: 'fail',
     });
   });
 });

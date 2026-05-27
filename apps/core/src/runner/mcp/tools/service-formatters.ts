@@ -106,7 +106,7 @@ export function formatSkillProposalResponse(
       ? `- Package hash: ${context.skill.contentHash}`
       : undefined,
     context.requiredEnvVars.length > 0
-      ? `- Required Gantry Secrets: ${context.requiredEnvVars.join(', ')}`
+      ? `- Required Gantry Credentials: ${context.requiredEnvVars.join(', ')}`
       : undefined,
     '',
     'Use this skill now by following its SKILL.md. Gantry will load it automatically for later runs.',

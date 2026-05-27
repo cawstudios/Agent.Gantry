@@ -30,7 +30,6 @@ vi.mock('fs', async () => {
 vi.mock(
   '@core/adapters/llm/anthropic-claude-agent/claude-config-materializer.js',
   () => ({
-    applyOpenRouterSdkEnv: vi.fn(),
     materializeClaudeRuntime: mockMaterializeClaudeRuntime,
     projectClaudeModelCredentialEnv: (env: Record<string, string>) => env,
   }),
@@ -141,10 +140,10 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
           },
         }),
       ),
-    ).rejects.toThrow('requires an OpenRouter-scoped credential');
+    ).rejects.toThrow('requires Gantry Model Gateway credentials');
   });
 
-  it('allows external broker projections for OpenRouter models', async () => {
+  it('allows Gantry gateway projections for OpenRouter models', async () => {
     const adapter = new AnthropicClaudeAgentExecutionAdapter();
 
     await expect(
@@ -157,10 +156,12 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
           },
           modelCredentialProjection: {
             env: Object.fromEntries([
-              [anthropicBaseUrlKey(), 'https://broker.example.com'],
+              [anthropicBaseUrlKey(), 'http://127.0.0.1:4567/openrouter'],
+              ['ANTHROPIC_API_KEY', 'gtw_test'],
+              ['ANTHROPIC_AUTH_TOKEN', 'gtw_test'],
             ]),
             credentialProviders: {},
-            brokerProfile: 'external',
+            brokerProfile: 'gantry',
             brokerApplied: true,
           },
         }),
@@ -181,10 +182,10 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
           },
         }),
       ),
-    ).rejects.toThrow('requires Anthropic credentials from Model Access');
+    ).rejects.toThrow('requires Gantry Model Gateway credentials');
   });
 
-  it('allows external broker projections for Anthropic models', async () => {
+  it('allows Gantry gateway projections for Anthropic models', async () => {
     const adapter = new AnthropicClaudeAgentExecutionAdapter();
 
     await expect(
@@ -197,10 +198,11 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
           },
           modelCredentialProjection: {
             env: Object.fromEntries([
-              [anthropicBaseUrlKey(), 'https://broker.example.com'],
+              [anthropicBaseUrlKey(), 'http://127.0.0.1:4567/anthropic'],
+              ['ANTHROPIC_API_KEY', 'gtw_test'],
             ]),
             credentialProviders: {},
-            brokerProfile: 'external',
+            brokerProfile: 'gantry',
             brokerApplied: true,
           },
         }),
@@ -208,7 +210,7 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
     ).resolves.toBeDefined();
   });
 
-  it('rejects OpenRouter-scoped credentials for non-OpenRouter models', async () => {
+  it('rejects non-loopback gateway credentials for provider models', async () => {
     const adapter = new AnthropicClaudeAgentExecutionAdapter();
 
     await expect(
@@ -222,12 +224,12 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
           modelCredentialProjection: {
             env: { ANTHROPIC_BASE_URL: 'https://api.openrouter.ai./v1' },
             credentialProviders: {},
-            brokerProfile: 'onecli',
+            brokerProfile: 'gantry',
             brokerApplied: true,
           },
         }),
       ),
-    ).rejects.toThrow('returned OpenRouter-scoped Anthropic SDK credentials');
+    ).rejects.toThrow('must use a loopback ANTHROPIC_BASE_URL');
   });
 
   it('rejects runner paths outside the package root', async () => {

@@ -147,7 +147,7 @@ const OPERATING_GUIDANCE_BLOCK = [
   '- Use send_message for progress updates and ask_user_question for structured choices.',
   '- Use capability_search, propose_capability, and manage_capability for durable capability changes; request_permission is only a one-off or exact fallback access request.',
   '- For skills, Bash may be used for narrow prep such as inspecting, copying, unzipping, or constructing files, but durable install/selection must go through request_skill_install with staged files when available or an exact installer argv for catalog/local/URL/CLI installs.',
-  '- Declare requiredEnvVars for secrets the installed skill needs at runtime; they are projected later from Gantry Secrets and are not generic installer env.',
+  '- Declare requiredEnvVars for secrets the installed skill needs at runtime; they are projected later from Gantry Credentials and are not generic installer env.',
   '- Access decision ladder: use capability_search first, propose_capability for approved semantic capability grants and reviewed local_cli capabilities, manage_capability for change/revoke/test/audit guidance, and request_permission only for one-off exact access, Browser, exact Gantry admin tools, or scoped RunCommand fallback when no reviewed capability fits.',
   '- Agents with selected admin capabilities may use settings_desired_state before local configuration changes and request_settings_update for reviewed settings.yaml changes; do not edit settings.yaml directly.',
   '- Agents with selected admin capabilities may use service_restart after approved capability or config changes and register_agent for conversation binding.',

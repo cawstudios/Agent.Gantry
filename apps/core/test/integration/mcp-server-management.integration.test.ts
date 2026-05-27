@@ -207,7 +207,6 @@ vi.mock('@core/config/index.js', () => ({
   GANTRY_HOME: '/tmp/gantry-mcp-integration-home',
   DATA_DIR: '/tmp/gantry-mcp-integration-home/data',
   GANTRY_IPC_AUTH_SECRET: 'test-ipc-secret',
-  ONECLI_ALLOWED_ENV_KEYS: [],
   getControlEnvValue: vi.fn((key: string) => process.env[key]?.trim() || ''),
   syncRuntimeSettingsFromProjection: vi.fn(async () => undefined),
   getDefaultModelConfig: vi.fn(() => ({
@@ -513,7 +512,7 @@ describe('MCP server management integration flow', () => {
     }
   });
 
-  it('fails closed when an approved MCP credential ref is missing its Gantry Secret', async () => {
+  it('fails closed when an approved MCP credential ref is missing its Gantry Credential', async () => {
     const { McpServerService } =
       await import('@core/application/mcp/mcp-server-service.js');
     const service = new McpServerService(state.mcpServers);
@@ -551,7 +550,7 @@ describe('MCP server management integration flow', () => {
         agentId: 'agent:one' as never,
         credentialEnv: {},
       }),
-    ).rejects.toThrow(/Gantry Secret.*required|Missing Gantry Secret/);
+    ).rejects.toThrow(/Gantry capability credential.*required/i);
   });
 
   it('stores normalized MCP credential ref names', async () => {
@@ -916,7 +915,7 @@ describe('MCP server management integration flow', () => {
             { name: 'openai-api-key', target: 'header', key: 'Authorization' },
           ],
         }),
-      ).rejects.toThrow(/Gantry Secret/i);
+      ).rejects.toThrow(/Gantry Credential/i);
 
       const created = await client.mcpServers.drafts.create({
         name: 'linear',

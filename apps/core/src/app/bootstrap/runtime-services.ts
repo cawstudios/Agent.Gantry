@@ -89,6 +89,7 @@ interface Deps {
   publishBrowserJobActivity: IpcDeps['publishBrowserJobActivity'];
   closeBrowserToolBackends: IpcDeps['closeBrowserToolBackends'];
   executionAdapter?: RuntimeApp['executionAdapter'];
+  executionAdapters?: RuntimeApp['executionAdapters'];
   exit: (code: number) => never;
 }
 type RuntimeServicesDefaults = Omit<
@@ -209,6 +210,7 @@ export async function startRuntimeServices(
       getToolRepository: resolved.getToolRepository,
       getBrowserStatus,
       executionAdapter: resolved.executionAdapter ?? app.executionAdapter,
+      executionAdapters: resolved.executionAdapters ?? app.executionAdapters,
       closeBrowserSession: closeBrowser,
       closeBrowserToolBackends: resolved.closeBrowserToolBackends,
     });

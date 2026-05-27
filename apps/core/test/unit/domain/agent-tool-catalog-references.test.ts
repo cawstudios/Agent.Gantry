@@ -27,7 +27,7 @@ describe('agent tool catalog references', () => {
               implementationBindings: [
                 {
                   kind: 'tool_rule',
-                  rule: 'RunCommand(onecli google sheets write *)',
+                  rule: 'RunCommand(model_gateway google sheets write *)',
                 },
               ],
             },
@@ -56,7 +56,7 @@ describe('agent tool catalog references', () => {
         ],
       },
     });
-    expect(JSON.stringify(item.inputSchema)).not.toContain('onecli');
+    expect(JSON.stringify(item.inputSchema)).not.toContain('model_gateway');
     expect(saveTool).toHaveBeenCalledWith(item);
   });
 });

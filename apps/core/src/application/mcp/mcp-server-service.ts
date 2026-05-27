@@ -529,7 +529,7 @@ export class McpServerService {
       });
       if (
         result.reason instanceof ApplicationError &&
-        /(?:Missing Gantry Secret|Gantry Secret(?:s)? required)/i.test(
+        /(?:Missing Gantry Credential|Gantry (?:Credential|capability credential)(?:s)? required|required Gantry capability credential is missing)/i.test(
           result.reason.message,
         )
       ) {

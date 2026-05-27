@@ -37,7 +37,7 @@ Durable state stays outside Claude runtime files:
   storage ref; Postgres stores metadata, status, hash, bindings, and provider
   refs.
 - Postgres owns MCP server definitions, reviewed versions, agent bindings,
-  Gantry Secret reference names, and audit events. Claude SDK `mcpServers` is a
+  Gantry Credential reference names, and audit events. Claude SDK `mcpServers` is a
   per-run projection, not durable truth.
 - Package or configured local skill folders provide file-based Claude skills.
 - Gantry may add runtime-installed skills into the generated per-run config
@@ -169,12 +169,12 @@ API/SDK-only in v1; agent requests and CLI draft creation only advertise
 HTTP/SSE. The `npx-package` template accepts exactly one safe npm package
 argument; other v1 stdio templates do not accept caller-supplied args.
 
-MCP credentials are Gantry Secret env names such as `GITHUB_TOKEN`. Raw tokens,
+MCP credentials are Gantry Credential env names such as `GITHUB_TOKEN`. Raw tokens,
 API keys, OAuth values, runtime secrets, and database URLs must not be stored in
 MCP definitions or inherited by third-party MCP processes. Runtime
 materialization resolves only the reviewed credential refs for selected MCP
 servers from the encrypted capability secret store, not arbitrary host
-environment keys or model broker profiles. Resolved MCP credentials are handed
+environment keys or model gateway profiles. Resolved MCP credentials are handed
 to the runner through a private per-run config file with `0600` permissions, and
 the runner deletes that file after reading it. The host also removes the
 handoff file during spawn cleanup so early runner failures do not leave
@@ -184,7 +184,7 @@ credential artifacts on disk.
 third-party MCP server. `autoApproveToolPatterns` is narrower session-only
 auto-allow scope and must be inside the allowed set when an explicit allowlist
 exists. Agent-requested credential needs are labels; the host maps them to
-normalized Gantry Secret names like `GITHUB_TOKEN` rather than letting the
+normalized Gantry Credential names like `GITHUB_TOKEN` rather than letting the
 agent submit raw values.
 
 ## Provider Artifacts

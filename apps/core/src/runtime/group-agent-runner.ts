@@ -28,6 +28,7 @@ import { buildBoundedMemoryRecallQuery } from '../memory/app-memory-recall-query
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { isRuntimeEventType } from '../domain/events/runtime-event-types.js';
 import { resolveRuntimeExecutionProviderId } from './execution-provider-id.js';
+import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 const DEFAULT_ASSISTANT_NAME = 'Gantry';
 const DEFAULT_MODEL_ALIAS = 'opus';
 const MEMORY_REVIEW_APPROVER_CACHE_TTL_MS = 60_000;
@@ -183,9 +184,14 @@ export function createGroupAgentRunner(input: {
       }[];
     },
   ): Promise<'success' | 'error'> {
-    const executionProviderId = resolveRuntimeExecutionProviderId(
-      deps.executionAdapter,
+    const initialModelSelection = defaultModelStatusSelection(
+      group.agentConfig?.model ?? DEFAULT_MODEL_ALIAS,
     );
+    const executionProviderId = (initialModelSelection.model
+      ?.executionProviderId ??
+      resolveRuntimeExecutionProviderId(
+        deps.executionAdapter,
+      )) as ExecutionProviderId;
     const sessionThreadId = options?.memoryContext?.threadId ?? null;
     const modelStatus = createRuntimeModelStatusAccess(
       group.folder,
@@ -390,6 +396,7 @@ export function createGroupAgentRunner(input: {
         mcpDnsValidationCache: deps.getMcpDnsValidationCache?.(),
         publishRuntimeEvent: deps.publishRuntimeEvent,
         executionAdapter: deps.executionAdapter,
+        executionAdapters: deps.executionAdapters,
         turnContext,
       });
       const invokeAgent = (agentInput: { memoryContextBlock?: string }) =>

@@ -1,5 +1,7 @@
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
 import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
+import { getEffectiveModelConfig } from '../config/index.js';
+import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 import type { Job } from '../domain/types.js';
 import { spawnAgent } from '../runtime/agent-spawn.js';
 import type { AgentOutput } from '../runtime/agent-spawn.js';
@@ -33,6 +35,10 @@ import {
   resolveExecutionMemoryContext,
 } from './execution-context.js';
 import type { JobTurnContext, SchedulerDependencies } from './types.js';
+import {
+  modelUseKindForJobSchedule,
+  resolveJobModel,
+} from './model-resolution.js';
 
 const MAX_RECOVERY_TURN_TIMEOUT_MS = 300_000;
 const DEFAULT_RECOVERY_ASSISTANT_NAME = 'Gantry';
@@ -316,10 +322,18 @@ async function runJobRecoveryAgentTurn(input: {
   ) => Promise<unknown> | unknown;
 }): Promise<AgentOutput> {
   const runAgentImpl = input.deps.runAgent ?? spawnAgent;
-  const executionProviderId =
-    input.deps.executionAdapter || !input.deps.runAgent
+  const resolvedModel = resolveJobModel(
+    input.job,
+    getEffectiveModelConfig(
+      undefined,
+      modelUseKindForJobSchedule(input.job.schedule_type),
+      input.execution.group.folder,
+    ),
+  );
+  const executionProviderId = (resolvedModel.entry?.executionProviderId ??
+    (input.deps.executionAdapter || !input.deps.runAgent
       ? resolveRuntimeExecutionProviderId(input.deps.executionAdapter)
-      : DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID;
+      : DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID)) as ExecutionProviderId;
   const { memoryDefaultScope, memoryUserId } = resolveExecutionMemoryContext({
     conversationKind: input.execution.group.conversationKind,
     executionJid: input.execution.executionJid,
@@ -383,6 +397,7 @@ async function runJobRecoveryAgentTurn(input: {
     mcpDnsValidationCache: input.deps.getMcpDnsValidationCache?.(),
     publishRuntimeEvent: input.publishRuntimeEvent,
     executionAdapter: input.deps.executionAdapter,
+    executionAdapters: input.deps.executionAdapters,
     skillContext: {
       appId: executionAppId,
       agentId: executionAgentId,

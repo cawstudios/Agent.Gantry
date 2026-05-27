@@ -3,12 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETUP_MODEL_ALIAS,
   findModelByRunnerModel,
-  formatModelCatalog,
   MEMORY_MODEL_DEFAULT_ALIASES,
   resolveModelSelection,
   resolveModelSelectionForWorkload,
   resolveRunnerModel,
 } from '@core/shared/model-catalog.js';
+import { resolveModelCacheSupport } from '@core/shared/model-cache-support.js';
+import { formatModelCatalog } from '@core/shared/model-catalog-format.js';
 import { normalizeModelUsage } from '@core/shared/model-usage.js';
 
 describe('model catalog resolution', () => {
@@ -113,11 +114,48 @@ describe('model catalog resolution', () => {
 
     expect(output).toContain('Supported model aliases');
     expect(output).toContain('Response family');
+    expect(output).toContain('prompt cache supported/accounted');
     expect(output).toContain('chat default');
     expect(output).toContain('one-time default');
     expect(output).toContain('recurring default');
     expect(output).toContain('memory extractor');
     expect(output).toContain('OpenRouter');
+  });
+
+  it('derives cache support from provider metadata and model route', () => {
+    const anthropic = findModelByRunnerModel('claude-sonnet-4-6');
+    const openrouter = findModelByRunnerModel('moonshotai/kimi-k2.6');
+
+    expect(anthropic && resolveModelCacheSupport(anthropic)).toMatchObject({
+      providerId: 'anthropic',
+      cacheProvider: 'anthropic',
+      statusLabel: 'prompt cache supported/accounted',
+      prompt: {
+        mode: 'anthropic_cache_control',
+        supported: true,
+        accounted: true,
+      },
+      response: {
+        mode: 'none',
+        available: false,
+      },
+    });
+    expect(openrouter && resolveModelCacheSupport(openrouter)).toMatchObject({
+      providerId: 'openrouter',
+      cacheProvider: 'openrouter-provider',
+      statusLabel:
+        'prompt cache supported/accounted; response cache available but disabled',
+      prompt: {
+        mode: 'openrouter_anthropic_cache_control',
+        supported: true,
+        accounted: true,
+      },
+      response: {
+        mode: 'openrouter_response_cache',
+        enabledByDefault: false,
+        available: true,
+      },
+    });
   });
 });
 
@@ -244,6 +282,32 @@ describe('model usage normalization', () => {
     });
   });
 
+  it('reads direct Anthropic cache usage fields from provider metadata', () => {
+    const usage = normalizeModelUsage({
+      message: {
+        usage: {
+          input_tokens: 200,
+          output_tokens: 40,
+          cache_read_input_tokens: 75,
+          cache_creation_input_tokens: 25,
+        },
+      },
+      fallbackModel: 'claude-sonnet-4-6',
+    });
+
+    expect(usage).toMatchObject({
+      model: 'sonnet',
+      modelRoute: 'anthropic',
+      inputTokens: 200,
+      outputTokens: 40,
+      cacheReadTokens: 75,
+      cacheWriteTokens: 25,
+      totalBillableInputTokens: 125,
+      cacheProvider: 'anthropic',
+      cacheStatus: 'partial',
+    });
+  });
+
   it('marks cache as unsupported when provider metadata is unavailable', () => {
     const usage = normalizeModelUsage({
       message: {
@@ -265,7 +329,7 @@ describe('model usage normalization', () => {
       provider: undefined,
       cacheProvider: 'none',
       cacheStatus: 'unsupported',
-      totalBillableInputTokens: 8,
+      totalBillableInputTokens: 10,
     });
   });
 

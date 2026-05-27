@@ -272,7 +272,7 @@ Each phase has: **goal**, **scope**, **exit criteria**, **deletion target**, **a
 
 | Concern                                              | Path                                                                | Line             | Phase |
 | ---------------------------------------------------- | ------------------------------------------------------------------- | ---------------- | ----- |
-| Credential broker error wrap                         | `apps/core/src/application/credentials/agent-credential-service.ts` | 97–126           | 3     |
+| Model gateway error wrap                             | `apps/core/src/application/credentials/agent-credential-service.ts` | 97–126           | 3     |
 | Telegram streaming formatter                         | `apps/core/src/channels/telegram/channel-shared.ts`                 | 131–138          | 3     |
 | Telegram direct delivery chunking and partial errors | `apps/core/src/channels/telegram/channel-delivery.ts`               | 53–158           | 3     |
 | Telegram private streaming divergence                | `apps/core/src/channels/telegram/channel-delivery.ts`               | 161–273          | 3     |

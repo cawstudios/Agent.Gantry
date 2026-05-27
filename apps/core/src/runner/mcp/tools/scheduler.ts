@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { CronExpressionParser } from 'cron-parser';
 import { parseIso } from '../../../shared/time/datetime.js';
 import { makeIpcId } from '../ipc-ids.js';
-import { formatModelCatalog } from '../../../shared/model-catalog.js';
+import { formatModelCatalog } from '../../../shared/model-catalog-format.js';
 import {
   schedulerEventsSummary,
   schedulerJobSummary,

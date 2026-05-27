@@ -9,11 +9,9 @@ import type {
   PreparedAgentExecution,
 } from '../../../application/agent-execution/agent-execution-adapter.js';
 import {
-  applyOpenRouterSdkEnv,
   materializeClaudeRuntime,
   projectClaudeModelCredentialEnv,
 } from './claude-config-materializer.js';
-import { isOpenRouterModelRoute } from '../../../shared/model-catalog.js';
 import { validateModelCredentialProjectionForEntry } from './model-provider-credential-validation.js';
 import {
   ArtifactClaudeSkillSource,
@@ -85,9 +83,6 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
     const modelCredentialEnv = projectClaudeModelCredentialEnv(
       input.modelCredentialProjection.env,
     );
-    if (isOpenRouterModelRoute(input.effectiveModelEntry)) {
-      applyOpenRouterSdkEnv(modelCredentialEnv);
-    }
     const serializedModelCredentialEnv = Object.fromEntries(
       Object.entries(modelCredentialEnv).filter(
         (entry): entry is [string, string] => typeof entry[1] === 'string',

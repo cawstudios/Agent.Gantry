@@ -1,6 +1,3 @@
-/**
- * Agent runner for Gantry — host-only execution.
- */
 import { ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import fs from 'fs';
@@ -61,7 +58,8 @@ import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { getRuntimeFileArtifactStore } from '../adapters/storage/postgres/runtime-store.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 import { formatGeneratedRuntimePathPermissionError } from './generated-runtime-path-error.js';
-
+import { resolveAgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter-registry.js';
+import { writeRunnerMcpConfigFile } from './agent-spawn-mcp-config.js';
 type RunnerAgentInput = AgentInput & {
   modelCredentialEnv?: Record<string, string>;
 };
@@ -73,7 +71,6 @@ const PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV =
   'GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON';
 const LOCAL_CLI_CREDENTIAL_DIRS_ENV = 'GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON';
 const DEFAULT_RUNNER_APP_ID = 'default';
-
 export { writeGroupsSnapshot } from './agent-spawn-snapshots.js';
 export type {
   AvailableGroup,
@@ -225,6 +222,18 @@ function validateRunnerAllowedTools(rules: readonly string[]): string | null {
   }
 }
 
+function cleanupRunnerMcpConfigFile(configPath: string | undefined): void {
+  if (!configPath) return;
+  try {
+    fs.rmSync(configPath, { force: true });
+  } catch (err) {
+    logger.warn(
+      { err, configPath },
+      'Failed to remove MCP runner handoff file',
+    );
+  }
+}
+
 export async function spawnAgent(
   group: ConversationRoute,
   input: AgentInput,
@@ -334,15 +343,32 @@ export async function spawnAgent(
   const hostCredentials = await getHostRuntimeCredentialEnv(
     agentIdentifier,
     options?.credentialBroker,
-    { purpose: 'model_runtime' },
+    {
+      purpose: 'model_runtime',
+      runContext: input,
+      modelRouteId: effectiveModelEntry?.modelRoute.id,
+    },
   );
-  const executionAdapter = options?.executionAdapter;
+  let executionAdapter: NonNullable<RunAgentOptions['executionAdapter']>;
+  try {
+    executionAdapter = resolveAgentExecutionAdapter({
+      executionProviderId: effectiveModelEntry.executionProviderId,
+      registry: options?.executionAdapters,
+      fallback: options?.executionAdapter,
+    }) as NonNullable<RunAgentOptions['executionAdapter']>;
+  } catch (err) {
+    return {
+      status: 'error',
+      result: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
   if (!executionAdapter) {
     return {
       status: 'error',
       result: null,
       error:
-        'No LLM execution adapter configured. Runtime bootstrap must provide an AgentExecutionAdapter.',
+        'No LLM execution adapter configured. Runtime bootstrap must provide an AgentExecutionAdapterRegistry.',
     };
   }
   let preparedExecution: Awaited<ReturnType<typeof executionAdapter.prepare>>;
@@ -657,44 +683,12 @@ export async function spawnAgent(
     if (egressGateway) {
       await closeEgressGateway(egressGateway);
     }
+    await hostCredentials.revoke?.();
     preparedExecution.cleanup();
     revokeIpcResponseSigningKey(
       ipcAuth.responseKeyId,
       group.folder,
       input.threadId,
-    );
-  }
-}
-
-function writeRunnerMcpConfigFile(
-  groupIpcDir: string,
-  capabilities: MaterializedMcpCapability[],
-): string {
-  const configPath = path.join(
-    groupIpcDir,
-    `mcp-${globalThis.crypto.randomUUID()}.json`,
-  );
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(
-    configPath,
-    JSON.stringify(
-      Object.fromEntries(
-        capabilities.map((capability) => [capability.name, capability.config]),
-      ),
-    ),
-    { encoding: 'utf-8', mode: 0o600 },
-  );
-  return configPath;
-}
-
-function cleanupRunnerMcpConfigFile(configPath: string | undefined): void {
-  if (!configPath) return;
-  try {
-    fs.rmSync(configPath, { force: true });
-  } catch (err) {
-    logger.warn(
-      { err, configPath },
-      'Failed to remove MCP runner handoff file',
     );
   }
 }

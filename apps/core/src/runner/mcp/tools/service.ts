@@ -61,7 +61,7 @@ export function registerServiceTools(server: McpServer): void {
       requiredEnvVars: z
         .array(z.string())
         .optional()
-        .describe('Env var names this skill needs from Gantry Secrets'),
+        .describe('Env var names this skill needs from Gantry Credentials'),
       files: z
         .array(
           z.object({

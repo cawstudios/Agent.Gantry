@@ -187,6 +187,18 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'model-catalog.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/model-provider-registry.ts'),
+    path.join(sharedDir, 'model-provider-registry.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/model-cache-support.ts'),
+    path.join(sharedDir, 'model-cache-support.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/model-catalog-format.ts'),
+    path.join(sharedDir, 'model-catalog-format.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/model-usage.ts'),
     path.join(sharedDir, 'model-usage.ts'),
   );
@@ -812,7 +824,7 @@ describe('agent-runner IPC lifecycle', () => {
             http_proxy: 'http://127.0.0.1:18080/',
             https_proxy: 'http://127.0.0.1:18080/',
             NODE_USE_ENV_PROXY: '1',
-            NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
+            NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
           },
         }),
         {
@@ -825,7 +837,7 @@ describe('agent-runner IPC lifecycle', () => {
           GIT_HTTP_PROXY_AUTHMETHOD: 'basic',
           NO_PROXY: '',
           no_proxy: '',
-          NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
+          NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
           GANTRY_IPC_AUTH_TOKEN: 'runner-test-token',
           GANTRY_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
           GANTRY_EGRESS_PROXY_URL: 'http://127.0.0.1:18080/',
@@ -844,15 +856,15 @@ describe('agent-runner IPC lifecycle', () => {
       expect(sdkEnv.https_proxy).toBe('http://127.0.0.1:18080/');
       expect(sdkEnv.NODE_USE_ENV_PROXY).toBe('1');
       expect(sdkEnv.GIT_HTTP_PROXY_AUTHMETHOD).toBeUndefined();
-      expect(sdkEnv.NODE_EXTRA_CA_CERTS).toBe('/tmp/onecli-ca.pem');
-      expect(sdkEnv.SSL_CERT_FILE).toBe('/tmp/onecli-ca.pem');
-      expect(sdkEnv.REQUESTS_CA_BUNDLE).toBe('/tmp/onecli-ca.pem');
-      expect(sdkEnv.CURL_CA_BUNDLE).toBe('/tmp/onecli-ca.pem');
-      expect(sdkEnv.GIT_SSL_CAINFO).toBe('/tmp/onecli-ca.pem');
-      expect(sdkEnv.PIP_CERT).toBe('/tmp/onecli-ca.pem');
-      expect(sdkEnv.AWS_CA_BUNDLE).toBe('/tmp/onecli-ca.pem');
-      expect(sdkEnv.CARGO_HTTP_CAINFO).toBe('/tmp/onecli-ca.pem');
-      expect(sdkEnv.DENO_CERT).toBe('/tmp/onecli-ca.pem');
+      expect(sdkEnv.NODE_EXTRA_CA_CERTS).toBe('/tmp/model_gateway-ca.pem');
+      expect(sdkEnv.SSL_CERT_FILE).toBe('/tmp/model_gateway-ca.pem');
+      expect(sdkEnv.REQUESTS_CA_BUNDLE).toBe('/tmp/model_gateway-ca.pem');
+      expect(sdkEnv.CURL_CA_BUNDLE).toBe('/tmp/model_gateway-ca.pem');
+      expect(sdkEnv.GIT_SSL_CAINFO).toBe('/tmp/model_gateway-ca.pem');
+      expect(sdkEnv.PIP_CERT).toBe('/tmp/model_gateway-ca.pem');
+      expect(sdkEnv.AWS_CA_BUNDLE).toBe('/tmp/model_gateway-ca.pem');
+      expect(sdkEnv.CARGO_HTTP_CAINFO).toBe('/tmp/model_gateway-ca.pem');
+      expect(sdkEnv.DENO_CERT).toBe('/tmp/model_gateway-ca.pem');
       expect(sdkEnv.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
       expect(sdkEnv.NO_PROXY?.split(',')).toEqual(
         expect.arrayContaining([
@@ -2122,7 +2134,7 @@ describe('agent-runner IPC lifecycle', () => {
           jobId: 'job-1',
           allowedTools: ['RunCommand(gog sheets *)'],
           modelCredentialEnv: {
-            NODE_EXTRA_CA_CERTS: '/tmp/onecli-ca.pem',
+            NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
           },
         }),
         {
@@ -2133,14 +2145,14 @@ describe('agent-runner IPC lifecycle', () => {
 
       const trustPrefix = [
         'GODEBUG=netdns=go',
-        "SSL_CERT_FILE='/tmp/onecli-ca.pem'",
-        "REQUESTS_CA_BUNDLE='/tmp/onecli-ca.pem'",
-        "CURL_CA_BUNDLE='/tmp/onecli-ca.pem'",
-        "GIT_SSL_CAINFO='/tmp/onecli-ca.pem'",
-        "PIP_CERT='/tmp/onecli-ca.pem'",
-        "AWS_CA_BUNDLE='/tmp/onecli-ca.pem'",
-        "CARGO_HTTP_CAINFO='/tmp/onecli-ca.pem'",
-        "DENO_CERT='/tmp/onecli-ca.pem'",
+        "SSL_CERT_FILE='/tmp/model_gateway-ca.pem'",
+        "REQUESTS_CA_BUNDLE='/tmp/model_gateway-ca.pem'",
+        "CURL_CA_BUNDLE='/tmp/model_gateway-ca.pem'",
+        "GIT_SSL_CAINFO='/tmp/model_gateway-ca.pem'",
+        "PIP_CERT='/tmp/model_gateway-ca.pem'",
+        "AWS_CA_BUNDLE='/tmp/model_gateway-ca.pem'",
+        "CARGO_HTTP_CAINFO='/tmp/model_gateway-ca.pem'",
+        "DENO_CERT='/tmp/model_gateway-ca.pem'",
       ].join(' ');
 
       expect(result.exitCode).toBe(0);

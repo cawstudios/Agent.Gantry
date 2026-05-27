@@ -242,6 +242,32 @@ describe('OpenAIEmbeddingClient', () => {
       );
     });
 
+    it('routes brokered embeddings through a gateway base URL', async () => {
+      const vectors = [[0.1, 0.2, 0.3]];
+      const fetchSpy = mockFetchOk(vectors.map((v) => ({ embedding: v })));
+      const resolveApiKey = vi.fn(async () => 'gtw_openai');
+      const resolveBaseUrl = vi.fn(async () => 'http://127.0.0.1:8123/openai');
+
+      const client = new OpenAIEmbeddingClient(
+        resolveApiKey,
+        'text-embedding-test',
+        undefined,
+        resolveBaseUrl,
+      );
+      const result = await client.embedMany(['hello']);
+
+      expect(result).toEqual(vectors);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'http://127.0.0.1:8123/openai/v1/embeddings',
+        expect.objectContaining({
+          headers: {
+            Authorization: 'Bearer gtw_openai',
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
+    });
+
     it('throws on non-ok HTTP response', async () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValue({
         ok: false,

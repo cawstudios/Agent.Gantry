@@ -15,8 +15,6 @@ import { NEUTRAL_CA_TRUST_ENV_KEYS } from './neutral-ca-trust-env.js';
 
 export type SemanticCapabilityRisk = 'read' | 'write' | 'admin';
 export type SemanticCapabilityCredentialSource =
-  | 'onecli'
-  | 'external_broker'
   | 'configured_access'
   | 'skill_secret'
   | 'local_cli'

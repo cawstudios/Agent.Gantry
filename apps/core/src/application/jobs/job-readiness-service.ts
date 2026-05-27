@@ -10,7 +10,6 @@ import type {
   ToolCatalogRepository,
 } from '../../domain/ports/repositories.js';
 import type { AgentCredentialBroker } from '../../domain/ports/agent-credential-broker.js';
-import type { AgentCredentialBrokerBinding } from '../../domain/models/credentials.js';
 import type { McpServerId } from '../../domain/mcp/mcp-servers.js';
 import type { Clock } from '../common/clock.js';
 import { ApplicationError } from '../common/application-error.js';
@@ -458,58 +457,6 @@ async function semanticCapabilityCredentialBlocker(input: {
     };
   }
   if (capability.credentialSource === 'local_cli') return null;
-  if (
-    capability.credentialSource !== 'onecli' &&
-    capability.credentialSource !== 'external_broker' &&
-    !semanticCapabilityNeedsBroker(capability)
-  ) {
-    return null;
-  }
-  if (!input.broker) {
-    return {
-      state: 'broker_unreachable',
-      requirementType: 'credential',
-      requirementId: input.capabilityId,
-      message: 'Credential broker is not available for this capability.',
-      nextAction:
-        'Connect or refresh the credential broker account, then resume or recheck the job.',
-    };
-  }
-  const binding = brokerBinding(input.broker, input.agentId);
-  try {
-    const health = await input.broker.healthCheck({ binding });
-    if (health.status === 'fail') {
-      return {
-        state: 'broker_unreachable',
-        requirementType: 'credential',
-        requirementId: input.capabilityId,
-        message: 'Credential broker health check is failing.',
-        nextAction:
-          health.nextAction ||
-          'Connect or refresh the credential broker account, then resume or recheck the job.',
-      };
-    }
-    if (health.status === 'warn') {
-      return {
-        state: 'credential_unknown',
-        requirementType: 'credential',
-        requirementId: input.capabilityId,
-        message: 'Credential broker could not prove this account is ready.',
-        nextAction:
-          health.nextAction ||
-          'Refresh the account connection, then resume or recheck the job.',
-      };
-    }
-  } catch {
-    return {
-      state: 'broker_unreachable',
-      requirementType: 'credential',
-      requirementId: input.capabilityId,
-      message: 'Credential broker health check could not complete.',
-      nextAction:
-        'Connect or refresh the credential broker account, then resume or recheck the job.',
-    };
-  }
   if (capability.preflight?.kind === 'broker') {
     return {
       state: 'credential_unknown',
@@ -537,14 +484,6 @@ function proposeCapabilityAction(capabilityId: string): string {
     reason:
       'This autonomous run requires a reviewed capability that is not in the approved catalog.',
   })}`;
-}
-
-function semanticCapabilityNeedsBroker(
-  capability: NonNullable<ReturnType<typeof getBuiltinSemanticCapability>>,
-): boolean {
-  return capability.implementationBindings.some((binding) =>
-    binding.rule?.startsWith(`${RUN_COMMAND_TOOL_NAME}(onecli `),
-  );
 }
 
 async function mcpReadinessBlockers(input: {
@@ -638,7 +577,7 @@ function mcpCredentialBlocker(
     requirementType: 'mcp_server',
     requirementId: serverName,
     message: formatMissingGantrySecretsMessage(secretNames),
-    nextAction: `Set ${secretNames.map((name) => `gantry secrets set ${name}`).join(' and ')}, then resume or recheck the job.`,
+    nextAction: `Set ${secretNames.map((name) => `gantry credentials capability set ${name}`).join(' and ')}, then resume or recheck the job.`,
   };
 }
 
@@ -647,15 +586,4 @@ function mcpRequestAction(requirement: string): string {
     name: requirement,
     reason: 'This autonomous run requires this MCP server.',
   })}`;
-}
-
-function brokerBinding(
-  broker: AgentCredentialBroker,
-  agentId: string,
-): AgentCredentialBrokerBinding {
-  return {
-    profile: broker.getCapabilities().profile,
-    purpose: 'tool_capability',
-    agentIdentifier: agentId,
-  };
 }

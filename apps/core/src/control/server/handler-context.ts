@@ -75,6 +75,7 @@ export type ControlRouteContext = {
   ) => ControlModelDefaultsPatchResult;
   preflightModelPreset: (
     preset: ModelPresetId,
+    appId?: AppId,
   ) => Promise<ControlModelPresetPreflightResult>;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
   syncSettingsFromProjection: (appId: AppId) => Promise<void>;
