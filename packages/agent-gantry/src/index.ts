@@ -241,12 +241,307 @@ export interface StructuredJsonModelProvider {
 
 export interface StructuredBrowserToolProvider {
   runTask?(input: GantryStructuredTaskInput): Promise<Record<string, unknown>>;
+  inspect?(input: GantryBrowserInspectInput): Promise<GantryBrowserInspectResult>;
+}
+
+export interface GantryToolBudget {
+  readonly timeoutMs?: number;
+  readonly maxResults?: number;
+  readonly maxBytes?: number;
+  readonly maxPages?: number;
+}
+
+export interface GantrySearchToolInput {
+  readonly query: string;
+  readonly limit?: number;
+  readonly budget?: GantryToolBudget;
+  readonly correlationId?: string | null;
+}
+
+export interface GantrySearchResultItem {
+  readonly url: string;
+  readonly title?: string | null;
+  readonly snippet?: string | null;
+  readonly source?: string | null;
+}
+
+export interface GantrySearchToolResult {
+  readonly items: readonly GantrySearchResultItem[];
+  readonly provider?: string | null;
+  readonly warnings?: readonly string[];
+}
+
+export interface StructuredSearchToolProvider {
+  search(input: GantrySearchToolInput): Promise<GantrySearchToolResult>;
+}
+
+export interface GantryFetchToolInput {
+  readonly url: string;
+  readonly budget?: GantryToolBudget;
+  readonly correlationId?: string | null;
+}
+
+export interface GantryFetchToolResult {
+  readonly url: string;
+  readonly statusCode?: number | null;
+  readonly contentType?: string | null;
+  readonly title?: string | null;
+  readonly text?: string | null;
+  readonly blockedReason?: "login_required" | "captcha" | "robots" | "dead" | "parked" | "unsupported" | string | null;
+  readonly provider?: string | null;
+  readonly warnings?: readonly string[];
+}
+
+export interface StructuredFetchToolProvider {
+  fetch(input: GantryFetchToolInput): Promise<GantryFetchToolResult>;
+}
+
+export interface GantryCrawlToolInput {
+  readonly url: string;
+  readonly limit?: number;
+  readonly budget?: GantryToolBudget;
+  readonly correlationId?: string | null;
+}
+
+export interface GantryCrawlToolResult {
+  readonly startUrl: string;
+  readonly pages: ReadonlyArray<{
+    readonly url: string;
+    readonly title?: string | null;
+    readonly text?: string | null;
+    readonly blockedReason?: string | null;
+  }>;
+  readonly provider?: string | null;
+  readonly warnings?: readonly string[];
+}
+
+export interface StructuredCrawlToolProvider {
+  crawl(input: GantryCrawlToolInput): Promise<GantryCrawlToolResult>;
+}
+
+export interface GantryBrowserInspectInput {
+  readonly url: string;
+  readonly instructions?: string | null;
+  readonly budget?: GantryToolBudget;
+  readonly correlationId?: string | null;
+}
+
+export interface GantryBrowserInspectResult {
+  readonly url: string;
+  readonly title?: string | null;
+  readonly text?: string | null;
+  readonly screenshotRef?: string | null;
+  readonly blockedReason?: "login_required" | "captcha" | "dead" | "unsupported" | string | null;
+  readonly provider?: string | null;
+  readonly warnings?: readonly string[];
+}
+
+export interface GantryDocumentExtractInput {
+  readonly url?: string | null;
+  readonly contentType?: string | null;
+  readonly bytes?: Uint8Array;
+  readonly text?: string | null;
+  readonly budget?: GantryToolBudget;
+  readonly correlationId?: string | null;
+}
+
+export interface GantryDocumentExtractResult {
+  readonly text?: string | null;
+  readonly metadata?: Record<string, unknown> | null;
+  readonly provider?: string | null;
+  readonly warnings?: readonly string[];
+}
+
+export interface StructuredDocumentExtractToolProvider {
+  extract(input: GantryDocumentExtractInput): Promise<GantryDocumentExtractResult>;
+}
+
+export interface StructuredToolProviderSet {
+  readonly search?: StructuredSearchToolProvider;
+  readonly fetch?: StructuredFetchToolProvider;
+  readonly crawl?: StructuredCrawlToolProvider;
+  readonly browser?: StructuredBrowserToolProvider;
+  readonly documentExtract?: StructuredDocumentExtractToolProvider;
 }
 
 export interface StructuredModelTaskRunnerConfig {
   readonly model: StructuredJsonModelProvider;
   readonly browser?: StructuredBrowserToolProvider;
+  readonly tools?: StructuredToolProviderSet;
   readonly storage?: GantryRuntimeStorage;
+}
+
+export interface TavilySearchProviderConfig {
+  readonly apiKey?: string | null;
+  readonly fetchImpl?: typeof fetch;
+  readonly timeoutMs?: number;
+  readonly maxResults?: number;
+}
+
+export interface HttpFetchProviderConfig {
+  readonly fetchImpl?: typeof fetch;
+  readonly timeoutMs?: number;
+  readonly maxBytes?: number;
+}
+
+export interface FirecrawlCrawlProviderConfig {
+  readonly apiKey?: string | null;
+  readonly fetchImpl?: typeof fetch;
+  readonly timeoutMs?: number;
+  readonly maxPages?: number;
+}
+
+export function createTavilySearchProvider(config: TavilySearchProviderConfig): StructuredSearchToolProvider {
+  if (!config.apiKey?.trim()) {
+    throw new Error("TAVILY_API_KEY is required to create the Tavily search provider.");
+  }
+  const fetchImpl = config.fetchImpl ?? fetch;
+  const apiKey = config.apiKey.trim();
+  return {
+    search: async (input) => {
+      const maxResults = Math.min(input.limit ?? input.budget?.maxResults ?? config.maxResults ?? 5, config.maxResults ?? 10);
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        "https://api.tavily.com/search",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            api_key: apiKey,
+            query: input.query,
+            search_depth: "basic",
+            include_answer: false,
+            max_results: maxResults,
+          }),
+        },
+        input.budget?.timeoutMs ?? config.timeoutMs ?? 15_000,
+      );
+      const payload = await response.json() as Record<string, unknown>;
+      if (!response.ok) {
+        throw new Error(`Tavily search failed with HTTP ${response.status}.`);
+      }
+      const results = Array.isArray(payload.results) ? payload.results : [];
+      return {
+        provider: "tavily",
+        items: results.flatMap((item) => {
+          const record = asRecord(item);
+          const url = asNonEmptyString(record?.url);
+          if (!url) return [];
+          return [{
+            url,
+            title: asNonEmptyString(record?.title),
+            snippet: asNonEmptyString(record?.content) ?? asNonEmptyString(record?.snippet),
+            source: "tavily",
+          }];
+        }).slice(0, maxResults),
+      };
+    },
+  };
+}
+
+export function createHttpFetchProvider(config: HttpFetchProviderConfig = {}): StructuredFetchToolProvider {
+  const fetchImpl = config.fetchImpl ?? fetch;
+  return {
+    fetch: async (input) => {
+      const maxBytes = input.budget?.maxBytes ?? config.maxBytes ?? 256_000;
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        input.url,
+        {
+          method: "GET",
+          headers: {
+            accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.3",
+            "user-agent": "Agent.Gantry source discovery (+public procurement source validation)",
+          },
+        },
+        input.budget?.timeoutMs ?? config.timeoutMs ?? 12_000,
+      );
+      const contentType = response.headers.get("content-type");
+      const text = trimToBudget(await response.text(), maxBytes);
+      const isHtml = Boolean(contentType?.includes("html"));
+      const readableText = isHtml ? htmlToReadableText(text) : text;
+      return {
+        url: response.url || input.url,
+        statusCode: response.status,
+        contentType,
+        title: isHtml ? extractHtmlTitle(text) : null,
+        text: trimToBudget(readableText, maxBytes),
+        blockedReason: detectBlockedReason(response.status, contentType, readableText),
+        provider: "http-fetch",
+        warnings: text.length >= maxBytes ? [`Response truncated at ${maxBytes} bytes.`] : [],
+      };
+    },
+  };
+}
+
+export function createFirecrawlCrawlProvider(config: FirecrawlCrawlProviderConfig): StructuredCrawlToolProvider {
+  if (!config.apiKey?.trim()) {
+    throw new Error("FIRECRAWL_API_KEY is required to create the Firecrawl crawl provider.");
+  }
+  const fetchImpl = config.fetchImpl ?? fetch;
+  const apiKey = config.apiKey.trim();
+  return {
+    crawl: async (input) => {
+      const limit = Math.min(input.limit ?? input.budget?.maxPages ?? config.maxPages ?? 3, config.maxPages ?? 5);
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        "https://api.firecrawl.dev/v1/crawl",
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${apiKey}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            url: input.url,
+            limit,
+            scrapeOptions: { formats: ["markdown"] },
+          }),
+        },
+        input.budget?.timeoutMs ?? config.timeoutMs ?? 30_000,
+      );
+      const payload = await response.json() as Record<string, unknown>;
+      if (!response.ok) {
+        throw new Error(`Firecrawl crawl failed with HTTP ${response.status}.`);
+      }
+      const data = Array.isArray(payload.data) ? payload.data : [];
+      return {
+        startUrl: input.url,
+        provider: "firecrawl",
+        pages: data.flatMap((page) => {
+          const record = asRecord(page);
+          const metadata = asRecord(record?.metadata);
+          const url = asNonEmptyString(metadata?.sourceURL) ?? asNonEmptyString(record?.url) ?? input.url;
+          return [{
+            url,
+            title: asNonEmptyString(metadata?.title),
+            text: asNonEmptyString(record?.markdown) ?? asNonEmptyString(record?.content),
+            blockedReason: null,
+          }];
+        }).slice(0, limit),
+      };
+    },
+  };
+}
+
+export function createHttpCrawlProvider(config: HttpFetchProviderConfig = {}): StructuredCrawlToolProvider {
+  const fetchProvider = createHttpFetchProvider(config);
+  return {
+    crawl: async (input) => {
+      const first = await fetchProvider.fetch(input);
+      return {
+        startUrl: input.url,
+        provider: "http-crawl",
+        warnings: first.warnings,
+        pages: [{
+          url: first.url,
+          title: first.title,
+          text: first.text,
+          blockedReason: first.blockedReason,
+        }],
+      };
+    },
+  };
 }
 
 export interface GantrySignatureInput {
@@ -804,12 +1099,19 @@ export function createStructuredModelTaskRunner(
     runStructuredTask: async (input) => {
       const taskRunId = input.correlationId ?? randomUUID();
       try {
-        const browserContext = await config.browser?.runTask?.(input);
+        const tools = config.tools ?? { browser: config.browser };
+        const browserContext = await (tools.browser ?? config.browser)?.runTask?.(input);
+        const toolContext = await collectStructuredToolContext(tools, input);
         const generated = await config.model.generateJson({
           ...input,
-          input: browserContext ? { ...input.input, browserContext } : input.input,
+          input: {
+            ...input.input,
+            ...(browserContext ? { browserContext } : {}),
+            ...(toolContext ? { toolContext } : {}),
+          },
         });
-        const output = typeof generated === "string" ? parseJsonRecord(generated) : generated;
+        const modelOutput = typeof generated === "string" ? parseJsonRecord(generated) : generated;
+        const output = toolContext ? { ...modelOutput, toolContext } : modelOutput;
         const status = output.status === "needs_review" || output.status === "failed"
           ? output.status
           : "completed";
@@ -850,6 +1152,96 @@ export function createStructuredModelTaskRunner(
       }
     },
   };
+}
+
+async function collectStructuredToolContext(
+  tools: StructuredToolProviderSet,
+  input: GantryStructuredTaskInput,
+): Promise<Record<string, unknown> | null> {
+  const toolRequests = asRecord(input.input.toolRequests);
+  if (!toolRequests) {
+    return null;
+  }
+
+  const context: Record<string, unknown> = {};
+  const searchRequests = Array.isArray(toolRequests.search) ? toolRequests.search : [];
+  if (tools.search && searchRequests.length > 0) {
+    const searchTool = tools.search;
+    context.search = await Promise.all(searchRequests.map(async (request) => {
+      const record = asRecord(request) ?? {};
+      const query = readString(record, "query") ?? "";
+      if (!query.trim()) return { error: "search_query_required" };
+      const result = await searchTool.search({
+        query,
+        limit: readNumber(record, "limit") ?? undefined,
+        budget: asRecord(record.budget) ?? undefined,
+        correlationId: input.correlationId ?? null,
+      });
+      return { query, ...result };
+    }));
+  }
+
+  const fetchRequests = Array.isArray(toolRequests.fetch) ? toolRequests.fetch : [];
+  if (tools.fetch && fetchRequests.length > 0) {
+    const fetchTool = tools.fetch;
+    context.fetch = await Promise.all(fetchRequests.map(async (request) => {
+      const record = asRecord(request) ?? {};
+      const url = readString(record, "url") ?? "";
+      if (!url.trim()) return { error: "fetch_url_required" };
+      const result = await fetchTool.fetch({
+        url,
+        budget: asRecord(record.budget) ?? undefined,
+        correlationId: input.correlationId ?? null,
+      });
+      return { requestedUrl: url, ...result };
+    }));
+  }
+
+  const crawlRequests = Array.isArray(toolRequests.crawl) ? toolRequests.crawl : [];
+  if (tools.crawl && crawlRequests.length > 0) {
+    context.crawl = await Promise.all(crawlRequests.map(async (request) => {
+      const record = asRecord(request) ?? {};
+      const url = readString(record, "url") ?? "";
+      if (!url.trim()) return { error: "crawl_url_required" };
+      return await tools.crawl?.crawl({
+        url,
+        limit: readNumber(record, "limit") ?? undefined,
+        budget: asRecord(record.budget) ?? undefined,
+        correlationId: input.correlationId ?? null,
+      });
+    }));
+  }
+
+  const browserRequests = Array.isArray(toolRequests.browserInspect) ? toolRequests.browserInspect : [];
+  if (tools.browser?.inspect && browserRequests.length > 0) {
+    context.browserInspect = await Promise.all(browserRequests.map(async (request) => {
+      const record = asRecord(request) ?? {};
+      const url = readString(record, "url") ?? "";
+      if (!url.trim()) return { error: "browser_url_required" };
+      return await tools.browser?.inspect?.({
+        url,
+        instructions: readString(record, "instructions"),
+        budget: asRecord(record.budget) ?? undefined,
+        correlationId: input.correlationId ?? null,
+      });
+    }));
+  }
+
+  const documentRequests = Array.isArray(toolRequests.documentExtract) ? toolRequests.documentExtract : [];
+  if (tools.documentExtract && documentRequests.length > 0) {
+    context.documentExtract = await Promise.all(documentRequests.map(async (request) => {
+      const record = asRecord(request) ?? {};
+      return await tools.documentExtract?.extract({
+        url: readString(record, "url"),
+        contentType: readString(record, "contentType"),
+        text: readString(record, "text"),
+        budget: asRecord(record.budget) ?? undefined,
+        correlationId: input.correlationId ?? null,
+      });
+    }));
+  }
+
+  return Object.keys(context).length > 0 ? context : null;
 }
 
 export function createGantryClient(config: GantryClientConfig): GantryClient {
@@ -1094,9 +1486,64 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+async function fetchWithTimeout(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function trimToBudget(text: string, maxBytes: number): string {
+  return text.length > maxBytes ? text.slice(0, maxBytes) : text;
+}
+
+function extractHtmlTitle(html: string): string | null {
+  const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  return match?.[1]?.replace(/\s+/g, " ").trim() || null;
+}
+
+function htmlToReadableText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function detectBlockedReason(statusCode: number, contentType: string | null, text: string): GantryFetchToolResult["blockedReason"] {
+  const normalized = text.toLowerCase();
+  if (statusCode === 404 || statusCode === 410) return "dead";
+  if (statusCode >= 400) return "unsupported";
+  if (contentType && !contentType.includes("html") && !contentType.includes("text") && !contentType.includes("json")) return "unsupported";
+  if (normalized.includes("captcha") || normalized.includes("cloudflare ray id")) return "captcha";
+  if (normalized.includes("login required") || normalized.includes("sign in") || normalized.includes("please login")) return "login_required";
+  if (normalized.includes("domain for sale") || normalized.includes("buy this domain") || normalized.includes("parked free")) return "parked";
+  return null;
+}
+
 function readString(record: Record<string, unknown> | null, key: string): string | null {
   const value = record?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readNumber(record: Record<string, unknown> | null, key: string): number | null {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function readStringValue(value: unknown): string {

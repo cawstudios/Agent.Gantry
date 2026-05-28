@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildExternalNotificationAdaptiveCard,
   createBotFrameworkTeamsTransport,
+  createHttpFetchProvider,
   createGantryClient,
   createGantryRuntime,
   createPgGantryRuntimeStorage,
   createStructuredModelTaskRunner,
+  createTavilySearchProvider,
   parseExternalCardAction,
   signExternalCardAction,
   signExternalEventRequest,
@@ -17,6 +19,39 @@ import {
 } from "../src/index.js";
 
 describe("@cawstudios/agent-gantry", () => {
+  it("maps Tavily search responses into structured search results", async () => {
+    const provider = createTavilySearchProvider({
+      apiKey: "test-key",
+      fetchImpl: async () => new Response(JSON.stringify({
+        results: [{ url: "https://example.gov/tenders", title: "Tenders", content: "Bid notices" }],
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+
+    await expect(provider.search({ query: "karnataka tenders", limit: 1 })).resolves.toMatchObject({
+      provider: "tavily",
+      items: [{ url: "https://example.gov/tenders", title: "Tenders", snippet: "Bid notices" }],
+    });
+  });
+
+  it("fetches and summarizes HTTP pages with blocking signals", async () => {
+    const provider = createHttpFetchProvider({
+      fetchImpl: async () => new Response("<html><title>Portal</title><body>Please login to continue</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+    });
+
+    await expect(provider.fetch({ url: "https://example.gov" })).resolves.toMatchObject({
+      title: "Portal",
+      blockedReason: "login_required",
+      provider: "http-fetch",
+    });
+  });
+
+  it("fails search provider construction clearly when the Tavily key is missing", () => {
+    expect(() => createTavilySearchProvider({ apiKey: "" })).toThrow("TAVILY_API_KEY");
+  });
+
   it("signs and verifies external event requests", () => {
     const input = {
       secret: "secret",
