@@ -118,6 +118,9 @@ function makeRepositories(overrides: Record<string, unknown> = {}) {
             }
           : null,
       ),
+      saveServer: vi.fn(async () => undefined),
+      saveVersion: vi.fn(async () => undefined),
+      listVersions: vi.fn(async () => []),
       getVersion: vi.fn(async (id: string) =>
         id === 'mcp-version:github'
           ? {
@@ -166,6 +169,31 @@ function makeOps(groups: Record<string, any> = {}) {
 }
 
 describe('SettingsDesiredStateService', () => {
+  it('validates configured guardrail policies through an injected registry', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agents.boondi_support = {
+      name: 'Boondi',
+      folder: 'boondi_support',
+      guardrail: { policy: 'general_support', model: 'haiku' },
+      bindings: {},
+      capabilities: { toolIds: [], skillIds: [], mcpServerIds: [] },
+    };
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories: makeRepositories(),
+      guardrailPolicies: {
+        isRegistered: (policyId) => policyId === 'bss_customer_support',
+        registeredIds: () => ['bss_customer_support'],
+      },
+    });
+
+    const result = await service.reconcile(settings);
+
+    expect(result.invalidReferences).toEqual([
+      'agents.boondi_support.guardrail.policy is invalid: supported policies are bss_customer_support',
+    ]);
+  });
+
   it('validates capability references before reconciliation', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.agents.main_agent = {

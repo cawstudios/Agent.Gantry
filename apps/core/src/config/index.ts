@@ -6,6 +6,7 @@ import {
   envValue,
   envValueDynamic,
   runtimeEnvValue,
+  runtimeEnvValueDynamic,
 } from './env/index.js';
 import { getMemoryModelConfig } from './memory.js';
 import { getGantryHome } from '../shared/gantry-home.js';
@@ -23,7 +24,7 @@ import { resolvePermissionApprovalTimeoutMs } from '../shared/permission-timeout
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 export * from './memory.js';
 export { syncRuntimeSettingsFromProjection } from './settings/restart-sync.js';
-export const POLL_INTERVAL = 2000;
+export const POLL_INTERVAL = 500;
 export type ControlEnvKey =
   | 'GANTRY_CONTROL_API_KEYS_JSON'
   | 'GANTRY_CONTROL_HOST'
@@ -31,6 +32,9 @@ export type ControlEnvKey =
   | 'GANTRY_CONTROL_SOCKET_PATH';
 export function getControlEnvValue(key: ControlEnvKey): string {
   return envValueDynamic(key);
+}
+export function getRuntimeEnvValue(key: string): string {
+  return runtimeEnvValueDynamic(key);
 }
 const GANTRY_HOME_RAW =
   process.env.GANTRY_HOME?.trim() || envConfig.GANTRY_HOME?.trim() || '';
@@ -176,6 +180,12 @@ export function getConfiguredDefaultModel(): string {
 export const TELEGRAM_BOT_TOKEN = envValue('TELEGRAM_BOT_TOKEN');
 export const SLACK_BOT_TOKEN = envValue('SLACK_BOT_TOKEN');
 export const SLACK_APP_TOKEN = envValue('SLACK_APP_TOKEN');
+export const INTERAKT_BOT_TOKEN = envValue('INTERAKT_BOT_TOKEN');
+export const INTERAKT_WEBHOOK_SECRET = envValue('INTERAKT_WEBHOOK_SECRET');
+export const INTERAKT_BUSINESS_PHONE_NUMBER = envValue(
+  'INTERAKT_BUSINESS_PHONE_NUMBER',
+);
+export const INTERAKT_BASE_URL = envValue('INTERAKT_BASE_URL');
 export const GANTRY_IPC_AUTH_SECRET = envValue('GANTRY_IPC_AUTH_SECRET');
 export const LOG_LEVEL = envValue('LOG_LEVEL') || 'info';
 export const HOST_CREDENTIAL_ENV_KEYS = [
@@ -213,6 +223,18 @@ export function getSlackBotToken(): string {
 }
 export function getSlackAppToken(): string {
   return runtimeEnvValue('SLACK_APP_TOKEN');
+}
+export function getInteraktBotToken(): string {
+  return runtimeEnvValue('INTERAKT_BOT_TOKEN');
+}
+export function getInteraktWebhookSecret(): string {
+  return runtimeEnvValue('INTERAKT_WEBHOOK_SECRET');
+}
+export function getInteraktBusinessPhoneNumber(): string {
+  return runtimeEnvValue('INTERAKT_BUSINESS_PHONE_NUMBER');
+}
+export function getInteraktBaseUrl(): string {
+  return runtimeEnvValue('INTERAKT_BASE_URL') || 'https://api.interakt.ai/v1';
 }
 export type ClaudeAuthMode = 'broker' | 'none';
 export interface ClaudeAuthState {

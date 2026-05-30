@@ -31,6 +31,7 @@ import type {
   RuntimeConfiguredAgent,
   RuntimeConfiguredBinding,
   RuntimeConfiguredConversation,
+  RuntimeConfiguredMcpServer,
   RuntimeDesiredStateSettings,
   RuntimeMemorySettings,
   RuntimePermissionSettings,
@@ -208,8 +209,83 @@ function renderConfiguredAgentsYaml(
         `    recurring_job_default_model: ${quoteYamlString(agent.recurringJobDefaultModel)}`,
       );
     }
+    if (agent.guardrail) {
+      lines.push(
+        '    guardrail:',
+        `      policy: ${quoteYamlString(agent.guardrail.policy)}`,
+        `      model: ${quoteYamlString(agent.guardrail.model)}`,
+      );
+    }
     renderAgentSourcesYaml(lines, agent);
     renderAgentCapabilitiesYaml(lines, agent.capabilities);
+  }
+  lines.push('');
+}
+
+function renderMcpServersYaml(
+  lines: string[],
+  servers: Record<string, RuntimeConfiguredMcpServer>,
+): void {
+  const entries = Object.entries(servers).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  if (entries.length === 0) return;
+  lines.push('mcp_servers:');
+  for (const [serverId, server] of entries) {
+    lines.push(
+      `  ${quoteYamlKey(serverId)}:`,
+      `    name: ${quoteYamlString(server.name)}`,
+      `    transport: ${quoteYamlString(server.config.transport)}`,
+    );
+    if (server.config.url) {
+      lines.push(`    url: ${quoteYamlString(server.config.url)}`);
+    }
+    if (server.config.templateId) {
+      lines.push(
+        `    template_id: ${quoteYamlString(server.config.templateId)}`,
+      );
+    }
+    if (server.config.args?.length) {
+      lines.push(`    args: ${JSON.stringify(server.config.args)}`);
+    }
+    if (server.displayName) {
+      lines.push(`    display_name: ${quoteYamlString(server.displayName)}`);
+    }
+    if (server.description) {
+      lines.push(`    description: ${quoteYamlString(server.description)}`);
+    }
+    lines.push(`    risk_class: ${quoteYamlString(server.riskClass)}`);
+    if (server.config.callerIdentity) {
+      const callerIdentity = server.config.callerIdentity;
+      lines.push(
+        '    caller_identity:',
+        `      mode: ${quoteYamlString(callerIdentity.mode)}`,
+        `      header_name: ${quoteYamlString(callerIdentity.headerName)}`,
+        `      signing_ref: ${quoteYamlString(callerIdentity.signingRef)}`,
+        '      source:',
+        `        kind: ${quoteYamlString(callerIdentity.source.kind)}`,
+        `        jid_prefix: ${quoteYamlString(callerIdentity.source.jidPrefix)}`,
+      );
+    }
+    lines.push(
+      `    allowed_tool_patterns: ${JSON.stringify(server.allowedToolPatterns)}`,
+      `    auto_approve_tool_patterns: ${JSON.stringify(server.autoApproveToolPatterns)}`,
+    );
+    if (server.credentialRefs.length > 0) {
+      lines.push('    credential_refs:');
+      for (const ref of server.credentialRefs) {
+        lines.push(
+          `      - name: ${quoteYamlString(ref.name)}`,
+          `        target: ${quoteYamlString(ref.target)}`,
+          `        key: ${quoteYamlString(ref.key)}`,
+        );
+      }
+    }
+    if (server.sandboxProfileId) {
+      lines.push(
+        `    sandbox_profile_id: ${quoteYamlString(server.sandboxProfileId)}`,
+      );
+    }
   }
   lines.push('');
 }
@@ -344,6 +420,9 @@ function renderConversationsYaml(
       lines.push(
         `    control_approvers: ${JSON.stringify(conversation.controlApprovers)}`,
       );
+    }
+    if (conversation.isTemplate === true) {
+      lines.push('    template: true');
     }
     if (binding) {
       lines.push(
@@ -578,6 +657,11 @@ function renderProviderConnectionsInlineYaml(
   lines.push('providers:');
   for (const [providerId, provider] of enabledProviders) {
     lines.push(`  ${quoteYamlKey(providerId)}:`, '    enabled: true');
+    if (provider.defaultAgent) {
+      lines.push(
+        `    default_agent: ${quoteYamlString(provider.defaultAgent)}`,
+      );
+    }
     const connectionId = provider.defaultConnection;
     const connection = connectionId
       ? settings.providerConnections[connectionId]
@@ -618,6 +702,7 @@ export function renderRuntimeSettingsYaml(settings: RuntimeSettings): string {
     ),
   );
   renderProviderConnectionsYaml(lines, extraConnections);
+  renderMcpServersYaml(lines, settings.mcpServers);
   renderConfiguredAgentsYaml(lines, settings.agents);
   const groupedBindings = bindingsByConversation(settings.bindings);
   renderConversationsYaml(

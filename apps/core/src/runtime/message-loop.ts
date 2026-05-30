@@ -13,9 +13,12 @@ import {
   NewMessage,
   ProgressUpdateOptions,
   ConversationRoute,
+  MessageSendOptions,
 } from '../domain/types.js';
 import type { RuntimeMessageRepository } from '../domain/repositories/ops-repo.js';
 import { formatMessages } from '../messaging/router.js';
+import { handlePreAgentGuardrail } from './group-guardrail.js';
+import type { GuardrailClassifier } from '../application/guardrails/types.js';
 import {
   isSenderControlAllowed,
   isTriggerAllowed,
@@ -29,6 +32,7 @@ import {
 import type { SessionCommand } from '../session/session-commands.js';
 import { makeThreadQueueKey, parseThreadQueueKey } from './thread-queue-key.js';
 import { resolveNonSelfSenderIds } from './session-resume-runtime.js';
+import { isTestOperatorJid } from '../shared/test-mode.js';
 
 export interface MessageLoopDeps {
   getConversationRoutes: () => Record<string, ConversationRoute>;
@@ -44,6 +48,24 @@ export interface MessageLoopDeps {
     text: string,
     options?: ProgressUpdateOptions,
   ) => Promise<void>;
+  /**
+   * Delivers a message to the customer-facing channel. Used by the
+   * continuation-path guardrail to send a policy's canned reply without
+   * spawning/continuing an agent. Optional so existing callers/tests that
+   * never exercise the continuation guardrail keep working.
+   */
+  sendChannelMessage?: (
+    chatJid: string,
+    text: string,
+    options?: MessageSendOptions,
+  ) => Promise<void>;
+  /**
+   * Pre-agent guardrail classifier. When present, inbound messages routed to an
+   * already-running agent (the continuation path) are screened the same way the
+   * spawn path screens them in processGroupMessages, so the guardrail applies to
+   * every message regardless of path.
+   */
+  guardrailClassifier?: GuardrailClassifier;
   queue: {
     sendMessage: (
       chatJid: string,
@@ -147,7 +169,12 @@ export async function runMessagePollingTick(
                 loopCmdMsg.sender,
                 controlAllowlistCfg,
                 group.folder,
-              ),
+              ) ||
+                // DEV/TESTING ONLY: the configured test operator may run session
+                // commands (e.g. /new) on their own conversation even while the
+                // agent run is warm, so the scenario harness can fully reset
+                // between runs. No-op in production (operator phone unset).
+                isTestOperatorJid(chatJid),
             )
           ) {
             if (loopCommand && deps.handleActiveControlCommand) {
@@ -205,15 +232,50 @@ export async function runMessagePollingTick(
 
         while (nextBatch && nextBatch.length > 0) {
           const messagesToSend = nextBatch;
+
+          // Guardrail parity: screen this batch before piping it into the
+          // already-running agent. The spawn path guards in
+          // processGroupMessages, but the continuation path writes straight to
+          // the live agent and never goes through it — so without this check a
+          // policy-violating message that lands while the agent is still warm
+          // would bypass the guardrail entirely. We reuse the same
+          // handlePreAgentGuardrail so the decision (and canned reply) is
+          // identical on both paths. Gated on sendChannelMessage being wired;
+          // handlePreAgentGuardrail itself no-ops when the group has no
+          // guardrail configured, so unconfigured groups are unaffected.
+          if (deps.sendChannelMessage) {
+            const sendChannelMessage = deps.sendChannelMessage;
+            const latestMessage = messagesToSend[messagesToSend.length - 1];
+            const guardrailBlocked = await handlePreAgentGuardrail({
+              group,
+              messages: messagesToSend,
+              latestMessage,
+              queueJid,
+              guardrailClassifier: deps.guardrailClassifier,
+              sendMessage: (text: string, options?: MessageSendOptions) =>
+                sendChannelMessage(chatJid, text, options),
+              buildMessageOptions: (tid?: string) =>
+                tid ? { threadId: tid } : undefined,
+              setCursor: deps.setAgentCursor,
+              saveState: deps.saveState,
+              info: (metadata, message) => logger.info(metadata, message),
+            });
+            if (guardrailBlocked) {
+              // Canned reply sent and cursor advanced past this batch inside the
+              // guardrail. Do not pipe it to the agent. Any later messages stay
+              // after the cursor and are picked up by the enqueue below.
+              shouldEnqueueMessageCheck = true;
+              break;
+            }
+          }
+
           const formatted = formatMessages(messagesToSend, TIMEZONE);
           const senderUserIds = resolveNonSelfSenderIds(messagesToSend);
-
-          if (
-            !deps.queue.sendMessage(queueJid, formatted, {
-              threadId,
-              senderUserIds,
-            })
-          ) {
+          const a = !deps.queue.sendMessage(queueJid, formatted, {
+            threadId,
+            senderUserIds,
+          });
+          if (a) {
             shouldEnqueueMessageCheck = true;
             break;
           }

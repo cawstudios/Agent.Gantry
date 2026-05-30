@@ -1,9 +1,13 @@
-import { resolveModelSelectionForWorkload } from '../../shared/model-catalog.js';
 import { parseAgentPersona } from '../../shared/agent-persona.js';
+import {
+  resolveModelSelection,
+  resolveModelSelectionForWorkload,
+} from '../../shared/model-catalog.js';
 import type {
   RuntimeConfiguredAgent,
   RuntimeConfiguredAgentBinding,
   RuntimeConfiguredAgentCapability,
+  RuntimeConfiguredAgentGuardrail,
   RuntimeConfiguredAgentSourceRef,
   RuntimeConfiguredAgentSources,
   RuntimeDesiredStateSettings,
@@ -135,12 +139,37 @@ function parseConfiguredAgentSources(
     mcpServers: parseConfiguredAgentSourceArray(
       map.mcp_servers,
       `${pathPrefix}.mcp_servers`,
-      { requireVersion: true },
+      { requireVersion: false },
     ),
     tools: parseConfiguredAgentSourceArray(map.tools, `${pathPrefix}.tools`, {
       requireKind: true,
     }),
   };
+}
+
+function parseConfiguredAgentGuardrail(
+  raw: unknown,
+  pathPrefix: string,
+): RuntimeConfiguredAgentGuardrail | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${pathPrefix} must be a mapping`);
+  }
+  const map = raw as Record<string, unknown>;
+  for (const key of Object.keys(map)) {
+    if (key !== 'policy' && key !== 'model') {
+      throw new Error(
+        `${pathPrefix}.${key} is not supported. Configure policy or model.`,
+      );
+    }
+  }
+  const policy = parseStringValue(map.policy, `${pathPrefix}.policy`);
+  const model = parseStringValue(map.model, `${pathPrefix}.model`);
+  const resolved = resolveModelSelection(model);
+  if (!resolved.ok) {
+    throw new Error(`${pathPrefix}.model is invalid: ${resolved.message}`);
+  }
+  return { policy, model };
 }
 
 function parseConfiguredAgentCapabilities(
@@ -346,13 +375,14 @@ export function parseConfiguredAgents(
         key !== 'model' &&
         key !== 'one_time_job_default_model' &&
         key !== 'recurring_job_default_model' &&
+        key !== 'guardrail' &&
         key !== 'bindings' &&
         key !== 'sources' &&
         key !== 'capabilities'
       ) {
         if (legacyGrantKey(key)) rejectLegacyAgentGrantField(pathPrefix, key);
         throw new Error(
-          `${pathPrefix}.${key} is not supported. Configure name, persona, model, job model defaults, bindings, sources, or capabilities.`,
+          `${pathPrefix}.${key} is not supported. Configure name, persona, model, job model defaults, guardrail, bindings, sources, or capabilities.`,
         );
       }
     }
@@ -415,6 +445,10 @@ export function parseConfiguredAgents(
       model,
       oneTimeJobDefaultModel,
       recurringJobDefaultModel,
+      guardrail: parseConfiguredAgentGuardrail(
+        map.guardrail,
+        `${pathPrefix}.guardrail`,
+      ),
       bindings: parseConfiguredAgentBindings(
         map.bindings,
         `${pathPrefix}.bindings`,

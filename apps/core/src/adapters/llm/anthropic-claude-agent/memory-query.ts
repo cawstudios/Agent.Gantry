@@ -34,6 +34,7 @@ export interface ClaudeQueryOpts {
   modelProfile?: MemoryLlmModelProfile;
   prompt: string;
   systemPrompt?: string;
+  disableTools?: boolean;
   userBlocks?: Array<{
     text: string;
     cacheStatic?: boolean;
@@ -204,6 +205,7 @@ async function runWithOnecli(opts: ClaudeQueryOpts): Promise<string> {
       abortController,
       model: opts.model,
       maxTurns: 1,
+      ...(opts.disableTools ? { tools: [] as [] } : {}),
       env: sdkEnv,
       settings: {
         autoMemoryEnabled: false,

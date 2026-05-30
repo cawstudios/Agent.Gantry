@@ -2,6 +2,7 @@ import path from 'path';
 
 import { McpServerService } from '../application/mcp/mcp-server-service.js';
 import { McpToolProxy } from '../application/mcp/mcp-tool-proxy.js';
+import { applyTestCallerIdentityOverride } from '../application/mcp/test-caller-identity-override.js';
 import {
   getRuntimeRepositories,
   getRuntimeStorage,
@@ -263,6 +264,7 @@ const mcpListToolsHandler: TaskHandler = async (context) => {
     const proxy = await createMcpProxyForSourceGroup({
       appId: data.appId as never,
       agentId: memoryAgentIdForGroupFolder(sourceAgentFolder) as never,
+      callerIdentityJid: requestedTargetJid,
       deps,
     });
     const result = await proxy.listTools({
@@ -313,15 +315,42 @@ const mcpCallToolHandler: TaskHandler = async (context) => {
     const proxy = await createMcpProxyForSourceGroup({
       appId: data.appId as never,
       agentId: memoryAgentIdForGroupFolder(sourceAgentFolder) as never,
+      callerIdentityJid: requestedTargetJid,
       deps,
     });
-    const result = await proxy.callTool({
-      appId: data.appId as never,
-      agentId: memoryAgentIdForGroupFolder(sourceAgentFolder) as never,
-      serverName,
-      toolName,
-      arguments: args,
-    });
+    const startedAt = Date.now();
+    let result: unknown;
+    try {
+      result = await proxy.callTool({
+        appId: data.appId as never,
+        agentId: memoryAgentIdForGroupFolder(sourceAgentFolder) as never,
+        serverName,
+        toolName,
+        arguments: args,
+      });
+    } catch (err) {
+      logger.warn(
+        {
+          serverName,
+          toolName,
+          arguments: args,
+          durationMs: Date.now() - startedAt,
+          err,
+        },
+        'MCP tool call failed',
+      );
+      throw err;
+    }
+    logger.info(
+      {
+        serverName,
+        toolName,
+        arguments: args,
+        durationMs: Date.now() - startedAt,
+        response: result,
+      },
+      'MCP tool call response',
+    );
     acceptData(`MCP tool ${serverName}.${toolName} completed.`, result);
   } catch (err) {
     reject(
@@ -852,6 +881,7 @@ async function rejectMcpDraftFromPermission(
 async function createMcpProxyForSourceGroup(input: {
   appId: import('../domain/app/app.js').AppId;
   agentId: import('../domain/agent/agent.js').AgentId;
+  callerIdentityJid: string;
   deps: Parameters<TaskHandler>[0]['deps'];
 }): Promise<McpToolProxy> {
   const storage = getRuntimeStorage();
@@ -867,6 +897,10 @@ async function createMcpProxyForSourceGroup(input: {
     tools: storage.repositories.tools,
     skills: storage.repositories.skills,
     credentialEnv,
+    // Dev-only: remaps the MCP caller identity to a test number when
+    // GANTRY_TEST_CALLER_IDENTITY_PHONE is set; no-op otherwise. Same-channel
+    // validation already ran on the real JID above, and outbound is unaffected.
+    callerIdentityJid: applyTestCallerIdentityOverride(input.callerIdentityJid),
     lookupHostname: input.deps.mcpHostnameLookup,
   });
 }

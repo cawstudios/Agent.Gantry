@@ -195,7 +195,12 @@ export async function runQuery(
     writeOutput,
     getSessionId: () => newSessionId,
   });
-  const systemPrompt = buildRunnerSystemPrompt(agentInput, memoryBlock);
+  const externalMcpServers = readExternalMcpServers();
+  const externalMcpAllowedTools = readExternalMcpAllowedTools();
+  const externalMcpAlwaysAllowedTools = readExternalMcpAlwaysAllowedTools();
+  const systemPrompt = buildRunnerSystemPrompt(agentInput, memoryBlock, {
+    approvedMcpServerNames: Object.keys(externalMcpServers),
+  });
   const localCliCredentialDirectories = [
     ...new Set([
       ...readLocalCliCredentialDirectories(),
@@ -240,9 +245,9 @@ export async function runQuery(
     memoryIpcAuthToken: process.env.GANTRY_MEMORY_IPC_AUTH_TOKEN,
     ipcResponseVerifyKey: process.env.GANTRY_IPC_RESPONSE_VERIFY_KEY,
     ipcResponseKeyId: process.env.GANTRY_IPC_RESPONSE_KEY_ID,
-    externalMcpServers: readExternalMcpServers(),
-    externalMcpAllowedTools: readExternalMcpAllowedTools(),
-    externalMcpAlwaysAllowedTools: readExternalMcpAlwaysAllowedTools(),
+    externalMcpServers,
+    externalMcpAllowedTools,
+    externalMcpAlwaysAllowedTools,
     isScheduledJob: agentInput.isScheduledJob,
   });
   const sdkQuery = query({

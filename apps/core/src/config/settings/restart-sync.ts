@@ -1,5 +1,6 @@
 import type { AppId } from '../../domain/app/app.js';
 import type {
+  SettingsDesiredStateServiceDeps,
   SettingsDesiredStateOps,
   SettingsDesiredStateRepositories,
 } from './desired-state-service.js';
@@ -20,6 +21,7 @@ export async function applyRuntimeSettingsDesiredState(input: {
   ops: SettingsDesiredStateOps;
   repositories: SettingsDesiredStateRepositories;
   appId?: AppId;
+  guardrailPolicies?: SettingsDesiredStateServiceDeps['guardrailPolicies'];
   previousSettings?: RuntimeSettings;
   reloadRuntimeState?: () => Promise<void>;
 }): Promise<void> {
@@ -27,6 +29,7 @@ export async function applyRuntimeSettingsDesiredState(input: {
     ops: input.ops,
     repositories: input.repositories,
     appId: input.appId,
+    guardrailPolicies: input.guardrailPolicies,
   });
   const cleanup = await cleanupGeneratedRuntimeCapabilitiesInSettings({
     settings: input.settings,
@@ -70,6 +73,7 @@ export async function syncRuntimeSettingsFromProjection(input: {
   ops: SettingsDesiredStateOps;
   repositories: SettingsDesiredStateRepositories;
   appId?: AppId;
+  guardrailPolicies?: SettingsDesiredStateServiceDeps['guardrailPolicies'];
   reloadRuntimeState?: () => Promise<void>;
 }): Promise<void> {
   const settings = loadRuntimeSettings(input.runtimeHome);
@@ -77,6 +81,7 @@ export async function syncRuntimeSettingsFromProjection(input: {
     ops: input.ops,
     repositories: input.repositories,
     appId: input.appId,
+    guardrailPolicies: input.guardrailPolicies,
   });
   await applyRuntimeSettingsDesiredState({
     ...input,
@@ -92,6 +97,7 @@ export async function addAgentToolRulesToSyncedRuntimeSettings(input: {
   ops: SettingsDesiredStateOps;
   repositories: SettingsDesiredStateRepositories;
   appId?: AppId;
+  guardrailPolicies?: SettingsDesiredStateServiceDeps['guardrailPolicies'];
   reloadRuntimeState?: () => Promise<void>;
 }): Promise<void> {
   const previousSettings = loadRuntimeSettings(input.runtimeHome);
@@ -108,6 +114,7 @@ export async function addAgentToolRulesToSyncedRuntimeSettings(input: {
     ops: input.ops,
     repositories: input.repositories,
     appId: input.appId,
+    guardrailPolicies: input.guardrailPolicies,
     reloadRuntimeState: input.reloadRuntimeState,
   });
 }

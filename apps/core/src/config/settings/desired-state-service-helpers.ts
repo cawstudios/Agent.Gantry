@@ -166,6 +166,9 @@ export function classifySettingsChanges(
   if (!jsonEqual(before.agents, after.agents)) {
     restartRequired.push('agents');
   }
+  if (!jsonEqual(before.mcpServers, after.mcpServers)) {
+    restartRequired.push('mcp_servers');
+  }
   if (!jsonEqual(before.memory, after.memory)) {
     restartRequired.push('memory');
   }

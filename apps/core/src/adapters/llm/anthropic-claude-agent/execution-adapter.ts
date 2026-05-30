@@ -2,6 +2,12 @@ import fs from 'fs';
 import path from 'path';
 
 import { ARTIFACTS_DIR, RUNTIME_SETTINGS_PATH } from '../../../config/index.js';
+import { logger } from '../../../infrastructure/logging/logger.js';
+import {
+  CHILD_RUNNER_FROM_SOURCE_ENV,
+  CHILD_RUNNER_INSPECT_PORT_ENV,
+  buildChildRunnerLaunch,
+} from './child-runner-launch.js';
 import type {
   AgentExecutionAdapter,
   AgentExecutionAdapterPrepareInput,
@@ -67,6 +73,15 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
         'Anthropic execution adapter runner path escaped the Gantry package root.',
       );
     }
+
+    // Developer-only: optionally launch the child runner from TypeScript source
+    // (via tsx) instead of compiled dist, so breakpoints bind to .ts and edits
+    // need no rebuild. Off by default; falls back to dist if source is absent.
+    const runnerLaunch = this.resolveChildRunnerLaunch(
+      packageRoot,
+      relativeRunnerPath,
+      runnerPath,
+    );
     const skillSources = this.skillSources(input, packageRoot);
     const materialization = await materializeClaudeRuntime({
       groupDir: input.groupDir,
@@ -144,7 +159,7 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
     return {
       providerId: this.id,
       runnerPath,
-      runnerArgs: [runnerPath],
+      runnerArgs: runnerLaunch.runnerArgs,
       runnerInputPatch,
       env,
       protectedFilesystemPaths: materialization.protectedFilesystemPaths,
@@ -159,6 +174,56 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
       ],
       cleanup: () => materialization.cleanup(),
     };
+  }
+
+  /**
+   * Map the compiled dist runner entry to its TypeScript source counterpart and
+   * decide whether to launch from source. dist layout mirrors src under the same
+   * package root (tsconfig rootDir=apps/core/src, outDir=dist), so the
+   * `dist/<X>.js` ⇄ `apps/core/src/<X>.ts` swap is exact. Existence is checked on
+   * disk; the pure builder handles the flag + inspector-port logic and falls back
+   * to dist when source is unavailable.
+   */
+  private resolveChildRunnerLaunch(
+    packageRoot: string,
+    relativeRunnerPath: string,
+    distRunnerPath: string,
+  ): ReturnType<typeof buildChildRunnerLaunch> {
+    let sourceRunnerPath: string | undefined;
+    let sourceExists = false;
+    if (relativeRunnerPath.startsWith(`dist${path.sep}`)) {
+      const withoutDist = relativeRunnerPath.slice(`dist${path.sep}`.length);
+      const candidate = path
+        .join(packageRoot, 'apps', 'core', 'src', withoutDist)
+        .replace(/\.js$/, '.ts');
+      sourceRunnerPath = candidate;
+      sourceExists = fs.existsSync(candidate);
+    }
+
+    const launch = buildChildRunnerLaunch({
+      distRunnerPath,
+      sourceRunnerPath,
+      sourceExists,
+      fromSourceFlag: process.env[CHILD_RUNNER_FROM_SOURCE_ENV],
+      inspectPortRaw: process.env[CHILD_RUNNER_INSPECT_PORT_ENV],
+    });
+
+    if (launch.mode === 'source') {
+      logger.warn(
+        {
+          runner: sourceRunnerPath,
+          inspectPort: launch.inspectPort,
+        },
+        `${CHILD_RUNNER_FROM_SOURCE_ENV} enabled: launching agent child from TypeScript source via tsx (developer mode — do not use in production)`,
+      );
+    } else if (process.env[CHILD_RUNNER_FROM_SOURCE_ENV] && !sourceExists) {
+      logger.warn(
+        { distRunner: distRunnerPath, attemptedSource: sourceRunnerPath },
+        `${CHILD_RUNNER_FROM_SOURCE_ENV} set but TypeScript source runner not found; falling back to compiled dist runner`,
+      );
+    }
+
+    return launch;
   }
 
   private skillSources(

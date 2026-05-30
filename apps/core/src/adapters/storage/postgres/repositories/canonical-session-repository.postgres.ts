@@ -82,6 +82,7 @@ export class PostgresCanonicalSessionRepository {
     agentSessionId: string;
     agentSessionResetAt?: string | null;
     providerSessionId?: string;
+    providerSessionProvider?: string;
     externalSessionId?: string;
   }> {
     assertSafeExecutionProviderId(input.executionProviderId);
@@ -90,6 +91,7 @@ export class PostgresCanonicalSessionRepository {
     const [providerSession] = await this.db
       .select({
         id: pgSchema.providerSessionsPostgres.id,
+        provider: pgSchema.providerSessionsPostgres.provider,
         externalSessionId: pgSchema.providerSessionsPostgres.externalSessionId,
       })
       .from(pgSchema.providerSessionsPostgres)
@@ -113,6 +115,7 @@ export class PostgresCanonicalSessionRepository {
       ...(providerSession
         ? {
             providerSessionId: providerSession.id,
+            providerSessionProvider: providerSession.provider,
             externalSessionId: providerSession.externalSessionId,
           }
         : {}),

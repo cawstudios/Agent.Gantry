@@ -206,6 +206,7 @@ import fs from 'fs';
 import type { ConversationRoute } from '@core/domain/types.js';
 import { PromptProfileService } from '@core/application/agents/prompt-profile-service.js';
 import { logger } from '@core/infrastructure/logging/logger.js';
+import { CUSTOMER_IDENTITY_MISMATCH_MESSAGE } from '@core/shared/user-visible-messages.js';
 import { getHostRuntimeCredentialEnv } from '@core/runtime/agent-spawn-host.js';
 import { createSignedIpcRequestEnvelope } from '@core/runner/mcp/signing.js';
 import { parseMemoryIpcRequest } from '@core/runtime/ipc-parsing.js';
@@ -525,6 +526,57 @@ function mcpRecord(): MaterializedMcpServer {
   };
   const binding: AgentMcpServerBinding = {
     id: 'agent-mcp-binding:one' as never,
+    appId: 'app-one' as never,
+    agentId: 'agent-one' as never,
+    serverId: definition.id,
+    versionId: version.id,
+    status: 'active',
+    required: false,
+    permissionPolicyIds: [],
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  };
+  return { definition, version, binding };
+}
+
+function mcpHttpRecord(input: {
+  id: string;
+  name: string;
+  url?: string;
+  transport?: 'http' | 'sse';
+  callerIdentity?: McpServerVersion['config']['callerIdentity'];
+}): MaterializedMcpServer {
+  const definition: McpServerDefinition = {
+    id: input.id as McpServerId,
+    appId: 'app-one' as never,
+    name: input.name,
+    status: 'approved',
+    createdSource: 'admin',
+    riskClass: 'medium',
+    latestApprovedVersionId: `mcp-version:${input.id}` as McpServerVersionId,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  };
+  const transport = input.transport ?? 'http';
+  const version: McpServerVersion = {
+    id: definition.latestApprovedVersionId,
+    appId: 'app-one' as never,
+    serverId: definition.id,
+    version: 1,
+    transport,
+    config: {
+      transport,
+      url: input.url ?? 'http://127.0.0.1:8081/mcp',
+      ...(input.callerIdentity ? { callerIdentity: input.callerIdentity } : {}),
+    },
+    allowedToolPatterns: ['lookup_customer'],
+    autoApproveToolPatterns: ['lookup_customer'],
+    credentialRefs: [],
+    configHash: 'hash',
+    createdAt: new Date(0).toISOString(),
+  };
+  const binding: AgentMcpServerBinding = {
+    id: `agent-mcp-binding:${input.id}` as never,
     appId: 'app-one' as never,
     agentId: 'agent-one' as never,
     serverId: definition.id,
@@ -1627,6 +1679,100 @@ describe('agent-spawn timeout behavior', () => {
       ]),
     );
     rmSyncSpy.mockRestore();
+  });
+
+  it('fails closed for caller identity MCP servers without a signing secret', async () => {
+    const repository = new SpawnMcpRepository([
+      mcpHttpRecord({
+        id: 'mcp:crm',
+        name: 'crm-api',
+        callerIdentity: {
+          mode: 'required',
+          headerName: 'x-caller-identity',
+          signingRef: 'CRM_IDENTITY_SECRET',
+          source: { kind: 'conversation_jid_phone', jidPrefix: 'wa:' },
+        },
+      }),
+    ]);
+    const result = await spawnTestAgent(
+      testGroup,
+      {
+        ...testInput,
+        chatJid: 'wa:919654405340',
+        selectedMcpServerIds: ['mcp:crm'],
+      },
+      () => {},
+      undefined,
+      {
+        mcpServerRepository: repository,
+        capabilitySecretRepository: new SpawnCapabilitySecretRepository({}),
+        mcpContext: { appId: 'app-one', agentId: 'agent-one' },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'error',
+      error: CUSTOMER_IDENTITY_MISMATCH_MESSAGE,
+    });
+    expect(result.error).not.toMatch(
+      /Gantry|Secret|header|credential|privacy guard|signed channel|Shopify Admin|bypass|MCP/i,
+    );
+    expect(vi.mocked(spawn)).not.toHaveBeenCalled();
+  });
+
+  it('injects signed caller identity only into MCP servers that request it', async () => {
+    const repository = new SpawnMcpRepository([
+      mcpHttpRecord({
+        id: 'mcp:crm',
+        name: 'crm-api',
+        callerIdentity: {
+          mode: 'required',
+          headerName: 'x-caller-identity',
+          signingRef: 'CRM_IDENTITY_SECRET',
+          source: { kind: 'conversation_jid_phone', jidPrefix: 'wa:' },
+        },
+      }),
+      mcpHttpRecord({
+        id: 'mcp:inventory',
+        name: 'inventory-api',
+        url: 'http://127.0.0.1:18081/mcp',
+      }),
+    ]);
+    const resultPromise = spawnTestAgent(
+      testGroup,
+      {
+        ...testInput,
+        chatJid: 'wa:919654405340',
+        selectedMcpServerIds: ['mcp:crm', 'mcp:inventory'],
+      },
+      () => {},
+      undefined,
+      {
+        mcpServerRepository: repository,
+        capabilitySecretRepository: new SpawnCapabilitySecretRepository({
+          CRM_IDENTITY_SECRET: 'test_secret_thirty_two_bytes_long_xx',
+        }),
+        mcpContext: { appId: 'app-one', agentId: 'agent-one' },
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const mcpConfigWrite = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find(([target]) => String(target).includes('/mcp-'));
+    expect(mcpConfigWrite).toBeDefined();
+    const config = JSON.parse(String(mcpConfigWrite?.[1])) as Record<
+      string,
+      { headers?: Record<string, string> }
+    >;
+    expect(config['crm-api']?.headers?.['x-caller-identity']).toMatch(
+      /^phone:\+919654405340;ts:\d+;sig:[0-9a-f]+$/,
+    );
+    expect(config['inventory-api']?.headers).toBeUndefined();
   });
 
   it('cleans up runtime resources when selected skill secrets are missing', async () => {

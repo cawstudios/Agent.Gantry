@@ -202,30 +202,33 @@ async function resolveConfiguredMcpSourceVersions(input: {
   const sourceMap = new Map(
     input.agent.sources.mcpServers.map((source) => [
       source.id as McpServerId,
-      source.version as McpServerVersionId,
+      source.version as McpServerVersionId | undefined,
     ]),
   );
   const entries = await Promise.all(
     [...new Set(input.agent.sources.mcpServers.map((source) => source.id))].map(
       async (serverId) => {
-        const requestedVersionId = sourceMap.get(serverId as McpServerId)!;
-        const [server, version] = await Promise.all([
-          input.repositories.mcpServers.getServer(serverId as never),
-          input.repositories.mcpServers.getVersion(requestedVersionId),
-        ]);
+        const requestedVersionId = sourceMap.get(serverId as McpServerId);
+        const server = await input.repositories.mcpServers.getServer(
+          serverId as never,
+        );
         if (!server?.latestApprovedVersionId) {
           throw new Error(`MCP server ${serverId} has no approved version.`);
         }
+        const effectiveVersionId = (requestedVersionId ??
+          server.latestApprovedVersionId) as McpServerVersionId;
+        const version =
+          await input.repositories.mcpServers.getVersion(effectiveVersionId);
         if (
           !version ||
           version.appId !== input.appId ||
           version.serverId !== serverId
         ) {
           throw new Error(
-            `MCP server ${serverId} version ${requestedVersionId} is not approved for that source.`,
+            `MCP server ${serverId} version ${effectiveVersionId} is not approved for that source.`,
           );
         }
-        return [serverId as McpServerId, requestedVersionId] as const;
+        return [serverId as McpServerId, effectiveVersionId] as const;
       },
     ),
   );

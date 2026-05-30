@@ -28,6 +28,9 @@ import {
   isPartialMessageDeliveryError,
 } from '../../domain/messages/partial-delivery.js';
 import { AmbiguousDurableDeliveryError } from '../../domain/messages/durable-delivery.js';
+import { guardCustomerVisibleOutput } from '../../application/customer-output/customer-safe-output.js';
+import { flowLog } from '../../shared/flow-log.js';
+import { jidInTestScope } from '../../shared/test-mode.js';
 import {
   getRuntimeStorage,
   getRuntimeRepositories,
@@ -297,11 +300,39 @@ export function createChannelWiring(
       return;
     }
 
-    const formatted = formatOutboundForChannel(
+    const formattedRaw = formatOutboundForChannel(
       rawText,
       providerForJid(jid)?.id ?? channel.name,
     );
-    if (!formatted) return;
+    if (!formattedRaw) return;
+    // Channel-neutral, last-resort customer-safety backstop: redact internal
+    // implementation detail from customer-facing replies (skipped for
+    // developer-persona agents). Behind the system prompt + guardrail, not a
+    // replacement for them.
+    const formatted = guardCustomerVisibleOutput({
+      text: formattedRaw,
+      persona: app.getConversationRoutes()[jid]?.agentConfig?.persona,
+      conversationJid: jid,
+      logger: resolved.logger,
+    });
+    // Flow trace: the final customer-visible reply, keyed by the real
+    // conversation JID. With dry-run on, this is the only record of the reply.
+    flowLog(resolved.logger, 'outbound', {
+      jid,
+      replyChars: formatted.length,
+      reply: formatted,
+    });
+    // Dry-run (dev/testing): compute + log the reply but skip the real provider
+    // send (and the durability/persistence machinery below). Scoped to the test
+    // operator so real customers still get real replies; returns a synthetic
+    // delivery so the rest of the turn proceeds as if delivered.
+    if (process.env.GANTRY_OUTBOUND_DRYRUN === '1' && jidInTestScope(jid)) {
+      resolved.logger.info(
+        { jid },
+        'Outbound dry-run: reply logged, not sent to provider',
+      );
+      return { externalMessageId: `dryrun:${randomUUID()}` };
+    }
     const provider = providerForJid(jid)?.id ?? channel.name;
     const now = nowIso();
     const messageId = `outbound:${randomUUID()}`;

@@ -148,6 +148,7 @@ export class CanonicalSessionOpsService {
     agentId: string;
     agentSessionId: string;
     providerSessionId?: string;
+    providerSessionProvider?: string;
     externalSessionId?: string;
     agentSessionResetAt?: string | null;
     memoryContextBlock?: string;

@@ -44,6 +44,7 @@ async function loadRuntimeApp() {
 
 async function loadRuntimeAppWithGroupProcessorSpy() {
   vi.resetModules();
+  const runClaudeQuery = vi.fn(async () => '{"action":"allow","reason":"ok"}');
   const createGroupProcessor = vi.fn(() => ({
     processGroupMessages: vi.fn(async () => true),
   }));
@@ -65,6 +66,16 @@ async function loadRuntimeAppWithGroupProcessorSpy() {
   vi.doMock('@core/runtime/group-processing.js', () => ({
     createGroupProcessor,
   }));
+  vi.doMock(
+    '@core/adapters/llm/anthropic-claude-agent/memory-query.js',
+    async (importOriginal) => {
+      const actual =
+        await importOriginal<
+          typeof import('@core/adapters/llm/anthropic-claude-agent/memory-query.js')
+        >();
+      return { ...actual, runClaudeQuery };
+    },
+  );
   vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
     getRuntimeRepositories: vi.fn(() => {
       throw new Error('ops repository should not be used by this test');
@@ -73,7 +84,7 @@ async function loadRuntimeAppWithGroupProcessorSpy() {
     getRuntimeStorage: vi.fn(),
   }));
   const runtimeApp = await import('@core/app/bootstrap/runtime-app.js');
-  return { ...runtimeApp, createGroupProcessor };
+  return { ...runtimeApp, createGroupProcessor, runClaudeQuery };
 }
 
 describe('runtime app credential binding', () => {
@@ -174,5 +185,35 @@ describe('runtime app credential binding', () => {
     expect(capturedDeps?.channelRuntime.supportsStreaming('tg:primary')).toBe(
       true,
     );
+  });
+
+  it('wires a default no-tools guardrail classifier into group processing', async () => {
+    const { createRuntimeApp, createGroupProcessor, runClaudeQuery } =
+      await loadRuntimeAppWithGroupProcessorSpy();
+    createRuntimeApp();
+    const capturedDeps = vi.mocked(createGroupProcessor).mock.calls[0]?.[0];
+    expect(capturedDeps?.guardrailClassifier).toBeDefined();
+
+    await expect(
+      capturedDeps!.guardrailClassifier!({
+        policy: 'bss_customer_support',
+        model: 'haiku',
+        messages: ['Can you help?'],
+        prompt: 'classify',
+      }),
+    ).resolves.toEqual({ action: 'allow', reason: 'ok' });
+    expect(runClaudeQuery).toHaveBeenCalledWith({
+      model: 'claude-haiku-4-5-20251001',
+      systemPrompt: 'classify',
+      disableTools: true,
+      prompt: JSON.stringify(
+        {
+          policy: 'bss_customer_support',
+          messages: ['Can you help?'],
+        },
+        null,
+        2,
+      ),
+    });
   });
 });

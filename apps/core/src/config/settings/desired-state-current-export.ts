@@ -1,5 +1,6 @@
 import type { AppId } from '../../domain/app/app.js';
 import type { Conversation } from '../../domain/conversation/conversation.js';
+import type { GuardrailConfig } from '../../domain/types.js';
 import type {
   AgentConversationBinding,
   ProviderConnection,
@@ -28,6 +29,7 @@ import {
 import type { SettingsDesiredStateServiceDeps } from './desired-state-service-types.js';
 import type {
   RuntimeConfiguredAgent,
+  RuntimeConfiguredAgentGuardrail,
   RuntimeConfiguredBinding,
   RuntimeConfiguredConversation,
   RuntimeProviderConnectionSettings,
@@ -394,6 +396,9 @@ export async function exportCurrentDesiredState(input: {
       model: existing?.model ?? group.agentConfig?.model,
       oneTimeJobDefaultModel: existing?.oneTimeJobDefaultModel,
       recurringJobDefaultModel: existing?.recurringJobDefaultModel,
+      guardrail:
+        existing?.guardrail ??
+        runtimeConfiguredGuardrail(group.agentConfig?.guardrail),
       bindings: {
         ...(existing?.bindings ?? {}),
         [bindingId]: {
@@ -473,6 +478,16 @@ function runtimeMemoryScope(
   value: AgentConversationBinding['memoryScope'],
 ): RuntimeConfiguredBinding['memoryScope'] {
   return value === 'app' ? 'agent' : value;
+}
+
+function runtimeConfiguredGuardrail(
+  guardrail: GuardrailConfig | undefined,
+): RuntimeConfiguredAgentGuardrail | undefined {
+  if (!guardrail) return undefined;
+  return {
+    policy: guardrail.policy,
+    model: guardrail.model,
+  };
 }
 
 function nonEmptyTrigger(...candidates: Array<string | undefined>): string {

@@ -26,12 +26,18 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export interface GuardrailConfig {
+  policy: string;
+  model: string;
+}
+
 export interface AgentConfig {
   additionalMounts?: AdditionalMount[];
   persona?: import('../shared/agent-persona.js').AgentPersona;
   model?: string; // Optional model alias/full name for this group
   thinking?: ThinkingOverride; // Optional thinking override for this group
   timeout?: number; // Default: 300000 (5 minutes)
+  guardrail?: GuardrailConfig;
 }
 
 export interface ConversationRoute {
@@ -42,6 +48,10 @@ export interface ConversationRoute {
   agentConfig?: AgentConfig;
   requiresTrigger?: boolean;
   conversationKind?: 'dm' | 'channel';
+  // True when this route is a "clone source" for inbound messages whose
+  // external id has no specific route yet. Set by settings.yaml's
+  // conversations.<id>.template flag.
+  isTemplate?: boolean;
 }
 
 export interface NewMessage {
