@@ -104,6 +104,7 @@ describe('ModelCredentialService', () => {
     const created = await service.set({
       appId,
       providerId: 'Anthropic',
+      authMode: 'api_key',
       payload: { apiKey: '  sk-ant-test  ' },
       actor: 'owner',
     });
@@ -128,7 +129,7 @@ describe('ModelCredentialService', () => {
       status: 'active',
       health: 'ready',
       fingerprint: created.fingerprint,
-      credentialModes: [
+      credentialModes: expect.arrayContaining([
         expect.objectContaining({
           id: 'api_key',
           gatewayAuthStrategy: 'header',
@@ -140,7 +141,7 @@ describe('ModelCredentialService', () => {
             }),
           ],
         }),
-      ],
+      ]),
     });
     expect(listed.find((row) => row.providerId === 'openrouter')).toMatchObject(
       {
@@ -194,6 +195,7 @@ describe('ModelCredentialService', () => {
       service.set({
         appId,
         providerId: 'anthropic',
+        authMode: 'api_key',
         payload: { apiKey: '   ' },
       }),
     ).rejects.toThrow(
@@ -208,6 +210,7 @@ describe('ModelCredentialService', () => {
     await service.set({
       appId,
       providerId: 'anthropic',
+      authMode: 'api_key',
       payload: { apiKey: 'sk-ant-old' },
     });
 
@@ -321,6 +324,7 @@ describe('ModelCredentialService', () => {
     await service.set({
       appId,
       providerId: 'anthropic',
+      authMode: 'api_key',
       payload: { apiKey: 'sk-ant-old' },
     });
     await service.disable({ appId, providerId: 'anthropic' });

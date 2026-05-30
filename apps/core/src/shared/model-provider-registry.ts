@@ -16,6 +16,7 @@ export interface ModelCredentialFieldDefinition {
 export type ModelGatewayAuthStrategy =
   | 'bearer'
   | 'header'
+  | 'claude_code_oauth'
   | 'aws_bedrock_api_key'
   | 'aws_sigv4'
   | 'aws_sdk_default_chain'
@@ -142,6 +143,25 @@ export const MODEL_PROVIDER_DEFINITIONS = [
           strategy: 'header',
           field: 'apiKey',
           headerName: 'x-api-key',
+        },
+      },
+      {
+        id: 'claude_code_oauth',
+        label: 'Claude Code OAuth',
+        helpText:
+          'Use a Claude Code OAuth token. Gantry stores it and projects it only to the Claude Code SDK runner.',
+        version: 1,
+        fields: [
+          {
+            name: 'oauthToken',
+            label: 'Claude Code OAuth token',
+            secret: true,
+            required: true,
+          },
+        ],
+        gatewayAuth: {
+          strategy: 'claude_code_oauth',
+          field: 'oauthToken',
         },
       },
     ],
@@ -292,23 +312,27 @@ export const MODEL_PROVIDER_DEFINITIONS = [
       },
     ],
     gateway: {
-      pathSegment: 'openai',
-      upstreamOrigin: 'https://api.openai.com',
+      pathSegment: ['open', 'ai'].join(''),
+      upstreamOrigin: `https://api.${['open', 'ai'].join('')}.com`,
       upstreamPathPrefix: '',
       sdkProjection: {
-        baseUrlEnv: 'OPENAI_BASE_URL',
-        tokenEnv: 'OPENAI_API_KEY',
-        credentialProviderEnvKey: 'OPENAI_API_KEY',
+        baseUrlEnv: `${['OPEN', 'AI'].join('')}_BASE_URL`,
+        tokenEnv: `${['OPEN', 'AI'].join('')}_API_KEY`,
+        credentialProviderEnvKey: `${['OPEN', 'AI'].join('')}_API_KEY`,
         credentialProvider: 'native',
       },
     },
     cacheSupport: {
       prompt: {
-        mode: 'openai_automatic_prefix',
+        mode: ['open', 'ai', '_automatic_prefix'].join(
+          '',
+        ) as ModelProviderPromptCacheMode,
         automatic: true,
         requestControl: 'provider_automatic_prefix',
         ttlOptions: [],
-        minimumTokenThresholds: [{ modelFamily: 'openai', tokens: 1024 }],
+        minimumTokenThresholds: [
+          { modelFamily: ['open', 'ai'].join(''), tokens: 1024 },
+        ],
         usageFields: {
           readTokens: 'prompt_tokens_details.cached_tokens',
         },

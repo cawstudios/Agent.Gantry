@@ -27,7 +27,10 @@ import {
   isSessionCommandAllowed,
 } from '../session/session-commands.js';
 import type { SessionCommand } from '../session/session-commands.js';
-import { makeThreadQueueKey, parseThreadQueueKey } from './thread-queue-key.js';
+import {
+  makeThreadQueueKey,
+  parseThreadQueueKey,
+} from '../shared/thread-queue-key.js';
 import { resolveNonSelfSenderIds } from './session-resume-runtime.js';
 
 export interface MessageLoopDeps {

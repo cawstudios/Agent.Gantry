@@ -30,19 +30,19 @@ export function materializeMcpRecord(
   record: MaterializedMcpServer,
   credentialEnv: Record<string, string>,
 ): MaterializedMcpCapability {
-  const config = record.version.config;
+  const config = record.definition.config;
   const credentialValues = resolveCredentialValues(
-    record.version.credentialRefs,
+    record.definition.credentialRefs,
     credentialEnv,
   );
   const allowedToolPatterns =
-    record.version.allowedToolPatterns.length > 0
-      ? record.version.allowedToolPatterns
-      : record.version.autoApproveToolPatterns;
+    record.definition.allowedToolPatterns.length > 0
+      ? record.definition.allowedToolPatterns
+      : record.definition.autoApproveToolPatterns;
   const allowedToolNames = allowedToolPatterns.map(
     (tool) => `mcp__${record.definition.name}__${tool}`,
   );
-  const autoApproveToolNames = record.version.autoApproveToolPatterns.map(
+  const autoApproveToolNames = record.definition.autoApproveToolPatterns.map(
     (tool) => `mcp__${record.definition.name}__${tool}`,
   );
   if (config.transport === 'http' || config.transport === 'sse') {
@@ -72,7 +72,7 @@ export function materializeMcpRecord(
       ...(Object.keys(env).length > 0 ? { env } : {}),
     },
     allowedToolPatterns,
-    autoApproveToolPatterns: record.version.autoApproveToolPatterns,
+    autoApproveToolPatterns: record.definition.autoApproveToolPatterns,
     allowedToolNames,
     autoApproveToolNames,
     required: record.binding.required,

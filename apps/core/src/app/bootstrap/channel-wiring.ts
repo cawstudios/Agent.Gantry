@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import { RuntimeSettings } from '../../config/settings/runtime-settings.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import {
@@ -12,7 +10,6 @@ import {
 } from '../../domain/types.js';
 import {
   findChannel,
-  formatOutboundForChannel,
   stripInternalTagsPreserveWhitespace,
 } from '../../messaging/router.js';
 import {
@@ -71,6 +68,7 @@ import {
   createRecoveryDispatchPermit,
   sanitizeDeliveryError,
 } from './channel-wiring-delivery-guards.js';
+import { createConversationOutboundProjection } from './conversation-outbound-projection.js';
 import { sanitizeRetryTailForCanonicalDestination } from './runtime-services-destination-hints.js';
 import { nowIso } from '../../shared/time/datetime.js';
 export type { ChannelWiring } from './channel-wiring-types.js';
@@ -297,26 +295,24 @@ export function createChannelWiring(
       return;
     }
 
-    const formatted = formatOutboundForChannel(
+    const projection = createConversationOutboundProjection({
       rawText,
-      providerForJid(jid)?.id ?? channel.name,
-    );
-    if (!formatted) return;
-    const provider = providerForJid(jid)?.id ?? channel.name;
-    const now = nowIso();
-    const messageId = `outbound:${randomUUID()}`;
-    const baseMessage = {
-      id: messageId,
-      chat_jid: jid,
-      provider: provider,
-      sender: 'gantry',
-      sender_name: 'Gantry',
-      content: formatted,
-      timestamp: now,
-      is_from_me: true,
-      is_bot_message: true,
-      thread_id: options.messageOptions?.threadId,
-    };
+      channelName: channel.name,
+      providerId: providerForJid(jid)?.id ?? channel.name,
+      conversationJid: jid,
+      threadId: options.messageOptions?.threadId,
+      appId: resolved.appId,
+      publishRuntimeEvent: resolved.publishRuntimeEvent,
+      logger: resolved.logger,
+    });
+    if (!projection) return;
+    const {
+      formatted,
+      provider,
+      messageId,
+      baseMessage,
+      publishEvent: publishConversationOutboundEvent,
+    } = projection;
 
     let durableAttempt:
       | Awaited<ReturnType<DurableOutboundAttemptFactory>>
@@ -465,6 +461,10 @@ export function createChannelWiring(
           'Failed to persist outbound delivery failure',
         );
       }
+      await publishConversationOutboundEvent({
+        deliveryStatus: partial ? 'partially_sent' : 'failed',
+        error: sanitizeDeliveryError(err, provider),
+      });
       throw thrownError;
     }
 
@@ -565,6 +565,10 @@ export function createChannelWiring(
         }
       }
     }
+    await publishConversationOutboundEvent({
+      deliveryStatus: 'sent',
+      externalMessageId: result?.externalMessageId,
+    });
     return result;
   }
 

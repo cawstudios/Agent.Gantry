@@ -431,25 +431,25 @@ export async function spawnAgent(
       'mcp',
       'stdio.js',
     );
-    const selectedMcpServerIds = input.selectedMcpServerIds ?? [];
+    const attachedMcpSourceIds = input.attachedMcpSourceIds ?? [];
     const allMcpCapabilities: MaterializedMcpCapability[] =
       options?.mcpServerRepository &&
       options.capabilitySecretRepository &&
       options.mcpContext?.appId &&
       options.mcpContext.agentId &&
-      selectedMcpServerIds.length > 0
+      attachedMcpSourceIds.length > 0
         ? await new McpServerService(options.mcpServerRepository, undefined, {
             lookupHostname: options.mcpHostnameLookup,
             dnsValidationCache: options.mcpDnsValidationCache,
           }).materializeForAgent({
             appId: options.mcpContext.appId as never,
             agentId: options.mcpContext.agentId as never,
-            serverIds: selectedMcpServerIds as never,
+            serverIds: attachedMcpSourceIds as never,
             credentialEnv: options.capabilitySecretRepository
               ? await resolveMcpCredentialEnvForAgent({
                   appId: options.mcpContext.appId as never,
                   agentId: options.mcpContext.agentId as never,
-                  serverIds: selectedMcpServerIds as never,
+                  serverIds: attachedMcpSourceIds as never,
                   mcpServers: options.mcpServerRepository,
                   secrets: options.capabilitySecretRepository,
                 })
@@ -495,6 +495,9 @@ export async function spawnAgent(
     runnerInputPatch.modelCredentialEnv.https_proxy = egressGateway.proxyUrl;
     runnerInputPatch.modelCredentialEnv.NODE_USE_ENV_PROXY = '1';
     runnerInput.modelCredentialEnv = runnerInputPatch.modelCredentialEnv;
+    if (runnerInputPatch.semanticCapabilities) {
+      runnerInput.semanticCapabilities = runnerInputPatch.semanticCapabilities;
+    }
     const localCliCredentialPaths = resolveHomeRelativePaths(
       localCliCredentialPathHintsFromRuntimeAccess(input.runtimeAccess),
       process.env,
@@ -593,7 +596,6 @@ export async function spawnAgent(
 
     const logsDir = path.join(groupDir, 'logs');
     fs.mkdirSync(logsDir, { recursive: true });
-
     const selectedSkillEnv =
       options?.skillRepository &&
       options.capabilitySecretRepository &&
@@ -604,15 +606,9 @@ export async function spawnAgent(
             agentId: options.skillContext.agentId as never,
             skills: options.skillRepository,
             secrets: options.capabilitySecretRepository,
+            runtimeAccess: input.runtimeAccess ?? [],
           })
         : { env: {} };
-    if (selectedSkillEnv.missingMessage) {
-      return {
-        status: 'error',
-        result: null,
-        error: selectedSkillEnv.missingMessage,
-      };
-    }
     Object.assign(env, pickSelectedCapabilityEnv(selectedSkillEnv.env));
     mcpConfigPath =
       allMcpCapabilities.length > 0

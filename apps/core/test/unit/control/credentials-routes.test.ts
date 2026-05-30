@@ -148,6 +148,7 @@ describe('credential control routes', () => {
       'PUT',
       '/v1/credentials/models/anthropic',
       {
+        authMode: 'api_key',
         payload: { apiKey: 'sk-ant-route' },
       },
       { scopes: ['credentials:read'] },
@@ -162,6 +163,7 @@ describe('credential control routes', () => {
       'PUT',
       '/v1/credentials/models/anthropic',
       {
+        authMode: 'api_key',
         payload: { apiKey: 'sk-ant-route' },
       },
     );
@@ -300,6 +302,7 @@ describe('credential control routes', () => {
       'PUT',
       '/v1/credentials/models/anthropic',
       {
+        authMode: 'api_key',
         payload: { apiKey: 'sk-ant-route' },
       },
     );

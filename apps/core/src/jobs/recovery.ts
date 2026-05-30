@@ -14,6 +14,7 @@ import {
   createRuntimeUserVisibleResultAccumulator,
 } from '../runtime/session-resume-runtime.js';
 import {
+  resolveTurnSemanticCapabilities,
   resolveTurnSelectedMcpServerIds,
   resolveTurnSelectedSkillContext,
 } from '../runtime/group-run-context.js';
@@ -21,7 +22,7 @@ import {
   DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID,
   resolveRuntimeExecutionProviderId,
 } from '../runtime/execution-provider-id.js';
-import { makeThreadQueueKey } from '../runtime/thread-queue-key.js';
+import { makeThreadQueueKey } from '../shared/thread-queue-key.js';
 import {
   createJobRecoveryIntent,
   shouldRunRecoveryIntent,
@@ -357,6 +358,7 @@ async function runJobRecoveryAgentTurn(input: {
   const [
     toolPolicy,
     selectedSkillContext,
+    semanticCapabilities,
     credentialBroker,
     approvedSkillContext,
   ] = await Promise.all([
@@ -371,6 +373,10 @@ async function runJobRecoveryAgentTurn(input: {
       appId: executionAppId,
       agentId: executionAgentId,
     }),
+    resolveTurnSemanticCapabilities(input.deps, {
+      appId: executionAppId,
+      agentId: executionAgentId,
+    }),
     input.deps.getCredentialBroker?.() ?? Promise.resolve(undefined),
     buildApprovedSkillContextBlock({
       skillRepository: input.deps.getSkillRepository?.(),
@@ -378,7 +384,7 @@ async function runJobRecoveryAgentTurn(input: {
       turnContext: turnContextForSkillContext(turnContext),
     }),
   ]);
-  const selectedMcpServerIds = await resolveTurnSelectedMcpServerIds(
+  const attachedMcpSourceIds = await resolveTurnSelectedMcpServerIds(
     input.deps,
     {
       appId: executionAppId,
@@ -432,9 +438,10 @@ async function runJobRecoveryAgentTurn(input: {
       .join('\n\n'),
     allowedTools: toolPolicy.effectiveAllowedTools,
     runtimeAccess: toolPolicy.runtimeAccess,
-    selectedSkillIds: selectedSkillContext.ids,
+    attachedSkillSourceIds: selectedSkillContext.ids,
     selectedSkillDisplays: selectedSkillContext.displays,
-    selectedMcpServerIds,
+    attachedMcpSourceIds,
+    semanticCapabilities,
     ...(turnContext?.externalSessionId
       ? { sessionId: turnContext.externalSessionId }
       : {}),

@@ -1093,7 +1093,7 @@ describe('agent-runner IPC lifecycle', () => {
       const localCliCredentialDir = path.join(
         fixture.root,
         'credentials',
-        'gog',
+        'acme',
       );
       fs.mkdirSync(runtimeProjectionDir, { recursive: true });
       fs.mkdirSync(localCliCredentialDir, { recursive: true });
@@ -2132,14 +2132,14 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({
           isScheduledJob: true,
           jobId: 'job-1',
-          allowedTools: ['RunCommand(gog sheets *)'],
+          allowedTools: ['RunCommand(acme records *)'],
           modelCredentialEnv: {
             NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
           },
         }),
         {
           TEST_TOOL_USE_ONLY: 'Bash',
-          TEST_TOOL_USE_CMD: 'gog sheets get budget',
+          TEST_TOOL_USE_CMD: 'acme records get budget',
         },
       );
 
@@ -2160,7 +2160,7 @@ describe('agent-runner IPC lifecycle', () => {
       expect(call?.permissionDecision).toEqual({
         behavior: 'allow',
         updatedInput: {
-          cmd: `${trustPrefix} gog sheets get budget`,
+          cmd: `${trustPrefix} acme records get budget`,
         },
       });
       expect(
@@ -2263,7 +2263,7 @@ describe('agent-runner IPC lifecycle', () => {
     'scheduled jobs correlate parentless SDK network prompts through typed local CLI runtime access',
     async () => {
       const fixture = createRunnerFixture();
-      const credentialDir = path.join(fixture.root, 'credentials', 'gog');
+      const credentialDir = path.join(fixture.root, 'credentials', 'acme');
       fs.mkdirSync(credentialDir, { recursive: true });
 
       const result = await runRunner(
@@ -2271,20 +2271,22 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({
           isScheduledJob: true,
           jobId: 'job-1',
-          allowedTools: ['RunCommand(/opt/homebrew/bin/gog sheets get *)'],
+          allowedTools: ['RunCommand(/opt/homebrew/bin/acme records get *)'],
           runtimeAccess: [
             {
-              selectedCapabilityId: 'gog.sheets.get',
+              selectedCapabilityId: 'acme.records.get',
               sourceType: 'local_cli',
               auditLabel: 'Gog Sheets get',
-              commandRules: ['RunCommand(/opt/homebrew/bin/gog sheets get *)'],
+              commandRules: [
+                'RunCommand(/opt/homebrew/bin/acme records get *)',
+              ],
               credentialDirs: [credentialDir],
               networkBindings: [
                 {
                   commandRules: [
-                    'RunCommand(/opt/homebrew/bin/gog sheets get *)',
+                    'RunCommand(/opt/homebrew/bin/acme records get *)',
                   ],
-                  hosts: ['oauth2.googleapis.com', 'sheets.googleapis.com'],
+                  hosts: ['oauth2.googleapis.com', 'records.googleapis.com'],
                 },
               ],
             },
@@ -2295,7 +2297,7 @@ describe('agent-runner IPC lifecycle', () => {
           TEST_PARENTLESS_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_SDK_NETWORK_HOST: 'oauth2.googleapis.com',
           TEST_TOOL_USE_CMD:
-            '/opt/homebrew/bin/gog sheets get 12s6uzwLDLV-DVcTH6XBa5vV3FZJUo04fLm0npfgACb4 "Bot Recommendation!A1:Z1" --json --account ravi@knacklabs.ai',
+            '/opt/homebrew/bin/acme records get 12s6uzwLDLV-DVcTH6XBa5vV3FZJUo04fLm0npfgACb4 "Bot Recommendation!A1:Z1" --json --account ravi@knacklabs.ai',
         },
       );
 
@@ -2329,13 +2331,13 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({
           isScheduledJob: true,
           jobId: 'job-1',
-          allowedTools: ['RunCommand(/opt/homebrew/bin/gog sheets get *)'],
+          allowedTools: ['RunCommand(/opt/homebrew/bin/acme records get *)'],
         }),
         {
           TEST_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_PARENTLESS_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_TOOL_USE_CMD:
-            '/opt/homebrew/bin/gog sheets get 12s6uzwLDLV-DVcTH6XBa5vV3FZJUo04fLm0npfgACb4 "Bot Recommendation!A1:Z1" --json --account ravi@knacklabs.ai',
+            '/opt/homebrew/bin/acme records get 12s6uzwLDLV-DVcTH6XBa5vV3FZJUo04fLm0npfgACb4 "Bot Recommendation!A1:Z1" --json --account ravi@knacklabs.ai',
         },
       );
 
@@ -2511,7 +2513,7 @@ describe('agent-runner IPC lifecycle', () => {
           isScheduledJob: true,
           jobId: 'job-1',
           allowedTools: [],
-          selectedMcpServerIds: ['mcp:github'],
+          attachedMcpSourceIds: ['mcp:github'],
         }),
         {
           GANTRY_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([

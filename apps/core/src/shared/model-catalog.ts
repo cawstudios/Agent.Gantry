@@ -47,7 +47,7 @@ const MODEL_RUNTIME_CREDENTIAL_PROFILE_REF = 'gantry-model-access';
 const CLAUDE_MODELS_OVERVIEW_SOURCE = {
   label: 'Anthropic models overview',
   url: 'https://platform.claude.com/docs/en/about-claude/models/overview',
-  verifiedAt: '2026-05-21',
+  verifiedAt: '2026-05-29',
 };
 const CLAUDE_MODEL_IDS_SOURCE = {
   label: 'Anthropic model IDs and versions',
@@ -306,12 +306,33 @@ export type ModelResolution =
 
 export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
   executableModelEntry({
+    id: 'anthropic:opus-4.8',
+    route: anthropicRoute('claude-opus-4-8'),
+    displayName: 'Opus 4.8',
+    runnerModel: 'claude-opus-4-8',
+    aliases: ['opus', 'opus-4.8'],
+    recommendedAlias: 'opus',
+    source: CLAUDE_MODELS_OVERVIEW_SOURCE,
+    contextWindowTokens: 1_000_000,
+    maxOutputTokens: 128_000,
+    inputUsdPerMillionTokens: 5,
+    outputUsdPerMillionTokens: 25,
+    cacheMode: DIRECT_PROMPT_CACHE_MODE,
+    cacheTokenFields: [
+      'cache_creation_input_tokens',
+      'cache_read_input_tokens',
+    ],
+    supportsThinking: true,
+    supportsTools: true,
+    supportedWorkloads: ['chat', 'one_time_job', 'recurring_job'],
+  }),
+  executableModelEntry({
     id: 'anthropic:opus-4.7',
     route: anthropicRoute('claude-opus-4-7'),
     displayName: 'Opus 4.7',
     runnerModel: 'claude-opus-4-7',
-    aliases: ['opus', 'opus-4.7'],
-    recommendedAlias: 'opus',
+    aliases: ['opus-4.7'],
+    recommendedAlias: 'opus-4.7',
     source: CLAUDE_MODELS_OVERVIEW_SOURCE,
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 128_000,

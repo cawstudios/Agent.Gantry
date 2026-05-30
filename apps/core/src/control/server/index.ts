@@ -177,6 +177,7 @@ function createControlRequestHandler(ctx: ControlRouteContext) {
 export function startControlServer(input: {
   app: RuntimeApp;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
+  sendConversationIngressProjection?: ControlRouteContext['sendConversationIngressProjection'];
 }): ControlServerHandle {
   const keys = parseControlApiKeysStrict({
     rawJson: getControlEnvValue('GANTRY_CONTROL_API_KEYS_JSON'),
@@ -214,6 +215,7 @@ export function startControlServer(input: {
         settings: getRuntimeSettingsForConfig(),
         appId,
       }),
+    sendConversationIngressProjection: input.sendConversationIngressProjection,
     getBrowserStatus: input.getBrowserStatus,
     syncSettingsFromProjection: (appId: AppId) =>
       syncRuntimeSettingsFromProjection({

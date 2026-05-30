@@ -59,8 +59,8 @@ describe('scheduler MCP tools', () => {
     const response = await tools.get('scheduler_list_models')!();
     const text = response.content[0].text;
 
-    expect(text).toContain('Opus 4.7');
-    expect(text).toContain('opus-4.7 | Opus 4.7');
+    expect(text).toContain('Opus 4.8');
+    expect(text).toContain('opus-4.8 | Opus 4.8');
     expect(text).toContain('Kimi K2.6');
     expect(text).toContain('kimi-2.6 | Kimi K2.6');
     expect(text).toContain('Response family');
@@ -168,17 +168,17 @@ describe('scheduler MCP tools', () => {
     expect(
       schemas.get('scheduler_upsert_job')?.capability_requirements.safeParse([
         {
-          capability_id: 'google.sheets.write',
+          capability_id: 'acme.records.append',
           reason: 'Write lead rows after each run',
           implementation: {
             kind: 'local_cli',
-            name: 'gog',
-            executable_path: '/usr/local/bin/gog',
+            name: 'acme',
+            executable_path: '/usr/local/bin/acme',
             executable_version: 'v0.9.0',
             executable_hash: 'sha256:abc123',
-            command_template: '/usr/local/bin/gog sheets append *',
-            auth_preflight: '/usr/local/bin/gog auth status',
-            protected_paths: ['~/.config/gog/*'],
+            command_template: '/usr/local/bin/acme records append *',
+            auth_preflight: '/usr/local/bin/acme auth status',
+            protected_paths: ['~/.config/acme/*'],
           },
         },
       ]).success,
@@ -186,13 +186,13 @@ describe('scheduler MCP tools', () => {
     expect(
       schemas.get('scheduler_upsert_job')?.capability_requirements.safeParse([
         {
-          capability_id: 'google.sheets.write',
+          capability_id: 'acme.records.append',
           reason: 'Write lead rows after each run',
           implementation: {
             kind: 'local_cli',
-            name: 'gog',
-            executable_path: '/usr/local/bin/gog',
-            command_template: 'gog sheets append *',
+            name: 'acme',
+            executable_path: '/usr/local/bin/acme',
+            command_template: 'acme records append *',
           },
         },
       ]).success,
@@ -200,14 +200,14 @@ describe('scheduler MCP tools', () => {
     expect(
       schemas.get('scheduler_upsert_job')?.capability_requirements.safeParse([
         {
-          capability_id: 'google.sheets.write',
+          capability_id: 'acme.records.append',
           reason: 'Write lead rows after each run',
           implementation: {
             kind: 'local_cli',
-            name: 'gog',
-            executable_path: '/usr/local/bin/gog',
-            command_template: '/usr/local/bin/gog sheets append *',
-            auth_preflight: 'gog auth status',
+            name: 'acme',
+            executable_path: '/usr/local/bin/acme',
+            command_template: '/usr/local/bin/acme records append *',
+            auth_preflight: 'acme auth status',
           },
         },
       ]).success,
@@ -225,17 +225,17 @@ describe('scheduler MCP tools', () => {
     expect(
       schemas.get('scheduler_update_job')?.capability_requirements.safeParse([
         {
-          capability_id: 'google.sheets.write',
+          capability_id: 'acme.records.append',
           reason: 'Write lead rows after each run',
           implementation: {
             kind: 'local_cli',
-            name: 'gog',
-            executable_path: '/usr/local/bin/gog',
+            name: 'acme',
+            executable_path: '/usr/local/bin/acme',
             executable_version: 'v0.9.0',
             executable_hash: 'sha256:abc123',
-            command_template: '/usr/local/bin/gog sheets append *',
-            auth_preflight: '/usr/local/bin/gog auth status',
-            protected_paths: ['~/.config/gog/*'],
+            command_template: '/usr/local/bin/acme records append *',
+            auth_preflight: '/usr/local/bin/acme auth status',
+            protected_paths: ['~/.config/acme/*'],
           },
         },
       ]).success,
@@ -282,15 +282,15 @@ describe('scheduler MCP tools', () => {
       },
       capability_requirements: [
         {
-          capability_id: 'google.sheets.write',
+          capability_id: 'acme.records.append',
           reason: 'Write lead rows after each run',
           implementation: {
             kind: 'local_cli',
-            name: 'gog',
-            executable_path: '/usr/local/bin/gog',
+            name: 'acme',
+            executable_path: '/usr/local/bin/acme',
             executable_version: 'v0.9.0',
             executable_hash: 'sha256:abc123',
-            command_template: '/usr/local/bin/gog sheets append *',
+            command_template: '/usr/local/bin/acme records append *',
           },
         },
       ],
@@ -309,15 +309,15 @@ describe('scheduler MCP tools', () => {
         },
         capabilityRequirements: [
           {
-            capabilityId: 'google.sheets.write',
+            capabilityId: 'acme.records.append',
             reason: 'Write lead rows after each run',
             implementation: {
               kind: 'local_cli',
-              name: 'gog',
-              executablePath: '/usr/local/bin/gog',
+              name: 'acme',
+              executablePath: '/usr/local/bin/acme',
               executableVersion: 'v0.9.0',
               executableHash: 'sha256:abc123',
-              commandTemplate: '/usr/local/bin/gog sheets append *',
+              commandTemplate: '/usr/local/bin/acme records append *',
             },
           },
         ],
@@ -420,15 +420,15 @@ describe('scheduler MCP tools', () => {
       target: 'here',
       capability_requirements: [
         {
-          capability_id: 'google.sheets.write',
+          capability_id: 'acme.records.append',
           reason: 'Write lead rows after each run',
           implementation: {
             kind: 'local_cli',
-            name: 'gog',
-            executable_path: '/usr/local/bin/gog',
+            name: 'acme',
+            executable_path: '/usr/local/bin/acme',
             executable_version: 'v0.9.0',
             executable_hash: 'sha256:abc123',
-            command_template: '/usr/local/bin/gog sheets append *',
+            command_template: '/usr/local/bin/acme records append *',
           },
         },
       ],
@@ -441,13 +441,13 @@ describe('scheduler MCP tools', () => {
     expect(response.content[0].text).toContain('- Model: job default');
     expect(response.content[0].text).toContain('- Tool access:');
     expect(response.content[0].text).toContain(
-      '- Required capabilities: Google Sheets write using gog',
+      '- Required capabilities: Acme Records Append using acme',
     );
     expect(response.content[0].text).toContain(
       '- Tool access requirements: Browser',
     );
     expect(response.content[0].text).toContain(
-      'use capability:<id> for semantic access such as gog.sheets.get',
+      'use capability:<id> for reviewed semantic access',
     );
     expect(response.content[0].text).toContain('- Network:');
     expect(response.content[0].text).toContain('- Memory:');

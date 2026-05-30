@@ -7,10 +7,10 @@ job creation, CLI defaults, recurring jobs, one-time jobs, and internal MCP
 scheduler tools. Raw provider model IDs are hard to remember and make provider
 details leak into user workflows.
 
-The supported catalog for this cut is intentionally small: Anthropic Opus 4.7,
-Opus 4.6, Sonnet 4.6, Haiku 4.5, and OpenRouter Kimi K2.6. Anthropic documents
-Opus 4.7, Sonnet 4.6, and Haiku 4.5 IDs, context windows, max outputs, and
-pricing in its model overview. Anthropic prompt caching reports
+The supported catalog for this cut is intentionally small: Anthropic Opus 4.8,
+Opus 4.7, Opus 4.6, Sonnet 4.6, Haiku 4.5, and OpenRouter Kimi K2.6.
+Anthropic documents Opus 4.8, Sonnet 4.6, and Haiku 4.5 IDs, context windows,
+max outputs, and pricing in its model overview. Anthropic prompt caching reports
 `cache_creation_input_tokens` and `cache_read_input_tokens`. OpenRouter lists
 Kimi K2.6 as `moonshotai/kimi-k2.6` with a 262,142-token context window.
 
@@ -19,7 +19,7 @@ Kimi K2.6 as `moonshotai/kimi-k2.6` with a 262,142-token context window.
 Gantry owns a provider-neutral catalog in application code. Users select models
 through friendly aliases such as `opus`, `sonnet`, `haiku`, and `kimi`; aliases
 are case-insensitive and punctuation-insensitive. Raw provider IDs such as
-`claude-opus-4-7` and `moonshotai/kimi-k2.6` are rejected at user/API/job/MCP
+`claude-opus-4-8` and `moonshotai/kimi-k2.6` are rejected at user/API/job/MCP
 boundaries unless registered as catalog aliases.
 
 Catalog entries declare workload eligibility for chat, one-time jobs,

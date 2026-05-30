@@ -18,6 +18,7 @@ import {
 const appId = 'default' as AppId;
 const anthropicBaseUrlKey = ['ANTHROPIC', 'BASE_URL'].join('_');
 const anthropicApiKeyKey = ['ANTHROPIC', 'API_KEY'].join('_');
+const claudeCodeOAuthTokenKey = ['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_');
 
 class MutableModelCredentialRepository implements ModelCredentialRepository {
   private readonly rows = new Map<string, ModelCredential>();
@@ -247,6 +248,33 @@ describe('GantryModelGatewayBroker', () => {
     }
   });
 
+  it('projects Anthropic Claude Code OAuth tokens directly to the SDK runner', async () => {
+    const repo = new MutableModelCredentialRepository();
+    repo.setWithMode('anthropic', 'claude_code_oauth', {
+      oauthToken: 'sk-ant-oat-upstream',
+    });
+    const broker = new GantryModelGatewayBroker(repo);
+
+    const injection = await broker.getInjection({
+      binding: {
+        profile: 'gantry',
+        purpose: 'model_runtime',
+        appId,
+        modelRouteId: 'anthropic',
+      },
+    });
+
+    expect(injection).toMatchObject({
+      applied: true,
+      brokerProfile: 'gantry',
+      credentialProviders: { [claudeCodeOAuthTokenKey]: 'native' },
+      env: { [claudeCodeOAuthTokenKey]: 'sk-ant-oat-upstream' },
+    });
+    expect(injection.env[anthropicBaseUrlKey]).toBeUndefined();
+    expect(injection.env[anthropicApiKeyKey]).toBeUndefined();
+    await broker.close();
+  });
+
   it('honors numeric loopback bind hosts only', async () => {
     const repo = new MutableModelCredentialRepository();
     repo.set('anthropic', 'sk-ant-upstream');
@@ -352,6 +380,39 @@ describe('GantryModelGatewayBroker', () => {
         token: injection.env[anthropicApiKeyKey]!,
       });
       expect(afterRevoke.status).toBe(401);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it('does not publish ephemeral credential revocation scopes as runtime run ids', async () => {
+    const repo = new MutableModelCredentialRepository();
+    repo.set('anthropic', 'sk-ant-old');
+    const audit = vi.fn(async () => undefined);
+    const broker = new GantryModelGatewayBroker(repo, { audit });
+    try {
+      await broker.getInjection({
+        binding: {
+          profile: 'gantry',
+          purpose: 'model_runtime',
+          appId,
+          runId: 'credential-run:ephemeral' as never,
+          modelRouteId: 'anthropic',
+        },
+      });
+
+      expect(audit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appId,
+          eventType: 'credential.model.used',
+          actor: 'gantry-model-gateway',
+          payload: expect.objectContaining({
+            providerId: 'anthropic',
+            outcome: 'token_issued',
+          }),
+        }),
+      );
+      expect(audit.mock.calls[0]?.[0]).not.toHaveProperty('runId');
     } finally {
       await broker.close();
     }

@@ -74,7 +74,9 @@ describe('setup credentials step', () => {
       select,
       success,
       upsertModelCredential,
-    } = await loadCredentialsStep({ selections: ['anthropic', 'store'] });
+    } = await loadCredentialsStep({
+      selections: ['anthropic', 'api_key', 'store'],
+    });
     const draft = {
       credentialMode: 'none' as const,
       postgresSetupKind: 'local' as const,
@@ -113,7 +115,9 @@ describe('setup credentials step', () => {
 
   it('keeps an explicit deferred credential command path', async () => {
     const { runCredentialsStep, note, password, upsertModelCredential } =
-      await loadCredentialsStep({ selections: ['anthropic', 'defer'] });
+      await loadCredentialsStep({
+        selections: ['anthropic', 'api_key', 'defer'],
+      });
     const draft = {
       credentialMode: 'none' as const,
       postgresSetupKind: 'local' as const,

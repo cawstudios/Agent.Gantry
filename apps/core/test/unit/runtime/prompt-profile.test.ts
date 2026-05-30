@@ -280,7 +280,10 @@ describe('PromptProfileService', () => {
       'Use capability_search, propose_capability, and manage_capability for durable capability changes',
     );
     expect(prompt).toContain(
-      'Approved third-party MCP servers are always used through mcp_list_tools and mcp_call_tool',
+      'Source = what exists; Capability = reviewed action; Grant = this agent is allowed to use the capability',
+    );
+    expect(prompt).toContain(
+      'Approved third-party MCP sources are inspected through mcp_list_tools and used through mcp_call_tool only when reviewed current-run access covers that action',
     );
     expect(prompt).not.toContain('[[SHARED_CONTEXT]]');
   });

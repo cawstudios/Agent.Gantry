@@ -123,8 +123,9 @@ environment controls.
 deployment secret so Gantry credentials survive stateless
 restarts. General agent tool, script, browser, and MCP environments do not
 receive `GANTRY_DATABASE_URL` or raw provider keys. Selected MCP servers and
-skills receive only their named Gantry capability credentials. Model gateway
-projection is limited to the model SDK credential lane.
+selected reviewed skill actions receive only their named Gantry capability
+credentials. Model gateway projection is limited to the model SDK credential
+lane.
 
 ## Security Architecture (Host Runtime)
 

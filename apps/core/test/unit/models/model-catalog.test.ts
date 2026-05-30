@@ -24,9 +24,9 @@ describe('model catalog resolution', () => {
       alias: 'kimi',
       runnerModel: 'moonshotai/kimi-k2.6',
     });
-    expect(resolveModelSelection('Opus 4.7')).toMatchObject({
+    expect(resolveModelSelection('Opus 4.8')).toMatchObject({
       ok: true,
-      alias: 'opus-4.7',
+      alias: 'opus-4.8',
     });
   });
 
@@ -50,7 +50,8 @@ describe('model catalog resolution', () => {
   });
 
   it('resolves catalog aliases without accepting raw runner IDs', () => {
-    expect(resolveRunnerModel('opus')).toBe('claude-opus-4-7');
+    expect(resolveRunnerModel('opus')).toBe('claude-opus-4-8');
+    expect(resolveRunnerModel('opus 4.8')).toBe('claude-opus-4-8');
     expect(resolveRunnerModel('opus 4.7')).toBe('claude-opus-4-7');
     expect(resolveRunnerModel('claude-sonnet-4-6')).toBeUndefined();
     expect(resolveRunnerModel('opusplan')).toBeUndefined();
@@ -340,8 +341,11 @@ describe('model usage normalization', () => {
   });
 
   it('finds entries by runner ID, provider model ID, and alias', () => {
-    expect(findModelByRunnerModel('claude-opus-4-7')?.recommendedAlias).toBe(
+    expect(findModelByRunnerModel('claude-opus-4-8')?.recommendedAlias).toBe(
       'opus',
+    );
+    expect(findModelByRunnerModel('claude-opus-4-7')?.recommendedAlias).toBe(
+      'opus-4.7',
     );
     expect(
       findModelByRunnerModel('moonshotai/kimi-k2.6')?.recommendedAlias,

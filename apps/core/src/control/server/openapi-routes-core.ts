@@ -198,7 +198,7 @@ export const coreOpenApiRouteDocs: RouteDoc[] = [
     'getAgentSources',
     'Capabilities',
     'Get attached agent sources',
-    'Returns attached skills, MCP servers, and tool sources without granting authority.',
+    'Returns attached skills, MCP servers, and tool sources without creating authority.',
     ['agents:admin'],
     { parameters: [ids.agent] },
   ),

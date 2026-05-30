@@ -4,6 +4,8 @@ import type { AgentCredentialBroker } from '@core/domain/ports/agent-credential-
 import type { ModelPresetId } from '@core/shared/model-catalog.js';
 
 const anthropicProvider = (): ModelPresetId => 'anthropic' as ModelPresetId;
+const claudeCodeOAuthTokenKey = () =>
+  ['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_');
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -46,9 +48,13 @@ function gatewayBroker(env: Record<string, string>): AgentCredentialBroker {
       supportsAgentBinding: false,
       supportsModelRuntimeProfile: true,
       modelRuntimeProfileIdentifier: 'gantry-model-access',
-      returnsRawSecrets: false,
-      projectsProviderTokens: false,
-      projectedSecretEnvKeys: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY'],
+      returnsRawSecrets: true,
+      projectsProviderTokens: true,
+      projectedSecretEnvKeys: [
+        'ANTHROPIC_BASE_URL',
+        'ANTHROPIC_API_KEY',
+        claudeCodeOAuthTokenKey(),
+      ],
     }),
   };
 }
@@ -127,6 +133,28 @@ describe('model provider preflight', () => {
     ).resolves.toMatchObject({
       ok: false,
       status: 'fail',
+    });
+  });
+
+  it('passes when Gantry projects a Claude Code OAuth token for Anthropic', async () => {
+    const broker = gatewayBroker({
+      [claudeCodeOAuthTokenKey()]: 'sk-ant-oat-test',
+    });
+    const { preflightModelPreset } = await loadPreflight(broker);
+
+    await expect(
+      preflightModelPreset({
+        runtimeHome: '/tmp/gantry-model-preflight-test',
+        preset: anthropicProvider(),
+        settings: {
+          credentialBroker: {
+            mode: 'gantry',
+          },
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'pass',
     });
   });
 });

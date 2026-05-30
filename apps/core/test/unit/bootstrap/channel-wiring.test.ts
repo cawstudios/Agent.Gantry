@@ -495,6 +495,52 @@ describe('createChannelWiring', () => {
     );
   });
 
+  it('publishes provider-neutral outbound conversation message events', async () => {
+    const app = makeApp();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+    const outbound = makeChannel({
+      ownsJid: vi.fn((jid: string) => jid === 'sl:C123'),
+      sendMessage: vi.fn(async () => ({ externalMessageId: '171.123' })),
+    });
+
+    const wiring = createChannelWiring(app, {
+      providerIds: [
+        makeProvider(
+          'slack',
+          vi.fn(() => outbound),
+        ),
+      ],
+      publishRuntimeEvent,
+    });
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: false, slack: true }),
+    );
+
+    await wiring.sendMessage('sl:C123', 'done', {
+      durability: 'best_effort',
+      messageOptions: { threadId: '1700.1' },
+    });
+
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'default',
+        conversationId: 'sl:C123',
+        threadId: '1700.1',
+        eventType: 'conversation.message.outbound',
+        actor: 'agent',
+        responseMode: 'none',
+        payload: expect.objectContaining({
+          conversationId: 'conversation:sl:C123',
+          threadId: 'thread:sl:C123:1700.1',
+          direction: 'outbound',
+          deliveryStatus: 'sent',
+          externalMessageId: '171.123',
+          text: 'done',
+        }),
+      }),
+    );
+  });
+
   it('requires a channel-minted recovery permit for provider-level recovery sends', async () => {
     const app = makeApp();
     const outbound = makeChannel({

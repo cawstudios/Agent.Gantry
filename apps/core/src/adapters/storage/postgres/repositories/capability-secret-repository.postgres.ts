@@ -16,6 +16,7 @@ import { nowIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
 import type { CanonicalDb } from './canonical-graph-repository.postgres.js';
 import {
+  CredentialSecretCryptoIntegrityError,
   decryptCredentialSecretValue,
   encryptCredentialSecretValue,
 } from './credential-secret-crypto.js';
@@ -43,19 +44,25 @@ export class PostgresCapabilitySecretRepository implements CapabilitySecretRepos
       )
       .limit(1);
     const row = rows[0];
-    return row
-      ? {
-          ...mapMetadata(row),
-          value: decryptCapabilitySecretValue(
-            row.valueEncrypted,
-            {
-              appId: row.appId,
-              name: row.name,
-            },
-            this.runtimeSecrets,
-          ),
-        }
-      : null;
+    if (!row) return null;
+    try {
+      return {
+        ...mapMetadata(row),
+        value: decryptCapabilitySecretValue(
+          row.valueEncrypted,
+          {
+            appId: row.appId,
+            name: row.name,
+          },
+          this.runtimeSecrets,
+        ),
+      };
+    } catch (error) {
+      if (error instanceof CredentialSecretCryptoIntegrityError) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async listSecrets(input: {

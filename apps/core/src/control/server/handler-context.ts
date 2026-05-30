@@ -77,6 +77,11 @@ export type ControlRouteContext = {
     preset: ModelPresetId,
     appId?: AppId,
   ) => Promise<ControlModelPresetPreflightResult>;
+  sendConversationIngressProjection?: (input: {
+    conversationJid: string;
+    threadId: string | null;
+    text: string;
+  }) => Promise<void>;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
   syncSettingsFromProjection: (appId: AppId) => Promise<void>;
 };

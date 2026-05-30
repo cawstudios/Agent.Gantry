@@ -16,7 +16,10 @@ import {
   materializedSkillDirectoryNameFor,
   reservedMaterializedSkillDirectoryNameFor,
 } from '../../domain/skills/skills.js';
-import { skillMaterializationKey } from '../../domain/skills/skill-identity.js';
+import {
+  skillMaterializationKey,
+  skillMaterializationKeyForName,
+} from '../../domain/skills/skill-identity.js';
 import { parseSkillActionPermissionsFromAssets } from '../../domain/skills/skill-action-permissions.js';
 import {
   assertValidCapabilitySecretName,
@@ -25,13 +28,13 @@ import {
 import { reservedSdkNativeSkillNameFor } from '../../shared/sdk-native-skill-names.js';
 import { nowIso } from '../../shared/time/datetime.js';
 
-export class SkillDraftService {
+export class SkillService {
   constructor(
     private readonly skills: SkillCatalogRepository,
     private readonly artifacts: SkillArtifactStore,
   ) {}
 
-  async importDraft(input: {
+  async installSkill(input: {
     appId: AppId;
     agentId?: AgentId;
     name?: string;
@@ -47,7 +50,6 @@ export class SkillDraftService {
     now?: string;
   }): Promise<SkillCatalogItem> {
     const now = input.now ?? nowIso();
-    const skillId = `skill:${globalThis.crypto.randomUUID()}` as SkillId;
     const metadata = resolveSkillMetadata({
       assets: input.assets,
       name: input.name,
@@ -59,26 +61,28 @@ export class SkillDraftService {
       catalogName: metadata.name,
       declaredName: metadata.declaredName,
     });
+    const existing = await this.findExistingSkillByMaterializationKey({
+      appId: input.appId,
+      name: metadata.name,
+    });
+    const skillId =
+      existing?.id ?? (`skill:${globalThis.crypto.randomUUID()}` as SkillId);
     const stored = await this.artifacts.putSkillArtifact({
       appId: input.appId,
       skillId,
+      skillName: metadata.name,
       bundle: { assets: input.assets },
     });
-    const existing = await this.findExistingSkillByContentHash({
-      appId: input.appId,
-      agentId: input.agentId,
-      contentHash: stored.contentHash,
-    });
-    if (existing) return existing;
     const skill: SkillCatalogItem = {
       id: skillId,
       appId: input.appId,
-      agentId: input.agentId,
+      agentId: undefined,
       name: metadata.name,
       description: metadata.description,
-      version: stored.contentHash.replace(/^sha256:/, '').slice(0, 12),
-      source: input.agentId ? 'agent_created' : 'admin_uploaded',
-      status: 'draft',
+      source:
+        existing?.source ??
+        (input.agentId ? 'agent_created' : 'admin_uploaded'),
+      status: 'installed',
       promptRefs: [],
       toolIds: [],
       workflowRefs: [],
@@ -86,14 +90,20 @@ export class SkillDraftService {
       actionPermissions: metadata.actionPermissions,
       storage: stored,
       createdBy: input.createdBy,
-      createdAt: now,
+      createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
     await this.skills.saveSkill(skill);
+    await this.disableInstalledMaterializationDuplicates({
+      appId: input.appId,
+      keepSkillId: skill.id,
+      name: skill.name,
+      updatedAt: now,
+    });
     return skill;
   }
 
-  listDrafts(input: {
+  listSkills(input: {
     appId: AppId;
     agentId?: AgentId;
     statuses?: SkillStatus[];
@@ -101,65 +111,8 @@ export class SkillDraftService {
     return this.skills.listSkills({
       appId: input.appId,
       agentId: input.agentId,
-      statuses: input.statuses ?? ['draft'],
+      statuses: input.statuses ?? ['installed'],
     });
-  }
-
-  async approveDraft(input: {
-    appId: AppId;
-    skillId: SkillId;
-    approvedBy?: string;
-    now?: string;
-  }): Promise<SkillCatalogItem> {
-    const skill = await this.requireSkill(input.appId, input.skillId);
-    if (skill.status !== 'draft') {
-      throw new Error(`Only draft skills can be approved: ${skill.id}`);
-    }
-    if (!skill.storage) {
-      throw new Error(`Skill draft has no stored artifact: ${skill.id}`);
-    }
-    assertSkillNameDoesNotCollideWithReservedMaterialization(skill.name);
-    const bundle = await this.artifacts.getSkillArtifact(
-      skill.storage.storageRef,
-    );
-    assertSkillMetadataCanBeMaterialized({
-      catalogName: skill.name,
-      declaredName: skillDeclaredNameFromAssets(bundle.assets),
-    });
-    const now = input.now ?? nowIso();
-    const approved: SkillCatalogItem = {
-      ...skill,
-      status: 'approved',
-      approvedBy: input.approvedBy,
-      approvedAt: now,
-      rejectedBy: undefined,
-      rejectedAt: undefined,
-      updatedAt: now,
-    };
-    await this.skills.saveSkill(approved);
-    return approved;
-  }
-
-  async rejectDraft(input: {
-    appId: AppId;
-    skillId: SkillId;
-    rejectedBy?: string;
-    now?: string;
-  }): Promise<SkillCatalogItem> {
-    const skill = await this.requireSkill(input.appId, input.skillId);
-    if (skill.status !== 'draft') {
-      throw new Error(`Only draft skills can be rejected: ${skill.id}`);
-    }
-    const now = input.now ?? nowIso();
-    const rejected: SkillCatalogItem = {
-      ...skill,
-      status: 'rejected',
-      rejectedBy: input.rejectedBy,
-      rejectedAt: now,
-      updatedAt: now,
-    };
-    await this.skills.saveSkill(rejected);
-    return rejected;
   }
 
   async bindSkillToAgent(input: {
@@ -170,7 +123,7 @@ export class SkillDraftService {
   }): Promise<AgentSkillBinding> {
     const skill = await this.requireSkill(input.appId, input.skillId);
     if (!isSkillUsableForBinding(skill)) {
-      throw new Error(`Skill must be approved before binding: ${skill.id}`);
+      throw new Error(`Skill must be installed before binding: ${skill.id}`);
     }
     const now = input.now ?? nowIso();
     await this.disableActiveMaterializationCollisions({
@@ -238,7 +191,7 @@ export class SkillDraftService {
     });
   }
 
-  async rollbackApprovedSkillBinding(input: {
+  async rollbackInstalledSkillBinding(input: {
     appId: AppId;
     agentId: AgentId;
     skillId: SkillId;
@@ -249,15 +202,6 @@ export class SkillDraftService {
       appId: input.appId,
       agentId: input.agentId,
       skillId: input.skillId,
-      updatedAt: now,
-    });
-    const skill = await this.requireSkill(input.appId, input.skillId);
-    if (skill.status !== 'approved') return;
-    await this.skills.saveSkill({
-      ...skill,
-      status: 'draft',
-      approvedBy: undefined,
-      approvedAt: undefined,
       updatedAt: now,
     });
   }
@@ -281,37 +225,46 @@ export class SkillDraftService {
     return skill;
   }
 
-  private async findExistingSkillByContentHash(input: {
+  private async findExistingSkillByMaterializationKey(input: {
     appId: AppId;
-    agentId?: AgentId;
-    contentHash: string;
+    name: string;
   }): Promise<SkillCatalogItem | null> {
-    const statuses: SkillStatus[] = [
-      'draft',
-      'approved',
-      'rejected',
-      'disabled',
-    ];
-    if (this.skills.getSkillByContentHash) {
-      return this.skills.getSkillByContentHash({
-        appId: input.appId,
-        contentHash: input.contentHash,
-        agentId: input.agentId ?? null,
-        statuses,
-      });
-    }
     const existing = await this.skills.listSkills({
       appId: input.appId,
-      statuses,
+      statuses: ['installed'],
     });
+    const targetKey = skillMaterializationKeyForName(input.name);
     return (
-      existing.find(
-        (skill) =>
-          skill.storage?.contentHash === input.contentHash &&
-          (input.agentId
-            ? skill.agentId === input.agentId
-            : skill.agentId === undefined),
-      ) ?? null
+      existing.find((skill) => skillMaterializationKey(skill) === targetKey) ??
+      null
+    );
+  }
+
+  private async disableInstalledMaterializationDuplicates(input: {
+    appId: AppId;
+    keepSkillId: SkillId;
+    name: string;
+    updatedAt: string;
+  }): Promise<void> {
+    const skills = await this.skills.listSkills({
+      appId: input.appId,
+      statuses: ['installed'],
+    });
+    const targetKey = skillMaterializationKeyForName(input.name);
+    await Promise.all(
+      skills
+        .filter(
+          (skill) =>
+            skill.id !== input.keepSkillId &&
+            skillMaterializationKey(skill) === targetKey,
+        )
+        .map((skill) =>
+          this.skills.saveSkill({
+            ...skill,
+            status: 'disabled',
+            updatedAt: input.updatedAt,
+          }),
+        ),
     );
   }
 }

@@ -6,7 +6,7 @@ import {
   writeContinuationInput,
 } from './continuation-input.js';
 import { stopActiveGroupRun } from './group-queue-stop.js';
-import { normalizeThreadQueueId } from './thread-queue-key.js';
+import { normalizeThreadQueueId } from '../shared/thread-queue-key.js';
 
 type QueueKind = 'message' | 'task';
 type ContinuationOptions = {

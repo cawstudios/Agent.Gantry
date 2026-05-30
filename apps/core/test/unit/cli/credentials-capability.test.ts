@@ -9,6 +9,7 @@ import type { AppId } from '@core/domain/app/app.js';
 const originalEnv = { ...process.env };
 
 function makeSecretRepository() {
+  const getSecret = vi.fn(async () => null);
   const upsertSecret = vi.fn(
     async (
       input: Parameters<CapabilitySecretRepository['upsertSecret']>[0],
@@ -22,7 +23,7 @@ function makeSecretRepository() {
     }),
   );
   const repository: CapabilitySecretRepository = {
-    getSecret: vi.fn(async () => null),
+    getSecret,
     listSecrets: vi.fn(async (input: { appId: AppId }) => [
       {
         id: 'secret:default:GITHUB_TOKEN' as never,
@@ -36,7 +37,7 @@ function makeSecretRepository() {
     upsertSecret,
     deleteSecret: vi.fn(async () => true),
   };
-  return { repository, upsertSecret };
+  return { repository, getSecret, upsertSecret };
 }
 
 function makeModelCredentialRepository() {
@@ -115,6 +116,45 @@ describe('credentials capability CLI', () => {
     expect(rendered).toContain('runtime access: via Gantry Model Gateway');
     expect(rendered).toContain('configured: Anthropic key');
     expect(rendered).not.toContain('apiKey');
+  });
+
+  it('reports capability secrets that cannot be resolved as needing reset', async () => {
+    const { repository } = makeSecretRepository();
+    const note = vi.fn();
+    vi.doMock('@clack/prompts', () => ({
+      note,
+      isCancel: vi.fn(() => false),
+      password: vi.fn(),
+      outro: vi.fn(),
+      log: { error: vi.fn(), info: vi.fn(), success: vi.fn(), warn: vi.fn() },
+    }));
+    vi.doMock('@core/adapters/storage/postgres/factory.js', () => ({
+      createStorageRuntime: () => ({
+        service: {
+          migrate: vi.fn(async () => undefined),
+          close: vi.fn(async () => undefined),
+        },
+        runtimeEventNotifier: { close: vi.fn(async () => undefined) },
+        runtimeEvents: { publish: vi.fn(async () => undefined) },
+        repositories: {
+          capabilitySecrets: repository,
+          modelCredentials: makeModelCredentialRepository(),
+        },
+      }),
+    }));
+
+    const { runCredentialsCommand } = await import('@core/cli/credentials.js');
+
+    await expect(
+      runCredentialsCommand('/tmp/gantry-credentials-test', [
+        'capability',
+        'list',
+      ]),
+    ).resolves.toBe(0);
+
+    const rendered = note.mock.calls.flat().join('\n');
+    expect(rendered).toContain('GITHUB_TOKEN: needs reset');
+    expect(rendered).not.toContain('secret-token-value');
   });
 
   it('imports shell secrets into Gantry Credentials without printing values', async () => {

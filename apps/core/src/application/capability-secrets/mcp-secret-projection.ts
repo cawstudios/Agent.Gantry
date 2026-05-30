@@ -22,7 +22,7 @@ export async function resolveMcpCredentialEnvForAgent(input: {
   const service = new CapabilitySecretService(input.secrets);
   const credentialEnv: Record<string, string> = {};
   for (const record of records) {
-    const refs = record.version.credentialRefs;
+    const refs = record.definition.credentialRefs;
     if (refs.length === 0) continue;
     const resolved = await service.resolveMcpCredentialRefs({
       appId: input.appId,

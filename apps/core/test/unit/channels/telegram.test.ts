@@ -1916,6 +1916,27 @@ describe('TelegramChannel', () => {
       );
     });
 
+    it('streams in groups even when private draft streaming is unavailable', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+      (channel as unknown as { draftStreamApi: null }).draftStreamApi = null;
+
+      const delivered = await channel.sendStreamingChunk(
+        'tg:-1001234567890',
+        'group update',
+        { threadId: '1' },
+      );
+
+      expect(delivered).toBe(true);
+      expect(currentBot().api.sendMessageDraft).not.toHaveBeenCalled();
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        '-1001234567890',
+        'group update',
+        { message_thread_id: 1 },
+      );
+    });
+
     it('does not duplicate final group message when edit returns "message is not modified"', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
@@ -2532,7 +2553,7 @@ describe('TelegramChannel', () => {
         '100200300',
         987,
         expect.stringContaining(
-          'Allowed once: exact command access\nFor: RunCommand',
+          'Allowed once: exact command access\nFor: Allow command',
         ),
         expect.objectContaining({
           reply_markup: { inline_keyboard: [] },

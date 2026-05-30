@@ -20,6 +20,7 @@ import type { CapabilityRuntimeAccess } from '../shared/capability-runtime-acces
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
 import type { AgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter.js';
 import type { AgentExecutionAdapterRegistry } from '../application/agent-execution/agent-execution-adapter-registry.js';
+import type { SemanticCapabilityDefinition } from '../shared/semantic-capabilities.js';
 
 export interface AgentInput {
   prompt: string;
@@ -37,9 +38,10 @@ export interface AgentInput {
   browserProfileName?: string;
   allowedTools?: string[];
   toolAccessRequirements?: string[];
-  selectedSkillIds?: string[];
+  attachedSkillSourceIds?: string[];
   selectedSkillDisplays?: string[];
-  selectedMcpServerIds?: string[];
+  attachedMcpSourceIds?: string[];
+  semanticCapabilities?: SemanticCapabilityDefinition[];
   isScheduledJob?: boolean;
   jobId?: string;
   jobName?: string;

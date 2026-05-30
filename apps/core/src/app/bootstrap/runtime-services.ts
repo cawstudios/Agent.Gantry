@@ -21,7 +21,7 @@ import { recoverPendingMessages, startMessagePollingLoop } from '../../runtime/m
 // prettier-ignore
 import { requestSchedulerSync, startSchedulerLoop } from '../../jobs/scheduler.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { makeThreadQueueKey } from '../../runtime/thread-queue-key.js';
+import { makeThreadQueueKey } from '../../shared/thread-queue-key.js';
 import type { RuntimeJobRepository } from '../../domain/repositories/ops-repo.js';
 import type {
   CapabilitySecretRepository,

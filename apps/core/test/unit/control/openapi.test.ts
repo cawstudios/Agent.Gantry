@@ -75,10 +75,8 @@ const expectedControlRoutes = [
   'POST /v1/jobs/{jobId}/resume',
   'POST /v1/jobs/{jobId}/trigger',
   'GET /v1/mcp-servers',
-  'GET /v1/mcp-servers/drafts',
-  'POST /v1/mcp-servers/drafts',
-  'POST /v1/mcp-servers/drafts/{serverId}/approve',
-  'POST /v1/mcp-servers/drafts/{serverId}/reject',
+  'POST /v1/mcp-servers',
+  'GET /v1/mcp-servers/{serverId}',
   'POST /v1/mcp-servers/{serverId}/disable',
   'POST /v1/mcp-servers/{serverId}/test',
   'GET /v1/memory',
@@ -111,12 +109,10 @@ const expectedControlRoutes = [
   'POST /v1/sessions/ensure',
   'GET /v1/settings',
   'PATCH /v1/settings',
+  'GET /v1/skills',
+  'POST /v1/skills/install',
   'GET /v1/skills/{skillId}/files',
   'GET /v1/skills/{skillId}/files/{filePath}',
-  'GET /v1/skills/drafts',
-  'POST /v1/skills/drafts/upload',
-  'POST /v1/skills/drafts/{skillId}/approve',
-  'POST /v1/skills/drafts/{skillId}/reject',
   'GET /v1/triggers/{triggerId}/wait',
   'GET /v1/webhooks',
   'POST /v1/webhooks',
@@ -439,12 +435,16 @@ describe('control OpenAPI documentation', () => {
     expect(spec.paths['/v1/ingresses/{ingressId}/invoke']?.post.security).toBe(
       undefined,
     );
+    expect(
+      spec.components.schemas.ExternalIngressConversationMessageTarget
+        .properties.kind.enum,
+    ).toEqual(['conversation_message']);
 
     const operationIds = Object.values(spec.paths).flatMap((pathItem) =>
       Object.values(pathItem).map((operation) => operation.operationId),
     );
     expect(operationIds).toContain('listProviderConnections');
-    expect(operationIds).toContain('createMcpServerDraft');
+    expect(operationIds).toContain('connectMcpServer');
     expect(new Set(operationIds).size).toBe(operationIds.length);
   });
 

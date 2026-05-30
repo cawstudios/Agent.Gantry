@@ -1346,6 +1346,7 @@ describe('app memory dreaming settings', () => {
     });
 
     expect(createEmbeddingProvider).toHaveBeenCalledWith('test_embedder', {
+      appId: 'app-a',
       model: 'test-embedding-model',
     });
     expect(validateConfiguration).toHaveBeenCalledOnce();
@@ -1405,6 +1406,7 @@ describe('app memory dreaming settings', () => {
     });
 
     expect(createEmbeddingProvider).toHaveBeenCalledWith('openai', {
+      appId: 'app-a',
       model: 'text-embedding-3-large',
     });
     expect(validateConfiguration).toHaveBeenCalledOnce();
@@ -2089,6 +2091,7 @@ describe('app memory dreaming settings', () => {
       }),
     );
     expect(createEmbeddingProvider).toHaveBeenCalledWith('test_embedder', {
+      appId: 'app-a',
       model: 'test-embedding-model',
     });
     expect(inserted).toContainEqual(

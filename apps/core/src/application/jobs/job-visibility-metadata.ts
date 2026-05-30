@@ -66,7 +66,6 @@ export interface JobHealthMetadata {
     | 'credential_unknown'
     | 'browser_login_may_be_required'
     | 'mcp_missing_credential'
-    | 'draft_only'
     | 'running'
     | 'completed'
     | 'failed'

@@ -38,7 +38,10 @@ import {
   createRuntimeUserVisibleStreamSanitizer,
   resolveMemoryUserId,
 } from './session-resume-runtime.js';
-import { firstThreadQueueId, parseThreadQueueKey } from './thread-queue-key.js';
+import {
+  firstThreadQueueId,
+  parseThreadQueueKey,
+} from '../shared/thread-queue-key.js';
 import { formatElapsed } from './time-format.js';
 import { createRuntimeModelStatusAccess } from './model-status-store.js';
 import { memoryScopeForConversationKind } from './group-run-context.js';

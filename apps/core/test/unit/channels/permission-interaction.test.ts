@@ -227,38 +227,33 @@ describe('permission interaction', () => {
         sourceAgentFolder: 'main_agent',
         toolName: 'request_permission',
         toolInput: {
-          capabilityId: 'google.sheets.write',
-          capabilityDisplayName: 'Google Sheets write',
-          accountLabel: 'ravi@example.com',
-          can: 'Update spreadsheet values.',
-          cannot: 'Change sharing or read Gmail.',
+          capabilityId: 'acme.records.append',
+          capabilityDisplayName: 'Acme records append',
+          accountLabel: 'Acme tenant',
+          can: 'Append records through reviewed Acme access.',
+          cannot: 'Delete records, export secrets, or change account settings.',
         },
         suggestions: [
           {
             type: 'addRules',
             behavior: 'allow',
-            rules: [{ toolName: 'capability:google.sheets.write' }],
+            rules: [{ toolName: 'capability:acme.records.append' }],
           },
         ],
       },
       60_000,
     );
 
-    expect(text.split('\n')[0]).toBe('Allow Google Sheets write?');
-    expect(text).toContain('Account: Configured Google access');
+    expect(text.split('\n')[0]).toBe('Allow Acme records append?');
+    expect(text).toContain('Account: Acme tenant');
     expect(text).toContain(
-      'Allows: Read and update spreadsheet values through configured Google access.',
+      'Allows: Append records through reviewed Acme access.',
     );
     expect(text).toContain(
-      'Does not allow: Change sharing, manage Drive files outside Sheets operations, access Gmail, or receive raw OAuth tokens.',
+      'Does not allow: Delete records, export secrets, or change account settings.',
     );
-    expect(text).toContain(
-      'Details: capability:google.sheets.write; risk: write',
-    );
-    expect(text).not.toContain('Capability: capability:google.sheets.write');
-    expect(text).not.toContain('\nRisk: write');
-    expect(text).not.toContain('ravi@example.com');
-    expect(text).not.toContain('Change sharing or read Gmail.');
+    expect(text).toContain('Capability: Acme Records Append');
+    expect(text).not.toContain('capability:acme.records.append');
     expect(
       permissionButtonLabel(
         'allow_persistent_rule',
@@ -266,7 +261,7 @@ describe('permission interaction', () => {
           {
             type: 'addRules',
             behavior: 'allow',
-            rules: [{ toolName: 'capability:google.sheets.write' }],
+            rules: [{ toolName: 'capability:acme.records.append' }],
           },
         ]),
       ),
@@ -333,7 +328,7 @@ describe('permission interaction', () => {
       decidedBy: 'ravi',
     });
     expect(receipt).toContain('Always allowed: LinkedIn posting');
-    expect(receipt).toContain('Details: LinkedIn posting [sha256:');
+    expect(receipt).toContain('Details: LinkedIn posting');
   });
 
   it('hides generated runtime skill paths in command prompts and receipts', () => {
@@ -372,7 +367,7 @@ describe('permission interaction', () => {
       decidedBy: 'ravi',
     });
     expect(receipt).toContain(
-      'For: RunCommand (generated skill action: skills/linkedin-posting/post.py)',
+      'For: Selected skill action (skills/linkedin-posting/post.py)',
     );
     expect(receipt).not.toContain('.llm-runtime');
   });
@@ -385,7 +380,7 @@ describe('permission interaction', () => {
       threadId: '2771',
       toolName: 'Bash',
       toolInput: {
-        command: 'gog sheets append sheet-id A1:B2',
+        command: 'acme records append sheet-id A1:B2',
       },
       suggestions: [
         {
@@ -394,7 +389,7 @@ describe('permission interaction', () => {
           rules: [
             {
               toolName: 'RunCommand',
-              ruleContent: 'gog sheets append *',
+              ruleContent: 'acme records append *',
             },
           ],
         },
@@ -430,13 +425,13 @@ describe('permission interaction', () => {
         requestId: 'permission_123',
         sourceAgentFolder: 'main_agent',
         toolName: 'request_permission',
-        displayName: 'Permission: Google Sheets write using gog',
+        displayName: 'Permission: Acme records append using acme',
         title: 'Approve permission request',
         toolInput: {
-          capabilityId: 'google.sheets.write',
-          capabilityDisplayName: 'Google Sheets write using gog',
+          capabilityId: 'acme.records.append',
+          capabilityDisplayName: 'Acme records append using acme',
           toolNames: ['Bash'],
-          rule: '/usr/local/bin/gog sheets append *',
+          rule: '/usr/local/bin/acme records append *',
         },
         suggestions: [
           {
@@ -445,7 +440,7 @@ describe('permission interaction', () => {
             rules: [
               {
                 toolName: 'Bash',
-                ruleContent: '/usr/local/bin/gog sheets append *',
+                ruleContent: '/usr/local/bin/acme records append *',
               },
             ],
           },
@@ -456,14 +451,41 @@ describe('permission interaction', () => {
 
     expect(text.split('\n')[0]).toBe('Allow exact command access?');
     expect(text).toContain(
-      'Request: Permission: Google Sheets write using gog',
+      'Request: Permission: Acme records append using acme',
     );
-    expect(text).toContain('Details: scoped RunCommand rule');
+    expect(text).toContain('Details: matching command access');
     expect(text).not.toContain('Always allow grants this capability');
     expect(text).not.toContain(
-      'RunCommand(/usr/local/bin/gog sheets append *)',
+      'RunCommand(/usr/local/bin/acme records append *)',
     );
     expect(text).not.toContain('Configured Google access');
+  });
+
+  it('renders request_permission command fallbacks without implementation tool names', () => {
+    const text = formatPermissionPromptText(
+      {
+        requestId: 'permission_123',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'request_permission',
+        displayName: 'RunCommand',
+        description: 'Publish the LinkedIn post draft',
+        decisionReason: 'Contains simple_expansion',
+        toolInput: {
+          command:
+            'REQUESTS_CA_BUNDLE=$NODE_EXTRA_CA_CERTS /opt/homebrew/bin/python3 "$CLAUDE_PROJECT_DIR/skills/linkedin-posting/post.py" --file /tmp/post.md',
+          description: 'Publish the LinkedIn post draft',
+        },
+      },
+      60_000,
+    );
+
+    expect(text.split('\n')[0]).toBe('Allow exact command access?');
+    expect(text).toContain('Request: Exact Command Access');
+    expect(text).toContain('Reason: Contains shell expansion');
+    expect(text).toContain('Details: Publish the LinkedIn post draft');
+    expect(text).not.toContain('Allow RunCommand?');
+    expect(text).not.toContain('"command"');
+    expect(text).not.toContain('simple_expansion');
   });
 
   it('hides Bash commands with secrets in permission prompt previews', () => {
@@ -523,9 +545,9 @@ describe('permission interaction', () => {
       60_000,
     );
 
-    expect(text).toContain('Closest existing rule: scoped RunCommand rule');
+    expect(text).toContain('Closest existing access: matching command access');
     expect(text).toContain(
-      '(did not match: Bash leaf npm test did not match any scoped autonomous rule.)',
+      '(did not match: command npm test did not match any scoped autonomous rule.)',
     );
   });
 
@@ -585,7 +607,7 @@ describe('permission interaction', () => {
       \`\`\`
       Redirect: > /tmp/leads.json
 
-      Details: scoped RunCommand rule [sha256:651e0a28f1709b35], scoped RunCommand rule [sha256:4c22b27e112603fa]
+      Details: matching command access, matching command access
 
       Scope: this request, a short 5-minute grant, or future matching tool calls.
       Safety: only matching future access is included; unrelated tools, secrets, and settings changes are not included.
@@ -677,9 +699,7 @@ describe('permission interaction', () => {
     );
 
     expect(text).toContain('Allow LinkedIn posting?');
-    expect(text).toContain(
-      'Details: capability:skill.linkedin-posting.publish; risk: write',
-    );
+    expect(text).toContain('Risk: Write');
   });
 
   it('does not trust free-form labels for unknown skill action capabilities', () => {
@@ -761,22 +781,39 @@ describe('permission interaction', () => {
     expect(webFetch).toContain('Prompt: Summarize the setup section.');
   });
 
-  it('renders unknown MCP input as pretty JSON with head and tail content', () => {
-    const longValue = `curl ${'x'.repeat(650)} > /tmp/out`;
+  it('renders unknown non-command input as pretty JSON with head and tail content', () => {
+    const longValue = `lookup ${'x'.repeat(650)} tail`;
     const text = formatPermissionPromptText(
       {
         requestId: 'permission_123',
         sourceAgentFolder: 'main_agent',
         toolName: 'mcp__thirdparty__unknown',
-        toolInput: { command: longValue, nested: { ok: true } },
+        toolInput: { query: longValue, nested: { ok: true } },
       },
       60_000,
     );
 
     expect(text).toContain('```json');
-    expect(text).toContain('curl ');
-    expect(text).toContain('> /tmp/out');
+    expect(text).toContain('lookup ');
+    expect(text).toContain('tail');
     expect(text).toContain('…');
+  });
+
+  it('renders any command-shaped permission input without a JSON dump', () => {
+    const text = formatPermissionPromptText(
+      {
+        requestId: 'permission_123',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'mcp__thirdparty__run',
+        toolInput: { command: 'acme publish draft-123' },
+      },
+      60_000,
+    );
+
+    expect(text.split('\n')[0]).toBe('Allow exact command access?');
+    expect(text).toContain('Command:\n```');
+    expect(text).toContain('acme publish draft-123');
+    expect(text).not.toContain('```json');
   });
 
   it('echoes the approved action in once receipts', () => {
@@ -796,7 +833,7 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain('Allowed once: exact command access');
-    expect(receipt).toContain('For: RunCommand (git status --short)');
+    expect(receipt).toContain('For: Command (git status --short)');
     expect(receipt).toContain('From: agent chat');
     expect(receipt).toContain('Agent: main_agent');
     expect(receipt).not.toContain('Request ID');
@@ -822,7 +859,7 @@ describe('permission interaction', () => {
 
     expect(receipt).toContain('Allowed for 5 minutes: exact command access');
     expect(receipt).toContain('Until:');
-    expect(receipt).toContain('For: RunCommand (git status --short)');
+    expect(receipt).toContain('For: Command (git status --short)');
     expect(receipt).toContain('From: agent chat');
     expect(receipt).toContain('Agent: main_agent');
     expect(receipt).not.toContain('eligible tools and SDK API/network prompts');
@@ -924,13 +961,13 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain('Always allowed: exact command access');
-    expect(receipt).toContain('Details: scoped RunCommand rule');
-    expect(receipt).toContain('Browser [sha256:');
+    expect(receipt).toContain('Details: matching command access');
+    expect(receipt).toContain('Browser');
     expect(receipt).not.toContain('RunCommand(curl https://api.example.com/*)');
     expect(receipt).not.toContain('RunCommand(jq *)');
     expect(receipt).toContain('Revoke: /permissions remove <rule>');
     expect(receipt).toContain(
-      'For: RunCommand (curl https://api.example.com/leads > /tmp/out)',
+      'For: Command (curl https://api.example.com/leads > /tmp/out)',
     );
     expect(receipt).not.toContain('Request ID');
     expect(receipt).not.toContain('perm-abc-123');
@@ -956,7 +993,7 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain('Allowed once');
-    expect(receipt).toContain('For: RunCommand command');
+    expect(receipt).toContain('For: Command');
     expect(receipt).not.toContain('REDACTED');
     expect(receipt).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
     expect(receipt).not.toContain('Request ID');

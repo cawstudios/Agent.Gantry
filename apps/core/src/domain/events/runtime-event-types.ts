@@ -4,6 +4,8 @@ export const RUNTIME_EVENT_TYPES = {
   SESSION_MESSAGE_STREAMING: 'session.message.streaming',
   SESSION_TYPING: 'session.typing',
   SESSION_PROGRESS: 'session.progress',
+  CONVERSATION_MESSAGE_INBOUND: 'conversation.message.inbound',
+  CONVERSATION_MESSAGE_OUTBOUND: 'conversation.message.outbound',
   JOB_TRIGGERED: 'job.triggered',
   JOB_RUN_STARTED: 'job.run.started',
   JOB_STARTED: 'job.started',

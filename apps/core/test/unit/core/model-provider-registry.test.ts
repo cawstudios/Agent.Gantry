@@ -81,20 +81,33 @@ describe('model provider registry', () => {
     });
   });
 
-  it('keeps current providers on one direct credential mode with friendly field labels', () => {
+  it('keeps current providers on direct credential modes with friendly field labels', () => {
     for (const provider of listExecutableModelProviders()) {
-      expect(provider.credentialModes).toHaveLength(1);
-      expect(provider.credentialModes[0]).toMatchObject({
-        id: 'api_key',
-        gatewayAuth: expect.objectContaining({
-          strategy: expect.stringMatching(/^(bearer|header)$/),
-        }),
-      });
-      for (const field of provider.credentialModes[0]!.fields) {
-        expect(field.label).not.toMatch(/^[A-Z0-9_]+$/);
-        expect(field.label).not.toContain('_');
+      expect(provider.credentialModes.map((mode) => mode.id)).toContain(
+        'api_key',
+      );
+      for (const mode of provider.credentialModes) {
+        for (const field of mode.fields) {
+          expect(field.label).not.toMatch(/^[A-Z0-9_]+$/);
+          expect(field.label).not.toContain('_');
+        }
       }
     }
+    expect(
+      getModelProviderDefinition('anthropic')?.credentialModes.map(
+        (mode) => mode.id,
+      ),
+    ).toEqual(['api_key', 'claude_code_oauth']);
+    expect(
+      getModelProviderDefinition('openrouter')?.credentialModes.map(
+        (mode) => mode.id,
+      ),
+    ).toEqual(['api_key']);
+    expect(
+      getModelProviderDefinition('openai')?.credentialModes.map(
+        (mode) => mode.id,
+      ),
+    ).toEqual(['api_key']);
   });
 
   it('validates payloads through the selected credential mode', () => {
@@ -105,6 +118,13 @@ describe('model provider registry', () => {
         payload: { apiKey: '  sk-ant-test  ' },
       }),
     ).toEqual({ apiKey: 'sk-ant-test' });
+    expect(
+      normalizeModelCredentialPayload({
+        providerId: 'anthropic',
+        authMode: 'claude_code_oauth',
+        payload: { oauthToken: '  sk-ant-oat-test  ' },
+      }),
+    ).toEqual({ oauthToken: 'sk-ant-oat-test' });
     expect(() =>
       normalizeModelCredentialPayload({
         providerId: 'anthropic',

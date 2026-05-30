@@ -571,6 +571,28 @@ describe('Postgres migration journal', () => {
     expect(migration).not.toContain("COALESCE(thread_id, '')");
   });
 
+  it('keeps pending skill and MCP drafts disabled during simple capability cutover', () => {
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0069_simple_capability_lifecycle.sql',
+      ),
+      'utf8',
+    );
+
+    expect(migration).toContain(
+      "WHEN status IN ('active', 'approved') THEN 'installed'",
+    );
+    expect(migration).toContain(
+      "WHEN status IN ('draft', 'rejected') THEN 'disabled'",
+    );
+    expect(migration).toContain(
+      "WHEN status IN ('approved', 'active') THEN 'active'",
+    );
+    expect(migration).toContain("WHEN status = 'draft' THEN 'disabled'");
+    expect(migration).not.toContain("'draft') THEN 'installed'");
+    expect(migration).not.toContain("'draft', 'active') THEN 'active'");
+  });
+
   it('registers message attachment message lookup index migration and schema', () => {
     const journalPath = path.resolve(
       'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
@@ -753,7 +775,7 @@ describe('Postgres migration journal', () => {
     expect(sessionDeletePolicyMigration).toContain('ON DELETE SET NULL');
   });
 
-  it('keeps skill draft persistence indexes aligned with one binding per agent skill', () => {
+  it('keeps skill persistence indexes aligned with one binding per agent skill', () => {
     const canonicalMigration = fs.readFileSync(
       path.resolve(
         'apps/core/src/adapters/storage/postgres/schema/migrations/0009_canonical_persistence_adapter_cut.sql',
@@ -775,6 +797,12 @@ describe('Postgres migration journal', () => {
     const repository = fs.readFileSync(
       path.resolve(
         'apps/core/src/adapters/storage/postgres/repositories/skill-repository.postgres.ts',
+      ),
+      'utf8',
+    );
+    const simpleCapabilityMigration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0069_simple_capability_lifecycle.sql',
       ),
       'utf8',
     );
@@ -812,7 +840,14 @@ describe('Postgres migration journal', () => {
     expect(skillOwnerScopedMigration).toContain(
       "ON skill_catalog(app_id, (coalesce(agent_id, '')), name, version)",
     );
-    expect(repository).toContain(
+    expect(simpleCapabilityMigration).toContain(
+      'DROP INDEX IF EXISTS idx_skill_catalog_app_hash',
+    );
+    expect(simpleCapabilityMigration).toContain('ranked_skill_slugs');
+    expect(simpleCapabilityMigration).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_catalog_app_skill_slug_installed',
+    );
+    expect(repository).not.toContain(
       'coalesce(${pgSchema.skillCatalogPostgres.agentId}',
     );
     expect(repository).toContain('configVersionId: binding.configVersionId');

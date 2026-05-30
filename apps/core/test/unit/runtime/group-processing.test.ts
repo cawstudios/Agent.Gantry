@@ -977,6 +977,74 @@ describe('createGroupProcessor', () => {
       });
     });
 
+    it('expires a missing provider session and retries the turn without resume', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const { deps } = setupHappyPath({ group });
+      (deps.opsRepository as any).getAgentTurnContext = vi
+        .fn()
+        .mockResolvedValue({
+          appId: 'app:test',
+          agentId: 'agent:test',
+          agentSessionId: 'agent-session:1',
+          providerSessionId: 'provider-session:1',
+          externalSessionId: 'claude-session-stale',
+        });
+      (deps.opsRepository as any).createSessionAgentRun = vi
+        .fn()
+        .mockResolvedValue('agent-run:message-1');
+
+      mockSpawnAgent.mockImplementationOnce(async () => ({
+        status: 'error',
+        result: null,
+        error: 'No conversation found with session ID: stale',
+      }));
+      mockSpawnAgent.mockImplementationOnce(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          const output: AgentOutput = {
+            status: 'success',
+            result: 'fresh reply',
+            newSessionId: 'claude-session-fresh',
+          };
+          await onOutput?.(output);
+          return output;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await expect(processGroupMessages('group1@g.us')).resolves.toBe(true);
+
+      expect(mockSpawnAgent).toHaveBeenCalledTimes(2);
+      expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
+        sessionId: 'claude-session-stale',
+      });
+      expect(mockSpawnAgent.mock.calls[1][1]).not.toHaveProperty('sessionId');
+      expect(deps.opsRepository.expireProviderSession).toHaveBeenCalledWith({
+        providerSessionId: 'provider-session:1',
+        agentSessionId: 'agent-session:1',
+        provider: 'anthropic:claude-agent-sdk',
+        externalSessionId: 'claude-session-stale',
+      });
+      expect(
+        deps.opsRepository.updateAgentRunProviderMetadata,
+      ).toHaveBeenCalledWith({
+        runId: 'agent-run:message-1',
+        providerSessionId: null,
+      });
+      expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
+        group.folder,
+        'claude-session-fresh',
+        null,
+        expect.objectContaining({
+          expectedAgentSessionId: 'agent-session:1',
+        }),
+      );
+    });
+
     it('persists SDK session ids from final agent output for the next turn', async () => {
       const agentOutput: AgentOutput = {
         status: 'success',

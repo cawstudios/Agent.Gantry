@@ -68,6 +68,8 @@ function prepareInput(
 }
 
 const anthropicBaseUrlKey = () => 'ANTHROPIC' + '_BASE_URL';
+const claudeCodeOAuthTokenKey = () =>
+  ['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_');
 function catalogEntry(alias: string): ModelCatalogEntry {
   const resolved = resolveModelSelection(alias);
   if (!resolved.ok) throw new Error(resolved.message);
@@ -202,6 +204,32 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
               ['ANTHROPIC_API_KEY', 'gtw_test'],
             ]),
             credentialProviders: {},
+            brokerProfile: 'gantry',
+            brokerApplied: true,
+          },
+        }),
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('allows Gantry Claude Code OAuth projections for Anthropic models', async () => {
+    const adapter = new AnthropicClaudeAgentExecutionAdapter();
+
+    await expect(
+      adapter.prepare(
+        prepareInput({
+          effectiveModelEntry: {
+            ...catalogEntry('sonnet'),
+            displayName: 'Sonnet',
+            runnerModel: 'claude-sonnet-4-5',
+          },
+          modelCredentialProjection: {
+            env: {
+              [claudeCodeOAuthTokenKey()]: 'sk-ant-oat-test',
+            },
+            credentialProviders: {
+              [claudeCodeOAuthTokenKey()]: 'native',
+            },
             brokerProfile: 'gantry',
             brokerApplied: true,
           },

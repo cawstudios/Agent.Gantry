@@ -114,7 +114,7 @@ describe('runtime app credential binding', () => {
       agentIdentifier: 'agent:side_agent',
       agentName: 'Side Agent',
     });
-  }, 10_000);
+  });
 
   it('retries a failed credential profile ensure attempt', async () => {
     const { createRuntimeApp } = await loadRuntimeApp();

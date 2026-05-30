@@ -1,7 +1,7 @@
 # Credential Management
 
 Gantry separates runtime-owned secrets, model gateway credentials, and
-capability environment secrets projected to approved skills, MCP servers, and
+capability environment secrets projected to installed skills, MCP servers, and
 tools.
 
 ## Source Lanes
@@ -123,17 +123,20 @@ with `gantry credentials model set anthropic`,
 `gantry credentials model set openai` and then projected through the Gantry
 Model Gateway according to the selected model provider or embedding provider.
 Each provider exposes explicit credential modes through the control API as
-`credentialModes`; current built-in providers use `authMode: api_key`. `PUT
-/v1/credentials/models/:providerId` replaces a credential, `PATCH` rotates
-fields for the existing auth mode, and all read/mutation responses return only
-redacted status, fingerprints, configured field names, and mode metadata.
+`credentialModes`; Anthropic supports `api_key` and `claude_code_oauth`, while
+OpenRouter and OpenAI currently use `api_key`. `PUT
+/v1/credentials/models/:providerId` replaces a credential and selects the auth
+mode, `PATCH` rotates fields for the existing auth mode, and all read/mutation
+responses return only redacted status, fingerprints, configured field names,
+and mode metadata.
 
 Agents do not receive every raw secret value from Gantry. Runtime code projects
-only the selected capability's declared credential names. Selected skills get
-their `requiredEnvVars`; selected MCP servers get only their reviewed
-credential refs; reviewed tools get only their declared env needs. Model
-credential injection remains broker-owned and must never be reused for tool
-env.
+only the selected capability's declared credential names. Attached skills do
+not receive secrets by being attached; a selected reviewed skill action must
+declare the matching `requiredEnvVars` before those values are projected.
+Selected MCP servers get only their reviewed credential refs; reviewed tools get
+only their declared env needs. Model credential injection remains broker-owned
+and must never be reused for tool env.
 
 For local authenticated CLIs, Gantry does not copy raw OAuth tokens or broker
 proxies into generic Bash. The approved semantic capability maps to narrow
@@ -223,8 +226,9 @@ provider declares one or more credential modes with:
 - required field metadata
 - a gateway auth strategy
 
-The current Anthropic, OpenRouter, and OpenAI providers each expose one
-`api_key` mode, so setup stays direct. Providers that need more than one path,
+OpenRouter and OpenAI each expose one `api_key` mode, so setup stays direct.
+Anthropic exposes `api_key` for direct API keys and `claude_code_oauth` for
+Claude Code subscription OAuth tokens. Providers that need more than one path,
 such as Azure Foundry or AWS Bedrock, add additional modes in the registry
 instead of adding CLI, API, storage, or gateway branches.
 
@@ -253,8 +257,10 @@ Control API semantics:
   deleting the encrypted payload or metadata.
 
 Gateway auth strategies are fail-closed. Current `header` and `bearer`
-strategies inject Anthropic, OpenRouter, and OpenAI credentials at the outbound
-provider boundary. Future strategies such as `aws_bedrock_api_key`,
+strategies inject Anthropic API-key, OpenRouter, and OpenAI credentials at the
+outbound provider boundary. Anthropic `claude_code_oauth` bypasses HTTP header
+injection and projects only `CLAUDE_CODE_OAUTH_TOKEN` to the trusted Claude
+Code SDK process. Future strategies such as `aws_bedrock_api_key`,
 `aws_sigv4`, `aws_sdk_default_chain`, `azure_api_key`, and
 `azure_entra_default_credential` are distinct strategy slots; they must not
 fall through to generic header injection.
@@ -266,11 +272,13 @@ deployment, and key fields; Azure Entra mode uses bearer tokens produced from
 local or hosted identity, so onboarding explains the required identity and runs
 readiness checks instead of asking for a token.
 
-The Claude SDK process receives `ANTHROPIC_BASE_URL` pointed at the loopback
-gateway and a short-lived `gtw_*` token. The gateway swaps that token for the
-stored provider key only at the outbound provider boundary. Bash tools, MCP
-stdio subprocesses, browser tools, and skills do not receive model provider
-keys.
+For API-key modes, the Claude SDK process receives `ANTHROPIC_BASE_URL` pointed
+at the loopback gateway and a short-lived `gtw_*` token. The gateway swaps that
+token for the stored provider key only at the outbound provider boundary. For
+Anthropic Claude Code OAuth mode, the SDK process receives
+`CLAUDE_CODE_OAUTH_TOKEN` directly because Claude Code owns that auth path.
+Bash tools, MCP stdio subprocesses, browser tools, and skills do not receive
+model provider keys.
 
 `NO_PROXY` and `no_proxy` are compatibility hints for cooperative tools, not an
 authorization boundary. They keep common developer tools such as `gh`, `git`,

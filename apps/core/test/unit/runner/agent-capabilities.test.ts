@@ -153,6 +153,7 @@ describe('agent capability composition', () => {
         GANTRY_BROWSER_PROFILE_NAME: 'c-team-abc123abc123',
         GANTRY_ADMIN_MCP_TOOLS_JSON: '[]',
         GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '[]',
+        GANTRY_SEMANTIC_CAPABILITIES_JSON: '[]',
         GANTRY_SELECTED_SKILLS_JSON: '[]',
         GANTRY_SELECTED_SKILL_DISPLAYS_JSON: '[]',
         GANTRY_SELECTED_MCP_SERVERS_JSON: '[]',
@@ -453,7 +454,7 @@ describe('agent capability composition', () => {
       isScheduledJob: true,
       configuredAllowedTools: [
         'FileRead',
-        'RunCommand(/usr/local/bin/gog sheets append *)',
+        'RunCommand(/usr/local/bin/acme records append *)',
         'RunCommand(python3 /Users/example/scripts/dedup-append-lead.py)',
       ],
     });
@@ -461,7 +462,7 @@ describe('agent capability composition', () => {
     expect(profile.allowedTools).toContain('Read');
     expect(profile.allowedTools).not.toContain('Bash');
     expect(profile.allowedTools).not.toContain(
-      'RunCommand(/usr/local/bin/gog sheets append *)',
+      'RunCommand(/usr/local/bin/acme records append *)',
     );
     expect(profile.availableTools).toEqual(
       expect.arrayContaining([
@@ -555,9 +556,9 @@ describe('agent capability composition', () => {
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'tg:sales',
       groupFolder: 'sales',
-      selectedSkillIds: ['skill:release'],
+      attachedSkillSourceIds: ['skill:release'],
       selectedSkillDisplays: ['release (skill:release)'],
-      selectedMcpServerIds: ['mcp:github'],
+      attachedMcpSourceIds: ['mcp:github'],
     });
 
     expect(profile.mcpServers.gantry?.env?.GANTRY_SELECTED_SKILLS_JSON).toBe(

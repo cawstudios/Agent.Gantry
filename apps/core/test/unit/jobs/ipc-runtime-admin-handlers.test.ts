@@ -150,7 +150,7 @@ describe('runtime admin IPC handlers', () => {
       ok: false,
       code: 'missing_capability',
       error: expect.stringContaining(
-        'Ask a configured conversation approver to approve mcp__gantry__settings_desired_state, then choose Always allow.',
+        'Ask a configured conversation approver to approve settings_desired_state, then choose persistent access.',
       ),
     });
   });
@@ -181,7 +181,7 @@ describe('runtime admin IPC handlers', () => {
       ok: false,
       code: 'missing_capability',
       error: expect.stringContaining(
-        'Ask a configured conversation approver to approve mcp__gantry__request_settings_update, then choose Always allow.',
+        'Ask a configured conversation approver to approve request_settings_update, then choose persistent access.',
       ),
     });
   });

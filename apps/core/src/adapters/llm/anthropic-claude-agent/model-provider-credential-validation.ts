@@ -20,12 +20,23 @@ export function validateModelCredentialProjectionForEntry(input: {
 function validateGantryGatewayProjection(
   env: Partial<
     Record<
-      'ANTHROPIC_BASE_URL' | 'ANTHROPIC_API_KEY' | 'ANTHROPIC_AUTH_TOKEN',
+      | 'ANTHROPIC_BASE_URL'
+      | 'ANTHROPIC_API_KEY'
+      | 'ANTHROPIC_AUTH_TOKEN'
+      | 'CLAUDE_CODE_OAUTH_TOKEN',
       string
     >
   >,
   model: ModelCatalogEntry,
 ): void {
+  if (env.CLAUDE_CODE_OAUTH_TOKEN) {
+    if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN) {
+      throw new Error(
+        `Gantry Model Gateway projection for ${model.displayName} must use only one Anthropic credential mode.`,
+      );
+    }
+    return;
+  }
   if (!isLoopbackGatewayUrl(env.ANTHROPIC_BASE_URL)) {
     throw new Error(
       `Gantry Model Gateway projection for ${model.displayName} must use a loopback ANTHROPIC_BASE_URL.`,

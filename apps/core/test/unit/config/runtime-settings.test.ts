@@ -15,6 +15,7 @@ import {
 import { renderRuntimeSettingsYaml } from '@core/config/settings/runtime-settings-renderer.js';
 import { validateLoadedRuntimeSettings } from '@core/config/settings/runtime-settings-validation.js';
 import { settingsFilePath } from '@core/config/settings/runtime-home.js';
+import { runSettingsCommand } from '@core/cli/settings.js';
 
 function emptySources() {
   return { skills: [], mcpServers: [], tools: [] };
@@ -232,6 +233,46 @@ describe('runtime settings', () => {
     max_jobb_runs: 4
 `),
     ).toThrow('runtime.queue.max_jobb_runs is not supported');
+  });
+
+  it('rejects duplicate settings keys before schema normalization', () => {
+    expect(() =>
+      parseRuntimeSettings(`agent:
+  name: Kai
+agent:
+  name: Other
+`),
+    ).toThrow('duplicate key "agent" (line 3)');
+
+    expect(() =>
+      parseRuntimeSettings(`agents:
+  main_agent:
+    name: Main
+    name: Other
+`),
+    ).toThrow('duplicate key "name" (line 4)');
+  });
+
+  it('validates settings.yaml schema without runtime preflight dependencies', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-settings-validate-'),
+    );
+    try {
+      saveRuntimeSettings(runtimeHome, createDefaultRuntimeSettings());
+      await expect(runSettingsCommand(runtimeHome, ['validate'])).resolves.toBe(
+        0,
+      );
+
+      fs.writeFileSync(
+        settingsFilePath(runtimeHome),
+        ['agent:', '  name: Kai', 'agent:', '  name: Other', ''].join('\n'),
+      );
+      await expect(runSettingsCommand(runtimeHome, ['validate'])).resolves.toBe(
+        1,
+      );
+    } finally {
+      fs.rmSync(runtimeHome, { recursive: true, force: true });
+    }
   });
 
   it('rejects unsupported agent settings keys', () => {
@@ -561,8 +602,8 @@ conversations:
       recurringJobDefaultModel: 'opus',
       bindings: {},
       sources: {
-        skills: [{ id: 'skill:admin', version: 'approved' }],
-        mcpServers: [{ id: 'mcp:github', version: 'mcp-version:github' }],
+        skills: [{ id: 'skill:admin' }],
+        mcpServers: [{ id: 'mcp:github' }],
         tools: [],
       },
       capabilities: [{ id: 'Read', version: 'builtin' }],
@@ -637,7 +678,7 @@ conversations:
         rules: [
           'RunCommand(npm test *)',
           'Browser',
-          'capability:google.sheets.write',
+          'capability:acme.records.append',
         ],
       });
 
@@ -646,10 +687,10 @@ conversations:
         { id: 'mcp__gantry__service_restart', version: 'builtin' },
         { id: 'RunCommand(npm test *)', version: 'builtin' },
         { id: 'browser.use', version: 'builtin' },
-        { id: 'google.sheets.write', version: 'builtin' },
+        { id: 'acme.records.append', version: 'builtin' },
       ]);
       const yaml = fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8');
-      expect(yaml).toContain('id: google.sheets.write');
+      expect(yaml).toContain('id: acme.records.append');
       expect(yaml).not.toContain('capabilityPolicy');
       expect(yaml).not.toContain('permission-rule:');
     } finally {
@@ -657,7 +698,7 @@ conversations:
     }
   });
 
-  it('drops generated runtime skill paths before mirroring settings', () => {
+  it('rejects generated runtime skill paths before mirroring settings', () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-settings-generated-runtime-'),
     );
@@ -672,13 +713,17 @@ conversations:
       };
       saveRuntimeSettings(runtimeHome, settings);
 
-      mirrorAgentToolRulesToRuntimeSettings({
-        runtimeHome,
-        agentFolder: 'main_agent',
-        rules: [
-          'RunCommand(/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
-        ],
-      });
+      expect(() =>
+        mirrorAgentToolRulesToRuntimeSettings({
+          runtimeHome,
+          agentFolder: 'main_agent',
+          rules: [
+            'RunCommand(/tmp/run/.llm-runtime/claude/skills/linkedin-posting/post.py *)',
+          ],
+        }),
+      ).toThrow(
+        'Persistent RunCommand rules cannot reference generated runtime skill paths',
+      );
       const parsed = loadRuntimeSettings(runtimeHome);
       expect(parsed.agents.main_agent.capabilities).toEqual([]);
     } finally {
@@ -1314,9 +1359,8 @@ conversations:
           {
             name: 'linkedin-posting',
             id: 'skill:3014949c-a616-4b2c-80e7-0bc61bb31e85',
-            version: 'approved',
           },
-          { id: 'company-handbook', version: 'approved' },
+          { id: 'company-handbook' },
         ],
         mcpServers: [],
         tools: [],
@@ -1331,7 +1375,6 @@ conversations:
         '      skills:',
         '        - name: linkedin-posting',
         '          id: "skill:3014949c-a616-4b2c-80e7-0bc61bb31e85"',
-        '          version: approved',
       ].join('\n'),
     );
     expect(yaml).toContain('company-handbook');
@@ -1339,9 +1382,8 @@ conversations:
       {
         name: 'linkedin-posting',
         id: 'skill:3014949c-a616-4b2c-80e7-0bc61bb31e85',
-        version: 'approved',
       },
-      { id: 'company-handbook', version: 'approved' },
+      { id: 'company-handbook' },
     ]);
   });
 });

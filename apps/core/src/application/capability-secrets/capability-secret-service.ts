@@ -24,6 +24,19 @@ export class CapabilitySecretService {
     return this.secrets.listSecrets(input);
   }
 
+  async status(input: {
+    appId: AppId;
+    name: string;
+  }): Promise<CapabilitySecretStatus> {
+    const name = normalizeCapabilitySecretName(input.name);
+    assertValidCapabilitySecretName(name);
+    const secret = await this.secrets.getSecret({
+      appId: input.appId,
+      name,
+    });
+    return secret?.value ? 'ready' : 'needs_secret';
+  }
+
   async set(input: {
     appId: AppId;
     name: string;

@@ -737,7 +737,7 @@ Postgres state and are never written to `settings.yaml`.
 5. **Browser Action Gating**: Browser actions use the selected canonical
    `Browser` capability and projected gateway tools: `browser_status`,
    `browser_open`, `browser_inspect`, `browser_act`, and `browser_close`.
-   Private browser backend job tool names are rejected instead of granting
+   Private browser backend job tool names are rejected instead of creating
    browser action access.
 
 ### Schedule Types
@@ -837,7 +837,7 @@ Scheduler MCP job visibility and mutation are scoped to both the calling
 agent's group and the current conversation: `group_scope` must match the
 agent, and `executionContext.conversationJid` must match the originating chat.
 Thread/topic ids may be checked to prevent delivery retargeting, but they do
-not grant job visibility or run authority.
+do not create job visibility or run authority.
 
 ---
 

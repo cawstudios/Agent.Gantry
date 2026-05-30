@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { randomUUID } from 'node:crypto';
 
 import { getCredentialBrokerRuntimeConfig } from '../config/index.js';
 import { getAgentCredentialInjection } from '../application/credentials/agent-credential-service.js';
@@ -59,11 +60,15 @@ export async function getHostRuntimeCredentialEnv(
 }> {
   const brokerConfig = getCredentialBrokerRuntimeConfig();
   const purpose = options.purpose ?? 'model_runtime';
+  const runId =
+    options.runId ??
+    (options.runContext?.runId as AgentRunId | undefined) ??
+    (`credential-run:${randomUUID()}` as AgentRunId);
   const bindingOptions = {
     purpose,
     appId: options.appId ?? (options.runContext?.appId as never),
     agentId: options.agentId ?? (options.runContext?.agentId as never),
-    runId: options.runId ?? (options.runContext?.runId as never),
+    runId,
     jobId: options.jobId ?? (options.runContext?.jobId as never),
     conversationId:
       options.conversationId ?? (options.runContext?.chatJid as never),

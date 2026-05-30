@@ -302,7 +302,7 @@ function formatModelCredentialStatusRow(
     row.authMode ? `  auth mode: ${mode?.label ?? row.authMode}` : undefined,
     `  secret status: ${formatSecretStatus(row.health)}`,
     row.health === 'ready'
-      ? '  runtime access: via Gantry Model Gateway'
+      ? `  runtime access: ${formatModelCredentialRuntimeAccess(row.authMode)}`
       : undefined,
     configuredFieldLabels.length > 0
       ? `  configured: ${configuredFieldLabels.join(', ')}`
@@ -324,6 +324,11 @@ function formatSecretStatus(health: string): string {
   if (health === 'ready') return 'stored, encrypted, active';
   if (health === 'disabled') return 'stored, encrypted, disabled';
   return 'not stored';
+}
+
+function formatModelCredentialRuntimeAccess(authMode: string | null): string {
+  if (authMode === 'claude_code_oauth') return 'via Claude Code OAuth';
+  return 'via Gantry Model Gateway';
 }
 
 function requiredModelCredentialProvider(runtimeHome: string): string {
@@ -360,8 +365,26 @@ async function runCapabilityCredentialCommand(
 }
 
 async function listCapabilitySecrets(runtimeHome: string): Promise<number> {
-  const secrets = await withCredentialServices(runtimeHome, ({ capability }) =>
-    capability.list({ appId: DEFAULT_APP_ID }),
+  const { secrets, statuses } = await withCredentialServices(
+    runtimeHome,
+    async ({ capability }) => {
+      const secrets = await capability.list({ appId: DEFAULT_APP_ID });
+      const statuses = new Map(
+        await Promise.all(
+          secrets.map(
+            async (secret) =>
+              [
+                secret.name,
+                await capability.status({
+                  appId: DEFAULT_APP_ID,
+                  name: secret.name,
+                }),
+              ] as const,
+          ),
+        ),
+      );
+      return { secrets, statuses };
+    },
   );
   if (secrets.length === 0) {
     p.note('No capability secrets are configured.', 'Capability Credentials');
@@ -371,7 +394,7 @@ async function listCapabilitySecrets(runtimeHome: string): Promise<number> {
     secrets
       .map((secret) =>
         [
-          `${secret.name}: ready`,
+          `${secret.name}: ${statuses.get(secret.name) === 'ready' ? 'ready' : 'needs reset'}`,
           secret.allowedCapabilityIds.length > 0
             ? `  allowed: ${secret.allowedCapabilityIds.join(', ')}`
             : undefined,

@@ -151,8 +151,7 @@ export async function seedDefaultRuntimeData(
           id: skill.id,
           appId: DEFAULT_APP_ID,
           name: skill.name,
-          version: 'builtin',
-          status: 'approved',
+          status: 'installed',
         })
         .onConflictDoNothing();
     }

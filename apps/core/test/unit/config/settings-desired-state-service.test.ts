@@ -17,9 +17,8 @@ function linkedinPostingSkill() {
     appId: 'default',
     name: 'linkedin-posting',
     description: 'LinkedIn posting',
-    version: 'v1',
     source: 'admin_uploaded',
-    status: 'approved',
+    status: 'installed',
     promptRefs: [],
     toolIds: [],
     workflowRefs: [],
@@ -90,7 +89,7 @@ function makeRepositories(overrides: Record<string, unknown> = {}) {
               id,
               appId: 'default',
               name: 'admin',
-              status: 'approved',
+              status: 'installed',
               storage: { type: 'local' },
             }
           : null,
@@ -100,7 +99,7 @@ function makeRepositories(overrides: Record<string, unknown> = {}) {
           id: 'skill:admin',
           appId: 'default',
           name: 'admin',
-          status: 'approved',
+          status: 'installed',
           storage: { type: 'local' },
         },
       ]),
@@ -113,27 +112,17 @@ function makeRepositories(overrides: Record<string, unknown> = {}) {
           ? {
               id,
               appId: 'default',
-              status: 'approved',
-              latestApprovedVersionId: 'mcp-version:github-next',
+              status: 'active',
+              name: 'github',
+              createdSource: 'admin',
+              riskClass: 'medium',
+              transport: 'stdio_template',
+              config: { transport: 'stdio_template', templateId: 'github' },
+              allowedToolPatterns: [],
+              autoApproveToolPatterns: [],
+              credentialRefs: [],
             }
           : null,
-      ),
-      getVersion: vi.fn(async (id: string) =>
-        id === 'mcp-version:github'
-          ? {
-              id,
-              appId: 'default',
-              serverId: 'mcp:github',
-              version: 1,
-            }
-          : id === 'mcp-version:github-next'
-            ? {
-                id,
-                appId: 'default',
-                serverId: 'mcp:github',
-                version: 2,
-              }
-            : null,
       ),
       listAgentBindings: vi.fn(async () => []),
       listAgentBindingsForAgents: vi.fn(async () => []),
@@ -173,12 +162,12 @@ describe('SettingsDesiredStateService', () => {
       folder: 'main_agent',
       bindings: {},
       sources: {
-        skills: [{ id: 'skill:admin', version: 'approved' }],
-        mcpServers: [{ id: 'mcp:github', version: 'mcp-version:github' }],
+        skills: [{ id: 'skill:admin' }],
+        mcpServers: [{ id: 'mcp:github' }],
         tools: [],
       },
       capabilities: [
-        { id: 'google.sheets.write', version: 'builtin' },
+        { id: 'acme.records.append', version: 'builtin' },
         { id: 'tool:read', version: 'builtin' },
         { id: '*', version: 'builtin' },
       ],
@@ -192,8 +181,9 @@ describe('SettingsDesiredStateService', () => {
 
     expect([...errors].sort()).toEqual(
       [
-        'agents.main_agent.capabilities contains unavailable capability *: Capability id must use lowercase dot-separated words such as google.sheets.write.',
-        'agents.main_agent.capabilities contains unavailable capability tool:read: Capability id must use lowercase dot-separated words such as google.sheets.write.',
+        'agents.main_agent.capabilities contains unavailable capability *: Capability id must use lowercase dot-separated words such as app.resource.action.',
+        'agents.main_agent.capabilities contains unavailable capability acme.records.append: Unknown semantic capability acme.records.append. Review and register a user-defined capability before selecting it.',
+        'agents.main_agent.capabilities contains unavailable capability tool:read: Capability id must use lowercase dot-separated words such as app.resource.action.',
       ].sort(),
     );
   });
@@ -205,7 +195,7 @@ describe('SettingsDesiredStateService', () => {
       folder: 'main_agent',
       bindings: {},
       sources: {
-        skills: [{ id: 'admin', version: 'approved' }],
+        skills: [{ id: 'admin' }],
         mcpServers: [],
         tools: [],
       },
@@ -228,7 +218,7 @@ describe('SettingsDesiredStateService', () => {
     );
   });
 
-  it('preserves configured MCP source versions during reconciliation', async () => {
+  it('reconciles configured MCP source ids', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.agents.main_agent = {
       name: 'Main',
@@ -236,7 +226,7 @@ describe('SettingsDesiredStateService', () => {
       bindings: {},
       sources: {
         skills: [],
-        mcpServers: [{ id: 'mcp:github', version: 'mcp-version:github' }],
+        mcpServers: [{ id: 'mcp:github' }],
         tools: [],
       },
       capabilities: [],
@@ -256,7 +246,6 @@ describe('SettingsDesiredStateService', () => {
         mcpBindings: [
           expect.objectContaining({
             serverId: 'mcp:github',
-            versionId: 'mcp-version:github',
           }),
         ],
       }),
@@ -313,7 +302,7 @@ describe('SettingsDesiredStateService', () => {
       sources: emptySources(),
       capabilities: [
         {
-          id: 'RunCommand(/usr/local/bin/gog sheets append *)',
+          id: 'RunCommand(/usr/local/bin/acme records append *)',
           version: 'builtin',
         },
       ],
@@ -328,7 +317,7 @@ describe('SettingsDesiredStateService', () => {
 
     expect(repositories.tools.saveTool).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: 'RunCommand(/usr/local/bin/gog sheets append *)',
+        name: 'RunCommand(/usr/local/bin/acme records append *)',
       }),
     );
     expect(
@@ -344,14 +333,14 @@ describe('SettingsDesiredStateService', () => {
     );
   });
 
-  it('converts generated runtime skill grants to selected skill action capabilities during reconciliation', async () => {
+  it('rejects generated runtime skill grants during reconciliation', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.agents.main_agent = {
       name: 'Main',
       folder: 'main_agent',
       bindings: {},
       sources: {
-        skills: [{ id: 'linkedin-posting', version: 'approved' }],
+        skills: [{ id: 'linkedin-posting' }],
         mcpServers: [],
         tools: [],
       },
@@ -377,23 +366,8 @@ describe('SettingsDesiredStateService', () => {
 
     const result = await service.reconcile(settings);
 
-    expect(result.invalidReferences).toEqual([]);
-    expect(repositories.tools.saveTool).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'tool:capability:skill.linkedin-posting.publish',
-        name: 'capability:skill.linkedin-posting.publish',
-        displayName: 'LinkedIn posting',
-        inputSchema: expect.objectContaining({
-          schema: expect.objectContaining({
-            capabilityId: 'skill.linkedin-posting.publish',
-            source: expect.objectContaining({
-              kind: 'skill_action',
-              skillId: 'skill:linkedin-posting',
-              skillContentHash: 'sha256:linkedin-v1',
-            }),
-          }),
-        }),
-      }),
+    expect(result.invalidReferences.join('\n')).toContain(
+      'Persistent RunCommand rules cannot reference generated runtime skill paths',
     );
     expect(repositories.tools.saveTool).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -402,18 +376,10 @@ describe('SettingsDesiredStateService', () => {
     );
     expect(
       repositories.agents.replaceAgentCapabilityBindings,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toolBindings: [
-          expect.objectContaining({
-            toolId: 'tool:capability:skill.linkedin-posting.publish',
-          }),
-        ],
-      }),
-    );
+    ).not.toHaveBeenCalled();
   });
 
-  it('drops generated runtime skill grants without trusted selected skill action metadata', async () => {
+  it('rejects generated runtime skill grants without selected skill action metadata', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.agents.main_agent = {
       name: 'Main',
@@ -435,7 +401,9 @@ describe('SettingsDesiredStateService', () => {
 
     const result = await service.reconcile(settings);
 
-    expect(result.invalidReferences).toEqual([]);
+    expect(result.invalidReferences.join('\n')).toContain(
+      'Persistent RunCommand rules cannot reference generated runtime skill paths',
+    );
     expect(repositories.tools.saveTool).not.toHaveBeenCalledWith(
       expect.objectContaining({
         name: expect.stringContaining('.llm-runtime'),
@@ -443,22 +411,17 @@ describe('SettingsDesiredStateService', () => {
     );
     expect(
       repositories.agents.replaceAgentCapabilityBindings,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: 'agent:main_agent',
-        toolBindings: [],
-      }),
-    );
+    ).not.toHaveBeenCalled();
   });
 
-  it('rejects duplicate approved skills with the same settings name', async () => {
+  it('rejects duplicate installed skills with the same settings name', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.agents.main_agent = {
       name: 'Main',
       folder: 'main_agent',
       bindings: {},
       sources: {
-        skills: [{ id: 'admin', version: 'approved' }],
+        skills: [{ id: 'admin' }],
         mcpServers: [],
         tools: [],
       },
@@ -472,14 +435,14 @@ describe('SettingsDesiredStateService', () => {
             id: 'skill:first',
             appId: 'default',
             name: 'admin',
-            status: 'approved',
+            status: 'installed',
             storage: { type: 'local' },
           },
           {
             id: 'skill:second',
             appId: 'default',
             name: 'admin',
-            status: 'approved',
+            status: 'installed',
             storage: { type: 'local' },
           },
         ]),
@@ -493,18 +456,18 @@ describe('SettingsDesiredStateService', () => {
     const errors = await service.validateCapabilityReferences(settings);
 
     expect(errors).toEqual([
-      'agents.main_agent.sources.skills contains ambiguous skill name: admin matched 2 approved skills; use an exact skill id in settings, such as skill:first, skill:second',
+      'agents.main_agent.sources.skills contains ambiguous skill name: admin matched 2 installed skills; use an exact skill id in settings, such as skill:first, skill:second',
     ]);
   });
 
-  it('accepts exact skill ids when approved skill names are duplicated', async () => {
+  it('accepts exact skill ids when installed skill names are duplicated', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.agents.main_agent = {
       name: 'Main',
       folder: 'main_agent',
       bindings: {},
       sources: {
-        skills: [{ id: 'skill:first', version: 'approved' }],
+        skills: [{ id: 'skill:first' }],
         mcpServers: [],
         tools: [],
       },
@@ -514,14 +477,14 @@ describe('SettingsDesiredStateService', () => {
       id: 'skill:first',
       appId: 'default',
       name: 'admin',
-      status: 'approved',
+      status: 'installed',
       storage: { type: 'local' },
     };
     const second = {
       id: 'skill:second',
       appId: 'default',
       name: 'admin',
-      status: 'approved',
+      status: 'installed',
       storage: { type: 'local' },
     };
     const repositories = makeRepositories({
@@ -550,10 +513,7 @@ describe('SettingsDesiredStateService', () => {
       folder: 'main_agent',
       bindings: {},
       sources: {
-        skills: [
-          { id: 'skill:first', version: 'approved' },
-          { id: 'skill:second', version: 'approved' },
-        ],
+        skills: [{ id: 'skill:first' }, { id: 'skill:second' }],
         mcpServers: [],
         tools: [],
       },
@@ -563,14 +523,14 @@ describe('SettingsDesiredStateService', () => {
       id: 'skill:first',
       appId: 'default',
       name: 'admin',
-      status: 'approved',
+      status: 'installed',
       storage: { type: 'local' },
     };
     const second = {
       id: 'skill:second',
       appId: 'default',
       name: 'admin',
-      status: 'approved',
+      status: 'installed',
       storage: { type: 'local' },
     };
     const repositories = makeRepositories({
@@ -612,7 +572,6 @@ describe('SettingsDesiredStateService', () => {
           {
             name: 'stale-display-name',
             id: 'skill:first',
-            version: 'approved',
           },
         ],
         mcpServers: [],
@@ -629,7 +588,7 @@ describe('SettingsDesiredStateService', () => {
                 id: 'skill:first',
                 appId: 'default',
                 name: 'admin',
-                status: 'approved',
+                status: 'installed',
                 storage: { type: 'local' },
               }
             : null,
@@ -639,7 +598,7 @@ describe('SettingsDesiredStateService', () => {
             id: 'skill:other',
             appId: 'default',
             name: 'stale-display-name',
-            status: 'approved',
+            status: 'installed',
             storage: { type: 'local' },
           },
         ]),
@@ -1019,7 +978,7 @@ describe('SettingsDesiredStateService', () => {
       folder: 'main_agent',
       bindings: {},
       sources: {
-        skills: [{ id: 'skill:admin', version: 'approved' }],
+        skills: [{ id: 'skill:admin' }],
         mcpServers: [],
         tools: [],
       },
@@ -1061,7 +1020,7 @@ describe('SettingsDesiredStateService', () => {
       folder: 'main_agent',
       bindings: {},
       sources: {
-        skills: [{ id: 'skill:admin', version: 'approved' }],
+        skills: [{ id: 'skill:admin' }],
         mcpServers: [],
         tools: [],
       },
@@ -1788,7 +1747,7 @@ describe('SettingsDesiredStateService', () => {
       model: 'sonnet',
       bindings: {},
       sources: {
-        skills: [{ id: 'stale-skill', version: 'approved' }],
+        skills: [{ id: 'stale-skill' }],
         mcpServers: [],
         tools: [],
       },
@@ -1931,7 +1890,7 @@ describe('SettingsDesiredStateService', () => {
             id: 'skill:3014949c-a616-4b2c-80e7-0bc61bb31e85',
             appId: 'default',
             name: 'custom-skill',
-            status: 'approved',
+            status: 'installed',
             storage: { type: 'local' },
           },
         ]),
@@ -1956,7 +1915,6 @@ describe('SettingsDesiredStateService', () => {
             agentId: 'agent:side_agent',
             serverId: 'mcp:github',
             status: 'active',
-            versionId: 'mcp-version:github',
             createdAt: '2026-05-01T00:00:00.000Z',
             updatedAt: '2026-05-01T00:00:00.000Z',
           },
@@ -1980,10 +1938,9 @@ describe('SettingsDesiredStateService', () => {
             {
               name: 'custom-skill',
               id: 'skill:3014949c-a616-4b2c-80e7-0bc61bb31e85',
-              version: 'approved',
             },
           ],
-          mcpServers: [{ id: 'mcp:github', version: 'mcp-version:github' }],
+          mcpServers: [{ id: 'mcp:github' }],
           tools: [{ id: 'browser', kind: 'builtin' }],
         },
         capabilities: [{ id: 'Read', version: 'builtin' }],
@@ -2014,14 +1971,13 @@ describe('SettingsDesiredStateService', () => {
     expect(exported.bindings.stale).toBeUndefined();
   });
 
-  it('exports generated runtime skill command grants as selected skill action capabilities', async () => {
+  it('rejects generated runtime skill command grants during export', async () => {
     const settings = createDefaultRuntimeSettings();
     const skill = {
       id: 'skill:linkedin',
       appId: 'default',
       name: 'linkedin-posting',
-      version: '3',
-      status: 'approved',
+      status: 'installed',
       source: 'admin_uploaded',
       promptRefs: [],
       toolIds: [],
@@ -2106,17 +2062,12 @@ describe('SettingsDesiredStateService', () => {
       repositories,
     });
 
-    const exported = await service.exportCurrent(settings);
-
-    expect(exported.agents.main_agent.sources.skills).toEqual([
-      { name: 'linkedin-posting', id: 'skill:linkedin', version: 'approved' },
-    ]);
-    expect(exported.agents.main_agent.capabilities).toEqual([
-      { id: 'skill.linkedin-posting.publish', version: 'builtin' },
-    ]);
+    await expect(service.exportCurrent(settings)).rejects.toThrow(
+      'Persistent RunCommand rules cannot reference generated runtime skill paths',
+    );
   });
 
-  it('drops generated runtime skill command grants without selected action metadata', async () => {
+  it('rejects generated runtime skill command grants without selected action metadata', async () => {
     const settings = createDefaultRuntimeSettings();
     const repositories = makeRepositories({
       agents: {
@@ -2161,9 +2112,9 @@ describe('SettingsDesiredStateService', () => {
       repositories,
     });
 
-    const exported = await service.exportCurrent(settings);
-
-    expect(exported.agents.main_agent.capabilities).toEqual([]);
+    await expect(service.exportCurrent(settings)).rejects.toThrow(
+      'Persistent RunCommand rules cannot reference generated runtime skill paths',
+    );
   });
 
   it('disables DB-only agents and clears their policies in authoritative mode', async () => {

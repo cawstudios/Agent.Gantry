@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { SkillDraftService } from '@core/application/skills/skill-draft-service.js';
+import { SkillService } from '@core/application/skills/skill-service.js';
 import type { SkillArtifactStore } from '@core/domain/ports/skill-artifact-store.js';
 import type { SkillCatalogRepository } from '@core/domain/ports/repositories.js';
 import type {
@@ -16,25 +16,6 @@ class MemorySkillRepository implements SkillCatalogRepository {
 
   async getSkill(id: SkillId): Promise<SkillCatalogItem | null> {
     return this.skills.get(id) ?? null;
-  }
-
-  async getSkillByContentHash(input: {
-    appId: string;
-    contentHash: string;
-    agentId?: string | null;
-    statuses?: SkillCatalogItem['status'][];
-  }): Promise<SkillCatalogItem | null> {
-    return (
-      [...this.skills.values()].find(
-        (skill) =>
-          skill.appId === input.appId &&
-          skill.storage?.contentHash === input.contentHash &&
-          (input.agentId === null
-            ? skill.agentId === undefined
-            : input.agentId === undefined || skill.agentId === input.agentId) &&
-          (!input.statuses || input.statuses.includes(skill.status)),
-      ) ?? null
-    );
   }
 
   listSkills(input: {
@@ -118,7 +99,7 @@ class MemorySkillRepository implements SkillCatalogRepository {
         continue;
       }
       const skill = this.skills.get(binding.skillId);
-      if (skill?.status === 'approved') {
+      if (skill?.status === 'installed') {
         skills.push(skill);
       }
     }
@@ -135,7 +116,7 @@ class MemoryArtifactStore implements SkillArtifactStore {
   async putSkillArtifact(
     input: Parameters<SkillArtifactStore['putSkillArtifact']>[0],
   ) {
-    const storageRef = `skills/${input.skillId}.json`;
+    const storageRef = `skills/${input.skillName}`;
     this.bundles.set(storageRef, input.bundle);
     return {
       storageType: 'local-filesystem' as const,
@@ -158,7 +139,7 @@ class MemoryArtifactStore implements SkillArtifactStore {
 function createService() {
   const repo = new MemorySkillRepository();
   const artifacts = new MemoryArtifactStore();
-  const service = new SkillDraftService(repo, artifacts);
+  const service = new SkillService(repo, artifacts);
   return { repo, artifacts, service };
 }
 
@@ -168,11 +149,11 @@ const asset = {
   contentType: 'text/markdown',
 };
 
-describe('SkillDraftService', () => {
-  it('imports an agent-created skill as a durable draft that is not materialized', async () => {
+describe('SkillService', () => {
+  it('installs an agent-created skill and materializes it only when bound', async () => {
     const { service } = createService();
 
-    const draft = await service.importDraft({
+    const skill = await service.installSkill({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
       name: 'agent-skill',
@@ -180,8 +161,8 @@ describe('SkillDraftService', () => {
       now: '2026-04-28T00:00:00.000Z',
     });
 
-    expect(draft.status).toBe('draft');
-    expect(draft.storage?.storageRef).toContain('skills/');
+    expect(skill.status).toBe('installed');
+    expect(skill.storage?.storageRef).toContain('skills/');
     await expect(
       service.resolveLocalSkillsForAgent({
         appId: 'app:one' as never,
@@ -190,10 +171,10 @@ describe('SkillDraftService', () => {
     ).resolves.toEqual([]);
   });
 
-  it('derives draft metadata from SKILL.md when upload context omits it', async () => {
+  it('derives installed skill metadata from SKILL.md when context omits it', async () => {
     const { service } = createService();
 
-    const draft = await service.importDraft({
+    const skill = await service.installSkill({
       appId: 'app:one' as never,
       fallbackName: 'fallback-skill',
       assets: [
@@ -206,14 +187,14 @@ describe('SkillDraftService', () => {
       ],
     });
 
-    expect(draft.name).toBe('Uploaded Skill');
-    expect(draft.description).toBe('Zip metadata');
+    expect(skill.name).toBe('Uploaded Skill');
+    expect(skill.description).toBe('Zip metadata');
   });
 
   it('parses skill action permissions from the skill manifest', async () => {
     const { service } = createService();
 
-    const draft = await service.importDraft({
+    const skill = await service.installSkill({
       appId: 'app:one' as never,
       assets: [
         {
@@ -230,7 +211,7 @@ describe('SkillDraftService', () => {
                   capabilityId: 'skill.linkedin-posting.publish',
                   displayName: 'LinkedIn posting',
                   risk: 'write',
-                  can: 'Publish a prepared LinkedIn post through the approved script.',
+                  can: 'Publish a prepared LinkedIn post through the installed script.',
                   cannot:
                     'Read unrelated accounts or receive raw LinkedIn credentials.',
                   requiredEnvVars: ['LINKEDIN_ACCESS_TOKEN'],
@@ -246,14 +227,14 @@ describe('SkillDraftService', () => {
       ],
     });
 
-    expect(draft.requiredEnvVars).toEqual(['LINKEDIN_ACCESS_TOKEN']);
-    expect(draft.actionPermissions).toEqual([
+    expect(skill.requiredEnvVars).toEqual(['LINKEDIN_ACCESS_TOKEN']);
+    expect(skill.actionPermissions).toEqual([
       {
         id: 'publish',
         capabilityId: 'skill.linkedin-posting.publish',
         displayName: 'LinkedIn posting',
         risk: 'write',
-        can: 'Publish a prepared LinkedIn post through the approved script.',
+        can: 'Publish a prepared LinkedIn post through the installed script.',
         cannot: 'Read unrelated accounts or receive raw LinkedIn credentials.',
         requiredEnvVars: ['LINKEDIN_ACCESS_TOKEN'],
         commandTemplates: ['skills/linkedin-posting/post.py *'],
@@ -265,7 +246,7 @@ describe('SkillDraftService', () => {
     const { artifacts, service } = createService();
 
     await expect(
-      service.importDraft({
+      service.installSkill({
         appId: 'app:one' as never,
         name: 'Gantry Admin',
         assets: [asset],
@@ -274,11 +255,11 @@ describe('SkillDraftService', () => {
     expect(artifacts.bundles.size).toBe(0);
   });
 
-  it('rejects skill names that collide with SDK-native skills before storing drafts', async () => {
+  it('rejects skill names that collide with SDK-native skills before storing', async () => {
     const { artifacts, service } = createService();
 
     await expect(
-      service.importDraft({
+      service.installSkill({
         appId: 'app:one' as never,
         name: 'Commands',
         assets: [asset],
@@ -287,11 +268,11 @@ describe('SkillDraftService', () => {
     expect(artifacts.bundles.size).toBe(0);
   });
 
-  it('rejects SKILL.md names that collide with SDK-native skills before storing drafts', async () => {
+  it('rejects SKILL.md names that collide with SDK-native skills before storing', async () => {
     const { artifacts, service } = createService();
 
     await expect(
-      service.importDraft({
+      service.installSkill({
         appId: 'app:one' as never,
         name: 'LinkedIn Posting',
         assets: [
@@ -308,11 +289,11 @@ describe('SkillDraftService', () => {
     expect(artifacts.bundles.size).toBe(0);
   });
 
-  it('rejects SKILL.md names that do not align with the Gantry skill name before storing drafts', async () => {
+  it('rejects SKILL.md names that do not align with the Gantry skill name before storing', async () => {
     const { artifacts, service } = createService();
 
     await expect(
-      service.importDraft({
+      service.installSkill({
         appId: 'app:one' as never,
         name: 'LinkedIn Posting',
         assets: [
@@ -329,111 +310,10 @@ describe('SkillDraftService', () => {
     expect(artifacts.bundles.size).toBe(0);
   });
 
-  it('rejects approving existing drafts with reserved materialized names', async () => {
-    const { repo, service } = createService();
-    const draft: SkillCatalogItem = {
-      id: 'skill:reserved' as SkillId,
-      appId: 'app:one' as never,
-      name: 'Gantry Browser',
-      version: 'v1',
-      source: 'admin_uploaded',
-      status: 'draft',
-      promptRefs: [],
-      toolIds: [],
-      workflowRefs: [],
-      storage: {
-        storageType: 'local-filesystem',
-        storageRef: 'skills/reserved.json',
-        contentHash: 'sha256:reserved',
-        sizeBytes: 1,
-      },
-      createdAt: '2026-04-28T00:00:00.000Z' as never,
-      updatedAt: '2026-04-28T00:00:00.000Z' as never,
-    };
-    await repo.saveSkill(draft);
-
-    await expect(
-      service.approveDraft({
-        appId: 'app:one' as never,
-        skillId: draft.id,
-      }),
-    ).rejects.toThrow('reserved Gantry skill directory "gantry-browser"');
-  });
-
-  it('rejects approving existing drafts with SDK-native materialized names', async () => {
-    const { repo, service } = createService();
-    const draft: SkillCatalogItem = {
-      id: 'skill:reserved-native' as SkillId,
-      appId: 'app:one' as never,
-      name: 'Review',
-      version: 'v1',
-      source: 'admin_uploaded',
-      status: 'draft',
-      promptRefs: [],
-      toolIds: [],
-      workflowRefs: [],
-      storage: {
-        storageType: 'local-filesystem',
-        storageRef: 'skills/reserved-native.json',
-        contentHash: 'sha256:reserved-native',
-        sizeBytes: 1,
-      },
-      createdAt: '2026-04-28T00:00:00.000Z' as never,
-      updatedAt: '2026-04-28T00:00:00.000Z' as never,
-    };
-    await repo.saveSkill(draft);
-
-    await expect(
-      service.approveDraft({
-        appId: 'app:one' as never,
-        skillId: draft.id,
-      }),
-    ).rejects.toThrow('reserved SDK-native skill name "review"');
-  });
-
-  it('rejects approving existing drafts whose stored SKILL.md declares an SDK-native name', async () => {
-    const { artifacts, repo, service } = createService();
-    const draft: SkillCatalogItem = {
-      id: 'skill:stored-native' as SkillId,
-      appId: 'app:one' as never,
-      name: 'LinkedIn Posting',
-      version: 'v1',
-      source: 'admin_uploaded',
-      status: 'draft',
-      promptRefs: [],
-      toolIds: [],
-      workflowRefs: [],
-      storage: {
-        storageType: 'local-filesystem',
-        storageRef: 'skills/stored-native.json',
-        contentHash: 'sha256:stored-native',
-        sizeBytes: 1,
-      },
-      createdAt: '2026-04-28T00:00:00.000Z' as never,
-      updatedAt: '2026-04-28T00:00:00.000Z' as never,
-    };
-    artifacts.bundles.set('skills/stored-native.json', {
-      assets: [
-        {
-          path: 'SKILL.md',
-          content: Buffer.from('---\nname: loop\n---\n# Loop'),
-        },
-      ],
-    });
-    await repo.saveSkill(draft);
-
-    await expect(
-      service.approveDraft({
-        appId: 'app:one' as never,
-        skillId: draft.id,
-      }),
-    ).rejects.toThrow('reserved SDK-native skill name "loop"');
-  });
-
   it('rejects unsafe skill action manifests', async () => {
     const { service } = createService();
     const importWithAction = (action: Record<string, unknown>) =>
-      service.importDraft({
+      service.installSkill({
         appId: 'app:one' as never,
         assets: [
           {
@@ -483,24 +363,19 @@ describe('SkillDraftService', () => {
     ).rejects.toThrow('secret-like command parts');
   });
 
-  it('materializes only approved and bound local skills', async () => {
+  it('materializes only installed and bound local skills', async () => {
     const { service } = createService();
-    const draft = await service.importDraft({
+    const skill = await service.installSkill({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
       name: 'agent-skill',
       assets: [asset],
     });
 
-    await service.approveDraft({
-      appId: 'app:one' as never,
-      skillId: draft.id,
-      target: 'local',
-    });
     await service.bindSkillToAgent({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
-      skillId: draft.id,
+      skillId: skill.id,
     });
 
     const skills = await service.resolveLocalSkillsForAgent({
@@ -513,13 +388,13 @@ describe('SkillDraftService', () => {
 
   it('replaces older active bindings that materialize to the same skill directory', async () => {
     const { repo, service } = createService();
-    const first = await service.importDraft({
+    const first = await service.installSkill({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
       name: 'LinkedIn Posting',
       assets: [asset],
     });
-    const second = await service.importDraft({
+    const second = await service.installSkill({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
       name: 'linkedin-posting',
@@ -530,15 +405,6 @@ describe('SkillDraftService', () => {
         },
       ],
     });
-    await service.approveDraft({
-      appId: 'app:one' as never,
-      skillId: first.id,
-    });
-    await service.approveDraft({
-      appId: 'app:one' as never,
-      skillId: second.id,
-    });
-
     await service.bindSkillToAgent({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
@@ -552,10 +418,7 @@ describe('SkillDraftService', () => {
       now: '2026-05-02T00:00:00.000Z',
     });
 
-    expect(repo.bindings.get(`agent:one:${first.id}`)).toMatchObject({
-      status: 'disabled',
-      updatedAt: '2026-05-02T00:00:00.000Z',
-    });
+    expect(second.id).toBe(first.id);
     expect(repo.bindings.get(`agent:one:${second.id}`)).toMatchObject({
       status: 'active',
     });
@@ -567,27 +430,37 @@ describe('SkillDraftService', () => {
     ).resolves.toMatchObject([{ id: second.id }]);
   });
 
-  it('does not materialize rejected or disabled skills', async () => {
-    const { service } = createService();
-    const rejected = await service.importDraft({
+  it('does not bind or materialize disabled skills', async () => {
+    const { repo, service } = createService();
+    const disabled: SkillCatalogItem = {
+      id: 'skill:disabled' as SkillId,
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
-      name: 'rejected-skill',
-      assets: [asset],
-    });
-    await service.rejectDraft({
-      appId: 'app:one' as never,
-      skillId: rejected.id,
-    });
+      name: 'disabled-skill',
+      source: 'admin_uploaded',
+      status: 'disabled',
+      promptRefs: [],
+      toolIds: [],
+      workflowRefs: [],
+      storage: {
+        storageType: 'local-filesystem',
+        storageRef: 'skills/disabled.json',
+        contentHash: 'sha256:disabled',
+        sizeBytes: 1,
+      },
+      createdAt: '2026-04-28T00:00:00.000Z' as never,
+      updatedAt: '2026-04-28T00:00:00.000Z' as never,
+    };
+    await repo.saveSkill(disabled);
     await expect(
       service.bindSkillToAgent({
         appId: 'app:one' as never,
         agentId: 'agent:one' as never,
-        skillId: rejected.id,
+        skillId: disabled.id,
       }),
-    ).rejects.toThrow('approved');
+    ).rejects.toThrow('installed');
 
-    const approved = await service.importDraft({
+    const skill = await service.installSkill({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
       name: 'disabled-skill',
@@ -598,19 +471,15 @@ describe('SkillDraftService', () => {
         },
       ],
     });
-    await service.approveDraft({
-      appId: 'app:one' as never,
-      skillId: approved.id,
-    });
     await service.bindSkillToAgent({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
-      skillId: approved.id,
+      skillId: skill.id,
     });
     await service.unbindSkillFromAgent({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
-      skillId: approved.id,
+      skillId: skill.id,
     });
 
     const skills = await service.resolveLocalSkillsForAgent({
@@ -620,105 +489,74 @@ describe('SkillDraftService', () => {
     expect(skills).toEqual([]);
   });
 
-  it('rejects only draft skills and preserves approval metadata', async () => {
-    const { service } = createService();
-    const draft = await service.importDraft({
+  it('replaces imports by app and materialized skill name', async () => {
+    const { repo, service } = createService();
+
+    const first = await service.installSkill({
       appId: 'app:one' as never,
-      name: 'reviewed-skill',
+      name: 'LinkedIn Posting',
       assets: [asset],
     });
-    const approved = await service.approveDraft({
+    const second = await service.installSkill({
       appId: 'app:one' as never,
-      skillId: draft.id,
-      approvedBy: 'admin:one',
-      now: '2026-04-28T00:00:00.000Z',
-    });
-
-    await expect(
-      service.rejectDraft({
-        appId: 'app:one' as never,
-        skillId: approved.id,
-        rejectedBy: 'admin:two',
-      }),
-    ).rejects.toThrow('Only draft skills can be rejected');
-    expect(approved.approvedBy).toBe('admin:one');
-
-    const second = await service.importDraft({
-      appId: 'app:one' as never,
-      name: 'second-skill',
+      name: 'linkedin-posting',
       assets: [
         {
           ...asset,
-          content: Buffer.from('# Second'),
+          content: Buffer.from('# Durable skill v2'),
         },
       ],
     });
-    const rejected = await service.rejectDraft({
-      appId: 'app:one' as never,
-      skillId: second.id,
-      rejectedBy: 'admin:two',
-      now: '2026-04-28T01:00:00.000Z',
-    });
-
-    expect(rejected.rejectedBy).toBe('admin:two');
-    expect(rejected.rejectedAt).toBe('2026-04-28T01:00:00.000Z');
-    expect(rejected.approvedBy).toBeUndefined();
-  });
-
-  it('approves only draft skills and preserves rejection metadata', async () => {
-    const { service } = createService();
-    const draft = await service.importDraft({
-      appId: 'app:one' as never,
-      name: 'reviewed-skill',
-      assets: [asset],
-    });
-    const rejected = await service.rejectDraft({
-      appId: 'app:one' as never,
-      skillId: draft.id,
-      rejectedBy: 'admin:rejector',
-      now: '2026-04-28T00:00:00.000Z',
-    });
-
-    await expect(
-      service.approveDraft({
-        appId: 'app:one' as never,
-        skillId: rejected.id,
-        approvedBy: 'admin:approver',
-      }),
-    ).rejects.toThrow('Only draft skills can be approved');
-    expect(rejected.rejectedBy).toBe('admin:rejector');
-  });
-
-  it('deduplicates imports by app and content hash', async () => {
-    const { repo, service } = createService();
-
-    const first = await service.importDraft({
-      appId: 'app:one' as never,
-      name: 'first-name',
-      assets: [asset],
-    });
-    const second = await service.importDraft({
-      appId: 'app:one' as never,
-      name: 'second-name',
-      assets: [asset],
-    });
 
     expect(second.id).toBe(first.id);
-    expect(second.name).toBe('first-name');
-    expect(repo.listSkillsSpy).not.toHaveBeenCalled();
+    expect(second.name).toBe('linkedin-posting');
+    expect(second.storage?.storageRef).toBe('skills/linkedin-posting');
+    expect(repo.listSkillsSpy).toHaveBeenCalled();
   });
 
-  it('creates separate agent-originated drafts even when content hashes match', async () => {
+  it('does not return disabled matching content when reinstalling a skill', async () => {
+    const { repo, service } = createService();
+    const disabled: SkillCatalogItem = {
+      id: 'skill:disabled-duplicate' as SkillId,
+      appId: 'app:one' as never,
+      name: 'disabled-duplicate',
+      source: 'admin_uploaded',
+      status: 'disabled',
+      promptRefs: [],
+      toolIds: [],
+      workflowRefs: [],
+      storage: {
+        storageType: 'local-filesystem',
+        storageRef: 'skills/disabled-duplicate.json',
+        contentHash: 'sha256:232044757261626c6520736b696c6c',
+        sizeBytes: 15,
+      },
+      createdAt: '2026-04-28T00:00:00.000Z' as never,
+      updatedAt: '2026-04-28T00:00:00.000Z' as never,
+    };
+    await repo.saveSkill(disabled);
+
+    const installed = await service.installSkill({
+      appId: 'app:one' as never,
+      name: 'reinstalled',
+      assets: [asset],
+    });
+
+    expect(installed.id).not.toBe(disabled.id);
+    expect(installed.status).toBe('installed');
+  });
+
+  it('keeps different agent-originated skill names separate', async () => {
     const { service } = createService();
 
-    const first = await service.importDraft({
+    const first = await service.installSkill({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
       name: 'first-name',
       createdBy: 'agent:one',
       assets: [asset],
     });
-    const second = await service.importDraft({
+    const second = await service.installSkill({
       appId: 'app:one' as never,
       agentId: 'agent:two' as never,
       name: 'second-name',
@@ -727,33 +565,56 @@ describe('SkillDraftService', () => {
     });
 
     expect(second.id).not.toBe(first.id);
-    expect(second.agentId).toBe('agent:two');
+    expect(second.agentId).toBeUndefined();
     expect(second.name).toBe('second-name');
   });
 
-  it('keeps admin and agent duplicate scopes separate for identical content', async () => {
+  it('reuses one app skill identity for the same skill name across agents', async () => {
     const { service } = createService();
 
-    const agentDraft = await service.importDraft({
+    const first = await service.installSkill({
+      appId: 'app:one' as never,
+      agentId: 'agent:one' as never,
+      name: 'shared-name',
+      createdBy: 'agent:one',
+      assets: [asset],
+    });
+    const second = await service.installSkill({
+      appId: 'app:one' as never,
+      agentId: 'agent:two' as never,
+      name: 'Shared Name',
+      createdBy: 'agent:two',
+      assets: [{ ...asset, content: Buffer.from('# Shared v2') }],
+    });
+
+    expect(second.id).toBe(first.id);
+    expect(second.name).toBe('Shared Name');
+    expect(second.agentId).toBeUndefined();
+  });
+
+  it('keeps different skill names separate even when content matches', async () => {
+    const { service } = createService();
+
+    const agentSkill = await service.installSkill({
       appId: 'app:one' as never,
       agentId: 'agent:one' as never,
       name: 'agent-owned',
       assets: [asset],
     });
-    const adminDraft = await service.importDraft({
+    const adminSkill = await service.installSkill({
       appId: 'app:one' as never,
       name: 'admin-owned',
       assets: [asset],
     });
-    const adminAgain = await service.importDraft({
+    const adminAgain = await service.installSkill({
       appId: 'app:one' as never,
       name: 'admin-owned-again',
       assets: [asset],
     });
 
-    expect(adminDraft.id).not.toBe(agentDraft.id);
-    expect(adminDraft.agentId).toBeUndefined();
-    expect(adminDraft.name).toBe('admin-owned');
-    expect(adminAgain.id).toBe(adminDraft.id);
+    expect(adminSkill.id).not.toBe(agentSkill.id);
+    expect(adminSkill.agentId).toBeUndefined();
+    expect(adminSkill.name).toBe('admin-owned');
+    expect(adminAgain.id).not.toBe(adminSkill.id);
   });
 });

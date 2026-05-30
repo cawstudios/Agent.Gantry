@@ -21,7 +21,7 @@ import { createGroupProcessor } from '../../runtime/group-processing.js';
 import type { GroupProcessingDeps } from '../../runtime/group-processing-types.js';
 import { listAvailableGroups } from '../../runtime/group-registry.js';
 import { GroupQueue } from '../../runtime/group-queue.js';
-import { parseThreadQueueKey } from '../../runtime/thread-queue-key.js';
+import { parseThreadQueueKey } from '../../shared/thread-queue-key.js';
 import {
   registerGroup as registerGroupEntry,
   setGroupModelOverride as setGroupModelOverrideEntry,

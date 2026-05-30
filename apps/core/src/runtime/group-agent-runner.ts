@@ -10,6 +10,7 @@ import type {
 import {
   memoryScopeForConversationKind,
   resolveTurnToolPolicy,
+  resolveTurnSemanticCapabilities,
   resolveTurnSelectedMcpServerIds,
   resolveTurnSelectedSkillContext,
 } from './group-run-context.js';
@@ -60,6 +61,9 @@ const RUNTIME_LOG_PROVIDER_VALUE_PATTERNS: RegExp[] = [
 const RUNTIME_LOG_REDACT_KEY_PATTERN =
   /^(sessionId|newSessionId|providerSessionId|externalSessionId|latestProviderSessionId|session_id)$/i;
 const memoryReviewApproverCache = new Map<string, [boolean, number]>();
+function isMissingProviderSessionError(error: string | undefined): boolean {
+  return /\bNo conversation found with session ID\b/i.test(error ?? '');
+}
 function redactRuntimeLogString(value: string): string {
   let out = value;
   for (const pattern of RUNTIME_LOG_PROVIDER_FIELD_PATTERNS) {
@@ -357,11 +361,13 @@ export function createGroupAgentRunner(input: {
       skillArtifactStore: deps.getSkillArtifactStore?.(),
       turnContext,
     });
-    const [configuredToolPolicy, selectedSkillContext] = await Promise.all([
-      resolveTurnToolPolicy(deps, turnContext),
-      resolveTurnSelectedSkillContext(deps, turnContext),
-    ]);
-    const selectedMcpServerIds = await resolveTurnSelectedMcpServerIds(
+    const [configuredToolPolicy, selectedSkillContext, semanticCapabilities] =
+      await Promise.all([
+        resolveTurnToolPolicy(deps, turnContext),
+        resolveTurnSelectedSkillContext(deps, turnContext),
+        resolveTurnSemanticCapabilities(deps, turnContext),
+      ]);
+    const attachedMcpSourceIds = await resolveTurnSelectedMcpServerIds(
       deps,
       turnContext,
       configuredToolPolicy.allowedTools,
@@ -399,7 +405,35 @@ export function createGroupAgentRunner(input: {
         executionAdapters: deps.executionAdapters,
         turnContext,
       });
-      const invokeAgent = (agentInput: { memoryContextBlock?: string }) =>
+      const expireTurnProviderSession = async (
+        reason: string,
+      ): Promise<boolean> => {
+        if (
+          !turnContext?.providerSessionId ||
+          !turnContext.agentSessionId ||
+          !turnContext.externalSessionId ||
+          !ops().expireProviderSession
+        ) {
+          return false;
+        }
+        await ops().expireProviderSession?.({
+          providerSessionId: turnContext.providerSessionId,
+          agentSessionId: turnContext.agentSessionId,
+          provider: executionProviderId,
+          externalSessionId: turnContext.externalSessionId,
+        });
+        latestProviderSessionId = undefined;
+        await updateRunProviderMetadata({ providerSessionId: null });
+        runtimeLogger.warn(
+          { group: group.name, reason },
+          'Expired stale provider session and retrying without resume',
+        );
+        return true;
+      };
+      const invokeAgent = (agentInput: {
+        memoryContextBlock?: string;
+        resumeSessionId?: string;
+      }) =>
         runAgentImpl(
           group,
           {
@@ -414,14 +448,15 @@ export function createGroupAgentRunner(input: {
             persona: group.agentConfig?.persona,
             allowedTools: configuredToolPolicy.allowedTools,
             runtimeAccess: configuredToolPolicy.runtimeAccess,
-            selectedSkillIds: selectedSkillContext.ids,
+            attachedSkillSourceIds: selectedSkillContext.ids,
             selectedSkillDisplays: selectedSkillContext.displays,
-            selectedMcpServerIds,
+            attachedMcpSourceIds,
+            semanticCapabilities,
             assistantName: group.trigger || DEFAULT_ASSISTANT_NAME,
             thinking: group.agentConfig?.thinking,
             memoryContextBlock: agentInput.memoryContextBlock,
-            ...(turnContext?.externalSessionId
-              ? { sessionId: turnContext.externalSessionId }
+            ...(agentInput.resumeSessionId
+              ? { sessionId: agentInput.resumeSessionId }
               : {}),
             [WORKSPACE_FOLDER_INPUT_KEY]: group.folder,
           } as Parameters<typeof runAgentImpl>[1],
@@ -455,7 +490,17 @@ export function createGroupAgentRunner(input: {
           wrappedOnOutput,
           runOptions,
         );
-      const output = await invokeAgent({ memoryContextBlock });
+      let output = await invokeAgent({
+        memoryContextBlock,
+        resumeSessionId: turnContext?.externalSessionId,
+      });
+      if (
+        output.status === 'error' &&
+        isMissingProviderSessionError(output.error) &&
+        (await expireTurnProviderSession(output.error ?? 'missing session'))
+      ) {
+        output = await invokeAgent({ memoryContextBlock });
+      }
       if (output.status === 'error') {
         runtimeLogger.error(
           { group: group.name, error: output.error },

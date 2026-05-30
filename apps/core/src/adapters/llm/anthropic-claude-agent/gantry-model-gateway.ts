@@ -51,6 +51,7 @@ const DEFAULT_TOKEN_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_TOKENS = 1024;
 const DEFAULT_REQUEST_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 10 * 60 * 1000;
+const CLAUDE_CODE_OAUTH_TOKEN_ENV = 'CLAUDE_CODE_OAUTH_TOKEN';
 
 interface GatewayTokenRecord {
   token: string;
@@ -129,6 +130,17 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
     if (!credential) {
       throw new Error(
         `Model credential for ${providerId} is not configured. Run \`gantry credentials model set ${providerId}\`.`,
+      );
+    }
+    const credentialMode = resolveModelCredentialMode(
+      provider,
+      credential.authMode,
+    );
+    if (credentialMode.gatewayAuth.strategy === 'claude_code_oauth') {
+      return projectClaudeCodeOAuthInjection(
+        provider,
+        credentialMode.gatewayAuth.field,
+        credential.payload,
       );
     }
     await this.ensureListening();
@@ -216,9 +228,9 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       supportsAgentBinding: false,
       supportsModelRuntimeProfile: true,
       modelRuntimeProfileIdentifier: 'gantry-model-access',
-      returnsRawSecrets: false,
-      projectsProviderTokens: false,
-      projectedSecretEnvKeys: projectedGatewayEnvKeys(),
+      returnsRawSecrets: true,
+      projectsProviderTokens: true,
+      projectedSecretEnvKeys: projectedModelCredentialEnvKeys(),
     };
   }
 
@@ -449,7 +461,9 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       await this.audit({
         appId: tokenRecord.appId,
         ...(tokenRecord.agentId ? { agentId: tokenRecord.agentId } : {}),
-        ...(tokenRecord.runId ? { runId: tokenRecord.runId } : {}),
+        ...(runtimeEventRunIdFor(tokenRecord)
+          ? { runId: runtimeEventRunIdFor(tokenRecord) }
+          : {}),
         ...(tokenRecord.jobId ? { jobId: tokenRecord.jobId } : {}),
         ...(tokenRecord.conversationId
           ? { conversationId: tokenRecord.conversationId }
@@ -485,7 +499,9 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       await this.audit({
         appId: tokenRecord.appId,
         ...(tokenRecord.agentId ? { agentId: tokenRecord.agentId } : {}),
-        ...(tokenRecord.runId ? { runId: tokenRecord.runId } : {}),
+        ...(runtimeEventRunIdFor(tokenRecord)
+          ? { runId: runtimeEventRunIdFor(tokenRecord) }
+          : {}),
         ...(tokenRecord.jobId ? { jobId: tokenRecord.jobId } : {}),
         ...(tokenRecord.conversationId
           ? { conversationId: tokenRecord.conversationId }
@@ -529,6 +545,15 @@ function gatewayProviderFor(providerId: string): ModelProviderDefinition {
   const provider = getModelProviderDefinition(normalized);
   if (provider?.executable && provider.gateway) return provider;
   throw new Error(`Unsupported model gateway provider: ${providerId}`);
+}
+
+function runtimeEventRunIdFor(
+  tokenRecord: GatewayTokenRecord,
+): RuntimeEventPublishInput['runId'] | undefined {
+  if (!tokenRecord.runId) return undefined;
+  return String(tokenRecord.runId).startsWith('credential-run:')
+    ? undefined
+    : tokenRecord.runId;
 }
 
 function defaultGatewayProviderId(): string {
@@ -597,10 +622,38 @@ function projectGatewayTokenEnv(input: {
   };
 }
 
-function projectedGatewayEnvKeys(): string[] {
+function projectClaudeCodeOAuthInjection(
+  provider: ModelProviderDefinition,
+  field: string | undefined,
+  payload: ModelCredentialPayload,
+): AgentCredentialInjection {
+  if (provider.id !== 'anthropic') {
+    throw new Error('Claude Code OAuth is only supported for Anthropic.');
+  }
+  if (!field) {
+    throw new Error(
+      `Claude Code OAuth credential mode for ${provider.id} is missing a credential field.`,
+    );
+  }
+  const token = payload[field];
+  if (!token) {
+    throw new Error(
+      `Model credential payload for ${provider.id} is missing ${field}.`,
+    );
+  }
+  return {
+    env: { [CLAUDE_CODE_OAUTH_TOKEN_ENV]: token },
+    credentialProviders: { [CLAUDE_CODE_OAUTH_TOKEN_ENV]: 'native' },
+    applied: true,
+    brokerProfile: 'gantry',
+  };
+}
+
+function projectedModelCredentialEnvKeys(): string[] {
   return [
-    ...new Set(
-      listExecutableModelProviders().flatMap((provider) => {
+    ...new Set([
+      CLAUDE_CODE_OAUTH_TOKEN_ENV,
+      ...listExecutableModelProviders().flatMap((provider) => {
         const projection = provider.gateway.sdkProjection;
         return [
           projection.baseUrlEnv,
@@ -608,7 +661,7 @@ function projectedGatewayEnvKeys(): string[] {
           projection.additionalTokenEnv,
         ].filter((key): key is string => Boolean(key));
       }),
-    ),
+    ]),
   ].sort();
 }
 

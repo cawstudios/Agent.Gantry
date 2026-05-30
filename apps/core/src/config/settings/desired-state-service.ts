@@ -17,11 +17,11 @@ import {
 } from './desired-state-capability-reconcile.js';
 import { exportCurrentDesiredState } from './desired-state-current-export.js';
 import {
-  cleanupGeneratedRuntimeCapabilities,
-  cleanupGeneratedRuntimeCapabilitiesInSettings,
+  normalizeConfiguredCapabilities,
+  normalizeConfiguredCapabilitiesInSettings,
   semanticCapabilityDefinitionsById,
   skillActionDefinitionsForSkills,
-} from './generated-runtime-capability-cleanup.js';
+} from './configured-capability-normalization.js';
 import {
   configuredConversationKind,
   jidForConfiguredConversation,
@@ -89,8 +89,8 @@ export class SettingsDesiredStateService {
     });
   }
 
-  async cleanupGeneratedRuntimeCapabilities(settings: RuntimeSettings) {
-    return cleanupGeneratedRuntimeCapabilitiesInSettings({
+  async normalizeConfiguredCapabilities(settings: RuntimeSettings) {
+    return normalizeConfiguredCapabilitiesInSettings({
       settings,
       repositories: this.deps.repositories,
       appId: this.appId,
@@ -100,8 +100,7 @@ export class SettingsDesiredStateService {
   async drift(
     settings: RuntimeSettings,
   ): Promise<SettingsDesiredStateDriftReport> {
-    settings = (await this.cleanupGeneratedRuntimeCapabilities(settings))
-      .settings;
+    settings = (await this.normalizeConfiguredCapabilities(settings)).settings;
     const groups = await this.deps.ops.getAllConversationRoutes();
     const configuredFolders = new Set(Object.keys(settings.agents));
     const configuredJids = new Set(
@@ -123,16 +122,15 @@ export class SettingsDesiredStateService {
   }
 
   async reconcile(settings: RuntimeSettings): Promise<SettingsReconcileResult> {
-    const cleanup = await cleanupGeneratedRuntimeCapabilitiesInSettings({
+    const normalization = await normalizeConfiguredCapabilitiesInSettings({
       settings,
       repositories: this.deps.repositories,
       appId: this.appId,
     });
-    settings = cleanup.settings;
-    const generatedCapabilityCleanupFolders = new Set([
-      ...cleanup.converted.map((item) => item.agentFolder),
-      ...cleanup.dropped.map((item) => item.agentFolder),
-    ]);
+    settings = normalization.settings;
+    const normalizedCapabilityFolders = new Set(
+      normalization.changedAgentFolders,
+    );
     const invalidReferences = await this.validateCapabilityReferences(settings);
     if (invalidReferences.length > 0) {
       return { applied: [], skipped: [], invalidReferences };
@@ -182,7 +180,7 @@ export class SettingsDesiredStateService {
       if (
         settings.desiredState.authoritative ||
         hasAnyCapability(agent) ||
-        generatedCapabilityCleanupFolders.has(folder)
+        normalizedCapabilityFolders.has(folder)
       ) {
         await this.replaceCapabilities(agentId, agent, now);
         applied.push(`capabilities:${folder}`);
@@ -501,12 +499,11 @@ export class SettingsDesiredStateService {
       const skillActionDefinitions = semanticCapabilityDefinitionsById(
         skillActionDefinitionsForAgent,
       );
-      const cleanedCapabilities = cleanupGeneratedRuntimeCapabilities({
+      const normalizedCapabilities = normalizeConfiguredCapabilities({
         capabilities: agent.capabilities,
-        skillActionDefinitions: skillActionDefinitionsForAgent,
       }).capabilities;
       for (const capability of [
-        ...new Set(cleanedCapabilities.map((item) => item.id)),
+        ...new Set(normalizedCapabilities.map((item) => item.id)),
       ]) {
         const toolReference = settingsCapabilityToToolReference({
           id: capability,
@@ -546,8 +543,7 @@ export class SettingsDesiredStateService {
         if (
           !server ||
           server.appId !== this.appId ||
-          server.status !== 'approved' ||
-          !server.latestApprovedVersionId
+          server.status !== 'active'
         ) {
           errors.push(
             `agents.${folder}.sources.mcp_servers contains unavailable MCP server: ${serverId}`,
