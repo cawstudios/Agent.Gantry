@@ -65,6 +65,9 @@ export type RuntimeAppRepository = RuntimeRouterStateRepository &
 export interface RuntimeApp {
   executionAdapter: AgentExecutionAdapter;
   queue: GroupQueue;
+  // The guardrail classifier used on the agent-spawn path. Exposed so the
+  // message loop can apply the same guardrail to the continuation path.
+  guardrailClassifier: GroupProcessingDeps['guardrailClassifier'];
   loadState: () => Promise<void>;
   saveState: () => Promise<void>;
   getOrRecoverCursor: (chatJid: string) => Promise<string>;
@@ -148,6 +151,12 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   let agentSettingsByFolder: Record<string, RuntimeConfiguredAgent> = {};
 
   const queue = options.queue ?? new GroupQueue(getRuntimeQueueConfig());
+  // Single guardrail classifier instance shared by both the spawn path
+  // (group processor) and the continuation path (message loop), so the
+  // guardrail behaves identically regardless of which path a message takes.
+  const guardrailClassifier =
+    options.guardrailClassifier ??
+    createGuardrailClassifier({ query: runClaudeQuery });
   const executionAdapter =
     options.executionAdapter ?? createDefaultAgentExecutionAdapter();
   registerMemoryLlmClient(createDefaultMemoryLlmClient());
@@ -537,15 +546,14 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     collectSessionMemory:
       options.collectSessionMemory ?? collectRuntimeSessionMemory,
     publishRuntimeEvent: options.publishRuntimeEvent,
-    guardrailClassifier:
-      options.guardrailClassifier ??
-      createGuardrailClassifier({ query: runClaudeQuery }),
+    guardrailClassifier,
     executionAdapter,
   });
 
   return {
     executionAdapter,
     queue,
+    guardrailClassifier,
     loadState,
     saveState,
     getOrRecoverCursor,

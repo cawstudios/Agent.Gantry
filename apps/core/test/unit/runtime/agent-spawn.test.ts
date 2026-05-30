@@ -1694,7 +1694,7 @@ describe('agent-spawn timeout behavior', () => {
         },
       }),
     ]);
-    const result = await spawnAgent(
+    const result = await spawnTestAgent(
       testGroup,
       {
         ...testInput,
@@ -1738,7 +1738,7 @@ describe('agent-spawn timeout behavior', () => {
         url: 'http://127.0.0.1:18081/mcp',
       }),
     ]);
-    const resultPromise = spawnAgent(
+    const resultPromise = spawnTestAgent(
       testGroup,
       {
         ...testInput,

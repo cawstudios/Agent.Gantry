@@ -11,7 +11,7 @@ import {
   toGroupMessageCursor,
 } from '../shared/message-cursor.js';
 import { logger } from '../infrastructure/logging/logger.js';
-import { MessageSendOptions, ProgressUpdateOptions } from '../domain/types.js';
+import { MessageSendOptions } from '../domain/types.js';
 import {
   createSerializedAgentOutputCallbacks,
   isAgentTurnCompleteMarker,

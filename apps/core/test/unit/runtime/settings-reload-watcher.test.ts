@@ -73,6 +73,14 @@ describe('settings reload watcher', () => {
       'SECRET_ENCRYPTION_KEY',
       '123456789abcdefghijklmnopqrstuvwxyzABCDEFGH',
     );
+    // The host shell (e.g. Claude Code) can inject ANTHROPIC_* into the
+    // process env. The settings reload validator rejects non-secret model
+    // configuration that belongs in settings.yaml when it is found in the
+    // environment, which would make every reload fail. Strip them so this
+    // test exercises reload behavior independent of the surrounding shell.
+    vi.stubEnv('ANTHROPIC_BASE_URL', undefined);
+    vi.stubEnv('ANTHROPIC_API_KEY', undefined);
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', undefined);
     saveRuntimeSettings(runtimeHome, createDefaultRuntimeSettings());
     const deps = makeDeps();
     const watcher = startSettingsReloadWatcher({

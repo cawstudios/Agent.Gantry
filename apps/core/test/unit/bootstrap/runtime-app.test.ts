@@ -44,7 +44,7 @@ async function loadRuntimeApp() {
 
 async function loadRuntimeAppWithGroupProcessorSpy() {
   vi.resetModules();
-  const runModelQuery = vi.fn(async () => '{"action":"allow","reason":"ok"}');
+  const runClaudeQuery = vi.fn(async () => '{"action":"allow","reason":"ok"}');
   const createGroupProcessor = vi.fn(() => ({
     processGroupMessages: vi.fn(async () => true),
   }));
@@ -66,9 +66,16 @@ async function loadRuntimeAppWithGroupProcessorSpy() {
   vi.doMock('@core/runtime/group-processing.js', () => ({
     createGroupProcessor,
   }));
-  vi.doMock('@core/memory/model-query.js', () => ({
-    runModelQuery,
-  }));
+  vi.doMock(
+    '@core/adapters/llm/anthropic-claude-agent/memory-query.js',
+    async (importOriginal) => {
+      const actual =
+        await importOriginal<
+          typeof import('@core/adapters/llm/anthropic-claude-agent/memory-query.js')
+        >();
+      return { ...actual, runClaudeQuery };
+    },
+  );
   vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
     getRuntimeRepositories: vi.fn(() => {
       throw new Error('ops repository should not be used by this test');
@@ -77,7 +84,7 @@ async function loadRuntimeAppWithGroupProcessorSpy() {
     getRuntimeStorage: vi.fn(),
   }));
   const runtimeApp = await import('@core/app/bootstrap/runtime-app.js');
-  return { ...runtimeApp, createGroupProcessor, runModelQuery };
+  return { ...runtimeApp, createGroupProcessor, runClaudeQuery };
 }
 
 describe('runtime app credential binding', () => {
@@ -181,7 +188,7 @@ describe('runtime app credential binding', () => {
   });
 
   it('wires a default no-tools guardrail classifier into group processing', async () => {
-    const { createRuntimeApp, createGroupProcessor, runModelQuery } =
+    const { createRuntimeApp, createGroupProcessor, runClaudeQuery } =
       await loadRuntimeAppWithGroupProcessorSpy();
     createRuntimeApp();
     const capturedDeps = vi.mocked(createGroupProcessor).mock.calls[0]?.[0];
@@ -195,7 +202,7 @@ describe('runtime app credential binding', () => {
         prompt: 'classify',
       }),
     ).resolves.toEqual({ action: 'allow', reason: 'ok' });
-    expect(runModelQuery).toHaveBeenCalledWith({
+    expect(runClaudeQuery).toHaveBeenCalledWith({
       model: 'claude-haiku-4-5-20251001',
       systemPrompt: 'classify',
       disableTools: true,

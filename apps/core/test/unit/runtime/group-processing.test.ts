@@ -591,7 +591,7 @@ describe('createGroupProcessor', () => {
       expect(mockSpawnAgent).not.toHaveBeenCalled();
       expect(channel.sendMessage).toHaveBeenCalledWith(
         'group1@g.us',
-        expect.stringContaining('Please ask about your order'),
+        expect.stringContaining('I can help with Bombay Sweet Shop'),
       );
     });
   });
@@ -1155,6 +1155,7 @@ describe('createGroupProcessor', () => {
           memoryUserId: 'user1@s.whatsapp.net',
           expectedAgentSessionId: 'agent-session:1',
           expectedAgentSessionResetAt: null,
+          executionProviderId: 'anthropic:claude-agent-sdk',
         },
       );
     });

@@ -361,6 +361,14 @@ export async function startRuntimeServices(
         channelWiring.setTyping(chatJid, isTyping),
       sendProgressUpdate: (chatJid, text, options) =>
         channelWiring.sendProgressUpdate(chatJid, text, options),
+      sendChannelMessage: (chatJid, text, options) =>
+        channelWiring.sendMessage(chatJid, text, {
+          durability: 'required',
+          ...(options?.threadId
+            ? { messageOptions: { threadId: options.threadId } }
+            : {}),
+        }),
+      guardrailClassifier: app.guardrailClassifier,
       queue: app.queue,
       handleActiveControlCommand,
       opsRepository: resolved.opsRepository,
@@ -684,6 +692,14 @@ export async function startRuntimeServices(
         channelWiring.setTyping(chatJid, isTyping),
       sendProgressUpdate: (chatJid, text, options) =>
         channelWiring.sendProgressUpdate(chatJid, text, options),
+      sendChannelMessage: (chatJid, text, options) =>
+        channelWiring.sendMessage(chatJid, text, {
+          durability: 'required',
+          ...(options?.threadId
+            ? { messageOptions: { threadId: options.threadId } }
+            : {}),
+        }),
+      guardrailClassifier: app.guardrailClassifier,
       queue: app.queue,
       handleActiveControlCommand,
       opsRepository: resolved.opsRepository,
