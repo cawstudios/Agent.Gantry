@@ -517,15 +517,15 @@ Provider ids are stored without changing the boundary meaning:
 
 #### Search Architecture
 
-Search currently uses Postgres full-text lexical ranking plus keyword-style
-fallback over visible `memory_items`. This works when embeddings are disabled,
-which is the default local setup.
+Search uses Postgres full-text lexical ranking over visible `memory_items` when
+embeddings are disabled, which is the default local setup. When embeddings are
+enabled and item vectors are ready for the configured provider/model/dimensions,
+runtime recall fuses lexical and pgvector cosine candidates with reciprocal
+rank fusion. Query embedding is deadline-bounded and falls back to lexical
+retrieval on quota, rate-limit, provider error, or timeout.
 
-Embedding providers and the `embedding_cache` table exist for brokered
-embedding work, but vector memory retrieval is inactive until the runtime has a
-complete memory item embedding index and query path. Do not describe current
-runtime recall as hybrid or RRF-based.
-Embedding work is limited to dreaming promotion/update workflows in this slice.
+Embedding writes happen outside turn-time recall through dreaming
+promotion/update workflows and resumable embedding backfill.
 
 #### Source Ingestion
 
@@ -590,7 +590,7 @@ continuation state.
 | `memory.enabled`                      | `true`                   | Enables durable memory                                          |
 | `memory.embeddings.enabled`           | `false`                  | Optional embedding toggle                                       |
 | `memory.embeddings.provider`          | `disabled`               | Embedding provider (`disabled` or `openai`)                     |
-| `memory.embeddings.model`             | `text-embedding-3-large` | Embedding model                                                 |
+| `memory.embeddings.model`             | `text-embedding-3-small` | Embedding model                                                 |
 | `memory.embeddings.batch_size`        | `16`                     | Texts per embedding API call                                    |
 | `memory.embeddings.daily_limit`       | `500`                    | Daily embedding API call limit                                  |
 | `memory.llm.extractor_max_facts`      | `8`                      | Max candidate facts extracted per evidence batch                |

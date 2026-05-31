@@ -433,6 +433,21 @@ agents:
     expect(parsed.memory.maintenance.maxPending).toBe(250);
   });
 
+  it('rejects unsupported semantic memory vector dimensions', () => {
+    expect(() =>
+      parseRuntimeSettings(`memory:
+  enabled: true
+  embeddings:
+    enabled: true
+    provider: openai
+    model: text-embedding-3-small
+    dimensions: 3072
+`),
+    ).toThrow(
+      'memory.embeddings.dimensions must be 1536; Gantry semantic memory v1 stores vector(1536) only.',
+    );
+  });
+
   it('keeps explicit verbose provider connections over compact defaults', () => {
     const parsed = parseRuntimeSettings(`providers:
   telegram:

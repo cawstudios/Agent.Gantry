@@ -269,10 +269,6 @@ export async function triggerAppMemoryDreaming(input: {
         dreamDeadline.throwIfExpired();
         return storeDreamItemEmbedding({
           db,
-          schema: {
-            memoryItemEmbeddingsPostgres: pgSchema.memoryItemEmbeddingsPostgres,
-          },
-          sqlOps: { and, eq },
           now: nowIso,
           provider: embeddingProvider,
           providerName: MEMORY_DREAMING_EMBED_PROVIDER,

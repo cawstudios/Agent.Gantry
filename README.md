@@ -142,7 +142,7 @@ memory:
   embeddings:
     enabled: false
     provider: disabled
-    model: text-embedding-3-large
+    model: text-embedding-3-small
   dreaming:
     enabled: true
 
@@ -392,7 +392,7 @@ Continuity is explicit runtime resume/current-work state. Durable memory is sepa
 - open loops once commitment tracking is enabled
 - dream status (enabled/schedule/last run outcome)
 
-Embeddings are off by default. Memory search and context injection work without embeddings today through lexical search and keyword fallback. Configuring embeddings prepares provider access, but vector retrieval is not active until the runtime indexing/query path is enabled.
+Embeddings are off by default. Memory search and context injection work without embeddings through lexical search and keyword fallback. When embeddings are enabled and backfilled, recall uses hybrid lexical plus pgvector ranking with lexical fallback if query embedding is unavailable, paused, or over its live deadline.
 
 Host runtime injects a digest-first memory context block when a fresh chat runner or scheduled job starts: recent session digests (when persisted), then active durable memory items. Follow-up chat messages continue through the same live Claude SDK stream while the runner is alive, so Gantry does not replay raw message history or run logs into every prompt. The memory block is sent as structured untrusted data with a system-level boundary policy that forbids treating memory records as instructions or tool-use authority.
 

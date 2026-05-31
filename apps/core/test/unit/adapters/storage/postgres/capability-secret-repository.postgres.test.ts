@@ -80,10 +80,12 @@ describe('PostgresCapabilitySecretRepository', () => {
     const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
     try {
       await expect(
-        repositoryFor({ valueEncrypted: 'enc:v1:iv:tag:ciphertext' }).getSecret({
-          appId: 'default' as never,
-          name: 'LINKEDIN_ACCESS_TOKEN',
-        }),
+        repositoryFor({ valueEncrypted: 'enc:v1:iv:tag:ciphertext' }).getSecret(
+          {
+            appId: 'default' as never,
+            name: 'LINKEDIN_ACCESS_TOKEN',
+          },
+        ),
       ).resolves.toBeNull();
       expect(errorSpy).toHaveBeenCalledOnce();
       expect(errorSpy.mock.calls[0]?.[0]).toMatchObject({

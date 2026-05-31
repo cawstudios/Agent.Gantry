@@ -147,13 +147,11 @@ Without embeddings, Gantry uses:
 - memory kind priority
 - pinned/importance signals
 
-Embeddings are configuration and cache plumbing in this slice; enabling them
-does not activate vector memory retrieval. Future vector search can improve
-recall and deduplication only after the memory item embedding index and query
-path are complete. It must never be required to save memory, search memory,
-inject context, or continue work.
-Embedding computation is limited to dreaming promotion/update workflows, not
-normal turn-time recall.
+Embeddings are optional. When embeddings are enabled and item vectors have been
+written by dreaming promotion/update workflows or resumable embedding backfill,
+turn-time recall fuses lexical and vector candidates. It must never be required
+to save memory, search memory, inject context, or continue work; query embedding
+timeouts and provider pauses fall back to lexical recall.
 
 ## User Controls
 

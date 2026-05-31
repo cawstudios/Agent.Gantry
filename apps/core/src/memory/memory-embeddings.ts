@@ -2,10 +2,21 @@ import { randomUUID } from 'node:crypto';
 
 import {
   MEMORY_EMBED_BATCH_SIZE,
+  MEMORY_EMBED_DIMENSIONS,
   MEMORY_EMBED_MODEL,
   MEMORY_EMBED_PROVIDER,
   getCredentialBrokerRuntimeConfig,
 } from '../config/index.js';
+import {
+  EmbeddingProviderError,
+  classifyEmbeddingHttpError,
+  classifyEmbeddingThrown,
+} from './memory-embedding-errors.js';
+import {
+  fetchEmbeddingBatchResults,
+  pollEmbeddingBatch,
+  submitEmbeddingBatch,
+} from './embedding-batch-http.js';
 import { getAgentCredentialInjection } from '../application/credentials/agent-credential-service.js';
 import { createAgentCredentialBroker } from '../adapters/credentials/agent-credential-broker-factory.js';
 import { getRuntimeStorage } from '../adapters/storage/postgres/runtime-store.js';
@@ -26,11 +37,55 @@ export interface EmbeddingProvider {
   isEnabled(): boolean;
   validateConfiguration(): void;
   validateReady?(options?: { signal?: AbortSignal }): Promise<void>;
+  expectedDimensions?(): number;
   embedMany(
     texts: string[],
     options?: { signal?: AbortSignal },
   ): Promise<number[][]>;
   embedOne(text: string, options?: { signal?: AbortSignal }): Promise<number[]>;
+  /** Present only on providers that support async batch embedding (backfill). */
+  batch?: EmbeddingBatchCapability;
+}
+
+export interface EmbeddingBatchRequest {
+  customId: string;
+  input: string;
+}
+
+export type EmbeddingBatchState =
+  | 'pending'
+  | 'completed'
+  | 'failed'
+  | 'expired'
+  | 'cancelled';
+
+export interface EmbeddingBatchPoll {
+  batchId: string;
+  state: EmbeddingBatchState;
+  outputFileId: string | null;
+  errorFileId: string | null;
+  error: string | null;
+}
+
+export interface EmbeddingBatchResultRow {
+  customId: string;
+  embedding?: number[];
+  error?: string;
+}
+
+export interface EmbeddingBatchCapability {
+  submitBatch(
+    requests: EmbeddingBatchRequest[],
+    options?: { signal?: AbortSignal },
+  ): Promise<{ batchId: string }>;
+  pollBatch(
+    batchId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<EmbeddingBatchPoll>;
+  fetchBatchResults(
+    poll: EmbeddingBatchPoll,
+    options?: { signal?: AbortSignal },
+  ): Promise<EmbeddingBatchResultRow[]>;
 }
 
 type EmbeddingCredentialResolver = () => Promise<string | null>;
@@ -43,6 +98,7 @@ type EmbeddingConnectionResolver = () => Promise<{
 type EmbeddingCredentialConfigurationValidator = () => void;
 interface EmbeddingProviderOptions {
   model?: string;
+  dimensions?: number;
   appId?: AppId;
 }
 
@@ -60,6 +116,7 @@ let embeddingCredentialBrokerConfigKey = '';
 export class OpenAIEmbeddingClient implements EmbeddingProvider {
   private readonly apiKey: string | null | EmbeddingCredentialResolver;
   private readonly model: string;
+  private readonly dimensions: number;
   private readonly validateCredentialConfiguration?: EmbeddingCredentialConfigurationValidator;
   private readonly baseUrl: string | EmbeddingBaseUrlResolver;
   private readonly connection?: EmbeddingConnectionResolver;
@@ -70,9 +127,11 @@ export class OpenAIEmbeddingClient implements EmbeddingProvider {
     validateCredentialConfiguration?: EmbeddingCredentialConfigurationValidator,
     baseUrl: string | EmbeddingBaseUrlResolver = DEFAULT_EMBEDDING_BASE_URL,
     connection?: EmbeddingConnectionResolver,
+    dimensions: number = MEMORY_EMBED_DIMENSIONS,
   ) {
     this.apiKey = apiKey;
     this.model = model;
+    this.dimensions = dimensions;
     this.validateCredentialConfiguration = validateCredentialConfiguration;
     this.baseUrl = baseUrl;
     this.connection = connection;
@@ -87,6 +146,10 @@ export class OpenAIEmbeddingClient implements EmbeddingProvider {
     );
   }
 
+  expectedDimensions(): number {
+    return this.dimensions;
+  }
+
   validateConfiguration(): void {
     if (!this.model.trim()) {
       throw new Error('MEMORY_EMBED_MODEL is required for memory embeddings');
@@ -94,6 +157,11 @@ export class OpenAIEmbeddingClient implements EmbeddingProvider {
     if (!/embedding/i.test(this.model)) {
       throw new Error(
         `MEMORY_EMBED_MODEL must reference an embedding model, got "${this.model}"`,
+      );
+    }
+    if (!Number.isInteger(this.dimensions) || this.dimensions <= 0) {
+      throw new Error(
+        `memory embedding dimensions must be a positive integer, got ${this.dimensions}`,
       );
     }
     if (typeof this.apiKey === 'function') {
@@ -182,24 +250,29 @@ export class OpenAIEmbeddingClient implements EmbeddingProvider {
       const all: number[][] = [];
       for (let i = 0; i < texts.length; i += MEMORY_EMBED_BATCH_SIZE) {
         const batch = texts.slice(i, i + MEMORY_EMBED_BATCH_SIZE);
-        const res = await fetch(`${connection.baseUrl}/v1/embeddings`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${connection.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          signal: options?.signal,
-          body: JSON.stringify({
-            model: this.model,
-            input: batch,
-          }),
-        });
+        let res: Response;
+        try {
+          res = await fetch(`${connection.baseUrl}/v1/embeddings`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${connection.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            signal: options?.signal,
+            body: JSON.stringify({
+              model: this.model,
+              input: batch,
+              dimensions: this.dimensions,
+            }),
+          });
+        } catch (error) {
+          if (options?.signal?.aborted) throw error;
+          throw classifyEmbeddingThrown(error);
+        }
 
         if (!res.ok) {
           const text = await res.text();
-          throw new Error(
-            `embedding request failed (${res.status}): ${text.slice(0, 200)}`,
-          );
+          throw classifyEmbeddingHttpError(res.status, text, res.headers);
         }
 
         const json = (await res.json()) as EmbeddingResponse;
@@ -212,6 +285,12 @@ export class OpenAIEmbeddingClient implements EmbeddingProvider {
           if (!Array.isArray(row.embedding) || row.embedding.length === 0) {
             throw new Error(
               'embedding response contained invalid embedding vector',
+            );
+          }
+          if (row.embedding.length !== this.dimensions) {
+            throw new EmbeddingProviderError(
+              'invalid_dimension',
+              `model "${this.model}" returned ${row.embedding.length} dimensions, but Gantry semantic memory is configured for ${this.dimensions}`,
             );
           }
           all.push(row.embedding);
@@ -233,6 +312,53 @@ export class OpenAIEmbeddingClient implements EmbeddingProvider {
       throw new Error('embedding response was empty');
     }
     return rows[0];
+  }
+
+  get batch(): EmbeddingBatchCapability {
+    return this;
+  }
+
+  private async withConnection<T>(
+    fn: (conn: { apiKey: string; baseUrl: string }) => Promise<T>,
+  ): Promise<T> {
+    this.validateConfiguration();
+    const connection = await this.resolveConnection();
+    try {
+      return await fn(connection);
+    } finally {
+      await connection.revoke?.();
+    }
+  }
+
+  async submitBatch(
+    requests: EmbeddingBatchRequest[],
+    options?: { signal?: AbortSignal },
+  ): Promise<{ batchId: string }> {
+    return this.withConnection((conn) =>
+      submitEmbeddingBatch(
+        conn,
+        { model: this.model, dimensions: this.dimensions, requests },
+        options?.signal,
+      ),
+    );
+  }
+
+  async pollBatch(
+    batchId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<EmbeddingBatchPoll> {
+    return this.withConnection((conn) =>
+      pollEmbeddingBatch(conn, batchId, options?.signal),
+    );
+  }
+
+  async fetchBatchResults(
+    poll: EmbeddingBatchPoll,
+    options?: { signal?: AbortSignal },
+  ): Promise<EmbeddingBatchResultRow[]> {
+    return this.withConnection((conn) =>
+      fetchEmbeddingBatchResults(conn, poll, options?.signal),
+    );
   }
 }
 
@@ -405,6 +531,7 @@ for (const provider of listEmbeddingModelProviders()) {
         },
         DEFAULT_EMBEDDING_BASE_URL,
         () => resolveBrokeredEmbeddingConnection(provider.id, options?.appId),
+        options?.dimensions ?? MEMORY_EMBED_DIMENSIONS,
       ),
   );
 }
@@ -429,6 +556,7 @@ if (
             defaultEmbeddingProvider.id,
             options?.appId,
           ),
+        options?.dimensions ?? MEMORY_EMBED_DIMENSIONS,
       ),
   );
 }

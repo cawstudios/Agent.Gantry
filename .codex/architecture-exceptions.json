@@ -310,9 +310,9 @@
   {
     "file": "apps/core/src/cli/memory-health.ts",
     "rule": "forbidden_import_by_layer",
-    "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
+    "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor, plus embedding default/model imports for the semantic-memory health check; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 2
+    "maxViolations": 3
   },
   {
     "file": "apps/core/src/cli/model.ts",
@@ -334,6 +334,13 @@
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
     "maxViolations": 4
+  },
+  {
+    "file": "apps/core/src/cli/memory-embeddings-backfill.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "CLI embedding backfill command drives the runtime backfill engine and reads embedding settings, following the existing CLI memory-administration adapters; capped until the canonical boundary cleanup ports CLI memory writes.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 6
   },
   {
     "file": "apps/core/src/cli/onboarding-config.ts",
@@ -796,6 +803,125 @@
     "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
     "maxViolations": 4
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-backfill.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Semantic-memory embedding backfill engine carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-backfill.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Semantic-memory embedding backfill engine carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 3
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-backfill-candidates.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Semantic-memory backfill candidate scan carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-backfill-candidates.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Semantic-memory backfill candidate scan carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-backfill-runs.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Semantic-memory backfill run records carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-backfill-runs.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Semantic-memory backfill run records carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-backfill-provider-batch.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Semantic-memory provider batch poll/import carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-backfill-provider-batch.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Semantic-memory provider batch poll/import carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-embedding-writes.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Shared semantic-memory embedding write helper carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-embedding-writes.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Shared semantic-memory embedding write helper carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/memory/memory-embedding-cache-store.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Query-embedding cache store carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/memory/memory-embedding-cache-store.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Query-embedding cache store carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-dream-embeddings.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Dream embedding writes now persist pgvector columns via the shared embedding write helper, carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-dream-embeddings.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Dream embedding writes now persist pgvector columns via the shared embedding write helper, carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-recall-embedding.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Recall query-embedding capability reads embedding config/schema and the shared logger, carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 3
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-embedding-status.ts",
+    "rule": "forbidden_external_import_by_layer",
+    "reason": "Semantic-memory status counts read embedding schema directly, carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/memory/app-memory-embedding-status.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Semantic-memory status counts read embedding schema/config directly, carrying the same Postgres-backed runtime debt as the memory service slice; replace with repository ports in the canonical boundary cleanup.",
+    "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 2
   },
   {
     "file": "apps/core/src/memory/app-memory-trigger-dreaming.ts",

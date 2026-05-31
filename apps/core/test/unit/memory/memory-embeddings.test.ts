@@ -197,6 +197,10 @@ describe('OpenAIEmbeddingClient', () => {
       const client = new OpenAIEmbeddingClient(
         'test-key',
         'text-embedding-test',
+        undefined,
+        undefined,
+        undefined,
+        3,
       );
       const result = await client.embedMany(['hello', 'world']);
 
@@ -213,6 +217,7 @@ describe('OpenAIEmbeddingClient', () => {
           body: JSON.stringify({
             model: 'text-embedding-test',
             input: ['hello', 'world'],
+            dimensions: 3,
           }),
         }),
       );
@@ -226,6 +231,10 @@ describe('OpenAIEmbeddingClient', () => {
       const client = new OpenAIEmbeddingClient(
         resolveApiKey,
         'text-embedding-test',
+        undefined,
+        undefined,
+        undefined,
+        3,
       );
       const result = await client.embedMany(['hello']);
 
@@ -253,6 +262,8 @@ describe('OpenAIEmbeddingClient', () => {
         'text-embedding-test',
         undefined,
         resolveBaseUrl,
+        undefined,
+        3,
       );
       const result = await client.embedMany(['hello']);
 
@@ -284,6 +295,7 @@ describe('OpenAIEmbeddingClient', () => {
         undefined,
         'https://api.openai.com',
         resolveConnection,
+        3,
       );
       const result = await client.embedMany(['hello']);
 
@@ -306,14 +318,31 @@ describe('OpenAIEmbeddingClient', () => {
         ok: false,
         status: 429,
         text: async () => 'rate limited',
-      } as Response);
+        headers: { get: () => null },
+      } as unknown as Response);
 
       const client = new OpenAIEmbeddingClient(
         'test-key',
         'text-embedding-test',
       );
       await expect(client.embedMany(['hello'])).rejects.toThrow(
-        /embedding request failed \(429\): rate limited/,
+        /embedding provider rate limited \(429\): rate limited/,
+      );
+    });
+
+    it('throws invalid_dimension when the returned vector length mismatches', async () => {
+      mockFetchOk([{ embedding: [0.1, 0.2, 0.3, 0.4] }]);
+
+      const client = new OpenAIEmbeddingClient(
+        'test-key',
+        'text-embedding-test',
+        undefined,
+        undefined,
+        undefined,
+        3,
+      );
+      await expect(client.embedMany(['hello'])).rejects.toThrow(
+        /returned 4 dimensions, but Gantry semantic memory is configured for 3/,
       );
     });
 
@@ -393,6 +422,10 @@ describe('OpenAIEmbeddingClient', () => {
       const client = new OpenAIEmbeddingClient(
         'test-key',
         'text-embedding-test',
+        undefined,
+        undefined,
+        undefined,
+        2,
       );
       const result = await client.embedMany(texts);
 
@@ -439,6 +472,10 @@ describe('OpenAIEmbeddingClient', () => {
       const client = new OpenAIEmbeddingClient(
         'test-key',
         'text-embedding-test',
+        undefined,
+        undefined,
+        undefined,
+        4,
       );
       const result = await client.embedOne('hello');
 

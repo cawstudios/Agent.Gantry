@@ -75,6 +75,30 @@ async function loadCliWithBoundaryMocks(options?: {
       message: 'Postgres is ready.',
     })),
   }));
+  vi.doMock('@core/adapters/storage/postgres/factory.js', () => ({
+    createStorageRuntime: vi.fn(() => ({
+      repositories: {
+        modelCredentials: {
+          listModelCredentials: vi.fn(async () => [
+            {
+              id: 'model-credential:default:anthropic',
+              appId: 'default',
+              providerId: 'anthropic',
+              authMode: 'api_key',
+              schemaVersion: 1,
+              fingerprint: 'test-fingerprint',
+              fieldFingerprints: [],
+              status: 'active',
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+              updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ]),
+        },
+      },
+      runtimeEventNotifier: { close: vi.fn(async () => {}) },
+      service: { close: vi.fn(async () => {}) },
+    })),
+  }));
   vi.doMock('@core/cli/runtime-group-db.js', () => ({
     openRuntimeGroupDb: vi.fn(async () => ({
       countConversationRoutesByJidPrefix: vi.fn(async () => 1),
@@ -140,7 +164,7 @@ describe('runtime setup and doctor CLI e2e', () => {
     const rendered = note.mock.calls.map((call) => String(call[0])).join('\n');
     expect(code, rendered).toBe(0);
     expect(rendered).toContain('Postgres is ready.');
-    expect(rendered).toContain('Gantry Model Gateway is enabled');
+    expect(rendered).toContain('Gantry Model Gateway config is enabled');
     expect(rendered).not.toContain(process.env.HOME);
   });
 

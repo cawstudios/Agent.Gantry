@@ -171,7 +171,7 @@ function createTestOpts(
         embeddings: {
           enabled: false,
           provider: 'disabled',
-          model: 'text-embedding-3-large',
+          model: 'text-embedding-3-small',
         },
         dreaming: { enabled: true },
         llm: {

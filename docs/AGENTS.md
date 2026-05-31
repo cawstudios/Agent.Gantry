@@ -22,8 +22,8 @@
   ids, tool rules, task ids, queue diagnostics, and raw logs in details/audit
   sections instead of the primary chat or notification text.
 - Admin docs must describe conversation-scoped approvers for both direct/private and group/channel conversations; do not imply Slack, Teams, Telegram, Web, or local user ids are interchangeable.
-- Memory docs must describe the current first slice truthfully: flattened `memory_items` is canonical, lexical retrieval is active, vector retrieval is inactive until item embedding indexing/querying ships, `memory_subjects` is not current active schema, and Gantry has no `PostCompact`/`compact_summary` prompt-replay behavior.
-- Memory and continuity docs must describe digest-first fresh-run context hydration (recent persisted session digests before active durable memory items), dreaming-only automatic durable promotion/update, and embedding work limited to dreaming promotion/update.
+- Memory docs must describe the current first slice truthfully: flattened `memory_items` is canonical, lexical retrieval is always active, hybrid vector retrieval is active only when embeddings are enabled and ready, `memory_subjects` is not current active schema, and Gantry has no `PostCompact`/`compact_summary` prompt-replay behavior.
+- Memory and continuity docs must describe digest-first fresh-run context hydration (recent persisted session digests before active durable memory items), dreaming-only automatic durable promotion/update, and embedding writes limited to dreaming promotion/update plus resumable embedding backfill.
 - Continuity docs must preserve the clean-cut contract: unsupported old continuity rows fail closed and are not imported, backfilled, or repaired.
 - Memory tool docs must keep `memory_save` limited to canonical direct-save kinds (`preference`, `decision`, `fact`, `correction`, `constraint`) and state that common/global writes require approved admin or service authority.
 - SDK docs must describe `sessions.sendMessage` as durable acceptance into the runtime event stream. Do not imply `accepted` or `acceptedEventId` means synchronous model completion or provider/channel delivery success.

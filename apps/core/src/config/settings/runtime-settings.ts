@@ -13,6 +13,8 @@ import {
   applyModelPreset,
   applyPresetManagedMemoryDefaults,
   createDefaultRuntimeSettings,
+  DEFAULT_EMBED_DIMENSIONS,
+  DEFAULT_EMBED_MODEL,
   getPresetManagedMemoryDefaults,
 } from './runtime-settings-defaults.js';
 import { parseRuntimeSettings } from './runtime-settings-parser.js';
@@ -80,6 +82,8 @@ export {
   applyModelPreset,
   applyPresetManagedMemoryDefaults,
   createDefaultRuntimeSettings,
+  DEFAULT_EMBED_DIMENSIONS,
+  DEFAULT_EMBED_MODEL,
   getPresetManagedMemoryDefaults,
   parseRuntimeSettings,
   readRuntimeMemorySettingsSnapshot,

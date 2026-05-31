@@ -23,6 +23,52 @@ describe('Postgres migration journal', () => {
     }
   });
 
+  it('registers the semantic memory vectors migration and schema', () => {
+    const journalPath = path.resolve(
+      'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
+    );
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as {
+      entries: Array<{ idx: number; tag: string }>;
+    };
+    const entry = journal.entries.find(
+      (item) => item.tag === '0070_semantic_memory_vectors',
+    );
+    expect(entry).toMatchObject({ idx: 70 });
+
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0070_semantic_memory_vectors.sql',
+      ),
+      'utf8',
+    );
+    expect(migration).toContain(
+      'ADD COLUMN IF NOT EXISTS embedding vector(1536)',
+    );
+    expect(migration).toContain('USING hnsw (embedding vector_cosine_ops)');
+    expect(migration).toContain(
+      "WHERE status = 'ready' AND embedding IS NOT NULL",
+    );
+    expect(migration).toContain('idx_memory_item_embeddings_ready_lookup');
+    expect(migration).toContain(
+      'ON memory_item_embeddings(provider, model, status, provider_batch_id, updated_at, item_id)',
+    );
+    expect(migration).toContain(
+      'CREATE TABLE IF NOT EXISTS memory_embedding_backfill_runs',
+    );
+    expect(migration).toContain('run_id uuid');
+    expect(migration).toContain('idx_memory_embedding_backfill_runs_running');
+    expect(migration).toContain("WHERE status = 'running' AND mode = 'inline'");
+
+    const schema = fs.readFileSync(
+      path.resolve('apps/core/src/adapters/storage/postgres/schema/schema.ts'),
+      'utf8',
+    );
+    expect(schema).toContain('memoryEmbeddingBackfillRunsPostgres');
+    expect(schema).toContain("vector('embedding', { dimensions: 1536 })");
+    expect(schema).toContain('idx_memory_item_embeddings_hnsw');
+    expect(schema).toContain('idx_memory_item_embeddings_ready_lookup');
+  });
+
   it('applies the memory schema migration on fresh databases', () => {
     const journalPath = path.resolve(
       'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
