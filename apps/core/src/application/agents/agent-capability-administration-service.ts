@@ -59,6 +59,7 @@ import {
   type ReadableSkillSource,
   type ReadableToolSource,
 } from './agent-source-views.js';
+import { replaceAgentAccessDocument } from './agent-access-document-replacement.js';
 
 export interface CapabilityCatalogView {
   tools: ToolCatalogItem[];
@@ -366,26 +367,25 @@ export class AgentCapabilityAdministrationService {
     };
   }
 
-  /**
-   * Structurally validate capability selections without writing anything.
-   * Lets a full-document replace (PUT /access) reject malformed selections
-   * before sources are persisted, so a bad selection can't leave the agent
-   * with new sources but stale selections.
-   */
-  async validateAccessSelections(input: {
+  async replaceAccessDocument(input: {
     appId: AppId;
     agentId: AgentId;
+    sources: AgentCapabilitiesView['sources'];
     capabilities: Array<{ id: string; version: string }>;
-  }): Promise<void> {
-    const semanticCapabilityDefinitions = await skillActionDefinitionsForAgent({
-      appId: input.appId,
-      agentId: input.agentId,
-      skillRepository: this.repositories.skills,
+  }): Promise<AgentCapabilitiesView> {
+    return replaceAgentAccessDocument({
+      ...input,
+      repositories: this.repositories,
+      now: this.clock.now(),
+      requireAgent: (appId, agentId) => this.requireAgent(appId, agentId),
+      requireInstalledSkills: (appId, skillIds) =>
+        this.requireInstalledSkills(appId, skillIds),
+      requireActiveMcpServers: (appId, serverIds) =>
+        this.requireActiveMcpServers(appId, serverIds),
+      requireSelectableTools: (appId, toolIds) =>
+        this.requireSelectableTools(appId, toolIds),
+      getCapabilities: (scope) => this.getCapabilities(scope),
     });
-    resolveSelectedToolReferences(
-      input.capabilities,
-      semanticCapabilityDefinitions,
-    );
   }
 
   async replaceSources(input: {
@@ -412,10 +412,11 @@ export class AgentCapabilityAdministrationService {
       agentId: input.agentId,
       now,
     });
-    const [skillMap, mcpMap] = await Promise.all([
-      this.requireInstalledSkills(input.appId, sourceSkillIds),
-      this.requireActiveMcpServers(input.appId, sourceMcpServerIds),
-    ]);
+    const skillMap = await this.requireInstalledSkills(
+      input.appId,
+      sourceSkillIds,
+    );
+    await this.requireActiveMcpServers(input.appId, sourceMcpServerIds);
     assertUniqueSkillMaterializationKeys(sourceSkillIds, skillMap);
     const [toolBindings, skillBindings, mcpBindings] = await Promise.all([
       this.repositories.tools.listAgentToolBindings(input),

@@ -45,9 +45,9 @@ export function buildPermissionPromptContentBlocks(
     elements: [
       {
         type: 'mrkdwn',
-        text: [...parts.contextLines, `Reply in ${parts.replyInMinutes}m`].join(
-          '\n',
-        ),
+        text: [...parts.contextLines, `Reply in ${parts.replyInMinutes}m`]
+          .map(escapeSlackMrkdwnText)
+          .join('\n'),
       },
     ],
   });
@@ -61,8 +61,21 @@ export function buildPermissionReceiptBlocks(text: string): SlackBlock[] {
     {
       type: 'context',
       elements: [
-        { type: 'mrkdwn', text: truncateSlackText(text, SLACK_SECTION_MAX) },
+        {
+          type: 'mrkdwn',
+          text: truncateSlackText(
+            escapeSlackMrkdwnText(text),
+            SLACK_SECTION_MAX,
+          ),
+        },
       ],
     },
   ];
+}
+
+function escapeSlackMrkdwnText(input: string): string {
+  return input
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }

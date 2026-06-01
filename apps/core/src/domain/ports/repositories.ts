@@ -112,6 +112,15 @@ export interface AgentRepository {
     mcpBindings: AgentMcpServerBinding[];
     updatedAt: string;
   }): Promise<void>;
+  replaceAgentAccess(input: {
+    appId: AppId;
+    agentId: AgentId;
+    toolBindings: AgentToolBinding[];
+    skillBindings: AgentSkillBinding[];
+    mcpBindings: AgentMcpServerBinding[];
+    toolSources: AgentToolSource[];
+    updatedAt: string;
+  }): Promise<void>;
   disableAgent(input: {
     appId: AppId;
     agentId: AgentId;

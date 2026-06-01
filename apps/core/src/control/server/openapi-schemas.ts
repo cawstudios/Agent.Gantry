@@ -53,7 +53,7 @@ export const openApiSchemas: Record<string, JsonSchema> = {
     required: ['agent', 'boundConversations'],
     properties: {
       agent: { $ref: '#/components/schemas/Agent' },
-      capabilities: { $ref: '#/components/schemas/AgentCapabilitiesResponse' },
+      capabilities: { $ref: '#/components/schemas/AgentAccessResponse' },
       boundConversations: {
         type: 'array',
         items: {
@@ -190,31 +190,6 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       toolAccess: metadata,
       updatedAt: isoDateTime,
     },
-  },
-  AgentCapabilitiesRequest: {
-    type: 'object',
-    required: ['capabilities'],
-    properties: {
-      capabilities: {
-        type: 'array',
-        items: { $ref: '#/components/schemas/CapabilitySelection' },
-      },
-    },
-  },
-  AgentCapabilitiesResponse: {
-    allOf: [
-      { $ref: '#/components/schemas/AgentCapabilitiesRequest' },
-      {
-        type: 'object',
-        required: ['agentId', 'sources', 'toolAccess', 'updatedAt'],
-        properties: {
-          agentId: { type: 'string' },
-          sources: { $ref: '#/components/schemas/AgentSources' },
-          toolAccess: metadata,
-          updatedAt: isoDateTime,
-        },
-      },
-    ],
   },
   HealthResponse: {
     type: 'object',

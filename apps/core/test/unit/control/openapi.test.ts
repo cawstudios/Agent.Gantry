@@ -587,6 +587,19 @@ describe('control OpenAPI documentation', () => {
       spec.components.schemas.AgentSourceSelection.properties,
     ).not.toHaveProperty('kind');
     expect(
+      spec.components.schemas.AgentAdminSummaryResponse.properties,
+    ).toEqual(
+      expect.objectContaining({
+        capabilities: { $ref: '#/components/schemas/AgentAccessResponse' },
+      }),
+    );
+    expect(spec.components.schemas).not.toHaveProperty(
+      'AgentCapabilitiesRequest',
+    );
+    expect(spec.components.schemas).not.toHaveProperty(
+      'AgentCapabilitiesResponse',
+    );
+    expect(
       spec.components.schemas.JobCreateRequest.properties.accessRequirements
         .items.properties.target.oneOf[1].properties.implementation.properties,
     ).toMatchObject({

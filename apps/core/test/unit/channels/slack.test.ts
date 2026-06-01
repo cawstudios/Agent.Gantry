@@ -114,6 +114,10 @@ vi.mock('@slack/bolt', () => ({
 }));
 
 import { createSlackChannel, SlackChannel } from '@core/channels/slack.js';
+import {
+  buildPermissionPromptContentBlocks,
+  buildPermissionReceiptBlocks,
+} from '@core/channels/slack/permission-blocks.js';
 
 function createOpts(
   controlAllowlist = {
@@ -990,6 +994,28 @@ describe('Slack channel', () => {
     await expect(approvalPromise).resolves.toEqual(
       expect.objectContaining({ approved: true }),
     );
+  });
+
+  it('escapes permission metadata before rendering Slack mrkdwn blocks', () => {
+    const blocks = buildPermissionPromptContentBlocks({
+      title: 'Allow command?',
+      bodyLines: [],
+      contextLines: ['agent <@U123> & ops · scheduled job: <deploy>'],
+      replyInMinutes: 5,
+    });
+    const contextBlock = blocks.find((block: any) => block.type === 'context');
+    expect((contextBlock as any).elements[0].text).toBe(
+      'agent &lt;@U123&gt; &amp; ops · scheduled job: &lt;deploy&gt;\nReply in 5m',
+    );
+
+    expect(buildPermissionReceiptBlocks('Allowed by <@U123> & ops')).toEqual([
+      {
+        type: 'context',
+        elements: [
+          { type: 'mrkdwn', text: 'Allowed by &lt;@U123&gt; &amp; ops' },
+        ],
+      },
+    ]);
   });
 
   it('denies same-channel Slack permission decisions when no approver IDs are configured', async () => {

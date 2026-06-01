@@ -464,6 +464,59 @@ maybeDescribe('Postgres domain repositories', () => {
     );
   });
 
+  it('replaces agent access bindings and tool sources in one repository call', async () => {
+    const updatedAt = '2026-05-02T00:01:00.000Z';
+
+    await repositories.agents.replaceAgentAccess({
+      appId,
+      agentId,
+      toolBindings: [
+        {
+          id: `agent-tool-binding:${agentId}:tool:Browser` as never,
+          appId,
+          agentId,
+          toolId: 'tool:Browser' as never,
+          status: 'active',
+          createdAt: updatedAt,
+          updatedAt,
+        },
+      ],
+      skillBindings: [],
+      mcpBindings: [],
+      toolSources: [
+        {
+          id: `agent-tool-source:${agentId}:builtin:browser:builtin` as never,
+          appId,
+          agentId,
+          sourceId: 'browser',
+          kind: 'builtin',
+          version: 'builtin',
+          status: 'active',
+          createdAt: updatedAt,
+          updatedAt,
+        },
+      ],
+      updatedAt,
+    });
+
+    await expect(
+      repositories.tools.listAgentToolBindings({ appId, agentId }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolId: 'tool:Browser', status: 'active' }),
+      ]),
+    );
+    await expect(
+      repositories.tools.listAgentToolSources?.({ appId, agentId }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        sourceId: 'browser',
+        kind: 'builtin',
+        status: 'active',
+      }),
+    ]);
+  });
+
   it('inserts messages idempotently by provider redelivery key', async () => {
     await repositories.messages.saveMessage({
       id: 'message:test:first' as MessageId,

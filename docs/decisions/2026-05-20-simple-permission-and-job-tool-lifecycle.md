@@ -59,3 +59,18 @@ Old `requiredTools`, `required_tools`, `toolAccessRequirements`,
 `capabilityRequirements`, and `requiredMcpServers` inputs are rejected after the
 clean cut. They remain only in migration SQL, private derived runtime fields, and
 explicit stale-field rejection messages.
+
+## Migration 0071 Operator Note
+
+Migration `0071_jobs_target_workspace_key_cutover.sql` is an intentional hard
+cutover for job execution scope naming. It refuses to run when any existing job
+payload still contains the former execution-scope field names.
+
+Before applying the migration in an environment with existing jobs:
+
+- Run the migration in a maintenance window.
+- If it fails on the stale-shape guard, use the guard predicate in that
+  migration file to list affected job ids.
+- Recreate those jobs through the current API or CLI so their execution context
+  uses `workspaceKey`, then re-run migrations.
+- Do not add runtime readers, aliases, or automatic repair for the old shape.

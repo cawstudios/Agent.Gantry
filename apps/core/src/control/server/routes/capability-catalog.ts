@@ -108,27 +108,10 @@ export async function handleCapabilityCatalogRoutes(
     const appId = auth.appId as AppId;
     const agentId = decodeURIComponent(agentAccessMatch[1]) as AgentId;
     try {
-      // PUT replaces the full access document: sources first (so newly
-      // attached sources are selectable), then selections. Validate the
-      // selections structurally up front so a malformed selection fails before
-      // any write, instead of leaving sources persisted with stale selections.
-      // (Full cross-aggregate atomicity would need a transaction spanning the
-      // source + selection repositories; a source-dependent selection mismatch
-      // can still fail after the source write, but settings sync only on full
-      // success, so the live runtime is unaffected until a clean retry.)
-      await service().validateAccessSelections({
-        appId,
-        agentId,
-        capabilities: parsed.data.selections,
-      });
-      await service().replaceSources({
+      const access = await service().replaceAccessDocument({
         appId,
         agentId,
         sources: parsed.data.sources,
-      });
-      const access = await service().replaceCapabilities({
-        appId,
-        agentId,
         capabilities: parsed.data.selections,
       });
       await ctx.syncSettingsFromProjection(appId);
