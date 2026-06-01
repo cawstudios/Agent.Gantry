@@ -38,6 +38,7 @@ import type {
   SlackSnippetFallbackResult,
 } from './channel-delivery-helpers.js';
 import { SlackChannelInteractions } from './channel-interactions.js';
+import { slackPermissionDecisionActionId } from './permission-action-id.js';
 import {
   SLACK_FALLBACK_CHUNK_MAX_LENGTH,
   SLACK_STREAM_UPDATE_INTERVAL_MS,
@@ -463,7 +464,7 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
             type: 'actions',
             elements: permissionDecisionOptions(request).map((mode) => ({
               type: 'button',
-              action_id: 'gantry_perm_decision',
+              action_id: slackPermissionDecisionActionId(mode),
               text: {
                 type: 'plain_text',
                 text: permissionButtonLabel(mode, request),

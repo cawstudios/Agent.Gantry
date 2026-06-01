@@ -18,6 +18,7 @@ import {
   splitSlackTextByCodeUnits,
 } from './text-limits.js';
 import { nowIso } from '../../shared/time/datetime.js';
+import { SLACK_PERMISSION_DECISION_ACTION_IDS } from './permission-action-id.js';
 const SLACK_RETRY_DELAY_FALLBACK_MS = 1000;
 const SLACK_RETRY_DELAY_MAX_MS = 5000;
 const SCHEDULER_MESSAGE_ACTION_KINDS = new Set<MessageActionAffordanceKind>([
@@ -391,7 +392,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         logger.debug({ err }, 'Failed to respond to Slack message shortcut');
       }
     });
-    this.app.action('gantry_perm_decision', async (args: any) => {
+    const handlePermissionDecision = async (args: any) => {
       await args.ack();
       const body = args.body as {
         channel?: { id?: string };
@@ -469,7 +470,10 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
       await this.resolvePermissionPrompt(payload.requestId, {
         ...decision,
       });
-    });
+    };
+    for (const actionId of SLACK_PERMISSION_DECISION_ACTION_IDS) {
+      this.app.action(actionId, handlePermissionDecision);
+    }
     this.app.action('gantry_userq_select', async (args: any) => {
       await args.ack();
       const action = args.action as { value?: string };

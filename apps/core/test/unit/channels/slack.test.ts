@@ -966,6 +966,14 @@ describe('Slack channel', () => {
       'Route: shown in this Slack thread; approval applies to the parent conversation.',
     );
     expect(postCall?.text).toContain('Command:\n```\ngit status --short\n```');
+    const actionsBlock = postCall?.blocks?.find(
+      (block: any) => block.type === 'actions',
+    ) as { elements?: Array<{ action_id?: string }> } | undefined;
+    const actionIds = (actionsBlock?.elements || []).map(
+      (element) => element.action_id,
+    );
+    expect(new Set(actionIds).size).toBe(actionIds.length);
+    expect(actionIds).toContain('gantry_perm_decision_allow_once');
 
     const actionHandler = appRef.current.actionHandlers.get(
       'gantry_perm_decision',
