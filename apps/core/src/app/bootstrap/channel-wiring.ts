@@ -28,7 +28,11 @@ import {
   isPartialMessageDeliveryError,
 } from '../../domain/messages/partial-delivery.js';
 import { AmbiguousDurableDeliveryError } from '../../domain/messages/durable-delivery.js';
-import { guardCustomerVisibleOutput } from '../../application/customer-output/customer-safe-output.js';
+import {
+  findInternalLeak,
+  guardCustomerVisibleOutput,
+} from '../../application/customer-output/customer-safe-output.js';
+import { CUSTOMER_VISIBLE_DECLINE_MESSAGE } from '../../shared/user-visible-messages.js';
 import { flowLog } from '../../shared/flow-log.js';
 import { jidInTestScope } from '../../shared/test-mode.js';
 import {
@@ -100,6 +104,14 @@ export function createChannelWiring(
   let enqueueRetryTailRecovery: RetryTailRecoveryEnqueue | undefined;
   let durableOutboundAttemptFactory: DurableOutboundAttemptFactory | undefined;
   const persistenceQueue = new AsyncTaskQueue(4, 5_000);
+  // Per-stream state for the streaming-output customer-safety backstop (see
+  // sendStreamingChunk). Keyed by stream identity (jid + threadId); the
+  // generation field detects a fresh streamed message reusing the same key.
+  // Cleared on the stream's `done` chunk and when the generation advances.
+  const streamingLeakGuards = new Map<
+    string,
+    { generation: number | undefined; buffer: string; tripped: boolean }
+  >();
   const ops = () => resolved.opsRepository ?? getRuntimeRepositories();
   const optionalOps = () => {
     try {
@@ -631,6 +643,66 @@ export function createChannelWiring(
 
     const sink = asStreamingSink(channel);
     if (!sink) return false;
+
+    // Customer-safety backstop for the STREAMING path — the streaming twin of
+    // guardCustomerVisibleOutput on the non-streaming send. A leak token (MCP,
+    // "shopify api", PRIVACY_GUARD_FAILED, …) can span chunk boundaries, so we
+    // accumulate the customer-visible text per stream and screen the whole
+    // buffer on every chunk. findInternalLeak only matches a COMPLETE token, and
+    // we screen BEFORE forwarding, so the chunk that completes a leak is never
+    // handed to the sink — nothing already shown is itself a complete leak. On a
+    // hit we fail closed like the non-streaming guard: stop streaming the
+    // agent's content, reset the in-place stream, and deliver the canned decline
+    // via the (also guarded) non-streaming send. Developer-persona agents are
+    // exempt, matching guardCustomerVisibleOutput. Non-streaming channels (e.g.
+    // Interakt) never reach here — they have no streaming sink and returned
+    // above — so this is inert for them.
+    const persona = app.getConversationRoutes()[jid]?.agentConfig?.persona;
+    if (persona !== 'developer') {
+      const guardKey = `${jid}\0${options?.threadId ?? ''}`;
+      let guard = streamingLeakGuards.get(guardKey);
+      if (!guard || guard.generation !== options?.generation) {
+        guard = { generation: options?.generation, buffer: '', tripped: false };
+        streamingLeakGuards.set(guardKey, guard);
+      }
+      if (guard.tripped) {
+        // Stream already replaced with the decline; swallow remaining chunks.
+        if (options?.done) streamingLeakGuards.delete(guardKey);
+        return true;
+      }
+      guard.buffer += text;
+      const matchedPattern = findInternalLeak(guard.buffer);
+      if (matchedPattern) {
+        guard.tripped = true;
+        resolved.logger.warn(
+          { jid, matchedPattern },
+          'Streaming output guard tripped: agent reply leaked internal detail; replaced the stream with the customer-safe decline',
+        );
+        // The leak is already contained — this chunk is not forwarded and the
+        // in-place stream is reset. The decline is a courtesy follow-up, so a
+        // failure to deliver it must not crash the turn or trip a fallback that
+        // re-sends the raw (leaky) transcript: log and carry on.
+        resetStreaming(jid);
+        try {
+          await sendMessage(jid, CUSTOMER_VISIBLE_DECLINE_MESSAGE, {
+            durability: 'best_effort',
+            ...(options?.threadId
+              ? { messageOptions: { threadId: options.threadId } }
+              : {}),
+          });
+          // eslint-disable-next-line no-catch-all/no-catch-all -- decline is best-effort; the leak is already contained.
+        } catch (err) {
+          resolved.logger.warn(
+            { jid, err },
+            'Failed to deliver customer-safe decline after streaming guard trip',
+          );
+        }
+        if (options?.done) streamingLeakGuards.delete(guardKey);
+        return true;
+      }
+      if (options?.done) streamingLeakGuards.delete(guardKey);
+    }
+
     return sink.sendStreamingChunk(jid, text, options);
   }
 

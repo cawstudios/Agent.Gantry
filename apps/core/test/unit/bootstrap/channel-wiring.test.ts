@@ -2258,3 +2258,277 @@ describe('createChannelPersistenceHandlers conversation-owned direct routes', ()
     expect(storeMessage).toHaveBeenCalledWith(msg);
   });
 });
+
+describe('streaming output customer-safety guard', () => {
+  // Streaming twin of guardCustomerVisibleOutput: the streaming path must also
+  // redact internal-implementation leaks, fail-closed, including a leak token
+  // that spans chunk boundaries. tg:-100 is a streamable group JID
+  // (canStreamToJid → true for tg:-).
+  function makeStreamingWiring(
+    persona: string | undefined,
+    opts: { streaming?: boolean } = {},
+  ) {
+    const streaming = opts.streaming ?? true;
+    const conversationRoutes: Record<string, any> = {
+      'tg:-100': {
+        name: 'Boondi',
+        folder: 'boondi',
+        trigger: '@b',
+        added_at: '2024-01-01T00:00:00.000Z',
+        ...(persona ? { agentConfig: { persona } } : {}),
+      },
+    };
+    const app = makeApp(conversationRoutes);
+    const streamCalls: Array<{ text: string; done: boolean | undefined }> = [];
+    const outbound = makeChannel({
+      name: 'telegram',
+      ownsJid: vi.fn((jid: string) => jid === 'tg:-100'),
+      sendMessage: vi.fn(async () => {}),
+      ...(streaming
+        ? {
+            sendStreamingChunk: vi.fn(
+              async (_jid: string, text: string, o?: { done?: boolean }) => {
+                streamCalls.push({ text, done: o?.done });
+                return true;
+              },
+            ),
+            resetStreaming: vi.fn(),
+          }
+        : {}),
+    });
+    const wiring = createChannelWiring(app, {
+      providerIds: [
+        makeProvider(
+          'telegram',
+          vi.fn(() => outbound),
+        ),
+      ],
+    });
+    return { wiring, outbound, streamCalls };
+  }
+
+  const connect = (wiring: ReturnType<typeof createChannelWiring>) =>
+    wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: true, slack: false }),
+    );
+
+  it('replaces the stream with the decline when a leak token spans two chunks (fail closed)', async () => {
+    const { wiring, outbound, streamCalls } = makeStreamingWiring('sales');
+    await connect(wiring);
+
+    // "shopify a" + "pi" completes the "shopify api" leak across the boundary.
+    const r1 = await wiring.sendStreamingChunk(
+      'tg:-100',
+      'Your order ships via shopify a',
+      { generation: 1 },
+    );
+    const r2 = await wiring.sendStreamingChunk('tg:-100', 'pi shortly', {
+      generation: 1,
+    });
+    const r3 = await wiring.sendStreamingChunk('tg:-100', ' anything else?', {
+      generation: 1,
+      done: true,
+    });
+
+    // Only the pre-leak chunk reached the sink; the leak-completing chunk and
+    // the trailing done chunk were never forwarded.
+    expect(streamCalls).toEqual([
+      { text: 'Your order ships via shopify a', done: undefined },
+    ]);
+    expect(outbound.resetStreaming).toHaveBeenCalledTimes(1);
+    // The canned decline was delivered via the guarded non-streaming send.
+    expect(outbound.sendMessage).toHaveBeenCalledTimes(1);
+    expect(outbound.sendMessage).toHaveBeenCalledWith(
+      'tg:-100',
+      expect.stringContaining("Sorry, I can't share that here"),
+    );
+    // Tripped chunks report delivered so the runtime does not re-send raw output.
+    expect([r1, r2, r3]).toEqual([true, true, true]);
+  });
+
+  it('replaces the stream with the decline when a single chunk holds a complete leak', async () => {
+    const { wiring, outbound, streamCalls } = makeStreamingWiring('sales');
+    await connect(wiring);
+
+    const r = await wiring.sendStreamingChunk(
+      'tg:-100',
+      'Hit an mcp error, sorry',
+      { generation: 1 },
+    );
+
+    expect(streamCalls).toEqual([]); // leak-completing chunk never forwarded
+    expect(outbound.resetStreaming).toHaveBeenCalledTimes(1);
+    expect(outbound.sendMessage).toHaveBeenCalledWith(
+      'tg:-100',
+      expect.stringContaining("Sorry, I can't share that here"),
+    );
+    expect(r).toBe(true);
+  });
+
+  it('streams clean output normally — no redaction, no decline', async () => {
+    const { wiring, outbound, streamCalls } = makeStreamingWiring('sales');
+    await connect(wiring);
+
+    await wiring.sendStreamingChunk('tg:-100', 'Your order ', {
+      generation: 1,
+    });
+    await wiring.sendStreamingChunk('tg:-100', 'ships tomorrow.', {
+      generation: 1,
+      done: true,
+    });
+
+    expect(streamCalls).toEqual([
+      { text: 'Your order ', done: undefined },
+      { text: 'ships tomorrow.', done: true },
+    ]);
+    expect(outbound.resetStreaming).not.toHaveBeenCalled();
+    expect(outbound.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not redact streaming output for a developer-persona agent', async () => {
+    const { wiring, outbound, streamCalls } = makeStreamingWiring('developer');
+    await connect(wiring);
+
+    await wiring.sendStreamingChunk('tg:-100', 'debug: mcp call failed', {
+      generation: 1,
+      done: true,
+    });
+
+    expect(streamCalls).toEqual([
+      { text: 'debug: mcp call failed', done: true },
+    ]);
+    expect(outbound.resetStreaming).not.toHaveBeenCalled();
+    expect(outbound.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('is inert for a non-streaming channel (no streaming sink) — e.g. Interakt/WhatsApp', async () => {
+    const { wiring, outbound } = makeStreamingWiring('sales', {
+      streaming: false,
+    });
+    await connect(wiring);
+
+    const r = await wiring.sendStreamingChunk('tg:-100', 'mcp leak here', {
+      generation: 1,
+    });
+
+    // No streaming sink → returns false before the guard; no decline injected.
+    expect(r).toBe(false);
+    expect(outbound.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('starts a fresh guard buffer when the streamed generation advances', async () => {
+    const { wiring, outbound, streamCalls } = makeStreamingWiring('sales');
+    await connect(wiring);
+
+    // Generation 1: a clean message that ends with a fragment ("shopify a").
+    await wiring.sendStreamingChunk('tg:-100', 'see shopify a', {
+      generation: 1,
+      done: true,
+    });
+    // Generation 2 is a new message starting with "pi". If the guard kept gen
+    // 1's buffer, the concatenation would read "shopify api soon" and falsely
+    // trip; a fresh per-generation buffer means gen 2 alone has no leak.
+    await wiring.sendStreamingChunk('tg:-100', 'pi soon', {
+      generation: 2,
+      done: true,
+    });
+
+    expect(streamCalls).toEqual([
+      { text: 'see shopify a', done: true },
+      { text: 'pi soon', done: true },
+    ]);
+    expect(outbound.resetStreaming).not.toHaveBeenCalled();
+    expect(outbound.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('keys the guard by threadId so concurrent threads on one JID never share a buffer', async () => {
+    const { wiring, outbound, streamCalls } = makeStreamingWiring('sales');
+    await connect(wiring);
+
+    // Same generation, two different threads. If the guard ignored threadId the
+    // shared buffer "see shopify a" + "pi soon" would read "shopify api soon"
+    // and falsely trip; separate per-thread buffers mean neither trips.
+    await wiring.sendStreamingChunk('tg:-100', 'see shopify a', {
+      generation: 1,
+      threadId: 't1',
+    });
+    await wiring.sendStreamingChunk('tg:-100', 'pi soon', {
+      generation: 1,
+      threadId: 't2',
+    });
+
+    expect(streamCalls).toEqual([
+      { text: 'see shopify a', done: undefined },
+      { text: 'pi soon', done: undefined },
+    ]);
+    expect(outbound.resetStreaming).not.toHaveBeenCalled();
+    expect(outbound.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('swallows every chunk after a trip and declines exactly once', async () => {
+    const { wiring, outbound, streamCalls } = makeStreamingWiring('sales');
+    await connect(wiring);
+
+    const r1 = await wiring.sendStreamingChunk('tg:-100', 'oops mcp failure', {
+      generation: 1,
+    }); // trips on this chunk
+    const r2 = await wiring.sendStreamingChunk('tg:-100', ' more text', {
+      generation: 1,
+    }); // swallowed by the tripped latch
+    const r3 = await wiring.sendStreamingChunk('tg:-100', ' final', {
+      generation: 1,
+      done: true,
+    }); // swallowed + clears guard state
+
+    expect(streamCalls).toEqual([]); // nothing forwarded once tripped
+    expect(outbound.resetStreaming).toHaveBeenCalledTimes(1);
+    expect(outbound.sendMessage).toHaveBeenCalledTimes(1); // one decline, not one per chunk
+    expect([r1, r2, r3]).toEqual([true, true, true]);
+  });
+
+  it('does not crash the turn when the decline send fails after a trip', async () => {
+    const conversationRoutes: Record<string, any> = {
+      'tg:-100': {
+        name: 'Boondi',
+        folder: 'boondi',
+        trigger: '@b',
+        added_at: '2024-01-01T00:00:00.000Z',
+        agentConfig: { persona: 'sales' },
+      },
+    };
+    const app = makeApp(conversationRoutes);
+    const warn = vi.fn();
+    const outbound = makeChannel({
+      name: 'telegram',
+      ownsJid: vi.fn((jid: string) => jid === 'tg:-100'),
+      sendMessage: vi.fn(async () => {
+        throw new Error('provider down');
+      }),
+      sendStreamingChunk: vi.fn(async () => true),
+      resetStreaming: vi.fn(),
+    });
+    const wiring = createChannelWiring(app, {
+      providerIds: [
+        makeProvider(
+          'telegram',
+          vi.fn(() => outbound),
+        ),
+      ],
+      logger: { info: vi.fn(), warn, debug: vi.fn(), error: vi.fn() },
+    });
+    await connect(wiring);
+
+    // The leak is already contained (chunk withheld + stream reset); a failing
+    // decline send must be logged, not rethrown — the turn must not crash.
+    const r = await wiring.sendStreamingChunk('tg:-100', 'mcp blew up', {
+      generation: 1,
+    });
+
+    expect(r).toBe(true);
+    expect(outbound.resetStreaming).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ jid: 'tg:-100' }),
+      expect.stringContaining('Failed to deliver customer-safe decline'),
+    );
+  });
+});

@@ -17,8 +17,7 @@ import {
 } from '../domain/types.js';
 import type { RuntimeMessageRepository } from '../domain/repositories/ops-repo.js';
 import { formatMessages } from '../messaging/router.js';
-import { handlePreAgentGuardrail } from './group-guardrail.js';
-import { loadGuardrailContext } from './guardrail-context.js';
+import { screenBatchPreAgent } from './group-guardrail.js';
 import type { GuardrailClassifier } from '../application/guardrails/types.js';
 import {
   isSenderControlAllowed,
@@ -79,6 +78,16 @@ export interface MessageLoopDeps {
     enqueueMessageCheck: (chatJid: string) => void;
     closeStdin: (chatJid: string) => void;
     stopGroup?: (chatJid: string) => boolean;
+    /**
+     * True when an agent run is live for this queue (the continuation path).
+     * Gates the tick's guardrail screen: only this path pipes straight to
+     * the live agent, so only it screens in the tick — the no-agent case
+     * defers to the spawn path (processGroupMessages). Required (not
+     * optional like stopGroup?) because it gates a SAFETY screen: a
+     * silently-absent gate could turn "skipped here" into "piped
+     * unscreened".
+     */
+    isGroupActive: (chatJid: string) => boolean;
   };
   handleActiveControlCommand?: (args: {
     chatJid: string;
@@ -234,31 +243,32 @@ export async function runMessagePollingTick(
         while (nextBatch && nextBatch.length > 0) {
           const messagesToSend = nextBatch;
 
-          // Guardrail parity: screen this batch before piping it into the
-          // already-running agent. The spawn path guards in
-          // processGroupMessages, but the continuation path writes straight to
-          // the live agent and never goes through it — so without this check a
-          // policy-violating message that lands while the agent is still warm
-          // would bypass the guardrail entirely. We reuse the same
-          // handlePreAgentGuardrail so the decision (and canned reply) is
-          // identical on both paths. Gated on sendChannelMessage being wired;
-          // handlePreAgentGuardrail itself no-ops when the group has no
-          // guardrail configured, so unconfigured groups are unaffected.
-          if (deps.sendChannelMessage) {
+          // Guardrail parity (continuation path): this path pipes straight
+          // to the live agent, bypassing processGroupMessages, so it must
+          // screen here, via the same screenBatchPreAgent the spawn path
+          // uses — both doors then decide identically. Without this screen,
+          // a policy-violating message arriving while the agent is warm
+          // would bypass the guardrail entirely.
+          //
+          // Gated on isGroupActive (and sendChannelMessage being wired) so
+          // we screen ONLY when piping to a live agent; the no-agent case
+          // defers to the spawn path instead of double-screening.
+          // SAFETY: when the gate is false this block is skipped with NO
+          // await before the synchronous sendMessage below, and GroupQueue
+          // guarantees `!isGroupActive(jid) ⇒ sendMessage(jid) === false`,
+          // so a skipped batch can never pipe to a live agent unscreened.
+          // Never add an await before the pipe. (Thread-scoped runs alias
+          // the parent JID, so a bare-parent message mid-run may screen
+          // here AND defer to spawn: twice, never unscreened.)
+          if (deps.sendChannelMessage && deps.queue.isGroupActive(queueJid)) {
             const sendChannelMessage = deps.sendChannelMessage;
-            const latestMessage = messagesToSend[messagesToSend.length - 1];
-            const guardrailContext = await loadGuardrailContext({
+            const guardrailBlocked = await screenBatchPreAgent({
               repository: opsRepository,
-              chatJid,
-              threadId: threadId ?? null,
-              excludeMessageIds: new Set(messagesToSend.map((m) => m.id)),
-            });
-            const guardrailBlocked = await handlePreAgentGuardrail({
               group,
-              messages: messagesToSend,
-              latestMessage,
+              chatJid,
               queueJid,
-              recentContext: guardrailContext,
+              threadId: threadId ?? null,
+              messages: messagesToSend,
               guardrailClassifier: deps.guardrailClassifier,
               sendMessage: (text: string, options?: MessageSendOptions) =>
                 sendChannelMessage(chatJid, text, options),

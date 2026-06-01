@@ -18,6 +18,8 @@ import {
 } from '../shared/message-cursor.js';
 import { isFlowLogEnabled } from '../shared/flow-log.js';
 import type { GroupProcessingDeps } from './group-processing-types.js';
+import { loadGuardrailContext } from './guardrail-context.js';
+import type { RuntimeMessageRepository } from '../domain/repositories/ops-repo.js';
 
 export async function handlePreAgentGuardrail(input: {
   group: ConversationRoute;
@@ -103,4 +105,46 @@ export async function handlePreAgentGuardrail(input: {
     'Guardrail allowed message for agent processing',
   );
   return false;
+}
+
+/**
+ * Load recent context and run the pre-agent guardrail for one batch — the single
+ * screening entry point shared by the spawn (processGroupMessages) and
+ * continuation (runMessagePollingTick) paths. Returns true when it handled the batch.
+ */
+export async function screenBatchPreAgent(input: {
+  repository: RuntimeMessageRepository;
+  group: ConversationRoute;
+  chatJid: string;
+  queueJid: string;
+  threadId?: string | null;
+  messages: readonly NewMessage[];
+  guardrailClassifier?: GuardrailClassifier;
+  sendMessage: (text: string, options?: MessageSendOptions) => Promise<void>;
+  buildMessageOptions: (threadId?: string) => MessageSendOptions | undefined;
+  setCursor: GroupProcessingDeps['setCursor'];
+  saveState: GroupProcessingDeps['saveState'];
+  info: (metadata: Record<string, unknown>, message: string) => void;
+}): Promise<boolean> {
+  if (input.messages.length === 0) return false;
+  const latestMessage = input.messages[input.messages.length - 1];
+  const recentContext = await loadGuardrailContext({
+    repository: input.repository,
+    chatJid: input.chatJid,
+    threadId: input.threadId ?? null,
+    excludeMessageIds: new Set(input.messages.map((m) => m.id)),
+  });
+  return handlePreAgentGuardrail({
+    group: input.group,
+    messages: input.messages,
+    latestMessage,
+    queueJid: input.queueJid,
+    recentContext,
+    guardrailClassifier: input.guardrailClassifier,
+    sendMessage: input.sendMessage,
+    buildMessageOptions: input.buildMessageOptions,
+    setCursor: input.setCursor,
+    saveState: input.saveState,
+    info: input.info,
+  });
 }

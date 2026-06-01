@@ -22,6 +22,7 @@ import {
   sendFinalProgressUpdate,
 } from './progress-updates.js';
 import { finalizeGroupAgentUserVisibleOutput } from './group-output-finalization.js';
+import { guardCustomerVisibleOutput } from '../application/customer-output/customer-safe-output.js';
 import {
   formatMessages,
   formatOutboundForChannel,
@@ -62,8 +63,7 @@ import {
 } from './group-progress-heartbeats.js';
 import { createProgressChannelSender } from './group-progress-channel-sender.js';
 import { createGroupAgentRunner } from './group-agent-runner.js';
-import { handlePreAgentGuardrail } from './group-guardrail.js';
-import { loadGuardrailContext } from './guardrail-context.js';
+import { screenBatchPreAgent } from './group-guardrail.js';
 import { createThreadOptionBuilders } from './group-thread-options.js';
 import { buildMemoryRecallQueryFromMessages } from '../memory/app-memory-recall-query.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
@@ -266,20 +266,14 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     )
       return true;
 
-    const guardrailContext = await loadGuardrailContext({
-      repository: ops(),
-      chatJid,
-      threadId: activeThreadId ?? null,
-      excludeMessageIds: new Set(missedMessages.map((m) => m.id)),
-    });
-
     if (
-      await handlePreAgentGuardrail({
+      await screenBatchPreAgent({
+        repository: ops(),
         group,
-        messages: missedMessages,
-        latestMessage,
+        chatJid,
         queueJid,
-        recentContext: guardrailContext,
+        threadId: activeThreadId ?? null,
+        messages: missedMessages,
         guardrailClassifier: deps.guardrailClassifier,
         sendMessage: sendMessageToChannel,
         buildMessageOptions,
@@ -746,9 +740,25 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         logger,
       });
     } else {
+      // Persist/finalize only customer-safe text. The streaming wire itself is
+      // guarded in channel-wiring, but this accumulated transcript is built here
+      // and would otherwise persist raw (pre-redaction) output as a 'sent' bot
+      // message — which also re-enters the guardrail classifier context on later
+      // turns. Run the same fail-closed backstop the non-streaming send applies,
+      // so the stored record can never hold a complete internal-detail leak.
+      // Clean transcripts pass through unchanged.
+      const rawTranscript = userVisibleTranscript.snapshot();
+      const safeTranscript = rawTranscript
+        ? guardCustomerVisibleOutput({
+            text: rawTranscript,
+            persona: group.agentConfig?.persona,
+            conversationJid: chatJid,
+            logger,
+          })
+        : rawTranscript;
       const finalization = await finalizeGroupAgentUserVisibleOutput({
         streamedTranscriptDeliveryStatus,
-        boundedTranscript: userVisibleTranscript.snapshot(),
+        boundedTranscript: safeTranscript,
         chatJid,
         activeThreadId,
         outputSentToUser,

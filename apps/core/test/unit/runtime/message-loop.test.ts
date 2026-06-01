@@ -121,6 +121,9 @@ function makeDeps(overrides: Partial<MessageLoopDeps> = {}): MessageLoopDeps & {
         stoppedGroups.push(chatJid);
         return true;
       },
+      // Default models an active agent (coherent with sendMessage → true).
+      // Tests that exercise the no-agent path override this with () => false.
+      isGroupActive: () => true,
     },
     opsRepository,
     enqueued,
@@ -513,6 +516,7 @@ describe('startMessagePollingLoop', () => {
         sendMessage: () => false,
         enqueueMessageCheck: (jid: string) => deps.enqueued.push(jid),
         closeStdin: () => {},
+        isGroupActive: () => false,
       },
     });
     const { startMessagePollingLoop } =
@@ -992,6 +996,9 @@ describe('continuation-path guardrail', () => {
       queue: {
         ...makeDeps().queue,
         sendMessage,
+        // Agent is warm on the continuation path, so the tick is responsible
+        // for screening this batch before piping it to the live agent.
+        isGroupActive: () => true,
       },
     });
     return { deps, sendChannelMessage, sendMessage };
@@ -1070,7 +1077,8 @@ describe('continuation-path guardrail', () => {
     const sendMessage = vi.fn(() => true);
     const deps = makeDeps({
       getConversationRoutes: () => ({ 'group@g.us': guardedRoute }),
-      // sendChannelMessage intentionally omitted
+      // sendChannelMessage intentionally omitted; the gate short-circuits on it
+      // before isGroupActive is ever consulted (default queue supplies it).
       queue: { ...makeDeps().queue, sendMessage },
     });
     const { runMessagePollingTick } =
@@ -1081,5 +1089,177 @@ describe('continuation-path guardrail', () => {
     // No channel guard wired → guardrail not consulted, message piped as before.
     expect(mockEvaluateAgentGuardrail).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('screens once and defers (never double-pipes) when the agent goes idle between the check and the pipe', async () => {
+    // TOCTOU seam the safety argument leans on: isGroupActive saw a live agent,
+    // but by the time we pipe the run has ended, so sendMessage no-ops. The
+    // batch was already screened here (once); it is enqueued for the spawn path.
+    // The message is never piped unscreened, and the tick never double-screens.
+    mockGetNewMessages.mockReturnValueOnce({
+      messages: [inboundMsg],
+      newTimestamp: '2024-01-01T00:00:01.000Z',
+    });
+    mockGetMessagesSince.mockReturnValue([inboundMsg]);
+    mockEvaluateAgentGuardrail.mockResolvedValue({
+      action: 'allow',
+      reason: 'in_scope',
+    });
+
+    const sendChannelMessage = vi.fn().mockResolvedValue(undefined);
+    const sendMessage = vi.fn(() => false); // agent ended: the pipe no-ops
+    const enqueued: string[] = [];
+    const deps = makeDeps({
+      getConversationRoutes: () => ({ 'group@g.us': guardedRoute }),
+      sendChannelMessage,
+      guardrailClassifier: vi.fn(),
+      queue: {
+        ...makeDeps().queue,
+        sendMessage,
+        isGroupActive: () => true, // looked active at check time
+        enqueueMessageCheck: (jid: string) => enqueued.push(jid),
+      },
+    });
+    const { runMessagePollingTick } =
+      await import('@core/runtime/message-loop.js');
+
+    await runMessagePollingTick(deps);
+
+    // Screened exactly once here (agent looked active), allowed, attempted to
+    // pipe (which no-opped), and was NOT blocked...
+    expect(mockEvaluateAgentGuardrail).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendChannelMessage).not.toHaveBeenCalled();
+    // ...then deferred to the spawn path. Re-screening there is the documented,
+    // safe continuation→idle boundary cost — never an unscreened pipe.
+    expect(enqueued).toContain('group@g.us');
+  });
+
+  it('screens EVERY batch before piping it on the continuation path (multi-batch)', async () => {
+    // The guardrail lives inside the while-loop, so a turn that spans more than
+    // MAX_MESSAGES_PER_PROMPT must be screened once per batch, and each screen
+    // must come BEFORE that batch is piped. A regression that screened only the
+    // first batch — or piped before screening — would let a policy-violating
+    // message in a later batch reach the live agent unscreened. We assert the
+    // exact screen→pipe interleaving, not just the counts, to pin that order.
+    const batch1 = Array.from({ length: 50 }, (_, i) => ({
+      ...inboundMsg,
+      id: String(i + 1),
+      message_id: `msg-${i + 1}`,
+    }));
+    const batch2 = [
+      { ...inboundMsg, id: '51', message_id: 'msg-51' },
+      { ...inboundMsg, id: '52', message_id: 'msg-52' },
+    ];
+    mockGetNewMessages.mockReturnValueOnce({
+      messages: [batch1[0]],
+      newTimestamp: '2024-01-01T00:00:01.000Z',
+    });
+    // initialBatch (50 = MAX → loop continues), then the trailing batch (<MAX).
+    mockGetMessagesSince
+      .mockReturnValueOnce(batch1)
+      .mockReturnValueOnce(batch2)
+      .mockReturnValue([]);
+
+    // Record the interleaving of screens (guardrail) and pipes (sendMessage) to
+    // prove every batch is screened before it is piped.
+    const order: string[] = [];
+    mockEvaluateAgentGuardrail.mockImplementation(async () => {
+      order.push('screen');
+      return { action: 'allow', reason: 'in_scope' };
+    });
+    const sendChannelMessage = vi.fn().mockResolvedValue(undefined);
+    const sendMessage = vi.fn(() => {
+      order.push('pipe');
+      return true;
+    });
+    const deps = makeDeps({
+      getConversationRoutes: () => ({ 'group@g.us': guardedRoute }),
+      sendChannelMessage,
+      guardrailClassifier: vi.fn(),
+      queue: { ...makeDeps().queue, sendMessage, isGroupActive: () => true },
+    });
+    const { runMessagePollingTick } =
+      await import('@core/runtime/message-loop.js');
+
+    await runMessagePollingTick(deps);
+
+    // One screen per batch, one pipe per batch, screen always before its pipe.
+    expect(mockEvaluateAgentGuardrail).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(order).toEqual(['screen', 'pipe', 'screen', 'pipe']);
+    expect(sendChannelMessage).not.toHaveBeenCalled();
+  });
+});
+
+// Regression coverage for the double-guardrail bug: when NO agent is running,
+// an allowed inbound message must be screened exactly once. The tick used to
+// screen it (guardrail #1) and then — because the pipe no-ops with no live
+// agent — re-enqueue it so the spawn path screened it again (guardrail #2),
+// doubling the classifier calls + context reads for every cold message. The
+// fix gates the tick's screen on the agent being active, so the tick defers to
+// the spawn path on the no-agent path.
+describe('no-agent path guardrail (double-evaluation regression)', () => {
+  const guardedRoute: ConversationRoute = {
+    name: 'Boondi',
+    folder: 'boondi',
+    trigger: '@Andy',
+    added_at: '2024-01-01T00:00:00.000Z',
+    requiresTrigger: false,
+    agentConfig: {
+      plugins: { guardrail: { file: 'guardrail.ts', model: 'test-model' } },
+    },
+  } as unknown as ConversationRoute;
+
+  const inboundMsg = {
+    id: '1',
+    chat_jid: 'group@g.us',
+    sender: 'user@s.whatsapp.net',
+    content: 'where is my order',
+    timestamp: '2024-01-01T00:00:01.000Z',
+    is_from_me: false,
+    message_id: 'msg-1',
+    reply_to_message_id: null,
+    reply_to_content: null,
+    sender_name: 'User',
+  };
+
+  it('does not screen in the tick when no agent is active (defers to the spawn path)', async () => {
+    mockGetNewMessages.mockReturnValueOnce({
+      messages: [inboundMsg],
+      newTimestamp: '2024-01-01T00:00:01.000Z',
+    });
+    mockGetMessagesSince.mockReturnValue([inboundMsg]);
+    mockEvaluateAgentGuardrail.mockResolvedValue({
+      action: 'allow',
+      reason: 'in_scope',
+    });
+
+    const sendChannelMessage = vi.fn().mockResolvedValue(undefined);
+    const sendMessage = vi.fn(() => false); // no live agent: the pipe no-ops
+    const enqueued: string[] = [];
+    const deps = makeDeps({
+      getConversationRoutes: () => ({ 'group@g.us': guardedRoute }),
+      sendChannelMessage,
+      guardrailClassifier: vi.fn(),
+      queue: {
+        ...makeDeps().queue,
+        sendMessage,
+        isGroupActive: () => false, // no agent running
+        enqueueMessageCheck: (jid: string) => enqueued.push(jid),
+      },
+    });
+    const { runMessagePollingTick } =
+      await import('@core/runtime/message-loop.js');
+
+    await runMessagePollingTick(deps);
+
+    // The tick skipped its guardrail (nothing to pipe to) and handed the
+    // message to the spawn path via enqueue — which screens it exactly once.
+    // (The end-to-end "exactly once across tick → queue → spawn" proof lives in
+    // guardrail-dedup-bench.test.ts, which drives the real GroupQueue.)
+    expect(mockEvaluateAgentGuardrail).not.toHaveBeenCalled();
+    expect(sendChannelMessage).not.toHaveBeenCalled();
+    expect(enqueued).toContain('group@g.us');
   });
 });

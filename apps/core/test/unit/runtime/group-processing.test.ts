@@ -1863,6 +1863,55 @@ describe('createGroupProcessor', () => {
       );
     });
 
+    it('redacts a leaky streamed transcript before persisting it (no raw internal detail stored)', async () => {
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      // Agent emits a reply that leaks an internal detail ("mcp"). The wire is
+      // guarded in channel-wiring (covered elsewhere); here we assert the
+      // accumulated transcript is run through the same fail-closed backstop
+      // before it is persisted, so the stored bot message — which also re-enters
+      // the guardrail classifier context on later turns — holds the decline, not
+      // the raw leak.
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({
+            status: 'success',
+            result: 'your mcp call failed',
+          });
+          return {
+            status: 'success',
+            result: 'your mcp call failed',
+          } as AgentOutput;
+        },
+      );
+
+      const storeMessage = deps.opsRepository!
+        .storeMessage as unknown as ReturnType<typeof vi.fn>;
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      const streamedPersist = storeMessage.mock.calls.find(
+        (call) =>
+          typeof call[0]?.content === 'string' &&
+          typeof call[0]?.id === 'string' &&
+          call[0].id.startsWith('streamed-outbound:'),
+      );
+      expect(streamedPersist).toBeTruthy();
+      expect(streamedPersist![0].content).toContain(
+        "Sorry, I can't share that here",
+      );
+      expect(streamedPersist![0].content).not.toMatch(/\bmcp\b/);
+    });
+
     it('preserves whitespace-only streaming deltas from provider output', async () => {
       const streamingChannel = makeChannel({
         sendStreamingChunk: vi.fn().mockResolvedValue(true),
