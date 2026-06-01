@@ -393,7 +393,7 @@ export class AgentCapabilityAdministrationService {
       agentId: input.agentId,
       now,
     });
-    const [skillMap, mcpMap] = await Promise.all([
+    const [skillMap] = await Promise.all([
       this.requireInstalledSkills(input.appId, sourceSkillIds),
       this.requireActiveMcpServers(input.appId, sourceMcpServerIds),
     ]);

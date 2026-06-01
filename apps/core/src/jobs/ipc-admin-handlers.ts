@@ -49,7 +49,11 @@ import {
   formatApprovalRequestedMessage,
   formatNotApprovedMessage,
 } from '../shared/user-visible-messages.js';
-import { semanticCapabilityDefinitionFromToolInput } from '../shared/semantic-capabilities.js';
+import {
+  semanticCapabilityDefinitionFromToolInput,
+  type SemanticCapabilityDefinition,
+} from '../shared/semantic-capabilities.js';
+import { semanticCapabilityRule } from '../shared/semantic-capability-ids.js';
 import { jobLocalCliCapabilityConflict } from './ipc-request-permission-local-cli.js';
 import {
   configureSkillInstallHandlers,
@@ -62,6 +66,7 @@ import {
 } from './ipc-mcp-server-request-credentials.js';
 
 const pendingRequestOnlyCapabilityReviews = new Set<string>();
+type RequestedMcpTransport = 'stdio_template' | 'http' | 'sse';
 
 configureSkillInstallHandlers({
   getStorage: getRuntimeStorage,
@@ -157,6 +162,9 @@ const requestMcpServerHandler: TaskHandler = async (context) => {
   const sandboxProfileId = toTrimmedString(payload.sandboxProfileId, {
     maxLen: 120,
   });
+  const origin = toTrimmedString(payload.origin ?? payload.url, {
+    maxLen: 2048,
+  });
   const reason = toTrimmedString(payload.reason, { maxLen: 2000 }) || '';
   if (!name || !reason) {
     reject('Missing required fields: name and reason.', 'invalid_request');
@@ -175,16 +183,23 @@ const requestMcpServerHandler: TaskHandler = async (context) => {
     );
     return;
   }
-  if (transport !== 'stdio_template') {
+  if (!isRequestedMcpTransport(transport)) {
     reject(
-      'request_mcp_server supports only stdio_template servers until Gantry has a DNS-pinned remote MCP transport.',
+      'request_mcp_server supports stdio_template, http, or sse transports.',
       'invalid_request',
     );
     return;
   }
-  if (!templateId || !sandboxProfileId) {
+  if (transport === 'stdio_template' && (!templateId || !sandboxProfileId)) {
     reject(
       'stdio_template MCP server requests require templateId and sandboxProfileId.',
+      'invalid_request',
+    );
+    return;
+  }
+  if ((transport === 'http' || transport === 'sse') && !origin) {
+    reject(
+      `${transport} MCP server requests require origin or url.`,
       'invalid_request',
     );
     return;
@@ -209,11 +224,15 @@ const requestMcpServerHandler: TaskHandler = async (context) => {
   // prettier-ignore
   const service = new McpServerService(storage.repositories.mcpServers, undefined, { lookupHostname: deps.mcpHostnameLookup });
   try {
-    const config = {
-      transport,
-      templateId,
-      ...(args.length > 0 ? { args } : {}),
-    };
+    const requestOrigin = origin ?? '';
+    const config =
+      transport === 'stdio_template'
+        ? {
+            transport,
+            templateId,
+            ...(args.length > 0 ? { args } : {}),
+          }
+        : { transport, url: requestOrigin };
     const credentialRefs = credentialRefsForRequestedMcp(
       name,
       transport,
@@ -232,7 +251,7 @@ const requestMcpServerHandler: TaskHandler = async (context) => {
       transport,
       sandboxProfileId,
       transportConfig: config as never,
-      origin: '',
+      origin: requestOrigin,
       requestedToolPatterns,
       credentialRefs,
       credentialNeeds,
@@ -245,6 +264,12 @@ const requestMcpServerHandler: TaskHandler = async (context) => {
     );
   }
 };
+
+function isRequestedMcpTransport(
+  value: string | undefined,
+): value is RequestedMcpTransport {
+  return value === 'stdio_template' || value === 'http' || value === 'sse';
+}
 
 const mcpListToolsHandler: TaskHandler = async (context) => {
   const { data, deps, sourceAgentFolder, sourceAgentFolderJids } = context;
@@ -768,6 +793,7 @@ async function completeMcpPermissionReview(
       agentId: input.agentId,
       serverId: server.id,
     });
+    await persistApprovedMcpServerCapability(input, decision.decidedBy);
     await syncApprovedCapabilitySettings(input.appId);
   } catch (err) {
     if (connectedServerId) {
@@ -807,6 +833,90 @@ async function completeMcpPermissionReview(
     sameSessionContext,
     'mcp_connected',
   );
+}
+
+async function persistApprovedMcpServerCapability(
+  input: Parameters<typeof startMcpPermissionReview>[0],
+  approvedBy?: string,
+): Promise<string[]> {
+  const capability = semanticCapabilityForApprovedMcpServer({
+    serverName: input.server.name,
+    requestedToolPatterns: input.requestedToolPatterns,
+  });
+  if (!capability) {
+    throw new Error(
+      'MCP server approval requires at least one exact requested tool pattern so durable capability authority can be recorded.',
+    );
+  }
+  const toolRepository = input.deps.getToolRepository?.();
+  const mirrorAgentToolRulesToSettings =
+    input.deps.mirrorAgentToolRulesToSettings;
+  if (!toolRepository || !mirrorAgentToolRulesToSettings) {
+    throw new Error(
+      'MCP capability approval requires tool repository and settings mirror.',
+    );
+  }
+  const rule = semanticCapabilityRule(capability.capabilityId);
+  return new PermissionManagementService().applyPersistentToolRuleGrant({
+    appId: input.appId,
+    agentId: input.agentId,
+    sourceAgentFolder: input.sourceAgentFolder,
+    updates: [
+      {
+        type: 'addRules',
+        behavior: 'allow',
+        destination: 'session',
+        rules: [{ toolName: rule }],
+      },
+    ],
+    toolRepository,
+    mirrorAgentToolRulesToSettings,
+    permissionRepository: input.deps.getPermissionRepository?.(),
+    semanticCapabilityDefinitions: {
+      [capability.capabilityId]: capability,
+    },
+    actor: approvedBy,
+    conversationId: input.targetJid,
+    threadId: input.threadId,
+    reason: input.reason,
+  });
+}
+
+function semanticCapabilityForApprovedMcpServer(input: {
+  serverName: string;
+  requestedToolPatterns: readonly string[];
+}): SemanticCapabilityDefinition | null {
+  const exactTools = [
+    ...new Set(
+      input.requestedToolPatterns
+        .map((pattern) => pattern.trim())
+        .filter((pattern) => pattern && !pattern.includes('*')),
+    ),
+  ];
+  if (exactTools.length === 0) return null;
+  const capabilityId = `mcp.${input.serverName}.access`;
+  return {
+    capabilityId,
+    version: '1',
+    displayName: `${input.serverName} MCP access`,
+    category: 'MCP',
+    risk: 'write',
+    can: `Call approved tools on the ${input.serverName} MCP server through the Gantry MCP proxy.`,
+    cannot:
+      'Call unapproved MCP tools, receive raw MCP credentials, or bypass Gantry capability review.',
+    credentialSource: 'none',
+    implementationBindings: exactTools.map((toolName) => ({
+      kind: 'mcp_tool',
+      mcpTool: `mcp__${input.serverName}__${toolName}`,
+    })),
+    preflight: { kind: 'none' },
+    sandboxProfile: { network: 'required', filesystem: 'read_only' },
+    source: {
+      source: 'mcp',
+      serverName: input.serverName,
+      allowedToolPatterns: exactTools,
+    },
+  };
 }
 
 async function rejectMcpRequestFromPermission(

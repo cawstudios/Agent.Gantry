@@ -15,12 +15,23 @@ function recordWithTemplate(templateId: string | undefined) {
   } as never;
 }
 
-function recordWithRemoteTransport(transport: 'http' | 'sse') {
+function recordWithRemoteTransport(
+  transport: 'http' | 'sse',
+  options: {
+    url?: string;
+    headers?: Record<string, string>;
+    credentialRefs?: Array<{ name: string; target: 'header'; key: string }>;
+  } = {},
+) {
   return {
     definition: {
       name: 'github',
-      config: { transport, url: 'https://mcp.example.test/github' },
-      credentialRefs: [],
+      config: {
+        transport,
+        url: options.url ?? 'https://mcp.example.test/github',
+        ...(options.headers ? { headers: options.headers } : {}),
+      },
+      credentialRefs: options.credentialRefs ?? [],
       allowedToolPatterns: ['search'],
       autoApproveToolPatterns: [],
     },
@@ -46,5 +57,36 @@ describe('materializeMcpRecord', () => {
         materializeMcpRecord(recordWithRemoteTransport(transport), {}),
       ).toThrow(/DNS-pinned host transport/);
     }
+  });
+
+  it('can materialize remote MCP servers for the Gantry proxy', () => {
+    expect(
+      materializeMcpRecord(
+        recordWithRemoteTransport('http', {
+          url: 'http://127.0.0.1:3030/mcp',
+          headers: { 'x-static': 'safe' },
+          credentialRefs: [
+            {
+              name: 'MCP_TOKEN',
+              target: 'header',
+              key: 'Authorization',
+            },
+          ],
+        }),
+        { MCP_TOKEN: 'Bearer secret' },
+        { allowRemoteHttpProjection: true },
+      ),
+    ).toMatchObject({
+      name: 'github',
+      config: {
+        type: 'http',
+        url: 'http://127.0.0.1:3030/mcp',
+        headers: {
+          'x-static': 'safe',
+          Authorization: 'Bearer secret',
+        },
+      },
+      allowedToolNames: ['mcp__github__search'],
+    });
   });
 });

@@ -145,6 +145,7 @@ export class McpToolProxy {
       lookupHostname: this.options.lookupHostname,
       dnsValidationCache: this.options.dnsValidationCache,
       auditMaterialization: false,
+      allowRemoteHttpProjection: true,
     }).materializeForAgent({
       appId: input.appId,
       agentId: input.agentId,

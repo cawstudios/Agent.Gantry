@@ -29,6 +29,7 @@ export interface MaterializedMcpCapability {
 export function materializeMcpRecord(
   record: MaterializedMcpServer,
   credentialEnv: Record<string, string>,
+  options: { allowRemoteHttpProjection?: boolean } = {},
 ): MaterializedMcpCapability {
   const config = record.definition.config;
   const credentialValues = resolveCredentialValues(
@@ -46,6 +47,37 @@ export function materializeMcpRecord(
     (tool) => `mcp__${record.definition.name}__${tool}`,
   );
   if (config.transport === 'http' || config.transport === 'sse') {
+    if (options.allowRemoteHttpProjection) {
+      if (!config.url) {
+        throw new ApplicationError(
+          'INVALID_REQUEST',
+          `${config.transport} MCP server requires url.`,
+        );
+      }
+      return {
+        name: record.definition.name,
+        config: {
+          type: config.transport,
+          url: config.url,
+          ...(Object.keys({
+            ...(config.headers ?? {}),
+            ...credentialValues.headers,
+          }).length > 0
+            ? {
+                headers: {
+                  ...(config.headers ?? {}),
+                  ...credentialValues.headers,
+                },
+              }
+            : {}),
+        },
+        allowedToolPatterns,
+        autoApproveToolPatterns: record.definition.autoApproveToolPatterns,
+        allowedToolNames,
+        autoApproveToolNames,
+        required: record.binding.required,
+      };
+    }
     throw new ApplicationError(
       'INVALID_REQUEST',
       'Remote MCP HTTP/SSE servers cannot be projected directly to the SDK until runtime uses a DNS-pinned host transport.',

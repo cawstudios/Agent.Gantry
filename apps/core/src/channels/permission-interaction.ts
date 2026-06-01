@@ -10,7 +10,6 @@ import {
   isThirdPartyMcpToolRule,
   parseReadableScopedToolRule,
   publicGantryToolNameForSdkTool,
-  RUN_COMMAND_TOOL_NAME,
 } from '../shared/agent-tool-references.js';
 import { formatPersistentPermissionRulesForUser } from '../shared/persistent-permission-rules.js';
 import { deliveryLabel } from './provider-delivery-labels.js';

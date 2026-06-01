@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const runtimeHomes: string[] = [];
 
-async function loadAdminHandlers(runtimeHome: string) {
+async function loadAdminHandlers(
+  runtimeHome: string,
+  repositories: Record<string, unknown> = {},
+) {
   vi.resetModules();
   vi.stubEnv('GANTRY_HOME', runtimeHome);
   const syncRuntimeSettingsFromProjection = vi.fn(async () => undefined);
@@ -17,7 +20,7 @@ async function loadAdminHandlers(runtimeHome: string) {
   });
   vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
     getRuntimeRepositories: vi.fn(() => ({})),
-    getRuntimeStorage: vi.fn(() => ({ repositories: {} })),
+    getRuntimeStorage: vi.fn(() => ({ repositories })),
   }));
   const ipcAuth = await import('@core/runtime/ipc-auth.js');
   const handlers = await import('@core/jobs/ipc-admin-handlers.js');
@@ -98,7 +101,7 @@ afterEach(() => {
 });
 
 describe('admin IPC handlers', () => {
-  it('rejects remote MCP server requests before approval because runtime cannot project them yet', async () => {
+  it('rejects unsupported MCP server transports before approval', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
@@ -117,8 +120,8 @@ describe('admin IPC handlers', () => {
         targetJid: 'sl:C123',
         payload: {
           name: 'github',
-          transport: 'http',
-          origin: 'https://mcp.example.test/github',
+          transport: 'websocket',
+          origin: 'wss://mcp.example.test/github',
           reason: 'Use the github MCP server.',
         },
       }) as never,
@@ -134,9 +137,101 @@ describe('admin IPC handlers', () => {
       ok: false,
       code: 'invalid_request',
       error:
-        'request_mcp_server supports only stdio_template servers until Gantry has a DNS-pinned remote MCP transport.',
+        'request_mcp_server supports stdio_template, http, or sse transports.',
     });
     expect(requestPermissionApproval).not.toHaveBeenCalled();
+  });
+
+  it('persists a reviewed MCP source capability for same-host HTTP servers', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const servers = new Map<string, Record<string, unknown>>();
+    const bindings: Record<string, unknown>[] = [];
+    const mcpServers = {
+      getServerByName: vi.fn(async () => null),
+      saveServer: vi.fn(async (server: Record<string, unknown>) => {
+        servers.set(String(server.id), server);
+      }),
+      getServer: vi.fn(async (serverId: string) => servers.get(serverId)),
+      listAgentBindings: vi.fn(async () => bindings),
+      saveAgentBinding: vi.fn(async (binding: Record<string, unknown>) => {
+        bindings.push(binding);
+      }),
+      appendAuditEvent: vi.fn(async () => undefined),
+    };
+    const tools = {
+      listTools: vi.fn(async () => []),
+      listAgentToolBindings: vi.fn(async () => []),
+      getTool: vi.fn(async () => null),
+      saveTool: vi.fn(async () => undefined),
+      saveAgentToolBinding: vi.fn(async () => undefined),
+    };
+    const { adminTaskHandlers, taskData } = await loadAdminHandlers(
+      runtimeHome,
+      { mcpServers, tools },
+    );
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: true,
+      decidedBy: 'U_APPROVER',
+    }));
+    const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
+
+    await adminTaskHandlers.request_mcp_server({
+      data: taskData('loopback-http-mcp', {
+        type: 'request_mcp_server',
+        chatJid: 'sl:C123',
+        targetJid: 'sl:C123',
+        payload: {
+          name: 'caw-ats',
+          transport: 'http',
+          origin: 'http://127.0.0.1:3030/mcp',
+          requestedToolPatterns: ['ats_list_positions'],
+          credentialNeeds: ['Authorization'],
+          reason: 'Use the caw-ats MCP server.',
+        },
+      }) as never,
+      sourceAgentFolder: 'main_agent',
+      deps: depsWithAdminTools([], {
+        requestPermissionApproval,
+        getToolRepository: () => tools,
+        mirrorAgentToolRulesToSettings,
+      }) as never,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['sl:C123'],
+    });
+
+    await vi.waitFor(() => {
+      expect(readResponse(runtimeHome, 'loopback-http-mcp')).toMatchObject({
+        ok: true,
+        code: 'mcp_connected',
+      });
+    });
+    expect(mcpServers.saveAgentBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'active' }),
+    );
+    expect(tools.saveTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'capability:mcp.caw-ats.access',
+        inputSchema: expect.objectContaining({
+          schema: expect.objectContaining({
+            capabilityId: 'mcp.caw-ats.access',
+            implementationBindings: [
+              {
+                kind: 'mcp_tool',
+                mcpTool: 'mcp__caw-ats__ats_list_positions',
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(mirrorAgentToolRulesToSettings).toHaveBeenCalledWith(
+      'main_agent',
+      ['capability:mcp.caw-ats.access'],
+      { appId: 'app:test' },
+    );
   });
 
   it('rejects direct request_permission semantic capability requests outside propose_capability', async () => {

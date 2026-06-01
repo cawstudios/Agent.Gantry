@@ -44,6 +44,7 @@ export class McpServerService {
       lookupHostname?: HostnameLookup;
       dnsValidationCache?: RemoteMcpDnsValidationCache;
       auditMaterialization?: boolean;
+      allowRemoteHttpProjection?: boolean;
     } = {},
   ) {}
 
@@ -444,7 +445,9 @@ export class McpServerService {
       this.options.lookupHostname,
       { cache: this.options.dnsValidationCache },
     );
-    return materializeMcpRecord(record, credentialEnv);
+    return materializeMcpRecord(record, credentialEnv, {
+      allowRemoteHttpProjection: this.options.allowRemoteHttpProjection,
+    });
   }
 
   async requireServer(

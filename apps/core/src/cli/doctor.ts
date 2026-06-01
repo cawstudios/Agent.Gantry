@@ -386,9 +386,9 @@ export function runDoctor(
     message: `${memoryHealth.embeddingProvider} (source: ${memoryHealth.embeddingProviderSource}): ${memoryHealth.embeddingCheck.message}`,
     nextAction: memoryHealth.embeddingCheck.nextAction,
   });
-  let modelAccessStatus: DoctorStatus =
+  const modelAccessStatus: DoctorStatus =
     credentialMode === 'gantry' ? 'pass' : 'warn';
-  let modelAccessMessage =
+  const modelAccessMessage =
     credentialMode === 'gantry'
       ? 'Gantry Model Gateway config is enabled; provider credential readiness is checked separately.'
       : 'Model Access is disabled. Agent execution and memory LLM extraction require Gantry Model Gateway credentials.';
