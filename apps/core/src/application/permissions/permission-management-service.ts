@@ -123,8 +123,14 @@ export class PermissionManagementService {
       appId: input.appId,
       statuses: ['active'],
     });
-    const trustedSemanticCapabilityDefinitions =
+    const catalogSemanticCapabilityDefinitions =
       semanticCapabilityDefinitionsFromToolCatalog(activeCatalogTools);
+    assertNoRequestCapabilityDefinitionConflicts({
+      catalogDefinitions: catalogSemanticCapabilityDefinitions,
+      requestDefinitions: input.semanticCapabilityDefinitions,
+    });
+    const trustedSemanticCapabilityDefinitions =
+      catalogSemanticCapabilityDefinitions;
     const allowedRules = canonicalPersistentPermissionRules(
       permissionUpdateAllowedToolRules(input.updates),
       trustedSemanticCapabilityDefinitions,
@@ -498,6 +504,27 @@ function semanticCapabilityDefinitionsFromToolCatalog(
     definitions[capability.capabilityId] = capability;
   }
   return Object.keys(definitions).length > 0 ? definitions : undefined;
+}
+
+function assertNoRequestCapabilityDefinitionConflicts(input: {
+  catalogDefinitions?: Record<string, SemanticCapabilityDefinition>;
+  requestDefinitions?: Record<string, SemanticCapabilityDefinition>;
+}): void {
+  for (const [capabilityId, requestDefinition] of Object.entries(
+    input.requestDefinitions ?? {},
+  )) {
+    const catalogDefinition = input.catalogDefinitions?.[capabilityId];
+    if (!catalogDefinition) continue;
+    if (
+      stableSha256Json(catalogDefinition) ===
+      stableSha256Json(requestDefinition)
+    ) {
+      continue;
+    }
+    throw new Error(
+      `Semantic capability ${capabilityId} does not match the active catalog definition.`,
+    );
+  }
 }
 
 function persistentPermissionRuleAuditPreviewForRules(

@@ -521,16 +521,12 @@ describe('handleSessionCommand', () => {
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.getMemoryStatus).toHaveBeenCalledTimes(1);
     expect(deps.sendMessage).toHaveBeenCalledWith(
-      expect.stringContaining('Memory status'),
-    );
-    expect(deps.sendMessage).toHaveBeenCalledWith(
-      expect.stringContaining('embeddings: configured'),
-    );
-    expect(deps.sendMessage).toHaveBeenCalledWith(
-      expect.stringContaining('vector_search: inactive'),
-    );
-    expect(deps.sendMessage).toHaveBeenCalledWith(
-      expect.stringContaining('top_used: fact:key(12)'),
+      [
+        'Memory: Ready',
+        'Last dream: never',
+        'Review queue: 0',
+        'Injected this run: 0',
+      ].join('\n'),
     );
   });
 

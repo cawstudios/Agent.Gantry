@@ -700,14 +700,14 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 ### Commands Available in Any Group
 
-| Command                | Example                     | Effect         |
-| ---------------------- | --------------------------- | -------------- |
+| Command            | Example                     | Effect                       |
+| ------------------ | --------------------------- | ---------------------------- |
 | `@Agent [message]` | `@Andy what's the weather?` | Message the configured agent |
 
 ### Commands Available in Main Channel Only
 
-| Command                          | Example                             | Effect                    |
-| -------------------------------- | ----------------------------------- | ------------------------- |
+| Command                      | Example                             | Effect                    |
+| ---------------------------- | ----------------------------------- | ------------------------- |
 | `@Agent add group "Name"`    | `@Andy add group "Family Chat"`     | Register a new group      |
 | `@Agent remove group "Name"` | `@Andy remove group "Work Team"`    | Unregister a group        |
 | `@Agent list groups`         | `@Andy list groups`                 | Show registered groups    |
@@ -994,12 +994,12 @@ chmod 700 ~/gantry/agents ~/gantry/data
 
 ### Common Issues
 
-| Issue                              | Cause                             | Solution                                                          |
-| ---------------------------------- | --------------------------------- | ----------------------------------------------------------------- |
-| No response to messages            | Service not running               | Run `gantry status` and check the service line                    |
-| Startup fails at runtime preflight | Host runtime prerequisites failed | Run `npm run build` and re-check runtime diagnostics              |
-| Session not continuing             | Session state not persisted       | Run `gantry status` and verify Postgres runtime storage readiness |
-| "No groups registered"             | Haven't added groups              | Register a channel group with the current channel setup flow      |
+| Issue                              | Cause                                 | Solution                                                          |
+| ---------------------------------- | ------------------------------------- | ----------------------------------------------------------------- |
+| No response to messages            | Service not running                   | Run `gantry status` and check the service line                    |
+| Startup fails at runtime preflight | Runtime build or storage check failed | Run `gantry status` and follow the displayed next action          |
+| Session not continuing             | Session state not persisted           | Run `gantry status` and verify Postgres runtime storage readiness |
+| "No conversations connected"       | No Conversation connected             | Run `gantry setup` and connect one Conversation                   |
 
 ### Log Location
 

@@ -119,6 +119,7 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
               totalChunks: chunks.length,
             });
             Object.assign(partial, {
+              provider: 'telegram',
               deliveredParts: deliveredChunks,
               totalParts: chunks.length,
               externalMessageIds,

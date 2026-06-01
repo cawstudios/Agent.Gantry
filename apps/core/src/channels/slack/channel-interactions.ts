@@ -215,6 +215,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
             totalChunks: chunks.length,
           });
           Object.assign(partial, {
+            provider: 'slack',
             deliveredParts: appendedChunks,
             totalParts: chunks.length,
             sentPrefix,

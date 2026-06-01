@@ -62,7 +62,6 @@ import {
 } from './ipc-mcp-server-request-credentials.js';
 
 const pendingRequestOnlyCapabilityReviews = new Set<string>();
-
 configureSkillInstallHandlers({
   getStorage: getRuntimeStorage,
   logInfo: (context, message) => logger.info(context, message),
@@ -506,16 +505,12 @@ function parseRequestOnlyCapabilityReview(toolName: RequestOnlyCapabilityToolNam
 
 // prettier-ignore
 function requestOnlyCapabilityEffect(toolName: RequestOnlyCapabilityToolName, toolInput: Record<string, unknown>, fallback: string): string {
-  return toolName === 'request_permission'
-    ? requestPermissionReviewEffect(toolInput, fallback)
-    : fallback;
+  return toolName === 'request_permission' ? requestPermissionReviewEffect(toolInput, fallback) : fallback;
 }
 
 // prettier-ignore
 function requestOnlyCapabilityQueuedMessage(review: RequestOnlyCapabilityReview): string {
-  return review.toolName === 'request_permission'
-    ? requestPermissionQueuedMessage({ toolName: 'request_permission', displayName: review.displayName })
-    : `${formatApprovalRequestedMessage(review.displayName)} Admin setup may still be needed after approval.`;
+  return review.toolName === 'request_permission' ? requestPermissionQueuedMessage({ toolName: 'request_permission', displayName: review.displayName }) : `${formatApprovalRequestedMessage(review.displayName)} Admin setup may still be needed after approval.`;
 }
 
 // prettier-ignore

@@ -281,18 +281,13 @@ async function runSetupCommand(
     | 'welcome'
     | 'runtime_home'
     | 'storage'
-    | 'prerequisites'
     | 'channel'
     | 'credentials'
     | 'model'
     | 'telegram'
     | 'slack'
-    | 'memory'
-    | 'embeddings'
-    | 'dreaming'
     | 'config'
     | 'group'
-    | 'service'
     | 'verify'
     | 'ready',
 ): Promise<number> {

@@ -211,6 +211,10 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'sdk-native-skill-names.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/operator-error.ts'),
+    path.join(sharedDir, 'operator-error.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/admin-mcp-tools.ts'),
     path.join(sharedDir, 'admin-mcp-tools.ts'),
   );

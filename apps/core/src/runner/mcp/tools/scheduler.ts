@@ -27,7 +27,6 @@ import {
   schedulerAccessRequirementSchema,
   type SchedulerAccessRequirementInput,
 } from './scheduler-capability-schema.js';
-
 const SCHEDULER_UPSERT_ARG_KEYS = new Set([
   'job_id',
   'name',
@@ -119,10 +118,8 @@ function unsupportedSchedulerArgError(
   };
 }
 
-// passthrough() keeps unknown keys alive into superRefine so the MCP SDK's
-// schema parse can reject removed execution-scope inputs deterministically
-// before the handler runs. The normalizer only reads known fields, so extra
-// keys surviving here does not loosen anything downstream.
+// passthrough() keeps unknown keys alive so the MCP SDK rejects removed
+// execution-scope inputs before the handler runs; the normalizer ignores extras.
 const executionContextSchema = z
   .object({
     conversation_jid: z.string(),

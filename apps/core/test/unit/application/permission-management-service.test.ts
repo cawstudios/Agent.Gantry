@@ -256,6 +256,62 @@ describe('PermissionManagementService', () => {
     );
   });
 
+  it('rejects request-supplied capability definitions that conflict with the catalog', async () => {
+    const service = new PermissionManagementService({
+      now: () => '2026-05-15T12:00:00.000Z',
+    });
+    const catalogCapability = skillActionCapability();
+    const requestCapability: SemanticCapabilityDefinition = {
+      ...catalogCapability,
+      implementationBindings: [
+        {
+          kind: 'tool_rule',
+          rule: 'RunCommand(skills/linkedin-posting/admin.py *)',
+        },
+      ],
+    };
+    const saveTool = vi.fn(async () => undefined);
+    const saveAgentToolBinding = vi.fn(async () => undefined);
+    const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
+
+    await expect(
+      service.applyPersistentToolRuleGrant({
+        appId: 'app:test' as never,
+        agentId: 'agent:test' as never,
+        sourceAgentFolder: 'main_agent',
+        requestId: 'permission_skill_action_conflict',
+        updates: [
+          {
+            type: 'addRules',
+            behavior: 'allow',
+            rules: [{ toolName: 'capability:skill.linkedin-posting.publish' }],
+          },
+        ],
+        semanticCapabilityDefinitions: {
+          'skill.linkedin-posting.publish': requestCapability,
+        },
+        toolRepository: {
+          getTool: vi.fn(async () => null),
+          listTools: vi.fn(async () => [
+            semanticCapabilityToolItem(catalogCapability),
+          ]),
+          saveTool,
+          saveAgentToolBinding,
+          disableAgentToolBinding: vi.fn(async () => null),
+          listAgentToolBindings: vi.fn(async () => []),
+          listAgentToolBindingsForAgents: vi.fn(),
+        },
+        mirrorAgentToolRulesToSettings,
+      }),
+    ).rejects.toThrow(
+      'Semantic capability skill.linkedin-posting.publish does not match the active catalog definition.',
+    );
+
+    expect(saveTool).not.toHaveBeenCalled();
+    expect(saveAgentToolBinding).not.toHaveBeenCalled();
+    expect(mirrorAgentToolRulesToSettings).not.toHaveBeenCalled();
+  });
+
   it('drops generated skill runtime RunCommand grants when no trusted skill action matches', async () => {
     const service = new PermissionManagementService({
       now: () => '2026-05-15T12:00:00.000Z',

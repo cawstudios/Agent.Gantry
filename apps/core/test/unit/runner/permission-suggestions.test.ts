@@ -275,21 +275,7 @@ describe('scheduledPermissionSuggestions', () => {
       },
     });
 
-    expect(plan).toEqual({
-      suggestions: [
-        {
-          type: 'addRules',
-          behavior: 'allow',
-          destination: 'session',
-          rules: [
-            {
-              toolName: 'RunCommand',
-              ruleContent: 'skills/linkedin-posting/post.py *',
-            },
-          ],
-        },
-      ],
-    });
+    expect(plan).toEqual({});
   });
 
   it('does not offer persistent suggestions for invalid durable tool rules', () => {

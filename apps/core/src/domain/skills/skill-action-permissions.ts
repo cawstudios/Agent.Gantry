@@ -14,7 +14,6 @@ import type {
   SemanticCapabilityDefinition,
   SemanticCapabilityRisk,
 } from '../../shared/semantic-capabilities.js';
-import { validateDurableAccessRule } from '../../shared/durable-access-policy.js';
 import {
   assertValidCapabilitySecretName,
   normalizeCapabilitySecretName,
@@ -271,12 +270,6 @@ function normalizeSkillActionCommandTemplate(
   if (!readable.ok) {
     throw new Error(
       `Invalid skill action command template: ${readable.reason}`,
-    );
-  }
-  const persistent = validateDurableAccessRule(readableRule);
-  if (!persistent.ok) {
-    throw new Error(
-      `Invalid skill action command template: ${persistent.reason}`,
     );
   }
   return stableNormalized;

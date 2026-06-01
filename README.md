@@ -36,7 +36,7 @@ npm i -g @caw/gantry
 gantry
 ```
 
-The first run is a guided CLI flow that collects setup choices first, then runs final doctor verification before marking the runtime ready.
+The first run is a guided CLI flow with a single path: runtime home, database, model access, channel connection, agent, conversation binding, then final doctor verification before the ready screen. Memory, the background service, and extra providers are optional and configured after the runtime is ready.
 
 ### NPM Install First-Run Flow
 
@@ -47,17 +47,16 @@ gantry
 
 Then follow this order:
 
-1. Run `gantry` with no args.
+1. Run `gantry` with no args and confirm the runtime home (default `~/gantry`).
 2. Choose `Use local Postgres URL` if you started the provided Compose stack, or choose hosted/existing Postgres and paste those URLs.
-3. Choose your first channel: `Telegram` or `Slack`.
-4. Follow the in-CLI channel guide, choose the default agent name, paste channel credentials, and pick a discovered chat/channel (or enter an ID manually). Setup binds that conversation to the default agent; channel IDs and runtime folders stay internal.
-5. Connect Model Access once for all agent, subagent, memory, and scheduled job model calls. Gantry stores provider keys in encrypted Postgres rows and projects only loopback gateway tokens to the model SDK; agents select catalog model aliases and never receive database URLs or raw provider credentials.
-6. Choose a provider, then a main model alias. Anthropic defaults to `opus`; OpenRouter defaults to `kimi`.
-7. Confirm memory settings. Memory model defaults are preset-managed.
-8. Choose whether to install/start a background service.
-9. Review the final summary and choose `Create Runtime`; before this point Back, Resume Later, and Cancel are transactional.
-10. Let setup write config, register the group, run final doctor verification, and show the ready screen.
-11. Finish setup. The default is to exit cleanly; choose `Start Gantry now` only if you want the runtime to begin listening immediately.
+3. Connect Model Access once for agent, subagent, and scheduled job model calls. Gantry stores provider keys in encrypted Postgres rows and projects only loopback gateway tokens to the model SDK; agents select catalog model aliases and never receive database URLs or raw provider credentials.
+4. Choose your first channel (`Telegram` or `Slack`).
+5. Choose the default agent name and a main model alias. Anthropic defaults to `opus`; OpenRouter defaults to `kimi`.
+6. Follow the in-CLI channel guide, paste channel credentials, and pick a discovered Conversation. Channel IDs and runtime folders stay internal.
+7. Review the summary and choose `Create Runtime`; before this point Back, Resume Later, and Cancel are transactional. Setup writes config, binds that Conversation to the default Agent, and runs final doctor verification.
+8. On the ready screen, finish setup (the default exits cleanly) or choose `Start Gantry now` to begin listening immediately.
+
+Optional, post-ready: memory is on by default (`gantry memory ...` to adjust), install a background service with `gantry service install`, and add more providers with `gantry provider connect`.
 
 ### CLI Commands
 
@@ -106,7 +105,7 @@ Defaults in v1:
 - storage: Postgres through `GANTRY_DATABASE_URL`; guided setup validates URLs but does not create Docker containers
 - memory: on
 - embeddings: off by default; external embedding providers require brokered Model Access and are not configured through Gantry `.env`
-- dreaming: on in guided setup; disable with `gantry memory dreaming off`
+- dreaming: on by default; disable with `gantry memory dreaming off`
 - provider connections, conversations, bindings, and conversation approvers live under `providers`, `provider_connections`, `conversations`, and `bindings` in `settings.yaml`
 - conversation approvers approve direct/private and group/channel actions only when listed on that conversation and currently a member
 - the same agent can be bound across providers, but admin user ids stay provider-scoped: Slack approvers are Slack member ids and Teams approvers are Teams user ids
