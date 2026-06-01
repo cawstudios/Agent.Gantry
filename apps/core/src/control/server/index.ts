@@ -215,6 +215,15 @@ export function startControlServer(input: {
         settings: getRuntimeSettingsForConfig(),
         appId,
       }),
+    hasActiveModelCredential: async (appId: AppId) => {
+      const credentials =
+        await getRuntimeStorage().repositories.modelCredentials.listModelCredentials(
+          { appId },
+        );
+      return credentials.some((credential) => credential.status === 'active');
+    },
+    listControlPlaneJobs: async (appId: AppId) =>
+      getRuntimeRepositories().listJobs({ appId }),
     sendConversationIngressProjection: input.sendConversationIngressProjection,
     getBrowserStatus: input.getBrowserStatus,
     syncSettingsFromProjection: (appId: AppId) =>

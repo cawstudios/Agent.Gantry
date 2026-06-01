@@ -390,6 +390,8 @@ function mockContext(
       status: 'pass',
       message: 'ok',
     }),
+    hasActiveModelCredential: async () => true,
+    listControlPlaneJobs: async () => [],
     syncSettingsFromProjection: async () => undefined,
   };
 }

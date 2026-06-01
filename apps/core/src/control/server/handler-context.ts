@@ -77,6 +77,14 @@ export type ControlRouteContext = {
     preset: ModelPresetId,
     appId?: AppId,
   ) => Promise<ControlModelPresetPreflightResult>;
+  hasActiveModelCredential: (appId: AppId) => Promise<boolean>;
+  listControlPlaneJobs: (appId: AppId) => Promise<
+    Array<{
+      id: string;
+      status?: string;
+      workspace_key?: string | null;
+    }>
+  >;
   sendConversationIngressProjection?: (input: {
     conversationJid: string;
     threadId: string | null;

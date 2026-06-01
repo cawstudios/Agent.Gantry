@@ -3,6 +3,15 @@ import { doc, ids, query, type RouteDoc } from './openapi-route-helpers.js';
 export const coreOpenApiRouteDocs: RouteDoc[] = [
   doc(
     'get',
+    '/v1/status',
+    'getStatus',
+    'System',
+    'Get unified Gantry status',
+    'Returns the operator read model used by status surfaces.',
+    ['agents:admin'],
+  ),
+  doc(
+    'get',
     '/v1/health',
     'getHealth',
     'System',
