@@ -26,6 +26,7 @@ import {
   requestPermissionReviewEffect,
   requestPermissionReviewSuggestions,
   requestPermissionSetupDecisionOptions,
+  semanticCapabilityDefinitionsForToolInput,
   validateRequestPermissionCapabilityProposal,
   validateRequestPermissionSemanticCapability,
 } from './request-permission-review.js';
@@ -574,6 +575,7 @@ function startRequestOnlyCapabilityReview(input: { deps: Parameters<TaskHandler>
     let message: string;
     try {
       const requestId = `capability-${input.review.toolName}-${globalThis.crypto.randomUUID()}`;
+      const semanticCapabilityDefinitions = input.review.toolName === 'request_permission' ? semanticCapabilityDefinitionsForToolInput(input.review.toolInput) : undefined;
       const decision = await input.deps.requestPermissionApproval({
         requestId,
         appId: input.appId,
@@ -596,6 +598,9 @@ function startRequestOnlyCapabilityReview(input: { deps: Parameters<TaskHandler>
               suggestions: requestPermissionReviewSuggestions(
                 input.review.toolInput,
               ),
+              ...(semanticCapabilityDefinitions
+                ? { semanticCapabilityDefinitions }
+                : {}),
               decisionOptions: requestPermissionSetupDecisionOptions(
                 input.review.toolInput,
               ),

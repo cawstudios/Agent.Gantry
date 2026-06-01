@@ -319,6 +319,74 @@ describe('admin IPC handlers', () => {
     expect(requestPermissionApproval).not.toHaveBeenCalled();
   });
 
+  it('passes reviewed semantic capability definitions into request_permission approvals', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { adminTaskHandlers, taskData } =
+      await loadAdminHandlers(runtimeHome);
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: false,
+      reason: 'test denial',
+    }));
+    const capabilityDefinition = {
+      capabilityId: 'mcp.caw-ats.access',
+      version: '1',
+      displayName: 'caw-ats MCP access',
+      category: 'MCP',
+      risk: 'write',
+      can: 'Call approved caw-ats MCP tools.',
+      cannot: 'Receive raw credentials or call unapproved MCP tools.',
+      credentialSource: 'none',
+      implementationBindings: [
+        {
+          kind: 'mcp_tool',
+          mcpTool: 'mcp__caw-ats__ats_list_positions',
+        },
+      ],
+    };
+
+    await adminTaskHandlers.request_permission({
+      data: taskData('reviewed-capability-proposal', {
+        type: 'request_permission',
+        chatJid: 'sl:C123',
+        payload: {
+          permissionKind: 'tool',
+          capabilityRequestSource: 'propose_capability',
+          capabilityId: 'mcp.caw-ats.access',
+          capabilityDisplayName: 'caw-ats MCP access',
+          semanticCapabilityDefinition: capabilityDefinition,
+          temporaryOnly: false,
+          reason: 'Use caw-ats from ReAgent.',
+        },
+      }) as never,
+      sourceAgentFolder: 'main_agent',
+      deps: depsWithAdminTools([], {
+        requestPermissionApproval,
+      }) as never,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['sl:C123'],
+    });
+
+    await vi.waitFor(() => {
+      expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
+    });
+    expect(requestPermissionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decisionOptions: ['allow_once', 'allow_persistent_rule', 'cancel'],
+        semanticCapabilityDefinitions: {
+          'mcp.caw-ats.access': capabilityDefinition,
+        },
+        suggestions: [
+          expect.objectContaining({
+            rules: [{ toolName: 'capability:mcp.caw-ats.access' }],
+          }),
+        ],
+      }),
+    );
+  });
+
   it('requires same-channel approval and syncs settings after register_agent', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-admin-ipc-'),
