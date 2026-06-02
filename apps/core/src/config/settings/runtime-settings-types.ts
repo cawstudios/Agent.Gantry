@@ -6,6 +6,7 @@ import type { AgentPersona } from '../../shared/agent-persona.js';
 import type {
   AgentPluginsConfig,
   GuardrailConfig,
+  ThinkingOverride,
 } from '../../domain/types.js';
 import type { YoloModeSettings } from '../../shared/yolo-mode-policy.js';
 import type { EgressSettings } from '../../shared/egress-policy.js';
@@ -168,6 +169,7 @@ export interface RuntimeConfiguredAgent {
   model?: string;
   oneTimeJobDefaultModel?: string;
   recurringJobDefaultModel?: string;
+  thinking?: ThinkingOverride;
   plugins?: RuntimeConfiguredAgentPlugins;
   bindings: Record<string, RuntimeConfiguredAgentBinding>;
   sources: RuntimeConfiguredAgentSources;

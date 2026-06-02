@@ -108,10 +108,11 @@ export function buildChildRunnerLaunch(
   const inspectPort = resolveInspectPort(input.inspectPortRaw);
   const runnerArgs: string[] = ['--import', 'tsx'];
   if (inspectPort !== null) {
-    // 127.0.0.1 keeps the inspector loopback-only. -brk pauses on the first
-    // line so a debugger can attach before the short-lived child runs.
-    // runnerArgs.push(`--inspect=127.0.0.1:${inspectPort}`);
-    runnerArgs.push(`--inspect-brk=127.0.0.1:${inspectPort}`);
+    // 127.0.0.1 keeps the inspector loopback-only. Plain --inspect attaches
+    // without pausing the child; swap to the --inspect-brk line below to pause on
+    // the first line (so a debugger can attach before a short-lived child runs).
+    runnerArgs.push(`--inspect=127.0.0.1:${inspectPort}`);
+    // runnerArgs.push(`--inspect-brk=127.0.0.1:${inspectPort}`);
   }
   runnerArgs.push(input.sourceRunnerPath);
 

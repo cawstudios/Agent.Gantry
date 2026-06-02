@@ -5,7 +5,11 @@ import {
 import { GANTRY_HOME } from '../../config/index.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import { ensureRuntimeLayoutDirectories } from '../../platform/runtime-layout.js';
-import { initializeRuntimeStorage } from '../../adapters/storage/postgres/runtime-store.js';
+import {
+  initializeRuntimeStorage,
+  getRuntimeFileArtifactStore,
+} from '../../adapters/storage/postgres/runtime-store.js';
+import { syncAuthoredPromptsAtBoot } from '../../runtime/authored-prompt-boot-sync.js';
 import { SettingsDesiredStateService } from '../../config/settings/desired-state-service.js';
 import { loadSessionAppMemoryItems } from '../../memory/app-memory-session-hydration.js';
 import { RuntimeApp } from './runtime-app.js';
@@ -75,9 +79,32 @@ export async function runStartup(
         'Settings desired state reconciled',
       );
     }
-  } else if (process.env.GANTRY_SKIP_RECONCILE_ON_STARTUP === '1') {
+    // Files (SOUL.md/CLAUDE.md) are the source of truth for each agent's
+    // prompt. reconcile() above ensured the agent rows exist, so sync the
+    // authored files into the prompt-profile store now (write-on-change,
+    // versioned). A present-but-empty SOUL/CLAUDE throws here and aborts
+    // startup (fail-loud), exactly at server start.
+    await syncAuthoredPromptsAtBoot({
+      agents: runtimeSettings.agents,
+      getFileArtifactStore: () => getRuntimeFileArtifactStore(),
+      logger: resolved.logger,
+    });
+  } else if (
+    runtimeSettings.agents &&
+    (process.env.GANTRY_SKIP_RECONCILE_ON_STARTUP === '1' ||
+      !runtimeSettings.desiredState)
+  ) {
+    // Reconcile did not run, so the authored-prompt sync — and with it the
+    // present-but-empty SOUL/CLAUDE fail-loud check — is also skipped this boot
+    // (the artifact write FKs to the agent rows reconcile creates, so it cannot
+    // safely run on its own). Surface it rather than silently dropping the
+    // startup invariant.
     resolved.logger.warn(
-      'Skipping settings desired-state startup reconcile because GANTRY_SKIP_RECONCILE_ON_STARTUP=1',
+      {
+        skipReconcile: process.env.GANTRY_SKIP_RECONCILE_ON_STARTUP === '1',
+        hasDesiredState: Boolean(runtimeSettings.desiredState),
+      },
+      'Settings desired-state reconcile skipped at startup; authored-prompt sync and its empty SOUL/CLAUDE fail-loud check are NOT enforced this boot',
     );
   }
   // Snapshot provider + agent settings on the app so the routing layer can

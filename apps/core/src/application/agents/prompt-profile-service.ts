@@ -1,5 +1,6 @@
 import { FileArtifactNotFoundError } from '../../domain/file-artifacts/file-artifact.js';
 import type { FileArtifactStore } from '../../domain/ports/file-artifact-store.js';
+import { logger } from '../../infrastructure/logging/logger.js';
 import {
   resolveAgentPersona,
   type AgentPersona,
@@ -15,7 +16,7 @@ type PromptSectionName =
 
 const PROFILE_CONTEXT_FILENAME = ['CLAU', 'DE.md'].join('');
 const PROMPT_PROFILE_SCOPE = 'prompt-profile';
-const DEFAULT_PROMPT_PROFILE_APP_ID = 'default';
+export const DEFAULT_PROMPT_PROFILE_APP_ID = 'default';
 const SOUL_FILENAME = 'SOUL.md';
 const SOUL_SOURCE = 'gantry://soul';
 const PERSONA_SOURCE = 'gantry://persona';
@@ -30,13 +31,22 @@ export const DEFAULT_PROMPT_SECTION_BUDGETS: Readonly<
 > = {
   RUNTIME_RULES: 1200,
   PERSONA: 1200,
-  SOUL: 3000,
+  // SOUL and GROUP_CONTEXT carry an agent's AUTHORED persona/context (its
+  // SOUL.md / CLAUDE.md). The runtime must not silently truncate an agent's
+  // intentional persona, so these are generous neutral SAFETY CEILINGS — a cap
+  // that bounds total prompt size and guards against a runaway authored file,
+  // not a target. They are ceilings, not reservations: the prompt carries each
+  // file's real bytes, so a small persona stays small. (An agent that needs a
+  // different cap can be given one via per-agent config.)
+  SOUL: 32000,
   CAPABILITY_GUIDANCE: 1500,
   OPERATING_GUIDANCE: 6500,
-  GROUP_CONTEXT: 5000,
+  GROUP_CONTEXT: 32000,
 };
 
-export const DEFAULT_PROMPT_TOTAL_BUDGET = 26000;
+// Generous neutral ceiling on the assembled system prompt: bounds runaway size
+// without truncating a reasonable authored persona. Not a per-agent target.
+export const DEFAULT_PROMPT_TOTAL_BUDGET = 80000;
 
 const RUNTIME_RULES_BLOCK = [
   '# Gantry Runtime Rules',
@@ -271,6 +281,59 @@ export class PromptProfileService {
     });
   }
 
+  /**
+   * Sync an authored prompt file (SOUL.md/CLAUDE.md) into the artifact store.
+   * Write-on-change: only appends a new version when the normalized content
+   * differs from the latest stored version. Content is normalized (CRLF→LF,
+   * trimmed) so whitespace-only churn never creates a version.
+   */
+  async syncAuthoredArtifact(input: {
+    appId: string;
+    agentId: string;
+    virtualPath: string;
+    content: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<{ changed: boolean; version: number | null }> {
+    const store = this.fileArtifactStore();
+    if (!store) return { changed: false, version: null };
+
+    const normalized = normalizeContent(input.content);
+
+    let latest: string | null = null;
+    try {
+      const current = await store.readFileArtifact({
+        appId: input.appId,
+        agentId: input.agentId,
+        virtualScope: PROMPT_PROFILE_SCOPE,
+        virtualPath: input.virtualPath,
+      });
+      latest = normalizeContent(
+        typeof current.content === 'string'
+          ? current.content
+          : Buffer.from(current.content).toString('utf-8'),
+      );
+    } catch (err) {
+      if (!(err instanceof FileArtifactNotFoundError)) throw err;
+    }
+
+    if (latest !== null && latest === normalized) {
+      return { changed: false, version: null };
+    }
+
+    const written = await store.writeFileArtifact({
+      appId: input.appId,
+      agentId: input.agentId,
+      virtualScope: PROMPT_PROFILE_SCOPE,
+      virtualPath: input.virtualPath,
+      content: normalized,
+      contentType: 'text/markdown',
+      createdBy: 'authored-file-sync',
+      metadata: input.metadata ?? {},
+    });
+
+    return { changed: true, version: written.version };
+  }
+
   async compileSystemPrompt(
     options: CompilePromptProfileOptions,
   ): Promise<string> {
@@ -284,14 +347,6 @@ export class PromptProfileService {
     );
     if (runtimeRules) sections.push(runtimeRules);
 
-    const personaSection = makeSection(
-      'PERSONA',
-      PERSONA_SOURCE,
-      personaPrompt(resolveAgentPersona(options.persona)),
-      this.sectionBudgets.PERSONA,
-    );
-    if (personaSection) sections.push(personaSection);
-
     const appId = options.appId || this.appId;
     const agentId =
       options.agentId || promptProfileAgentIdForFolder(options.agentFolder);
@@ -301,6 +356,22 @@ export class PromptProfileService {
       appId,
       agentId,
     );
+
+    // SOUL.md is the single source of voice. When an authored SOUL exists,
+    // suppress the generic PERSONA block so it does not compete with or dilute
+    // the authored voice. PERSONA's only operational line (no dev/shell/Git
+    // work) is duplicated in CAPABILITY_GUIDANCE, so nothing safety-relevant is
+    // lost. Self-scoping: agents without an authored SOUL keep their persona.
+    if (!soul) {
+      const personaSection = makeSection(
+        'PERSONA',
+        PERSONA_SOURCE,
+        personaPrompt(resolveAgentPersona(options.persona)),
+        this.sectionBudgets.PERSONA,
+      );
+      if (personaSection) sections.push(personaSection);
+    }
+
     if (soul) sections.push(soul);
 
     const capabilityGuidance = makeSection(
@@ -385,6 +456,16 @@ export class PromptProfileService {
         normalized,
       ].join('\n');
 
+      if (framed.length > this.sectionBudgets.SOUL) {
+        logger.warn(
+          {
+            section: 'SOUL',
+            length: framed.length,
+            budget: this.sectionBudgets.SOUL,
+          },
+          'Authored SOUL exceeds budget; content will be truncated',
+        );
+      }
       const content = truncateDeterministically(
         framed,
         this.sectionBudgets.SOUL,
@@ -431,6 +512,12 @@ export class PromptProfileService {
       const normalized = normalizeContent(raw);
       if (!normalized) return null;
 
+      if (normalized.length > budget) {
+        logger.warn(
+          { section: name, length: normalized.length, budget },
+          `Authored ${name} exceeds budget; content will be truncated`,
+        );
+      }
       const content = truncateDeterministically(normalized, budget);
       if (!content) return null;
 

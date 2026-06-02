@@ -43,7 +43,7 @@ export function registerSearchProducts(
 ): void {
   server.tool(
     'search_products',
-    'Search the BSS catalogue by query, tag, status, or price band. Defaults to ACTIVE products.',
+    'Search the store catalogue by query, tag, status, or price band. Defaults to ACTIVE products.',
     inputSchema,
     async (args) => {
       const limit = args.limit ?? 10;

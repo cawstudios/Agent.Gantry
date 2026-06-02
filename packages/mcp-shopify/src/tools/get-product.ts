@@ -11,7 +11,7 @@ const inputSchema = {
   handleOrId: z
     .string()
     .min(1)
-    .describe('Product handle (e.g. "kaju-katli") or full GID'),
+    .describe('Product handle (e.g. "blue-t-shirt") or full GID'),
 };
 
 interface ProductByHandleResponse {

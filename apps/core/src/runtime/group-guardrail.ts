@@ -25,6 +25,7 @@ export async function handlePreAgentGuardrail(input: {
   group: ConversationRoute;
   messages: readonly NewMessage[];
   latestMessage: NewMessage;
+  chatJid: string;
   queueJid: string;
   /**
    * Recent prior turns (oldest→newest, role-tagged) that precede `messages`, so
@@ -64,6 +65,10 @@ export async function handlePreAgentGuardrail(input: {
   const flowFields = isFlowLogEnabled()
     ? {
         flow: 'guardrail',
+        // chatJid keeps the decision attributable to one conversation so a
+        // harness driving several conversations in parallel never crosses
+        // traces (opt-in; off in production).
+        chatJid: input.chatJid,
         inboundText: input.latestMessage.content,
         guardrailContextTurns: input.recentContext?.length ?? 0,
       }
@@ -138,6 +143,7 @@ export async function screenBatchPreAgent(input: {
     group: input.group,
     messages: input.messages,
     latestMessage,
+    chatJid: input.chatJid,
     queueJid: input.queueJid,
     recentContext,
     guardrailClassifier: input.guardrailClassifier,

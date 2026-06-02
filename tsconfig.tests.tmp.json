@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@gantry/contracts": ["packages/contracts/src/index.ts"],
+      "@core/*": ["apps/core/src/*"],
+      "@contracts-src/*": ["packages/contracts/src/*"],
+      "@agent-runner-src/*": ["apps/core/src/runner/*"]
+    }
+  },
+  "include": ["apps/core/src/**/*", "apps/core/test/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

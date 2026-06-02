@@ -3,7 +3,9 @@ import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 
-import { afterAll } from 'vitest';
+import { afterAll, beforeEach } from 'vitest';
+
+import { clearCachedSystemPrompt } from '@core/runtime/prompt-cache.js';
 
 const runtimeHome = path.join(
   os.tmpdir(),
@@ -46,6 +48,12 @@ fs.writeFileSync(settingsPath, settingsYaml, 'utf-8');
 
 process.env.GANTRY_HOME = runtimeHome;
 
+// The runtime rejects non-secret LLM routing config (e.g. ANTHROPIC_BASE_URL)
+// in the process environment — it belongs in settings.yaml. Some dev shells and
+// the Claude Code harness inject it; strip it here so settings/preflight
+// validation tests are deterministic regardless of who runs them.
+delete process.env.ANTHROPIC_BASE_URL;
+
 function listOwnedBrowserPids(): number[] {
   if (process.platform === 'win32') return [];
   let output = '';
@@ -85,6 +93,12 @@ function cleanupOwnedBrowsers(): void {
     }
   }
 }
+
+// Reset the process-lifetime compiled system-prompt cache between tests so a
+// prompt cached by one spawn test does not leak into the next.
+beforeEach(() => {
+  clearCachedSystemPrompt();
+});
 
 afterAll(() => {
   cleanupOwnedBrowsers();

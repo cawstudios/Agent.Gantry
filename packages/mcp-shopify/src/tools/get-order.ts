@@ -18,7 +18,7 @@ const inputSchema = {
     .string()
     .min(1)
     .describe(
-      'Order identifier — accepts the display name (e.g. #1001 or BSS-2847), the numeric Shopify ID (e.g. 7057409966300), or the full GID (gid://shopify/Order/7057409966300).',
+      'Order identifier — accepts the display name (e.g. #1001), the numeric Shopify ID (e.g. 7057409966300), or the full GID (gid://shopify/Order/7057409966300).',
     ),
   callerPhone: z
     .string()

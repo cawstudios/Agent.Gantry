@@ -33,6 +33,48 @@ export function findInternalLeak(text: string): string | undefined {
   return INTERNAL_LEAK_PATTERNS.find((pattern) => pattern.test(text))?.source;
 }
 
+// A leading "I'll look up… / let me check… / looking that up…" sentence is
+// lookup preamble the customer should never see — a customer reply must lead
+// with the answer, not narrate the fetch. Generic English narration only (no
+// agent-specific phrasing); models tend to emit this before a tool call and it
+// gets glued to the answer ("…now.Your order is…").
+const LEADING_NARRATION_RE =
+  /\b(?:i['’]?ll\s+(?:just\s+|quickly\s+)?(?:look(?:\s+(?:that|it|this))?\s*up|pull(?:\s+(?:that|it|this))?\s*up|check|fetch|grab|pull|search)|let me\s+(?:just\s+|quickly\s+)?(?:look(?:\s+(?:that|it|this))?\s*up|pull(?:\s+(?:that|it|this))?\s*up|check|fetch|grab|pull|search)|looking\s+(?:that\s+up|it\s+up|up\b)|searching\b|pulling\s+(?:that|this|it|your)[^.!?\n]*\bup\b|fetching\b|one moment\b|on it\b)/i;
+
+// A lookup-narration sentence is not always the FIRST sentence: models often emit
+// a one-word acknowledgment or a line of empathy first ("Sure! Let me pull that
+// up. …" / "I'm so sorry. Let me pull up your order. …"). A handoff line ("let me
+// check with the team") must be preserved. So scan the first few sentences, remove
+// the FIRST that is pure lookup-narration (and not a handoff), and keep everything
+// else — acknowledgment, empathy, the answer — with its original formatting.
+const NARRATION_HANDOFF_RE =
+  /\b(?:team|someone|colleague|a human|connect|specialist|reach out|get back to you)\b/i;
+
+// Conservative by design: only the first few sentences are scanned (a verb deep in
+// a long answer is never touched), only a clear lookup-narration sentence is cut,
+// handoffs are spared, and it never removes a sentence that leaves nothing after it
+// — so it cannot blank a reply or clip a genuine answer.
+export function stripLeadingNarration(text: string): string {
+  const sentenceRe = /[^.!?\n]*[.!?]+/g;
+  let match: RegExpExecArray | null;
+  let scanned = 0;
+  while ((match = sentenceRe.exec(text)) !== null && scanned < 3) {
+    scanned += 1;
+    const sentence = match[0];
+    if (
+      !LEADING_NARRATION_RE.test(sentence) ||
+      NARRATION_HANDOFF_RE.test(sentence)
+    ) {
+      continue;
+    }
+    const before = text.slice(0, match.index).replace(/\s+$/, '');
+    const after = text.slice(match.index + sentence.length).replace(/^\s+/, '');
+    if (!after) return text; // nothing of substance would remain — leave it alone
+    return before ? `${before} ${after}` : after;
+  }
+  return text;
+}
+
 // Guards a customer-facing outbound message. Developer-persona agents are
 // allowed to surface implementation detail; every other persona — including an
 // agent with no explicit persona — is treated as customer-facing and gets the
@@ -47,10 +89,19 @@ export function guardCustomerVisibleOutput(input: {
 }): string {
   if (input.persona === 'developer') return input.text;
   const matchedPattern = findInternalLeak(input.text);
-  if (!matchedPattern) return input.text;
-  input.logger?.warn(
-    { conversationJid: input.conversationJid, matchedPattern },
-    'Customer-visible output guard replaced a reply that leaked internal implementation detail',
-  );
-  return CUSTOMER_VISIBLE_DECLINE_MESSAGE;
+  if (matchedPattern) {
+    input.logger?.warn(
+      { conversationJid: input.conversationJid, matchedPattern },
+      'Customer-visible output guard replaced a reply that leaked internal implementation detail',
+    );
+    return CUSTOMER_VISIBLE_DECLINE_MESSAGE;
+  }
+  const trimmed = stripLeadingNarration(input.text);
+  if (trimmed !== input.text) {
+    input.logger?.warn(
+      { conversationJid: input.conversationJid },
+      'Customer-visible output guard trimmed a leading lookup-narration preamble from a reply',
+    );
+  }
+  return trimmed;
 }

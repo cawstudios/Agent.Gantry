@@ -901,6 +901,8 @@ async function createMcpProxyForSourceGroup(input: {
     // GANTRY_TEST_CALLER_IDENTITY_PHONE is set; no-op otherwise. Same-channel
     // validation already ran on the real JID above, and outbound is unaffected.
     callerIdentityJid: applyTestCallerIdentityOverride(input.callerIdentityJid),
+    // The real conversation JID (pre-override) for flow-trace attribution only.
+    conversationJid: input.callerIdentityJid,
     lookupHostname: input.deps.mcpHostnameLookup,
   });
 }

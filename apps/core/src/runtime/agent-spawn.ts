@@ -60,6 +60,10 @@ import { resolveMcpCredentialEnvForAgent } from '../application/capability-secre
 import { resolveSelectedSkillEnvForAgent } from '../application/capability-secrets/skill-secret-projection.js';
 import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { getRuntimeFileArtifactStore } from '../adapters/storage/postgres/runtime-store.js';
+import {
+  getCachedSystemPrompt,
+  setCachedSystemPrompt,
+} from './prompt-cache.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 import { formatGeneratedRuntimePathPermissionError } from './generated-runtime-path-error.js';
 
@@ -293,20 +297,47 @@ export async function spawnAgent(
   });
   const agentIdentifier = group.folder.toLowerCase().replace(/_/g, '-');
 
-  let compiledSystemPrompt = '';
+  const compileAppId = input.appId || DEFAULT_RUNNER_APP_ID;
+  const compileAgentId =
+    input.agentId || promptProfileAgentIdForFolder(group.folder);
+  const compilePersona = input.persona ?? group.agentConfig?.persona;
+  // Keyed by the full compile identity so per-route persona overrides never
+  // collide. The cache is process-lifetime; authored files only change at boot
+  // (which restarts the process), so any hit is current.
+  const promptCacheKey = `${compileAppId}::${compileAgentId}::${compilePersona ?? ''}`;
 
-  try {
-    compiledSystemPrompt = await promptProfileService.compileSystemPrompt({
-      agentFolder: group.folder,
-      persona: input.persona ?? group.agentConfig?.persona,
-      appId: input.appId || DEFAULT_RUNNER_APP_ID,
-      agentId: input.agentId || promptProfileAgentIdForFolder(group.folder),
-    });
-  } catch (err) {
-    logger.warn(
-      { err, agentFolder: group.folder },
-      'Failed to compile prompt profile; continuing without custom system prompt',
-    );
+  let compiledSystemPrompt = getCachedSystemPrompt(promptCacheKey) ?? '';
+
+  if (!compiledSystemPrompt) {
+    try {
+      compiledSystemPrompt = await promptProfileService.compileSystemPrompt({
+        agentFolder: group.folder,
+        persona: compilePersona,
+        appId: compileAppId,
+        agentId: compileAgentId,
+      });
+      if (compiledSystemPrompt) {
+        setCachedSystemPrompt(promptCacheKey, compiledSystemPrompt);
+      }
+    } catch (err) {
+      logger.warn(
+        { err, agentFolder: group.folder },
+        'Failed to compile prompt profile; continuing without custom system prompt',
+      );
+    }
+  }
+
+  // MEASUREMENT-ONLY: dump the exact compiled system-prompt append the model
+  // receives, so we can verify which guidance actually reaches it.
+  if (process.env.GANTRY_DUMP_SYSTEM_PROMPT) {
+    try {
+      fs.writeFileSync(
+        process.env.GANTRY_DUMP_SYSTEM_PROMPT,
+        `=== compiledSystemPrompt (${compiledSystemPrompt.length} chars) ===\n${compiledSystemPrompt}\n`,
+      );
+    } catch {
+      /* never break the run */
+    }
   }
 
   const browserProfileName = resolveConversationBrowserProfile({
@@ -504,6 +535,10 @@ export async function spawnAgent(
       GANTRY_APP_ID: runnerAppId,
       ...(input.agentId ? { GANTRY_AGENT_ID: input.agentId } : {}),
       GANTRY_AGENT_RUN_HANDLE: processName,
+      // MEASUREMENT-ONLY: forward the timing-probe sink to the runner child.
+      ...(process.env.GANTRY_TIMING_LOG
+        ? { GANTRY_TIMING_LOG: process.env.GANTRY_TIMING_LOG }
+        : {}),
       GANTRY_WORKSPACE_EXTRA_DIR: path.join(
         DATA_DIR,
         'sessions',
@@ -580,6 +615,7 @@ export async function spawnAgent(
         processName,
         model: effectiveModel ?? null,
         modelSource: effectiveModelSource,
+        thinking: group.agentConfig?.thinking ?? null,
         systemPromptChars: compiledSystemPrompt.length,
       },
       'Spawning host agent',

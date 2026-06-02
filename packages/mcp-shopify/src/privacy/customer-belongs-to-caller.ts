@@ -43,16 +43,22 @@ function customerIdMismatchError(
 export async function assertCustomerBelongsToCaller(
   client: ShopifyClient,
   identity: EffectiveIdentity,
-  rawCustomerId: string,
+  rawCustomerId: string | undefined,
   cache?: CustomerIdentityCache,
 ): Promise<{ resolvedId: string; matchedVia: 'phone' | 'email' }> {
-  const wanted = normalizeShopifyCustomerId(rawCustomerId);
+  // Auto-scope: when the caller omits customerId, default to THEIR OWN resolved
+  // record (resolved below from the verified phone/email — the same identity
+  // lookup_customer trusts). A *provided* customerId is still asserted to match
+  // the verified caller, so cross-customer access stays denied.
+  const wanted = rawCustomerId
+    ? normalizeShopifyCustomerId(rawCustomerId)
+    : undefined;
 
   // Cache fast path — skip Shopify if we've recently resolved this identity.
   if (cache) {
     const hit = cache.get({ phone: identity.phone, email: identity.email });
     if (hit) {
-      if (normalizeShopifyCustomerId(hit.customerId) === wanted) {
+      if (wanted === undefined || normalizeShopifyCustomerId(hit.customerId) === wanted) {
         return { resolvedId: hit.customerId, matchedVia: hit.matchedVia };
       }
       throw customerIdMismatchError(
@@ -79,7 +85,7 @@ export async function assertCustomerBelongsToCaller(
           match.node.id,
           'phone',
         );
-        if (normalizeShopifyCustomerId(match.node.id) === wanted) {
+        if (wanted === undefined || normalizeShopifyCustomerId(match.node.id) === wanted) {
           return { resolvedId: match.node.id, matchedVia: 'phone' };
         }
         throw customerIdMismatchError(
@@ -107,7 +113,7 @@ export async function assertCustomerBelongsToCaller(
           match.node.id,
           'email',
         );
-        if (normalizeShopifyCustomerId(match.node.id) === wanted) {
+        if (wanted === undefined || normalizeShopifyCustomerId(match.node.id) === wanted) {
           return { resolvedId: match.node.id, matchedVia: 'email' };
         }
         throw customerIdMismatchError(

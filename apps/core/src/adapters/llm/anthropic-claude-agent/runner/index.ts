@@ -33,6 +33,12 @@ import {
 } from './session-slash.js';
 import type { AgentRunnerInput } from './types.js';
 import { sdkSandboxBlockedRuntimeEvents } from './sandbox-events.js';
+import { timingMark } from './timing-probe.js';
+
+// MEASUREMENT-ONLY: earliest runner JS after the full module graph (incl. the
+// Agent SDK) is loaded. Diff against the parent's "Spawning host agent" log to
+// get node-boot + module-load cost.
+timingMark('runner_loaded');
 
 const SCHEDULED_JOB_REPORT_INSTRUCTIONS = [
   '[SCHEDULED JOB - The following message was sent automatically and is not coming directly from the user or group.]',

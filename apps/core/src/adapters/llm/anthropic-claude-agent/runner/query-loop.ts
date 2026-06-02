@@ -19,6 +19,7 @@ import {
 import { SteeringDeliveryGate } from './steering-delivery-gate.js';
 import { log } from './logging.js';
 import { writeOutput } from './output.js';
+import { timingMark } from './timing-probe.js';
 import {
   buildSdkFilesystemSandbox,
   normalizeFilesystemSandboxPaths,
@@ -250,6 +251,8 @@ export async function runQuery(
     externalMcpAlwaysAllowedTools,
     isScheduledJob: agentInput.isScheduledJob,
   });
+  // MEASUREMENT-ONLY: just before the SDK spawns the Claude Code CLI subprocess.
+  timingMark('before_sdk_query');
   const sdkQuery = query({
     prompt: stream,
     options: {
@@ -310,6 +313,9 @@ export async function runQuery(
   try {
     for await (const message of sdkQuery) {
       messageCount++;
+      // MEASUREMENT-ONLY: first message from the SDK == CLI subprocess booted &
+      // MCP servers connected (system/init). Diff from before_sdk_query.
+      if (messageCount === 1) timingMark('first_sdk_message');
       heartbeat.markActivity();
       const msgType =
         message.type === 'system'

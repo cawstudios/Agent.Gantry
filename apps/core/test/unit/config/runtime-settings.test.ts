@@ -74,7 +74,10 @@ mcp_servers:
 agents:
   boondi_support:
     name: Boondi
-    mcp_servers: ["mcp:shopify-api"]
+    sources:
+      mcp_servers:
+        - id: "mcp:shopify-api"
+          version: "mcp-version:shopify-api"
 `);
 
     expect(parsed.mcpServers['mcp:shopify-api']).toMatchObject({
@@ -99,8 +102,8 @@ agents:
         },
       ],
     });
-    expect(parsed.agents.boondi_support.capabilities.mcpServerIds).toEqual([
-      'mcp:shopify-api',
+    expect(parsed.agents.boondi_support.sources.mcpServers).toEqual([
+      { id: 'mcp:shopify-api', version: 'mcp-version:shopify-api' },
     ]);
     expect(renderRuntimeSettingsYaml(parsed)).toContain('mcp_servers:');
   });

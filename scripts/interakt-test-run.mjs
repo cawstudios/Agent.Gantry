@@ -24,6 +24,29 @@ const RESET_WAIT_MS = Number(process.env.RESET_WAIT_MS || 3_000);
 // turn's flow:llm.output trails its outbound — without this settle the harness
 // returns on the first event and drops the rest of the turn's trace.
 const SETTLE_MS = Number(process.env.SETTLE_MS || 700);
+// Bound for awaiting the /new reset confirmation before a turn. Under parallel
+// load the host is busy, so a fixed RESET_WAIT_MS sleep is unreliable — poll for
+// the actual reset reply and only then mark the turn offset.
+const RESET_WAIT_TIMEOUT_MS = Number(process.env.RESET_WAIT_TIMEOUT_MS || 20_000);
+// The canned reply the runtime sends for /new. It must never be mistaken for a
+// turn's agent reply when it co-lands in the window under parallel load.
+const RESET_REPLY_RE = /Started a fresh session/i;
+// A turn's agent session stays warm (intended) after its reply. A FOLLOW-UP turn
+// fired before that session goes idle races the still-active session: the follow-up
+// is dropped and, worse, stalls the host's group processing for every lane until
+// the next /new frees it. So before a follow-up we wait for QUIESCENCE: no new flow
+// event for this conversation for QUIESCE_QUIET_MS, meaning the session has finished
+// streaming and is idle. Verified: a follow-up ~3s after the reply still raced; ~5s
+// was processed — so the quiet window is 6s, with headroom for load. Bounded by
+// QUIESCE_MAX_MS. (The first turn after /new needs no quiescence — waitForReset's
+// reset reply already signals a fresh, ready session.)
+const QUIESCE_QUIET_MS = Number(process.env.QUIESCE_QUIET_MS || 6000);
+const QUIESCE_MAX_MS = Number(process.env.QUIESCE_MAX_MS || 60000);
+// When a turn's raw llm.output is seen but its customer-visible outbound hasn't
+// landed yet (continuation turns emit them in that order), wait up to this grace
+// for the outbound before accepting llm.output — so assertions judge the
+// post-guard customer reply whenever it is available.
+const LLM_OUTBOUND_GRACE_MS = Number(process.env.LLM_OUTBOUND_GRACE_MS || 4000);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logSize = () => {
@@ -82,20 +105,75 @@ async function waitForTurn(fromOffset, chatJid) {
     await sleep(SETTLE_MS);
     return parseFlowEvents(readSlice(fromOffset), chatJid);
   };
+  // The customer-visible reply is the post-guard `outbound` (not the canned /new
+  // reply). Prefer it as the terminal signal so assertions judge what the customer
+  // actually receives. Continuation turns emit `llm.output` (raw, pre-guard) FIRST
+  // and the outbound trails by a second or two; so when only llm.output is seen,
+  // grace-wait briefly for the outbound before accepting llm.output as fallback.
+  const isOutbound = (e) =>
+    e.flow === 'outbound' && !RESET_REPLY_RE.test(e.reply || '');
+  let firstLlmAt = null;
   while (Date.now() < deadline) {
     const events = parseFlowEvents(readSlice(fromOffset), chatJid);
-    // A turn is done once the reply is emitted (agent path: llm.output, or the
-    // outbound send for either the agent reply or a guardrail canned reply), or
-    // when the guardrail returns a direct response (no agent is spawned).
-    if (events.some((e) => e.flow === 'outbound' || e.flow === 'llm.output')) {
+    // Customer-visible outbound (or a guardrail direct-response) ends the turn.
+    if (events.some(isOutbound)) {
       return settleAndSnapshot();
     }
     if (events.some((e) => e.flow === 'guardrail' && e.guardrailDecision)) {
       return settleAndSnapshot();
     }
+    // llm.output with no outbound yet: wait up to the grace for the trailing
+    // outbound, then accept llm.output so we never hang on a missing outbound.
+    if (events.some((e) => e.flow === 'llm.output')) {
+      if (firstLlmAt === null) firstLlmAt = Date.now();
+      else if (Date.now() - firstLlmAt >= LLM_OUTBOUND_GRACE_MS) {
+        return settleAndSnapshot();
+      }
+    }
     await sleep(1_000);
   }
   return parseFlowEvents(readSlice(fromOffset), chatJid);
+}
+
+// After /new, wait specifically for the canned reset reply ("Started a fresh
+// session.") for this chatJid — NOT just any outbound. The /new SIGTERMs the warm
+// session, which first flushes the previous turn's pending reply and only then
+// emits the reset reply; returning on that flushed reply would mark the offset
+// before /new finished and the next turn would race the still-resetting session.
+async function waitForReset(fromOffset, chatJid) {
+  const deadline = Date.now() + RESET_WAIT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const events = parseFlowEvents(readSlice(fromOffset), chatJid);
+    if (
+      events.some(
+        (e) => e.flow === 'outbound' && RESET_REPLY_RE.test(e.reply || ''),
+      )
+    ) {
+      return;
+    }
+    await sleep(250);
+  }
+}
+
+// Wait until the conversation goes quiet for this chatJid — no NEW flow event
+// since fromOffset for QUIESCE_QUIET_MS — so the warm session has finished
+// streaming and is idle and ready for the next message. Bounded by QUIESCE_MAX_MS.
+// During active processing the session emits events (llm.input, mcp.*, outbound)
+// far more often than the quiet window, so this only fires once it truly settles.
+async function waitForQuiescence(fromOffset, chatJid) {
+  const deadline = Date.now() + QUIESCE_MAX_MS;
+  let lastCount = -1;
+  let lastChange = Date.now();
+  while (Date.now() < deadline) {
+    const n = parseFlowEvents(readSlice(fromOffset), chatJid).length;
+    if (n !== lastCount) {
+      lastCount = n;
+      lastChange = Date.now();
+    } else if (Date.now() - lastChange >= QUIESCE_QUIET_MS) {
+      return;
+    }
+    await sleep(500);
+  }
 }
 
 // Privacy denials surface two ways: the Shopify MCP returns them as a tool
@@ -137,6 +215,22 @@ function detectReplyLanguage(text) {
   return markers.length >= 2 ? 'hinglish' : 'english';
 }
 
+// Output-discipline checks for the customer-facing reply. These assert the
+// SOUL/CLAUDE rules that the eyeball-only ALLOW invariant misses.
+//
+// noNarration: the reply must lead with the answer, never narrate the lookup.
+// Covers CLAUDE.md's banned openers AND their close variants ("I'll look up",
+// "I'll pull up …") — scoped to lookup verbs so legitimate handoff lines like
+// "let me get someone for you" do NOT trip it.
+const NARRATION_RE =
+  /(let me (?:just )?(?:look(?: (?:that|it|this))? up|check|pull(?: (?:that|it|this))? up|pull that|pull your|see if|find that|search)|i['’]?ll (?:look(?: (?:that|it|this))? up|check|pull(?: (?:that|it|this))? up|pull that|pull your|fetch|search)|i['’]?ll pull\b|now i['’]?ll\b|one moment|i have the tools|got your account|i found your account|\blooking (?:up|that up|it up)\b|\bsearching\b|pulling (?:that|this|it|your)\s*\w*\s*up|checking (?:the catalogue|that|your)\b|fetching\b|on it[!.])/i;
+// noBanned: corporate dead language from SOUL's "Banned forever" list.
+const BANNED_RE =
+  /\bkindly\b|please be informed|as per (?:your query|policy)|apologise for the inconvenience|sure,? no problem|i ?am just a bot|i['’]?m just a bot/i;
+// noLeak: the customer must never see an internal system name or error code.
+const LEAK_RE =
+  /\bshopify\b|\bmcp\b|\bgantry\b|knowledge base|admin panel|x-caller-identity|\b(?:401|403|429|503)\b/i;
+
 function evaluate(events, expect, cfg) {
   const by = (f) => events.filter((e) => e.flow === f);
   const guardrail = events.find((e) => e.flow === 'guardrail');
@@ -147,11 +241,21 @@ function evaluate(events, expect, cfg) {
   const llmOut = events.find((e) => e.flow === 'llm.output');
   const exp = expect || {};
   const failures = [];
-  // The reply this turn-set produced (LLM output preferred; a canned guardrail
-  // reply falls back to outbound), and the language it is written in.
-  const replyText = [llmOut?.reply, ...outbound.map((o) => o.reply)]
-    .filter((t) => typeof t === 'string' && t.trim())
-    .join('\n');
+  // The CUSTOMER-VISIBLE reply: the post-guard `outbound` is what the customer
+  // actually receives — the customer-safety guard strips leading lookup-narration
+  // and redacts internal leaks on this path before logging flow:outbound. Output
+  // discipline (noNarration/noBanned/noLeak) and content assertions must judge
+  // THIS, never the raw pre-guard `llm.output` (which still contains the narration
+  // the customer never sees). Fall back to llm.output only if no outbound was
+  // captured (defensive; an agent turn always emits one).
+  const customerReplies = outbound
+    .map((o) => o.reply)
+    .filter((t) => typeof t === 'string' && t.trim() && !RESET_REPLY_RE.test(t));
+  const replyText = (
+    customerReplies.length
+      ? customerReplies
+      : [llmOut?.reply].filter((t) => typeof t === 'string' && t.trim())
+  ).join('\n');
   const replyLang = detectReplyLanguage(replyText);
   // Privacy denials seen at the MCP layer this turn (thrown OR isError result).
   const mcpPrivacyDenies = [
@@ -189,9 +293,7 @@ function evaluate(events, expect, cfg) {
     // Defense-in-depth: the MCP privacy guard should reject the mismatched
     // lookup. A bare agent refusal (no MCP deny) still protects the customer, so
     // accept it too, but only when nothing leaked at the MCP layer.
-    const replyRefused = [llmOut?.reply, ...outbound.map((o) => o.reply)].some(
-      replyRefusesAccess,
-    );
+    const replyRefused = customerReplies.some(replyRefusesAccess);
     if (mcpPrivacyDenies.length === 0 && !replyRefused) {
       failures.push('expected a privacy DENY, none seen (no MCP privacy guard, no refusal in reply)');
     }
@@ -202,6 +304,52 @@ function evaluate(events, expect, cfg) {
     failures.push(
       `expected reply language "${exp.replyLang}", got "${replyLang}"`,
     );
+  }
+  // Output discipline (opt-in): lead with the answer, no banned phrasing, no
+  // internal-system leaks. Only checked when the reply this turn carries text.
+  if (replyText.trim()) {
+    if (exp.noNarration) {
+      // Only the OPENER matters: the reply must LEAD with the answer and never
+      // announce a current lookup up front. A trailing, conditional offer ("just
+      // let me know and I'll pull that up for you", "ask and I'll check") is
+      // legitimate help, not narration — so scope the check to the first couple of
+      // sentences, not the whole reply, to avoid flagging those offers.
+      const opener = (replyText.match(/[^.!?\n]*[.!?]+/g) || [replyText])
+        .slice(0, 2)
+        .join(' ');
+      const m = opener.match(NARRATION_RE);
+      if (m) failures.push(`reply opens by narrating the lookup (banned opener): "${m[0]}"`);
+    }
+    if (exp.noBanned) {
+      const m = replyText.match(BANNED_RE);
+      if (m) failures.push(`reply uses banned corporate phrasing: "${m[0]}"`);
+    }
+    if (exp.noLeak) {
+      const m = replyText.match(LEAK_RE);
+      if (m) failures.push(`reply leaks an internal system/error code: "${m[0]}"`);
+    }
+  }
+  // Generic content assertions: replyMustMatch (every pattern must be present)
+  // and replyMustNotMatch (no pattern may be present). Each entry is a JS regex
+  // source string, matched case-insensitively against the reply.
+  if (exp.replyMustMatch) {
+    const pats = Array.isArray(exp.replyMustMatch)
+      ? exp.replyMustMatch
+      : [exp.replyMustMatch];
+    for (const p of pats) {
+      if (!new RegExp(p, 'i').test(replyText)) {
+        failures.push(`reply must match /${p}/i but did not`);
+      }
+    }
+  }
+  if (exp.replyMustNotMatch) {
+    const pats = Array.isArray(exp.replyMustNotMatch)
+      ? exp.replyMustNotMatch
+      : [exp.replyMustNotMatch];
+    for (const p of pats) {
+      const m = replyText.match(new RegExp(p, 'i'));
+      if (m) failures.push(`reply must NOT match /${p}/i but did: "${m[0]}"`);
+    }
   }
   // SAFETY invariant: every outbound delivery targets the REAL number. The reply
   // must never be routed to the test number, regardless of identity override.
@@ -254,7 +402,11 @@ function printReport(scenario, turns, turnsEvents, cfg) {
     const denies = tr.mcpPrivacyDenies.length
       ? ` deny:${tr.mcpPrivacyDenies.length}`
       : '';
-    const reply = tr.llmOut?.reply ?? tr.outbound[0]?.reply ?? '';
+    // Show the CUSTOMER-VISIBLE reply (post-guard outbound), not raw llm.output.
+    const reply =
+      tr.outbound.find((o) => !RESET_REPLY_RE.test(o.reply || ''))?.reply ??
+      tr.llmOut?.reply ??
+      '';
     console.log(`  [${i + 1}] ${JSON.stringify(turn.text)}`);
     console.log(
       `      guardrail=${gline} mcp=${tools}${denies} lang=${tr.replyLang}`,
@@ -267,6 +419,83 @@ function printReport(scenario, turns, turnsEvents, cfg) {
 
 const truncate = (s, n) => (typeof s === 'string' && s.length > n ? `${s.slice(0, n)}…` : s);
 
+// Lane phones: distinct routing numbers, each its own session/agent, all mapped
+// server-side to the test Shopify identity + outbound dry-run. SAFETY: every lane
+// number MUST be listed in the server's GANTRY_TEST_OPERATOR_PHONE set — otherwise
+// that lane is out of test scope and its reply would be REALLY sent (not dry-run)
+// and resolve against the wrong Shopify identity. Source order of precedence:
+// GANTRY_TEST_LANE_PHONES env > cfg.lanePhones > [realFrom] (single lane = the old
+// sequential behaviour, fully back-compatible).
+function resolveLanePhones(cfg, realFrom) {
+  const norm = (list) =>
+    list.map((s) => String(s).replace(/\D/g, '')).filter(Boolean);
+  const fromEnv = norm((process.env.GANTRY_TEST_LANE_PHONES || '').split(/[\s,]+/));
+  if (fromEnv.length) return [...new Set(fromEnv)];
+  if (Array.isArray(cfg.lanePhones) && cfg.lanePhones.length) {
+    return [...new Set(norm(cfg.lanePhones))];
+  }
+  return [realFrom];
+}
+
+// Run one scenario end-to-end on a single lane number: reset the lane's session,
+// then drive each turn, collecting the per-turn flow events (filtered to this
+// lane's chatJid). Returns the raw material for printReport; never prints, so the
+// caller can render reports in a stable order after concurrent lanes finish.
+async function runScenario(scenario, lanePhone, cfg) {
+  const chatJid = `wa:${lanePhone}`;
+  if (scenario.reset !== false) {
+    const resetOffset = logSize();
+    await sendWebhook({ text: '/new', from: lanePhone });
+    // The reset reply confirms the old session was torn down and a fresh one is
+    // ready — that is the readiness signal for turn 1; no extra quiescence needed.
+    await waitForReset(resetOffset, chatJid);
+  }
+  // A turn is a plain string or { text, expect } for per-turn assertions.
+  const turns = scenario.turns.map((t) =>
+    typeof t === 'string' ? { text: t } : t,
+  );
+  const turnsEvents = [];
+  let aborted = null;
+  for (let ti = 0; ti < turns.length; ti += 1) {
+    const turn = turns[ti];
+    const offset = logSize();
+    const sent = await sendWebhook({ text: turn.text, from: lanePhone });
+    if (!sent.ok) {
+      aborted = `webhook rejected (HTTP ${sent.status}): ${sent.response}`;
+      break;
+    }
+    const tStart = Date.now();
+    const ev = await waitForTurn(offset, chatJid);
+    turnsEvents.push(ev);
+    if (process.env.E2E_DIAG === '1') {
+      const c = (f) => ev.filter((e) => e.flow === f).length;
+      const out = ev.find(
+        (e) => e.flow === 'outbound' && !RESET_REPLY_RE.test(e.reply || ''),
+      );
+      const decisions = ev.filter(
+        (e) => e.flow === 'guardrail' && e.guardrailDecision,
+      ).length;
+      console.error(
+        `    [diag] ${scenario.name} t${turnsEvents.length} ${Date.now() - tStart}ms ` +
+          `out=${c('outbound')} llm=${c('llm.output')} guard=${c('guardrail')}/${decisions}dec ` +
+          `mcpReq=${c('mcp.request')} reply=${JSON.stringify((out?.reply || '').slice(0, 45))}`,
+      );
+    }
+    // Before a follow-up turn, wait for the warm session to go idle so the next
+    // message isn't dropped by the still-active session.
+    if (ti < turns.length - 1) await waitForQuiescence(offset, chatJid);
+  }
+  // The SAFETY invariant in evaluate() checks outbound jid against realFrom; for a
+  // lane that is the lane's own number, so override realFrom per lane.
+  return {
+    scenario,
+    turns,
+    turnsEvents,
+    aborted,
+    cfgLane: { ...cfg, realFrom: lanePhone },
+  };
+}
+
 async function main() {
   if (!fs.existsSync(LOG)) {
     console.error(`Dev log not found at ${LOG}. Start Gantry with GANTRY_FLOW_LOG=1 and tee to this path.`);
@@ -274,39 +503,48 @@ async function main() {
   }
   const cfg = JSON.parse(fs.readFileSync(SCENARIOS_PATH, 'utf8'));
   const realFrom = cfg.realFrom || '919654405340';
+  const lanePhones = resolveLanePhones(cfg, realFrom);
+  const scenarios = cfg.scenarios;
+
+  // Round-robin scenarios across lanes. Each lane owns one routing number and runs
+  // its scenarios sequentially (own session, /new between). Lanes run concurrently;
+  // the shared logfile is filtered per-lane by chatJid, so traces never cross. Each
+  // scenario resets its own session, so they are order-independent and safe to
+  // shard. Concurrency == number of lanes (one warm child agent per lane).
+  const laneQueues = lanePhones.map(() => []);
+  scenarios.forEach((s, i) => laneQueues[i % lanePhones.length].push(s));
+  const resultsByName = new Map();
+  const t0 = Date.now();
+  console.error(
+    `Running ${scenarios.length} scenarios across ${lanePhones.length} lane(s): ${lanePhones.join(', ')}`,
+  );
+  await Promise.all(
+    lanePhones.map(async (lanePhone, laneIdx) => {
+      for (const scenario of laneQueues[laneIdx]) {
+        const r = await runScenario(scenario, lanePhone, cfg);
+        resultsByName.set(scenario.name, r);
+        console.error(`  lane${laneIdx} (${lanePhone}) done: ${scenario.name}`);
+      }
+    }),
+  );
+
+  // Print reports in original scenario order for a stable, readable summary.
   let passed = 0;
   let failed = 0;
-
-  for (const scenario of cfg.scenarios) {
-    if (scenario.reset !== false) {
-      await sendWebhook({ text: '/new', from: realFrom });
-      await sleep(RESET_WAIT_MS);
-    }
-    const chatJid = `wa:${realFrom}`;
-    // A turn is a plain string or { text, expect } for per-turn assertions.
-    const turns = scenario.turns.map((t) =>
-      typeof t === 'string' ? { text: t } : t,
-    );
-    const turnsEvents = [];
-    let aborted = false;
-    for (const turn of turns) {
-      const offset = logSize();
-      const sent = await sendWebhook({ text: turn.text, from: realFrom });
-      if (!sent.ok) {
-        console.log(`\nFAIL  ${scenario.name}\n  -> webhook rejected (HTTP ${sent.status}): ${sent.response}`);
-        aborted = true;
-        break;
-      }
-      turnsEvents.push(await waitForTurn(offset, chatJid));
-    }
-    if (!aborted && printReport(scenario, turns, turnsEvents, { ...cfg, realFrom })) {
-      passed += 1;
-    } else {
+  for (const scenario of scenarios) {
+    const r = resultsByName.get(scenario.name);
+    if (!r) continue;
+    if (r.aborted) {
+      console.log(`\nFAIL  ${scenario.name}\n  -> ${r.aborted}`);
       failed += 1;
+      continue;
     }
+    if (printReport(r.scenario, r.turns, r.turnsEvents, r.cfgLane)) passed += 1;
+    else failed += 1;
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`);
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`\n${passed} passed, ${failed} failed  (${secs}s, ${lanePhones.length} lanes)`);
   process.exit(failed === 0 ? 0 : 1);
 }
 

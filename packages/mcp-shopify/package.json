@@ -1,7 +1,7 @@
 {
   "name": "@gantry/mcp-shopify",
   "version": "0.1.0",
-  "description": "Read-only Shopify Admin API MCP server for the Boondi agent.",
+  "description": "Read-only Shopify Admin API MCP server for Gantry agents.",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",

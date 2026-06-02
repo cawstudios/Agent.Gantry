@@ -44,7 +44,7 @@ describe('buildChildRunnerLaunch', () => {
     expect(launch.runnerArgs).toEqual([
       '--import',
       'tsx',
-      '--inspect-brk=127.0.0.1:9230',
+      '--inspect=127.0.0.1:9230',
       SRC,
     ]);
   });
@@ -61,7 +61,7 @@ describe('buildChildRunnerLaunch', () => {
       input({ fromSourceFlag: 'true', inspectPortRaw: '9777' }),
     );
     expect(launch.inspectPort).toBe(9777);
-    expect(launch.runnerArgs).toContain('--inspect-brk=127.0.0.1:9777');
+    expect(launch.runnerArgs).toContain('--inspect=127.0.0.1:9777');
   });
 
   it('runs from source WITHOUT an inspector when the port is disabled', () => {

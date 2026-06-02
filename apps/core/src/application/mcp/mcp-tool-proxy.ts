@@ -47,6 +47,10 @@ export class McpToolProxy {
       skills?: SkillCatalogRepository;
       credentialEnv?: Record<string, string>;
       callerIdentityJid?: string;
+      // The real conversation JID (pre identity-override) — trace-only, so flow
+      // logs attribute each MCP call to its conversation even when the signing
+      // identity is remapped to a shared test number. Off in production.
+      conversationJid?: string;
       lookupHostname?: HostnameLookup;
       dnsValidationCache?: RemoteMcpDnsValidationCache;
     },
@@ -123,6 +127,7 @@ export class McpToolProxy {
     flowLog(logger, 'mcp.request', {
       serverName: input.serverName,
       toolName: input.toolName,
+      chatJid: this.options.conversationJid,
       callerIdentityJid: this.options.callerIdentityJid,
       arguments: input.arguments ?? {},
     });
@@ -138,6 +143,7 @@ export class McpToolProxy {
       flowLog(logger, 'mcp.response', {
         serverName: input.serverName,
         toolName: input.toolName,
+        chatJid: this.options.conversationJid,
         result,
       });
       return result;
@@ -145,6 +151,7 @@ export class McpToolProxy {
       flowLog(logger, 'mcp.error', {
         serverName: input.serverName,
         toolName: input.toolName,
+        chatJid: this.options.conversationJid,
         error: err instanceof Error ? err.message : String(err),
       });
       await closeCachedClient(capability);

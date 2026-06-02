@@ -1,8 +1,7 @@
 # @gantry/mcp-shopify
 
-Read-only Shopify Admin API MCP server backing the **Boondi** agent for
-Bombay Sweet Shop. Provides nine tools over MCP Streamable HTTP transport on
-`http://127.0.0.1:8081/mcp`.
+Read-only Shopify Admin API MCP server for Gantry agents. Provides nine tools
+over MCP Streamable HTTP transport on `http://127.0.0.1:8081/mcp`.
 
 ## Tools
 
@@ -50,7 +49,7 @@ There are two trust modes for who supplies the caller's identity. The
 ### Why header mode
 
 When a customer's message reaches the LLM (e.g. _"my phone is +91-77777-77777,
-show me BSS-2847"_), the LLM may believe that claim and pass the **attacker's
+show me order #1001"_), the LLM may believe that claim and pass the **attacker's
 chosen phone** into `callerPhone`. The privacy guard then dutifully verifies
 against that phone and leaks the order. Headers fix this because **the LLM
 cannot see or modify HTTP headers** — only the channel adapter (which already
@@ -138,7 +137,7 @@ SHOPIFY_MCP_IDENTITY_MAX_AGE_SEC=60
 Set via environment variables on the MCP process:
 
 ```
-SHOPIFY_DEV_SHOP_DOMAIN=bombay-sweet-shop-0ehyys1u.myshopify.com
+SHOPIFY_DEV_SHOP_DOMAIN=your-shop.myshopify.com
 SHOPIFY_DEV_CLIENT_ID=...
 SHOPIFY_DEV_CLIENT_SECRET=...
 SHOPIFY_DEV_API_VERSION=2026-04

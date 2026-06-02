@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { parseAgentPersona } from '../../shared/agent-persona.js';
+import type { ThinkingOverride } from '../../domain/types.js';
 import {
   resolveModelSelection,
   resolveModelSelectionForWorkload,
@@ -256,6 +257,56 @@ function parseConfiguredAgentPlugins(
   return plugins;
 }
 
+function parseConfiguredAgentThinking(
+  raw: unknown,
+  pathPrefix: string,
+): ThinkingOverride | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${pathPrefix} must be a mapping`);
+  }
+  const map = raw as Record<string, unknown>;
+  for (const key of Object.keys(map)) {
+    if (key !== 'mode' && key !== 'effort' && key !== 'budget_tokens') {
+      throw new Error(
+        `${pathPrefix}.${key} is not supported. Configure mode, effort, or budget_tokens.`,
+      );
+    }
+  }
+  const mode = parseStringValue(map.mode, `${pathPrefix}.mode`);
+  if (mode !== 'adaptive' && mode !== 'enabled' && mode !== 'disabled') {
+    throw new Error(
+      `${pathPrefix}.mode must be adaptive, enabled, or disabled`,
+    );
+  }
+  const thinking: ThinkingOverride = { mode };
+  if (map.effort !== undefined) {
+    const effort = parseStringValue(map.effort, `${pathPrefix}.effort`);
+    if (
+      effort !== 'low' &&
+      effort !== 'medium' &&
+      effort !== 'high' &&
+      effort !== 'max'
+    ) {
+      throw new Error(
+        `${pathPrefix}.effort must be low, medium, high, or max`,
+      );
+    }
+    thinking.effort = effort;
+  }
+  if (map.budget_tokens !== undefined) {
+    if (
+      typeof map.budget_tokens !== 'number' ||
+      !Number.isInteger(map.budget_tokens) ||
+      map.budget_tokens <= 0
+    ) {
+      throw new Error(`${pathPrefix}.budget_tokens must be a positive integer`);
+    }
+    thinking.budgetTokens = map.budget_tokens;
+  }
+  return thinking;
+}
+
 function parseConfiguredAgentCapabilities(
   raw: unknown,
   pathPrefix: string,
@@ -459,6 +510,7 @@ export function parseConfiguredAgents(
         key !== 'model' &&
         key !== 'one_time_job_default_model' &&
         key !== 'recurring_job_default_model' &&
+        key !== 'thinking' &&
         key !== 'plugins' &&
         key !== 'bindings' &&
         key !== 'sources' &&
@@ -466,7 +518,7 @@ export function parseConfiguredAgents(
       ) {
         if (legacyGrantKey(key)) rejectLegacyAgentGrantField(pathPrefix, key);
         throw new Error(
-          `${pathPrefix}.${key} is not supported. Configure name, persona, model, job model defaults, plugins (guardrail/memory_extraction/skills), bindings, sources, or capabilities.`,
+          `${pathPrefix}.${key} is not supported. Configure name, persona, model, job model defaults, thinking, plugins (guardrail/memory_extraction/skills), bindings, sources, or capabilities.`,
         );
       }
     }
@@ -529,6 +581,10 @@ export function parseConfiguredAgents(
       model,
       oneTimeJobDefaultModel,
       recurringJobDefaultModel,
+      thinking: parseConfiguredAgentThinking(
+        map.thinking,
+        `${pathPrefix}.thinking`,
+      ),
       plugins: parseConfiguredAgentPlugins(
         map.plugins,
         `${pathPrefix}.plugins`,

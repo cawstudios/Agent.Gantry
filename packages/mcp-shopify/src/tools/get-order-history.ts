@@ -20,8 +20,9 @@ const inputSchema = {
   customerId: z
     .string()
     .min(1)
+    .optional()
     .describe(
-      'Shopify customer GID or numeric ID. In customer conversations, it must belong to the same customer as the phone number being used to message.',
+      'Shopify customer GID or numeric ID. Omit in customer conversations to default to the verified caller (recommended — no lookup_customer step needed). If supplied, it must belong to the same customer as the phone number being used to message.',
     ),
   callerPhone: z
     .string()
@@ -101,7 +102,15 @@ export function registerGetOrderHistory(
 
         const customerToken =
           ownership?.resolvedId.split('/').pop() ??
-          normalizeShopifyCustomerId(args.customerId);
+          (args.customerId
+            ? normalizeShopifyCustomerId(args.customerId)
+            : undefined);
+        if (!customerToken) {
+          return toolErrorContent(
+            'INVALID_REQUEST',
+            'customerId is required when there is no verified caller identity',
+          );
+        }
         const sinceIso = new Date(sinceMs).toISOString();
         const untilIso = new Date(untilMs).toISOString();
         const query = `customer_id:${customerToken} created_at:>=${sinceIso} created_at:<${untilIso}`;
