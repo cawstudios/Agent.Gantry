@@ -8,7 +8,10 @@ import {
   deliveryLabel as providerDeliveryLabel,
   ownerLabel as providerOwnerLabel,
 } from '../../../channels/provider-delivery-labels.js';
-import { semanticCapabilityRule } from '../../../shared/semantic-capability-ids.js';
+import {
+  parseSemanticCapabilityRule,
+  semanticCapabilityRule,
+} from '../../../shared/semantic-capability-ids.js';
 import { formatDurableAccessRulesForUser } from '../../../shared/durable-access-policy.js';
 import { redactSensitiveText } from '../../../shared/sensitive-material.js';
 
@@ -388,18 +391,36 @@ function formatAccessRequirementSummary(input: {
   toolAccessRequirements: readonly string[];
   requiredMcpServers: readonly string[];
 }): string {
+  const toolAccessRequirements = visibleToolAccessRequirements(input);
   const parts = [
     input.capabilityRequirements.length
       ? `capabilities ${formatTools(input.capabilityRequirements)}`
       : undefined,
-    input.toolAccessRequirements.length
-      ? `tools ${formatDurableAccessRulesForUser(input.toolAccessRequirements)}`
+    toolAccessRequirements.length
+      ? `tools ${formatDurableAccessRulesForUser(toolAccessRequirements)}`
       : undefined,
     input.requiredMcpServers.length
       ? `MCP servers ${formatTools(input.requiredMcpServers)}`
       : undefined,
   ].filter((part): part is string => Boolean(part));
   return parts.length ? parts.join('; ') : '(none)';
+}
+
+function visibleToolAccessRequirements(input: {
+  capabilityRequirements: readonly string[];
+  toolAccessRequirements: readonly string[];
+}): string[] {
+  const capabilityIds = new Set(
+    input.capabilityRequirements.map(capabilityIdFromRequirementLabel),
+  );
+  return input.toolAccessRequirements.filter((rule) => {
+    const capabilityId = parseSemanticCapabilityRule(rule);
+    return !capabilityId || !capabilityIds.has(capabilityId);
+  });
+}
+
+function capabilityIdFromRequirementLabel(label: string): string {
+  return label.split(/\s+via\s+/, 1)[0]?.trim() || label.trim();
 }
 
 function parsePayload(value: unknown): Record<string, unknown> {

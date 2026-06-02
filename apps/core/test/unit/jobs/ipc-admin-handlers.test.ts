@@ -836,6 +836,130 @@ describe('admin IPC handlers', () => {
     );
   });
 
+  it('rechecks setup-paused jobs after persistent request_access approvals', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { adminTaskHandlers, taskData } =
+      await loadAdminHandlers(runtimeHome);
+    const tools = new Map<string, Record<string, unknown>>();
+    const bindings: Array<Record<string, unknown>> = [];
+    const toolRepository = {
+      listTools: vi.fn(async () => [...tools.values()]),
+      getTool: vi.fn(async (toolId: string) => tools.get(toolId)),
+      saveTool: vi.fn(async (tool: Record<string, unknown>) => {
+        tools.set(String(tool.id), tool);
+      }),
+      listAgentToolBindings: vi.fn(async () => bindings),
+      saveAgentToolBinding: vi.fn(async (binding: Record<string, unknown>) => {
+        bindings.push(binding);
+      }),
+    };
+    let job = {
+      id: 'job-1',
+      name: 'Sheet append job',
+      workspace_key: 'main_agent',
+      status: 'paused',
+      pause_reason: 'Setup required',
+      next_run: null,
+      execution_context: {
+        conversationJid: 'sl:C123',
+        threadId: null,
+        workspaceKey: 'main_agent',
+      },
+      access_requirements: [
+        {
+          target: {
+            kind: 'tool_rule',
+            rule: 'RunCommand(npm test *)',
+          },
+          reason: 'Run tests before updating the sheet.',
+        },
+      ],
+      setup_state: {
+        state: 'missing_capability',
+        checked_at: '2026-06-02T00:00:00.000Z',
+        fingerprint: 'old',
+        blockers: [
+          {
+            state: 'missing_capability',
+            requirementType: 'tool',
+            requirementId: 'RunCommand(npm test *)',
+            message: 'Needs command access.',
+            nextAction: 'request_access ...',
+          },
+        ],
+      },
+    };
+    const updateJob = vi.fn(async (_jobId: string, updates: object) => {
+      job = { ...job, ...updates };
+    });
+    const onSchedulerChanged = vi.fn();
+    const sendMessage = vi.fn(async () => undefined);
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: true,
+      mode: 'allow_persistent_rule',
+      decidedBy: 'U_APPROVER',
+      decisionClassification: 'user_permanent',
+      updatedPermissions: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          destination: 'session',
+          rules: [{ toolName: 'RunCommand', ruleContent: 'npm test *' }],
+        },
+      ],
+    }));
+
+    await adminTaskHandlers.request_permission({
+      data: taskData('request-command-access', {
+        type: 'request_permission',
+        chatJid: 'sl:C123',
+        jobId: 'job-1',
+        payload: {
+          permissionKind: 'tool',
+          capabilityRequestSource: 'request_access',
+          toolName: 'RunCommand',
+          rule: 'npm test *',
+          temporaryOnly: false,
+          reason: 'Run tests before updating the sheet.',
+        },
+      }) as never,
+      sourceAgentFolder: 'main_agent',
+      deps: depsWithAdminTools([], {
+        sendMessage,
+        requestPermissionApproval,
+        getToolRepository: () => toolRepository,
+        mirrorAgentToolRulesToSettings: vi.fn(async () => undefined),
+        onSchedulerChanged,
+        opsRepository: {
+          getJobById: vi.fn(async () => job),
+          updateJob,
+        },
+      }) as never,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['sl:C123'],
+    });
+
+    await vi.waitFor(() => {
+      expect(updateJob).toHaveBeenCalledWith(
+        'job-1',
+        expect.objectContaining({
+          status: 'active',
+          pause_reason: null,
+          setup_state: expect.objectContaining({ state: 'ready' }),
+        }),
+      );
+    });
+    expect(onSchedulerChanged).toHaveBeenCalledWith('job-1');
+    expect(sendMessage).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.stringContaining('Job resumed: Sheet append job.'),
+      undefined,
+    );
+  });
+
   it('applies temporary request_access run_command approvals to current-run live rules', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-admin-ipc-'),

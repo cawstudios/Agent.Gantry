@@ -573,15 +573,22 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     expect(fs.existsSync(path.join(fixture.ipcDir, 'tasks'))).toBe(false);
   });
 
-  it('lists admin permissions from the runner read-only view when selected', async () => {
+  it('lists admin permissions from the runner read-only view without a grant', async () => {
     const fixture = createMcpFixture();
+    fs.mkdirSync(path.join(fixture.ipcDir, 'live-tool-rules'), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(fixture.ipcDir, 'live-tool-rules', 'run-1.json'),
+      JSON.stringify(['capability:acme.records.append']),
+    );
 
     const result = await runMcpFixture(
       fixture,
       'admin_permission_list',
       {},
       {
-        GANTRY_ADMIN_MCP_TOOLS_JSON: '["admin_permission_list"]',
+        GANTRY_AGENT_RUN_HANDLE: 'run-1',
         GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: '["RunCommand(npm test *)"]',
       },
     );
@@ -592,9 +599,12 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       'Admin permission inventory (read-only runner view):',
     );
     expect(record.result.content[0].text).toContain(
-      'mcp__gantry__admin_permission_list: approved',
+      'mcp__gantry__admin_permission_list: available (read-only)',
     );
     expect(record.result.content[0].text).toContain('RunCommand(npm test *)');
+    expect(record.result.content[0].text).toContain(
+      'capability:acme.records.append',
+    );
     expect(fs.existsSync(path.join(fixture.ipcDir, 'tasks'))).toBe(false);
   });
 

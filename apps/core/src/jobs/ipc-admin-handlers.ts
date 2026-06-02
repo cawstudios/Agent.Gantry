@@ -67,6 +67,11 @@ import {
 } from './ipc-mcp-server-request-credentials.js';
 import { semanticCapabilityInteraction } from './ipc-semantic-capability-interaction.js';
 import { appendLiveToolRules } from '../shared/live-tool-rules.js';
+import {
+  formatRequestAccessPersistentGrantMessage,
+  recheckPausedSetupJobsAfterRequestAccessGrant,
+} from './request-access-job-recovery.js';
+import { requestOnlyCapabilityPendingKey } from './request-only-capability-dedupe.js';
 
 const pendingRequestOnlyCapabilityReviews = new Set<string>();
 configureSkillInstallHandlers({
@@ -368,7 +373,7 @@ const requestOnlyCapabilityHandler: TaskHandler = async (context) => {
   const pendingKey = requestOnlyCapabilityPendingKey({ data, sourceAgentFolder, targetJid: requestedTargetJid, review: parsed.review });
   if (pendingRequestOnlyCapabilityReviews.has(pendingKey)) { accept(`${parsed.review.displayName} request is already waiting for approval in this chat.`, 'capability_request_already_pending'); return; }
   pendingRequestOnlyCapabilityReviews.add(pendingKey);
-  startRequestOnlyCapabilityReview({ deps, appId: data.appId as never, agentId: memoryAgentIdForWorkspaceFolder(sourceAgentFolder) as never, sourceAgentFolder, targetJid: requestedTargetJid, threadId: data.authThreadId, ipcDir: context.ipcBaseDir ? path.join(context.ipcBaseDir, sourceAgentFolder) : undefined, runHandle: data.runHandle, review: parsed.review, pendingKey });
+  startRequestOnlyCapabilityReview({ deps, appId: data.appId as never, agentId: memoryAgentIdForWorkspaceFolder(sourceAgentFolder) as never, sourceAgentFolder, targetJid: requestedTargetJid, threadId: data.authThreadId, ipcDir: context.ipcBaseDir ? path.join(context.ipcBaseDir, sourceAgentFolder) : undefined, runHandle: data.runHandle, jobId: data.jobId, review: parsed.review, pendingKey });
   accept(requestOnlyCapabilityQueuedMessage(parsed.review), 'capability_request_recorded');
 };
 
@@ -591,7 +596,7 @@ function capabilityDisplayValue(payload: Record<string, unknown>, spec: (typeof 
   return spec.kind;
 }
 // prettier-ignore
-function startRequestOnlyCapabilityReview(input: { deps: Parameters<TaskHandler>[0]['deps']; appId: import('../domain/app/app.js').AppId; agentId: import('../domain/agent/agent.js').AgentId; sourceAgentFolder: string; targetJid: string; threadId?: string; ipcDir?: string; runHandle?: string; review: RequestOnlyCapabilityReview; pendingKey?: string }): void {
+function startRequestOnlyCapabilityReview(input: { deps: Parameters<TaskHandler>[0]['deps']; appId: import('../domain/app/app.js').AppId; agentId: import('../domain/agent/agent.js').AgentId; sourceAgentFolder: string; targetJid: string; threadId?: string; ipcDir?: string; runHandle?: string; jobId?: string; review: RequestOnlyCapabilityReview; pendingKey?: string }): void {
   void (async () => {
     let message: string;
     const requestId = `capability-${input.review.toolName}-${globalThis.crypto.randomUUID()}`;
@@ -648,8 +653,9 @@ function startRequestOnlyCapabilityReview(input: { deps: Parameters<TaskHandler>
       let persistedRules: string[] = [];
       let liveRules: string[] = [];
       if (input.review.toolName === 'request_permission' && isPermanentPermissionDecision(decision)) {
-        persistedRules = await persistRequestPermissionRules({ deps: input.deps, appId: input.appId, agentId: input.agentId, sourceAgentFolder: input.sourceAgentFolder, ipcDir: input.ipcDir, runHandle: input.runHandle, requestId, updates: decision.updatedPermissions ?? [], toolInput: input.review.toolInput, semanticCapabilityDefinitions, actor: decision.decidedBy, conversationId: input.targetJid, threadId: input.threadId, reason: decision.reason });
+        persistedRules = await persistRequestPermissionRules({ deps: input.deps, appId: input.appId, agentId: input.agentId, sourceAgentFolder: input.sourceAgentFolder, ipcDir: input.ipcDir, runHandle: input.runHandle, requestId, updates: decision.updatedPermissions ?? [], toolInput: input.review.toolInput, semanticCapabilityDefinitions, actor: decision.decidedBy, conversationId: input.targetJid, threadId: input.threadId, jobId: input.jobId, reason: decision.reason });
       }
+      const recovery = persistedRules.length > 0 ? await recheckPausedSetupJobsAfterRequestAccessGrant({ deps: input.deps, appId: input.appId, sourceAgentFolder: input.sourceAgentFolder, targetJid: input.targetJid, jobId: input.jobId, logWarn: (context, message) => logger.warn(context, message) }) : undefined;
       const transientRules = input.review.toolName === 'request_permission' && decision.approved && decision.decidedBy && decision.mode === 'allow_once' ? requestPermissionOnceLiveRules(input.review.toolInput, semanticCapabilityDefinitions) : [];
       if (transientRules.length > 0) liveRules = appendLiveToolRules({ ipcDir: input.ipcDir, runHandle: input.runHandle, rules: transientRules });
       try {
@@ -663,7 +669,7 @@ function startRequestOnlyCapabilityReview(input: { deps: Parameters<TaskHandler>
       }
       message = decision.approved && decision.decidedBy
         ? persistedRules.length
-          ? `Allowed ${input.review.displayName}. Future matching requests are allowed. Details: ${formatDurableAccessRulesForUser(persistedRules)}.`
+          ? formatRequestAccessPersistentGrantMessage({ displayName: input.review.displayName, rules: persistedRules, semanticCapabilityDefinitions, recovery })
           : liveRules.length
             ? `Allowed ${input.review.displayName} for this run. Details: ${formatDurableAccessRulesForUser(liveRules)}.`
           : `Approved ${input.review.displayName}. Admin setup may still be needed before it can be used.`
@@ -690,23 +696,6 @@ function startRequestOnlyCapabilityReview(input: { deps: Parameters<TaskHandler>
     .finally(() => {
       if (input.pendingKey) pendingRequestOnlyCapabilityReviews.delete(input.pendingKey);
     });
-}
-
-function requestOnlyCapabilityPendingKey(input: {
-  data: Parameters<TaskHandler>[0]['data'];
-  sourceAgentFolder: string;
-  targetJid: string;
-  review: RequestOnlyCapabilityReview;
-}): string {
-  return JSON.stringify({
-    toolName: input.review.toolName,
-    appId: input.data.appId,
-    agent: input.sourceAgentFolder,
-    targetJid: input.targetJid,
-    threadId: input.data.authThreadId ?? null,
-    jobId: input.data.jobId ?? null,
-    toolInput: input.review.toolInput,
-  });
 }
 
 function hasAgentSuppliedCapabilityDefinition(

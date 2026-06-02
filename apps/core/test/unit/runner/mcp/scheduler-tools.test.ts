@@ -826,6 +826,32 @@ describe('scheduler MCP tools', () => {
         },
       }),
     ).toContain('Access requirements: tools Browser');
+    const semanticSummary = schedulerJobSummary({
+      id: 'job-3',
+      name: 'Append reviewed records',
+      access_requirements: [
+        {
+          target: {
+            kind: 'capability',
+            capabilityId: 'acme.records.append',
+          },
+        },
+      ],
+      visibility: {
+        executionContext: { conversationJid: 'tg:team' },
+        toolAccess: {
+          effectiveAllowedTools: ['capability:acme.records.append'],
+          inheritedAgentTools: ['capability:acme.records.append'],
+          projectedRuntimeTools: ['acme.records.append'],
+        },
+      },
+    });
+    expect(semanticSummary).toContain(
+      'Access requirements: capabilities acme.records.append',
+    );
+    expect(semanticSummary).not.toContain(
+      'tools capability:acme.records.append',
+    );
   });
 
   it('renders notification targets with shortcut and routing values', async () => {
