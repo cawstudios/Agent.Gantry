@@ -285,6 +285,9 @@ describe('PromptProfileService', () => {
     expect(prompt).toContain(
       'Approved third-party MCP sources are inspected through mcp_list_tools and used through mcp_call_tool only when reviewed current-run access covers that action',
     );
+    expect(prompt).toContain(
+      'If capability_status shows an MCP source as ready or a reviewed MCP capability is already selected for this run, do not request the same capability again',
+    );
     expect(prompt).not.toContain('[[SHARED_CONTEXT]]');
   });
 

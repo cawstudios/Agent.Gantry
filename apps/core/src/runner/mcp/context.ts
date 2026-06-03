@@ -172,6 +172,75 @@ function parseEnabledAdminMcpTools(
   }
 }
 
+function mcpSourceNameFromCapability(
+  capability: SemanticCapabilityDefinition,
+): string | undefined {
+  const source = capability.source;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return undefined;
+  }
+  const record = source as Record<string, unknown>;
+  if (record.source !== 'mcp') return undefined;
+  const serverName =
+    typeof record.serverName === 'string' ? record.serverName.trim() : '';
+  return serverName || undefined;
+}
+
+function mcpToolNamesFromCapability(
+  capability: SemanticCapabilityDefinition,
+): string[] {
+  return [
+    ...new Set(
+      capability.implementationBindings
+        .map((binding) =>
+          binding.kind === 'mcp_tool' && binding.mcpTool
+            ? binding.mcpTool.trim()
+            : '',
+        )
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function selectedMcpCapabilityLines(): string[] {
+  const selectedByName = new Map<string, SemanticCapabilityDefinition[]>();
+  for (const capability of availableSemanticCapabilities) {
+    const sourceName = mcpSourceNameFromCapability(capability);
+    if (!sourceName) continue;
+    const existing = selectedByName.get(sourceName) ?? [];
+    existing.push(capability);
+    selectedByName.set(sourceName, existing);
+  }
+
+  if (selectedByName.size === 0) {
+    return attachedMcpSourceIds.length > 0
+      ? attachedMcpSourceIds
+          .slice()
+          .sort()
+          .map((serverId) => `- ready source: ${serverId}`)
+      : ['- none connected yet'];
+  }
+
+  return [...selectedByName.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .flatMap(([serverName, capabilities]) => {
+      const capabilityIds = capabilities
+        .map((capability) => capability.capabilityId)
+        .sort();
+      const toolNames = capabilities
+        .flatMap((capability) => mcpToolNamesFromCapability(capability))
+        .sort();
+      return [
+        `- ready source: ${serverName}`,
+        `  selected capabilities: ${capabilityIds.join(', ')}`,
+        `  use: mcp_list_tools with serverName="${serverName}", then mcp_call_tool with serverName="${serverName}"`,
+        ...(toolNames.length > 0
+          ? [`  approved tool rules: ${toolNames.join(', ')}`]
+          : []),
+      ];
+    });
+}
+
 export function capabilityStatusText(): string {
   const currentAdminTools = currentEnabledAdminMcpTools();
   const selectedSkillStatusItems =
@@ -199,6 +268,7 @@ export function capabilityStatusText(): string {
     '- capability_search: find reviewed capabilities generated from attached tools, skills, MCP servers, adapters, and CLI manifests',
     '- propose_capability: request an approved semantic capability or propose a reviewed local_cli capability with pinned executable details',
     '- manage_capability: view/change/revoke/test/audit guidance for selected capabilities',
+    '- If capability_status lists an MCP source as ready with selected capabilities, do not call propose_capability for that source again. Use mcp_list_tools and mcp_call_tool.',
     '',
     'Scheduler monitoring:',
     '- Use scheduler_get_job, scheduler_list_runs, scheduler_list_events, and scheduler_wait_for_events to inspect or wait for jobs.',
@@ -228,12 +298,13 @@ export function capabilityStatusText(): string {
       : ['- none installed yet']),
     '',
     'Connected MCP services ready for this agent:',
+    ...selectedMcpCapabilityLines(),
     ...(attachedMcpSourceIds.length > 0
-      ? attachedMcpSourceIds
-          .slice()
-          .sort()
-          .map((serverId) => `- ready: ${serverId}`)
-      : ['- none connected yet']),
+      ? [
+          `Attached MCP source ids: ${attachedMcpSourceIds.slice().sort().join(', ')}`,
+          'MCP source rule: ready sources are already attached. Inspect them with mcp_list_tools and call approved actions through mcp_call_tool. Do not request the same MCP capability again unless the proxy response says access is missing.',
+        ]
+      : []),
     '',
     'Browser capability:',
     ...(requestableBrowserTools.length > 0

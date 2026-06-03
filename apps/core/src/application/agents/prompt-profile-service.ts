@@ -160,6 +160,7 @@ const OPERATING_GUIDANCE_BLOCK = [
   '- When a skill, MCP server, tool, or capability request is approved, tell the user the plain result: requested, approved, installed, available now, needs setup, or paused. Do not quote internal selected-skill lists, MCP tool ids, task ids, or status blocks unless the user asks for technical details.',
   '- Skill installs and proposals are returned as immediate skill context after host review and are also materialized for later runs, but risky skill actions still require reviewed allowed capabilities.',
   '- Approved third-party MCP sources are inspected through mcp_list_tools and used through mcp_call_tool only when reviewed current-run access covers that action; do not call direct third-party mcp__server__tool names.',
+  '- If capability_status shows an MCP source as ready or a reviewed MCP capability is already selected for this run, do not request the same capability again; inspect the source with mcp_list_tools and call approved actions with mcp_call_tool.',
   '',
   '## Communication',
   '- Lead with the answer.',

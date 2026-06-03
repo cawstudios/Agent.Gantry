@@ -536,6 +536,27 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
 
   it('shows configured tools, selected skills, and selected MCP servers', async () => {
     const fixture = createMcpFixture();
+    const cawAtsCapability = {
+      capabilityId: 'mcp.caw-ats.access',
+      version: '1',
+      displayName: 'caw-ats MCP access',
+      category: 'MCP',
+      risk: 'write',
+      can: 'Call approved tools on the caw-ats MCP server.',
+      cannot: 'Call unapproved MCP tools or receive raw credentials.',
+      credentialSource: 'none',
+      implementationBindings: [
+        {
+          kind: 'mcp_tool',
+          mcpTool: 'mcp__caw-ats__ats_list_positions',
+        },
+      ],
+      source: {
+        source: 'mcp',
+        serverName: 'caw-ats',
+        allowedToolPatterns: ['ats_list_positions'],
+      },
+    };
 
     const result = await runMcpFixture(
       fixture,
@@ -546,6 +567,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
         GANTRY_SELECTED_SKILLS_JSON: '["skill:release"]',
         GANTRY_SELECTED_SKILL_DISPLAYS_JSON: '["release (skill:release)"]',
         GANTRY_SELECTED_MCP_SERVERS_JSON: '["mcp:github"]',
+        GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([cawAtsCapability]),
       },
     );
 
@@ -557,7 +579,19 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     expect(record.result.content[0].text).toContain(
       'ready: release (skill:release)',
     );
-    expect(record.result.content[0].text).toContain('ready: mcp:github');
+    expect(record.result.content[0].text).toContain('ready source: caw-ats');
+    expect(record.result.content[0].text).toContain(
+      'selected capabilities: mcp.caw-ats.access',
+    );
+    expect(record.result.content[0].text).toContain(
+      'use: mcp_list_tools with serverName="caw-ats", then mcp_call_tool with serverName="caw-ats"',
+    );
+    expect(record.result.content[0].text).toContain(
+      'Do not request the same MCP capability again',
+    );
+    expect(record.result.content[0].text).toContain(
+      'Attached MCP source ids: mcp:github',
+    );
   });
 
   it('registers selected admin tools and reports remaining requestable tools', async () => {
