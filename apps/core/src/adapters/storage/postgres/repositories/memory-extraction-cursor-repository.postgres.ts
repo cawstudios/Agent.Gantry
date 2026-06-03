@@ -16,9 +16,7 @@ function cursorId(i: {
   return `${i.appId}|${i.agentId}|${i.conversationId}|${i.threadId ?? ''}`;
 }
 
-export class PostgresMemoryExtractionCursorRepository
-  implements MemoryExtractionCursorRepository
-{
+export class PostgresMemoryExtractionCursorRepository implements MemoryExtractionCursorRepository {
   constructor(private readonly db: CanonicalDb) {}
 
   async getCursor(
@@ -32,9 +30,7 @@ export class PostgresMemoryExtractionCursorRepository
           pgSchema.memoryExtractionCursorPostgres.coveredThroughMessageId,
       })
       .from(pgSchema.memoryExtractionCursorPostgres)
-      .where(
-        eq(pgSchema.memoryExtractionCursorPostgres.id, cursorId(input)),
-      )
+      .where(eq(pgSchema.memoryExtractionCursorPostgres.id, cursorId(input)))
       .limit(1);
     const row = rows[0];
     return row

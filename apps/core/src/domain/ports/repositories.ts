@@ -240,8 +240,8 @@ export interface MessageRepository {
   getMessagesSince(input: {
     conversationId: ConversationId;
     threadId?: ConversationThreadId;
-    since: string;     // ISO created_at cursor
-    sinceId: string;   // tie-break on equal created_at
+    since: string; // ISO created_at cursor
+    sinceId: string; // tie-break on equal created_at
     limit?: number;
   }): Promise<Message[]>;
   /** The last `limit` messages AT/BEFORE (before, beforeId), returned oldest→newest. */
