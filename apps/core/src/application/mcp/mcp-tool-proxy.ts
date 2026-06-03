@@ -14,7 +14,6 @@ import {
   isIpAddress,
   type HostnameLookup,
 } from '../../domain/network/public-address-policy.js';
-import { declaredNetworkAuthority } from '../../shared/network-host-declaration.js';
 import { evaluateEgressDenylist } from '../../shared/egress-policy.js';
 import { createDnsPinnedMcpFetch } from '../../shared/dns-pinned-fetch.js';
 import {
@@ -292,10 +291,8 @@ export class McpToolProxy {
 
 /**
  * Enforce third-party MCP server network authority at connection establishment,
- * reusing the shared egress denylist policy. The global denylist always wins; an
- * undeclared host is rejected with the MCP-server-specific message. Connecting an
- * MCP source is inventory only — declared hosts plus approved tool patterns
- * define what the server may reach.
+ * reusing the shared egress denylist policy. The global denylist always wins;
+ * declared hosts are review/audit metadata, not an operational allowlist.
  */
 export function assertMcpNetworkHostAllowed(input: {
   serverName: string;
@@ -317,17 +314,6 @@ export function assertMcpNetworkHostAllowed(input: {
     throw new ApplicationError(
       'FORBIDDEN',
       `Network access denied: MCP server ${input.serverName} host ${hostLabel} matches the egress denylist.`,
-    );
-  }
-  const declared = new Set(
-    input.networkHosts
-      .map((value) => declaredNetworkAuthority(value))
-      .filter((value): value is string => Boolean(value)),
-  );
-  if (!declared.has(hostLabel)) {
-    throw new ApplicationError(
-      'FORBIDDEN',
-      `Network access denied: MCP server ${input.serverName} did not declare ${hostLabel} for the approved tool access. Update and re-approve the MCP server or capability.`,
     );
   }
 }

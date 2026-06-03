@@ -35,7 +35,7 @@ export function registerServiceTools(server: McpServer): void {
   registerSkillProposalTool(
     server,
     'request_skill_proposal',
-    'Submit an agent-created or modified skill bundle for same-conversation admin review. Approval makes the skill available to this agent.',
+    'Request skill source setup for an agent-created or modified skill bundle. Approval makes the skill available as inventory; risky actions still require reviewed capability access.',
   );
   registerSettingsTools(server, { isAdminToolEnabled: isAdminMcpToolEnabled });
   registerAdminPermissionTools(server, {
@@ -44,7 +44,7 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'request_skill_install',
-    'Request a skill source install for same-conversation admin approval. Approval installs staged files, or runs an approved installer command in host-controlled staging and imports the resulting SKILL.md package. Skill source approval records inventory only; reviewed gantry.skill.json actions become capability candidates.',
+    'Request skill source setup for same-conversation admin approval. Approval installs staged files, or runs an approved installer command in host-controlled staging and imports the resulting SKILL.md package. Skill source approval records inventory only; reviewed gantry.skill.json actions become capability candidates.',
     {
       expectedFiles: z
         .array(z.string())
@@ -111,7 +111,7 @@ export function registerServiceTools(server: McpServer): void {
   );
   server.tool(
     'request_skill_dependency_install',
-    'Request host-installed dependencies needed by a reviewed skill. Approval records the admin decision; the agent never runs install commands directly.',
+    'Request host-installed dependencies needed by a reviewed skill source. Approval records setup inventory; the agent never runs install commands directly.',
     {
       ecosystem: z
         .enum(['npm', 'brew', 'go', 'uv', 'download'])
@@ -161,7 +161,7 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'request_mcp_server',
-    'Request a third-party MCP server source for admin review. Approval connects the source; raw MCP tools are inventory and do not become durable capabilities until reviewed.',
+    'Request third-party MCP source setup for admin review. Approval connects the source; raw MCP tools are inventory and do not become durable capabilities until reviewed.',
     {
       name: z
         .string()
@@ -268,7 +268,7 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'mcp_list_tools',
-    'List tools from MCP server sources connected to this agent. This refreshes source inventory only; raw MCP tools are not durable capability ids.',
+    'Refresh tools from MCP server sources connected to this agent. This is source inventory only; use reviewed action capabilities as the authority.',
     {
       serverName: z
         .string()
@@ -318,7 +318,7 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'mcp_call_tool',
-    'Call a tool on an MCP server source only when the requested action is covered by reviewed current-run access. Use this for third-party MCP servers; do not call direct third-party mcp__server__tool names.',
+    'Call a raw MCP source tool only when the requested action is covered by reviewed current-run capability access. Prefer the reviewed action capability as the product contract; do not call direct third-party mcp__server__tool names.',
     {
       serverName: z.string().describe('Connected MCP server name'),
       toolName: z

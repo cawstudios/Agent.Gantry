@@ -31,7 +31,11 @@ describe('buildPermissionPromptParts', () => {
     expect(parts.bodyLines).toContain('Command:');
     expect(parts.bodyLines).toContain('npm test');
     expect(parts.bodyLines).toContain('```');
-    expect(parts.contextLines[0]).toBe('Main Agent · agent chat');
+    expect(parts.contextLines[0]).toBe('Agent: Main Agent');
+    expect(parts.contextLines[1]).toBe('Context: agent chat');
+    expect(parts.contextLines).toContain(
+      'The agent cannot approve this itself.',
+    );
     expect(parts.replyInMinutes).toBe(1);
   });
 
@@ -287,19 +291,20 @@ describe('Slack permission blocks', () => {
     );
     expect(blocks.some((b) => b.type === 'section')).toBe(true);
     const context = blocks.find((b) => b.type === 'context');
-    expect(context?.elements[0].text).toContain('Main Agent · agent chat');
+    expect(context?.elements[0].text).toContain('Agent: Main Agent');
+    expect(context?.elements[0].text).toContain('Context: agent chat');
     expect(context?.elements[0].text).toContain('Reply in 1m');
     expect(blocks.at(-1)?.type).toBe('divider');
   });
 
   it('renders a receipt as a single muted context block', () => {
     const blocks = buildPermissionReceiptBlocks(
-      '✅ Allowed once · Command (npm test)',
+      'Allowed once: Command (npm test). The agent will continue this request.',
     ) as Array<Record<string, any>>;
     expect(blocks).toHaveLength(1);
     expect(blocks[0].type).toBe('context');
     expect(blocks[0].elements[0].text).toBe(
-      '✅ Allowed once · Command (npm test)',
+      'Allowed once: Command (npm test). The agent will continue this request.',
     );
   });
 });

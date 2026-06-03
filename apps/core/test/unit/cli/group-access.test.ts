@@ -46,7 +46,7 @@ describe('agent access CLI (runAccess)', () => {
     );
   });
 
-  it('renders one unified view of skills, MCP op scope, and permissions', async () => {
+  it('renders the outcome-first summary sections', async () => {
     const note = vi.fn();
     mockClack(note);
     const controlApiRequest = vi.fn(async () => ({
@@ -57,15 +57,95 @@ describe('agent access CLI (runAccess)', () => {
         tools: [],
       },
       selections: [{ id: 'browser.use', version: 'builtin' }],
+      summary: {
+        connected: [
+          { label: 'linkedin-posting', detail: 'skill' },
+          { label: 'github', detail: 'read_*' },
+          { label: 'linear', detail: 'all reviewed tools' },
+        ],
+        allowed: [{ label: 'browser use', detail: 'future access' }],
+        needsAttention: [
+          {
+            label: 'Send email is awaiting approval',
+            detail: "Approve it in the agent's chat.",
+          },
+        ],
+        suggestedCleanup: [
+          { label: 'tool:old', detail: 'No longer used. You can remove it.' },
+        ],
+      },
     }));
     vi.doMock('@core/cli/control-api.js', () => ({ controlApiRequest }));
     const { runAccess } = await import('@core/cli/group-access.js');
     expect(await runAccess('/tmp/gantry-access-test', ['show', 'a1'])).toBe(0);
     const rendered = String(note.mock.calls[0]?.[0] ?? '');
-    expect(rendered).toContain('linkedin-posting');
-    expect(rendered).toContain('github  [read_*]');
-    expect(rendered).toContain('linear  [all reviewed tools]');
-    expect(rendered).toContain('browser.use@builtin');
+    expect(rendered).toContain('Agent Access');
+    expect(rendered).toContain(
+      'Used in every conversation this agent is added to.',
+    );
+    expect(rendered).toContain('Connected:');
+    expect(rendered).toContain('  - linkedin-posting (skill)');
+    expect(rendered).toContain('  - github (read_*)');
+    expect(rendered).toContain('  - linear (all reviewed tools)');
+    expect(rendered).toContain('Allowed:');
+    expect(rendered).toContain('  - browser use (future access)');
+    expect(rendered).toContain('Needs attention:');
+    expect(rendered).toContain(
+      "  - Send email is awaiting approval. Next: Approve it in the agent's chat.",
+    );
+    expect(rendered).toContain('Suggested cleanup:');
+    expect(rendered).toContain(
+      '  - tool:old. Reason: No longer used. You can remove it.',
+    );
+    expect(rendered).toContain(
+      'Details: use --json or audit/events for exact ids and rule details.',
+    );
+  });
+
+  it('prints (none) for empty summary sections', async () => {
+    const note = vi.fn();
+    mockClack(note);
+    const controlApiRequest = vi.fn(async () => ({
+      agentId: 'agent:a1',
+      sources: { skills: [], mcpServers: [], tools: [] },
+      selections: [],
+      summary: {
+        connected: [],
+        allowed: [],
+        needsAttention: [],
+        suggestedCleanup: [],
+      },
+    }));
+    vi.doMock('@core/cli/control-api.js', () => ({ controlApiRequest }));
+    const { runAccess } = await import('@core/cli/group-access.js');
+    expect(await runAccess('/tmp/gantry-access-test', ['show', 'a1'])).toBe(0);
+    const rendered = String(note.mock.calls[0]?.[0] ?? '');
+    expect(rendered.match(/\(none\)/g)?.length).toBe(4);
+  });
+
+  it('falls back to raw sources and selections when summary is absent', async () => {
+    const note = vi.fn();
+    mockClack(note);
+    const controlApiRequest = vi.fn(async () => ({
+      agentId: 'agent:a1',
+      sources: {
+        skills: [{ id: 'skill:linkedin', name: 'linkedin-posting' }],
+        mcpServers: [{ id: 'github', tools: ['read_*'] }, { id: 'linear' }],
+        tools: [{ id: 'tool:notes', kind: 'adapter' }],
+      },
+      selections: [{ id: 'browser.use', version: 'builtin' }],
+      toolAccess: {},
+      updatedAt: '2026-06-03T00:00:00.000Z',
+    }));
+    vi.doMock('@core/cli/control-api.js', () => ({ controlApiRequest }));
+    const { runAccess } = await import('@core/cli/group-access.js');
+    expect(await runAccess('/tmp/gantry-access-test', ['show', 'a1'])).toBe(0);
+    const rendered = String(note.mock.calls[0]?.[0] ?? '');
+    expect(rendered).toContain('  - linkedin-posting (skill)');
+    expect(rendered).toContain('  - github (read_*)');
+    expect(rendered).toContain('  - linear (all reviewed tools)');
+    expect(rendered).toContain('  - tool:notes (adapter)');
+    expect(rendered).toContain('  - browser use (future access)');
   });
 
   it('emits raw JSON for show --json', async () => {

@@ -190,21 +190,36 @@ export function capabilityStatusText(): string {
   for (const adminToolName of currentAdminTools) {
     availableToolNames.push(adminToolName);
   }
+  const normalActionToolNames = availableToolNames.filter(
+    (toolName) =>
+      toolName === 'send_message' ||
+      toolName === 'ask_user_question' ||
+      toolName === 'memory_search' ||
+      toolName === 'memory_save' ||
+      toolName === 'continuity_summary' ||
+      toolName === 'procedure_save' ||
+      toolName === 'file' ||
+      toolName === 'request_access' ||
+      toolName.startsWith('scheduler_'),
+  );
   const requestableBrowserTools = buildRequestableBrowserToolAccess({
     configuredTools: configuredAllowedTools,
   });
   const lines = [
-    'Runtime capability context for this agent. Use these details to choose tools; do not quote this block directly to users.',
+    'Runtime capability context for this agent. Use available actions first; do not quote this block directly to users. Summarize access in plain language; keep raw capability ids and the Tool Access selected-capability block behind details and share verbatim only on explicit request.',
     '',
-    'Gantry MCP tools available in this run:',
-    ...availableToolNames
+    'Core actions available in this run:',
+    ...normalActionToolNames
       .sort()
       .map((toolName) => `- available: ${gantryMcpFullToolName(toolName)}`),
     '',
-    'Agent access requests:',
-    '- request_access target.kind=capability: request an already-reviewed semantic capability by id (ids come from this access summary and attached source inventory)',
-    '- request_access target.kind=run_command: request an exact scoped RunCommand fallback when no reviewed capability fits',
-    '- Source install/connect stays separate: use request_skill_install/request_skill_proposal for skills and request_mcp_server for third-party MCP sources',
+    'Agent access model:',
+    '- Use an available action when one fits.',
+    '- If the action is missing, request_access target.kind=capability for the reviewed capability id.',
+    '- If setup is missing, request source setup through the Gantry access flow; setup records inventory, not authority.',
+    '- Use request_access target.kind=run_command only as a temporary exact-command fallback when no reviewed capability fits.',
+    '- Use admin_permission_list (read-only, no grant needed) to review current permissions, suggest cleanup of unused or overly broad access, or spot missing access; report findings in plain language.',
+    '- Treat skill commands, MCP tool names, local CLI commands, browser internals, and network hosts as review/audit metadata unless a reviewed capability grants the action.',
     '',
     'Scheduler monitoring:',
     '- Use scheduler_get_job, scheduler_list_runs, scheduler_list_events, and scheduler_wait_for_events to inspect or wait for jobs.',
@@ -254,7 +269,7 @@ export function capabilityStatusText(): string {
   ];
   const view = buildAgentToolAccessView({
     configuredTools: configuredAllowedTools,
-    defaultTools: availableToolNames
+    defaultTools: normalActionToolNames
       .filter((toolName) => !ADMIN_MCP_TOOL_NAMES.includes(toolName as never))
       .map(gantryMcpFullToolName),
     availableButGatedTools: PERMISSION_GATED_NATIVE_TOOLS.filter(
@@ -268,7 +283,8 @@ export function capabilityStatusText(): string {
       ...buildRequestableAdminToolAccess(currentAdminTools),
       ...requestableBrowserTools,
     ],
-    source: 'settings.yaml current agent tools plus runtime defaults',
+    source:
+      'settings.yaml selected capabilities plus action-first runtime defaults',
   });
   return [...lines, '', formatAgentToolAccess(view)].join('\n');
 }

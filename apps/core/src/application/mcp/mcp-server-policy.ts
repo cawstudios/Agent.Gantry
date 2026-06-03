@@ -39,10 +39,10 @@ const NPM_PACKAGE_SPEC_PATTERN =
 
 /**
  * Validate and normalize declared MCP server network hosts. Third-party MCP
- * source install/bind is inventory only; declared hosts plus approved tool
- * patterns define what an MCP server may reach. For remote http/sse servers the
- * configured URL host is the only host Gantry can locally enforce, so it must be
- * present in the declaration (it is added automatically when omitted).
+ * source install/bind is inventory only; approved tool patterns define operation
+ * authority, while declared hosts are review/audit metadata. For remote http/sse
+ * servers the configured URL host is added automatically when omitted so review
+ * prompts and audit can show the connection target.
  */
 export function normalizeMcpNetworkHosts(input: {
   serverName: string;

@@ -1,7 +1,8 @@
 import http from 'http';
+import dns from 'node:dns/promises';
 import net from 'net';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   closeEgressGateway,
@@ -9,12 +10,19 @@ import {
   ensureEgressGateway,
 } from '@core/runtime/egress-gateway.js';
 
+beforeEach(() => {
+  vi.spyOn(dns, 'lookup').mockResolvedValue([
+    { address: '93.184.216.34', family: 4 },
+  ]);
+});
+
 afterEach(async () => {
+  vi.restoreAllMocks();
   await closeEgressGatewaysForTest();
 });
 
 describe('egress gateway', () => {
-  it('allows CONNECT by default and audits the decision', async () => {
+  it('blocks private CONNECT targets by default and audits the decision', async () => {
     const target = await startTargetServer();
     const publishRuntimeEvent = vi.fn();
     const gateway = await ensureEgressGateway({
@@ -34,7 +42,7 @@ describe('egress gateway', () => {
       authority: `127.0.0.1:${target.port}`,
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(403);
     const auditEvent = publishRuntimeEvent.mock.calls[0]?.[0];
     expect(auditEvent).toEqual(
       expect.objectContaining({
@@ -43,9 +51,9 @@ describe('egress gateway', () => {
         conversationId: 'conversation:tg:test',
         payload: expect.objectContaining({
           host: '127.0.0.1',
-          allowed: true,
-          denied: false,
-          reason: 'default_allow',
+          allowed: false,
+          denied: true,
+          reason: expect.stringContaining('Network blocked by policy'),
           principal: 'agent:test',
           conversationId: 'tg:test',
           runId: 'run-1',
@@ -70,9 +78,6 @@ describe('egress gateway', () => {
           capabilityLabel: 'LinkedIn Posting publish',
         },
       ],
-      lookupHostname: vi.fn(async () => [
-        { address: '93.184.216.34', family: 4 as const },
-      ]),
       upstreamProxy: {
         provider: 'test-proxy',
         url: `http://127.0.0.1:${upstream.port}/`,
@@ -85,6 +90,9 @@ describe('egress gateway', () => {
       authority: 'api.linkedin.com:443',
     });
 
+    // Default-allow: the declared host is reviewed audit metadata, so traffic
+    // passes through normally while DNS pinning keeps the tunnel public and the
+    // audit event still names the capability that declared it.
     expect(response.statusCode).toBe(502);
     expect(upstream.headers[0]).toContain('CONNECT 93.184.216.34:443 HTTP/1.1');
     expect(upstream.headers[0]).toContain('Host: api.linkedin.com:443');
@@ -102,167 +110,9 @@ describe('egress gateway', () => {
     await upstream.close();
   });
 
-  it('honors explicit unrestricted mode when some capability hosts are attributed', async () => {
-    const target = await startTargetServer();
+  it('allows undeclared public hosts by default when capability network hosts are present', async () => {
+    const upstream = await startRecordingProxy();
     const publishRuntimeEvent = vi.fn();
-    const gateway = await ensureEgressGateway({
-      key: 'test:attribution-explicit-unrestricted',
-      settings: { denylist: [] },
-      principal: { appId: 'default', agentId: 'agent:test' },
-      networkAttribution: [
-        {
-          host: 'api.linkedin.com:443',
-          capabilityId: 'skill.linkedin-posting.publish',
-          capabilityLabel: 'LinkedIn Posting publish',
-        },
-      ],
-      restrictToAttributedNetworkHosts: false,
-      publishRuntimeEvent,
-    });
-
-    const response = await connectThroughGateway({
-      gatewayPort: gateway.port,
-      authority: `127.0.0.1:${target.port}`,
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(publishRuntimeEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: 'egress.connect',
-        payload: expect.objectContaining({
-          host: '127.0.0.1',
-          allowed: true,
-          denied: false,
-          reason: 'default_allow',
-        }),
-      }),
-    );
-    await target.close();
-  });
-
-  it('denies attributed declared hosts that resolve to private addresses', async () => {
-    const publishRuntimeEvent = vi.fn();
-    const gateway = await ensureEgressGateway({
-      key: 'test:attribution-private-dns',
-      settings: { denylist: [] },
-      principal: { appId: 'default', agentId: 'agent:test' },
-      networkAttribution: [
-        {
-          host: 'api.linkedin.com:443',
-          capabilityId: 'skill.linkedin-posting.publish',
-          capabilityLabel: 'LinkedIn Posting publish',
-        },
-      ],
-      lookupHostname: vi.fn(async () => [
-        { address: '127.0.0.1', family: 4 as const },
-      ]),
-      publishRuntimeEvent,
-    });
-
-    const response = await connectThroughGateway({
-      gatewayPort: gateway.port,
-      authority: 'api.linkedin.com:443',
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(JSON.parse(response.body)).toEqual({
-      deniedHost: 'api.linkedin.com',
-      matchedPattern: 'capability_network_host',
-      reason:
-        'Capability-declared network host api.linkedin.com resolved to private, loopback, or link-local address 127.0.0.1.',
-      recovery: 'request or update network access',
-    });
-    expect(publishRuntimeEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: 'egress.connect',
-        payload: expect.objectContaining({
-          host: 'api.linkedin.com',
-          denied: true,
-          matchedPattern: 'capability_network_host',
-          capabilityId: 'skill.linkedin-posting.publish',
-        }),
-      }),
-    );
-  });
-
-  it('fails closed when attributed host DNS validation times out', async () => {
-    const gateway = await ensureEgressGateway({
-      key: 'test:attribution-dns-timeout',
-      settings: { denylist: [] },
-      principal: { appId: 'default', agentId: 'agent:test' },
-      networkAttribution: [
-        {
-          host: 'api.linkedin.com:443',
-          capabilityId: 'skill.linkedin-posting.publish',
-          capabilityLabel: 'LinkedIn Posting publish',
-        },
-      ],
-      lookupHostname: vi.fn(
-        () => new Promise<Array<{ address: string; family: 4 | 6 }>>(() => {}),
-      ),
-      dnsLookupTimeoutMs: 1,
-    });
-
-    const response = await connectThroughGateway({
-      gatewayPort: gateway.port,
-      authority: 'api.linkedin.com:443',
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(JSON.parse(response.body)).toEqual({
-      deniedHost: 'api.linkedin.com',
-      matchedPattern: 'capability_network_host',
-      reason:
-        'Capability-declared network host api.linkedin.com could not be resolved safely.',
-      recovery: 'request or update network access',
-    });
-  });
-
-  it('denies attributed declared hosts on undeclared ports', async () => {
-    const publishRuntimeEvent = vi.fn();
-    const gateway = await ensureEgressGateway({
-      key: 'test:attribution-wrong-port',
-      settings: { denylist: [] },
-      principal: { appId: 'default', agentId: 'agent:test' },
-      networkAttribution: [
-        {
-          host: 'api.linkedin.com:443',
-          capabilityId: 'skill.linkedin-posting.publish',
-          capabilityLabel: 'LinkedIn Posting publish',
-        },
-      ],
-      lookupHostname: vi.fn(async () => [
-        { address: '93.184.216.34', family: 4 as const },
-      ]),
-      publishRuntimeEvent,
-    });
-
-    const response = await connectThroughGateway({
-      gatewayPort: gateway.port,
-      authority: 'api.linkedin.com:8443',
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(JSON.parse(response.body)).toEqual({
-      deniedHost: 'api.linkedin.com',
-      matchedPattern: 'capability_network_host',
-      reason:
-        'Capability-declared network access did not declare api.linkedin.com:8443.',
-      recovery: 'request or update network access',
-    });
-    expect(publishRuntimeEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: 'egress.connect',
-        payload: expect.objectContaining({
-          host: 'api.linkedin.com',
-          denied: true,
-          matchedPattern: 'capability_network_host',
-        }),
-      }),
-    );
-  });
-
-  it('denies undeclared hosts when capability network hosts are present', async () => {
     const gateway = await ensureEgressGateway({
       key: 'test:attribution-undeclared-host',
       settings: { denylist: [] },
@@ -274,35 +124,69 @@ describe('egress gateway', () => {
           capabilityLabel: 'LinkedIn Posting publish',
         },
       ],
-      lookupHostname: vi.fn(async () => [
-        { address: '93.184.216.34', family: 4 as const },
-      ]),
+      upstreamProxy: {
+        provider: 'test-proxy',
+        url: `http://127.0.0.1:${upstream.port}/`,
+      },
+      publishRuntimeEvent,
     });
 
+    // Declared hosts are reviewed metadata, not an allowlist: an approved run
+    // can still reach other public hosts through the gateway by default.
     const response = await connectThroughGateway({
       gatewayPort: gateway.port,
-      authority: 'evil.example.com:443',
+      authority: 'example.com:443',
     });
 
-    expect(response.statusCode).toBe(403);
-    expect(response.statusLine).toContain(
-      'Gantry blocked egress to evil.example.com; request or update network access',
+    expect(response.statusCode).toBe(502);
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          host: 'example.com',
+          allowed: true,
+          denied: false,
+          reason: 'default_allow',
+        }),
+      }),
     );
-    expect(JSON.parse(response.body)).toEqual({
-      deniedHost: 'evil.example.com',
-      matchedPattern: 'capability_network_host',
-      reason:
-        'Capability-declared network access did not declare evil.example.com:443.',
-      recovery: 'request or update network access',
-    });
+    await upstream.close();
   });
 
-  it('allows undeclared hosts when attributed host restriction is explicitly off', async () => {
-    const target = await startTargetServer();
+  it('pins upstream-proxied HTTP requests to the locally resolved public address', async () => {
+    const upstream = await startRecordingProxy();
     const gateway = await ensureEgressGateway({
-      key: 'test:attribution-open-egress',
+      key: 'test:http-pinned-upstream',
       settings: { denylist: [] },
       principal: { appId: 'default', agentId: 'agent:test' },
+      upstreamProxy: {
+        provider: 'test-proxy',
+        url: `http://127.0.0.1:${upstream.port}/`,
+      },
+    });
+
+    const response = await httpProxyRequestThroughGateway({
+      gatewayPort: gateway.port,
+      url: 'http://api.linkedin.com/feed?q=1',
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(upstream.headers[0]).toContain(
+      'GET http://93.184.216.34/feed?q=1 HTTP/1.1',
+    );
+    expect(upstream.headers[0]?.toLowerCase()).toContain(
+      'host: api.linkedin.com',
+    );
+    await upstream.close();
+  });
+
+  it('does not return a Gantry 403 for an approved declared public host (regression)', async () => {
+    const upstream = await startRecordingProxy();
+    const gateway = await ensureEgressGateway({
+      key: 'test:attribution-linkedin-regression',
+      settings: { denylist: [] },
+      principal: { appId: 'default', agentId: 'agent:test' },
+      // An approved linkedin-posting skill action that declared its hosts, run
+      // interactively without a runtime DNS validator configured.
       networkAttribution: [
         {
           host: 'api.linkedin.com:443',
@@ -310,118 +194,28 @@ describe('egress gateway', () => {
           capabilityLabel: 'LinkedIn Posting publish',
         },
       ],
-      restrictToAttributedNetworkHosts: false,
-    });
-
-    const response = await connectThroughGateway({
-      gatewayPort: gateway.port,
-      authority: `127.0.0.1:${target.port}`,
-    });
-
-    expect(response.statusCode).toBe(200);
-    await target.close();
-  });
-
-  it('denies external hosts when restricted mode has no declared hosts', async () => {
-    const gateway = await ensureEgressGateway({
-      key: 'test:attribution-restricted-empty',
-      settings: { denylist: [] },
-      principal: { appId: 'default', agentId: 'agent:test' },
-      networkAttribution: [],
-      restrictToAttributedNetworkHosts: true,
-      lookupHostname: vi.fn(async () => [
-        { address: '93.184.216.34', family: 4 as const },
-      ]),
-    });
-
-    const response = await connectThroughGateway({
-      gatewayPort: gateway.port,
-      authority: 'api.linkedin.com:443',
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(JSON.parse(response.body)).toEqual({
-      deniedHost: 'api.linkedin.com',
-      matchedPattern: 'capability_network_host',
-      reason:
-        'Capability-declared network access did not declare api.linkedin.com:443.',
-      recovery: 'request or update network access',
-    });
-  });
-
-  it('allows model-provider hosts separately from restricted capability hosts', async () => {
-    const target = await startTargetServer();
-    const gateway = await ensureEgressGateway({
-      key: 'test:model-provider-restricted',
-      settings: { denylist: [] },
-      principal: { appId: 'default', agentId: 'agent:test' },
-      modelProviderNetworkHosts: [`127.0.0.1:${target.port}`],
-      networkAttribution: [],
-      restrictToAttributedNetworkHosts: true,
-    });
-
-    const allowed = await connectThroughGateway({
-      gatewayPort: gateway.port,
-      authority: `127.0.0.1:${target.port}`,
-    });
-    const denied = await connectThroughGateway({
-      gatewayPort: gateway.port,
-      authority: 'api.linkedin.com:443',
-    });
-
-    expect(allowed.statusCode).toBe(200);
-    expect(denied.statusCode).toBe(403);
-    expect(JSON.parse(denied.body)).toEqual({
-      deniedHost: 'api.linkedin.com',
-      matchedPattern: 'capability_network_host',
-      reason:
-        'Capability-declared network access did not declare api.linkedin.com:443.',
-      recovery: 'request or update network access',
-    });
-    await target.close();
-  });
-
-  it('fails closed for attributed HTTP proxy requests when upstream proxy cannot preserve DNS pinning', async () => {
-    const upstream = await startRecordingProxy();
-    const gateway = await ensureEgressGateway({
-      key: 'test:attribution-http-upstream-proxy',
-      settings: { denylist: [] },
-      principal: { appId: 'default', agentId: 'agent:test' },
-      networkAttribution: [
-        {
-          host: 'api.linkedin.com:80',
-          capabilityId: 'skill.linkedin-posting.publish',
-          capabilityLabel: 'LinkedIn Posting publish',
-        },
-      ],
-      lookupHostname: vi.fn(async () => [
-        { address: '93.184.216.34', family: 4 as const },
-      ]),
       upstreamProxy: {
         provider: 'test-proxy',
         url: `http://127.0.0.1:${upstream.port}/`,
       },
     });
 
-    const response = await httpRequestThroughGateway({
+    const response = await connectThroughGateway({
       gatewayPort: gateway.port,
-      url: 'http://api.linkedin.com/post',
+      authority: 'api.linkedin.com:443',
     });
 
-    expect(response.statusCode).toBe(403);
-    expect(JSON.parse(response.body)).toEqual({
-      deniedHost: 'api.linkedin.com',
-      matchedPattern: 'capability_network_host',
-      reason:
-        'Capability-declared network host api.linkedin.com cannot be DNS-pinned through an upstream HTTP proxy request.',
-      recovery: 'request or update network access',
-    });
-    expect(upstream.headers).toEqual([]);
+    // Previously the missing host validator turned a declared host into a
+    // CONNECT 403; now the approved capability reaches public hosts through the
+    // gateway while DNS pinning keeps private targets blocked.
+    expect(response.statusCode).not.toBe(403);
+    expect(upstream.headers[0]).toContain('CONNECT 93.184.216.34:443 HTTP/1.1');
+    expect(upstream.headers[0]).toContain('Host: api.linkedin.com:443');
     await upstream.close();
   });
 
   it('keeps default-allowed CONNECT traffic working when audit persistence fails', async () => {
-    const target = await startTargetServer();
+    const upstream = await startRecordingProxy();
     const publishRuntimeEvent = vi.fn(async () => {
       throw new Error('audit store unavailable');
     });
@@ -433,19 +227,23 @@ describe('egress gateway', () => {
         agentId: 'agent:test',
         conversationId: 'tg:test',
       },
+      upstreamProxy: {
+        provider: 'test-proxy',
+        url: `http://127.0.0.1:${upstream.port}/`,
+      },
       publishRuntimeEvent,
     });
 
     const response = await connectThroughGateway({
       gatewayPort: gateway.port,
-      authority: `127.0.0.1:${target.port}`,
+      authority: 'api.linkedin.com:443',
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(502);
     expect(publishRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: 'egress.connect' }),
     );
-    await target.close();
+    await upstream.close();
   });
 
   it('returns useful 403 JSON when denylist matches', async () => {
@@ -512,16 +310,20 @@ describe('egress gateway', () => {
   });
 
   it('closes promptly while CONNECT tunnels are still open', async () => {
-    const target = await startHoldingTarget();
+    const upstream = await startHoldingProxy();
     const gateway = await ensureEgressGateway({
       key: 'test:close-open-connect',
       settings: { denylist: [] },
       principal: { appId: 'default', agentId: 'agent:test' },
+      upstreamProxy: {
+        provider: 'test-proxy',
+        url: `http://127.0.0.1:${upstream.port}/`,
+      },
     });
 
     const tunnel = await openTunnelThroughGateway({
       gatewayPort: gateway.port,
-      authority: `127.0.0.1:${target.port}`,
+      authority: 'api.linkedin.com:443',
     });
 
     await expect(
@@ -536,15 +338,19 @@ describe('egress gateway', () => {
       ]),
     ).resolves.toBeUndefined();
     await waitForSocketClose(tunnel);
-    await target.close();
+    await upstream.close();
   });
 
   it('keeps running when a CONNECT client resets an established tunnel', async () => {
-    const target = await startHoldingTarget();
+    const upstream = await startHoldingProxy();
     const gateway = await ensureEgressGateway({
       key: 'test:client-reset-connect',
       settings: { denylist: [] },
       principal: { appId: 'default', agentId: 'agent:test' },
+      upstreamProxy: {
+        provider: 'test-proxy',
+        url: `http://127.0.0.1:${upstream.port}/`,
+      },
     });
     const uncaught = vi.fn();
     process.once('uncaughtException', uncaught);
@@ -552,14 +358,14 @@ describe('egress gateway', () => {
     try {
       const tunnel = await openTunnelThroughGateway({
         gatewayPort: gateway.port,
-        authority: `127.0.0.1:${target.port}`,
+        authority: 'api.linkedin.com:443',
       });
       tunnel.resetAndDestroy();
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(uncaught).not.toHaveBeenCalled();
     } finally {
       process.removeListener('uncaughtException', uncaught);
-      await target.close();
+      await upstream.close();
     }
   });
 });
@@ -677,6 +483,42 @@ async function startHoldingTarget(): Promise<{
   };
 }
 
+async function startHoldingProxy(): Promise<{
+  port: number;
+  close: () => Promise<void>;
+}> {
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.once('close', () => {
+      sockets.delete(socket);
+    });
+    let buffered = '';
+    socket.setEncoding('utf-8');
+    socket.on('data', (chunk) => {
+      buffered += chunk;
+      if (!buffered.includes('\r\n\r\n')) return;
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      socket.removeAllListeners('data');
+    });
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Holding proxy did not bind to TCP.');
+  }
+  return {
+    port: address.port,
+    close: () =>
+      new Promise((resolve) => {
+        for (const socket of sockets) socket.destroy();
+        server.close(() => resolve());
+      }),
+  };
+}
+
 function openTunnelThroughGateway(input: {
   gatewayPort: number;
   authority: string;
@@ -733,6 +575,34 @@ function waitForSocketClose(socket: net.Socket): Promise<void> {
       clearTimeout(timeout);
       resolve();
     });
+  });
+}
+
+function httpProxyRequestThroughGateway(input: {
+  gatewayPort: number;
+  url: string;
+}): Promise<{ statusCode: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: input.gatewayPort,
+        method: 'GET',
+        path: input.url,
+      },
+      (res) => {
+        let body = '';
+        res.setEncoding('utf-8');
+        res.on('data', (chunk) => {
+          body += chunk;
+        });
+        res.on('end', () => {
+          resolve({ statusCode: res.statusCode ?? 0, body });
+        });
+      },
+    );
+    req.on('error', reject);
+    req.end();
   });
 }
 

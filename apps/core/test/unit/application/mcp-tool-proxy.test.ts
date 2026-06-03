@@ -256,7 +256,7 @@ describe('assertMcpNetworkHostAllowed', () => {
     ).not.toThrow();
   });
 
-  it('denies a declared host on the wrong port', () => {
+  it('allows an undeclared host because MCP networkHosts are metadata', () => {
     expect(() =>
       assertMcpNetworkHostAllowed({
         serverName: 'github',
@@ -264,12 +264,10 @@ describe('assertMcpNetworkHostAllowed', () => {
         networkHosts: ['api.github.com:443'],
         denylist: [],
       }),
-    ).toThrow(
-      /MCP server github did not declare api\.github\.com:8443 for the approved tool access/,
-    );
+    ).not.toThrow();
   });
 
-  it('does not treat explicit port 80 as the default HTTPS port', () => {
+  it('allows an explicit non-default port when it is not denylisted', () => {
     expect(() =>
       assertMcpNetworkHostAllowed({
         serverName: 'github',
@@ -277,12 +275,10 @@ describe('assertMcpNetworkHostAllowed', () => {
         networkHosts: ['api.github.com:443'],
         denylist: [],
       }),
-    ).toThrow(
-      /MCP server github did not declare api\.github\.com:80 for the approved tool access/,
-    );
+    ).not.toThrow();
   });
 
-  it('denies an undeclared host with the MCP-specific message', () => {
+  it('allows an undeclared hostname when it is not denylisted', () => {
     expect(() =>
       assertMcpNetworkHostAllowed({
         serverName: 'github',
@@ -290,9 +286,7 @@ describe('assertMcpNetworkHostAllowed', () => {
         networkHosts: ['api.github.com:443'],
         denylist: [],
       }),
-    ).toThrow(
-      /MCP server github did not declare evil\.example\.com:443 for the approved tool access/,
-    );
+    ).not.toThrow();
   });
 
   it('lets the global denylist win over a declared host', () => {
@@ -434,9 +428,7 @@ describe('McpToolProxy', () => {
 
     await connect(capability);
 
-    await expect(connect(remoteCapability([]))).rejects.toThrow(
-      /MCP server github did not declare api\.github\.com:443/,
-    );
+    await expect(connect(remoteCapability([]))).resolves.toBeTruthy();
     denylist.push('api.github.com');
     await expect(connect(capability)).rejects.toThrow(
       /matches the egress denylist/,

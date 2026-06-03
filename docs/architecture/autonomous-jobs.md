@@ -100,12 +100,12 @@ Recovery: request_access { "target": { "kind": "capability", "id": "acme.records
 Recovery: request_access { "target": { "kind": "run_command", "argvPattern": "npm test *" }, "temporaryOnly": false, "reason": "This autonomous run needs scoped command access." }
 ```
 
-Missing capability recovery uses the same reviewed request tools as interactive
-agents: `request_access target.kind=capability` for reviewed semantic app/tool
-access, `request_access target.kind=run_command` only for scoped command
-fallback, `request_skill_install` or `request_skill_proposal` for skills, and
-`request_mcp_server` for third-party MCP servers. Approval updates the target
-agent's durable `access.selections` list or attached `access.sources`, exports the readable
+Missing capability recovery follows the same action-first flow as interactive
+agents: request the reviewed capability for the missing action, request source
+setup only when the skill, MCP server, or local CLI source is missing, and use
+`request_access target.kind=run_command` only as a scoped exact-command fallback
+when no reviewed capability fits. Approval updates the target agent's durable
+`access.selections` list or attached `access.sources`, exports the readable
 projection to `settings.yaml`, and activates for future runs. When a persistent
 tool approval matches paused jobs in `Setup required`, Gantry immediately
 re-runs shared setup readiness for those jobs. Jobs are reactivated and queued

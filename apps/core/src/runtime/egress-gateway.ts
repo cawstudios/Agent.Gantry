@@ -1,4 +1,5 @@
 import http from 'http';
+import dns from 'node:dns/promises';
 import { createHash } from 'crypto';
 import type { Duplex } from 'stream';
 
@@ -14,12 +15,6 @@ import {
 } from '../domain/events/runtime-event-types.js';
 import { normalizeRuntimeEventConversationId } from '../domain/events/runtime-event-conversation.js';
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
-import {
-  isIpAddress,
-  isPrivateNetworkAddress,
-  type HostnameLookup,
-} from '../domain/network/public-address-policy.js';
-import { lookupHostnameWithDeadline } from '../shared/hostname-lookup-deadline.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import {
   requestDirect,
@@ -27,6 +22,11 @@ import {
   tunnelDirect,
   tunnelViaUpstreamProxy,
 } from './egress-gateway-proxying.js';
+import {
+  isIpAddress,
+  isPrivateNetworkAddress,
+} from '../shared/network-host-declaration.js';
+import { lookupHostnameWithDeadline } from '../shared/hostname-lookup-deadline.js';
 
 export interface EgressGatewayPrincipal {
   appId: string;
@@ -68,10 +68,6 @@ interface EgressGatewayState {
   settings: EgressSettings;
   principal: EgressGatewayPrincipal;
   networkAttribution: Map<string, EgressNetworkAttribution>;
-  modelProviderNetworkHosts: Set<string>;
-  restrictToAttributedNetworkHosts: boolean;
-  lookupHostname?: HostnameLookup;
-  dnsLookupTimeoutMs: number;
   upstreamProxy?: EgressGatewayUpstreamProxy;
   publishRuntimeEvent?: (
     event: RuntimeEventPublishInput,
@@ -87,17 +83,6 @@ function networkAttributionMap(
     if (authority && !map.has(authority)) map.set(authority, entry);
   }
   return map;
-}
-
-function declaredNetworkHostSet(
-  hosts: readonly string[] | undefined,
-): Set<string> {
-  const out = new Set<string>();
-  for (const host of hosts ?? []) {
-    const authority = declaredNetworkAuthority(host);
-    if (authority) out.add(authority);
-  }
-  return out;
 }
 
 const EGRESS_GATEWAY_BASE_PORT = 18_080;
@@ -130,9 +115,6 @@ export async function ensureEgressGateway(input: {
   principal: EgressGatewayPrincipal;
   networkAttribution?: readonly EgressNetworkAttribution[];
   modelProviderNetworkHosts?: readonly string[];
-  restrictToAttributedNetworkHosts?: boolean;
-  lookupHostname?: HostnameLookup;
-  dnsLookupTimeoutMs?: number;
   upstreamProxy?: EgressGatewayUpstreamProxy;
   publishRuntimeEvent?: (
     event: RuntimeEventPublishInput,
@@ -145,19 +127,6 @@ export async function ensureEgressGateway(input: {
     existing.networkAttribution = networkAttributionMap(
       input.networkAttribution,
     );
-    existing.modelProviderNetworkHosts = declaredNetworkHostSet(
-      input.modelProviderNetworkHosts,
-    );
-    existing.restrictToAttributedNetworkHosts =
-      input.restrictToAttributedNetworkHosts ??
-      existing.networkAttribution.size > 0;
-    if (input.lookupHostname) {
-      existing.lookupHostname = input.lookupHostname;
-    } else {
-      delete existing.lookupHostname;
-    }
-    existing.dnsLookupTimeoutMs =
-      input.dnsLookupTimeoutMs ?? EGRESS_GATEWAY_DNS_LOOKUP_TIMEOUT_MS;
     if (input.upstreamProxy) {
       existing.upstreamProxy = input.upstreamProxy;
     } else {
@@ -192,16 +161,6 @@ export async function ensureEgressGateway(input: {
         settings: input.settings,
         principal: input.principal,
         networkAttribution,
-        modelProviderNetworkHosts: declaredNetworkHostSet(
-          input.modelProviderNetworkHosts,
-        ),
-        restrictToAttributedNetworkHosts:
-          input.restrictToAttributedNetworkHosts ?? networkAttribution.size > 0,
-        dnsLookupTimeoutMs:
-          input.dnsLookupTimeoutMs ?? EGRESS_GATEWAY_DNS_LOOKUP_TIMEOUT_MS,
-        ...(input.lookupHostname
-          ? { lookupHostname: input.lookupHostname }
-          : {}),
         ...(input.upstreamProxy ? { upstreamProxy: input.upstreamProxy } : {}),
         ...(input.publishRuntimeEvent
           ? { publishRuntimeEvent: input.publishRuntimeEvent }
@@ -279,21 +238,17 @@ async function handleConnectRequest(
     writeDeniedConnect(clientSocket, deny);
     return;
   }
-  const attributedTarget = await validateCapabilityAttributedTarget(
-    state,
-    target.host,
-    target.port,
-  );
-  if (attributedTarget.deny) {
+  const publicTarget = await resolvePublicEgressTarget(target);
+  if ('deny' in publicTarget) {
     await auditConnect(state, {
-      host: attributedTarget.deny.host,
+      host: publicTarget.deny.host,
       port: target.port,
       allowed: false,
       denied: true,
-      reason: attributedTarget.deny.reason,
-      matchedPattern: attributedTarget.deny.matchedPattern,
+      reason: publicTarget.deny.reason,
+      matchedPattern: publicTarget.deny.matchedPattern,
     });
-    writeDeniedConnect(clientSocket, attributedTarget.deny);
+    writeDeniedConnect(clientSocket, publicTarget.deny);
     return;
   }
   await auditConnect(state, {
@@ -306,7 +261,7 @@ async function handleConnectRequest(
   if (state.upstreamProxy) {
     await tunnelViaUpstreamProxy({
       upstream: state.upstreamProxy,
-      target: { ...target, connectHost: attributedTarget.connectHost },
+      target: publicTarget.target,
       clientSocket,
       head,
       trackSocket: (socket) => trackGatewaySocket(state, socket),
@@ -314,7 +269,7 @@ async function handleConnectRequest(
     return;
   }
   await tunnelDirect({
-    target: { ...target, connectHost: attributedTarget.connectHost },
+    target: publicTarget.target,
     clientSocket,
     head,
     trackSocket: (socket) => trackGatewaySocket(state, socket),
@@ -349,39 +304,22 @@ async function handleHttpProxyRequest(
     res.end(JSON.stringify(deniedBody(deny)));
     return;
   }
-  const attributedTarget = await validateCapabilityAttributedTarget(
-    state,
-    target.hostname,
-    urlPort(target),
-  );
-  if (attributedTarget.deny) {
+  const publicTarget = await resolvePublicEgressTarget({
+    host: normalizeEgressHost(target.hostname),
+    port: urlPort(target),
+    authority: target.host,
+  });
+  if ('deny' in publicTarget) {
     await auditConnect(state, {
-      host: attributedTarget.deny.host,
+      host: publicTarget.deny.host,
       port: urlPort(target),
       allowed: false,
       denied: true,
-      reason: attributedTarget.deny.reason,
-      matchedPattern: attributedTarget.deny.matchedPattern,
+      reason: publicTarget.deny.reason,
+      matchedPattern: publicTarget.deny.matchedPattern,
     });
     res.writeHead(403, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(deniedBody(attributedTarget.deny)));
-    return;
-  }
-  if (state.upstreamProxy && attributedTarget.connectHost) {
-    const deny = capabilityHostDeny(
-      normalizeEgressHost(target.hostname),
-      `Capability-declared network host ${normalizeEgressHost(target.hostname)} cannot be DNS-pinned through an upstream HTTP proxy request.`,
-    );
-    await auditConnect(state, {
-      host: deny.host,
-      port: urlPort(target),
-      allowed: false,
-      denied: true,
-      reason: deny.reason,
-      matchedPattern: deny.matchedPattern,
-    });
-    res.writeHead(403, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(deniedBody(deny)));
+    res.end(JSON.stringify(deniedBody(publicTarget.deny)));
     return;
   }
   await auditConnect(state, {
@@ -392,8 +330,13 @@ async function handleHttpProxyRequest(
     reason: 'default_allow',
   });
   const upstream = state.upstreamProxy
-    ? requestViaUpstreamProxy(state.upstreamProxy, req, target)
-    : requestDirect(req, target, attributedTarget.connectHost);
+    ? requestViaUpstreamProxy(
+        state.upstreamProxy,
+        req,
+        target,
+        publicTarget.target.connectHost,
+      )
+    : requestDirect(req, target, publicTarget.target.connectHost);
   upstream.on('response', (upstreamRes) => {
     res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
     upstreamRes.pipe(res);
@@ -403,100 +346,6 @@ async function handleHttpProxyRequest(
     res.end('Bad Gateway');
   });
   req.pipe(upstream);
-}
-
-async function validateCapabilityAttributedTarget(
-  state: EgressGatewayState,
-  host: string,
-  port: number,
-): Promise<{
-  connectHost?: string;
-  deny?: { host: string; matchedPattern: string; reason: string };
-}> {
-  const normalizedHost = normalizeEgressHost(host);
-  const authority = normalizedHost ? `${normalizedHost}:${port}` : undefined;
-  if (!normalizedHost || !authority) {
-    return {};
-  }
-  if (state.modelProviderNetworkHosts.has(authority)) {
-    return {};
-  }
-  if (!state.networkAttribution.has(authority)) {
-    return state.restrictToAttributedNetworkHosts
-      ? {
-          deny: capabilityHostDeny(
-            normalizedHost,
-            `Capability-declared network access did not declare ${authority}.`,
-          ),
-        }
-      : {};
-  }
-  if (isIpAddress(normalizedHost)) {
-    if (isPrivateNetworkAddress(normalizedHost)) {
-      return {
-        deny: capabilityHostDeny(
-          normalizedHost,
-          `Capability-declared network host ${normalizedHost} is private, loopback, or link-local.`,
-        ),
-      };
-    }
-    return { connectHost: normalizedHost };
-  }
-  if (!state.lookupHostname) {
-    return {
-      deny: capabilityHostDeny(
-        normalizedHost,
-        `Capability-declared network host ${normalizedHost} cannot be DNS-validated by this runtime.`,
-      ),
-    };
-  }
-  let records;
-  try {
-    records = await lookupHostnameWithDeadline({
-      hostname: normalizedHost,
-      lookupHostname: state.lookupHostname,
-      timeoutMs: state.dnsLookupTimeoutMs,
-      timeoutMessage: `Capability-declared network host ${normalizedHost} DNS validation timed out.`,
-    });
-  } catch {
-    return {
-      deny: capabilityHostDeny(
-        normalizedHost,
-        `Capability-declared network host ${normalizedHost} could not be resolved safely.`,
-      ),
-    };
-  }
-  if (records.length === 0) {
-    return {
-      deny: capabilityHostDeny(
-        normalizedHost,
-        `Capability-declared network host ${normalizedHost} did not resolve to a public address.`,
-      ),
-    };
-  }
-  const privateRecord = records.find((record) =>
-    isPrivateNetworkAddress(record.address),
-  );
-  if (privateRecord) {
-    return {
-      deny: capabilityHostDeny(
-        normalizedHost,
-        `Capability-declared network host ${normalizedHost} resolved to private, loopback, or link-local address ${privateRecord.address}.`,
-      ),
-    };
-  }
-  return { connectHost: records[0]!.address };
-}
-
-function capabilityHostDeny(
-  host: string,
-  reason: string,
-): { host: string; matchedPattern: string; reason: string } {
-  return {
-    host,
-    matchedPattern: 'capability_network_host',
-    reason,
-  };
 }
 
 function trackGatewaySocket(state: EgressGatewayState, socket: Duplex): void {
@@ -561,10 +410,7 @@ function deniedConnectReasonPhrase(deny: {
   host: string;
   matchedPattern: string;
 }): string {
-  const message =
-    deny.matchedPattern === 'capability_network_host'
-      ? `Gantry blocked egress to ${deny.host}; request or update network access`
-      : `Gantry blocked egress to ${deny.host}`;
+  const message = `Gantry blocked egress to ${deny.host}`;
   return sanitizeHttpReasonPhrase(message);
 }
 
@@ -586,10 +432,94 @@ function deniedBody(deny: {
     deniedHost: deny.host,
     matchedPattern: deny.matchedPattern,
     reason: deny.reason,
-    ...(deny.matchedPattern === 'capability_network_host'
-      ? { recovery: 'request or update network access' }
-      : {}),
   };
+}
+
+async function resolvePublicEgressTarget(target: {
+  host: string;
+  port: number;
+  authority: string;
+}): Promise<
+  | {
+      target: {
+        host: string;
+        port: number;
+        authority: string;
+        connectHost?: string;
+      };
+    }
+  | {
+      deny: { host: string; matchedPattern: string; reason: string };
+    }
+> {
+  const host = normalizeEgressHost(target.host);
+  if (isIpAddress(host)) {
+    const address = host.replace(/^\[/, '').replace(/\]$/, '');
+    if (isPrivateNetworkAddress(address)) {
+      return { deny: privateNetworkDeny(host) };
+    }
+    return { target: { ...target, host, connectHost: address } };
+  }
+  if (isLocalhostName(host)) {
+    return { deny: privateNetworkDeny(host) };
+  }
+  let records: Array<{ address: string; family: number }>;
+  try {
+    records = await lookupHostnameWithDeadline({
+      hostname: host,
+      lookupHostname: lookupEgressHostname,
+      timeoutMs: EGRESS_GATEWAY_DNS_LOOKUP_TIMEOUT_MS,
+      timeoutMessage: 'Egress gateway DNS lookup timed out.',
+    });
+  } catch {
+    return {
+      deny: {
+        host,
+        matchedPattern: 'dns_resolution_failed',
+        reason: `Network blocked by policy: ${host} did not resolve to a public routable address.`,
+      },
+    };
+  }
+  const firstPublic = records.find(
+    (record) => !isPrivateNetworkAddress(record.address),
+  );
+  if (
+    records.length === 0 ||
+    !firstPublic ||
+    records.some((record) => isPrivateNetworkAddress(record.address))
+  ) {
+    return { deny: privateNetworkDeny(host) };
+  }
+  return { target: { ...target, host, connectHost: firstPublic.address } };
+}
+
+function privateNetworkDeny(host: string): {
+  host: string;
+  matchedPattern: string;
+  reason: string;
+} {
+  return {
+    host,
+    matchedPattern: 'private_network',
+    reason: `Network blocked by policy: ${host} targets a private, loopback, link-local, or otherwise non-public address.`,
+  };
+}
+
+function isLocalhostName(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/\.+$/, '');
+  return normalized === 'localhost' || normalized.endsWith('.localhost');
+}
+
+async function lookupEgressHostname(
+  hostname: string,
+): Promise<Array<{ address: string; family: 4 | 6 }>> {
+  const records = await dns.lookup(hostname, { all: true, verbatim: true });
+  return records
+    .filter((record) => record.family === 4 || record.family === 6)
+    .map((record) => ({
+      address: record.address,
+      family: record.family as 4 | 6,
+    }));
 }
 
 async function auditConnect(

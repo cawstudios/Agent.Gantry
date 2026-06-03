@@ -122,7 +122,7 @@ export function permissionButtonLabel(
     return 'Allow 5 min';
   }
   if (mode === 'cancel') return 'Cancel';
-  return 'Always allow';
+  return 'Allow for future';
 }
 
 export function formatPermissionPromptText(
@@ -167,11 +167,8 @@ export function formatPermissionReceiptText(
 ): string {
   const summary = formatPermissionReceiptActionSummary(request);
   if (!decision.approved || decision.mode === 'cancel') {
-    return limitPermissionMessage(`🚫 Canceled · ${summary}`);
+    return limitPermissionMessage(`Canceled: ${summary}. Nothing changed.`);
   }
-  const actor = decision.decidedBy
-    ? ` (by ${sanitizePermissionText(decision.decidedBy, 60, 20)})`
-    : '';
   if (decision.mode === 'allow_timed_grant') {
     const expiresAt = decision.timedGrantExpiresAtMs;
     const until = expiresAt
@@ -181,13 +178,20 @@ export function formatPermissionReceiptText(
         })
       : 'soon';
     return limitPermissionMessage(
-      `✅ Allowed 5 min · ${summary} · until ${until}${actor}`,
+      `Allowed for 5 min: ${summary}. This expires at ${until}.`,
     );
   }
   if (decision.mode === 'allow_persistent_rule') {
-    return limitPermissionMessage(`✅ Always allowed · ${summary}${actor}`);
+    const agentName = request
+      ? formatAgentDisplayName(request.sourceAgentFolder)
+      : 'this agent';
+    return limitPermissionMessage(
+      `Allowed for future: ${summary}. Saved for ${agentName}. You can remove it from Agent Access.`,
+    );
   }
-  return limitPermissionMessage(`✅ Allowed once · ${summary}${actor}`);
+  return limitPermissionMessage(
+    `Allowed once: ${summary}. The agent will continue this request.`,
+  );
 }
 
 export const PERMISSION_GLYPH = '🔐';
@@ -313,15 +317,17 @@ function formatPermissionContextLines(
   request: PermissionApprovalRequest | undefined,
 ): string[] {
   if (!request) return [];
-  const source = request.jobId
+  const context = request.jobId
     ? `scheduled job${request.jobName ? `: ${sanitizePermissionText(request.jobName, 120, 40)}` : ''}`
     : 'agent chat';
   const lines = [
-    `${formatAgentDisplayName(request.sourceAgentFolder)} · ${source}`,
+    `Agent: ${formatAgentDisplayName(request.sourceAgentFolder)}`,
+    `Context: ${context}`,
   ];
   if (requestHasThreadRoute(request)) {
     lines.push('Approval applies to the parent conversation.');
   }
+  lines.push('The agent cannot approve this itself.');
   return lines;
 }
 

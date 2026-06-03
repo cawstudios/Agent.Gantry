@@ -256,7 +256,7 @@ describe('ipc-interaction-handler', () => {
     );
     expect(sendMessage).toHaveBeenCalledWith(
       'tg:team',
-      expect.stringContaining('Always allowed:'),
+      expect.stringContaining('Allowed for future:'),
       expect.any(Object),
     );
   });
@@ -345,7 +345,7 @@ describe('ipc-interaction-handler', () => {
     );
     expect(sendMessage).toHaveBeenCalledWith(
       'tg:team',
-      expect.stringContaining('Always allowed:'),
+      expect.stringContaining('Allowed for future:'),
       { threadId: 'topic-7' },
     );
   });

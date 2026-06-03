@@ -101,6 +101,25 @@ export function buildAgentToolAccessView(input: {
   };
 }
 
+export function buildConfiguredAgentToolAccess(
+  configuredTools: string[],
+  requestableAdminTools: readonly RequestableAdminToolAccess[],
+): AgentToolAccessView {
+  return buildAgentToolAccessView({
+    configuredTools,
+    defaultTools: [],
+    availableButGatedTools: PERMISSION_GATED_NATIVE_TOOLS.filter(
+      (toolName) =>
+        !configuredTools.some(
+          (configured) =>
+            configured === toolName || configured.startsWith(`${toolName}(`),
+        ),
+    ),
+    requestableAdminTools,
+    source: 'Postgres agent_tool_bindings projected from settings.yaml',
+  });
+}
+
 export function buildJobToolAccessView(input: {
   inheritedAgentTools?: readonly string[];
   effectiveAllowedTools?: readonly string[];

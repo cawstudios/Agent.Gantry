@@ -875,18 +875,10 @@ describe('agent-runner IPC lifecycle', () => {
       expect(sdkEnv.DENO_CERT).toBe('/tmp/model_gateway-ca.pem');
       expect(sdkEnv.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
       expect(sdkEnv.NO_PROXY?.split(',')).toEqual(
-        expect.arrayContaining([
-          '127.0.0.1',
-          'localhost',
-          '::1',
-          'github.com',
-          '.github.com',
-          'api.github.com',
-          'raw.githubusercontent.com',
-          'objects.githubusercontent.com',
-          'codeload.github.com',
-        ]),
+        expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
       );
+      expect(sdkEnv.NO_PROXY).not.toContain('api.github.com');
+      expect(sdkEnv.NO_PROXY).not.toContain('.github.com');
       expect(sdkEnv.no_proxy).toBe(sdkEnv.NO_PROXY);
       expect(sdkEnv.GANTRY_IPC_AUTH_TOKEN).toBeUndefined();
       expect(sdkEnv.GANTRY_IPC_RESPONSE_VERIFY_KEY).toBeUndefined();

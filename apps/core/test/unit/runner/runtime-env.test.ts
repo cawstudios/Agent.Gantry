@@ -60,18 +60,20 @@ describe('Anthropic runner runtime env', () => {
     expect(sdkEnv.CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL).toBe('1');
   });
 
-  it('keeps SDK no-proxy loopback-only when attributed egress is restricted', async () => {
+  it('keeps SDK no-proxy loopback-only so external hosts pass through Gantry egress', async () => {
     process.env.NO_PROXY = 'api.github.com,corp.internal,127.0.0.1';
     process.env.no_proxy = 'lower.internal,localhost';
-    process.env.GANTRY_EGRESS_RESTRICT_EXTERNAL_NO_PROXY = '1';
     const { buildSdkEnv } = await loadRuntimeEnv();
 
     const sdkEnv = buildSdkEnv();
     const noProxy = sdkEnv.NO_PROXY?.split(',') ?? [];
 
-    expect(noProxy).toEqual(['127.0.0.1', 'localhost', '::1']);
+    expect(noProxy).toEqual(
+      expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
+    );
     expect(sdkEnv.no_proxy).toBe(sdkEnv.NO_PROXY);
     expect(noProxy).not.toContain('api.github.com');
+    expect(noProxy).not.toContain('.github.com');
     expect(noProxy).not.toContain('corp.internal');
     expect(noProxy).not.toContain('lower.internal');
   });

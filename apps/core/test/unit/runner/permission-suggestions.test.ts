@@ -150,6 +150,27 @@ describe('scheduledPermissionSuggestions', () => {
 
     expect(
       synthesizePermissionSuggestions('Bash', {
+        toolInput: {
+          command:
+            'GODEBUG=netdns=go /opt/homebrew/bin/acme records get leads --json',
+        },
+      }),
+    ).toEqual([
+      {
+        type: 'addRules',
+        behavior: 'allow',
+        destination: 'session',
+        rules: [
+          {
+            toolName: 'RunCommand',
+            ruleContent: '/opt/homebrew/bin/acme records get leads --json',
+          },
+        ],
+      },
+    ]);
+
+    expect(
+      synthesizePermissionSuggestions('Bash', {
         toolInput: { command: 'python3 /tmp/check.py' },
       }),
     ).toBeUndefined();
@@ -233,7 +254,7 @@ describe('scheduledPermissionSuggestions', () => {
       scheduledPermissionSuggestionPlan('Bash', undefined, {
         toolInput: {
           command:
-            'REQUESTS_CA_BUNDLE=$NODE_EXTRA_CA_CERTS /opt/homebrew/bin/python3 "$CLAUDE_PROJECT_DIR/skills/linkedin-posting/post.py" --file /tmp/post.md',
+            'GODEBUG=netdns=go REQUESTS_CA_BUNDLE=$NODE_EXTRA_CA_CERTS /opt/homebrew/bin/python3 "$CLAUDE_PROJECT_DIR/skills/linkedin-posting/post.py" --file /tmp/post.md',
         },
         semanticCapabilityDefinitions: [capability],
       }),

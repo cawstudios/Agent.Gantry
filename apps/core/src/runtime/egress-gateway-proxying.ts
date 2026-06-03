@@ -44,15 +44,21 @@ export function requestViaUpstreamProxy(
   upstream: EgressGatewayUpstreamProxy,
   req: http.IncomingMessage,
   target: URL,
+  connectHost?: string,
 ): http.ClientRequest {
   const proxy = new URL(upstream.url);
-  const headers = { ...req.headers };
+  const headers = connectHost
+    ? { ...req.headers, host: target.host }
+    : { ...req.headers };
   applyProxyAuthorization(headers, proxy);
+  const proxyTarget = connectHost
+    ? pinnedProxyUrl(target, connectHost)
+    : target;
   const upstreamRequest = http.request({
     hostname: proxy.hostname,
     port: proxy.port || 80,
     method: req.method,
-    path: target.toString(),
+    path: proxyTarget.toString(),
     headers,
   });
   upstreamRequest.setTimeout(EGRESS_GATEWAY_CONNECT_TIMEOUT_MS, () => {
@@ -61,6 +67,15 @@ export function requestViaUpstreamProxy(
     );
   });
   return upstreamRequest;
+}
+
+function pinnedProxyUrl(target: URL, connectHost: string): URL {
+  const pinned = new URL(target.toString());
+  pinned.hostname =
+    connectHost.includes(':') && !connectHost.startsWith('[')
+      ? `[${connectHost}]`
+      : connectHost;
+  return pinned;
 }
 
 export async function tunnelDirect(input: {

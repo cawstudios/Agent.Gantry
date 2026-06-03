@@ -227,7 +227,7 @@ describe('admin IPC handlers', () => {
       ok: false,
       code: 'invalid_request',
       error:
-        'Capability access requires an active reviewed capability catalog entry. Use capability_search/propose_capability/manage_capability before request_access.',
+        'Capability access requires an active reviewed capability catalog entry. Request the reviewed capability with request_access target.kind=capability.',
     });
     expect(requestPermissionApproval).not.toHaveBeenCalled();
   });

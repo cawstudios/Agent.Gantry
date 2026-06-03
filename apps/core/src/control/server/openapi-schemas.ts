@@ -198,6 +198,7 @@ export const openApiSchemas: Record<string, JsonSchema> = {
         items: { $ref: '#/components/schemas/CapabilitySelection' },
       },
       toolAccess: metadata,
+      summary: metadata,
       updatedAt: isoDateTime,
     },
   },

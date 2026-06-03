@@ -232,37 +232,6 @@ function modelProviderNetworkHostsFromModelEntry(
   }
 }
 
-function shouldRestrictToDeclaredCapabilityNetworkHosts(
-  runtimeAccess: AgentInput['runtimeAccess'],
-): boolean {
-  let hasScopedHosts = false;
-  for (const access of runtimeAccess ?? []) {
-    if (
-      access.sourceType === 'local_cli' ||
-      access.sourceType === 'skill_action'
-    ) {
-      for (const binding of access.networkBindings ?? []) {
-        const hasHosts = (binding.hosts ?? []).some((host) => host.trim());
-        if (hasHosts) {
-          hasScopedHosts = true;
-          continue;
-        }
-        return false;
-      }
-      continue;
-    }
-    if (access.sourceType === 'mcp_server') {
-      const hasHosts = (access.networkHosts ?? []).some((host) => host.trim());
-      if (hasHosts) {
-        hasScopedHosts = true;
-        continue;
-      }
-      if (access.allowedTools.length > 0) return false;
-    }
-  }
-  return hasScopedHosts;
-}
-
 function withStdioMcpEgressEnv(
   capabilities: readonly MaterializedMcpCapability[],
   env: NodeJS.ProcessEnv,
@@ -677,8 +646,6 @@ export async function spawnAgent(
     const networkAttribution = egressNetworkAttributionFromRuntimeAccess(
       effectiveRuntimeAccess,
     );
-    const restrictToCapabilityNetworkHosts =
-      shouldRestrictToDeclaredCapabilityNetworkHosts(effectiveRuntimeAccess);
     const memoryIpcAllowedActions = selectedMemoryIpcActionsFromToolRules(
       trustedAllowedTools ?? [],
       {
@@ -700,7 +667,6 @@ export async function spawnAgent(
       },
       modelProviderNetworkHosts,
       networkAttribution,
-      restrictToAttributedNetworkHosts: restrictToCapabilityNetworkHosts,
       ...(options?.mcpHostnameLookup
         ? { lookupHostname: options.mcpHostnameLookup }
         : {}),
@@ -786,12 +752,7 @@ export async function spawnAgent(
       GANTRY_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
       GANTRY_EGRESS_PROXY_URL: egressGateway.proxyUrl,
     };
-    applyAgentEgressNoProxyEnv(env, {
-      externalBypass: !restrictToCapabilityNetworkHosts,
-    });
-    if (restrictToCapabilityNetworkHosts) {
-      env.GANTRY_EGRESS_RESTRICT_EXTERNAL_NO_PROXY = '1';
-    }
+    applyAgentEgressNoProxyEnv(env, { externalBypass: false });
     // Job-level model overrides group-level model.
     const effectiveModelSource = input.model ? 'job.model' : modelConfig.source;
 

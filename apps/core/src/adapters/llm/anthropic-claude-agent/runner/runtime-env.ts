@@ -39,18 +39,6 @@ export const PERMISSION_REQUEST_TIMEOUT_MS = getPermissionTimeoutMs(
 export const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 export const IPC_POLL_MS = 500;
 
-function copyEnv(
-  target: Record<string, string | undefined>,
-  keys: string[],
-): void {
-  for (const key of keys) {
-    const value = process.env[key];
-    if (typeof value === 'string' && value.length > 0) {
-      target[key] = value;
-    }
-  }
-}
-
 function copyPlaceholderEnv(
   target: Record<string, string | undefined>,
   keys: string[],
@@ -157,12 +145,8 @@ export function buildSdkEnv(
   Object.assign(sdkEnv, readModelCredentialEnv(modelCredentialEnv));
   applyNeutralCaTrustAliases(sdkEnv);
   copyPlaceholderEnv(sdkEnv, ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']);
-  copyEnv(sdkEnv, ['NO_PROXY', 'no_proxy']);
   stripNonModelProxyEnv(sdkEnv);
-  applyAgentEgressNoProxyEnv(sdkEnv, {
-    externalBypass:
-      process.env.GANTRY_EGRESS_RESTRICT_EXTERNAL_NO_PROXY !== '1',
-  });
+  applyAgentEgressNoProxyEnv(sdkEnv, { externalBypass: false });
   delete sdkEnv.GANTRY_IPC_AUTH_TOKEN;
   delete sdkEnv.GANTRY_IPC_RESPONSE_VERIFY_KEY;
   delete sdkEnv.GANTRY_IPC_RESPONSE_KEY_ID;

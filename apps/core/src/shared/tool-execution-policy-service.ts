@@ -1,4 +1,7 @@
-import { evaluateAutonomousToolUse } from './tool-rule-matcher.js';
+import {
+  evaluateAutonomousToolUse,
+  normalizeRuntimeOwnedBashCommandForMatching,
+} from './tool-rule-matcher.js';
 import {
   bashExecutableName,
   nonDurableBashLeafReason,
@@ -456,7 +459,9 @@ function escapeJson(value: string): string {
 }
 
 function persistentBashRecoveryRule(command: string): string | undefined {
-  const parsed = parseBashCommand(command);
+  const parsed = parseBashCommand(
+    normalizeRuntimeOwnedBashCommandForMatching(command),
+  );
   if (!parsed.ok || parsed.leaves.length !== 1) return undefined;
   const [leaf] = parsed.leaves;
   if (!leaf || nonDurableBashLeafReason(leaf)) return undefined;

@@ -482,6 +482,75 @@ describe('ToolExecutionPolicyService', () => {
     );
   });
 
+  it('allows autonomous reviewed commands despite runtime-owned env aliases', () => {
+    const skillRequest = classifier.classify({
+      origin: 'sdk',
+      toolName: 'Bash',
+      toolInput: {
+        command:
+          'REQUESTS_CA_BUNDLE=$NODE_EXTRA_CA_CERTS /opt/homebrew/bin/python3 "$CLAUDE_PROJECT_DIR/skills/linkedin-posting/post.py" --file /tmp/post.md --json',
+      },
+      executionMode: 'autonomous',
+      runContext: { jobId: 'job-skill' },
+    });
+
+    expect(
+      policy.evaluate({
+        request: skillRequest,
+        autonomousAllowedToolRules: [
+          'RunCommand(skills/linkedin-posting/post.py *)',
+        ],
+      }),
+    ).toMatchObject({
+      status: 'allow',
+      matchedRule: 'RunCommand(skills/linkedin-posting/post.py *)',
+    });
+
+    const cliRequest = classifier.classify({
+      origin: 'sdk',
+      toolName: 'Bash',
+      toolInput: {
+        command:
+          'GODEBUG=netdns=go /opt/homebrew/bin/acme records get leads --json',
+      },
+      executionMode: 'autonomous',
+      runContext: { jobId: 'job-cli' },
+    });
+
+    expect(
+      policy.evaluate({
+        request: cliRequest,
+        autonomousAllowedToolRules: [
+          'RunCommand(/opt/homebrew/bin/acme records get *)',
+        ],
+      }),
+    ).toMatchObject({
+      status: 'allow',
+      matchedRule: 'RunCommand(/opt/homebrew/bin/acme records get *)',
+    });
+  });
+
+  it('recovers autonomous runtime-owned env aliases as plain scoped commands', () => {
+    const request = classifier.classify({
+      origin: 'sdk',
+      toolName: 'Bash',
+      toolInput: {
+        command:
+          'GODEBUG=netdns=go /opt/homebrew/bin/acme records get leads --json',
+      },
+      executionMode: 'autonomous',
+      runContext: { jobId: 'job-cli' },
+    });
+
+    expect(
+      policy.evaluate({ request, autonomousAllowedToolRules: [] }),
+    ).toMatchObject({
+      status: 'deny',
+      recoveryAction:
+        'request_access { "target": { "kind": "run_command", "argvPattern": "/opt/homebrew/bin/acme records get leads --json" }, "temporaryOnly": false, "reason": "This autonomous run needs scoped command access." }',
+    });
+  });
+
   it('preserves closest-rule mismatch details on autonomous denials', () => {
     const request = classifier.classify({
       origin: 'sdk',

@@ -11,6 +11,7 @@ import type { McpServerDefinition } from '../../../domain/mcp/mcp-servers.js';
 import type { SkillCatalogItem } from '../../../domain/skills/skills.js';
 import type { ToolCatalogItem } from '../../../domain/tools/tools.js';
 import type { AgentToolAccessView } from '../../../shared/tool-access-view.js';
+import type { AgentAccessSummary } from '../../../application/agents/agent-access-summary.js';
 import { semanticCapabilityFromToolCatalogItem } from '../../../shared/semantic-capabilities.js';
 import {
   authorizeControlRequest,
@@ -130,6 +131,7 @@ function accessToResponse(input: {
   sources: unknown;
   capabilities: Array<{ id: string; version: string }>;
   toolAccess: AgentToolAccessView;
+  summary: AgentAccessSummary;
   updatedAt: string;
 }) {
   const { capabilities, ...rest } = input;

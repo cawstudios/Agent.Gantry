@@ -1400,15 +1400,9 @@ describe('agent-spawn timeout behavior', () => {
       port: 18080,
     });
     expect(env.NO_PROXY.split(',')).toEqual(
-      expect.arrayContaining([
-        'github.com',
-        '.github.com',
-        'api.github.com',
-        'raw.githubusercontent.com',
-        'objects.githubusercontent.com',
-        'codeload.github.com',
-      ]),
+      expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
     );
+    expect(env.NO_PROXY).not.toContain('api.github.com');
   });
 
   it('keeps host-only brokered OpenAI embedding credentials out of the Claude runner input', async () => {
@@ -1658,20 +1652,14 @@ describe('agent-spawn timeout behavior', () => {
             expect.objectContaining({ host: 'oauth2.googleapis.com:443' }),
             expect.objectContaining({ host: 'sheets.googleapis.com:443' }),
           ],
-          restrictToAttributedNetworkHosts: false,
         }),
       );
-      expect(env.GANTRY_EGRESS_RESTRICT_EXTERNAL_NO_PROXY).toBeUndefined();
       expect(env.NO_PROXY.split(',')).toEqual(
-        expect.arrayContaining([
-          '127.0.0.1',
-          'localhost',
-          '::1',
-          'api.github.com',
-          'corp.internal',
-          'lower.internal',
-        ]),
+        expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
       );
+      expect(env.NO_PROXY).not.toContain('api.github.com');
+      expect(env.NO_PROXY).not.toContain('corp.internal');
+      expect(env.NO_PROXY).not.toContain('lower.internal');
     } finally {
       if (originalNoProxy === undefined) {
         delete process.env.NO_PROXY;
@@ -1847,13 +1835,11 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.NO_PROXY.split(',')).toEqual(
       expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
     );
-    expect(env.NO_PROXY.split(',')).not.toEqual(
-      expect.arrayContaining(['api.github.com', '.github.com']),
-    );
+    expect(env.NO_PROXY).not.toContain('api.github.com');
+    expect(env.NO_PROXY).not.toContain('.github.com');
     expect(mockEnsureEgressGateway).toHaveBeenCalledWith(
       expect.objectContaining({
         modelProviderNetworkHosts: ['api.anthropic.com:443'],
-        restrictToAttributedNetworkHosts: true,
         networkAttribution: expect.arrayContaining([
           expect.objectContaining({ host: 'api.github.com:443' }),
         ]),
@@ -2586,22 +2572,12 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.GANTRY_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
     expect(env.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON).toBeUndefined();
     expect(env.NO_PROXY.split(',')).toEqual(
-      expect.arrayContaining([
-        'corp.internal',
-        'lower.internal',
-        '127.0.0.1',
-        'localhost',
-        '::1',
-      ]),
+      expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
     );
+    expect(env.NO_PROXY).not.toContain('corp.internal');
+    expect(env.NO_PROXY).not.toContain('lower.internal');
     expect(env.no_proxy.split(',')).toEqual(
-      expect.arrayContaining([
-        'corp.internal',
-        'lower.internal',
-        '127.0.0.1',
-        'localhost',
-        '::1',
-      ]),
+      expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
     );
     if (originalNoProxy === undefined) {
       delete process.env.NO_PROXY;

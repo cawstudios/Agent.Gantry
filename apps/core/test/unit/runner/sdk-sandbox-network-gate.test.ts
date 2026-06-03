@@ -184,14 +184,80 @@ describe('sdk sandbox network gate', () => {
       parentToolUseIDHash: sha256('toolu_mcp_1'),
       approvedToolName: 'mcp__github__create_issue',
       hostHash: networkHostHash('api.github.com'),
-      approvedHostHashes: [networkHostHash('api.github.com')],
     });
   });
 
-  it('denies parent-linked external MCP prompts without reviewed source hosts', () => {
+  it('suppresses parent-linked MCP prompts for reviewed IPv6 source hosts', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, {
+      ...runnerInput,
+      runtimeAccess: mcpServerRuntimeAccess({
+        hosts: ['[2606:4700:4700::1111]:443'],
+      }),
+    });
+
+    gate.rememberAllowedTool(
+      'mcp__github__create_issue',
+      { owner: 'acme', repo: 'roadmap' },
+      { toolUseID: 'toolu_mcp_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: '[2606:4700:4700::1111]:443', parentToolUseID: 'toolu_mcp_1' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision?.behavior).toBe('allow');
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_suppressed',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      parentToolUseIDHash: sha256('toolu_mcp_1'),
+      hostHash: sha256('2606:4700:4700::1111:443'),
+    });
+  });
+
+  it('applies reviewed MCP network hosts when runtime access uses a wildcard tool rule', () => {
+    const now = { value: 1_000 };
+    const gate = makeGate(now, {
+      ...runnerInput,
+      runtimeAccess: mcpServerRuntimeAccess({
+        allowedTools: ['mcp__github__*'],
+        hosts: ['api.github.com:443'],
+      }),
+    });
+
+    gate.rememberAllowedTool(
+      'mcp__github__create_issue',
+      { owner: 'acme', repo: 'roadmap' },
+      { toolUseID: 'toolu_mcp_1' },
+    );
+    const decision = gate.decide(
+      'SandboxNetworkAccess',
+      { host: 'evil.example.com', parentToolUseID: 'toolu_mcp_1' },
+      { toolUseID: 'toolu_network_1' },
+    );
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('outside the reviewed tool metadata'),
+      }),
+    );
+    expect(latestPayload()).toMatchObject({
+      decision: 'sdk_network_gate_denied',
+      networkToolUseIDHash: sha256('toolu_network_1'),
+      parentToolUseIDHash: sha256('toolu_mcp_1'),
+      hostHash: networkHostHash('evil.example.com'),
+    });
+  });
+
+  it('suppresses parent-linked external MCP prompts when no host metadata is declared', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now);
 
+    // Declared MCP hosts are reviewed metadata, not durable network authority,
+    // so an approved MCP operation is not blocked just because its source
+    // server declared no hosts.
     gate.rememberAllowedTool(
       'mcp__github__create_issue',
       { owner: 'acme', repo: 'roadmap' },
@@ -203,16 +269,12 @@ describe('sdk sandbox network gate', () => {
       { toolUseID: 'toolu_network_1' },
     );
 
-    expect(decision).toEqual(
-      expect.objectContaining({
-        behavior: 'deny',
-        message: expect.stringContaining('not declared'),
-      }),
-    );
+    expect(decision?.behavior).toBe('allow');
     expect(latestPayload()).toMatchObject({
-      decision: 'sdk_network_gate_denied',
+      decision: 'sdk_network_gate_suppressed',
       networkToolUseIDHash: sha256('toolu_network_1'),
       parentToolUseIDHash: sha256('toolu_mcp_1'),
+      approvedToolName: 'mcp__github__create_issue',
       hostHash: networkHostHash('api.github.com'),
     });
   });
@@ -241,11 +303,10 @@ describe('sdk sandbox network gate', () => {
       networkToolUseIDHash: sha256('toolu_network_1'),
       parentToolUseIDHash: sha256('toolu_mcp_1'),
       hostHash: networkHostHash('api.github.com:8443'),
-      approvedHostHashes: [networkHostHash('api.github.com')],
     });
   });
 
-  it('does not collapse explicit port 80 to the default HTTPS port', () => {
+  it('denies parent-linked MCP prompts for undeclared explicit ports', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, {
       ...runnerInput,
@@ -269,7 +330,6 @@ describe('sdk sandbox network gate', () => {
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
       hostHash: networkHostHash('api.github.com:80'),
-      approvedHostHashes: [networkHostHash('api.github.com:443')],
     });
   });
 
@@ -295,7 +355,6 @@ describe('sdk sandbox network gate', () => {
       tokenExpiresAtMs: 301_000,
       tokenTtlMs: 300_000,
     });
-    expect(payload).not.toHaveProperty('approvedHostHashes');
   });
 
   it('suppresses SDK network prompts during a global approval window', () => {
@@ -489,7 +548,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('denies parentless scheduled job network prompts for a different host', () => {
+  it('denies parentless scheduled job network prompts for hosts outside the reviewed command binding', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, {
       ...runnerInput,
@@ -499,7 +558,7 @@ describe('sdk sandbox network gate', () => {
 
     gate.rememberAllowedTool(
       'Bash',
-      { command: 'acme records get leads --json' },
+      { command: 'GODEBUG=netdns=go acme records get leads --json' },
       { toolUseID: 'toolu_bash_1' },
     );
     const decision = gate.decide(
@@ -508,17 +567,11 @@ describe('sdk sandbox network gate', () => {
       { toolUseID: 'toolu_network_1' },
     );
 
-    expect(decision).toEqual(
-      expect.objectContaining({
-        behavior: 'deny',
-        message: expect.stringContaining('without a parent tool-use id'),
-      }),
-    );
+    expect(decision?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
       networkToolUseIDHash: sha256('toolu_network_1'),
       hostHash: networkHostHash('registry.npmjs.org'),
-      expiredTokenCount: 0,
     });
   });
 
@@ -561,7 +614,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('denies parentless scheduled job network prompts when the approved command has no host binding', () => {
+  it('denies parentless scheduled job network prompts when the approved command has no capability binding', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, { ...runnerInput, isScheduledJob: true });
 
@@ -612,11 +665,10 @@ describe('sdk sandbox network gate', () => {
       networkToolUseIDHash: sha256('toolu_network_1'),
       parentToolUseIDHash: sha256('toolu_bash_1'),
       hostHash: networkHostHash('records.googleapis.com'),
-      approvedHostHashes: [networkHostHash('records.googleapis.com')],
     });
   });
 
-  it('derives parentless scheduled host authority from typed local CLI runtime access', () => {
+  it('does not require typed local CLI host metadata for parentless scheduled suppression', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, {
       ...runnerInput,
@@ -660,10 +712,7 @@ describe('sdk sandbox network gate', () => {
     });
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_suppressed_parentless_recent_tool',
-      approvedHostHashes: [
-        networkHostHash('oauth2.googleapis.com'),
-        networkHostHash('records.googleapis.com'),
-      ],
+      hostHash: networkHostHash('oauth2.googleapis.com'),
     });
   });
 
@@ -724,7 +773,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('denies parentless scheduled prompts when the local CLI host binding does not match', () => {
+  it('denies parentless scheduled prompts when host metadata does not match', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, {
       ...runnerInput,
@@ -779,7 +828,6 @@ describe('sdk sandbox network gate', () => {
       networkToolUseIDHash: sha256('toolu_network_1'),
       parentToolUseIDHash: sha256('toolu_bash_1'),
       hostHash: networkHostHash('api.linkedin.com'),
-      approvedHostHashes: [networkHostHash('api.linkedin.com')],
     });
   });
 
@@ -810,7 +858,7 @@ describe('sdk sandbox network gate', () => {
     });
   });
 
-  it('denies parentless scheduled prompts for skill action hosts on an undeclared port', () => {
+  it('denies parentless scheduled prompts for skill action hosts on undeclared ports', () => {
     const now = { value: 1_000 };
     const gate = makeGate(now, {
       ...runnerInput,
@@ -861,7 +909,6 @@ describe('sdk sandbox network gate', () => {
       networkToolUseIDHash: sha256('toolu_network_1'),
       parentToolUseIDHash: sha256('toolu_bash_1'),
       hostHash: networkHostHash('api.linkedin.com'),
-      approvedHostHashes: [networkHostHash('api.linkedin.com')],
     });
   });
 
@@ -883,18 +930,12 @@ describe('sdk sandbox network gate', () => {
       { toolUseID: 'toolu_network_1' },
     );
 
-    expect(decision).toEqual(
-      expect.objectContaining({
-        behavior: 'deny',
-        message: expect.stringContaining('not declared'),
-      }),
-    );
+    expect(decision?.behavior).toBe('deny');
     expect(latestPayload()).toMatchObject({
       decision: 'sdk_network_gate_denied',
       networkToolUseIDHash: sha256('toolu_network_1'),
       parentToolUseIDHash: sha256('toolu_bash_1'),
       hostHash: networkHostHash('evil.example.com'),
-      approvedHostHashes: [networkHostHash('api.linkedin.com')],
     });
   });
 
@@ -923,7 +964,6 @@ describe('sdk sandbox network gate', () => {
       parentToolUseIDHash: sha256('toolu_bash_1'),
       hostHash: networkHostHash('api.linkedin.com'),
     });
-    expect(latestPayload()).not.toHaveProperty('approvedHostHashes');
   });
 
   it('denies interactive parentless prompts even for reviewed local CLI command-bound hosts', () => {

@@ -53,11 +53,11 @@ export function registerAccessRequestTool(
   server.tool(
     'request_access',
     [
-      'Request agent access for review. One tool for every access request.',
+      'Request agent access for review. Use this as the normal path when an action is missing.',
       'target.kind=capability requests an already-reviewed semantic capability by id.',
-      'target.kind=run_command requests a scoped RunCommand fallback such as "npm test *".',
+      'target.kind=run_command requests a scoped temporary exact-command fallback such as "npm test *" when no reviewed capability fits.',
       'Set temporaryOnly=true for one-off transient access; leave it false for durable grants.',
-      'Source install/connect stays separate: use request_skill_install/request_skill_proposal for skills and request_mcp_server for third-party MCP sources.',
+      'Source setup and raw skill, MCP, CLI, browser, or network details are review metadata, not durable authority.',
     ].join(' '),
     {
       target: z.discriminatedUnion('kind', [
@@ -95,7 +95,7 @@ export function registerAccessRequestTool(
                   type: 'text' as const,
                   text: [
                     `No reviewed capability matches id "${target.id}".`,
-                    'Use the Agent Access summary in your run context to find a valid capability id, or request source install/connect if the capability is missing.',
+                    'Use the Agent Access summary in your run context to find a valid capability id. If setup is missing, request source setup through the Gantry access flow.',
                     SOURCE_INVENTORY_AUTHORITY_GUIDANCE,
                   ].join('\n'),
                 },

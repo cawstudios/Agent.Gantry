@@ -187,7 +187,7 @@ Use these Gantry tools for capability work:
 | `request_skill_proposal`           | Agent-created or modified skill file bundles for review.                                                                                        |
 | `request_skill_dependency_install` | npm, brew, go, uv, or download dependencies required by a skill; never run those commands directly.                                             |
 | `request_mcp_server`               | Third-party MCP source requests with transport, origin, tool patterns, credentials, and reason.                                                  |
-| `request_access`                   | One agent access tool. Targets: `capability` (reviewed semantic capability by id), `run_command` (scoped command fallback), `tool` (exact tool such as Browser/FileEdit/MCP tool), `provider_capability` (Slack/Teams/Telegram), or `propose` (new reviewed `local_cli` capability with pinned executable, preflight, and protected paths). |
+| `request_access`                   | One agent access tool. `target.kind=capability` requests an already-reviewed semantic capability by id for durable access; `target.kind=run_command` requests a scoped exact-command fallback (e.g. `"npm test *"`) and should set `temporaryOnly=true` for one-off use. |
 | `service_restart`                  | Main/admin agent only, after approved config or capability changes when host restart is needed.                                                 |
 | `register_agent`                   | Main/admin agent only, for binding a new channel conversation to an agent.                                                                      |
 
@@ -202,16 +202,14 @@ Permission selection:
   answer, multi-select when multiple answers are valid, and include concise
   option descriptions so Slack, Telegram, Teams, and Web/API can render native
   controls.
-- Use `request_access` with `target.kind=tool`/`run_command`/`provider_capability`
-  when a low-level one-off or fallback permission is needed for provider-neutral
-  tools or provider/channel capabilities such as `Bash`, `Write`, `Edit`, the
-  canonical `Browser` tool, scheduler tools, memory tools, service tools, Slack
-  file reads, Telegram file downloads, Teams proactive messages, Teams card
-  updates, or Web/API file browser access.
+- Use `request_access` with `target.kind=run_command` and `temporaryOnly=true`
+  when a scoped one-off exact-command fallback is needed and no reviewed
+  capability fits, such as a bounded `Bash`-style command like `npm test *` or
+  `git status`. Never request a broad `cli *` pattern.
 - For app/tool workflows such as records, publishing, repository checks, or
-  business CLIs, use `request_access` with `target.kind=capability` (or
-  `target.kind=propose` for a new reviewed `local_cli`) so the user approves a
-  semantic capability instead of a raw command.
+  business CLIs, use `request_access` with `target.kind=capability` and a
+  reviewed capability id so the user approves a semantic capability instead of a
+  raw command.
 - Permission prompts offer `Allow once`, `Always allow for this agent` for
   semantic capabilities, `Always allow Browser`,
   persistent access for exact Gantry admin tools,
@@ -276,6 +274,68 @@ Global options:
 gantry --runtime-home <path> ...
 gantry --help
 ```
+
+## Permission Management
+
+Never edit permission files, `settings.yaml` permission blocks, `.claude`
+settings, or generated runtime config directly to change access. All grant
+changes go through reviewed runtime tools with durable audit.
+
+List current grants:
+
+- `admin_permission_list` is read-only and available without an admin grant. Use
+  it to see the agent's enabled admin tools, visible tool rules, selected
+  skills, and attached MCP sources before requesting or revoking anything.
+
+Request missing access:
+
+- Use `request_access` with `target.kind=capability` (reviewed semantic
+  capability by id) for durable app/tool access, or `target.kind=run_command`
+  with `temporaryOnly=true` for a scoped one-off exact-command fallback.
+- Use `request_skill_install`, `request_skill_proposal`,
+  `request_skill_dependency_install`, or `request_mcp_server` for skill, skill
+  dependency, and MCP source access.
+
+Revoke stale or overly broad grants:
+
+- Use `admin_permission_revoke` (requires the
+  `mcp__gantry__admin_permission_revoke` grant) to remove one current-agent
+  persistent tool grant by `tool_name` (public tool rule or `mcp__gantry__`
+  name) or `tool_id` (durable catalog id such as `tool:Browser`), with a
+  `reason`. Proactively suggest revoking access that `admin_permission_list`
+  shows as unused or broader than needed.
+
+## Proactive Actions
+
+When a request matches one of these patterns, proactively propose the durable
+fix instead of repeating one-off work. Every path below is a reviewed runtime
+tool; none are direct file edits.
+
+- Recurring or time-based request -> create a scheduled job with
+  `scheduler_upsert_job` (`schedule_type` `cron` | `interval` | `once`). Manage
+  it with `scheduler_update_job`, `scheduler_run_now`, `scheduler_pause_job`,
+  `scheduler_resume_job`, `scheduler_delete_job`, and the `scheduler_list_*`
+  read tools.
+- Repeated steps or a reusable procedure -> propose or install a skill with
+  `request_skill_proposal` (agent-authored bundle) or `request_skill_install`
+  (source ref such as `gantryhub:<slug>@<version>`). Use
+  `request_skill_dependency_install` for any npm/brew/go/uv/download dependency;
+  never run package managers from the agent.
+- Connect an MCP server or external source -> `request_mcp_server` with
+  transport, origin, tool patterns, credentials, and reason.
+- The same bounded shell command repeats -> request a durable local CLI
+  capability with `request_access` (`target.kind=run_command`, leave
+  `temporaryOnly` false) using a literal command prefix; never request broad
+  `cli *`.
+- Missing secret -> set it through Gantry Credential Center
+  (`gantry credentials model set <provider>` for model keys); the secret is
+  entered outside chat and is never pasted into the conversation.
+- Needs a runtime settings change -> read current state with
+  `settings_desired_state`, then submit `request_settings_update`
+  (`replacementYaml`, `expectedRevision` from the read, `reason`). Never edit
+  `settings.yaml` directly to change a reviewed agent's runtime behavior.
+- Host restart needed after approved config or capability changes ->
+  `service_restart` (main/admin agent only).
 
 ## settings.yaml
 

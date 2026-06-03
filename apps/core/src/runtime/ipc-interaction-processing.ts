@@ -353,7 +353,7 @@ function formatPersistentPermissionOutcome(input: {
   >;
 }): string {
   const lines = [
-    `Always allowed: ${formatDurableAccessRulesForUser(input.rules, {
+    `Allowed for future: ${formatDurableAccessRulesForUser(input.rules, {
       semanticCapabilityDefinitions: input.semanticCapabilityDefinitions,
     })}.`,
   ];
@@ -361,13 +361,13 @@ function formatPersistentPermissionOutcome(input: {
     lines.push(
       `Job ready: ${input.recovery.queued
         .map((job) => job.name || job.jobId)
-        .join(', ')}`,
+        .join(', ')}. It will run now.`,
     );
   }
   if (input.recovery.stillBlocked.length > 0) {
     const blocker = input.recovery.stillBlocked[0];
     lines.push(
-      `Still needs setup: ${blocker.nextAction ?? 'review job setup'}`,
+      `Still needs setup: ${blocker.nextAction ?? 'review job setup'}.`,
     );
   }
   if (

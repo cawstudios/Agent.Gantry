@@ -16,62 +16,120 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-/**
- * Render the one agent-wide view of skills + permissions. Authority is
- * agent-scoped and used in every conversation (DM and group) the agent is added
- * to, so this view is keyed by the agent, not by any conversation.
- */
-function formatAgentAccess(agentId: string, access: unknown): string {
-  const sources =
-    isRecord(access) && isRecord(access.sources) ? access.sources : {};
-  const lines = [
-    `Agent: ${agentId}`,
-    '(used in every conversation it is added to)',
-  ];
+function summaryEntries(value: unknown): { label: string; detail: string }[] {
+  return asArray(value).flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    return [
+      {
+        label: String(entry.label ?? ''),
+        detail: String(entry.detail ?? ''),
+      },
+    ];
+  });
+}
 
-  const skills = asArray(sources.skills);
-  lines.push('', 'Skills:');
-  if (skills.length === 0) lines.push('  (none)');
-  for (const skill of skills) {
+function humanizeId(id: string): string {
+  const stripped = id.replace(/^capability:/, '').trim();
+  if (!stripped) return id;
+  return stripped.replace(/[._:/-]+/g, ' ');
+}
+
+function fallbackSummary(access: unknown): Record<string, unknown> {
+  const record = isRecord(access) ? access : {};
+  const sources = isRecord(record.sources) ? record.sources : {};
+  const connected: { label: string; detail: string }[] = [];
+  for (const skill of asArray(sources.skills)) {
     if (!isRecord(skill)) continue;
-    const name = String(skill.name ?? skill.id ?? '');
     const id = String(skill.id ?? '');
-    lines.push(`  - ${name}${id && id !== name ? ` (${id})` : ''}`);
+    const name = String(skill.name ?? id);
+    if (name) connected.push({ label: name, detail: 'skill' });
   }
-
-  const mcpServers = asArray(sources.mcpServers);
-  lines.push('', 'MCP servers:');
-  if (mcpServers.length === 0) lines.push('  (none)');
-  for (const server of mcpServers) {
+  for (const server of asArray(sources.mcpServers)) {
     if (!isRecord(server)) continue;
     const id = String(server.id ?? '');
     const tools = asArray(server.tools)
-      .map((t) => String(t ?? '').trim())
+      .map((tool) => String(tool ?? '').trim())
       .filter(Boolean);
-    const scope = tools.length > 0 ? tools.join(', ') : 'all reviewed tools';
-    lines.push(`  - ${id}  [${scope}]`);
-  }
-
-  const tools = asArray(sources.tools);
-  if (tools.length > 0) {
-    lines.push('', 'Tools:');
-    for (const tool of tools) {
-      if (!isRecord(tool)) continue;
-      const id = String(tool.id ?? '');
-      const kind = tool.kind ? ` (${String(tool.kind)})` : '';
-      lines.push(`  - ${id}${kind}`);
+    if (id) {
+      connected.push({
+        label: id,
+        detail: tools.length > 0 ? tools.join(', ') : 'all reviewed tools',
+      });
     }
   }
-
-  const selections = asArray(isRecord(access) ? access.selections : undefined);
-  lines.push('', 'Permissions:');
-  if (selections.length === 0) lines.push('  (none)');
-  for (const selection of selections) {
-    if (!isRecord(selection)) continue;
-    const id = String(selection.id ?? '');
-    const version = String(selection.version ?? 'builtin');
-    lines.push(`  - ${id}@${version}`);
+  for (const tool of asArray(sources.tools)) {
+    if (!isRecord(tool)) continue;
+    const id = String(tool.id ?? '');
+    if (id) connected.push({ label: id, detail: String(tool.kind ?? 'tool') });
   }
+
+  const allowed = asArray(record.selections).flatMap((selection) => {
+    if (!isRecord(selection)) return [];
+    const id = String(selection.id ?? '');
+    return id ? [{ label: humanizeId(id), detail: 'future access' }] : [];
+  });
+  return {
+    connected,
+    allowed,
+    needsAttention: [],
+    suggestedCleanup: [],
+  };
+}
+
+/**
+ * Render the one agent-wide view of access outcomes. Authority is agent-scoped
+ * and used in every conversation (DM and group) the agent is added to, so this
+ * view is keyed by the agent, not by any conversation. Outcome-first: it leans
+ * on the read-only `summary` projection rather than raw ids and rules.
+ */
+function formatAgentAccess(_agentId: string, access: unknown): string {
+  const summary =
+    isRecord(access) && isRecord(access.summary)
+      ? access.summary
+      : fallbackSummary(access);
+  const lines = [
+    'Agent Access',
+    'Used in every conversation this agent is added to.',
+  ];
+
+  const section = (
+    heading: string,
+    entries: { label: string; detail: string }[],
+    render: (entry: { label: string; detail: string }) => string,
+  ) => {
+    lines.push('', `${heading}:`);
+    if (entries.length === 0) {
+      lines.push('  (none)');
+      return;
+    }
+    for (const entry of entries) lines.push(render(entry));
+  };
+
+  section(
+    'Connected',
+    summaryEntries(summary.connected),
+    (entry) => `  - ${entry.label} (${entry.detail})`,
+  );
+  section(
+    'Allowed',
+    summaryEntries(summary.allowed),
+    (entry) => `  - ${entry.label} (${entry.detail})`,
+  );
+  section(
+    'Needs attention',
+    summaryEntries(summary.needsAttention),
+    (entry) => `  - ${entry.label}. Next: ${entry.detail}`,
+  );
+  section(
+    'Suggested cleanup',
+    summaryEntries(summary.suggestedCleanup),
+    (entry) => `  - ${entry.label}. Reason: ${entry.detail}`,
+  );
+
+  lines.push(
+    '',
+    'Details: use --json or audit/events for exact ids and rule details.',
+  );
 
   return lines.join('\n');
 }

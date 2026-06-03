@@ -188,12 +188,30 @@ export type AgentCapabilitiesResponse = z.infer<
   typeof AgentCapabilitiesResponseSchema
 >;
 
+const AgentAccessSummaryEntrySchema = z
+  .object({
+    label: z.string(),
+    detail: z.string(),
+  })
+  .strict();
+
+export const AgentAccessSummarySchema = z
+  .object({
+    connected: z.array(AgentAccessSummaryEntrySchema),
+    allowed: z.array(AgentAccessSummaryEntrySchema),
+    needsAttention: z.array(AgentAccessSummaryEntrySchema),
+    suggestedCleanup: z.array(AgentAccessSummaryEntrySchema),
+  })
+  .strict();
+export type AgentAccessSummary = z.infer<typeof AgentAccessSummarySchema>;
+
 export const AgentAccessResponseSchema = z
   .object({
     agentId: z.string(),
     sources: AgentSourcesRequestSchema.shape.sources,
     selections: z.array(AgentCapabilitySelectionSchema),
     toolAccess: AgentToolAccessSchema,
+    summary: AgentAccessSummarySchema.optional(),
     updatedAt: IsoDateTimeSchema,
   })
   .strict();

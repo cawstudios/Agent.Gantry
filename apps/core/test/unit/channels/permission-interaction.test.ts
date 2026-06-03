@@ -79,7 +79,7 @@ describe('permission interaction', () => {
       'allow_persistent_rule',
     );
     expect(permissionButtonLabel('allow_persistent_rule', request)).toBe(
-      'Always allow',
+      'Allow for future',
     );
     expect(
       decisionForMode(request, 'allow_persistent_rule').updatedPermissions,
@@ -306,7 +306,7 @@ describe('permission interaction', () => {
           },
         ]),
       ),
-    ).toBe('Always allow');
+    ).toBe('Allow for future');
   });
 
   it('renders trusted skill action prompts with short mobile buttons', () => {
@@ -350,7 +350,7 @@ describe('permission interaction', () => {
 
     expect(text.split('\n')[0]).toBe('🔐 Allow LinkedIn posting?');
     expect(text).toContain('scheduled job');
-    expect(text).toContain('Main Agent ·');
+    expect(text).toContain('Agent: Main Agent');
     expect(text).not.toContain(
       'Allows: Publish a prepared LinkedIn post through the approved script.',
     );
@@ -359,7 +359,7 @@ describe('permission interaction', () => {
       'Allow 5 min',
     );
     expect(permissionButtonLabel('allow_persistent_rule', request)).toBe(
-      'Always allow',
+      'Allow for future',
     );
     expect(permissionButtonLabel('cancel', request)).toBe('Cancel');
 
@@ -368,7 +368,9 @@ describe('permission interaction', () => {
       mode: 'allow_persistent_rule',
       decidedBy: 'ravi',
     });
-    expect(receipt).toContain('✅ Always allowed · LinkedIn posting (by ravi)');
+    expect(receipt).toContain(
+      'Allowed for future: LinkedIn posting. Saved for Main Agent. You can remove it from Agent Access.',
+    );
   });
 
   it('shows declared skill action network hosts in the permission prompt', () => {
@@ -454,7 +456,7 @@ describe('permission interaction', () => {
     const text = formatPermissionPromptText(request, 60_000);
 
     expect(text.split('\n')[0]).toBe('🔐 Allow Acme records append?');
-    expect(text).toContain('Main Agent ·');
+    expect(text).toContain('Agent: Main Agent');
     expect(text).toContain('agent chat');
     expect(text).not.toContain('Access: Acme records append');
     expect(text).not.toContain(
@@ -507,7 +509,7 @@ describe('permission interaction', () => {
       decidedBy: 'ravi',
     });
     expect(receipt).toContain(
-      '✅ Allowed once · Selected skill action (skills/linkedin-posting/post.py) (by ravi)',
+      'Allowed once: Selected skill action (skills/linkedin-posting/post.py). The agent will continue this request.',
     );
     expect(receipt).not.toContain('.llm-runtime');
   });
@@ -548,9 +550,8 @@ describe('permission interaction', () => {
       timedGrantExpiresAtMs: Date.now() + 60_000,
     });
     expect(receipt).toContain(
-      '✅ Allowed 5 min · Command (acme records append sheet-id A1:B2)',
+      'Allowed for 5 min: Command (acme records append sheet-id A1:B2). This expires at ',
     );
-    expect(receipt).toContain('(by ravi)');
     expect(receipt).not.toContain('Route:');
   });
 
@@ -719,7 +720,9 @@ describe('permission interaction', () => {
       \`\`\`
       Redirect: > /tmp/leads.json
 
-      Main Agent · agent chat
+      Agent: Main Agent
+      Context: agent chat
+      The agent cannot approve this itself.
       Reply in 5m"
     `);
   });
@@ -738,8 +741,9 @@ describe('permission interaction', () => {
     );
 
     expect(text).toContain(
-      'Main Agent · scheduled job: KnackLabs Lead Maintenance Controller',
+      'Context: scheduled job: KnackLabs Lead Maintenance Controller',
     );
+    expect(text).toContain('Agent: Main Agent');
     expect(text).not.toContain(
       'knacklabs-lead-maintenance-controller-2026-05-15',
     );
@@ -756,7 +760,7 @@ describe('permission interaction', () => {
       60_000,
     );
 
-    expect(text).toContain('Main Agent · agent chat');
+    expect(text).toContain('Context: agent chat');
     expect(text).not.toContain('scheduled job');
   });
 
@@ -941,7 +945,7 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain(
-      '✅ Allowed once · Command (git status --short) (by ravi)',
+      'Allowed once: Command (git status --short). The agent will continue this request.',
     );
     expect(receipt).not.toContain('From: agent chat');
     expect(receipt).not.toContain('Request ID');
@@ -966,9 +970,8 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain(
-      '✅ Allowed 5 min · Command (git status --short) · until ',
+      'Allowed for 5 min: Command (git status --short). This expires at ',
     );
-    expect(receipt).toContain('(by ravi)');
     expect(receipt).not.toContain('eligible tools and SDK API/network prompts');
     expect(receipt).not.toContain('Request ID');
     expect(receipt).not.toContain('perm-abc-123');
@@ -996,7 +999,7 @@ describe('permission interaction', () => {
       timedGrantExpiresAtMs: Date.parse('2026-05-15T12:05:00Z'),
     });
     expect(timedReceipt).toContain(
-      '✅ Allowed 5 min · Command (npm test) · until ',
+      'Allowed for 5 min: Command (npm test). This expires at ',
     );
 
     const persistentReceipt = formatPermissionReceiptText(
@@ -1007,7 +1010,9 @@ describe('permission interaction', () => {
         mode: 'allow_persistent_rule',
       },
     );
-    expect(persistentReceipt).toBe('✅ Always allowed · Command (npm test)');
+    expect(persistentReceipt).toBe(
+      'Allowed for future: Command (npm test). Saved for Kai Group. You can remove it from Agent Access.',
+    );
   });
 
   it('marks scheduled-job receipts without exposing job ids', () => {
@@ -1028,7 +1033,7 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain(
-      '✅ Allowed once · Command (npm run lead-generator) (by ravi)',
+      'Allowed once: Command (npm run lead-generator). The agent will continue this request.',
     );
     expect(receipt).not.toContain('From: scheduled job');
     expect(receipt).not.toContain(
@@ -1065,7 +1070,7 @@ describe('permission interaction', () => {
     );
 
     expect(receipt).toContain(
-      '✅ Always allowed · Command (curl https://api.example.com/leads > /tmp/out) (by ravi)',
+      'Allowed for future: Command (curl https://api.example.com/leads > /tmp/out). Saved for Kai Group. You can remove it from Agent Access.',
     );
     expect(receipt).not.toContain('RunCommand(curl https://api.example.com/*)');
     expect(receipt).not.toContain('RunCommand(jq -r *)');
@@ -1092,7 +1097,7 @@ describe('permission interaction', () => {
       },
     );
 
-    expect(receipt).toContain('✅ Allowed once · Command');
+    expect(receipt).toContain('Allowed once: Command');
     expect(receipt).not.toContain('REDACTED');
     expect(receipt).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
     expect(receipt).not.toContain('Request ID');
