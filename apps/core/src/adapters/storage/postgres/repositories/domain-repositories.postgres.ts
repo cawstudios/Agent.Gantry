@@ -59,6 +59,7 @@ import type {
   SkillCatalogRepository,
   ToolCatalogRepository,
   OutboundDeliveryRepository,
+  MemoryExtractionCursorRepository,
 } from '../../../../domain/ports/repositories.js';
 import type {
   SandboxLease,
@@ -86,6 +87,7 @@ import { PostgresToolCatalogRepository } from './tool-repository.postgres.js';
 import { PostgresAgentRepository } from './agent-repository.postgres.js';
 import { PostgresOutboundDeliveryRepository } from './outbound-delivery-repository.postgres.js';
 import { PostgresCapabilitySecretRepository } from './capability-secret-repository.postgres.js';
+import { PostgresMemoryExtractionCursorRepository } from './memory-extraction-cursor-repository.postgres.js';
 export interface PostgresDomainRepositoryBundle {
   apps: AppRepository;
   agents: AgentRepository;
@@ -106,6 +108,7 @@ export interface PostgresDomainRepositoryBundle {
   permissions: PermissionRepository;
   sandboxes: SandboxRepository;
   outboundDeliveries: OutboundDeliveryRepository;
+  memoryExtractionCursor: MemoryExtractionCursorRepository;
 }
 type JsonRecord = Record<string, unknown>;
 function encodeJson(value: unknown): string {
@@ -1664,5 +1667,6 @@ export function createPostgresDomainRepositories(
     permissions: new PostgresPermissionRepository(db),
     sandboxes: new PostgresSandboxRepository(db),
     outboundDeliveries: new PostgresOutboundDeliveryRepository(db),
+    memoryExtractionCursor: new PostgresMemoryExtractionCursorRepository(db),
   };
 }

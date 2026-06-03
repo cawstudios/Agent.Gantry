@@ -523,3 +523,25 @@ export interface SandboxRepository {
     id: WorkspaceSnapshotId,
   ): Promise<WorkspaceSnapshot | null>;
 }
+
+export interface MemoryExtractionCursor {
+  coveredThroughAt: string; // ISO timestamp of newest covered message
+  coveredThroughMessageId: string;
+}
+
+export interface MemoryExtractionCursorRepository {
+  getCursor(input: {
+    appId: AppId;
+    agentId: AgentId;
+    conversationId: ConversationId;
+    threadId?: ConversationThreadId | null;
+  }): Promise<MemoryExtractionCursor | null>;
+  upsertCursor(input: {
+    appId: AppId;
+    agentId: AgentId;
+    conversationId: ConversationId;
+    threadId?: ConversationThreadId | null;
+    coveredThroughAt: string;
+    coveredThroughMessageId: string;
+  }): Promise<void>;
+}
