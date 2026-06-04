@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { collectDurableMemoryFromRepositories } from '@core/memory/boundary-extraction-core.js';
 
 function fakeRepos(overrides: any) {
-  return {
+  const repos: any = {
     agentSessions: {
       getAgentSession: vi.fn().mockResolvedValue({
         id: 's1',
@@ -18,6 +18,31 @@ function fakeRepos(overrides: any) {
       listRecentMessages: vi.fn().mockResolvedValue([]),
       getMessagesSince: vi.fn().mockResolvedValue([]),
       getMessagesBefore: vi.fn().mockResolvedValue([]),
+      // Mirror the real repo: return the EXACT (raw) created_at for a message id.
+      // Resolve it from whatever messages the read-mocks returned so the watermark
+      // assertions below keep their existing coveredThroughAt values.
+      getMessageCreatedAt: vi.fn(
+        async ({ messageId }: { messageId: string }) => {
+          const lookup = async (
+            fn: ReturnType<typeof vi.fn>,
+          ): Promise<string | null> => {
+            for (const result of fn.mock.results) {
+              if (result.type !== 'return') continue;
+              const msgs = (await result.value) as Array<{
+                id: string;
+                createdAt: string;
+              }>;
+              const hit = msgs.find((m) => m?.id === messageId);
+              if (hit) return hit.createdAt;
+            }
+            return null;
+          };
+          return (
+            (await lookup(repos.messages.getMessagesSince)) ??
+            (await lookup(repos.messages.listRecentMessages))
+          );
+        },
+      ),
     },
     memory: {
       listPriorMemoryItems: vi.fn().mockResolvedValue([]),
@@ -32,6 +57,7 @@ function fakeRepos(overrides: any) {
     },
     ...overrides,
   };
+  return repos;
 }
 
 const msg = (

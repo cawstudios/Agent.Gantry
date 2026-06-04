@@ -14,6 +14,34 @@ This skill is the source-of-truth for policy, store, and product-care answers
 that Boondi gives without going to Shopify. Fill in the bracketed sections with
 content from BSS before going live.
 
+## Gifting & business-interest cues (detecting queries and leads)
+
+Bombay Sweet Shop sells sweets (mithai), namkeen/savouries, chocolates, and
+gift boxes/hampers — for personal treats, personal gifts, and bulk/corporate
+gifting. Use these cues to recognise commercial intent and capture it silently
+(see CLAUDE.md "Capturing business interest"):
+
+- **Shopping / product intent** — specific items (Kaju Katli, ladoo, barfi,
+  bhujia, chocolate, hampers, gift boxes) or "what do you recommend", "something
+  sweet/savoury". A self-treat or single gift is a light query.
+- **Gifting intent** — "gift", "gifting", "hamper", "for my friend / family /
+  team / clients", or an occasion (Diwali, wedding, Raksha Bandhan, Eid,
+  anniversary, birthday, corporate). Always worth a query.
+- **The five gifting questions** (ask one at a time, as a conversation, never a
+  form): 1) Occasion · 2) Quantity · 3) Budget (per gift or total) · 4) Delivery
+  location(s) · 5) Timeline. Each answer you learn fills a capture field.
+- **Self-serve boundary** — personal gifting under ~25 pieces: guide them to
+  order on the website, but still capture it as a query (a human can upsell).
+- **Promote a query to a lead** when intent is decided/strong, or on any
+  strong-B2B signal: 25+ pieces · total budget over ~₹10k · corporate email
+  domain · multi-city / pan-India delivery · timeline under a week.
+- **Buyer read** — personal, wedding/event, small business, employee gifting, or
+  client/VIP/procurement. Corporate email + multiple cities + larger quantity are
+  the strongest, highest-priority signals.
+
+Seasonal peaks with more gifting/bulk intent: Diwali, wedding season, Raksha
+Bandhan, Holi, Eid, New Year, and corporate year-end.
+
 ## Return policy
 
 [TO BE FILLED BY BSS]

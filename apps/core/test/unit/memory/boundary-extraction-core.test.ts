@@ -28,6 +28,46 @@ describe('collectDurableMemoryFromRepositories', () => {
       evidence.push(value);
       return { id: `mev-${evidence.length}` };
     });
+    // Defined as a self-referencing const so getMessageCreatedAt can mirror the
+    // real repo (return the exact created_at for an id) even after individual
+    // it() blocks reassign listRecentMessages on this same object.
+    const messagesFake: any = {
+      listRecentMessages: vi.fn().mockResolvedValue([
+        {
+          id: 'message:1',
+          appId: 'default',
+          conversationId: 'conversation:tg-1',
+          direction: 'inbound',
+          parts: [{ kind: 'text', text: 'Remember this.' }],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ]),
+      getMessagesSince: vi.fn().mockResolvedValue([]),
+      getMessagesBefore: vi.fn().mockResolvedValue([]),
+      getMessageCreatedAt: vi.fn(
+        async ({ messageId }: { messageId: string }) => {
+          const lookup = async (
+            fn: ReturnType<typeof vi.fn>,
+          ): Promise<string | null> => {
+            for (const result of fn.mock.results) {
+              if (result.type !== 'return') continue;
+              const msgs = (await result.value) as Array<{
+                id: string;
+                createdAt: string;
+              }>;
+              const hit = msgs.find((m) => m?.id === messageId);
+              if (hit) return hit.createdAt;
+            }
+            return null;
+          };
+          return (
+            (await lookup(messagesFake.getMessagesSince)) ??
+            (await lookup(messagesFake.listRecentMessages))
+          );
+        },
+      ),
+    };
     return {
       digests,
       evidence,
@@ -47,21 +87,7 @@ describe('collectDurableMemoryFromRepositories', () => {
             updatedAt: '2026-01-01T00:00:00.000Z',
           }),
         },
-        messages: {
-          listRecentMessages: vi.fn().mockResolvedValue([
-            {
-              id: 'message:1',
-              appId: 'default',
-              conversationId: 'conversation:tg-1',
-              direction: 'inbound',
-              parts: [{ kind: 'text', text: 'Remember this.' }],
-              createdAt: '2026-01-01T00:00:00.000Z',
-              updatedAt: '2026-01-01T00:00:00.000Z',
-            },
-          ]),
-          getMessagesSince: vi.fn().mockResolvedValue([]),
-          getMessagesBefore: vi.fn().mockResolvedValue([]),
-        },
+        messages: messagesFake,
         memory: {
           listPriorMemoryItems: vi.fn().mockResolvedValue([]),
           saveBoundaryEvidence,

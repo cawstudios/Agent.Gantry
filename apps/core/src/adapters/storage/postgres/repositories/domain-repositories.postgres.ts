@@ -1340,6 +1340,31 @@ export class PostgresMessageRepository implements MessageRepository {
       .limit(limit);
     return this.assembleMessages(rows.reverse());
   }
+  async getMessageCreatedAt(input: {
+    conversationId: Conversation['id'];
+    threadId?: ConversationThread['id'];
+    messageId: string;
+  }): Promise<string | null> {
+    // Select the raw `created_at` column directly. It is Drizzle `mode: 'string'`,
+    // so this returns the FULL microsecond text exactly as stored (e.g.
+    // `2026-06-03 15:32:11.517932+00`). We deliberately do NOT route it through
+    // `messageFromRows`/`toIsoTimestamp`, which round-trips through a JS Date and
+    // truncates to milliseconds. The memory-extraction watermark needs this exact
+    // value, or a covered sub-millisecond message re-qualifies as "new" each sweep.
+    const m = pgSchema.messagesPostgres;
+    const rows = await this.db
+      .select({ createdAt: m.createdAt })
+      .from(m)
+      .where(
+        and(
+          eq(m.id, input.messageId),
+          eq(m.conversationId, input.conversationId),
+          input.threadId ? eq(m.threadId, input.threadId) : undefined,
+        ),
+      )
+      .limit(1);
+    return rows[0]?.createdAt ?? null;
+  }
   private async assembleMessages(
     rows: Array<typeof pgSchema.messagesPostgres.$inferSelect>,
   ): Promise<Message[]> {

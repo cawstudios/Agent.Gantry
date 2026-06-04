@@ -1,0 +1,46 @@
+{
+  "name": "@gantry/mcp-crm",
+  "version": "0.1.0",
+  "description": "Boondi-owned CRM MCP server: captures business queries/leads, scores them, and reconciles missed captures from the durable transcript. Specific to the Boondi (Bombay Sweet Shop) agent; Gantry core knows it only as a configured MCP server.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "migrations/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24 <26"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "node --enable-source-maps --import tsx src/index.ts",
+    "watch": "node --watch --watch-path=./src --enable-source-maps --import tsx src/index.ts",
+    "migrate": "node --import tsx scripts/migrate.ts",
+    "smoke": "node --import tsx scripts/_smoke.ts",
+    "cli": "node --import tsx scripts/mcp-cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.93.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "pg": "^8.16.3",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  }
+}

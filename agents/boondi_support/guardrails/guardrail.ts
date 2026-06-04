@@ -141,6 +141,15 @@ export const bssCustomerSupportPolicy: GuardrailPolicy = {
       };
     }
     if (GREETING_PATTERN.test(latest)) {
+      // A returning customer (we have prior turns with this number) gets to
+      // reach Boondi so she can greet them PERSONALLY — recognising them from
+      // memory + their open query/lead ("welcome back — shall we continue the
+      // Diwali boxes?"). Only a genuine first contact (no prior context at all)
+      // gets the instant canned greeting, since there is nothing personal to
+      // say yet. `context` is empty ([]) on a true first contact.
+      if (context && context.length > 0) {
+        return { action: 'allow', reason: 'returning_customer_greeting' };
+      }
       return {
         action: 'direct_response',
         responseKind: 'greeting',

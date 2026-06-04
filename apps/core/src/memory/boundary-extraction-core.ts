@@ -75,6 +75,11 @@ interface BoundaryMemoryRepositories {
       beforeId: string;
       limit: number;
     }) => Promise<Message[]>;
+    getMessageCreatedAt: (input: {
+      conversationId: NonNullable<AgentSession['conversationId']>;
+      threadId: AgentSession['threadId'];
+      messageId: string;
+    }) => Promise<string | null>;
   };
   memory: {
     listPriorMemoryItems: (input: {
@@ -187,8 +192,21 @@ export async function collectDurableMemoryFromRepositories(input: {
   // Both getMessagesSince and listRecentMessages return oldest->newest, so the
   // last element is the newest covered message: that becomes the new watermark.
   const newest = messages[messages.length - 1]!;
+  // The watermark MUST be the message's exact (microsecond) created_at, not
+  // `Message.createdAt`. The latter is truncated to milliseconds by
+  // messageFromRows/toIsoTimestamp (it round-trips through a JS Date); storing
+  // that truncated value makes the just-covered message re-qualify as "new" on
+  // the next getMessagesSince sweep (`created_at .517932 > since .517000`) — an
+  // infinite re-extraction loop. getMessageCreatedAt reads the raw column text.
+  // (Fallback to newest.createdAt only if the lookup unexpectedly returns null.)
+  const exactCoveredAt =
+    (await input.repositories.messages.getMessageCreatedAt({
+      conversationId: session.conversationId,
+      threadId: session.threadId,
+      messageId: newest.id,
+    })) ?? newest.createdAt;
   const newWatermark = {
-    coveredThroughAt: newest.createdAt,
+    coveredThroughAt: exactCoveredAt,
     coveredThroughMessageId: newest.id,
   };
   const candidateTurns: Array<{ role: 'user' | 'assistant'; text: string }> =

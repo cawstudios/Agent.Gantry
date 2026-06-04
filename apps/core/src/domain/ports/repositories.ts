@@ -252,6 +252,19 @@ export interface MessageRepository {
     beforeId: string;
     limit: number;
   }): Promise<Message[]>;
+  /**
+   * The EXACT (raw, un-truncated) `created_at` of a single message, as stored in
+   * the column. Unlike `Message.createdAt` (which round-trips through a JS Date in
+   * `messageFromRows`/`toIsoTimestamp` and so is truncated to milliseconds), this
+   * returns the full microsecond text — needed by the memory-extraction watermark
+   * so a covered message does not re-qualify as "new" on the next sweep.
+   * Returns null when the message is not found.
+   */
+  getMessageCreatedAt(input: {
+    conversationId: ConversationId;
+    threadId?: ConversationThreadId;
+    messageId: string;
+  }): Promise<string | null>;
 }
 
 export interface AgentSessionRepository {
