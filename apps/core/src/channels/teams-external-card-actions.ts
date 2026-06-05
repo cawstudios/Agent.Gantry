@@ -10,10 +10,13 @@ export type ExternalCardAction = {
   eventId: string;
   resourceId: string;
   workspaceId: string;
+  sourceWorkspaceId?: string | null;
   sourceChannelId: string;
   teamsTenantId: string;
   actionType: string;
   platformOperation: string;
+  requestId?: string | null;
+  signatureVersion?: 'v2' | null;
   nonce: string;
   expiresAt: string;
   signature: string;
@@ -198,16 +201,35 @@ function readExternalCardAction(value: unknown): ExternalCardAction | null {
     eventId: readString(record.eventId),
     resourceId: readString(record.resourceId),
     workspaceId: readString(record.workspaceId),
+    sourceWorkspaceId: readString(record.sourceWorkspaceId) || null,
     sourceChannelId: readString(record.sourceChannelId),
     teamsTenantId: readString(record.teamsTenantId),
     actionType: readString(record.actionType),
     platformOperation: readString(record.platformOperation),
+    requestId: readString(record.requestId) || null,
+    signatureVersion: readString(record.signatureVersion) === 'v2' ? 'v2' as const : null,
     nonce: readString(record.nonce),
     expiresAt: readString(record.expiresAt),
     signature: readString(record.signature),
   };
-  if (Object.values(action).some((value) => !value)) return null;
-  return action as ExternalCardAction;
+  const requiredValues = [
+    action.integrationId,
+    action.eventId,
+    action.resourceId,
+    action.workspaceId,
+    action.sourceChannelId,
+    action.teamsTenantId,
+    action.actionType,
+    action.platformOperation,
+    action.nonce,
+    action.expiresAt,
+    action.signature,
+  ];
+  if (requiredValues.some((value) => !value)) return null;
+  return {
+    ...action,
+    expiresAt: normalizeExternalCardActionExpiresAtForSignature(action.expiresAt),
+  } as ExternalCardAction;
 }
 
 function describeExternalCardActionParseMiss(value: unknown): {
@@ -273,7 +295,8 @@ function unwrapExternalCardActionValue(
 }
 
 function verifyExternalCardActionSignature(action: ExternalCardAction): void {
-  const expiresAtMs = Date.parse(action.expiresAt);
+  const expiresAt = normalizeExternalCardActionExpiresAtForSignature(action.expiresAt);
+  const expiresAtMs = Date.parse(expiresAt);
   if (!Number.isFinite(expiresAtMs) || expiresAtMs < Date.now()) {
     throw new Error('Card action has expired');
   }
@@ -295,7 +318,14 @@ function verifyExternalCardActionSignature(action: ExternalCardAction): void {
             teamsTenantId: action.teamsTenantId,
             actionType: action.actionType,
             nonce: action.nonce,
-            expiresAt: action.expiresAt,
+            expiresAt,
+            ...(action.signatureVersion === 'v2'
+              ? {
+                  signatureVersion: 'v2',
+                  platformOperation: action.platformOperation,
+                  requestId: action.requestId ?? null,
+                }
+              : {}),
           }).sort(),
         ),
       ),
@@ -306,6 +336,14 @@ function verifyExternalCardActionSignature(action: ExternalCardAction): void {
   if (left.length !== right.length || !timingSafeEqual(left, right)) {
     throw new Error('Invalid card action signature');
   }
+}
+
+function normalizeExternalCardActionExpiresAtForSignature(expiresAt: string): string {
+  const parsed = Date.parse(expiresAt.trim());
+  if (!Number.isFinite(parsed)) {
+    throw new Error('External card action expiration timestamp is invalid');
+  }
+  return new Date(parsed).toISOString();
 }
 
 async function callExternalCardActionOperation(input: {
@@ -433,4 +471,5 @@ export const _testExternalCardActions = {
   canonicalTeamsConversationId,
   describeExternalCardActionParseMiss,
   readExternalCardAction,
+  verifyExternalCardActionSignature,
 };

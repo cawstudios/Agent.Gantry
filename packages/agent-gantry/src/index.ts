@@ -1164,15 +1164,27 @@ export function createPgGantryRuntimeStorage(
       );
     },
     getTeamsConversationReference: async (conversationId) => {
-      const normalized = normalizeTeamsJid(conversationId);
+      const trimmed = conversationId.trim();
+      const canonicalConversationId = canonicalTeamsConversationId(trimmed);
+      const normalized = normalizeTeamsJid(canonicalConversationId);
+      const originalJid = normalizeTeamsJid(trimmed);
       const result = await config.pool.query(
         `select conversation_jid, conversation_id, service_url, tenant_id, bot_id, teams_user_id, raw_reference_json, updated_at
          from "${schema}"."teams_conversation_references"
-         where conversation_jid = $1 or conversation_id = $2
+         where conversation_jid in ($1, $2)
+            or conversation_id in ($3, $4)
+            or regexp_replace(conversation_jid, ';messageid=.*$', '', 'i') = $1
+            or regexp_replace(conversation_id, ';messageid=.*$', '', 'i') = $3
+         order by case
+            when conversation_jid = $1 or conversation_id = $3 then 0
+            when conversation_jid = $2 or conversation_id = $4 then 1
+            else 2
+          end,
+          updated_at desc
          limit 1`,
-        [normalized, conversationId],
+        [normalized, originalJid, canonicalConversationId, trimmed],
       );
-      return mapTeamsReferenceRow(result.rows[0], conversationId);
+      return mapTeamsReferenceRow(result.rows[0], canonicalConversationId || trimmed);
     },
     getTeamsPersonalConversationReference: async (input) => {
       const result = await config.pool.query(
@@ -1436,7 +1448,9 @@ export function signExternalCardAction(input: GantryExternalCardActionSigningInp
   readonly signatureVersion?: "v2";
 } {
   const nonce = input.nonce ?? randomUUID();
-  const expiresAt = input.expiresAt ?? new Date((input.nowMs ?? Date.now()) + 24 * 60 * 60_000).toISOString();
+  const expiresAt = normalizeExternalCardActionExpiresAtForSignature(
+    input.expiresAt ?? new Date((input.nowMs ?? Date.now()) + 24 * 60 * 60_000).toISOString(),
+  );
   return {
     nonce,
     expiresAt,
@@ -1448,7 +1462,8 @@ export function signExternalCardAction(input: GantryExternalCardActionSigningInp
 }
 
 export function verifyExternalCardAction(input: GantryExternalCardActionVerificationInput): boolean {
-  const expiresAtMs = Date.parse(input.action.expiresAt);
+  const expiresAt = normalizeExternalCardActionExpiresAtForSignature(input.action.expiresAt);
+  const expiresAtMs = Date.parse(expiresAt);
   if (!Number.isFinite(expiresAtMs) || expiresAtMs < (input.nowMs ?? Date.now())) {
     return false;
   }
@@ -1462,10 +1477,10 @@ export function verifyExternalCardAction(input: GantryExternalCardActionVerifica
     teamsTenantId: input.action.teamsTenantId,
     actionType: input.action.actionType,
     platformOperation: input.action.signatureVersion === "v2" ? input.action.platformOperation : null,
-    requestId: input.action.signatureVersion === "v2" ? input.action.requestId ?? null : null,
+    requestId: input.action.signatureVersion === "v2" ? input.action.requestId || null : null,
     signatureVersion: input.action.signatureVersion ?? null,
     nonce: input.action.nonce,
-    expiresAt: input.action.expiresAt,
+    expiresAt,
     nowMs: input.nowMs,
   }).signature;
   return timingSafeHexEqual(expected, input.action.signature);
@@ -1506,7 +1521,18 @@ export function parseExternalCardAction(value: unknown): GantryExternalCardActio
   ) {
     return null;
   }
-  return action;
+  return {
+    ...action,
+    expiresAt: normalizeExternalCardActionExpiresAtForSignature(action.expiresAt),
+  };
+}
+
+export function normalizeExternalCardActionExpiresAtForSignature(expiresAt: string): string {
+  const parsed = Date.parse(expiresAt.trim());
+  if (!Number.isFinite(parsed)) {
+    throw new Error("External card action expiration timestamp is invalid.");
+  }
+  return new Date(parsed).toISOString();
 }
 
 export function buildExternalNotificationAdaptiveCard(
@@ -1959,14 +1985,16 @@ async function rememberTeamsConversationReference(
   if (!storage.saveTeamsConversationReference) return;
   const conversationId = activity.conversation?.id;
   if (!conversationId || !activity.serviceUrl) return;
+  const canonicalConversationId = readTeamsChannelConversationId(activity)
+    ?? canonicalTeamsConversationId(conversationId);
   const reference = TurnContext.getConversationReference(activity);
   const from = activity.from as { id?: string; aadObjectId?: string; name?: string } | undefined;
   const channelData = asRecord(activity.channelData);
   const tenant = asRecord(channelData?.tenant);
   await storage.saveTeamsConversationReference({
     exists: true,
-    conversationId,
-    conversationJid: normalizeTeamsJid(conversationId),
+    conversationId: canonicalConversationId,
+    conversationJid: normalizeTeamsJid(canonicalConversationId),
     serviceUrl: activity.serviceUrl,
     tenantId: readString(tenant, "id") ?? readString(channelData, "tenantId"),
     botId: activity.recipient?.id,
@@ -1999,7 +2027,7 @@ function parseStoredReference(
 }
 
 function teamsBaseConversationIdFromThreadConversationId(conversationId: string): string {
-  return conversationId.split(";messageid=")[0]?.trim() || conversationId;
+  return canonicalTeamsConversationId(conversationId);
 }
 
 function teamsThreadConversationId(conversationId: string, replyToId: string): string {
@@ -2045,6 +2073,19 @@ function createBotFrameworkResponse(res: ServerResponse): {
 function normalizeTeamsJid(input: string): string {
   const trimmed = input.trim();
   return trimmed.startsWith("teams:") ? trimmed : `teams:${trimmed}`;
+}
+
+function canonicalTeamsConversationId(conversationId: string): string {
+  const trimmed = conversationId.trim();
+  const messageIdIndex = trimmed.toLowerCase().indexOf(";messageid=");
+  if (messageIdIndex < 0) return trimmed;
+  return trimmed.slice(0, messageIdIndex).trim() || trimmed;
+}
+
+function readTeamsChannelConversationId(activity: Activity): string | null {
+  const channelData = asRecord(activity.channelData);
+  const channel = asRecord(channelData?.channel);
+  return readString(channelData, "teamsChannelId") ?? readString(channel, "id");
 }
 
 function normalizeSqlIdentifier(value: string): string {

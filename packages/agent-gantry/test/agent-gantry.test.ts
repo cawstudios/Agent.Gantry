@@ -230,6 +230,126 @@ describe("@cawstudios/agent-gantry", () => {
     })).toBe(false);
   });
 
+  it("verifies card actions when Teams rewrites equivalent expiresAt strings", () => {
+    const baseAction = {
+      action: "external_card_action",
+      signatureVersion: "v2" as const,
+      integrationId: "manipal-tender-bot",
+      eventId: "outbox-1",
+      resourceId: "tender-1",
+      workspaceId: "workspace-1",
+      sourceWorkspaceId: "workspace-1",
+      sourceChannelId: "19:workspace",
+      teamsTenantId: "tenant-1",
+      actionType: "request_analysis",
+      platformOperation: "requestAdminProcessingApproval",
+    };
+    const signedWithMilliseconds = signExternalCardAction({
+      secret: "secret",
+      ...baseAction,
+      expiresAt: "2099-01-01T00:00:00.550Z",
+      nonce: "nonce-550",
+    });
+    const shortenedMillisecondsAction = parseExternalCardAction({
+      ...baseAction,
+      nonce: signedWithMilliseconds.nonce,
+      expiresAt: "2099-01-01T00:00:00.55Z",
+      signature: signedWithMilliseconds.signature,
+    });
+
+    expect(shortenedMillisecondsAction).toMatchObject({
+      expiresAt: "2099-01-01T00:00:00.550Z",
+    });
+    expect(shortenedMillisecondsAction && verifyExternalCardAction({
+      action: shortenedMillisecondsAction,
+      secret: "secret",
+      nowMs: Date.parse("2026-05-27T00:00:00Z"),
+    })).toBe(true);
+
+    const signedWithZeroMilliseconds = signExternalCardAction({
+      secret: "secret",
+      ...baseAction,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      nonce: "nonce-000",
+    });
+    const omittedZeroMillisecondsAction = parseExternalCardAction({
+      ...baseAction,
+      nonce: signedWithZeroMilliseconds.nonce,
+      expiresAt: "2099-01-01T00:00:00Z",
+      signature: signedWithZeroMilliseconds.signature,
+    });
+
+    expect(omittedZeroMillisecondsAction).toMatchObject({
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    expect(omittedZeroMillisecondsAction && verifyExternalCardAction({
+      action: omittedZeroMillisecondsAction,
+      secret: "secret",
+      nowMs: Date.parse("2026-05-27T00:00:00Z"),
+    })).toBe(true);
+  });
+
+  it("keeps card action signatures strict after expiresAt normalization", () => {
+    const signed = signExternalCardAction({
+      secret: "secret",
+      signatureVersion: "v2",
+      integrationId: "manipal-tender-bot",
+      eventId: "outbox-1",
+      resourceId: "tender-1",
+      workspaceId: "workspace-1",
+      sourceChannelId: "19:workspace",
+      teamsTenantId: "tenant-1",
+      actionType: "request_analysis",
+      platformOperation: "requestAdminProcessingApproval",
+      nonce: "nonce-1",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const action = parseExternalCardAction({
+      action: "external_card_action",
+      signatureVersion: signed.signatureVersion,
+      integrationId: "manipal-tender-bot",
+      eventId: "outbox-1",
+      resourceId: "tender-1",
+      workspaceId: "workspace-1",
+      sourceChannelId: "19:workspace",
+      teamsTenantId: "tenant-1",
+      actionType: "request_analysis",
+      platformOperation: "requestAdminProcessingApproval",
+      nonce: signed.nonce,
+      expiresAt: "2099-01-01T00:00:00Z",
+      signature: signed.signature,
+    });
+
+    expect(action && verifyExternalCardAction({
+      action: { ...action, platformOperation: "markTenderWatching" },
+      secret: "secret",
+      nowMs: Date.parse("2026-05-27T00:00:00Z"),
+    })).toBe(false);
+    expect(action && verifyExternalCardAction({
+      action: { ...action, resourceId: "tender-2" },
+      secret: "secret",
+      nowMs: Date.parse("2026-05-27T00:00:00Z"),
+    })).toBe(false);
+    expect(action && verifyExternalCardAction({
+      action: { ...action, nonce: "nonce-2" },
+      secret: "secret",
+      nowMs: Date.parse("2026-05-27T00:00:00Z"),
+    })).toBe(false);
+    expect(() => signExternalCardAction({
+      secret: "secret",
+      signatureVersion: "v2",
+      integrationId: "manipal-tender-bot",
+      eventId: "outbox-1",
+      resourceId: "tender-1",
+      workspaceId: "workspace-1",
+      sourceChannelId: "19:workspace",
+      teamsTenantId: "tenant-1",
+      actionType: "request_analysis",
+      platformOperation: "requestAdminProcessingApproval",
+      expiresAt: "not-a-date",
+    })).toThrow("External card action expiration timestamp is invalid.");
+  });
+
   it("sends notification card requests through the external platform event route", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const client = createGantryClient({
@@ -373,6 +493,103 @@ describe("@cawstudios/agent-gantry", () => {
     });
   });
 
+  it("stores Teams channel conversation references under the base channel id", async () => {
+    const savedReferences: unknown[] = [];
+    const activity = {
+      type: "message",
+      id: "message-action-1",
+      serviceUrl: "https://smba.trafficmanager.net/in/tenant-1/",
+      conversation: {
+        id: "19:channel@thread.tacv2;messageid=parent-card-1",
+        isGroup: true,
+        conversationType: "channel",
+      },
+      from: { aadObjectId: "teams-user-1", id: "29:user", name: "User" },
+      recipient: { id: "28:bot", name: "Tender Bot" },
+      channelData: {
+        channel: { id: "19:channel@thread.tacv2" },
+        tenant: { id: "tenant-1" },
+      },
+    };
+    const adapter: BotFrameworkAdapterLike = {
+      processActivity: async (_req, _res, logic) => {
+        await logic({ activity } as never);
+      },
+      continueConversation: async () => undefined,
+    };
+    const transport = createBotFrameworkTeamsTransport({
+      botAppId: "bot",
+      botAppPassword: "secret",
+      storage: {
+        saveTeamsConversationReference: (reference) => savedReferences.push(reference),
+      },
+      adapter,
+    });
+    const seenActivities: unknown[] = [];
+
+    await transport.handleHttpActivity?.({
+      req: {} as never,
+      res: {
+        writableEnded: false,
+        end: () => undefined,
+        setHeader: () => undefined,
+      } as never,
+      onActivity: (incoming) => seenActivities.push(incoming),
+    });
+
+    expect(savedReferences[0]).toMatchObject({
+      exists: true,
+      conversationId: "19:channel@thread.tacv2",
+      conversationJid: "teams:19:channel@thread.tacv2",
+      serviceUrl: "https://smba.trafficmanager.net/in/tenant-1/",
+      tenantId: "tenant-1",
+      botId: "28:bot",
+      teamsUserId: "teams-user-1",
+    });
+    expect(seenActivities[0]).toMatchObject({
+      conversationId: "19:channel@thread.tacv2;messageid=parent-card-1",
+    });
+  });
+
+  it("finds historical Teams references stored with message-scoped conversation ids", async () => {
+    const storage = createPgGantryRuntimeStorage({
+      schema: "gantry_runtime",
+      pool: {
+        query: async (_sql, values) => {
+          expect(values).toEqual([
+            "teams:19:channel@thread.tacv2",
+            "teams:19:channel@thread.tacv2",
+            "19:channel@thread.tacv2",
+            "19:channel@thread.tacv2",
+          ]);
+          return {
+            rows: [{
+              conversation_jid: "teams:19:channel@thread.tacv2;messageid=parent-card-1",
+              conversation_id: "19:channel@thread.tacv2;messageid=parent-card-1",
+              service_url: "https://smba.trafficmanager.net/in/tenant-1/",
+              tenant_id: "tenant-1",
+              bot_id: "28:bot",
+              teams_user_id: "teams-user-1",
+              raw_reference_json: JSON.stringify({
+                serviceUrl: "https://smba.trafficmanager.net/in/tenant-1/",
+                conversation: { id: "19:channel@thread.tacv2;messageid=parent-card-1" },
+              }),
+              updated_at: new Date("2026-06-05T13:29:56.000Z"),
+            }],
+          };
+        },
+      },
+    });
+
+    await expect(storage.getTeamsConversationReference?.("19:channel@thread.tacv2")).resolves.toMatchObject({
+      exists: true,
+      conversationId: "19:channel@thread.tacv2;messageid=parent-card-1",
+      conversationJid: "teams:19:channel@thread.tacv2;messageid=parent-card-1",
+      tenantId: "tenant-1",
+      rawReferenceJson: expect.stringContaining("parent-card-1"),
+    });
+  });
+
   it("sends Teams cards through embedded Bot Framework transport", async () => {
     const sent: unknown[] = [];
     const adapter: BotFrameworkAdapterLike = {
@@ -410,6 +627,59 @@ describe("@cawstudios/agent-gantry", () => {
       card: { type: "AdaptiveCard" },
     })).resolves.toMatchObject({ accepted: true, statusCode: 202 });
     expect(sent).toHaveLength(1);
+  });
+
+  it("sends Teams cards to the base channel when the stored reference is message-scoped", async () => {
+    const sent: unknown[] = [];
+    const references: unknown[] = [];
+    const adapter: BotFrameworkAdapterLike = {
+      processActivity: async () => undefined,
+      continueConversation: async (reference, logic) => {
+        references.push(reference);
+        await logic({
+          sendActivity: async (activity: unknown) => {
+            sent.push(activity);
+            return { id: "teams-message-1" };
+          },
+        } as never);
+      },
+    };
+    const storage = {
+      getTeamsConversationReference: (conversationId: string) => {
+        expect(conversationId).toBe("19:channel@thread.tacv2");
+        return {
+          exists: true,
+          conversationId: "19:channel@thread.tacv2;messageid=parent-card-1",
+          conversationJid: "teams:19:channel@thread.tacv2;messageid=parent-card-1",
+          serviceUrl: "https://smba.trafficmanager.net/in/tenant-1/",
+          rawReferenceJson: JSON.stringify({
+            serviceUrl: "https://smba.trafficmanager.net/in/tenant-1/",
+            conversation: { id: "19:channel@thread.tacv2;messageid=parent-card-1" },
+          }),
+        };
+      },
+    };
+    const transport = createBotFrameworkTeamsTransport({
+      botAppId: "bot",
+      botAppPassword: "secret",
+      storage,
+      adapter,
+    });
+
+    await expect(transport.sendCard({
+      conversationId: "19:channel@thread.tacv2",
+      card: { type: "AdaptiveCard" },
+    })).resolves.toMatchObject({ accepted: true, statusCode: 202 });
+
+    expect(references).toEqual([
+      expect.objectContaining({ conversation: { id: "19:channel@thread.tacv2" } }),
+    ]);
+    expect(sent).toEqual([
+      expect.objectContaining({
+        type: "message",
+        attachments: [expect.objectContaining({ content: { type: "AdaptiveCard" } })],
+      }),
+    ]);
   });
 
   it("sends Teams thread replies with a thread-scoped conversation reference", async () => {

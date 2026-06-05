@@ -164,6 +164,8 @@ function buildTeamsAction(
         sourceChannelId: readOptionalString(card.workspace?.teamsChannelId),
         teamsTenantId,
         actionType: action.actionType,
+        platformOperation: operation,
+        signatureVersion: 'v2',
       }),
     },
   };
@@ -239,7 +241,10 @@ function signExternalCardAction(input: {
   sourceChannelId: string | null;
   teamsTenantId: string | null;
   actionType: string;
-}): { nonce: string; expiresAt: string; signature: string } {
+  platformOperation?: string | null;
+  requestId?: string | null;
+  signatureVersion?: 'v2' | null;
+}): { nonce: string; expiresAt: string; signature: string; signatureVersion?: 'v2' } {
   const secret =
     envValueDynamic('GANTRY_EXTERNAL_ACTION_SECRET') ||
     envValueDynamic('GANTRY_EXTERNAL_EVENT_SECRET');
@@ -247,7 +252,9 @@ function signExternalCardAction(input: {
     throw new Error('GANTRY_EXTERNAL_ACTION_SECRET is not configured');
   }
   const nonce = randomUUID();
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+  const expiresAt = normalizeExternalCardActionExpiresAtForSignature(
+    new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+  );
   const payload = stableActionPayload({
     ...input,
     nonce,
@@ -256,6 +263,7 @@ function signExternalCardAction(input: {
   return {
     nonce,
     expiresAt,
+    ...(input.signatureVersion === 'v2' ? { signatureVersion: 'v2' as const } : {}),
     signature: createHmac('sha256', secret).update(payload).digest('hex'),
   };
 }
@@ -268,10 +276,14 @@ export function signExternalCardActionForVerification(input: {
   sourceChannelId: string | null;
   teamsTenantId: string | null;
   actionType: string;
+  platformOperation?: string | null;
+  requestId?: string | null;
+  signatureVersion?: 'v2' | null;
   nonce: string;
   expiresAt: string;
   secret: string;
 }): string {
+  const expiresAt = normalizeExternalCardActionExpiresAtForSignature(input.expiresAt);
   return createHmac('sha256', input.secret)
     .update(
       stableActionPayload({
@@ -282,8 +294,15 @@ export function signExternalCardActionForVerification(input: {
         sourceChannelId: input.sourceChannelId,
         teamsTenantId: input.teamsTenantId,
         actionType: input.actionType,
+        ...(input.signatureVersion === 'v2'
+          ? {
+              signatureVersion: 'v2',
+              platformOperation: input.platformOperation ?? null,
+              requestId: input.requestId ?? null,
+            }
+          : {}),
         nonce: input.nonce,
-        expiresAt: input.expiresAt,
+        expiresAt,
       }),
     )
     .digest('hex');
@@ -291,6 +310,14 @@ export function signExternalCardActionForVerification(input: {
 
 function stableActionPayload(input: Record<string, string | null>): string {
   return JSON.stringify(Object.fromEntries(Object.entries(input).sort()));
+}
+
+function normalizeExternalCardActionExpiresAtForSignature(expiresAt: string): string {
+  const parsed = Date.parse(expiresAt.trim());
+  if (!Number.isFinite(parsed)) {
+    throw new Error('External card action expiration timestamp is invalid');
+  }
+  return new Date(parsed).toISOString();
 }
 
 function expectedTeamsTenantId(

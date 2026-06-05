@@ -18,6 +18,7 @@ import {
   _testExternalCardActions,
   buildExternalCardActionGraphqlRequest,
 } from '@core/channels/teams-external-card-actions.js';
+import { signExternalCardActionForVerification } from '@core/control/server/routes/external-notification-card.js';
 import { _testTeamsBotFrameworkClient } from '@core/channels/teams-bot-framework-client.js';
 import type { ChannelOpts } from '@core/channels/channel-provider.js';
 
@@ -279,6 +280,62 @@ describe('Teams Adaptive Card payloads', () => {
         '19:abc@thread.tacv2',
       ),
     ).toBe('19:abc@thread.tacv2');
+  });
+
+  it('verifies external card actions when Teams rewrites equivalent expiresAt strings', () => {
+    const previousSecret = process.env.GANTRY_EXTERNAL_ACTION_SECRET;
+    process.env.GANTRY_EXTERNAL_ACTION_SECRET = 'secret';
+    const signature = signExternalCardActionForVerification({
+      secret: 'secret',
+      integrationId: 'integration-test',
+      eventId: 'outbox-1',
+      resourceId: 'tender-1',
+      workspaceId: 'workspace-1',
+      sourceChannelId: '19:abc@thread.v2',
+      teamsTenantId: 'tenant-1',
+      actionType: 'request_analysis',
+      platformOperation: 'requestAdminProcessingApproval',
+      signatureVersion: 'v2',
+      nonce: 'nonce-1',
+      expiresAt: '2099-01-01T00:00:00.550Z',
+    });
+
+    try {
+      expect(() => _testExternalCardActions.verifyExternalCardActionSignature({
+        integrationId: 'integration-test',
+        eventId: 'outbox-1',
+        resourceId: 'tender-1',
+        workspaceId: 'workspace-1',
+        sourceChannelId: '19:abc@thread.v2',
+        teamsTenantId: 'tenant-1',
+        actionType: 'request_analysis',
+        platformOperation: 'requestAdminProcessingApproval',
+        signatureVersion: 'v2',
+        nonce: 'nonce-1',
+        expiresAt: '2099-01-01T00:00:00.55Z',
+        signature,
+      })).not.toThrow();
+      expect(() => _testExternalCardActions.verifyExternalCardActionSignature({
+        integrationId: 'integration-test',
+        eventId: 'outbox-1',
+        resourceId: 'tender-1',
+        workspaceId: 'workspace-1',
+        sourceChannelId: '19:abc@thread.v2',
+        teamsTenantId: 'tenant-1',
+        actionType: 'request_analysis',
+        platformOperation: 'markTenderWatching',
+        signatureVersion: 'v2',
+        nonce: 'nonce-1',
+        expiresAt: '2099-01-01T00:00:00.55Z',
+        signature,
+      })).toThrow('Invalid card action signature');
+    } finally {
+      if (previousSecret === undefined) {
+        delete process.env.GANTRY_EXTERNAL_ACTION_SECRET;
+      } else {
+        process.env.GANTRY_EXTERNAL_ACTION_SECRET = previousSecret;
+      }
+    }
   });
 
   it('builds Action.Execute allow-once and cancel actions', () => {
