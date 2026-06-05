@@ -25,11 +25,7 @@ describe('mapWithConcurrency', () => {
 describe('drainBatches — adaptive drain', () => {
   it('drains consecutive FULL batches and stops on the first partial batch', async () => {
     // batchSize 2: [full, full, partial] -> should fetch 3 times, process all 5.
-    const batches = [
-      [1, 2],
-      [3, 4],
-      [5],
-    ];
+    const batches = [[1, 2], [3, 4], [5]];
     let fetches = 0;
     const processed: number[] = [];
     const total = await drainBatches({

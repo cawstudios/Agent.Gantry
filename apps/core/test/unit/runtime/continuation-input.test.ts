@@ -13,8 +13,16 @@ import {
 // messages bled into each other's running sessions.
 describe('getContinuationInputDir — per-conversation isolation', () => {
   it('gives two DM conversations on the SAME agent different input dirs', () => {
-    const a = getContinuationInputDir('boondi_support', 'wa:919624194499', null);
-    const b = getContinuationInputDir('boondi_support', 'wa:919900020006', null);
+    const a = getContinuationInputDir(
+      'boondi_support',
+      'wa:919624194499',
+      null,
+    );
+    const b = getContinuationInputDir(
+      'boondi_support',
+      'wa:919900020006',
+      null,
+    );
     expect(a).not.toBe(b); // the core fix: customers must not share a mailbox
     expect(a).toContain('conv-'); // namespaced per conversation
     expect(a).toContain(encodeURIComponent('wa:919624194499'));
@@ -42,7 +50,11 @@ describe('getContinuationInputDir — per-conversation isolation', () => {
 
   it('keeps threads within a conversation isolated under that conversation', () => {
     const base = getContinuationInputDir('boondi_support', 'wa:111', null);
-    const threaded = getContinuationInputDir('boondi_support', 'wa:111', 'topicA');
+    const threaded = getContinuationInputDir(
+      'boondi_support',
+      'wa:111',
+      'topicA',
+    );
     expect(threaded).not.toBe(base);
     expect(threaded).toContain('conv-');
   });
