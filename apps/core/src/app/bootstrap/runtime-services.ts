@@ -46,7 +46,11 @@ import {
 import { isAmbiguousDurableDeliveryError } from '../../domain/messages/durable-delivery.js';
 import { startOutboundDeliveryRecoveryLoop } from '../../jobs/outbound-delivery-recovery.js';
 // prettier-ignore
-import { closeBrowser, getBrowserStatus } from '../../runtime/browser-capability.js';
+import {
+  closeBrowser,
+  ensureBrowserReady,
+  getBrowserStatus,
+} from '../../runtime/browser-capability.js';
 import type { OutboundDeliveryProfile } from '../../domain/outbound-delivery/planner.js';
 import {
   LIVE_SEND_PROFILE_ID,
@@ -90,11 +94,15 @@ interface Deps {
   closeBrowserToolBackends: IpcDeps['closeBrowserToolBackends'];
   executionAdapter?: RuntimeApp['executionAdapter'];
   executionAdapters?: RuntimeApp['executionAdapters'];
+  runnerSandboxProvider: RuntimeApp['runnerSandboxProvider'];
   exit: (code: number) => never;
 }
 type RuntimeServicesDefaults = Omit<
   Deps,
-  'opsRepository' | 'getToolRepository' | 'getPermissionRepository'
+  | 'opsRepository'
+  | 'getToolRepository'
+  | 'getPermissionRepository'
+  | 'runnerSandboxProvider'
 >;
 export type RuntimeServicesOptions = {
   app: RuntimeApp;
@@ -117,6 +125,7 @@ function makeDefaultDeps(): RuntimeServicesDefaults {
     exit: (code: number) => process.exit(code),
   };
 }
+
 function createGroupSnapshotSync(app: RuntimeApp, deps: Deps): () => void {
   let syncInFlight: Promise<void> | undefined;
   let syncDirty = false;
@@ -156,32 +165,31 @@ function createGroupSnapshotSync(app: RuntimeApp, deps: Deps): () => void {
       });
   };
 }
-
 export async function startRuntimeServices(
   options: RuntimeServicesOptions,
   deps: Partial<RuntimeServicesDefaults> &
     Pick<Deps, 'opsRepository' | 'getToolRepository'> &
     Partial<Pick<Deps, 'getPermissionRepository'>>,
 ): Promise<void> {
+  const { app, channelWiring } = options;
   const resolved: Deps = {
     ...makeDefaultDeps(),
     ...deps,
+    runnerSandboxProvider: app.runnerSandboxProvider,
   };
 
-  const { app, channelWiring } = options;
   const syncGroupSnapshots = createGroupSnapshotSync(app, resolved);
-
   const onSchedulerChanged = (jobId?: string) => requestSchedulerSync(jobId);
   const startScheduler = () =>
     resolved.startSchedulerLoop({
       conversationRoutes: () => app.getConversationRoutes(),
       queue: app.queue,
-      onProcess: (groupJid, proc, runHandle, groupFolder, stopAliasJids) =>
+      onProcess: (groupJid, proc, runHandle, workspaceFolder, stopAliasJids) =>
         app.queue.registerProcess(
           groupJid,
           proc,
           runHandle,
-          groupFolder,
+          workspaceFolder,
           stopAliasJids,
         ),
       sendMessage: (jid, rawText, options) =>
@@ -209,8 +217,11 @@ export async function startRuntimeServices(
       getSkillArtifactStore: resolved.getSkillArtifactStore,
       getToolRepository: resolved.getToolRepository,
       getBrowserStatus,
+      openBrowserSession: (profileName) => ensureBrowserReady({ profileName }),
       executionAdapter: resolved.executionAdapter ?? app.executionAdapter,
       executionAdapters: resolved.executionAdapters ?? app.executionAdapters,
+      runnerSandboxProvider:
+        resolved.runnerSandboxProvider ?? app.runnerSandboxProvider,
       closeBrowserSession: closeBrowser,
       closeBrowserToolBackends: resolved.closeBrowserToolBackends,
     });
@@ -529,13 +540,8 @@ export async function startRuntimeServices(
               'Outbound delivery canonical destination resolves to an unknown provider JID prefix.',
           } as const;
         }
-        const resolvedProviderIdForComparison =
-          destination.providerId === 'control-http' &&
-          destinationJid.startsWith('app:')
-            ? 'app'
-            : String(destination.providerId);
         if (
-          destinationDescriptor.providerId !== resolvedProviderIdForComparison
+          destinationDescriptor.providerId !== String(destination.providerId)
         ) {
           return {
             status: 'failed',
@@ -664,11 +670,8 @@ export async function startRuntimeServices(
       warn: (meta, message) => resolved.logger.warn(meta, message),
     });
   }
-
   await startScheduler();
-
   resolved.logger.info(`Gantry running (default trigger: ${DEFAULT_TRIGGER})`);
-
   resolved
     .startMessagePollingLoop({
       getConversationRoutes: () => app.getConversationRoutes(),

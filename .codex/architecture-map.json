@@ -8,7 +8,7 @@
     "apps/core/src/app/bootstrap/channel-wiring.ts": 711,
     "apps/core/src/channels/slack/channel-delivery-helpers.ts": 774,
     "apps/core/src/channels/telegram/channel-delivery.ts": 766,
-    "apps/core/src/cli/group.ts": 820,
+    "apps/core/src/cli/group.ts": 824,
     "apps/core/src/config/settings/desired-state-service.ts": 820,
     "apps/core/src/config/settings/runtime-settings-parser.ts": 1120,
     "apps/core/src/jobs/ipc-admin-handlers.ts": 883,
@@ -18,20 +18,12 @@
   },
   "layers": {
     "domain": {
-      "paths": [
-        "apps/core/src/domain"
-      ],
-      "allowedImportLayers": [
-        "domain",
-        "shared",
-        "packages/contracts"
-      ],
+      "paths": ["apps/core/src/domain"],
+      "allowedImportLayers": ["domain", "shared", "packages/contracts"],
       "allowedExternalImports": []
     },
     "application": {
-      "paths": [
-        "apps/core/src/application"
-      ],
+      "paths": ["apps/core/src/application"],
       "allowedImportLayers": [
         "domain",
         "application",
@@ -85,14 +77,10 @@
         "shared",
         "packages/contracts"
       ],
-      "allowedExternalImports": [
-        "*"
-      ]
+      "allowedExternalImports": ["*"]
     },
     "config": {
-      "paths": [
-        "apps/core/src/config"
-      ],
+      "paths": ["apps/core/src/config"],
       "allowedImportLayers": [
         "config",
         "domain",
@@ -110,48 +98,19 @@
       ]
     },
     "shared": {
-      "paths": [
-        "apps/core/src/shared"
-      ],
-      "allowedImportLayers": [
-        "shared",
-        "packages/contracts"
-      ],
-      "allowedExternalImports": [
-        "node:",
-        "crypto",
-        "fs",
-        "path",
-        "url",
-        "os"
-      ]
+      "paths": ["apps/core/src/shared"],
+      "allowedImportLayers": ["shared", "packages/contracts"],
+      "allowedExternalImports": ["node:", "crypto", "fs", "path", "url", "os"]
     },
     "packages/contracts": {
-      "paths": [
-        "packages/contracts/src"
-      ],
-      "allowedImportLayers": [
-        "packages/contracts"
-      ],
-      "allowedExternalImports": [
-        "zod"
-      ]
+      "paths": ["packages/contracts/src"],
+      "allowedImportLayers": ["packages/contracts"],
+      "allowedExternalImports": ["zod"]
     },
     "packages/sdk": {
-      "paths": [
-        "packages/sdk/src"
-      ],
-      "allowedImportLayers": [
-        "packages/contracts",
-        "packages/sdk"
-      ],
-      "allowedExternalImports": [
-        "node:",
-        "http",
-        "https",
-        "url",
-        "crypto"
-      ]
+      "paths": ["packages/sdk/src"],
+      "allowedImportLayers": ["packages/contracts", "packages/sdk"],
+      "allowedExternalImports": ["node:", "http", "https", "url", "crypto"]
     }
   },
   "approvedProviderSpecificPaths": [
@@ -189,9 +148,7 @@
     "playwright": "\\b(?:Playwright|playwright)\\b",
     "docker": "\\b(?:Docker|docker|docker-compose)\\b"
   },
-  "riskyExecutionApprovedPaths": [
-    "apps/core/src/adapters/sandbox"
-  ],
+  "riskyExecutionApprovedPaths": ["apps/core/src/adapters/sandbox"],
   "browserDefaultProfilePathPatterns": [
     "Google Chrome default profile",
     "~[/\\\\]\\.config[/\\\\]google-chrome",
@@ -204,8 +161,5 @@
     "registeredGroup": "\\bregisteredGroups?\\b",
     "claude_only": "\\b(?:claude-only|Claude-only|claude only|Claude only|only Claude|only supports Claude)\\b"
   },
-  "emptyFolderScanRoots": [
-    "apps/core/src",
-    "packages"
-  ]
+  "emptyFolderScanRoots": ["apps/core/src", "packages"]
 }

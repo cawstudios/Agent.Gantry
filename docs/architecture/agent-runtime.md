@@ -28,7 +28,7 @@ ACP/ACPS are harness/runtime integration concerns. They are not part of the agen
 ## Message lifecycle
 
 1. A backend app calls `sessions.ensure()`.
-2. The control server maps `(appId, conversationId)` to an `app:` JID and runtime group folder.
+2. The control server maps `(appId, conversationId)` to an `app:` JID and runtime workspace folder.
 3. The app calls `sessions.sendMessage()`.
 4. The runtime stores the inbound message in Postgres.
 5. The runtime enqueues the group for normal processing.
@@ -171,6 +171,10 @@ single run. Once `AgentDelegation` is granted, the runtime does not add a
 second `subagent_type` allowlist. It still rejects cross-provider models and custom
 `tools`/`mcpServers`/`skills` input on the Agent tool call because those mutate
 the runner projection instead of using the selected parent-agent capabilities.
+When `runtime.sandbox.provider: sandbox_runtime` is configured, native
+subagents execute inside the same sandboxed parent runner process. They do not
+receive a separate host-spawned sandbox or a separate durable authority surface,
+and the Claude Code child is marked already sandboxed for that run.
 See `validateAgentModelRequest` and `validateAgentToolInput` in
 `apps/core/src/adapters/llm/anthropic-claude-agent/runner/agent-model-selection.ts`.
 

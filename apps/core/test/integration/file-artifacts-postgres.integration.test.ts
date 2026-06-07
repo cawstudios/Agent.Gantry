@@ -29,6 +29,7 @@ maybeDescribe('Postgres file artifact store', () => {
       'agent:versioned',
       'agent:other',
       'agent:concurrent',
+      'agent:expected-version',
       'agent:promoter',
       'agent:binary',
     ]) {
@@ -179,6 +180,50 @@ maybeDescribe('Postgres file artifact store', () => {
     expect(listed.map((artifact) => artifact.version)).toEqual([
       8, 7, 6, 5, 4, 3, 2, 1,
     ]);
+  });
+
+  it('rejects concurrent writers with the same expected version atomically', async () => {
+    const store = runtime.storageRuntime.fileArtifacts;
+    const owner = {
+      appId: 'app:test',
+      agentId: 'agent:expected-version',
+      virtualScope: 'prompt-profile',
+      virtualPath: 'main_agent/AGENTS.md',
+      contentType: 'text/markdown',
+    };
+    await store.writeFileArtifact({
+      ...owner,
+      content: '# initial',
+    });
+
+    const results = await Promise.allSettled(
+      ['# next a', '# next b'].map((content) =>
+        store.writeFileArtifact({
+          ...owner,
+          content,
+          expectedVersion: 1,
+        }),
+      ),
+    );
+
+    expect(
+      results.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    expect(rejected?.reason).toMatchObject({
+      name: 'FileArtifactVersionConflictError',
+      latestVersion: 2,
+    });
+    const listed = await store.listFileArtifacts({
+      appId: owner.appId,
+      agentId: owner.agentId,
+      virtualScope: owner.virtualScope,
+      virtualPath: owner.virtualPath,
+      limit: 10,
+    });
+    expect(listed.map((artifact) => artifact.version)).toEqual([2, 1]);
   });
 
   it('promotes scratch artifacts with lineage metadata', async () => {

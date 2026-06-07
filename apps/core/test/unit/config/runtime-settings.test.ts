@@ -50,6 +50,45 @@ describe('runtime settings', () => {
     expect(parsed.agent.recurringJobDefaultModel).toBe('opus-4.6');
   });
 
+  it('round-trips per-agent mcp tool scope through settings.yaml', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agents.main_agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      bindings: {},
+      sources: {
+        skills: [],
+        mcpServers: [{ id: 'github', tools: ['read_*'] }],
+        tools: [],
+      },
+      capabilities: [],
+    };
+
+    const yaml = renderRuntimeSettingsYaml(settings);
+    expect(yaml).toContain('mcp_servers:');
+    expect(yaml).toContain('tools:');
+
+    const parsed = parseRuntimeSettings(yaml);
+    expect(parsed.agents.main_agent.sources.mcpServers).toEqual([
+      { id: 'github', tools: ['read_*'] },
+    ]);
+  });
+
+  it('rejects tool scope on non-mcp source refs', () => {
+    expect(() =>
+      parseRuntimeSettings(`agents:
+  main_agent:
+    name: Main
+    access:
+      sources:
+        skills:
+          - id: demo
+            tools:
+              - read_*
+`),
+    ).toThrow(/tools is only supported for mcp_servers/);
+  });
+
   it('defaults, renders, and parses runtime queue policy', () => {
     const settings = createDefaultRuntimeSettings();
     expect(settings.runtime.queue).toEqual({
@@ -75,6 +114,35 @@ describe('runtime settings', () => {
 
     const parsed = parseRuntimeSettings(yaml);
     expect(parsed.runtime.queue).toEqual(settings.runtime.queue);
+  });
+
+  it('defaults, renders, and parses runner sandbox policy', () => {
+    const settings = createDefaultRuntimeSettings();
+    expect(settings.runtime.sandbox).toEqual({
+      provider: 'direct',
+      resourceLimits: {
+        cpuSeconds: 0,
+        memoryMb: 0,
+        maxProcesses: 0,
+      },
+    });
+
+    settings.runtime.sandbox = {
+      provider: 'sandbox_runtime',
+      resourceLimits: {
+        cpuSeconds: 120,
+        memoryMb: 2048,
+        maxProcesses: 64,
+      },
+    };
+
+    const yaml = renderRuntimeSettingsYaml(settings);
+    expect(yaml).toContain('sandbox:');
+    expect(yaml).toContain('provider: sandbox_runtime');
+    expect(yaml).toContain('cpu_seconds: 120');
+
+    const parsed = parseRuntimeSettings(yaml);
+    expect(parsed.runtime.sandbox).toEqual(settings.runtime.sandbox);
   });
 
   it('defaults, renders, and parses neutral browser usage policy', () => {
@@ -233,6 +301,15 @@ describe('runtime settings', () => {
     max_jobb_runs: 4
 `),
     ).toThrow('runtime.queue.max_jobb_runs is not supported');
+  });
+
+  it('rejects unsupported runtime sandbox keys', () => {
+    expect(() =>
+      parseRuntimeSettings(`runtime:
+  sandbox:
+    provider: unsandboxed
+`),
+    ).toThrow('runtime.sandbox.provider must be direct or sandbox_runtime');
   });
 
   it('rejects duplicate settings keys before schema normalization', () => {
@@ -612,6 +689,7 @@ conversations:
       name: 'Default Agent',
       folder: 'main_agent',
       persona: 'generalist',
+      relationshipMode: 'organization',
       model: 'sonnet',
       oneTimeJobDefaultModel: 'haiku',
       recurringJobDefaultModel: 'opus',
@@ -651,8 +729,12 @@ conversations:
 
     expect(parsed.desiredState.authoritative).toBe(true);
     expect(parsed.agents.main_agent.persona).toBe('generalist');
+    expect(parsed.agents.main_agent.relationshipMode).toBe('organization');
     expect(renderRuntimeSettingsYaml(parsed)).toContain(
       '    persona: generalist',
+    );
+    expect(renderRuntimeSettingsYaml(parsed)).toContain(
+      '    relationship_mode: organization',
     );
     expect(parsed.agents.main_agent.bindings.main_dm).toMatchObject({
       jid: 'tg:100',
@@ -1387,9 +1469,9 @@ conversations:
 
     expect(yaml).toContain(
       [
-        '      skills:',
-        '        - name: linkedin-posting',
-        '          id: "skill:3014949c-a616-4b2c-80e7-0bc61bb31e85"',
+        '        skills:',
+        '          - name: linkedin-posting',
+        '            id: "skill:3014949c-a616-4b2c-80e7-0bc61bb31e85"',
       ].join('\n'),
     );
     expect(yaml).toContain('company-handbook');

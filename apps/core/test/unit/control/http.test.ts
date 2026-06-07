@@ -46,6 +46,18 @@ describe('control http body readers', () => {
     await expect(readJson(req)).rejects.toThrow('Payload too large');
   });
 
+  it('accepts json payloads under an explicit larger parser limit', async () => {
+    const payload = JSON.stringify({ content: 'x'.repeat(70 * 1024) });
+    const req = makeRequest({
+      headers: { 'content-length': String(Buffer.byteLength(payload)) },
+      chunks: [Buffer.from(payload)],
+    });
+
+    await expect(readJson(req, 80 * 1024)).resolves.toMatchObject({
+      content: expect.any(String),
+    });
+  });
+
   it('uses the first content-length header value when headers are arrays', async () => {
     const req = makeRequest({
       headers: { 'content-length': [String(1024), '1'] },

@@ -339,7 +339,7 @@ Additional mounts appear under `/workspace/extra/` in the runtime workspace.
 
 Interactive model precedence is:
 
-1. `group.agentConfig.model`
+1. `conversation.agentConfig.model`
 2. `agent.default_model` in `settings.yaml`
 3. system default `opus`
 
@@ -423,7 +423,7 @@ Prompt profile FileArtifacts are static guidance, not memory dumps:
 | Layer             | Virtual path               | Purpose                                  |
 | ----------------- | -------------------------- | ---------------------------------------- |
 | **Soul**          | `<agent-folder>/SOUL.md`   | Agent personality, voice, and boundaries |
-| **Agent context** | `<agent-folder>/CLAUDE.md` | Stable agent-specific guidance           |
+| **Agent context** | `<agent-folder>/AGENTS.md` | Stable agent-specific guidance           |
 
 Dynamic facts, open loops, and raw transcripts must not be written into these
 FileArtifacts. Durable facts go through structured memory. Active task state is
@@ -432,7 +432,7 @@ runtime events, and digests.
 
 Shared/default operating rules are not stored in `agents/shared`. The runtime
 compiles them as built-in prompt guidance with memory, continuity, privacy,
-tool-use, and communication defaults before appending agent `CLAUDE.md`
+tool-use, and communication defaults before appending agent `AGENTS.md`
 content.
 
 ### Continuity Context
@@ -470,7 +470,7 @@ decisions. It stores app-grade memory in Postgres.
 | **Dream runs**      | Postgres (`memory_dream_runs`)      | Dreaming lifecycle runs per boundary                                                                                            |
 | **Dream decisions** | Postgres (`memory_dream_decisions`) | Auditable promotion, merge, rewrite, decay, retire, or review rows                                                              |
 | **Lexical search**  | Postgres full-text search           | Always-on memory retrieval path                                                                                                 |
-| **Vector search**   | Future `pgvector` path              | Inactive until memory item embedding indexing and query are fully implemented                                                   |
+| **Vector search**   | Optional `pgvector` hybrid path     | Active when embeddings are enabled and items are indexed; otherwise full-text recall remains the always-on baseline             |
 
 `memory_subjects` is not an active current-schema table. Subject identity is
 flattened into `memory_items` and preserved in item metadata for visibility
@@ -564,9 +564,9 @@ Gantry memory uses Postgres tables in the configured runtime schema.
 
 - Runtime database: `GANTRY_DATABASE_URL`
 - Runtime schema: `storage.postgres.schema` (default `gantry`)
-- Lexical search: Postgres full-text search
-- Vector search: inactive until memory item embeddings are fully indexed and
-  queried
+- Lexical search: Postgres full-text search (always-on baseline)
+- Vector search: optional semantic enhancement; active when embeddings are
+  enabled and indexed, otherwise full-text recall remains the baseline
 
 Transcript export, when needed, is generated from canonical Postgres messages
 into a `FileArtifact`. Provider SDK JSONL files are not stored as durable
@@ -700,14 +700,14 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 ### Commands Available in Any Group
 
-| Command                | Example                     | Effect         |
-| ---------------------- | --------------------------- | -------------- |
+| Command            | Example                     | Effect                       |
+| ------------------ | --------------------------- | ---------------------------- |
 | `@Agent [message]` | `@Andy what's the weather?` | Message the configured agent |
 
 ### Commands Available in Main Channel Only
 
-| Command                          | Example                             | Effect                    |
-| -------------------------------- | ----------------------------------- | ------------------------- |
+| Command                      | Example                             | Effect                    |
+| ---------------------------- | ----------------------------------- | ------------------------- |
 | `@Agent add group "Name"`    | `@Andy add group "Family Chat"`     | Register a new group      |
 | `@Agent remove group "Name"` | `@Andy remove group "Work Team"`    | Unregister a group        |
 | `@Agent list groups`         | `@Andy list groups`                 | Show registered groups    |
@@ -727,9 +727,9 @@ Postgres state and are never written to `settings.yaml`.
 2. **Agent Capabilities**: Scheduled jobs inherit the selected target agent's
    selected capabilities plus attached sources. They do not carry job-specific
    capability grants, raw tool grants, or receive all tools by default.
-   Job `capabilityRequirements`, `toolAccessRequirements`, and
-   `requiredMcpServers` are readiness assertions that pause the job until the
-   target agent has the required capability, tool facade, or MCP source.
+   Job `accessRequirements` are readiness assertions that pause the job until
+   the target agent has the required capability, scoped command fallback, or MCP
+   source.
 3. **Optional Messaging**: Jobs can send messages to their configured conversation or thread/topic route using the `send_message` tool, or complete silently
 4. **Admin Privileges**: Admin-wide job management belongs to the Control API
    and local/admin CLI surfaces. Normal agent-facing scheduler MCP tools stay
@@ -834,7 +834,7 @@ The `gantry` MCP server is created dynamically per agent call with the current c
 | `send_message` | Send a message to the configured conversation route |
 
 Scheduler MCP job visibility and mutation are scoped to both the calling
-agent's runtime scope and the current conversation: `group_scope` must match the
+agent's runtime scope and the current conversation: `workspace_key` must match the
 agent, and `executionContext.conversationJid` must match the originating chat.
 Thread/topic ids may be checked to prevent delivery retargeting, but they do
 not create job visibility or run authority.
@@ -994,12 +994,12 @@ chmod 700 ~/gantry/agents ~/gantry/data
 
 ### Common Issues
 
-| Issue                              | Cause                             | Solution                                                          |
-| ---------------------------------- | --------------------------------- | ----------------------------------------------------------------- |
-| No response to messages            | Service not running               | Run `gantry status` and check the service line                    |
-| Startup fails at runtime preflight | Host runtime prerequisites failed | Run `npm run build` and re-check runtime diagnostics              |
-| Session not continuing             | Session state not persisted       | Run `gantry status` and verify Postgres runtime storage readiness |
-| "No groups registered"             | Haven't added groups              | Register a channel group with the current channel setup flow      |
+| Issue                              | Cause                                 | Solution                                                          |
+| ---------------------------------- | ------------------------------------- | ----------------------------------------------------------------- |
+| No response to messages            | Service not running                   | Run `gantry status` and check the service line                    |
+| Startup fails at runtime preflight | Runtime build or storage check failed | Run `gantry status` and follow the displayed next action          |
+| Session not continuing             | Session state not persisted           | Run `gantry status` and verify Postgres runtime storage readiness |
+| "No conversations connected"       | No Conversation connected             | Run `gantry setup` and connect one Conversation                   |
 
 ### Log Location
 

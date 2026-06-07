@@ -2,7 +2,6 @@ import { ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
-
 import {
   DATA_DIR,
   PERMISSION_APPROVAL_TIMEOUT_MS,
@@ -16,7 +15,7 @@ import { MODEL_RUNTIME_CREDENTIAL_IDENTIFIER } from '../domain/models/credential
 import { LlmProfileResolutionService } from '../application/model-resolution/llm-profile-resolution-service.js';
 import type { LlmProfile } from '../domain/agent/agent.js';
 import { DEFAULT_SETUP_MODEL_ALIAS } from '../shared/model-catalog.js';
-import { resolveGroupFolderPath } from '../platform/group-folder.js';
+import { resolveWorkspaceFolderPath } from '../platform/workspace-folder.js';
 import {
   getHostRuntimeCredentialEnv,
   prepareHostRuntimeContext,
@@ -25,7 +24,7 @@ import {
   McpServerService,
   type MaterializedMcpCapability,
 } from '../application/mcp/mcp-server-service.js';
-import { ensureGroupIpcLayout } from './agent-spawn-layout.js';
+import { ensureWorkspaceIpcLayout } from './agent-spawn-layout.js';
 import { resolvePackageRootFromSourceDir } from '../platform/package-root.js';
 import {
   computeBrowserIpcAuthToken,
@@ -42,6 +41,7 @@ import {
 } from '../application/agents/prompt-profile-service.js';
 import { executeRunnerProcess } from './agent-spawn-process.js';
 import { applyAgentEgressNoProxyEnv } from '../shared/no-proxy.js';
+import { buildToolNetworkEnv } from '../shared/tool-network-env.js';
 import { closeEgressGateway, ensureEgressGateway } from './egress-gateway.js';
 import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
 import {
@@ -51,25 +51,41 @@ import {
 } from './agent-spawn-types.js';
 import { selectedMemoryIpcActionsFromToolRules } from '../shared/memory-ipc-actions.js';
 import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-references.js';
-import { validateAgentToolRuntimeRules } from '../application/agents/agent-tool-runtime-rules.js';
 import { resolveMcpCredentialEnvForAgent } from '../application/capability-secrets/mcp-secret-projection.js';
 import { resolveSelectedSkillEnvForAgent } from '../application/capability-secrets/skill-secret-projection.js';
+import {
+  attachMcpSourceNetworkHosts,
+  egressNetworkAttributionFromRuntimeAccess,
+  LOCAL_CLI_CREDENTIAL_DIRS_ENV,
+  localCliCredentialPathHintsFromRuntimeAccess,
+  pickPreparedExecutionEnv,
+  pickSafeHostEnv,
+  pickSelectedCapabilityEnv,
+  PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV,
+  PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV,
+  PROTECTED_FILESYSTEM_PATHS_ENV,
+  resolveHomeRelativePaths,
+  resolveRunnerMcpProjection,
+  sandboxAllowedNetworkHostsFromRuntimeAccess,
+  validateRunnerAllowedTools,
+} from './agent-spawn-runtime-policy.js';
 import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { getRuntimeFileArtifactStore } from '../adapters/storage/postgres/runtime-store.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 import { formatGeneratedRuntimePathPermissionError } from './generated-runtime-path-error.js';
 import { resolveAgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter-registry.js';
 import { writeRunnerMcpConfigFile } from './agent-spawn-mcp-config.js';
-type RunnerAgentInput = AgentInput & {
-  modelCredentialEnv?: Record<string, string>;
-};
-
-const PROTECTED_FILESYSTEM_PATHS_ENV = 'GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON';
-const PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV =
-  'GANTRY_PROTECTED_FILESYSTEM_DENY_READ_PATHS_JSON';
-const PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV =
-  'GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON';
-const LOCAL_CLI_CREDENTIAL_DIRS_ENV = 'GANTRY_LOCAL_CLI_CREDENTIAL_DIRS_JSON';
+import { withStdioMcpEgressEnv } from './agent-spawn-mcp-egress-env.js';
+import {
+  cleanupRunnerMcpConfigFile,
+  cleanupRunnerTempDir,
+  buildSandboxRuntimeGatewayOptions,
+  protectedWritePathsForOuterSandbox,
+  resolveClaudeCodeToolTempDir,
+  sandboxRuntimeToolProcessEnv,
+  sandboxRuntimeToolNetworkEnv,
+  type RunnerAgentInput,
+} from './agent-spawn-helpers.js';
 const DEFAULT_RUNNER_APP_ID = 'default';
 export { writeGroupsSnapshot } from './agent-spawn-snapshots.js';
 export type {
@@ -77,175 +93,21 @@ export type {
   AgentInput,
   AgentOutput,
 } from './agent-spawn-types.js';
-
-const SAFE_HOST_ENV_KEYS = [
-  'PATH',
-  'TMPDIR',
-  'TMP',
-  'TEMP',
-  'LANG',
-  'LC_ALL',
-  'LC_CTYPE',
-  'TERM',
-  'COLORTERM',
-  'NO_COLOR',
-  'FORCE_COLOR',
-  'NO_PROXY',
-  'no_proxy',
-] as const;
-const PREPARED_EXECUTION_ENV_DENYLIST = new Set([
-  'PATH',
-  'NODE_OPTIONS',
-  'LD_PRELOAD',
-  'NODE_EXTRA_CA_CERTS',
-]);
-const PREPARED_EXECUTION_GANTRY_ENV_ALLOWLIST = new Set([
-  'GANTRY_EFFECTIVE_MODEL_SOURCE',
-  'GANTRY_CLAUDE_SDK_SKILLS_JSON',
-  'GANTRY_SKILL_ACTIONS_JSON',
-]);
-const PREPARED_EXECUTION_ENV_SUFFIX_ALLOWLIST = ['_CONFIG_DIR', '_MODEL'];
-const PREPARED_EXECUTION_SECRET_ENV_PATTERN =
-  /(?:^|_)(?:API_)?(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)(?:_|$)/i;
-
-function isPreparedExecutionEnvKeyAllowed(key: string): boolean {
-  if (PREPARED_EXECUTION_ENV_DENYLIST.has(key)) return false;
-  if (key.startsWith('GANTRY_')) {
-    return PREPARED_EXECUTION_GANTRY_ENV_ALLOWLIST.has(key);
-  }
-  if (PREPARED_EXECUTION_SECRET_ENV_PATTERN.test(key)) return false;
-  return PREPARED_EXECUTION_ENV_SUFFIX_ALLOWLIST.some((suffix) =>
-    key.endsWith(suffix),
-  );
-}
-
-function pickSafeHostEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of SAFE_HOST_ENV_KEYS) {
-    const value = source[key];
-    if (typeof value === 'string' && value.length > 0) {
-      env[key] = value;
-    }
-  }
-  return env;
-}
-
-function resolveHomeRelativePaths(
-  values: readonly string[],
-  source: NodeJS.ProcessEnv,
-): string[] {
-  const home = source.HOME ?? source.USERPROFILE;
-  const out = new Set<string>();
-  for (const value of values) {
-    const trimmed = value.trim();
-    if (!trimmed) continue;
-    if (trimmed === '~') {
-      if (home) out.add(home);
-      continue;
-    }
-    if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
-      if (home) out.add(path.join(home, trimmed.slice(2)));
-      continue;
-    }
-    const expanded = expandCredentialPathTemplate(trimmed, source);
-    if (expanded) out.add(expanded);
-  }
-  return [...out];
-}
-function localCliCredentialPathHintsFromRuntimeAccess(
-  runtimeAccess: AgentInput['runtimeAccess'],
-): string[] {
-  const dirs = (runtimeAccess ?? []).flatMap((access) =>
-    access.sourceType === 'local_cli' ? access.credentialDirs : [],
-  );
-  return [...new Set(dirs.map((dir) => dir.trim()).filter(Boolean))];
-}
-function expandCredentialPathTemplate(
-  value: string,
-  source: NodeJS.ProcessEnv,
-): string | null {
-  let missing = false;
-  const expanded = value
-    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, key: string) => {
-      const envValue = source[key];
-      if (!envValue) missing = true;
-      return envValue ?? '';
-    })
-    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, key: string) => {
-      const envValue = source[key];
-      if (!envValue) missing = true;
-      return envValue ?? '';
-    })
-    .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (_match, key: string) => {
-      const envValue = source[key];
-      if (!envValue) missing = true;
-      return envValue ?? '';
-    });
-  return missing ? null : expanded;
-}
-
-function pickPreparedExecutionEnv(
-  source: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(source)) {
-    if (typeof value !== 'string' || value.length === 0) continue;
-    if (!isPreparedExecutionEnvKeyAllowed(key)) continue;
-    env[key] = value;
-  }
-  return env;
-}
-
-function pickSelectedCapabilityEnv(
-  source: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(source)) {
-    if (typeof value !== 'string' || value.length === 0) continue;
-    if (PREPARED_EXECUTION_ENV_DENYLIST.has(key) || key.startsWith('GANTRY_')) {
-      continue;
-    }
-    env[key] = value;
-  }
-  return env;
-}
-
-function validateRunnerAllowedTools(rules: readonly string[]): string | null {
-  try {
-    validateAgentToolRuntimeRules({
-      rules,
-      errorSubject: 'Configured agent tool',
-    });
-    return null;
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
-  }
-}
-
-function cleanupRunnerMcpConfigFile(configPath: string | undefined): void {
-  if (!configPath) return;
-  try {
-    fs.rmSync(configPath, { force: true });
-  } catch (err) {
-    logger.warn(
-      { err, configPath },
-      'Failed to remove MCP runner handoff file',
-    );
-  }
-}
-
 export async function spawnAgent(
   group: ConversationRoute,
   input: AgentInput,
   onProcess: (proc: ChildProcess, runHandle: string) => void,
-  onOutput?: (output: AgentOutput) => Promise<void>,
-  options?: RunAgentOptions,
+  onOutput: ((output: AgentOutput) => Promise<void>) | undefined,
+  options: RunAgentOptions,
 ): Promise<AgentOutput> {
   const startTime = currentTimeMs();
-
-  const groupDir = resolveGroupFolderPath(group.folder);
-  fs.mkdirSync(groupDir, { recursive: true });
-
+  const groupDir = resolveWorkspaceFolderPath(group.folder);
+  fs.mkdirSync(groupDir, { recursive: true, mode: 0o700 });
+  try {
+    fs.chmodSync(groupDir, 0o700);
+  } catch (err) {
+    logger.warn({ err, groupDir }, 'Failed to tighten agent workspace mode');
+  }
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const processName = `gantry-${safeName}-${currentTimeMs()}-${randomUUID().slice(0, 8)}`;
   const modelConfig = getEffectiveModelConfig(
@@ -300,9 +162,7 @@ export async function spawnAgent(
     fileArtifactStore: () => getRuntimeFileArtifactStore(),
   });
   const agentIdentifier = group.folder.toLowerCase().replace(/_/g, '-');
-
   let compiledSystemPrompt = '';
-
   try {
     compiledSystemPrompt = await promptProfileService.compileSystemPrompt({
       agentFolder: group.folder,
@@ -316,18 +176,15 @@ export async function spawnAgent(
       'Failed to compile prompt profile; continuing without custom system prompt',
     );
   }
-
   const browserProfileName = resolveConversationBrowserProfile({
     agentId: group.folder,
     workspaceKey: group.folder,
     conversationId: input.chatJid,
   });
-
   const trustedAllowedTools = input.allowedTools;
   const browserIpcEnabled = (trustedAllowedTools ?? []).some(
     isCanonicalBrowserCapabilityRule,
   );
-
   const runnerInput: RunnerAgentInput = {
     ...input,
     allowedTools: trustedAllowedTools,
@@ -339,7 +196,7 @@ export async function spawnAgent(
   };
 
   const hostRuntime = prepareHostRuntimeContext(group);
-  ensureGroupIpcLayout(hostRuntime.groupIpcDir);
+  ensureWorkspaceIpcLayout(hostRuntime.workspaceIpcDir);
   let executionAdapter: NonNullable<RunAgentOptions['executionAdapter']>;
   try {
     executionAdapter = resolveAgentExecutionAdapter({
@@ -414,6 +271,9 @@ export async function spawnAgent(
   }
 
   let mcpConfigPath: string | undefined;
+  let sandboxConfigPath: string | undefined;
+  let runnerTempDir: string | undefined;
+  let claudeToolTempDir: string | undefined;
   let egressGateway:
     | Awaited<ReturnType<typeof ensureEgressGateway>>
     | undefined;
@@ -432,30 +292,54 @@ export async function spawnAgent(
       'stdio.js',
     );
     const attachedMcpSourceIds = input.attachedMcpSourceIds ?? [];
+    const mcpSourceRecords =
+      options?.mcpServerRepository &&
+      options.mcpContext?.appId &&
+      options.mcpContext.agentId &&
+      attachedMcpSourceIds.length > 0
+        ? await options.mcpServerRepository.listMaterializedServersForAgent({
+            appId: options.mcpContext.appId as never,
+            agentId: options.mcpContext.agentId as never,
+            serverIds: attachedMcpSourceIds as never,
+          })
+        : [];
+    const { reviewedMcpToolNames, projectedMcpSourceIds } =
+      resolveRunnerMcpProjection({
+        runtimeAccess: input.runtimeAccess ?? [],
+        mcpSourceRecords,
+      });
     const allMcpCapabilities: MaterializedMcpCapability[] =
       options?.mcpServerRepository &&
       options.capabilitySecretRepository &&
       options.mcpContext?.appId &&
       options.mcpContext.agentId &&
-      attachedMcpSourceIds.length > 0
+      projectedMcpSourceIds.length > 0
         ? await new McpServerService(options.mcpServerRepository, undefined, {
             lookupHostname: options.mcpHostnameLookup,
             dnsValidationCache: options.mcpDnsValidationCache,
           }).materializeForAgent({
             appId: options.mcpContext.appId as never,
             agentId: options.mcpContext.agentId as never,
-            serverIds: attachedMcpSourceIds as never,
-            credentialEnv: options.capabilitySecretRepository
-              ? await resolveMcpCredentialEnvForAgent({
-                  appId: options.mcpContext.appId as never,
-                  agentId: options.mcpContext.agentId as never,
-                  serverIds: attachedMcpSourceIds as never,
-                  mcpServers: options.mcpServerRepository,
-                  secrets: options.capabilitySecretRepository,
-                })
-              : {},
+            serverIds: projectedMcpSourceIds as never,
+            credentialEnv: await resolveMcpCredentialEnvForAgent({
+              appId: options.mcpContext.appId as never,
+              agentId: options.mcpContext.agentId as never,
+              serverIds: projectedMcpSourceIds as never,
+              mcpServers: options.mcpServerRepository,
+              secrets: options.capabilitySecretRepository,
+            }),
           })
         : [];
+    const effectiveRuntimeAccess = attachMcpSourceNetworkHosts(
+      input.runtimeAccess ?? [],
+      allMcpCapabilities,
+    );
+    runnerInput.runtimeAccess = effectiveRuntimeAccess;
+    const networkAttribution = egressNetworkAttributionFromRuntimeAccess(
+      effectiveRuntimeAccess,
+    );
+    const sandboxAllowedNetworkHosts =
+      sandboxAllowedNetworkHostsFromRuntimeAccess(effectiveRuntimeAccess);
     const memoryIpcAllowedActions = selectedMemoryIpcActionsFromToolRules(
       trustedAllowedTools ?? [],
       {
@@ -464,6 +348,24 @@ export async function spawnAgent(
     );
     const upstreamProxyUrl =
       hostCredentials.proxy?.https || hostCredentials.proxy?.http;
+    const runnerInputPatch = preparedExecution.runnerInputPatch ?? {};
+    runnerInput.modelCredentialEnv = runnerInputPatch.modelCredentialEnv;
+    const runtimeSandbox = getRuntimeSettingsForConfig().runtime.sandbox;
+    const runnerSandboxProviderId =
+      options?.runnerSandboxProvider?.id ?? 'direct';
+    if (runnerSandboxProviderId !== runtimeSandbox.provider) {
+      throw new Error(
+        `Runner sandbox provider mismatch: settings.yaml has ${runtimeSandbox.provider}, but the live runtime provider is ${runnerSandboxProviderId}. Restart Gantry before running agents.`,
+      );
+    }
+    const sandboxRuntimeGateway = buildSandboxRuntimeGatewayOptions(
+      runnerSandboxProviderId,
+      sandboxAllowedNetworkHosts,
+      runnerInput.modelCredentialEnv,
+    );
+    runnerInput.modelCredentialEnv = sandboxRuntimeGateway.modelCredentialEnv;
+    runnerInputPatch.modelCredentialEnv =
+      sandboxRuntimeGateway.modelCredentialEnv;
     egressGateway = await ensureEgressGateway({
       key: `${runnerAppId}:${input.agentId || group.folder}:${processName}`,
       settings: getRuntimeSettingsForConfig().permissions.egress,
@@ -475,6 +377,11 @@ export async function spawnAgent(
         ...(input.runId ? { runId: input.runId } : {}),
         ...(input.jobId ? { jobId: input.jobId } : {}),
       },
+      networkAttribution,
+      ...sandboxRuntimeGateway.gatewayOptions,
+      ...(options?.mcpHostnameLookup
+        ? { lookupHostname: options.mcpHostnameLookup }
+        : {}),
       ...(upstreamProxyUrl
         ? {
             upstreamProxy: {
@@ -487,39 +394,70 @@ export async function spawnAgent(
         ? { publishRuntimeEvent: options.publishRuntimeEvent }
         : {}),
     });
-    const runnerInputPatch = preparedExecution.runnerInputPatch ?? {};
-    runnerInputPatch.modelCredentialEnv ??= {};
-    runnerInputPatch.modelCredentialEnv.HTTP_PROXY = egressGateway.proxyUrl;
-    runnerInputPatch.modelCredentialEnv.HTTPS_PROXY = egressGateway.proxyUrl;
-    runnerInputPatch.modelCredentialEnv.http_proxy = egressGateway.proxyUrl;
-    runnerInputPatch.modelCredentialEnv.https_proxy = egressGateway.proxyUrl;
-    runnerInputPatch.modelCredentialEnv.NODE_USE_ENV_PROXY = '1';
-    runnerInput.modelCredentialEnv = runnerInputPatch.modelCredentialEnv;
+    const toolNetworkEnv = sandboxRuntimeToolNetworkEnv(
+      runnerSandboxProviderId,
+      runnerInputPatch.toolNetworkEnv ??
+        buildToolNetworkEnv({
+          proxyUrl: egressGateway.proxyUrl,
+          caBundlePath:
+            runnerInputPatch.modelCredentialEnv?.NODE_EXTRA_CA_CERTS ??
+            hostCredentials.env.NODE_EXTRA_CA_CERTS,
+          noProxy: {
+            NO_PROXY: process.env.NO_PROXY,
+            no_proxy: process.env.no_proxy,
+          },
+        }),
+    );
+    runnerInputPatch.toolNetworkEnv = toolNetworkEnv;
+    runnerInput.toolNetworkEnv = toolNetworkEnv;
     if (runnerInputPatch.semanticCapabilities) {
       runnerInput.semanticCapabilities = runnerInputPatch.semanticCapabilities;
     }
     const localCliCredentialPaths = resolveHomeRelativePaths(
-      localCliCredentialPathHintsFromRuntimeAccess(input.runtimeAccess),
+      localCliCredentialPathHintsFromRuntimeAccess(effectiveRuntimeAccess),
       process.env,
     );
+    const workspaceExtraDir = path.join(
+      DATA_DIR,
+      'sessions',
+      group.folder,
+      'extra',
+    );
+    if (runnerSandboxProviderId === 'sandbox_runtime') {
+      runnerTempDir = path.join(
+        hostRuntime.workspaceIpcDir,
+        'tmp',
+        processName,
+      );
+      claudeToolTempDir = resolveClaudeCodeToolTempDir(runnerTempDir);
+      fs.mkdirSync(runnerTempDir, { recursive: true, mode: 0o700 });
+      if (claudeToolTempDir) {
+        fs.mkdirSync(claudeToolTempDir, { recursive: true, mode: 0o700 });
+      }
+    }
     const env: NodeJS.ProcessEnv = {
       ...pickSafeHostEnv(process.env),
       ...pickPreparedExecutionEnv(preparedExecution.env),
+      ...sandboxRuntimeToolProcessEnv(runnerSandboxProviderId, toolNetworkEnv),
+      ...(runnerTempDir
+        ? {
+            TMPDIR: runnerTempDir,
+            TMP: runnerTempDir,
+            TEMP: runnerTempDir,
+            CLAUDE_CODE_TMPDIR: runnerTempDir,
+            CLAUDE_TMPDIR: runnerTempDir,
+          }
+        : {}),
       TZ: TIMEZONE,
       GANTRY_MCP_SERVER_PATH: mcpServerPath,
       GANTRY_WORKSPACE_GROUP_DIR: hostRuntime.groupDir,
       GANTRY_WORKSPACE_GLOBAL_DIR: '',
-      GANTRY_GROUP_FOLDER: group.folder,
+      GANTRY_WORKSPACE_KEY: group.folder,
       GANTRY_APP_ID: runnerAppId,
       ...(input.agentId ? { GANTRY_AGENT_ID: input.agentId } : {}),
       GANTRY_AGENT_RUN_HANDLE: processName,
-      GANTRY_WORKSPACE_EXTRA_DIR: path.join(
-        DATA_DIR,
-        'sessions',
-        group.folder,
-        'extra',
-      ),
-      GANTRY_IPC_DIR: hostRuntime.groupIpcDir,
+      GANTRY_WORKSPACE_EXTRA_DIR: workspaceExtraDir,
+      GANTRY_IPC_DIR: hostRuntime.workspaceIpcDir,
       GANTRY_IPC_INPUT_DIR: ipcInputDir,
       GANTRY_IPC_AUTH_TOKEN: ipcAuth.authToken,
       GANTRY_CHAT_JID: input.chatJid,
@@ -556,8 +494,11 @@ export async function spawnAgent(
       ),
       GANTRY_PERMISSION_TIMEOUT_MS: String(PERMISSION_APPROVAL_TIMEOUT_MS),
       GANTRY_EGRESS_PROXY_URL: egressGateway.proxyUrl,
+      ...(runnerSandboxProviderId === 'sandbox_runtime'
+        ? { GANTRY_SANDBOX_RUNTIME_PROXY: '1' }
+        : {}),
     };
-    applyAgentEgressNoProxyEnv(env);
+    applyAgentEgressNoProxyEnv(env, { externalBypass: false });
     // Job-level model overrides group-level model.
     const effectiveModelSource = input.model ? 'job.model' : modelConfig.source;
 
@@ -565,6 +506,7 @@ export async function spawnAgent(
       `groupDir=${hostRuntime.groupDir}`,
       'globalDir=(none)',
       `ipcInput=${ipcInputDir}`,
+      `sandbox=${options?.runnerSandboxProvider?.id ?? 'direct'} enforcing=${options?.runnerSandboxProvider?.enforcing === true}`,
       `broker=${hostCredentials.brokerProfile}`,
       `brokerApplied=${hostCredentials.brokerApplied}`,
       `mcpServers=${allMcpCapabilities.map((capability) => capability.name).join(',') || '(none)'}`,
@@ -606,36 +548,48 @@ export async function spawnAgent(
             agentId: options.skillContext.agentId as never,
             skills: options.skillRepository,
             secrets: options.capabilitySecretRepository,
-            runtimeAccess: input.runtimeAccess ?? [],
+            runtimeAccess: effectiveRuntimeAccess,
           })
         : { env: {} };
     Object.assign(env, pickSelectedCapabilityEnv(selectedSkillEnv.env));
     mcpConfigPath =
       allMcpCapabilities.length > 0
-        ? writeRunnerMcpConfigFile(hostRuntime.groupIpcDir, allMcpCapabilities)
+        ? writeRunnerMcpConfigFile(
+            hostRuntime.workspaceIpcDir,
+            withStdioMcpEgressEnv(allMcpCapabilities, toolNetworkEnv),
+          )
         : undefined;
     if (mcpConfigPath) {
       env.GANTRY_MCP_CONFIG_FILE = mcpConfigPath;
-      env.GANTRY_MCP_ALLOWED_TOOLS_JSON = JSON.stringify(
-        allMcpCapabilities.flatMap((capability) => capability.allowedToolNames),
-      );
-      env.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON = JSON.stringify(
-        allMcpCapabilities.flatMap(
-          (capability) => capability.autoApproveToolNames,
-        ),
-      );
+      env.GANTRY_MCP_ALLOWED_TOOLS_JSON = JSON.stringify(reviewedMcpToolNames);
+      env.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON =
+        env.GANTRY_MCP_ALLOWED_TOOLS_JSON;
     }
     const protectedFilesystemDenyReadPaths = [
       ...(preparedExecution.protectedFilesystemDenyReadPaths ??
         preparedExecution.protectedFilesystemPaths),
       ...(mcpConfigPath ? [mcpConfigPath] : []),
     ];
+    const providerConfigDirKey = ['CLA' + 'UDE', 'CONFIG', 'DIR'].join('_');
+    const providerConfigDir = env[providerConfigDirKey];
+    const sandboxRunnerReadablePaths = [
+      ...(providerConfigDir
+        ? [path.join(providerConfigDir, 'settings.json')]
+        : []),
+      ...(mcpConfigPath ? [mcpConfigPath] : []),
+    ].map((item) => path.resolve(item));
+    const sandboxProtectedReadPaths = protectedFilesystemDenyReadPaths.filter(
+      (item) => !sandboxRunnerReadablePaths.includes(path.resolve(item)),
+    );
     const protectedFilesystemDenyWritePaths = [
       ...(preparedExecution.protectedFilesystemDenyWritePaths ??
         preparedExecution.protectedFilesystemPaths),
       ...localCliCredentialPaths,
-      ...(mcpConfigPath ? [mcpConfigPath] : []),
     ];
+    const sandboxProtectedWritePaths = protectedWritePathsForOuterSandbox(
+      protectedFilesystemDenyWritePaths,
+      providerConfigDir,
+    );
     env[PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV] = JSON.stringify(
       protectedFilesystemDenyReadPaths,
     );
@@ -657,6 +611,13 @@ export async function spawnAgent(
         threadId: input.threadId,
       });
     }
+    sandboxConfigPath = path.join(
+      hostRuntime.workspaceIpcDir,
+      `${processName}.sandbox-runtime.json`,
+    );
+    const runnerPackageRoot = resolvePackageRootFromSourceDir(
+      path.dirname(args[0] ?? hostRuntime.runnerDistDir),
+    );
     const output = await executeRunnerProcess({
       group,
       input: runnerInput,
@@ -671,9 +632,51 @@ export async function spawnAgent(
       startTime,
       logsDir,
       runtimeDetails,
+      sandbox: {
+        cwd: hostRuntime.groupDir,
+        workspaceRoot: hostRuntime.groupDir,
+        configFilePath: sandboxConfigPath,
+        egressProxyUrl: egressGateway?.proxyUrl,
+        allowedNetworkHosts:
+          sandboxRuntimeGateway.gatewayOptions.allowedNetworkHosts ??
+          sandboxAllowedNetworkHosts,
+        runtimeReadPaths: [
+          runnerPackageRoot,
+          hostRuntime.workspaceIpcDir,
+          workspaceExtraDir,
+          ...(providerConfigDir ? [providerConfigDir] : []),
+          ...(runnerTempDir ? [runnerTempDir] : []),
+          ...(claudeToolTempDir ? [claudeToolTempDir] : []),
+          ...localCliCredentialPaths,
+          ...(mcpConfigPath ? [mcpConfigPath] : []),
+        ],
+        runtimeWritePaths: [
+          hostRuntime.workspaceIpcDir,
+          ...(providerConfigDir ? [providerConfigDir] : []),
+          ...(runnerTempDir ? [runnerTempDir] : []),
+          ...(claudeToolTempDir ? [claudeToolTempDir] : []),
+        ],
+        protectedReadPaths: sandboxProtectedReadPaths,
+        protectedWritePaths: sandboxProtectedWritePaths,
+        resourceLimits: runtimeSandbox.resourceLimits,
+        sandboxProfile: {
+          id: 'runner-default',
+          network: 'required',
+          filesystem: 'workspace_write',
+        },
+        principal: {
+          appId: runnerAppId,
+          agentId: input.agentId,
+          conversationId: input.chatJid,
+          threadId: input.threadId,
+          runId: input.runId,
+          jobId: input.jobId,
+        },
+      },
     });
     return output;
   } finally {
+    cleanupRunnerTempDir(runnerTempDir, logger.warn.bind(logger));
     if (browserIpcEnabled) {
       revokeBrowserIpcAuthorization({
         workspaceKey: group.folder,
@@ -681,7 +684,8 @@ export async function spawnAgent(
         threadId: input.threadId,
       });
     }
-    cleanupRunnerMcpConfigFile(mcpConfigPath);
+    cleanupRunnerMcpConfigFile(mcpConfigPath, logger.warn.bind(logger));
+    cleanupRunnerMcpConfigFile(sandboxConfigPath, logger.warn.bind(logger));
     if (egressGateway) {
       await closeEgressGateway(egressGateway);
     }

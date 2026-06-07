@@ -497,6 +497,7 @@ describe('handleSessionCommand', () => {
   it('handles /memory-status by formatting status output', async () => {
     const deps = makeDeps({
       getMemoryStatus: vi.fn().mockResolvedValue({
+        memory_enabled: true,
         items_by_kind: { fact: 3 },
         items_by_scope: { group: 3 },
         top10_most_used: [{ key: 'fact:key', retrieval_count: 12 }],
@@ -521,16 +522,15 @@ describe('handleSessionCommand', () => {
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.getMemoryStatus).toHaveBeenCalledTimes(1);
     expect(deps.sendMessage).toHaveBeenCalledWith(
-      expect.stringContaining('Memory status'),
-    );
-    expect(deps.sendMessage).toHaveBeenCalledWith(
-      expect.stringContaining('embeddings: configured'),
-    );
-    expect(deps.sendMessage).toHaveBeenCalledWith(
-      expect.stringContaining('vector_search: inactive'),
-    );
-    expect(deps.sendMessage).toHaveBeenCalledWith(
-      expect.stringContaining('top_used: fact:key(12)'),
+      [
+        'Memory: on',
+        'Pre-answer recall: on',
+        'Search mode: full-text',
+        'Semantic recall: index building. Full-text memory is still active.',
+        'Last dream: never',
+        'Review queue: 0',
+        'Injected this run: 0',
+      ].join('\n'),
     );
   });
 
@@ -1439,7 +1439,7 @@ describe('handleSessionCommand', () => {
         headless: false,
       }),
       getModelStatus: vi.fn().mockReturnValue({
-        groupFolder: 'test',
+        scopeKey: 'test',
         selectionSource: 'session override',
         modelAlias: 'sonnet',
         contextUsage: {
@@ -1714,6 +1714,31 @@ describe('getGroupMemoryStatus', () => {
 
       expect(status.retrieval?.embeddings).toBe('disabled');
       expect(status.retrieval?.vectorSearch).toBe('inactive');
+    } finally {
+      vi.doUnmock('@core/memory/app-memory-service.js');
+      vi.resetModules();
+    }
+  });
+
+  it('threads disabled memory into the status snapshot', async () => {
+    vi.resetModules();
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
+        getInstance: () => ({
+          list: vi.fn().mockResolvedValue([]),
+          dreamingStatus: vi.fn().mockResolvedValue([]),
+        }),
+      },
+    }));
+
+    try {
+      const { getGroupMemoryStatus } =
+        await import('@core/runtime/group-memory-commands.js');
+      const status = await getGroupMemoryStatus('test', {
+        memoryEnabled: false,
+      });
+
+      expect(status.memory_enabled).toBe(false);
     } finally {
       vi.doUnmock('@core/memory/app-memory-service.js');
       vi.resetModules();

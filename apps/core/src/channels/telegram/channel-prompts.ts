@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import path from 'path';
 
-import { resolveGroupFolderPath } from '../../platform/group-folder.js';
+import { resolveWorkspaceFolderPath } from '../../platform/workspace-folder.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import { ensurePrivateDirSync } from '../../shared/private-fs.js';
 import {
@@ -11,9 +11,17 @@ import {
 } from '../../domain/types.js';
 import { writeTelegramFetchResponseToFile } from '../telegram-file-download.js';
 import {
-  formatPermissionPromptText as formatSharedPermissionPromptText,
+  buildPermissionPromptParts,
+  formatPermissionPromptText,
   formatPermissionReceiptText,
+  permissionButtonLabel,
+  permissionDecisionOptions,
 } from '../permission-interaction.js';
+import {
+  escapeTelegramHtml,
+  renderPermissionPromptHtml,
+  renderUserQuestionPromptHtml,
+} from './html-render.js';
 
 import { TelegramChannelState } from './channel-state.js';
 
@@ -21,7 +29,8 @@ const TELEGRAM_POLL_LEASE_HASH_CHARS = 24;
 import {
   PendingUserQuestionState,
   TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES,
-  truncateText,
+  TELEGRAM_MESSAGE_MAX_LENGTH,
+  splitTelegramTextByCodeUnits,
   truncateUtf8ToByteLimit,
 } from './channel-shared.js';
 
@@ -31,51 +40,11 @@ export interface TelegramDownloadedFile {
 }
 
 export abstract class TelegramChannelPrompts extends TelegramChannelState {
-  protected formatPermissionPromptText(
-    request: PermissionApprovalRequest,
-    timeoutMs: number,
-  ): string {
-    return formatSharedPermissionPromptText(request, timeoutMs);
-  }
-
   protected pendingUserQuestionKey(
     requestId: string,
     questionIndex: number,
   ): string {
     return `${requestId}:${questionIndex}`;
-  }
-
-  protected formatUserQuestionPromptText(
-    request: UserQuestionRequest,
-    question: UserQuestionRequest['questions'][number],
-    timeoutMs: number,
-  ): string {
-    const timeoutMinutes = Math.max(1, Math.round(timeoutMs / 60000));
-    const lines = [
-      `❓ ${question.header}`,
-      `Source: ${truncateText(request.sourceAgentFolder, 80)}`,
-    ];
-    if (request.threadId) {
-      lines.push(`Thread: ${truncateText(request.threadId, 80)}`);
-    }
-    lines.push(question.question, '');
-    question.options.forEach((option, optionIndex) => {
-      const description = option.description
-        ? ` — ${truncateText(option.description, 180)}`
-        : '';
-      lines.push(`${optionIndex + 1}. ${option.label}${description}`);
-      if (option.preview) {
-        lines.push(`  Preview: ${truncateText(option.preview, 180)}`);
-      }
-    });
-    lines.push('');
-    if (question.multiSelect) {
-      lines.push('Select one or more options, then tap Done.');
-    } else {
-      lines.push('Select one option.');
-    }
-    lines.push(`Reply timeout: ${timeoutMinutes} minute(s)`);
-    return lines.join('\n');
   }
 
   protected formatUserQuestionButtonLabel(
@@ -130,6 +99,156 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
       ]);
     }
     return { inline_keyboard };
+  }
+
+  protected async sendPermissionPromptMessage(input: {
+    chatId: string;
+    request: PermissionApprovalRequest;
+    callbackId: string;
+    timeoutMs: number;
+    threadOpts: { message_thread_id?: number };
+  }): Promise<{ message_id: number }> {
+    if (!this.bot) throw new Error('Telegram bot is not connected');
+    const parts = buildPermissionPromptParts(input.request, input.timeoutMs);
+    const promptHtml = renderPermissionPromptHtml(parts);
+    const replyMarkup = {
+      inline_keyboard: permissionDecisionOptions(input.request).map((mode) => [
+        {
+          text: permissionButtonLabel(mode, input.request),
+          callback_data: `perm:${mode}:${input.callbackId}`,
+        },
+      ]),
+    };
+    if (promptHtml.length > TELEGRAM_MESSAGE_MAX_LENGTH) {
+      await this.sendSplitPermissionReviewMessages({
+        chatId: input.chatId,
+        request: input.request,
+        timeoutMs: input.timeoutMs,
+        threadOpts: input.threadOpts,
+      });
+      return this.bot.api.sendMessage(
+        input.chatId,
+        renderPermissionPromptHtml({
+          ...parts,
+          bodyLines: ['Review the approval details above before choosing.'],
+        }),
+        {
+          ...input.threadOpts,
+          parse_mode: 'HTML',
+          link_preview_options: { is_disabled: true },
+          reply_markup: replyMarkup,
+        },
+      );
+    }
+    return this.bot.api
+      .sendMessage(input.chatId, promptHtml, {
+        ...input.threadOpts,
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+        reply_markup: replyMarkup,
+      })
+      .catch((htmlErr) => {
+        logger.warn(
+          {
+            requestId: input.request.requestId,
+            error: this.sanitizeErrorMessage(htmlErr),
+          },
+          'Telegram HTML permission prompt failed; retrying as plain text',
+        );
+        const plainPrompt = formatPermissionPromptText(
+          input.request,
+          input.timeoutMs,
+        );
+        if (plainPrompt.length > TELEGRAM_MESSAGE_MAX_LENGTH) {
+          return this.sendSplitPermissionReviewMessages({
+            chatId: input.chatId,
+            request: input.request,
+            timeoutMs: input.timeoutMs,
+            threadOpts: input.threadOpts,
+          }).then(() =>
+            this.bot!.api.sendMessage(
+              input.chatId,
+              'Review the approval details above before choosing.',
+              { ...input.threadOpts, reply_markup: replyMarkup },
+            ),
+          );
+        }
+        return this.bot!.api.sendMessage(input.chatId, plainPrompt, {
+          ...input.threadOpts,
+          reply_markup: replyMarkup,
+        });
+      });
+  }
+
+  private async sendSplitPermissionReviewMessages(input: {
+    chatId: string;
+    request: PermissionApprovalRequest;
+    timeoutMs: number;
+    threadOpts: { message_thread_id?: number };
+  }): Promise<void> {
+    if (!this.bot) throw new Error('Telegram bot is not connected');
+    const promptText = formatPermissionPromptText(
+      input.request,
+      input.timeoutMs,
+      { budget: Number.POSITIVE_INFINITY },
+    );
+    for (const chunk of splitTelegramTextByCodeUnits(
+      promptText,
+      TELEGRAM_MESSAGE_MAX_LENGTH,
+    )) {
+      await this.bot.api.sendMessage(input.chatId, chunk, {
+        ...input.threadOpts,
+        link_preview_options: { is_disabled: true },
+      });
+    }
+  }
+
+  protected async sendUserQuestionPromptMessage(input: {
+    chatId: string;
+    requestId: string;
+    questionIndex: number;
+    question: UserQuestionRequest['questions'][number];
+    threadOpts: { message_thread_id?: number };
+  }): Promise<{
+    messageId: number;
+    promptText: string;
+    promptIsHtml: boolean;
+  }> {
+    if (!this.bot) throw new Error('Telegram bot is not connected');
+    const htmlPrompt = renderUserQuestionPromptHtml(input.question);
+    const plainPrompt = formatTelegramUserQuestionPlainText(input.question);
+    const replyMarkup = this.buildUserQuestionKeyboard(
+      input.requestId,
+      input.questionIndex,
+      input.question,
+      new Set<number>(),
+    );
+    let promptText = htmlPrompt;
+    let promptIsHtml = true;
+    const sent = await this.bot.api
+      .sendMessage(input.chatId, htmlPrompt, {
+        ...input.threadOpts,
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+        reply_markup: replyMarkup,
+      })
+      .catch((htmlErr) => {
+        logger.warn(
+          {
+            requestId: input.requestId,
+            questionIndex: input.questionIndex,
+            error: this.sanitizeErrorMessage(htmlErr),
+          },
+          'Telegram HTML user question failed; retrying as plain text',
+        );
+        promptText = plainPrompt;
+        promptIsHtml = false;
+        return this.bot!.api.sendMessage(input.chatId, plainPrompt, {
+          ...input.threadOpts,
+          reply_markup: replyMarkup,
+        });
+      });
+    return { messageId: sent.message_id, promptText, promptIsHtml };
   }
 
   protected async isTelegramApproverAuthorized(
@@ -187,10 +306,8 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
     clearTimeout(pending.timer);
     pending.resolve(decision);
 
-    const text = formatPermissionReceiptText(
-      requestId,
-      pending.request,
-      decision,
+    const text = escapeTelegramHtml(
+      formatPermissionReceiptText(requestId, pending.request, decision),
     );
     try {
       await this.bot.api.editMessageText(
@@ -198,6 +315,7 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
         pending.messageId,
         text,
         {
+          parse_mode: 'HTML',
           reply_markup: { inline_keyboard: [] },
         },
       );
@@ -219,6 +337,7 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
         pending.messageId,
         pending.promptText,
         {
+          ...(pending.promptIsHtml ? { parse_mode: 'HTML' as const } : {}),
           reply_markup: this.buildUserQuestionKeyboard(
             pending.requestId,
             pending.questionIndex,
@@ -263,15 +382,19 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
     const selectionText = Array.isArray(selection)
       ? selection.join(', ')
       : selection;
-    const status = reason || 'answered';
-    const actor = answeredBy ? ` by ${answeredBy}` : '';
-    const text = `❓ ${pending.questionHeader}\n${pending.questionText}\n\nAnswer: ${selectionText || '[none]'}\nStatus: ${status}${actor}`;
+    const actor = answeredBy ? ` (by ${answeredBy})` : '';
+    const text = escapeTelegramHtml(
+      selectionText
+        ? `✅ ${pending.questionHeader} · ${selectionText}${actor}`
+        : `⌛ ${pending.questionHeader} · ${reason || 'no answer'}`,
+    );
     try {
       await this.bot.api.editMessageText(
         pending.chatId,
         pending.messageId,
         text,
         {
+          parse_mode: 'HTML',
           reply_markup: { inline_keyboard: [] },
         },
       );
@@ -410,7 +533,7 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
    */
   protected async downloadFile(
     fileId: string,
-    groupFolder: string,
+    workspaceFolder: string,
     filename: string,
   ): Promise<TelegramDownloadedFile | null> {
     if (!this.bot) return null;
@@ -430,7 +553,7 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
         return null;
       }
 
-      const groupDir = resolveGroupFolderPath(groupFolder);
+      const groupDir = resolveWorkspaceFolderPath(workspaceFolder);
       const attachDir = path.join(groupDir, 'attachments');
       ensurePrivateDirSync(attachDir);
 
@@ -469,4 +592,18 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
       return null;
     }
   }
+}
+
+function formatTelegramUserQuestionPlainText(
+  question: UserQuestionRequest['questions'][number],
+): string {
+  return [
+    `❓ ${question.header}`,
+    question.question,
+    '',
+    ...question.options.map(
+      (option, optionIndex) =>
+        `${optionIndex + 1}. ${option.label}${option.description ? ` — ${option.description}` : ''}`,
+    ),
+  ].join('\n');
 }

@@ -74,7 +74,7 @@ export interface AgentExecutionAdapterOptions {
 
 export interface AgentExecutionHostRuntime {
   groupDir: string;
-  groupIpcDir: string;
+  workspaceIpcDir: string;
   runnerDistDir: string;
 }
 
@@ -108,6 +108,7 @@ export interface PreparedAgentExecution {
   runnerArgs: string[];
   runnerInputPatch?: {
     modelCredentialEnv?: Record<string, string>;
+    toolNetworkEnv?: Record<string, string>;
     semanticCapabilities?: SemanticCapabilityDefinition[];
   };
   env: NodeJS.ProcessEnv;

@@ -43,6 +43,18 @@ export class FileArtifactNotFoundError extends Error {
   }
 }
 
+// Thrown when a write supplies expectedVersion and the latest version observed
+// inside the write's locked transaction does not match — i.e. a concurrent
+// writer advanced the version between the caller's read and this write.
+export class FileArtifactVersionConflictError extends Error {
+  constructor(public readonly latestVersion: number) {
+    super(
+      `File artifact changed concurrently (latest version ${latestVersion}).`,
+    );
+    this.name = 'FileArtifactVersionConflictError';
+  }
+}
+
 export function describeFileArtifact(
   artifact: FileArtifact,
 ): FileArtifactDescriptor {

@@ -10,6 +10,11 @@ async function loadAdminHandlers(runtimeHome: string) {
   vi.resetModules();
   vi.stubEnv('GANTRY_HOME', runtimeHome);
   const syncRuntimeSettingsFromProjection = vi.fn(async () => undefined);
+  const pendingAccessRequests = {
+    insertPending: vi.fn(async () => undefined),
+    markResolved: vi.fn(async () => undefined),
+    countPendingAccessRequests: vi.fn(async () => 0),
+  };
   vi.doMock('@core/config/index.js', async (importOriginal) => {
     const actual =
       await importOriginal<typeof import('@core/config/index.js')>();
@@ -17,12 +22,15 @@ async function loadAdminHandlers(runtimeHome: string) {
   });
   vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
     getRuntimeRepositories: vi.fn(() => ({})),
-    getRuntimeStorage: vi.fn(() => ({ repositories: {} })),
+    getRuntimeStorage: vi.fn(() => ({
+      repositories: { pendingAccessRequests },
+    })),
   }));
   const ipcAuth = await import('@core/runtime/ipc-auth.js');
   const handlers = await import('@core/jobs/ipc-admin-handlers.js');
   return {
     ...handlers,
+    pendingAccessRequests,
     syncRuntimeSettingsFromProjection,
     taskData: (
       taskId: string,
@@ -139,7 +147,7 @@ describe('admin IPC handlers', () => {
     expect(requestPermissionApproval).not.toHaveBeenCalled();
   });
 
-  it('rejects direct request_permission semantic capability requests outside propose_capability', async () => {
+  it('rejects direct request_permission semantic capability requests outside request_access', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
@@ -176,7 +184,7 @@ describe('admin IPC handlers', () => {
       ok: false,
       code: 'invalid_request',
       error:
-        'Capability requests must use propose_capability, not request_permission.',
+        'Capability access must use request_access target.kind=capability, not direct request_permission.',
     });
     expect(requestPermissionApproval).not.toHaveBeenCalled();
   });
@@ -199,7 +207,7 @@ describe('admin IPC handlers', () => {
         chatJid: 'sl:C123',
         payload: {
           permissionKind: 'tool',
-          capabilityRequestSource: 'propose_capability',
+          capabilityRequestSource: 'request_access',
           capabilityId: 'acme.records.append',
           temporaryOnly: false,
           reason: 'write leads',
@@ -219,9 +227,115 @@ describe('admin IPC handlers', () => {
       ok: false,
       code: 'invalid_request',
       error:
-        'Capability proposals must include a reviewed semantic capability definition.',
+        'Capability access requires an active reviewed capability catalog entry. Request the reviewed capability with request_access target.kind=capability.',
     });
     expect(requestPermissionApproval).not.toHaveBeenCalled();
+  });
+
+  it('accepts request_access skill action capabilities from selected skill definitions', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { adminTaskHandlers, taskData } =
+      await loadAdminHandlers(runtimeHome);
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: false,
+      reason: 'not now',
+    }));
+    const now = '2026-06-02T00:00:00.000Z';
+
+    await adminTaskHandlers.request_permission({
+      data: taskData('selected-skill-capability-request', {
+        type: 'request_permission',
+        chatJid: 'sl:C123',
+        payload: {
+          permissionKind: 'tool',
+          capabilityRequestSource: 'request_access',
+          capabilityId: 'skill.publisher.publish',
+          capabilityDisplayName: 'Publisher publish',
+          temporaryOnly: false,
+          reason: 'publish prepared content',
+        },
+      }) as never,
+      sourceAgentFolder: 'main_agent',
+      deps: depsWithAdminTools([], {
+        requestPermissionApproval,
+        getToolRepository: () => ({
+          listTools: vi.fn(async () => []),
+        }),
+        getSkillRepository: () => ({
+          listAgentSkillBindings: vi.fn(async () => [
+            {
+              id: 'binding:publisher',
+              appId: 'app:test',
+              agentId: 'agent:main_agent',
+              skillId: 'skill:publisher',
+              status: 'active',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]),
+          getSkill: vi.fn(async () => ({
+            id: 'skill:publisher',
+            appId: 'app:test',
+            name: 'publisher',
+            source: 'admin_uploaded',
+            status: 'installed',
+            promptRefs: [],
+            toolIds: [],
+            workflowRefs: [],
+            actionPermissions: [
+              {
+                id: 'publish',
+                capabilityId: 'skill.publisher.publish',
+                displayName: 'Publisher publish',
+                risk: 'write',
+                can: 'Publish prepared content through the selected skill.',
+                cannot: 'Use unrelated skills or credentials.',
+                requiredEnvVars: [],
+                commandTemplates: ['skills/publisher/publish.py *'],
+              },
+            ],
+            createdAt: now,
+            updatedAt: now,
+          })),
+        }),
+      }) as never,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['sl:C123'],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      readResponse(runtimeHome, 'selected-skill-capability-request'),
+    ).toMatchObject({
+      ok: true,
+      code: 'capability_request_recorded',
+    });
+    expect(requestPermissionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'request_permission',
+        toolInput: expect.objectContaining({
+          capabilityId: 'skill.publisher.publish',
+        }),
+        // Guards the "Always Allow" fix: the trusted capability definition must
+        // be attached so decisionForMode can validate the capability:<id> rule
+        // (without it, persistent approval was rejected as "unknown capability").
+        semanticCapabilityDefinitions: expect.objectContaining({
+          'skill.publisher.publish': expect.objectContaining({
+            capabilityId: 'skill.publisher.publish',
+          }),
+        }),
+        suggestions: [
+          expect.objectContaining({
+            type: 'addRules',
+            rules: [{ toolName: 'capability:skill.publisher.publish' }],
+          }),
+        ],
+        decisionOptions: ['allow_once', 'allow_persistent_rule', 'cancel'],
+      }),
+    );
   });
 
   it('requires same-channel approval and syncs settings after register_agent', async () => {
@@ -379,7 +493,7 @@ describe('admin IPC handlers', () => {
         jobId: 'job-1',
         payload: {
           permissionKind: 'tool',
-          capabilityRequestSource: 'propose_capability',
+          capabilityRequestSource: 'request_access',
           capabilityId: 'acme.records.append',
           capabilityDisplayName: 'Acme records append',
           semanticCapabilityDefinition: {
@@ -403,19 +517,22 @@ describe('admin IPC handlers', () => {
         requestPermissionApproval,
         opsRepository: {
           getJobById: vi.fn(async () => ({
-            capability_requirements: [
+            access_requirements: [
               {
-                capabilityId: 'acme.records.append',
-                reason: 'write leads',
-                implementation: {
-                  kind: 'local_cli',
-                  name: 'acme',
-                  executablePath: '/usr/local/bin/acme',
-                  executableVersion: 'v0.9.0',
-                  executableHash: 'sha256:abc123',
-                  commandTemplate:
-                    '/usr/local/bin/acme records append <sheet_id> ...',
+                target: {
+                  kind: 'capability',
+                  capabilityId: 'acme.records.append',
+                  implementation: {
+                    kind: 'local_cli',
+                    name: 'acme',
+                    executablePath: '/usr/local/bin/acme',
+                    executableVersion: 'v0.9.0',
+                    executableHash: 'sha256:abc123',
+                    commandTemplate:
+                      '/usr/local/bin/acme records append <sheet_id> ...',
+                  },
                 },
+                reason: 'write leads',
               },
             ],
           })),
@@ -427,12 +544,10 @@ describe('admin IPC handlers', () => {
 
     expect(readResponse(runtimeHome, 'request-generic-records')).toMatchObject({
       ok: false,
-      code: 'wrong_capability_lane',
-      error: expect.stringContaining('Acme Records Append using acme'),
+      code: 'invalid_request',
+      error:
+        'Capability definitions are host-owned catalog metadata and cannot be supplied in request_permission input.',
     });
-    expect(
-      readResponse(runtimeHome, 'request-generic-records').error,
-    ).toContain('RunCommand(/usr/local/bin/acme records append *)');
     expect(requestPermissionApproval).not.toHaveBeenCalled();
   });
 
@@ -465,19 +580,22 @@ describe('admin IPC handlers', () => {
         requestPermissionApproval,
         opsRepository: {
           getJobById: vi.fn(async () => ({
-            capability_requirements: [
+            access_requirements: [
               {
-                capabilityId: 'acme.records.append',
-                reason: 'write leads',
-                implementation: {
-                  kind: 'local_cli',
-                  name: 'acme',
-                  executablePath: '/usr/local/bin/acme',
-                  executableVersion: 'v0.9.0',
-                  executableHash: 'sha256:abc123',
-                  commandTemplate:
-                    '/usr/local/bin/acme records append <sheet_id> ...',
+                target: {
+                  kind: 'capability',
+                  capabilityId: 'acme.records.append',
+                  implementation: {
+                    kind: 'local_cli',
+                    name: 'acme',
+                    executablePath: '/usr/local/bin/acme',
+                    executableVersion: 'v0.9.0',
+                    executableHash: 'sha256:abc123',
+                    commandTemplate:
+                      '/usr/local/bin/acme records append <sheet_id> ...',
+                  },
                 },
+                reason: 'write leads',
               },
             ],
           })),
@@ -528,19 +646,22 @@ describe('admin IPC handlers', () => {
         requestPermissionApproval,
         opsRepository: {
           getJobById: vi.fn(async () => ({
-            capability_requirements: [
+            access_requirements: [
               {
-                capabilityId: 'acme.records.append',
-                reason: 'write leads',
-                implementation: {
-                  kind: 'local_cli',
-                  name: 'acme',
-                  executablePath: '/usr/local/bin/acme',
-                  executableVersion: 'v0.9.0',
-                  executableHash: 'sha256:abc123',
-                  commandTemplate:
-                    '/usr/local/bin/acme records append <sheet_id> ...',
+                target: {
+                  kind: 'capability',
+                  capabilityId: 'acme.records.append',
+                  implementation: {
+                    kind: 'local_cli',
+                    name: 'acme',
+                    executablePath: '/usr/local/bin/acme',
+                    executableVersion: 'v0.9.0',
+                    executableHash: 'sha256:abc123',
+                    commandTemplate:
+                      '/usr/local/bin/acme records append <sheet_id> ...',
+                  },
                 },
+                reason: 'write leads',
               },
             ],
           })),
@@ -581,7 +702,7 @@ describe('admin IPC handlers', () => {
         jobId: 'job-1',
         payload: {
           permissionKind: 'tool',
-          capabilityRequestSource: 'propose_capability',
+          capabilityRequestSource: 'request_access',
           capabilityId: 'acme.records.append',
           capabilityDisplayName: 'Acme records append using acme',
           credentialSource: 'local_cli',
@@ -598,19 +719,22 @@ describe('admin IPC handlers', () => {
         requestPermissionApproval,
         opsRepository: {
           getJobById: vi.fn(async () => ({
-            capability_requirements: [
+            access_requirements: [
               {
-                capabilityId: 'acme.records.append',
-                reason: 'write leads',
-                implementation: {
-                  kind: 'local_cli',
-                  name: 'acme',
-                  executablePath: '/usr/local/bin/acme',
-                  executableVersion: 'v0.9.0',
-                  executableHash: 'sha256:abc123',
-                  commandTemplate:
-                    '/usr/local/bin/acme records append <sheet_id> ...',
+                target: {
+                  kind: 'capability',
+                  capabilityId: 'acme.records.append',
+                  implementation: {
+                    kind: 'local_cli',
+                    name: 'acme',
+                    executablePath: '/usr/local/bin/acme',
+                    executableVersion: 'v0.9.0',
+                    executableHash: 'sha256:abc123',
+                    commandTemplate:
+                      '/usr/local/bin/acme records append <sheet_id> ...',
+                  },
                 },
+                reason: 'write leads',
               },
             ],
           })),
@@ -637,7 +761,7 @@ describe('admin IPC handlers', () => {
       path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
-    const { adminTaskHandlers, taskData } =
+    const { adminTaskHandlers, pendingAccessRequests, taskData } =
       await loadAdminHandlers(runtimeHome);
     let resolveApproval:
       | ((value: { approved: false; reason: string }) => void)
@@ -676,6 +800,23 @@ describe('admin IPC handlers', () => {
     });
 
     expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
+    expect(pendingAccessRequests.insertPending).toHaveBeenCalledTimes(1);
+    expect(pendingAccessRequests.insertPending).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          activation: 'future_config_version',
+          effect: 'persistent_rule_when_always_allowed',
+          requestKind: 'Permission',
+          requestTool: 'request_permission',
+        },
+      }),
+    );
+    const insertedRequest = pendingAccessRequests.insertPending.mock
+      .calls[0]?.[0] as { target?: unknown; reason?: unknown } | undefined;
+    expect(JSON.stringify(insertedRequest)).not.toContain(
+      '/usr/local/bin/acme records append',
+    );
+    expect(insertedRequest).not.toHaveProperty('reason');
     expect(readResponse(runtimeHome, 'request-acme-1')).toMatchObject({
       ok: true,
       code: 'capability_request_recorded',
@@ -687,6 +828,236 @@ describe('admin IPC handlers', () => {
 
     resolveApproval?.({ approved: false, reason: 'test complete' });
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pendingAccessRequests.markResolved).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'app:test',
+        resolution: 'denied',
+      }),
+    );
+  });
+
+  it('rechecks setup-paused jobs after persistent request_access approvals', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { adminTaskHandlers, taskData } =
+      await loadAdminHandlers(runtimeHome);
+    const tools = new Map<string, Record<string, unknown>>();
+    const bindings: Array<Record<string, unknown>> = [];
+    const toolRepository = {
+      listTools: vi.fn(async () => [...tools.values()]),
+      getTool: vi.fn(async (toolId: string) => tools.get(toolId)),
+      saveTool: vi.fn(async (tool: Record<string, unknown>) => {
+        tools.set(String(tool.id), tool);
+      }),
+      listAgentToolBindings: vi.fn(async () => bindings),
+      saveAgentToolBinding: vi.fn(async (binding: Record<string, unknown>) => {
+        bindings.push(binding);
+      }),
+    };
+    let job = {
+      id: 'job-1',
+      name: 'Sheet append job',
+      workspace_key: 'main_agent',
+      status: 'paused',
+      pause_reason: 'Setup required',
+      next_run: null,
+      execution_context: {
+        conversationJid: 'sl:C123',
+        threadId: null,
+        workspaceKey: 'main_agent',
+      },
+      access_requirements: [
+        {
+          target: {
+            kind: 'tool_rule',
+            rule: 'RunCommand(npm test *)',
+          },
+          reason: 'Run tests before updating the sheet.',
+        },
+      ],
+      setup_state: {
+        state: 'missing_capability',
+        checked_at: '2026-06-02T00:00:00.000Z',
+        fingerprint: 'old',
+        blockers: [
+          {
+            state: 'missing_capability',
+            requirementType: 'tool',
+            requirementId: 'RunCommand(npm test *)',
+            message: 'Needs command access.',
+            nextAction: 'request_access ...',
+          },
+        ],
+      },
+    };
+    const updateJob = vi.fn(async (_jobId: string, updates: object) => {
+      job = { ...job, ...updates };
+    });
+    const onSchedulerChanged = vi.fn();
+    const sendMessage = vi.fn(async () => undefined);
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: true,
+      mode: 'allow_persistent_rule',
+      decidedBy: 'U_APPROVER',
+      decisionClassification: 'user_permanent',
+      updatedPermissions: [
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          destination: 'session',
+          rules: [{ toolName: 'RunCommand', ruleContent: 'npm test *' }],
+        },
+      ],
+    }));
+
+    await adminTaskHandlers.request_permission({
+      data: taskData('request-command-access', {
+        type: 'request_permission',
+        chatJid: 'sl:C123',
+        jobId: 'job-1',
+        payload: {
+          permissionKind: 'tool',
+          capabilityRequestSource: 'request_access',
+          toolName: 'RunCommand',
+          rule: 'npm test *',
+          temporaryOnly: false,
+          reason: 'Run tests before updating the sheet.',
+        },
+      }) as never,
+      sourceAgentFolder: 'main_agent',
+      deps: depsWithAdminTools([], {
+        sendMessage,
+        requestPermissionApproval,
+        getToolRepository: () => toolRepository,
+        mirrorAgentToolRulesToSettings: vi.fn(async () => undefined),
+        onSchedulerChanged,
+        opsRepository: {
+          getJobById: vi.fn(async () => job),
+          updateJob,
+        },
+      }) as never,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['sl:C123'],
+    });
+
+    await vi.waitFor(() => {
+      expect(updateJob).toHaveBeenCalledWith(
+        'job-1',
+        expect.objectContaining({
+          status: 'active',
+          pause_reason: null,
+          setup_state: expect.objectContaining({ state: 'ready' }),
+        }),
+      );
+    });
+    expect(onSchedulerChanged).toHaveBeenCalledWith('job-1');
+    expect(sendMessage).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.stringContaining('Job resumed: Sheet append job.'),
+      undefined,
+    );
+  });
+
+  it('applies temporary request_access run_command approvals to current-run live rules', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { adminTaskHandlers, taskData } =
+      await loadAdminHandlers(runtimeHome);
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: true,
+      mode: 'allow_once',
+      decidedBy: 'U_APPROVER',
+      decisionClassification: 'user_temporary',
+    }));
+    const deps = depsWithAdminTools([], { requestPermissionApproval });
+    const ipcBaseDir = path.join(runtimeHome, 'data', 'ipc');
+
+    await adminTaskHandlers.request_permission({
+      data: taskData('temp-run-command', {
+        type: 'request_permission',
+        chatJid: 'sl:C123',
+        runHandle: 'agent-run-temp',
+        payload: {
+          permissionKind: 'tool',
+          capabilityRequestSource: 'request_access',
+          toolName: 'RunCommand',
+          rule: 'npm test *',
+          temporaryOnly: true,
+          reason: 'run the focused test once',
+        },
+      }) as never,
+      sourceAgentFolder: 'main_agent',
+      deps: deps as never,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['sl:C123'],
+      ipcBaseDir,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(
+            ipcBaseDir,
+            'main_agent',
+            'live-tool-rules',
+            'agent-run-temp.json',
+          ),
+          'utf-8',
+        ),
+      ),
+    ).toEqual(['RunCommand(npm test *)']);
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.stringContaining('for this run'),
+      undefined,
+    );
+  });
+
+  it('does not resolve pending access as approved without an approving principal', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-admin-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { adminTaskHandlers, pendingAccessRequests, taskData } =
+      await loadAdminHandlers(runtimeHome);
+    const requestPermissionApproval = vi.fn(async () => ({ approved: true }));
+    const deps = depsWithAdminTools([], { requestPermissionApproval });
+
+    await adminTaskHandlers.request_permission({
+      data: taskData('request-acme-missing-approver', {
+        type: 'request_permission',
+        chatJid: 'sl:C123',
+        payload: {
+          permissionKind: 'tool',
+          toolName: 'Bash',
+          rule: '/usr/local/bin/acme records append *',
+          temporaryOnly: false,
+          reason: 'write leads with acme',
+        },
+      }) as never,
+      sourceAgentFolder: 'main_agent',
+      deps: deps as never,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['sl:C123'],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pendingAccessRequests.markResolved).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'app:test',
+        resolution: 'denied',
+      }),
+    );
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.stringContaining('missing approving principal'),
+      undefined,
+    );
   });
 
   it('coalesces duplicate pending skill install command reviews', async () => {

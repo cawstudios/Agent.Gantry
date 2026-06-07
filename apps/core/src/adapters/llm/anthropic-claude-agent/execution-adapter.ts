@@ -15,7 +15,7 @@ import {
 import { validateModelCredentialProjectionForEntry } from './model-provider-credential-validation.js';
 import {
   ArtifactClaudeSkillSource,
-  BundledClaudeSkillSource,
+  BundledGantrySkillSource,
   CompositeSkillSource,
   RuntimeInstalledGantryBrowserSkillSource,
   type SkillSource,
@@ -161,7 +161,7 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
     packageRoot: string,
   ): SkillSource[] {
     const skillSources: SkillSource[] = [
-      new BundledClaudeSkillSource(packageRoot),
+      new BundledGantrySkillSource(packageRoot),
     ];
     if (input.browserIpcEnabled) {
       skillSources.push(new RuntimeInstalledGantryBrowserSkillSource());

@@ -2,6 +2,7 @@ import type {
   MaterializedMcpServer,
   McpCredentialRef,
 } from '../../domain/mcp/mcp-servers.js';
+import { reviewedMcpToolPatterns } from '../../shared/mcp-tool-scope.js';
 import { formatMissingGantrySecretsMessage } from '../../shared/user-visible-messages.js';
 import { ApplicationError } from '../common/application-error.js';
 import { STDIO_TEMPLATE_COMMANDS } from './mcp-server-policy.js';
@@ -23,6 +24,7 @@ export interface MaterializedMcpCapability {
   autoApproveToolPatterns: string[];
   allowedToolNames: string[];
   autoApproveToolNames: string[];
+  networkHosts: string[];
   required: boolean;
 }
 
@@ -35,10 +37,13 @@ export function materializeMcpRecord(
     record.definition.credentialRefs,
     credentialEnv,
   );
+  const definitionPatterns = reviewedMcpToolPatterns(record.definition);
+  // Per-agent scope: when the binding declares its own allowed tool patterns,
+  // the agent is restricted to that subset of the server definition. Empty means
+  // the agent inherits the definition's full reviewed set.
+  const bindingPatterns = record.binding.allowedToolPatterns ?? [];
   const allowedToolPatterns =
-    record.definition.allowedToolPatterns.length > 0
-      ? record.definition.allowedToolPatterns
-      : record.definition.autoApproveToolPatterns;
+    bindingPatterns.length > 0 ? bindingPatterns : definitionPatterns;
   const allowedToolNames = allowedToolPatterns.map(
     (tool) => `mcp__${record.definition.name}__${tool}`,
   );
@@ -46,10 +51,30 @@ export function materializeMcpRecord(
     (tool) => `mcp__${record.definition.name}__${tool}`,
   );
   if (config.transport === 'http' || config.transport === 'sse') {
-    throw new ApplicationError(
-      'INVALID_REQUEST',
-      'Remote MCP HTTP/SSE servers cannot be projected directly to the SDK until runtime uses a DNS-pinned host transport.',
-    );
+    if (!config.url) {
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        `${config.transport} MCP server requires url.`,
+      );
+    }
+    const headers = {
+      ...(config.headers ?? {}),
+      ...credentialValues.headers,
+    };
+    return {
+      name: record.definition.name,
+      config: {
+        type: config.transport,
+        url: config.url,
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
+      },
+      allowedToolPatterns,
+      autoApproveToolPatterns: record.definition.autoApproveToolPatterns,
+      allowedToolNames,
+      autoApproveToolNames,
+      networkHosts: record.definition.networkHosts ?? [],
+      required: record.binding.required,
+    };
   }
 
   const template = STDIO_TEMPLATE_COMMANDS[config.templateId ?? ''];
@@ -75,6 +100,7 @@ export function materializeMcpRecord(
     autoApproveToolPatterns: record.definition.autoApproveToolPatterns,
     allowedToolNames,
     autoApproveToolNames,
+    networkHosts: record.definition.networkHosts ?? [],
     required: record.binding.required,
   };
 }

@@ -20,6 +20,65 @@ export const AgentPersonaSchema = z.enum([
 ]);
 export type AgentPersona = z.infer<typeof AgentPersonaSchema>;
 
+export const AgentRelationshipModeSchema = z.enum(['personal', 'organization']);
+export type AgentRelationshipMode = z.infer<typeof AgentRelationshipModeSchema>;
+
+export const AgentProfileFileKindSchema = z.enum(['soul', 'agents']);
+export type AgentProfileFileKind = z.infer<typeof AgentProfileFileKindSchema>;
+
+export const AgentProfileFileSummarySchema = z
+  .object({
+    kind: AgentProfileFileKindSchema,
+    path: z.string(),
+    version: z.number().int().nonnegative(),
+    contentHash: z.string(),
+    sizeBytes: z.number().int().nonnegative(),
+    updatedAt: IsoDateTimeSchema.nullable(),
+  })
+  .strict();
+export type AgentProfileFileSummary = z.infer<
+  typeof AgentProfileFileSummarySchema
+>;
+
+export const AgentProfileFilesResponseSchema = z
+  .object({
+    agentId: z.string(),
+    files: z.array(AgentProfileFileSummarySchema),
+  })
+  .strict();
+export type AgentProfileFilesResponse = z.infer<
+  typeof AgentProfileFilesResponseSchema
+>;
+
+export const AgentProfileFileContentResponseSchema = z
+  .object({
+    agentId: z.string(),
+    kind: AgentProfileFileKindSchema,
+    path: z.string(),
+    version: z.number().int().nonnegative(),
+    contentHash: z.string(),
+    content: z.string(),
+  })
+  .strict();
+export type AgentProfileFileContentResponse = z.infer<
+  typeof AgentProfileFileContentResponseSchema
+>;
+
+// Coarse upper bound on profile content (chars ~ bytes for markdown). The
+// runtime enforces the exact byte limit; this keeps oversized request bodies
+// from reaching the service at all.
+export const MAX_AGENT_PROFILE_CONTENT_BYTES = 2_000_000;
+
+export const PutAgentProfileFileRequestSchema = z
+  .object({
+    content: z.string().max(MAX_AGENT_PROFILE_CONTENT_BYTES),
+    expectedVersion: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type PutAgentProfileFileRequest = z.infer<
+  typeof PutAgentProfileFileRequestSchema
+>;
+
 export const CreateAgentRequestSchema = z.object({
   appId: z.string(),
   name: z.string().min(1),
@@ -100,10 +159,28 @@ export const AgentSourceSelectionSchema = z
   .object({
     name: z.string().trim().min(1).optional(),
     id: z.string().min(1),
-    version: z.union([z.string().min(1), z.number()]).transform(String),
+    version: z
+      .union([z.string().min(1), z.number()])
+      .transform(String)
+      .optional(),
   })
   .strict();
 export type AgentSourceSelection = z.infer<typeof AgentSourceSelectionSchema>;
+
+export const AgentMcpSourceSelectionSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    id: z.string().min(1),
+    version: z
+      .union([z.string().min(1), z.number()])
+      .transform(String)
+      .optional(),
+    tools: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+export type AgentMcpSourceSelection = z.infer<
+  typeof AgentMcpSourceSelectionSchema
+>;
 
 export const AgentToolSourceSelectionSchema = z
   .object({
@@ -124,7 +201,7 @@ export const AgentSourcesRequestSchema = z
     sources: z
       .object({
         skills: z.array(AgentSourceSelectionSchema).default([]),
-        mcpServers: z.array(AgentSourceSelectionSchema).default([]),
+        mcpServers: z.array(AgentMcpSourceSelectionSchema).default([]),
         tools: z.array(AgentToolSourceSelectionSchema).default([]),
       })
       .strict(),
@@ -132,14 +209,13 @@ export const AgentSourcesRequestSchema = z
   .strict();
 export type AgentSourcesRequest = z.infer<typeof AgentSourcesRequestSchema>;
 
-export const AgentCapabilitiesRequestSchema = z
+export const AgentAccessRequestSchema = z
   .object({
-    capabilities: z.array(AgentCapabilitySelectionSchema),
+    sources: AgentSourcesRequestSchema.shape.sources,
+    selections: z.array(AgentCapabilitySelectionSchema).default([]),
   })
   .strict();
-export type AgentCapabilitiesRequest = z.infer<
-  typeof AgentCapabilitiesRequestSchema
->;
+export type AgentAccessRequest = z.infer<typeof AgentAccessRequestSchema>;
 
 export const AgentToolAccessSchema = z
   .object({
@@ -170,6 +246,35 @@ export const AgentCapabilitiesResponseSchema = z
 export type AgentCapabilitiesResponse = z.infer<
   typeof AgentCapabilitiesResponseSchema
 >;
+
+const AgentAccessSummaryEntrySchema = z
+  .object({
+    label: z.string(),
+    detail: z.string(),
+  })
+  .strict();
+
+export const AgentAccessSummarySchema = z
+  .object({
+    connected: z.array(AgentAccessSummaryEntrySchema),
+    allowed: z.array(AgentAccessSummaryEntrySchema),
+    needsAttention: z.array(AgentAccessSummaryEntrySchema),
+    suggestedCleanup: z.array(AgentAccessSummaryEntrySchema),
+  })
+  .strict();
+export type AgentAccessSummary = z.infer<typeof AgentAccessSummarySchema>;
+
+export const AgentAccessResponseSchema = z
+  .object({
+    agentId: z.string(),
+    sources: AgentSourcesRequestSchema.shape.sources,
+    selections: z.array(AgentCapabilitySelectionSchema),
+    toolAccess: AgentToolAccessSchema,
+    summary: AgentAccessSummarySchema.optional(),
+    updatedAt: IsoDateTimeSchema,
+  })
+  .strict();
+export type AgentAccessResponse = z.infer<typeof AgentAccessResponseSchema>;
 
 export const AgentAdminBoundConversationSchema = z.object({
   conversationId: z.string(),

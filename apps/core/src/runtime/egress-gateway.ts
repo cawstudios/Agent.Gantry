@@ -1,22 +1,33 @@
 import http from 'http';
-import https from 'https';
-import net from 'net';
+import dns from 'node:dns/promises';
 import { createHash } from 'crypto';
 import type { Duplex } from 'stream';
-
 import {
   evaluateEgressDenylist,
   normalizeEgressHost,
   type EgressSettings,
 } from '../shared/egress-policy.js';
-import {
-  RUNTIME_EVENT_TYPES,
-  type RuntimeEventType,
-} from '../domain/events/runtime-event-types.js';
-import { normalizeRuntimeEventConversationId } from '../domain/events/runtime-event-conversation.js';
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
 import { logger } from '../infrastructure/logging/logger.js';
-
+import {
+  requestDirect,
+  requestViaUpstreamProxy,
+  tunnelDirect,
+  tunnelViaUpstreamProxy,
+} from './egress-gateway-proxying.js';
+import {
+  declaredNetworkAuthority,
+  isIpAddress,
+  isPrivateNetworkAddress,
+} from '../shared/network-host-declaration.js';
+import { lookupHostnameWithDeadline } from '../shared/hostname-lookup-deadline.js';
+import {
+  allowedPrivateEgressTarget,
+  evaluateEgressAllowlist,
+  networkAttributionMap,
+  networkAuthoritySet,
+} from './egress-gateway-access-policy.js';
+import { auditConnect } from './egress-gateway-audit.js';
 export interface EgressGatewayPrincipal {
   appId: string;
   agentId?: string;
@@ -25,18 +36,25 @@ export interface EgressGatewayPrincipal {
   runId?: string;
   jobId?: string;
 }
-
 export interface EgressGatewayUpstreamProxy {
   url: string;
   provider: string;
 }
-
+/** Run-scoped attribution of a declared outbound host to its reviewed capability. */
+export interface EgressNetworkAttribution {
+  host: string;
+  capabilityId: string;
+  capabilityLabel: string;
+}
 export interface EgressGatewayHandle {
   key: string;
   proxyUrl: string;
   port: number;
 }
-
+export interface EgressGatewayPrivateHostMapping {
+  authority: string;
+  connectHost: string;
+}
 interface EgressGatewayState {
   key: string;
   port: number;
@@ -44,25 +62,26 @@ interface EgressGatewayState {
   sockets: Set<Duplex>;
   settings: EgressSettings;
   principal: EgressGatewayPrincipal;
+  networkAttribution: Map<string, EgressNetworkAttribution>;
+  allowedNetworkAuthorities?: Set<string>;
+  allowedPrivateAuthorities?: Set<string>;
+  privateNetworkConnectHosts?: Map<string, string>;
   upstreamProxy?: EgressGatewayUpstreamProxy;
   publishRuntimeEvent?: (
     event: RuntimeEventPublishInput,
   ) => Promise<unknown> | unknown;
+  logger: Pick<typeof logger, 'info' | 'warn'>;
 }
-
 const EGRESS_GATEWAY_BASE_PORT = 18_080;
 const EGRESS_GATEWAY_PORT_SPAN = 2_000;
 const EGRESS_GATEWAY_MAX_PORT_PROBES = 50;
-const EGRESS_GATEWAY_CONNECT_TIMEOUT_MS = 30_000;
 const EGRESS_GATEWAY_CLOSE_TIMEOUT_MS = 1_000;
 const gateways = new Map<string, EgressGatewayState>();
-
 export async function closeEgressGatewaysForTest(): Promise<void> {
   const states = [...gateways.values()];
   gateways.clear();
   await Promise.all(states.map((state) => closeGatewayState(state)));
 }
-
 export async function closeEgressGateway(
   handleOrKey: EgressGatewayHandle | string | undefined,
 ): Promise<void> {
@@ -73,11 +92,14 @@ export async function closeEgressGateway(
   gateways.delete(key);
   await closeGatewayState(state);
 }
-
 export async function ensureEgressGateway(input: {
   key: string;
   settings: EgressSettings;
   principal: EgressGatewayPrincipal;
+  networkAttribution?: readonly EgressNetworkAttribution[];
+  allowedNetworkHosts?: readonly string[];
+  allowedPrivateNetworkHosts?: readonly string[];
+  privateNetworkHostMappings?: readonly EgressGatewayPrivateHostMapping[];
   upstreamProxy?: EgressGatewayUpstreamProxy;
   publishRuntimeEvent?: (
     event: RuntimeEventPublishInput,
@@ -87,6 +109,21 @@ export async function ensureEgressGateway(input: {
   if (existing) {
     existing.settings = input.settings;
     existing.principal = input.principal;
+    existing.networkAttribution = networkAttributionMap(
+      input.networkAttribution,
+    );
+    existing.allowedNetworkAuthorities = input.allowedNetworkHosts
+      ? networkAuthoritySet(input.allowedNetworkHosts)
+      : undefined;
+    existing.allowedPrivateAuthorities = hasPrivateNetworkAuthority(input)
+      ? networkAuthoritySet([
+          ...(input.allowedPrivateNetworkHosts ?? []),
+          ...privateHostMappingAuthorities(input.privateNetworkHostMappings),
+        ])
+      : undefined;
+    existing.privateNetworkConnectHosts = privateHostMappingConnectHosts(
+      input.privateNetworkHostMappings,
+    );
     if (input.upstreamProxy) {
       existing.upstreamProxy = input.upstreamProxy;
     } else {
@@ -110,6 +147,9 @@ export async function ensureEgressGateway(input: {
       ((preferredPort - EGRESS_GATEWAY_BASE_PORT + offset) %
         EGRESS_GATEWAY_PORT_SPAN);
     try {
+      const networkAttribution = networkAttributionMap(
+        input.networkAttribution,
+      );
       const state: EgressGatewayState = {
         key: input.key,
         port,
@@ -117,6 +157,28 @@ export async function ensureEgressGateway(input: {
         sockets: new Set(),
         settings: input.settings,
         principal: input.principal,
+        networkAttribution,
+        logger,
+        ...(input.allowedNetworkHosts
+          ? {
+              allowedNetworkAuthorities: networkAuthoritySet(
+                input.allowedNetworkHosts,
+              ),
+            }
+          : {}),
+        ...(hasPrivateNetworkAuthority(input)
+          ? {
+              allowedPrivateAuthorities: networkAuthoritySet([
+                ...(input.allowedPrivateNetworkHosts ?? []),
+                ...privateHostMappingAuthorities(
+                  input.privateNetworkHostMappings,
+                ),
+              ]),
+            }
+          : {}),
+        privateNetworkConnectHosts: privateHostMappingConnectHosts(
+          input.privateNetworkHostMappings,
+        ),
         ...(input.upstreamProxy ? { upstreamProxy: input.upstreamProxy } : {}),
         ...(input.publishRuntimeEvent
           ? { publishRuntimeEvent: input.publishRuntimeEvent }
@@ -137,7 +199,31 @@ export async function ensureEgressGateway(input: {
   }
   throw new Error(`No available egress gateway port for ${input.key}.`);
 }
-
+function hasPrivateNetworkAuthority(input: {
+  allowedPrivateNetworkHosts?: readonly string[];
+  privateNetworkHostMappings?: readonly EgressGatewayPrivateHostMapping[];
+}): boolean {
+  return (
+    (input.allowedPrivateNetworkHosts?.length ?? 0) > 0 ||
+    (input.privateNetworkHostMappings?.length ?? 0) > 0
+  );
+}
+function privateHostMappingAuthorities(
+  mappings: readonly EgressGatewayPrivateHostMapping[] | undefined,
+): string[] {
+  return (mappings ?? []).map((mapping) => mapping.authority);
+}
+function privateHostMappingConnectHosts(
+  mappings: readonly EgressGatewayPrivateHostMapping[] | undefined,
+): Map<string, string> | undefined {
+  const map = new Map<string, string>();
+  for (const mapping of mappings ?? []) {
+    const authority = declaredNetworkAuthority(mapping.authority);
+    const connectHost = mapping.connectHost.trim();
+    if (authority && connectHost) map.set(authority, connectHost);
+  }
+  return map.size > 0 ? map : undefined;
+}
 function createEgressGatewayServer(key: string): http.Server {
   const server = http.createServer((req, res) => {
     void handleHttpProxyRequest(key, req, res).catch((err) => {
@@ -165,7 +251,6 @@ function createEgressGatewayServer(key: string): http.Server {
   });
   return server;
 }
-
 async function handleConnectRequest(
   key: string,
   req: http.IncomingMessage,
@@ -177,6 +262,19 @@ async function handleConnectRequest(
   const target = parseConnectTarget(req.url || '');
   if (!target) {
     clientSocket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+    return;
+  }
+  const allowlistDeny = evaluateEgressAllowlist(state, target);
+  if (allowlistDeny) {
+    await auditConnect(state, {
+      host: allowlistDeny.host,
+      port: target.port,
+      allowed: false,
+      denied: true,
+      reason: allowlistDeny.reason,
+      matchedPattern: allowlistDeny.matchedPattern,
+    });
+    writeDeniedConnect(clientSocket, allowlistDeny);
     return;
   }
   const deny = evaluateEgressDenylist({
@@ -194,25 +292,60 @@ async function handleConnectRequest(
     writeDeniedConnect(clientSocket, deny);
     return;
   }
+  const privateTarget = allowedPrivateEgressTarget(state, target);
+  if (privateTarget) {
+    await auditConnect(state, {
+      host: privateTarget.host,
+      port: target.port,
+      allowed: true,
+      denied: false,
+      reason: 'model_gateway_allow',
+    });
+    await tunnelDirect({
+      target: privateTarget,
+      clientSocket,
+      head,
+      trackSocket: (socket) => trackGatewaySocket(state, socket),
+    });
+    return;
+  }
+  const publicTarget = await resolvePublicEgressTarget(target);
+  if ('deny' in publicTarget) {
+    await auditConnect(state, {
+      host: publicTarget.deny.host,
+      port: target.port,
+      allowed: false,
+      denied: true,
+      reason: publicTarget.deny.reason,
+      matchedPattern: publicTarget.deny.matchedPattern,
+    });
+    writeDeniedConnect(clientSocket, publicTarget.deny);
+    return;
+  }
   await auditConnect(state, {
     host: normalizeEgressHost(target.host),
+    port: target.port,
     allowed: true,
     denied: false,
     reason: 'default_allow',
   });
   if (state.upstreamProxy) {
-    await tunnelViaUpstreamProxy(
-      state,
-      state.upstreamProxy,
-      target,
+    await tunnelViaUpstreamProxy({
+      upstream: state.upstreamProxy,
+      target: publicTarget.target,
       clientSocket,
       head,
-    );
+      trackSocket: (socket) => trackGatewaySocket(state, socket),
+    });
     return;
   }
-  await tunnelDirect(state, target, clientSocket, head);
+  await tunnelDirect({
+    target: publicTarget.target,
+    clientSocket,
+    head,
+    trackSocket: (socket) => trackGatewaySocket(state, socket),
+  });
 }
-
 async function handleHttpProxyRequest(
   key: string,
   req: http.IncomingMessage,
@@ -223,6 +356,24 @@ async function handleHttpProxyRequest(
   if (!target) {
     res.writeHead(400);
     res.end('Bad Request');
+    return;
+  }
+  const allowlistDeny = evaluateEgressAllowlist(state, {
+    host: normalizeEgressHost(target.hostname),
+    port: urlPort(target),
+    authority: target.host,
+  });
+  if (allowlistDeny) {
+    await auditConnect(state, {
+      host: allowlistDeny.host,
+      port: urlPort(target),
+      allowed: false,
+      denied: true,
+      reason: allowlistDeny.reason,
+      matchedPattern: allowlistDeny.matchedPattern,
+    });
+    res.writeHead(403, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(deniedBody(allowlistDeny)));
     return;
   }
   const deny = evaluateEgressDenylist({
@@ -241,15 +392,64 @@ async function handleHttpProxyRequest(
     res.end(JSON.stringify(deniedBody(deny)));
     return;
   }
+  const privateTarget = allowedPrivateEgressTarget(state, {
+    host: normalizeEgressHost(target.hostname),
+    port: urlPort(target),
+    authority: target.host,
+  });
+  if (privateTarget) {
+    await auditConnect(state, {
+      host: privateTarget.host,
+      port: urlPort(target),
+      allowed: true,
+      denied: false,
+      reason: 'model_gateway_allow',
+    });
+    const upstream = requestDirect(req, target, privateTarget.connectHost);
+    upstream.on('response', (upstreamRes) => {
+      res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
+      upstreamRes.pipe(res);
+    });
+    upstream.on('error', () => {
+      if (!res.headersSent) res.writeHead(502);
+      res.end('Bad Gateway');
+    });
+    req.pipe(upstream);
+    return;
+  }
+  const publicTarget = await resolvePublicEgressTarget({
+    host: normalizeEgressHost(target.hostname),
+    port: urlPort(target),
+    authority: target.host,
+  });
+  if ('deny' in publicTarget) {
+    await auditConnect(state, {
+      host: publicTarget.deny.host,
+      port: urlPort(target),
+      allowed: false,
+      denied: true,
+      reason: publicTarget.deny.reason,
+      matchedPattern: publicTarget.deny.matchedPattern,
+    });
+    res.writeHead(403, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(deniedBody(publicTarget.deny)));
+    return;
+  }
   await auditConnect(state, {
     host: normalizeEgressHost(target.hostname),
+    port: urlPort(target),
     allowed: true,
     denied: false,
     reason: 'default_allow',
   });
   const upstream = state.upstreamProxy
-    ? requestViaUpstreamProxy(state.upstreamProxy, req, target)
-    : requestDirect(req, target);
+    ? requestViaUpstreamProxy(
+        state.upstreamProxy,
+        req,
+        target,
+        publicTarget.target.connectHost,
+      )
+    : requestDirect(req, target, publicTarget.target.connectHost);
   upstream.on('response', (upstreamRes) => {
     res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
     upstreamRes.pipe(res);
@@ -260,136 +460,6 @@ async function handleHttpProxyRequest(
   });
   req.pipe(upstream);
 }
-
-function requestDirect(
-  req: http.IncomingMessage,
-  target: URL,
-): http.ClientRequest {
-  const client = target.protocol === 'https:' ? https : http;
-  const upstream = client.request({
-    protocol: target.protocol,
-    hostname: target.hostname,
-    port: target.port || (target.protocol === 'https:' ? 443 : 80),
-    method: req.method,
-    path: `${target.pathname}${target.search}`,
-    headers: req.headers,
-  });
-  upstream.setTimeout(EGRESS_GATEWAY_CONNECT_TIMEOUT_MS, () => {
-    upstream.destroy(new Error('Egress gateway HTTP upstream timed out.'));
-  });
-  return upstream;
-}
-
-function requestViaUpstreamProxy(
-  upstream: EgressGatewayUpstreamProxy,
-  req: http.IncomingMessage,
-  target: URL,
-): http.ClientRequest {
-  const proxy = new URL(upstream.url);
-  const headers = { ...req.headers };
-  applyProxyAuthorization(headers, proxy);
-  const upstreamRequest = http.request({
-    hostname: proxy.hostname,
-    port: proxy.port || 80,
-    method: req.method,
-    path: target.toString(),
-    headers,
-  });
-  upstreamRequest.setTimeout(EGRESS_GATEWAY_CONNECT_TIMEOUT_MS, () => {
-    upstreamRequest.destroy(
-      new Error('Egress gateway upstream proxy request timed out.'),
-    );
-  });
-  return upstreamRequest;
-}
-
-async function tunnelDirect(
-  state: EgressGatewayState,
-  target: { host: string; port: number; authority: string },
-  clientSocket: Duplex,
-  head: Buffer,
-): Promise<void> {
-  const upstreamSocket = net.connect(target.port, target.host, () => {
-    upstreamSocket.setTimeout(0);
-    clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-    if (head.length > 0) upstreamSocket.write(head);
-    upstreamSocket.pipe(clientSocket);
-    clientSocket.pipe(upstreamSocket);
-  });
-  trackGatewaySocket(state, upstreamSocket);
-  upstreamSocket.on('error', () => {
-    clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-  });
-  upstreamSocket.setTimeout(EGRESS_GATEWAY_CONNECT_TIMEOUT_MS, () => {
-    upstreamSocket.destroy();
-    clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-  });
-}
-
-async function tunnelViaUpstreamProxy(
-  state: EgressGatewayState,
-  upstream: EgressGatewayUpstreamProxy,
-  target: { host: string; port: number; authority: string },
-  clientSocket: Duplex,
-  head: Buffer,
-): Promise<void> {
-  const proxy = new URL(upstream.url);
-  const proxySocket = net.connect(
-    Number(proxy.port || 80),
-    proxy.hostname,
-    () => {
-      const headers = [
-        `CONNECT ${target.authority} HTTP/1.1`,
-        `Host: ${target.authority}`,
-      ];
-      const authorization = proxyAuthorizationHeader(proxy);
-      if (authorization) headers.push(`Proxy-Authorization: ${authorization}`);
-      proxySocket.write(`${headers.join('\r\n')}\r\n\r\n`);
-    },
-  );
-  trackGatewaySocket(state, proxySocket);
-  let buffered = Buffer.alloc(0);
-  let established = false;
-  let failed = false;
-  const failBeforeEstablished = () => {
-    if (established || failed) return;
-    failed = true;
-    if (!clientSocket.destroyed && !clientSocket.writableEnded) {
-      clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-    }
-    proxySocket.destroy();
-  };
-  proxySocket.on('data', function onProxyData(chunk) {
-    buffered = Buffer.concat([buffered, chunk]);
-    const headerEnd = buffered.indexOf('\r\n\r\n');
-    if (headerEnd === -1) return;
-    proxySocket.off('data', onProxyData);
-    const header = buffered.slice(0, headerEnd).toString('utf-8');
-    if (!/^HTTP\/1\.[01] 2\d\d\b/.test(header)) {
-      clientSocket.end(`${header}\r\n\r\n`);
-      proxySocket.destroy();
-      return;
-    }
-    established = true;
-    proxySocket.setTimeout(0);
-    clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-    const remainder = buffered.slice(headerEnd + 4);
-    if (remainder.length > 0) clientSocket.write(remainder);
-    if (head.length > 0) proxySocket.write(head);
-    proxySocket.pipe(clientSocket);
-    clientSocket.pipe(proxySocket);
-  });
-  proxySocket.on('error', () => {
-    failBeforeEstablished();
-  });
-  proxySocket.on('end', failBeforeEstablished);
-  proxySocket.on('close', failBeforeEstablished);
-  proxySocket.setTimeout(
-    EGRESS_GATEWAY_CONNECT_TIMEOUT_MS,
-    failBeforeEstablished,
-  );
-}
-
 function trackGatewaySocket(state: EgressGatewayState, socket: Duplex): void {
   if (state.sockets.has(socket)) return;
   state.sockets.add(socket);
@@ -405,7 +475,6 @@ function trackGatewaySocket(state: EgressGatewayState, socket: Duplex): void {
     socket.off('error', onError);
   });
 }
-
 async function closeGatewayState(state: EgressGatewayState): Promise<void> {
   state.server.closeIdleConnections?.();
   state.server.closeAllConnections?.();
@@ -431,7 +500,6 @@ async function closeGatewayState(state: EgressGatewayState): Promise<void> {
     state.server.close(() => finish());
   });
 }
-
 function writeDeniedConnect(
   socket: Duplex,
   deny: { host: string; matchedPattern: string; reason: string },
@@ -439,7 +507,7 @@ function writeDeniedConnect(
   const body = JSON.stringify(deniedBody(deny));
   socket.end(
     [
-      'HTTP/1.1 403 Forbidden',
+      `HTTP/1.1 403 ${deniedConnectReasonPhrase(deny)}`,
       'content-type: application/json',
       `content-length: ${Buffer.byteLength(body)}`,
       '',
@@ -447,7 +515,21 @@ function writeDeniedConnect(
     ].join('\r\n'),
   );
 }
-
+function deniedConnectReasonPhrase(deny: {
+  host: string;
+  matchedPattern: string;
+}): string {
+  const message = `Gantry blocked egress to ${deny.host}`;
+  return sanitizeHttpReasonPhrase(message);
+}
+function sanitizeHttpReasonPhrase(value: string): string {
+  const sanitized = value
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[^\x20-\x7E]+/g, '')
+    .slice(0, 180)
+    .trim();
+  return sanitized || 'Forbidden';
+}
 function deniedBody(deny: {
   host: string;
   matchedPattern: string;
@@ -459,63 +541,94 @@ function deniedBody(deny: {
     reason: deny.reason,
   };
 }
-
-async function auditConnect(
-  state: EgressGatewayState,
-  decision: {
-    host: string;
-    allowed: boolean;
-    denied: boolean;
-    reason: string;
-    matchedPattern?: string;
-  },
-): Promise<void> {
-  const payload = {
-    host: decision.host,
-    principal: state.principal.agentId || state.principal.appId,
-    allowed: decision.allowed,
-    denied: decision.denied,
-    reason: decision.reason,
-    ...(decision.matchedPattern
-      ? { matchedPattern: decision.matchedPattern }
-      : {}),
-    provider: state.upstreamProxy?.provider ?? 'direct',
-    conversationId: state.principal.conversationId,
-    runId: state.principal.runId,
-  };
-  logger.info(payload, 'Egress CONNECT decision');
-  if (!state.publishRuntimeEvent) return;
-  const eventConversationId = normalizeRuntimeEventConversationId(
-    state.principal.conversationId as never,
-  );
-  try {
-    await state.publishRuntimeEvent({
-      appId: state.principal.appId as never,
-      ...(state.principal.agentId
-        ? { agentId: state.principal.agentId as never }
-        : {}),
-      ...(eventConversationId
-        ? { conversationId: eventConversationId as never }
-        : {}),
-      eventType: RUNTIME_EVENT_TYPES.EGRESS_CONNECT as RuntimeEventType,
-      actor: 'egress-gateway',
-      responseMode: 'none',
-      payload,
-    });
-  } catch (err) {
-    logger.warn(
-      { err, host: decision.host, principal: payload.principal },
-      'Egress CONNECT audit persistence failed',
-    );
+async function resolvePublicEgressTarget(target: {
+  host: string;
+  port: number;
+  authority: string;
+}): Promise<
+  | {
+      target: {
+        host: string;
+        port: number;
+        authority: string;
+        connectHost?: string;
+      };
+    }
+  | {
+      deny: { host: string; matchedPattern: string; reason: string };
+    }
+> {
+  const host = normalizeEgressHost(target.host);
+  if (isIpAddress(host)) {
+    const address = host.replace(/^\[/, '').replace(/\]$/, '');
+    if (isPrivateNetworkAddress(address)) {
+      return { deny: privateNetworkDeny(host) };
+    }
+    return { target: { ...target, host, connectHost: address } };
   }
+  if (isLocalhostName(host)) {
+    return { deny: privateNetworkDeny(host) };
+  }
+  let records: Array<{ address: string; family: number }>;
+  try {
+    records = await lookupHostnameWithDeadline({
+      hostname: host,
+      lookupHostname: lookupEgressHostname,
+      timeoutMs: 30_000,
+      timeoutMessage: 'Egress gateway DNS lookup timed out.',
+    });
+  } catch {
+    return {
+      deny: {
+        host,
+        matchedPattern: 'dns_resolution_failed',
+        reason: `Network blocked by policy: ${host} did not resolve to a public routable address.`,
+      },
+    };
+  }
+  const firstPublic = records.find(
+    (record) => !isPrivateNetworkAddress(record.address),
+  );
+  if (
+    records.length === 0 ||
+    !firstPublic ||
+    records.some((record) => isPrivateNetworkAddress(record.address))
+  ) {
+    return { deny: privateNetworkDeny(host) };
+  }
+  return { target: { ...target, host, connectHost: firstPublic.address } };
 }
-
+function privateNetworkDeny(host: string): {
+  host: string;
+  matchedPattern: string;
+  reason: string;
+} {
+  return {
+    host,
+    matchedPattern: 'private_network',
+    reason: `Network blocked by policy: ${host} targets a private, loopback, link-local, or otherwise non-public address.`,
+  };
+}
+function isLocalhostName(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/\.+$/, '');
+  return normalized === 'localhost' || normalized.endsWith('.localhost');
+}
+async function lookupEgressHostname(
+  hostname: string,
+): Promise<Array<{ address: string; family: 4 | 6 }>> {
+  const records = await dns.lookup(hostname, { all: true, verbatim: true });
+  return records
+    .filter((record) => record.family === 4 || record.family === 6)
+    .map((record) => ({
+      address: record.address,
+      family: record.family as 4 | 6,
+    }));
+}
 function requireGatewayState(key: string): EgressGatewayState {
   const state = gateways.get(key);
   if (!state) throw new Error(`Egress gateway state not found for ${key}.`);
   return state;
 }
-
 function parseConnectTarget(
   authority: string,
 ): { host: string; port: number; authority: string } | undefined {
@@ -523,7 +636,6 @@ function parseConnectTarget(
   if (!parsed) return undefined;
   return { ...parsed, authority };
 }
-
 function parseAuthority(
   authority: string,
 ): { host: string; port: number } | undefined {
@@ -541,7 +653,6 @@ function parseAuthority(
     return undefined;
   }
 }
-
 function parseHttpProxyTarget(rawUrl: string): URL | undefined {
   try {
     const parsed = new URL(rawUrl);
@@ -553,28 +664,15 @@ function parseHttpProxyTarget(rawUrl: string): URL | undefined {
     return undefined;
   }
 }
-
-function applyProxyAuthorization(
-  headers: http.OutgoingHttpHeaders,
-  proxy: URL,
-): void {
-  const authorization = proxyAuthorizationHeader(proxy);
-  if (authorization) headers['proxy-authorization'] = authorization;
+function urlPort(target: URL): number {
+  return Number(target.port || (target.protocol === 'https:' ? 443 : 80));
 }
-
-function proxyAuthorizationHeader(proxy: URL): string | undefined {
-  if (!proxy.username && !proxy.password) return undefined;
-  const raw = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
-  return `Basic ${Buffer.from(raw).toString('base64')}`;
-}
-
 function preferredEgressGatewayPort(key: string): number {
   const hash = createHash('sha256').update(key).digest();
   return (
     EGRESS_GATEWAY_BASE_PORT + (hash.readUInt32BE(0) % EGRESS_GATEWAY_PORT_SPAN)
   );
 }
-
 function listen(server: http.Server, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const onError = (err: Error) => {
@@ -590,7 +688,6 @@ function listen(server: http.Server, port: number): Promise<void> {
     server.listen(port, '127.0.0.1');
   });
 }
-
 function isListenCollision(err: unknown): boolean {
   return (
     Boolean(err) &&

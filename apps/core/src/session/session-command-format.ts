@@ -13,6 +13,7 @@ import { resolveModelCacheSupport } from '../shared/model-cache-support.js';
 import type { RuntimeModelStatusSnapshot } from '../runtime/model-status-store.js';
 
 export interface MemoryStatusSnapshot {
+  memory_enabled?: boolean;
   items_by_kind: Record<string, number>;
   items_by_scope: Record<string, number>;
   top10_most_used: Array<{ key: string; retrieval_count: number }>;
@@ -100,89 +101,91 @@ export function formatBrowserStatus(status: BrowserStatusSnapshot): string {
   return lines.join('\n');
 }
 
-function describeBackfillPause(
+export function formatMemoryStatus(status: MemoryStatusSnapshot): string {
+  const dream = status.last_dream_run?.at || 'never';
+  const pipeline = status.memory_pipeline;
+  const lastInjected = status.last_injected_block;
+  const injectedCount = lastInjected ? 1 : 0;
+  const memoryOn = status.memory_enabled === true;
+  return [
+    `Memory: ${memoryOn ? 'on' : 'off'}`,
+    `Pre-answer recall: ${memoryOn ? 'on' : 'off'}`,
+    ...formatRetrievalLines(status.retrieval),
+    `Last dream: ${dream}`,
+    `Review queue: ${pipeline?.needs_review ?? 0}`,
+    `Injected this run: ${injectedCount}`,
+  ].join('\n');
+}
+
+function describePauseReason(
   reason: NonNullable<MemoryStatusSnapshot['retrieval']>['pauseReason'],
 ): string {
   switch (reason) {
     case 'paused_budget':
-      return 'paused (daily embedding budget reached; resumes tomorrow or when the limit is raised)';
+      return 'daily embedding budget reached';
     case 'paused_provider_quota':
-      return 'paused (provider quota unavailable; resumes on the next run)';
+      return 'embedding provider quota reached';
     case 'paused_rate_limit':
-      return 'paused (provider rate limit; resumes on the next run)';
+      return 'embedding provider rate limit';
     case 'paused_retryable_provider_error':
-      return 'paused (provider error; resumes on the next run)';
+      return 'temporary embedding provider error';
     default:
-      return 'paused';
+      return 'embedding provider unavailable';
   }
 }
 
-export function formatMemoryStatus(status: MemoryStatusSnapshot): string {
-  const kinds = Object.entries(status.items_by_kind || {})
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([kind, count]) => `${kind}:${count}`)
-    .join(', ');
-  const scopes = Object.entries(status.items_by_scope || {})
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([scope, count]) => `${scope}:${count}`)
-    .join(', ');
-  const used = (status.top10_most_used || [])
-    .slice(0, 5)
-    .map((row) => `${row.key}(${row.retrieval_count})`)
-    .join(', ');
-  const stalest = (status.top10_stalest || [])
-    .slice(0, 5)
-    .map((row) => `${row.key}@${row.updated_at.slice(0, 10)}`)
-    .join(', ');
-  const dream = status.last_dream_run?.at || 'never';
-  const pipeline = status.memory_pipeline;
-  const lastInjected = status.last_injected_block;
-  const lastInjectedText = lastInjected
-    ? [
-        lastInjected.subject || 'unknown subject',
-        typeof lastInjected.bytes === 'number'
-          ? `${lastInjected.bytes} bytes`
-          : 'unknown bytes',
-        lastInjected.at ? `at ${lastInjected.at}` : undefined,
-      ]
-        .filter((part): part is string => Boolean(part))
-        .join(', ')
-    : 'none';
-  const disk = status.disk_kb
-    ? Object.entries(status.disk_kb)
-        .map(([k, v]) => `${k}:${v}kb`)
-        .join(', ')
-    : 'n/a';
-  const retrieval = status.retrieval;
-  const searchMode = retrieval?.searchMode || 'lexical_keyword';
-  const vectorSearch = retrieval?.vectorSearch || 'inactive';
-  const pending = retrieval?.pending ?? 0;
-  const vectorDetail =
-    retrieval?.ready !== undefined || retrieval?.pending !== undefined
-      ? ` (${retrieval?.ready ?? 0} ready, ${pending} pending` +
-        (vectorSearch === 'partial' && pending > 0
-          ? '; run `gantry memory embeddings backfill` to index the rest)'
-          : ')')
-      : '';
-  const pauseLine = retrieval?.pauseReason
-    ? `backfill: ${describeBackfillPause(retrieval.pauseReason)}`
-    : undefined;
-  return [
-    'Memory status',
-    'sample: latest 100 active memories; counts/top/stale are from this sample',
-    `kinds: ${kinds || 'none'}`,
-    `scopes: ${scopes || 'none'}`,
-    `retrieval: ${searchMode}`,
-    `embeddings: ${retrieval?.embeddings || 'unknown'}`,
-    `vector_search: ${vectorSearch}${vectorDetail}`,
-    ...(pauseLine ? [pauseLine] : []),
-    `pipeline: staged:${pipeline?.staged ?? 0}, promoted:${pipeline?.promoted ?? 0}, needs_review:${pipeline?.needs_review ?? 0}`,
-    `last_injected_block: ${lastInjectedText}`,
-    `top_used: ${used || 'none'}`,
-    `stale: ${stalest || 'none'}`,
-    `last_dream: ${dream}`,
-    `disk: ${disk}`,
-  ].join('\n');
+// The "Semantic recall" line is derived from vectorSearch (whether vectors are
+// actually contributing) and pauseReason, so it can never contradict the
+// "Search mode" line above it: full-text mode pairs with off/indexing/paused
+// copy, hybrid modes pair with "on". Full-text recall is the always-on baseline;
+// semantic recall is an optional enhancement, never required for memory to work.
+function describeSemanticRecall(
+  retrieval: NonNullable<MemoryStatusSnapshot['retrieval']>,
+): string {
+  if (retrieval.embeddings !== 'configured') {
+    return 'Semantic recall: off (optional)';
+  }
+  const vectorSearch = retrieval.vectorSearch ?? 'inactive';
+  const paused = retrieval.pauseReason;
+  if (vectorSearch === 'active') {
+    return 'Semantic recall: on';
+  }
+  if (vectorSearch === 'partial') {
+    return paused
+      ? `Semantic recall: on (index build paused: ${describePauseReason(paused)})`
+      : 'Semantic recall: on (index building)';
+  }
+  // No vectors are contributing yet, so full-text recall is doing the work.
+  return paused
+    ? `Semantic recall paused: ${describePauseReason(paused)}. Full-text memory is still active.`
+    : 'Semantic recall: index building. Full-text memory is still active.';
+}
+
+function formatRetrievalLines(
+  retrieval: MemoryStatusSnapshot['retrieval'],
+): string[] {
+  const searchMode = retrieval?.searchMode ?? 'lexical_keyword';
+  const searchLabel =
+    searchMode === 'hybrid_semantic_ready'
+      ? 'hybrid'
+      : searchMode === 'hybrid_semantic_partial'
+        ? 'hybrid partial'
+        : 'full-text';
+  const lines = [
+    `Search mode: ${searchLabel}`,
+    retrieval
+      ? describeSemanticRecall(retrieval)
+      : 'Semantic recall: off (optional)',
+  ];
+  if (
+    typeof retrieval?.ready === 'number' &&
+    typeof retrieval?.pending === 'number'
+  ) {
+    lines.push(
+      `Semantic index: ${retrieval.ready} ready, ${retrieval.pending} pending`,
+    );
+  }
+  return lines;
 }
 
 export function describeThinking(value: ThinkingOverride): string {

@@ -174,7 +174,7 @@ describe('PromptProfileService', () => {
     loggerSpies.info.mockReset();
   });
 
-  it('seeds per-agent CLAUDE.md and SOUL.md as prompt FileArtifacts', async () => {
+  it('seeds per-agent AGENTS.md and SOUL.md as prompt FileArtifacts', async () => {
     const { store, service } = createService();
 
     await service.ensureAgentDefaults({
@@ -188,7 +188,7 @@ describe('PromptProfileService', () => {
       virtualScope: 'prompt-profile',
     });
     expect(artifacts.map((artifact) => artifact.path).sort()).toEqual([
-      'team/CLAUDE.md',
+      'team/AGENTS.md',
       'team/SOUL.md',
     ]);
 
@@ -204,6 +204,52 @@ describe('PromptProfileService', () => {
     expect(soul.content).toContain(
       'For migrated jobs, describe what the job will do',
     );
+    expect(soul.content).toContain(
+      'a scheduled job for recurring or time-based requests',
+    );
+
+    const groupContext = await store.readFileArtifact({
+      appId: 'default',
+      agentId: 'agent:team',
+      virtualScope: 'prompt-profile',
+      virtualPath: 'team/AGENTS.md',
+    });
+    expect(groupContext.content).toContain('request_access');
+    expect(groupContext.content).toContain('Diagnose the real blocker');
+  });
+
+  it('compiles permissioned-assistant guidance with only current tool names', async () => {
+    const { service } = createService();
+
+    const prompt = await service.compileSystemPrompt({ agentFolder: 'team' });
+
+    // Current tool names are present.
+    for (const toolName of [
+      'request_access',
+      'send_message',
+      'ask_user_question',
+      'service_restart',
+      'register_agent',
+    ]) {
+      expect(prompt).toContain(toolName);
+    }
+
+    // Proactive recommendation ladder is surfaced.
+    expect(prompt).toContain('scheduler_upsert_job');
+    expect(prompt).toContain('request_skill_proposal');
+    expect(prompt).toContain('request_access target.kind=capability');
+    expect(prompt).toContain('Credential Center');
+    expect(prompt).toContain('admin_permission_list');
+
+    // No stale tool names leak into the compiled prompt.
+    for (const stale of [
+      'request_permission',
+      'capability_search',
+      'request_capability',
+      'propose_local_cli_capability',
+    ]) {
+      expect(prompt).not.toContain(stale);
+    }
   });
 
   it('does not overwrite existing per-agent prompt artifacts', async () => {
@@ -227,7 +273,7 @@ describe('PromptProfileService', () => {
   it('compiles deterministic order without shared context projection', async () => {
     const { store, service } = createService();
     await writePromptArtifact(store, 'team/SOUL.md', '# Soul\nBe direct.');
-    await writePromptArtifact(store, 'team/CLAUDE.md', 'group context');
+    await writePromptArtifact(store, 'team/AGENTS.md', 'group context');
 
     const prompt = await service.compileSystemPrompt({
       agentFolder: 'team',
@@ -247,7 +293,7 @@ describe('PromptProfileService', () => {
       prompt.indexOf('[[OPERATING_GUIDANCE]]'),
     );
     expect(prompt.indexOf('[[OPERATING_GUIDANCE]]')).toBeLessThan(
-      prompt.indexOf('[[GROUP_CONTEXT]]'),
+      prompt.indexOf('[[AGENT_INSTRUCTIONS]]'),
     );
     expect(prompt).not.toContain('[[SHARED_CONTEXT]]');
     expect(prompt).toContain('source: gantry://soul');
@@ -255,7 +301,7 @@ describe('PromptProfileService', () => {
     expect(prompt).toContain('Generalist persona');
     expect(prompt).toContain('source: gantry://capability-guidance');
     expect(prompt).toContain('source: gantry://operating-guidance');
-    expect(prompt).toContain('source: gantry://group-context');
+    expect(prompt).toContain('source: gantry://agent-instructions');
   });
 
   it('consolidates former shared guidance into generated operating guidance', async () => {
@@ -274,29 +320,60 @@ describe('PromptProfileService', () => {
       'When the user says "continue", "resume", or similar, call memory_search',
     );
     expect(prompt).toContain(
+      'Durable memory works by default through full-text recall; semantic recall is an optional ranking enhancement',
+    );
+    expect(prompt).toContain(
+      'Call memory_search before telling the user you do not know a prior decision, user preference, or continuation context.',
+    );
+    expect(prompt).toContain(
+      'Do not ask the user to configure embeddings or an embedding provider unless they explicitly want better semantic ranking',
+    );
+    expect(prompt).toContain(
       'Never expose secrets, tokens, credentials, or unrelated local paths.',
     );
     expect(prompt).toContain(
-      'Use capability_search, propose_capability, and manage_capability for durable capability changes',
+      'Use request_access target.kind=capability for durable reviewed access',
     );
     expect(prompt).toContain(
-      'Source = what exists; Capability = reviewed action; Grant = this agent is allowed to use the capability',
+      'Use available actions first. If the action is missing, request the reviewed capability',
     );
     expect(prompt).toContain(
-      'Approved third-party MCP sources are inspected through mcp_list_tools and used through mcp_call_tool only when reviewed current-run access covers that action',
+      'source setup and raw implementation details stay in review metadata',
+    );
+    expect(prompt).not.toContain('Source = what exists');
+    expect(prompt).not.toContain(
+      'mcp_list_tools and used through mcp_call_tool',
     );
     expect(prompt).not.toContain('[[SHARED_CONTEXT]]');
   });
 
-  it('includes SOUL section with identity directive when artifact exists', async () => {
+  it('includes SOUL section framed as voice-only, not authority', async () => {
     const { store, service } = createService();
     await writePromptArtifact(store, 'team/SOUL.md', '# Soul\n\nBe sharp.');
 
     const prompt = await service.compileSystemPrompt({ agentFolder: 'team' });
 
     expect(prompt).toContain('[[SOUL]]');
-    expect(prompt).toContain('CRITICAL IDENTITY DIRECTIVE');
+    expect(prompt).toContain('IDENTITY & VOICE');
+    expect(prompt).toContain('governs voice and style only');
+    expect(prompt).toContain('NEVER overrides safety');
     expect(prompt).toContain('Be sharp.');
+  });
+
+  it('frames AGENT_INSTRUCTIONS as advisory, not authority', async () => {
+    const { store, service } = createService();
+    await writePromptArtifact(
+      store,
+      'team/AGENTS.md',
+      '# How I work\nShip it.',
+    );
+
+    const prompt = await service.compileSystemPrompt({ agentFolder: 'team' });
+
+    expect(prompt).toContain('[[AGENT_INSTRUCTIONS]]');
+    expect(prompt).toContain('AGENT INSTRUCTIONS (advisory)');
+    expect(prompt).toContain('not authority');
+    expect(prompt).toContain('Ship it.');
   });
 
   it('skips missing or empty prompt artifacts', async () => {
@@ -307,7 +384,7 @@ describe('PromptProfileService', () => {
 
     expect(prompt).toContain('[[RUNTIME_RULES]]');
     expect(prompt).not.toContain('[[SOUL]]');
-    expect(prompt).not.toContain('[[GROUP_CONTEXT]]');
+    expect(prompt).not.toContain('[[AGENT_INSTRUCTIONS]]');
   });
 
   it('skips invalid agent folder names for SOUL and group sections', async () => {
@@ -319,16 +396,16 @@ describe('PromptProfileService', () => {
 
     expect(prompt).toContain('[[RUNTIME_RULES]]');
     expect(prompt).not.toContain('[[SOUL]]');
-    expect(prompt).not.toContain('[[GROUP_CONTEXT]]');
+    expect(prompt).not.toContain('[[AGENT_INSTRUCTIONS]]');
     expect(loggerSpies.warn).not.toHaveBeenCalled();
   });
 
   it('surfaces artifact infrastructure read failures', async () => {
     const { store, service } = createService();
     await writePromptArtifact(store, 'team/SOUL.md', '# Soul');
-    await writePromptArtifact(store, 'team/CLAUDE.md', 'group context');
+    await writePromptArtifact(store, 'team/AGENTS.md', 'group context');
     store.failReadPaths.add('team/SOUL.md');
-    store.failReadPaths.add('team/CLAUDE.md');
+    store.failReadPaths.add('team/AGENTS.md');
 
     await expect(
       service.compileSystemPrompt({ agentFolder: 'team' }),
@@ -338,7 +415,7 @@ describe('PromptProfileService', () => {
   it('enforces budget caps for sections and total output', async () => {
     const { store, service } = createService();
     await writePromptArtifact(store, 'team/SOUL.md', 's'.repeat(8000));
-    await writePromptArtifact(store, 'team/CLAUDE.md', 't'.repeat(8000));
+    await writePromptArtifact(store, 'team/AGENTS.md', 't'.repeat(8000));
 
     const capped = new PromptProfileService({
       fileArtifactStore: () => store,
@@ -347,7 +424,7 @@ describe('PromptProfileService', () => {
         SOUL: 400,
         CAPABILITY_GUIDANCE: 0,
         OPERATING_GUIDANCE: 0,
-        GROUP_CONTEXT: 200,
+        AGENT_INSTRUCTIONS: 200,
       },
       totalBudget: 900,
     });
@@ -361,20 +438,20 @@ describe('PromptProfileService', () => {
   it('omits sections when section budgets are zero', async () => {
     const { store } = createService();
     await writePromptArtifact(store, 'team/SOUL.md', 'soul');
-    await writePromptArtifact(store, 'team/CLAUDE.md', 'group');
+    await writePromptArtifact(store, 'team/AGENTS.md', 'group');
 
     const service = new PromptProfileService({
       fileArtifactStore: () => store,
       sectionBudgets: {
         SOUL: 0,
-        GROUP_CONTEXT: 0,
+        AGENT_INSTRUCTIONS: 0,
       },
     });
     const prompt = await service.compileSystemPrompt({ agentFolder: 'team' });
 
     expect(prompt).toContain('[[RUNTIME_RULES]]');
     expect(prompt).not.toContain('[[SOUL]]');
-    expect(prompt).not.toContain('[[GROUP_CONTEXT]]');
+    expect(prompt).not.toContain('[[AGENT_INSTRUCTIONS]]');
   });
 
   it('normalizes CRLF in prompt artifacts', async () => {
@@ -384,11 +461,63 @@ describe('PromptProfileService', () => {
       'team/SOUL.md',
       '# Soul\r\n\r\nVoice line\r\n',
     );
-    await writePromptArtifact(store, 'team/CLAUDE.md', 'group\r\nrules');
+    await writePromptArtifact(store, 'team/AGENTS.md', 'group\r\nrules');
 
     const prompt = await service.compileSystemPrompt({ agentFolder: 'team' });
 
     expect(prompt).toContain('Voice line');
     expect(prompt).toContain('group\nrules');
+  });
+
+  it('seeds organization-mode defaults distinct from personal mode', async () => {
+    const { store: orgStore, service: orgService } = createService();
+    await orgService.ensureAgentDefaults({
+      agentFolder: 'team',
+      agentName: 'Kai',
+      relationshipMode: 'organization',
+    });
+    const orgAgents = await orgStore.readFileArtifact({
+      appId: 'default',
+      agentId: 'agent:team',
+      virtualScope: 'prompt-profile',
+      virtualPath: 'team/AGENTS.md',
+    });
+    expect(orgAgents.content).toContain('work-focused agent');
+    expect(orgAgents.content).toContain('request_agent_profile_update');
+
+    const { store: personalStore, service: personalService } = createService();
+    await personalService.ensureAgentDefaults({
+      agentFolder: 'team',
+      agentName: 'Kai',
+      relationshipMode: 'personal',
+    });
+    const personalSoul = await personalStore.readFileArtifact({
+      appId: 'default',
+      agentId: 'agent:team',
+      virtualScope: 'prompt-profile',
+      virtualPath: 'team/SOUL.md',
+    });
+    expect(personalSoul.content).toContain('companion-like helper');
+  });
+
+  it('mirrors seeded profile files through the injected mirror writer', async () => {
+    const store = new MemoryFileArtifactStore();
+    const mirrored: Array<{ fileName: string; content: string }> = [];
+    const service = new PromptProfileService({
+      fileArtifactStore: () => store,
+      mirrorProfileFile: (input) => {
+        mirrored.push({ fileName: input.fileName, content: input.content });
+      },
+    });
+
+    await service.ensureAgentDefaults({
+      agentFolder: 'team',
+      agentName: 'Kai',
+    });
+
+    expect(mirrored.map((entry) => entry.fileName).sort()).toEqual([
+      'AGENTS.md',
+      'SOUL.md',
+    ]);
   });
 });

@@ -1,6 +1,7 @@
 import { logger } from '../infrastructure/logging/logger.js';
 import { IpcDeps } from '../runtime/ipc-domain-types.js';
 import { adminTaskHandlers } from './ipc-admin-handlers.js';
+import { agentProfileTaskHandlers } from './ipc-agent-profile-handlers.js';
 import { fileArtifactTaskHandlers } from './ipc-file-artifact-handlers.js';
 import { schedulerCreateTaskHandlers } from './ipc-scheduler-create-handlers.js';
 import { schedulerMutateTaskHandlers } from './ipc-scheduler-mutate-handlers.js';
@@ -19,6 +20,7 @@ const taskHandlers: Record<string, TaskHandler> = {
   ...schedulerMutateTaskHandlers,
   ...schedulerQueryTaskHandlers,
   ...adminTaskHandlers,
+  ...agentProfileTaskHandlers,
   ...fileArtifactTaskHandlers,
 };
 

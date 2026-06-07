@@ -738,6 +738,7 @@ describe('startRuntimeServices', () => {
         message: 'first segment sent',
       });
       Object.assign(partial, {
+        provider: 'slack',
         deliveredParts: 1,
         totalParts: 2,
         retryTail: {
@@ -849,6 +850,7 @@ describe('startRuntimeServices', () => {
         message: 'first segment sent',
       });
       Object.assign(partial, {
+        provider: 'slack',
         deliveredParts: 1,
         totalParts: 2,
         retryTail: {
@@ -1205,7 +1207,7 @@ describe('startRuntimeServices', () => {
             ({
               resolveDeliveryDestination: vi.fn(async () => ({
                 conversationJid: 'app:app-other:conv-1',
-                providerId: 'control-http',
+                providerId: 'app',
                 providerConnectionId: 'control:app-other',
               })),
             }) as any,

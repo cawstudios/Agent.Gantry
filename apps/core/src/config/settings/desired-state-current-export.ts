@@ -138,7 +138,9 @@ export async function exportCurrentDesiredState(input: {
   );
 
   for (const connection of storedProviderConnections.filter(
-    (connection) => connection.status === 'active',
+    (connection) =>
+      connection.status === 'active' &&
+      !isInternalAppControlProviderConnection(connection),
   )) {
     const providerId = connection.providerId as string;
     const connectionId = connection.id as string;
@@ -211,6 +213,7 @@ export async function exportCurrentDesiredState(input: {
       name: agent.name,
       folder,
       persona: existing?.persona ?? 'developer',
+      relationshipMode: existing?.relationshipMode ?? 'personal',
       model: existing?.model,
       oneTimeJobDefaultModel: existing?.oneTimeJobDefaultModel,
       recurringJobDefaultModel: existing?.recurringJobDefaultModel,
@@ -391,6 +394,10 @@ export async function exportCurrentDesiredState(input: {
       name: existing?.name ?? group.name,
       folder,
       persona: existing?.persona ?? group.agentConfig?.persona ?? 'developer',
+      relationshipMode:
+        existing?.relationshipMode ??
+        group.agentConfig?.relationshipMode ??
+        'personal',
       model: existing?.model ?? group.agentConfig?.model,
       oneTimeJobDefaultModel: existing?.oneTimeJobDefaultModel,
       recurringJobDefaultModel: existing?.recurringJobDefaultModel,
@@ -426,6 +433,13 @@ export async function exportCurrentDesiredState(input: {
     bindings,
     agents,
   };
+}
+
+function isInternalAppControlProviderConnection(
+  connection: ProviderConnection,
+): boolean {
+  const providerId = String(connection.providerId);
+  return providerId === 'app' || providerId === 'control-http';
 }
 
 function runtimeSecretRefsForConnection(

@@ -17,6 +17,10 @@ import {
 import { syncConfiguredConversationBinding } from './group-helpers.js';
 import { nowIso } from '../shared/time/datetime.js';
 import { PromptProfileService } from '../application/agents/prompt-profile-service.js';
+import {
+  createProfileFileMirrorExists,
+  createProfileFileMirrorWriter,
+} from '../platform/profile-file-mirror.js';
 
 export interface TelegramTokenValidation {
   ok: boolean;
@@ -331,7 +335,7 @@ export async function registerTelegramMainGroup(options: {
       agentConfig: existingGroup?.agentConfig,
     };
     await db.setConversationRoute(options.chatJid, route);
-    syncConfiguredConversationBinding({
+    await syncConfiguredConversationBinding({
       runtimeHome: options.runtimeHome,
       agentId: folder,
       agentName: groupName,
@@ -344,6 +348,8 @@ export async function registerTelegramMainGroup(options: {
 
     await new PromptProfileService({
       fileArtifactStore: () => db.getFileArtifactStore(),
+      mirrorProfileFile: createProfileFileMirrorWriter(options.runtimeHome),
+      mirrorFileExists: createProfileFileMirrorExists(options.runtimeHome),
     }).ensureAgentDefaults({ agentFolder: folder, agentName: groupName });
 
     return { folder, groupName };

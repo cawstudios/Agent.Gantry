@@ -17,7 +17,7 @@ import {
 import {
   ensureConfiguredConversationBinding,
   loadRuntimeSettings,
-  saveRuntimeSettings,
+  writeDesiredRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 import { openRuntimeGroupDb } from './runtime-group-db.js';
 import {
@@ -27,6 +27,10 @@ import {
 } from './main-agent.js';
 import { nowIso } from '../shared/time/datetime.js';
 import { PromptProfileService } from '../application/agents/prompt-profile-service.js';
+import {
+  createProfileFileMirrorExists,
+  createProfileFileMirrorWriter,
+} from '../platform/profile-file-mirror.js';
 
 type TeamsChannelChoice =
   | { type: 'selected'; channel: TeamsDiscoveredChannel }
@@ -70,6 +74,7 @@ export async function registerTeamsMainGroup(options: {
     };
     await db.setConversationRoute(options.chatJid, route);
     const settings = loadRuntimeSettings(options.runtimeHome);
+    const previousSettings = structuredClone(settings);
     ensureConfiguredConversationBinding(settings, {
       agentId: folder,
       agentName: groupName,
@@ -79,10 +84,16 @@ export async function registerTeamsMainGroup(options: {
       trigger: route.trigger,
       requiresTrigger: false,
     });
-    saveRuntimeSettings(options.runtimeHome, settings);
+    await writeDesiredRuntimeSettings({
+      runtimeHome: options.runtimeHome,
+      settings,
+      previousSettings,
+    });
 
     await new PromptProfileService({
       fileArtifactStore: () => db.getFileArtifactStore(),
+      mirrorProfileFile: createProfileFileMirrorWriter(options.runtimeHome),
+      mirrorFileExists: createProfileFileMirrorExists(options.runtimeHome),
     }).ensureAgentDefaults({ agentFolder: folder, agentName: groupName });
 
     return { folder, groupName };
@@ -315,6 +326,7 @@ export async function runTeamsConnectCommand(
     TEAMS_TENANT_ID: credentials.tenantId,
   });
   const settings = loadRuntimeSettings(runtimeHome);
+  const previousSettings = structuredClone(settings);
   settings.providers.teams.enabled = true;
   if (registeredFolder) {
     ensureConfiguredConversationBinding(settings, {
@@ -328,7 +340,11 @@ export async function runTeamsConnectCommand(
       approverIds,
     });
   }
-  saveRuntimeSettings(runtimeHome, settings);
+  await writeDesiredRuntimeSettings({
+    runtimeHome,
+    settings,
+    previousSettings,
+  });
 
   if (channelChoice.type === 'selected') {
     p.outro('Teams conversation is configured and ready.');

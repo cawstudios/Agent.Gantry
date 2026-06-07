@@ -30,6 +30,7 @@ export type ParsedSkillPackageAssets =
   | { ok: false; error: string };
 
 const SKILL_MARKDOWN_APPROVAL_MAX_CHARS = 4_000;
+const SKILL_MARKDOWN_REVIEW_MAX_CHARS = 90_000;
 
 export function parseSkillPackageAssets(
   files: unknown,
@@ -107,11 +108,11 @@ export function parseSkillPackageAssets(
   if (!skillMarkdown) {
     return { ok: false, error: 'Skill package must include SKILL.md.' };
   }
-  if (skillMarkdown.content.length > SKILL_MARKDOWN_APPROVAL_MAX_CHARS) {
+  if (skillMarkdown.content.length > SKILL_MARKDOWN_REVIEW_MAX_CHARS) {
     return {
       ok: false,
       error:
-        'Agent-created skill SKILL.md is too large for same-channel approval. Use a smaller SKILL.md or upload it through an admin review flow.',
+        'Skill package SKILL.md is too large for same-channel review. Keep SKILL.md under 90,000 characters and move long references into bundled resource files.',
     };
   }
   return {

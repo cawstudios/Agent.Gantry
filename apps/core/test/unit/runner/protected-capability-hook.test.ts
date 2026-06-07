@@ -84,6 +84,37 @@ describe('protected capability SDK hook', () => {
     );
   });
 
+  it('prefixes Bash commands with trusted tool network env in the native PreToolUse hook', async () => {
+    const hook = createSafetyPreToolUseHook('', {
+      HTTPS_PROXY: 'http://127.0.0.1:48080',
+      NO_PROXY: '',
+    });
+
+    const result = await hook({
+      hook_event_name: 'PreToolUse',
+      session_id: 'session-1',
+      transcript_path: '/tmp/transcript.jsonl',
+      cwd: '/tmp/work',
+      tool_name: 'Bash',
+      tool_input: {
+        command: '/opt/homebrew/bin/gog sheets get sheet-id A1',
+      },
+      tool_use_id: 'toolu_1',
+    });
+
+    expect(result).toEqual({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        updatedInput: {
+          command: expect.stringContaining(
+            "GODEBUG=netdns=go HTTPS_PROXY='http://127.0.0.1:48080'",
+          ),
+        },
+      },
+    });
+  });
+
   it('blocks direct permission setting changes through Config', () => {
     expect(
       evaluateProtectedCapabilityToolUse('Config', {
@@ -124,8 +155,8 @@ describe('protected capability SDK hook', () => {
     ).toBeNull();
 
     expect(
-      evaluateProtectedCapabilityToolUse('mcp__gantry__request_permission', {
-        toolName: 'Bash',
+      evaluateProtectedCapabilityToolUse('mcp__gantry__request_access', {
+        target: { kind: 'run_command', argvPattern: 'npm test *' },
         reason: 'Run project tests',
       }),
     ).toBeNull();
@@ -155,8 +186,8 @@ describe('protected capability SDK hook', () => {
     ).toBeNull();
 
     expect(
-      evaluateProtectedCapabilityToolUse('mcp__gantry__request_permission', {
-        channelTool: 'slack_file_access',
+      evaluateProtectedCapabilityToolUse('mcp__gantry__request_access', {
+        target: { kind: 'capability', id: 'slack.files.read' },
         reason: 'Allow file download support',
       }),
     ).toBeNull();

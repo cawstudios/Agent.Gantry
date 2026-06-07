@@ -255,6 +255,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
               defaultScope: defaultMemoryScope,
             },
             {
+              memoryEnabled: memory.enabled,
               embeddings:
                 memory.enabled &&
                 memory.embeddings.enabled &&

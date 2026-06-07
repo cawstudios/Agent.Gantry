@@ -1,5 +1,6 @@
 import { resolveModelSelectionForWorkload } from '../../shared/model-catalog.js';
 import { parseAgentPersona } from '../../shared/agent-persona.js';
+import { parseAgentRelationshipMode } from '../../shared/agent-relationship-mode.js';
 import type {
   RuntimeConfiguredAgent,
   RuntimeConfiguredAgentBinding,
@@ -62,6 +63,7 @@ function parseConfiguredAgentSourceRef(
     allowVersion?: boolean;
     requireVersion?: boolean;
     requireKind?: boolean;
+    allowTools?: boolean;
   },
 ): RuntimeConfiguredAgentSourceRef {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -69,8 +71,15 @@ function parseConfiguredAgentSourceRef(
   }
   const map = raw as Record<string, unknown>;
   const allowVersion = options.allowVersion ?? true;
+  const allowTools = options.allowTools ?? false;
   for (const key of Object.keys(map)) {
-    if (key !== 'name' && key !== 'id' && key !== 'version' && key !== 'kind') {
+    if (
+      key !== 'name' &&
+      key !== 'id' &&
+      key !== 'version' &&
+      key !== 'kind' &&
+      key !== 'tools'
+    ) {
       throw new Error(
         `${pathPrefix}.${key} is not supported. Configure name, id, version, or kind.`,
       );
@@ -78,6 +87,11 @@ function parseConfiguredAgentSourceRef(
     if (key === 'version' && !allowVersion) {
       throw new Error(
         `${pathPrefix}.version is not supported. Configure id only.`,
+      );
+    }
+    if (key === 'tools' && !allowTools) {
+      throw new Error(
+        `${pathPrefix}.tools is only supported for mcp_servers sources.`,
       );
     }
   }
@@ -105,6 +119,19 @@ function parseConfiguredAgentSourceRef(
     }
     source.kind = kind;
   }
+  if (allowTools && map.tools !== undefined) {
+    if (!Array.isArray(map.tools)) {
+      throw new Error(`${pathPrefix}.tools must be an array`);
+    }
+    const tools = [
+      ...new Set(
+        map.tools.map((value, index) =>
+          parseStringValue(value, `${pathPrefix}.tools[${index}]`).trim(),
+        ),
+      ),
+    ].filter(Boolean);
+    if (tools.length > 0) source.tools = tools;
+  }
   return source;
 }
 
@@ -115,6 +142,7 @@ function parseConfiguredAgentSourceArray(
     allowVersion?: boolean;
     requireVersion?: boolean;
     requireKind?: boolean;
+    allowTools?: boolean;
   },
 ): RuntimeConfiguredAgentSourceRef[] {
   if (raw === undefined) return [];
@@ -149,7 +177,7 @@ function parseConfiguredAgentSources(
     mcpServers: parseConfiguredAgentSourceArray(
       map.mcp_servers,
       `${pathPrefix}.mcp_servers`,
-      { allowVersion: false },
+      { allowVersion: false, allowTools: true },
     ),
     tools: parseConfiguredAgentSourceArray(map.tools, `${pathPrefix}.tools`, {
       requireKind: true,
@@ -157,14 +185,47 @@ function parseConfiguredAgentSources(
   };
 }
 
-function parseConfiguredAgentCapabilities(
+function parseConfiguredAgentAccess(
+  raw: unknown,
+  pathPrefix: string,
+): {
+  sources: RuntimeConfiguredAgentSources;
+  capabilities: RuntimeConfiguredAgentCapability[];
+} {
+  if (raw === undefined) {
+    return {
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+    };
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${pathPrefix} must be a mapping`);
+  }
+  const map = raw as Record<string, unknown>;
+  for (const key of Object.keys(map)) {
+    if (key !== 'sources' && key !== 'selections') {
+      throw new Error(
+        `${pathPrefix}.${key} is not supported. Configure sources or selections.`,
+      );
+    }
+  }
+  return {
+    sources: parseConfiguredAgentSources(map.sources, `${pathPrefix}.sources`),
+    capabilities: parseConfiguredAgentSelections(
+      map.selections,
+      `${pathPrefix}.selections`,
+    ),
+  };
+}
+
+function parseConfiguredAgentSelections(
   raw: unknown,
   pathPrefix: string,
 ): RuntimeConfiguredAgentCapability[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) {
     throw new Error(
-      `${pathPrefix} must be an array of selected capability entries`,
+      `${pathPrefix} must be an array of selected access entries`,
     );
   }
   return raw.map((item, index) => {
@@ -324,6 +385,7 @@ export function parseConfiguredAgents(
       if (
         key !== 'name' &&
         key !== 'persona' &&
+        key !== 'relationship_mode' &&
         key !== 'jid' &&
         key !== 'trigger' &&
         key !== 'added_at' &&
@@ -332,11 +394,10 @@ export function parseConfiguredAgents(
         key !== 'one_time_job_default_model' &&
         key !== 'recurring_job_default_model' &&
         key !== 'bindings' &&
-        key !== 'sources' &&
-        key !== 'capabilities'
+        key !== 'access'
       ) {
         throw new Error(
-          `${pathPrefix}.${key} is not supported. Configure name, persona, model, job model defaults, bindings, sources, or capabilities.`,
+          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, model, job model defaults, bindings, or access.`,
         );
       }
     }
@@ -392,6 +453,10 @@ export function parseConfiguredAgents(
       name: parseStringValue(map.name, `${pathPrefix}.name`),
       folder,
       persona: parseAgentPersona(map.persona, `${pathPrefix}.persona`),
+      relationshipMode: parseAgentRelationshipMode(
+        map.relationship_mode,
+        `${pathPrefix}.relationship_mode`,
+      ),
       model,
       oneTimeJobDefaultModel,
       recurringJobDefaultModel,
@@ -410,14 +475,7 @@ export function parseConfiguredAgents(
           model,
         },
       ),
-      sources: parseConfiguredAgentSources(
-        map.sources,
-        `${pathPrefix}.sources`,
-      ),
-      capabilities: parseConfiguredAgentCapabilities(
-        map.capabilities,
-        `${pathPrefix}.capabilities`,
-      ),
+      ...parseConfiguredAgentAccess(map.access, `${pathPrefix}.access`),
     };
   }
   const seenJids = new Map<string, string>();

@@ -20,6 +20,7 @@ import {
   normalizeConfiguredCapabilities,
   normalizeConfiguredCapabilitiesInSettings,
   semanticCapabilityDefinitionsById,
+  semanticCapabilityDefinitionsFromCatalogTools,
   skillActionDefinitionsForSkills,
 } from './configured-capability-normalization.js';
 import {
@@ -170,8 +171,12 @@ export class SettingsDesiredStateService {
               ? 'dm'
               : 'channel',
           agentConfig:
-            binding.model || agent.persona
-              ? { model: binding.model, persona: agent.persona }
+            binding.model || agent.persona || agent.relationshipMode
+              ? {
+                  model: binding.model,
+                  persona: agent.persona,
+                  relationshipMode: agent.relationshipMode,
+                }
               : undefined,
         });
         applied.push(`binding:${binding.jid}`);
@@ -475,6 +480,13 @@ export class SettingsDesiredStateService {
       this.deps.repositories.mcpServers,
       [...serverIds],
     );
+    const catalogSemanticCapabilityDefinitions =
+      semanticCapabilityDefinitionsFromCatalogTools(
+        await this.deps.repositories.tools.listTools({
+          appId: this.appId,
+          statuses: ['active'],
+        }),
+      );
     for (const [folder, agent] of Object.entries(settings.agents)) {
       const resolvedSkills = await resolveConfiguredSkillReferences({
         repository: this.deps.repositories.skills,
@@ -496,9 +508,10 @@ export class SettingsDesiredStateService {
       const skillActionDefinitionsForAgent = skillActionDefinitionsForSkills([
         ...resolvedSkills.skills.values(),
       ]);
-      const skillActionDefinitions = semanticCapabilityDefinitionsById(
-        skillActionDefinitionsForAgent,
-      );
+      const skillActionDefinitions = {
+        ...catalogSemanticCapabilityDefinitions,
+        ...semanticCapabilityDefinitionsById(skillActionDefinitionsForAgent),
+      };
       const normalizedCapabilities = normalizeConfiguredCapabilities({
         capabilities: agent.capabilities,
       }).capabilities;

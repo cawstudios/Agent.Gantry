@@ -185,8 +185,8 @@ describe('file artifact IPC handlers', () => {
             action: 'write',
             protected: true,
             scope: 'prompt',
-            path: 'agents/main_agent/CLAUDE.md',
-            content: 'runtime prompt\n',
+            path: 'agents/main_agent/settings.yaml',
+            content: 'runtime config\n',
           },
         }),
         writeFileArtifact,
@@ -195,8 +195,8 @@ describe('file artifact IPC handlers', () => {
 
     expect(writeFileArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
-        virtualPath: 'agents/main_agent/CLAUDE.md',
-        content: 'runtime prompt\n',
+        virtualPath: 'agents/main_agent/settings.yaml',
+        content: 'runtime config\n',
       }),
     );
     expect(readResponse(runtimeHome, 'write-protected-live')).toMatchObject({
@@ -220,8 +220,8 @@ describe('file artifact IPC handlers', () => {
             action: 'write',
             protected: true,
             scope: 'prompt',
-            path: 'agents/main_agent/CLAUDE.md',
-            content: 'runtime prompt\n',
+            path: 'agents/main_agent/settings.yaml',
+            content: 'runtime config\n',
           },
         }),
         writeFileArtifact,
@@ -232,6 +232,86 @@ describe('file artifact IPC handlers', () => {
     expect(readResponse(runtimeHome, 'write-protected-denied')).toMatchObject({
       ok: false,
       code: 'missing_capability',
+    });
+  });
+
+  it('rejects profile artifact writes in the prompt-profile scope and points to request_agent_profile_update', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-file-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { fileArtifactTaskHandlers, taskData } =
+      await loadFileArtifactHandlers(runtimeHome);
+    const ipcBaseDir = path.join(runtimeHome, 'data', 'ipc');
+    // Even with admin capability + protected=true, profile artifacts are
+    // off-limits to the generic file tool.
+    appendLiveToolRules({
+      ipcDir: path.join(ipcBaseDir, 'main_agent'),
+      runHandle: 'run_live_profile',
+      rules: ['mcp__gantry__request_settings_update'],
+    });
+    const writeFileArtifact = vi.fn();
+
+    for (const fileName of ['AGENTS.md', 'SOUL.md']) {
+      await fileArtifactTaskHandlers.file_artifact(
+        contextFor({
+          ipcBaseDir,
+          data: taskData(`write-profile-${fileName}`, {
+            runHandle: 'run_live_profile',
+            payload: {
+              action: 'write',
+              protected: true,
+              scope: 'prompt-profile',
+              path: `main_agent/${fileName}`,
+              content: 'tampered\n',
+            },
+          }),
+          writeFileArtifact,
+        }),
+      );
+      const response = readResponse(runtimeHome, `write-profile-${fileName}`);
+      expect(response).toMatchObject({ ok: false, code: 'forbidden' });
+      expect(String(response.error)).toContain('request_agent_profile_update');
+    }
+    expect(writeFileArtifact).not.toHaveBeenCalled();
+  });
+
+  it('allows ordinary artifacts that merely share a profile filename in another scope', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-file-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { fileArtifactTaskHandlers, taskData } =
+      await loadFileArtifactHandlers(runtimeHome);
+    const writeFileArtifact = vi.fn(async (input) =>
+      makeArtifact({
+        virtualScope: input.virtualScope,
+        virtualPath: input.virtualPath,
+        content: input.content,
+      }),
+    );
+
+    await fileArtifactTaskHandlers.file_artifact(
+      contextFor({
+        data: taskData('write-docs-agents', {
+          payload: {
+            action: 'write',
+            scope: 'default',
+            path: 'docs/AGENTS.md',
+            content: 'project notes\n',
+          },
+        }),
+        writeFileArtifact,
+      }),
+    );
+
+    expect(writeFileArtifact).toHaveBeenCalledTimes(1);
+    expect(readResponse(runtimeHome, 'write-docs-agents')).toMatchObject({
+      ok: true,
+      data: {
+        ok: true,
+        artifact: { scope: 'default', path: 'docs/AGENTS.md' },
+      },
     });
   });
 });

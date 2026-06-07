@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-import { AgentPersonaSchema } from '../agents/index.js';
+import {
+  AgentPersonaSchema,
+  AgentRelationshipModeSchema,
+} from '../agents/index.js';
 
 const EgressDenylistPatternSchema = z
   .string()
@@ -58,6 +61,7 @@ export const RuntimeSettingsConfiguredAgentSchema = z
     name: z.string().trim().min(1),
     folder: z.string().trim().min(1),
     persona: AgentPersonaSchema.optional(),
+    relationshipMode: AgentRelationshipModeSchema.optional(),
     model: z.string().optional(),
     oneTimeJobDefaultModel: z.string().optional(),
     recurringJobDefaultModel: z.string().optional(),
@@ -159,6 +163,21 @@ export const RuntimeSettingsPublicSchema = z
             maxJobRuns: z.number().int().positive(),
             maxRetries: z.number().int().nonnegative(),
             baseRetryMs: z.number().int().nonnegative(),
+          })
+          .strict(),
+        sandbox: z
+          .object({
+            provider: z.union([
+              z.literal('direct'),
+              z.literal('sandbox_runtime'),
+            ]),
+            resourceLimits: z
+              .object({
+                cpuSeconds: z.number().int().nonnegative(),
+                memoryMb: z.number().int().nonnegative(),
+                maxProcesses: z.number().int().nonnegative(),
+              })
+              .strict(),
           })
           .strict(),
       })

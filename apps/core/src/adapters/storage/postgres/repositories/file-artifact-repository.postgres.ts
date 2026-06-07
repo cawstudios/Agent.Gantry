@@ -9,6 +9,7 @@ import type {
 import {
   describeFileArtifact,
   FileArtifactNotFoundError,
+  FileArtifactVersionConflictError,
 } from '../../../../domain/file-artifacts/file-artifact.js';
 import {
   normalizeFileArtifactPath,
@@ -82,6 +83,15 @@ export class PostgresFileArtifactStore implements FileArtifactStore {
             },
             tx,
           );
+          // Optimistic concurrency, enforced under the version-path lock so it
+          // is atomic with the write: the current latest version is one below
+          // the version we are about to allocate.
+          if (
+            input.expectedVersion !== undefined &&
+            version - 1 !== input.expectedVersion
+          ) {
+            throw new FileArtifactVersionConflictError(version - 1);
+          }
           const stored = await this.bytes.putBytes({
             id,
             appId: input.appId,

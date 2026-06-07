@@ -32,6 +32,7 @@ export function startSkillPermissionReview(input: {
   fileSummaries: Array<{
     path: string;
     sizeBytes: number;
+    fingerprint: string;
   }>;
   skillMarkdownPreview: {
     path: string;
@@ -78,6 +79,7 @@ async function completeSkillPermissionReview(
         ? 'Only configured approvers can decide this request. Approval installs the skill and makes it available to this agent.'
         : 'Only configured approvers can decide this request. Approval makes the skill available to this agent.',
     decisionReason: input.reason,
+    interaction: skillReviewInteraction(input),
     toolInput: {
       skillId: input.skill.id,
       name: input.skill.name,
@@ -88,9 +90,10 @@ async function completeSkillPermissionReview(
         content: input.skillMarkdownPreview.content,
         truncated: input.skillMarkdownPreview.truncated,
       },
-      files: input.fileSummaries.map(({ path, sizeBytes }) => ({
+      files: input.fileSummaries.map(({ path, sizeBytes, fingerprint }) => ({
         path,
         sizeBytes,
+        contentHash: fingerprint,
       })),
       totalSizeBytes: input.totalSizeBytes,
       activation: 'current_and_future_sessions',
@@ -174,6 +177,64 @@ async function rejectSkillRequestFromPermission(
     input.threadId ? { threadId: input.threadId } : undefined,
   );
   input.responder.reject(message, 'permission_denied');
+}
+
+function skillReviewInteraction(
+  input: Parameters<typeof startSkillPermissionReview>[0],
+) {
+  const skillMarkdown = input.assets.find((asset) => asset.path === 'SKILL.md');
+  const skillMarkdownSummary = input.fileSummaries.find(
+    (summary) => summary.path === 'SKILL.md',
+  );
+  return {
+    id: `skill-review-${globalThis.crypto.randomUUID()}`,
+    title: `Install skill ${input.skill.name}`,
+    body: input.reason,
+    severity: 'warning' as const,
+    requestContext: {
+      sourceAgentFolder: input.sourceAgentFolder,
+      targetJid: input.targetJid,
+      threadId: input.threadId,
+      toolName: input.requestToolName,
+      capabilityType: 'skill',
+      capabilityId: input.skill.id,
+      capabilityDisplayName: input.skill.name,
+    },
+    details: [
+      { label: 'Skill', value: input.skill.name },
+      { label: 'Activation', value: 'current and future sessions' },
+      { label: 'Package size', value: `${input.totalSizeBytes} bytes` },
+      ...(input.skill.requiredEnvVars?.length
+        ? [
+            {
+              label: 'Requires env',
+              value: input.skill.requiredEnvVars.join(', '),
+            },
+          ]
+        : []),
+    ],
+    files: [
+      ...(skillMarkdown
+        ? [
+            {
+              path: skillMarkdown.path,
+              sizeBytes: skillMarkdownSummary?.sizeBytes,
+              contentHash: skillMarkdownSummary?.fingerprint,
+              contentType: skillMarkdown.contentType ?? 'text/markdown',
+              preview: Buffer.from(skillMarkdown.content).toString('utf-8'),
+              truncated: false,
+            },
+          ]
+        : []),
+      ...input.fileSummaries
+        .filter((summary) => summary.path !== 'SKILL.md')
+        .map((summary) => ({
+          path: summary.path,
+          sizeBytes: summary.sizeBytes,
+          contentHash: summary.fingerprint,
+        })),
+    ],
+  };
 }
 
 function buildInstalledSkillSameSessionContext(

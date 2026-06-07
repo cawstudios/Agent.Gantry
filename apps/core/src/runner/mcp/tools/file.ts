@@ -55,7 +55,7 @@ const fileToolSchema = {
     .boolean()
     .optional()
     .describe(
-      'Required for SOUL.md or CLAUDE.md writes, and honored only when this MCP process has admin context.',
+      'Honored only for protected config writes (settings.yaml, .mcp.json, SKILL.md) when this MCP process has admin context. Profile files (SOUL.md, AGENTS.md) cannot be written here — use request_agent_profile_update.',
     ),
   limit: z.number().int().positive().max(100).optional(),
 };

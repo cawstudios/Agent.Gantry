@@ -14,7 +14,9 @@ tools are:
 - `request_skill_proposal`
 - `request_skill_dependency_install`
 - `request_mcp_server`
-- `request_permission`
+- `request_access`
+- `agent_profile_read`
+- `request_agent_profile_update`
 - `service_restart`
 - `register_agent`
 

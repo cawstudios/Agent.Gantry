@@ -3,6 +3,7 @@ import { registerBrowserTools } from './tools/browser.js';
 import { registerFileTools } from './tools/file.js';
 import { registerMemoryTools } from './tools/memory.js';
 import { registerMessagingTools } from './tools/messaging.js';
+import { registerProfileTools } from './tools/profile.js';
 import { registerSchedulerTools } from './tools/scheduler.js';
 import { registerServiceTools } from './tools/service.js';
 import { parseEnabledGantryMcpToolNames } from '../gantry-mcp-tool-surface.js';
@@ -10,6 +11,7 @@ import {
   ADMIN_MCP_TOOL_NAMES,
   isAdminMcpToolName,
 } from '../../shared/admin-mcp-tools.js';
+import { formatOperatorError } from '../../shared/operator-error.js';
 
 type McpToolRegistrar = {
   tool: (name: string, ...args: unknown[]) => unknown;
@@ -44,7 +46,12 @@ export function assertRegisteredMcpToolHandlers(input: {
   if (missingHandlers.length === 0) return;
 
   throw new Error(
-    `Missing MCP tool handlers for enabled tools: ${missingHandlers.join(', ')}`,
+    formatOperatorError({
+      summary: `Gantry could not start because ${missingHandlers[0]} is registered without a handler.`,
+      cause: 'MCP tool registry mismatch',
+      recover:
+        'remove the tool registration or add its handler before starting Gantry.',
+    }),
   );
 }
 
@@ -69,6 +76,7 @@ export function createGantryMcpServer(): McpServer {
   registerMemoryTools(filteredServer);
   registerBrowserTools(filteredServer);
   registerFileTools(filteredServer);
+  registerProfileTools(filteredServer);
   registerServiceTools(filteredServer);
 
   assertRegisteredMcpToolHandlers({ enabledTools, registeredHandlers });

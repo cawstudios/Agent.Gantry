@@ -3,12 +3,30 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   CreateAgentRequestSchema,
+  PutAgentProfileFileRequestSchema,
   UpdateAgentRequestSchema,
 } from '@gantry/contracts';
 
 import { ApplicationError } from '../../../application/common/application-error.js';
 import { AgentCapabilityAdministrationService } from '../../../application/agents/agent-capability-administration-service.js';
-import { getRuntimeStorage } from '../../../adapters/storage/postgres/runtime-store.js';
+import {
+  AgentProfileService,
+  MAX_PROFILE_CONTENT_BYTES,
+  ProfileContentTooLargeError,
+  ProfileVersionConflictError,
+  isProfileFileKind,
+} from '../../../application/agents/agent-profile-service.js';
+import { PROFILE_FILE_NAMES } from '../../../application/agents/prompt-profile-service.js';
+import { logger } from '../../../infrastructure/logging/logger.js';
+import {
+  getRuntimeFileArtifactStore,
+  getRuntimeStorage,
+} from '../../../adapters/storage/postgres/runtime-store.js';
+import { FileArtifactNotFoundError } from '../../../domain/file-artifacts/file-artifact.js';
+import { folderForAgentId } from '../../../config/settings/desired-state-service-helpers.js';
+import { isValidWorkspaceFolder } from '../../../platform/workspace-folder.js';
+import { createProfileFileMirrorWriter } from '../../../platform/profile-file-mirror.js';
+import { RUNTIME_EVENT_TYPES } from '../../../domain/events/runtime-event-types.js';
 import type { Agent, AgentId } from '../../../domain/agent/agent.js';
 import type { AppId } from '../../../domain/app/app.js';
 import type { AgentConversationBinding } from '../../../domain/provider/provider.js';
@@ -18,6 +36,63 @@ import {
 } from '../handler-context.js';
 import { readJson, sendError, sendJson } from '../http.js';
 import { nowIso } from '../../../shared/time/datetime.js';
+
+const PROFILE_JSON_BODY_MAX_BYTES = MAX_PROFILE_CONTENT_BYTES * 6 + 64 * 1024;
+
+function buildAgentProfileService(
+  actorAgentId: AgentId,
+  appId: AppId,
+  runtimeHome: string,
+): AgentProfileService {
+  const storage = getRuntimeStorage();
+  return new AgentProfileService({
+    appId,
+    fileArtifactStore: () => getRuntimeFileArtifactStore(),
+    mirrorProfileFile: createProfileFileMirrorWriter(runtimeHome),
+    onSideEffectError: (input) => {
+      logger.warn(
+        {
+          err: input.error,
+          agentId: actorAgentId,
+          sideEffect: input.sideEffect,
+          fileKind: input.kind,
+          version: input.version,
+        },
+        'Profile update side effect failed after durable write',
+      );
+    },
+    audit: (input) =>
+      // Audit is best-effort but must not be silently dropped: a failed publish
+      // is logged instead of becoming an unhandled rejection, and it never fails
+      // the profile read/write itself.
+      storage.runtimeEvents
+        .publish({
+          appId,
+          agentId: actorAgentId,
+          eventType:
+            input.action === 'update'
+              ? RUNTIME_EVENT_TYPES.PROFILE_FILE_UPDATED
+              : RUNTIME_EVENT_TYPES.PROFILE_FILE_READ,
+          actor: input.actor,
+          payload: {
+            fileKind: input.kind,
+            version: input.version,
+            contentHash: input.contentHash,
+            actor: input.actor,
+            ...(input.approvalSource
+              ? { approvalSource: input.approvalSource }
+              : {}),
+          },
+        })
+        .then(() => undefined)
+        .catch((err) => {
+          logger.warn(
+            { err, agentId: actorAgentId, action: input.action },
+            'Failed to publish profile audit event',
+          );
+        }),
+  });
+}
 
 function sendApplicationError(res: ServerResponse, error: unknown): boolean {
   if (!(error instanceof ApplicationError)) return false;
@@ -96,7 +171,7 @@ export async function handleAgentRoutes(
         agentId,
       });
       const repositories = getRuntimeStorage().repositories;
-      const capabilities =
+      const capabilitiesView =
         repositories.tools && repositories.skills && repositories.mcpServers
           ? await new AgentCapabilityAdministrationService({
               agents: repositories.agents,
@@ -108,6 +183,11 @@ export async function handleAgentRoutes(
               agentId,
             })
           : undefined;
+      // The /admin response contract (AgentCapabilitiesResponseSchema, strict)
+      // does not carry the access summary; that lives on the /access endpoint.
+      const capabilities = capabilitiesView
+        ? (({ summary: _summary, ...rest }) => rest)(capabilitiesView)
+        : undefined;
       sendJson(res, 200, {
         agent: agentToResponse(agent),
         capabilities,
@@ -115,6 +195,125 @@ export async function handleAgentRoutes(
       });
     } catch (error) {
       if (!sendApplicationError(res, error)) throw error;
+    }
+    return true;
+  }
+
+  const profileListMatch = pathname.match(
+    /^\/v1\/agents\/([^/]+)\/profile-files$/,
+  );
+  if (profileListMatch && req.method === 'GET') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['agents:admin']);
+    if (!auth) return true;
+    const agentId = decodeURIComponent(profileListMatch[1]) as AgentId;
+    const folder = await resolveProfileAgentFolder(
+      res,
+      auth.appId as AppId,
+      agentId,
+    );
+    if (!folder) return true;
+    const files = await buildAgentProfileService(
+      agentId,
+      auth.appId as AppId,
+      ctx.runtimeHome,
+    ).listProfileFiles(folder);
+    sendJson(res, 200, { agentId, files });
+    return true;
+  }
+
+  const profileKindMatch = pathname.match(
+    /^\/v1\/agents\/([^/]+)\/profile-files\/([^/]+)$/,
+  );
+  if (profileKindMatch && req.method === 'GET') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['agents:admin']);
+    if (!auth) return true;
+    const agentId = decodeURIComponent(profileKindMatch[1]) as AgentId;
+    const kind = decodeURIComponent(profileKindMatch[2]);
+    if (!isProfileFileKind(kind)) {
+      sendError(res, 400, 'INVALID_REQUEST', 'Unknown profile file kind');
+      return true;
+    }
+    const folder = await resolveProfileAgentFolder(
+      res,
+      auth.appId as AppId,
+      agentId,
+    );
+    if (!folder) return true;
+    try {
+      const file = await buildAgentProfileService(
+        agentId,
+        auth.appId as AppId,
+        ctx.runtimeHome,
+      ).readProfileFile(folder, kind, { actor: 'control' });
+      sendJson(res, 200, { agentId, ...file });
+    } catch (error) {
+      if (error instanceof FileArtifactNotFoundError) {
+        sendError(res, 404, 'NOT_FOUND', 'Profile file not found');
+        return true;
+      }
+      throw error;
+    }
+    return true;
+  }
+
+  if (profileKindMatch && req.method === 'PUT') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['agents:admin']);
+    if (!auth) return true;
+    const agentId = decodeURIComponent(profileKindMatch[1]) as AgentId;
+    const kind = decodeURIComponent(profileKindMatch[2]);
+    if (!isProfileFileKind(kind)) {
+      sendError(res, 400, 'INVALID_REQUEST', 'Unknown profile file kind');
+      return true;
+    }
+    const parsed = PutAgentProfileFileRequestSchema.safeParse(
+      await readJson(req, PROFILE_JSON_BODY_MAX_BYTES),
+    );
+    if (!parsed.success) {
+      sendError(res, 400, 'INVALID_REQUEST', 'Invalid profile file update');
+      return true;
+    }
+    const folder = await resolveProfileAgentFolder(
+      res,
+      auth.appId as AppId,
+      agentId,
+    );
+    if (!folder) return true;
+    try {
+      const result = await buildAgentProfileService(
+        agentId,
+        auth.appId as AppId,
+        ctx.runtimeHome,
+      ).writeProfileFile({
+        agentFolder: folder,
+        kind,
+        content: parsed.data.content,
+        expectedVersion: parsed.data.expectedVersion,
+        actor: 'control',
+        approvalSource: 'control_api',
+      });
+      sendJson(res, 200, {
+        agentId,
+        kind,
+        path: PROFILE_FILE_NAMES[kind],
+        version: result.version,
+        contentHash: result.contentHash,
+        content: parsed.data.content,
+      });
+    } catch (error) {
+      if (error instanceof ProfileVersionConflictError) {
+        sendError(
+          res,
+          409,
+          'CONFLICT',
+          `${error.message} Latest version is ${error.latestVersion}.`,
+        );
+        return true;
+      }
+      if (error instanceof ProfileContentTooLargeError) {
+        sendError(res, 413, 'PAYLOAD_TOO_LARGE', error.message);
+        return true;
+      }
+      throw error;
     }
     return true;
   }
@@ -164,6 +363,29 @@ export async function handleAgentRoutes(
   }
 
   return false;
+}
+
+async function resolveProfileAgentFolder(
+  res: ServerResponse,
+  appId: AppId,
+  agentId: AgentId,
+): Promise<string | null> {
+  const agent = await getRuntimeStorage().repositories.agents.getAgent(agentId);
+  if (!agent || agent.appId !== appId) {
+    sendError(res, 404, 'NOT_FOUND', 'Agent not found');
+    return null;
+  }
+  const folder = folderForAgentId(agentId);
+  if (!folder || !isValidWorkspaceFolder(folder)) {
+    sendError(
+      res,
+      400,
+      'INVALID_REQUEST',
+      'Agent does not have profile files (no workspace folder).',
+    );
+    return null;
+  }
+  return folder;
 }
 
 function agentToResponse(agent: Agent) {

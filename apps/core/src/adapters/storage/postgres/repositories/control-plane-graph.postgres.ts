@@ -5,7 +5,7 @@ import * as pgSchema from '../schema/schema.js';
 import type { CanonicalExecutor } from './canonical-graph-repository.postgres.js';
 
 const DEFAULT_LLM_PROFILE_ID = 'llm:default';
-const CONTROL_PROVIDER_ID = 'control-http';
+const CONTROL_PROVIDER_ID = 'app';
 
 function agentIdForFolder(folder: string): string {
   return `agent:${folder || 'default'}`;
@@ -106,7 +106,7 @@ export async function ensureControlGraph(
     .insert(pgSchema.providersPostgres)
     .values({
       id: CONTROL_PROVIDER_ID,
-      displayName: 'Control HTTP',
+      displayName: 'App',
       capabilityFlagsJson: '[]',
       createdAt: now,
     })
@@ -117,8 +117,8 @@ export async function ensureControlGraph(
       id: providerConnectionId,
       appId,
       providerId: CONTROL_PROVIDER_ID,
-      externalRefJson: JSON.stringify({ adapter: 'control-http', appId }),
-      label: 'Control HTTP',
+      externalRefJson: JSON.stringify({ adapter: 'app', appId }),
+      label: 'App',
       status: 'active',
       runtimeSecretRefsJson: '[]',
       createdAt: now,
@@ -126,7 +126,14 @@ export async function ensureControlGraph(
     })
     .onConflictDoUpdate({
       target: pgSchema.providerConnectionsPostgres.id,
-      set: { updatedAt: now },
+      set: {
+        providerId: CONTROL_PROVIDER_ID,
+        externalRefJson: JSON.stringify({ adapter: 'app', appId }),
+        label: 'App',
+        status: 'active',
+        runtimeSecretRefsJson: '[]',
+        updatedAt: now,
+      },
     });
   await db
     .insert(pgSchema.conversationsPostgres)

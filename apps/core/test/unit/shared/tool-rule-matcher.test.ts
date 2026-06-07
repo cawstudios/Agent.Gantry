@@ -410,6 +410,107 @@ describe('autonomous tool rule matcher', () => {
     ).toMatchObject({ allowed: false });
   });
 
+  it('matches reviewed skill commands with runtime-owned env and project aliases', () => {
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['RunCommand(date *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command: 'TZ=Asia/Kolkata date +"%Y-%m-%d %H:%M"',
+        },
+      }),
+    ).toMatchObject({
+      allowed: true,
+      matchedRule: 'RunCommand(date *)',
+    });
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['RunCommand(skills/linkedin-posting/post.py *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            'REQUESTS_CA_BUNDLE=$NODE_EXTRA_CA_CERTS /opt/homebrew/bin/python3 "$CLAUDE_PROJECT_DIR/skills/linkedin-posting/post.py" --file /tmp/post.md --json',
+        },
+      }),
+    ).toMatchObject({
+      allowed: true,
+      matchedRule: 'RunCommand(skills/linkedin-posting/post.py *)',
+    });
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['RunCommand(skills/linkedin-posting/post.py *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            'GODEBUG=netdns=go REQUESTS_CA_BUNDLE=${NODE_EXTRA_CA_CERTS} python3 ${CLAUDE_PROJECT_DIR}/skills/linkedin-posting/post.py --file /tmp/post.md',
+        },
+      }),
+    ).toMatchObject({
+      allowed: true,
+      matchedRule: 'RunCommand(skills/linkedin-posting/post.py *)',
+    });
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['RunCommand(skills/linkedin-posting/post.py *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            "GODEBUG=netdns=go NODE_EXTRA_CA_CERTS='/tmp/ca.pem' python3 skills/linkedin-posting/post.py --file /tmp/post.md",
+        },
+      }),
+    ).toMatchObject({
+      allowed: true,
+      matchedRule: 'RunCommand(skills/linkedin-posting/post.py *)',
+    });
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['RunCommand(skills/linkedin-posting/post.py *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            "GODEBUG=netdns=go SOME_PATH='/tmp/gantry'\\''s-ca.pem' python3 skills/linkedin-posting/post.py --file /tmp/post.md",
+        },
+      }),
+    ).toMatchObject({
+      allowed: true,
+      matchedRule: 'RunCommand(skills/linkedin-posting/post.py *)',
+    });
+  });
+
+  it('does not treat arbitrary environment assignments as reviewed command authority', () => {
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['RunCommand(skills/linkedin-posting/post.py *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            'ACCESS_TOKEN=$ACCESS_TOKEN python3 skills/linkedin-posting/post.py --file /tmp/post.md',
+        },
+      }),
+    ).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining('shell expansion'),
+    });
+
+    expect(
+      evaluateAutonomousToolUse({
+        rules: ['RunCommand(skills/linkedin-posting/post.py *)'],
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            'REQUESTS_CA_BUNDLE=/tmp/other-ca.pem python3 skills/linkedin-posting/post.py --file /tmp/post.md',
+        },
+      }),
+    ).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining('environment assignments'),
+    });
+  });
+
   it('rejects exact bare Bash as too broad', () => {
     expect(validateAutonomousToolRule('Bash')).toMatchObject({
       ok: false,
