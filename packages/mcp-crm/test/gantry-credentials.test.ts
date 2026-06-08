@@ -47,6 +47,22 @@ function makeCiphertext(token: string, appId = 'default'): string {
   );
 }
 
+// Encrypt an arbitrary payload object the way core stores it (same AAD/key as
+// makeCiphertext) so the row decrypts to valid JSON — used to exercise the
+// field-extraction guard with a payload that lacks a usable oauthToken.
+function makeCiphertextFor(payload: unknown, appId = 'default'): string {
+  return encryptCredentialSecretValue(
+    JSON.stringify(payload),
+    modelCredentialAadContext({
+      appId,
+      providerId: 'anthropic',
+      authMode: 'claude_code_oauth',
+      schemaVersion: 1,
+    }),
+    keyProvider(),
+  );
+}
+
 // Minimal mock pool: one active anthropic row.
 function poolWithRow(row: Record<string, unknown> | null): Pool {
   const query = vi.fn(async () => ({ rows: row ? [row] : [] }));
@@ -147,6 +163,73 @@ describe('bootstrapGantryCredentials', () => {
     expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(log).toHaveBeenCalledWith(
       'gantry_creds_decrypt_failed',
+      expect.any(Object),
+    );
+  });
+
+  it('no-ops with a log when the decrypted payload lacks a usable oauthToken', async () => {
+    const log = vi.fn();
+    const pool = poolWithRow({
+      // Valid JSON, valid ciphertext, but no string oauthToken field.
+      payload_encrypted: makeCiphertextFor({ apiKey: 'x' }),
+      auth_mode: 'claude_code_oauth',
+      schema_version: 1,
+    });
+
+    await bootstrapGantryCredentials(pool, {
+      appId: APP_ID,
+      secrets: keyProvider(),
+      log,
+    });
+
+    expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(log).toHaveBeenCalledWith(
+      'gantry_creds_no_token',
+      expect.any(Object),
+    );
+  });
+
+  it('no-ops with a log when an empty-string oauthToken is not usable', async () => {
+    const log = vi.fn();
+    const pool = poolWithRow({
+      // Present but empty: trim() falsy, so not a usable token.
+      payload_encrypted: makeCiphertextFor({ oauthToken: '' }),
+      auth_mode: 'claude_code_oauth',
+      schema_version: 1,
+    });
+
+    await bootstrapGantryCredentials(pool, {
+      appId: APP_ID,
+      secrets: keyProvider(),
+      log,
+    });
+
+    expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(log).toHaveBeenCalledWith(
+      'gantry_creds_no_token',
+      expect.any(Object),
+    );
+  });
+
+  it('does not throw when the pool query rejects; logs and disables', async () => {
+    const log = vi.fn();
+    const pool = {
+      query: async () => {
+        throw new Error('db down');
+      },
+    } as unknown as Pool;
+
+    await expect(
+      bootstrapGantryCredentials(pool, {
+        appId: APP_ID,
+        secrets: keyProvider(),
+        log,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(log).toHaveBeenCalledWith(
+      'gantry_creds_query_failed',
       expect.any(Object),
     );
   });
