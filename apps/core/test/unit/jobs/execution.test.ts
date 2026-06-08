@@ -16,7 +16,7 @@ vi.mock('@core/config/index.js', async (importOriginal) => {
   return {
     ...actual,
     ASSISTANT_NAME: 'Andy',
-    getEffectiveModelConfig: () => ({ model: undefined }),
+    getEffectiveModelConfig: () => ({ model: 'opus' }),
   };
 });
 
@@ -221,6 +221,7 @@ describe('jobs/execution', () => {
         sendMessage: sendMessage as never,
         opsRepository: opsRepository as never,
         runAgent: vi.fn() as never,
+        executionAdapter: { id: 'anthropic:claude-agent-sdk' },
       },
       'tg:scheduler',
     );
@@ -1079,7 +1080,7 @@ describe('jobs/execution', () => {
     expect(runAgent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        allowedTools: ['Browser'],
+        toolPolicyRules: ['Browser'],
       }),
       expect.any(Function),
       expect.any(Function),

@@ -27,7 +27,10 @@ import {
   PERSISTENT_RULE_APPROVAL_MAX_RULES,
 } from './permission-decision.js';
 import { escapeMarkdownFenceDelimiters } from './permission-fenced-content.js';
-import { formatPermissionToolInputLines } from './permission-tool-input-format.js';
+import {
+  formatPermissionToolInputLines,
+  runtimeDisplayCommand,
+} from './permission-tool-input-format.js';
 
 export {
   decisionForMode,
@@ -59,8 +62,6 @@ const USER_FACING_TOOL_LABELS: Record<string, string> = {
   Agent: 'agent delegation',
   Task: 'agent delegation',
 };
-
-export type PermissionActionToken = PermissionApprovalDecisionMode;
 
 export function normalizePermissionAction(
   action: string,
@@ -655,9 +656,14 @@ function formatPermissionReceiptActionSummary(
   }
   const command = permissionCommand(request);
   if (command) {
-    const generatedSkillPath = generatedRuntimeSkillPathDisplay(command);
+    const displayCommand = runtimeDisplayCommand(command);
+    const generatedSkillPath = generatedRuntimeSkillPathDisplay(
+      displayCommand.command,
+    );
     if (generatedSkillPath) {
-      return `Selected skill action (${generatedSkillPath})`;
+      const env = displayCommand.runtimeEnvAssignments.join(' ');
+      const envSummary = env ? `; env: ${sanitizeReceiptDetail(env)}` : '';
+      return `Selected skill action (${generatedSkillPath}${envSummary})`;
     }
     const safeCommand = sanitizeReceiptDetail(command);
     return safeCommand ? `Command (${safeCommand})` : 'Command';

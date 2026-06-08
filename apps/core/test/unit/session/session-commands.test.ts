@@ -689,6 +689,26 @@ describe('handleSessionCommand', () => {
     );
   });
 
+  it('returns success:false on stopped pre-compact processing', async () => {
+    const deps = makeDeps({ runAgent: vi.fn().mockResolvedValue('stopped') });
+    const msgs = [
+      makeMsg('summarize this', { timestamp: '99' }),
+      makeMsg('/compact', { timestamp: '100' }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.archiveCurrentSession).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to process'),
+    );
+  });
+
   it('clears session for /new without processing stale pre-command messages', async () => {
     const deps = makeDeps({ runAgent: vi.fn().mockResolvedValue('error') });
     const msgs = [
@@ -1273,6 +1293,23 @@ describe('handleSessionCommand', () => {
   it('reports /compact failure when SDK compact fails', async () => {
     const deps = makeDeps({
       runAgent: vi.fn().mockResolvedValue('error'),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/compact')],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.archiveCurrentSession).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith('/compact failed.');
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
+  });
+
+  it('reports /compact failure when SDK compact is stopped', async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn().mockResolvedValue('stopped'),
     });
     const result = await handleSessionCommand({
       missedMessages: [makeMsg('/compact')],

@@ -923,6 +923,7 @@ describe('executeRunnerProcess', () => {
       expect(result).toEqual({
         status: 'success',
         result: null,
+        providerSession: { externalSessionId: 'sess-closed' },
         newSessionId: 'sess-closed',
       });
       expect(mockLogger.error).not.toHaveBeenCalledWith(
@@ -963,6 +964,7 @@ describe('executeRunnerProcess', () => {
       expect(result).toEqual({
         status: 'error',
         result: null,
+        providerSession: { externalSessionId: 'sess-stopped' },
         newSessionId: 'sess-stopped',
         error: 'test-runner stopped by request',
       });

@@ -7,7 +7,8 @@ import { projectSandboxRuntimeModelGatewayEnv } from './agent-spawn-runtime-poli
 
 const SANDBOX_RUNTIME_GO_DNS = 'netdns=go';
 
-export type RunnerAgentInput = AgentInput & {
+export type RunnerAgentInput = Omit<AgentInput, 'toolPolicyRules'> & {
+  allowedTools?: string[];
   modelCredentialEnv?: Record<string, string>;
   toolNetworkEnv?: Record<string, string>;
 };
@@ -57,17 +58,6 @@ export function protectedWritePathsForOuterSandbox(
         ]
       : [item],
   );
-}
-
-export function resolveClaudeCodeToolTempDir(
-  baseTempDir: string | undefined,
-): string | undefined {
-  if (!baseTempDir) return undefined;
-  const leaf =
-    process.platform === 'win32'
-      ? ['cla', 'ude'].join('')
-      : `${['cla', 'ude'].join('')}-${process.getuid?.() ?? 0}`;
-  return path.join(baseTempDir, leaf);
 }
 
 export function sandboxRuntimeToolProcessEnv(

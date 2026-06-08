@@ -1,4 +1,5 @@
 import type { Job } from '../../domain/types.js';
+import type { ExecutionProviderId } from '../../domain/sessions/sessions.js';
 import {
   resolveModelSelectionForWorkload,
   type ModelCatalogEntry,
@@ -15,6 +16,7 @@ export interface ResolvedJobModel {
   source: string;
   resolution?: ModelResolution;
   entry?: ModelCatalogEntry;
+  defaultExecutionProviderId?: ExecutionProviderId;
 }
 
 export function modelUseKindForJobSchedule(
@@ -33,11 +35,29 @@ export function jobModelWorkloadForSchedule(
     : 'one_time_job';
 }
 
+export function resolveDefaultJobExecutionProviderId(
+  scheduleType: Job['schedule_type'],
+): ExecutionProviderId | undefined {
+  const resolution = resolveModelSelectionForWorkload(
+    'opus',
+    jobModelWorkloadForSchedule(scheduleType),
+  );
+  return resolution.ok
+    ? (resolution.entry.executionProviderId as ExecutionProviderId)
+    : undefined;
+}
+
 export function resolveJobModel(
   job: Pick<Job, 'model' | 'schedule_type'>,
   defaultConfig: JobModelDefaultConfig,
 ): ResolvedJobModel {
   const selectedModel = job.model || defaultConfig.model;
+  const defaultResolution = defaultConfig.model
+    ? resolveModelSelectionForWorkload(
+        defaultConfig.model,
+        jobModelWorkloadForSchedule(job.schedule_type),
+      )
+    : undefined;
   const resolution = selectedModel
     ? resolveModelSelectionForWorkload(
         selectedModel,
@@ -49,5 +69,8 @@ export function resolveJobModel(
     source: job.model ? 'job.model' : defaultConfig.source,
     resolution,
     entry: resolution?.ok ? resolution.entry : undefined,
+    defaultExecutionProviderId: defaultResolution?.ok
+      ? (defaultResolution.entry.executionProviderId as ExecutionProviderId)
+      : undefined,
   };
 }

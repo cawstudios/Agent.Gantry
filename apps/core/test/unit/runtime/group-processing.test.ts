@@ -8,6 +8,7 @@ import {
 import type { AgentOutput } from '@core/runtime/agent-spawn-types.js';
 import type { GroupProcessingDeps } from '@core/runtime/group-processing-types.js';
 import { PartialMessageDeliveryError } from '@core/domain/messages/partial-delivery.js';
+import { createAgentExecutionAdapterRegistry } from '@core/application/agent-execution/agent-execution-adapter-registry.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -206,6 +207,8 @@ function makeDeps(
     collectSessionMemory: vi.fn().mockResolvedValue({ saved: 0 }),
     executionAdapter: {
       id: 'anthropic:claude-agent-sdk',
+      isMissingProviderSessionError: (error: string | undefined) =>
+        /\bNo conversation found with session ID\b/i.test(error ?? ''),
       prepare: vi.fn(),
     },
     runnerSandboxProvider: {
@@ -1090,6 +1093,66 @@ describe('createGroupProcessor', () => {
           expectedAgentSessionId: 'agent-session:1',
         }),
       );
+    });
+
+    it('uses the selected execution adapter to classify missing provider sessions', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const otherAdapter = {
+        id: 'test:other-agent-sdk',
+        isMissingProviderSessionError: vi.fn(() => false),
+        prepare: vi.fn(),
+      };
+      const selectedAdapter = {
+        id: 'anthropic:claude-agent-sdk',
+        isMissingProviderSessionError: vi.fn((error: string | undefined) =>
+          /\bNo conversation found with session ID\b/i.test(error ?? ''),
+        ),
+        prepare: vi.fn(),
+      };
+      const { deps } = setupHappyPath({ group });
+      deps.executionAdapter = undefined;
+      deps.executionAdapters = createAgentExecutionAdapterRegistry([
+        otherAdapter,
+        selectedAdapter,
+      ]);
+      (deps.opsRepository as any).getAgentTurnContext = vi
+        .fn()
+        .mockResolvedValue({
+          appId: 'app:test',
+          agentId: 'agent:test',
+          agentSessionId: 'agent-session:1',
+          providerSessionId: 'provider-session:1',
+          externalSessionId: 'claude-session-stale',
+        });
+      (deps.opsRepository as any).createSessionAgentRun = vi
+        .fn()
+        .mockResolvedValue('agent-run:message-1');
+
+      mockSpawnAgent.mockImplementationOnce(async () => ({
+        status: 'error',
+        result: null,
+        error: 'No conversation found with session ID: stale',
+      }));
+      mockSpawnAgent.mockImplementationOnce(async () => ({
+        status: 'success',
+        result: 'fresh reply',
+        newSessionId: 'claude-session-fresh',
+      }));
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await expect(processGroupMessages('group1@g.us')).resolves.toBe(true);
+
+      expect(
+        selectedAdapter.isMissingProviderSessionError,
+      ).toHaveBeenCalledWith('No conversation found with session ID: stale');
+      expect(otherAdapter.isMissingProviderSessionError).not.toHaveBeenCalled();
+      expect(mockSpawnAgent).toHaveBeenCalledTimes(2);
+      expect(deps.opsRepository.expireProviderSession).toHaveBeenCalledWith({
+        providerSessionId: 'provider-session:1',
+        agentSessionId: 'agent-session:1',
+        provider: 'anthropic:claude-agent-sdk',
+        externalSessionId: 'claude-session-stale',
+      });
     });
 
     it('persists SDK session ids from final agent output for the next turn', async () => {
@@ -2223,6 +2286,31 @@ describe('createGroupProcessor', () => {
         progressCalls.find((call) => call[1] === 'Done in 0s.')?.[2]
           ?.replaceOnly,
       ).toBeUndefined();
+    });
+
+    it('reports requested stops without marking progress as failed', async () => {
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+        sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+
+      mockSpawnAgent.mockResolvedValue({
+        status: 'error',
+        result: null,
+        error: 'Host agent stopped by request',
+      } satisfies AgentOutput);
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      const result = await processGroupMessages('group1@g.us');
+
+      expect(result).toBe(true);
+      const progressTexts = (
+        streamingChannel.sendProgressUpdate as ReturnType<typeof vi.fn>
+      ).mock.calls.map((call) => call[1]);
+      expect(progressTexts).toContain('Stopped after 0s.');
+      expect(progressTexts).not.toContain('Failed after 0s.');
     });
 
     it('does not treat compact boundary markers as turn completion', async () => {

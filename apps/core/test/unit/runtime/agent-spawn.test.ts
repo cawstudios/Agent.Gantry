@@ -356,10 +356,18 @@ const testExecutionAdapter: AgentExecutionAdapter = {
       providerId: 'anthropic:claude-agent-sdk' as const,
       runnerPath,
       runnerArgs: [runnerPath],
+      runtimeConfigDir: materialization.claudeConfigDir,
       runnerInputPatch:
         Object.keys(modelCredentialEnv).length > 0
           ? { modelCredentialEnv }
           : {},
+      sandboxRuntime: {
+        toolTempDirLeaf: `claude-${process.getuid?.() ?? 0}`,
+        tempEnv: (runnerTempDir) => ({
+          CLAUDE_CODE_TMPDIR: runnerTempDir,
+          CLAUDE_TMPDIR: runnerTempDir,
+        }),
+      },
       env: {
         CLAUDE_CONFIG_DIR: materialization.claudeConfigDir,
         ...(input.effectiveModel
@@ -722,9 +730,15 @@ describe('agent-spawn timeout behavior', () => {
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
+    expect(result.providerSession).toEqual({
+      externalSessionId: 'session-123',
+    });
     expect(result.newSessionId).toBe('session-123');
     expect(onOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ result: 'Here is my response' }),
+      expect.objectContaining({
+        result: 'Here is my response',
+        providerSession: { externalSessionId: 'session-123' },
+      }),
     );
   });
 
@@ -776,6 +790,9 @@ describe('agent-spawn timeout behavior', () => {
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
+    expect(result.providerSession).toEqual({
+      externalSessionId: 'session-456',
+    });
     expect(result.newSessionId).toBe('session-456');
   });
 
@@ -1709,16 +1726,16 @@ describe('agent-spawn timeout behavior', () => {
     const startInput = start.mock.calls[0]?.[0] as RunnerSandboxSpawnInput;
     const env = startInput.env as Record<string, string>;
     const providerConfigDir = env.CLAUDE_CONFIG_DIR;
-    expect(env.CLAUDE_CODE_TMPDIR).toContain(
+    expect(env.TMPDIR).toContain(
       '/tmp/gantry-test-data/ipc/test-group/tmp/gantry-test-group-',
     );
-    expect(env.TMPDIR).toBe(env.CLAUDE_CODE_TMPDIR);
+    expect(env.CLAUDE_CODE_TMPDIR).toBe(env.TMPDIR);
     expect(startInput.runtimeReadPaths).toContain(
       '/tmp/gantry-test-data/sessions/test-group/extra',
     );
     expect(startInput.runtimeReadPaths).toContain(providerConfigDir);
     expect(startInput.runtimeWritePaths).toContain(providerConfigDir);
-    expect(startInput.runtimeWritePaths).toContain(env.CLAUDE_CODE_TMPDIR);
+    expect(startInput.runtimeWritePaths).toContain(env.TMPDIR);
     const claudeToolTempDir = startInput.runtimeWritePaths.find((item) =>
       /\/tmp\/gantry-test-group-.*\/claude-\d+$/.test(item),
     );
@@ -1809,7 +1826,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: [
+        toolPolicyRules: [
           'capability:acme.records.get',
           'RunCommand(/opt/homebrew/bin/acme records get *)',
         ],
@@ -1899,7 +1916,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: [
+        toolPolicyRules: [
           'capability:acme.invoices.read',
           'RunCommand(/usr/local/bin/acme invoices read *)',
         ],
@@ -1964,7 +1981,7 @@ describe('agent-spawn timeout behavior', () => {
         testGroup,
         {
           ...testInput,
-          allowedTools: [
+          toolPolicyRules: [
             'capability:google.sheets.values.get',
             'RunCommand(/opt/homebrew/bin/gog sheets get *)',
             'capability:skill.linkedin-posting.publish',
@@ -2020,7 +2037,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: [
+        toolPolicyRules: [
           'capability:acme.invoices.read',
           'RunCommand(/usr/local/bin/acme invoices read *)',
         ],
@@ -2786,7 +2803,7 @@ describe('agent-spawn timeout behavior', () => {
   it('does not launch or attach a raw browser backend when Browser is selected', async () => {
     const resultPromise = spawnTestAgent(
       testGroup,
-      { ...testInput, allowedTools: ['Browser'] },
+      { ...testInput, toolPolicyRules: ['Browser'] },
       () => {},
     );
     await vi.advanceTimersByTimeAsync(10);
@@ -2811,7 +2828,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: ['Read', 'mcp__browser' + '_' + 'backend' + '__*'],
+        toolPolicyRules: ['Read', 'mcp__browser' + '_' + 'backend' + '__*'],
       },
       () => {},
     );
@@ -2827,7 +2844,7 @@ describe('agent-spawn timeout behavior', () => {
   it('fails closed on stale projected browser MCP rules during spawn', async () => {
     const result = await spawnTestAgent(
       testGroup,
-      { ...testInput, allowedTools: ['Read', 'mcp__gantry__browser_act'] },
+      { ...testInput, toolPolicyRules: ['Read', 'mcp__gantry__browser_act'] },
       () => {},
     );
     expect(result).toMatchObject({
@@ -2858,7 +2875,7 @@ describe('agent-spawn timeout behavior', () => {
     async (_label, rules, reason) => {
       const result = await spawnTestAgent(
         testGroup,
-        { ...testInput, allowedTools: rules },
+        { ...testInput, toolPolicyRules: rules },
         () => {},
       );
       expect(result).toMatchObject({
@@ -2888,7 +2905,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: ['Browser'],
+        toolPolicyRules: ['Browser'],
       },
       () => {},
     );
@@ -2963,7 +2980,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: ['Browser'],
+        toolPolicyRules: ['Browser'],
       },
       () => {},
     );
