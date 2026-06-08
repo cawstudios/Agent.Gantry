@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { ModelCredentialService } from '../../../application/model-credentials/model-credential-service.js';
 import { getRuntimeStorage } from '../../../adapters/storage/postgres/runtime-store.js';
-import { isCredentialSecretCryptoError } from '../../../adapters/storage/postgres/repositories/credential-secret-crypto.js';
+import { isCredentialSecretCryptoError } from '@gantry/credential-crypto';
 import type { AppId } from '../../../domain/app/app.js';
 import {
   listSupportedModelCredentialProviders,

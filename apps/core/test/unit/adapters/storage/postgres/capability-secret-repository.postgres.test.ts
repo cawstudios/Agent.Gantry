@@ -4,7 +4,7 @@ import {
   encryptCapabilitySecretValue,
   PostgresCapabilitySecretRepository,
 } from '@core/adapters/storage/postgres/repositories/capability-secret-repository.postgres.js';
-import { SECRET_ENCRYPTION_KEY_ENV } from '@core/adapters/storage/postgres/repositories/credential-secret-crypto.js';
+import { SECRET_ENCRYPTION_KEY_ENV } from '@gantry/credential-crypto';
 import { logger } from '@core/infrastructure/logging/logger.js';
 import type { RuntimeSecretProvider } from '@core/domain/ports/runtime-secret-provider.js';
 

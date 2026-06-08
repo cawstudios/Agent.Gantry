@@ -7,8 +7,8 @@ import {
   SECRET_ENCRYPTION_KEY_ENV,
   SECRET_ENCRYPTION_KEYRING_ENV,
   type CredentialSecretAadContext,
-} from '@core/adapters/storage/postgres/repositories/credential-secret-crypto.js';
-import type { RuntimeSecretProvider } from '@core/domain/ports/runtime-secret-provider.js';
+  type RuntimeSecretProvider,
+} from '@gantry/credential-crypto';
 
 const key = Buffer.alloc(32, 7).toString('base64');
 

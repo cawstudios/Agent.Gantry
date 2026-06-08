@@ -19,7 +19,8 @@ import type { CanonicalDb } from './canonical-graph-repository.postgres.js';
 import {
   decryptCredentialSecretValue,
   encryptCredentialSecretValue,
-} from './credential-secret-crypto.js';
+  modelCredentialAadContext,
+} from '@gantry/credential-crypto';
 
 export class PostgresModelCredentialRepository implements ModelCredentialRepository {
   constructor(
@@ -220,19 +221,4 @@ function parseFieldFingerprints(
 function toIsoTimestamp(value: string): string {
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : value;
-}
-
-function modelCredentialAadContext(input: {
-  appId: string;
-  providerId: string;
-  authMode: string;
-  schemaVersion: number;
-}) {
-  return {
-    appId: input.appId,
-    subjectKind: 'model_credential' as const,
-    subjectId: normalizeModelCredentialProvider(input.providerId),
-    authMode: input.authMode,
-    schemaVersion: input.schemaVersion,
-  };
 }

@@ -293,7 +293,7 @@ describe('credential control routes', () => {
 
   it('returns 500 instead of 400 for server-side credential crypto failures', async () => {
     const { CredentialSecretCryptoConfigurationError } =
-      await import('@core/adapters/storage/postgres/repositories/credential-secret-crypto.js');
+      await import('@gantry/credential-crypto');
     upsertFailures.push(
       new CredentialSecretCryptoConfigurationError('missing test key'),
     );

@@ -20,7 +20,7 @@ import {
   CredentialSecretCryptoIntegrityError,
   decryptCredentialSecretValue,
   encryptCredentialSecretValue,
-} from './credential-secret-crypto.js';
+} from '@gantry/credential-crypto';
 
 export class PostgresCapabilitySecretRepository implements CapabilitySecretRepository {
   constructor(
