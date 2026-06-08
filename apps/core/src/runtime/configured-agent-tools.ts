@@ -9,7 +9,7 @@ import {
 import type { CapabilityRuntimeAccess } from '../shared/capability-runtime-access.js';
 
 export interface ConfiguredAgentToolPolicy {
-  allowedTools: string[] | undefined;
+  toolPolicyRules: string[] | undefined;
   runtimeAccess: CapabilityRuntimeAccess[];
 }
 
@@ -37,7 +37,7 @@ export async function resolveConfiguredToolPolicy(input: {
 }): Promise<ConfiguredAgentToolPolicy> {
   if (!input.repository) {
     return {
-      allowedTools: undefined,
+      toolPolicyRules: undefined,
       runtimeAccess: [],
     };
   }
@@ -49,7 +49,7 @@ export async function resolveConfiguredToolPolicy(input: {
     skillRepository: input.skillRepository,
   });
   return {
-    allowedTools: policy.rules,
+    toolPolicyRules: policy.rules,
     runtimeAccess: policy.runtimeAccess,
   };
 }

@@ -40,7 +40,7 @@ export interface AgentInput {
   memoryReviewerIsControlApprover?: boolean;
   persona?: AgentPersona;
   browserProfileName?: string;
-  allowedTools?: string[];
+  toolPolicyRules?: string[];
   toolAccessRequirements?: string[];
   attachedSkillSourceIds?: string[];
   selectedSkillDisplays?: string[];
@@ -62,6 +62,7 @@ export interface AgentInput {
 export interface AgentOutput {
   status: 'success' | 'error';
   result: string | null;
+  providerSession?: AgentOutputProviderSession;
   newSessionId?: string;
   compactBoundary?: boolean;
   interactionBoundary?: 'user_interaction';
@@ -71,6 +72,10 @@ export interface AgentOutput {
   contextUsage?: RuntimeContextUsageSnapshot;
   error?: string;
   runtimeEvents?: AgentOutputRuntimeEvent[];
+}
+
+export interface AgentOutputProviderSession {
+  externalSessionId: string;
 }
 
 export interface AgentOutputRuntimeEvent {

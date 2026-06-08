@@ -236,6 +236,7 @@ describe('host child-process runtime smoke', () => {
     expect(result).toEqual({
       status: 'success',
       result: null,
+      providerSession: { externalSessionId: 'host-child-session' },
       newSessionId: 'host-child-session',
     });
     expect(onProcess).toHaveBeenCalledTimes(1);

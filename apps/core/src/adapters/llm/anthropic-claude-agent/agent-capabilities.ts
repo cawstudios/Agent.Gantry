@@ -176,8 +176,8 @@ const gantryMcpProvider: AgentCapabilityProvider = {
       GANTRY_CHAT_JID: ctx.chatJid,
       GANTRY_WORKSPACE_KEY: ctx.workspaceFolder,
       GANTRY_THREAD_ID: ctx.threadId || '',
-      GANTRY_JOB_ID: ctx.jobId || '',
-      GANTRY_JOB_RUN_ID: ctx.runId || '',
+      ...(ctx.jobId ? { GANTRY_JOB_ID: ctx.jobId } : {}),
+      ...(ctx.runId ? { GANTRY_JOB_RUN_ID: ctx.runId } : {}),
       GANTRY_MEMORY_USER_ID: ctx.memoryUserId || '',
       GANTRY_MEMORY_DEFAULT_SCOPE: ctx.memoryDefaultScope || 'group',
       GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER:

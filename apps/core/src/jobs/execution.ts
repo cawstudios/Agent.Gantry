@@ -2,7 +2,6 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import { ASSISTANT_NAME, getEffectiveModelConfig } from '../config/index.js';
 import type { Job } from '../domain/types.js';
-import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import {
   getRuntimeControlRepository,
@@ -16,6 +15,7 @@ import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
 import { nowIso, nowMs, toIso } from '../shared/time/datetime.js';
 import { resolveWorkspaceFolderPath } from '../platform/workspace-folder.js';
 import { AgentOutput, spawnAgent } from '../runtime/agent-spawn.js';
+import { providerSessionExternalSessionId } from '../runtime/agent-output-provider-session.js';
 import {
   buildRuntimeRunOptions,
   completeFailedRuntimeSessionRun,
@@ -27,10 +27,6 @@ import {
   resolveTurnSelectedMcpServerIds,
   resolveTurnSelectedSkillContext,
 } from '../runtime/group-run-context.js';
-import {
-  DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID,
-  resolveRuntimeExecutionProviderId,
-} from '../runtime/execution-provider-id.js';
 import {
   collectCompactBoundaryMemory,
   collectJobCompletionMemory,
@@ -54,6 +50,7 @@ import {
   jobCompletedModelPayload,
   jobStartedModelPayload,
   modelUseKindForJobSchedule,
+  resolveJobExecutionProviderId,
   resolveJobModel,
   type NormalizedModelUsage,
 } from './model-resolution.js';
@@ -89,7 +86,6 @@ export async function runJob(
   queueJid: string,
   dispatch?: SchedulerDispatchPayload,
 ): Promise<void> {
-  const runAgentImpl = deps.runAgent ?? spawnAgent;
   const currentJob = await deps.opsRepository.getJobById(job.id);
   if (!currentJob || currentJob.status !== 'active') return;
   const scheduledFor =
@@ -145,10 +141,12 @@ export async function runJob(
     publishRuntimeEvent,
   });
   if (pausedForSetup) return;
-  const executionProviderId = (resolvedModel.entry?.executionProviderId ??
-    (deps.executionAdapter || !deps.runAgent
-      ? resolveRuntimeExecutionProviderId(deps.executionAdapter)
-      : DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID)) as ExecutionProviderId;
+  const executionProviderId = resolveJobExecutionProviderId({
+    resolvedModel,
+    executionAdapter: deps.executionAdapter,
+    executionAdapters: deps.executionAdapters,
+    fallbackForInjectedRunner: Boolean(deps.runAgent),
+  });
   const claimed = await deps.opsRepository.claimDueJobRunStart({
     jobId: currentJob.id,
     runId,
@@ -413,7 +411,7 @@ export async function runJob(
                   cause: 'job',
                 })
               : undefined;
-            const output = await runAgentImpl(
+            const output = await (deps.runAgent ?? spawnAgent)(
               execution.group,
               {
                 prompt: currentJob.prompt,
@@ -433,7 +431,7 @@ export async function runJob(
                 jobModelUseKind,
                 assistantName: ASSISTANT_NAME,
                 memoryContextBlock: turnContext?.memoryContextBlock,
-                allowedTools: toolPolicy.effectiveAllowedTools,
+                toolPolicyRules: toolPolicy.effectiveAllowedTools,
                 toolAccessRequirements:
                   toolAccessRequirementPreflight.toolAccessRequirements,
                 runtimeAccess: toolPolicy.runtimeAccess,
@@ -463,9 +461,11 @@ export async function runJob(
                   emitJobEvent,
                 });
                 if (streamedOutput.usage) latestUsage = streamedOutput.usage;
-                if (streamedOutput.newSessionId) {
+                const streamedProviderSessionId =
+                  providerSessionExternalSessionId(streamedOutput);
+                if (streamedProviderSessionId) {
                   await updateRunProviderMetadata({
-                    providerSessionId: streamedOutput.newSessionId,
+                    providerSessionId: streamedProviderSessionId,
                   });
                 }
                 await collectCompactBoundaryMemory({

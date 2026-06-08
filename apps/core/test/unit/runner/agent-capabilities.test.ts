@@ -148,8 +148,6 @@ describe('agent capability composition', () => {
         GANTRY_CHAT_JID: 'tg:team',
         GANTRY_WORKSPACE_KEY: 'telegram_team',
         GANTRY_THREAD_ID: 'topic-1',
-        GANTRY_JOB_ID: '',
-        GANTRY_JOB_RUN_ID: '',
         GANTRY_MEMORY_USER_ID: '5759865942',
         GANTRY_MEMORY_DEFAULT_SCOPE: 'group',
         GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER: '',

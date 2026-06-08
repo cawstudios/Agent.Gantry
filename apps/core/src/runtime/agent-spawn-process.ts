@@ -13,13 +13,18 @@ import { formatDuration } from '../shared/human-format.js';
 import { nowIso, nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { formatRunnerProcessExitError } from './generated-runtime-path-error.js';
 import type { RunnerSandboxProvider } from '../shared/runner-sandbox-provider.js';
-import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
 import {
   formatScheduledJobIdleStallError,
   readScheduledJobHeartbeat,
   scheduledJobIdleTimeoutMs,
   type ScheduledJobHeartbeatPayload,
 } from './agent-spawn-scheduled-idle.js';
+import { sandboxBlockedEvents } from './agent-spawn-sandbox-events.js';
+import {
+  outputWithProviderSession,
+  providerSessionExternalSessionId,
+  runnerResultWithProviderSession,
+} from './agent-output-provider-session.js';
 const OUTPUT_START_MARKER = '---GANTRY_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---GANTRY_OUTPUT_END---';
 
@@ -93,40 +98,6 @@ function runnerContextPayload(input: RunnerProcessSpec['input']) {
   };
 }
 
-function sandboxBlockedEvents(
-  spec: RunnerProcessSpec,
-  message: string,
-): NonNullable<AgentOutput['runtimeEvents']> {
-  const provider = spec.options?.runnerSandboxProvider;
-  return [
-    {
-      appId: spec.sandbox.principal.appId,
-      agentId: spec.sandbox.principal.agentId,
-      runId: spec.sandbox.principal.runId,
-      jobId: spec.sandbox.principal.jobId,
-      conversationId: spec.sandbox.principal.conversationId,
-      threadId: spec.sandbox.principal.threadId,
-      eventType: RUNTIME_EVENT_TYPES.SANDBOX_BLOCKED,
-      actor: 'runner',
-      responseMode: 'none',
-      payload: {
-        provider: provider?.id ?? 'direct',
-        enforcing: provider?.enforcing === true,
-        profileId: spec.sandbox.sandboxProfile.id,
-        networkMode: spec.sandbox.sandboxProfile.network,
-        filesystemMode: spec.sandbox.sandboxProfile.filesystem,
-        allowedNetworkHostCount: spec.sandbox.allowedNetworkHosts.length,
-        runtimeReadPathCount: spec.sandbox.runtimeReadPaths.length,
-        runtimeWritePathCount: spec.sandbox.runtimeWritePaths.length,
-        protectedReadPathCount: spec.sandbox.protectedReadPaths.length,
-        protectedWritePathCount: spec.sandbox.protectedWritePaths.length,
-        resourceLimits: spec.sandbox.resourceLimits,
-        message: sanitizeLogText(message, 500),
-      },
-    },
-  ];
-}
-
 function stderrLooksLikeSandboxBlock(stderr: string): boolean {
   return SANDBOX_BLOCKED_PATTERNS.some((pattern) => pattern.test(stderr));
 }
@@ -158,10 +129,11 @@ export function executeRunnerProcess(
         status: 'error',
         result: null,
         error: `${runnerLabel} sandbox provider is not configured.`,
-        runtimeEvents: sandboxBlockedEvents(
+        runtimeEvents: sandboxBlockedEvents({
           spec,
-          'runner sandbox provider is not configured',
-        ),
+          message: 'runner sandbox provider is not configured',
+          sanitize: sanitizeLogText,
+        }),
       });
       return;
     }
@@ -183,7 +155,11 @@ export function executeRunnerProcess(
         status: 'error',
         result: null,
         error: `Sandbox startup failed: ${error}. The run did not start.`,
-        runtimeEvents: sandboxBlockedEvents(spec, error),
+        runtimeEvents: sandboxBlockedEvents({
+          spec,
+          message: error,
+          sanitize: sanitizeLogText,
+        }),
       });
       return;
     }
@@ -200,7 +176,7 @@ export function executeRunnerProcess(
 
     let parseBuffer = '';
     let parseBufferTruncated = false;
-    let newSessionId: string | undefined;
+    let providerSessionExternalId: string | undefined;
     let outputChain = Promise.resolve();
     let timedOut = false;
     let timeoutReason: RunnerTimeoutReason = 'timeout';
@@ -277,10 +253,16 @@ export function executeRunnerProcess(
           parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
 
           try {
-            const parsed: AgentOutput = JSON.parse(jsonStr);
-            if (parsed.newSessionId) {
-              newSessionId = parsed.newSessionId;
+            let parsed: AgentOutput = JSON.parse(jsonStr);
+            const streamedProviderSessionId =
+              providerSessionExternalSessionId(parsed);
+            if (streamedProviderSessionId) {
+              providerSessionExternalId = streamedProviderSessionId;
             }
+            parsed = outputWithProviderSession(
+              parsed,
+              providerSessionExternalId,
+            );
             const heartbeat = readScheduledJobHeartbeat(parsed);
             if (input.isScheduledJob && heartbeat) {
               lastScheduledJobHeartbeat = heartbeat;
@@ -420,11 +402,12 @@ export function executeRunnerProcess(
             `${runnerLabel} timed out after output (idle cleanup)`,
           );
           outputChain.then(() => {
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
-            });
+            resolve(
+              runnerResultWithProviderSession({
+                status: 'success',
+                externalSessionId: providerSessionExternalId,
+              }),
+            );
           });
           return;
         }
@@ -457,12 +440,13 @@ export function executeRunnerProcess(
         );
 
         outputChain.then(() => {
-          resolve({
-            status: 'error',
-            result: null,
-            newSessionId,
-            error,
-          });
+          resolve(
+            runnerResultWithProviderSession({
+              status: 'error',
+              externalSessionId: providerSessionExternalId,
+              error,
+            }),
+          );
         });
         return;
       }
@@ -550,16 +534,17 @@ export function executeRunnerProcess(
             {
               group: group.name,
               duration,
-              providerSessionCreated: !!newSessionId,
+              providerSessionCreated: !!providerSessionExternalId,
               signal,
             },
             `${runnerLabel} closed after streamed output`,
           );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
-          });
+          resolve(
+            runnerResultWithProviderSession({
+              status: 'success',
+              externalSessionId: providerSessionExternalId,
+            }),
+          );
         });
         return;
       }
@@ -576,12 +561,13 @@ export function executeRunnerProcess(
             },
             `${runnerLabel} stopped by request`,
           );
-          resolve({
-            status: 'error',
-            result: null,
-            newSessionId,
-            error: `${runnerLabel} stopped by request`,
-          });
+          resolve(
+            runnerResultWithProviderSession({
+              status: 'error',
+              externalSessionId: providerSessionExternalId,
+              error: `${runnerLabel} stopped by request`,
+            }),
+          );
         });
         return;
       }
@@ -616,13 +602,17 @@ export function executeRunnerProcess(
           stdout,
           stderr,
           structuredError,
-          newSessionId,
+          newSessionId: providerSessionExternalId,
           fallbackStderr: sanitizeLogText(stderr.slice(-200), 200),
         });
         if (stderrLooksLikeSandboxBlock(stderr)) {
           processError.runtimeEvents = [
             ...(processError.runtimeEvents ?? []),
-            ...sandboxBlockedEvents(spec, stderr),
+            ...sandboxBlockedEvents({
+              spec,
+              message: stderr,
+              sanitize: sanitizeLogText,
+            }),
           ];
         }
         if (structuredError) outputChain.then(() => resolve(processError));
@@ -636,21 +626,25 @@ export function executeRunnerProcess(
             {
               group: group.name,
               duration,
-              providerSessionCreated: !!newSessionId,
+              providerSessionCreated: !!providerSessionExternalId,
             },
             `${runnerLabel} completed (streaming mode)`,
           );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
-          });
+          resolve(
+            runnerResultWithProviderSession({
+              status: 'success',
+              externalSessionId: providerSessionExternalId,
+            }),
+          );
         });
         return;
       }
 
       try {
-        const output = parseBufferedRunnerOutput(stdout);
+        const output = outputWithProviderSession(
+          parseBufferedRunnerOutput(stdout),
+          providerSessionExternalId,
+        );
 
         logger.info(
           {

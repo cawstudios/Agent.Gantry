@@ -102,6 +102,9 @@ sequenceDiagram
 `agent-spawn.ts` launches a provider-neutral `AgentExecutionAdapter`. The
 adapter prepares provider-specific child runner files, SDK environment, model
 projection, runtime materialization, protected filesystem paths, and cleanup.
+Shared runtime passes Gantry-owned `toolPolicyRules` and neutral provider
+session output; adapter-owned renderers translate those into provider-native
+shapes such as Claude SDK `allowedTools` and stale-session error handling.
 The Anthropic adapter is the only production path that calls
 `@anthropic-ai/claude-agent-sdk`.
 The final child process spawn always goes through `RunnerSandboxProvider`.
@@ -121,7 +124,9 @@ Key runner inputs:
 
 `apps/core/src/adapters/llm/anthropic-claude-agent/runner/query-loop.ts` creates a `MessageStream` and passes it to `query()`. The stream lets the host add follow-up user messages to an already-running agent when the queue decides continuation is safe. The same `query()` call receives:
 
-- `allowedTools` from `apps/core/src/adapters/llm/anthropic-claude-agent/agent-capabilities.ts`, backed by the Gantry MCP surface in `apps/core/src/runner/gantry-mcp-tool-surface.ts`
+- `allowedTools` rendered by the Anthropic adapter from Gantry
+  `toolPolicyRules`, backed by the Gantry MCP surface in
+  `apps/core/src/runner/gantry-mcp-tool-surface.ts`
 - Gantry MCP server config from `apps/core/src/runner/mcp/server.ts`
 - provider-session projection: live interactive turns may pass adapter resume
   metadata from `ProviderSession`; scheduled jobs keep provider persistence

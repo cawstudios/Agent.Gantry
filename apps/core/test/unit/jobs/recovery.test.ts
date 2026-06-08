@@ -93,7 +93,7 @@ describe('job recovery turn queueing', () => {
         input: {
           prompt: string;
           isScheduledJob?: boolean;
-          allowedTools?: string[];
+          toolPolicyRules?: string[];
         },
       ) => {
         expect(input.prompt).toContain('<gantry_scheduler_job_recovery>');
@@ -103,7 +103,7 @@ describe('job recovery turn queueing', () => {
         expect(input.prompt).toContain('&lt;evil&gt;');
         expect(input.prompt).toContain('request_access');
         expect(input.isScheduledJob).toBeUndefined();
-        expect(input.allowedTools).toEqual(['mcp__gantry__request_access']);
+        expect(input.toolPolicyRules).toEqual(['mcp__gantry__request_access']);
         return { status: 'success', result: 'Requested Browser access.' };
       },
     );
@@ -168,6 +168,7 @@ describe('job recovery turn queueing', () => {
             })),
           }) as never,
         runAgent: runAgent as never,
+        executionAdapter: { id: 'anthropic:claude-agent-sdk' },
       } as never,
       execution: {
         group: makeRoute(),

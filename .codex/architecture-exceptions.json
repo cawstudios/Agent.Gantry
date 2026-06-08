@@ -1196,13 +1196,6 @@
     "removeByPhase": "canonical-boundary-cleanup-phase"
   },
   {
-    "file": "apps/core/src/runtime/execution-provider-id.ts",
-    "rule": "provider_specific_path",
-    "reason": "Runtime test fallback stores the current execution adapter id as projection metadata; production selection still resolves through the adapter id.",
-    "removeByPhase": "execution-provider-registry-composition",
-    "maxViolations": 2
-  },
-  {
     "file": "apps/core/src/session/index.ts",
     "rule": "wrapper_only_file",
     "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",

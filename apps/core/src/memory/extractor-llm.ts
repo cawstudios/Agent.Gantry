@@ -318,7 +318,7 @@ function buildPromptParts(input: ArcExtractionInput): {
 }
 
 export class LlmMemoryExtractionProvider implements MemoryExtractionProvider {
-  readonly providerName = 'llm-haiku';
+  readonly providerName = 'memory-llm';
 
   async extractFacts(
     input: ArcExtractionInput,

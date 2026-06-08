@@ -30,3 +30,7 @@
 - Generated `.llm-runtime` access failures are adapter-state failures. Surface
   actionable `.llm-runtime` guidance instead of returning raw `EACCES` as a
   generic runner-exited error.
+- Shared runtime accepts Gantry-owned `toolPolicyRules` and neutral
+  `providerSession` output. Provider-native names such as Claude SDK
+  `allowedTools` and stale provider-session error strings belong behind the
+  execution adapter boundary.

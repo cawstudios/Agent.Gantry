@@ -81,7 +81,6 @@ import {
   cleanupRunnerTempDir,
   buildSandboxRuntimeGatewayOptions,
   protectedWritePathsForOuterSandbox,
-  resolveClaudeCodeToolTempDir,
   sandboxRuntimeToolProcessEnv,
   sandboxRuntimeToolNetworkEnv,
   type RunnerAgentInput,
@@ -149,7 +148,7 @@ export async function spawnAgent(
   const effectiveModel = resolvedModel.value.runnerModel;
   const effectiveModelEntry = resolvedModel.value.modelEntry;
   const allowedToolValidationError = validateRunnerAllowedTools(
-    input.allowedTools ?? [],
+    input.toolPolicyRules ?? [],
   );
   if (allowedToolValidationError) {
     return {
@@ -181,13 +180,13 @@ export async function spawnAgent(
     workspaceKey: group.folder,
     conversationId: input.chatJid,
   });
-  const trustedAllowedTools = input.allowedTools;
-  const browserIpcEnabled = (trustedAllowedTools ?? []).some(
+  const trustedToolPolicyRules = input.toolPolicyRules;
+  const browserIpcEnabled = (trustedToolPolicyRules ?? []).some(
     isCanonicalBrowserCapabilityRule,
   );
   const runnerInput: RunnerAgentInput = {
     ...input,
-    allowedTools: trustedAllowedTools,
+    allowedTools: trustedToolPolicyRules,
     browserProfileName,
     compiledSystemPrompt,
     yoloMode: effectiveYoloModeSettings(
@@ -273,7 +272,7 @@ export async function spawnAgent(
   let mcpConfigPath: string | undefined;
   let sandboxConfigPath: string | undefined;
   let runnerTempDir: string | undefined;
-  let claudeToolTempDir: string | undefined;
+  let providerToolTempDir: string | undefined;
   let egressGateway:
     | Awaited<ReturnType<typeof ensureEgressGateway>>
     | undefined;
@@ -341,7 +340,7 @@ export async function spawnAgent(
     const sandboxAllowedNetworkHosts =
       sandboxAllowedNetworkHostsFromRuntimeAccess(effectiveRuntimeAccess);
     const memoryIpcAllowedActions = selectedMemoryIpcActionsFromToolRules(
-      trustedAllowedTools ?? [],
+      trustedToolPolicyRules ?? [],
       {
         memoryReviewerIsControlApprover: input.memoryReviewerIsControlApprover,
       },
@@ -429,10 +428,12 @@ export async function spawnAgent(
         'tmp',
         processName,
       );
-      claudeToolTempDir = resolveClaudeCodeToolTempDir(runnerTempDir);
       fs.mkdirSync(runnerTempDir, { recursive: true, mode: 0o700 });
-      if (claudeToolTempDir) {
-        fs.mkdirSync(claudeToolTempDir, { recursive: true, mode: 0o700 });
+      const providerToolTempDirLeaf =
+        preparedExecution.sandboxRuntime?.toolTempDirLeaf;
+      if (providerToolTempDirLeaf) {
+        providerToolTempDir = path.join(runnerTempDir, providerToolTempDirLeaf);
+        fs.mkdirSync(providerToolTempDir, { recursive: true, mode: 0o700 });
       }
     }
     const env: NodeJS.ProcessEnv = {
@@ -444,8 +445,8 @@ export async function spawnAgent(
             TMPDIR: runnerTempDir,
             TMP: runnerTempDir,
             TEMP: runnerTempDir,
-            CLAUDE_CODE_TMPDIR: runnerTempDir,
-            CLAUDE_TMPDIR: runnerTempDir,
+            ...(preparedExecution.sandboxRuntime?.tempEnv?.(runnerTempDir) ??
+              {}),
           }
         : {}),
       TZ: TIMEZONE,
@@ -570,8 +571,7 @@ export async function spawnAgent(
         preparedExecution.protectedFilesystemPaths),
       ...(mcpConfigPath ? [mcpConfigPath] : []),
     ];
-    const providerConfigDirKey = ['CLA' + 'UDE', 'CONFIG', 'DIR'].join('_');
-    const providerConfigDir = env[providerConfigDirKey];
+    const providerConfigDir = preparedExecution.runtimeConfigDir;
     const sandboxRunnerReadablePaths = [
       ...(providerConfigDir
         ? [path.join(providerConfigDir, 'settings.json')]
@@ -646,7 +646,7 @@ export async function spawnAgent(
           workspaceExtraDir,
           ...(providerConfigDir ? [providerConfigDir] : []),
           ...(runnerTempDir ? [runnerTempDir] : []),
-          ...(claudeToolTempDir ? [claudeToolTempDir] : []),
+          ...(providerToolTempDir ? [providerToolTempDir] : []),
           ...localCliCredentialPaths,
           ...(mcpConfigPath ? [mcpConfigPath] : []),
         ],
@@ -654,7 +654,7 @@ export async function spawnAgent(
           hostRuntime.workspaceIpcDir,
           ...(providerConfigDir ? [providerConfigDir] : []),
           ...(runnerTempDir ? [runnerTempDir] : []),
-          ...(claudeToolTempDir ? [claudeToolTempDir] : []),
+          ...(providerToolTempDir ? [providerToolTempDir] : []),
         ],
         protectedReadPaths: sandboxProtectedReadPaths,
         protectedWritePaths: sandboxProtectedWritePaths,

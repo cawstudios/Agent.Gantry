@@ -44,6 +44,9 @@
   Durable mutation still requires host validation against subject scope,
   evidence ids, current target versions, allowed memory kinds, confidence, and
   shared sensitive-material checks.
+- User-visible memory extractor labels must stay provider-neutral. Specific
+  model/provider choices belong in model settings or LLM adapter code, not
+  `MemoryExtractionProvider.providerName`.
 - Retire, rewrite, contradiction, and merge proposals belong in
   `memory_review_requests` with `pending_review` status; do not route these
   through `request_permission`, because review approves a specific data

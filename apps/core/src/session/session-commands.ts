@@ -193,7 +193,7 @@ export interface SessionCommandDeps {
     prompt: string,
     onOutput: (result: AgentResult) => Promise<void>,
     options?: { timeoutMs?: number },
-  ) => Promise<'success' | 'error'>;
+  ) => Promise<'success' | 'error' | 'stopped'>;
   closeStdin: () => void;
   advanceCursor: (message: Pick<NewMessage, 'timestamp' | 'id'>) => void;
   formatMessages: (msgs: NewMessage[], timezone: string) => string;
@@ -381,7 +381,7 @@ export async function handleSessionCommand(opts: {
       }
     });
 
-    if (preResult === 'error' || hadPreError) {
+    if (preResult !== 'success' || hadPreError) {
       logger.warn(
         { group: groupName },
         'Pre-command processing failed, aborting session command',
@@ -440,11 +440,10 @@ export async function handleSessionCommand(opts: {
     let compactError: string | undefined;
     const compactResult = await deps.runAgent('/compact', async (result) => {
       if (result.status !== 'error') return;
-      compactError =
-        resultToText(result.result) || 'Provider compact command failed.';
+      compactError = resultToText(result.result) || 'Compact failed.';
     });
 
-    if (compactResult === 'error' || compactError) {
+    if (compactResult !== 'success' || compactError) {
       const suffix = compactError ? ` ${sanitizeErrorText(compactError)}` : '';
       await deps.sendMessage(`/compact failed.${suffix}`);
       return { handled: true, success: false };

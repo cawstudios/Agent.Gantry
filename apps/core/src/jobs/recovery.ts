@@ -5,6 +5,7 @@ import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 import type { Job } from '../domain/types.js';
 import { spawnAgent } from '../runtime/agent-spawn.js';
 import type { AgentOutput } from '../runtime/agent-spawn.js';
+import { providerSessionExternalSessionId } from '../runtime/agent-output-provider-session.js';
 import type { AgentInput } from '../runtime/agent-spawn-types.js';
 import {
   buildApprovedSkillContextBlock,
@@ -18,10 +19,7 @@ import {
   resolveTurnSelectedMcpServerIds,
   resolveTurnSelectedSkillContext,
 } from '../runtime/group-run-context.js';
-import {
-  DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID,
-  resolveRuntimeExecutionProviderId,
-} from '../runtime/execution-provider-id.js';
+import { resolveConfiguredRuntimeExecutionProviderId } from '../runtime/execution-provider-id.js';
 import { makeThreadQueueKey } from '../shared/thread-queue-key.js';
 import {
   createJobRecoveryIntent,
@@ -332,9 +330,10 @@ async function runJobRecoveryAgentTurn(input: {
     ),
   );
   const executionProviderId = (resolvedModel.entry?.executionProviderId ??
-    (input.deps.executionAdapter || !input.deps.runAgent
-      ? resolveRuntimeExecutionProviderId(input.deps.executionAdapter)
-      : DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID)) as ExecutionProviderId;
+    resolveConfiguredRuntimeExecutionProviderId({
+      executionAdapter: input.deps.executionAdapter,
+      executionAdapters: input.deps.executionAdapters,
+    })) as ExecutionProviderId;
   const { memoryDefaultScope, memoryUserId } = resolveExecutionMemoryContext({
     conversationKind: input.execution.group.conversationKind,
     executionJid: input.execution.executionJid,
@@ -437,7 +436,7 @@ async function runJobRecoveryAgentTurn(input: {
     memoryContextBlock: [turnContext?.memoryContextBlock, approvedSkillContext]
       .filter((block): block is string => Boolean(block?.trim()))
       .join('\n\n'),
-    allowedTools: toolPolicy.effectiveAllowedTools,
+    toolPolicyRules: toolPolicy.effectiveAllowedTools,
     runtimeAccess: toolPolicy.runtimeAccess,
     attachedSkillSourceIds: selectedSkillContext.ids,
     selectedSkillDisplays: selectedSkillContext.displays,
@@ -472,20 +471,23 @@ async function runJobRecoveryAgentTurn(input: {
       if (streamedOutput.result) {
         resultSummaryAccumulator.append(streamedOutput.result);
       }
-      if (streamedOutput.newSessionId && agentRunId) {
+      const streamedProviderSessionId =
+        providerSessionExternalSessionId(streamedOutput);
+      if (streamedProviderSessionId && agentRunId) {
         await input.deps.opsRepository.updateAgentRunProviderMetadata?.({
           runId: agentRunId,
-          providerSessionId: streamedOutput.newSessionId,
+          providerSessionId: streamedProviderSessionId,
         });
       }
     },
     runOptions,
   );
   if (output.result) resultSummaryAccumulator.append(output.result);
-  if (output.newSessionId && agentRunId) {
+  const providerSessionId = providerSessionExternalSessionId(output);
+  if (providerSessionId && agentRunId) {
     await input.deps.opsRepository.updateAgentRunProviderMetadata?.({
       runId: agentRunId,
-      providerSessionId: output.newSessionId,
+      providerSessionId,
     });
   }
   if (output.status === 'error') {

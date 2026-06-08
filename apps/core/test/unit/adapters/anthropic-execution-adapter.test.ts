@@ -100,6 +100,32 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
     });
   });
 
+  it('declares Claude runtime paths through the adapter boundary', async () => {
+    const adapter = new AnthropicClaudeAgentExecutionAdapter();
+
+    const prepared = await adapter.prepare(prepareInput());
+
+    expect(prepared.runtimeConfigDir).toBe('/tmp/gantry-runtime/.claude');
+    expect(prepared.sandboxRuntime?.toolTempDirLeaf).toMatch(/^claude/);
+    expect(prepared.sandboxRuntime?.tempEnv?.('/tmp/runner')).toEqual({
+      CLAUDE_CODE_TMPDIR: '/tmp/runner',
+      CLAUDE_TMPDIR: '/tmp/runner',
+    });
+  });
+
+  it('classifies stale Claude SDK resume sessions inside the adapter boundary', () => {
+    const adapter = new AnthropicClaudeAgentExecutionAdapter();
+
+    expect(
+      adapter.isMissingProviderSessionError(
+        'No conversation found with session ID: stale',
+      ),
+    ).toBe(true);
+    expect(adapter.isMissingProviderSessionError('provider auth failed')).toBe(
+      false,
+    );
+  });
+
   it('passes only materialized Gantry skill names to the runner SDK whitelist', async () => {
     mockMaterializeClaudeRuntime.mockResolvedValueOnce({
       claudeConfigDir: '/tmp/gantry-runtime/.claude',

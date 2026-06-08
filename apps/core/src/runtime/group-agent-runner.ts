@@ -3,6 +3,7 @@ import { collectCompactBoundaryMemory } from '../jobs/compact-memory.js';
 import { defaultModelStatusSelection } from '../session/session-model-status.js';
 import type { AgentOutput } from './agent-spawn.js';
 import { spawnAgent } from './agent-spawn.js';
+import { resolveAgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter-registry.js';
 import type {
   GroupProcessingDeps,
   GroupProcessingRepository,
@@ -61,8 +62,20 @@ const RUNTIME_LOG_PROVIDER_VALUE_PATTERNS: RegExp[] = [
 const RUNTIME_LOG_REDACT_KEY_PATTERN =
   /^(sessionId|newSessionId|providerSessionId|externalSessionId|latestProviderSessionId|session_id)$/i;
 const memoryReviewApproverCache = new Map<string, [boolean, number]>();
+
+export type GroupAgentRunResult = 'success' | 'error' | 'stopped';
+
 function isMissingProviderSessionError(error: string | undefined): boolean {
-  return /\bNo conversation found with session ID\b/i.test(error ?? '');
+  return /\bprovider session\b.*\b(?:missing|expired|not found)\b/i.test(
+    error ?? '',
+  );
+}
+
+function isStoppedByRequest(output: AgentOutput): boolean {
+  return (
+    output.status === 'error' &&
+    /\bstopped by request\b/i.test(output.error ?? '')
+  );
 }
 function redactRuntimeLogString(value: string): string {
   let out = value;
@@ -216,7 +229,7 @@ export function createGroupAgentRunner(input: {
         is_from_me?: boolean | null;
       }[];
     },
-  ): Promise<'success' | 'error'> {
+  ): Promise<GroupAgentRunResult> {
     const initialModelSelection = defaultModelStatusSelection(
       group.agentConfig?.model ?? DEFAULT_MODEL_ALIAS,
     );
@@ -278,7 +291,9 @@ export function createGroupAgentRunner(input: {
     };
     const persistProviderSessionFromOutput = async (output: AgentOutput) => {
       if (output.status === 'error') return;
-      const nextSessionId = output.newSessionId?.trim();
+      const nextSessionId = (
+        output.providerSession?.externalSessionId ?? output.newSessionId
+      )?.trim();
       if (
         !nextSessionId ||
         nextSessionId === latestProviderSessionId ||
@@ -415,7 +430,7 @@ export function createGroupAgentRunner(input: {
     const attachedMcpSourceIds = await resolveTurnSelectedMcpServerIds(
       deps,
       turnContext,
-      configuredToolPolicy.allowedTools,
+      configuredToolPolicy.toolPolicyRules,
     );
     const memoryContextBlock = [
       turnContext?.memoryContextBlock,
@@ -492,7 +507,7 @@ export function createGroupAgentRunner(input: {
             memoryDefaultScope: defaultMemoryScope,
             memoryReviewerIsControlApprover,
             persona: group.agentConfig?.persona,
-            allowedTools: configuredToolPolicy.allowedTools,
+            toolPolicyRules: configuredToolPolicy.toolPolicyRules,
             runtimeAccess: configuredToolPolicy.runtimeAccess,
             attachedSkillSourceIds: selectedSkillContext.ids,
             selectedSkillDisplays: selectedSkillContext.displays,
@@ -540,15 +555,35 @@ export function createGroupAgentRunner(input: {
         memoryContextBlock,
         resumeSessionId: turnContext?.externalSessionId,
       });
+      const activeExecutionAdapter = resolveAgentExecutionAdapter({
+        executionProviderId,
+        registry: deps.executionAdapters,
+        fallback: deps.executionAdapter,
+      });
+      const missingProviderSession =
+        activeExecutionAdapter?.isMissingProviderSessionError?.(output.error) ??
+        isMissingProviderSessionError(output.error);
       if (
         output.status === 'error' &&
-        isMissingProviderSessionError(output.error) &&
+        missingProviderSession &&
         (await expireTurnProviderSession(output.error ?? 'missing session'))
       ) {
         output = await invokeAgent({ memoryContextBlock });
       }
       await forwardRuntimeEvents(output);
       if (output.status === 'error') {
+        if (isStoppedByRequest(output)) {
+          runtimeLogger.warn(
+            { group: group.name },
+            'Agent runner stopped by request',
+          );
+          await completeFailedRuntimeSessionRun({
+            ops: ops(),
+            runId: runState.runId,
+            errorSummary: output.error ?? 'Agent runner stopped by request',
+          });
+          return 'stopped';
+        }
         runtimeLogger.error(
           { group: group.name, error: output.error },
           'Agent runner error',

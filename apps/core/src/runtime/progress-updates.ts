@@ -1,6 +1,10 @@
 import type { ProgressUpdateOptions } from '../domain/types.js';
 
-export type FinalProgressState = 'completed' | 'failed' | 'delivery_incomplete';
+export type FinalProgressState =
+  | 'completed'
+  | 'failed'
+  | 'delivery_incomplete'
+  | 'stopped';
 
 export function buildDoneProgressOptions(
   threadId?: string,
@@ -40,6 +44,8 @@ export async function sendFinalProgressUpdate(args: {
       ? `Failed after ${args.elapsed}.`
       : args.state === 'delivery_incomplete'
         ? `Delivery incomplete after ${args.elapsed}.`
-        : `Done in ${args.elapsed}.`;
+        : args.state === 'stopped'
+          ? `Stopped after ${args.elapsed}.`
+          : `Done in ${args.elapsed}.`;
   await args.send(status, args.options).catch((err) => args.onError?.(err));
 }
