@@ -5,7 +5,8 @@ import { createLogger } from './logger.js';
 import { startHttpServer } from './server.js';
 import { startDigestWatcher } from './watcher/index.js';
 import { createAnthropicExtractorLlm } from './extractor/llm-client.js';
-import { bootstrapOneCliCredentials } from './onecli-bootstrap.js';
+import { bootstrapGantryCredentials } from './gantry-credentials.js';
+import { createPool } from './db/pool.js';
 
 // Public surface (also used by tests / the migrate + smoke scripts).
 export { loadEnv } from './env.js';
@@ -32,17 +33,29 @@ const isEntry =
 if (isEntry) {
   void (async () => {
     loadRuntimeEnv();
-    // Project the model credential from the OneCLI broker the same way Gantry core
-    // does — sets CLAUDE_CODE_OAUTH_TOKEN + proxy + CA into this process's env. The
-    // extractor hands these to the Agent SDK's query() (which spawns the Claude
-    // CLI); the connector process makes no outbound model HTTPS itself, so no
-    // re-exec is needed.
-    await bootstrapOneCliCredentials((msg, extra) =>
+    const env = loadEnv();
+    const bootLog = (msg: string, extra?: Record<string, unknown>) =>
       console.error(
         JSON.stringify({ level: 'info', service: 'mcp-crm', msg, ...(extra ?? {}) }),
-      ),
-    );
-    const env = loadEnv();
+      );
+
+    // Resolve the Anthropic credential from core's Credential Center (the gantry
+    // schema's model_credentials table) and project CLAUDE_CODE_OAUTH_TOKEN — the
+    // same projection core's model gateway makes. loadRuntimeEnv() above has
+    // already loaded ~/gantry/.env into process.env (including
+    // SECRET_ENCRYPTION_KEY / SECRET_ENCRYPTION_KEYRING_JSON, which are NOT
+    // forbidden runtime-secret names), so the package default
+    // EnvRuntimeSecretProvider (process.env-backed) can read the key. A short-lived
+    // pool scoped to the gantry schema reads the row, then is closed.
+    const credPool = createPool(env.databaseUrl, env.gantrySchema);
+    try {
+      await bootstrapGantryCredentials(credPool, {
+        appId: env.modelAppId,
+        log: bootLog,
+      });
+    } finally {
+      await credPool.end().catch(() => undefined);
+    }
     const logger = createLogger({
       level: env.logLevel,
       format: env.logFormat,

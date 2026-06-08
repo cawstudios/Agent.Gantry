@@ -13,25 +13,21 @@ export interface ExtractorLlm {
 // hung CLI subprocess must not wedge the watcher forever.
 const QUERY_TIMEOUT_MS = 120_000;
 
-// Credential + transport keys the OneCLI bootstrap (onecli-bootstrap.ts) projects
-// into this process's env at startup. We hand exactly these to the spawned CLI —
-// NOT the whole ambient env — so it authenticates the same way Gantry core does
-// and so stray CLAUDE_CODE_* markers (present only when run from inside Claude
-// Code, e.g. a probe) never make the child think it is nested.
-// Token vs API key are mutually exclusive by construction: the bootstrap early-
-// returns when ANTHROPIC_API_KEY is set (and never projects the OAuth token), so
-// at most one auth credential is ever present here. ANTHROPIC_API_KEY is kept in
-// the list only so that deliberate raw-key path still reaches the child.
+// Credential keys the bootstrap (gantry-credentials.ts) projects into this
+// process's env at startup. We hand exactly these to the spawned CLI — NOT the
+// whole ambient env — so it authenticates the same way Gantry core does and so
+// stray CLAUDE_CODE_* markers (present only when run from inside Claude Code,
+// e.g. a probe) never make the child think it is nested. No proxy/CA: the
+// Credential Center hands a real OAuth token that reaches Anthropic directly
+// (core's agent runs on it with no proxy).
+// Token vs API key are mutually exclusive by construction: the bootstrap
+// early-returns when ANTHROPIC_API_KEY is set (and never projects the OAuth
+// token), so at most one auth credential is ever present here. ANTHROPIC_API_KEY
+// is kept in the list only so the deliberate raw-key path still reaches the child.
 const SDK_ENV_KEYS = [
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_API_KEY',
-  'HTTPS_PROXY',
-  'HTTP_PROXY',
-  'https_proxy',
-  'http_proxy',
-  'NODE_USE_ENV_PROXY',
-  'NODE_EXTRA_CA_CERTS',
   'PATH',
   'HOME',
 ] as const;
@@ -80,8 +76,9 @@ function readResultText(message: unknown): string {
 // path Gantry core uses for the live agent and memory extraction. This matters:
 // a subscription OAuth token (what the OneCLI broker hands us) is rate-limited to
 // 429 on the raw Messages API, but works through the first-party CLI the Agent SDK
-// spawns. The OneCLI bootstrap must have projected the credential + proxy + CA into
-// this process's env first; otherwise this returns null and the extractor disables.
+// spawns. The Credential Center bootstrap (gantry-credentials.ts) must have projected the
+// OAuth token into this process's env first; otherwise this returns null and the
+// extractor disables.
 export function createAnthropicExtractorLlm(env: BoondiCrmEnv): ExtractorLlm | null {
   if (!hasModelCredential(env)) return null;
   return {
