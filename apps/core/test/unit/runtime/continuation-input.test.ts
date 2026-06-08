@@ -4,7 +4,7 @@ import { getContinuationInputDir } from '@core/runtime/continuation-input.js';
 import {
   makeThreadQueueKey,
   parseThreadQueueKey,
-} from '@core/runtime/thread-queue-key.js';
+} from '@core/shared/thread-queue-key.js';
 
 // Regression guard for the concurrency context-bleed bug: the continuation-input
 // mailbox MUST be isolated per conversation. Before the fix it was keyed only by

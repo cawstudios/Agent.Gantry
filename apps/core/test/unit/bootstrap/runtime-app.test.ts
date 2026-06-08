@@ -203,6 +203,7 @@ describe('runtime app credential binding', () => {
       }),
     ).resolves.toEqual({ action: 'allow', reason: 'ok' });
     expect(runClaudeQuery).toHaveBeenCalledWith({
+      appId: 'default',
       model: 'claude-haiku-4-5-20251001',
       systemPrompt: 'classify',
       disableTools: true,
