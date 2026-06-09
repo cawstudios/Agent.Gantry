@@ -836,6 +836,75 @@ describe("@cawstudios/agent-gantry", () => {
     expect(String(calls[0]?.[0])).toContain('"gantry_runtime"."runtime_messages"');
   });
 
+  it("creates, reads, and merges pg-backed user conversation state by full scope key", async () => {
+    const calls: unknown[][] = [];
+    const storage = createPgGantryRuntimeStorage({
+      pool: {
+        query: async (...args: unknown[]) => {
+          calls.push(args);
+          return {
+            rows: [{
+              provider: "teams",
+              tenant_id: "tenant-1",
+              user_id: "user-1",
+              conversation_id: "conversation-1",
+              conversation_scope_type: "teams_thread",
+              conversation_scope_id: "reply-1",
+              summary_text: "Safe UX summary",
+              state_json: { last_intent: "document_qa" },
+              last_tender_id: "tender-1",
+              last_seen_at: new Date("2026-06-01T00:00:00.000Z"),
+              expires_at: new Date("2026-07-01T00:00:00.000Z"),
+              created_at: new Date("2026-06-01T00:00:00.000Z"),
+              updated_at: new Date("2026-06-01T00:00:00.000Z"),
+            }],
+          };
+        },
+      },
+    });
+    const key = {
+      provider: "teams",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      conversationId: "conversation-1",
+      conversationScopeType: "teams_thread",
+      conversationScopeId: "reply-1",
+    };
+
+    await expect(storage.upsertUserConversationState?.({
+      ...key,
+      summaryText: "Safe UX summary",
+      stateJson: { last_intent: "document_qa" },
+      lastTenderId: "tender-1",
+      lastSeenAt: "2026-06-01T00:00:00.000Z",
+      expiresAt: "2026-07-01T00:00:00.000Z",
+    })).resolves.toMatchObject({
+      ...key,
+      summaryText: "Safe UX summary",
+      stateJson: { last_intent: "document_qa" },
+    });
+    await storage.getUserConversationState?.(key);
+    await storage.mergeUserConversationState?.({
+      ...key,
+      summaryText: "Safe follow-up",
+      stateJson: { last_answered: true },
+      lastSeenAt: "2026-06-01T00:01:00.000Z",
+      expiresAt: "2026-07-01T00:01:00.000Z",
+    });
+
+    expect(String(calls[0]?.[0])).toContain('"gantry_runtime"."user_conversation_state"');
+    expect(String(calls[1]?.[0])).toContain("expires_at > now()");
+    expect(String(calls[2]?.[0])).toContain("state_json");
+    expect(calls[1]?.[1]).toEqual([
+      "teams",
+      "tenant-1",
+      "user-1",
+      "conversation-1",
+      "teams_thread",
+      "reply-1",
+    ]);
+  });
+
   it("runs structured model tasks and records audit state", async () => {
     const audits: unknown[] = [];
     const runner = createStructuredModelTaskRunner({
