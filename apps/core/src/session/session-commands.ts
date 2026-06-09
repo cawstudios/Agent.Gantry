@@ -44,7 +44,6 @@ export type SessionCommand =
   | { kind: 'memory_status'; raw: '/memory-status' }
   | { kind: 'digest_session'; raw: '/digest-session' }
   | { kind: 'extract_memory_facts'; raw: '/extract-memory-facts' }
-  | { kind: 'extract_leads_queries'; raw: '/extract-leads-queries' }
   | { kind: 'models_list'; raw: '/models' }
   | { kind: 'status'; raw: '/status' }
   | { kind: 'save_procedure'; raw: string; title: string; body?: string }
@@ -143,8 +142,6 @@ export function extractSessionCommand(
     return { kind: 'digest_session', raw: '/digest-session' };
   if (text === '/extract-memory-facts')
     return { kind: 'extract_memory_facts', raw: '/extract-memory-facts' };
-  if (text === '/extract-leads-queries')
-    return { kind: 'extract_leads_queries', raw: '/extract-leads-queries' };
   if (text === '/models') return { kind: 'models_list', raw: '/models' };
   if (text === '/status') return { kind: 'status', raw: '/status' };
   if (text === '/model') return { kind: 'model_show', raw: '/model' };
@@ -242,13 +239,6 @@ export interface SessionCommandDeps {
   collectCurrentSessionMemory?: (input: {
     excludeMessageIds?: string[];
   }) => Promise<{ saved: number; digestCreated?: boolean }>;
-  extractLeadQueries?: () => Promise<{
-    digests: number;
-    extracted: number;
-    created: number;
-    updated: number;
-    skipped: number;
-  }>;
   saveProcedure?: (input: {
     title: string;
     body: string;
@@ -260,7 +250,8 @@ export interface SessionCommandDeps {
   getAgentCommand?: (
     name: string,
   ) => Promise<
-    import('../application/commands/agent-command-types.js').AgentCommandModule | null
+    | import('../application/commands/agent-command-types.js').AgentCommandModule
+    | null
   >;
   buildAgentCommandContext?: () => import('../application/commands/agent-command-types.js').AgentCommandContext;
 }
@@ -409,15 +400,6 @@ export async function handleSessionCommand(opts: {
   }
 
   if (command.kind === 'extract_memory_facts') {
-    return handleManualExtractionCommand({
-      kind: command.kind,
-      deps,
-      cmdMsg,
-      sanitizeErrorText,
-    });
-  }
-
-  if (command.kind === 'extract_leads_queries') {
     return handleManualExtractionCommand({
       kind: command.kind,
       deps,
@@ -764,7 +746,9 @@ export async function handleSessionCommand(opts: {
     const { getAgentCommand, buildAgentCommandContext } = deps;
     if (!getAgentCommand || !buildAgentCommandContext) {
       deps.advanceCursor(cmdMsg);
-      await deps.sendMessage(`/${command.name} is unavailable in this runtime.`);
+      await deps.sendMessage(
+        `/${command.name} is unavailable in this runtime.`,
+      );
       return { handled: true, success: true };
     }
     return handleAgentCommand({

@@ -22,7 +22,6 @@ export function formatSessionCommandsHelp(
     '/dream - Run memory dreaming now when enabled.',
     '/digest-session - Capture the current conversation boundary for memory processing.',
     '/extract-memory-facts - Extract memory facts from the current conversation boundary.',
-    '/extract-leads-queries - Extract CRM lead/query candidates from the current conversation boundary.',
     '',
     'Thinking',
     '/thinking - Show the current thinking setting.',

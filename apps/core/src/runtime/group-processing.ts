@@ -244,7 +244,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
           memoryUserId,
           collectMemory: collectSessionMemory,
           executionAdapter: deps.executionAdapter,
-          extractLeadQueries: deps.extractLeadQueries,
         }),
         saveProcedure: createSaveProcedureHandler({
           folder: group.folder,

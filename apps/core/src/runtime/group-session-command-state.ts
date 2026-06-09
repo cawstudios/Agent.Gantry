@@ -13,9 +13,13 @@ import {
 } from '../shared/message-cursor.js';
 import { isTestOperatorJid } from '../shared/test-mode.js';
 import { archiveCurrentRuntimeSession } from './session-resume-runtime.js';
-import { saveGroupProcedureMemory } from './group-memory-commands.js';
+import {
+  getGroupMemoryStatus,
+  saveGroupProcedureMemory,
+} from './group-memory-commands.js';
 import { resolveRuntimeExecutionProviderId } from './execution-provider-id.js';
 import type { AgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter.js';
+import { runDreamingForGroup } from './memory-dreaming-runner.js';
 
 type ArchiveSessionInput = Parameters<typeof archiveCurrentRuntimeSession>[0];
 type SenderPolicyGroup = {
@@ -99,6 +103,95 @@ export function createPrepareSessionArchiveHandler(input: {
         defaultScope: input.defaultScope,
       });
     };
+  };
+}
+
+export function createCollectCurrentSessionMemoryHandler(input: {
+  ops: () => RuntimeAgentSessionRepository;
+  group: ArchiveSessionInput['group'];
+  chatJid: string;
+  threadId: string | null;
+  defaultScope: 'user' | 'group';
+  memoryUserId?: string;
+  collectMemory?: SessionMemoryCollector;
+  executionAdapter?: Pick<AgentExecutionAdapter, 'id'>;
+}) {
+  return async (options: { excludeMessageIds?: string[] } = {}) => {
+    if (!input.collectMemory) {
+      throw new Error('session memory collection is unavailable');
+    }
+    const turnContext = await input.ops().getAgentTurnContext?.({
+      agentFolder: input.group.folder,
+      executionProviderId: resolveRuntimeExecutionProviderId(
+        input.executionAdapter,
+      ),
+      conversationJid: input.chatJid,
+      threadId: input.threadId,
+      conversationKind: input.group.conversationKind,
+      memoryUserId: input.memoryUserId,
+      hydrateMemory: false,
+    });
+    if (!turnContext?.agentSessionId) {
+      return { saved: 0, digestCreated: false };
+    }
+    return input.collectMemory({
+      agentSessionId: turnContext.agentSessionId,
+      trigger: 'session-end',
+      defaultScope: input.defaultScope,
+      ...(options.excludeMessageIds
+        ? { excludeMessageIds: options.excludeMessageIds }
+        : {}),
+    });
+  };
+}
+
+export function createManualExtractionCommandHandlers(input: {
+  ops: () => RuntimeAgentSessionRepository;
+  group: ArchiveSessionInput['group'];
+  chatJid: string;
+  threadId: string | null;
+  defaultScope: 'user' | 'group';
+  memoryUserId?: string;
+  collectMemory?: SessionMemoryCollector;
+  executionAdapter?: Pick<AgentExecutionAdapter, 'id'>;
+}) {
+  return {
+    collectCurrentSessionMemory:
+      createCollectCurrentSessionMemoryHandler(input),
+  };
+}
+
+export function createMemorySessionCommandHandlers(input: {
+  group: ArchiveSessionInput['group'];
+  chatJid: string;
+  activeThreadId?: string;
+  defaultScope: 'user' | 'group';
+  memoryUserId?: string;
+  embeddingStatus: 'configured' | 'disabled';
+}) {
+  return {
+    runMemoryDreaming: () =>
+      runDreamingForGroup({
+        folder: input.group.folder,
+        conversationId: input.chatJid,
+        userId: input.memoryUserId,
+        activeThreadId: input.activeThreadId,
+        defaultScope: input.defaultScope,
+      }),
+    getMemoryStatus: async () => {
+      return getGroupMemoryStatus(
+        {
+          folder: input.group.folder,
+          conversationId: input.chatJid,
+          userId: input.memoryUserId,
+          threadId: input.activeThreadId,
+          defaultScope: input.defaultScope,
+        },
+        {
+          embeddings: input.embeddingStatus,
+        },
+      );
+    },
   };
 }
 

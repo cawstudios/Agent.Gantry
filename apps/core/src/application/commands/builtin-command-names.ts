@@ -6,6 +6,9 @@
  * Kept in its own file (no side-effectful imports) so the settings parser can
  * import this constant without pulling in the full command-registry module.
  */
+// NOTE: 'extract-leads-queries' is intentionally NOT here. It is the canonical
+// agent-declared command (activated per-agent via plugins.commands), not a core
+// built-in — including it would block agents from declaring it.
 export const BUILTIN_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'commands',
   'compact',

@@ -213,10 +213,6 @@ describe('extractSessionCommand', () => {
       kind: 'extract_memory_facts',
       raw: '/extract-memory-facts',
     });
-    expect(extractSessionCommand('/extract-leads-queries', trigger)).toEqual({
-      kind: 'extract_leads_queries',
-      raw: '/extract-leads-queries',
-    });
   });
 
   it('rejects legacy and suffixed manual digest command variants', () => {
@@ -224,9 +220,6 @@ describe('extractSessionCommand', () => {
     expect(extractSessionCommand('/digest-session now', trigger)).toBeNull();
     expect(
       extractSessionCommand('/extract-memory-facts now', trigger),
-    ).toBeNull();
-    expect(
-      extractSessionCommand('/extract-leads-queries now', trigger),
     ).toBeNull();
   });
 
@@ -277,7 +270,6 @@ describe('formatSessionCommandsHelp', () => {
 
     expect(help).toContain('/digest-session');
     expect(help).toContain('/extract-memory-facts');
-    expect(help).toContain('/extract-leads-queries');
     expect(help).not.toContain('/digest-summary');
   });
 });
@@ -661,42 +653,10 @@ describe('handleSessionCommand', () => {
     );
   });
 
-  it('handles /extract-leads-queries through injected CRM extraction stats', async () => {
-    const deps = makeDeps({
-      collectCurrentSessionMemory: vi.fn().mockResolvedValue({
-        saved: 1,
-        digestCreated: true,
-      }),
-      extractLeadQueries: vi.fn().mockResolvedValue({
-        digests: 1,
-        extracted: 2,
-        created: 1,
-        updated: 1,
-        skipped: 0,
-      }),
-    });
-    const result = await handleSessionCommand({
-      missedMessages: [makeMsg('/extract-leads-queries', { id: 'cmd-1' })],
-      groupName: 'test',
-      triggerPattern: trigger,
-      timezone: 'UTC',
-      deps,
-    });
-
-    expect(result).toEqual({ handled: true, success: true });
-    expect(deps.collectCurrentSessionMemory).toHaveBeenCalledWith({
-      excludeMessageIds: ['cmd-1'],
-    });
-    expect(deps.extractLeadQueries).toHaveBeenCalledTimes(1);
-    expect(deps.sendMessage).toHaveBeenCalledWith(
-      'Lead/query extraction processed. Digests: 1. Opportunities extracted: 2. Created: 1. Updated: 1. Skipped: 0.',
-    );
-  });
-
   it('reports unavailable manual command dependencies clearly', async () => {
     const deps = makeDeps();
     const result = await handleSessionCommand({
-      missedMessages: [makeMsg('/extract-leads-queries')],
+      missedMessages: [makeMsg('/extract-memory-facts')],
       groupName: 'test',
       triggerPattern: trigger,
       timezone: 'UTC',
@@ -705,7 +665,7 @@ describe('handleSessionCommand', () => {
 
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.sendMessage).toHaveBeenCalledWith(
-      '/extract-leads-queries is unavailable in this runtime.',
+      '/extract-memory-facts is unavailable in this runtime.',
     );
   });
 
