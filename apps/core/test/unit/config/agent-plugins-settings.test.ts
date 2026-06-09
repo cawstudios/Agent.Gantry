@@ -23,6 +23,7 @@ describe('agent plugins settings (plugins.*)', () => {
           '      guardrail:',
           '        file: guardrail.ts',
           '        model: haiku',
+          '        mode: deterministic',
           '      memory_extraction: MEMORY_EXTRACTION.md',
           '      skills:',
           '        - boondi-kb',
@@ -31,7 +32,11 @@ describe('agent plugins settings (plugins.*)', () => {
       ),
     );
     expect(parsed.agents.boondi_support.plugins).toEqual({
-      guardrail: { file: 'guardrail.ts', model: 'haiku' },
+      guardrail: {
+        file: 'guardrail.ts',
+        model: 'haiku',
+        mode: 'deterministic',
+      },
       memoryExtraction: 'MEMORY_EXTRACTION.md',
       skills: ['boondi-kb', 'returns-kb'],
     });
@@ -50,6 +55,7 @@ describe('agent plugins settings (plugins.*)', () => {
           '      guardrail:',
           '        file: guardrail.ts',
           '        model: haiku',
+          '        mode: classifier',
           '      memory_extraction: MEMORY_EXTRACTION.md',
           '      skills:',
           '        - boondi-kb',
@@ -60,15 +66,50 @@ describe('agent plugins settings (plugins.*)', () => {
     expect(yaml).toContain('plugins:');
     expect(yaml).toContain('guardrail:');
     expect(yaml).toContain('file: guardrail.ts');
+    expect(yaml).toContain('mode: classifier');
     expect(yaml).toContain('memory_extraction: MEMORY_EXTRACTION.md');
     expect(yaml).toContain('- boondi-kb');
 
     const reparsed = parseRuntimeSettings(yaml);
     expect(reparsed.agents.boondi_support.plugins).toEqual({
-      guardrail: { file: 'guardrail.ts', model: 'haiku' },
+      guardrail: { file: 'guardrail.ts', model: 'haiku', mode: 'classifier' },
       memoryExtraction: 'MEMORY_EXTRACTION.md',
       skills: ['boondi-kb'],
     });
+  });
+
+  it('defaults guardrail mode to both when omitted', () => {
+    const parsed = parseRuntimeSettings(
+      agentYaml(
+        [
+          '    plugins:',
+          '      guardrail:',
+          '        file: guardrail.ts',
+          '        model: haiku',
+        ].join('\n'),
+      ),
+    );
+    expect(parsed.agents.boondi_support.plugins?.guardrail).toEqual({
+      file: 'guardrail.ts',
+      model: 'haiku',
+      mode: 'both',
+    });
+  });
+
+  it('rejects invalid guardrail modes', () => {
+    expect(() =>
+      parseRuntimeSettings(
+        agentYaml(
+          [
+            '    plugins:',
+            '      guardrail:',
+            '        file: guardrail.ts',
+            '        model: haiku',
+            '        mode: random',
+          ].join('\n'),
+        ),
+      ),
+    ).toThrow(/guardrail\.mode must be one of/);
   });
 
   it('activates the exact guardrail file named (an agent may keep several)', () => {
@@ -85,6 +126,7 @@ describe('agent plugins settings (plugins.*)', () => {
     expect(parsed.agents.boondi_support.plugins?.guardrail).toEqual({
       file: 'guardrail-strict.ts',
       model: 'haiku',
+      mode: 'both',
     });
   });
 
@@ -109,6 +151,47 @@ describe('agent plugins settings (plugins.*)', () => {
         agentYaml(['    plugins:', '      bogus: nope'].join('\n')),
       ),
     ).toThrow(/plugins\.bogus is not supported/);
+  });
+
+  it('parses a commands list', () => {
+    const parsed = parseRuntimeSettings(
+      agentYaml(
+        [
+          '    plugins:',
+          '      commands:',
+          '        - extract-leads-queries',
+          '        - reindex-knowledge',
+        ].join('\n'),
+      ),
+    );
+    expect(parsed.agents.boondi_support.plugins?.commands).toEqual([
+      'extract-leads-queries',
+      'reindex-knowledge',
+    ]);
+  });
+
+  it('rejects a command name that collides with a built-in', () => {
+    expect(() =>
+      parseRuntimeSettings(
+        agentYaml(
+          ['    plugins:', '      commands:', '        - new'].join('\n'),
+        ),
+      ),
+    ).toThrow(/built-in/i);
+  });
+
+  it('rejects a command name that is not kebab-case', () => {
+    expect(() =>
+      parseRuntimeSettings(
+        agentYaml(
+          [
+            '    plugins:',
+            '      commands:',
+            '        - Extract_Leads',
+          ].join('\n'),
+        ),
+      ),
+    ).toThrow(/kebab/i);
   });
 
   it('rejects path-escaping plugin references (defense in depth)', () => {

@@ -9,25 +9,7 @@ import {
   type AgentCommandModule,
 } from './agent-command-types.js';
 
-/**
- * Built-in command names owned by core (see session-commands.ts). An agent
- * command may not shadow one of these; the settings parser rejects collisions.
- */
-export const BUILTIN_COMMAND_NAMES: ReadonlySet<string> = new Set([
-  'commands',
-  'compact',
-  'new',
-  'stop',
-  'dream',
-  'memory-status',
-  'digest-session',
-  'extract-memory-facts',
-  'models',
-  'status',
-  'model',
-  'save-procedure',
-  'thinking',
-]);
+export { BUILTIN_COMMAND_NAMES } from './builtin-command-names.js';
 
 const pluginCache = new Map<string, AgentCommandModule | null>();
 

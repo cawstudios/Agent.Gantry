@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { BUILTIN_COMMAND_NAMES } from '../../application/commands/builtin-command-names.js';
 import { parseAgentPersona } from '../../shared/agent-persona.js';
 import type { ThinkingOverride } from '../../domain/types.js';
 import {
@@ -176,9 +177,9 @@ function parseConfiguredAgentGuardrail(
   }
   const map = raw as Record<string, unknown>;
   for (const key of Object.keys(map)) {
-    if (key !== 'file' && key !== 'model') {
+    if (key !== 'file' && key !== 'model' && key !== 'mode') {
       throw new Error(
-        `${pathPrefix}.${key} is not supported. Configure file or model.`,
+        `${pathPrefix}.${key} is not supported. Configure file, model, or mode.`,
       );
     }
   }
@@ -188,7 +189,24 @@ function parseConfiguredAgentGuardrail(
   if (!resolved.ok) {
     throw new Error(`${pathPrefix}.model is invalid: ${resolved.message}`);
   }
-  return { file, model };
+  const mode =
+    map.mode === undefined
+      ? 'both'
+      : parseGuardrailMode(map.mode, `${pathPrefix}.mode`);
+  return { file, model, mode };
+}
+
+function parseGuardrailMode(
+  raw: unknown,
+  pathPrefix: string,
+): RuntimeConfiguredAgentGuardrail['mode'] {
+  const value = parseStringValue(raw, pathPrefix);
+  if (value === 'both' || value === 'deterministic' || value === 'classifier') {
+    return value;
+  }
+  throw new Error(
+    `${pathPrefix} must be one of both, deterministic, or classifier`,
+  );
 }
 
 // A skill id is a single folder name under `skills/` — keep it a plain segment.
@@ -242,10 +260,11 @@ function parseConfiguredAgentPlugins(
     if (
       key !== 'guardrail' &&
       key !== 'memory_extraction' &&
-      key !== 'skills'
+      key !== 'skills' &&
+      key !== 'commands'
     ) {
       throw new Error(
-        `${pathPrefix}.${key} is not supported. Configure guardrail, memory_extraction, or skills.`,
+        `${pathPrefix}.${key} is not supported. Configure guardrail, memory_extraction, skills, or commands.`,
       );
     }
   }
@@ -268,6 +287,25 @@ function parseConfiguredAgentPlugins(
     plugins.skills = map.skills.map((item, index) =>
       parsePluginPathSegment(item, `${pathPrefix}.skills[${index}]`),
     );
+  }
+  if (map.commands !== undefined) {
+    if (!Array.isArray(map.commands)) {
+      throw new Error(`${pathPrefix}.commands must be an array of command names`);
+    }
+    plugins.commands = map.commands.map((item, index) => {
+      const name = parseStringValue(item, `${pathPrefix}.commands[${index}]`);
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+        throw new Error(
+          `${pathPrefix}.commands[${index}] must be kebab-case (lowercase, hyphen-separated)`,
+        );
+      }
+      if (BUILTIN_COMMAND_NAMES.has(name)) {
+        throw new Error(
+          `${pathPrefix}.commands[${index}] "${name}" collides with a built-in command`,
+        );
+      }
+      return name;
+    });
   }
   return plugins;
 }

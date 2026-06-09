@@ -26,6 +26,8 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export type GuardrailMode = 'both' | 'deterministic' | 'classifier';
+
 export interface GuardrailConfig {
   /**
    * Exact guardrail plugin file in the agent's runtime folder (e.g.
@@ -36,6 +38,11 @@ export interface GuardrailConfig {
   file: string;
   /** Model alias for the guardrail's LLM-classifier stage. */
   model: string;
+  /**
+   * Which guardrail stages to run. Omit for the current default: deterministic
+   * policy checks first, then the classifier for unresolved ambiguous input.
+   */
+  mode?: GuardrailMode;
 }
 
 /**
@@ -67,6 +74,13 @@ export interface AgentPluginsConfig {
    * materialized for the agent; undeclared skill folders are inert.
    */
   skills?: string[];
+  /**
+   * Slash-command names this agent activates. Each name maps to a module at
+   * `<folder>/commands/<name>.{ts,js}` exporting an AgentCommandModule. Only
+   * listed names are loaded; undeclared command files are inert. A name may not
+   * collide with a built-in command.
+   */
+  commands?: string[];
 }
 
 /**
