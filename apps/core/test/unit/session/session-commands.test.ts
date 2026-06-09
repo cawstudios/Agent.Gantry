@@ -4,6 +4,7 @@ import {
   handleSessionCommand,
   isSessionCommandAllowed,
 } from '@core/session/session-commands.js';
+import { formatSessionCommandsHelp } from '@core/session/session-command-help.js';
 import type { NewMessage } from '@core/domain/types.js';
 import type { SessionCommandDeps } from '@core/session/session-commands.js';
 
@@ -203,6 +204,32 @@ describe('extractSessionCommand', () => {
     });
   });
 
+  it('detects only approved manual digest and extraction commands', () => {
+    expect(extractSessionCommand('/digest-session', trigger)).toEqual({
+      kind: 'digest_session',
+      raw: '/digest-session',
+    });
+    expect(extractSessionCommand('/extract-memory-facts', trigger)).toEqual({
+      kind: 'extract_memory_facts',
+      raw: '/extract-memory-facts',
+    });
+    expect(extractSessionCommand('/extract-leads-queries', trigger)).toEqual({
+      kind: 'extract_leads_queries',
+      raw: '/extract-leads-queries',
+    });
+  });
+
+  it('rejects legacy and suffixed manual digest command variants', () => {
+    expect(extractSessionCommand('/digest-summary', trigger)).toBeNull();
+    expect(extractSessionCommand('/digest-session now', trigger)).toBeNull();
+    expect(
+      extractSessionCommand('/extract-memory-facts now', trigger),
+    ).toBeNull();
+    expect(
+      extractSessionCommand('/extract-leads-queries now', trigger),
+    ).toBeNull();
+  });
+
   it('detects /save-procedure with quoted title and body', () => {
     expect(
       extractSessionCommand(
@@ -224,6 +251,34 @@ describe('extractSessionCommand', () => {
   it('is case-sensitive for commands', () => {
     expect(extractSessionCommand('/Compact', trigger)).toBeNull();
     expect(extractSessionCommand('/Model', trigger)).toBeNull();
+  });
+
+  it('recognizes a configured agent command name', () => {
+    const cmd = extractSessionCommand('/reindex-knowledge', trigger, [
+      'reindex-knowledge',
+    ]);
+    expect(cmd).toEqual({
+      kind: 'agent_command',
+      raw: '/reindex-knowledge',
+      name: 'reindex-knowledge',
+    });
+  });
+
+  it('does not recognize an unconfigured slash word', () => {
+    expect(
+      extractSessionCommand('/nope', trigger, ['reindex-knowledge']),
+    ).toBeNull();
+  });
+});
+
+describe('formatSessionCommandsHelp', () => {
+  it('lists approved manual extraction commands and omits /digest-summary', () => {
+    const help = formatSessionCommandsHelp();
+
+    expect(help).toContain('/digest-session');
+    expect(help).toContain('/extract-memory-facts');
+    expect(help).toContain('/extract-leads-queries');
+    expect(help).not.toContain('/digest-summary');
   });
 });
 
@@ -531,6 +586,126 @@ describe('handleSessionCommand', () => {
     );
     expect(deps.sendMessage).toHaveBeenCalledWith(
       expect.stringContaining('top_used: fact:key(12)'),
+    );
+  });
+
+  it('denies unauthorized manual extraction commands through existing session command auth', async () => {
+    const deps = makeDeps();
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/extract-memory-facts', { is_from_me: false })],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'Session commands require admin access.',
+    );
+    expect(deps.runAgent).not.toHaveBeenCalled();
+  });
+
+  it('handles /digest-session by collecting current session memory and excluding the command message', async () => {
+    const collectCurrentSessionMemory = vi.fn().mockResolvedValue({
+      saved: 2,
+      digestCreated: true,
+    });
+    const deps = makeDeps({ collectCurrentSessionMemory });
+    const result = await handleSessionCommand({
+      missedMessages: [
+        makeMsg('lead context', { id: 'msg-context', timestamp: '99' }),
+        makeMsg('/digest-session', { id: 'msg-command', timestamp: '100' }),
+      ],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.runAgent).not.toHaveBeenCalled();
+    expect(deps.formatMessages).not.toHaveBeenCalled();
+    expect(collectCurrentSessionMemory).toHaveBeenCalledWith({
+      excludeMessageIds: ['msg-command'],
+    });
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'Digest processed. New digest: yes. Memory facts saved: 2.',
+    );
+    expect(deps.advanceCursor).toHaveBeenCalledWith(
+      expect.objectContaining({ timestamp: '100' }),
+    );
+  });
+
+  it('handles /extract-memory-facts through current session memory collection', async () => {
+    const deps = makeDeps({
+      collectCurrentSessionMemory: vi.fn().mockResolvedValue({
+        saved: 0,
+        digestCreated: false,
+      }),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/extract-memory-facts', { id: 'cmd-1' })],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.collectCurrentSessionMemory).toHaveBeenCalledWith({
+      excludeMessageIds: ['cmd-1'],
+    });
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'Memory extraction processed. Facts saved: 0. New digest: no.',
+    );
+  });
+
+  it('handles /extract-leads-queries through injected CRM extraction stats', async () => {
+    const deps = makeDeps({
+      collectCurrentSessionMemory: vi.fn().mockResolvedValue({
+        saved: 1,
+        digestCreated: true,
+      }),
+      extractLeadQueries: vi.fn().mockResolvedValue({
+        digests: 1,
+        extracted: 2,
+        created: 1,
+        updated: 1,
+        skipped: 0,
+      }),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/extract-leads-queries', { id: 'cmd-1' })],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.collectCurrentSessionMemory).toHaveBeenCalledWith({
+      excludeMessageIds: ['cmd-1'],
+    });
+    expect(deps.extractLeadQueries).toHaveBeenCalledTimes(1);
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'Lead/query extraction processed. Digests: 1. Opportunities extracted: 2. Created: 1. Updated: 1. Skipped: 0.',
+    );
+  });
+
+  it('reports unavailable manual command dependencies clearly', async () => {
+    const deps = makeDeps();
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/extract-leads-queries')],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      '/extract-leads-queries is unavailable in this runtime.',
     );
   });
 

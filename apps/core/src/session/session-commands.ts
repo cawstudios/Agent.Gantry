@@ -32,6 +32,7 @@ import {
   runNewSessionArchiveFinalizer,
   type PrepareSessionArchive,
 } from './session-new-archive.js';
+import { handleManualExtractionCommand } from './session-manual-extraction-commands.js';
 
 export type SessionCommand =
   | { kind: 'commands'; raw: '/commands' }
@@ -40,6 +41,9 @@ export type SessionCommand =
   | { kind: 'stop'; raw: '/stop' }
   | { kind: 'dream'; raw: '/dream' }
   | { kind: 'memory_status'; raw: '/memory-status' }
+  | { kind: 'digest_session'; raw: '/digest-session' }
+  | { kind: 'extract_memory_facts'; raw: '/extract-memory-facts' }
+  | { kind: 'extract_leads_queries'; raw: '/extract-leads-queries' }
   | { kind: 'models_list'; raw: '/models' }
   | { kind: 'status'; raw: '/status' }
   | { kind: 'save_procedure'; raw: string; title: string; body?: string }
@@ -48,7 +52,8 @@ export type SessionCommand =
   | { kind: 'model_default'; raw: '/model default' }
   | { kind: 'thinking_show'; raw: '/thinking' }
   | { kind: 'thinking_set'; raw: string; value: ThinkingOverride }
-  | { kind: 'thinking_default'; raw: '/thinking default' };
+  | { kind: 'thinking_default'; raw: '/thinking default' }
+  | { kind: 'agent_command'; raw: string; name: string };
 
 interface DreamQueueResult {
   queued: boolean;
@@ -122,6 +127,7 @@ function parseThinkingCommand(text: string): SessionCommand | null {
 export function extractSessionCommand(
   content: string,
   triggerPattern: RegExp,
+  agentCommandNames: readonly string[] = [],
 ): SessionCommand | null {
   let text = content.trim();
   text = text.replace(triggerPattern, '').trim();
@@ -132,6 +138,12 @@ export function extractSessionCommand(
   if (text === '/dream') return { kind: 'dream', raw: '/dream' };
   if (text === '/memory-status')
     return { kind: 'memory_status', raw: '/memory-status' };
+  if (text === '/digest-session')
+    return { kind: 'digest_session', raw: '/digest-session' };
+  if (text === '/extract-memory-facts')
+    return { kind: 'extract_memory_facts', raw: '/extract-memory-facts' };
+  if (text === '/extract-leads-queries')
+    return { kind: 'extract_leads_queries', raw: '/extract-leads-queries' };
   if (text === '/models') return { kind: 'models_list', raw: '/models' };
   if (text === '/status') return { kind: 'status', raw: '/status' };
   if (text === '/model') return { kind: 'model_show', raw: '/model' };
@@ -166,6 +178,11 @@ export function extractSessionCommand(
 
   const thinking = parseThinkingCommand(text);
   if (thinking) return thinking;
+
+  const agentMatch = text.match(/^\/([a-z0-9]+(?:-[a-z0-9]+)*)$/);
+  if (agentMatch && agentCommandNames.includes(agentMatch[1])) {
+    return { kind: 'agent_command', raw: text, name: agentMatch[1] };
+  }
 
   return null;
 }
@@ -221,6 +238,16 @@ export interface SessionCommandDeps {
   stopCurrentRun?: () => boolean;
   runMemoryDreaming?: () => Promise<unknown>;
   getMemoryStatus?: () => Promise<MemoryStatusSnapshot>;
+  collectCurrentSessionMemory?: (input: {
+    excludeMessageIds?: string[];
+  }) => Promise<{ saved: number; digestCreated?: boolean }>;
+  extractLeadQueries?: () => Promise<{
+    digests: number;
+    extracted: number;
+    created: number;
+    updated: number;
+    skipped: number;
+  }>;
   saveProcedure?: (input: {
     title: string;
     body: string;
@@ -359,6 +386,33 @@ export async function handleSessionCommand(opts: {
     deps.advanceCursor(cmdMsg);
     await deps.sendMessage('Started a fresh session.');
     return { handled: true, success: true };
+  }
+
+  if (command.kind === 'digest_session') {
+    return handleManualExtractionCommand({
+      kind: command.kind,
+      deps,
+      cmdMsg,
+      sanitizeErrorText,
+    });
+  }
+
+  if (command.kind === 'extract_memory_facts') {
+    return handleManualExtractionCommand({
+      kind: command.kind,
+      deps,
+      cmdMsg,
+      sanitizeErrorText,
+    });
+  }
+
+  if (command.kind === 'extract_leads_queries') {
+    return handleManualExtractionCommand({
+      kind: command.kind,
+      deps,
+      cmdMsg,
+      sanitizeErrorText,
+    });
   }
 
   // Send pre-command messages to the agent so they're in the session context.
@@ -693,6 +747,12 @@ export async function handleSessionCommand(opts: {
       'Thinking override cleared. Using default thinking: adaptive (effort medium).',
     );
     return { handled: true, success: true };
+  }
+
+  if (command.kind === 'agent_command') {
+    // Agent-declared commands are recognised but not dispatched here;
+    // the caller handles them after extractSessionCommand returns.
+    return { handled: false };
   }
 
   const _exhaustive: never = command;
