@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { materializeClaudeRuntime } from '@core/adapters/llm/anthropic-claude-agent/claude-config-materializer.js';
 import {
   ArtifactClaudeSkillSource,
-  BundledClaudeSkillSource,
-  GANTRY_BUNDLED_CLAUDE_SKILL_IDS,
+  BundledGantrySkillSource,
+  GANTRY_BUNDLED_SKILL_IDS,
   RuntimeInstalledGantryBrowserSkillSource,
   materializeClaudeSkills,
   type SkillSource,
@@ -117,10 +117,10 @@ describe('Claude config materializer', () => {
     expect(fs.existsSync(transcriptPath)).toBe(true);
   });
 
-  it('materializes only Gantry-owned bundled Claude skills from packageRoot', async () => {
-    const skillsRoot = path.join(tempRoot, '.claude', 'skills');
+  it('materializes only Gantry-owned bundled skills from packageRoot', async () => {
+    const skillsRoot = path.join(tempRoot, '.agents', 'skills');
     for (const skillId of [
-      ...GANTRY_BUNDLED_CLAUDE_SKILL_IDS,
+      ...GANTRY_BUNDLED_SKILL_IDS,
       'external-helper',
       'claude-api',
     ]) {
@@ -132,13 +132,13 @@ describe('Claude config materializer', () => {
     const skillsDir = path.join(tempRoot, 'run', 'claude', 'skills');
     const materialized = await materializeClaudeSkills({
       skillsDir,
-      skillSource: new BundledClaudeSkillSource(tempRoot),
+      skillSource: new BundledGantrySkillSource(tempRoot),
     });
 
     expect(materialized.map((skill) => skill.id)).toEqual([
-      ...GANTRY_BUNDLED_CLAUDE_SKILL_IDS,
+      ...GANTRY_BUNDLED_SKILL_IDS,
     ]);
-    for (const skillId of GANTRY_BUNDLED_CLAUDE_SKILL_IDS) {
+    for (const skillId of GANTRY_BUNDLED_SKILL_IDS) {
       expect(fs.existsSync(path.join(skillsDir, skillId, 'SKILL.md'))).toBe(
         true,
       );
@@ -307,7 +307,7 @@ description: mismatch
       'Close the browser with `browser_close` after scheduled jobs',
     );
     expect(skillText).toContain('Do not install browser skills');
-    expect(fs.existsSync(path.join(tempRoot, '.claude', 'skills'))).toBe(false);
+    expect(fs.existsSync(path.join(tempRoot, '.agents', 'skills'))).toBe(false);
   });
 
   it('materializes artifact skills under their sanitized skill name', async () => {

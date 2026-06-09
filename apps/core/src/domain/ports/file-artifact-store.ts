@@ -17,6 +17,10 @@ export interface FileArtifactWriteInput extends FileArtifactOwner {
   createdBy?: string;
   metadata?: Record<string, unknown>;
   promotedFromArtifactId?: FileArtifactId;
+  // Optimistic concurrency: when set, the write fails with
+  // FileArtifactVersionConflictError unless the latest stored version observed
+  // inside the write's locked transaction equals this value.
+  expectedVersion?: number;
 }
 
 export interface FileArtifactListInput extends FileArtifactOwner {

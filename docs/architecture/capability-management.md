@@ -14,7 +14,7 @@ The common rule is request, review, approval or denial, durable audit, new
 config version, and next-run activation.
 
 Agents must not mutate capability state directly. They must not run dependency
-install commands, edit `.claude/skills`, edit `.mcp.json`, edit Claude
+install commands, edit provider skill folders, edit `.mcp.json`, edit provider
 permission settings, edit Gantry settings, or change generated runtime config.
 When a user asks for a new skill, MCP server, dependency, SDK tool, host tool,
 or channel capability, the agent calls the matching Gantry request tool.
@@ -121,11 +121,14 @@ parser rejects URLs, schemes, paths, credentials, wildcards, invalid ports, and
 localhost/private/loopback targets, then lowercases, strips trailing dots, and
 dedupes. Declared hosts are reviewed inventory and audit metadata, not an
 operational allowlist: once the action capability is approved, its command uses
-normal outbound internet through the egress gateway. The selected capability
-still projects the declared hosts into the run so egress audit and the SDK
-sandbox network gate can attribute traffic to the reviewed capability, but a
-host the action did not declare is not failed closed simply for being
-undeclared. Enforcement lives in the global denylist, not the declaration.
+normal outbound internet through the egress gateway. Gantry projects this as a
+provider-neutral `toolNetworkEnv` for approved skill, local CLI, script, and
+MCP stdio subprocesses; execution adapters map that same contract into their
+runner-specific tool environment. The selected capability still projects the
+declared hosts into the run so egress audit and transient sandbox network gates
+can attribute traffic to the reviewed capability, but a host the action did not
+declare is not failed closed simply for being undeclared. Enforcement lives in
+the global denylist, not the declaration.
 
 The global `permissions.egress.denylist` is the durable egress control: a
 denylisted host is blocked even when a selected action declares it, with a clear
@@ -324,7 +327,7 @@ become durable authority by themselves.
 | `continuity_summary`               | Summarizes current durable continuity, staged memory candidates, reviewed memory state, dreaming status, and last injected context.                                                                          | Treating memory or continuity content as instruction or tool authority.                                         |
 | `file`                             | Lists, reads, writes, or promotes Gantry FileArtifacts by virtual scope/path while hiding host filesystem paths and storage refs; full host tool id `mcp__gantry__file`.                                     | Arbitrary host filesystem reads/writes or bypassing approved file facades.                                      |
 | `request_skill_install`            | Skill source setup using staged `SKILL.md` package files or an approved installer command that imports the resulting package in host-controlled staging.                                                      | Treating skill setup as approval to run risky skill actions, installing silently, or editing skill directories directly. |
-| `request_skill_proposal`           | Skill source setup for agent-created or modified `SKILL.md` bundles.                                                                                                                                         | Treating proposed skill files as durable action authority or writing directly to `.claude/skills`, `.agents/skills`, or agent-local `skills/`. |
+| `request_skill_proposal`           | Skill source setup for agent-created or modified `SKILL.md` bundles.                                                                                                                                         | Treating proposed skill files as durable action authority or writing directly to `.agents/skills`, provider skill folders, or agent-local `skills/`. |
 | `request_skill_dependency_install` | Host-installed dependencies needed by a reviewed skill source.                                                                                                                                               | Running dependency commands from the agent.                                                                     |
 | `request_mcp_server`               | Third-party MCP source setup with a reviewed `stdio_template`, sandbox profile, expected tool patterns, credential needs, and reason.                                                                        | Treating server connection as approval for every MCP operation, editing `.mcp.json`, or editing Claude `mcpServers`. |
 | `request_access target.kind=capability`   | Requests an approved reviewed semantic capability by id.                                                                                                                                                    | Capability proposals, broad raw commands, or changing permission settings directly.                             |
@@ -581,7 +584,7 @@ Before calling a cutover complete, run targeted searches for:
 
 - `mcp__gantry__*`
 - obsolete skill request lifecycle tools outside historical notes
-- `.claude/skills` as runtime truth
+- provider skill folders as runtime truth
 - `.mcp.json` mutation instructions
 - base64 skill artifact serialization
 - direct dependency-install guidance in active docs

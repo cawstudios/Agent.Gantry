@@ -2537,6 +2537,74 @@ describe('TelegramChannel', () => {
       expect(decision.approved).toBe(true);
     });
 
+    it('splits oversized permission review text before sending the decision buttons', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+      const tail = 'review-tail-after-shared-budget';
+      const proposed = `${'x'.repeat(7000)}${tail}`;
+
+      const decisionPromise = channel.requestPermissionApproval(
+        'tg:100200300',
+        {
+          requestId: 'perm-profile-large',
+          sourceAgentFolder: 'whatsapp_main',
+          toolName: 'request_agent_profile_update',
+          title: 'Update AGENTS.md',
+          interaction: {
+            id: 'perm-profile-large',
+            title: 'Update AGENTS.md',
+            body: 's'.repeat(2000),
+            requestContext: {
+              requestId: 'perm-profile-large',
+              sourceAgentFolder: 'whatsapp_main',
+              targetJid: 'tg:100200300',
+              toolName: 'request_agent_profile_update',
+            },
+            files: [
+              {
+                path: 'AGENTS.md',
+                preview: proposed,
+                truncated: false,
+                sizeBytes: proposed.length,
+                contentHash: 'abc123',
+              },
+            ],
+          },
+        },
+      );
+      await flushPromises();
+
+      const calls = currentBot().api.sendMessage.mock.calls;
+      expect(calls.length).toBeGreaterThan(1);
+      const reviewCalls = calls.slice(0, -1);
+      const finalCall = calls.at(-1);
+      for (const call of reviewCalls) {
+        expect(call[1].length).toBeLessThanOrEqual(4096);
+        expect(call[2]).not.toHaveProperty('reply_markup');
+        expect(call[2]).not.toHaveProperty('parse_mode');
+      }
+      expect(reviewCalls.map((call) => call[1]).join('')).toContain(tail);
+      expect(finalCall?.[1]).toContain(
+        'Review the approval details above before choosing.',
+      );
+      expect(finalCall?.[2]).toMatchObject({
+        parse_mode: 'HTML',
+        reply_markup: expect.objectContaining({
+          inline_keyboard: expect.any(Array),
+        }),
+      });
+
+      await triggerCallbackQuery({
+        callbackQuery: { data: 'perm:allow_once:perm-profile-large' },
+        chat: { id: 100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+      const decision = await decisionPromise;
+      expect(decision.approved).toBe(true);
+    });
+
     it('sends approval prompt and resolves when an admin approves', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);

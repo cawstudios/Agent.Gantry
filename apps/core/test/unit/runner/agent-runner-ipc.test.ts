@@ -827,12 +827,15 @@ describe('agent-runner IPC lifecycle', () => {
         baseInput({
           modelCredentialEnv: {
             ANTHROPIC_BASE_URL: 'https://broker.local/anthropic',
+            NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
+          },
+          toolNetworkEnv: {
             HTTP_PROXY: 'http://127.0.0.1:18080/',
             HTTPS_PROXY: 'http://127.0.0.1:18080/',
             http_proxy: 'http://127.0.0.1:18080/',
             https_proxy: 'http://127.0.0.1:18080/',
             NODE_USE_ENV_PROXY: '1',
-            NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
+            REQUESTS_CA_BUNDLE: '/tmp/model_gateway-ca.pem',
           },
         }),
         {
@@ -858,11 +861,11 @@ describe('agent-runner IPC lifecycle', () => {
       expect(sdkEnv.ANTHROPIC_BASE_URL).toBe('https://broker.local/anthropic');
       expect(sdkEnv.ANTHROPIC_API_KEY).toBeUndefined();
       expect(sdkEnv.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-      expect(sdkEnv.HTTP_PROXY).toBe('http://127.0.0.1:18080/');
-      expect(sdkEnv.HTTPS_PROXY).toBe('http://127.0.0.1:18080/');
-      expect(sdkEnv.http_proxy).toBe('http://127.0.0.1:18080/');
-      expect(sdkEnv.https_proxy).toBe('http://127.0.0.1:18080/');
-      expect(sdkEnv.NODE_USE_ENV_PROXY).toBe('1');
+      expect(sdkEnv.HTTP_PROXY).toBeUndefined();
+      expect(sdkEnv.HTTPS_PROXY).toBeUndefined();
+      expect(sdkEnv.http_proxy).toBeUndefined();
+      expect(sdkEnv.https_proxy).toBeUndefined();
+      expect(sdkEnv.NODE_USE_ENV_PROXY).toBeUndefined();
       expect(sdkEnv.GIT_HTTP_PROXY_AUTHMETHOD).toBeUndefined();
       expect(sdkEnv.NODE_EXTRA_CA_CERTS).toBe('/tmp/model_gateway-ca.pem');
       expect(sdkEnv.SSL_CERT_FILE).toBe('/tmp/model_gateway-ca.pem');
@@ -902,7 +905,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'rejects model proxy env that bypasses the Gantry egress gateway',
+    'rejects proxy env in the model credential lane',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -922,7 +925,7 @@ describe('agent-runner IPC lifecycle', () => {
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain(
-        'modelCredentialEnv.HTTP_PROXY must match GANTRY_EGRESS_PROXY_URL.',
+        'modelCredentialEnv.HTTP_PROXY is not supported.',
       );
       expect(fs.existsSync(fixture.recordPath)).toBe(false);
     },
@@ -1158,6 +1161,36 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
+    'does not request a nested SDK filesystem sandbox inside the outer runner sandbox',
+    async () => {
+      const fixture = createRunnerFixture();
+      const protectedSettingsPath = path.join(
+        fixture.root,
+        'runtime',
+        'settings.json',
+      );
+      fs.mkdirSync(path.dirname(protectedSettingsPath), { recursive: true });
+      fs.writeFileSync(protectedSettingsPath, '{}');
+
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_EXIT_AFTER_QUERY: '1',
+        GANTRY_SANDBOX_RUNTIME_PROXY: '1',
+        GANTRY_PROTECTED_FILESYSTEM_DENY_READ_PATHS_JSON: JSON.stringify([
+          protectedSettingsPath,
+        ]),
+        GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON: JSON.stringify([
+          protectedSettingsPath,
+        ]),
+      });
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      const call = readRecord(fixture.recordPath).calls[0];
+      expect(call?.sandbox).toBeUndefined();
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
     'rejects unsupported model credential env keys before Agent SDK launch',
     async () => {
       const fixture = createRunnerFixture();
@@ -1217,6 +1250,62 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
+    'merges private MCP config proxy env inside sandbox runtime',
+    async () => {
+      const fixture = createRunnerFixture();
+      const mcpConfigPath = path.join(fixture.root, 'mcp-config.json');
+      fs.writeFileSync(
+        mcpConfigPath,
+        JSON.stringify({
+          github: {
+            type: 'stdio',
+            command: '/tmp/github-mcp',
+            env: {
+              GITHUB_TOKEN: 'token',
+              HTTP_PROXY: 'http://127.0.0.1:18080/',
+              HTTPS_PROXY: 'http://127.0.0.1:18080/',
+            },
+          },
+        }),
+      );
+
+      const result = await runRunner(
+        fixture,
+        baseInput({
+          toolNetworkEnv: {
+            HTTP_PROXY: 'http://127.0.0.1:18080/',
+            HTTPS_PROXY: 'http://127.0.0.1:18080/',
+          },
+        }),
+        {
+          TEST_EXIT_AFTER_QUERY: '1',
+          GANTRY_SANDBOX_RUNTIME_PROXY: '1',
+          HTTP_PROXY: 'http://127.0.0.1:28080/',
+          HTTPS_PROXY: 'http://127.0.0.1:28080/',
+          GANTRY_MCP_CONFIG_FILE: mcpConfigPath,
+          GANTRY_MCP_ALLOWED_TOOLS_JSON: JSON.stringify(['mcp__github__*']),
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      const call = readRecord(fixture.recordPath).calls[0];
+      const githubMcp = call?.mcpServers?.github as
+        | { env?: Record<string, string> }
+        | undefined;
+      expect(githubMcp?.env).toMatchObject({
+        GITHUB_TOKEN: 'token',
+        HTTP_PROXY: 'http://127.0.0.1:28080/',
+        HTTPS_PROXY: 'http://127.0.0.1:28080/',
+        http_proxy: 'http://127.0.0.1:28080/',
+        https_proxy: 'http://127.0.0.1:28080/',
+        NODE_USE_ENV_PROXY: '1',
+      });
+      expect(fs.existsSync(mcpConfigPath)).toBe(false);
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
     'rejects host-private browser backend hyphenated config from a private file',
     async () => {
       const fixture = createRunnerFixture();
@@ -1253,7 +1342,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'passes broker placeholder auth values into the Agent SDK env',
+    'passes broker placeholder API key values into the Agent SDK env',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1268,7 +1357,7 @@ describe('agent-runner IPC lifecycle', () => {
       expect(result.exitCode).toBe(0);
       const sdkEnv = readRecord(fixture.recordPath).calls[0]?.sdkEnv || {};
       expect(sdkEnv.ANTHROPIC_API_KEY).toBe('placeholder');
-      expect(sdkEnv.CLAUDE_CODE_OAUTH_TOKEN).toBe('placeholder');
+      expect(sdkEnv.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
@@ -2045,6 +2134,7 @@ describe('agent-runner IPC lifecycle', () => {
             'Browser',
             'RunCommand(/Users/example/runtime/scripts/append-lead.py *)',
           ],
+          toolAccessRequirements: ['Browser'],
           prompt: 'Find new leads.',
         }),
       );
@@ -2061,6 +2151,10 @@ describe('agent-runner IPC lifecycle', () => {
         'RunCommand(/Users/example/runtime/scripts/append-lead.py *)',
       );
       expect(prompt).toContain('Do not wrap it in python -c');
+      expect(prompt).toContain('Use browser_open early');
+      expect(prompt).toContain(
+        'Do not claim Browser was used or opened unless',
+      );
       expect(prompt).toContain('Find new leads.');
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
@@ -2123,7 +2217,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'adds neutral CA trust aliases to allowed Bash tool calls',
+    'adds tool network env to allowed Bash tool calls',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -2133,8 +2227,17 @@ describe('agent-runner IPC lifecycle', () => {
           isScheduledJob: true,
           jobId: 'job-1',
           allowedTools: ['RunCommand(acme records *)'],
-          modelCredentialEnv: {
-            NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
+          toolNetworkEnv: {
+            HTTP_PROXY: 'http://127.0.0.1:18080/',
+            HTTPS_PROXY: 'http://127.0.0.1:18080/',
+            http_proxy: 'http://127.0.0.1:18080/',
+            https_proxy: 'http://127.0.0.1:18080/',
+            ALL_PROXY: 'socks5h://127.0.0.1:18081',
+            GRPC_PROXY: 'socks5h://127.0.0.1:18081',
+            NODE_USE_ENV_PROXY: '1',
+            NO_PROXY: '127.0.0.1,localhost,::1',
+            no_proxy: '127.0.0.1,localhost,::1',
+            REQUESTS_CA_BUNDLE: '/tmp/model_gateway-ca.pem',
           },
         }),
         {
@@ -2145,14 +2248,16 @@ describe('agent-runner IPC lifecycle', () => {
 
       const trustPrefix = [
         'GODEBUG=netdns=go',
-        "SSL_CERT_FILE='/tmp/model_gateway-ca.pem'",
+        "HTTP_PROXY='http://127.0.0.1:18080/'",
+        "HTTPS_PROXY='http://127.0.0.1:18080/'",
+        "http_proxy='http://127.0.0.1:18080/'",
+        "https_proxy='http://127.0.0.1:18080/'",
+        "ALL_PROXY='socks5h://127.0.0.1:18081'",
+        "GRPC_PROXY='socks5h://127.0.0.1:18081'",
+        "NODE_USE_ENV_PROXY='1'",
+        "NO_PROXY='127.0.0.1,localhost,::1'",
+        "no_proxy='127.0.0.1,localhost,::1'",
         "REQUESTS_CA_BUNDLE='/tmp/model_gateway-ca.pem'",
-        "CURL_CA_BUNDLE='/tmp/model_gateway-ca.pem'",
-        "GIT_SSL_CAINFO='/tmp/model_gateway-ca.pem'",
-        "PIP_CERT='/tmp/model_gateway-ca.pem'",
-        "AWS_CA_BUNDLE='/tmp/model_gateway-ca.pem'",
-        "CARGO_HTTP_CAINFO='/tmp/model_gateway-ca.pem'",
-        "DENO_CERT='/tmp/model_gateway-ca.pem'",
       ].join(' ');
 
       expect(result.exitCode).toBe(0);

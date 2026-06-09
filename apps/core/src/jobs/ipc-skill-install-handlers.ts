@@ -423,10 +423,13 @@ const requestSkillPackageHandler = async (
         requiredEnvVars,
       },
       assets: parsed.assets,
-      fileSummaries: parsed.fileSummaries.map(({ path, sizeBytes }) => ({
-        path,
-        sizeBytes,
-      })),
+      fileSummaries: parsed.fileSummaries.map(
+        ({ path, sizeBytes, fingerprint }) => ({
+          path,
+          sizeBytes,
+          fingerprint,
+        }),
+      ),
       skillMarkdownPreview: {
         path: parsed.skillMarkdownPreview.path,
         content: parsed.skillMarkdownPreview.content,

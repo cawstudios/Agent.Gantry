@@ -1,5 +1,6 @@
 import { resolveModelSelectionForWorkload } from '../../shared/model-catalog.js';
 import { parseAgentPersona } from '../../shared/agent-persona.js';
+import { parseAgentRelationshipMode } from '../../shared/agent-relationship-mode.js';
 import type {
   RuntimeConfiguredAgent,
   RuntimeConfiguredAgentBinding,
@@ -384,6 +385,7 @@ export function parseConfiguredAgents(
       if (
         key !== 'name' &&
         key !== 'persona' &&
+        key !== 'relationship_mode' &&
         key !== 'jid' &&
         key !== 'trigger' &&
         key !== 'added_at' &&
@@ -395,7 +397,7 @@ export function parseConfiguredAgents(
         key !== 'access'
       ) {
         throw new Error(
-          `${pathPrefix}.${key} is not supported. Configure name, persona, model, job model defaults, bindings, or access.`,
+          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, model, job model defaults, bindings, or access.`,
         );
       }
     }
@@ -451,6 +453,10 @@ export function parseConfiguredAgents(
       name: parseStringValue(map.name, `${pathPrefix}.name`),
       folder,
       persona: parseAgentPersona(map.persona, `${pathPrefix}.persona`),
+      relationshipMode: parseAgentRelationshipMode(
+        map.relationship_mode,
+        `${pathPrefix}.relationship_mode`,
+      ),
       model,
       oneTimeJobDefaultModel,
       recurringJobDefaultModel,

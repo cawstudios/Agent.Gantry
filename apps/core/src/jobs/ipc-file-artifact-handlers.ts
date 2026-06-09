@@ -2,7 +2,10 @@ import {
   describeFileArtifact,
   type FileArtifactId,
 } from '../domain/file-artifacts/file-artifact.js';
-import { isProtectedFileArtifactVirtualPath } from '../domain/file-artifacts/protected-virtual-path.js';
+import {
+  isAgentProfileArtifactWrite,
+  isProtectedFileArtifactVirtualPath,
+} from '../domain/file-artifacts/protected-virtual-path.js';
 import {
   normalizeFileArtifactPath,
   normalizeFileArtifactScope,
@@ -117,8 +120,16 @@ const fileArtifactHandler: TaskHandler = async (context) => {
 
     if (action === 'write') {
       const virtualPath = normalizeFileArtifactPath(String(payload.path || ''));
+      const virtualScope = normalizeFileArtifactScope(
+        String(payload.scope || 'default'),
+      );
       if (
-        !(await authorizeProtectedPromptMutation(context, virtualPath, reject))
+        !(await authorizeProtectedPromptMutation(
+          context,
+          virtualScope,
+          virtualPath,
+          reject,
+        ))
       ) {
         return;
       }
@@ -128,9 +139,7 @@ const fileArtifactHandler: TaskHandler = async (context) => {
       );
       const artifact = await store.writeFileArtifact({
         ...owner,
-        virtualScope: normalizeFileArtifactScope(
-          String(payload.scope || 'default'),
-        ),
+        virtualScope,
         virtualPath,
         content,
         contentType:
@@ -151,17 +160,23 @@ const fileArtifactHandler: TaskHandler = async (context) => {
     const targetPath = normalizeFileArtifactPath(
       String(payload.targetPath || ''),
     );
+    const targetScope = normalizeFileArtifactScope(
+      String(payload.targetScope || 'default'),
+    );
     if (
-      !(await authorizeProtectedPromptMutation(context, targetPath, reject))
+      !(await authorizeProtectedPromptMutation(
+        context,
+        targetScope,
+        targetPath,
+        reject,
+      ))
     ) {
       return;
     }
     const artifact = await store.promoteScratch({
       ...owner,
       scratchPath,
-      targetScope: normalizeFileArtifactScope(
-        String(payload.targetScope || 'default'),
-      ),
+      targetScope,
       targetPath,
       createdBy: `agent:${sourceAgentFolder}`,
     });
@@ -216,9 +231,17 @@ function validateSameChannelTarget(input: {
 
 async function authorizeProtectedPromptMutation(
   context: TaskContext,
+  virtualScope: string,
   virtualPath: string,
   reject: (error: string, code?: string, details?: string[]) => void,
 ): Promise<boolean> {
+  if (isAgentProfileArtifactWrite(virtualScope, virtualPath)) {
+    reject(
+      'Profile files (SOUL.md, AGENTS.md) cannot be written through the file tool. Use request_agent_profile_update.',
+      'forbidden',
+    );
+    return false;
+  }
   if (!isProtectedPromptPath(virtualPath)) return true;
   const protectedRequested = context.data.payload?.protected === true;
   const authorized =

@@ -1,6 +1,7 @@
 import type { PermissionApprovalRequest } from '../domain/types.js';
 import { firstDestructiveRedirectTarget } from '../shared/bash-command-parser.js';
 import { generatedRuntimeSkillPathDisplay } from '../shared/generated-runtime-paths.js';
+import { escapeMarkdownFenceDelimiters } from './permission-fenced-content.js';
 
 const PERMISSION_JSON_MAX_KEYS = 12;
 const PERMISSION_JSON_MAX_ARRAY_ITEMS = 8;
@@ -30,6 +31,29 @@ function isInternalPlumbingKey(key: string): boolean {
 }
 const REDACTION_MARKER_PATTERN =
   /\[REDACTED_(?:SECRET|POTENTIALLY_SENSITIVE)\]/;
+const RUNTIME_ENV_ASSIGNMENT_KEYS = new Set([
+  'GODEBUG',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+  'FTP_PROXY',
+  'ftp_proxy',
+  'RSYNC_PROXY',
+  'DOCKER_HTTP_PROXY',
+  'DOCKER_HTTPS_PROXY',
+  'CLOUDSDK_PROXY_TYPE',
+  'CLOUDSDK_PROXY_ADDRESS',
+  'CLOUDSDK_PROXY_PORT',
+  'GRPC_PROXY',
+  'grpc_proxy',
+  'GIT_SSH_COMMAND',
+  'NODE_USE_ENV_PROXY',
+  'NO_PROXY',
+  'no_proxy',
+]);
 
 type PermissionTextSanitizer = (
   input: string,
@@ -45,25 +69,39 @@ export function formatPermissionToolInputLines(
   if (!request.toolInput || typeof request.toolInput !== 'object') return [];
   const input = request.toolInput;
   if (typeof input.command === 'string' && input.command.trim()) {
+    const displayCommand = runtimeDisplayCommand(input.command.trim());
     const generatedSkillPath = generatedRuntimeSkillPathDisplay(
-      input.command.trim(),
+      displayCommand.command,
     );
     if (generatedSkillPath) {
-      const redirectTarget = firstDestructiveRedirectTarget(input.command);
+      const redirectTarget = firstDestructiveRedirectTarget(
+        displayCommand.command,
+      );
+      const runtimeEnvLine =
+        displayCommand.runtimeEnvAssignments.length > 0
+          ? `Runtime environment: ${sanitizePermissionText(
+              displayCommand.runtimeEnvAssignments.join(' '),
+              600,
+              200,
+            )}`
+          : null;
       return [
         'Command: generated skill action command; runtime path hidden.',
         `Action: ${sanitizePermissionText(generatedSkillPath, 180, 80)}`,
+        ...(runtimeEnvLine ? [runtimeEnvLine] : []),
         ...(redirectTarget ? [`Redirect: ${redirectTarget}`] : []),
       ];
     }
     const command = (options.sanitizeCommandText ?? sanitizePermissionText)(
-      input.command.trim(),
+      displayCommand.command,
       900,
       300,
     );
-    const redirectTarget = firstDestructiveRedirectTarget(input.command);
+    const redirectTarget = firstDestructiveRedirectTarget(
+      displayCommand.command,
+    );
     if (hasRedactionMarker(command)) {
-      const program = shellProgramLabel(input.command);
+      const program = shellProgramLabel(displayCommand.command);
       return [
         'Command: hidden because it may contain sensitive values.',
         ...(program
@@ -77,6 +115,15 @@ export function formatPermissionToolInputLines(
       '```',
       command,
       '```',
+      ...(displayCommand.runtimeEnvAssignments.length > 0
+        ? [
+            `Runtime environment: ${sanitizePermissionText(
+              displayCommand.runtimeEnvAssignments.join(' '),
+              600,
+              200,
+            )}`,
+          ]
+        : []),
       ...(redirectTarget ? [`Redirect: ${redirectTarget}`] : []),
     ];
   }
@@ -174,17 +221,23 @@ function formatFileToolInputLines(
   if (toolName === 'Edit') {
     if (typeof input.old_string === 'string' && input.old_string.trim()) {
       diffLines.push(
-        `-${sanitizePermissionText(input.old_string.trim(), 200, 100)}`,
+        `-${escapeMarkdownFenceDelimiters(
+          sanitizePermissionText(input.old_string.trim(), 200, 100),
+        )}`,
       );
     }
     if (typeof input.new_string === 'string' && input.new_string.trim()) {
       diffLines.push(
-        `+${sanitizePermissionText(input.new_string.trim(), 200, 100)}`,
+        `+${escapeMarkdownFenceDelimiters(
+          sanitizePermissionText(input.new_string.trim(), 200, 100),
+        )}`,
       );
     }
   } else if (typeof input.content === 'string' && input.content.trim()) {
     diffLines.push(
-      `+${sanitizePermissionText(input.content.trim(), 200, 100)}`,
+      `+${escapeMarkdownFenceDelimiters(
+        sanitizePermissionText(input.content.trim(), 200, 100),
+      )}`,
     );
   }
   if (diffLines.length > 0) {
@@ -204,6 +257,89 @@ function shellProgramLabel(command: string): string | null {
   if (!first?.[2]) return null;
   const program = first[2].split('/').pop() || first[2];
   return program || null;
+}
+
+export function runtimeDisplayCommand(command: string): {
+  command: string;
+  runtimeEnvAssignments: string[];
+} {
+  const parsed = splitRuntimeEnvAssignments(command);
+  if (!parsed || !parsed.command.trim()) {
+    return { command, runtimeEnvAssignments: [] };
+  }
+  return {
+    command: parsed.command.trim(),
+    runtimeEnvAssignments: parsed.assignments,
+  };
+}
+
+function splitRuntimeEnvAssignments(
+  command: string,
+): { command: string; assignments: string[] } | null {
+  let offset = 0;
+  const assignments: string[] = [];
+  while (offset < command.length) {
+    const next = parseRuntimeEnvAssignment(command, offset);
+    if (!next) break;
+    assignments.push(
+      command.slice(skipSpaces(command, offset), next.nextOffset).trim(),
+    );
+    offset = next.nextOffset;
+  }
+  if (assignments.length === 0) return null;
+  return { command: command.slice(offset), assignments };
+}
+
+function parseRuntimeEnvAssignment(
+  command: string,
+  offset: number,
+): { nextOffset: number } | null {
+  let cursor = skipSpaces(command, offset);
+  const keyMatch = command.slice(cursor).match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+  if (!keyMatch?.[1] || !RUNTIME_ENV_ASSIGNMENT_KEYS.has(keyMatch[1])) {
+    return null;
+  }
+  cursor += keyMatch[0].length;
+  const parsedValue = parseShellAssignmentValue(command, cursor);
+  if (!parsedValue || parsedValue.nextOffset === cursor) return null;
+  return { nextOffset: skipSpaces(command, parsedValue.nextOffset) };
+}
+
+function parseShellAssignmentValue(
+  command: string,
+  offset: number,
+): { nextOffset: number } | null {
+  const quote = command[offset];
+  if (quote === "'" || quote === '"') {
+    let cursor = offset + 1;
+    while (cursor < command.length) {
+      if (command[cursor] === '\\') {
+        cursor += 2;
+        continue;
+      }
+      if (command[cursor] === quote) {
+        return { nextOffset: cursor + 1 };
+      }
+      cursor += 1;
+    }
+    return null;
+  }
+  let cursor = offset;
+  while (
+    cursor < command.length &&
+    !/[\s;|&<>()]/.test(command[cursor] ?? '')
+  ) {
+    cursor += 1;
+  }
+  return { nextOffset: cursor };
+}
+
+function skipSpaces(command: string, offset: number): number {
+  let cursor = offset;
+  while (cursor < command.length && /\s/.test(command[cursor] ?? '')) {
+    cursor += 1;
+  }
+  return cursor;
 }
 
 function formatApproxBytes(bytes: number): string {
@@ -227,6 +363,36 @@ function skillMarkdownPreviewContent(input: Record<string, unknown>): {
     content,
     truncated: record.truncated === true,
   };
+}
+
+function skillReviewFileLines(
+  input: Record<string, unknown>,
+  sanitizePermissionText: PermissionTextSanitizer,
+): string[] {
+  if (!Array.isArray(input.files) || input.files.length === 0) return [];
+  const lines: string[] = ['Review files:'];
+  for (const file of input.files.slice(0, 5)) {
+    if (!file || typeof file !== 'object') continue;
+    const record = file as Record<string, unknown>;
+    const path =
+      typeof record.path === 'string'
+        ? sanitizePermissionText(record.path, 160, 60)
+        : 'unknown';
+    const details: string[] = [];
+    if (typeof record.sizeBytes === 'number') {
+      details.push(formatApproxBytes(record.sizeBytes));
+    }
+    if (typeof record.contentHash === 'string' && record.contentHash.trim()) {
+      details.push(sanitizePermissionText(record.contentHash.trim(), 80, 16));
+    }
+    lines.push(
+      `- ${path}${details.length > 0 ? ` (${details.join(', ')})` : ''}`,
+    );
+  }
+  if (input.files.length > 5) {
+    lines.push(`+${input.files.length - 5} more files`);
+  }
+  return lines;
 }
 
 function formatKnownToolInputFields(
@@ -305,6 +471,7 @@ function formatKnownToolInputFields(
           ? ` (${formatApproxBytes(input.totalSizeBytes)})`
           : '';
       lines.push(`Files: ${input.files.length}${size}`);
+      lines.push(...skillReviewFileLines(input, sanitizePermissionText));
     }
     addList('Requires env', input.requiredEnvVars);
     const preview = skillMarkdownPreviewContent(input);
@@ -314,7 +481,9 @@ function formatKnownToolInputFields(
           ? 'SKILL.md preview (truncated):'
           : 'SKILL.md preview:',
         '```markdown',
-        sanitizePermissionText(preview.content, 2400, 600),
+        escapeMarkdownFenceDelimiters(
+          sanitizePermissionText(preview.content, 2400, 600),
+        ),
         '```',
       );
     }
@@ -334,6 +503,47 @@ function formatKnownToolInputFields(
         }`,
       );
     }
+  }
+  if (toolName === 'request_agent_profile_update') {
+    const fileName =
+      typeof input.fileName === 'string' ? input.fileName : String(input.file);
+    add('File', fileName);
+    add('Why', input.summary, 280);
+    add('Proposed hash', input.proposedContentHash, 96);
+    if (typeof input.proposedContentBytes === 'number') {
+      lines.push(`Proposed size: ${input.proposedContentBytes} bytes`);
+    }
+    if (
+      typeof input.proposedContent === 'string' &&
+      input.proposedContent.trim()
+    ) {
+      const proposedContent = input.proposedContent.trim();
+      if (proposedContent.length <= 1600) {
+        lines.push(
+          'Proposed content:',
+          '```markdown',
+          escapeMarkdownFenceDelimiters(
+            sanitizePermissionText(proposedContent, proposedContent.length, 0),
+          ),
+          '```',
+        );
+      } else {
+        lines.push(
+          'Proposed content: full content is attached to the approval evidence; do not approve from this text summary alone.',
+        );
+      }
+    }
+    if (typeof input.diffPreview === 'string' && input.diffPreview.trim()) {
+      lines.push(
+        'Change:',
+        '```diff',
+        escapeMarkdownFenceDelimiters(
+          sanitizePermissionText(input.diffPreview.trim(), 1800, 400),
+        ),
+        '```',
+      );
+    }
+    lines.push('Applies on the next run.');
   }
   return lines;
 }

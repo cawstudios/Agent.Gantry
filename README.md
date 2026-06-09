@@ -97,6 +97,33 @@ gantry settings validate
 gantry service install|start|stop|restart
 ```
 
+### Sandbox Modes
+
+`runtime.sandbox.provider` is the only v1 execution-mode setting.
+
+- `direct`: easiest personal laptop setup; compatibility mode with no outer OS sandbox.
+- `sandbox_runtime`: recommended for organisation or safe-host use; wraps runner work in the enforcing OS sandbox when `gantry doctor` confirms support.
+- Docker or cloud sandboxes are future optional backends, not required for v1.
+
+Browser stays host-managed through Gantry IPC. Stdio MCP servers, local CLIs, skills, jobs, and native subagents follow the configured sandbox provider. The sandbox does not install tools: missing CLI or MCP dependencies are setup blockers, not permission grants. In `sandbox_runtime`, networked tools must use standard proxy-aware clients (`HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY`); tools that bypass those proxies fail closed.
+
+To switch modes, edit `~/gantry/settings.yaml`:
+
+```yaml
+runtime:
+  sandbox:
+    provider: sandbox_runtime
+```
+
+Then verify and restart:
+
+```bash
+gantry settings validate
+gantry service restart
+gantry doctor
+gantry status
+```
+
 Defaults in v1:
 
 - runtime home: `~/gantry`
@@ -297,7 +324,7 @@ Notes:
 
 ### Capability Management
 
-Skills, MCP servers, SDK tools, host tools, browser tools, local CLIs, and channel-native tools are approved agent capabilities. Normal agent guidance is action-first: use an available action, request the reviewed capability when the action is missing, and request source setup only when the underlying source is not connected. Agents must not run dependency install commands, edit `.claude/skills`, edit `.mcp.json`, edit settings, or mutate generated Claude config directly. Gantry keeps the source-specific tools below as reviewed setup/proxy surfaces, not as durable authority by themselves:
+Skills, MCP servers, SDK tools, host tools, browser tools, local CLIs, and channel-native tools are approved agent capabilities. Normal agent guidance is action-first: use an available action, request the reviewed capability when the action is missing, and request source setup only when the underlying source is not connected. Agents must not run dependency install commands, edit provider skill folders, edit `.mcp.json`, edit settings, or mutate generated provider config directly. Gantry keeps the source-specific tools below as reviewed setup/proxy surfaces, not as durable authority by themselves:
 
 - `send_message`
 - `ask_user_question`
@@ -327,7 +354,7 @@ Browser authority is selected in `settings.yaml` and the public capabilities API
 
 Jobs are scheduled agent runs and inherit the target agent's selected capabilities and attached sources at execution time. Job `accessRequirements` entries are readiness and preflight assertions, not job-local authority. The canonical `toolAccess` view in MCP, CLI, SDK, and Control API responses shows the inherited agent capability projection. Skill source is stored as readable skill folders with `SKILL.md` plus supporting files; Postgres stores metadata, source type, hash, binding, and audit records. Skills installed from catalogs, URLs, CLI commands, or uploads all become the same reviewed local skill package after approval.
 
-Capability-owned secrets for selected skills and MCP servers use Gantry Credential Center rather than runtime `.env` or model credentials. Use `gantry credentials access set <NAME>`, `gantry credentials access import-env <NAME>`, `gantry credentials access list`, and `gantry credentials access unset <NAME>`; add `--allow <capabilityId>` to scope a secret to a specific MCP definition, `mcp:<name>`, skill id, or `skill:<name>`.
+Capability-owned secrets for selected skills and MCP servers use Gantry Credential Center rather than runtime `.env` or model credentials. From the host/admin shell, use `gantry credentials access set <NAME>`, `gantry credentials access import-env <NAME>`, `gantry credentials access list`, and `gantry credentials access unset <NAME>`; add `--allow <capabilityId>` to scope a secret to a specific MCP definition, `mcp:<name>`, skill id, or `skill:<name>`. Agents should report missing credentials as setup blockers, not run the credential CLI themselves.
 
 `permissions.yolo_mode` controls the denylist applied only to the 5-minute
 all-tools timed grant. Gantry ships defaults for destructive commands such as
@@ -404,7 +431,7 @@ Background dreaming cycles turn raw conversational evidence into curated, high-c
 2. **REM** — cross-checks candidates against existing memory and flags contradictions. If the user said X yesterday and not-X today, the conflict is surfaced rather than silently overwritten.
 3. **Deep Sleep** — high-confidence candidates promoted to durable memory. Low-confidence or contradicted candidates held back. Duplicates merged. Obsolete facts retired. Destructive changes are policy-gated.
 
-Embedding work runs only during dreaming promotion/update passes. Runtime recall and context injection continue to use active memory items through lexical search and keyword fallback until memory item embedding indexing/querying is fully implemented.
+Embedding work runs during dreaming promotion/update passes and the resumable embedding backfill. Runtime recall and context injection use active memory items through full-text (lexical plus keyword) search by default; semantic recall is layered in as an optional enhancement only when embeddings are enabled and indexed, and falls back to full-text if a query embedding is unavailable, paused, or over its live deadline.
 
 ### Memory Boundaries
 
@@ -469,9 +496,13 @@ git clone https://github.com/AventCaw/Agent.Gantry.git
 cd Agent.Gantry
 npm install
 npm run build
-# local testing entrypoint (equivalent CLI flow)
-node dist/cli/index.js
+npm link
+gantry status
 ```
+
+`npm link` exposes this checkout's built CLI as `gantry`; rerun
+`npm run build` after source changes before restarting or validating the
+service.
 
 ## Testing
 
@@ -501,7 +532,7 @@ npm run test:e2e
 
 ## Shipped Chat Surfaces
 
-Gantry ships host-managed chat commands and in-house skill surfaces. Skills are bundled into the npm package or installed as reviewed skill zips. Runtime copies installed skills into a temporary per-run Claude config directory; runtime-home `.claude/skills` is not the durable source of truth.
+Gantry ships host-managed chat commands and in-house skill surfaces. Skills are bundled into the npm package under `.agents/skills` or installed as reviewed skill zips. Runtime copies installed skills into a temporary per-run provider config directory; runtime-home provider skill folders are not the durable source of truth.
 
 | Surface        | Purpose                                                               |
 | -------------- | --------------------------------------------------------------------- |

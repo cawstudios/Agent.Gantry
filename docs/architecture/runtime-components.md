@@ -102,8 +102,15 @@ sequenceDiagram
 `agent-spawn.ts` launches a provider-neutral `AgentExecutionAdapter`. The
 adapter prepares provider-specific child runner files, SDK environment, model
 projection, runtime materialization, protected filesystem paths, and cleanup.
+Shared runtime passes Gantry-owned `toolPolicyRules` and neutral provider
+session output; adapter-owned renderers translate those into provider-native
+shapes such as Claude SDK `allowedTools` and stale-session error handling.
 The Anthropic adapter is the only production path that calls
 `@anthropic-ai/claude-agent-sdk`.
+The final child process spawn always goes through `RunnerSandboxProvider`.
+`direct` is compatibility mode; `sandbox_runtime` wraps the entire runner
+process, including SDK-managed Bash/file/MCP subprocesses and native SDK
+subagents.
 
 Key runner inputs:
 
@@ -117,7 +124,9 @@ Key runner inputs:
 
 `apps/core/src/adapters/llm/anthropic-claude-agent/runner/query-loop.ts` creates a `MessageStream` and passes it to `query()`. The stream lets the host add follow-up user messages to an already-running agent when the queue decides continuation is safe. The same `query()` call receives:
 
-- `allowedTools` from `apps/core/src/adapters/llm/anthropic-claude-agent/agent-capabilities.ts`, backed by the Gantry MCP surface in `apps/core/src/runner/gantry-mcp-tool-surface.ts`
+- `allowedTools` rendered by the Anthropic adapter from Gantry
+  `toolPolicyRules`, backed by the Gantry MCP surface in
+  `apps/core/src/runner/gantry-mcp-tool-surface.ts`
 - Gantry MCP server config from `apps/core/src/runner/mcp/server.ts`
 - provider-session projection: live interactive turns may pass adapter resume
   metadata from `ProviderSession`; scheduled jobs keep provider persistence
@@ -125,10 +134,20 @@ Key runner inputs:
 - working directory and extra directories
 - `canUseTool`, the permission callback that projects each SDK request through
   the canonical tool execution boundary before sensitive tools run
-- Claude SDK sandbox settings with `enabled=true`, `failIfUnavailable=true`,
-  `allowUnsandboxedCommands=false`, and `filesystem.denyWrite` for
-  `settings.yaml`, generated Claude config, MCP handoff files, and local
-  capability/config paths
+- an enforcing filesystem sandbox boundary for SDK-managed subprocesses:
+  `direct` runner mode uses Claude SDK sandbox settings with
+  `enabled=true`, `failIfUnavailable=true`, `allowUnsandboxedCommands=false`,
+  and protected-path denies, while `sandbox_runtime` mode uses the outer
+  whole-runner OS sandbox and does not request a nested SDK sandbox. In
+  outer-sandbox mode, the Claude Code child is marked already sandboxed, Gantry
+  prefers the resolved `claude` executable on `PATH` when present, reads stay
+  broad except explicit protected read denies, and generated Claude
+  session/cache state remains writable in
+  the per-agent config directory, per-run temp directory, and Claude Code's
+  uid-scoped temp directory, while stable settings, MCP, and skill definitions
+  stay deny-write protected. On macOS, sandbox-runtime's weaker network
+  isolation is enabled for this outer sandbox so Go-based approved CLIs can
+  perform TLS verification through `com.apple.trustd.agent`.
 
 The runner emits structured stdout markers back to the host. The group processor treats those markers as implementation signals, not as the public integration stream. SDK consumers should observe durable runtime events instead.
 
@@ -178,12 +197,18 @@ commands that reference protected capability paths; known text-payload flows
 such as `gh issue create --body ...` may mention those paths without becoming a
 capability mutation.
 
-SDK-managed Bash, file, hook, and MCP subprocesses also run behind the Claude
-SDK sandbox. Gantry passes only concrete protected paths through
-`GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON`; the runner projects them into
-`sandbox.filesystem.denyWrite`. On macOS and Linux, the SDK must fail closed if
-its sandbox dependency is unavailable. Docker deployments should still mount
-durable Gantry config and broker state read-only into the agent execution
+SDK-managed Bash, file, hook, and MCP subprocesses run behind one OS sandbox
+boundary. In `direct` runner mode, Gantry passes concrete protected paths
+through `GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON` and the runner projects them
+into the Claude SDK sandbox. In `sandbox_runtime` mode, Gantry does not request
+a nested SDK sandbox; the whole runner process and its children already run
+inside the enforcing sandbox-runtime profile, the Claude Code child is marked
+already sandboxed, reads stay broad except explicit protected read denies, and
+Gantry prefers the resolved `claude` executable on `PATH` when present. Gantry
+also allows Claude Code's uid-scoped temp directory for tool state, and enables
+macOS trustd access for Go-based CLI TLS verification while retaining Gantry's
+egress proxy enforcement. Docker deployments should still
+mount durable Gantry config and broker state read-only into the agent execution
 container wherever those paths are visible, because container mount policy is
 the OS boundary for non-SDK host-owned processes.
 
@@ -287,6 +312,11 @@ The public lifecycle is:
 Jobs have no serialized execution mode. Interactive message admission stays in
 `GroupQueue`; scheduler work enters the background pg-boss lane and uses
 `runtime.queue.max_job_runs` as its worker concurrency bound.
+Scheduled job prompt runs and scheduler recovery turns call the same
+`agent-spawn` runner path as live turns, so `runtime.sandbox.provider:
+sandbox_runtime` applies to jobs without a job-specific sandbox setting.
+Host-owned system jobs are trusted control-plane work and do not spawn an agent
+runner.
 
 ## Runtime Events
 
@@ -324,9 +354,9 @@ subject identity is stored directly on `memory_items` and in item metadata.
 
 Retrieval uses two Postgres-native paths:
 
-- Postgres full-text search for lexical matching, filtering, and ranking
-- Future pgvector semantic lookup only after memory item embedding indexing and
-  querying are fully implemented
+- Postgres full-text search for lexical matching, filtering, and ranking (always-on baseline)
+- Optional pgvector semantic lookup, fused with lexical results when embeddings
+  are enabled and items are indexed; recall falls back to full-text otherwise
 
 Memory injected into a prompt is context, not trusted authority. The agent may use it to answer better, but runtime authorization still happens outside the model.
 

@@ -51,6 +51,7 @@ export const ids = {
   job: id('jobId', 'Job id.'),
   memory: id('memoryId', 'Memory item id.'),
   modelCredentialProvider: id('providerId', 'Model credential provider id.'),
+  profileFileKind: id('kind', 'Profile file kind (soul | agents).'),
   providerConnection: id('providerConnectionId', 'Provider connection id.'),
   run: id('runId', 'Run id.'),
   server: id('serverId', 'MCP server id.'),

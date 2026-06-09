@@ -261,7 +261,7 @@ describe('configured agent tools', () => {
         agentId: 'agent:one',
       }),
     ).resolves.toEqual({
-      allowedTools: [
+      toolPolicyRules: [
         'capability:skill.linkedin-posting.publish',
         'RunCommand(skills/linkedin-posting/post.py *)',
       ],
@@ -388,7 +388,7 @@ describe('configured agent tools', () => {
         agentId: 'agent:one',
       }),
     ).resolves.toEqual({
-      allowedTools: [
+      toolPolicyRules: [
         'capability:acme.invoices.read',
         'RunCommand(/usr/local/bin/acme invoices read *)',
       ],

@@ -3,6 +3,7 @@ import type {
   RuntimeStorageSettingsSnapshot,
 } from './memory-snapshot.js';
 import type { AgentPersona } from '../../shared/agent-persona.js';
+import type { AgentRelationshipMode } from '../../shared/agent-relationship-mode.js';
 import type { YoloModeSettings } from '../../shared/yolo-mode-policy.js';
 import type { EgressSettings } from '../../shared/egress-policy.js';
 
@@ -147,6 +148,7 @@ export interface RuntimeConfiguredAgent {
   name: string;
   folder: string;
   persona?: AgentPersona;
+  relationshipMode?: AgentRelationshipMode;
   model?: string;
   oneTimeJobDefaultModel?: string;
   recurringJobDefaultModel?: string;
@@ -177,8 +179,20 @@ export interface RuntimeQueueSettings {
   baseRetryMs: number;
 }
 
+export type RuntimeSandboxProvider = 'direct' | 'sandbox_runtime';
+
+export interface RuntimeSandboxSettings {
+  provider: RuntimeSandboxProvider;
+  resourceLimits: {
+    cpuSeconds: number;
+    memoryMb: number;
+    maxProcesses: number;
+  };
+}
+
 export interface RuntimeProcessSettings {
   queue: RuntimeQueueSettings;
+  sandbox: RuntimeSandboxSettings;
 }
 
 export type RuntimeBrowserUsagePolicyMode = 'audit' | 'enforce';

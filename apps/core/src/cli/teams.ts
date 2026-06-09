@@ -27,6 +27,10 @@ import {
 } from './main-agent.js';
 import { nowIso } from '../shared/time/datetime.js';
 import { PromptProfileService } from '../application/agents/prompt-profile-service.js';
+import {
+  createProfileFileMirrorExists,
+  createProfileFileMirrorWriter,
+} from '../platform/profile-file-mirror.js';
 
 type TeamsChannelChoice =
   | { type: 'selected'; channel: TeamsDiscoveredChannel }
@@ -88,6 +92,8 @@ export async function registerTeamsMainGroup(options: {
 
     await new PromptProfileService({
       fileArtifactStore: () => db.getFileArtifactStore(),
+      mirrorProfileFile: createProfileFileMirrorWriter(options.runtimeHome),
+      mirrorFileExists: createProfileFileMirrorExists(options.runtimeHome),
     }).ensureAgentDefaults({ agentFolder: folder, agentName: groupName });
 
     return { folder, groupName };

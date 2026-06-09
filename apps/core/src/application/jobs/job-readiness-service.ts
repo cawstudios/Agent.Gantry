@@ -52,15 +52,12 @@ import {
   formatMissingGantrySecretsMessage,
   humanizeTechnicalIdentifier,
 } from '../../shared/user-visible-messages.js';
-
 export const SETUP_REQUIRED_PAUSE_REASON = 'Setup required';
-
 export interface JobReadinessBrowserStatus {
   hasState?: boolean;
   authMarkers?: string[];
   error?: string;
 }
-
 export interface JobReadinessDeps {
   toolRepository?: ToolCatalogRepository;
   skillRepository?: SkillCatalogRepository;
@@ -72,7 +69,6 @@ export interface JobReadinessDeps {
   ) => Promise<JobReadinessBrowserStatus | undefined>;
   clock?: Clock;
 }
-
 export interface JobReadinessInput extends JobReadinessDeps {
   job: Pick<
     Job,
@@ -86,13 +82,11 @@ export interface JobReadinessInput extends JobReadinessDeps {
   appId?: string;
   agentId?: string;
 }
-
 export interface JobReadinessResult {
   ready: boolean;
   setupState: JobSetupState;
   pauseReason: typeof SETUP_REQUIRED_PAUSE_REASON | null;
 }
-
 export async function evaluateJobReadiness(
   input: JobReadinessInput,
 ): Promise<JobReadinessResult> {
@@ -109,7 +103,6 @@ export async function evaluateJobReadiness(
       previous: input.job.setup_state,
     });
   }
-
   let splitRequirements;
   try {
     splitRequirements = splitAccessRequirements(input.job.access_requirements);
@@ -197,7 +190,6 @@ export async function evaluateJobReadiness(
     });
     if (blocker) blockers.push(blocker);
   }
-
   try {
     const missingToolSet = new Set(toolPreflight.missingTools);
     for (const toolAccessRequirement of toolPreflight.toolAccessRequirements) {
@@ -245,7 +237,6 @@ export async function evaluateJobReadiness(
     }
     throw error;
   }
-
   const setupState = buildJobSetupState({
     blockers,
     checkedAt: input.clock?.now() ?? nowIso(),
@@ -258,7 +249,6 @@ export async function evaluateJobReadiness(
       setupState.state === 'ready' ? null : SETUP_REQUIRED_PAUSE_REASON,
   };
 }
-
 function invalidWorkspaceConfigBlocker(
   job: JobReadinessInput['job'],
 ): JobSetupBlocker | null {
@@ -290,7 +280,6 @@ function invalidWorkspaceConfigBlocker(
   }
   return null;
 }
-
 function brokerUnreachableBlocker(message: string): JobSetupBlocker {
   return {
     state: 'broker_unreachable',
@@ -425,6 +414,27 @@ export function setupStateForTransientPermission(input: {
   });
 }
 
+export function setupStateForBrowserPrelaunchFailure(input: {
+  checkedAt?: string;
+  previous?: JobSetupState;
+}): JobSetupState {
+  return buildJobSetupState({
+    checkedAt: input.checkedAt ?? nowIso(),
+    previous: input.previous,
+    blockers: [
+      {
+        state: 'browser_login_may_be_required',
+        requirementType: 'browser',
+        requirementId: 'Browser',
+        message:
+          'Browser could not be launched for this scheduled job before the agent run started.',
+        nextAction:
+          'Run `gantry browser status`, fix the Browser profile if needed, then resume the job.',
+      },
+    ],
+  });
+}
+
 function buildJobSetupState(input: {
   blockers: readonly JobSetupBlocker[];
   checkedAt: string;
@@ -488,7 +498,7 @@ function missingToolBlocker(toolName: string): JobSetupBlocker {
     state: 'missing_capability',
     requirementType: requirementTypeForTool(toolName),
     requirementId: toolName,
-    message: `This job needs ${toolRequirementLabel(toolName)} before it can run.`,
+    message: `Setup required: capability dependency missing: ${toolRequirementLabel(toolName)}.`,
     nextAction: toolAccessRequirementRecoveryAction(toolName),
   };
 }
@@ -686,8 +696,5 @@ function mcpCredentialBlocker(
 }
 
 function mcpRequestAction(requirement: string): string {
-  return `request_mcp_server ${JSON.stringify({
-    name: requirement,
-    reason: 'This autonomous run requires this MCP server.',
-  })}`;
+  return `request_mcp_server ${JSON.stringify({ name: requirement, reason: 'This autonomous run requires this MCP server.' })}`;
 }

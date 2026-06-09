@@ -3,6 +3,7 @@ import { registerBrowserTools } from './tools/browser.js';
 import { registerFileTools } from './tools/file.js';
 import { registerMemoryTools } from './tools/memory.js';
 import { registerMessagingTools } from './tools/messaging.js';
+import { registerProfileTools } from './tools/profile.js';
 import { registerSchedulerTools } from './tools/scheduler.js';
 import { registerServiceTools } from './tools/service.js';
 import { parseEnabledGantryMcpToolNames } from '../gantry-mcp-tool-surface.js';
@@ -75,6 +76,7 @@ export function createGantryMcpServer(): McpServer {
   registerMemoryTools(filteredServer);
   registerBrowserTools(filteredServer);
   registerFileTools(filteredServer);
+  registerProfileTools(filteredServer);
   registerServiceTools(filteredServer);
 
   assertRegisteredMcpToolHandlers({ enabledTools, registeredHandlers });

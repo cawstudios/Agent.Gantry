@@ -21,6 +21,10 @@ import type { RuntimeEventPublishInput } from '../domain/events/events.js';
 import type { AgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter.js';
 import type { AgentExecutionAdapterRegistry } from '../application/agent-execution/agent-execution-adapter-registry.js';
 import type { SemanticCapabilityDefinition } from '../shared/semantic-capabilities.js';
+import type {
+  RunnerSandboxProvider,
+  RunnerSandboxSpawnInput,
+} from '../shared/runner-sandbox-provider.js';
 
 export interface AgentInput {
   prompt: string;
@@ -36,7 +40,7 @@ export interface AgentInput {
   memoryReviewerIsControlApprover?: boolean;
   persona?: AgentPersona;
   browserProfileName?: string;
-  allowedTools?: string[];
+  toolPolicyRules?: string[];
   toolAccessRequirements?: string[];
   attachedSkillSourceIds?: string[];
   selectedSkillDisplays?: string[];
@@ -58,6 +62,7 @@ export interface AgentInput {
 export interface AgentOutput {
   status: 'success' | 'error';
   result: string | null;
+  providerSession?: AgentOutputProviderSession;
   newSessionId?: string;
   compactBoundary?: boolean;
   interactionBoundary?: 'user_interaction';
@@ -67,6 +72,10 @@ export interface AgentOutput {
   contextUsage?: RuntimeContextUsageSnapshot;
   error?: string;
   runtimeEvents?: AgentOutputRuntimeEvent[];
+}
+
+export interface AgentOutputProviderSession {
+  externalSessionId: string;
 }
 
 export interface AgentOutputRuntimeEvent {
@@ -104,6 +113,7 @@ export interface RunAgentOptions {
   ) => Promise<unknown> | unknown;
   executionAdapter?: AgentExecutionAdapter;
   executionAdapters?: AgentExecutionAdapterRegistry;
+  runnerSandboxProvider: RunnerSandboxProvider;
 }
 
 export interface HostRuntimeContext {
@@ -133,4 +143,5 @@ export interface RunnerProcessSpec {
   startTime: number;
   logsDir: string;
   runtimeDetails: string[];
+  sandbox: Omit<RunnerSandboxSpawnInput, 'command' | 'args' | 'env'>;
 }

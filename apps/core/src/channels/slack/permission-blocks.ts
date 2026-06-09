@@ -32,13 +32,15 @@ export function buildPermissionPromptContentBlocks(
     },
   ];
   if (parts.bodyLines.length > 0) {
-    blocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: truncateSlackText(parts.bodyLines.join('\n'), SLACK_SECTION_MAX),
-      },
-    });
+    for (const sectionText of chunkSlackSectionText(parts.bodyLines)) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: sectionText,
+        },
+      });
+    }
   }
   blocks.push({
     type: 'context',
@@ -71,6 +73,92 @@ export function buildPermissionReceiptBlocks(text: string): SlackBlock[] {
       ],
     },
   ];
+}
+
+function chunkSlackSectionText(lines: string[]): string[] {
+  const chunks: string[] = [];
+  let plainLines: string[] = [];
+  let fenceMarker: string | null = null;
+  let fenceLines: string[] = [];
+
+  const flushPlain = () => {
+    chunks.push(...chunkSlackPlainSectionText(plainLines));
+    plainLines = [];
+  };
+  const flushFence = () => {
+    if (!fenceMarker) return;
+    flushPlain();
+    chunks.push(...chunkSlackFencedSectionText(fenceMarker, fenceLines));
+    fenceMarker = null;
+    fenceLines = [];
+  };
+
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      if (fenceMarker) {
+        flushFence();
+      } else {
+        flushPlain();
+        fenceMarker = line;
+        fenceLines = [];
+      }
+      continue;
+    }
+    if (fenceMarker) {
+      fenceLines.push(line);
+    } else {
+      plainLines.push(line);
+    }
+  }
+  flushFence();
+  flushPlain();
+  return chunks;
+}
+
+function chunkSlackPlainSectionText(lines: string[]): string[] {
+  const chunks: string[] = [];
+  let current = '';
+  for (const line of lines) {
+    if (line.length > SLACK_SECTION_MAX) {
+      if (current) {
+        chunks.push(current);
+        current = '';
+      }
+      for (let offset = 0; offset < line.length; offset += SLACK_SECTION_MAX) {
+        chunks.push(line.slice(offset, offset + SLACK_SECTION_MAX));
+      }
+      continue;
+    }
+    const next = current ? `${current}\n${line}` : line;
+    if (next.length <= SLACK_SECTION_MAX) {
+      current = next;
+      continue;
+    }
+    if (current) chunks.push(current);
+    current = line;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function chunkSlackFencedSectionText(
+  marker: string,
+  lines: string[],
+): string[] {
+  const content = lines.join('\n');
+  const close = '```';
+  const budget = Math.max(
+    1,
+    SLACK_SECTION_MAX - marker.length - close.length - 2,
+  );
+  if (!content) return [`${marker}\n${close}`];
+  const chunks: string[] = [];
+  for (let offset = 0; offset < content.length; offset += budget) {
+    chunks.push(
+      `${marker}\n${content.slice(offset, offset + budget)}\n${close}`,
+    );
+  }
+  return chunks;
 }
 
 function escapeSlackMrkdwnText(input: string): string {

@@ -83,7 +83,7 @@ environment variables are defense in depth, not the authority boundary.
 
 For each persona with browser capability, Gantry also materializes a pinned
 runtime-installed `gantry-browser` skill into that same temp directory. It is not
-stored under the repo-bundled `.claude/skills` tree and does not require user
+stored under the repo-bundled `.agents/skills` tree and does not require user
 `.claude` edits. The skill always points the model at the projected public
 Browser gateway tools: `browser_status`, `browser_open`, `browser_inspect`,
 `browser_act`, and `browser_close`. Private browser backend tools must not
@@ -115,7 +115,8 @@ current package instead of creating another installed skill row.
 
 The canonical tool execution policy, projected through the Claude Agent SDK
 `PreToolUse` hook, blocks direct agent edits to skill capability files such as
-`SKILL.md`, runtime-home `.claude/skills`, and agent-local `skills/` folders.
+`SKILL.md`, runtime-home provider skill folders, and agent-local `skills/`
+folders.
 Agents must use
 `mcp__gantry__request_skill_install` for reviewed skill installs or
 `mcp__gantry__request_skill_proposal` for skill file bundles. Admins/users can

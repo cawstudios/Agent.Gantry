@@ -147,4 +147,36 @@ describe('buildControlPlaneReadModelFromRepositories model credential readiness'
     expect(filters).toEqual([{}]);
     expect(model.jobs).toEqual({ ready: 1, needsAction: 1, blocked: 0 });
   });
+
+  it('includes host-owned default jobs when no control lookup is available', async () => {
+    const filters: unknown[] = [];
+    const model = await buildControlPlaneReadModelFromRepositories({
+      appId: APP_ID,
+      settings: settings(),
+      ...repos([{ providerId: 'anthropic', status: 'active' }]),
+      jobsRepository: {
+        listJobs: async (input) => {
+          filters.push(input);
+          return [
+            {
+              id: 'host-owned-needs-action',
+              status: 'paused',
+              workspace_key: 'main_agent',
+              session_id: null,
+              execution_context: { conversationJid: 'tg:main' },
+            },
+          ] as unknown as Awaited<
+            ReturnType<BuilderInput['jobsRepository']['listJobs']>
+          >;
+        },
+      },
+    });
+
+    expect(filters).toEqual([{}]);
+    expect(model.jobs).toEqual({ ready: 0, needsAction: 1, blocked: 0 });
+    expect(model.nextAction).toMatchObject({
+      kind: 'blocked_job',
+      params: { jobId: 'host-owned-needs-action' },
+    });
+  });
 });

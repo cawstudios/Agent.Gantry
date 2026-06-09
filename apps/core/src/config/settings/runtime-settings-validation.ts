@@ -145,6 +145,7 @@ export function validateLoadedRuntimeSettings(
       );
     }
     if (
+      connection?.provider !== 'app' &&
       conversation.kind !== 'dm' &&
       conversation.kind !== 'direct' &&
       conversation.controlApprovers.length === 0

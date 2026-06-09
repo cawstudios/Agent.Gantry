@@ -23,7 +23,7 @@ export async function resolveTurnToolPolicy(
 ): Promise<ConfiguredAgentToolPolicy> {
   if (!turnContext) {
     return {
-      allowedTools: undefined,
+      toolPolicyRules: undefined,
       runtimeAccess: [],
     };
   }
@@ -75,7 +75,7 @@ export async function resolveTurnSelectedMcpServerIds(
     'getMcpServerRepository' | 'getToolRepository' | 'getSkillRepository'
   >,
   turnContext?: { appId: string; agentId: string } | null,
-  allowedTools?: readonly string[],
+  toolPolicyRules?: readonly string[],
 ): Promise<string[] | undefined> {
   const mcpServers = deps.getMcpServerRepository?.();
   const tools = deps.getToolRepository?.();
@@ -86,7 +86,7 @@ export async function resolveTurnSelectedMcpServerIds(
     skills: deps.getSkillRepository?.(),
     appId: turnContext.appId,
     agentId: turnContext.agentId,
-    allowedTools,
+    allowedTools: toolPolicyRules,
   });
 }
 

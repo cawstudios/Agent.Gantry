@@ -87,6 +87,45 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
     );
   });
 
+  it('keeps Claude config in a stable session store', async () => {
+    mockMaterializeClaudeRuntime.mockClear();
+    const adapter = new AnthropicClaudeAgentExecutionAdapter();
+
+    await adapter.prepare(prepareInput());
+
+    const materializeInput = mockMaterializeClaudeRuntime.mock.calls[0]?.[0];
+    expect(materializeInput).toMatchObject({
+      baseTempDir: '/tmp/gantry/agents/test-agent/.llm-runtime',
+      cleanupPolicy: 'retain-for-debug',
+    });
+  });
+
+  it('declares Claude runtime paths through the adapter boundary', async () => {
+    const adapter = new AnthropicClaudeAgentExecutionAdapter();
+
+    const prepared = await adapter.prepare(prepareInput());
+
+    expect(prepared.runtimeConfigDir).toBe('/tmp/gantry-runtime/.claude');
+    expect(prepared.sandboxRuntime?.toolTempDirLeaf).toMatch(/^claude/);
+    expect(prepared.sandboxRuntime?.tempEnv?.('/tmp/runner')).toEqual({
+      CLAUDE_CODE_TMPDIR: '/tmp/runner',
+      CLAUDE_TMPDIR: '/tmp/runner',
+    });
+  });
+
+  it('classifies stale Claude SDK resume sessions inside the adapter boundary', () => {
+    const adapter = new AnthropicClaudeAgentExecutionAdapter();
+
+    expect(
+      adapter.isMissingProviderSessionError(
+        'No conversation found with session ID: stale',
+      ),
+    ).toBe(true);
+    expect(adapter.isMissingProviderSessionError('provider auth failed')).toBe(
+      false,
+    );
+  });
+
   it('passes only materialized Gantry skill names to the runner SDK whitelist', async () => {
     mockMaterializeClaudeRuntime.mockResolvedValueOnce({
       claudeConfigDir: '/tmp/gantry-runtime/.claude',
@@ -212,7 +251,7 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
     ).resolves.toBeDefined();
   });
 
-  it('allows Gantry Claude Code OAuth projections for Anthropic models', async () => {
+  it('rejects raw Claude Code OAuth projections for Anthropic models', async () => {
     const adapter = new AnthropicClaudeAgentExecutionAdapter();
 
     await expect(
@@ -235,7 +274,7 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
           },
         }),
       ),
-    ).resolves.toBeDefined();
+    ).rejects.toThrow('must not expose provider OAuth tokens');
   });
 
   it('allows IPv6 loopback Gantry gateway projections', async () => {

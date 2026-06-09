@@ -29,6 +29,8 @@ const TELEGRAM_POLL_LEASE_HASH_CHARS = 24;
 import {
   PendingUserQuestionState,
   TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES,
+  TELEGRAM_MESSAGE_MAX_LENGTH,
+  splitTelegramTextByCodeUnits,
   truncateUtf8ToByteLimit,
 } from './channel-shared.js';
 
@@ -107,9 +109,8 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
     threadOpts: { message_thread_id?: number };
   }): Promise<{ message_id: number }> {
     if (!this.bot) throw new Error('Telegram bot is not connected');
-    const promptHtml = renderPermissionPromptHtml(
-      buildPermissionPromptParts(input.request, input.timeoutMs),
-    );
+    const parts = buildPermissionPromptParts(input.request, input.timeoutMs);
+    const promptHtml = renderPermissionPromptHtml(parts);
     const replyMarkup = {
       inline_keyboard: permissionDecisionOptions(input.request).map((mode) => [
         {
@@ -118,6 +119,27 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
         },
       ]),
     };
+    if (promptHtml.length > TELEGRAM_MESSAGE_MAX_LENGTH) {
+      await this.sendSplitPermissionReviewMessages({
+        chatId: input.chatId,
+        request: input.request,
+        timeoutMs: input.timeoutMs,
+        threadOpts: input.threadOpts,
+      });
+      return this.bot.api.sendMessage(
+        input.chatId,
+        renderPermissionPromptHtml({
+          ...parts,
+          bodyLines: ['Review the approval details above before choosing.'],
+        }),
+        {
+          ...input.threadOpts,
+          parse_mode: 'HTML',
+          link_preview_options: { is_disabled: true },
+          reply_markup: replyMarkup,
+        },
+      );
+    }
     return this.bot.api
       .sendMessage(input.chatId, promptHtml, {
         ...input.threadOpts,
@@ -133,12 +155,52 @@ export abstract class TelegramChannelPrompts extends TelegramChannelState {
           },
           'Telegram HTML permission prompt failed; retrying as plain text',
         );
-        return this.bot!.api.sendMessage(
-          input.chatId,
-          formatPermissionPromptText(input.request, input.timeoutMs),
-          { ...input.threadOpts, reply_markup: replyMarkup },
+        const plainPrompt = formatPermissionPromptText(
+          input.request,
+          input.timeoutMs,
         );
+        if (plainPrompt.length > TELEGRAM_MESSAGE_MAX_LENGTH) {
+          return this.sendSplitPermissionReviewMessages({
+            chatId: input.chatId,
+            request: input.request,
+            timeoutMs: input.timeoutMs,
+            threadOpts: input.threadOpts,
+          }).then(() =>
+            this.bot!.api.sendMessage(
+              input.chatId,
+              'Review the approval details above before choosing.',
+              { ...input.threadOpts, reply_markup: replyMarkup },
+            ),
+          );
+        }
+        return this.bot!.api.sendMessage(input.chatId, plainPrompt, {
+          ...input.threadOpts,
+          reply_markup: replyMarkup,
+        });
       });
+  }
+
+  private async sendSplitPermissionReviewMessages(input: {
+    chatId: string;
+    request: PermissionApprovalRequest;
+    timeoutMs: number;
+    threadOpts: { message_thread_id?: number };
+  }): Promise<void> {
+    if (!this.bot) throw new Error('Telegram bot is not connected');
+    const promptText = formatPermissionPromptText(
+      input.request,
+      input.timeoutMs,
+      { budget: Number.POSITIVE_INFINITY },
+    );
+    for (const chunk of splitTelegramTextByCodeUnits(
+      promptText,
+      TELEGRAM_MESSAGE_MAX_LENGTH,
+    )) {
+      await this.bot.api.sendMessage(input.chatId, chunk, {
+        ...input.threadOpts,
+        link_preview_options: { is_disabled: true },
+      });
+    }
   }
 
   protected async sendUserQuestionPromptMessage(input: {

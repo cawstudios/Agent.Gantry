@@ -72,6 +72,11 @@ gantry agent edit <agentId> [--name <name>] [--disabled|--active]
 gantry agent capabilities <agentId> --tools <ids> --skills <ids> --mcp <ids>
 gantry agent dm-access <agentId> --provider <provider> --allow <userId,userId> --admin <userId>
 gantry agent audit <agentId>
+gantry agent profile list <agentId>
+gantry agent profile read <agentId> <soul|agents>
+gantry agent profile set <agentId> <soul|agents> --file <path|-> [--expect-version N]
+gantry agent profile import <agentId> <soul|agents>
+gantry agent profile export <agentId> [<soul|agents>]
 
 gantry channel onboard <slack|teams|telegram> --external-id <id> --title <name>
 gantry channel list
@@ -164,15 +169,16 @@ Runtime memory:
   output and JSONL transcripts are not Gantry session state.
 
 Runtime Claude settings and skills are generated into a temporary per-run
-`CLAUDE_CONFIG_DIR`. Runtime-home `.claude/skills` is not the skill source of
-truth. Do not install separate global Claude hooks for Gantry memory. Generated
-runtime settings do not install memory hooks.
+`CLAUDE_CONFIG_DIR`. Runtime-home provider skill folders are not the skill
+source of truth. Do not install separate global Claude hooks for Gantry memory.
+Generated runtime settings do not install memory hooks.
 
 Capability changes are never direct edits. Agents must not run dependency
-install commands, edit `.claude/skills`, edit `.mcp.json`, edit `settings.yaml`,
-edit Claude permission settings, or mutate generated runtime config. Every
-capability change goes through request, review, approval or denial, durable
-audit, and a new config version. Tool permission approval can also resume the
+install commands, edit provider skill folders, edit `.mcp.json`, edit
+`settings.yaml`, edit provider permission settings, or mutate generated runtime
+config. Every capability change goes through request, review, approval or
+denial, durable audit, and a new config version. Tool permission approval can
+also resume the
 blocked active tool call: `Allow once` is current-run only, while `Always allow`
 updates the target agent capability binding, mirrors `settings.yaml`, and
 applies to future runs too.
@@ -327,9 +333,11 @@ tool; none are direct file edits.
   capability with `request_access` (`target.kind=run_command`, leave
   `temporaryOnly` false) using a literal command prefix; never request broad
   `cli *`.
-- Missing secret -> set it through Gantry Credential Center
-  (`gantry credentials model set <provider>` for model keys); the secret is
-  entered outside chat and is never pasted into the conversation.
+- Missing secret -> report `Setup required: credential missing: <NAME>` and ask
+  the host admin to set it in Gantry Credential Center. Do not run
+  `gantry credentials ...` from an agent; that CLI reads protected runtime
+  config and is host/admin-only. The secret is entered outside chat and is
+  never pasted into the conversation.
 - Needs a runtime settings change -> read current state with
   `settings_desired_state`, then submit `request_settings_update`
   (`replacementYaml`, `expectedRevision` from the read, `reason`). Never edit
@@ -448,10 +456,11 @@ Use `gantry config list` to inspect configured keys. Use `gantry config get
 <KEY> --raw` only when the raw value is required.
 
 Model selection and provider base URLs belong in `settings.yaml`, not `.env`.
-Provider keys belong in Gantry Credential Center through
-`gantry credentials model set <provider>`. Agent runners receive only the
-loopback Gantry Model Gateway URL and run-scoped gateway token. Do not pass raw
-provider keys, database URLs, or channel-token values through Model Access.
+Provider keys belong in Gantry Credential Center through host/admin setup
+(`gantry credentials model set <provider>`). Agents must not run credential CLI
+commands or inspect `settings.yaml`; they receive only the loopback Gantry Model
+Gateway URL and run-scoped gateway token. Do not pass raw provider keys,
+database URLs, or channel-token values through Model Access.
 
 ## Direct Edit Workflow
 
@@ -460,7 +469,7 @@ When setting up local services for personal use:
 1. Run `gantry local setup`.
 2. Run `gantry local doctor`.
 3. Confirm `.env` has `GANTRY_DATABASE_URL` and `SECRET_ENCRYPTION_KEY`.
-4. Configure required model credentials with
+4. From the host/admin shell, configure required model credentials with
    `gantry credentials model set <provider>`.
 5. Continue with `gantry setup` or restart with `gantry restart`.
 6. Confirm with `gantry status`.
@@ -556,6 +565,11 @@ Capability requests:
 - `mcp__gantry__request_mcp_server`
 - `mcp__gantry__request_access`
 
+Agent profile (own SOUL.md / AGENTS.md):
+
+- `mcp__gantry__agent_profile_read`
+- `mcp__gantry__request_agent_profile_update`
+
 Service and agents:
 
 - `mcp__gantry__service_restart`
@@ -609,7 +623,7 @@ profile. DM sessions, channel/group conversations, and jobs created from them
 use separate profiles by default. The runtime installs `gantry-browser` into the
 generated per-run Claude config and exposes Gantry-owned browser gateway tools
 only when the canonical `Browser` capability is selected. Do not ask the user to
-install browser skills or edit `.claude/skills` manually.
+install browser skills or edit provider skill folders manually.
 
 ## Scheduler Usage
 

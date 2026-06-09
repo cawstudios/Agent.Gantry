@@ -191,7 +191,10 @@ export async function getGroupMemoryStatus(
         threadId?: string | null;
         defaultScope?: 'user' | 'group';
       },
-  options: { embeddings?: MemoryEmbeddingsStatus } = {},
+  options: {
+    embeddings?: MemoryEmbeddingsStatus;
+    memoryEnabled?: boolean;
+  } = {},
 ): Promise<MemoryStatusSnapshot> {
   const service = AppMemoryService.getInstance();
   const context =
@@ -278,6 +281,7 @@ export async function getGroupMemoryStatus(
   );
   const embeddingStatus = await safeEmbeddingStatus(service, subject);
   return {
+    memory_enabled: options.memoryEnabled ?? true,
     items_by_kind: memories.reduce<Record<string, number>>((acc, item) => {
       acc[item.kind] = (acc[item.kind] || 0) + 1;
       return acc;

@@ -85,7 +85,7 @@ class RuntimeTruthScriptTests(unittest.TestCase):
 
     def test_gantry_admin_documents_capability_request_tools(self) -> None:
         content = (
-            REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md"
+            REPO_ROOT / ".agents" / "skills" / "gantry-admin" / "SKILL.md"
         ).read_text(encoding="utf-8")
         for tool_name in self.REQUIRED_CAPABILITY_TOOL_NAMES:
             with self.subTest(tool_name=tool_name):
@@ -93,7 +93,7 @@ class RuntimeTruthScriptTests(unittest.TestCase):
 
     def test_gantry_admin_documents_permission_and_proactive_sections(self) -> None:
         content = (
-            REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md"
+            REPO_ROOT / ".agents" / "skills" / "gantry-admin" / "SKILL.md"
         ).read_text(encoding="utf-8")
         for fragment in [
             "## Permission Management",
@@ -110,7 +110,7 @@ class RuntimeTruthScriptTests(unittest.TestCase):
 
     def test_gantry_admin_excludes_stale_tool_names(self) -> None:
         content = (
-            REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md"
+            REPO_ROOT / ".agents" / "skills" / "gantry-admin" / "SKILL.md"
         ).read_text(encoding="utf-8")
         for stale in [
             "request_permission",
@@ -132,7 +132,7 @@ class RuntimeTruthScriptTests(unittest.TestCase):
                 root,
                 ignore=shutil.ignore_patterns(".git", "node_modules", "dist"),
             )
-            admin_skill = root / ".claude" / "skills" / "gantry-admin" / "SKILL.md"
+            admin_skill = root / ".agents" / "skills" / "gantry-admin" / "SKILL.md"
             admin_skill.write_text(
                 admin_skill.read_text(encoding="utf-8")
                 + "\nUse capability_search before request_access.\n",
@@ -158,7 +158,7 @@ class RuntimeTruthScriptTests(unittest.TestCase):
                 root,
                 ignore=shutil.ignore_patterns(".git", "node_modules", "dist"),
             )
-            commands_skill = root / ".claude" / "skills" / "commands" / "SKILL.md"
+            commands_skill = root / ".agents" / "skills" / "commands" / "SKILL.md"
             commands_skill.parent.mkdir(parents=True, exist_ok=True)
             commands_skill.write_text("# Commands\n", encoding="utf-8")
             result = subprocess.run(
@@ -172,7 +172,7 @@ class RuntimeTruthScriptTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 1)
             self.assertIn(
-                ".claude/skills/commands/SKILL.md must not exist",
+                ".agents/skills/commands/SKILL.md must not exist",
                 result.stdout,
             )
 
@@ -184,7 +184,7 @@ class RuntimeTruthScriptTests(unittest.TestCase):
                 root,
                 ignore=shutil.ignore_patterns(".git", "node_modules", "dist"),
             )
-            admin_skill = root / ".claude" / "skills" / "gantry-admin" / "SKILL.md"
+            admin_skill = root / ".agents" / "skills" / "gantry-admin" / "SKILL.md"
             admin_skill.write_text(
                 admin_skill.read_text(encoding="utf-8")
                 + "\nRun `claude mcp add-json github '{\"type\":\"http\"}'` to install MCP servers directly.\n",

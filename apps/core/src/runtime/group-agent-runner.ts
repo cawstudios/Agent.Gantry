@@ -3,6 +3,7 @@ import { collectCompactBoundaryMemory } from '../jobs/compact-memory.js';
 import { defaultModelStatusSelection } from '../session/session-model-status.js';
 import type { AgentOutput } from './agent-spawn.js';
 import { spawnAgent } from './agent-spawn.js';
+import { resolveAgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter-registry.js';
 import type {
   GroupProcessingDeps,
   GroupProcessingRepository,
@@ -65,8 +66,20 @@ const RUNTIME_LOG_PROVIDER_VALUE_PATTERNS: RegExp[] = [
 const RUNTIME_LOG_REDACT_KEY_PATTERN =
   /^(sessionId|newSessionId|providerSessionId|externalSessionId|latestProviderSessionId|session_id)$/i;
 const memoryReviewApproverCache = new Map<string, [boolean, number]>();
+
+export type GroupAgentRunResult = 'success' | 'error' | 'stopped';
+
 function isMissingProviderSessionError(error: string | undefined): boolean {
-  return /\bNo conversation found with session ID\b/i.test(error ?? '');
+  return /\bprovider session\b.*\b(?:missing|expired|not found)\b/i.test(
+    error ?? '',
+  );
+}
+
+function isStoppedByRequest(output: AgentOutput): boolean {
+  return (
+    output.status === 'error' &&
+    /\bstopped by request\b/i.test(output.error ?? '')
+  );
 }
 function redactRuntimeLogString(value: string): string {
   let out = value;
@@ -118,6 +131,35 @@ function redactRuntimeLogValue(value: unknown, depth: number): unknown {
   }
   return value;
 }
+
+function runtimeEventDedupKey(input: {
+  eventType: string;
+  appId?: string;
+  agentId?: string;
+  runId?: string;
+  jobId?: string;
+  conversationId?: string;
+  threadId?: string | null;
+  payload: unknown;
+}): string {
+  let payload: string;
+  try {
+    payload = JSON.stringify(input.payload) ?? 'undefined';
+  } catch {
+    payload = String(input.payload);
+  }
+  return [
+    input.eventType,
+    input.appId ?? '',
+    input.agentId ?? '',
+    input.runId ?? '',
+    input.jobId ?? '',
+    input.conversationId ?? '',
+    input.threadId ?? '',
+    payload,
+  ].join('\u001f');
+}
+
 async function memoryReviewerApproverAllowed(
   deps: GroupProcessingDeps,
   conversationJid: string,
@@ -191,7 +233,7 @@ export function createGroupAgentRunner(input: {
         is_from_me?: boolean | null;
       }[];
     },
-  ): Promise<'success' | 'error'> {
+  ): Promise<GroupAgentRunResult> {
     const initialModelSelection = defaultModelStatusSelection(
       group.agentConfig?.model ?? DEFAULT_MODEL_ALIAS,
     );
@@ -219,6 +261,7 @@ export function createGroupAgentRunner(input: {
           : undefined,
     });
     let defaultRuntimeModel: string | undefined;
+    const forwardedRuntimeEventKeys = new Set<string>();
     const defaultMemoryScope = memoryScopeForConversationKind(
       group.conversationKind,
     );
@@ -255,7 +298,9 @@ export function createGroupAgentRunner(input: {
     };
     const persistProviderSessionFromOutput = async (output: AgentOutput) => {
       if (output.status === 'error') return;
-      const nextSessionId = output.newSessionId?.trim();
+      const nextSessionId = (
+        output.providerSession?.externalSessionId ?? output.newSessionId
+      )?.trim();
       if (
         !nextSessionId ||
         nextSessionId === latestProviderSessionId ||
@@ -288,6 +333,49 @@ export function createGroupAgentRunner(input: {
       latestProviderSessionId = nextSessionId;
       await updateRunProviderMetadata({ providerSessionId: nextSessionId });
     };
+    const forwardRuntimeEvents = async (output: AgentOutput) => {
+      if (output.runtimeEvents?.length && deps.publishRuntimeEvent) {
+        for (const event of output.runtimeEvents) {
+          if (!isRuntimeEventType(event.eventType)) continue;
+          const appId = event.appId ?? turnContext?.appId;
+          if (!appId) continue;
+          const eventKey = runtimeEventDedupKey({
+            eventType: event.eventType,
+            appId,
+            agentId: event.agentId ?? turnContext?.agentId,
+            runId: event.runId ?? runState.runId,
+            jobId: event.jobId,
+            conversationId: event.conversationId ?? chatJid,
+            threadId: event.threadId ?? sessionThreadId,
+            payload: event.payload,
+          });
+          if (forwardedRuntimeEventKeys.has(eventKey)) continue;
+          forwardedRuntimeEventKeys.add(eventKey);
+          await deps.publishRuntimeEvent({
+            appId: appId as never,
+            ...((event.agentId ?? turnContext?.agentId)
+              ? {
+                  agentId: (event.agentId ?? turnContext?.agentId) as never,
+                }
+              : {}),
+            ...((event.runId ?? runState.runId)
+              ? { runId: (event.runId ?? runState.runId) as never }
+              : {}),
+            ...(event.jobId ? { jobId: event.jobId as never } : {}),
+            conversationId: (event.conversationId ?? chatJid) as never,
+            ...((event.threadId ?? sessionThreadId)
+              ? {
+                  threadId: (event.threadId ?? sessionThreadId) as never,
+                }
+              : {}),
+            eventType: event.eventType,
+            actor: event.actor ?? 'runner',
+            responseMode: event.responseMode ?? 'none',
+            payload: event.payload,
+          });
+        }
+      }
+    };
     const wrappedOnOutput = async (output: AgentOutput) => {
       await persistProviderSessionFromOutput(output);
       if (output.usage) {
@@ -319,35 +407,7 @@ export function createGroupAgentRunner(input: {
       if (output.status !== 'error' && output.result) {
         streamedResult.append(String(output.result));
       }
-      if (output.runtimeEvents?.length && deps.publishRuntimeEvent) {
-        for (const event of output.runtimeEvents) {
-          if (!isRuntimeEventType(event.eventType)) continue;
-          const appId = event.appId ?? turnContext?.appId;
-          if (!appId) continue;
-          await deps.publishRuntimeEvent({
-            appId: appId as never,
-            ...((event.agentId ?? turnContext?.agentId)
-              ? {
-                  agentId: (event.agentId ?? turnContext?.agentId) as never,
-                }
-              : {}),
-            ...((event.runId ?? runState.runId)
-              ? { runId: (event.runId ?? runState.runId) as never }
-              : {}),
-            ...(event.jobId ? { jobId: event.jobId as never } : {}),
-            conversationId: (event.conversationId ?? chatJid) as never,
-            ...((event.threadId ?? sessionThreadId)
-              ? {
-                  threadId: (event.threadId ?? sessionThreadId) as never,
-                }
-              : {}),
-            eventType: event.eventType,
-            actor: event.actor ?? 'runner',
-            responseMode: event.responseMode ?? 'none',
-            payload: event.payload,
-          });
-        }
-      }
+      await forwardRuntimeEvents(output);
       if (
         output.compactBoundary &&
         turnContext?.agentSessionId &&
@@ -378,7 +438,7 @@ export function createGroupAgentRunner(input: {
     const attachedMcpSourceIds = await resolveTurnSelectedMcpServerIds(
       deps,
       turnContext,
-      configuredToolPolicy.allowedTools,
+      configuredToolPolicy.toolPolicyRules,
     );
     const currentAccessFingerprint = buildProviderSessionAccessFingerprint({
       allowedTools: configuredToolPolicy.allowedTools,
@@ -446,6 +506,7 @@ export function createGroupAgentRunner(input: {
         publishRuntimeEvent: deps.publishRuntimeEvent,
         executionAdapter: deps.executionAdapter,
         executionAdapters: deps.executionAdapters,
+        runnerSandboxProvider: deps.runnerSandboxProvider,
         turnContext,
       });
       const expireTurnProviderSession = async (
@@ -489,7 +550,7 @@ export function createGroupAgentRunner(input: {
             memoryDefaultScope: defaultMemoryScope,
             memoryReviewerIsControlApprover,
             persona: group.agentConfig?.persona,
-            allowedTools: configuredToolPolicy.allowedTools,
+            toolPolicyRules: configuredToolPolicy.toolPolicyRules,
             runtimeAccess: configuredToolPolicy.runtimeAccess,
             attachedSkillSourceIds: selectedSkillContext.ids,
             selectedSkillDisplays: selectedSkillContext.displays,
@@ -537,14 +598,35 @@ export function createGroupAgentRunner(input: {
         memoryContextBlock,
         resumeSessionId: resumeExternalSessionId,
       });
+      const activeExecutionAdapter = resolveAgentExecutionAdapter({
+        executionProviderId,
+        registry: deps.executionAdapters,
+        fallback: deps.executionAdapter,
+      });
+      const missingProviderSession =
+        activeExecutionAdapter?.isMissingProviderSessionError?.(output.error) ??
+        isMissingProviderSessionError(output.error);
       if (
         output.status === 'error' &&
-        isMissingProviderSessionError(output.error) &&
+        missingProviderSession &&
         (await expireTurnProviderSession(output.error ?? 'missing session'))
       ) {
         output = await invokeAgent({ memoryContextBlock });
       }
+      await forwardRuntimeEvents(output);
       if (output.status === 'error') {
+        if (isStoppedByRequest(output)) {
+          runtimeLogger.warn(
+            { group: group.name },
+            'Agent runner stopped by request',
+          );
+          await completeFailedRuntimeSessionRun({
+            ops: ops(),
+            runId: runState.runId,
+            errorSummary: output.error ?? 'Agent runner stopped by request',
+          });
+          return 'stopped';
+        }
         runtimeLogger.error(
           { group: group.name, error: output.error },
           'Agent runner error',

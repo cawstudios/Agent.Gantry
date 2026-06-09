@@ -34,7 +34,7 @@ export interface AgentExecutionRunInput {
   memoryReviewerIsControlApprover?: boolean;
   persona?: AgentPersona;
   browserProfileName?: string;
-  allowedTools?: string[];
+  toolPolicyRules?: string[];
   attachedSkillSourceIds?: string[];
   selectedSkillDisplays?: string[];
   attachedMcpSourceIds?: string[];
@@ -106,9 +106,15 @@ export interface PreparedAgentExecution {
   providerId: AgentExecutionProviderId;
   runnerPath: string;
   runnerArgs: string[];
+  runtimeConfigDir?: string;
   runnerInputPatch?: {
     modelCredentialEnv?: Record<string, string>;
+    toolNetworkEnv?: Record<string, string>;
     semanticCapabilities?: SemanticCapabilityDefinition[];
+  };
+  sandboxRuntime?: {
+    toolTempDirLeaf?: string;
+    tempEnv?: (runnerTempDir: string) => NodeJS.ProcessEnv;
   };
   env: NodeJS.ProcessEnv;
   protectedFilesystemPaths: string[];
@@ -120,6 +126,7 @@ export interface PreparedAgentExecution {
 
 export interface AgentExecutionAdapter {
   readonly id: AgentExecutionProviderId;
+  isMissingProviderSessionError?(error: string | undefined): boolean;
   prepare(
     input: AgentExecutionAdapterPrepareInput,
   ): Promise<PreparedAgentExecution>;

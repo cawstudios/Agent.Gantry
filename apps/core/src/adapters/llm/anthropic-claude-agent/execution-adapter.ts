@@ -15,7 +15,7 @@ import {
 import { validateModelCredentialProjectionForEntry } from './model-provider-credential-validation.js';
 import {
   ArtifactClaudeSkillSource,
-  BundledClaudeSkillSource,
+  BundledGantrySkillSource,
   CompositeSkillSource,
   RuntimeInstalledGantryBrowserSkillSource,
   type SkillSource,
@@ -32,8 +32,18 @@ const GANTRY_EFFECTIVE_MODEL_SOURCE_ENV = 'GANTRY_EFFECTIVE_MODEL_SOURCE';
 const GANTRY_MCP_SERVER_PATH_ENV = 'GANTRY_MCP_SERVER_PATH';
 const GANTRY_SKILL_ACTIONS_ENV = 'GANTRY_SKILL_ACTIONS_JSON';
 
+function claudeCodeToolTempDirLeaf(): string {
+  return process.platform === 'win32'
+    ? 'claude'
+    : `claude-${process.getuid?.() ?? 0}`;
+}
+
 export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapter {
   readonly id = 'anthropic:claude-agent-sdk' as AgentExecutionProviderId;
+
+  isMissingProviderSessionError(error: string | undefined): boolean {
+    return /\bNo conversation found with session ID\b/i.test(error ?? '');
+  }
 
   async prepare(
     input: AgentExecutionAdapterPrepareInput,
@@ -140,7 +150,15 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
       providerId: this.id,
       runnerPath,
       runnerArgs: [runnerPath],
+      runtimeConfigDir: materialization.claudeConfigDir,
       runnerInputPatch,
+      sandboxRuntime: {
+        toolTempDirLeaf: claudeCodeToolTempDirLeaf(),
+        tempEnv: (runnerTempDir) => ({
+          CLAUDE_CODE_TMPDIR: runnerTempDir,
+          CLAUDE_TMPDIR: runnerTempDir,
+        }),
+      },
       env,
       protectedFilesystemPaths: materialization.protectedFilesystemPaths,
       protectedFilesystemDenyReadPaths:
@@ -161,7 +179,7 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
     packageRoot: string,
   ): SkillSource[] {
     const skillSources: SkillSource[] = [
-      new BundledClaudeSkillSource(packageRoot),
+      new BundledGantrySkillSource(packageRoot),
     ];
     if (input.browserIpcEnabled) {
       skillSources.push(new RuntimeInstalledGantryBrowserSkillSource());

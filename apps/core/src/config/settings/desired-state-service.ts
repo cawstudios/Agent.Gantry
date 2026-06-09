@@ -171,8 +171,12 @@ export class SettingsDesiredStateService {
               ? 'dm'
               : 'channel',
           agentConfig:
-            binding.model || agent.persona
-              ? { model: binding.model, persona: agent.persona }
+            binding.model || agent.persona || agent.relationshipMode
+              ? {
+                  model: binding.model,
+                  persona: agent.persona,
+                  relationshipMode: agent.relationshipMode,
+                }
               : undefined,
         });
         applied.push(`binding:${binding.jid}`);

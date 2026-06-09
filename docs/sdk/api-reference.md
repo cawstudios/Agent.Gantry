@@ -61,8 +61,8 @@ client.settings.get();
 ## Capability Requests
 
 Agents and SDK clients must use Gantry request surfaces for capability changes.
-Do not edit generated Claude config, `.mcp.json`, `.claude/skills`, settings, or
-permission files directly.
+Do not edit generated provider config, `.mcp.json`, provider skill folders,
+settings, or permission files directly.
 
 Owner/admin automation uses the reduced public API:
 

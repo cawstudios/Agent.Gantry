@@ -1,8 +1,6 @@
-import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 import type { AgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter.js';
-
-export const DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID =
-  'anthropic:claude-agent-sdk' as ExecutionProviderId;
+import type { AgentExecutionAdapterRegistry } from '../application/agent-execution/agent-execution-adapter-registry.js';
+import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 
 export function resolveRuntimeExecutionProviderId(
   executionAdapter?: Pick<AgentExecutionAdapter, 'id'>,
@@ -12,4 +10,18 @@ export function resolveRuntimeExecutionProviderId(
     throw new Error('Runtime execution adapter is not configured.');
   }
   return id as ExecutionProviderId;
+}
+
+export function resolveConfiguredRuntimeExecutionProviderId(input: {
+  executionAdapter?: Pick<AgentExecutionAdapter, 'id'>;
+  executionAdapters?: Pick<AgentExecutionAdapterRegistry, 'list'>;
+  fallbackExecutionProviderId?: ExecutionProviderId;
+}): ExecutionProviderId {
+  const executionAdapter =
+    input.executionAdapter ?? input.executionAdapters?.list()[0];
+  if (executionAdapter)
+    return resolveRuntimeExecutionProviderId(executionAdapter);
+  if (input.fallbackExecutionProviderId)
+    return input.fallbackExecutionProviderId;
+  return resolveRuntimeExecutionProviderId();
 }

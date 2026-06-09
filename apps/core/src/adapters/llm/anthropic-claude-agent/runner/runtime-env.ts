@@ -56,26 +56,36 @@ const NON_MODEL_PROXY_ENV_KEYS = [
   'GIT_HTTP_PROXY_AUTHMETHOD',
   'GIT_TERMINAL_PROMPT',
 ] as const;
+const PROXY_ENV_KEYS = [
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+] as const;
+const SANDBOX_RUNTIME_TOOL_PROXY_ENV_KEYS = [
+  ...PROXY_ENV_KEYS,
+  'FTP_PROXY',
+  'ftp_proxy',
+  'RSYNC_PROXY',
+  'DOCKER_HTTP_PROXY',
+  'DOCKER_HTTPS_PROXY',
+  'CLOUDSDK_PROXY_TYPE',
+  'CLOUDSDK_PROXY_ADDRESS',
+  'CLOUDSDK_PROXY_PORT',
+  'GRPC_PROXY',
+  'grpc_proxy',
+  'GIT_SSH_COMMAND',
+] as const;
+const SANDBOX_RUNTIME_GO_DNS = 'netdns=go';
 
 const MODEL_CREDENTIAL_ENV_KEYS = new Set([
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_API_KEY',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'http_proxy',
-  'https_proxy',
-  'NODE_USE_ENV_PROXY',
   'NODE_EXTRA_CA_CERTS',
 ]);
-
-const MODEL_PROXY_ENV_KEYS = [
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'http_proxy',
-  'https_proxy',
-] as const;
 function readModelCredentialEnv(
   source: Record<string, unknown> | undefined,
 ): Record<string, string | undefined> {
@@ -93,26 +103,7 @@ function readModelCredentialEnv(
       throw new Error(`modelCredentialEnv.${key} must be a string.`);
     }
   }
-  validateModelProxyEnv(env);
   return env;
-}
-
-function validateModelProxyEnv(env: Record<string, string | undefined>): void {
-  const expectedProxy = process.env.GANTRY_EGRESS_PROXY_URL?.trim() || '';
-  for (const key of MODEL_PROXY_ENV_KEYS) {
-    const value = env[key];
-    if (!value) continue;
-    if (!expectedProxy) {
-      throw new Error(
-        `modelCredentialEnv.${key} requires GANTRY_EGRESS_PROXY_URL.`,
-      );
-    }
-    if (value !== expectedProxy) {
-      throw new Error(
-        `modelCredentialEnv.${key} must match GANTRY_EGRESS_PROXY_URL.`,
-      );
-    }
-  }
 }
 
 function stripNonModelProxyEnv(
@@ -121,6 +112,53 @@ function stripNonModelProxyEnv(
   for (const key of NON_MODEL_PROXY_ENV_KEYS) {
     target[key] = undefined;
   }
+}
+
+function applySandboxRuntimeProxyEnv(
+  target: Record<string, string | undefined>,
+): void {
+  if (process.env.GANTRY_SANDBOX_RUNTIME_PROXY !== '1') return;
+  target.CLAUDE_CODE_SANDBOXED = '1';
+  for (const key of SANDBOX_RUNTIME_TOOL_PROXY_ENV_KEYS) {
+    const value = process.env[key]?.trim();
+    if (value) target[key] = value;
+  }
+  target.http_proxy = target.http_proxy ?? target.HTTP_PROXY;
+  target.https_proxy = target.https_proxy ?? target.HTTPS_PROXY;
+  if (
+    target.HTTP_PROXY ||
+    target.http_proxy ||
+    target.HTTPS_PROXY ||
+    target.https_proxy
+  ) {
+    target.NODE_USE_ENV_PROXY = '1';
+  }
+  target.CLAUDE_CODE_PROXY_RESOLVES_HOSTS = '1';
+  target.GODEBUG = target.GODEBUG?.trim() || SANDBOX_RUNTIME_GO_DNS;
+  target.NO_PROXY = '';
+  target.no_proxy = '';
+}
+
+function hasProxyEnv(target: Record<string, string | undefined>): boolean {
+  return PROXY_ENV_KEYS.some((key) => !!target[key]?.trim());
+}
+
+export function buildEffectiveToolNetworkEnv(
+  toolNetworkEnv?: Record<string, string>,
+): Record<string, string> {
+  const env: Record<string, string | undefined> = {
+    ...(toolNetworkEnv ?? {}),
+  };
+  applySandboxRuntimeProxyEnv(env);
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === 'string' &&
+        (entry[1].length > 0 ||
+          entry[0] === 'NO_PROXY' ||
+          entry[0] === 'no_proxy'),
+    ),
+  );
 }
 
 export function buildSdkEnv(
@@ -144,9 +182,15 @@ export function buildSdkEnv(
   };
   Object.assign(sdkEnv, readModelCredentialEnv(modelCredentialEnv));
   applyNeutralCaTrustAliases(sdkEnv);
-  copyPlaceholderEnv(sdkEnv, ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']);
+  copyPlaceholderEnv(sdkEnv, ['ANTHROPIC_API_KEY']);
   stripNonModelProxyEnv(sdkEnv);
-  applyAgentEgressNoProxyEnv(sdkEnv, { externalBypass: false });
+  applySandboxRuntimeProxyEnv(sdkEnv);
+  if (hasProxyEnv(sdkEnv)) {
+    sdkEnv.NO_PROXY = '';
+    sdkEnv.no_proxy = '';
+  } else {
+    applyAgentEgressNoProxyEnv(sdkEnv, { externalBypass: false });
+  }
   delete sdkEnv.GANTRY_IPC_AUTH_TOKEN;
   delete sdkEnv.GANTRY_IPC_RESPONSE_VERIFY_KEY;
   delete sdkEnv.GANTRY_IPC_RESPONSE_KEY_ID;
@@ -154,6 +198,56 @@ export function buildSdkEnv(
   delete sdkEnv.GANTRY_MCP_SERVERS_JSON;
   delete sdkEnv.GANTRY_MCP_ALLOWED_TOOLS_JSON;
   return sdkEnv;
+}
+
+export function resolveClaudeCodeExecutableFromPath(
+  envPath: string | undefined = process.env.PATH,
+): string | undefined {
+  if (!envPath) return undefined;
+  for (const entry of envPath.split(path.delimiter)) {
+    if (!path.isAbsolute(entry)) continue;
+    const candidate = path.join(entry, 'claude');
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      return fs.realpathSync(candidate);
+    } catch {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+export function allowedOuterSandboxClaudeExecutable(
+  executable: string | undefined,
+): string | undefined {
+  if (!executable) return undefined;
+  const resolved = path.resolve(executable);
+  const home = process.env.HOME ?? process.env.USERPROFILE;
+  const allowedRoots = [
+    '/bin',
+    '/usr/bin',
+    '/usr/local',
+    '/opt/homebrew',
+    '/System',
+    '/Library/Developer/CommandLineTools',
+    ...(home
+      ? [
+          path.join(home, '.local', 'bin'),
+          path.join(home, '.local', 'share', 'claude', 'versions'),
+        ]
+      : []),
+  ];
+  return allowedRoots.some((root) => pathContainsOrEquals(root, resolved))
+    ? resolved
+    : undefined;
+}
+
+function pathContainsOrEquals(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return (
+    relative === '' ||
+    (!relative.startsWith('..') && !path.isAbsolute(relative))
+  );
 }
 
 export function resolveMcpServerPath(importMetaUrl: string): string {

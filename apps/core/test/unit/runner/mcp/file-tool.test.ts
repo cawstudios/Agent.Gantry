@@ -90,7 +90,7 @@ describe('mcp__gantry__file', () => {
     await expect(
       handleFileToolAction({
         action: 'write',
-        path: 'CLAUDE.md',
+        path: 'AGENTS.md',
         content: 'bad',
         protected: true,
       }).then(JSON.parse),

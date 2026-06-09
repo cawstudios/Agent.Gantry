@@ -9,6 +9,10 @@ import {
   resolveModelSelectionForWorkload,
 } from '../shared/model-catalog.js';
 import { resolveWorkspaceFolderPath } from '../platform/workspace-folder.js';
+import {
+  profileFileMirrorExists,
+  writeProfileFileMirror,
+} from '../platform/profile-file-mirror.js';
 import { AvailableGroup } from './agent-spawn.js';
 import { PromptProfileService } from '../application/agents/prompt-profile-service.js';
 import type { FileArtifactStore } from '../domain/ports/file-artifact-store.js';
@@ -76,9 +80,12 @@ export async function registerGroup(
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
   await new PromptProfileService({
     fileArtifactStore: () => options.getFileArtifactStore?.(),
+    mirrorProfileFile: writeProfileFileMirror,
+    mirrorFileExists: profileFileMirrorExists,
   }).ensureAgentDefaults({
     agentFolder: group.folder,
     agentName: assistantName,
+    relationshipMode: group.agentConfig?.relationshipMode,
   });
 
   conversationRoutes[jid] = group;

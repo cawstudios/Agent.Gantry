@@ -1207,7 +1207,7 @@ describe('startRuntimeServices', () => {
             ({
               resolveDeliveryDestination: vi.fn(async () => ({
                 conversationJid: 'app:app-other:conv-1',
-                providerId: 'control-http',
+                providerId: 'app',
                 providerConnectionId: 'control:app-other',
               })),
             }) as any,

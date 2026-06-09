@@ -13,7 +13,6 @@ import { resolveModelCacheSupport } from '../shared/model-cache-support.js';
 import type { RuntimeModelStatusSnapshot } from '../runtime/model-status-store.js';
 
 export interface MemoryStatusSnapshot {
-  state?: 'Ready' | 'Needs setup' | 'Needs review' | 'Disabled';
   memory_enabled?: boolean;
   items_by_kind: Record<string, number>;
   items_by_scope: Record<string, number>;
@@ -107,31 +106,86 @@ export function formatMemoryStatus(status: MemoryStatusSnapshot): string {
   const pipeline = status.memory_pipeline;
   const lastInjected = status.last_injected_block;
   const injectedCount = lastInjected ? 1 : 0;
+  const memoryOn = status.memory_enabled === true;
   return [
-    `Memory: ${status.state ?? inferMemoryState(status)}`,
+    `Memory: ${memoryOn ? 'on' : 'off'}`,
+    `Pre-answer recall: ${memoryOn ? 'on' : 'off'}`,
+    ...formatRetrievalLines(status.retrieval),
     `Last dream: ${dream}`,
     `Review queue: ${pipeline?.needs_review ?? 0}`,
     `Injected this run: ${injectedCount}`,
   ].join('\n');
 }
 
-function inferMemoryState(
-  status: MemoryStatusSnapshot,
-): 'Ready' | 'Needs setup' | 'Needs review' | 'Disabled' {
-  if (status.memory_enabled === false) return 'Disabled';
-  if ((status.memory_pipeline?.needs_review ?? 0) > 0) return 'Needs review';
-  const itemCount = Object.values(status.items_by_kind || {}).reduce(
-    (total, count) => total + count,
-    0,
-  );
-  if (
-    itemCount > 0 ||
-    status.last_dream_run?.at ||
-    status.last_injected_block
-  ) {
-    return 'Ready';
+function describePauseReason(
+  reason: NonNullable<MemoryStatusSnapshot['retrieval']>['pauseReason'],
+): string {
+  switch (reason) {
+    case 'paused_budget':
+      return 'daily embedding budget reached';
+    case 'paused_provider_quota':
+      return 'embedding provider quota reached';
+    case 'paused_rate_limit':
+      return 'embedding provider rate limit';
+    case 'paused_retryable_provider_error':
+      return 'temporary embedding provider error';
+    default:
+      return 'embedding provider unavailable';
   }
-  return 'Needs setup';
+}
+
+// The "Semantic recall" line is derived from vectorSearch (whether vectors are
+// actually contributing) and pauseReason, so it can never contradict the
+// "Search mode" line above it: full-text mode pairs with off/indexing/paused
+// copy, hybrid modes pair with "on". Full-text recall is the always-on baseline;
+// semantic recall is an optional enhancement, never required for memory to work.
+function describeSemanticRecall(
+  retrieval: NonNullable<MemoryStatusSnapshot['retrieval']>,
+): string {
+  if (retrieval.embeddings !== 'configured') {
+    return 'Semantic recall: off (optional)';
+  }
+  const vectorSearch = retrieval.vectorSearch ?? 'inactive';
+  const paused = retrieval.pauseReason;
+  if (vectorSearch === 'active') {
+    return 'Semantic recall: on';
+  }
+  if (vectorSearch === 'partial') {
+    return paused
+      ? `Semantic recall: on (index build paused: ${describePauseReason(paused)})`
+      : 'Semantic recall: on (index building)';
+  }
+  // No vectors are contributing yet, so full-text recall is doing the work.
+  return paused
+    ? `Semantic recall paused: ${describePauseReason(paused)}. Full-text memory is still active.`
+    : 'Semantic recall: index building. Full-text memory is still active.';
+}
+
+function formatRetrievalLines(
+  retrieval: MemoryStatusSnapshot['retrieval'],
+): string[] {
+  const searchMode = retrieval?.searchMode ?? 'lexical_keyword';
+  const searchLabel =
+    searchMode === 'hybrid_semantic_ready'
+      ? 'hybrid'
+      : searchMode === 'hybrid_semantic_partial'
+        ? 'hybrid partial'
+        : 'full-text';
+  const lines = [
+    `Search mode: ${searchLabel}`,
+    retrieval
+      ? describeSemanticRecall(retrieval)
+      : 'Semantic recall: off (optional)',
+  ];
+  if (
+    typeof retrieval?.ready === 'number' &&
+    typeof retrieval?.pending === 'number'
+  ) {
+    lines.push(
+      `Semantic index: ${retrieval.ready} ready, ${retrieval.pending} pending`,
+    );
+  }
+  return lines;
 }
 
 export function describeThinking(value: ThinkingOverride): string {

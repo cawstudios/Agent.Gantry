@@ -16,7 +16,7 @@
 - Job docs must preserve the settings/runtime boundary: job instances, prompts, schedules, leases, runs, and notification targets are Postgres runtime state, while jobs inherit target-agent tools, skills, and MCP servers instead of carrying job-scoped capability authority.
 - Capability docs must keep the semantic model primary: users approve reviewed `capability:<id>` records derived from tool, skill, MCP server, adapter, or CLI manifests. Raw request ids, command hashes, scoped `RunCommand(...)` rules, sandbox profiles, executable paths, and provider implementation details stay in Details/audit sections. Do not document source-code hardcoded capability ids as the authority model.
 - Local CLI capability docs must state that user-defined `local_cli` capabilities require pinned executable identity, auth preflight, protected paths, denied environment overrides, and reviewed command templates before runtime projects scoped command authority.
-- Credential and runner docs must keep the broker-lane boundary explicit: `NODE_EXTRA_CA_CERTS` can derive neutral SDK/Bash CA aliases, but broker proxies and raw provider tokens must never be described as tool subprocess env.
+- Credential and runner docs must keep the broker-lane boundary explicit: model credentials stay in `modelCredentialEnv`, approved tool networking is projected through `toolNetworkEnv`, and broker proxies/raw provider tokens must never be described as tool subprocess env.
 - Permission docs must describe `SandboxNetworkAccess` as SDK-internal transient defense-in-depth, never as a persistent capability or selected agent tool. The durable user action is a semantic capability, canonical `Browser`, exact Gantry file/web facade, exact admin MCP tool, or scoped `RunCommand(...)` rule.
 - User-facing runtime examples must be concise and action-first. Keep internal
   ids, tool rules, task ids, queue diagnostics, and raw logs in details/audit
@@ -44,9 +44,9 @@
   `interactive`, `job`, and `delegation` model work. pg-boss is a scheduler
   trigger, `JobRun` is terminal evidence, and provider-native async subagent
   task state is never durable scaling authority.
-- Sandbox and scaling docs must not describe model agents or subagent model
-  loops as running inside sandbox in v1. Sandboxes are file/shell tool execution
-  backends only; scalable subagents are child `delegation` admission rows, while
-  inline/native subagents are bounded under the parent admission.
+- Sandbox and scaling docs must distinguish the `direct` runner provider from
+  enforcing providers. A model runner is only OS-contained when
+  `runtime.sandbox.provider` is an enforcing provider such as
+  `sandbox_runtime` and verification proves the host supports it.
 - Runtime refactor plans must keep code anchors current with repo-relative paths and verified line ranges; note stale or removed anchors in the plan instead of leaving historical paths as active guidance.
 - Runtime refactor budget docs must distinguish LOCAL-35 phase checks from final PR checks: phase checks use the recorded T0 `--baseline-file`, and final/overall deletion targets use an explicit branch `--base-ref`.

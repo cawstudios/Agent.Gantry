@@ -2,7 +2,6 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import { ASSISTANT_NAME, getEffectiveModelConfig } from '../config/index.js';
 import type { Job } from '../domain/types.js';
-import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import {
   getRuntimeControlRepository,
@@ -16,6 +15,7 @@ import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
 import { nowIso, nowMs, toIso } from '../shared/time/datetime.js';
 import { resolveWorkspaceFolderPath } from '../platform/workspace-folder.js';
 import { AgentOutput, spawnAgent } from '../runtime/agent-spawn.js';
+import { providerSessionExternalSessionId } from '../runtime/agent-output-provider-session.js';
 import {
   buildRuntimeRunOptions,
   completeFailedRuntimeSessionRun,
@@ -27,10 +27,6 @@ import {
   resolveTurnSelectedMcpServerIds,
   resolveTurnSelectedSkillContext,
 } from '../runtime/group-run-context.js';
-import {
-  DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID,
-  resolveRuntimeExecutionProviderId,
-} from '../runtime/execution-provider-id.js';
 import {
   collectCompactBoundaryMemory,
   collectJobCompletionMemory,
@@ -54,6 +50,7 @@ import {
   jobCompletedModelPayload,
   jobStartedModelPayload,
   modelUseKindForJobSchedule,
+  resolveJobExecutionProviderId,
   resolveJobModel,
   type NormalizedModelUsage,
 } from './model-resolution.js';
@@ -61,6 +58,7 @@ import {
   createJobRunDiagnostics,
   formatTerminalToolDenial,
   forwardRunnerRuntimeEvents,
+  runnerRuntimeEventKey,
   terminalDiagnosticsPayload,
 } from './execution-diagnostics.js';
 import { pauseJobForSetupIfNeeded } from './execution-readiness.js';
@@ -73,6 +71,7 @@ import { resolveAppSessionForJob } from './app-session-resolution.js';
 import { finalizeSchedulerJobRun } from './execution-finalization.js';
 import { assertToolAccessRequirementsReadyForRun } from './execution-tool-access-requirements.js';
 import { closeBrowserAfterJobRun } from './execution-browser-cleanup.js';
+import { prelaunchBrowserForJobRun } from './execution-browser-prelaunch.js';
 import { completeFailedRunFailsafe } from './run-failsafe.js';
 import { createRunProviderMetadataUpdater } from './run-provider-metadata.js';
 import type {
@@ -87,7 +86,6 @@ export async function runJob(
   queueJid: string,
   dispatch?: SchedulerDispatchPayload,
 ): Promise<void> {
-  const runAgentImpl = deps.runAgent ?? spawnAgent;
   const currentJob = await deps.opsRepository.getJobById(job.id);
   if (!currentJob || currentJob.status !== 'active') return;
   const scheduledFor =
@@ -96,6 +94,12 @@ export async function runJob(
   const startedAtMs = nowMs();
   const startedAt = toIso(startedAtMs);
   const runtimeAppId = DEFAULT_JOB_RUNTIME_APP_ID;
+  const runtimeEventExchange = getRuntimeEventExchange();
+  const publishRuntimeEvent = async (
+    event: Parameters<typeof runtimeEventExchange.publish>[0],
+  ): Promise<void> => {
+    await runtimeEventExchange.publish(event);
+  };
   const groups = deps.conversationRoutes();
   const execution = resolveExecutionContext(currentJob, groups);
   if (!execution) {
@@ -109,9 +113,7 @@ export async function runJob(
       dispatch,
       runtimeAppId,
       control: getRuntimeControlRepository(),
-      publishRuntimeEvent: async (event) => {
-        await getRuntimeEventExchange().publish(event);
-      },
+      publishRuntimeEvent,
       logger,
     });
     return;
@@ -136,15 +138,15 @@ export async function runJob(
     appSession: preflightAppSession,
     source: 'preflight_setup',
     runId,
-    publishRuntimeEvent: async (event) => {
-      await getRuntimeEventExchange().publish(event);
-    },
+    publishRuntimeEvent,
   });
   if (pausedForSetup) return;
-  const executionProviderId = (resolvedModel.entry?.executionProviderId ??
-    (deps.executionAdapter || !deps.runAgent
-      ? resolveRuntimeExecutionProviderId(deps.executionAdapter)
-      : DEFAULT_RUNTIME_EXECUTION_PROVIDER_ID)) as ExecutionProviderId;
+  const executionProviderId = resolveJobExecutionProviderId({
+    resolvedModel,
+    executionAdapter: deps.executionAdapter,
+    executionAdapters: deps.executionAdapters,
+    fallbackForInjectedRunner: Boolean(deps.runAgent),
+  });
   const claimed = await deps.opsRepository.claimDueJobRunStart({
     jobId: currentJob.id,
     runId,
@@ -172,9 +174,7 @@ export async function runJob(
       scheduledFor,
       runtimeAppId,
       control: eventControl,
-      publishRuntimeEvent: async (event) => {
-        await getRuntimeEventExchange().publish(event);
-      },
+      publishRuntimeEvent,
       logger,
     });
     const deletionGuard = createJobExecutionDeletionGuard({
@@ -191,9 +191,7 @@ export async function runJob(
       state: eventState,
       resolveEventAppSession: () =>
         resolveAppSessionForJob(currentJob, eventControl),
-      publishRuntimeEvent: async (event) => {
-        await getRuntimeEventExchange().publish(event);
-      },
+      publishRuntimeEvent,
       deletionGuard,
       logger,
     });
@@ -201,15 +199,19 @@ export async function runJob(
       queue_jid: queueJid,
       scheduled_for: scheduledFor,
       timeout_ms: timeoutMs,
+      sandbox_provider: deps.runnerSandboxProvider?.id ?? 'direct',
+      sandbox_enforcing: deps.runnerSandboxProvider?.enforcing === true,
       ...jobStartedModelPayload(resolvedModel),
     });
     let result: string | null = null;
     let error: string | null = null;
     const diagnostics = createJobRunDiagnostics();
     let pausedForSetupDuringRun = false;
+    let setupStateForSetupPause: NonNullable<Job['setup_state']> | undefined;
     const resultSummaryAccumulator =
       createRuntimeUserVisibleResultAccumulator();
     let hasStreamedResult = false;
+    const streamedRuntimeEventKeys = new Set<string>();
     const appendResultSummary = (delta: string | null | undefined): void => {
       if (!delta) return;
       resultSummaryAccumulator.append(delta);
@@ -360,14 +362,28 @@ export async function runJob(
             agentId: executionAgentId,
             source: 'final_setup',
             runId,
-            publishRuntimeEvent: async (event) => {
-              await getRuntimeEventExchange().publish(event);
-            },
+            publishRuntimeEvent,
           }));
+          const browserPrelaunchSetup = finalReadinessPassed
+            ? await prelaunchBrowserForJobRun({
+                currentJob,
+                executionGroupFolder: execution.group.folder,
+                executionJid: execution.executionJid,
+                diagnostics,
+                deps,
+                emitJobEvent,
+                logger,
+              })
+            : undefined;
           if (!finalReadinessPassed) {
             pausedForSetupDuringRun = true;
             error = SETUP_REQUIRED_PAUSE_REASON;
-          } else {
+          } else if (browserPrelaunchSetup) {
+            error = browserPrelaunchSetup.error;
+            setupStateForSetupPause = browserPrelaunchSetup.setupState;
+            pausedForSetupDuringRun = true;
+          }
+          if (!error) {
             const runOptions = buildRuntimeRunOptions({
               timeoutMs,
               credentialBroker,
@@ -378,11 +394,10 @@ export async function runJob(
                 deps.getCapabilitySecretRepository?.(),
               mcpHostnameLookup: deps.getMcpHostnameLookup?.(),
               mcpDnsValidationCache: deps.getMcpDnsValidationCache?.(),
-              publishRuntimeEvent: async (event) => {
-                await getRuntimeEventExchange().publish(event);
-              },
+              publishRuntimeEvent,
               executionAdapter: deps.executionAdapter,
               executionAdapters: deps.executionAdapters,
+              runnerSandboxProvider: deps.runnerSandboxProvider,
               skillContext: {
                 appId: executionAppId,
                 agentId: executionAgentId,
@@ -396,7 +411,7 @@ export async function runJob(
                   cause: 'job',
                 })
               : undefined;
-            const output = await runAgentImpl(
+            const output = await (deps.runAgent ?? spawnAgent)(
               execution.group,
               {
                 prompt: currentJob.prompt,
@@ -416,7 +431,7 @@ export async function runJob(
                 jobModelUseKind,
                 assistantName: ASSISTANT_NAME,
                 memoryContextBlock: turnContext?.memoryContextBlock,
-                allowedTools: toolPolicy.effectiveAllowedTools,
+                toolPolicyRules: toolPolicy.effectiveAllowedTools,
                 toolAccessRequirements:
                   toolAccessRequirementPreflight.toolAccessRequirements,
                 runtimeAccess: toolPolicy.runtimeAccess,
@@ -436,15 +451,21 @@ export async function runJob(
                 );
               },
               async (streamedOutput: AgentOutput) => {
+                for (const event of streamedOutput.runtimeEvents ?? []) {
+                  const eventKey = runnerRuntimeEventKey(event);
+                  if (eventKey) streamedRuntimeEventKeys.add(eventKey);
+                }
                 await forwardRunnerRuntimeEvents({
                   events: streamedOutput.runtimeEvents,
                   diagnostics,
                   emitJobEvent,
                 });
                 if (streamedOutput.usage) latestUsage = streamedOutput.usage;
-                if (streamedOutput.newSessionId) {
+                const streamedProviderSessionId =
+                  providerSessionExternalSessionId(streamedOutput);
+                if (streamedProviderSessionId) {
                   await updateRunProviderMetadata({
-                    providerSessionId: streamedOutput.newSessionId,
+                    providerSessionId: streamedProviderSessionId,
                   });
                 }
                 await collectCompactBoundaryMemory({
@@ -472,6 +493,14 @@ export async function runJob(
               runOptions,
             );
             flushStreamingEvent(true);
+            await forwardRunnerRuntimeEvents({
+              events: output.runtimeEvents?.filter((event) => {
+                const eventKey = runnerRuntimeEventKey(event);
+                return !eventKey || !streamedRuntimeEventKeys.has(eventKey);
+              }),
+              diagnostics,
+              emitJobEvent,
+            });
             await updateRunProviderMetadata({ force: true });
             if (output.status === 'error') {
               error = output.error || 'Unknown error';
@@ -551,13 +580,12 @@ export async function runJob(
       error,
       diagnostics,
       pausedForSetupDuringRun,
+      setupStateForSetupPause,
       deletedDuringRun: deletionGuard.deletedDuringRun,
       runtimeAppId,
       runId,
       appSession: eventState.eventAppSession ?? preflightAppSession,
-      publishRuntimeEvent: async (event) => {
-        await getRuntimeEventExchange().publish(event);
-      },
+      publishRuntimeEvent,
     });
     const resultSummary = deletionGuard.deletedDuringRun
       ? null
@@ -645,9 +673,7 @@ export async function runJob(
       state: eventState,
       runtimeAppId,
       control: eventControl,
-      publishRuntimeEvent: async (event) => {
-        await getRuntimeEventExchange().publish(event);
-      },
+      publishRuntimeEvent,
       logger,
     });
     deps.onSchedulerChanged?.(currentJob.id);

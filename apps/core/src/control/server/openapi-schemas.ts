@@ -202,6 +202,56 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       updatedAt: isoDateTime,
     },
   },
+  AgentProfileFileSummary: {
+    type: 'object',
+    required: [
+      'kind',
+      'path',
+      'version',
+      'contentHash',
+      'sizeBytes',
+      'updatedAt',
+    ],
+    properties: {
+      kind: { type: 'string', enum: ['soul', 'agents'] },
+      path: { type: 'string', example: 'AGENTS.md' },
+      version: { type: 'integer' },
+      contentHash: { type: 'string' },
+      sizeBytes: { type: 'integer' },
+      updatedAt: { type: ['string', 'null'], format: 'date-time' },
+    },
+  },
+  AgentProfileFilesResponse: {
+    type: 'object',
+    required: ['agentId', 'files'],
+    properties: {
+      agentId: { type: 'string' },
+      files: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/AgentProfileFileSummary' },
+      },
+    },
+  },
+  AgentProfileFileContentResponse: {
+    type: 'object',
+    required: ['agentId', 'kind', 'path', 'version', 'contentHash', 'content'],
+    properties: {
+      agentId: { type: 'string' },
+      kind: { type: 'string', enum: ['soul', 'agents'] },
+      path: { type: 'string' },
+      version: { type: 'integer' },
+      contentHash: { type: 'string' },
+      content: { type: 'string' },
+    },
+  },
+  PutAgentProfileFileRequest: {
+    type: 'object',
+    required: ['content'],
+    properties: {
+      content: { type: 'string' },
+      expectedVersion: { type: 'integer' },
+    },
+  },
   HealthResponse: {
     type: 'object',
     required: ['status', 'transport', 'features'],

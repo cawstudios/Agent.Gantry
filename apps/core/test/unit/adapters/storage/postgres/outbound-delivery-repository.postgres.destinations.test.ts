@@ -109,7 +109,7 @@ describe('resolveOutboundDeliveryDestination', () => {
           externalConversationId: 'conv-1',
           externalConversationRef: 'app:app-one:conv-1',
         }),
-        providerId: 'control-http',
+        providerId: 'app',
       },
     ]);
 
@@ -120,7 +120,7 @@ describe('resolveOutboundDeliveryDestination', () => {
 
     expect(resolved).toEqual({
       conversationJid: 'app:app-one:conv-1',
-      providerId: 'control-http',
+      providerId: 'app',
       providerConnectionId: 'control:app-one',
     });
   });

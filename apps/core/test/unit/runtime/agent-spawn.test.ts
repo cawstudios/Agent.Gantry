@@ -49,6 +49,16 @@ vi.mock('@core/config/index.js', () => ({
         denylist: [],
       },
     },
+    runtime: {
+      sandbox: {
+        provider: 'direct',
+        resourceLimits: {
+          cpuSeconds: 0,
+          memoryMb: 0,
+          maxProcesses: 0,
+        },
+      },
+    },
   })),
 }));
 
@@ -109,7 +119,6 @@ vi.mock(
         'ANTHROPIC_BASE_URL',
         'ANTHROPIC_AUTH_TOKEN',
         'ANTHROPIC_API_KEY',
-        'CLAUDE_CODE_OAUTH_TOKEN',
         'HTTP_PROXY',
         'HTTPS_PROXY',
         'http_proxy',
@@ -202,7 +211,11 @@ import {
   spawnAgent as runtimeSpawnAgent,
   AgentOutput,
 } from '@core/runtime/agent-spawn.js';
-import { getEffectiveModelConfig } from '@core/config/index.js';
+import {
+  getEffectiveModelConfig,
+  getRuntimeSettingsForConfig,
+} from '@core/config/index.js';
+import { DirectRunnerSandboxProvider } from '@core/adapters/sandbox/runner-sandbox-provider.js';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import type { ConversationRoute } from '@core/domain/types.js';
@@ -232,6 +245,14 @@ import type {
   AgentExecutionAdapter,
   AgentExecutionAdapterPrepareInput,
 } from '@core/application/agent-execution/agent-execution-adapter.js';
+import type {
+  RunnerSandboxProvider,
+  RunnerSandboxSpawnInput,
+} from '@core/shared/runner-sandbox-provider.js';
+import type { RunAgentOptions } from '@core/runtime/agent-spawn-types.js';
+import { SANDBOX_RUNTIME_MODEL_GATEWAY_HOST } from '@core/runtime/agent-spawn-runtime-policy.js';
+
+const anthropicEnvKey = (suffix: string) => ['ANTHROPIC', suffix].join('_');
 
 const testGroup: ConversationRoute = {
   name: 'Test Group',
@@ -268,12 +289,6 @@ function projectTestModelCredentialEnv(source: Record<string, string>) {
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_API_KEY',
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'HTTP_PROXY',
-    'HTTPS_PROXY',
-    'http_proxy',
-    'https_proxy',
-    'NODE_USE_ENV_PROXY',
     'NODE_EXTRA_CA_CERTS',
   ]);
   return Object.fromEntries(
@@ -301,34 +316,28 @@ const testExecutionAdapter: AgentExecutionAdapter = {
       const claudeCodeOAuthToken = ['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join(
         '_',
       );
-      if (modelCredentialEnv[claudeCodeOAuthToken]) {
-        if (
-          modelCredentialEnv[anthropicApiKey] ||
-          modelCredentialEnv[anthropicAuthToken]
-        ) {
-          throw new Error(
-            `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must use only one Anthropic credential mode.`,
-          );
-        }
-      } else {
-        if (!isLoopbackGatewayUrl(modelCredentialEnv.ANTHROPIC_BASE_URL)) {
-          throw new Error(
-            `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must use a loopback ANTHROPIC_BASE_URL.`,
-          );
-        }
-        if (!modelCredentialEnv.ANTHROPIC_API_KEY?.startsWith('gtw_')) {
-          throw new Error(
-            `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must use a run-scoped gateway token.`,
-          );
-        }
-        if (
-          modelCredentialEnv.ANTHROPIC_AUTH_TOKEN &&
-          !modelCredentialEnv.ANTHROPIC_AUTH_TOKEN.startsWith('gtw_')
-        ) {
-          throw new Error(
-            `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must not expose provider auth tokens.`,
-          );
-        }
+      if (input.modelCredentialProjection.env[claudeCodeOAuthToken]) {
+        throw new Error(
+          `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must not expose provider OAuth tokens.`,
+        );
+      }
+      if (!isLoopbackGatewayUrl(modelCredentialEnv.ANTHROPIC_BASE_URL)) {
+        throw new Error(
+          `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must use a loopback ANTHROPIC_BASE_URL.`,
+        );
+      }
+      if (!modelCredentialEnv.ANTHROPIC_API_KEY?.startsWith('gtw_')) {
+        throw new Error(
+          `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must use a run-scoped gateway token.`,
+        );
+      }
+      if (
+        modelCredentialEnv.ANTHROPIC_AUTH_TOKEN &&
+        !modelCredentialEnv.ANTHROPIC_AUTH_TOKEN.startsWith('gtw_')
+      ) {
+        throw new Error(
+          `Gantry Model Gateway projection for ${input.effectiveModelEntry.displayName} must not expose provider auth tokens.`,
+        );
       }
     }
     const materialization = await mockMaterializeClaudeRuntime({
@@ -347,10 +356,18 @@ const testExecutionAdapter: AgentExecutionAdapter = {
       providerId: 'anthropic:claude-agent-sdk' as const,
       runnerPath,
       runnerArgs: [runnerPath],
+      runtimeConfigDir: materialization.claudeConfigDir,
       runnerInputPatch:
         Object.keys(modelCredentialEnv).length > 0
           ? { modelCredentialEnv }
           : {},
+      sandboxRuntime: {
+        toolTempDirLeaf: `claude-${process.getuid?.() ?? 0}`,
+        tempEnv: (runnerTempDir) => ({
+          CLAUDE_CODE_TMPDIR: runnerTempDir,
+          CLAUDE_TMPDIR: runnerTempDir,
+        }),
+      },
       env: {
         CLAUDE_CONFIG_DIR: materialization.claudeConfigDir,
         ...(input.effectiveModel
@@ -369,13 +386,18 @@ const testExecutionAdapter: AgentExecutionAdapter = {
 };
 
 function spawnTestAgent(
-  ...args: Parameters<typeof runtimeSpawnAgent>
+  group: Parameters<typeof runtimeSpawnAgent>[0],
+  input: Parameters<typeof runtimeSpawnAgent>[1],
+  onProcess: Parameters<typeof runtimeSpawnAgent>[2],
+  onOutput?: Parameters<typeof runtimeSpawnAgent>[3],
+  options: Partial<RunAgentOptions> = {},
 ): ReturnType<typeof runtimeSpawnAgent> {
-  const options = args[4] ?? {};
-  return runtimeSpawnAgent(args[0], args[1], args[2], args[3], {
+  return runtimeSpawnAgent(group, input, onProcess, onOutput, {
     ...options,
     executionAdapter: options.executionAdapter ?? testExecutionAdapter,
-  });
+    runnerSandboxProvider:
+      options.runnerSandboxProvider ?? new DirectRunnerSandboxProvider(),
+  } as RunAgentOptions);
 }
 
 class SpawnMcpRepository implements McpServerRepository {
@@ -591,6 +613,28 @@ describe('agent-spawn timeout behavior', () => {
     vi.mocked(spawn).mockClear();
     vi.mocked(fs.writeFileSync).mockClear();
     vi.mocked(getEffectiveModelConfig).mockClear();
+    vi.mocked(getRuntimeSettingsForConfig).mockReturnValue({
+      permissions: {
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+        egress: {
+          denylist: [],
+        },
+      },
+      runtime: {
+        sandbox: {
+          provider: 'direct',
+          resourceLimits: {
+            cpuSeconds: 0,
+            memoryMb: 0,
+            maxProcesses: 0,
+          },
+        },
+      },
+    } as any);
     vi.mocked(getHostRuntimeCredentialEnv).mockReset();
     vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValue({
       env: {
@@ -622,7 +666,6 @@ describe('agent-spawn timeout behavior', () => {
         `${input.groupDir}/.claude/settings.json`,
         `${input.groupDir}/.claude/skills`,
         `${input.groupDir}/skills`,
-        `${input.packageRoot}/.claude/skills`,
         `${input.packageRoot}/.codex/skills`,
         `${input.packageRoot}/.agents/skills`,
         ...(input.managedSkillArtifactRoots ?? []),
@@ -634,7 +677,6 @@ describe('agent-spawn timeout behavior', () => {
         `${input.groupDir}/.claude/settings.json`,
         `${input.groupDir}/.claude/skills`,
         `${input.groupDir}/skills`,
-        `${input.packageRoot}/.claude/skills`,
         `${input.packageRoot}/.codex/skills`,
         `${input.packageRoot}/.agents/skills`,
         ...(input.managedSkillArtifactRoots ?? []),
@@ -646,7 +688,6 @@ describe('agent-spawn timeout behavior', () => {
         `${input.groupDir}/.claude/settings.json`,
         `${input.groupDir}/.claude/skills`,
         `${input.groupDir}/skills`,
-        `${input.packageRoot}/.claude/skills`,
         `${input.packageRoot}/.codex/skills`,
         `${input.packageRoot}/.agents/skills`,
         ...(input.managedSkillArtifactRoots ?? []),
@@ -689,9 +730,15 @@ describe('agent-spawn timeout behavior', () => {
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
+    expect(result.providerSession).toEqual({
+      externalSessionId: 'session-123',
+    });
     expect(result.newSessionId).toBe('session-123');
     expect(onOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ result: 'Here is my response' }),
+      expect.objectContaining({
+        result: 'Here is my response',
+        providerSession: { externalSessionId: 'session-123' },
+      }),
     );
   });
 
@@ -743,6 +790,9 @@ describe('agent-spawn timeout behavior', () => {
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
+    expect(result.providerSession).toEqual({
+      externalSessionId: 'session-456',
+    });
     expect(result.newSessionId).toBe('session-456');
   });
 
@@ -1118,14 +1168,14 @@ describe('agent-spawn timeout behavior', () => {
       ANTHROPIC_API_KEY: 'gtw_test',
       ANTHROPIC_AUTH_TOKEN: 'gtw_test',
     });
-    expect(mockEnsureEgressGateway).toHaveBeenCalledWith(
+    expect(mockEnsureEgressGateway).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        modelProviderNetworkHosts: ['openrouter.ai:443'],
+        allowedNetworkHosts: expect.arrayContaining(['openrouter.ai:443']),
       }),
     );
   });
 
-  it('projects Claude Code OAuth credentials only through runner input', async () => {
+  it('rejects raw Claude Code OAuth projection in direct runtime', async () => {
     vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
       env: {
         [['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_')]: 'sk-ant-oat-test',
@@ -1136,33 +1186,15 @@ describe('agent-spawn timeout behavior', () => {
       brokerApplied: true,
       brokerProfile: 'gantry',
     });
-    const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
-    const resultPromise = spawnTestAgent(
+    const result = await spawnTestAgent(
       testGroup,
       { ...testInput, model: 'sonnet' },
       () => {},
     );
-    await vi.advanceTimersByTimeAsync(10);
-    fakeProc.emit('close', 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
 
-    const spawnCalls = vi.mocked(spawn).mock.calls;
-    const env = spawnCalls[spawnCalls.length - 1][2]?.env as Record<
-      string,
-      string
-    >;
-    expect(env[['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_')]).toBeUndefined();
-    const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
-    expect(runnerInput.modelCredentialEnv).toMatchObject({
-      [['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_')]: 'sk-ant-oat-test',
-    });
-    expect(
-      runnerInput.modelCredentialEnv[['ANTHROPIC', 'API_KEY'].join('_')],
-    ).toBeUndefined();
-    expect(
-      runnerInput.modelCredentialEnv[['ANTHROPIC', 'AUTH_TOKEN'].join('_')],
-    ).toBeUndefined();
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('must not expose provider OAuth tokens');
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it('rejects provider models when the broker token is not run-scoped', async () => {
@@ -1338,7 +1370,7 @@ describe('agent-spawn timeout behavior', () => {
     }
   });
 
-  it('keeps broker proxy credentials out of the general runner env', async () => {
+  it('keeps broker proxy credentials out of model env and projects safe tool network env', async () => {
     vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
       env: {
         ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
@@ -1379,13 +1411,32 @@ describe('agent-spawn timeout behavior', () => {
     expect(runnerInput.modelCredentialEnv).toMatchObject({
       ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
       ANTHROPIC_API_KEY: 'gtw_proxy',
+      NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
+    });
+    expect(runnerInput.modelCredentialEnv.HTTP_PROXY).toBeUndefined();
+    expect(runnerInput.modelCredentialEnv.HTTPS_PROXY).toBeUndefined();
+    expect(runnerInput.modelCredentialEnv.http_proxy).toBeUndefined();
+    expect(runnerInput.modelCredentialEnv.https_proxy).toBeUndefined();
+    expect(runnerInput.modelCredentialEnv.NODE_USE_ENV_PROXY).toBeUndefined();
+    expect(runnerInput.toolNetworkEnv).toMatchObject({
       HTTP_PROXY: 'http://127.0.0.1:18080/',
       HTTPS_PROXY: 'http://127.0.0.1:18080/',
       http_proxy: 'http://127.0.0.1:18080/',
       https_proxy: 'http://127.0.0.1:18080/',
       NODE_USE_ENV_PROXY: '1',
-      NODE_EXTRA_CA_CERTS: '/tmp/model_gateway-ca.pem',
+      SSL_CERT_FILE: '/tmp/model_gateway-ca.pem',
+      REQUESTS_CA_BUNDLE: '/tmp/model_gateway-ca.pem',
+      CURL_CA_BUNDLE: '/tmp/model_gateway-ca.pem',
+      GIT_SSL_CAINFO: '/tmp/model_gateway-ca.pem',
+      PIP_CERT: '/tmp/model_gateway-ca.pem',
+      AWS_CA_BUNDLE: '/tmp/model_gateway-ca.pem',
+      CARGO_HTTP_CAINFO: '/tmp/model_gateway-ca.pem',
+      DENO_CERT: '/tmp/model_gateway-ca.pem',
     });
+    expect(runnerInput.toolNetworkEnv.NO_PROXY.split(',')).toEqual(
+      expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
+    );
+    expect(runnerInput.toolNetworkEnv.HTTP_PROXY).not.toContain('aoc_');
     expect(mockEnsureEgressGateway).toHaveBeenCalledWith(
       expect.objectContaining({
         upstreamProxy: {
@@ -1403,6 +1454,310 @@ describe('agent-spawn timeout behavior', () => {
       expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
     );
     expect(env.NO_PROXY).not.toContain('api.github.com');
+  });
+
+  it('lets sandbox-runtime provide in-sandbox proxy env for runner traffic', async () => {
+    vi.mocked(getRuntimeSettingsForConfig).mockReturnValue({
+      permissions: {
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+        egress: {
+          denylist: [],
+        },
+      },
+      runtime: {
+        sandbox: {
+          provider: 'sandbox_runtime',
+          resourceLimits: {
+            cpuSeconds: 0,
+            memoryMb: 0,
+            maxProcesses: 0,
+          },
+        },
+      },
+    } as any);
+    const start = vi.fn(() => fakeProc as any);
+    const runnerSandboxProvider: RunnerSandboxProvider = {
+      id: 'sandbox_runtime',
+      enforcing: true,
+      start,
+    };
+    const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
+
+    const resultPromise = spawnTestAgent(
+      testGroup,
+      testInput,
+      () => {},
+      undefined,
+      { runnerSandboxProvider },
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const startInput = start.mock.calls[0]?.[0] as RunnerSandboxSpawnInput;
+    const env = startInput.env as Record<string, string>;
+    const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
+    expect(env.GANTRY_SANDBOX_RUNTIME_PROXY).toBe('1');
+    expect(env.GODEBUG).toBe('netdns=go');
+    expect(env.HTTP_PROXY).toBe('http://127.0.0.1:18080/');
+    expect(env.HTTPS_PROXY).toBe('http://127.0.0.1:18080/');
+    expect(env.HTTP_PROXY).not.toContain('aoc_');
+    expect(runnerInput.toolNetworkEnv.GODEBUG).toBe('netdns=go');
+    expect(runnerInput.modelCredentialEnv[anthropicEnvKey('BASE_URL')]).toBe(
+      `http://${SANDBOX_RUNTIME_MODEL_GATEWAY_HOST}:4567/anthropic`,
+    );
+    expect(runnerInput.modelCredentialEnv.HTTP_PROXY).toBeUndefined();
+    expect(runnerInput.modelCredentialEnv.HTTPS_PROXY).toBeUndefined();
+    expect(mockEnsureEgressGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedNetworkHosts: [`${SANDBOX_RUNTIME_MODEL_GATEWAY_HOST}:4567`],
+        privateNetworkHostMappings: [
+          {
+            authority: `${SANDBOX_RUNTIME_MODEL_GATEWAY_HOST}:4567`,
+            connectHost: '127.0.0.1',
+          },
+        ],
+      }),
+    );
+  });
+
+  it('fails closed when live sandbox provider drifts from settings', async () => {
+    vi.mocked(getRuntimeSettingsForConfig).mockReturnValue({
+      permissions: {
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+        egress: {
+          denylist: [],
+        },
+      },
+      runtime: {
+        sandbox: {
+          provider: 'sandbox_runtime',
+          resourceLimits: {
+            cpuSeconds: 0,
+            memoryMb: 0,
+            maxProcesses: 0,
+          },
+        },
+      },
+    } as any);
+
+    await expect(
+      spawnTestAgent(testGroup, testInput, () => {}),
+    ).rejects.toThrow('Runner sandbox provider mismatch');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('routes IPv6 loopback model gateway URLs through the sandbox gateway alias', async () => {
+    vi.mocked(getRuntimeSettingsForConfig).mockReturnValue({
+      permissions: {
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+        egress: {
+          denylist: [],
+        },
+      },
+      runtime: {
+        sandbox: {
+          provider: 'sandbox_runtime',
+          resourceLimits: {
+            cpuSeconds: 0,
+            memoryMb: 0,
+            maxProcesses: 0,
+          },
+        },
+      },
+    } as any);
+    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
+      env: {
+        [anthropicEnvKey('BASE_URL')]: 'http://[::1]:4567/anthropic',
+        [anthropicEnvKey('API_KEY')]: 'gtw_test',
+      },
+      credentialProviders: {},
+      brokerApplied: true,
+      brokerProfile: 'gantry',
+    });
+    const start = vi.fn(() => fakeProc as any);
+    const runnerSandboxProvider: RunnerSandboxProvider = {
+      id: 'sandbox_runtime',
+      enforcing: true,
+      start,
+    };
+    const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
+
+    const resultPromise = spawnTestAgent(
+      testGroup,
+      testInput,
+      () => {},
+      undefined,
+      { runnerSandboxProvider },
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
+    expect(runnerInput.modelCredentialEnv[anthropicEnvKey('BASE_URL')]).toBe(
+      `http://${SANDBOX_RUNTIME_MODEL_GATEWAY_HOST}:4567/anthropic`,
+    );
+    expect(mockEnsureEgressGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedNetworkHosts: [`${SANDBOX_RUNTIME_MODEL_GATEWAY_HOST}:4567`],
+        privateNetworkHostMappings: [
+          {
+            authority: `${SANDBOX_RUNTIME_MODEL_GATEWAY_HOST}:4567`,
+            connectHost: '::1',
+          },
+        ],
+      }),
+    );
+    expect(start).toHaveBeenCalled();
+  });
+
+  it('rejects raw Claude Code OAuth projection before starting sandbox runtime', async () => {
+    vi.mocked(getRuntimeSettingsForConfig).mockReturnValue({
+      permissions: {
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+        egress: {
+          denylist: [],
+        },
+      },
+      runtime: {
+        sandbox: {
+          provider: 'sandbox_runtime',
+          resourceLimits: {
+            cpuSeconds: 0,
+            memoryMb: 0,
+            maxProcesses: 0,
+          },
+        },
+      },
+    } as any);
+    vi.mocked(getHostRuntimeCredentialEnv).mockResolvedValueOnce({
+      env: {
+        [['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_')]: 'sk-ant-oat-test',
+      },
+      credentialProviders: {
+        [['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_')]: 'native',
+      },
+      brokerApplied: true,
+      brokerProfile: 'gantry',
+    });
+    const start = vi.fn(() => fakeProc as any);
+    const runnerSandboxProvider: RunnerSandboxProvider = {
+      id: 'sandbox_runtime',
+      enforcing: true,
+      start,
+    };
+
+    const result = await spawnTestAgent(
+      testGroup,
+      testInput,
+      () => {},
+      undefined,
+      {
+        runnerSandboxProvider,
+      },
+    );
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('must not expose provider OAuth tokens');
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('lets the outer sandbox protect Claude config files without blocking session state', async () => {
+    vi.mocked(getRuntimeSettingsForConfig).mockReturnValue({
+      permissions: {
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+        egress: {
+          denylist: [],
+        },
+      },
+      runtime: {
+        sandbox: {
+          provider: 'sandbox_runtime',
+          resourceLimits: {
+            cpuSeconds: 0,
+            memoryMb: 0,
+            maxProcesses: 0,
+          },
+        },
+      },
+    } as any);
+    const start = vi.fn(() => fakeProc as any);
+    const runnerSandboxProvider: RunnerSandboxProvider = {
+      id: 'sandbox_runtime',
+      enforcing: true,
+      start,
+    };
+
+    const resultPromise = spawnTestAgent(
+      testGroup,
+      testInput,
+      () => {},
+      undefined,
+      { runnerSandboxProvider },
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const startInput = start.mock.calls[0]?.[0] as RunnerSandboxSpawnInput;
+    const env = startInput.env as Record<string, string>;
+    const providerConfigDir = env.CLAUDE_CONFIG_DIR;
+    expect(env.TMPDIR).toContain(
+      '/tmp/gantry-test-data/ipc/test-group/tmp/gantry-test-group-',
+    );
+    expect(env.CLAUDE_CODE_TMPDIR).toBe(env.TMPDIR);
+    expect(startInput.runtimeReadPaths).toContain(
+      '/tmp/gantry-test-data/sessions/test-group/extra',
+    );
+    expect(startInput.runtimeReadPaths).toContain(providerConfigDir);
+    expect(startInput.runtimeWritePaths).toContain(providerConfigDir);
+    expect(startInput.runtimeWritePaths).toContain(env.TMPDIR);
+    const claudeToolTempDir = startInput.runtimeWritePaths.find((item) =>
+      /\/tmp\/gantry-test-group-.*\/claude-\d+$/.test(item),
+    );
+    expect(claudeToolTempDir).toBeDefined();
+    expect(startInput.runtimeReadPaths).toContain(claudeToolTempDir);
+    expect(fs.mkdirSync).toHaveBeenCalledWith(claudeToolTempDir, {
+      recursive: true,
+      mode: 0o700,
+    });
+    expect(startInput.protectedWritePaths).not.toContain(providerConfigDir);
+    expect(startInput.protectedWritePaths).toEqual(
+      expect.arrayContaining([
+        `${providerConfigDir}/settings.json`,
+        `${providerConfigDir}/settings.local.json`,
+        `${providerConfigDir}/mcp`,
+        `${providerConfigDir}/skills`,
+      ]),
+    );
+    const sdkDenyWritePaths = JSON.parse(
+      env.GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON,
+    ) as string[];
+    expect(sdkDenyWritePaths).toContain(providerConfigDir);
   });
 
   it('keeps host-only brokered OpenAI embedding credentials out of the Claude runner input', async () => {
@@ -1471,7 +1826,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: [
+        toolPolicyRules: [
           'capability:acme.records.get',
           'RunCommand(/opt/homebrew/bin/acme records get *)',
         ],
@@ -1561,7 +1916,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: [
+        toolPolicyRules: [
           'capability:acme.invoices.read',
           'RunCommand(/usr/local/bin/acme invoices read *)',
         ],
@@ -1626,7 +1981,7 @@ describe('agent-spawn timeout behavior', () => {
         testGroup,
         {
           ...testInput,
-          allowedTools: [
+          toolPolicyRules: [
             'capability:google.sheets.values.get',
             'RunCommand(/opt/homebrew/bin/gog sheets get *)',
             'capability:skill.linkedin-posting.publish',
@@ -1647,7 +2002,6 @@ describe('agent-spawn timeout behavior', () => {
       >;
       expect(mockEnsureEgressGateway).toHaveBeenCalledWith(
         expect.objectContaining({
-          modelProviderNetworkHosts: ['api.anthropic.com:443'],
           networkAttribution: [
             expect.objectContaining({ host: 'oauth2.googleapis.com:443' }),
             expect.objectContaining({ host: 'sheets.googleapis.com:443' }),
@@ -1683,7 +2037,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: [
+        toolPolicyRules: [
           'capability:acme.invoices.read',
           'RunCommand(/usr/local/bin/acme invoices read *)',
         ],
@@ -1839,7 +2193,6 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.NO_PROXY).not.toContain('.github.com');
     expect(mockEnsureEgressGateway).toHaveBeenCalledWith(
       expect.objectContaining({
-        modelProviderNetworkHosts: ['api.anthropic.com:443'],
         networkAttribution: expect.arrayContaining([
           expect.objectContaining({ host: 'api.github.com:443' }),
         ]),
@@ -2282,6 +2635,7 @@ describe('agent-spawn timeout behavior', () => {
   it('filters authority and loader env from prepared execution env', async () => {
     const providerModelEnvKey = ['ANTHROPIC', 'MODEL'].join('_');
     const providerAuthTokenEnvKey = ['ANTHROPIC', 'AUTH', 'TOKEN'].join('_');
+    const providerConfigDirKey = ['CLAUDE', 'CONFIG', 'DIR'].join('_');
     const resultPromise = spawnTestAgent(
       testGroup,
       testInput,
@@ -2295,7 +2649,7 @@ describe('agent-spawn timeout behavior', () => {
             runnerPath: '/tmp/runner/index.js',
             runnerArgs: ['/tmp/runner/index.js'],
             env: {
-              CLAUDE_CONFIG_DIR: '/tmp/adapter-claude',
+              [providerConfigDirKey]: '/tmp/adapter-claude',
               [providerModelEnvKey]: 'claude-sonnet-4-6',
               GANTRY_EFFECTIVE_MODEL_SOURCE: 'runtime',
               GANTRY_CLAUDE_SDK_SKILLS_JSON: '["gantry-admin"]',
@@ -2373,7 +2727,6 @@ describe('agent-spawn timeout behavior', () => {
         '/tmp/gantry-test-data/agents/test-group/.claude/settings.json',
         '/tmp/gantry-test-data/agents/test-group/.claude/skills',
         '/tmp/gantry-test-data/agents/test-group/skills',
-        '/tmp/gantry-home/dist/adapters/llm/anthropic-claude-agent/runner/.claude/skills',
         '/tmp/gantry-home/dist/adapters/llm/anthropic-claude-agent/runner/.codex/skills',
         '/tmp/gantry-home/dist/adapters/llm/anthropic-claude-agent/runner/.agents/skills',
         '/tmp/gantry-test-data/artifacts/skills',
@@ -2388,7 +2741,6 @@ describe('agent-spawn timeout behavior', () => {
         '/tmp/gantry-test-data/agents/test-group/.claude/settings.json',
         '/tmp/gantry-test-data/agents/test-group/.claude/skills',
         '/tmp/gantry-test-data/agents/test-group/skills',
-        '/tmp/gantry-home/dist/adapters/llm/anthropic-claude-agent/runner/.claude/skills',
         '/tmp/gantry-home/dist/adapters/llm/anthropic-claude-agent/runner/.codex/skills',
         '/tmp/gantry-home/dist/adapters/llm/anthropic-claude-agent/runner/.agents/skills',
         '/tmp/gantry-test-data/artifacts/skills',
@@ -2451,7 +2803,7 @@ describe('agent-spawn timeout behavior', () => {
   it('does not launch or attach a raw browser backend when Browser is selected', async () => {
     const resultPromise = spawnTestAgent(
       testGroup,
-      { ...testInput, allowedTools: ['Browser'] },
+      { ...testInput, toolPolicyRules: ['Browser'] },
       () => {},
     );
     await vi.advanceTimersByTimeAsync(10);
@@ -2476,7 +2828,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: ['Read', 'mcp__browser' + '_' + 'backend' + '__*'],
+        toolPolicyRules: ['Read', 'mcp__browser' + '_' + 'backend' + '__*'],
       },
       () => {},
     );
@@ -2492,7 +2844,7 @@ describe('agent-spawn timeout behavior', () => {
   it('fails closed on stale projected browser MCP rules during spawn', async () => {
     const result = await spawnTestAgent(
       testGroup,
-      { ...testInput, allowedTools: ['Read', 'mcp__gantry__browser_act'] },
+      { ...testInput, toolPolicyRules: ['Read', 'mcp__gantry__browser_act'] },
       () => {},
     );
     expect(result).toMatchObject({
@@ -2523,7 +2875,7 @@ describe('agent-spawn timeout behavior', () => {
     async (_label, rules, reason) => {
       const result = await spawnTestAgent(
         testGroup,
-        { ...testInput, allowedTools: rules },
+        { ...testInput, toolPolicyRules: rules },
         () => {},
       );
       expect(result).toMatchObject({
@@ -2584,7 +2936,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: ['Browser'],
+        toolPolicyRules: ['Browser'],
       },
       () => {},
     );
@@ -2659,7 +3011,7 @@ describe('agent-spawn timeout behavior', () => {
       testGroup,
       {
         ...testInput,
-        allowedTools: ['Browser'],
+        toolPolicyRules: ['Browser'],
       },
       () => {},
     );

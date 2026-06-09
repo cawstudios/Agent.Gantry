@@ -423,7 +423,7 @@ Prompt profile FileArtifacts are static guidance, not memory dumps:
 | Layer             | Virtual path               | Purpose                                  |
 | ----------------- | -------------------------- | ---------------------------------------- |
 | **Soul**          | `<agent-folder>/SOUL.md`   | Agent personality, voice, and boundaries |
-| **Agent context** | `<agent-folder>/CLAUDE.md` | Stable agent-specific guidance           |
+| **Agent context** | `<agent-folder>/AGENTS.md` | Stable agent-specific guidance           |
 
 Dynamic facts, open loops, and raw transcripts must not be written into these
 FileArtifacts. Durable facts go through structured memory. Active task state is
@@ -432,7 +432,7 @@ runtime events, and digests.
 
 Shared/default operating rules are not stored in `agents/shared`. The runtime
 compiles them as built-in prompt guidance with memory, continuity, privacy,
-tool-use, and communication defaults before appending agent `CLAUDE.md`
+tool-use, and communication defaults before appending agent `AGENTS.md`
 content.
 
 ### Continuity Context
@@ -470,7 +470,7 @@ decisions. It stores app-grade memory in Postgres.
 | **Dream runs**      | Postgres (`memory_dream_runs`)      | Dreaming lifecycle runs per boundary                                                                                            |
 | **Dream decisions** | Postgres (`memory_dream_decisions`) | Auditable promotion, merge, rewrite, decay, retire, or review rows                                                              |
 | **Lexical search**  | Postgres full-text search           | Always-on memory retrieval path                                                                                                 |
-| **Vector search**   | Future `pgvector` path              | Inactive until memory item embedding indexing and query are fully implemented                                                   |
+| **Vector search**   | Optional `pgvector` hybrid path     | Active when embeddings are enabled and items are indexed; otherwise full-text recall remains the always-on baseline             |
 
 `memory_subjects` is not an active current-schema table. Subject identity is
 flattened into `memory_items` and preserved in item metadata for visibility
@@ -564,9 +564,9 @@ Gantry memory uses Postgres tables in the configured runtime schema.
 
 - Runtime database: `GANTRY_DATABASE_URL`
 - Runtime schema: `storage.postgres.schema` (default `gantry`)
-- Lexical search: Postgres full-text search
-- Vector search: inactive until memory item embeddings are fully indexed and
-  queried
+- Lexical search: Postgres full-text search (always-on baseline)
+- Vector search: optional semantic enhancement; active when embeddings are
+  enabled and indexed, otherwise full-text recall remains the baseline
 
 Transcript export, when needed, is generated from canonical Postgres messages
 into a `FileArtifact`. Provider SDK JSONL files are not stored as durable

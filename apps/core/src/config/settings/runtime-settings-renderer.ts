@@ -205,6 +205,11 @@ function renderConfiguredAgentsYaml(
     if (agent.persona && agent.persona !== 'developer') {
       lines.push(`    persona: ${quoteYamlString(agent.persona)}`);
     }
+    if (agent.relationshipMode && agent.relationshipMode !== 'personal') {
+      lines.push(
+        `    relationship_mode: ${quoteYamlString(agent.relationshipMode)}`,
+      );
+    }
     if (agent.model) {
       lines.push(`    model: ${quoteYamlString(agent.model)}`);
     }
@@ -491,7 +496,11 @@ function isDefaultRuntime(runtime: RuntimeSettings['runtime']): boolean {
     runtime.queue.maxMessageRuns === 3 &&
     runtime.queue.maxJobRuns === 4 &&
     runtime.queue.maxRetries === 5 &&
-    runtime.queue.baseRetryMs === 5000
+    runtime.queue.baseRetryMs === 5000 &&
+    runtime.sandbox.provider === 'direct' &&
+    runtime.sandbox.resourceLimits.cpuSeconds === 0 &&
+    runtime.sandbox.resourceLimits.memoryMb === 0 &&
+    runtime.sandbox.resourceLimits.maxProcesses === 0
   );
 }
 
@@ -573,6 +582,12 @@ function renderRuntimeProcessYaml(
     `    max_job_runs: ${runtime.queue.maxJobRuns}`,
     `    max_retries: ${runtime.queue.maxRetries}`,
     `    base_retry_ms: ${runtime.queue.baseRetryMs}`,
+    '  sandbox:',
+    `    provider: ${quoteYamlString(runtime.sandbox.provider)}`,
+    '    resource_limits:',
+    `      cpu_seconds: ${runtime.sandbox.resourceLimits.cpuSeconds}`,
+    `      memory_mb: ${runtime.sandbox.resourceLimits.memoryMb}`,
+    `      max_processes: ${runtime.sandbox.resourceLimits.maxProcesses}`,
     '',
   );
 }

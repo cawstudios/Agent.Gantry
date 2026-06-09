@@ -4,6 +4,10 @@ import path from 'path';
 import type { ConversationRoute } from '../domain/types.js';
 import type { FileArtifactStore } from '../domain/ports/file-artifact-store.js';
 import { isValidWorkspaceFolder } from '../platform/workspace-folder.js';
+import {
+  createProfileFileMirrorExists,
+  createProfileFileMirrorWriter,
+} from '../platform/profile-file-mirror.js';
 import { PromptProfileService } from '../application/agents/prompt-profile-service.js';
 import { providerFromGroupJid, getProviderIds } from './provider-utils.js';
 import {
@@ -36,6 +40,11 @@ export function usage(): string {
     `  gantry agent policy-show [--channel ${channels}]`,
     '  gantry agent access show <jid|folder>',
     '  gantry agent access apply <jid|folder> --file <path|->',
+    '  gantry agent profile list <jid|folder>',
+    '  gantry agent profile read <jid|folder> <soul|agents>',
+    '  gantry agent profile set <jid|folder> <soul|agents> --file <path|-> [--expect-version N]',
+    '  gantry agent profile import <jid|folder> <soul|agents>',
+    '  gantry agent profile export <jid|folder> [<soul|agents>]',
   ].join('\n');
 }
 
@@ -361,6 +370,8 @@ export async function ensureGroupFiles(
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
   await new PromptProfileService({
     fileArtifactStore: () => fileArtifactStore,
+    mirrorProfileFile: createProfileFileMirrorWriter(runtimeHome),
+    mirrorFileExists: createProfileFileMirrorExists(runtimeHome),
   }).ensureAgentDefaults({
     agentFolder: folder,
     agentName: normalizeAgentDisplayName(agentName),

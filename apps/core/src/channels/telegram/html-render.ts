@@ -17,7 +17,7 @@ export function escapeTelegramHtml(input: string): string {
     .replaceAll('>', '&gt;');
 }
 
-const CODE_FENCES = new Set(['```', '```diff', '```json']);
+const CODE_FENCES = new Set(['```', '```diff', '```json', '```markdown']);
 
 /**
  * Escape a non-fenced line for Telegram HTML, converting inline `code` spans

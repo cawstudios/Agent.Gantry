@@ -64,7 +64,10 @@ import {
   startGroupProgressHeartbeats,
 } from './group-progress-heartbeats.js';
 import { createProgressChannelSender } from './group-progress-channel-sender.js';
-import { createGroupAgentRunner } from './group-agent-runner.js';
+import {
+  createGroupAgentRunner,
+  type GroupAgentRunResult,
+} from './group-agent-runner.js';
 import { buildMemoryRecallQueryFromMessages } from '../memory/app-memory-recall-query.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import {
@@ -255,6 +258,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
               defaultScope: defaultMemoryScope,
             },
             {
+              memoryEnabled: memory.enabled,
               embeddings:
                 memory.enabled &&
                 memory.embeddings.enabled &&
@@ -591,7 +595,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       }
       if (settlement === 'delivery_incomplete') sawDeliveryIncomplete = true;
     };
-    let output: 'success' | 'error' = 'error';
+    let output: GroupAgentRunResult = 'error';
     const handleAgentOutput = async (result: AgentOutput) => {
       lastAgentProgressAt = currentTimeMs();
       if (awaitingResponseReceipt && !result.interactionBoundary) {
@@ -775,14 +779,16 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     }
 
     const finalProgressState: FinalProgressState =
-      output === 'error' || hadError
-        ? 'failed'
-        : sawDeliveryIncomplete ||
-            (sawTerminalDeliveryFailure && outputSentToUser)
-          ? 'delivery_incomplete'
-          : sawTerminalDeliveryFailure
-            ? 'failed'
-            : 'completed';
+      output === 'stopped'
+        ? 'stopped'
+        : output === 'error' || hadError
+          ? 'failed'
+          : sawDeliveryIncomplete ||
+              (sawTerminalDeliveryFailure && outputSentToUser)
+            ? 'delivery_incomplete'
+            : sawTerminalDeliveryFailure
+              ? 'failed'
+              : 'completed';
     if (
       finalProgressState !== 'completed' ||
       !sentAnyTurnDoneProgress ||

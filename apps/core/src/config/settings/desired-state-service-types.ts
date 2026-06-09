@@ -1,4 +1,5 @@
 import type { AgentPersona } from '../../shared/agent-persona.js';
+import type { AgentRelationshipMode } from '../../shared/agent-relationship-mode.js';
 import type { AppId } from '../../domain/app/app.js';
 import type {
   AgentRepository,
@@ -17,7 +18,11 @@ export interface StoredAgentBinding {
   added_at: string;
   requiresTrigger?: boolean;
   conversationKind?: 'dm' | 'channel';
-  agentConfig?: { model?: string; persona?: AgentPersona };
+  agentConfig?: {
+    model?: string;
+    persona?: AgentPersona;
+    relationshipMode?: AgentRelationshipMode;
+  };
 }
 
 export interface ConfiguredRoutingBinding {

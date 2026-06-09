@@ -26,16 +26,16 @@ Gantry currently has these layers:
 
 1. Static prompt profile FileArtifacts
    - `scope: prompt-profile`, `path: <agent-folder>/SOUL.md`
-   - `scope: prompt-profile`, `path: <agent-folder>/CLAUDE.md`
+   - `scope: prompt-profile`, `path: <agent-folder>/AGENTS.md`
 
 2. Structured memory in Postgres
    - flattened `memory_items` for durable facts, decisions, procedures, and
      references
    - recent session digests for continuation recall
    - `memory_candidates` for staged extracted facts
-   - Postgres full-text search for lexical recall
-   - vector recall inactive until memory item embeddings are fully indexed and
-     queried
+   - Postgres full-text search for lexical recall (always-on baseline)
+   - optional pgvector semantic recall, active when embeddings are enabled and
+     indexed; otherwise full-text recall remains the baseline
 
 3. Host-driven continuity context
    - Host runtime injects a fresh digest-first continuity block for every run.
@@ -113,7 +113,7 @@ This should not be stored as normal durable memory because it goes stale quickly
 Static prompt FileArtifacts are not memory dumps.
 
 - `SOUL.md` defines personality, voice, and boundaries.
-- `CLAUDE.md` defines stable agent-specific guidance.
+- `AGENTS.md` defines stable agent-specific guidance.
 - Shared `agents/shared` prompt projection is not a runtime input.
 - Former shared operating rules are compiled from built-in generated prompt
   guidance so agents keep memory, continuity, privacy, tool-use, and

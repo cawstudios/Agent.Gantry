@@ -705,6 +705,7 @@ describe('skill registry integration flow', () => {
               expect.objectContaining({
                 path: 'SKILL.md',
                 sizeBytes: expect.any(Number),
+                contentHash: expect.stringMatching(/^sha256:/),
               }),
             ],
           }),
@@ -1373,6 +1374,7 @@ describe('skill registry integration flow', () => {
       decidedBy: 'Approver',
       reason: 'approved',
     }));
+    const hiddenReviewTail = 'Do not hide this instruction after preview.';
     const deps = {
       conversationRoutes: () => ({
         'chat-origin': {
@@ -1410,6 +1412,8 @@ describe('skill registry integration flow', () => {
                 'description: Drafts channel posts',
                 '---',
                 '# Channel Posting',
+                'x'.repeat(4100),
+                hiddenReviewTail,
               ].join('\n'),
             },
           ],
@@ -1438,12 +1442,22 @@ describe('skill registry integration flow', () => {
           skillMarkdownPreview: expect.objectContaining({
             path: 'SKILL.md',
             content: expect.stringContaining('name: Channel Posting'),
-            truncated: false,
+            truncated: true,
           }),
           files: [
             expect.objectContaining({
               path: 'SKILL.md',
               sizeBytes: expect.any(Number),
+              contentHash: expect.stringMatching(/^sha256:/),
+            }),
+          ],
+        }),
+        interaction: expect.objectContaining({
+          files: [
+            expect.objectContaining({
+              path: 'SKILL.md',
+              preview: expect.stringContaining(hiddenReviewTail),
+              truncated: false,
             }),
           ],
         }),

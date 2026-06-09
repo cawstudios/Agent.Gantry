@@ -20,6 +20,65 @@ export const AgentPersonaSchema = z.enum([
 ]);
 export type AgentPersona = z.infer<typeof AgentPersonaSchema>;
 
+export const AgentRelationshipModeSchema = z.enum(['personal', 'organization']);
+export type AgentRelationshipMode = z.infer<typeof AgentRelationshipModeSchema>;
+
+export const AgentProfileFileKindSchema = z.enum(['soul', 'agents']);
+export type AgentProfileFileKind = z.infer<typeof AgentProfileFileKindSchema>;
+
+export const AgentProfileFileSummarySchema = z
+  .object({
+    kind: AgentProfileFileKindSchema,
+    path: z.string(),
+    version: z.number().int().nonnegative(),
+    contentHash: z.string(),
+    sizeBytes: z.number().int().nonnegative(),
+    updatedAt: IsoDateTimeSchema.nullable(),
+  })
+  .strict();
+export type AgentProfileFileSummary = z.infer<
+  typeof AgentProfileFileSummarySchema
+>;
+
+export const AgentProfileFilesResponseSchema = z
+  .object({
+    agentId: z.string(),
+    files: z.array(AgentProfileFileSummarySchema),
+  })
+  .strict();
+export type AgentProfileFilesResponse = z.infer<
+  typeof AgentProfileFilesResponseSchema
+>;
+
+export const AgentProfileFileContentResponseSchema = z
+  .object({
+    agentId: z.string(),
+    kind: AgentProfileFileKindSchema,
+    path: z.string(),
+    version: z.number().int().nonnegative(),
+    contentHash: z.string(),
+    content: z.string(),
+  })
+  .strict();
+export type AgentProfileFileContentResponse = z.infer<
+  typeof AgentProfileFileContentResponseSchema
+>;
+
+// Coarse upper bound on profile content (chars ~ bytes for markdown). The
+// runtime enforces the exact byte limit; this keeps oversized request bodies
+// from reaching the service at all.
+export const MAX_AGENT_PROFILE_CONTENT_BYTES = 2_000_000;
+
+export const PutAgentProfileFileRequestSchema = z
+  .object({
+    content: z.string().max(MAX_AGENT_PROFILE_CONTENT_BYTES),
+    expectedVersion: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type PutAgentProfileFileRequest = z.infer<
+  typeof PutAgentProfileFileRequestSchema
+>;
+
 export const CreateAgentRequestSchema = z.object({
   appId: z.string(),
   name: z.string().min(1),

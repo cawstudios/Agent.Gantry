@@ -39,9 +39,11 @@ export function readRawBody(
   });
 }
 
-export function readJson(req: IncomingMessage): Promise<unknown> {
+export function readJson(
+  req: IncomingMessage,
+  maxBytes = 64 * 1024,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const maxBytes = 64 * 1024;
     const chunks: Buffer[] = [];
     let totalBytes = 0;
     const contentLength = parseContentLength(req.headers['content-length']);

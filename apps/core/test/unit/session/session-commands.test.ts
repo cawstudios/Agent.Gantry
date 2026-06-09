@@ -567,6 +567,7 @@ describe('handleSessionCommand', () => {
   it('handles /memory-status by formatting status output', async () => {
     const deps = makeDeps({
       getMemoryStatus: vi.fn().mockResolvedValue({
+        memory_enabled: true,
         items_by_kind: { fact: 3 },
         items_by_scope: { group: 3 },
         top10_most_used: [{ key: 'fact:key', retrieval_count: 12 }],
@@ -592,7 +593,10 @@ describe('handleSessionCommand', () => {
     expect(deps.getMemoryStatus).toHaveBeenCalledTimes(1);
     expect(deps.sendMessage).toHaveBeenCalledWith(
       [
-        'Memory: Ready',
+        'Memory: on',
+        'Pre-answer recall: on',
+        'Search mode: full-text',
+        'Semantic recall: index building. Full-text memory is still active.',
         'Last dream: never',
         'Review queue: 0',
         'Injected this run: 0',
@@ -750,6 +754,26 @@ describe('handleSessionCommand', () => {
       deps,
     });
     expect(result).toEqual({ handled: true, success: false });
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to process'),
+    );
+  });
+
+  it('returns success:false on stopped pre-compact processing', async () => {
+    const deps = makeDeps({ runAgent: vi.fn().mockResolvedValue('stopped') });
+    const msgs = [
+      makeMsg('summarize this', { timestamp: '99' }),
+      makeMsg('/compact', { timestamp: '100' }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.archiveCurrentSession).not.toHaveBeenCalled();
     expect(deps.sendMessage).toHaveBeenCalledWith(
       expect.stringContaining('Failed to process'),
     );
@@ -1353,6 +1377,23 @@ describe('handleSessionCommand', () => {
     expect(deps.advanceCursor).not.toHaveBeenCalled();
   });
 
+  it('reports /compact failure when SDK compact is stopped', async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn().mockResolvedValue('stopped'),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/compact')],
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.archiveCurrentSession).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith('/compact failed.');
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
+  });
+
   it('reports /compact failure when SDK compact output is an error', async () => {
     const deps = makeDeps({
       runAgent: vi.fn().mockImplementation(async (_prompt, onOutput) => {
@@ -1780,6 +1821,31 @@ describe('getGroupMemoryStatus', () => {
 
       expect(status.retrieval?.embeddings).toBe('disabled');
       expect(status.retrieval?.vectorSearch).toBe('inactive');
+    } finally {
+      vi.doUnmock('@core/memory/app-memory-service.js');
+      vi.resetModules();
+    }
+  });
+
+  it('threads disabled memory into the status snapshot', async () => {
+    vi.resetModules();
+    vi.doMock('@core/memory/app-memory-service.js', () => ({
+      AppMemoryService: {
+        getInstance: () => ({
+          list: vi.fn().mockResolvedValue([]),
+          dreamingStatus: vi.fn().mockResolvedValue([]),
+        }),
+      },
+    }));
+
+    try {
+      const { getGroupMemoryStatus } =
+        await import('@core/runtime/group-memory-commands.js');
+      const status = await getGroupMemoryStatus('test', {
+        memoryEnabled: false,
+      });
+
+      expect(status.memory_enabled).toBe(false);
     } finally {
       vi.doUnmock('@core/memory/app-memory-service.js');
       vi.resetModules();

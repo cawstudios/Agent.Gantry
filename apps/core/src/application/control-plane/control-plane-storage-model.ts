@@ -84,9 +84,7 @@ async function listControlPlaneJobs(input: {
 }) {
   const defaultScope = input.appId === DEFAULT_JOB_RUNTIME_APP_ID;
   const jobs = await input.jobsRepository.listJobs({
-    ...(defaultScope && input.jobControlRepository
-      ? {}
-      : { appId: input.appId }),
+    ...(defaultScope ? {} : { appId: input.appId }),
   });
   return input.jobControlRepository
     ? filterJobsByCanonicalAppSession({

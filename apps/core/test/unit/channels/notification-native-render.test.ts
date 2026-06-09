@@ -67,7 +67,14 @@ describe('buildPermissionPromptParts', () => {
           name: 'linkedin-posting',
           description: 'Publish posts to LinkedIn',
           requiredEnvVars: ['LINKEDIN_ACCESS_TOKEN'],
-          files: [{ path: 'a' }, { path: 'b' }],
+          files: [
+            {
+              path: 'SKILL.md',
+              sizeBytes: 1200,
+              contentHash: 'sha256:abc123',
+            },
+            { path: 'post.py', sizeBytes: 3400, contentHash: 'sha256:def456' },
+          ],
           totalSizeBytes: 4600,
           skillMarkdownPreview: {
             path: '/tmp/staged/SKILL.md',
@@ -81,6 +88,8 @@ describe('buildPermissionPromptParts', () => {
     );
     expect(skill.bodyLines).toContain('Description: Publish posts to LinkedIn');
     expect(skill.bodyLines).toContain('Files: 2 (4.5 KB)');
+    expect(skill.bodyLines).toContain('Review files:');
+    expect(skill.bodyLines).toContain('- SKILL.md (1.2 KB, sha256:abc123)');
     expect(skill.bodyLines).toContain('Requires env: LINKEDIN_ACCESS_TOKEN');
     expect(skill.bodyLines).toContain('SKILL.md preview:');
     expect(skill.bodyLines).toContain(
@@ -114,6 +123,77 @@ describe('buildPermissionPromptParts', () => {
     expect(mcp.bodyLines).toContain('Needs credentials: LINEAR_API_KEY');
     expect(mcp.bodyLines).toContain('Network: api.linear.app:443');
     expect(mcp.bodyLines.join('\n')).not.toContain('sandboxProfileId');
+  });
+
+  it('redacts only sensitive values inside skill review previews', () => {
+    const parts = buildPermissionPromptParts(
+      {
+        requestId: 'r',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'request_skill_proposal',
+        displayName: 'Skill: linkedin-posting',
+        toolInput: {
+          name: 'linkedin-posting',
+          description: 'Publish approved LinkedIn posts',
+          files: [
+            {
+              path: 'SKILL.md',
+              sizeBytes: 220,
+              contentHash: 'sha256:abc123',
+            },
+          ],
+          skillMarkdownPreview: {
+            path: 'SKILL.md',
+            content: [
+              '# LinkedIn Posting',
+              '',
+              'Use this skill to publish approved drafts.',
+              'access_token: abcdefghijklmnop123456',
+              'Network: api.linkedin.com:443',
+            ].join('\n'),
+            truncated: false,
+          },
+        },
+      },
+      60_000,
+    );
+    const body = parts.bodyLines.join('\n');
+
+    expect(body).toContain('# LinkedIn Posting');
+    expect(body).toContain('Use this skill to publish approved drafts.');
+    expect(body).toContain('access_token=[REDACTED_SECRET]');
+    expect(body).toContain('Network: api.linkedin.com:443');
+    expect(body).not.toContain('Sensitive detail hidden.');
+    expect(body).not.toContain('abcdefghijklmnop123456');
+  });
+
+  it('splits long Slack permission bodies instead of truncating review text', () => {
+    const blocks = buildPermissionPromptContentBlocks({
+      title: 'Allow profile update?',
+      bodyLines: ['Full content:', '```markdown', 'x'.repeat(3500), '```'],
+      contextLines: ['Agent: Main Agent'],
+      replyInMinutes: 1,
+    });
+
+    const sectionTexts = blocks
+      .filter((block) => block.type === 'section')
+      .map((block) => (block.text as { text: string }).text);
+    expect(sectionTexts).toHaveLength(3);
+    expect(sectionTexts[0]).toBe('Full content:');
+    expect(
+      sectionTexts
+        .slice(1)
+        .map((text) => text.replace(/^```markdown\n/, '').replace(/\n```$/, ''))
+        .join(''),
+    ).toBe('x'.repeat(3500));
+    for (const text of sectionTexts) {
+      expect(text.length).toBeLessThanOrEqual(3000);
+      expect(text).not.toContain('...');
+    }
+    expect(sectionTexts[1]?.startsWith('```markdown\n')).toBe(true);
+    expect(sectionTexts[1]?.endsWith('\n```')).toBe(true);
+    expect(sectionTexts[2]?.startsWith('```markdown\n')).toBe(true);
+    expect(sectionTexts[2]?.endsWith('\n```')).toBe(true);
   });
 
   it('drops internal plumbing ids from the generic fallback for unknown tools', () => {
@@ -212,6 +292,17 @@ describe('Telegram HTML rendering', () => {
       '```',
     ]);
     expect(html).toContain('<pre>echo "&lt;a&gt; &amp;&amp; &lt;/b&gt;"</pre>');
+  });
+
+  it('renders markdown fences used by profile review evidence as <pre>', () => {
+    const html = renderBodyLinesHtml([
+      'Full content:',
+      '```markdown',
+      '# Agent\nUse <safe> text.',
+      '```',
+    ]);
+    expect(html).toContain('<pre># Agent\nUse &lt;safe&gt; text.</pre>');
+    expect(html).not.toContain('```markdown');
   });
 
   it('wraps the prompt title and never leaks raw code fences', () => {

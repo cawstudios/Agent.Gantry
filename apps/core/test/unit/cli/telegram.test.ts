@@ -779,7 +779,7 @@ describe('cli telegram helpers', () => {
     );
   });
 
-  it('seeds CLAUDE.md and SOUL.md FileArtifacts when registering the main group', async () => {
+  it('seeds AGENTS.md and SOUL.md FileArtifacts when registering the main group', async () => {
     const runtimeHome = makeRuntimeHome();
 
     const result = await registerTelegramMainGroup({
@@ -790,7 +790,7 @@ describe('cli telegram helpers', () => {
 
     const claude =
       fileArtifacts.get(
-        `default:agent:${result.folder}:prompt-profile:${result.folder}/CLAUDE.md`,
+        `default:agent:${result.folder}:prompt-profile:${result.folder}/AGENTS.md`,
       ) ?? '';
     const soul =
       fileArtifacts.get(
@@ -804,6 +804,19 @@ describe('cli telegram helpers', () => {
         path.join(runtimeHome, 'agents', result.folder, 'CLAUDE.md'),
       ),
     ).toBe(false);
+    expect(
+      fs.existsSync(
+        path.join(runtimeHome, 'agents', result.folder, 'AGENTS.md'),
+      ),
+    ).toBe(false);
+    expect(
+      fs.existsSync(
+        path.join(runtimeHome, 'agents', result.folder, 'AGENTS.profile.md'),
+      ),
+    ).toBe(true);
+    expect(
+      fs.existsSync(path.join(runtimeHome, 'agents', result.folder, 'SOUL.md')),
+    ).toBe(true);
     expect(claude).toContain('agent for this conversation');
     expect(claude).toContain('Keep responses clear');
     expect(claude).not.toContain('capability changes');

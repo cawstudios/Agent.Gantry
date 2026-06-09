@@ -21,6 +21,7 @@ import {
 } from './main-agent.js';
 import { RuntimeGroupDb } from './runtime-group-db.js';
 import { runAccess } from './group-access.js';
+import { runProfile } from './agent-profile.js';
 import { verifyTelegramChatAccess } from './telegram.js';
 import {
   parseGroupAddArgs,
@@ -812,6 +813,8 @@ export async function runAgentCommand(
       return runPolicyShow(runtimeHome, rest);
     case 'access':
       return runAccess(runtimeHome, rest);
+    case 'profile':
+      return runProfile(runtimeHome, rest);
     default:
       p.log.error(`Unknown agent command: ${subcommand}`);
       console.log(usage());

@@ -43,6 +43,7 @@ import {
   PageRequestSchema,
   ProviderSessionResponseSchema,
   RuntimeLimitSchema,
+  RuntimeSettingsResponseSchema,
   SchemaDescriptorSchema,
   StreamEventSchema,
   ToolCatalogItemResponseSchema,
@@ -436,6 +437,72 @@ describe('contracts package', () => {
         providerModelId: 'claude-sonnet-4-6',
       },
     });
+  });
+
+  it('accepts relationship mode in public runtime settings agents', () => {
+    const parsed = RuntimeSettingsResponseSchema.parse({
+      settings: {
+        desiredState: { authoritative: true },
+        agent: {
+          name: 'Gantry',
+          defaultModel: 'opus',
+          oneTimeJobDefaultModel: 'inherit',
+          recurringJobDefaultModel: 'inherit',
+        },
+        agents: {
+          main_agent: {
+            name: 'Main Agent',
+            folder: 'main_agent',
+            persona: 'generalist',
+            relationshipMode: 'organization',
+            model: 'sonnet',
+            oneTimeJobDefaultModel: 'inherit',
+            recurringJobDefaultModel: 'inherit',
+            bindings: {},
+            sources: { skills: [], mcpServers: [], tools: [] },
+            capabilities: [],
+          },
+        },
+        providers: {},
+        providerConnections: {},
+        conversations: {},
+        bindings: {},
+        memory: { enabled: true, dreaming: { enabled: false } },
+        runtime: {
+          queue: {
+            maxMessageRuns: 1,
+            maxJobRuns: 1,
+            maxRetries: 0,
+            baseRetryMs: 0,
+          },
+          sandbox: {
+            provider: 'sandbox_runtime',
+            resourceLimits: {
+              cpuSeconds: 30,
+              memoryMb: 1024,
+              maxProcesses: 24,
+            },
+          },
+        },
+        browser: {
+          usage: {
+            enabled: true,
+            mode: 'audit',
+            windowMs: 60000,
+            maxActionsPerWindow: 20,
+            maxConcurrentPerSite: 2,
+          },
+        },
+        permissions: {
+          yoloMode: { enabled: false, denylist: [], denylistPaths: [] },
+          egress: { denylist: [] },
+        },
+      },
+    });
+
+    expect(parsed.settings.agents.main_agent?.relationshipMode).toBe(
+      'organization',
+    );
   });
 
   it('keeps public tool catalog contracts provider-neutral', () => {

@@ -178,6 +178,8 @@ describe('host child-process runtime smoke', () => {
     }));
 
     const { spawnAgent } = await import('@core/runtime/agent-spawn.js');
+    const { DirectRunnerSandboxProvider } =
+      await import('@core/adapters/sandbox/runner-sandbox-provider.js');
     const onOutput = vi.fn(async () => {});
     const onProcess = vi.fn();
 
@@ -199,6 +201,7 @@ describe('host child-process runtime smoke', () => {
       onOutput,
       {
         timeoutMs: 5_000,
+        runnerSandboxProvider: new DirectRunnerSandboxProvider(),
         executionAdapter: {
           id: 'anthropic:claude-agent-sdk',
           async prepare(input) {
@@ -233,6 +236,7 @@ describe('host child-process runtime smoke', () => {
     expect(result).toEqual({
       status: 'success',
       result: null,
+      providerSession: { externalSessionId: 'host-child-session' },
       newSessionId: 'host-child-session',
     });
     expect(onProcess).toHaveBeenCalledTimes(1);

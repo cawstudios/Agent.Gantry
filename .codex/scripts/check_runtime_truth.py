@@ -18,7 +18,7 @@ ACTIVE_DOCS = [
     REPO_ROOT / "docs" / "architecture" / "capability-management.md",
     REPO_ROOT / "docs" / "architecture" / "channel-interactions.md",
     REPO_ROOT / "docs" / "sdk" / "api-reference.md",
-    REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md",
+    REPO_ROOT / ".agents" / "skills" / "gantry-admin" / "SKILL.md",
 ]
 
 CLI_CONTRACT_FILES = [
@@ -73,7 +73,7 @@ REQUIRED_CAPABILITY_DOC_FILES = [
     REPO_ROOT / "docs" / "architecture" / "capability-management.md",
     REPO_ROOT / "docs" / "architecture" / "channel-interactions.md",
     REPO_ROOT / "docs" / "sdk" / "api-reference.md",
-    REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md",
+    REPO_ROOT / ".agents" / "skills" / "gantry-admin" / "SKILL.md",
     REPO_ROOT / "CLAUDE.md",
 ]
 
@@ -99,7 +99,7 @@ STALE_CAPABILITY_TOOL_NAMES = [
     "target.kind=propose",
 ]
 
-GANTRY_ADMIN_SKILL = REPO_ROOT / ".claude" / "skills" / "gantry-admin" / "SKILL.md"
+GANTRY_ADMIN_SKILL = REPO_ROOT / ".agents" / "skills" / "gantry-admin" / "SKILL.md"
 
 REQUIRED_GANTRY_ADMIN_FRAGMENTS = [
     "## Permission Management",
@@ -174,7 +174,7 @@ def _check_gantry_admin_playbook() -> list[str]:
 def _check_bundled_skill_claims() -> list[str]:
     failures: list[str] = []
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    commands_skill = REPO_ROOT / ".claude" / "skills" / "commands" / "SKILL.md"
+    commands_skill = REPO_ROOT / ".agents" / "skills" / "commands" / "SKILL.md"
     session_commands = (
         REPO_ROOT / "apps" / "core" / "src" / "session" / "session-commands.ts"
     ).read_text(encoding="utf-8")
@@ -192,7 +192,7 @@ def _check_bundled_skill_claims() -> list[str]:
 
     if commands_skill.exists():
         failures.append(
-            ".claude/skills/commands/SKILL.md must not exist; /commands is host-managed, not a Claude SDK skill"
+            ".agents/skills/commands/SKILL.md must not exist; /commands is host-managed, not an SDK skill"
         )
 
     return failures
