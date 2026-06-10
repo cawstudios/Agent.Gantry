@@ -6,12 +6,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { ALL_TEST_PHONES } from './phones.mjs';
+import { isAllowedTestPhone } from './phones.mjs';
 
-const GANTRY_HOME = process.env.GANTRY_HOME || path.join(os.homedir(), 'gantry');
+const GANTRY_HOME =
+  process.env.GANTRY_HOME || path.join(os.homedir(), 'gantry');
 const DEFAULT_PORT = Number(process.env.GANTRY_CONTROL_PORT || 4710);
-// A fake default — real numbers are never used as test senders (they'd receive sends).
-const DEFAULT_FROM = '919900050001';
+// A fake default — real numbers are never used as test senders.
+const DEFAULT_FROM = '000000001';
 
 function readEnvSecret(name) {
   const envPath = path.join(GANTRY_HOME, '.env');
@@ -39,9 +40,9 @@ export async function sendWebhook({
   name = 'Test Customer',
   messageId = crypto.randomUUID(),
 }) {
-  if (!ALL_TEST_PHONES.includes(from) && process.env.BOONDI_ALLOW_UNLISTED_TEST_PHONE !== '1') {
+  if (!isAllowedTestPhone(from)) {
     throw new Error(
-      `refusing to send signed test webhook from unlisted phone ${from}; add it to scripts/lib/phones.mjs or set BOONDI_ALLOW_UNLISTED_TEST_PHONE=1`,
+      `refusing to send signed test webhook from unlisted phone ${from}; add it to GANTRY_TEST_OPERATOR_PHONE for this test run`,
     );
   }
   const secret = readEnvSecret('INTERAKT_WEBHOOK_SECRET');
