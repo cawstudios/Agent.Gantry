@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isAgentCommandModule } from '@core/application/commands/agent-command-types.js';
@@ -5,6 +9,7 @@ import { isAgentCommandModule } from '@core/application/commands/agent-command-t
 // customer-support-guardrails.test.ts imports the agent guardrail — it lives
 // under agents/, outside core's src, and must not depend on core.
 import { command } from '../../../../../../agents/boondi_support/commands/extract-leads-queries.ts';
+import { verifyIdentityHeader } from '../../../../../../packages/mcp-crm/src/identity/identity-header.js';
 
 const originalEnv = { ...process.env };
 const originalFetch = globalThis.fetch;
@@ -23,6 +28,9 @@ describe('boondi extract-leads-queries command', () => {
     delete process.env.BOONDI_CRM_MCP_URL;
     delete process.env.BOONDI_CRM_MCP_PORT;
     delete process.env.MCP_IDENTITY_SECRET;
+    process.env.GANTRY_HOME = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'cmd-env-'),
+    );
   });
 
   afterEach(() => {
@@ -80,6 +88,12 @@ describe('boondi extract-leads-queries command', () => {
     expect(headers['X-Caller-Identity']).toMatch(
       /^phone:919876543210;ts:1781006400;sig:[a-f0-9]{64}$/,
     );
+    expect(
+      verifyIdentityHeader(headers['X-Caller-Identity'], {
+        secret: 'test-secret',
+        maxAgeSec: 120,
+      }),
+    ).toMatchObject({ kind: 'ok' });
     expect(fetchMock).toHaveBeenCalledWith(
       'http://127.0.0.1:8085/admin/extract-leads-queries',
       expect.any(Object),
@@ -104,5 +118,57 @@ describe('boondi extract-leads-queries command', () => {
     await expect(
       command.run(ctx('conversation:wa:919876543210')),
     ).rejects.toThrow(/extraction request failed \(502\): boom/);
+  });
+
+  it('omits the identity header when no secret is configured anywhere', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ stats: {} }));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    await command.run(ctx('conversation:wa:919876543210'));
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    const headers = init?.headers as Record<string, string>;
+    expect(headers['X-Caller-Identity']).toBeUndefined();
+  });
+
+  it('falls back to the GANTRY_HOME runtime env file for secret, url, and port', async () => {
+    fs.writeFileSync(
+      path.join(process.env.GANTRY_HOME as string, '.env'),
+      [
+        'MCP_IDENTITY_SECRET="file-secret"',
+        'BOONDI_CRM_MCP_PORT=9099',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const fetchMock = vi.fn(async () => Response.json({ stats: {} }));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    await command.run(ctx('conversation:wa:919876543210'));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:9099/admin/extract-leads-queries',
+      expect.any(Object),
+    );
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    const headers = init?.headers as Record<string, string>;
+    expect(
+      verifyIdentityHeader(headers['X-Caller-Identity'], {
+        secret: 'file-secret',
+        maxAgeSec: 120,
+      }),
+    ).toMatchObject({ kind: 'ok' });
+  });
+
+  it('declares a timeout above the CRM extraction budget and zero-fills malformed stats', async () => {
+    expect(command.timeoutMs).toBe(150_000);
+    const fetchMock = vi.fn(async () =>
+      Response.json({ stats: { extracted: 'x', created: 2 } }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    const result = await command.run(ctx('conversation:wa:919876543210'));
+    expect(result).toBe(
+      'Lead/query extraction processed. Extracted: 0. Created: 2. Updated: 0. Skipped: 0.',
+    );
   });
 });
