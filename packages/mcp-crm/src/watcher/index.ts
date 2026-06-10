@@ -60,6 +60,13 @@ function conversationRef(conversationId: string): string {
     .slice(0, 12);
 }
 
+// One summary string per open opportunity, fed to the extractor's matching
+// prompt. Single source: both the digest cycle and the manual path must show
+// the model IDENTICAL summaries, or their match decisions drift apart.
+function openOpportunitySummary(o: BusinessRecord): string {
+  return `${o.status} ${o.intentCategory} ${o.occasion ?? ''} qty=${o.quantity ?? '?'}`.trim();
+}
+
 function summarizeRecord(
   action: 'created' | 'updated',
   record: BusinessRecord,
@@ -165,8 +172,7 @@ export async function runDigestCycleOnce(
         digestText: d.digestText,
         openOpportunities: open.map((o) => ({
           id: o.id,
-          summary:
-            `${o.status} ${o.intentCategory} ${o.occasion ?? ''} qty=${o.quantity ?? '?'}`.trim(),
+          summary: openOpportunitySummary(o),
         })),
       },
       (detail) =>
@@ -296,8 +302,7 @@ export async function runManualConversationExtraction(
       digestText: '',
       openOpportunities: open.map((o) => ({
         id: o.id,
-        summary:
-          `${o.status} ${o.intentCategory} ${o.occasion ?? ''} qty=${o.quantity ?? '?'}`.trim(),
+        summary: openOpportunitySummary(o),
       })),
     },
     // Operator-facing path: hashed ref only, never rawHead (raw model output

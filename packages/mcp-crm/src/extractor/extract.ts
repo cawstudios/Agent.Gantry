@@ -8,7 +8,15 @@ function parseJsonLoose(text: string): unknown {
   if (start === -1 || end === -1 || end < start) {
     throw new Error('no JSON object in model output');
   }
-  return JSON.parse(text.slice(start, end + 1));
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    // V8's JSON.parse message quotes a snippet of the raw input — which can
+    // contain customer data (phone digits). Callers that need the raw head
+    // for debugging get it via onFailure's rawHead; the reason must stay
+    // content-free.
+    throw new Error('invalid JSON in model output');
+  }
 }
 
 // One model call → validated opportunities. Returns null on unrecoverable

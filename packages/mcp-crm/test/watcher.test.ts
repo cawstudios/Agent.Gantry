@@ -363,7 +363,13 @@ describe('runManualConversationExtraction', () => {
     });
     const repo = makeFakeRepo();
     const stats = await runManualConversationExtraction(
-      { env, logger, pool, repo, llm: { complete: vi.fn(async () => 'not json') } },
+      {
+        env,
+        logger,
+        pool,
+        repo,
+        llm: { complete: vi.fn(async () => '{"contactPhone": +919654405340}') },
+      },
       'conversation:wa:919654405340',
     );
     expect(stats).toEqual({ extracted: 0, created: 0, updated: 0, skipped: 1 });
@@ -371,6 +377,7 @@ describe('runManualConversationExtraction', () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
       '919654405340',
     );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('919654405');
   });
 
   it('passes open opportunities and an empty digestText to the extractor', async () => {
