@@ -36,20 +36,7 @@ export interface DigestCycleStats {
 
 export interface DigestCycleOptions extends PendingDigestFilter {
   apply?: boolean;
-  trigger?: 'timer' | 'startup' | 'manual';
-}
-
-const MANUAL_CONVERSATION_ID_RE = /^conversation:wa:\d+$/;
-
-function assertDigestCycleOptions(options: DigestCycleOptions): void {
-  if (
-    options.trigger === 'manual' &&
-    !MANUAL_CONVERSATION_ID_RE.test(options.conversationId ?? '')
-  ) {
-    throw new Error(
-      'manual digest cycles require conversation:wa:<digits> conversationId',
-    );
-  }
+  trigger?: 'timer' | 'startup';
 }
 
 function conversationRef(conversationId: string): string {
@@ -104,7 +91,6 @@ export async function runDigestCycleOnce(
   deps: WatcherDeps,
   options: DigestCycleOptions = {},
 ): Promise<DigestCycleStats> {
-  assertDigestCycleOptions(options);
   const stats: DigestCycleStats = {
     digests: 0,
     extracted: 0,
@@ -181,9 +167,7 @@ export async function runDigestCycleOnce(
             digestId: d.digestId,
             conversationRef: ref,
             reason: detail.reason,
-            ...(options.trigger === 'manual'
-              ? {}
-              : { rawHead: detail.rawHead }),
+            rawHead: detail.rawHead,
           },
           'extraction_parse_failed',
         ),
@@ -249,6 +233,9 @@ export interface ManualExtractionStats {
   updated: number;
   skipped: number;
 }
+
+// Manual extraction accepts exactly one WhatsApp conversation.
+const MANUAL_CONVERSATION_ID_RE = /^conversation:wa:\d+$/;
 
 /**
  * Operator-triggered extraction for ONE conversation, straight from the live

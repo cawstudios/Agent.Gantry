@@ -89,7 +89,7 @@ describe('runDigestCycleOnce', () => {
     expect(advanced).toBe(true);
   });
 
-  it('uses one manual conversation filter and keeps dry runs read-only', async () => {
+  it('supports a filtered, read-only dry run of the digest cycle', async () => {
     const complete = vi.fn(
       async () =>
         '{"opportunities":[{"match":null,"isLead":true,"summaryBrief":"200 Diwali","evidenceQuote":"200 boxes","confidence":0.9}]}',
@@ -120,7 +120,6 @@ describe('runDigestCycleOnce', () => {
       { env, logger, pool, repo, llm: { complete } },
       {
         apply: false,
-        trigger: 'manual',
         conversationId: 'conversation:wa:919654405340',
         since: '2026-06-08T20:00:00.000Z',
         limit: 1,
@@ -144,26 +143,6 @@ describe('runDigestCycleOnce', () => {
       String(sql).includes('INSERT INTO boondi_digest_cursor'),
     );
     expect(advanced).toBe(false);
-  });
-
-  it('rejects manual digest cycles without one exact WhatsApp conversation id', async () => {
-    const { pool } = makeFakePool(() => ({ rows: [] }));
-    await expect(
-      runDigestCycleOnce(
-        { env, logger, pool, repo: makeFakeRepo(), llm },
-        { trigger: 'manual', limit: 1 },
-      ),
-    ).rejects.toThrow(/manual digest cycles require conversation:wa:<digits>/);
-    await expect(
-      runDigestCycleOnce(
-        { env, logger, pool, repo: makeFakeRepo(), llm },
-        {
-          trigger: 'manual',
-          conversationId: 'conversation:slack:C123',
-          limit: 1,
-        },
-      ),
-    ).rejects.toThrow(/manual digest cycles require conversation:wa:<digits>/);
   });
 
   it('excludes manual digest command messages and their assistant acknowledgements from extraction', async () => {
@@ -215,49 +194,6 @@ describe('runDigestCycleOnce', () => {
     expect(prompt).not.toContain('Extracted memory facts.');
     expect(prompt).not.toContain('/extract-leads-queries');
     expect(prompt).not.toContain('Lead extraction complete.');
-  });
-
-  it('does not include raw conversation phones in manual extractor failure logs', async () => {
-    const { pool } = makeFakePool((sql) => {
-      if (sql.includes('agent_session_digests')) {
-        return {
-          rows: [
-            {
-              digest_id: 'd1',
-              conversation_id: 'conversation:wa:919654405340',
-              digest: 'digest text',
-              created_at: '2026-06-06T00:00:00Z',
-            },
-          ],
-        };
-      }
-      if (sql.includes('message_parts')) {
-        return {
-          rows: [{ direction: 'inbound', text: 'I want 200 boxes for Diwali' }],
-        };
-      }
-      return { rows: [] };
-    });
-
-    await runDigestCycleOnce(
-      {
-        env,
-        logger,
-        pool,
-        repo: makeFakeRepo(),
-        llm: { complete: vi.fn(async () => 'not json') },
-      },
-      {
-        apply: false,
-        trigger: 'manual',
-        conversationId: 'conversation:wa:919654405340',
-        limit: 1,
-      },
-    );
-
-    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
-      '919654405340',
-    );
   });
 
   it('is a no-op when no digests are pending', async () => {
