@@ -1443,13 +1443,15 @@ async function collectStructuredToolContext(
       const record = asRecord(request) ?? {};
       const query = readString(record, "query") ?? "";
       if (!query.trim()) return { error: "search_query_required" };
-      const result = await searchTool.search({
-        query,
-        limit: readNumber(record, "limit") ?? undefined,
-        budget: asRecord(record.budget) ?? undefined,
-        correlationId: input.correlationId ?? null,
+      return await collectToolResult("search", "search", { query }, async () => {
+        const result = await searchTool.search({
+          query,
+          limit: readNumber(record, "limit") ?? undefined,
+          budget: asRecord(record.budget) ?? undefined,
+          correlationId: input.correlationId ?? null,
+        });
+        return { query, ...result };
       });
-      return { query, ...result };
     }));
   }
 
@@ -1460,60 +1462,98 @@ async function collectStructuredToolContext(
       const record = asRecord(request) ?? {};
       const url = readString(record, "url") ?? "";
       if (!url.trim()) return { error: "fetch_url_required" };
-      const result = await fetchTool.fetch({
-        url,
-        budget: asRecord(record.budget) ?? undefined,
-        correlationId: input.correlationId ?? null,
+      return await collectToolResult("fetch", "fetch", { requestedUrl: url }, async () => {
+        const result = await fetchTool.fetch({
+          url,
+          budget: asRecord(record.budget) ?? undefined,
+          correlationId: input.correlationId ?? null,
+        });
+        return { requestedUrl: url, ...result };
       });
-      return { requestedUrl: url, ...result };
     }));
   }
 
   const crawlRequests = Array.isArray(toolRequests.crawl) ? toolRequests.crawl : [];
   if (tools.crawl && crawlRequests.length > 0) {
+    const crawlTool = tools.crawl;
     context.crawl = await Promise.all(crawlRequests.map(async (request) => {
       const record = asRecord(request) ?? {};
       const url = readString(record, "url") ?? "";
       if (!url.trim()) return { error: "crawl_url_required" };
-      return await tools.crawl?.crawl({
-        url,
-        limit: readNumber(record, "limit") ?? undefined,
-        budget: asRecord(record.budget) ?? undefined,
-        correlationId: input.correlationId ?? null,
+      return await collectToolResult("crawl", "crawl", { requestedUrl: url }, async () => {
+        return await crawlTool.crawl({
+          url,
+          limit: readNumber(record, "limit") ?? undefined,
+          budget: asRecord(record.budget) ?? undefined,
+          correlationId: input.correlationId ?? null,
+        });
       });
     }));
   }
 
   const browserRequests = Array.isArray(toolRequests.browserInspect) ? toolRequests.browserInspect : [];
   if (tools.browser?.inspect && browserRequests.length > 0) {
+    const inspectTool = tools.browser.inspect;
     context.browserInspect = await Promise.all(browserRequests.map(async (request) => {
       const record = asRecord(request) ?? {};
       const url = readString(record, "url") ?? "";
       if (!url.trim()) return { error: "browser_url_required" };
-      return await tools.browser?.inspect?.({
-        url,
-        instructions: readString(record, "instructions"),
-        budget: asRecord(record.budget) ?? undefined,
-        correlationId: input.correlationId ?? null,
+      return await collectToolResult("browserInspect", "inspect", { requestedUrl: url }, async () => {
+        return await inspectTool({
+          url,
+          instructions: readString(record, "instructions"),
+          budget: asRecord(record.budget) ?? undefined,
+          correlationId: input.correlationId ?? null,
+        });
       });
     }));
   }
 
   const documentRequests = Array.isArray(toolRequests.documentExtract) ? toolRequests.documentExtract : [];
   if (tools.documentExtract && documentRequests.length > 0) {
+    const documentExtractTool = tools.documentExtract;
     context.documentExtract = await Promise.all(documentRequests.map(async (request) => {
       const record = asRecord(request) ?? {};
-      return await tools.documentExtract?.extract({
-        url: readString(record, "url"),
-        contentType: readString(record, "contentType"),
-        text: readString(record, "text"),
-        budget: asRecord(record.budget) ?? undefined,
-        correlationId: input.correlationId ?? null,
-      });
+      return await collectToolResult(
+        "documentExtract",
+        "extract",
+        { requestedUrl: readString(record, "url") },
+        async () => {
+          return await documentExtractTool.extract({
+            url: readString(record, "url"),
+            contentType: readString(record, "contentType"),
+            text: readString(record, "text"),
+            budget: asRecord(record.budget) ?? undefined,
+            correlationId: input.correlationId ?? null,
+          });
+        },
+      );
     }));
   }
 
   return Object.keys(context).length > 0 ? context : null;
+}
+
+async function collectToolResult(
+  tool: string,
+  operation: string,
+  base: Record<string, unknown>,
+  run: () => Promise<unknown>,
+): Promise<Record<string, unknown>> {
+  try {
+    const result = await run();
+    return result && typeof result === "object" && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : { value: result };
+  } catch (error) {
+    return {
+      ...base,
+      tool,
+      operation,
+      toolFailure: true,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function createGantryClient(config: GantryClientConfig): GantryClient {

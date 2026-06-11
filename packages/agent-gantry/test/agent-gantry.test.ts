@@ -930,6 +930,90 @@ describe("@cawstudios/agent-gantry", () => {
     });
     expect(audits).toHaveLength(1);
   });
+
+  it("keeps successful structured tool evidence when sibling tools abort", async () => {
+    const runner = createStructuredModelTaskRunner({
+      tools: {
+        search: {
+          search: async () => ({
+            provider: "firecrawl-search",
+            items: [{
+              url: "https://example.gov/tenders",
+              title: "Tender portal",
+              snippet: "Open bid notices",
+            }],
+          }),
+        },
+        fetch: {
+          fetch: async () => {
+            throw new Error("This operation was aborted");
+          },
+        },
+        crawl: {
+          crawl: async () => {
+            throw new Error("This operation was aborted");
+          },
+        },
+      },
+      model: {
+        generateJson: async (input) => {
+          const toolContext = input.input.toolContext as {
+            search?: Array<{ items?: Array<{ title?: unknown; url?: unknown }> }>;
+          };
+          const firstItem = toolContext.search?.[0]?.items?.[0] ?? {};
+          return {
+            candidatesJson: [{
+              url: firstItem.url,
+              title: firstItem.title,
+              confidence: 0.8,
+            }],
+          };
+        },
+      },
+    });
+
+    await expect(runner.runStructuredTask({
+      taskType: "source_discovery",
+      instructions: "find tender sources",
+      input: {
+        toolRequests: {
+          search: [{ query: "state tender portal", limit: 1 }],
+          fetch: [{ url: "https://example.gov/tenders" }],
+          crawl: [{ url: "https://example.gov/tenders" }],
+        },
+      },
+      correlationId: "source-discovery",
+    })).resolves.toMatchObject({
+      status: "completed",
+      output: {
+        candidatesJson: [{
+          url: "https://example.gov/tenders",
+          title: "Tender portal",
+          confidence: 0.8,
+        }],
+        toolContext: {
+          search: [{
+            query: "state tender portal",
+            provider: "firecrawl-search",
+            items: [{
+              url: "https://example.gov/tenders",
+              title: "Tender portal",
+            }],
+          }],
+          fetch: [{
+            requestedUrl: "https://example.gov/tenders",
+            toolFailure: true,
+            error: "This operation was aborted",
+          }],
+          crawl: [{
+            requestedUrl: "https://example.gov/tenders",
+            toolFailure: true,
+            error: "This operation was aborted",
+          }],
+        },
+      },
+    });
+  });
 });
 
 function cryptoSign(secret: string, payload: string): string {
