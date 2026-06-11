@@ -1,9 +1,11 @@
-# HANDOFF — deployment-modes branch (2026-06-11)
+# HANDOFF — deployment-modes branch (2026-06-11, updated same day after handoff continuation)
 
 Session handoff for continuing on another machine. Delete this file once the
 items below are absorbed into PRs/issues. Branch: `feature/deployment-modes`
-(16 commits on top of `feature/mworker-01-safe-multi-worker-execution`'s
-`bdf86d2f`). Working tree committed clean; pushed.
+on top of `feature/mworker-01-safe-multi-worker-execution`'s `bdf86d2f`.
+Former Pending #1 (typed settings wire contract), #2 (SDK docs), and the
+buildable half of #4 (chaos-combo test + two-process e2e) were completed in
+the continuation session — see the DONE table.
 
 ## What is DONE (implemented, adversarially reviewed, committed, gates run)
 
@@ -14,15 +16,29 @@ items below are absorbed into PRs/issues. Branch: `feature/deployment-modes`
 | 2 | Packaging: `/healthz` `/readyz` `/metrics`; SIGTERM drain (`runtime.queue.drain_deadline_ms`); load-bearing lease-elected live host (in-process standby takeover); Node 24 image (python3 + bubblewrap, non-root); advisory-locked migrations (single lock incl. boot-time); GHCR CI w/ SBOM+Trivy; Terraform (network/db/storage/secrets/worker_pool/control + fleet/support envs); AWS runbook | `160e2c2f`, `5a1a6760` |
 | 3 | Fleet capability state: migration 0077 (`runtime_dependencies`, `settings_revisions`); S3 artifact driver (sha256, quarantine); npm bake jobs (`--ignore-scripts`, registry-pinned, idempotent, reaper-recovered); worker reconciler + `capabilities_json` advertising; capability-matched dispatch (requeue w/o retry burn, recovery filter, fleet-wide-only readiness pause, starvation alert+pause); settings revisions + desired-state control API + SDK; CLI (`settings validate\|import\|export\|drift\|revisions`, `workers list`, `bake status\|rebake`, `artifacts quarantine list\|purge\|rebake`); fleet boot gated on first revision; `GANTRY_SECURITY_POSTURE` rename (clean cut) | `f20ba11a`, `c4f22aac`, `4bfae3b0`, `f5d95ece`, `2e03596e`, `8be9014c`, `89d4a2dc` |
 | Ops/docs follow-ups | Single autoscaled fleet pool (lease elects live host; min ≥ 2); CPU target-tracking autoscaling; worker-configuration reference (sandbox resource limits + sizing rule); vertical-vs-horizontal scaling decision guide | `3793eeec`, `d5b2454b`, `f005605d` |
+| Continuation | Typed settings document wire contract for the desired-state API/SDK (`settingsYaml` eliminated; YAML confined to workstation file + CLI `--file` edge; `SettingsDocument` in contracts; `settings_revisions` stores the bare snake_case document); SDK docs rewrite (deployment shapes, desired-state contract, locked preset, ops endpoints — all claims source-verified; nonexistent `client.memory.sources.*` removed); chaos-combo fleet-capability integration test + true two-OS-process claim-protocol e2e (no production changes); parser file-size budget fix | `61ab50f9`, `a9f171d7`, `836c551f`, `a9fc3c03` |
 
 Review trail: per-phase adversarial Opus reviews. Found+fixed pre-commit: Phase 1
 permission-loop authority bypass (P0-class) and fail-open lock lookup; Phase 2
 decorative live-host lease (P1); Phase 3 stuck-`baking` rows never recovering +
 SIGTERM-mid-bake stranding (2×P0), settings 409 check-then-act race (P1), plus
 P2s (quarantine path collision, locked-projection residuals, rebake CAS).
-Security verdict: CLEAN. Hard gates at `f005605d`: `npm run build` clean;
-`npm test` 3581/3582 (see Pending #3). Postgres integration suites proven
-against a disposable pgvector container.
+Security verdict: CLEAN. Continuation session kept the same pattern: each of the
+three work items got its own adversarial Opus review pre-commit (all
+COMMIT-READY; fixed pre-commit: a vacuous boot-gate assertion in the chaos test,
+the file-size budget breach, lockfile churn, and an overstated "lossless"
+comment — the round-trip escaping limit is now a TODOS.md row). Hard gates at
+`a9fc3c03`: `npm run build` clean; `npm test` 3581/3582 (see Pending #1 below —
+same single pre-existing failure as the prior baseline);
+`python3 .codex/scripts/verify.py` fails in `check_architecture` with output
+byte-identical to base `975bb6c1` (pre-existing boundary debt + file budgets,
+none introduced by this branch's continuation work), which in turn makes
+`validate_artifacts.py` fail on `verify.json ok:false`. Postgres integration
+suites + both new tests proven against a disposable pgvector container on this
+machine too. A final whole-diff codex closeout review (autoreview helper) was
+attempted but the codex CLI on this workstation hangs at dyld load (stuck
+macOS Gatekeeper quarantine assessment on the Homebrew-cask binary); the user
+opted to skip it — per-change adversarial reviews above are the review record.
 
 User decisions binding on all future work (see also memory/ADRs): no skill
 versioning; YAML is ONLY the personal/workstation+CLI-file surface; no legacy
@@ -31,60 +47,45 @@ first; single autoscaled pool; Go toolchain stays out of the image.
 
 ## PENDING (in priority order)
 
-### 1. Settings wire contract: replace YAML strings with the typed document (IN FLIGHT, work discarded cleanly — restart fresh)
-The desired-state API/SDK currently transports `settingsYaml` strings
-(`routes/settings.ts`, `packages/sdk`). User ruling: WRONG — YAML is the human
-file format for workstation + CLI `--file` edges only; the API/SDK/future UI
-speak the typed JSON settings document (the same shape `settings_revisions`
-already stores as jsonb; validated by the shared `@gantry/contracts` schema).
-Full spec for the implementing agent:
-- `GET /v1/settings/desired-state` → `{revision, minReaderVersion, settings: <document>, createdBy, note, updatedAt}`; `PUT/POST` accepts `{settings, expectedRevision?, note?}`; 400 `INVALID_SETTINGS` errors are document-path-level; 409 semantics unchanged.
-- SDK methods typed with the contracts settings types, not string.
-- CLI `settings import --file <yaml>` parses YAML at the CLI edge → document → same service path; `export` renders YAML from the document. Watcher unchanged.
-- `settings-import-service.ts`: one validation path; YAML→document conversion used only by CLI/watcher callers.
-- Fleet boot/revision listener unchanged (consume the stored document; local render-to-settings.yaml is an internal loader reuse — comment it as non-contract).
-- Tests: route document in/out + 400/409; CLI YAML round-trip; SDK types compile. Grep repo for `settingsYaml` afterward.
-Note: an earlier partial attempt added docs/sdk sections documenting the OLD
-`settingsYaml` contract; those edits were discarded — do not resurrect them.
-
-### 2. SDK docs update (`docs/sdk/**`) — AFTER item 1 lands
-Six files (overview, quickstart-nestjs, quickstart-nextjs, webhooks,
-agent-internals, api-reference) predate this branch. Verify every claim against
-source, then update:
-- overview.md: "Deployment shapes" — same-machine (workstation sidecar, compose; parent + child runners co-located) vs separated-to-scale (fleet: control API behind ALB, N worker processes/machines, RDS+S3); SDK code identical in both — only base URL + key provisioning change. Fix the "Unix socket by default" transport claim for the fleet case. Add the desired-state surface (typed document per item 1).
-- quickstarts: customer-facing example agents use `access.preset: locked` (one sentence why); "Going to production" closer → AWS runbook + Scaling Decision Guide; Next.js keeps SDK strictly server-side.
-- api-reference.md: verify existing entries; ADD desired-state section (document contract, scope per routes/settings.ts, 409/400 semantics, one optimistic-concurrency example) + the operational endpoints (/healthz /readyz /metrics, unauthenticated, not on public ALB).
-- agent-internals.md: short locked-preset note (tools unmounted child-side; parent-side denial is the boundary; instructions stripped) linking the ADR.
-- Everywhere: `GANTRY_DEPLOYMENT_MODE` must not appear (renamed `GANTRY_SECURITY_POSTURE`; topology is the `runtime.deployment_mode` SETTING — different axes).
-- User's explicit ask: make it clearly answer "how do I run gantry+runtime on one machine vs separately to scale" for NestJS/Next.js builders.
-
-### 3. Pre-existing BASE-BRANCH defects (block merge gates; owned by `feature/mworker-01-safe-multi-worker-execution`, NOT this branch — both verified to fail with this branch's work stashed)
+### 1. Pre-existing BASE-BRANCH defects (block merge gates; owned by `feature/mworker-01-safe-multi-worker-execution`, NOT this branch — both verified to fail with this branch's work stashed)
 - `apps/core/test/unit/runtime/message-loop.test.ts` "passes non-self sender ids with continuation batches" — fails at `bdf86d2f`; blocks `npm test`.
 - `apps/core/test/integration/live-horizontal-execution.integration.test.ts` "delivers prompt resolutions to the recovered owner after adapter restart" — fails at base under Postgres; possible real durability bug (`interaction_resolved` command not enqueued after adapter restart + takeover). Ticket-worthy.
 
-### 4. Plan acceptance items never executed
-- Measured runbook walkthroughs: local compose → first turn ≤ 15 min; clean AWS account → first locked support-agent turn ≤ 60 min. Documented, never timed end-to-end.
-- Chaos-combo integration test from the plan's Phase 3 list (bake completes + NOTIFY + instance refresh simultaneously) and the ONE two-process e2e — unit/integration coverage exists per subsystem; the combined chaos scenario and a true two-process e2e were not built.
-- Real AWS deploy has never been applied (terraform validate-only so far).
+### 2. Architecture-check debt (owned by THIS branch's Phases 2–3, pre-dates the continuation session)
+`python3 .codex/scripts/check_architecture.py` fails (boundary violations in
+e.g. `settings-revision-listener.ts`, `fleet-boot.ts`, `toolchain-bake-*.ts`,
+plus external-import and file-size-budget findings) — identical output at
+`975bb6c1` and current HEAD; the continuation work added nothing new. This
+blocks `verify.py` and, through `verify.json ok:false`, also
+`validate_artifacts.py`. Resolve by either fixing the boundaries or recording
+sanctioned exceptions in the checker config before merge.
 
-### 5. Phase 4 (explicitly OUT of plan — future)
+### 3. Plan acceptance items never executed
+- Measured runbook walkthroughs: local compose → first turn ≤ 15 min; clean AWS account → first locked support-agent turn ≤ 60 min. Documented, never timed end-to-end.
+- Real AWS deploy has never been applied (terraform validate-only so far).
+- (The chaos-combo integration test and the two-process e2e from this list were built in the continuation session — `836c551f`. Note the e2e runs under `npm run test:e2e` (separate vitest config), which is not part of the default `npm test` gate; wire it into CI if the claim-protocol proof should gate merges.)
+
+### 4. Phase 4 (explicitly OUT of plan — future)
 Multi-live GroupQueue cutover (live chat horizontal scaling). Criteria recorded
 in `docs/decisions/2026-06-11-deployment-modes.md`; pull forward if a
 public-facing deployment expects real live-chat traffic. Browser profile
 snapshot/restore becomes necessary with it.
 
-### 6. TODOS.md near-term flags (full list in TODOS.md, each with triggers)
+### 5. TODOS.md near-term flags (full list in TODOS.md, each with triggers)
 - Fleet container sandbox enablement (`sandbox_runtime` in Docker: seccomp/userns + doctor check) — REQUIRED before the first production fleet running public-facing agents; until then fleet keeps `runtime.sandbox.provider: direct`.
 - Locked-agent unmet-need telemetry + human handoff (support product layer) — locked agents currently produce zero demand signal.
 - pip bake lane; pinned-binary bake lane; CLI dry-run missing-OS-dep report; live-conversation auto-resume after bake; subagent-aware run slots; fleet management UI on the desired-state API.
+- NEW (continuation review finding): simple-YAML codec escaping fidelity (`"`/`\` in string values; float-as-string in the document) — see the TODOS.md row.
 
-### 7. Merge path
+### 6. Merge path
 PR `feature/deployment-modes` → likely stacked on `feature/mworker-01-...`
-(this branch contains it). Repo hard gates (AGENTS.md): `npm run build`,
-`npm test` (blocked by Pending #3), `python3 .codex/scripts/verify.py`,
-`python3 .codex/scripts/validate_artifacts.py --allow-missing-run`. The repo's
-Codex-factory artifacts (`.factory/*`) were NOT produced — this work ran as a
-reviewed-subagent implementation; produce them or waive per team policy.
+(this branch contains it). Repo hard gates (AGENTS.md): `npm run build` (clean),
+`npm test` (blocked by Pending #1), `python3 .codex/scripts/verify.py` and
+`python3 .codex/scripts/validate_artifacts.py --allow-missing-run` (both
+blocked by Pending #2). The repo's Codex-factory artifacts (`.factory/*`,
+gitignored machine-local) were NOT produced via the factory flow — this work
+ran as a reviewed-subagent implementation; produce them or waive per team
+policy.
 
 ## Context locations
 - Repo-resident truth: ADRs `docs/decisions/2026-06-11-*.md`; `docs/architecture/deployment-profiles.md` (mode matrix, worker config, scaling guide); `docs/deployment/aws-terraform.md`; `TODOS.md`.
