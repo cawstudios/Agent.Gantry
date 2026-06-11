@@ -458,3 +458,44 @@ everywhere).
   **not** an agent-path problem; it strengthens the case for F3 (dedicated key,
   which cuts the classifier's own round time) and re-opens F7 (perceived-latency
   ack) if the operator wants it.
+
+## Follow-on tuning (2026-06-11, operator-directed)
+
+Three operator-directed changes after the P1/P2 work, each validated against
+`scripts/boondi-regression.mjs`:
+
+- **Guardrail classifier gap-fixes** — ✅ DONE (`3b35fcc2`). Classifier-only
+  guardrail now allows sincere AI-identity questions and a genuine BSS request
+  paired with a benign off-topic aside (answer the BSS part, decline the aside),
+  while a bare thanks/ack + off-topic pivot still scope_rejects; warm greeting
+  copy. Validated 22/22 conversation.
+- **Item 1 — empathy compose discipline** (extends F6) — ✅ DONE (`76b96e77`).
+  One clause folded into CLAUDE.md's existing "don't pad" rule: a complaint /
+  escalation / handoff is ONE sincere empathy beat + the concrete next step, no
+  restated reassurance. SOUL untouched, ~18 words added (prompt-size conscious).
+  Validated 22/22; the repeated-reassurance padding is gone (remaining length on
+  emotional turns is the legitimate order card, kept by decision).
+- **Item 2 — per-turn memory block trim** (relates to F5 context size) — ✅ DONE
+  (runtime `settings.yaml`, not repo). Global `agent.sessions`:
+  `memory_item_limit` 8→6, `max_memory_context_chars` 12000→8000 — fewer input
+  tokens + less prefix-cache busting on the per-turn `<gantry_memory_context>`.
+  Low latency leverage by design (cost/cache hygiene). A/B-validated: the crm
+  group fails the SAME 3 scenarios with the trim OR the 8/12000 defaults
+  (pre-existing extraction fragility, NOT trim-caused); conversation stayed
+  22/22.
+
+### Still open (unchanged)
+
+- **F3 — dedicated/tiered API key** — ⏸ DEFERRED, pre-launch gate. The live
+  Boondi SDK agent shares the operator's Claude Code OAuth window (RC2); the
+  single biggest remaining latency lever, operational not code.
+- **F5b — editorial SOUL/CLAUDE prefix diet** — 🔵 HELD for operator,
+  eval-gated against the lead-capture set.
+
+### Noted-but-separate (not a latency item)
+
+- **CRM lead/query extractor fragility** — the background extractor
+  intermittently misses the softest signals (`soft-shopping-query`,
+  `curious-browser`) and once mislabels a B2B intent (`corporate` vs
+  `gifting_b2b`). Pre-existing, reproduces independent of any latency change;
+  the durable reconciler backstops it. Track separately if/when it matters.
