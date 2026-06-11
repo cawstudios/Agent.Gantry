@@ -164,6 +164,41 @@ Operator sizing guidance (instance classes, scaling levers, autoscaling) lives i
 the [AWS Terraform runbook](../deployment/aws-terraform.md) "Sizing and scaling"
 section.
 
+## Scaling Decision Guide (vertical vs horizontal)
+
+Gantry scales on two axes and they solve different problems. **Vertical** =
+bigger instances and higher per-worker concurrency (`runtime.queue`,
+`runtime.sandbox.resource_limits`). **Horizontal** = more workers in the
+autoscaled pool. Start from the symptom, not the axis:
+
+| What is actually growing / hurting | Scale | Levers |
+|---|---|---|
+| Live conversations: turns queue behind `max_message_runs`, users wait for the agent to start replying | **Vertical** — in v1 exactly one lease-elected live host serves all live turns; adding workers adds zero chat capacity | Bigger instance for the pool, raise `runtime.queue.max_message_runs`, raise `resource_limits.memory_mb` headroom. Ceiling: one box — when this stops being enough, that is the Phase 4 multi-live trigger ([TODOS.md](../../TODOS.md), criteria in [ADR Deployment Modes](../decisions/2026-06-11-deployment-modes.md)) |
+| Scheduled jobs, bakes, webhook processing: queue depth grows, CPU sustained high | **Horizontal** — jobs are claimable by any eligible worker | ASG already does this (CPU target tracking); raise `worker_max_size`, tune `worker_cpu_target` |
+| Single turns are too heavy: worker memory pressure, OOM-killed runners, subagent-dense turns | **Vertical** — more workers do not shrink one turn's footprint | Bigger instance, or cap harder via `resource_limits` (memory_mb / max_processes); see the sizing rule in Worker Configuration above |
+| Availability: live-host failover tolerance, deploy safety | **Horizontal floor** — independent of throughput | `worker_min_size >= 2` (enforced); failover RTO ≈ lease TTL (~30s) |
+| Everything is slow but workers are idle | **Neither** — look at the database | RDS instance class, RDS Proxy pool, `pgboss` queue health |
+| Cost at idle | **Neither** — scale down to the floor, never to zero | Fleet floor 2 small instances; support stack floor 1; per-turn runner compute is already zero at idle |
+
+Signals to read before choosing (`/metrics` + CLI):
+
+- Queue depth rising while worker CPU is high → horizontal (the autoscaler
+  should already be reacting; check `worker_max_size`).
+- Live-turn admissions rejected / turns waiting while job workers idle →
+  vertical on the live host; horizontal will not help.
+- `gantry_capability_starved_runs` > 0 → neither axis: a capability is missing
+  (bake failed/pending, or no eligible worker) — `gantry bake status`.
+- Worker memory headroom shrinking with stable turn counts → vertical, or
+  tighter `resource_limits`.
+
+**Workstation → fleet is the same decision one level up.** Stay on a
+workstation (vertical only) while one machine's failure is acceptable and job
+load fits one box — it keeps live installs and the simplest ops. Move to fleet
+when you need availability (lease failover), job throughput beyond one machine,
+or locked public-facing agents on isolated stacks. Live-chat capacity is NOT a
+reason to move to fleet in v1 — the fleet's live ceiling is the same single
+host's.
+
 ## Runbook Index
 
 | Runbook | Location | Status |

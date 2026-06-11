@@ -307,6 +307,11 @@ the secrets created in B.2 separately if no longer needed.
 
 ## Sizing and scaling
 
+> Deciding **whether** to scale up (vertical) or out (horizontal)? Start with
+> the symptom-driven decision table in the
+> [Scaling Decision Guide](../architecture/deployment-profiles.md#scaling-decision-guide-vertical-vs-horizontal);
+> this section covers the AWS-side mechanics.
+
 **Memory model (process-per-turn).** The parent runtime process idles around
 ~200 MB. Each *active* turn spawns a runner subprocess costing roughly
 150–400 MB depending on tools and context size. Sessions are Postgres rows —
