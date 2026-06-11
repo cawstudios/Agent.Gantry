@@ -99,6 +99,27 @@ Medians from `/tmp/latency-baseline.json` (before) and
 
 ---
 
+## 3b. P2 progress (2026-06-11)
+
+Worked the remaining plan items after P1. Status:
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| **F5c — machinery diet** (drop native coding tools) | **Done** | Generic per-agent `tool_surface.native` keep-list; Boondi keeps only `Skill`+`ToolSearch`. Verified live: cold prefix **28.9K → 20.8K** cache-creation tokens (~8K / ~28% smaller). The `gantry-admin` skill-listing drop deferred (minor ~100-200 tok). |
+| **F6 — compose discipline** | **Done** | CLAUDE.md cap; verified replies stay tight (policy answer now a 2-liner). |
+| **F5a — cross-session cache breakpoint** | **Blocked (not Gantry-fixable)** | Investigated: the Claude Agent SDK exposes no `cache_control`/breakpoint API, and the per-session cache-buster is the customer identity + memory in msg[0] (inherent). Relocating the breakpoint to after system+tools is SDK-internal. Requires an SDK change. |
+| **F5b — editorial SOUL/CLAUDE diet** | **Held for operator** | Eval-gated by design ("never eyeball"). The machinery half of RC3 is captured by F5c; the editorial half is the riskiest (load-bearing behavior rules) and needs the operator's voice judgment + the lead-capture eval set + a full regression pass to adopt safely. Not done autonomously to avoid silently degrading Boondi. |
+| **F7 — Interakt progress/typing sink** | **Held for operator (UX decision)** | Interakt/WhatsApp has no native typing indicator, so this means sending customers an interstitial "checking…" *message* per slow turn — a customer-facing UX choice (copy + whether to enable), not a clean bug-fix. The `sendProgressUpdate` plumbing exists; implementable on request. |
+
+**Guardrail interaction (separate operator decision, 2026-06-11):** Boondi's
+guardrail was made classifier-only (deterministic layer removed). That adds a
+haiku classifier call to *every* turn, reversing the RC5 fast-path — a bare
+"hi" goes from ~0.5s to ~1.5-11s under load. It compounds the case for F3
+(dedicated key) and makes F7 (perceived-latency ack) more attractive if the
+operator wants it.
+
+---
+
 ## 4. Account-pressure note (RC2/F3, unchanged by decision)
 
 The interrupted final run drove the shared OAuth window to `rejected` (the §2
