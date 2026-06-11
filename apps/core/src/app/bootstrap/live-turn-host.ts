@@ -25,11 +25,24 @@ interface LiveTurnRuntimeSettings {
   };
 }
 
+export interface LiveTurnHostTransitionHandlers {
+  /** Fired each time this worker acquires the live-host lease (boot or takeover). */
+  onAcquired: (lease: RuntimeLease) => void;
+  /** Fired when a held lease is lost; the manager re-enters standby acquisition. */
+  onLost: (err: Error) => void;
+}
+
 export interface LiveTurnHostLeaseManager {
-  /** Resolves with the lease once acquired, or undefined when live turns are disabled. */
+  /** Resolves on the FIRST acquisition, or undefined when live turns are disabled. */
   whenAcquired: () => Promise<RuntimeLease | undefined>;
   /** The current lease if this worker owns live turns, otherwise undefined. */
   getLease: () => RuntimeLease | undefined;
+  /**
+   * Register the single transition consumer that starts/stops the live-host
+   * services. If the lease is already held at registration, onAcquired fires
+   * immediately (replay), so registration order does not race acquisition.
+   */
+  onTransition: (handlers: LiveTurnHostTransitionHandlers) => void;
   /** Stop the standby acquirer and release the lease if held (drain handoff). */
   stop: () => Promise<void>;
 }
@@ -74,6 +87,7 @@ export function startLiveTurnHostLeaseAcquisition(input: {
   let lease: RuntimeLease | undefined;
   let stopped = false;
   let pendingTimer: ReturnType<typeof setTimeout> | undefined;
+  let transitionHandlers: LiveTurnHostTransitionHandlers | undefined;
   let resolveAcquired!: (value: RuntimeLease | undefined) => void;
   const acquired = new Promise<RuntimeLease | undefined>((resolve) => {
     resolveAcquired = resolve;
@@ -85,6 +99,7 @@ export function startLiveTurnHostLeaseAcquisition(input: {
     return {
       whenAcquired: () => acquired,
       getLease: () => undefined,
+      onTransition: () => {},
       stop: async () => {},
     };
   }
@@ -96,6 +111,29 @@ export function startLiveTurnHostLeaseAcquisition(input: {
     );
     // Full jitter avoids a thundering herd of standby workers retrying in lockstep.
     return Math.floor(random() * exponential);
+  };
+
+  const scheduleRetry = (nextAttemptIndex: number): void => {
+    pendingTimer = setTimeoutFn(
+      () => {
+        pendingTimer = undefined;
+        void attempt(nextAttemptIndex);
+      },
+      backoffMs(nextAttemptIndex - 1),
+    );
+    // A standby retry must never keep an otherwise-exiting process alive.
+    pendingTimer.unref?.();
+  };
+
+  const handleLost = (err: Error): void => {
+    if (stopped || !lease) return;
+    lease = undefined;
+    log.warn(
+      { err },
+      'Live-turn host lease lost; stopping live-host services and re-entering standby acquisition',
+    );
+    transitionHandlers?.onLost(err);
+    void attempt(0);
   };
 
   const attempt = async (attemptIndex: number): Promise<void> => {
@@ -115,17 +153,16 @@ export function startLiveTurnHostLeaseAcquisition(input: {
     }
     if (acquiredLease) {
       lease = acquiredLease;
+      acquiredLease.onLost?.(handleLost);
       resolveAcquired(acquiredLease);
+      transitionHandlers?.onAcquired(acquiredLease);
       return;
     }
     log.info(
       { attempt: attemptIndex },
       'Another runtime owns live turns; standing by as a job-only worker until the lease is released',
     );
-    pendingTimer = setTimeoutFn(() => {
-      pendingTimer = undefined;
-      void attempt(attemptIndex + 1);
-    }, backoffMs(attemptIndex));
+    scheduleRetry(attemptIndex + 1);
   };
 
   void attempt(0);
@@ -133,6 +170,12 @@ export function startLiveTurnHostLeaseAcquisition(input: {
   return {
     whenAcquired: () => acquired,
     getLease: () => lease,
+    onTransition: (handlers) => {
+      transitionHandlers = handlers;
+      // Replay: the lease may already be held (fast acquisition on boot)
+      // before the consumer registers; fire onAcquired so services start.
+      if (lease) handlers.onAcquired(lease);
+    },
     stop: async () => {
       stopped = true;
       if (pendingTimer !== undefined) {

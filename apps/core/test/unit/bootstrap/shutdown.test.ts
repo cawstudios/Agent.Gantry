@@ -33,6 +33,9 @@ describe('installShutdownHandlers', () => {
         closeLiveTurnAdmission: vi.fn(() => {
           order.push('closeLiveTurnAdmission');
         }),
+        closeMessagePolling: vi.fn(() => {
+          order.push('closeMessagePolling');
+        }),
         closeLiveTurnRecovery: vi.fn(async () => {
           order.push('closeLiveTurnRecovery');
         }),
@@ -89,6 +92,7 @@ describe('installShutdownHandlers', () => {
       'markDraining',
       'closeScheduler',
       'closeLiveTurnAdmission',
+      'closeMessagePolling',
       'closeLiveTurnRecovery',
       'closeLiveTurnHostLease',
       'queue.shutdown',

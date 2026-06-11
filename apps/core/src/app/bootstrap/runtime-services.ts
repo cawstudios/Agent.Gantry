@@ -19,7 +19,7 @@ import type { HostnameLookup } from '../../domain/network/public-address-policy.
 import { writeGroupsSnapshot } from '../../runtime/agent-spawn.js';
 import { startIpcWatcher, type IpcDeps } from '../../runtime/ipc.js';
 // prettier-ignore
-import { recoverPendingMessages, startMessagePollingLoop } from '../../runtime/message-loop.js';
+import { recoverPendingMessages, startMessagePollingLoop, type MessageLoopDeps, type MessagePollingLoopHandle } from '../../runtime/message-loop.js';
 // prettier-ignore
 import { requestSchedulerSync, startSchedulerLoop } from '../../jobs/scheduler.js';
 import { registerWorkerInstance } from '../../jobs/worker-identity.js';
@@ -29,6 +29,7 @@ import {
   parseThreadQueueKey,
 } from '../../shared/thread-queue-key.js';
 import type { RuntimeJobRepository } from '../../domain/repositories/ops-repo.js';
+import type { RuntimeLease } from '../../domain/ports/runtime-lease.js';
 import type { WorkerCoordinationRepository } from '../../domain/ports/worker-coordination.js';
 import type {
   LiveTurnCoordinationRepository,
@@ -134,10 +135,27 @@ type RuntimeServicesDefaults = Omit<
   | 'getLiveTurnRepository'
   | 'runnerSandboxProvider'
 >;
+/**
+ * The singleton live-turn host lease elects WHICH worker runs the live-host
+ * services (message polling, live-turn admission, recovery sweep, pending
+ * message recovery). `liveTurnsEnabled` stays the global feature flag.
+ */
+export interface LiveTurnHostPort {
+  onTransition: (handlers: {
+    onAcquired: (lease: RuntimeLease) => void;
+    onLost: (err: Error) => void;
+  }) => void;
+}
 export type RuntimeServicesOptions = {
   app: RuntimeApp;
   channelWiring: ChannelWiring;
   liveTurnsEnabled?: boolean;
+  /**
+   * Live-host lease manager. When provided, the live-host services start only
+   * while this worker holds the lease (standby workers serve jobs only). When
+   * omitted (single-host embedding/tests), the worker hosts immediately.
+   */
+  liveTurnHost?: LiveTurnHostPort;
 };
 function makeDefaultDeps(): RuntimeServicesDefaults {
   return {
@@ -194,9 +212,14 @@ function createGroupSnapshotSync(app: RuntimeApp, deps: Deps): () => void {
 }
 let activeLiveTurnRecoveryLoop: LiveTurnRecoveryLoop | undefined;
 let activeLiveTurnAuthority: LiveTurnAuthority | undefined;
+let activeMessagePollingLoop: MessagePollingLoopHandle | undefined;
 export function stopLiveTurnRecoveryLoop(): void {
   activeLiveTurnRecoveryLoop?.stop();
   activeLiveTurnRecoveryLoop = undefined;
+}
+export function stopMessagePollingLoop(): void {
+  activeMessagePollingLoop?.stop();
+  activeMessagePollingLoop = undefined;
 }
 export function beginDrainingLiveTurnAdmission(): void {
   activeLiveTurnAuthority?.beginDraining();
@@ -251,6 +274,11 @@ export async function startRuntimeServices(
       'Live-turn admission is enabled, but durable live-turn repositories are unavailable; falling back to local queue admission',
     );
   }
+  // True only while this worker holds the live-turn host lease. Standby/job
+  // workers must not admit new live turns or poll for live messages; the
+  // lease decides WHICH worker hosts live turns (liveTurnsEnabled stays the
+  // global feature flag).
+  let hostingLiveTurns = false;
   const syncGroupSnapshots = createGroupSnapshotSync(app, resolved);
   const onSchedulerChanged = (jobId?: string) => requestSchedulerSync(jobId);
   const startScheduler = () =>
@@ -382,6 +410,16 @@ export async function startRuntimeServices(
     let liveRunId = liveTurnAuthority.ownedRunId(queueJid) ?? undefined;
     let liveRunFence = liveTurnAuthority.ownedFence(queueJid);
     if (!liveTurnAuthority.ownsQueue(queueJid)) {
+      // Already-owned turns (registered or recovered here) proceed under their
+      // fenced per-turn lease, but NEW admissions belong to the live-turn host
+      // only; a standby worker leaves the message for the host's polling loop.
+      if (!hostingLiveTurns) {
+        resolved.logger.warn(
+          { queueJid },
+          'Skipping live-turn admission; this worker is not the live-turn host',
+        );
+        return false;
+      }
       const { chatJid, threadId } = parseThreadQueueKey(queueJid);
       const route = app.getConversationRoutes()[chatJid];
       if (!route) return false;
@@ -662,37 +700,6 @@ export async function startRuntimeServices(
 
     return true;
   };
-  if (liveTurnsEnabled) {
-    void Promise.resolve(
-      resolved.recoverPendingMessages({
-        getConversationRoutes: () => app.getConversationRoutes(),
-        getLastTimestamp: () => app.getLastTimestamp(),
-        setLastTimestamp: (timestamp) => {
-          app.setLastTimestamp(timestamp);
-        },
-        getOrRecoverCursor: app.getOrRecoverCursor,
-        setAgentCursor: (chatJid, timestamp) => {
-          app.setAgentCursor(chatJid, timestamp);
-        },
-        saveState: app.saveState,
-        hasChannel: (chatJid) => channelWiring.hasChannel(chatJid),
-        setTyping: (chatJid, isTyping) =>
-          channelWiring.setTyping(chatJid, isTyping),
-        sendProgressUpdate: (chatJid, text, options) =>
-          channelWiring.sendProgressUpdate(chatJid, text, options),
-        queue: liveMessageQueue,
-        handleActiveControlCommand,
-        opsRepository: resolved.opsRepository,
-      }),
-    ).catch((err) =>
-      resolved.logger.warn({ err }, 'Pending message recovery failed'),
-    );
-  } else {
-    resolved.logger.info(
-      'Live-turn admission disabled; skipping pending message recovery',
-    );
-  }
-
   const outboundDeliveryRepository = resolved.getOutboundDeliveryRepository?.();
   if (outboundDeliveryRepository) {
     const liveSendProfile: OutboundDeliveryProfile = {
@@ -983,99 +990,153 @@ export async function startRuntimeServices(
   }
   await startScheduler();
   resolved.logger.info(`Gantry running (default trigger: ${DEFAULT_TRIGGER})`);
-  if (liveTurnAuthority && liveTurnLeaseDeps) {
-    activeLiveTurnRecoveryLoop?.stop();
-    activeLiveTurnRecoveryLoop = startLiveTurnRecoveryLoop({
-      intervalMs: 20_000,
-      tick: () =>
-        runLiveTurnRecoveryTick({
-          deps: liveTurnLeaseDeps,
-          slotCapacity: app.queue.getPolicy().maxMessageRuns,
-          leaseTtlMs: 60_000,
-          unleasedStaleMs: 30_000,
-          warn: (context, message) => resolved.logger.warn(context, message),
-          resumeRecoveredTurn: async ({ turn, lease }) => {
-            const queueJid = makeThreadQueueKey(
-              turn.conversationId,
-              turn.threadId ?? undefined,
-            );
-            liveTurnAuthority.adoptRecoveredTurn({
-              queueJid,
-              turn,
-              fence: {
-                leaseToken: lease.leaseToken,
-                workerInstanceId: lease.workerInstanceId,
-                fencingVersion: lease.fencingVersion,
-              },
-            });
-            const pendingMessage =
-              turn.pendingMessage &&
-              typeof turn.pendingMessage === 'object' &&
-              !Array.isArray(turn.pendingMessage)
-                ? turn.pendingMessage
-                : null;
-            const replayQueueJid =
-              pendingMessage?.queueJid === queueJid ? queueJid : null;
-            const cursorBefore =
-              typeof pendingMessage?.cursorBefore === 'string'
-                ? pendingMessage.cursorBefore
-                : null;
-            if (!replayQueueJid || cursorBefore === null) {
-              resolved.logger.warn(
-                { turnId: turn.id, runId: turn.runId, queueJid },
-                'Recovered live turn has no replayable pending message; failing closed',
-              );
-              await liveTurnAuthority.finalize(queueJid, 'failed', {
-                status: 'failed',
-                errorSummary:
-                  'Recovered live turn had no replayable pending message.',
-              });
-              return;
-            }
-            const pendingCommands =
-              await liveTurnLeaseDeps.liveTurns.listPendingLiveTurnCommands({
-                liveTurnId: turn.id,
-                limit: 5000,
-              });
-            app.setAgentCursor(queueJid, cursorBefore);
-            await app.saveState();
-            app.queue.enqueueMessageCheck(queueJid);
-            await markPendingContinuationCommandsApplied({
-              liveTurns: liveTurnLeaseDeps.liveTurns,
-              commands: pendingCommands,
-              fence: lease,
-            });
-          },
-        }),
-      warn: (context, message) => resolved.logger.warn(context, message),
-    });
-  }
   if (!liveTurnsEnabled) {
     resolved.logger.info(
-      'Live-turn admission disabled; skipping message polling loop',
+      'Live-turn admission disabled; skipping live-host services (pending message recovery, recovery sweep, message polling)',
     );
     return;
   }
-  resolved
-    .startMessagePollingLoop({
-      getConversationRoutes: () => app.getConversationRoutes(),
-      getLastTimestamp: () => app.getLastTimestamp(),
-      setLastTimestamp: (timestamp) => app.setLastTimestamp(timestamp),
-      getOrRecoverCursor: app.getOrRecoverCursor,
-      setAgentCursor: (chatJid, timestamp) =>
-        app.setAgentCursor(chatJid, timestamp),
-      saveState: app.saveState,
-      hasChannel: (chatJid) => channelWiring.hasChannel(chatJid),
-      setTyping: (chatJid, isTyping) =>
-        channelWiring.setTyping(chatJid, isTyping),
-      sendProgressUpdate: (chatJid, text, options) =>
-        channelWiring.sendProgressUpdate(chatJid, text, options),
-      queue: liveMessageQueue,
-      handleActiveControlCommand,
-      opsRepository: resolved.opsRepository,
-    })
-    .catch((err) => {
+
+  // Live-host services. These run ONLY on the worker holding the live-turn
+  // host lease: every worker is a job worker, the lease elects the live host.
+  const messageLoopDeps: MessageLoopDeps = {
+    getConversationRoutes: () => app.getConversationRoutes(),
+    getLastTimestamp: () => app.getLastTimestamp(),
+    setLastTimestamp: (timestamp) => app.setLastTimestamp(timestamp),
+    getOrRecoverCursor: app.getOrRecoverCursor,
+    setAgentCursor: (chatJid, timestamp) =>
+      app.setAgentCursor(chatJid, timestamp),
+    saveState: app.saveState,
+    hasChannel: (chatJid) => channelWiring.hasChannel(chatJid),
+    setTyping: (chatJid, isTyping) =>
+      channelWiring.setTyping(chatJid, isTyping),
+    sendProgressUpdate: (chatJid, text, options) =>
+      channelWiring.sendProgressUpdate(chatJid, text, options),
+    queue: liveMessageQueue,
+    handleActiveControlCommand,
+    opsRepository: resolved.opsRepository,
+  };
+  let pollingLoop: MessagePollingLoopHandle | undefined;
+  let recoveryLoop: LiveTurnRecoveryLoop | undefined;
+
+  const startLiveHostServices = (): void => {
+    if (hostingLiveTurns) return;
+    hostingLiveTurns = true;
+    // Takeover recovery: pick up messages the previous host never processed.
+    void Promise.resolve(
+      resolved.recoverPendingMessages(messageLoopDeps),
+    ).catch((err) =>
+      resolved.logger.warn({ err }, 'Pending message recovery failed'),
+    );
+    if (liveTurnAuthority && liveTurnLeaseDeps) {
+      activeLiveTurnRecoveryLoop?.stop();
+      recoveryLoop = startLiveTurnRecoveryLoop({
+        intervalMs: 20_000,
+        tick: () =>
+          runLiveTurnRecoveryTick({
+            deps: liveTurnLeaseDeps,
+            slotCapacity: app.queue.getPolicy().maxMessageRuns,
+            leaseTtlMs: 60_000,
+            unleasedStaleMs: 30_000,
+            warn: (context, message) => resolved.logger.warn(context, message),
+            resumeRecoveredTurn: async ({ turn, lease }) => {
+              const queueJid = makeThreadQueueKey(
+                turn.conversationId,
+                turn.threadId ?? undefined,
+              );
+              liveTurnAuthority.adoptRecoveredTurn({
+                queueJid,
+                turn,
+                fence: {
+                  leaseToken: lease.leaseToken,
+                  workerInstanceId: lease.workerInstanceId,
+                  fencingVersion: lease.fencingVersion,
+                },
+              });
+              const pendingMessage =
+                turn.pendingMessage &&
+                typeof turn.pendingMessage === 'object' &&
+                !Array.isArray(turn.pendingMessage)
+                  ? turn.pendingMessage
+                  : null;
+              const replayQueueJid =
+                pendingMessage?.queueJid === queueJid ? queueJid : null;
+              const cursorBefore =
+                typeof pendingMessage?.cursorBefore === 'string'
+                  ? pendingMessage.cursorBefore
+                  : null;
+              if (!replayQueueJid || cursorBefore === null) {
+                resolved.logger.warn(
+                  { turnId: turn.id, runId: turn.runId, queueJid },
+                  'Recovered live turn has no replayable pending message; failing closed',
+                );
+                await liveTurnAuthority.finalize(queueJid, 'failed', {
+                  status: 'failed',
+                  errorSummary:
+                    'Recovered live turn had no replayable pending message.',
+                });
+                return;
+              }
+              const pendingCommands =
+                await liveTurnLeaseDeps.liveTurns.listPendingLiveTurnCommands({
+                  liveTurnId: turn.id,
+                  limit: 5000,
+                });
+              app.setAgentCursor(queueJid, cursorBefore);
+              await app.saveState();
+              app.queue.enqueueMessageCheck(queueJid);
+              await markPendingContinuationCommandsApplied({
+                liveTurns: liveTurnLeaseDeps.liveTurns,
+                commands: pendingCommands,
+                fence: lease,
+              });
+            },
+          }),
+        warn: (context, message) => resolved.logger.warn(context, message),
+      });
+      activeLiveTurnRecoveryLoop = recoveryLoop;
+    }
+    pollingLoop = resolved.startMessagePollingLoop(messageLoopDeps);
+    activeMessagePollingLoop = pollingLoop;
+    pollingLoop.done.catch((err) => {
       resolved.logger.fatal({ err }, 'Message loop crashed unexpectedly');
       resolved.exit(1);
     });
+  };
+
+  const stopLiveHostServices = (): void => {
+    hostingLiveTurns = false;
+    pollingLoop?.stop();
+    if (activeMessagePollingLoop === pollingLoop) {
+      activeMessagePollingLoop = undefined;
+    }
+    pollingLoop = undefined;
+    recoveryLoop?.stop();
+    if (activeLiveTurnRecoveryLoop === recoveryLoop) {
+      activeLiveTurnRecoveryLoop = undefined;
+    }
+    recoveryLoop = undefined;
+  };
+
+  const liveTurnHost = options.liveTurnHost;
+  if (!liveTurnHost) {
+    // Single-host embedding (no lease manager): host live turns immediately.
+    startLiveHostServices();
+    return;
+  }
+  liveTurnHost.onTransition({
+    onAcquired: () => {
+      resolved.logger.info(
+        'Live-turn host lease held; starting live-host services (pending message recovery, recovery sweep, message polling)',
+      );
+      startLiveHostServices();
+    },
+    onLost: (err) => {
+      resolved.logger.warn(
+        { err },
+        'Live-turn host lease lost; stopping live-host services and serving jobs only until re-acquired',
+      );
+      stopLiveHostServices();
+    },
+  });
 }

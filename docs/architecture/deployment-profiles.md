@@ -53,7 +53,7 @@ shape. The runtime **setting** is `runtime.deployment_mode` (`workstation|fleet`
 | Scaling | None (one host) | ASG; horizontal job workers; singleton live host (v1) | Same as fleet, sized per support deployment |
 | Capability installs | Live on host (package manager runs) | Artifacts in S3, replace-on-update; sandboxed bake job; **no package manager on workers** | Pre-provisioned only; no live install, no escalation |
 | Settings surface | `settings.yaml` watcher → auto-import | Control-API desired-state CRUD; `settings_revisions` + pg_notify; YAML is bootstrap/backup only | Same as fleet |
-| Live-turn topology | In-process | 1 live host (singleton lease `runtime:live-turn-host:default`); failover RTO = lease TTL (~30s) | Same as fleet |
+| Live-turn topology | In-process | 1 lease-elected live host + N standbys: the singleton lease `runtime:live-turn-host:default` gates the live-host services (message polling, new-turn admission, recovery sweep); standbys serve jobs and retry acquisition with backoff; failover RTO = lease TTL (~30s) | Same as fleet |
 | Security posture | Relaxed local (may opt into production) | **Production required** | **Production required** |
 | Agent access preset | `full` (default) | `full` or `locked` per agent | `locked` |
 | Delivery | Local run | Terraform/AWS (`envs/fleet`) | Terraform/AWS (`terraform apply -var-file=support.tfvars`) |
@@ -86,9 +86,9 @@ operator-visible signal.
 | 1 | **Old worker + new settings revision** | Old worker whose code < revision `min_reader_version` **holds last-applied revision**, does not mis-apply | Skew-age alert + `/metrics` skew gauge; resolves as old workers cycle out |
 | 2 | **New worker + old revision** | New worker reads the current (older) revision normally; `min_reader_version` only blocks the reverse direction | No alert; normal convergence |
 | 3 | **Mixed-version workers mid-deploy** | Both serve; lease fencing + image digest keep terminal writes correct; no split-brain on a run | Worker inventory shows mixed image digests; normal during deploy |
-| 4 | **Migration vs old worker** | Additive-only migrations; entrypoint pg advisory lock serializes; old worker runs against newer additive schema | Migration runs once (lock holder); losers wait; failure exits non-zero |
+| 4 | **Migration vs old worker** | Additive-only migrations; one pg advisory lock (inside `migrate()`) serializes every migrator — entrypoint passes and runtime boot-time migrations alike, including boots with `GANTRY_SKIP_MIGRATIONS=1`; old worker runs against newer additive schema | Migration runs once (lock holder); losers wait; failure exits non-zero |
 | 5 | **Bake artifact vs old worker** | New artifact is replace-on-update; a worker still holding the prior artifact keeps serving until it reconciles (fetch → sha256 verify → atomic activate) | Capability advertised only after activate; hash mismatch → quarantine + `gantry artifacts quarantine rebake` |
-| 6 | **Live-host failover during deploy** | Draining live host releases the live-turn lease early; successor acquires via retry-with-backoff (no crash loop) and recovers the turn at a higher fencing version | Live-turn `recovered` state; failover RTO ≈ lease TTL (~30s) |
+| 6 | **Live-host failover during deploy** | Draining live host stops polling/admission, releases the live-turn lease early; a standby acquires via retry-with-backoff (no crash loop), starts the live-host services in-process, and recovers the turn at a higher fencing version | Live-turn `recovered` state; failover RTO ≈ lease TTL (~30s) |
 
 ## Security Posture vs Topology
 

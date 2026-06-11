@@ -151,6 +151,143 @@ describe('live-turn host lease acquisition', () => {
     expect(manager.getLease()).toBeUndefined();
   });
 
+  it('replays onAcquired when the lease was already held before onTransition registration', async () => {
+    const runtimeSettings = createDefaultRuntimeSettings();
+    const lease = { release: vi.fn(async () => undefined) };
+    const tryAcquire = vi.fn(async () => lease);
+
+    const manager = startLiveTurnHostLeaseAcquisition({
+      runtimeSettings,
+      leases: { tryAcquire },
+      deps: { logger: silentLogger },
+    });
+    await manager.whenAcquired();
+
+    const onAcquired = vi.fn();
+    const onLost = vi.fn();
+    manager.onTransition({ onAcquired, onLost });
+
+    expect(onAcquired).toHaveBeenCalledWith(lease);
+    expect(onLost).not.toHaveBeenCalled();
+    await manager.stop();
+  });
+
+  it('two workers, one lease: only the holder hosts; drain handoff moves hosting to the standby', async () => {
+    const runtimeSettings = createDefaultRuntimeSettings();
+    // Shared singleton lease: first acquirer wins until it releases.
+    let held = false;
+    const makeLease = () => ({
+      release: vi.fn(async () => {
+        held = false;
+      }),
+    });
+    const tryAcquire = vi.fn(async () => {
+      if (held) return undefined;
+      held = true;
+      return makeLease();
+    });
+    const timers = makeTimerHarness();
+    const deps = {
+      setTimeoutFn: timers.setTimeoutFn,
+      clearTimeoutFn: timers.clearTimeoutFn,
+      random: () => 0,
+      logger: silentLogger,
+      baseBackoffMs: 10,
+      maxBackoffMs: 100,
+    };
+
+    const workerA = startLiveTurnHostLeaseAcquisition({
+      runtimeSettings,
+      leases: { tryAcquire },
+      deps,
+    });
+    const aAcquired = vi.fn();
+    workerA.onTransition({ onAcquired: aAcquired, onLost: vi.fn() });
+    await workerA.whenAcquired();
+
+    const workerB = startLiveTurnHostLeaseAcquisition({
+      runtimeSettings,
+      leases: { tryAcquire },
+      deps,
+    });
+    const bAcquired = vi.fn();
+    workerB.onTransition({ onAcquired: bAcquired, onLost: vi.fn() });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Exactly one host: A holds, B stands by on a retry timer.
+    expect(aAcquired).toHaveBeenCalledOnce();
+    expect(bAcquired).not.toHaveBeenCalled();
+    expect(workerB.getLease()).toBeUndefined();
+    expect(timers.pendingCount()).toBe(1);
+
+    // A drains: lease released early, B's next standby attempt takes over.
+    await workerA.stop();
+    timers.fireNext();
+    await expect(workerB.whenAcquired()).resolves.toBeDefined();
+    expect(bAcquired).toHaveBeenCalledOnce();
+    expect(workerB.getLease()).toBeDefined();
+
+    await workerB.stop();
+  });
+
+  it('on lease loss: fires onLost, re-enters standby, and re-acquires once free', async () => {
+    const runtimeSettings = createDefaultRuntimeSettings();
+    const lostHandlers: Array<(err: Error) => void> = [];
+    const firstLease = {
+      onLost: (handler: (err: Error) => void) => {
+        lostHandlers.push(handler);
+      },
+      release: vi.fn(async () => undefined),
+    };
+    const secondLease = { release: vi.fn(async () => undefined) };
+    const tryAcquire = vi
+      .fn<[], Promise<typeof firstLease | typeof secondLease | undefined>>()
+      .mockResolvedValueOnce(firstLease)
+      .mockResolvedValueOnce(undefined) // immediate retry after loss: still contended
+      .mockResolvedValueOnce(secondLease);
+    const timers = makeTimerHarness();
+    const log = { info: vi.fn(), warn: vi.fn() };
+
+    const manager = startLiveTurnHostLeaseAcquisition({
+      runtimeSettings,
+      leases: { tryAcquire },
+      deps: {
+        setTimeoutFn: timers.setTimeoutFn,
+        clearTimeoutFn: timers.clearTimeoutFn,
+        random: () => 0,
+        logger: log,
+        baseBackoffMs: 10,
+        maxBackoffMs: 100,
+      },
+    });
+    const onAcquired = vi.fn();
+    const onLost = vi.fn();
+    manager.onTransition({ onAcquired, onLost });
+    await manager.whenAcquired();
+    expect(onAcquired).toHaveBeenCalledTimes(1);
+
+    // The advisory-lock connection dies: consumer is notified, manager
+    // re-enters standby acquisition in-process (no crash, no exit).
+    lostHandlers.forEach((handler) =>
+      handler(new Error('lease connection ended')),
+    );
+    expect(onLost).toHaveBeenCalledOnce();
+    expect(manager.getLease()).toBeUndefined();
+
+    // First retry is contended, then the lease frees up and we host again.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(timers.pendingCount()).toBe(1);
+    timers.fireNext();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onAcquired).toHaveBeenCalledTimes(2);
+    expect(manager.getLease()).toBe(secondLease);
+
+    await manager.stop();
+  });
+
   it('routes scope-active pending messages to the owning live turn', async () => {
     const completeSessionAgentRun = vi.fn(async () => undefined);
     const onRouted = vi.fn(async () => undefined);

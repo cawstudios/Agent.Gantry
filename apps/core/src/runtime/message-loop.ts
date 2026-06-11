@@ -272,13 +272,48 @@ export async function runMessagePollingTick(
   }
 }
 
-export async function startMessagePollingLoop(
+export interface MessagePollingLoopHandle {
+  /** Stop the loop after the in-flight tick; cancels the pending poll delay. */
+  stop: () => void;
+  /** Settles when the loop exits (only rejects on an unexpected crash). */
+  done: Promise<void>;
+}
+
+/**
+ * Start the live message polling loop. Only the live-turn host worker runs
+ * this loop; standby/job-only workers must not poll (it would duplicate run
+ * admission across the fleet). The returned handle stops the loop for graceful
+ * drain and live-host lease handoff.
+ */
+export function startMessagePollingLoop(
   deps: MessageLoopDeps,
-): Promise<never> {
-  while (true) {
-    await runMessagePollingTick(deps);
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-  }
+): MessagePollingLoopHandle {
+  let stopped = false;
+  let cancelDelay: (() => void) | undefined;
+  const done = (async () => {
+    while (!stopped) {
+      await runMessagePollingTick(deps);
+      if (stopped) break;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          cancelDelay = undefined;
+          resolve();
+        }, POLL_INTERVAL);
+        cancelDelay = () => {
+          cancelDelay = undefined;
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+    }
+  })();
+  return {
+    stop: () => {
+      stopped = true;
+      cancelDelay?.();
+    },
+    done,
+  };
 }
 
 export async function recoverPendingMessages(

@@ -9,6 +9,7 @@ import {
   beginDrainingLiveTurnAdmission,
   shutdownLiveTurnAuthority,
   stopLiveTurnRecoveryLoop,
+  stopMessagePollingLoop,
 } from './bootstrap/runtime-services.js';
 import { installShutdownHandlers } from './bootstrap/shutdown.js';
 import { runStartup } from './bootstrap/startup.js';
@@ -132,6 +133,7 @@ export async function startGantryRuntime(
     closeScheduler: stopSchedulerLoop,
     closeOutboundDeliveryRecovery: stopOutboundDeliveryRecoveryLoop,
     closeLiveTurnAdmission: beginDrainingLiveTurnAdmission,
+    closeMessagePolling: stopMessagePollingLoop,
     closeLiveTurnRecovery: async () => {
       stopLiveTurnRecoveryLoop();
     },
@@ -144,15 +146,10 @@ export async function startGantryRuntime(
       (await loadBrowserToolModule()).closeBrowserToolBackends(),
   });
 
-  // Standby acquirer runs in the background; a job-only worker boots fully
+  // The standby acquirer runs in the background; a job-only worker boots fully
   // while it waits for the live-host lease (fleet v1: 1 live host + N workers).
-  void liveTurnHostLeaseManager.whenAcquired().then((lease) => {
-    lease?.onLost?.((err) => {
-      logger.error({ err }, 'Live-turn host lease lost; shutting down runtime');
-      process.exit(1);
-    });
-  });
-
+  // Lease transitions (acquired/lost) start and stop the live-host services
+  // in-process via the manager handed to startRuntimeServices below.
   try {
     if (!runtimeSettings.runtime.liveTurns.enabled) {
       logger.info(
@@ -172,6 +169,7 @@ export async function startGantryRuntime(
         app,
         channelWiring,
         liveTurnsEnabled: runtimeSettings.runtime.liveTurns.enabled,
+        liveTurnHost: liveTurnHostLeaseManager,
       },
       {
         mcpHostnameLookup,

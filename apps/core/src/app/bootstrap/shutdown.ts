@@ -26,6 +26,8 @@ export interface InstallShutdownHandlersOptions {
   closeLiveTurnRecovery?: () => Promise<void>;
   /** Stop admitting NEW live turns (active turns keep running). */
   closeLiveTurnAdmission?: () => void;
+  /** Stop the live message polling loop so no new run rows are created. */
+  closeMessagePolling?: () => void;
   closeLiveTurnAuthority?: () => Promise<void>;
   closeSettingsWatcher?: () => void;
   /** Release the live-turn host lease EARLY so a successor can take over. */
@@ -74,12 +76,14 @@ export function installShutdownHandlers(
     resolved.markDraining();
 
     // 2. Stop intake: stop claiming new pg-boss work, stop admitting new live
-    //    turns, and stop the recovery sweep. In-flight work continues.
+    //    turns, stop polling for live messages (no more throwaway run rows),
+    //    and stop the recovery sweep. In-flight work continues.
     await runStep(
       options.closeScheduler,
       'Failed to stop scheduler during drain',
     );
     options.closeLiveTurnAdmission?.();
+    options.closeMessagePolling?.();
     await runStep(
       options.closeLiveTurnRecovery,
       'Failed to stop live-turn recovery during drain',

@@ -17,15 +17,17 @@ log() {
 # ---------------------------------------------------------------------------
 # Migrations.
 #
-# Default: every instance runs migrations. The advisory lock inside migrate.mjs
-# serializes them, and migrate() is idempotent (drizzle tracks applied
-# migrations), so N workers booting at once is safe — the lock holder migrates,
-# the rest block then find nothing pending.
+# Default: every instance runs migrations. The advisory lock inside migrate()
+# itself (storage-service) serializes every migrator — explicit passes like
+# this one and runtime boot-time migrations alike — and migrate() is
+# idempotent (drizzle tracks applied migrations), so N workers booting at once
+# is safe: the lock holder migrates, the rest block then find nothing pending.
 #
 # GANTRY_SKIP_MIGRATIONS=1: skip the explicit migrate step. Use this for an
 # N-worker fleet where one dedicated migrator (or the first booting worker)
-# already applied the schema. Note: the runtime ALSO runs an idempotent
-# boot-time migrate(); skipping here just avoids the redundant explicit pass.
+# already applied the schema. Still safe under concurrent boots: the runtime's
+# boot-time migrate() takes the same advisory lock, so skipping here only
+# avoids the redundant explicit pass.
 # ---------------------------------------------------------------------------
 if [ "${GANTRY_SKIP_MIGRATIONS:-0}" = "1" ]; then
   log "GANTRY_SKIP_MIGRATIONS=1 — skipping explicit migration step"

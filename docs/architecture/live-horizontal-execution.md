@@ -101,6 +101,28 @@ before a drain request is always observed.
 owns admission, the local runner-hook registry, the ownership tick (renew lease
 + slot, stop the local runner on ownership loss), and fenced finalization.
 
+## Live-host election
+
+The singleton advisory lease `runtime:live-turn-host:default`
+(`apps/core/src/app/bootstrap/live-turn-host.ts`) elects WHICH worker runs the
+live-host services: message polling, NEW live-turn admission, the recovery
+sweep, and pending-message recovery. `runtime.live_turns.enabled` stays the
+global feature flag; the lease decides the host among enabled workers.
+
+- **Standby:** a worker that loses the lease race boots fully as a job worker
+  and retries acquisition with bounded jittered backoff (no throw, no crash
+  loop). It does not poll, admit new live turns, or run the recovery sweep.
+- **Takeover:** when the holder drains, it releases the lease early; a standby
+  acquires it and starts the live-host services
+  (`startRuntimeServices` wires lease transitions in
+  `apps/core/src/app/bootstrap/runtime-services.ts`), including pending-message
+  recovery for messages the previous host never processed.
+- **Lease loss:** the holder stops its live-host services in-process and
+  re-enters standby acquisition. Already-active turns are NOT torn down — they
+  keep running under their fenced per-turn `run_leases` until they finish or
+  the per-turn lease expires and the recovery sweep on the new host reclaims
+  them at a higher fencing version.
+
 ## Prompt durability across adapter restart
 
 `pending_interactions` is still created before a permission/question prompt
