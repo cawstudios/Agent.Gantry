@@ -122,6 +122,18 @@ export interface WorkerRegistryRepository {
   heartbeatWorker(input: { id: string; now?: string }): Promise<boolean>;
   markStaleWorkersUnhealthy(input: { staleBefore: string }): Promise<string[]>;
   getWorker(id: string): Promise<WorkerInstance | null>;
+  /**
+   * Replace this worker's advertised capability id set in
+   * `worker_instances.capabilities_json`. Called by the capability reconciler
+   * after it fetches/verifies/activates artifacts locally; dispatch routes work
+   * only to workers whose advertised set covers the run's required capabilities.
+   * Returns false when the worker row no longer exists.
+   */
+  advertiseWorkerCapabilities(input: {
+    id: string;
+    capabilities: string[];
+    now?: string;
+  }): Promise<boolean>;
 }
 
 export interface RunLeaseRepository {

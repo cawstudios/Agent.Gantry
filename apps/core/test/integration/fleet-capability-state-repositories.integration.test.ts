@@ -43,8 +43,8 @@ maybeDescribe('Fleet capability-state repositories (0077)', () => {
 
   describe('runtimeDependencies', () => {
     it('creates a queued manifest idempotently on (appId, manifestHash)', async () => {
-      const created = await repositories.runtimeDependencies.createRuntimeDependency(
-        {
+      const created =
+        await repositories.runtimeDependencies.createRuntimeDependency({
           id: 'runtime-dependency:one',
           appId,
           manifestHash: 'sha256:manifest-one',
@@ -53,29 +53,31 @@ maybeDescribe('Fleet capability-state repositories (0077)', () => {
           approvedByConversationId: 'conversation:approve',
           approvedAt: now,
           now,
-        },
-      );
+        });
       expect(created.status).toBe('queued');
       expect(created.requestedPackages).toEqual(['left-pad@1.3.0']);
       expect(created.artifact).toBeNull();
 
-      const duplicate = await repositories.runtimeDependencies.createRuntimeDependency(
-        {
+      const duplicate =
+        await repositories.runtimeDependencies.createRuntimeDependency({
           id: 'runtime-dependency:two',
           appId,
           manifestHash: 'sha256:manifest-one',
           requestedPackages: ['ignored@9.9.9'],
           now,
-        },
-      );
+        });
       // Idempotent: returns the original row, does not start a second bake.
       expect(duplicate.id).toBe('runtime-dependency:one');
       expect(duplicate.requestedPackages).toEqual(['left-pad@1.3.0']);
 
-      const list = await repositories.runtimeDependencies.listRuntimeDependencies(
-        { appId, statuses: ['queued'] },
+      const list =
+        await repositories.runtimeDependencies.listRuntimeDependencies({
+          appId,
+          statuses: ['queued'],
+        });
+      expect(list.some((row) => row.id === 'runtime-dependency:one')).toBe(
+        true,
       );
-      expect(list.some((row) => row.id === 'runtime-dependency:one')).toBe(true);
     });
 
     it('transitions status and records produced artifact metadata', async () => {
@@ -86,8 +88,8 @@ maybeDescribe('Fleet capability-state repositories (0077)', () => {
         requestedPackages: ['dayjs@1.11.20'],
         now,
       });
-      const updated = await repositories.runtimeDependencies.updateRuntimeDependencyStatus(
-        {
+      const updated =
+        await repositories.runtimeDependencies.updateRuntimeDependencyStatus({
           id: 'runtime-dependency:activate',
           status: 'activated',
           artifact: {
@@ -97,8 +99,7 @@ maybeDescribe('Fleet capability-state repositories (0077)', () => {
             sizeBytes: 4096,
           },
           now,
-        },
-      );
+        });
       expect(updated).toBe(true);
 
       const row = await repositories.runtimeDependencies.getRuntimeDependency(
@@ -136,48 +137,53 @@ maybeDescribe('Fleet capability-state repositories (0077)', () => {
 
   describe('settingsRevisions', () => {
     it('allocates monotonic revisions per appId', async () => {
-      const first = await repositories.settingsRevisions.appendSettingsRevision({
-        appId,
-        settingsDocument: { agent: { name: 'rev-one' } },
-        minReaderVersion: 0,
-        createdBy: 'cli',
-        note: 'first',
-        now,
-      });
+      const first = await repositories.settingsRevisions.appendSettingsRevision(
+        {
+          appId,
+          settingsDocument: { agent: { name: 'rev-one' } },
+          minReaderVersion: 0,
+          createdBy: 'cli',
+          note: 'first',
+          now,
+        },
+      );
       expect(first.revision).toBe(1);
 
-      const second = await repositories.settingsRevisions.appendSettingsRevision({
-        appId,
-        settingsDocument: { agent: { name: 'rev-two' } },
-        minReaderVersion: 2,
-        createdBy: 'api',
-        now,
-      });
+      const second =
+        await repositories.settingsRevisions.appendSettingsRevision({
+          appId,
+          settingsDocument: { agent: { name: 'rev-two' } },
+          minReaderVersion: 2,
+          createdBy: 'api',
+          now,
+        });
       expect(second.revision).toBe(2);
       expect(second.minReaderVersion).toBe(2);
 
-      const latest = await repositories.settingsRevisions.getLatestSettingsRevision(
-        appId,
-      );
+      const latest =
+        await repositories.settingsRevisions.getLatestSettingsRevision(appId);
       expect(latest?.revision).toBe(2);
       expect(latest?.settingsDocument).toEqual({ agent: { name: 'rev-two' } });
 
-      const byNumber = await repositories.settingsRevisions.getSettingsRevision({
-        appId,
-        revision: 1,
-      });
+      const byNumber = await repositories.settingsRevisions.getSettingsRevision(
+        {
+          appId,
+          revision: 1,
+        },
+      );
       expect(byNumber?.note).toBe('first');
 
-      const recent = await repositories.settingsRevisions.listRecentSettingsRevisions(
-        { appId, limit: 10 },
-      );
+      const recent =
+        await repositories.settingsRevisions.listRecentSettingsRevisions({
+          appId,
+          limit: 10,
+        });
       expect(recent.map((row) => row.revision)).toEqual([2, 1]);
     });
 
     it('serializes concurrent appends without losing a revision', async () => {
-      const before = await repositories.settingsRevisions.getLatestSettingsRevision(
-        appId,
-      );
+      const before =
+        await repositories.settingsRevisions.getLatestSettingsRevision(appId);
       const baseline = before?.revision ?? 0;
       const results = await Promise.all(
         Array.from({ length: 5 }, (_, i) =>
@@ -190,7 +196,9 @@ maybeDescribe('Fleet capability-state repositories (0077)', () => {
           }),
         ),
       );
-      const revisions = results.map((row) => row.revision).sort((a, b) => a - b);
+      const revisions = results
+        .map((row) => row.revision)
+        .sort((a, b) => a - b);
       // Five distinct, contiguous revisions above the baseline.
       expect(new Set(revisions).size).toBe(5);
       expect(revisions[0]).toBeGreaterThan(baseline);

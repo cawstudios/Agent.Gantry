@@ -100,6 +100,7 @@ describe('registerWorkerInstance image inventory', () => {
       heartbeatWorker: async () => true,
       markStaleWorkersUnhealthy: async () => [],
       getWorker: async () => null,
+      advertiseWorkerCapabilities: async () => true,
     };
 
     try {

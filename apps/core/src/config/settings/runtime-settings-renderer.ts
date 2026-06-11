@@ -510,7 +510,8 @@ function isDefaultRuntime(runtime: RuntimeSettings['runtime']): boolean {
     runtime.sandbox.resourceLimits.cpuSeconds === 0 &&
     runtime.sandbox.resourceLimits.memoryMb === 0 &&
     runtime.sandbox.resourceLimits.maxProcesses === 0 &&
-    runtime.artifactStore.driver === 'local'
+    runtime.artifactStore.driver === 'local' &&
+    runtime.deploymentMode === 'workstation'
   );
 }
 
@@ -604,6 +605,11 @@ function renderRuntimeProcessYaml(
     `      memory_mb: ${runtime.sandbox.resourceLimits.memoryMb}`,
     `      max_processes: ${runtime.sandbox.resourceLimits.maxProcesses}`,
   );
+  // Default `workstation` renders nothing (the whole runtime block is omitted
+  // when everything is default); only the explicit `fleet` mode is emitted.
+  if (runtime.deploymentMode !== 'workstation') {
+    lines.push(`  deployment_mode: ${quoteYamlString(runtime.deploymentMode)}`);
+  }
   lines.push(...renderArtifactStoreYamlLines(runtime.artifactStore), '');
 }
 

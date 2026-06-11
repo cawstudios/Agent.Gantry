@@ -5,6 +5,7 @@ import type {
   RuntimeDependencyArtifact,
   RuntimeDependencyRepository,
   RuntimeDependencyStatus,
+  UpdateRuntimeDependencyStatusInput,
 } from '../../../../domain/ports/fleet-capability-state.js';
 import { nowIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
@@ -42,9 +43,7 @@ function toRuntimeDependency(row: RuntimeDependencyRow): RuntimeDependency {
   };
 }
 
-export class PostgresRuntimeDependencyRepository
-  implements RuntimeDependencyRepository
-{
+export class PostgresRuntimeDependencyRepository implements RuntimeDependencyRepository {
   constructor(private readonly db: CanonicalDb) {}
 
   async createRuntimeDependency(input: {
@@ -137,13 +136,9 @@ export class PostgresRuntimeDependencyRepository
     return rows.map(toRuntimeDependency);
   }
 
-  async updateRuntimeDependencyStatus(input: {
-    id: string;
-    status: RuntimeDependencyStatus;
-    artifact?: RuntimeDependencyArtifact | null;
-    failureReason?: string | null;
-    now?: string;
-  }): Promise<boolean> {
+  async updateRuntimeDependencyStatus(
+    input: UpdateRuntimeDependencyStatusInput,
+  ): Promise<boolean> {
     const now = input.now ?? nowIso();
     const set: Partial<
       typeof pgSchema.runtimeDependenciesPostgres.$inferInsert
@@ -160,10 +155,21 @@ export class PostgresRuntimeDependencyRepository
     if (input.failureReason !== undefined) {
       set.failureReason = input.failureReason;
     }
+    const filters: SQL[] = [
+      eq(pgSchema.runtimeDependenciesPostgres.id, input.id),
+    ];
+    if (input.fromStatus !== undefined) {
+      const fromStatuses = Array.isArray(input.fromStatus)
+        ? input.fromStatus
+        : [input.fromStatus];
+      filters.push(
+        inArray(pgSchema.runtimeDependenciesPostgres.status, fromStatuses),
+      );
+    }
     const rows = await this.db
       .update(pgSchema.runtimeDependenciesPostgres)
       .set(set)
-      .where(eq(pgSchema.runtimeDependenciesPostgres.id, input.id))
+      .where(and(...filters))
       .returning({ id: pgSchema.runtimeDependenciesPostgres.id });
     return rows.length > 0;
   }

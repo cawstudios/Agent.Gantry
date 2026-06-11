@@ -87,7 +87,9 @@ describe('runtime.artifact_store settings', () => {
     expect(yaml).toContain('    force_path_style: true');
 
     const parsed = parseRuntimeSettings(yaml);
-    expect(parsed.runtime.artifactStore).toEqual(settings.runtime.artifactStore);
+    expect(parsed.runtime.artifactStore).toEqual(
+      settings.runtime.artifactStore,
+    );
   });
 
   it('omits the artifact_store block for the default local driver to avoid drift', () => {

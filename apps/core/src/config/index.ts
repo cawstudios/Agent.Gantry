@@ -17,7 +17,10 @@ import {
 } from './settings/model-defaults.js';
 import { settingsFilePath } from './settings/runtime-home.js';
 import { DEFAULT_AGENT_NAME } from './settings/runtime-settings-defaults.js';
-import type { RuntimeSettings } from './settings/runtime-settings-types.js';
+import type {
+  RuntimeDeploymentMode,
+  RuntimeSettings,
+} from './settings/runtime-settings-types.js';
 import { isValidTimezone } from '../shared/timezone.js';
 import { resolvePermissionApprovalTimeoutMs } from '../shared/permission-timeout.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
@@ -129,6 +132,7 @@ export function getPublicRuntimeSettings() {
       queue: settings.runtime.queue,
       sandbox: settings.runtime.sandbox,
       artifactStore: settings.runtime.artifactStore,
+      deploymentMode: settings.runtime.deploymentMode,
     },
     browser: {
       usage: {
@@ -144,6 +148,9 @@ export function getPublicRuntimeSettings() {
       egress: settings.permissions.egress,
     },
   };
+}
+export function getDeploymentMode(): RuntimeDeploymentMode {
+  return getRuntimeSettingsForConfig().runtime.deploymentMode;
 }
 export function getRuntimeQueueConfig() {
   const queue = getRuntimeSettingsForConfig().runtime.queue;

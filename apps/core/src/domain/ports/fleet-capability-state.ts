@@ -54,17 +54,28 @@ export interface RuntimeDependencyRepository {
     statuses?: RuntimeDependencyStatus[];
   }): Promise<RuntimeDependency[]>;
   /**
-   * Status-transition writer used by later bake/reconciler chunks. Sets the
+   * Status-transition writer used by the bake/reconciler chunks. Sets the
    * status and any produced artifact/failure metadata. Returns false when the
    * row no longer exists.
+   *
+   * When {@link UpdateRuntimeDependencyStatusInput.fromStatus} is provided the
+   * write is a compare-and-set: it only applies when the row's current status
+   * is one of the listed values, returning false otherwise. The bake uses this
+   * as its lease — the worker that atomically flips `queued`→`baking` owns the
+   * bake; concurrent claimants observe false and stand down.
    */
-  updateRuntimeDependencyStatus(input: {
-    id: string;
-    status: RuntimeDependencyStatus;
-    artifact?: RuntimeDependencyArtifact | null;
-    failureReason?: string | null;
-    now?: string;
-  }): Promise<boolean>;
+  updateRuntimeDependencyStatus(
+    input: UpdateRuntimeDependencyStatusInput,
+  ): Promise<boolean>;
+}
+
+export interface UpdateRuntimeDependencyStatusInput {
+  id: string;
+  status: RuntimeDependencyStatus;
+  fromStatus?: RuntimeDependencyStatus | RuntimeDependencyStatus[];
+  artifact?: RuntimeDependencyArtifact | null;
+  failureReason?: string | null;
+  now?: string;
 }
 
 export interface SettingsRevision {

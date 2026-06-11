@@ -684,6 +684,7 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
     artifactStore: {
       driver: 'local',
     },
+    deploymentMode: 'workstation',
   };
   if (raw === undefined) return defaults;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -695,10 +696,11 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
       key !== 'queue' &&
       key !== 'live_turns' &&
       key !== 'sandbox' &&
-      key !== 'artifact_store'
+      key !== 'artifact_store' &&
+      key !== 'deployment_mode'
     ) {
       throw new Error(
-        `runtime.${key} is not supported. Configure runtime.queue.*, runtime.live_turns.*, runtime.sandbox.*, or runtime.artifact_store.*.`,
+        `runtime.${key} is not supported. Configure runtime.queue.*, runtime.live_turns.*, runtime.sandbox.*, runtime.artifact_store.*, or runtime.deployment_mode.`,
       );
     }
   }
@@ -792,6 +794,13 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
     );
   }
   const artifactStore = parseRuntimeArtifactStoreSettings(map.artifact_store);
+  const deploymentMode =
+    map.deployment_mode === undefined
+      ? defaults.deploymentMode
+      : parseStringValue(map.deployment_mode, 'runtime.deployment_mode');
+  if (deploymentMode !== 'workstation' && deploymentMode !== 'fleet') {
+    throw new Error('runtime.deployment_mode must be workstation or fleet');
+  }
   return {
     queue: {
       maxMessageRuns: parsePositiveIntegerValue(
@@ -858,6 +867,7 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
       },
     },
     artifactStore,
+    deploymentMode,
   };
 }
 

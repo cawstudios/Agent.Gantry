@@ -199,6 +199,7 @@ export const RuntimeSettingsPublicSchema = z
             forcePathStyle: z.boolean().optional(),
           })
           .strict(),
+        deploymentMode: z.union([z.literal('workstation'), z.literal('fleet')]),
       })
       .strict(),
     browser: z

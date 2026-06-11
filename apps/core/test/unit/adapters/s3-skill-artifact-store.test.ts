@@ -62,7 +62,9 @@ class FakeS3Client {
       }
       return {};
     }
-    throw new Error(`Unsupported command: ${(command as object).constructor.name}`);
+    throw new Error(
+      `Unsupported command: ${(command as object).constructor.name}`,
+    );
   }
 
   asClient(): S3Client {
@@ -112,7 +114,9 @@ describe('S3SkillArtifactStore', () => {
     expect(stored.storageRef).toBe('skills/Uploaded-One');
     expect(stored.contentHash).toBe(hashSkillBundle(skillBundle));
 
-    const keys = [...fake.objects.keys()].map((k) => k.slice(`${BUCKET}/`.length));
+    const keys = [...fake.objects.keys()].map((k) =>
+      k.slice(`${BUCKET}/`.length),
+    );
     expect(keys).toContain('skills/Uploaded-One/SKILL.md');
     expect(keys).toContain('skills/Uploaded-One/nested/context.md');
     // sha256 is written as object metadata (defense in depth).
@@ -159,7 +163,9 @@ describe('S3SkillArtifactStore', () => {
       skillName: 'replace',
       bundle: { assets: [{ path: 'SKILL.md', content: Buffer.from('# v2') }] },
     });
-    const keys = [...fake.objects.keys()].map((k) => k.slice(`${BUCKET}/`.length));
+    const keys = [...fake.objects.keys()].map((k) =>
+      k.slice(`${BUCKET}/`.length),
+    );
     expect(keys).not.toContain('skills/replace/old.md');
     const loaded = await store.getSkillArtifact('skills/replace');
     expect(loaded.assets.map((a) => a.path)).toEqual(['SKILL.md']);

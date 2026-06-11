@@ -86,6 +86,7 @@ export type RuntimeSettingsResponse = {
         endpoint?: string;
         forcePathStyle?: boolean;
       };
+      deploymentMode: 'workstation' | 'fleet';
     };
     browser: {
       usage: {

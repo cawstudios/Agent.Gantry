@@ -48,6 +48,7 @@ export const DEFAULT_BROWSER_USAGE_WINDOW_MS = 60_000;
 export const DEFAULT_BROWSER_USAGE_MAX_ACTIONS_PER_WINDOW = 120;
 export const DEFAULT_BROWSER_USAGE_MAX_CONCURRENT_PER_SITE = 1;
 export const DEFAULT_RUNTIME_SANDBOX_PROVIDER = 'direct';
+export const DEFAULT_RUNTIME_DEPLOYMENT_MODE = 'workstation';
 
 export function getDefaultRuntimeSandboxSettings(): RuntimeSandboxSettings {
   return {
@@ -150,6 +151,7 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
     artifactStore: {
       driver: 'local',
     },
+    deploymentMode: DEFAULT_RUNTIME_DEPLOYMENT_MODE,
   };
   const browser: RuntimeBrowserSettings = {
     usage: {

@@ -1,0 +1,262 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import type {
+  RuntimeDependency,
+  RuntimeDependencyRepository,
+} from '../domain/ports/fleet-capability-state.js';
+import type {
+  ToolchainArtifactFile,
+  ToolchainArtifactStore,
+} from '../domain/ports/toolchain-artifact-store.js';
+import {
+  NATIVE_MODULE_SCRIPT_ALLOWLIST,
+  renderBakeNpmrc,
+  renderBakePackageJson,
+} from './toolchain-bake-manifest.js';
+import type { ToolchainCommandRunner } from './toolchain-bake-runner.js';
+
+export interface ToolchainBakeNotifier {
+  /** pg_notify the manifest channel so worker reconcilers wake on completion. */
+  notifyManifestChanged(input: {
+    appId: string;
+    manifestHash: string;
+    status: RuntimeDependency['status'];
+  }): Promise<void>;
+}
+
+export interface ToolchainBakeFailureNotice {
+  /**
+   * Send a concise failure notice to the approval conversation that requested
+   * the dependency. Reuses the scheduler/notification machinery at the call
+   * site; the executor only formats and triggers it.
+   */
+  sendFailureNotice(input: {
+    dependency: RuntimeDependency;
+    reason: string;
+  }): Promise<void>;
+}
+
+export interface ToolchainBakeExecutorDeps {
+  runtimeDependencies: RuntimeDependencyRepository;
+  toolchainStore: ToolchainArtifactStore;
+  commandRunner: ToolchainCommandRunner;
+  notifier: ToolchainBakeNotifier;
+  failureNotice: ToolchainBakeFailureNotice;
+  registry: string;
+  logWarn?: (context: Record<string, unknown>, message: string) => void;
+  /** Override the npm binary/argv prefix for tests. Defaults to `npm`. */
+  npmCommand?: string;
+  installTimeoutMs?: number;
+}
+
+export type ToolchainBakeOutcome =
+  | { result: 'uploaded'; manifestHash: string }
+  | { result: 'skipped'; reason: 'not_claimable' }
+  | { result: 'failed'; reason: string };
+
+const DEFAULT_INSTALL_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Execute a single toolchain bake for a runtime_dependencies row. Lifecycle:
+ * claim queued→baking (status CAS = the bake's lease), run lockfile-pinned
+ * `npm install --ignore-scripts` in a temp dir against the allowlisted
+ * registry, pack node_modules + lockfile + package.json, upload via the
+ * artifact store, then transition baking→uploaded with the artifact ref + hash
+ * and NOTIFY. On failure the row goes →failed with a reason and a concise
+ * notice is sent to the approval conversation. Idempotent: a row that is not
+ * `queued` (another worker already claimed/completed it) short-circuits.
+ */
+export async function executeToolchainBake(
+  deps: ToolchainBakeExecutorDeps,
+  input: { dependencyId: string },
+): Promise<ToolchainBakeOutcome> {
+  const dependency = await deps.runtimeDependencies.getRuntimeDependency(
+    input.dependencyId,
+  );
+  if (!dependency) {
+    return { result: 'skipped', reason: 'not_claimable' };
+  }
+  // Claim: only the worker that flips queued→baking owns the bake. Already
+  // baking/uploaded/activated/failed rows are owned elsewhere or terminal.
+  const claimed = await deps.runtimeDependencies.updateRuntimeDependencyStatus({
+    id: dependency.id,
+    status: 'baking',
+    fromStatus: 'queued',
+  });
+  if (!claimed) {
+    return { result: 'skipped', reason: 'not_claimable' };
+  }
+  await deps.notifier.notifyManifestChanged({
+    appId: dependency.appId,
+    manifestHash: dependency.manifestHash,
+    status: 'baking',
+  });
+
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gantry-bake-'));
+  try {
+    await writeBakeInputs(workDir, dependency.requestedPackages, deps.registry);
+    await runNpmInstall(deps, dependency, workDir);
+    const files = await packToolchain(workDir);
+    const stored = await deps.toolchainStore.putToolchainArtifact({
+      appId: dependency.appId,
+      manifestHash: dependency.manifestHash,
+      files,
+    });
+    const uploaded =
+      await deps.runtimeDependencies.updateRuntimeDependencyStatus({
+        id: dependency.id,
+        status: 'uploaded',
+        fromStatus: 'baking',
+        artifact: {
+          storageType: stored.storageType,
+          storageRef: stored.storageRef,
+          contentHash: stored.contentHash,
+          sizeBytes: stored.sizeBytes,
+        },
+      });
+    if (!uploaded) {
+      // Lost the lease (row recovered/superseded); drop our write.
+      return { result: 'skipped', reason: 'not_claimable' };
+    }
+    await deps.notifier.notifyManifestChanged({
+      appId: dependency.appId,
+      manifestHash: dependency.manifestHash,
+      status: 'uploaded',
+    });
+    return { result: 'uploaded', manifestHash: dependency.manifestHash };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : 'toolchain bake failed';
+    await deps.runtimeDependencies.updateRuntimeDependencyStatus({
+      id: dependency.id,
+      status: 'failed',
+      fromStatus: 'baking',
+      failureReason: reason,
+    });
+    await deps.notifier.notifyManifestChanged({
+      appId: dependency.appId,
+      manifestHash: dependency.manifestHash,
+      status: 'failed',
+    });
+    try {
+      await deps.failureNotice.sendFailureNotice({ dependency, reason });
+    } catch (noticeErr) {
+      deps.logWarn?.(
+        { err: noticeErr, dependencyId: dependency.id },
+        'Failed to deliver toolchain bake failure notice',
+      );
+    }
+    return { result: 'failed', reason };
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
+}
+
+async function writeBakeInputs(
+  workDir: string,
+  packages: string[],
+  registry: string,
+): Promise<void> {
+  await fs.writeFile(
+    path.join(workDir, 'package.json'),
+    renderBakePackageJson(packages),
+    { mode: 0o600 },
+  );
+  await fs.writeFile(path.join(workDir, '.npmrc'), renderBakeNpmrc(registry), {
+    mode: 0o600,
+  });
+}
+
+async function runNpmInstall(
+  deps: ToolchainBakeExecutorDeps,
+  dependency: RuntimeDependency,
+  workDir: string,
+): Promise<void> {
+  const npm = deps.npmCommand ?? 'npm';
+  const argv = [
+    npm,
+    'install',
+    '--package-lock-only=false',
+    '--no-audit',
+    '--no-fund',
+    '--ignore-scripts',
+  ];
+  const result = await deps.commandRunner.run({
+    argv,
+    cwd: workDir,
+    env: bakeEnv(),
+    timeoutMs: deps.installTimeoutMs ?? DEFAULT_INSTALL_TIMEOUT_MS,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `npm install failed (exit ${result.exitCode}) for ${dependency.requestedPackages.join(
+        ', ',
+      )}: ${tail(result.stderr || result.stdout)}`,
+    );
+  }
+  // Native-module allowlist is empty by default; when populated a reviewed
+  // re-enable step would run here for allowlisted packages only. Documented as
+  // a code-reviewed constant per ADR capability-artifacts.
+  void NATIVE_MODULE_SCRIPT_ALLOWLIST;
+}
+
+async function packToolchain(
+  workDir: string,
+): Promise<ToolchainArtifactFile[]> {
+  const files: ToolchainArtifactFile[] = [];
+  for (const relative of ['package.json', 'package-lock.json', '.npmrc']) {
+    const filePath = path.join(workDir, relative);
+    const content = await readOptional(filePath);
+    if (content) files.push({ path: relative, content });
+  }
+  await collectDir(workDir, path.join(workDir, 'node_modules'), files);
+  return files;
+}
+
+async function collectDir(
+  root: string,
+  dir: string,
+  out: ToolchainArtifactFile[],
+): Promise<void> {
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) continue;
+    if (entry.isDirectory()) {
+      await collectDir(root, full, out);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const relative = path.relative(root, full).split(path.sep).join('/');
+    out.push({ path: relative, content: await fs.readFile(full) });
+  }
+}
+
+async function readOptional(filePath: string): Promise<Buffer | null> {
+  try {
+    return await fs.readFile(filePath);
+  } catch {
+    return null;
+  }
+}
+
+function bakeEnv(): NodeJS.ProcessEnv {
+  const allow = ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL'];
+  const env: NodeJS.ProcessEnv = { npm_config_audit: 'false' };
+  for (const key of allow) {
+    const value = process.env[key];
+    if (typeof value === 'string' && value.length > 0) env[key] = value;
+  }
+  return env;
+}
+
+function tail(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.length > 500 ? `…${trimmed.slice(-500)}` : trimmed;
+}

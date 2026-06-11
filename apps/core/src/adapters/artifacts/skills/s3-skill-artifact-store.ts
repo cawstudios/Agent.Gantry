@@ -140,7 +140,10 @@ export class S3SkillArtifactStore
       let sizeBytes = 0;
       for (const asset of bundle.assets) {
         const filePath = resolveAssetPath(tempDir, asset.path);
-        await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+        await fs.mkdir(path.dirname(filePath), {
+          recursive: true,
+          mode: 0o700,
+        });
         const content = Buffer.from(asset.content);
         await fs.writeFile(filePath, content, { mode: 0o600 });
         sizeBytes += content.byteLength;

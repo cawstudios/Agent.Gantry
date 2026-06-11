@@ -109,6 +109,21 @@ export class PostgresWorkerCoordinationRepository implements WorkerCoordinationR
     return rows.length > 0;
   }
 
+  async advertiseWorkerCapabilities(input: {
+    id: string;
+    capabilities: string[];
+    now?: string;
+  }): Promise<boolean> {
+    const now = input.now ?? currentIso();
+    const capabilities = [...new Set(input.capabilities)].sort();
+    const rows = await this.db
+      .update(pgSchema.workerInstancesPostgres)
+      .set({ capabilitiesJson: capabilities, lastSeenAt: now })
+      .where(eq(pgSchema.workerInstancesPostgres.id, input.id))
+      .returning({ id: pgSchema.workerInstancesPostgres.id });
+    return rows.length > 0;
+  }
+
   async markStaleWorkersUnhealthy(input: {
     staleBefore: string;
   }): Promise<string[]> {

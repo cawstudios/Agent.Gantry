@@ -29,9 +29,7 @@ function toSettingsRevision(row: SettingsRevisionRow): SettingsRevision {
   };
 }
 
-export class PostgresSettingsRevisionRepository
-  implements SettingsRevisionRepository
-{
+export class PostgresSettingsRevisionRepository implements SettingsRevisionRepository {
   constructor(private readonly db: CanonicalDb) {}
 
   async appendSettingsRevision(input: {

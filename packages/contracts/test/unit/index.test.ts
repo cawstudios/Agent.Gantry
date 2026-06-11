@@ -489,6 +489,7 @@ describe('contracts package', () => {
           artifactStore: {
             driver: 'local',
           },
+          deploymentMode: 'workstation',
         },
         browser: {
           usage: {
