@@ -178,12 +178,14 @@ send+persist ≈ 0.1 s. The non-LLM floor end-to-end is **0.52 s** (T1).
 
 ### Quick wins (config/prompt/one-liners — do these first)
 
-| # | Fix | Expected saving | Effort / risk |
-| --- | --- | --- | --- |
-| **F1** | **Kill the ToolSearch detour.** Right shape: shrink the gantry MCP surface for the sales persona to the few tools Boondi uses (`mcp_call_tool`, `mcp_list_tools`, memory tools…) via the existing `selectedGantryMcpToolNames`/settings plumbing so the schemas load upfront instead of deferring (≈ +2.4 K prefix tokens — the cW=2,363 observed when ToolSearch loaded them — net win vs. 2 rounds). 30-min stopgap: change `agents/boondi_support/CLAUDE.md` to name the exact full tool ids (`select:mcp__gantry__mcp_call_tool,mcp__gantry__mcp_list_tools`) so the first search succeeds. | **5–20 s on every cold tool turn** (removes 1–2 rounds) | Low. Verify the deferral threshold with one run; agent-agnostic (config + Boondi-owned prompt) |
-| **F2** | **Unblock the reply from `getContextUsage()`** — write the result envelope first, attach `contextUsage` to the post-close envelope (or fetch it async). Consumers are status/diagnostics only (`model-status-store`, session-command format). | **2.2–4.1 s on every turn**, warm included | Low (runner-only ordering change) |
-| **F3** | **Fix the account pressure.** Move Boondi prod traffic to a dedicated, properly-tiered API key (the raw-API 429 note in repo memory applies to the OAuth token, not an `sk-ant-api03` key); at minimum stop the background extractors and dev testing from sharing the live agent's credential. | Restores rounds from 8–15 s to 2.3–3.6 s ⇒ **cold turn ~44 s → ~25 s at peak**; removes the 20→50 s variance band | Operational; changes billing model. Without this, every other fix is partially masked at peak |
-| **F4** | **Collapse list→get**: add `get_recent_orders_with_details` (or enrich `list_orders_for_customer` with line items for the latest N) in `packages/mcp-shopify` + a CLAUDE.md hint to prefer it for order-status. | **3–15 s on the most common intent** (one round + one MCP trip) | Low-medium; watch result-payload size (tool results are triple-JSON-encoded — trim while there) |
+> **Status legend (annotated 2026-06-11):** ✅ DONE · ⏸ DEFERRED · 🔒 CLOSED/DROPPED · 🔵 HELD for operator. See `BOONDI-LATENCY-P1-RESULTS-2026-06-11.md` and the "Before / After results (2026-06-11)" section at the foot of this file for measured outcomes.
+
+| # | Status | Fix | Expected saving | Effort / risk |
+| --- | --- | --- | --- | --- |
+| **F1** | ✅ DONE (P1) | **Kill the ToolSearch detour.** Right shape: shrink the gantry MCP surface for the sales persona to the few tools Boondi uses (`mcp_call_tool`, `mcp_list_tools`, memory tools…) via the existing `selectedGantryMcpToolNames`/settings plumbing so the schemas load upfront instead of deferring (≈ +2.4 K prefix tokens — the cW=2,363 observed when ToolSearch loaded them — net win vs. 2 rounds). 30-min stopgap: change `agents/boondi_support/CLAUDE.md` to name the exact full tool ids (`select:mcp__gantry__mcp_call_tool,mcp__gantry__mcp_list_tools`) so the first search succeeds. | **5–20 s on every cold tool turn** (removes 1–2 rounds) | Low. Verify the deferral threshold with one run; agent-agnostic (config + Boondi-owned prompt) |
+| **F2** | ✅ DONE (P1) | **Unblock the reply from `getContextUsage()`** — write the result envelope first, attach `contextUsage` to the post-close envelope (or fetch it async). Consumers are status/diagnostics only (`model-status-store`, session-command format). | **2.2–4.1 s on every turn**, warm included | Low (runner-only ordering change) |
+| **F3** | ⏸ DEFERRED (pre-launch gate) | **Fix the account pressure.** Move Boondi prod traffic to a dedicated, properly-tiered API key (the raw-API 429 note in repo memory applies to the OAuth token, not an `sk-ant-api03` key); at minimum stop the background extractors and dev testing from sharing the live agent's credential. | Restores rounds from 8–15 s to 2.3–3.6 s ⇒ **cold turn ~44 s → ~25 s at peak**; removes the 20→50 s variance band | Operational; changes billing model. Without this, every other fix is partially masked at peak |
+| **F4** | ✅ DONE (P1) | **Collapse list→get**: add `get_recent_orders_with_details` (or enrich `list_orders_for_customer` with line items for the latest N) in `packages/mcp-shopify` + a CLAUDE.md hint to prefer it for order-status. | **3–15 s on the most common intent** (one round + one MCP trip) | Low-medium; watch result-payload size (tool results are triple-JSON-encoded — trim while there) |
 
 Combined expectation (F1+F2+F4, fast-window rounds): cold order turn
 ≈ 0.5 pre + 1.0 boot + 2 useful rounds (~3 + 5 s) + 1 MCP (~1 s) + compose ≈
@@ -191,12 +193,12 @@ Combined expectation (F1+F2+F4, fast-window rounds): cold order turn
 
 ### Deeper / structural (after the quick wins)
 
-| # | Fix | Expected saving | Effort / risk |
-| --- | --- | --- | --- |
-| **F5** | **Prefix diet + cache layout.** (a) One request-capture run (e.g. `ANTHROPIC_LOG=debug` or local proxy in the runner env) to confirm cache-segment layout; add a stable breakpoint after system+tools so new sessions hit the cached prefix (kills the 26 K re-ingest, ~2–6 s cold). (b) Trim the 54 KB append (SOUL+CLAUDE) — target ≤ half; A/B against the lead-capture eval set, never eyeball. (c) Drop coding tools (Bash/Edit/Write/MultiEdit/Agent/NotebookEdit…) and the `gantry-admin` skill from the sales persona via config — fewer schemas, smaller prefix, less attack surface. | 2–6 s cold + ~40 % cost cut + faster every round | Medium; accuracy risk gated by eval set. Keep core agent-agnostic (settings-driven tool selection) |
-| **F6** | **Compose discipline**: cap reply length/formatting for WhatsApp in CLAUDE.md (most replies need ≤ 60 tokens, measured replies were 90–200). | 2–6 s on compose round | Trivial change, UX trade-off |
-| **F7** | **Perceived latency**: implement the existing `ProgressSink`/typing plumbing for the Interakt channel (instant "checking that for you…" ack ≤ 2.5 s). Doesn't cut real latency — do it because even 10–14 s feels long on WhatsApp. | perceived 44 s → ~2.5 s | Medium; channel-layer only |
-| **F8** | **Process/runtime structure** (warm runner pool, in-process SDK instead of CLI subprocess): boot to first API call measured only 0.6–1.5 s — **not** the bottleneck today. Revisit only if sub-5 s cold turns become the goal after F1–F6. | ~1 s | High effort — explicitly deprioritized by the data |
+| # | Status | Fix | Expected saving | Effort / risk |
+| --- | --- | --- | --- | --- |
+| **F5** | (a) 🔒 CLOSED · (b) 🔵 HELD · (c) ✅ DONE (P2) | **Prefix diet + cache layout.** (a) [🔒 CLOSED — SDK owns the breakpoint, not Gantry-fixable] One request-capture run (e.g. `ANTHROPIC_LOG=debug` or local proxy in the runner env) to confirm cache-segment layout; add a stable breakpoint after system+tools so new sessions hit the cached prefix (kills the 26 K re-ingest, ~2–6 s cold). (b) [🔵 HELD for operator — eval-gated] Trim the 54 KB append (SOUL+CLAUDE) — target ≤ half; A/B against the lead-capture eval set, never eyeball. (c) [✅ DONE (P2) — cold prefix 28.9K→20.8K cache-creation tokens] Drop coding tools (Bash/Edit/Write/MultiEdit/Agent/NotebookEdit…) and the `gantry-admin` skill from the sales persona via config — fewer schemas, smaller prefix, less attack surface. | 2–6 s cold + ~40 % cost cut + faster every round | Medium; accuracy risk gated by eval set. Keep core agent-agnostic (settings-driven tool selection) |
+| **F6** | ✅ DONE (P2) | **Compose discipline**: cap reply length/formatting for WhatsApp in CLAUDE.md (most replies need ≤ 60 tokens, measured replies were 90–200). | 2–6 s on compose round | Trivial change, UX trade-off |
+| **F7** | 🔒 DROPPED by operator (plumbing exists) | **Perceived latency**: implement the existing `ProgressSink`/typing plumbing for the Interakt channel (instant "checking that for you…" ack ≤ 2.5 s). Doesn't cut real latency — do it because even 10–14 s feels long on WhatsApp. | perceived 44 s → ~2.5 s | Medium; channel-layer only |
+| **F8** | 🔒 DEPRIORITIZED by the data | **Process/runtime structure** (warm runner pool, in-process SDK instead of CLI subprocess): boot to first API call measured only 0.6–1.5 s — **not** the bottleneck today. Revisit only if sub-5 s cold turns become the goal after F1–F6. | ~1 s | High effort — explicitly deprioritized by the data |
 
 Also reproduced, out of scope but urgent elsewhere: **slot starvation** — T6
 queued 2 m 19 s behind three *idle* children (each lingers `IDLE_TIMEOUT` =
@@ -293,16 +295,27 @@ run.
 
 ### Revised priorities
 
-- **P1 (now):** F1 tool-surface restriction (+ CLAUDE.md stopgap) · F2 async
+> **Completion status annotated 2026-06-11** — markers below reflect committed
+> work; see `BOONDI-LATENCY-P1-RESULTS-2026-06-11.md` and the "Before / After
+> results (2026-06-11)" section at the foot of this file.
+
+- **P1 (now):** ✅ DONE — F1 tool-surface restriction (+ CLAUDE.md stopgap) · F2 async
   contextUsage · F4 combined order tool *(operator-confirmed 2026-06-10)* ·
-  the latency-suite harness + continuous usage/utilization logging.
-- **P2 (next, eval-gated):** F5 prompt diet (machinery + editorial) · F6
-  compose discipline · request-capture run → cache-breakpoint fix.
-- **Deferred by decision:** F3 dedicated API key (pre-launch gate) ·
-  classifier latency (rides on F3; deterministic stage already covers the
-  majority).
-- **Parked:** F7 typing/progress sink (revisit after P1 lands and real-reply
-  times are known) · F8 process/runtime restructuring (data says ~1 s).
+  the latency-suite harness + continuous usage/utilization logging
+  (`scripts/measure-latency.mjs` + per-turn `model.usage` / `model.rate_limit`).
+- **P2 (next, eval-gated):** F5c machinery diet ✅ DONE (cold prefix 28.9K→20.8K) ·
+  F6 compose discipline ✅ DONE · F5b editorial SOUL/CLAUDE diet 🔵 HELD for
+  operator (eval-gated) · F5a request-capture run → cache-breakpoint fix
+  🔒 CLOSED (Claude Agent SDK owns the breakpoint; not Gantry-fixable).
+- **Deferred by decision:** ⏸ DEFERRED — F3 dedicated API key (pre-launch gate) ·
+  classifier latency (rides on F3). **Note (2026-06-11):** the guardrail was
+  subsequently made **classifier-only** (commit `fc6d8e07`; deterministic
+  fast-path removed) by operator decision, so the 0-LLM deterministic stage no
+  longer covers the majority — every turn now pays a flat ~4.5–5.5 s haiku
+  classifier. This sharpens the case for F3.
+- **Parked:** 🔒 DROPPED — F7 typing/progress sink (UX decision; plumbing
+  exists, `sendProgressUpdate`) · 🔒 DEPRIORITIZED — F8 process/runtime
+  restructuring (data says ~1 s).
 
 ## 4. Where the 20–50 s actually goes (cold tool turn)
 
@@ -381,3 +394,67 @@ Corrected / new with transcript-level evidence:
 - CRM watcher log: `/tmp/mcp-crm-dev.log`
 - Rate-limit payload, failed-ToolSearch tool results, per-call token tables:
   quoted verbatim in §1–2 from the artifacts above.
+
+---
+
+## Before / After results (2026-06-11)
+
+Outcome of the implemented fixes, measured per the §3a verification protocol.
+All numbers are **medians**, all captured in healthy `allowed` 5-hour
+rate-limit windows (the RC2 confound is controlled — like-for-like windows on
+every side). Sources: pre-fix and After-P1 medians from
+`BOONDI-LATENCY-P1-RESULTS-2026-06-11.md` §2; "Now" medians from a
+post-runtime-reset run of `scripts/measure-latency.mjs` (3 samples/scenario,
+detail in `/tmp/latency-now.json`).
+
+### The confound you must read before the table
+
+The **After-P1** numbers were measured while the guardrail still ran its
+**deterministic + classifier** form: BSS keywords and greetings hit a **0-LLM
+fast-path** (15–25 ms), so "hi" cost ~276 ms and keyword turns paid no
+classifier tax. After P1, the guardrail was switched to **classifier-only**
+(operator decision, commit `fc6d8e07`; the deterministic layer was removed from
+`agents/boondi_support/guardrails/guardrail.ts`). That adds a flat
+**~4.5–5.5 s haiku-classifier call to *every* turn** — which is why a bare "hi"
+is now ~4.5 s instead of 276 ms. This is a guardrail-mode change, **not** an
+agent-path regression.
+
+Consequences for reading the data honestly:
+
+- The **structural agent-path fixes (F1 / F2 / F4 / F5c) are durable and hold.**
+  They live below the guardrail and are guardrail-independent: round count, MCP
+  trips, and the post-result tail all improved and stayed improved. T5 is now
+  **2 rounds** (was 5) with **one** MCP trip (`get_recent_orders_with_details`,
+  ~475–1007 ms) — F1+F4 hold. The post-result tail is **63–95 ms** every
+  turn — F2 holds (was 2.2–4.1 s).
+- **End-to-end wall-clock is partially masked by the classifier-only guardrail
+  tax.** To see the agent path, subtract the measured per-turn guardrail cost:
+  **agent-path ≈ total − guard**. Example: T5 ≈ 13 892 − 5 243 ≈ **8.6 s agent
+  path**, versus the ~21 s (mostly-agent) before. The structural win is real;
+  the guardrail decision is a separate, deliberate latency trade.
+
+### Before / after table
+
+| Scenario | Before (pre-fix) | After-P1 | Now (classifier-only) | Now agent-path (total − guard) | Rounds now | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| T1 greeting (guardrail floor) | 325 ms | 276 ms | 4 496 ms | ≈ 0 ms (floor) | 0 | "Now" is ~all guardrail (4 512 ms haiku classifier); the 276 ms After-P1 was the 0-LLM deterministic fast-path that classifier-only removed |
+| T2 policy question | 11 738 ms | 4 844 ms (−59 %) | 10 039 ms | ≈ 5 467 ms | 1 | guard 4 572 ms is the bulk of the delta vs After-P1; agent path is 1 round, tail 73 ms |
+| T3 product lookup | 16 998 ms | 15 681 ms | 15 075 ms | ≈ 9 414 ms | 2 | guard 5 661 ms; agent path = `mcp_call_tool(search_products)` (~539 ms MCP) + compose, tail 88 ms; no ToolSearch detour (F1) |
+| T4 warm follow-up (resume) | 11 408 ms | 14 837 ms | — (not re-measured) | — | — | classifier-bound (RC5), not an agent-path signal; not re-run this window |
+| T5 order status | 21 248 ms | 10 407 ms (−51 %) | 13 892 ms | ≈ 8 649 ms | 2 | guard 5 243 ms; agent path = `get_recent_orders_with_details` once (~475–1007 ms) + compose, tail 63–95 ms (F1+F4+F2 all hold) |
+
+Per-turn guardrail (haiku classifier) cost measured "Now": T1 4 512 ms,
+T2 4 572 ms, T3 5 661 ms, T5 5 243 ms. Post-result tail 63–95 ms (F2 holds
+everywhere).
+
+### Bottom line
+
+- **Agent-path latency dropped substantially and durably** — the round count,
+  MCP-trip, and post-result-tail wins (F1/F4/F2) are real and guardrail-
+  independent; F5c shrank the cold prefix 28.9K→20.8K cache-creation tokens.
+- **Wall-clock for short/keyword turns rose** purely because the guardrail is
+  now classifier-only (a deliberate operator decision), adding a flat
+  ~4.5–5.5 s per turn. This is the single biggest remaining lever and is
+  **not** an agent-path problem; it strengthens the case for F3 (dedicated key,
+  which cuts the classifier's own round time) and re-opens F7 (perceived-latency
+  ack) if the operator wants it.
