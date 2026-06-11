@@ -34,9 +34,9 @@ describe('BSS customer support guardrail (classifier-only)', () => {
 
   it('exposes a BSS classifier prompt and customer-facing copy', () => {
     expect(policy.prompt).toMatch(/Bombay Sweet Shop|BSS|Boondi/);
-    expect(policy.directResponse('greeting')).toMatch(
-      /Boondi|Bombay Sweet Shop/,
-    );
+    // Warm greeting (SOUL §6): invites a BSS action rather than reciting the
+    // cold scope-list self-intro.
+    expect(policy.directResponse('greeting')).toMatch(/sweets|order|gift/i);
     expect(policy.directResponse('scope_rejection')).toMatch(
       /only help with Bombay Sweet Shop/i,
     );
