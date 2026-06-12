@@ -90,7 +90,7 @@ jobs:
           artifact-name: gantry-image-sbom
 
       - name: Vulnerability scan (Trivy)
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: gantry-runtime:scan
           format: table
