@@ -1,3 +1,64 @@
+# HANDOFF — agent-engine branch (2026-06-12)
+
+> Branch: `feature/deepagents-agent-engine`. This section is additive; the
+> deployment-modes handoff below is unchanged.
+>
+> **What shipped (packets A-G).** Per-agent agent engine
+> (`anthropic_sdk` | `deepagents`) with `modelAlias + agentEngine ->
+> executionRoute` resolution. Five engine commits on top of the merged
+> deployment-modes work:
+>
+> - `5a28cae2` Packet A — `AgentEngine` vocabulary (`shared/agent-engine.ts`),
+>   engine-keyed `executionRoutes` on the provider registry, settings
+>   parse/render/import/export/project for `defaults.agent_engine` +
+>   `agents.<id>.agent_engine`, invalid pairings rejected before spawn with locked
+>   copy, jobs inherit the bound agent's engine.
+> - `851e452d` Packets B+C — `deepagents:langchain` adapter + adapter-owned runner
+>   (gateway env allowlist, Claude-OAuth rejection, `streamEvents` v2 →
+>   `GANTRY_OUTPUT` frames, runtime-reported context window); CLI `gantry agent
+>   engine`, agent list/show engine cell, `model why --agent`; Control API
+>   `agentEngine` on agent records + PATCH + model preview `target: 'agent'`;
+>   contracts/SDK `AgentEngine`, `ModelRecord.executionRoutes`, optional
+>   deepagents-lane limit fields. Deps: deepagents 1.10.2, @langchain/openai 1.4.7,
+>   @langchain/anthropic 1.4.0.
+> - `5a75a8ce` Packets D+E — authority bridge (provider-neutral tool-gate +
+>   permission-IPC extracted to `runner/`; Gantry facade/browser/third-party MCP
+>   tools projected through policy; raw DeepAgents authority denied; memory block
+>   injected as untrusted prompt context) + route-aware `MemoryLlmClient` (OpenAI
+>   chat-completions memory client over the brokered loopback gateway).
+> - `ff5f8680` Packet F — jobs/live parity (`_close` mid-stream abort, follow-up
+>   buffering, `JOB_HEARTBEAT`), pre-spawn shell/filesystem guard (locked
+>   raw-execute copy + data-driven enforcing-sandbox guard behind it),
+>   `AGENT_ENGINE_CHANGED` audit + engine diagnostics on `JOB_STARTED`/`RUN_STARTED`
+>   + `JobRun.agent_engine`.
+> - Packet G (this session) — docs: README (engine concept, `gantry agent engine`,
+>   settings example), SDK api-reference (agent `agentEngine`/PATCH, model preview
+>   `target: 'agent'`, `executionRoutes`), model-catalog ADR vocabulary,
+>   credential-management engine/credential-mode mapping, single-host-hardening v1
+>   guard note, new `docs/decisions/2026-06-12-agent-engine-selection.md`,
+>   superseded headers on the two goal-prompt docs + handoff plan. Cleanup searches
+>   run; no stale "harness is alias-only/internal" language remains in active
+>   guidance.
+>
+> **Decisions reference:** `docs/decisions/2026-06-12-agent-engine-selection.md`
+> and the implementation source `docs/architecture/deepagents-agent-engine-handoff-plan.md`.
+>
+> **Gates (Packet G):** see the PR description / final report for verbatim results.
+> Known pre-existing reds (NOT regressions, present on base): `agent-runner-ipc`
+> NO_PROXY unit test, `jobs-runs-memory-flow` integration, `runtime-setup-doctor`
+> e2e, `canonical-job-repository` `markRunNotified` unit. `check_architecture`
+> stays at exit 0 with count-exact provider-boundary exceptions for the public
+> engine vocabulary (no checker relaxation).
+>
+> **Remaining (v1 scope boundaries, by design):** DeepAgents shell/filesystem
+> authority disabled (guard fail-closed); the native Anthropic provider exposes a
+> DeepAgents api-key route (ChatAnthropic) but OpenRouter has no verified
+> ChatAnthropic DeepAgents lane over its Anthropic-compatible projection in v1;
+> OpenAI/gpt catalog entries are chat-only; no job- or conversation-level engine
+> override.
+
+---
+
 # HANDOFF — deployment-modes branch (2026-06-11, updated 2026-06-12 after the process-roles + multi-live session)
 
 > 2026-06-12 session: the role split (`GANTRY_PROCESS_ROLE`: all|control|live-worker|job-worker)

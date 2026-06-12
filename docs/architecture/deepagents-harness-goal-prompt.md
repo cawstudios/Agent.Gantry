@@ -1,5 +1,11 @@
 # DeepAgents Harness Goal Prompt
 
+> Status: superseded by implementation (2026-06-12). The plan this prompt asks for
+> was produced as `docs/architecture/deepagents-agent-engine-handoff-plan.md` and
+> implemented on `feature/deepagents-agent-engine`. For the current locked
+> decisions see `docs/decisions/2026-06-12-agent-engine-selection.md`. This prompt
+> is kept as the historical goal record; do not treat it as current guidance.
+
 Use this prompt to create a citation-backed, decision-complete implementation
 plan before changing Gantry's agent execution architecture.
 

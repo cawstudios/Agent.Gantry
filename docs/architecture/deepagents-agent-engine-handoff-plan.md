@@ -1,7 +1,10 @@
 # DeepAgents Agent Engine Handoff Plan
 
 Status: ENG-124 handoff plan, updated 2026-06-12 after the product decision that
-users must be able to choose between Anthropic SDK and DeepAgents.
+users must be able to choose between Anthropic SDK and DeepAgents. Implemented on
+`feature/deepagents-agent-engine` (packets A-G); the locked decisions are
+recorded in `docs/decisions/2026-06-12-agent-engine-selection.md`. This document
+remains the implementation reference and cleanup-search/test-plan source.
 
 ## Summary
 

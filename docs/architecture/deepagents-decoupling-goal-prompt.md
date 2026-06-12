@@ -1,5 +1,12 @@
 # DeepAgents Decoupling Goal Prompt
 
+> Status: superseded by implementation (2026-06-12). The per-agent agent-engine
+> decoupling described here shipped on `feature/deepagents-agent-engine`. For the
+> current contract see `docs/decisions/2026-06-12-agent-engine-selection.md`,
+> `docs/decisions/2026-05-01-model-catalog-and-cache-accounting.md`, and
+> `docs/architecture/deepagents-agent-engine-handoff-plan.md`. This prompt is kept
+> as the historical goal record; do not treat it as current guidance.
+
 Use this prompt after the citation-backed harness plan has been reviewed. It is
 for the implementation phase that makes Gantry's current Anthropic SDK runtime
 neutral enough to add DeepAgents as another harness.

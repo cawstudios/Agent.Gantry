@@ -215,6 +215,25 @@ The Phase-1 seam does **not** change when the harness is swapped, because the ho
 - Org mode must route `execute` back through Gantry's permission gate before exposing it.
 - This preserves the semantic-capability model and per-action audit where tenant risk exists.
 
+**v1 status (implemented):** the `deepagents:langchain` adapter has **no** shell
+or filesystem authority. The runner uses the default `StateBackend` (no
+`execute`), deny-all filesystem permissions, and never `LocalShellBackend` /
+`FilesystemBackend`. Two pure pre-spawn guards in
+`apps/core/src/runtime/deepagents-shell-filesystem-guard.ts` enforce this:
+
+- `deepAgentsShellExecutionGuard` fires first and **unconditionally** blocks any
+  DeepAgents run whose resolved tool rules request shell (`Bash`/`RunCommand`) or
+  filesystem (`FileRead`/`FileWrite`/`FileEdit`/`FileSearch`) authority, with
+  `DeepAgents shell execution is disabled until Gantry can route it through
+  RunCommand policy.`
+- `deepAgentsEnforcingSandboxGuard` is the data-driven future-enablement guard
+  behind it: once shell/filesystem authority is routed through Gantry policy, a
+  DeepAgents run that enables it on a production/remote posture, or without an
+  enforcing `sandbox_runtime` provider, is rejected with `DeepAgents requires an
+  enforcing sandbox before shell or filesystem tools can be enabled in this
+  deployment mode.` In v1 the first guard always blocks first, so this copy is
+  reachable only on the future path when the first guard is lifted.
+
 ---
 
 ## 7. Forward-compatibility with cloud / horizontal (LATER)

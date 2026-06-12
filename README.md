@@ -91,6 +91,7 @@ gantry provider doctor
 gantry conversation approvers <conversation-id> [--allow <userId,userId>]
 gantry agent list
 gantry agent add <jid|chat-id> [--name <name>]
+gantry agent engine <jid|folder> <anthropic_sdk|deepagents>
 gantry agent access show <jid|folder>
 gantry agent access apply <jid|folder> --file <path|->
 gantry settings validate
@@ -145,6 +146,7 @@ Human-editable runtime settings live in `~/gantry/settings.yaml`. Validate edits
 defaults:
   name: Default Agent
   model: opus
+  agent_engine: anthropic_sdk
   jobs:
     one_time_model: haiku
     recurring_model: sonnet
@@ -604,6 +606,12 @@ Use these as standalone chat messages:
 ## Model Policy
 
 Gantry uses a provider-neutral catalog. Normal users choose providers and aliases; provider slugs and SDK environment variables are adapter details.
+
+Each agent also has a durable **agent engine**. `anthropic_sdk` (display label `Anthropic SDK`) is the system default and the Claude OAuth/subscription lane; `deepagents` (display label `DeepAgents`) is the API-key engine for supported OpenAI-endpoint and Anthropic-endpoint catalog models. A run resolves `modelAlias + agentEngine -> executionRoute`: the model alias chooses the model, its provider route chooses the endpoint family, and the agent engine chooses the harness adapter. Jobs and conversations inherit the bound agent's engine; there is no job- or conversation-level engine selector. The internal `executionProviderId` stays read-only diagnostic.
+
+- Set it with `gantry agent engine <id> <anthropic_sdk|deepagents>`, the Control API `PATCH /v1/agents/:id` `agentEngine` field, or `defaults.agent_engine` / `agents.<id>.agent_engine` in `settings.yaml`. `gantry agent list` and `gantry agent show <id>` display the effective engine, and `gantry model why <alias> --agent <id>` shows the model alias, endpoint family, credential profile, agent engine, and diagnostic `executionProviderId`.
+- Incompatible pairings are rejected before the run spawns, never silently re-routed: an OpenAI-endpoint model under Anthropic SDK, Claude OAuth/subscription credentials under DeepAgents, and any model whose provider route has no execution route for the selected engine each fail with explicit copy.
+- For DeepAgents-lane chat models, the catalog declares identity and route only; the context window, output limits, and capability flags are reported at runtime from the LangChain model profile, and pricing is intentionally not declared.
 
 - Anthropic preset: chat `opus`; job defaults inherit chat; memory uses preset-managed extractor `haiku`, dreaming `sonnet`, consolidation `sonnet`
 - OpenRouter preset: chat defaults to `kimi`; job defaults inherit chat; memory extractor, dreaming, and consolidation use `kimi`

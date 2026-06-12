@@ -658,8 +658,13 @@ reviewed Gantry MCP request tools to change authority.
 
 Use `client.models.list()` to inspect supported model aliases, response family,
 route metadata, capabilities, context windows, cache policy, and supported
-workloads. API job creation rejects raw provider model IDs unless they are
-registered catalog aliases.
+workloads. Each `ModelRecord` carries an `executionRoutes` array
+(`{ engine, executionProviderId }` per agent engine) that is read-only
+diagnostic; resolution is `modelAlias + agentEngine -> executionRoute`.
+DeepAgents-lane entries omit the static `contextWindowTokens`/`maxOutputTokens`
+limits because those are reported at runtime from the engine's model profile.
+API job creation rejects raw provider model IDs unless they are registered
+catalog aliases.
 
 Use `client.models.defaults.get()` to inspect configured and effective chat,
 job, and memory defaults. Use `client.models.defaults.update()` or
@@ -684,12 +689,22 @@ Access and are projected privately by the runtime adapter.
 Use `POST /v1/models/preview` for "why" checks before a run. `target: "chat"`
 can include `conversationJid` or `workspaceKey` to expose live session `/model`
 overrides; `target: "job"` with `jobId` distinguishes explicit job aliases from
-inherited defaults.
+inherited defaults. `target: "agent"` with `agentId` resolves a `modelAlias`
+against that agent's effective engine and returns `agentEngine`,
+`agentEngineLabel`, `credentialProfile`, and diagnostic `executionProviderId`;
+when the model/engine pairing is unsupported it returns the rejection copy in
+`incompatible` instead of a resolved route.
 
 ```ts
 await client.models.preview({
   target: 'job',
   jobId,
+});
+
+await client.models.preview({
+  target: 'agent',
+  agentId,
+  modelAlias: 'opus',
 });
 
 await client.models.preview({
@@ -819,6 +834,14 @@ the provider, conversation kind, display name, and current conversation
 approver user ids. Direct/private and group/channel approvals are configured
 through the conversation approver endpoints below; agents do not expose a
 separate direct-message policy API.
+
+`GET /v1/agents/:id` and `POST /v1/agents` agent records expose the effective
+`agentEngine` (`anthropic_sdk` or `deepagents`); the raw `executionProviderId`
+stays internal and is not part of the agent record. `PATCH /v1/agents/:id`
+accepts `agentEngine` to set the durable per-agent override, which rewrites
+`settings.yaml` and reconciles the runtime projection in the same operation.
+Jobs and conversations inherit the bound agent's engine; there is no job- or
+conversation-level engine selector.
 
 `GET /v1/conversations/:id/approvers` returns the Conversation approver list.
 `PUT /v1/conversations/:id/approvers` replaces it with

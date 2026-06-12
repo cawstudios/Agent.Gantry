@@ -136,6 +136,18 @@ mode, `PATCH` rotates fields for the existing auth mode, and all read/mutation
 responses return only redacted status, fingerprints, configured field names,
 and mode metadata.
 
+The selected credential mode is constrained by the agent engine. DeepAgents is
+the API-key engine: it runs OpenAI-endpoint and Anthropic-API-key-endpoint routes
+through the Gantry Model Gateway and does not support Claude OAuth/subscription
+credentials. Anthropic SDK is the Claude OAuth/subscription lane and also runs
+Anthropic API-key models. A run that pairs DeepAgents with a Claude
+OAuth/subscription credential is rejected before spawn with `DeepAgents does not
+support Claude OAuth/subscription credentials in Gantry. Choose Anthropic SDK or
+configure Anthropic API-key Model Access.`; a run that pairs Anthropic SDK with
+an OpenAI-endpoint model is rejected with `Model <alias> uses the OpenAI
+endpoint, which is not supported by Anthropic SDK. Choose DeepAgents or an
+Anthropic-compatible model.` Neither pairing is silently re-routed.
+
 Agents do not receive every raw secret value from Gantry. Runtime code projects
 only the selected capability's declared credential names. Attached skills do
 not receive secrets by being attached; a selected reviewed skill action must

@@ -26,23 +26,45 @@ Catalog entries declare workload eligibility for chat, one-time jobs,
 recurring jobs, memory extraction, memory dreaming, and memory consolidation.
 A cataloged alias can still be rejected when it is not eligible for the
 requested workload. `/v1/models` exposes aliases, response family, diagnostic
-model route metadata, execution provider id, credential profile reference,
+model route metadata, per-engine execution routes, credential profile reference,
 capability descriptors, and supported workloads without exposing raw credential
 details or treating provider model IDs as selectors.
+
+Model selection resolves `modelAlias + agentEngine -> executionRoute`. The model
+alias chooses the model and its provider route fixes the endpoint family
+(`responseFamily`); the per-agent `agentEngine` chooses the harness adapter.
+Each provider route declares an `executionRoutes` array keyed by engine, with the
+endpoint family, credential modes, supported workloads, and the internal
+`executionProviderId`. A pairing whose provider route has no execution route for
+the selected engine is rejected before runner spawn rather than re-routed to a
+different engine.
 
 Vocabulary:
 
 - `modelAlias`: the normal user-facing selector.
-- `responseFamily`: the canonical API shape, currently `anthropic` plus
-  schema-only `openai`.
+- `agentEngine`: the durable per-agent harness choice, `anthropic_sdk`
+  (Anthropic SDK, the Claude OAuth/subscription lane) or `deepagents`
+  (DeepAgents, the API-key engine). Jobs and conversations inherit the bound
+  agent's engine; there is no job- or conversation-level engine selector.
+- `responseFamily`: the canonical API shape, `anthropic` or `openai`.
 - `modelRoute`: diagnostic/source metadata such as Anthropic or OpenRouter,
   including metadata-only provider model IDs.
-- `executionProviderId`: the adapter projection id resolved by the runtime.
+- `executionProviderId`: the adapter projection id resolved by the runtime per
+  engine; read-only diagnostic.
 - `credentialProfileRef`: the model-access credential profile, currently
   `gantry-model-access`.
 - `capabilities`: observable support/readiness descriptors for streaming, tool
   use, MCP/browser/sandbox projection, session resume, thinking controls,
   token/cache accounting, and structured output.
+
+The Anthropic-family aliases run on either engine where the provider route
+declares both execution routes; OpenAI-endpoint chat models run on the
+`deepagents:langchain` lane only. For the DeepAgents lane, catalog entries
+declare identity and route only: context window, output limits, and capability
+flags are reported at runtime from the LangChain model profile, and pricing is
+intentionally not declared. Anthropic SDK plus an OpenAI-endpoint model, and
+DeepAgents plus Claude OAuth/subscription credentials, are both rejected before
+the run starts.
 
 Interactive model precedence is:
 
@@ -78,10 +100,11 @@ model defaults. Memory extraction, dreaming, and consolidation read the current
 validated settings at call time so new runs pick up model changes without a
 service restart.
 
-Catalog entries expose `responseFamily` as the canonical API shape, currently
-`anthropic` with `openai` reserved for schema-only future support. OpenRouter is
-route metadata on Anthropic-family aliases, not a core response family or
-execution provider selector.
+Catalog entries expose `responseFamily` as the canonical API shape, `anthropic`
+or `openai`. OpenAI-endpoint chat models are executable through the
+`deepagents:langchain` lane, not just schema. OpenRouter is route metadata on
+Anthropic-family aliases, not a core response family or execution provider
+selector.
 
 Provider-side cache support means upstream model-provider prompt or response
 caching that can reduce cost or latency. It does not mean Gantry caches
