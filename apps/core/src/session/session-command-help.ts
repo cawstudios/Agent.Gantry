@@ -21,7 +21,6 @@ export function formatSessionCommandsHelp(
     '/memory-status - Show durable memory status.',
     '/dream - Run memory dreaming now when enabled.',
     '/digest-session - Capture the current conversation boundary for memory processing.',
-    '/extract-memory-facts - Extract memory facts from the current conversation boundary.',
     '',
     'Thinking',
     '/thinking - Show the current thinking setting.',

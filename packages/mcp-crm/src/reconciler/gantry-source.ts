@@ -12,7 +12,7 @@ export interface TranscriptMessage {
 }
 
 const TRANSCRIPT_CONTROL_COMMAND_RE =
-  /^\/(?:digest-session|extract-memory-facts|extract-leads-queries)(?:\s|$)/i;
+  /^\/(?:digest-session|extract-leads-queries)(?:\s|$)/i;
 
 // conversation id is "conversation:wa:<digits>"; the bare digits are the customer
 // key used everywhere else (records.phone, memory_items.user_id).

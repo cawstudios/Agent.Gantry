@@ -43,7 +43,6 @@ export type SessionCommand =
   | { kind: 'dream'; raw: '/dream' }
   | { kind: 'memory_status'; raw: '/memory-status' }
   | { kind: 'digest_session'; raw: '/digest-session' }
-  | { kind: 'extract_memory_facts'; raw: '/extract-memory-facts' }
   | { kind: 'models_list'; raw: '/models' }
   | { kind: 'status'; raw: '/status' }
   | { kind: 'save_procedure'; raw: string; title: string; body?: string }
@@ -140,8 +139,6 @@ export function extractSessionCommand(
     return { kind: 'memory_status', raw: '/memory-status' };
   if (text === '/digest-session')
     return { kind: 'digest_session', raw: '/digest-session' };
-  if (text === '/extract-memory-facts')
-    return { kind: 'extract_memory_facts', raw: '/extract-memory-facts' };
   if (text === '/models') return { kind: 'models_list', raw: '/models' };
   if (text === '/status') return { kind: 'status', raw: '/status' };
   if (text === '/model') return { kind: 'model_show', raw: '/model' };
@@ -391,15 +388,6 @@ export async function handleSessionCommand(opts: {
   }
 
   if (command.kind === 'digest_session') {
-    return handleManualExtractionCommand({
-      kind: command.kind,
-      deps,
-      cmdMsg,
-      sanitizeErrorText,
-    });
-  }
-
-  if (command.kind === 'extract_memory_facts') {
     return handleManualExtractionCommand({
       kind: command.kind,
       deps,

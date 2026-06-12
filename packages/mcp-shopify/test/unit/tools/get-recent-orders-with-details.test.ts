@@ -30,7 +30,7 @@ interface DetailedOrder {
 }
 
 describe('get_recent_orders_with_details', () => {
-  it('returns the latest orders WITH line items in one call, newest first', async () => {
+  it('returns the requested latest orders WITH line items in one call, newest first', async () => {
     const mock = buildMockFetch({
       graphqlResponses: [
         graphqlOk(customersEdges([BUSY_CUSTOMER])),
@@ -61,7 +61,7 @@ describe('get_recent_orders_with_details', () => {
     const result = await runWithIdentity(VERIFIED_BUSY_CUSTOMER, () =>
       harness.call<{ orders: DetailedOrder[] }>(
         'get_recent_orders_with_details',
-        { callerPhone: BUSY_CUSTOMER.phone },
+        { callerPhone: BUSY_CUSTOMER.phone, limit: 2 },
       ),
     );
     expect(result.error).toBeUndefined();
@@ -83,7 +83,7 @@ describe('get_recent_orders_with_details', () => {
     harness.tokenManager.stop();
   });
 
-  it('asks for ALL statuses with a small default limit (payload discipline)', async () => {
+  it('asks for ALL statuses with a one-order default limit (payload discipline)', async () => {
     const mock = buildMockFetch({
       graphqlResponses: [
         graphqlOk(customersEdges([BUSY_CUSTOMER])),
@@ -108,7 +108,7 @@ describe('get_recent_orders_with_details', () => {
       orderCall!.body as { variables: { query: string; first: number } }
     ).variables;
     expect(vars.query).toContain('status:any');
-    expect(vars.first).toBe(3);
+    expect(vars.first).toBe(1);
     harness.tokenManager.stop();
   });
 

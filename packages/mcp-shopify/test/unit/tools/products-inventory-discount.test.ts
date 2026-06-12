@@ -38,6 +38,47 @@ describe('search_products', () => {
     harness.tokenManager.stop();
   });
 
+  it('returns compact search summaries without bulky product fields', async () => {
+    const mock = buildMockFetch({
+      graphqlResponses: [
+        graphqlOk(
+          productsEdges([
+            {
+              handle: 'kaju-katli',
+              title: 'Kaju Katli Box',
+              description: 'A long product story that belongs on detail lookup.',
+              tags: ['show-search', 'active', 'contains-nuts'],
+              totalInventory: 12,
+              minPrice: '515.00',
+            },
+          ]),
+        ),
+      ],
+    });
+    const harness = buildToolHarness(mock.fetch);
+    const result = await harness.call<{
+      products: Array<Record<string, unknown>>;
+    }>('search_products', { query: 'kaju katli' });
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.products[0]).toEqual({
+      id: 'gid://shopify/Product/kaju-katli',
+      handle: 'kaju-katli',
+      title: 'Kaju Katli Box',
+      priceRange: {
+        minVariantPrice: '515.00',
+        maxVariantPrice: '515.00',
+        currencyCode: 'INR',
+      },
+      available: true,
+    });
+    expect(result.data?.products[0]).not.toHaveProperty('description');
+    expect(result.data?.products[0]).not.toHaveProperty('tags');
+    expect(result.data?.products[0]).not.toHaveProperty('images');
+    expect(result.data?.products[0]).not.toHaveProperty('onlineStoreUrl');
+    harness.tokenManager.stop();
+  });
+
   it('filters results by priceMin / priceMax post-fetch', async () => {
     const mock = buildMockFetch({
       graphqlResponses: [
@@ -78,6 +119,26 @@ describe('get_product', () => {
     }>('get_product', { handleOrId: 'kaju-katli' });
     expect(result.data?.product?.handle).toBe('kaju-katli');
     expect(result.data?.product?.available).toBe(true);
+    harness.tokenManager.stop();
+  });
+
+  it('accepts handle as a compatibility alias for handleOrId', async () => {
+    const mock = buildMockFetch({
+      graphqlResponses: [
+        graphqlOk(
+          productByHandle({
+            handle: 'chocolate-butterscotch-bark',
+            title: 'Choco Butterscotch Barks (200g)',
+          }),
+        ),
+      ],
+    });
+    const harness = buildToolHarness(mock.fetch);
+    const result = await harness.call<{
+      product: { handle: string; available: boolean } | null;
+    }>('get_product', { handle: 'chocolate-butterscotch-bark' });
+    expect(result.error).toBeUndefined();
+    expect(result.data?.product?.handle).toBe('chocolate-butterscotch-bark');
     harness.tokenManager.stop();
   });
 

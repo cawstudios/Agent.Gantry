@@ -1,0 +1,588 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]:
+          - img [ref=e7]
+          - generic [ref=e12]:
+            - heading "Boondi Conversations" [level=1] [ref=e13]
+            - paragraph [ref=e14]: WhatsApp support inbox · 45 chats · 354 messages
+        - generic [ref=e15]:
+          - navigation [ref=e16]:
+            - link "Conversations" [ref=e17] [cursor=pointer]:
+              - /url: /
+            - link "Leads" [ref=e18] [cursor=pointer]:
+              - /url: /leads
+          - generic [ref=e19]:
+            - switch "Turn auto-refresh off" [checked] [ref=e20] [cursor=pointer]:
+              - generic [ref=e23]: Auto-refresh
+            - generic [ref=e28]: Live
+          - generic [ref=e29]: Updated just now
+          - button "Refresh" [ref=e30] [cursor=pointer]:
+            - img [ref=e31]
+            - generic [ref=e33]: Refresh
+    - generic [ref=e34]:
+      - complementary [ref=e35]:
+        - generic [ref=e36]:
+          - generic [ref=e37]:
+            - generic [ref=e38]:
+              - generic:
+                - img
+              - textbox "Search name or phone number" [ref=e39]
+            - button "New dev chat" [ref=e85] [cursor=pointer]
+          - generic [ref=e40]: 45 conversations
+        - list [ref=e86]:
+          - listitem [ref=e571]:
+            - 'button "Dev 000115125585 11:24 PM Boondi: Started a fresh session. 4 +000115125585" [ref=e635] [cursor=pointer]':
+              - generic [ref=e573]: D0
+              - generic [ref=e574]:
+                - generic [ref=e575]:
+                  - generic [ref=e576]: Dev 000115125585
+                  - generic [ref=e606]: 11:24 PM
+                - generic [ref=e577]:
+                  - generic [ref=e578]: "Boondi: Started a fresh session."
+                  - generic [ref=e579]: "4"
+                - generic [ref=e580]: "+000115125585"
+          - listitem [ref=e87]:
+            - 'button "Test Customer 9:38 PM Boondi: Lead/query extraction processed. Extracted: 1. Created: 0. Updated: 1. Skipped: 0. 20 +000000058" [ref=e88] [cursor=pointer]':
+              - generic [ref=e89]: TC
+              - generic [ref=e90]:
+                - generic [ref=e91]:
+                  - generic [ref=e92]: Test Customer
+                  - generic [ref=e93]: 9:38 PM
+                - generic [ref=e94]:
+                  - generic [ref=e95]: "Boondi: Lead/query extraction processed. Extracted: 1. Created: 0. Updated: 1. Skipped: 0."
+                  - generic [ref=e96]: "20"
+                - generic [ref=e97]: "+000000058"
+          - listitem [ref=e98]:
+            - 'button "Test Customer 9:34 PM Boondi: Your last order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 (discount code BSS200 applied) Status: Delivered ✓ Good taste — those Barks are a favourite! Shall we sort your Diwali gifting now? 😊 6 +000000043" [ref=e99] [cursor=pointer]':
+              - generic [ref=e100]: TC
+              - generic [ref=e101]:
+                - generic [ref=e102]:
+                  - generic [ref=e103]: Test Customer
+                  - generic [ref=e104]: 9:34 PM
+                - generic [ref=e105]:
+                  - generic [ref=e106]: "Boondi: Your last order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 (discount code BSS200 applied) Status: Delivered ✓ Good taste — those Barks are a favourite! Shall we sort your Diwali gifting now? 😊"
+                  - generic [ref=e107]: "6"
+                - generic [ref=e108]: "+000000043"
+          - listitem [ref=e109]:
+            - 'button "Test Customer 9:34 PM Boondi: We have two kaju katli options available right now: 1. _Indie Bites – 54.5% Dark Chocolate Kaju Katli_ Price: ₹515 2. _Ultimate Sweet Shop Hamper_ (includes kaju katli along with other goodies) Price: ₹3,950 The classic Kaju Marzipan Bon Bon Box is currently out of stock. Sweet or snacky today — gifting or just for yourself? 😊 6 +000000042" [ref=e110] [cursor=pointer]':
+              - generic [ref=e111]: TC
+              - generic [ref=e112]:
+                - generic [ref=e113]:
+                  - generic [ref=e114]: Test Customer
+                  - generic [ref=e115]: 9:34 PM
+                - generic [ref=e116]:
+                  - generic [ref=e117]: "Boondi: We have two kaju katli options available right now: 1. _Indie Bites – 54.5% Dark Chocolate Kaju Katli_ Price: ₹515 2. _Ultimate Sweet Shop Hamper_ (includes kaju katli along with other goodies) Price: ₹3,950 The classic Kaju Marzipan Bon Bon Box is currently out of stock. Sweet or snacky today — gifting or just for yourself? 😊"
+                  - generic [ref=e118]: "6"
+                - generic [ref=e119]: "+000000042"
+          - listitem [ref=e120]:
+            - 'button "Test Customer 9:33 PM Boondi: I just re-checked — our records show #109260 (28 May, 2 × Choco Butterscotch Barks, ₹2,360) as the most recent order linked to this number. That''s the only one coming up. Is it possible the order was placed from a different number or email? Happy to help figure it out! 4 +000000041" [ref=e121] [cursor=pointer]':
+              - generic [ref=e122]: TC
+              - generic [ref=e123]:
+                - generic [ref=e124]:
+                  - generic [ref=e125]: Test Customer
+                  - generic [ref=e126]: 9:33 PM
+                - generic [ref=e127]:
+                  - generic [ref=e128]: "Boondi: I just re-checked — our records show #109260 (28 May, 2 × Choco Butterscotch Barks, ₹2,360) as the most recent order linked to this number. That's the only one coming up. Is it possible the order was placed from a different number or email? Happy to help figure it out!"
+                  - generic [ref=e129]: "4"
+                - generic [ref=e130]: "+000000041"
+          - listitem [ref=e131]:
+            - 'button "Test Customer 9:33 PM Boondi: I can only check details linked to the phone number you are messaging from. The number you asked about does not match that number. Is there anything I can help you with for your own orders? 😊 2 +000000037" [ref=e132] [cursor=pointer]':
+              - generic [ref=e133]: TC
+              - generic [ref=e134]:
+                - generic [ref=e135]:
+                  - generic [ref=e136]: Test Customer
+                  - generic [ref=e137]: 9:33 PM
+                - generic [ref=e138]:
+                  - generic [ref=e139]: "Boondi: I can only check details linked to the phone number you are messaging from. The number you asked about does not match that number. Is there anything I can help you with for your own orders? 😊"
+                  - generic [ref=e140]: "2"
+                - generic [ref=e141]: "+000000037"
+          - listitem [ref=e142]:
+            - 'button "Test Customer 9:32 PM Boondi: We haven''t confirmed a safe option yet, so shelf life would depend on whichever item the team clears for you. Let them confirm the allergen safety first — they can share shelf life at the same time. Want me to connect you now? 8 +000000035" [ref=e143] [cursor=pointer]':
+              - generic [ref=e144]: TC
+              - generic [ref=e145]:
+                - generic [ref=e146]:
+                  - generic [ref=e147]: Test Customer
+                  - generic [ref=e148]: 9:32 PM
+                - generic [ref=e149]:
+                  - generic [ref=e150]: "Boondi: We haven't confirmed a safe option yet, so shelf life would depend on whichever item the team clears for you. Let them confirm the allergen safety first — they can share shelf life at the same time. Want me to connect you now?"
+                  - generic [ref=e151]: "8"
+                - generic [ref=e152]: "+000000035"
+          - listitem [ref=e153]:
+            - 'button "Test Customer 9:32 PM Boondi: You used *BSS200* on that order. 😊 4 +000000029" [ref=e154] [cursor=pointer]':
+              - generic [ref=e155]: TC
+              - generic [ref=e156]:
+                - generic [ref=e157]:
+                  - generic [ref=e158]: Test Customer
+                  - generic [ref=e159]: 9:32 PM
+                - generic [ref=e160]:
+                  - generic [ref=e161]: "Boondi: You used *BSS200* on that order. 😊"
+                  - generic [ref=e162]: "4"
+                - generic [ref=e163]: "+000000029"
+          - listitem [ref=e164]:
+            - 'button "Test Customer 9:31 PM Boondi: The Bounty-ful Boondi Laddoo Box starts at ₹325 — the most accessible one in the range — but it''s currently unavailable online, same as most of the sweet boxes right now. What IS in stock: the *Bombay''s 3-Layer Chocolate Fudge* at ₹350. Rich, indulgent, and honestly perfect for a home celebration. 🍫 Want me to share more details on that one, or would you like me to check if the store team can help you get one of the mithai boxes sorted another way? 6 +000000015" [ref=e165] [cursor=pointer]':
+              - generic [ref=e166]: TC
+              - generic [ref=e167]:
+                - generic [ref=e168]:
+                  - generic [ref=e169]: Test Customer
+                  - generic [ref=e170]: 9:31 PM
+                - generic [ref=e171]:
+                  - generic [ref=e172]: "Boondi: The Bounty-ful Boondi Laddoo Box starts at ₹325 — the most accessible one in the range — but it's currently unavailable online, same as most of the sweet boxes right now. What IS in stock: the *Bombay's 3-Layer Chocolate Fudge* at ₹350. Rich, indulgent, and honestly perfect for a home celebration. 🍫 Want me to share more details on that one, or would you like me to check if the store team can help you get one of the mithai boxes sorted another way?"
+                  - generic [ref=e173]: "6"
+                - generic [ref=e174]: "+000000015"
+          - listitem [ref=e175]:
+            - 'button "Test Customer 9:30 PM Boondi: Already got it for you! Your last order was #109260 — 2 × Choco Butterscotch Barks (200g), placed 28 May, delivered, and you''d used the BSS200 code. Anything else I can help with? 😊 4 +000000014" [ref=e176] [cursor=pointer]':
+              - generic [ref=e177]: TC
+              - generic [ref=e178]:
+                - generic [ref=e179]:
+                  - generic [ref=e180]: Test Customer
+                  - generic [ref=e181]: 9:30 PM
+                - generic [ref=e182]:
+                  - generic [ref=e183]: "Boondi: Already got it for you! Your last order was #109260 — 2 × Choco Butterscotch Barks (200g), placed 28 May, delivered, and you'd used the BSS200 code. Anything else I can help with? 😊"
+                  - generic [ref=e184]: "4"
+                - generic [ref=e185]: "+000000014"
+          - listitem [ref=e186]:
+            - 'button "Test Customer 9:30 PM Boondi: Lead/query extraction processed. Extracted: 3. Created: 3. Updated: 0. Skipped: 0. 15 +000000059" [ref=e187] [cursor=pointer]':
+              - generic [ref=e188]: TC
+              - generic [ref=e189]:
+                - generic [ref=e190]:
+                  - generic [ref=e191]: Test Customer
+                  - generic [ref=e192]: 9:30 PM
+                - generic [ref=e193]:
+                  - generic [ref=e194]: "Boondi: Lead/query extraction processed. Extracted: 3. Created: 3. Updated: 0. Skipped: 0."
+                  - generic [ref=e195]: "15"
+                - generic [ref=e196]: "+000000059"
+          - listitem [ref=e197]:
+            - 'button "Test Customer 9:26 PM Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0. 13 +000000057" [ref=e198] [cursor=pointer]':
+              - generic [ref=e199]: TC
+              - generic [ref=e200]:
+                - generic [ref=e201]:
+                  - generic [ref=e202]: Test Customer
+                  - generic [ref=e203]: 9:26 PM
+                - generic [ref=e204]:
+                  - generic [ref=e205]: "Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0."
+                  - generic [ref=e206]: "13"
+                - generic [ref=e207]: "+000000057"
+          - listitem [ref=e208]:
+            - 'button "A.Samad 8:41 PM Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting. 64 +91 96544 05340" [ref=e209] [cursor=pointer]':
+              - generic [ref=e210]: A.
+              - generic [ref=e211]:
+                - generic [ref=e212]:
+                  - generic [ref=e213]: A.Samad
+                  - generic [ref=e214]: 8:41 PM
+                - generic [ref=e215]:
+                  - generic [ref=e216]: "Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting."
+                  - generic [ref=e217]: "64"
+                - generic [ref=e218]: +91 96544 05340
+          - listitem [ref=e219]:
+            - 'button "Latency Suite 8:08 PM Boondi: Your most recent order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered ✓ Anything else I can help with? 😊 37 +000000044" [ref=e220] [cursor=pointer]':
+              - generic [ref=e221]: LS
+              - generic [ref=e222]:
+                - generic [ref=e223]:
+                  - generic [ref=e224]: Latency Suite
+                  - generic [ref=e225]: 8:08 PM
+                - generic [ref=e226]:
+                  - generic [ref=e227]: "Boondi: Your most recent order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered ✓ Anything else I can help with? 😊"
+                  - generic [ref=e228]: "37"
+                - generic [ref=e229]: "+000000044"
+          - listitem [ref=e230]:
+            - 'button "Test Customer 7:33 PM Boondi: Your last order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered ✓ Anything else you''d like to know about it? 2 +000000023" [ref=e231] [cursor=pointer]':
+              - generic [ref=e232]: TC
+              - generic [ref=e233]:
+                - generic [ref=e234]:
+                  - generic [ref=e235]: Test Customer
+                  - generic [ref=e236]: 7:33 PM
+                - generic [ref=e237]:
+                  - generic [ref=e238]: "Boondi: Your last order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered ✓ Anything else you'd like to know about it?"
+                  - generic [ref=e239]: "2"
+                - generic [ref=e240]: "+000000023"
+          - listitem [ref=e241]:
+            - 'button "Test Customer 4:16 PM Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0. 11 +000000055" [ref=e242] [cursor=pointer]':
+              - generic [ref=e243]: TC
+              - generic [ref=e244]:
+                - generic [ref=e245]:
+                  - generic [ref=e246]: Test Customer
+                  - generic [ref=e247]: 4:16 PM
+                - generic [ref=e248]:
+                  - generic [ref=e249]: "Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0."
+                  - generic [ref=e250]: "11"
+                - generic [ref=e251]: "+000000055"
+          - listitem [ref=e252]:
+            - 'button "Test Customer 4:16 PM Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0. 11 +000000054" [ref=e253] [cursor=pointer]':
+              - generic [ref=e254]: TC
+              - generic [ref=e255]:
+                - generic [ref=e256]:
+                  - generic [ref=e257]: Test Customer
+                  - generic [ref=e258]: 4:16 PM
+                - generic [ref=e259]:
+                  - generic [ref=e260]: "Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0."
+                  - generic [ref=e261]: "11"
+                - generic [ref=e262]: "+000000054"
+          - listitem [ref=e263]:
+            - 'button "Test Customer 4:15 PM Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0. 9 +000000056" [ref=e264] [cursor=pointer]':
+              - generic [ref=e265]: TC
+              - generic [ref=e266]:
+                - generic [ref=e267]:
+                  - generic [ref=e268]: Test Customer
+                  - generic [ref=e269]: 4:15 PM
+                - generic [ref=e270]:
+                  - generic [ref=e271]: "Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0."
+                  - generic [ref=e272]: "9"
+                - generic [ref=e273]: "+000000056"
+          - listitem [ref=e274]:
+            - 'button "Test Customer 4:15 PM Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0. 10 +000000052" [ref=e275] [cursor=pointer]':
+              - generic [ref=e276]: TC
+              - generic [ref=e277]:
+                - generic [ref=e278]:
+                  - generic [ref=e279]: Test Customer
+                  - generic [ref=e280]: 4:15 PM
+                - generic [ref=e281]:
+                  - generic [ref=e282]: "Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0."
+                  - generic [ref=e283]: "10"
+                - generic [ref=e284]: "+000000052"
+          - listitem [ref=e285]:
+            - 'button "Test Customer 4:15 PM Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0. 9 +000000053" [ref=e286] [cursor=pointer]':
+              - generic [ref=e287]: TC
+              - generic [ref=e288]:
+                - generic [ref=e289]:
+                  - generic [ref=e290]: Test Customer
+                  - generic [ref=e291]: 4:15 PM
+                - generic [ref=e292]:
+                  - generic [ref=e293]: "Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0."
+                  - generic [ref=e294]: "9"
+                - generic [ref=e295]: "+000000053"
+          - listitem [ref=e296]:
+            - 'button "Test Customer 4:13 PM Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0. 9 +000000051" [ref=e297] [cursor=pointer]':
+              - generic [ref=e298]: TC
+              - generic [ref=e299]:
+                - generic [ref=e300]:
+                  - generic [ref=e301]: Test Customer
+                  - generic [ref=e302]: 4:13 PM
+                - generic [ref=e303]:
+                  - generic [ref=e304]: "Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0."
+                  - generic [ref=e305]: "9"
+                - generic [ref=e306]: "+000000051"
+          - listitem [ref=e307]:
+            - 'button "Test Customer 4:13 PM Boondi: Lead/query extraction processed. Extracted: 1. Created: 0. Updated: 1. Skipped: 0. 11 +000000050" [ref=e308] [cursor=pointer]':
+              - generic [ref=e309]: TC
+              - generic [ref=e310]:
+                - generic [ref=e311]:
+                  - generic [ref=e312]: Test Customer
+                  - generic [ref=e313]: 4:13 PM
+                - generic [ref=e314]:
+                  - generic [ref=e315]: "Boondi: Lead/query extraction processed. Extracted: 1. Created: 0. Updated: 1. Skipped: 0."
+                  - generic [ref=e316]: "11"
+                - generic [ref=e317]: "+000000050"
+          - listitem [ref=e318]:
+            - 'button "Test Customer 4:12 PM Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0. 9 +000000049" [ref=e319] [cursor=pointer]':
+              - generic [ref=e320]: TC
+              - generic [ref=e321]:
+                - generic [ref=e322]:
+                  - generic [ref=e323]: Test Customer
+                  - generic [ref=e324]: 4:12 PM
+                - generic [ref=e325]:
+                  - generic [ref=e326]: "Boondi: Lead/query extraction processed. Extracted: 0. Created: 0. Updated: 0. Skipped: 0."
+                  - generic [ref=e327]: "9"
+                - generic [ref=e328]: "+000000049"
+          - listitem [ref=e329]:
+            - 'button "Test Customer 4:11 PM Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0. 9 +000000048" [ref=e330] [cursor=pointer]':
+              - generic [ref=e331]: TC
+              - generic [ref=e332]:
+                - generic [ref=e333]:
+                  - generic [ref=e334]: Test Customer
+                  - generic [ref=e335]: 4:11 PM
+                - generic [ref=e336]:
+                  - generic [ref=e337]: "Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0."
+                  - generic [ref=e338]: "9"
+                - generic [ref=e339]: "+000000048"
+          - listitem [ref=e340]:
+            - 'button "Test Customer 4:11 PM Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0. 9 +000000047" [ref=e341] [cursor=pointer]':
+              - generic [ref=e342]: TC
+              - generic [ref=e343]:
+                - generic [ref=e344]:
+                  - generic [ref=e345]: Test Customer
+                  - generic [ref=e346]: 4:11 PM
+                - generic [ref=e347]:
+                  - generic [ref=e348]: "Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0."
+                  - generic [ref=e349]: "9"
+                - generic [ref=e350]: "+000000047"
+          - listitem [ref=e351]:
+            - 'button "Test Customer 4:10 PM Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0. 11 +000000046" [ref=e352] [cursor=pointer]':
+              - generic [ref=e353]: TC
+              - generic [ref=e354]:
+                - generic [ref=e355]:
+                  - generic [ref=e356]: Test Customer
+                  - generic [ref=e357]: 4:10 PM
+                - generic [ref=e358]:
+                  - generic [ref=e359]: "Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0."
+                  - generic [ref=e360]: "11"
+                - generic [ref=e361]: "+000000046"
+          - listitem [ref=e362]:
+            - 'button "Test Customer 4:09 PM Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0. 9 +000000045" [ref=e363] [cursor=pointer]':
+              - generic [ref=e364]: TC
+              - generic [ref=e365]:
+                - generic [ref=e366]:
+                  - generic [ref=e367]: Test Customer
+                  - generic [ref=e368]: 4:09 PM
+                - generic [ref=e369]:
+                  - generic [ref=e370]: "Boondi: Lead/query extraction processed. Extracted: 1. Created: 1. Updated: 0. Skipped: 0."
+                  - generic [ref=e371]: "9"
+                - generic [ref=e372]: "+000000045"
+          - listitem [ref=e373]:
+            - 'button "Test Customer 4:06 PM Boondi: Bhejne ke liye Kaju Katli sabse safe bet hai — shelf life achhi hoti hai, travel mein toot-phoot nahi hoti, aur almost sabko pasand aati hai! 😄 Mango Barfi bhi chalti hai lekin thoda jaldi khaani padti hai. Motichoor Ladoo thodi delicate hoti hai toh long-distance ke liye Kaju Katli hi best hai. Kahan bhej rahe ho — same city ya bahar? 4 +000000022" [ref=e374] [cursor=pointer]':
+              - generic [ref=e375]: TC
+              - generic [ref=e376]:
+                - generic [ref=e377]:
+                  - generic [ref=e378]: Test Customer
+                  - generic [ref=e379]: 4:06 PM
+                - generic [ref=e380]:
+                  - generic [ref=e381]: "Boondi: Bhejne ke liye Kaju Katli sabse safe bet hai — shelf life achhi hoti hai, travel mein toot-phoot nahi hoti, aur almost sabko pasand aati hai! 😄 Mango Barfi bhi chalti hai lekin thoda jaldi khaani padti hai. Motichoor Ladoo thodi delicate hoti hai toh long-distance ke liye Kaju Katli hi best hai. Kahan bhej rahe ho — same city ya bahar?"
+                  - generic [ref=e382]: "4"
+                - generic [ref=e383]: "+000000022"
+          - listitem [ref=e384]:
+            - 'button "Test Customer 4:06 PM Boondi: Aapka last order #109260 hai, 28 May ko place hua tha — aur wo deliver ho chuka hai! ✓ Order: _#109260_ Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered ✓ Koi aur help chahiye? 😊 2 +000000021" [ref=e385] [cursor=pointer]':
+              - generic [ref=e386]: TC
+              - generic [ref=e387]:
+                - generic [ref=e388]:
+                  - generic [ref=e389]: Test Customer
+                  - generic [ref=e390]: 4:06 PM
+                - generic [ref=e391]:
+                  - generic [ref=e392]: "Boondi: Aapka last order #109260 hai, 28 May ko place hua tha — aur wo deliver ho chuka hai! ✓ Order: _#109260_ Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered ✓ Koi aur help chahiye? 😊"
+                  - generic [ref=e393]: "2"
+                - generic [ref=e394]: "+000000021"
+          - listitem [ref=e395]:
+            - 'button "Test Customer 4:06 PM Boondi: आपका सबसे हाल का ऑर्डर यह रहा: ऑर्डर: _#109260_ दिनांक: 28 मई 2026 आइटम: 2 × Choco Butterscotch Barks (200g) कुल: ₹2,360 स्थिति: डिलीवर हो गया ✓ ऑर्डर पहुँच चुका है! क्या आपको कोई दिक्कत हुई या कुछ और जानना है? 😊 2 +000000020" [ref=e396] [cursor=pointer]':
+              - generic [ref=e397]: TC
+              - generic [ref=e398]:
+                - generic [ref=e399]:
+                  - generic [ref=e400]: Test Customer
+                  - generic [ref=e401]: 4:06 PM
+                - generic [ref=e402]:
+                  - generic [ref=e403]: "Boondi: आपका सबसे हाल का ऑर्डर यह रहा: ऑर्डर: _#109260_ दिनांक: 28 मई 2026 आइटम: 2 × Choco Butterscotch Barks (200g) कुल: ₹2,360 स्थिति: डिलीवर हो गया ✓ ऑर्डर पहुँच चुका है! क्या आपको कोई दिक्कत हुई या कुछ और जानना है? 😊"
+                  - generic [ref=e404]: "2"
+                - generic [ref=e405]: "+000000020"
+          - listitem [ref=e406]:
+            - 'button "Test Customer 4:06 PM Boondi: Haan, milti hai — aur BSS ka twist wali version toh extra khaas hai! 😄 Abhi available hai: _Indie Bites — 54.5% Dark Chocolate Kaju Katli_ Price: ₹515 Weight: ~140g Classic kaju katli ke upar dark chocolate ganache aur Dutch cocoa — ek dum indulgent combo! Classic plain kaju katli dhundhni ho toh bhi batao — aur koi occasion hai kya, ya bas apne liye? 🙂 2 +000000019" [ref=e407] [cursor=pointer]':
+              - generic [ref=e408]: TC
+              - generic [ref=e409]:
+                - generic [ref=e410]:
+                  - generic [ref=e411]: Test Customer
+                  - generic [ref=e412]: 4:06 PM
+                - generic [ref=e413]:
+                  - generic [ref=e414]: "Boondi: Haan, milti hai — aur BSS ka twist wali version toh extra khaas hai! 😄 Abhi available hai: _Indie Bites — 54.5% Dark Chocolate Kaju Katli_ Price: ₹515 Weight: ~140g Classic kaju katli ke upar dark chocolate ganache aur Dutch cocoa — ek dum indulgent combo! Classic plain kaju katli dhundhni ho toh bhi batao — aur koi occasion hai kya, ya bas apne liye? 🙂"
+                  - generic [ref=e415]: "2"
+                - generic [ref=e416]: "+000000019"
+          - listitem [ref=e417]:
+            - 'button "Test Customer 4:06 PM Boondi: हाँ, काजू कतली है! हमारे पास इस वक़्त एक ख़ास pick available है: _Indie Bites – 54.5% Dark Chocolate Kaju Katli_ कीमत: ₹515 वज़न: लगभग 140g काजू कतली के ऊपर 55% dark chocolate ganache और Dutch cocoa powder — एकदम indulgent combination! क्या आप इसे खुद के लिए चाहते हैं या किसी को gift करना है? 😊 2 +000000018" [ref=e418] [cursor=pointer]':
+              - generic [ref=e419]: TC
+              - generic [ref=e420]:
+                - generic [ref=e421]:
+                  - generic [ref=e422]: Test Customer
+                  - generic [ref=e423]: 4:06 PM
+                - generic [ref=e424]:
+                  - generic [ref=e425]: "Boondi: हाँ, काजू कतली है! हमारे पास इस वक़्त एक ख़ास pick available है: _Indie Bites – 54.5% Dark Chocolate Kaju Katli_ कीमत: ₹515 वज़न: लगभग 140g काजू कतली के ऊपर 55% dark chocolate ganache और Dutch cocoa powder — एकदम indulgent combination! क्या आप इसे खुद के लिए चाहते हैं या किसी को gift करना है? 😊"
+                  - generic [ref=e426]: "2"
+                - generic [ref=e427]: "+000000018"
+          - listitem [ref=e428]:
+            - 'button "Test Customer 4:06 PM Boondi: Yes, we do! We have a couple of kaju katli options right now: _Indie Bites — 54.5% Dark Chocolate Kaju Katli_ Price: ₹515 Weight: ~140g Classic kaju katli layered with dark chocolate ganache and Dutch cocoa — a BSS bestseller. ✅ In stock The plain classic kaju katli isn''t showing as available online right now, but the chocolate version is a crowd favourite and ships pan-India. Want me to share the link, or are you looking for something specific — a gift, a personal treat, or a particular quantity? 😊 2 +000000017" [ref=e429] [cursor=pointer]':
+              - generic [ref=e430]: TC
+              - generic [ref=e431]:
+                - generic [ref=e432]:
+                  - generic [ref=e433]: Test Customer
+                  - generic [ref=e434]: 4:06 PM
+                - generic [ref=e435]:
+                  - generic [ref=e436]: "Boondi: Yes, we do! We have a couple of kaju katli options right now: _Indie Bites — 54.5% Dark Chocolate Kaju Katli_ Price: ₹515 Weight: ~140g Classic kaju katli layered with dark chocolate ganache and Dutch cocoa — a BSS bestseller. ✅ In stock The plain classic kaju katli isn't showing as available online right now, but the chocolate version is a crowd favourite and ships pan-India. Want me to share the link, or are you looking for something specific — a gift, a personal treat, or a particular quantity? 😊"
+                  - generic [ref=e437]: "2"
+                - generic [ref=e438]: "+000000017"
+          - listitem [ref=e439]:
+            - 'button "Test Customer 4:05 PM Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting. 4 +000000016" [ref=e440] [cursor=pointer]':
+              - generic [ref=e441]: TC
+              - generic [ref=e442]:
+                - generic [ref=e443]:
+                  - generic [ref=e444]: Test Customer
+                  - generic [ref=e445]: 4:05 PM
+                - generic [ref=e446]:
+                  - generic [ref=e447]: "Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting."
+                  - generic [ref=e448]: "4"
+                - generic [ref=e449]: "+000000016"
+          - listitem [ref=e450]:
+            - 'button "Test Customer 4:05 PM Boondi: Yes! And ours are worth trying — hand-made in our Halwai kitchen, fresh off the kadai every day. Inspired by _Lemcha_ (the Gulab Jamun''s Bengali cousin), they''re made with khoya, chenna, and ghee, with pistachios and saffron. 6 pieces per portion, starting at ₹125. Would you like the link to order? 4 +000000011" [ref=e451] [cursor=pointer]':
+              - generic [ref=e452]: TC
+              - generic [ref=e453]:
+                - generic [ref=e454]:
+                  - generic [ref=e455]: Test Customer
+                  - generic [ref=e456]: 4:05 PM
+                - generic [ref=e457]:
+                  - generic [ref=e458]: "Boondi: Yes! And ours are worth trying — hand-made in our Halwai kitchen, fresh off the kadai every day. Inspired by _Lemcha_ (the Gulab Jamun's Bengali cousin), they're made with khoya, chenna, and ghee, with pistachios and saffron. 6 pieces per portion, starting at ₹125. Would you like the link to order?"
+                  - generic [ref=e459]: "4"
+                - generic [ref=e460]: "+000000011"
+          - listitem [ref=e461]:
+            - 'button "Test Customer 4:05 PM Boondi: 300 Diwali gift boxes for clients — that''s a beautiful order, and exactly the kind of thing our gifting team loves to get right. I''m looping them in so they can reach out with the right options and pricing. To make sure they come fully prepared, could you share: 1. *Budget* — rough range per gift, or a total (even a ballpark helps)? 2. *Delivery* — one city, or multiple locations? 3. *Timeline* — when do you need them by? 4. *Branding* — any logo or custom messaging on the boxes? Even rough answers work — the team will take it from there! 🪔 2 +000000013" [ref=e462] [cursor=pointer]':
+              - generic [ref=e463]: TC
+              - generic [ref=e464]:
+                - generic [ref=e465]:
+                  - generic [ref=e466]: Test Customer
+                  - generic [ref=e467]: 4:05 PM
+                - generic [ref=e468]:
+                  - generic [ref=e469]: "Boondi: 300 Diwali gift boxes for clients — that's a beautiful order, and exactly the kind of thing our gifting team loves to get right. I'm looping them in so they can reach out with the right options and pricing. To make sure they come fully prepared, could you share: 1. *Budget* — rough range per gift, or a total (even a ballpark helps)? 2. *Delivery* — one city, or multiple locations? 3. *Timeline* — when do you need them by? 4. *Branding* — any logo or custom messaging on the boxes? Even rough answers work — the team will take it from there! 🪔"
+                  - generic [ref=e470]: "2"
+                - generic [ref=e471]: "+000000013"
+          - listitem [ref=e472]:
+            - 'button "Test Customer 4:04 PM Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting. 2 +000000012" [ref=e473] [cursor=pointer]':
+              - generic [ref=e474]: TC
+              - generic [ref=e475]:
+                - generic [ref=e476]:
+                  - generic [ref=e477]: Test Customer
+                  - generic [ref=e478]: 4:04 PM
+                - generic [ref=e479]:
+                  - generic [ref=e480]: "Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting."
+                  - generic [ref=e481]: "2"
+                - generic [ref=e482]: "+000000012"
+          - listitem [ref=e483]:
+            - 'button "Test Customer 4:04 PM Boondi: That''s genuinely awful — a crushed box is not what we ever want landing at your door, especially when it''s something you were looking forward to.I''m so sorry — broken sweets after a delivery is genuinely not okay, and I completely understand the frustration. Your most recent order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered I''m flagging this to our care team right now with the full details — they''ll review it and reach out to you on this number with the next step. You won''t need to repeat any of this. 2 +000000010" [ref=e484] [cursor=pointer]':
+              - generic [ref=e485]: TC
+              - generic [ref=e486]:
+                - generic [ref=e487]:
+                  - generic [ref=e488]: Test Customer
+                  - generic [ref=e489]: 4:04 PM
+                - generic [ref=e490]:
+                  - generic [ref=e491]: "Boondi: That's genuinely awful — a crushed box is not what we ever want landing at your door, especially when it's something you were looking forward to.I'm so sorry — broken sweets after a delivery is genuinely not okay, and I completely understand the frustration. Your most recent order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered I'm flagging this to our care team right now with the full details — they'll review it and reach out to you on this number with the next step. You won't need to repeat any of this."
+                  - generic [ref=e492]: "2"
+                - generic [ref=e493]: "+000000010"
+          - listitem [ref=e494]:
+            - 'button "Test Customer 4:04 PM Boondi: That''s really not okay, and I''m sorry — stale mithai is genuinely disappointing, especially from us. Your most recent order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered ✓ A refund on this needs our care team to review — I''ll pass this along with the full details so you don''t have to repeat yourself. They''ll reach out on this number with the next step. Is there anything else you can share about the staleness (e.g. smell, texture, best-before date on the pack)? It helps the team look into it properly. 2 +000000007" [ref=e495] [cursor=pointer]':
+              - generic [ref=e496]: TC
+              - generic [ref=e497]:
+                - generic [ref=e498]:
+                  - generic [ref=e499]: Test Customer
+                  - generic [ref=e500]: 4:04 PM
+                - generic [ref=e501]:
+                  - generic [ref=e502]: "Boondi: That's really not okay, and I'm sorry — stale mithai is genuinely disappointing, especially from us. Your most recent order: Order: _#109260_ Placed: 28 May 2026 Items: 2 × Choco Butterscotch Barks (200g) Total: ₹2,360 Status: Delivered ✓ A refund on this needs our care team to review — I'll pass this along with the full details so you don't have to repeat yourself. They'll reach out on this number with the next step. Is there anything else you can share about the staleness (e.g. smell, texture, best-before date on the pack)? It helps the team look into it properly."
+                  - generic [ref=e503]: "2"
+                - generic [ref=e504]: "+000000007"
+          - listitem [ref=e505]:
+            - 'button "Test Customer 4:04 PM Boondi: Honestly, we don''t do comparisons — but I will say Bombay Sweet Shop''s Kaju Katli is made with a lot of love and really premium cashews. 😄 It speaks for itself. Want to try a box? I can tell you more about it — size, price, or what makes it special. 2 +000000009" [ref=e506] [cursor=pointer]':
+              - generic [ref=e507]: TC
+              - generic [ref=e508]:
+                - generic [ref=e509]:
+                  - generic [ref=e510]: Test Customer
+                  - generic [ref=e511]: 4:04 PM
+                - generic [ref=e512]:
+                  - generic [ref=e513]: "Boondi: Honestly, we don't do comparisons — but I will say Bombay Sweet Shop's Kaju Katli is made with a lot of love and really premium cashews. 😄 It speaks for itself. Want to try a box? I can tell you more about it — size, price, or what makes it special."
+                  - generic [ref=e514]: "2"
+                - generic [ref=e515]: "+000000009"
+          - listitem [ref=e516]:
+            - 'button "Test Customer 4:04 PM Boondi: An AI concierge — genuinely here to help, not a human. 😊 Anything I can do for you today — orders, products, gifting, or anything else BSS? 2 +000000008" [ref=e517] [cursor=pointer]':
+              - generic [ref=e518]: TC
+              - generic [ref=e519]:
+                - generic [ref=e520]:
+                  - generic [ref=e521]: Test Customer
+                  - generic [ref=e522]: 4:04 PM
+                - generic [ref=e523]:
+                  - generic [ref=e524]: "Boondi: An AI concierge — genuinely here to help, not a human. 😊 Anything I can do for you today — orders, products, gifting, or anything else BSS?"
+                  - generic [ref=e525]: "2"
+                - generic [ref=e526]: "+000000008"
+          - listitem [ref=e527]:
+            - 'button "Test Customer 4:04 PM Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting. 2 +000000005" [ref=e528] [cursor=pointer]':
+              - generic [ref=e529]: TC
+              - generic [ref=e530]:
+                - generic [ref=e531]:
+                  - generic [ref=e532]: Test Customer
+                  - generic [ref=e533]: 4:04 PM
+                - generic [ref=e534]:
+                  - generic [ref=e535]: "Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting."
+                  - generic [ref=e536]: "2"
+                - generic [ref=e537]: "+000000005"
+          - listitem [ref=e538]:
+            - 'button "Test Customer 4:04 PM Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting. 2 +000000006" [ref=e539] [cursor=pointer]':
+              - generic [ref=e540]: TC
+              - generic [ref=e541]:
+                - generic [ref=e542]:
+                  - generic [ref=e543]: Test Customer
+                  - generic [ref=e544]: 4:04 PM
+                - generic [ref=e545]:
+                  - generic [ref=e546]: "Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting."
+                  - generic [ref=e547]: "2"
+                - generic [ref=e548]: "+000000006"
+          - listitem [ref=e549]:
+            - 'button "Test Customer 4:04 PM Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting. 2 +000000004" [ref=e550] [cursor=pointer]':
+              - generic [ref=e551]: TC
+              - generic [ref=e552]:
+                - generic [ref=e553]:
+                  - generic [ref=e554]: Test Customer
+                  - generic [ref=e555]: 4:04 PM
+                - generic [ref=e556]:
+                  - generic [ref=e557]: "Boondi: I can only help with Bombay Sweet Shop orders, products, delivery, discounts, refunds, store details, and gifting."
+                  - generic [ref=e558]: "2"
+                - generic [ref=e559]: "+000000004"
+          - listitem [ref=e560]:
+            - 'button "Window Probe 2:17 PM Boondi: We do have a gorgeous one — our *Indie Bites - 54.5% Dark Chocolate Kaju Katli* at ₹515. It''s classic Kaju Katli layered with dark chocolate ganache and dusted with Dutch cocoa — a total bestseller. 😄 If you''re after something more traditional, that''s best picked up in-store. Are you shopping for yourself or gifting someone? 2 +000000906" [ref=e561] [cursor=pointer]':
+              - generic [ref=e562]: WP
+              - generic [ref=e563]:
+                - generic [ref=e564]:
+                  - generic [ref=e565]: Window Probe
+                  - generic [ref=e566]: 2:17 PM
+                - generic [ref=e567]:
+                  - generic [ref=e568]: "Boondi: We do have a gorgeous one — our *Indie Bites - 54.5% Dark Chocolate Kaju Katli* at ₹515. It's classic Kaju Katli layered with dark chocolate ganache and dusted with Dutch cocoa — a total bestseller. 😄 If you're after something more traditional, that's best picked up in-store. Are you shopping for yourself or gifting someone?"
+                  - generic [ref=e569]: "2"
+                - generic [ref=e570]: "+000000906"
+      - generic [ref=e581]:
+        - generic [ref=e582]:
+          - generic [ref=e583]: D0
+          - generic [ref=e584]:
+            - generic [ref=e585]: Dev 000115125585
+            - generic [ref=e586]: +000115125585 · 4 messages
+          - generic [ref=e587]:
+            - generic [ref=e588]: 2 from customer
+            - generic [ref=e589]: 2 from Boondi
+        - generic [ref=e607]:
+          - generic [ref=e609]: Today
+          - generic [ref=e612]:
+            - generic [ref=e613]: Do you have kaju katli boxes?
+            - generic [ref=e615]: 11:23 PM
+          - generic [ref=e617]:
+            - generic [ref=e618]:
+              - generic [ref=e619]:
+                - text: "We have a couple of kaju katli options right now: 1."
+                - emphasis [ref=e620]: Indie Bites — 54.5% Dark Chocolate Kaju Katli
+                - text: "Price: ₹515 Status: Available ✓ 2."
+                - emphasis [ref=e621]: Ultimate Sweet Shop Hamper
+                - text: "(includes kaju katli among other classics) Price: ₹3,950 Status: Available ✓ The Dark Chocolate Kaju Katli is a BSS favourite — classic kaju katli with a rich dark chocolate twist. Are you looking for something to gift, or just treating yourself? 😊"
+              - generic [ref=e622]:
+                - generic [ref=e623]: 11:24 PM
+                - generic "sent" [ref=e624]:
+                  - img [ref=e625]
+            - generic "Boondi replied 13s after the customer's message" [ref=e628]:
+              - img [ref=e629]
+              - text: took 13s
+          - generic [ref=e638]:
+            - generic [ref=e639]: /new
+            - generic [ref=e641]: 11:24 PM
+          - generic [ref=e643]:
+            - generic [ref=e644]:
+              - generic [ref=e645]: Started a fresh session.
+              - generic [ref=e646]:
+                - generic [ref=e647]: 11:24 PM
+                - generic "sent" [ref=e648]:
+                  - img [ref=e649]
+            - generic "Boondi replied <1s after the customer's message" [ref=e652]:
+              - img [ref=e653]
+              - text: took <1s
+        - generic [ref=e593]:
+          - textbox "Operator message" [ref=e594]
+          - button "Send" [disabled] [ref=e595]
+      - complementary [ref=e79]:
+        - generic [ref=e80]:
+          - heading "Customer profile" [level=2] [ref=e81]
+          - paragraph [ref=e82]: What Boondi knows · read-only
+        - generic [ref=e83]:
+          - generic [ref=e596]:
+            - generic [ref=e597]: D0
+            - generic [ref=e598]:
+              - generic [ref=e599]: Dev 000115125585
+              - generic [ref=e600]: "+000115125585"
+          - generic [ref=e601]: No open opportunities yet.
+          - heading "Saved details" [level=3] [ref=e603]
+          - generic [ref=e604]: No saved details yet.
+  - alert [ref=e84]

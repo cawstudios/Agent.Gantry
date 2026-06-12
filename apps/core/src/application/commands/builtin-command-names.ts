@@ -17,7 +17,6 @@ export const BUILTIN_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'dream',
   'memory-status',
   'digest-session',
-  'extract-memory-facts',
   'models',
   'status',
   'model',

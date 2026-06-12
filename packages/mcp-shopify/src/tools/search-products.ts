@@ -19,6 +19,11 @@ interface ProductEdgesResponse {
   };
 }
 
+type ProductSearchSummary = Pick<
+  ReturnType<typeof mapProductResponse>,
+  'id' | 'handle' | 'title' | 'priceRange' | 'available'
+>;
+
 function buildProductQuery(args: {
   query?: string;
   tag?: string;
@@ -67,7 +72,17 @@ export function registerSearchProducts(
             (p) => Number.parseFloat(p.priceRange.maxVariantPrice) <= args.priceMax!,
           );
         }
-        return jsonContent({ products: filtered });
+        return jsonContent({
+          products: filtered.map(
+            (product): ProductSearchSummary => ({
+              id: product.id,
+              handle: product.handle,
+              title: product.title,
+              priceRange: product.priceRange,
+              available: product.available,
+            }),
+          ),
+        });
       } catch (err) {
         return toolErrorContent(err);
       }

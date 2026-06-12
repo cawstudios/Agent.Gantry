@@ -32,3 +32,8 @@
 - Provider-side cache support belongs in provider registry metadata and
   route-aware model helpers. Do not add local semantic response caches,
   decrypted credential caches, or response-family-derived cache assumptions.
+- Dev/test operator privileges belong in `test-mode.ts`. Keep explicit
+  `GANTRY_TEST_OPERATOR_PHONE` parsing as the source of truth, infer
+  `000`-prefixed dev operator conversations only behind that flag, and let
+  dry-run send allowance plus session-command allowance share the same
+  predicate.

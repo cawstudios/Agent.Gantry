@@ -3,9 +3,9 @@
   "groups": {
     "conversation": "Boondi's natural behaviour as a conversationalist: greeting, persona/tone, output discipline (lead with the answer, no corporate dead-language, no internal leaks), language mirroring (English/Hindi/Hinglish), honesty (never deny being AI, never confirm a refund itself, never compare to competitors), and staying on-topic (guardrail). Checked from the runtime flow-log.",
     "shopify": "Boondi calls the Shopify MCP correctly for orders/products/inventory/discounts AND only ever reveals the customer's OWN data (privacy/identity DENY). Checked from the flow-log (MCP allow/deny + the customer-visible reply).",
-    "crm": "When a customer talks orders/gifting, the conversation produces the right queries & leads. The runner sends /digest-session, /extract-memory-facts, and /extract-leads-queries through the signed webhook path, then polls boondi_business_records after the digest watcher path runs. Each scenario is its own persona conversation."
+    "crm": "When a customer talks orders/gifting, the conversation produces the right queries & leads. The runner sends /digest-session and /extract-leads-queries through the signed webhook path, then polls boondi_business_records after the digest watcher path runs. Each scenario is its own persona conversation."
   },
-  "operatorCommandLifecycle": "CRM scenarios intentionally mimic a human/admin operator message in WhatsApp/Interakt: after relevant customer turns, send /digest-session, /extract-memory-facts, and /extract-leads-queries, then assert CRM rows. Do not replace this with a local replay script.",
+  "operatorCommandLifecycle": "CRM scenarios intentionally mimic a human/admin operator message in WhatsApp/Interakt: after relevant customer turns, send /digest-session and /extract-leads-queries, then assert CRM rows. Do not replace this with a local replay script.",
   "expectKeys": "Every scenario requires testIntent, unique fake phone, and object turns with text; expect is optional and only present for behavior-specific checks. noBanned, noLeak, noNarration, and replyRequired are runner defaults for every evaluated customer-visible reply; do not repeat them in scenarios unless intentionally overriding a default. Optional expect keys: greeting(welcomed, not rejected/blocked) · guardrail(scope_rejection|scope_clarification) · mcp · allow · deny · noGuardrailBlock · replyLang(english|hindi|hinglish) · replyMustMatch[] · replyMustNotMatch[] · (crm) expectRecord{status,intentCategory,buyerType,locationScope,customisation,scored,minScore,source,absent} · expectRecords[] for multi-opportunity",
   "scenarios": [
     {
@@ -599,7 +599,9 @@
           "text": "What discount code did I use on that order?",
           "expect": {
             "allow": true,
-            "mcp": true
+            "replyMustMatch": [
+              "BSS200"
+            ]
           }
         }
       ],
@@ -608,7 +610,7 @@
         "mcp": true
       },
       "phone": "000000029",
-      "testIntent": "Customer first asks for their last order, then asks which discount code was used; Boondi must preserve order context across turns and fetch the discount detail from live data."
+      "testIntent": "Customer first asks for their last order, then asks which discount code was used; Boondi must preserve order context across turns and answer from the live order detail already fetched when discountCodes are present."
     },
     {
       "group": "shopify",

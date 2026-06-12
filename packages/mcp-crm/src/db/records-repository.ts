@@ -5,6 +5,7 @@ import {
   type BusinessRecord,
   type BusinessStatus,
   type RecordInput,
+  type ResponseComment,
 } from './types.js';
 
 // All read/write access to boondi_business_records. The merge logic
@@ -21,6 +22,15 @@ const COLUMNS = `
 `;
 
 type Row = Record<string, unknown>;
+
+const SCHEMA_PATTERN = /^[a-z_][a-z0-9_]*$/i;
+
+export class ResponseCommentTargetError extends Error {
+  constructor() {
+    super('Response comment target must be an existing outbound message.');
+    this.name = 'ResponseCommentTargetError';
+  }
+}
 
 function toIso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
@@ -61,6 +71,24 @@ function rowToRecord(row: Row): BusinessRecord {
   };
 }
 
+function rowToResponseComment(row: Row): ResponseComment {
+  return {
+    messageId: row.message_id as string,
+    conversationId: row.conversation_id as string,
+    commentText: row.comment_text as string,
+    authorEmail: row.author_email as string,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+function safeSchemaName(schema: string): string {
+  if (!SCHEMA_PATTERN.test(schema)) {
+    throw new Error(`Unsafe schema name: ${schema}`);
+  }
+  return schema;
+}
+
 const STATUS_RANK: Record<'query' | 'qualifying' | 'lead', number> = {
   query: 1,
   qualifying: 2,
@@ -96,6 +124,90 @@ function hasAnyQualificationField(r: {
 
 export class RecordsRepository {
   constructor(private readonly pool: Pool) {}
+
+  private async assertOutboundMessageTarget(
+    client: Pick<PoolClient, 'query'>,
+    params: {
+      gantrySchema: string;
+      messageId: string;
+      conversationId: string;
+    },
+  ): Promise<void> {
+    const gantrySchema = safeSchemaName(params.gantrySchema);
+    const res = await client.query(
+      `SELECT m.id
+       FROM ${gantrySchema}.messages m
+       WHERE m.id = $1
+         AND m.conversation_id = $2
+         AND m.direction = 'outbound'
+       LIMIT 1`,
+      [params.messageId, params.conversationId],
+    );
+    if (!res.rows[0]) throw new ResponseCommentTargetError();
+  }
+
+  async upsertResponseComment(params: {
+    gantrySchema: string;
+    messageId: string;
+    conversationId: string;
+    commentText: string;
+    authorEmail: string;
+  }): Promise<ResponseComment> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await this.assertOutboundMessageTarget(client, params);
+      const res = await client.query(
+        `INSERT INTO boondi_response_comments (
+           message_id, conversation_id, comment_text, author_email
+         ) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (message_id) DO UPDATE SET
+           conversation_id = EXCLUDED.conversation_id,
+           comment_text = EXCLUDED.comment_text,
+           author_email = EXCLUDED.author_email,
+           updated_at = now()
+         RETURNING
+           message_id, conversation_id, comment_text, author_email,
+           created_at, updated_at`,
+        [
+          params.messageId,
+          params.conversationId,
+          params.commentText,
+          params.authorEmail,
+        ],
+      );
+      await client.query('COMMIT');
+      return rowToResponseComment(res.rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteResponseComment(params: {
+    gantrySchema: string;
+    messageId: string;
+    conversationId: string;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await this.assertOutboundMessageTarget(client, params);
+      await client.query(
+        `DELETE FROM boondi_response_comments
+         WHERE message_id = $1 AND conversation_id = $2`,
+        [params.messageId, params.conversationId],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
 
   async listAll(): Promise<BusinessRecord[]> {
     const res = await this.pool.query(

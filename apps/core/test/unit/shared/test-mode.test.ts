@@ -63,4 +63,28 @@ describe('isTestOperatorJid (session-command allowance)', () => {
     expect(isTestOperatorJid('wa:919654405341')).toBe(true);
     expect(isTestOperatorJid('wa:919654405342')).toBe(false);
   });
+
+  it('treats 000-prefixed conversations as dev operators when a valid operator is configured', () => {
+    process.env.GANTRY_TEST_OPERATOR_PHONE = '919654405340';
+    expect(isTestOperatorJid('wa:000000905')).toBe(true);
+    expect(isTestOperatorJid('000000905')).toBe(true);
+  });
+
+  it('does not allow 000-prefixed conversations when the operator flag is unset', () => {
+    delete process.env.GANTRY_TEST_OPERATOR_PHONE;
+    expect(isTestOperatorJid('wa:000000905')).toBe(false);
+    expect(isTestOperatorJid('000000905')).toBe(false);
+  });
+
+  it('does not allow 000-prefixed conversations when the operator flag has no valid digits', () => {
+    process.env.GANTRY_TEST_OPERATOR_PHONE = 'wa:, ,not-a-phone';
+    expect(isTestOperatorJid('wa:000000905')).toBe(false);
+    expect(isTestOperatorJid('000000905')).toBe(false);
+  });
+
+  it('still rejects non-000 unlisted conversations when a valid operator is configured', () => {
+    process.env.GANTRY_TEST_OPERATOR_PHONE = '919654405340';
+    expect(isTestOperatorJid('wa:919999999999')).toBe(false);
+    expect(isTestOperatorJid('919999999999')).toBe(false);
+  });
 });

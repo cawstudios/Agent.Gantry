@@ -1135,6 +1135,40 @@ describe('createChannelWiring', () => {
     }
   });
 
+  it('DRYRUN=1 sends to a 000-prefixed dev operator when GANTRY_TEST_OPERATOR_PHONE has a valid operator', async () => {
+    const app = makeApp();
+    const outbound = makeChannel({
+      ownsJid: vi.fn((jid: string) => jid === 'wa:000000905'),
+      sendMessage: vi.fn(async () => ({ externalMessageId: 'waid.dev' })),
+    });
+    const wiring = createChannelWiring(app, {
+      providerIds: [
+        makeProvider(
+          'telegram',
+          vi.fn(() => outbound),
+        ),
+      ],
+    });
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: true, slack: false }),
+    );
+
+    process.env.GANTRY_OUTBOUND_DRYRUN = '1';
+    process.env.GANTRY_TEST_OPERATOR_PHONE = '919654405340';
+    try {
+      await wiring.sendMessage('wa:000000905', 'hello', {
+        durability: 'best_effort',
+      });
+      expect(outbound.sendMessage).toHaveBeenCalledWith(
+        'wa:000000905',
+        'hello',
+      );
+    } finally {
+      delete process.env.GANTRY_OUTBOUND_DRYRUN;
+      delete process.env.GANTRY_TEST_OPERATOR_PHONE;
+    }
+  });
+
   it('records outbound final messages as pending and then sent', async () => {
     const app = makeApp();
     const storeMessage = vi.fn(async () => {});

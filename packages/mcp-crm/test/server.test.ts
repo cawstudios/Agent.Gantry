@@ -8,6 +8,7 @@ import { startHttpServer } from '../src/server.js';
 import { makeFakePool } from './helpers/fakes.js';
 import { runManualConversationExtraction } from '../src/watcher/index.js';
 import { createAnthropicExtractorLlm } from '../src/extractor/llm-client.js';
+import { computeIdentitySignature } from '../src/identity/identity-header.js';
 
 vi.mock('../src/watcher/index.js', () => ({
   runManualConversationExtraction: vi.fn(),
@@ -75,6 +76,12 @@ async function startTestServer(envOverrides: Partial<BoondiCrmEnv> = {}) {
     running,
     url: `http://127.0.0.1:${port}`,
   };
+}
+
+function signedEmailHeader(email: string, secret = 'test-secret'): string {
+  const ts = Math.floor(Date.now() / 1000);
+  const sig = computeIdentitySignature({ email, ts }, secret);
+  return `email:${email}; ts:${ts}; sig:${sig}`;
 }
 
 describe('Boondi CRM admin extraction route', () => {
@@ -212,5 +219,154 @@ describe('Boondi CRM admin extraction route', () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'internal_error' });
+  });
+});
+
+describe('Boondi CRM response comment route', () => {
+  let closeCurrent: (() => Promise<void>) | undefined;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    if (closeCurrent) {
+      await closeCurrent();
+      closeCurrent = undefined;
+    }
+  });
+
+  it('requires a verified email identity before saving comments', async () => {
+    const server = await startTestServer({
+      identity: { mode: 'required', secret: 'test-secret', maxAgeSec: 120 },
+      requireVerifiedIdentity: true,
+    } as Partial<BoondiCrmEnv>);
+    closeCurrent = server.running.close;
+
+    const response = await fetch(`${server.url}/admin/response-comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'upsert',
+        messageId: 'msg_out_1',
+        conversationId: 'conversation:wa:919900000001',
+        comment: 'Correct this answer.',
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: { code: 'IDENTITY_REQUIRED' },
+    });
+  });
+
+  it('rejects malformed comment requests before touching storage', async () => {
+    const server = await startTestServer({
+      identity: { mode: 'required', secret: 'test-secret', maxAgeSec: 120 },
+      requireVerifiedIdentity: true,
+    } as Partial<BoondiCrmEnv>);
+    closeCurrent = server.running.close;
+
+    const response = await fetch(`${server.url}/admin/response-comments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Caller-Identity': signedEmailHeader('admin@boondi.local'),
+      },
+      body: JSON.stringify({
+        action: 'upsert',
+        messageId: '',
+        conversationId: 'conversation:wa:919900000001',
+        comment: '',
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_request' });
+  });
+
+  it('rejects comments for non-outbound or missing Gantry messages', async () => {
+    const server = await startTestServer({
+      identity: { mode: 'required', secret: 'test-secret', maxAgeSec: 120 },
+      requireVerifiedIdentity: true,
+    } as Partial<BoondiCrmEnv>);
+    closeCurrent = server.running.close;
+
+    const response = await fetch(`${server.url}/admin/response-comments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Caller-Identity': signedEmailHeader('admin@boondi.local'),
+      },
+      body: JSON.stringify({
+        action: 'upsert',
+        messageId: 'msg_in_1',
+        conversationId: 'conversation:wa:919900000001',
+        comment: 'Correct this answer.',
+      }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: 'target_outbound_message_not_found',
+    });
+  });
+
+  it('saves an admin comment for an outbound Boondi response', async () => {
+    const { pool } = makeFakePool((sql, params) => {
+      if (sql.includes('FROM gantry.messages')) {
+        return { rows: [{ id: 'msg_out_1' }] };
+      }
+      if (sql.includes('RETURNING')) {
+        return {
+          rows: [
+            {
+              message_id: params?.[0],
+              conversation_id: params?.[1],
+              comment_text: params?.[2],
+              author_email: params?.[3],
+              created_at: '2026-06-12T01:00:00.000Z',
+              updated_at: '2026-06-12T01:00:00.000Z',
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const server = await startTestServer({
+      identity: { mode: 'required', secret: 'test-secret', maxAgeSec: 120 },
+      requireVerifiedIdentity: true,
+    } as Partial<BoondiCrmEnv>);
+    await server.running.close();
+    const logger = makeLogger();
+    const running = await startHttpServer({ env: server.env, logger, pool });
+    closeCurrent = running.close;
+
+    const response = await fetch(`${server.url}/admin/response-comments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Caller-Identity': signedEmailHeader('admin@boondi.local'),
+      },
+      body: JSON.stringify({
+        action: 'upsert',
+        messageId: 'msg_out_1',
+        conversationId: 'conversation:wa:919900000001',
+        comment: 'Explain pricing before suggesting the hamper.',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      comment: {
+        messageId: 'msg_out_1',
+        conversationId: 'conversation:wa:919900000001',
+        commentText: 'Explain pricing before suggesting the hamper.',
+        authorEmail: 'admin@boondi.local',
+        createdAt: '2026-06-12T01:00:00.000Z',
+        updatedAt: '2026-06-12T01:00:00.000Z',
+      },
+    });
   });
 });

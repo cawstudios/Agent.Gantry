@@ -149,12 +149,15 @@ function flowEvents(text, phone) {
     } catch {
       continue;
     }
+    const envelope = json;
     if (json && typeof json.flow !== 'string' && json.context && typeof json.context.flow === 'string') {
       json = json.context;
     }
     if (typeof json.flow !== 'string') continue;
     const iso = line.match(/^\[([0-9T:.Z+-]+)\]/);
-    const t = Date.parse(iso ? iso[1] : json.time || json.timestamp);
+    const t = Date.parse(
+      iso ? iso[1] : json.time || json.timestamp || envelope.time || envelope.timestamp,
+    );
     if (Number.isNaN(t)) continue;
     const jid = json.jid || json.chatJid || null;
     if (phone && jid && !String(jid).includes(phone)) continue;

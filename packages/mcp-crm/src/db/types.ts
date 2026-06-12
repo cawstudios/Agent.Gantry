@@ -95,3 +95,12 @@ export interface RecordInput {
   confidence?: number;
   needsReview?: boolean;
 }
+
+export interface ResponseComment {
+  messageId: string;
+  conversationId: string;
+  commentText: string;
+  authorEmail: string;
+  createdAt: string;
+  updatedAt: string;
+}

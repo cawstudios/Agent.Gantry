@@ -5,8 +5,8 @@
 - Do not use broad unlisted-phone bypasses for signed webhook replay. The safe
   test sender set is the checked-in fake numbers plus the runtime operator
   allowlist.
-- CRM lifecycle regressions should send `/digest-session`,
-  `/extract-memory-facts`, and `/extract-leads-queries` through the signed
+- CRM lifecycle regressions should send `/digest-session` and
+  `/extract-leads-queries` through the signed
   webhook path, then prove extraction through `boondi_business_records`.
 - Boondi scenario runs are also admin-panel review artifacts. Do not send a
   teardown `/new` by default or otherwise clear scenario transcripts after they

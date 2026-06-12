@@ -165,8 +165,6 @@ describe('runDigestCycleOnce', () => {
           rows: [
             { direction: 'inbound', text: '/digest-session' },
             { direction: 'outbound', text: 'Digest session queued.' },
-            { direction: 'inbound', text: '/extract-memory-facts now' },
-            { direction: 'outbound', text: 'Extracted memory facts.' },
             { direction: 'inbound', text: '/extract-leads-queries' },
             { direction: 'outbound', text: 'Lead extraction complete.' },
             { direction: 'inbound', text: 'I want 200 boxes for Diwali' },
@@ -190,8 +188,6 @@ describe('runDigestCycleOnce', () => {
     expect(prompt).toContain('assistant: Sure, sharing options.');
     expect(prompt).not.toContain('/digest-session');
     expect(prompt).not.toContain('Digest session queued.');
-    expect(prompt).not.toContain('/extract-memory-facts');
-    expect(prompt).not.toContain('Extracted memory facts.');
     expect(prompt).not.toContain('/extract-leads-queries');
     expect(prompt).not.toContain('Lead extraction complete.');
   });

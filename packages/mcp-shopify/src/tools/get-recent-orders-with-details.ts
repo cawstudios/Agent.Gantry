@@ -40,7 +40,7 @@ const inputSchema = {
     .min(1)
     .max(5)
     .optional()
-    .describe('How many recent orders to return with full detail (default 3).'),
+    .describe('How many recent orders to return with full detail (default 1).'),
 };
 
 interface OrderEdgesResponse {
@@ -91,7 +91,7 @@ export function registerGetRecentOrdersWithDetails(
 ): void {
   server.tool(
     'get_recent_orders_with_details',
-    "PREFERRED single call for order-status questions ('my last order', 'where is my order', 'what did I order'): returns the verified caller's most recent orders WITH line items, totals, and delivery/tracking status — no follow-up get_order needed. Defaults to ALL statuses sorted newest first, so the first result is the customer's true most recent order.",
+    "PREFERRED single call for order-status questions ('my last order', 'where is my order', 'what did I order'): returns the verified caller's most recent order WITH line items, totals, and delivery/tracking status by default — no follow-up get_order needed. Defaults to ALL statuses sorted newest first, so the first result is the customer's true most recent order. Pass limit only when the customer asks for multiple recent orders.",
     inputSchema,
     async (args) => {
       try {
@@ -119,7 +119,7 @@ export function registerGetRecentOrdersWithDetails(
         // list_orders_for_customer: "most recent order" means newest overall,
         // not newest unfulfilled.
         const filter = args.statusFilter ?? 'ANY';
-        const limit = args.limit ?? 3;
+        const limit = args.limit ?? 1;
         const customerToken =
           ownership?.resolvedId.split('/').pop() ??
           (args.customerId

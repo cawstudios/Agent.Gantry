@@ -204,19 +204,16 @@ describe('extractSessionCommand', () => {
     });
   });
 
-  it('detects only approved manual digest and extraction commands', () => {
+  it('detects the approved manual digest command only', () => {
     expect(extractSessionCommand('/digest-session', trigger)).toEqual({
       kind: 'digest_session',
       raw: '/digest-session',
     });
-    expect(extractSessionCommand('/extract-memory-facts', trigger)).toEqual({
-      kind: 'extract_memory_facts',
-      raw: '/extract-memory-facts',
-    });
   });
 
-  it('rejects legacy and suffixed manual digest command variants', () => {
+  it('rejects duplicate, legacy, and suffixed manual digest command variants', () => {
     expect(extractSessionCommand('/digest-summary', trigger)).toBeNull();
+    expect(extractSessionCommand('/extract-memory-facts', trigger)).toBeNull();
     expect(extractSessionCommand('/digest-session now', trigger)).toBeNull();
     expect(
       extractSessionCommand('/extract-memory-facts now', trigger),
@@ -265,11 +262,11 @@ describe('extractSessionCommand', () => {
 });
 
 describe('formatSessionCommandsHelp', () => {
-  it('lists approved manual extraction commands and omits /digest-summary', () => {
+  it('lists the approved manual digest command and omits duplicate variants', () => {
     const help = formatSessionCommandsHelp();
 
     expect(help).toContain('/digest-session');
-    expect(help).toContain('/extract-memory-facts');
+    expect(help).not.toContain('/extract-memory-facts');
     expect(help).not.toContain('/digest-summary');
   });
 });
@@ -581,10 +578,10 @@ describe('handleSessionCommand', () => {
     );
   });
 
-  it('denies unauthorized manual extraction commands through existing session command auth', async () => {
+  it('denies unauthorized manual digest commands through existing session command auth', async () => {
     const deps = makeDeps();
     const result = await handleSessionCommand({
-      missedMessages: [makeMsg('/extract-memory-facts', { is_from_me: false })],
+      missedMessages: [makeMsg('/digest-session', { is_from_me: false })],
       groupName: 'test',
       triggerPattern: trigger,
       timezone: 'UTC',
@@ -629,34 +626,10 @@ describe('handleSessionCommand', () => {
     );
   });
 
-  it('handles /extract-memory-facts through current session memory collection', async () => {
-    const deps = makeDeps({
-      collectCurrentSessionMemory: vi.fn().mockResolvedValue({
-        saved: 0,
-        digestCreated: false,
-      }),
-    });
-    const result = await handleSessionCommand({
-      missedMessages: [makeMsg('/extract-memory-facts', { id: 'cmd-1' })],
-      groupName: 'test',
-      triggerPattern: trigger,
-      timezone: 'UTC',
-      deps,
-    });
-
-    expect(result).toEqual({ handled: true, success: true });
-    expect(deps.collectCurrentSessionMemory).toHaveBeenCalledWith({
-      excludeMessageIds: ['cmd-1'],
-    });
-    expect(deps.sendMessage).toHaveBeenCalledWith(
-      'Memory extraction processed. Facts saved: 0. New digest: no.',
-    );
-  });
-
   it('reports unavailable manual command dependencies clearly', async () => {
     const deps = makeDeps();
     const result = await handleSessionCommand({
-      missedMessages: [makeMsg('/extract-memory-facts')],
+      missedMessages: [makeMsg('/digest-session')],
       groupName: 'test',
       triggerPattern: trigger,
       timezone: 'UTC',
@@ -665,7 +638,7 @@ describe('handleSessionCommand', () => {
 
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.sendMessage).toHaveBeenCalledWith(
-      '/extract-memory-facts is unavailable in this runtime.',
+      '/digest-session is unavailable in this runtime.',
     );
   });
 

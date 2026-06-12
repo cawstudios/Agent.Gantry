@@ -22,7 +22,7 @@ owns only the dispatch; it never gains agent-specific knowledge.
 
 - **Built-in commands** — core-owned, fixed set (`/new`, `/status`, `/dream`,
   `/memory-status`, `/models`, `/model`, `/stop`, `/thinking`, `/commands`,
-  `/digest-session`, `/extract-memory-facts`). These touch runtime internals
+  `/digest-session`). These touch runtime internals
   (cursors, sessions, queue, memory) and stay hardcoded in `session-commands.ts`.
 - **Agent commands** — declared *and* implemented on the agent side, loaded by core
   at boot. Their logic never enters core's source.
@@ -133,8 +133,8 @@ bounded pool in front of Postgres. Levers if a command ever gets hot: raise the 
   import and binding in `runtime-app.ts` (lines 49, 575); the hardcoded
   `extract_leads_queries` branch in `session-commands.ts`,
   `session-manual-extraction-commands.ts`, and `session-command-help.ts`.
-- **Keep** `/digest-session` and `/extract-memory-facts` as built-ins — memory is a
-  genuine core concept; only the CRM command moves out.
+- **Keep** `/digest-session` as a built-in — memory is a genuine core concept;
+  only the CRM command moves out.
 - Net: core loses all CRM/Boondi vocabulary; Boondi gains a declared command loaded the
   same way as its guardrail.
 

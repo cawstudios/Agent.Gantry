@@ -9,7 +9,10 @@ import type { Pool } from 'pg';
 import type { BoondiCrmEnv } from './env.js';
 import type { Logger } from './logger.js';
 import { createPool } from './db/pool.js';
-import { RecordsRepository } from './db/records-repository.js';
+import {
+  RecordsRepository,
+  ResponseCommentTargetError,
+} from './db/records-repository.js';
 import {
   IDENTITY_HEADER_NAME,
   verifyIdentityHeader,
@@ -46,6 +49,50 @@ function errToLog(err: unknown): Record<string, unknown> {
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
+}
+
+type ResponseCommentRequest =
+  | {
+      action: 'upsert';
+      messageId: string;
+      conversationId: string;
+      comment: string;
+    }
+  | {
+      action: 'delete';
+      messageId: string;
+      conversationId: string;
+    };
+
+function parseResponseCommentRequest(body: unknown): ResponseCommentRequest {
+  if (body == null || typeof body !== 'object') {
+    throw new Error('Request body must be an object.');
+  }
+  const record = body as Record<string, unknown>;
+  const action = record.action;
+  const messageId =
+    typeof record.messageId === 'string' ? record.messageId.trim() : '';
+  const conversationId =
+    typeof record.conversationId === 'string'
+      ? record.conversationId.trim()
+      : '';
+  if (action !== 'upsert' && action !== 'delete') {
+    throw new Error('action must be upsert or delete.');
+  }
+  if (!messageId) throw new Error('messageId is required.');
+  if (!/^conversation:wa:\d+$/.test(conversationId)) {
+    throw new Error('conversationId must be a WhatsApp conversation id.');
+  }
+  if (action === 'delete') {
+    return { action, messageId, conversationId };
+  }
+  const comment =
+    typeof record.comment === 'string' ? record.comment.trim() : '';
+  if (!comment) throw new Error('comment is required.');
+  if (comment.length > 4000) {
+    throw new Error('comment must be 4000 characters or fewer.');
+  }
+  return { action, messageId, conversationId, comment };
 }
 
 function verifiedIdentityForRequest(
@@ -186,6 +233,76 @@ export async function startHttpServer(
           sendJson(res, 200, { ok: true, stats });
         } catch (err) {
           logger.error(errToLog(err), 'boondi_crm_manual_extract_failed');
+          sendJson(res, 500, { error: 'internal_error' });
+        }
+        return;
+      }
+
+      if (path === '/admin/response-comments') {
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        const identity = verifiedIdentityForRequest(req, env, logger);
+        if (!identity.ok) {
+          sendJson(res, identity.status, identity.payload);
+          return;
+        }
+        if (identity.identity.kind !== 'ok') {
+          logger.warn({}, 'boondi_crm_response_comment_identity_missing');
+          sendJson(res, 401, { error: { code: 'IDENTITY_REQUIRED' } });
+          return;
+        }
+        const authorEmail = identity.identity.identity.email;
+        if (!authorEmail) {
+          logger.warn({}, 'boondi_crm_response_comment_email_missing');
+          sendJson(res, 401, {
+            error: { code: 'IDENTITY_EMAIL_REQUIRED' },
+          });
+          return;
+        }
+        const bodyResult = await readRequestBody(req);
+        if (!bodyResult.ok || !bodyResult.body) {
+          logger.warn(
+            { rawLen: bodyResult.rawLen, err: bodyResult.error },
+            'boondi_crm_body_parse_failed',
+          );
+          sendJson(res, 400, { error: 'malformed_json_body' });
+          return;
+        }
+        let body: ResponseCommentRequest;
+        try {
+          body = parseResponseCommentRequest(bodyResult.body);
+        } catch {
+          sendJson(res, 400, { error: 'invalid_request' });
+          return;
+        }
+        try {
+          if (body.action === 'delete') {
+            await repo.deleteResponseComment({
+              gantrySchema: env.gantrySchema,
+              messageId: body.messageId,
+              conversationId: body.conversationId,
+            });
+            sendJson(res, 200, { ok: true });
+            return;
+          }
+          const comment = await repo.upsertResponseComment({
+            gantrySchema: env.gantrySchema,
+            messageId: body.messageId,
+            conversationId: body.conversationId,
+            commentText: body.comment,
+            authorEmail,
+          });
+          sendJson(res, 200, { ok: true, comment });
+        } catch (err) {
+          if (err instanceof ResponseCommentTargetError) {
+            sendJson(res, 404, {
+              error: 'target_outbound_message_not_found',
+            });
+            return;
+          }
+          logger.error(errToLog(err), 'boondi_crm_response_comment_failed');
           sendJson(res, 500, { error: 'internal_error' });
         }
         return;

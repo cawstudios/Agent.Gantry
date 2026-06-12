@@ -97,12 +97,10 @@ const TEARDOWN_RESET = process.env.BOONDI_TEARDOWN_RESET === '1';
 const RESET_REPLY_RE = /Started a fresh session/i;
 const COMMAND_REPLY = {
   '/digest-session': /Digest processed\./i,
-  '/extract-memory-facts': /Memory extraction processed\./i,
   '/extract-leads-queries': /Lead\/query extraction processed\./i,
 };
 const CRM_EXTRACTION_COMMANDS = [
   '/digest-session',
-  '/extract-memory-facts',
   '/extract-leads-queries',
 ];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

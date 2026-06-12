@@ -11,7 +11,13 @@ const inputSchema = {
   handleOrId: z
     .string()
     .min(1)
+    .optional()
     .describe('Product handle (e.g. "blue-t-shirt") or full GID'),
+  handle: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Compatibility alias for handleOrId. Prefer handleOrId.'),
 };
 
 interface ProductByHandleResponse {
@@ -34,17 +40,24 @@ export function registerGetProduct(
     inputSchema,
     async (args) => {
       try {
-        if (args.handleOrId.startsWith('gid://')) {
+        const handleOrId = args.handleOrId ?? args.handle;
+        if (!handleOrId) {
+          return toolErrorContent(
+            'INVALID_REQUEST',
+            'handleOrId is required',
+          );
+        }
+        if (handleOrId.startsWith('gid://')) {
           const data = await client.graphql<ProductByIdResponse>(
             GET_PRODUCT_BY_ID,
-            { id: args.handleOrId },
+            { id: handleOrId },
           );
           if (!data.product) return jsonContent({ product: null });
           return jsonContent({ product: mapProductResponse(data.product) });
         }
         const data = await client.graphql<ProductByHandleResponse>(
           GET_PRODUCT_BY_HANDLE,
-          { handle: args.handleOrId },
+          { handle: handleOrId },
         );
         if (!data.productByHandle) return jsonContent({ product: null });
         return jsonContent({

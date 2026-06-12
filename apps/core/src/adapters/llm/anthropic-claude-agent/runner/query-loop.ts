@@ -126,6 +126,24 @@ function sdkResultFailureMessage(message: unknown): string | null {
   return null;
 }
 
+function messageContainsToolUse(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const candidates = [
+    (message as { content?: unknown }).content,
+    (message as { message?: { content?: unknown } }).message?.content,
+  ];
+  return candidates.some(
+    (content) =>
+      Array.isArray(content) &&
+      content.some(
+        (block) =>
+          block &&
+          typeof block === 'object' &&
+          (block as { type?: unknown }).type === 'tool_use',
+      ),
+  );
+}
+
 export async function runQuery(
   prompt: string,
   mcpServerPath: string,
@@ -197,6 +215,7 @@ export async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
   let sawPartialTextSinceLastResult = false;
+  let pendingPartialText = '';
   const primeToolAttempts: AgentRunnerToolAttemptOutput[] = [];
   const heartbeat = startJobHeartbeat({
     agentInput,
@@ -342,6 +361,9 @@ export async function runQuery(
       log(`[msg #${messageCount}] type=${msgType}`);
       if (message.type === 'assistant' && 'uuid' in message) {
         lastAssistantUuid = (message as { uuid: string }).uuid;
+        if (messageContainsToolUse(message)) {
+          pendingPartialText = '';
+        }
       }
       if (message.type === 'system' && message.subtype === 'init') {
         newSessionId = message.session_id;
@@ -457,11 +479,7 @@ export async function runQuery(
           const delta = event.delta;
           if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
             sawPartialTextSinceLastResult = true;
-            writeOutput({
-              status: 'success',
-              result: delta.text,
-              newSessionId,
-            });
+            pendingPartialText += delta.text;
           }
         }
       }
@@ -482,6 +500,13 @@ export async function runQuery(
           fallbackModel: configuredModel,
         });
         const continuedByFollowup = steeringGate.pendingCount() > 0;
+        if (pendingPartialText) {
+          writeOutput({
+            status: 'success',
+            result: pendingPartialText,
+            newSessionId,
+          });
+        }
         writeOutput({
           status: 'success',
           result:
@@ -503,6 +528,7 @@ export async function runQuery(
         });
         contextUsageEmitter.emitAfterResult();
         sawPartialTextSinceLastResult = false;
+        pendingPartialText = '';
         steeringGate.markTurnBoundary();
       }
     }

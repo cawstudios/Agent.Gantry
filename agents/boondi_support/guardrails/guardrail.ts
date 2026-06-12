@@ -7,12 +7,10 @@
  * classifier prompt and customer-facing copy below are Boondi-specific and live
  * here.
  *
- * Classifier-only (operator decision, 2026-06-11): this policy ships NO
- * deterministic pre-classifier. Every message is screened by the haiku
- * classifier via `prompt`, keeping the gate simple at the cost of a classifier
- * call per turn (the deterministic fast-path was removed). `directResponse`
- * supplies the customer-facing copy when the classifier returns a
- * direct_response.
+ * The deterministic stage handles obvious support turns and hard rejections
+ * before the classifier. Ambiguous turns still fall through to the haiku
+ * classifier via `prompt`. `directResponse` supplies the customer-facing copy
+ * when either stage returns a direct_response.
  *
  * Self-contained by design: the types are declared locally so the plugin has no
  * import dependency on Gantry's source layout. Core validates the exported
@@ -30,7 +28,24 @@ type GuardrailResponseKind =
 interface GuardrailPolicy {
   id: string;
   prompt: string;
+  evaluateDeterministic?(
+    messages: readonly string[],
+    context?: readonly GuardrailContextMessage[],
+  ): GuardrailDecision | null;
   directResponse(kind: GuardrailResponseKind): string;
+}
+
+type GuardrailDecision =
+  | { action: 'allow'; reason: string }
+  | {
+      action: 'direct_response';
+      responseKind: GuardrailResponseKind;
+      reason: string;
+    };
+
+interface GuardrailContextMessage {
+  role: 'customer' | 'assistant';
+  text: string;
 }
 
 const BSS_GUARDRAIL_PROMPT = [
@@ -53,9 +68,92 @@ const BSS_DIRECT_RESPONSES: Record<GuardrailResponseKind, string> = {
     'Sorry, I did not quite catch that. I can help with Bombay Sweet Shop orders, delivery, discounts, refunds, products, store details, or gifting — what would you like help with?',
 };
 
+const INTERNAL_PROBE_RE =
+  /\b(system prompt|developer instructions?|internal (?:tool|tools|rules|config|configuration|mechanics)|mcp|x-caller-identity|ignore (?:all )?(?:previous|your) instructions?|jailbreak|prompt injection|show me your rules|how do you work internally)\b/i;
+
+const BARE_GREETING_RE =
+  /^\s*(?:hi+|hello+|hey+|namaste|namaskar|hola|hiya|yo|good\s+(?:morning|afternoon|evening))[\s!.🙏🙂😊]*$/i;
+
+const BSS_TOPIC_RE =
+  /\b(order|orders|ordered|delivery|deliver|delivered|shipping|ship|shipped|tracking|track|refund|replacement|return|cancel|damaged|damage|broken|stale|wrong item|missing|payment|paid|invoice|receipt|discount|coupon|code|product|products|sweet|sweets|mithai|kaju|katli|barfi|lado[o]?|modak|hamper|gift|gifting|corporate|bulk|store|address|hours?|open|closed|allergen|ingredient|shelf life|stock|available|availability|price|cost|daam|kitna|kitni|kitne|kahan|where is my|last order|recent order)\b/i;
+
+const AI_IDENTITY_RE = /\b(?:real person|human|bot|ai|automated)\b/i;
+
+const OFF_TOPIC_RE =
+  /\b(weather|forecast|cricket|football|sport|news|politics|coding|code|debug|javascript|python|essay|translate|translation|capital of|trivia|recipe)\b/i;
+
+const MATH_ONLY_RE =
+  /\b(?:what(?:'s| is)?|solve|calculate|compute|times|plus|minus|divided by|multiplied by)\b.*\d+\s*(?:[x×*+\-/]|times|plus|minus|divided by|multiplied by)\s*\d+/i;
+
+const CONTINUATION_RE =
+  /^\s*(?:and\s+)?(?:yes|yeah|yep|no|nope|nah|ok(?:ay)?|sure|thanks?|thank you|got it|fair|that one|this one|it|that|please|pls|recheck|check again|are you sure|what about|how much|kitna|aur|haan|nahi|nahin)\b/i;
+
+function normalizeText(messages: readonly string[]): string {
+  return messages.join('\n').trim();
+}
+
+function contextHasBssTopic(
+  context?: readonly GuardrailContextMessage[],
+): boolean {
+  return Boolean(context?.some((message) => BSS_TOPIC_RE.test(message.text)));
+}
+
+function evaluateDeterministic(
+  messages: readonly string[],
+  context?: readonly GuardrailContextMessage[],
+): GuardrailDecision | null {
+  const text = normalizeText(messages);
+  if (!text) {
+    return {
+      action: 'direct_response',
+      responseKind: 'scope_clarification',
+      reason: 'empty_message',
+    };
+  }
+
+  if (INTERNAL_PROBE_RE.test(text)) {
+    return {
+      action: 'direct_response',
+      responseKind: 'scope_rejection',
+      reason: 'internal_probe',
+    };
+  }
+
+  if (BARE_GREETING_RE.test(text)) {
+    return {
+      action: 'direct_response',
+      responseKind: 'greeting',
+      reason: 'bare_greeting',
+    };
+  }
+
+  if (AI_IDENTITY_RE.test(text)) {
+    return { action: 'allow', reason: 'ai_identity_question' };
+  }
+
+  if (BSS_TOPIC_RE.test(text)) {
+    return { action: 'allow', reason: 'obvious_bss_topic' };
+  }
+
+  if (MATH_ONLY_RE.test(text) || OFF_TOPIC_RE.test(text)) {
+    return {
+      action: 'direct_response',
+      responseKind: 'scope_rejection',
+      reason: 'obvious_off_topic',
+    };
+  }
+
+  if (contextHasBssTopic(context) && CONTINUATION_RE.test(text)) {
+    return { action: 'allow', reason: 'bss_context_continuation' };
+  }
+
+  return null;
+}
+
 export const bssCustomerSupportPolicy: GuardrailPolicy = {
   id: 'bss_customer_support',
   prompt: BSS_GUARDRAIL_PROMPT,
+  evaluateDeterministic,
   directResponse(kind) {
     return BSS_DIRECT_RESPONSES[kind];
   },

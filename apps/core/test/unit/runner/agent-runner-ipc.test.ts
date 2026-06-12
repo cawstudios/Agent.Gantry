@@ -703,6 +703,42 @@ export async function* query({ prompt, options }) {
       summary: 'subagent done',
     };
   }
+  if (process.env.TEST_STREAM_TEXT_THEN_TOOL_USE === '1') {
+    yield {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'Let me check that.' },
+      },
+    };
+    yield {
+      type: 'assistant',
+      uuid: 'assistant-tool-1',
+      message: {
+        content: [
+          { type: 'text', text: 'Let me check that.' },
+          { type: 'tool_use', id: 'toolu_1', name: 'mcp_call_tool' },
+        ],
+      },
+    };
+    yield { type: 'result', subtype: 'success', result: '' };
+    yield {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'Here is the actual answer.' },
+      },
+    };
+    yield {
+      type: 'assistant',
+      uuid: 'assistant-final-1',
+      message: {
+        content: [{ type: 'text', text: 'Here is the actual answer.' }],
+      },
+    };
+    yield { type: 'result', subtype: 'success', result: '' };
+    return;
+  }
   yield { type: 'result', subtype: 'success', result: 'runner-ok' };
 
   if (process.env.TEST_EXIT_AFTER_QUERY === '1') {
@@ -1818,6 +1854,22 @@ describe('agent-runner IPC lifecycle', () => {
       expect(
         fs.readdirSync(path.join(fixture.ipcDir, 'interaction-boundaries')),
       ).toHaveLength(0);
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'suppresses streamed pre-tool text and emits only the post-tool answer',
+    async () => {
+      const fixture = createRunnerFixture();
+
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_STREAM_TEXT_THEN_TOOL_USE: '1',
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).not.toContain('Let me check that.');
+      expect(result.stdout).toContain('Here is the actual answer.');
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );

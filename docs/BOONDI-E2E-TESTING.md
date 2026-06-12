@@ -150,16 +150,22 @@ and both MCPs self-load it. If port 4710 is ever held by a stale launchd job
 ### Killing the gantry server (run before any restart — no thinking required)
 
 ```bash
-pkill -f "apps/core/src/index.ts" 2>/dev/null; pkill -f "packages/mcp-crm/src/index.ts" 2>/dev/null; sleep 1
-lsof -ti tcp:4710 -sTCP:LISTEN | while read -r p; do kill -9 "$p"; done
+pkill -f "apps/core/src/index.ts" 2>/dev/null; pkill -f "packages/mcp-crm/src/index.ts" 2>/dev/null; pkill -f "packages/mcp-shopify/src/index.ts" 2>/dev/null; sleep 1
+for port in 4710 8081; do
+  lsof -ti tcp:$port -sTCP:LISTEN | while read -r p; do kill -9 "$p"; done
+done
 lsof -ti tcp:4710 -sTCP:LISTEN >/dev/null 2>&1 \
   && echo "4710 STILL HELD — stale launchd job? launchctl bootout gui/$(id -u)/com.gantry" \
   || echo "gantry core down, 4710 free"
+lsof -ti tcp:8081 -sTCP:LISTEN >/dev/null 2>&1 \
+  && echo "8081 STILL HELD — stale shopify MCP?" \
+  || echo "shopify MCP down, 8081 free"
 ```
 
-Kills core + boondi-crm and force-frees :4710 (orphaned cores double-process
-every message — never run two). Shopify on :8081 can usually stay up; kill it
-the same way with `pkill -f "packages/mcp-shopify/src/index.ts"` when needed.
+Kills core + boondi-crm + shopify (127.0.0.1) and force-frees :4710 and :8081
+(orphaned cores double-process every message — never run two). Shopify on :8081
+can usually stay up across a DB reset; this snippet now clears it too for a full
+stop.
 
 ### Starting the stack (dev mode)
 
@@ -404,7 +410,6 @@ These are the commands the Boondi workflow uses:
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | `/new`                   | **Starts a fresh session** for this conversation: archives and clears the current agent session, so the next message begins with a clean context window (also the recovery path when a persisted session is corrupted; older queued messages are not replayed). The DB transcript and admin-panel history are NOT touched. Use between scenarios — never as teardown (transcripts are review artifacts). | `Started a fresh session.` (on failure: `/new failed. The session is unchanged.`)                                                                       |
 | `/digest-session`        | Forces the **session digest + memory-fact extraction NOW** (same collector the idle sweep uses — no waiting for `idle_end_minutes`). The digest row is what the CRM watcher's automatic run consumes.                                                                                                                                                                                                    | `Digest processed. New digest: yes`                                                                                                                     | `no new customer turns`. `Memory facts saved: N.` |
-| `/extract-memory-facts`  | Same collector, fact-focused: extracts durable memory facts from the current session into `gantry.memory_items` (creates the digest too if there are new turns).                                                                                                                                                                                                                                         | `Memory extraction processed. Facts saved: N. New digest: yes`                                                                                          | `no.`                                             |
 | `/extract-leads-queries` | Runs **CRM lead/query extraction for THIS conversation immediately** (agent-declared command → POST to mcp-crm `/admin/extract-leads-queries`). Reads the transcript directly, so it does NOT need a digest first — that's the difference from the automatic path, where the watcher only runs after a session-end digest exists.                                                                        | ack `Running lead/query extraction…`, then `Lead/query extraction processed. Extracted: N. Created: N. Updated: N. Skipped: N.` (wait up to 2 min — §5) |
 | `/commands`              | Lists the commands available in this conversation — useful to discover what's active.                                                                                                                                                                                                                                                                                                                    | the help list (built-ins + agent commands)                                                                                                              |
 
@@ -562,7 +567,7 @@ restart core. Runner-side TS changes need `npm run build` unless
    max 50 s, command replies max 2 min, then debug (§9). Reply arrived early ⇒
    proceed immediately.
 4. **For CRM/memory assertions** don't wait for idle timers: send
-   `/digest-session`, `/extract-memory-facts`, `/extract-leads-queries` from
+   `/digest-session` and `/extract-leads-queries` from
    the same number (§6c), then check `/api/records` and
    `/api/memory?phone=…`.
 5. **Prove it in the admin panel** (§7): link
