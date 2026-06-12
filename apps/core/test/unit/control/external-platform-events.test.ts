@@ -306,9 +306,7 @@ describe('External platform event adapter helpers', () => {
     expect(body).toContain(
       '[Spec \\\\[final\\\\] \\\\(v2\\\\).pdf](https://example.test/documents/spec%281%29.pdf)',
     );
-    expect(body).toContain(
-      '[boq.pdf](https://example.test/documents/boq.pdf)',
-    );
+    expect(body).toContain('[boq.pdf](https://example.test/documents/boq.pdf)');
     expect(body).not.toContain('ftp://example.test/bad.pdf');
     expect(body).not.toContain('missing.pdf');
     expect(JSON.stringify(delivery.card.actions)).not.toContain(

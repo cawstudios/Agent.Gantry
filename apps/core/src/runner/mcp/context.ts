@@ -59,6 +59,11 @@ export const workspaceFolder = process.env.GANTRY_WORKSPACE_KEY!;
 export const appId = process.env.GANTRY_APP_ID?.trim() || undefined;
 export const agentId = process.env.GANTRY_AGENT_ID?.trim() || undefined;
 export const jobId = process.env.GANTRY_JOB_ID?.trim() || undefined;
+export const jobRunId = process.env.GANTRY_JOB_RUN_ID?.trim() || undefined;
+export const jobRunLeaseToken =
+  process.env.GANTRY_JOB_RUN_LEASE_TOKEN?.trim() || undefined;
+export const jobRunLeaseFencingVersion =
+  process.env.GANTRY_JOB_RUN_LEASE_FENCING_VERSION?.trim() || undefined;
 export const threadId = process.env.GANTRY_THREAD_ID?.trim() || undefined;
 export const memoryUserId =
   process.env.GANTRY_MEMORY_USER_ID?.trim() || undefined;
@@ -71,11 +76,19 @@ export const memoryIpcAllowedActions = normalizeMemoryIpcActions(
 );
 export const browserProfileName =
   process.env.GANTRY_BROWSER_PROFILE_NAME?.trim() || undefined;
+// Locked agents never see capability-request/approval machinery: the enabled
+// tool set parses fail-closed and introspection text shows only what is
+// currently provisioned.
+export const lockedAccessPreset =
+  process.env.GANTRY_AGENT_ACCESS_PRESET === 'locked';
+export const deploymentMode: 'workstation' | 'fleet' =
+  process.env.GANTRY_DEPLOYMENT_MODE === 'fleet' ? 'fleet' : 'workstation';
 export const enabledAdminMcpTools = parseEnabledAdminMcpTools(
   process.env.GANTRY_ADMIN_MCP_TOOLS_JSON,
 );
 export const enabledGantryMcpTools = parseEnabledGantryMcpToolNames(
   process.env.GANTRY_MCP_TOOL_NAMES_JSON,
+  { lockedPreset: lockedAccessPreset },
 );
 export const configuredAllowedTools = parseConfiguredAllowedTools(
   process.env.GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON,
@@ -205,34 +218,55 @@ export function capabilityStatusText(): string {
   const requestableBrowserTools = buildRequestableBrowserToolAccess({
     configuredTools: configuredAllowedTools,
   });
+  // Locked agents get a provisioned-only view: no access-model ladder, no
+  // requestable admin/browser/tool enumeration, no Tool Access block.
   const lines = [
-    'Runtime capability context for this agent. Use available actions first; do not quote this block directly to users. Summarize access in plain language; keep raw capability ids and the Tool Access selected-capability block behind details and share verbatim only on explicit request.',
+    lockedAccessPreset
+      ? 'Runtime capability context for this agent. Use available actions first; do not quote this block directly to users. Summarize access in plain language.'
+      : 'Runtime capability context for this agent. Use available actions first; do not quote this block directly to users. Summarize access in plain language; keep raw capability ids and the Tool Access selected-capability block behind details and share verbatim only on explicit request.',
     '',
     'Core actions available in this run:',
     ...normalActionToolNames
       .sort()
       .map((toolName) => `- available: ${gantryMcpFullToolName(toolName)}`),
-    '',
-    'Agent access model:',
-    '- Use an available action when one fits.',
-    '- If the action is missing, request_access target.kind=capability for the reviewed capability id.',
-    '- If setup is missing, request source setup through the Gantry access flow; setup records inventory, not authority.',
-    '- Use request_access target.kind=run_command only as a temporary exact-command fallback when no reviewed capability fits.',
-    '- Use admin_permission_list (read-only, no grant needed) to review current permissions, suggest cleanup of unused or overly broad access, or spot missing access; report findings in plain language.',
-    '- Treat skill commands, MCP tool names, local CLI commands, browser internals, and network hosts as review/audit metadata unless a reviewed capability grants the action.',
-    '',
-    'Scheduler monitoring:',
-    '- Use scheduler_get_job, scheduler_list_runs, scheduler_list_events, and scheduler_wait_for_events to inspect or wait for jobs.',
-    '- Never request Bash just to sleep, wait, poll, or monitor scheduler job completion.',
-    '',
-    'Gantry admin tool capabilities:',
-    ...ADMIN_MCP_TOOL_NAMES.map((toolName) => {
-      const fullName = `mcp__gantry__${toolName}`;
-      if (currentAdminTools.has(toolName)) {
-        return `- available: ${fullName}`;
-      }
-      return `- requestable: ${fullName} (ask a configured approver to approve this capability)`;
-    }),
+    ...(lockedAccessPreset
+      ? []
+      : [
+          '',
+          'Agent access model:',
+          '- Use an available action when one fits.',
+          '- If the action is missing, request_access target.kind=capability for the reviewed capability id.',
+          '- If setup is missing, request source setup through the Gantry access flow; setup records inventory, not authority.',
+          '- Use request_access target.kind=run_command only as a temporary exact-command fallback when no reviewed capability fits.',
+          '- Use admin_permission_list (read-only, no grant needed) to review current permissions, suggest cleanup of unused or overly broad access, or spot missing access; report findings in plain language.',
+          '- Treat skill commands, MCP tool names, local CLI commands, browser internals, and network hosts as review/audit metadata unless a reviewed capability grants the action.',
+        ]),
+    // Scheduler guidance only when scheduler tools are actually mounted; the
+    // locked fail-closed tool set excludes them, so locked agents are never
+    // told about tools they cannot call.
+    ...(normalActionToolNames.some((toolName) =>
+      toolName.startsWith('scheduler_'),
+    )
+      ? [
+          '',
+          'Scheduler monitoring:',
+          '- Use scheduler_get_job, scheduler_list_runs, scheduler_list_events, and scheduler_wait_for_events to inspect or wait for jobs.',
+          '- Never request Bash just to sleep, wait, poll, or monitor scheduler job completion.',
+        ]
+      : []),
+    ...(lockedAccessPreset
+      ? []
+      : [
+          '',
+          'Gantry admin tool capabilities:',
+          ...ADMIN_MCP_TOOL_NAMES.map((toolName) => {
+            const fullName = `mcp__gantry__${toolName}`;
+            if (currentAdminTools.has(toolName)) {
+              return `- available: ${fullName}`;
+            }
+            return `- requestable: ${fullName} (ask a configured approver to approve this capability)`;
+          }),
+        ]),
     '',
     'Memory IPC actions available in this run:',
     ...memoryIpcAllowedActions
@@ -255,18 +289,27 @@ export function capabilityStatusText(): string {
           .sort()
           .map((serverId) => `- ready: ${serverId}`)
       : ['- none connected yet']),
-    '',
-    'Browser capability:',
     ...(requestableBrowserTools.length > 0
-      ? requestableBrowserTools.flatMap((tool) => [
-          `- requestable: ${tool.tool}`,
-          `  note: ${tool.note}`,
-        ])
+      ? lockedAccessPreset
+        ? []
+        : [
+            '',
+            'Browser capability:',
+            ...requestableBrowserTools.flatMap((tool) => [
+              `- requestable: ${tool.tool}`,
+              `  note: ${tool.note}`,
+            ]),
+          ]
       : [
+          '',
+          'Browser capability:',
           '- ready: Browser',
           '  note: Browser exposes Gantry-owned browser_* tools. Status is read-only; other actions launch the host-derived profile lazily.',
         ]),
   ];
+  if (lockedAccessPreset) {
+    return lines.join('\n');
+  }
   const view = buildAgentToolAccessView({
     configuredTools: configuredAllowedTools,
     defaultTools: normalActionToolNames

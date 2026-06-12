@@ -34,3 +34,18 @@
   `providerSession` output. Provider-native names such as Claude SDK
   `allowedTools` and stale provider-session error strings belong behind the
   execution adapter boundary.
+- Runtime queue backlog caps live under `runtime.queue`; a cap of `0` means
+  unlimited/current behavior. Keep backlog caps separate from concurrency limits
+  and apply them only at new waiting-work admission.
+- Message backlog admission must be checked from every path that adds a group
+  to `waitingMessageGroups`, including pending messages discovered while a
+  task or active run drains. Deferred pending state should stay durable in the
+  group until backlog capacity opens.
+- `GroupQueue` is process-local live-turn state. Horizontal scheduler workers
+  must set `runtime.live_turns.enabled: false`; only the single live-turn host
+  may run live message polling or admit live-turn ownership. Channels still
+  connect so scheduler outbound delivery can fail closed or send normally
+  instead of falsely stamping notification evidence.
+- Scheduled question IPC must carry the same run lease identity as scheduled
+  permission IPC. Recheck the lease before rendering a question prompt and
+  again before writing the answer response.

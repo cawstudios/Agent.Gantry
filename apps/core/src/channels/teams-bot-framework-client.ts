@@ -350,7 +350,9 @@ function teamsBaseConversationIdFromThreadConversationId(
   return conversationId.split(';messageid=')[0]?.trim() || conversationId;
 }
 
-function teamsReplyToIdFromConversationId(conversationId: string): string | null {
+function teamsReplyToIdFromConversationId(
+  conversationId: string,
+): string | null {
   const match = /;messageid=([^;]+)/.exec(conversationId);
   return match?.[1]?.trim() || null;
 }
@@ -424,7 +426,9 @@ function buildTeamsActivityDiagnostic(activity: Activity): {
 
 function diagnosticKeys(value: unknown): string[] {
   if (!value || typeof value !== 'object') return [];
-  return Object.keys(value as Record<string, unknown>).sort().slice(0, 20);
+  return Object.keys(value as Record<string, unknown>)
+    .sort()
+    .slice(0, 20);
 }
 
 function createAdaptiveCardInvokeResponse(

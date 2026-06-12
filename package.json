@@ -38,29 +38,35 @@
   ],
   "workspaces": [
     "packages/contracts",
-    "packages/agent-gantry",
-    "packages/sdk"
+    "packages/sdk",
+    "packages/agent-gantry"
   ],
   "scripts": {
     "build:contracts": "npm run build --workspace @gantry/contracts",
-    "build:agent-gantry": "npm run build --workspace @cawstudios/agent-gantry",
     "build:sdk": "npm run build --workspace @gantry/sdk",
-    "clean": "rm -rf dist packages/contracts/dist packages/sdk/dist",
-    "build": "npm run clean && npm run build:contracts && npm run build:sdk && tsc && npm run copy:migrations && chmod +x dist/cli/index.js",
+    "build:agent-gantry": "npm run build --workspace @cawstudios/agent-gantry",
+    "typecheck:agent-gantry": "npm run typecheck --workspace @cawstudios/agent-gantry",
+    "test:agent-gantry": "npm test --workspace @cawstudios/agent-gantry",
+    "clean": "rm -rf dist packages/contracts/dist packages/sdk/dist packages/agent-gantry/dist",
+    "build": "npm run clean && npm run build:contracts && npm run build:sdk && npm run build:agent-gantry && tsc && npm run copy:migrations && chmod +x dist/cli/index.js",
     "copy:migrations": "mkdir -p dist/adapters/storage/postgres/schema && cp -R apps/core/src/adapters/storage/postgres/schema/migrations dist/adapters/storage/postgres/schema/",
     "start": "node dist/index.js",
     "dev": "tsx apps/core/src/index.ts",
     "cli:dev": "tsx apps/core/src/cli/index.ts",
-    "typecheck": "npm run build:contracts && tsc --noEmit",
-    "format": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/agent-gantry/src/**/*.ts\" \"packages/sdk/src/**/*.ts\"",
-    "format:fix": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/agent-gantry/src/**/*.ts\" \"packages/sdk/src/**/*.ts\"",
-    "format:check": "prettier --check \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/agent-gantry/src/**/*.ts\" \"packages/sdk/src/**/*.ts\"",
+    "typecheck": "npm run build:contracts && npm run typecheck:agent-gantry && tsc --noEmit",
+    "format": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/sdk/src/**/*.ts\" \"packages/agent-gantry/src/**/*.ts\" \"packages/agent-gantry/test/**/*.ts\"",
+    "format:fix": "prettier --write \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/sdk/src/**/*.ts\" \"packages/agent-gantry/src/**/*.ts\" \"packages/agent-gantry/test/**/*.ts\"",
+    "format:check": "prettier --check \"apps/core/**/*.{ts,md}\" \"packages/contracts/src/**/*.ts\" \"packages/sdk/src/**/*.ts\" \"packages/agent-gantry/src/**/*.ts\" \"packages/agent-gantry/test/**/*.ts\"",
     "check:architecture": "python3 .codex/scripts/check_architecture.py",
+    "security:audit": "npm audit --omit=dev --audit-level=moderate",
+    "security:sbom": "npm sbom --omit=dev --sbom-format=cyclonedx",
+    "security:package": "python3 .codex/scripts/check_package_contents.py",
+    "security:images": "python3 .codex/scripts/check_runtime_images.py",
     "prepare": "HUSKY=1 husky || true",
     "prepublishOnly": "npm run build",
-    "lint": "eslint apps/core/src packages/contracts/src packages/agent-gantry/src packages/sdk/src",
-    "lint:fix": "eslint apps/core/src packages/contracts/src packages/agent-gantry/src packages/sdk/src --fix",
-    "test": "npm run build:contracts && npm run test:unit && npm run test:integration",
+    "lint": "eslint apps/core/src packages/contracts/src packages/sdk/src packages/agent-gantry/src packages/agent-gantry/test",
+    "lint:fix": "eslint apps/core/src packages/contracts/src packages/sdk/src packages/agent-gantry/src packages/agent-gantry/test --fix",
+    "test": "npm run build:contracts && npm run test:agent-gantry && npm run test:unit && npm run test:integration",
     "test:unit": "npm run build:contracts && vitest run -c vitest.unit.config.ts",
     "test:integration": "npm run build:contracts && vitest run -c vitest.integration.config.ts",
     "test:integration:postgres": "node .codex/scripts/require-postgres-integration-env.mjs && npm run test:integration -- apps/core/test/integration/session-continuity-postgres.integration.test.ts apps/core/test/integration/application-services-postgres.integration.test.ts apps/core/test/integration/durable-message-delivery.integration.test.ts apps/core/test/integration/outbound-delivery.postgres.integration.test.ts apps/core/test/integration/jobs-runs-memory-flow.integration.test.ts apps/core/test/integration/mcp-server-postgres.integration.test.ts apps/core/test/integration/control-plane-repository.postgres.integration.test.ts apps/core/test/integration/runtime-event-outbox.postgres.integration.test.ts apps/core/test/integration/file-artifacts-postgres.integration.test.ts apps/core/test/integration/pending-access-requests.postgres.integration.test.ts",
@@ -71,6 +77,7 @@
     "@anthropic-ai/claude-agent-sdk": "0.3.156",
     "@anthropic-ai/sandbox-runtime": "0.0.52",
     "@anthropic-ai/sdk": "^0.100.1",
+    "@aws-sdk/client-s3": "3.1066.0",
     "@clack/prompts": "^1.2.0",
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",
@@ -110,5 +117,11 @@
   },
   "engines": {
     "node": ">=24 <26"
+  },
+  "overrides": {
+    "esbuild": "0.28.0",
+    "hono": "4.12.24",
+    "ws": "8.21.0",
+    "qs": "6.15.2"
   }
 }

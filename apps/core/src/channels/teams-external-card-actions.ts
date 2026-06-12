@@ -207,7 +207,8 @@ function readExternalCardAction(value: unknown): ExternalCardAction | null {
     actionType: readString(record.actionType),
     platformOperation: readString(record.platformOperation),
     requestId: readString(record.requestId) || null,
-    signatureVersion: readString(record.signatureVersion) === 'v2' ? 'v2' as const : null,
+    signatureVersion:
+      readString(record.signatureVersion) === 'v2' ? ('v2' as const) : null,
     nonce: readString(record.nonce),
     expiresAt: readString(record.expiresAt),
     signature: readString(record.signature),
@@ -228,7 +229,9 @@ function readExternalCardAction(value: unknown): ExternalCardAction | null {
   if (requiredValues.some((value) => !value)) return null;
   return {
     ...action,
-    expiresAt: normalizeExternalCardActionExpiresAtForSignature(action.expiresAt),
+    expiresAt: normalizeExternalCardActionExpiresAtForSignature(
+      action.expiresAt,
+    ),
   } as ExternalCardAction;
 }
 
@@ -295,7 +298,9 @@ function unwrapExternalCardActionValue(
 }
 
 function verifyExternalCardActionSignature(action: ExternalCardAction): void {
-  const expiresAt = normalizeExternalCardActionExpiresAtForSignature(action.expiresAt);
+  const expiresAt = normalizeExternalCardActionExpiresAtForSignature(
+    action.expiresAt,
+  );
   const expiresAtMs = Date.parse(expiresAt);
   if (!Number.isFinite(expiresAtMs) || expiresAtMs < Date.now()) {
     throw new Error('Card action has expired');
@@ -338,7 +343,9 @@ function verifyExternalCardActionSignature(action: ExternalCardAction): void {
   }
 }
 
-function normalizeExternalCardActionExpiresAtForSignature(expiresAt: string): string {
+function normalizeExternalCardActionExpiresAtForSignature(
+  expiresAt: string,
+): string {
   const parsed = Date.parse(expiresAt.trim());
   if (!Number.isFinite(parsed)) {
     throw new Error('External card action expiration timestamp is invalid');
@@ -464,7 +471,9 @@ function canonicalTeamsConversationId(value: unknown): string | null {
 
 function diagnosticKeys(value: unknown): string[] {
   if (!value || typeof value !== 'object') return [];
-  return Object.keys(value as Record<string, unknown>).sort().slice(0, 20);
+  return Object.keys(value as Record<string, unknown>)
+    .sort()
+    .slice(0, 20);
 }
 
 export const _testExternalCardActions = {

@@ -30,7 +30,10 @@ export interface SkillSource {
   }): Promise<ClaudeSkillSourceItem[]>;
 }
 
-export const GANTRY_BUNDLED_SKILL_IDS = ['gantry-admin'] as const;
+export const GANTRY_BUNDLED_SKILL_IDS = [
+  'gantry-admin',
+  'gantry-commands',
+] as const;
 
 export class BundledGantrySkillSource implements SkillSource {
   constructor(private readonly packageRoot: string) {}

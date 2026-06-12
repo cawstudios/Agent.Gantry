@@ -8,10 +8,11 @@ import {
   isGantryMcpWildcardRule,
 } from '../../../shared/admin-mcp-tools.js';
 import {
+  BASELINE_GANTRY_MCP_TOOL_NAMES,
   DEFAULT_GANTRY_MCP_TOOL_NAMES,
+  NO_PERMISSION_HIDDEN_GANTRY_MCP_TOOL_NAMES,
   gantryMcpFullToolName,
   gantryMcpToolNameFromFullName,
-  selectedGantryMcpFullToolNames,
   selectedGantryMcpToolNames,
   selectedMemoryIpcActions,
 } from '../../../runner/gantry-mcp-tool-surface.js';
@@ -40,6 +41,8 @@ export interface AgentCapabilityContext {
   threadId?: string;
   jobId?: string;
   runId?: string;
+  runLeaseToken?: string;
+  runLeaseFencingVersion?: number;
   memoryUserId?: string;
   memoryDefaultScope?: 'user' | 'group';
   memoryReviewerIsControlApprover?: boolean;
@@ -50,6 +53,10 @@ export interface AgentCapabilityContext {
   selectedSkillDisplays?: readonly string[];
   attachedMcpSourceIds?: readonly string[];
   semanticCapabilities?: readonly SemanticCapabilityDefinition[];
+  hideAuthorityTools?: boolean;
+  // Locked agents auto-deny permission prompts and never mount authority/admin
+  // tools. Default 'full' preserves today's behavior.
+  accessPreset?: 'full' | 'locked';
   ipcDir?: string;
   ipcAuthToken?: string;
   browserIpcAuthToken?: string;
@@ -82,7 +89,9 @@ export interface AgentCapabilityProfile {
   availableTools: readonly string[];
   disallowedTools: readonly string[];
   mcpServers: Record<string, McpServerConfig>;
-  permissionMode: 'default';
+  // 'deny' auto-denies any permission prompt for locked agents: they work only
+  // with pre-provisioned capabilities and never trigger an approval prompt.
+  permissionMode: 'default' | 'deny';
   alwaysAllowedTools: readonly string[];
 }
 
@@ -94,15 +103,32 @@ export interface AgentCapabilityProvider {
 const CONFIGURABLE_NATIVE_SDK_TOOL_NAMES = new Set<string>([
   ...AVAILABLE_NATIVE_SDK_TOOLS,
 ]);
-
-const GANTRY_MCP_ALLOWED_TOOLS = DEFAULT_GANTRY_MCP_TOOL_NAMES.map(
-  gantryMcpFullToolName,
+const NO_PERMISSION_HIDDEN_GANTRY_MCP_TOOL_NAME_SET = new Set<string>(
+  NO_PERMISSION_HIDDEN_GANTRY_MCP_TOOL_NAMES,
 );
+const RUNNER_SUPPRESSED_GANTRY_MCP_TOOL_NAME_SET = new Set<string>([
+  'memory_patch',
+  'memory_demote',
+  'procedure_patch',
+  'memory_dream',
+  'memory_consolidate',
+]);
 
-const DEFAULT_ALLOWED_TOOLS = [
-  ...SAFE_NATIVE_SDK_TOOLS,
-  ...GANTRY_MCP_ALLOWED_TOOLS,
-] as const;
+function gantryMcpAllowedTools(input: {
+  hideAuthorityTools?: boolean;
+}): string[] {
+  return BASELINE_GANTRY_MCP_TOOL_NAMES.filter(
+    (toolName) =>
+      input.hideAuthorityTools !== true ||
+      !NO_PERMISSION_HIDDEN_GANTRY_MCP_TOOL_NAME_SET.has(toolName),
+  ).map(gantryMcpFullToolName);
+}
+
+function defaultAllowedTools(input: {
+  hideAuthorityTools?: boolean;
+}): string[] {
+  return [...SAFE_NATIVE_SDK_TOOLS, ...gantryMcpAllowedTools(input)];
+}
 
 function configuredToolAllowedSdkNames(toolRule: string): string[] {
   const trimmed = toolRule.trim();
@@ -151,8 +177,13 @@ const sdkToolsProvider: AgentCapabilityProvider = {
     return {
       allowedTools:
         persona === 'developer'
-          ? [...DEVELOPER_NATIVE_SDK_TOOLS, ...DEFAULT_ALLOWED_TOOLS]
-          : DEFAULT_ALLOWED_TOOLS,
+          ? [
+              ...DEVELOPER_NATIVE_SDK_TOOLS,
+              ...defaultAllowedTools({
+                hideAuthorityTools: ctx.hideAuthorityTools,
+              }),
+            ]
+          : defaultAllowedTools({ hideAuthorityTools: ctx.hideAuthorityTools }),
       availableTools: baseAvailableTools,
       disallowedTools: UNSUPPORTED_CLAUDE_CODE_BUILTIN_TOOLS,
     };
@@ -161,8 +192,8 @@ const sdkToolsProvider: AgentCapabilityProvider = {
 
 const permissionProvider: AgentCapabilityProvider = {
   id: 'permissions',
-  provide: () => ({
-    permissionMode: 'default',
+  provide: (ctx) => ({
+    permissionMode: ctx.accessPreset === 'locked' ? 'deny' : 'default',
     alwaysAllowedTools: [],
   }),
 };
@@ -178,6 +209,16 @@ const gantryMcpProvider: AgentCapabilityProvider = {
       GANTRY_THREAD_ID: ctx.threadId || '',
       ...(ctx.jobId ? { GANTRY_JOB_ID: ctx.jobId } : {}),
       ...(ctx.runId ? { GANTRY_JOB_RUN_ID: ctx.runId } : {}),
+      ...(ctx.runLeaseToken
+        ? { GANTRY_JOB_RUN_LEASE_TOKEN: ctx.runLeaseToken }
+        : {}),
+      ...(typeof ctx.runLeaseFencingVersion === 'number'
+        ? {
+            GANTRY_JOB_RUN_LEASE_FENCING_VERSION: String(
+              ctx.runLeaseFencingVersion,
+            ),
+          }
+        : {}),
       GANTRY_MEMORY_USER_ID: ctx.memoryUserId || '',
       GANTRY_MEMORY_DEFAULT_SCOPE: ctx.memoryDefaultScope || 'group',
       GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER:
@@ -203,7 +244,7 @@ const gantryMcpProvider: AgentCapabilityProvider = {
       ),
       GANTRY_MCP_TOOL_NAMES_JSON: JSON.stringify(
         selectedGantryMcpToolNames(ctx.configuredAllowedTools ?? [], {
-          memoryReviewerIsControlApprover: ctx.memoryReviewerIsControlApprover,
+          excludeAuthorityTools: ctx.hideAuthorityTools === true,
         }),
       ),
       GANTRY_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(
@@ -241,6 +282,10 @@ const gantryMcpProvider: AgentCapabilityProvider = {
   },
 };
 
+function isPublicExternalMcpServerName(name: string): boolean {
+  return !isHostPrivateBrowserMcpServerName(name);
+}
+
 function selectedAdminMcpToolNames(
   configuredTools: readonly string[],
 ): string[] {
@@ -250,10 +295,6 @@ function selectedAdminMcpToolNames(
     if (name) names.add(name);
   }
   return [...names].sort();
-}
-
-function isPublicExternalMcpServerName(name: string): boolean {
-  return !isHostPrivateBrowserMcpServerName(name);
 }
 
 function isPublicExternalMcpServerConfig(
@@ -308,22 +349,41 @@ const configuredMcpProvider: AgentCapabilityProvider = {
   },
 };
 
+function isHiddenAuthorityFullToolName(toolRule: string): boolean {
+  if (adminMcpToolNameFromFullName(toolRule)) return true;
+  const gantryToolName = gantryMcpToolNameFromFullName(toolRule);
+  if (
+    gantryToolName &&
+    NO_PERMISSION_HIDDEN_GANTRY_MCP_TOOL_NAME_SET.has(gantryToolName)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isRunnerSuppressedFullToolName(toolRule: string): boolean {
+  const gantryToolName = gantryMcpToolNameFromFullName(toolRule);
+  return gantryToolName
+    ? RUNNER_SUPPRESSED_GANTRY_MCP_TOOL_NAME_SET.has(gantryToolName)
+    : false;
+}
+
 const configuredToolProvider: AgentCapabilityProvider = {
   id: 'configured-tools',
   provide: (ctx) => {
-    const allowedTools = (ctx.configuredAllowedTools ?? []).flatMap(
-      configuredToolAllowedSdkNames,
-    );
+    const allowedTools = (ctx.configuredAllowedTools ?? [])
+      .flatMap(configuredToolAllowedSdkNames)
+      .filter(
+        (toolName) =>
+          !isRunnerSuppressedFullToolName(toolName) &&
+          (ctx.hideAuthorityTools !== true ||
+            !isHiddenAuthorityFullToolName(toolName)),
+      );
     const availableTools = (ctx.configuredAllowedTools ?? [])
       .flatMap(configuredToolAvailableSdkNames)
       .filter((toolName) => toolName.length > 0);
     return {
-      allowedTools: mergeUnique(
-        allowedTools,
-        selectedGantryMcpFullToolNames(ctx.configuredAllowedTools ?? [], {
-          memoryReviewerIsControlApprover: ctx.memoryReviewerIsControlApprover,
-        }),
-      ),
+      allowedTools,
       availableTools,
     };
   },

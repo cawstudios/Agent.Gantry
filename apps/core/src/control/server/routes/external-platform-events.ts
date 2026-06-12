@@ -399,7 +399,9 @@ async function acceptExternalEvent(
   if (!duplicate) {
     if (targetJid) {
       await dispatchExternalEventToRuntime(ctx, envelope, targetJid);
-    } else if (envelope.eventType === 'deep_analysis_admin_notification_requested') {
+    } else if (
+      envelope.eventType === 'deep_analysis_admin_notification_requested'
+    ) {
       const deliveredAt = new Date().toISOString();
       const error = 'admin_dm_not_configured';
       await updateExternalEventStatus({
@@ -832,11 +834,14 @@ function externalDeliveryMetadata(
   };
 }
 
-function firstExternalMessageId(
-  result: MessageDeliveryResult | void,
-): { teamsMessageId?: string } {
+function firstExternalMessageId(result: MessageDeliveryResult | void): {
+  teamsMessageId?: string;
+} {
   if (!result) return {};
-  if (typeof result.externalMessageId === 'string' && result.externalMessageId.trim()) {
+  if (
+    typeof result.externalMessageId === 'string' &&
+    result.externalMessageId.trim()
+  ) {
     return { teamsMessageId: result.externalMessageId.trim() };
   }
   const first = result.externalMessageIds?.find(
@@ -845,9 +850,9 @@ function firstExternalMessageId(
   return first ? { teamsMessageId: first.trim() } : {};
 }
 
-function teamsConversationIdFromTargetJid(
-  targetJid: string,
-): { conversationId?: string } {
+function teamsConversationIdFromTargetJid(targetJid: string): {
+  conversationId?: string;
+} {
   if (!targetJid.startsWith('teams:')) return {};
   const conversationId = targetJid.slice('teams:'.length).trim();
   return conversationId ? { conversationId } : {};

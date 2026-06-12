@@ -362,7 +362,7 @@ describe('RuntimeSecretConversationDiscovery', () => {
 });
 
 describe('BuiltInControlChannelProviderCatalog', () => {
-  it('does not advertise Teams runtime as installable while the transport is stubbed', () => {
+  it('advertises Teams Bot Framework runtime support without installer flow', () => {
     const catalog = new BuiltInControlChannelProviderCatalog();
 
     const teams = catalog
@@ -376,11 +376,12 @@ describe('BuiltInControlChannelProviderCatalog', () => {
         capabilityFlags: expect.arrayContaining([
           'setup',
           'discover',
-          'runtime-placeholder',
+          'bot-framework-runtime',
         ]),
       }),
     );
     expect(teams?.capabilityFlags).not.toContain('install');
     expect(teams?.capabilityFlags).not.toContain('placeholder');
+    expect(teams?.capabilityFlags).not.toContain('runtime-placeholder');
   });
 });

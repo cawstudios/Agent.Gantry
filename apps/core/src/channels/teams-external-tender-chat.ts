@@ -41,8 +41,7 @@ export async function forwardExternalTenderChatReply(
     },
     body: rawBody,
     signal: AbortSignal.timeout(
-      Number(envValueDynamic('GANTRY_EXTERNAL_TENDER_CHAT_TIMEOUT_MS')) ||
-        5000,
+      Number(envValueDynamic('GANTRY_EXTERNAL_TENDER_CHAT_TIMEOUT_MS')) || 5000,
     ),
   });
   if (!response.ok) {
@@ -69,7 +68,14 @@ function buildTenderChatHookBody(
   const messageId = readNonEmptyString(message.id);
   const teamsTenantId = readNonEmptyString(message.tenantId);
   const teamsUserId = readNonEmptyString(message.senderId ?? message.from?.id);
-  if (!text || !channelId || !replyToId || !messageId || !teamsTenantId || !teamsUserId) {
+  if (
+    !text ||
+    !channelId ||
+    !replyToId ||
+    !messageId ||
+    !teamsTenantId ||
+    !teamsUserId
+  ) {
     return null;
   }
   return {
@@ -86,7 +92,9 @@ function buildTenderChatHookBody(
 function resolveTenderChatHookUrl(): string | null {
   const explicit = envValueDynamic('GANTRY_EXTERNAL_TENDER_CHAT_URL');
   if (explicit) return explicit;
-  const platformGraphqlUrl = envValueDynamic('GANTRY_EXTERNAL_PLATFORM_GRAPHQL_URL');
+  const platformGraphqlUrl = envValueDynamic(
+    'GANTRY_EXTERNAL_PLATFORM_GRAPHQL_URL',
+  );
   if (!platformGraphqlUrl) return null;
   const url = new URL(platformGraphqlUrl);
   url.pathname = HOOK_PATH;

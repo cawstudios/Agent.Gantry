@@ -5,7 +5,9 @@ import {
   availableSemanticCapabilities,
   capabilityStatusText,
   chatJid,
+  deploymentMode,
   isAdminMcpToolEnabled,
+  lockedAccessPreset,
   TASKS_DIR,
   threadId,
 } from '../context.js';
@@ -111,7 +113,9 @@ export function registerServiceTools(server: McpServer): void {
   );
   server.tool(
     'request_skill_dependency_install',
-    'Request host-installed dependencies needed by a reviewed skill source. Approval records setup inventory; the agent never runs install commands directly.',
+    deploymentMode === 'fleet'
+      ? 'Request dependencies needed by a reviewed skill source. Approved dependencies are baked into a worker toolchain and take minutes before they are ready; the agent never runs install commands directly.'
+      : 'Request host-installed dependencies needed by a reviewed skill source. Approval records setup inventory; the agent never runs install commands directly.',
     {
       ecosystem: z
         .enum(['npm', 'brew', 'go', 'uv', 'download'])
@@ -268,7 +272,9 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'mcp_list_tools',
-    'Refresh tools from MCP server sources connected to this agent. This is source inventory only; use reviewed action capabilities as the authority.',
+    lockedAccessPreset
+      ? 'List tools from MCP server sources connected to this agent.'
+      : 'Refresh tools from MCP server sources connected to this agent. This is source inventory only; use reviewed action capabilities as the authority.',
     {
       serverName: z
         .string()
@@ -304,12 +310,20 @@ export function registerServiceTools(server: McpServer): void {
         content: [
           {
             type: 'text' as const,
-            text: [
-              formatMcpListToolsResponse(response.data),
-              SOURCE_INVENTORY_AUTHORITY_GUIDANCE,
-              UNREVIEWED_DISCOVERY_GUIDANCE,
-              capabilityStatusText(),
-            ].join('\n\n'),
+            text: (lockedAccessPreset
+              ? [
+                  formatMcpListToolsResponse(response.data, {
+                    includeReviewGuidance: false,
+                  }),
+                  capabilityStatusText(),
+                ]
+              : [
+                  formatMcpListToolsResponse(response.data),
+                  SOURCE_INVENTORY_AUTHORITY_GUIDANCE,
+                  UNREVIEWED_DISCOVERY_GUIDANCE,
+                  capabilityStatusText(),
+                ]
+            ).join('\n\n'),
           },
         ],
       };
@@ -318,7 +332,9 @@ export function registerServiceTools(server: McpServer): void {
 
   server.tool(
     'mcp_call_tool',
-    'Call a raw MCP source tool only when the requested action is covered by reviewed current-run capability access. Prefer the reviewed action capability as the product contract; do not call direct third-party mcp__server__tool names.',
+    lockedAccessPreset
+      ? 'Call a tool from an MCP server source connected to this agent. Use serverName and the raw tool name from mcp_list_tools.'
+      : 'Call a raw MCP source tool only when the requested action is covered by reviewed current-run capability access. Prefer the reviewed action capability as the product contract; do not call direct third-party mcp__server__tool names.',
     {
       serverName: z.string().describe('Connected MCP server name'),
       toolName: z
@@ -628,6 +644,7 @@ async function submitCapabilityReviewTask(
                 response.data,
                 response.message ||
                   `${requestLabel} approved. It is available now.`,
+                { deploymentMode },
               )
             : response.message ||
               `Approval requested for ${requestLabel}. It will be available after approval.`,
@@ -704,6 +721,7 @@ function registerSkillProposalTool(
               response.data,
               response.message ||
                 `${requestLabel} installed. It is available now.`,
+              { deploymentMode },
             ),
           },
         ],

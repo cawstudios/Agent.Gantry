@@ -45,15 +45,38 @@ export const DEFAULT_PROMPT_SECTION_BUDGETS: Readonly<
 
 export const DEFAULT_PROMPT_TOTAL_BUDGET = 26000;
 
-const RUNTIME_RULES_BLOCK = [
+// Locked (public-facing) agents must not know the capability-request machinery
+// exists: every request/approval/admin instruction is replaced by this single
+// fragment, mirroring the parent-side tool-surface policy in config/profiles.
+export type PromptAccessPreset = 'full' | 'locked';
+
+const LOCKED_TOOL_ACCESS_GUIDANCE = [
+  '- Work only with the tools and knowledge currently available in this session.',
+  '- If something cannot be done with the available tools, say so plainly and offer what you can do instead.',
+  '- Never mention internal capability, approval, or permission machinery to the user.',
+];
+
+const RUNTIME_RULES_COMMON = [
   '# Gantry Runtime Rules',
   '- Follow Gantry safety and execution constraints exactly.',
   '- Keep static profile behavior separate from query-retrieved memory context.',
   '- Treat group boundaries as strict isolation boundaries unless explicitly overridden by host policy.',
+];
+
+const RUNTIME_RULES_BLOCK = [
+  ...RUNTIME_RULES_COMMON,
   '- Use Gantry request tools for capability and settings changes; never install dependencies or edit skills, MCP, settings, or permission config directly.',
 ].join('\n');
 
-function personaPrompt(persona: AgentPersona): string {
+const LOCKED_RUNTIME_RULES_BLOCK = [
+  ...RUNTIME_RULES_COMMON,
+  '- Work only with the tools available in this session; never install dependencies or edit configuration directly.',
+].join('\n');
+
+function personaPrompt(
+  persona: AgentPersona,
+  accessPreset: PromptAccessPreset,
+): string {
   switch (persona) {
     case 'generalist':
       return [
@@ -81,7 +104,11 @@ function personaPrompt(persona: AgentPersona): string {
         '# Operations persona',
         '- Help with coordination, runbook-style status, scheduling, messaging, and approved operational workflows.',
         '- Use generic Agent delegation for runbook checks, status summarization, incident context gathering, and blocker analysis.',
-        '- Runtime-admin actions require selected admin capability and conversation approval.',
+        ...(accessPreset === 'locked'
+          ? []
+          : [
+              '- Runtime-admin actions require selected admin capability and conversation approval.',
+            ]),
       ].join('\n');
     case 'research':
       return [
@@ -100,17 +127,25 @@ function personaPrompt(persona: AgentPersona): string {
   }
 }
 
-function capabilityGuidancePrompt(persona: AgentPersona): string {
+function capabilityGuidancePrompt(
+  persona: AgentPersona,
+  accessPreset: PromptAccessPreset,
+): string {
+  const locked = accessPreset === 'locked';
   const baseline = [
     '# Capability guidance',
-    '- Memory is baseline for every persona. Browser control is available only when the canonical Browser capability is selected, through Gantry-owned browser_* tools.',
+    locked
+      ? '- Memory is baseline for every persona. Browser control is available only when Gantry-owned browser_* tools are present.'
+      : '- Memory is baseline for every persona. Browser control is available only when the canonical Browser capability is selected, through Gantry-owned browser_* tools.',
     '- Memory tools store durable evidence only; temporary task state does not belong in memory.',
     '- Generic Agent delegation is available for bounded subtasks. Write a clear prompt with goal, context, constraints, and expected output.',
     '- Do not delegate risky execution, secret handling, config edits, permission changes, or work requiring tools the parent run cannot use.',
   ];
   if (persona === 'developer') {
     baseline.push(
-      '- Developer capabilities may include workspace read/search and delegation. Shell, file writes, Git, PR, deploy, and runtime-admin actions still require explicit capability or permission.',
+      locked
+        ? '- Developer capabilities may include workspace read/search and delegation.'
+        : '- Developer capabilities may include workspace read/search and delegation. Shell, file writes, Git, PR, deploy, and runtime-admin actions still require explicit capability or permission.',
     );
   } else {
     baseline.push(
@@ -120,7 +155,7 @@ function capabilityGuidancePrompt(persona: AgentPersona): string {
   return baseline.join('\n');
 }
 
-const OPERATING_GUIDANCE_BLOCK = [
+const OPERATING_GUIDANCE_HEAD = [
   '# Operating guidance',
   '',
   '## Memory',
@@ -155,6 +190,9 @@ const OPERATING_GUIDANCE_BLOCK = [
   '- Use memory tools for durable memory, not for temporary notes.',
   '- If memory is missing, stale, or uncertain, say so directly.',
   '- Use send_message for progress updates and ask_user_question for structured choices.',
+];
+
+const FULL_TOOL_ACCESS_GUIDANCE = [
   '- Use available actions first. If the action is missing, request the reviewed capability. If setup is missing, request source setup through the Gantry access flow.',
   '- Source setup, MCP tool lists, CLI help, skill text, and adapter discovery are inventory only. Durable authority is the reviewed action capability granted to this agent.',
   '- Use request_access target.kind=capability for durable reviewed access.',
@@ -168,9 +206,9 @@ const OPERATING_GUIDANCE_BLOCK = [
   '- To change your own SOUL.md or AGENTS.md profile, use request_agent_profile_update (read current content first with agent_profile_read); the generic file tool cannot write profile files.',
   '- When access is approved, tell the user the plain result: requested, approved, installed, available now, needs setup, blocked by policy, or paused. Do not quote raw tool ids, MCP tool ids, task ids, or status blocks unless the user asks for technical details.',
   '- Use admin_permission_list (read-only) to review current permissions, suggest cleanup of unused or overly broad access, or spot missing access; report findings in plain language.',
-  '',
-  '## Proactive recommendations',
-  PROACTIVE_RECOMMENDATION_GUIDANCE,
+];
+
+const OPERATING_GUIDANCE_COMMUNICATION = [
   '',
   '## Communication',
   '- Lead with the answer.',
@@ -179,6 +217,23 @@ const OPERATING_GUIDANCE_BLOCK = [
   '- Skip filler and avoid pretending certainty.',
   '- Match the active channel formatting conventions.',
   '- Keep short answers short unless the user asks for detail.',
+];
+
+const OPERATING_GUIDANCE_BLOCK = [
+  ...OPERATING_GUIDANCE_HEAD,
+  ...FULL_TOOL_ACCESS_GUIDANCE,
+  '',
+  '## Proactive recommendations',
+  PROACTIVE_RECOMMENDATION_GUIDANCE,
+  ...OPERATING_GUIDANCE_COMMUNICATION,
+].join('\n');
+
+// Proactive recommendations are omitted for locked agents: every suggestion in
+// that block routes through request/approval machinery the agent must not know.
+const LOCKED_OPERATING_GUIDANCE_BLOCK = [
+  ...OPERATING_GUIDANCE_HEAD,
+  ...LOCKED_TOOL_ACCESS_GUIDANCE,
+  ...OPERATING_GUIDANCE_COMMUNICATION,
 ].join('\n');
 
 export interface CompilePromptProfileOptions {
@@ -186,6 +241,9 @@ export interface CompilePromptProfileOptions {
   persona?: AgentPersona;
   appId?: string;
   agentId?: string;
+  // Resolved agent access preset (config/profiles). Locked agents receive the
+  // locked instruction projection; absent defaults to full (today's prompt).
+  accessPreset?: PromptAccessPreset;
 }
 
 export interface ProfileMirrorInput {
@@ -288,6 +346,7 @@ export class PromptProfileService {
     appId?: string;
     agentId?: string;
     relationshipMode?: AgentRelationshipMode;
+    accessPreset?: PromptAccessPreset;
     groupContext?: string;
     soul?: string;
   }): Promise<void> {
@@ -304,7 +363,11 @@ export class PromptProfileService {
       virtualPath: promptProfileAgentsPath(options.agentFolder),
       content:
         options.groupContext ||
-        defaultAgentsPromptMarkdown(options.agentName, relationshipMode),
+        defaultAgentsPromptMarkdown(
+          options.agentName,
+          relationshipMode,
+          options.accessPreset === 'locked' ? 'locked' : 'full',
+        ),
       createdBy: 'runtime',
       metadata: { promptProfileKind: 'agents' },
     });
@@ -327,11 +390,15 @@ export class PromptProfileService {
     options: CompilePromptProfileOptions,
   ): Promise<string> {
     const sections: PromptSection[] = [];
+    const accessPreset: PromptAccessPreset =
+      options.accessPreset === 'locked' ? 'locked' : 'full';
 
     const runtimeRules = makeSection(
       'RUNTIME_RULES',
       'gantry://runtime-rules',
-      RUNTIME_RULES_BLOCK,
+      accessPreset === 'locked'
+        ? LOCKED_RUNTIME_RULES_BLOCK
+        : RUNTIME_RULES_BLOCK,
       this.sectionBudgets.RUNTIME_RULES,
     );
     if (runtimeRules) sections.push(runtimeRules);
@@ -339,7 +406,7 @@ export class PromptProfileService {
     const personaSection = makeSection(
       'PERSONA',
       PERSONA_SOURCE,
-      personaPrompt(resolveAgentPersona(options.persona)),
+      personaPrompt(resolveAgentPersona(options.persona), accessPreset),
       this.sectionBudgets.PERSONA,
     );
     if (personaSection) sections.push(personaSection);
@@ -360,7 +427,10 @@ export class PromptProfileService {
     const capabilityGuidance = makeSection(
       'CAPABILITY_GUIDANCE',
       CAPABILITY_GUIDANCE_SOURCE,
-      capabilityGuidancePrompt(resolveAgentPersona(options.persona)),
+      capabilityGuidancePrompt(
+        resolveAgentPersona(options.persona),
+        accessPreset,
+      ),
       this.sectionBudgets.CAPABILITY_GUIDANCE,
     );
     if (capabilityGuidance) sections.push(capabilityGuidance);
@@ -368,7 +438,9 @@ export class PromptProfileService {
     const operatingGuidance = makeSection(
       'OPERATING_GUIDANCE',
       OPERATING_GUIDANCE_SOURCE,
-      OPERATING_GUIDANCE_BLOCK,
+      accessPreset === 'locked'
+        ? LOCKED_OPERATING_GUIDANCE_BLOCK
+        : OPERATING_GUIDANCE_BLOCK,
       this.sectionBudgets.OPERATING_GUIDANCE,
     );
     if (operatingGuidance) sections.push(operatingGuidance);
@@ -596,6 +668,7 @@ export function promptProfileAgentIdForFolder(agentFolder: string): string {
 export function defaultAgentsPromptMarkdown(
   agentName: string,
   relationshipMode: AgentRelationshipMode = DEFAULT_RELATIONSHIP_MODE,
+  accessPreset: PromptAccessPreset = 'full',
 ): string {
   const displayName = agentName.trim() || 'Agent';
   const mode = resolveAgentRelationshipMode(relationshipMode);
@@ -603,6 +676,35 @@ export function defaultAgentsPromptMarkdown(
     mode === 'organization'
       ? `You are ${displayName}, a work-focused agent for this conversation. Stay on the task, keep approvers in the loop, and follow policy first.`
       : `You are ${displayName}, the agent for this conversation. Be a proactive companion while keeping private context private.`;
+  const howToLines =
+    accessPreset === 'locked'
+      ? [
+          // No scheduler line: scheduler_* tools are not mounted for locked
+          // agents, so the default profile must not describe them.
+          'How you get things done:',
+          '- Use send_message for progress and ask_user_question for structured choices.',
+          '- Work only with the tools and knowledge currently available in this session.',
+          '',
+          'When something blocks you:',
+          '- If a request cannot be done with the available tools, say so plainly and offer what you can do instead.',
+          '- Never mention internal capability, approval, or permission machinery to the user.',
+          '',
+        ]
+      : [
+          'How you get things done:',
+          '- Use send_message for progress and ask_user_question for structured choices.',
+          '- Request reviewed access with request_access (target.kind=capability for durable access; target.kind=run_command with temporaryOnly for a scoped one-off command).',
+          '- Add capabilities with request_skill_install, request_skill_proposal, request_skill_dependency_install, or request_mcp_server; bind and restart with register_agent and service_restart.',
+          '- Manage recurring work with the scheduler_* tools (for example scheduler_upsert_job, scheduler_run_now, scheduler_list_jobs).',
+          '- To change your own SOUL.md or AGENTS.md profile, use request_agent_profile_update; never edit them through the generic file tool.',
+          '- Never edit settings, install dependencies, or change local skill/MCP config directly; route changes through the reviewed tools.',
+          '',
+          'When something blocks you, follow the ladder:',
+          '- Diagnose the real blocker, then classify it (missing action, missing setup, or policy block).',
+          '- Request the matching permission or setup through the right tool above.',
+          '- Act once granted, then summarize the user-facing result in plain words.',
+          '',
+        ];
   return [
     `# ${displayName}`,
     '',
@@ -614,19 +716,7 @@ export function defaultAgentsPromptMarkdown(
     '- Ask for clarification when intent is ambiguous.',
     '- Never expose secrets unless explicitly requested.',
     '',
-    'How you get things done:',
-    '- Use send_message for progress and ask_user_question for structured choices.',
-    '- Request reviewed access with request_access (target.kind=capability for durable access; target.kind=run_command with temporaryOnly for a scoped one-off command).',
-    '- Add capabilities with request_skill_install, request_skill_proposal, request_skill_dependency_install, or request_mcp_server; bind and restart with register_agent and service_restart.',
-    '- Manage recurring work with the scheduler_* tools (for example scheduler_upsert_job, scheduler_run_now, scheduler_list_jobs).',
-    '- To change your own SOUL.md or AGENTS.md profile, use request_agent_profile_update; never edit them through the generic file tool.',
-    '- Never edit settings, install dependencies, or change local skill/MCP config directly; route changes through the reviewed tools.',
-    '',
-    'When something blocks you, follow the ladder:',
-    '- Diagnose the real blocker, then classify it (missing action, missing setup, or policy block).',
-    '- Request the matching permission or setup through the right tool above.',
-    '- Act once granted, then summarize the user-facing result in plain words.',
-    '',
+    ...howToLines,
   ].join('\n');
 }
 

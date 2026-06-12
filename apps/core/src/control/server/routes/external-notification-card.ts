@@ -171,7 +171,9 @@ function buildTeamsAction(
   };
 }
 
-function buildDocumentLinkBlocks(card: NotificationCard): Record<string, unknown>[] {
+function buildDocumentLinkBlocks(
+  card: NotificationCard,
+): Record<string, unknown>[] {
   if (!Array.isArray(card.documents)) return [];
   const links = card.documents
     .flatMap((entry, index): string[] => {
@@ -244,7 +246,12 @@ function signExternalCardAction(input: {
   platformOperation?: string | null;
   requestId?: string | null;
   signatureVersion?: 'v2' | null;
-}): { nonce: string; expiresAt: string; signature: string; signatureVersion?: 'v2' } {
+}): {
+  nonce: string;
+  expiresAt: string;
+  signature: string;
+  signatureVersion?: 'v2';
+} {
   const secret =
     envValueDynamic('GANTRY_EXTERNAL_ACTION_SECRET') ||
     envValueDynamic('GANTRY_EXTERNAL_EVENT_SECRET');
@@ -263,7 +270,9 @@ function signExternalCardAction(input: {
   return {
     nonce,
     expiresAt,
-    ...(input.signatureVersion === 'v2' ? { signatureVersion: 'v2' as const } : {}),
+    ...(input.signatureVersion === 'v2'
+      ? { signatureVersion: 'v2' as const }
+      : {}),
     signature: createHmac('sha256', secret).update(payload).digest('hex'),
   };
 }
@@ -283,7 +292,9 @@ export function signExternalCardActionForVerification(input: {
   expiresAt: string;
   secret: string;
 }): string {
-  const expiresAt = normalizeExternalCardActionExpiresAtForSignature(input.expiresAt);
+  const expiresAt = normalizeExternalCardActionExpiresAtForSignature(
+    input.expiresAt,
+  );
   return createHmac('sha256', input.secret)
     .update(
       stableActionPayload({
@@ -312,7 +323,9 @@ function stableActionPayload(input: Record<string, string | null>): string {
   return JSON.stringify(Object.fromEntries(Object.entries(input).sort()));
 }
 
-function normalizeExternalCardActionExpiresAtForSignature(expiresAt: string): string {
+function normalizeExternalCardActionExpiresAtForSignature(
+  expiresAt: string,
+): string {
   const parsed = Date.parse(expiresAt.trim());
   if (!Number.isFinite(parsed)) {
     throw new Error('External card action expiration timestamp is invalid');

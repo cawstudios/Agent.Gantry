@@ -127,7 +127,10 @@ export async function handleProviderConversationRoutes(
   url: URL,
   pathname: string,
 ): Promise<boolean> {
-  if (pathname === '/v1/providers/teams/thread-replies' && req.method === 'POST') {
+  if (
+    pathname === '/v1/providers/teams/thread-replies' &&
+    req.method === 'POST'
+  ) {
     const auth = authorizeControlRequest(req, res, ctx.keys, [
       'conversations:admin',
     ]);
@@ -135,7 +138,12 @@ export async function handleProviderConversationRoutes(
     const body = await readJson(req);
     const parsed = parseTeamsThreadReplyRequest(body);
     if (!parsed) {
-      sendError(res, 400, 'INVALID_REQUEST', 'Invalid Teams thread reply request');
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'Invalid Teams thread reply request',
+      );
       return true;
     }
     const threadConversationId = teamsThreadConversationId(
@@ -735,7 +743,9 @@ function canonicalTeamsConversationId(conversationId: string): string {
 }
 
 function normalizeTeamsJid(conversationId: string): string {
-  return conversationId.startsWith('teams:') ? conversationId : `teams:${conversationId}`;
+  return conversationId.startsWith('teams:')
+    ? conversationId
+    : `teams:${conversationId}`;
 }
 
 function readNonEmptyString(value: unknown): string | null {
