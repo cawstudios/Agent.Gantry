@@ -3,6 +3,11 @@ import type {
   ModelResponseFamily,
   ModelWorkload,
 } from './model-catalog.js';
+import {
+  DEFAULT_AGENT_ENGINE,
+  DEEPAGENTS_ENGINE,
+  type AgentEngine,
+} from './agent-engine.js';
 
 export type ModelCredentialPayload = Record<string, string>;
 
@@ -95,6 +100,15 @@ export interface ModelProviderCacheSupport {
   response: ModelProviderResponseCacheSupport;
 }
 
+// An execution route declares which internal execution adapter runs this
+// provider's models under a given agent engine, and which credential modes that
+// pairing supports. Resolution is `modelAlias + agentEngine -> executionRoute`.
+export interface ModelExecutionRoute {
+  engine: AgentEngine;
+  executionProviderId: ModelExecutionProviderId;
+  supportedCredentialModes: readonly string[];
+}
+
 export interface ModelProviderDefinition {
   id: string;
   label: string;
@@ -106,7 +120,7 @@ export interface ModelProviderDefinition {
   credentialModes: readonly ModelCredentialModeDefinition[];
   gateway: ModelGatewayDefinition;
   cacheSupport: ModelProviderCacheSupport;
-  executionProviderIds: readonly ModelExecutionProviderId[];
+  executionRoutes: readonly ModelExecutionRoute[];
 }
 
 export const MODEL_PROVIDER_DEFINITIONS = [
@@ -201,7 +215,21 @@ export const MODEL_PROVIDER_DEFINITIONS = [
         usageBehavior: 'normal_usage',
       },
     },
-    executionProviderIds: ['anthropic:claude-agent-sdk'],
+    executionRoutes: [
+      {
+        engine: DEFAULT_AGENT_ENGINE,
+        executionProviderId: 'anthropic:claude-agent-sdk',
+        supportedCredentialModes: ['api_key', 'claude_code_oauth'],
+      },
+      {
+        // DeepAgents runs Anthropic API-key models through LangChain
+        // ChatAnthropic. Claude OAuth/subscription is intentionally absent: it
+        // is the Anthropic SDK lane only.
+        engine: DEEPAGENTS_ENGINE,
+        executionProviderId: 'deepagents:langchain',
+        supportedCredentialModes: ['api_key'],
+      },
+    ],
   },
   {
     id: 'openrouter',
@@ -281,16 +309,24 @@ export const MODEL_PROVIDER_DEFINITIONS = [
         usageBehavior: 'zero_usage_on_hit',
       },
     },
-    executionProviderIds: ['anthropic:claude-agent-sdk'],
+    executionRoutes: [
+      // OpenRouter projects an Anthropic-compatible gateway with a bearer token;
+      // DeepAgents has no verified ChatAnthropic lane over that projection in v1.
+      {
+        engine: DEFAULT_AGENT_ENGINE,
+        executionProviderId: 'anthropic:claude-agent-sdk',
+        supportedCredentialModes: ['api_key'],
+      },
+    ],
   },
   {
     id: 'openai',
     label: 'OpenAI',
     executable: true,
-    modelRoute: false,
+    modelRoute: true,
     embeddingProvider: true,
     responseFamily: 'openai',
-    supportedWorkloads: [],
+    supportedWorkloads: ['chat'],
     credentialModes: [
       {
         id: 'api_key',
@@ -312,27 +348,23 @@ export const MODEL_PROVIDER_DEFINITIONS = [
       },
     ],
     gateway: {
-      pathSegment: ['open', 'ai'].join(''),
-      upstreamOrigin: `https://api.${['open', 'ai'].join('')}.com`,
+      pathSegment: 'openai',
+      upstreamOrigin: 'https://api.openai.com',
       upstreamPathPrefix: '',
       sdkProjection: {
-        baseUrlEnv: `${['OPEN', 'AI'].join('')}_BASE_URL`,
-        tokenEnv: `${['OPEN', 'AI'].join('')}_API_KEY`,
-        credentialProviderEnvKey: `${['OPEN', 'AI'].join('')}_API_KEY`,
+        baseUrlEnv: 'OPENAI_BASE_URL',
+        tokenEnv: 'OPENAI_API_KEY',
+        credentialProviderEnvKey: 'OPENAI_API_KEY',
         credentialProvider: 'native',
       },
     },
     cacheSupport: {
       prompt: {
-        mode: ['open', 'ai', '_automatic_prefix'].join(
-          '',
-        ) as ModelProviderPromptCacheMode,
+        mode: 'openai_automatic_prefix',
         automatic: true,
         requestControl: 'provider_automatic_prefix',
         ttlOptions: [],
-        minimumTokenThresholds: [
-          { modelFamily: ['open', 'ai'].join(''), tokens: 1024 },
-        ],
+        minimumTokenThresholds: [{ modelFamily: 'openai', tokens: 1024 }],
         usageFields: {
           readTokens: 'prompt_tokens_details.cached_tokens',
         },
@@ -346,7 +378,13 @@ export const MODEL_PROVIDER_DEFINITIONS = [
         usageBehavior: 'normal_usage',
       },
     },
-    executionProviderIds: [],
+    executionRoutes: [
+      {
+        engine: DEEPAGENTS_ENGINE,
+        executionProviderId: 'deepagents:langchain',
+        supportedCredentialModes: ['api_key'],
+      },
+    ],
   },
 ] as const satisfies readonly ModelProviderDefinition[];
 

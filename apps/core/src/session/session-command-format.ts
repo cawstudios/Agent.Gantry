@@ -321,7 +321,9 @@ export function formatModelStatus(
   if (entry) {
     lines.push(
       formatContextLine(snapshot, entry.contextWindowTokens),
-      `Max output: ${formatTokenCount(entry.maxOutputTokens)} tokens`,
+      typeof entry.maxOutputTokens === 'number'
+        ? `Max output: ${formatTokenCount(entry.maxOutputTokens)} tokens`
+        : 'Max output: reported at runtime',
       `Cache: ${resolveModelCacheSupport(entry).statusLabel}`,
     );
   } else {

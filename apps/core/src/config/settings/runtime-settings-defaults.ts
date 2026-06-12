@@ -1,6 +1,7 @@
 import '../../channels/register-builtins.js';
 
 import { DEFAULT_AGENT_NAME } from '../../shared/default-agent.js';
+import { DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
 import { listChannelProviders } from '../../channels/provider-registry.js';
 import {
   DEFAULT_MODEL_PRESET_ID,
@@ -92,6 +93,7 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
   const agent: RuntimeAgentSettings = {
     name: DEFAULT_AGENT_NAME,
     defaultModel: '',
+    defaultAgentEngine: DEFAULT_AGENT_ENGINE,
     oneTimeJobDefaultModel: '',
     recurringJobDefaultModel: '',
     sessions: {

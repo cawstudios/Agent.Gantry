@@ -1115,7 +1115,12 @@ describe('control server runtime hardening', () => {
             displayName: 'Kimi K2.6',
             aliases: expect.arrayContaining(['kimi', 'kimi-k2.6']),
             responseFamily: 'anthropic',
-            executionProviderId: 'anthropic:claude-agent-sdk',
+            executionRoutes: [
+              {
+                engine: 'anthropic_sdk',
+                executionProviderId: 'anthropic:claude-agent-sdk',
+              },
+            ],
             credentialProfileRef: 'gantry-model-access',
             modelRoute: {
               id: 'openrouter',

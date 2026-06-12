@@ -14,6 +14,7 @@ import {
   type ModelWorkload,
 } from '../../../shared/model-catalog.js';
 import { resolveModelCacheSupport } from '../../../shared/model-cache-support.js';
+import { getModelProviderDefinition } from '../../../shared/model-provider-registry.js';
 import { createJobManagementService } from './jobs.js';
 import {
   authorizeControlRequest,
@@ -31,7 +32,15 @@ function modelToResponse(
     aliases: entry.aliases,
     recommendedAlias: entry.recommendedAlias,
     responseFamily: entry.responseFamily,
-    executionProviderId: entry.executionProviderId,
+    // `executionProviderId` is now route-dependent (modelAlias + agentEngine).
+    // Surface the per-engine routes as the read-only diagnostic; the resolved
+    // single id is exposed by engine-aware preview surfaces.
+    executionRoutes: (
+      getModelProviderDefinition(entry.modelRoute.id)?.executionRoutes ?? []
+    ).map((route) => ({
+      engine: route.engine,
+      executionProviderId: route.executionProviderId,
+    })),
     credentialProfileRef: entry.credentialProfileRef,
     modelRoute: {
       id: entry.modelRoute.id,

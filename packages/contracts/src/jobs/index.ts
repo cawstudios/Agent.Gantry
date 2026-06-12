@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  AgentEngineSchema,
   ContractMetadataSchema,
   IsoDateTimeSchema,
 } from '../contract-primitives.js';
@@ -437,7 +438,16 @@ export const ModelRecordSchema = z.object({
   aliases: z.array(z.string()),
   recommendedAlias: z.string(),
   responseFamily: z.string(),
-  executionProviderId: z.string(),
+  // Read-only diagnostic: execution adapter per agent engine. Resolution is
+  // modelAlias + agentEngine -> executionRoute.
+  executionRoutes: z.array(
+    z
+      .object({
+        engine: AgentEngineSchema,
+        executionProviderId: z.string(),
+      })
+      .strict(),
+  ),
   credentialProfileRef: z.string(),
   modelRoute: z.object({
     id: z.string(),

@@ -4,6 +4,7 @@ import {
   jobCompletedModelPayload,
   jobStartedModelPayload,
   modelUseKindForJobSchedule,
+  resolveJobExecutionProviderId,
   resolveJobModel,
 } from '@core/jobs/model-resolution.js';
 
@@ -62,5 +63,25 @@ describe('job model resolution', () => {
       model_source: 'settings.yaml agent.one_time_job_default_model',
       cache_policy: 'anthropic-prompt',
     });
+  });
+
+  it('inherits the bound agent engine when resolving the job execution provider', () => {
+    const anthropicSdk = resolveJobModel(
+      { model: 'opus', schedule_type: 'manual' } as never,
+      { model: 'opus', source: 'system default' },
+      'anthropic_sdk',
+    );
+    const deepagents = resolveJobModel(
+      { model: 'opus', schedule_type: 'manual' } as never,
+      { model: 'opus', source: 'system default' },
+      'deepagents',
+    );
+
+    expect(resolveJobExecutionProviderId({ resolvedModel: anthropicSdk })).toBe(
+      'anthropic:claude-agent-sdk',
+    );
+    expect(resolveJobExecutionProviderId({ resolvedModel: deepagents })).toBe(
+      'deepagents:langchain',
+    );
   });
 });

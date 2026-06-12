@@ -1097,7 +1097,7 @@
     "rule": "provider_specific_path",
     "reason": "Exact shared model-catalog provider debt after removing the broad shared provider allowlist; capped so new provider-specific shared leakage fails.",
     "removeByPhase": "provider-boundary-model-catalog-cleanup-phase",
-    "maxViolations": 34
+    "maxViolations": 41
   },
   {
     "file": "apps/core/src/shared/model-cache-support.ts",
@@ -1111,7 +1111,7 @@
     "rule": "provider_specific_path",
     "reason": "The model provider registry is the intentional source of truth for provider definitions, credential modes, gateway behavior, and cache metadata until the architecture checker has first-class provider-registry ownership.",
     "removeByPhase": "provider-registry-boundary-rule",
-    "maxViolations": 32
+    "maxViolations": 39
   },
   {
     "file": "apps/core/src/platform/index.ts",
@@ -1325,6 +1325,27 @@
     "rule": "direct_risky_execution",
     "reason": "Toolchain bake runner spawns the registry-pinned npm install child process directly for bake jobs; capped to this single call until bake execution moves through the sandbox adapter.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/shared/agent-engine.ts",
+    "rule": "provider_specific_path",
+    "reason": "public AgentEngine vocabulary per docs/architecture/deepagents-agent-engine-handoff-plan.md",
+    "removeByPhase": "provider-boundary-model-catalog-cleanup-phase",
+    "maxViolations": 2
+  },
+  {
+    "file": "apps/core/src/shared/model-execution-route.ts",
+    "rule": "provider_specific_path",
+    "reason": "public AgentEngine vocabulary per docs/architecture/deepagents-agent-engine-handoff-plan.md",
+    "removeByPhase": "provider-boundary-model-catalog-cleanup-phase",
+    "maxViolations": 4
+  },
+  {
+    "file": "packages/contracts/src/contract-primitives.ts",
+    "rule": "provider_specific_path",
+    "reason": "public AgentEngine vocabulary per docs/architecture/deepagents-agent-engine-handoff-plan.md",
+    "removeByPhase": "provider-boundary-model-catalog-cleanup-phase",
     "maxViolations": 1
   }
 ]

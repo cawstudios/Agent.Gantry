@@ -36,10 +36,51 @@ describe('model provider registry', () => {
         true,
       );
       expect(provider?.modelRoute, entry.id).toBe(true);
-      expect(provider?.executionProviderIds, entry.id).toContain(
-        entry.executionProviderId,
+      expect(provider?.executionRoutes.length ?? 0, entry.id).toBeGreaterThan(
+        0,
       );
     }
+  });
+
+  it('declares engine-keyed execution routes with credential mode constraints', () => {
+    expect(getModelProviderDefinition('anthropic')?.executionRoutes).toEqual([
+      {
+        engine: 'anthropic_sdk',
+        executionProviderId: 'anthropic:claude-agent-sdk',
+        supportedCredentialModes: ['api_key', 'claude_code_oauth'],
+      },
+      {
+        engine: 'deepagents',
+        executionProviderId: 'deepagents:langchain',
+        supportedCredentialModes: ['api_key'],
+      },
+    ]);
+    expect(
+      getModelProviderDefinition('openrouter')?.executionRoutes.map(
+        (route) => route.engine,
+      ),
+    ).toEqual(['anthropic_sdk']);
+    expect(getModelProviderDefinition('openai')?.executionRoutes).toEqual([
+      {
+        engine: 'deepagents',
+        executionProviderId: 'deepagents:langchain',
+        supportedCredentialModes: ['api_key'],
+      },
+    ]);
+  });
+
+  it('makes OpenAI an executable chat model route', () => {
+    const openai = getModelProviderDefinition('openai');
+    expect(openai?.executable).toBe(true);
+    expect(openai?.modelRoute).toBe(true);
+    expect(openai?.supportedWorkloads).toEqual(['chat']);
+    expect(openai?.gateway.sdkProjection).toMatchObject({
+      baseUrlEnv: 'OPENAI_BASE_URL',
+      tokenEnv: 'OPENAI_API_KEY',
+    });
+    expect(listModelRouteProviders().map((provider) => provider.id)).toContain(
+      'openai',
+    );
   });
 
   it('declares provider-side cache support without a shared cache assumption', () => {
@@ -238,7 +279,7 @@ describe('model provider registry', () => {
           usageBehavior: 'normal_usage',
         },
       },
-      executionProviderIds: [],
+      executionRoutes: [],
     } satisfies ModelProviderDefinition;
 
     expect(

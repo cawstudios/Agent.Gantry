@@ -17,12 +17,12 @@
     "apps/core/src/channels/telegram/channel-delivery.ts": 766,
     "apps/core/src/cli/group.ts": 824,
     "apps/core/src/config/settings/desired-state-service.ts": 820,
-    "apps/core/src/config/settings/runtime-settings-parser.ts": 1120,
+    "apps/core/src/config/settings/runtime-settings-parser.ts": 1130,
     "apps/core/src/application/jobs/job-readiness-service.ts": 754,
-    "apps/core/src/jobs/execution.ts": 772,
+    "apps/core/src/jobs/execution.ts": 785,
     "apps/core/src/jobs/ipc-admin-handlers.ts": 933,
     "apps/core/src/runner/mcp/tools/service.ts": 850,
-    "apps/core/src/runtime/agent-spawn.ts": 762,
+    "apps/core/src/runtime/agent-spawn.ts": 780,
     "apps/core/src/runtime/browser-capability.ts": 737,
     "apps/core/src/runtime/group-processing.ts": 824,
     "apps/core/src/runtime/group-queue.ts": 757,
@@ -33,7 +33,8 @@
     "apps/core/src/adapters/llm/anthropic-claude-agent/runner/tool-permission-gate.ts": 725,
     "apps/core/src/adapters/storage/postgres/repositories/worker-coordination-repository.postgres.ts": 721,
     "apps/core/src/application/agents/prompt-profile-service.ts": 783,
-    "apps/core/src/config/settings/runtime-settings-renderer.ts": 706
+    "apps/core/src/config/settings/runtime-settings-renderer.ts": 720,
+    "apps/core/src/shared/model-catalog.ts": 770
   },
   "layers": {
     "domain": {

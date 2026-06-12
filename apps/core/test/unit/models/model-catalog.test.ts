@@ -40,6 +40,33 @@ describe('model catalog resolution', () => {
     });
   });
 
+  it('resolves OpenAI chat aliases on the openai response family', () => {
+    expect(resolveModelSelection('gpt')).toMatchObject({
+      ok: true,
+      alias: 'gpt',
+      runnerModel: 'gpt-5.5',
+    });
+    expect(resolveModelSelection('gpt-mini')).toMatchObject({
+      ok: true,
+      alias: 'gpt-mini',
+      runnerModel: 'gpt-5.4-mini',
+    });
+    expect(findModelByRunnerModel('gpt-5.5')?.responseFamily).toBe('openai');
+  });
+
+  it('keeps OpenAI chat models scoped to the chat workload only', () => {
+    expect(resolveModelSelectionForWorkload('gpt', 'chat')).toMatchObject({
+      ok: true,
+      alias: 'gpt',
+    });
+    expect(
+      resolveModelSelectionForWorkload('gpt', 'one_time_job'),
+    ).toMatchObject({
+      ok: false,
+      reason: 'unsupported-workload',
+    });
+  });
+
   it('uses catalog aliases for setup and memory defaults', () => {
     expect(DEFAULT_SETUP_MODEL_ALIAS).toBe('opus');
     expect(MEMORY_MODEL_DEFAULT_ALIASES).toEqual({

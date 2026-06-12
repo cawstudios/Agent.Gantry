@@ -229,7 +229,12 @@ describe('contracts package', () => {
               aliases: ['kimi'],
               recommendedAlias: 'kimi',
               responseFamily: 'anthropic',
-              executionProviderId: 'anthropic:claude-agent-sdk',
+              executionRoutes: [
+                {
+                  engine: 'anthropic_sdk',
+                  executionProviderId: 'anthropic:claude-agent-sdk',
+                },
+              ],
               credentialProfileRef: 'gantry-model-access',
               modelRoute: {
                 id: 'openrouter',

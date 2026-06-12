@@ -489,7 +489,7 @@ describe('control OpenAPI documentation', () => {
     expect(spec.components.schemas.Model).toMatchObject({
       properties: expect.objectContaining({
         responseFamily: { type: 'string' },
-        executionProviderId: { type: 'string' },
+        executionRoutes: expect.objectContaining({ type: 'array' }),
         credentialProfileRef: { type: 'string' },
         modelRoute: expect.objectContaining({
           type: 'object',

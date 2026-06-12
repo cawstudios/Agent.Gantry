@@ -2,6 +2,10 @@ import path from 'path';
 import fs from 'fs';
 import { resolveModelAlias } from '../shared/model-catalog.js';
 import {
+  resolveAgentEngine,
+  type AgentEngine,
+} from '../shared/agent-engine.js';
+import {
   envConfig,
   envValue,
   envValueDynamic,
@@ -398,6 +402,17 @@ export function getEffectiveModelConfig(
     };
   }
   return getDefaultModelConfig(kind, agentFolder);
+}
+
+// Durable agent engine: per-agent override else the defaults block else the
+// system default. Jobs and conversations inherit this; there is no job- or
+// conversation-level engine selector.
+export function getEffectiveAgentEngine(agentFolder?: string): AgentEngine {
+  const settings = getRuntimeSettingsForConfig();
+  const perAgent = agentFolder
+    ? settings.agents?.[agentFolder]?.agentEngine
+    : undefined;
+  return resolveAgentEngine(perAgent ?? settings.agent.defaultAgentEngine);
 }
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,

@@ -1,4 +1,5 @@
 import { quoteYamlString } from './yaml.js';
+import { DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
 import { renderArtifactStoreYamlLines } from './runtime-settings-artifact-store-renderer.js';
 import {
   DEFAULT_AGENT_NAME,
@@ -62,6 +63,9 @@ function renderDefaultsYaml(
   lines.push(
     `  model: ${quoteYamlString(agent.defaultModel || SYSTEM_DEFAULT_MODEL_ALIAS)}`,
   );
+  if (agent.defaultAgentEngine !== DEFAULT_AGENT_ENGINE) {
+    lines.push(`  agent_engine: ${quoteYamlString(agent.defaultAgentEngine)}`);
+  }
   if (agent.oneTimeJobDefaultModel || agent.recurringJobDefaultModel) {
     lines.push('  jobs:');
     if (agent.oneTimeJobDefaultModel) {
@@ -210,6 +214,9 @@ function renderConfiguredAgentsYaml(
       lines.push(
         `    relationship_mode: ${quoteYamlString(agent.relationshipMode)}`,
       );
+    }
+    if (agent.agentEngine) {
+      lines.push(`    agent_engine: ${quoteYamlString(agent.agentEngine)}`);
     }
     if (agent.model) {
       lines.push(`    model: ${quoteYamlString(agent.model)}`);

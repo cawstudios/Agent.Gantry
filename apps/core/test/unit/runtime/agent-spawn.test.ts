@@ -38,6 +38,7 @@ vi.mock('@core/config/index.js', () => ({
       ? { model: groupModel, source: 'conversation.agentConfig.model' }
       : { source: 'unset' },
   ),
+  getEffectiveAgentEngine: vi.fn(() => 'anthropic_sdk'),
   getDeploymentMode: vi.fn(() => 'workstation'),
   getRuntimeSettingsForConfig: vi.fn(() => ({
     permissions: {
@@ -220,6 +221,7 @@ import {
 import {
   getDeploymentMode,
   getEffectiveModelConfig,
+  getEffectiveAgentEngine,
   getRuntimeSettingsForConfig,
 } from '@core/config/index.js';
 import { DirectRunnerSandboxProvider } from '@core/adapters/sandbox/runner-sandbox-provider.js';
@@ -3182,6 +3184,49 @@ describe('agent-spawn timeout behavior', () => {
     });
     expect(getHostRuntimeCredentialEnv).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects an OpenAI model under the Anthropic SDK engine before spawn', async () => {
+    vi.mocked(getEffectiveAgentEngine).mockReturnValueOnce('anthropic_sdk');
+    const result = await spawnTestAgent(
+      testGroup,
+      { ...testInput, model: 'gpt' },
+      () => {},
+    );
+
+    expect(result).toMatchObject({
+      status: 'error',
+      error:
+        'Model gpt uses the OpenAI endpoint, which is not supported by Anthropic SDK. Choose DeepAgents or an Anthropic-compatible model.',
+    });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('routes an OpenAI model to the DeepAgents adapter when the agent engine is deepagents', async () => {
+    vi.mocked(getEffectiveAgentEngine).mockReturnValueOnce('deepagents');
+    const result = await spawnTestAgent(
+      testGroup,
+      { ...testInput, model: 'gpt' },
+      () => {},
+      undefined,
+      {
+        executionAdapter: {
+          id: 'deepagents:langchain',
+          prepare: vi.fn(async () => {
+            throw new Error('deepagents prepare not implemented in packet A');
+          }),
+        },
+      },
+    );
+
+    // Resolution selected the deepagents adapter (prepare ran) rather than
+    // rejecting on engine compatibility.
+    expect(result).toMatchObject({
+      status: 'error',
+      error: expect.stringContaining(
+        'deepagents prepare not implemented in packet A',
+      ),
+    });
   });
 
   it('returns error when execution adapter prepare rejects', async () => {

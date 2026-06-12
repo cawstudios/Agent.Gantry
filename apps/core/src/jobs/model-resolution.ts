@@ -3,6 +3,7 @@ import type { AgentExecutionAdapterRegistry } from '../application/agent-executi
 import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 import { resolveConfiguredRuntimeExecutionProviderId } from '../runtime/execution-provider-id.js';
 import type { NormalizedModelUsage } from '../shared/model-catalog.js';
+import { resolveExecutionRoute } from '../shared/model-execution-route.js';
 import {
   modelUseKindForJobSchedule,
   resolveDefaultJobExecutionProviderId,
@@ -23,10 +24,19 @@ export function resolveJobExecutionProviderId(input: {
   executionAdapters?: Pick<AgentExecutionAdapterRegistry, 'list'>;
   fallbackForInjectedRunner?: boolean;
 }): ExecutionProviderId {
+  const resolution = input.resolvedModel.resolution;
+  let routed: ExecutionProviderId | undefined;
+  if (resolution?.ok) {
+    const route = resolveExecutionRoute({
+      entry: resolution.entry,
+      agentEngine: input.resolvedModel.agentEngine,
+    });
+    if (route.ok) {
+      routed = route.value.executionProviderId as ExecutionProviderId;
+    }
+  }
   return (
-    (input.resolvedModel.entry?.executionProviderId as
-      | ExecutionProviderId
-      | undefined) ??
+    routed ??
     resolveConfiguredRuntimeExecutionProviderId({
       executionAdapter: input.executionAdapter,
       executionAdapters: input.executionAdapters,

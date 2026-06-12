@@ -199,6 +199,10 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'model-provider-registry.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/agent-engine.ts'),
+    path.join(sharedDir, 'agent-engine.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/model-cache-support.ts'),
     path.join(sharedDir, 'model-cache-support.ts'),
   );

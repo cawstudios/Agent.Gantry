@@ -277,7 +277,7 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       'aliases',
       'recommendedAlias',
       'responseFamily',
-      'executionProviderId',
+      'executionRoutes',
       'credentialProfileRef',
       'modelRoute',
       'capabilities',
@@ -290,7 +290,17 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       aliases: stringArray,
       recommendedAlias: { type: 'string' },
       responseFamily: { type: 'string' },
-      executionProviderId: { type: 'string' },
+      executionRoutes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          required: ['engine', 'executionProviderId'],
+          properties: {
+            engine: { type: 'string' },
+            executionProviderId: { type: 'string' },
+          },
+        },
+      },
       credentialProfileRef: { type: 'string' },
       modelRoute: {
         type: 'object',

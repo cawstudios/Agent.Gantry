@@ -871,6 +871,96 @@ conversations:
     });
   });
 
+  it('defaults, renders, parses, and round-trips the default agent engine', () => {
+    const settings = createDefaultRuntimeSettings();
+    expect(settings.agent.defaultAgentEngine).toBe('anthropic_sdk');
+
+    // System default stays implicit in rendered YAML.
+    expect(renderRuntimeSettingsYaml(settings)).not.toContain('agent_engine');
+
+    settings.agent.defaultAgentEngine = 'deepagents';
+    const yaml = renderRuntimeSettingsYaml(settings);
+    expect(yaml).toContain('  agent_engine: deepagents');
+    expect(parseRuntimeSettings(yaml).agent.defaultAgentEngine).toBe(
+      'deepagents',
+    );
+  });
+
+  it('parses, renders, and round-trips a per-agent engine override', () => {
+    const parsed = parseRuntimeSettings(`defaults:
+  model: opus
+
+agents:
+  main_agent:
+    name: Default Agent
+    agent_engine: deepagents
+    model: gpt
+`);
+    expect(parsed.agents.main_agent.agentEngine).toBe('deepagents');
+    expect(renderRuntimeSettingsYaml(parsed)).toContain(
+      '    agent_engine: deepagents',
+    );
+  });
+
+  it('rejects an unsupported engine value with the locked copy', () => {
+    expect(() =>
+      parseRuntimeSettings(`defaults:
+  model: opus
+  agent_engine: langchain
+`),
+    ).toThrow(
+      'defaults.agent_engine: Unsupported agent engine: langchain. Choose anthropic_sdk or deepagents.',
+    );
+    expect(() =>
+      parseRuntimeSettings(`agents:
+  kai:
+    name: Kai
+    agent_engine: claude
+`),
+    ).toThrow(
+      'agents.kai.agent_engine: Unsupported agent engine: claude. Choose anthropic_sdk or deepagents.',
+    );
+  });
+
+  it('rejects an incompatible per-agent engine/model pair at parse time', () => {
+    expect(() =>
+      parseRuntimeSettings(`agents:
+  kai:
+    name: Kai
+    agent_engine: anthropic_sdk
+    model: gpt
+`),
+    ).toThrow(
+      'agents.kai.model is invalid: Model gpt uses the OpenAI endpoint, which is not supported by Anthropic SDK. Choose DeepAgents or an Anthropic-compatible model.',
+    );
+  });
+
+  it('fails settings validation when the effective engine/model pair is incompatible', () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-settings-engine-'),
+    );
+    try {
+      const settings = createDefaultRuntimeSettings();
+      settings.agent.defaultModel = 'opus';
+      settings.agents.kai = {
+        name: 'Kai',
+        folder: 'kai',
+        agentEngine: 'anthropic_sdk',
+        model: 'gpt',
+        bindings: {},
+        sources: emptySources(),
+        capabilities: [],
+      } as never;
+      const result = validateLoadedRuntimeSettings(runtimeHome, settings);
+      expect(result.ok).toBe(false);
+      expect(result.failure?.details).toContain(
+        'agents.kai.model is invalid: Model gpt uses the OpenAI endpoint, which is not supported by Anthropic SDK. Choose DeepAgents or an Anthropic-compatible model.',
+      );
+    } finally {
+      fs.rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
   it('mirrors persistent permission grants into readable semantic, Browser, and scoped RunCommand tools', () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-settings-tools-'),

@@ -30,6 +30,8 @@ import { buildBoundedMemoryRecallQuery } from '../memory/app-memory-recall-query
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { isRuntimeEventType } from '../domain/events/runtime-event-types.js';
 import { resolveRuntimeExecutionProviderId } from './execution-provider-id.js';
+import { resolveExecutionRoute } from '../shared/model-execution-route.js';
+import { DEFAULT_AGENT_ENGINE } from '../shared/agent-engine.js';
 import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 const DEFAULT_ASSISTANT_NAME = 'Gantry';
 const DEFAULT_MODEL_ALIAS = 'opus';
@@ -237,11 +239,21 @@ export function createGroupAgentRunner(input: {
     const initialModelSelection = defaultModelStatusSelection(
       group.agentConfig?.model ?? DEFAULT_MODEL_ALIAS,
     );
-    const executionProviderId = (initialModelSelection.model
-      ?.executionProviderId ??
-      resolveRuntimeExecutionProviderId(
-        deps.executionAdapter,
-      )) as ExecutionProviderId;
+    // Live-turn lease execution provider must match the runner's engine-resolved
+    // route. Engine inherits from the projected route config or the bound agent.
+    const liveTurnEngine =
+      group.agentConfig?.agentEngine ?? DEFAULT_AGENT_ENGINE;
+    const liveTurnRoute = initialModelSelection.model
+      ? resolveExecutionRoute({
+          entry: initialModelSelection.model,
+          agentEngine: liveTurnEngine,
+        })
+      : undefined;
+    const executionProviderId = (
+      liveTurnRoute?.ok
+        ? liveTurnRoute.value.executionProviderId
+        : resolveRuntimeExecutionProviderId(deps.executionAdapter)
+    ) as ExecutionProviderId;
     const sessionThreadId = options?.memoryContext?.threadId ?? null;
     const modelStatus = createRuntimeModelStatusAccess(
       group.folder,

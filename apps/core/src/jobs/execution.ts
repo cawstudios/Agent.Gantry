@@ -1,6 +1,10 @@
 import { randomUUID } from 'crypto';
 import fs from 'fs';
-import { ASSISTANT_NAME, getEffectiveModelConfig } from '../config/index.js';
+import {
+  ASSISTANT_NAME,
+  getEffectiveModelConfig,
+  getEffectiveAgentEngine,
+} from '../config/index.js';
 import type { Job } from '../domain/types.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import {
@@ -129,6 +133,7 @@ export async function runJob(
   const resolvedModel = resolveJobModel(
     currentJob,
     getEffectiveModelConfig(undefined, jobModelUseKind, execution.group.folder),
+    getEffectiveAgentEngine(execution.group.folder),
   );
   const eventControl = getRuntimeControlRepository();
   const preflightAppSession = await resolveAppSessionForJob(

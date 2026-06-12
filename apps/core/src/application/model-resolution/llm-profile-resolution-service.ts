@@ -8,6 +8,11 @@ import {
   type ModelRouteId,
   type ModelWorkload,
 } from '../../shared/model-catalog.js';
+import {
+  DEFAULT_AGENT_ENGINE,
+  type AgentEngine,
+} from '../../shared/agent-engine.js';
+import { resolveExecutionRoute } from '../../shared/model-execution-route.js';
 
 export interface ResolvedLlmProfile {
   profile: LlmProfile;
@@ -22,7 +27,11 @@ export interface ResolvedLlmProfile {
       providerModelId: string;
     };
   };
+  // Read-only diagnostic: the internal execution adapter the resolved
+  // engine+route pairing runs on.
   executionProviderId: ModelExecutionProviderId;
+  agentEngine: AgentEngine;
+  supportedCredentialModes: readonly string[];
   credentialProfileRef: string;
   capabilities: ModelCapabilityDescriptor;
 }
@@ -31,7 +40,12 @@ export type LlmProfileResolution =
   | { ok: true; value: ResolvedLlmProfile }
   | {
       ok: false;
-      reason: 'empty' | 'unknown' | 'raw-provider-id' | 'unsupported-workload';
+      reason:
+        | 'empty'
+        | 'unknown'
+        | 'raw-provider-id'
+        | 'unsupported-workload'
+        | 'incompatible-engine';
       message: string;
     };
 
@@ -52,6 +66,18 @@ export class LlmProfileResolutionService {
         message: resolved.message,
       };
     }
+    const agentEngine = input.profile.agentEngine ?? DEFAULT_AGENT_ENGINE;
+    const executionRoute = resolveExecutionRoute({
+      entry: resolved.entry,
+      agentEngine,
+    });
+    if (!executionRoute.ok) {
+      return {
+        ok: false,
+        reason: 'incompatible-engine',
+        message: executionRoute.message,
+      };
+    }
     const credentialProfileRef =
       input.profile.credentialProfileRef ?? resolved.entry.credentialProfileRef;
     return {
@@ -69,7 +95,9 @@ export class LlmProfileResolutionService {
             providerModelId: resolved.entry.modelRoute.providerModelId,
           },
         },
-        executionProviderId: resolved.entry.executionProviderId,
+        executionProviderId: executionRoute.value.executionProviderId,
+        agentEngine,
+        supportedCredentialModes: executionRoute.value.supportedCredentialModes,
         credentialProfileRef,
         capabilities: resolved.entry.capabilities,
       },

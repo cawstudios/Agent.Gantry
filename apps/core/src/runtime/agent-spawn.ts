@@ -9,6 +9,7 @@ import {
   getDeploymentMode,
   getRuntimeSettingsForConfig,
   getEffectiveModelConfig,
+  getEffectiveAgentEngine,
 } from '../config/index.js';
 import { resolveAgentAccessPolicy } from '../config/profiles.js';
 import { logger } from '../infrastructure/logging/logger.js';
@@ -147,6 +148,12 @@ export async function spawnAgent(
       ? 'one_time_job'
       : 'recurring_job'
     : 'chat';
+  // Engine is durable agent state: per-agent override else the defaults block
+  // else the system default. Jobs and conversations inherit it; there is no
+  // job- or conversation-level engine selector. Resolution must surface the
+  // exact compatibility copy and fail before the runner process starts.
+  const runtimeSettings = getRuntimeSettingsForConfig();
+  const agentEngine = getEffectiveAgentEngine(group.folder);
   const llmProfileResolutionService = new LlmProfileResolutionService();
   const profileTimestamp = nowIso();
   const runtimeLlmProfile: LlmProfile = {
@@ -155,6 +162,7 @@ export async function spawnAgent(
     purpose: input.isScheduledJob ? 'coding' : 'chat',
     modelAlias:
       requestedModel || modelConfig.model || DEFAULT_SETUP_MODEL_ALIAS,
+    agentEngine,
     credentialProfileRef: MODEL_RUNTIME_CREDENTIAL_IDENTIFIER,
     createdAt: profileTimestamp as never,
     updatedAt: profileTimestamp as never,
@@ -201,7 +209,7 @@ export async function spawnAgent(
   // The instruction projection follows the same resolved access policy as the
   // tool surface: locked agents get the locked prompt fragments.
   const agentAccessPolicy = resolveAgentAccessPolicy(
-    getRuntimeSettingsForConfig().agents?.[group.folder]?.accessPreset,
+    runtimeSettings.agents?.[group.folder]?.accessPreset,
   );
   const isLockedAgent = agentAccessPolicy.preset === 'locked';
   let compiledSystemPrompt = '';
@@ -238,9 +246,7 @@ export async function spawnAgent(
     browserProfileName,
     hideAuthorityTools,
     compiledSystemPrompt,
-    yoloMode: effectiveYoloModeSettings(
-      getRuntimeSettingsForConfig().permissions.yoloMode,
-    ),
+    yoloMode: effectiveYoloModeSettings(runtimeSettings.permissions.yoloMode),
   };
 
   const hostRuntime = prepareHostRuntimeContext(group);
@@ -248,7 +254,7 @@ export async function spawnAgent(
   let executionAdapter: NonNullable<RunAgentOptions['executionAdapter']>;
   try {
     executionAdapter = resolveAgentExecutionAdapter({
-      executionProviderId: effectiveModelEntry.executionProviderId,
+      executionProviderId: resolvedModel.value.executionProviderId,
       registry: options?.executionAdapters,
       fallback: options?.executionAdapter,
     }) as NonNullable<RunAgentOptions['executionAdapter']>;
