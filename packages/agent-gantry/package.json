@@ -1,0 +1,36 @@
+{
+  "name": "@cawstudios/agent-gantry",
+  "version": "0.1.0",
+  "description": "Embeddable Gantry runtime package.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24 <26"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run test/agent-gantry.test.ts"
+  },
+  "dependencies": {
+    "botbuilder": "^4.23.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  }
+}

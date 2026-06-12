@@ -172,6 +172,18 @@
         "url",
         "crypto"
       ]
+    },
+    "packages/agent-gantry": {
+      "paths": [
+        "packages/agent-gantry/src"
+      ],
+      "allowedImportLayers": [
+        "packages/agent-gantry"
+      ],
+      "allowedExternalImports": [
+        "node:",
+        "botbuilder"
+      ]
     }
   },
   "approvedProviderSpecificPaths": [
@@ -181,7 +193,9 @@
     "apps/core/src/adapters/browser",
     "apps/core/src/channels",
     "apps/core/src/cli",
-    "apps/core/src/runner/mcp"
+    "apps/core/src/runner/mcp",
+    "packages/agent-gantry/src/adapters/teams",
+    "packages/agent-gantry/src/index.ts"
   ],
   "approvedProviderBoundaryPaths": [
     "apps/core/src/adapters/llm/anthropic-claude-agent"
