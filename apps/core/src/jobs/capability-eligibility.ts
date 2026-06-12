@@ -1,4 +1,4 @@
-import type { RuntimeDeploymentMode } from '../config/settings/runtime-settings-types.js';
+import type { RuntimeDeploymentMode } from '../shared/runtime-deployment-mode.js';
 import type { RuntimeDependencyRepository } from '../domain/ports/fleet-capability-state.js';
 import type { SkillCatalogRepository } from '../domain/ports/repositories.js';
 import {

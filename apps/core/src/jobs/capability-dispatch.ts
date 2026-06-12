@@ -1,7 +1,7 @@
 import type { Job } from '../domain/types.js';
 import type { RuntimeDependencyRepository } from '../domain/ports/fleet-capability-state.js';
 import type { SkillCatalogRepository } from '../domain/ports/repositories.js';
-import type { RuntimeDeploymentMode } from '../config/settings/runtime-settings-types.js';
+import type { RuntimeDeploymentMode } from '../shared/runtime-deployment-mode.js';
 import { agentIdForJobWorkspaceKey } from '../application/jobs/job-tool-policy.js';
 import { DEFAULT_JOB_RUNTIME_APP_ID } from '../application/jobs/job-access.js';
 import {

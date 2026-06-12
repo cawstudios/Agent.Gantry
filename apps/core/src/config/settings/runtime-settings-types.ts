@@ -2,6 +2,7 @@ import type {
   RuntimeMemorySettingsSnapshot,
   RuntimeStorageSettingsSnapshot,
 } from './memory-snapshot.js';
+import type { RuntimeDeploymentMode } from '../../shared/runtime-deployment-mode.js';
 import type { AgentPersona } from '../../shared/agent-persona.js';
 import type { AgentRelationshipMode } from '../../shared/agent-relationship-mode.js';
 import type { YoloModeSettings } from '../../shared/yolo-mode-policy.js';
@@ -209,12 +210,6 @@ export interface RuntimeArtifactStoreSettings {
   endpoint?: string;
   forcePathStyle?: boolean;
 }
-
-// Deployment topology (one machine vs many). Distinct axis from security
-// posture (GANTRY_SECURITY_POSTURE env). `workstation` is today's single-node
-// behavior with live installs; `fleet` runs immutable workers that fetch
-// capability artifacts produced by bake jobs.
-export type RuntimeDeploymentMode = 'workstation' | 'fleet';
 
 export interface RuntimeProcessSettings {
   queue: RuntimeQueueSettings;

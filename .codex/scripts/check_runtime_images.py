@@ -8,10 +8,12 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
 IMAGE_LINE = re.compile(r"^(?P<indent>\s*)image:\s*(?P<image>\S+)\s*$")
+KEY_LINE = re.compile(r"^(?P<indent>\s*)(?P<key>[A-Za-z0-9_.-]+):\s*(?:#.*)?$")
 FORBIDDEN_IMAGE_PATTERNS = [
     re.compile(r"(^|/)\.git($|/)"),
     re.compile(r"(^|/)\.claude($|/)"),
@@ -27,30 +29,113 @@ FORBIDDEN_IMAGE_PATTERNS = [
 ]
 
 
+@dataclass(frozen=True)
+class ComposeImageEntry:
+    image: str
+    line_no: int
+    built_locally: bool
+
+
+def default_compose_files(root: Path = Path(".")) -> list[Path]:
+    candidates = [
+        *root.glob("docker-compose*.yml"),
+        *root.glob("ops/docker/docker-compose*.yml"),
+    ]
+    return sorted({path for path in candidates if path.exists()})
+
+
+def compose_image_entries(file: Path) -> list[ComposeImageEntry]:
+    entries: list[ComposeImageEntry] = []
+    if not file.exists():
+        return entries
+
+    block: dict[str, object] | None = None
+    in_services = False
+    service: dict[str, object] | None = None
+
+    def finish_block() -> None:
+        nonlocal block
+        if block is not None and block["image"]:
+            entries.append(
+                ComposeImageEntry(
+                    str(block["image"]),
+                    int(block["line_no"]),
+                    bool(block["build"]),
+                )
+            )
+        block = None
+
+    def finish_service() -> None:
+        nonlocal service
+        if service is not None and service["image"]:
+            entries.append(
+                ComposeImageEntry(
+                    str(service["image"]),
+                    int(service["line_no"]),
+                    bool(service["build"]),
+                )
+            )
+        service = None
+
+    def record(container: dict[str, object], line: str, lineno: int) -> None:
+        image_match = IMAGE_LINE.match(line)
+        if image_match:
+            container["image"] = image_match.group("image")
+            container["line_no"] = lineno
+        if line.strip().startswith("build:"):
+            container["build"] = True
+
+    for lineno, line in enumerate(file.read_text().splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        indent = len(line) - len(line.lstrip(" "))
+        key_match = KEY_LINE.match(line)
+        if indent == 0 and key_match:
+            finish_service()
+            finish_block()
+            key = key_match.group("key")
+            in_services = key == "services"
+            if not in_services:
+                block = {"image": "", "line_no": 0, "build": False}
+            continue
+
+        if in_services:
+            if indent == 2 and key_match:
+                finish_service()
+                service = {"image": "", "line_no": 0, "build": False}
+                continue
+            if service is not None and indent > 2:
+                record(service, line, lineno)
+            continue
+
+        if block is not None and indent > 0:
+            record(block, line, lineno)
+
+    finish_service()
+    finish_block()
+    return entries
+
+
 def compose_image_violations(files: list[Path]) -> list[str]:
     violations: list[str] = []
     for file in files:
-        if not file.exists():
-            continue
-        for lineno, line in enumerate(file.read_text().splitlines(), start=1):
-            match = IMAGE_LINE.match(line)
-            if not match:
+        for entry in compose_image_entries(file):
+            if entry.built_locally:
                 continue
-            image = match.group("image")
+            image = entry.image
             if "@sha256:" not in image:
-                violations.append(f"{file}:{lineno}: {image}")
+                violations.append(f"{file}:{entry.line_no}: {image}")
     return violations
 
 
 def compose_images(files: list[Path]) -> list[str]:
     images: list[str] = []
     for file in files:
-        if not file.exists():
-            continue
-        for line in file.read_text().splitlines():
-            match = IMAGE_LINE.match(line)
-            if match:
-                images.append(match.group("image"))
+        for entry in compose_image_entries(file):
+            if not entry.built_locally:
+                images.append(entry.image)
     return sorted(set(images))
 
 
@@ -140,7 +225,7 @@ def main() -> int:
 
     compose_files = [Path(path) for path in args.compose]
     if not compose_files:
-        compose_files = sorted(Path(".").glob("docker-compose*.yml"))
+        compose_files = default_compose_files()
     digest_violations = compose_image_violations(compose_files)
     if digest_violations:
         print("Mutable image references detected:")

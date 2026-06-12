@@ -1,4 +1,7 @@
-import { ADMIN_MCP_TOOL_NAMES } from '../shared/admin-mcp-tools.js';
+import {
+  ADMIN_MCP_TOOL_NAMES,
+  AUTHORITY_CHANGING_GANTRY_MCP_TOOL_NAMES,
+} from '../shared/admin-mcp-tools.js';
 import {
   selectedMemoryIpcActionsFromToolRules,
   type GantryMemoryIpcAction,
@@ -29,15 +32,10 @@ export const BASELINE_GANTRY_MCP_TOOL_NAMES = [
 // authority for itself. In the fixed-image worker product mode they are hidden
 // from user-facing live agents and scheduled jobs: workers never install tools,
 // skills, MCP servers, or dependencies during a run. Admin tools are tracked
-// separately in ADMIN_MCP_TOOL_NAMES.
-export const AUTHORITY_CHANGING_GANTRY_MCP_TOOL_NAMES = [
-  'request_skill_install',
-  'request_skill_proposal',
-  'request_skill_dependency_install',
-  'request_mcp_server',
-  'request_access',
-  'request_agent_profile_update',
-] as const;
+// separately in ADMIN_MCP_TOOL_NAMES. The canonical names live in the shared
+// admin-mcp-tools module; this re-export keeps the runner the agent-facing
+// source of truth for the tool surface.
+export { AUTHORITY_CHANGING_GANTRY_MCP_TOOL_NAMES };
 
 export const OPTIONAL_GANTRY_MCP_TOOL_NAMES = [
   'scheduler_list_models',

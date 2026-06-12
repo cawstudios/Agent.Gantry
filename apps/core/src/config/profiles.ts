@@ -1,5 +1,7 @@
-import { AUTHORITY_CHANGING_GANTRY_MCP_TOOL_NAMES } from '../runner/gantry-mcp-tool-surface.js';
-import { ADMIN_MCP_TOOL_NAMES } from '../shared/admin-mcp-tools.js';
+import {
+  ADMIN_MCP_TOOL_NAMES,
+  AUTHORITY_CHANGING_GANTRY_MCP_TOOL_NAMES,
+} from '../shared/admin-mcp-tools.js';
 import { getRuntimeSettingsForConfig } from './index.js';
 
 // Locked agents have zero access to authority-changing/request/admin/settings

@@ -60,6 +60,7 @@ EOF
 docker run -d \
   --name "$CONTAINER_NAME" \
   --restart unless-stopped \
+  --security-opt seccomp=unconfined \
   --env-file "$ENV_FILE" \
   --stop-timeout "$DRAIN_DEADLINE_SECONDS" \
   -p "$CONTROL_PORT:$CONTROL_PORT" \

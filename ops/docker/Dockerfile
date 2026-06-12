@@ -69,9 +69,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 # bubblewrap backs runtime.sandbox.provider=sandbox_runtime (the whole-runner
 # OS sandbox on Linux). Creating its namespaces inside Docker additionally
-# requires a user-namespace-capable seccomp profile on `docker run` — see
-# TODOS.md (fleet container sandbox enablement) before flipping the provider
-# in fleet desired state.
+# requires a user-namespace-capable seccomp profile on `docker run`; fleet
+# rehearsal and Terraform launch configs pass that container runtime option.
 
 # Non-root runtime user. The base image already ships a `node` user (uid 1000);
 # create a dedicated home and a writable runtime-state dir owned by it.

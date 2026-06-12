@@ -68,17 +68,22 @@ export async function startGantryRuntime(
   options: StartGantryRuntimeOptions = {},
 ): Promise<void> {
   const mcpHostnameLookup = options.mcpHostnameLookup ?? defaultHostnameLookup;
-  if (!options.skipPreflight) {
+
+  // Resolve the deployment-owned process role before preflight. Fleet workers
+  // may start from an empty runtime home and must fetch settings_revisions from
+  // Postgres before the production sandbox gate can evaluate the real settings.
+  const processRole = resolveProcessRole(process.env);
+  const shouldDeferPreflightForFleetRole = processRole !== 'all';
+  if (!options.skipPreflight && !shouldDeferPreflightForFleetRole) {
     const validation = await validateRuntimePreflightWithStorage(GANTRY_HOME);
     if (!validation.ok && validation.failure) {
       throw new Error(formatRuntimePreflightFailure(validation.failure));
     }
   }
 
-  // Resolve the deployment-owned process role once and thread its capability
-  // struct into every subsystem. Workstation default (env unset) is `all`,
-  // which keeps full single-process behaviour; a wrong value throws here.
-  const processRole = resolveProcessRole(process.env);
+  // Thread the role capability struct into every subsystem. Workstation default
+  // (env unset) is `all`, which keeps full single-process behaviour; a wrong
+  // value already threw above.
   const roleCaps = roleCapabilities(processRole);
   logger.info({ processRole, capabilities: roleCaps }, 'Resolved process role');
 
@@ -116,7 +121,8 @@ export async function startGantryRuntime(
 
   let { runtimeSettings } = await runStartup(app);
   const storage = getRuntimeStorage();
-  const isFleet = getDeploymentMode() === 'fleet';
+  const isFleet =
+    getDeploymentMode() === 'fleet' || shouldDeferPreflightForFleetRole;
 
   // Fleet desired state lives in Postgres (ADR-3). Before runtime services need
   // settings, fetch the latest revision, render it to the runtime home, and
@@ -133,6 +139,16 @@ export async function startGantryRuntime(
     fleetSettingsLoaded = prepared.loaded;
     if (prepared.loaded) {
       runtimeSettings = loadRuntimeSettings(GANTRY_HOME);
+    }
+  }
+  if (
+    !options.skipPreflight &&
+    shouldDeferPreflightForFleetRole &&
+    fleetSettingsLoaded
+  ) {
+    const validation = await validateRuntimePreflightWithStorage(GANTRY_HOME);
+    if (!validation.ok && validation.failure) {
+      throw new Error(formatRuntimePreflightFailure(validation.failure));
     }
   }
   // P2 guard: a fleet worker with no settings revision must not claim

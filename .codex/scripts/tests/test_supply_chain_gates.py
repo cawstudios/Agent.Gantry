@@ -25,6 +25,16 @@ def load_package_script_module():
     return module
 
 
+def load_image_script_module():
+    spec = importlib.util.spec_from_file_location("check_runtime_images", IMAGE_SCRIPT)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def run_script(script: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(script), *args],
@@ -128,3 +138,53 @@ class SupplyChainGateTests(unittest.TestCase):
         result = run_script(IMAGE_SCRIPT, "--require-content-inspection")
         self.assertEqual(result.returncode, 1)
         self.assertIn("No runtime images configured", result.stdout)
+
+    def test_runtime_image_gate_ignores_locally_built_compose_images(self) -> None:
+        module = load_image_script_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            compose = Path(tmp) / "docker-compose.yml"
+            compose.write_text(
+                """
+x-worker-base:
+  build:
+    context: .
+  image: gantry-runtime:fleet-rehearsal
+
+services:
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg16-trixie@sha256:fce8fb583b92ef8af5150b373a96415d46a8cd38ba09b38efeea17c8b4c7d782
+""",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                module.compose_image_violations([compose]),
+                [f"{compose}:9: minio/minio:RELEASE.2025-04-22T22-12-26Z"],
+            )
+            self.assertEqual(
+                module.compose_images([compose]),
+                [
+                    "minio/minio:RELEASE.2025-04-22T22-12-26Z",
+                    "pgvector/pgvector:0.8.2-pg16-trixie@sha256:fce8fb583b92ef8af5150b373a96415d46a8cd38ba09b38efeea17c8b4c7d782",
+                ],
+            )
+
+    def test_runtime_image_gate_default_files_include_ops_compose(self) -> None:
+        module = load_image_script_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+            (root / "ops" / "docker").mkdir(parents=True)
+            (root / "ops" / "docker" / "docker-compose.fleet.yml").write_text(
+                "services: {}\n", encoding="utf-8"
+            )
+
+            self.assertEqual(
+                module.default_compose_files(root),
+                [
+                    root / "docker-compose.yml",
+                    root / "ops" / "docker" / "docker-compose.fleet.yml",
+                ],
+            )

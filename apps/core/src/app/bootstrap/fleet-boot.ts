@@ -10,6 +10,7 @@ import {
   getRuntimeSettingsForConfig,
 } from '../../config/index.js';
 import {
+  CURRENT_SETTINGS_READER_VERSION,
   importWorkstationSettings,
   settingsFromRevisionDocument,
 } from '../../config/settings/settings-import-service.js';
@@ -66,6 +67,20 @@ export async function prepareFleetSettings(input: {
         `desired state is seeded. Run: ${SEED_COMMAND}`,
     );
     return { loaded: false, revision: null };
+  }
+  if (latest.minReaderVersion > CURRENT_SETTINGS_READER_VERSION) {
+    markSettingsNotLoaded();
+    logger.error(
+      {
+        appId: input.appId,
+        revision: latest.revision,
+        minReaderVersion: latest.minReaderVersion,
+        readerVersion: CURRENT_SETTINGS_READER_VERSION,
+      },
+      'Fleet settings revision requires a newer reader version; holding boot ' +
+        'until this worker is upgraded',
+    );
+    return { loaded: false, revision: latest.revision };
   }
   const settings = settingsFromRevisionDocument(latest.settingsDocument);
   // Apply through the single shared import path (validate → write settings.yaml

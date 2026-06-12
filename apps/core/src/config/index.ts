@@ -17,10 +17,8 @@ import {
 } from './settings/model-defaults.js';
 import { settingsFilePath } from './settings/runtime-home.js';
 import { DEFAULT_AGENT_NAME } from './settings/runtime-settings-defaults.js';
-import type {
-  RuntimeDeploymentMode,
-  RuntimeSettings,
-} from './settings/runtime-settings-types.js';
+import type { RuntimeDeploymentMode } from '../shared/runtime-deployment-mode.js';
+import type { RuntimeSettings } from './settings/runtime-settings-types.js';
 import { isValidTimezone } from '../shared/timezone.js';
 import { resolvePermissionApprovalTimeoutMs } from '../shared/permission-timeout.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';

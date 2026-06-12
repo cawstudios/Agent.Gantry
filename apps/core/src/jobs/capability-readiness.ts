@@ -2,7 +2,7 @@ import type { JobSetupBlocker, JobSetupState } from '../domain/types.js';
 import type { RuntimeDependencyRepository } from '../domain/ports/fleet-capability-state.js';
 import type { SkillCatalogRepository } from '../domain/ports/repositories.js';
 import type { WorkerRegistryRepository } from '../domain/ports/worker-coordination.js';
-import type { RuntimeDeploymentMode } from '../config/settings/runtime-settings-types.js';
+import type { RuntimeDeploymentMode } from '../shared/runtime-deployment-mode.js';
 import { stableSha256Json } from '../shared/stable-hash.js';
 import { nowIso } from '../shared/time/datetime.js';
 import { humanizeTechnicalIdentifier } from '../shared/user-visible-messages.js';

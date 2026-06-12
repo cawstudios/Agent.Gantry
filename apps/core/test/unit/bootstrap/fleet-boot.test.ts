@@ -136,6 +136,7 @@ describe('prepareFleetSettings', () => {
     importMock.importWorkstationSettings.mockClear();
     log.warn.mockClear();
     log.info.mockClear();
+    log.error.mockClear();
   });
 
   it('marks settings not loaded and logs the seed command when no revision exists', async () => {
@@ -177,6 +178,37 @@ describe('prepareFleetSettings', () => {
     expect(result).toEqual({ loaded: true, revision: 9 });
     expect(importMock.importWorkstationSettings).toHaveBeenCalledOnce();
     expect(loadState.markSettingsLoaded).toHaveBeenCalledOnce();
+  });
+
+  it('holds a boot revision that requires a newer settings reader', async () => {
+    latest.current = {
+      appId: 'default',
+      revision: 10,
+      settingsDocument: { agent: { name: 'Ada' } },
+      minReaderVersion: 2,
+      createdBy: 'cli',
+      note: null,
+      createdAt: '2026-06-11T00:00:00.000Z',
+    };
+
+    const result = await prepareFleetSettings({
+      appId: 'default' as never,
+      runtimeHome: '/tmp/gantry-fleet',
+      app: fakeApp,
+    });
+
+    expect(result).toEqual({ loaded: false, revision: 10 });
+    expect(loadState.markSettingsNotLoaded).toHaveBeenCalledOnce();
+    expect(loadState.markSettingsLoaded).not.toHaveBeenCalled();
+    expect(importMock.importWorkstationSettings).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        revision: 10,
+        minReaderVersion: 2,
+        readerVersion: 1,
+      }),
+      expect.stringContaining('requires a newer reader version'),
+    );
   });
 });
 
