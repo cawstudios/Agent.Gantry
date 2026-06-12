@@ -60,6 +60,15 @@ versioning; YAML is ONLY the personal/workstation+CLI-file surface; no legacy
 affordances ever (no deprecation aliases, no rename guards); Terraform/AWS
 first; single autoscaled pool; Go toolchain stays out of the image.
 
+2026-06-12 ENG-124 handoff update: DeepAgents integration planning is now
+captured in `docs/architecture/deepagents-agent-engine-handoff-plan.md`. The
+binding product decision is that users choose a per-agent `agentEngine`
+(`anthropic_sdk` or `deepagents`) while models remain selected by `modelAlias`;
+the model provider route decides whether the endpoint family is `anthropic` or
+`openai`. Jobs and conversations inherit the bound agent's engine. Do not add
+public `job.harness`, job-level `agentEngine`, job-level `executionProviderId`,
+raw provider model ids, or provider-native tool/backend names.
+
 ## PENDING (in priority order)
 
 ### 1. Pre-existing BASE-BRANCH defects (block merge gates; owned by `feature/mworker-01-safe-multi-worker-execution`, NOT this branch — both verified to fail with this branch's work stashed)
