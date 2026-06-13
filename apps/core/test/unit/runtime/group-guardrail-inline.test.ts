@@ -70,7 +70,9 @@ describe('pre-agent guardrail inline system prompt', () => {
       info: vi.fn(),
     } as never);
 
-    expect(result).toEqual({
+    // toMatchObject (not toEqual): the result also carries an additive
+    // `guardrailTrace` (WS2 latency capture) that this WS1 assertion ignores.
+    expect(result).toMatchObject({
       handled: false,
       systemPromptAppend: 'Inline guardrail check before answering.',
       guardrailReason: 'inconclusive_inline_guardrail',
