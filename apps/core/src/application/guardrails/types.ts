@@ -76,10 +76,10 @@ export interface GuardrailPolicy {
     context?: readonly GuardrailContextMessage[],
   ): GuardrailDecision | null;
   /**
-   * Optional run-local system prompt append for policies that want the main
-   * agent call to carry the final scope check. When present, `mode: both`
-   * uses deterministic screening plus direct agent fallthrough instead of a
-   * separate classifier call.
+   * Optional run-local system prompt append. Gantry attaches it ONLY when the
+   * guardrail config sets `unresolved: inline` (and the inline path is
+   * attachable). Under any other `unresolved` value it is ignored — behavior is
+   * driven by config, never inferred from whether this function exists.
    */
   systemPromptAppend?(
     messages: readonly string[],
