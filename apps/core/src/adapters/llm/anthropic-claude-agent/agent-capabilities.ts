@@ -210,6 +210,13 @@ const gantryMcpProvider: AgentCapabilityProvider = {
     const env: Record<string, string> = {
       ...(ctx.appId ? { GANTRY_APP_ID: ctx.appId } : {}),
       ...(ctx.agentId ? { GANTRY_AGENT_ID: ctx.agentId } : {}),
+      // Propagate this run's handle into the gantry MCP server subprocess so its
+      // outbound MCP-call IPC writes carry the handle the reply latency trace
+      // keys on. The runner process owns this ambient value, same as the other
+      // GANTRY_* runtime env the runner reads.
+      ...(process.env.GANTRY_AGENT_RUN_HANDLE
+        ? { GANTRY_AGENT_RUN_HANDLE: process.env.GANTRY_AGENT_RUN_HANDLE }
+        : {}),
       GANTRY_CHAT_JID: ctx.chatJid,
       GANTRY_GROUP_FOLDER: ctx.groupFolder,
       GANTRY_THREAD_ID: ctx.threadId || '',

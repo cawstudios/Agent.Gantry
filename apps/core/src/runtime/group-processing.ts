@@ -272,19 +272,14 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       // the command reply message. Runs after the reply was sent.
       if (deps.replyTrace) {
         const commandMs = currentTimeMs() - commandStartedAt;
+        const commandPattern = getTriggerPattern(group.trigger);
+        const commandNames = group.agentConfig?.plugins?.commands ?? [];
         const commandName =
-          extractSessionCommand(
-            missedMessages.find(
-              (m) =>
-                extractSessionCommand(
-                  m.content,
-                  getTriggerPattern(group.trigger),
-                  group.agentConfig?.plugins?.commands ?? [],
-                ) !== null,
-            )?.content ?? '',
-            getTriggerPattern(group.trigger),
-            group.agentConfig?.plugins?.commands ?? [],
-          )?.raw ?? 'command';
+          missedMessages
+            .map((m) =>
+              extractSessionCommand(m.content, commandPattern, commandNames),
+            )
+            .find((c) => c !== null)?.raw ?? 'command';
         const cursor = await ops()
           .getLastBotMessageCursor(chatJid)
           .catch(() => undefined);
@@ -293,6 +288,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             replyTrace: deps.replyTrace,
             kind: 'command',
             chatJid,
+            // Command/canned replies never spawn the agent, so the resolved
+            // appId isn't in scope here; 'default' is a known placeholder (the
+            // admin joins traces by message_id, never by app_id).
             appId: 'default',
             outboundMessageId: cursor.id,
             command: {

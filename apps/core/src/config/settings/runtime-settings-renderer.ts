@@ -356,9 +356,7 @@ function renderAgentPluginsYaml(
     // (which the parser re-derives). Deterministic agents always print it.
     if (
       guardrail.unresolved &&
-      !(
-        guardrail.mode !== 'classifier' && guardrail.unresolved === 'classifier'
-      )
+      !(guardrail.mode === 'both' && guardrail.unresolved === 'classifier')
     ) {
       lines.push(
         `        unresolved: ${quoteYamlString(guardrail.unresolved)}`,

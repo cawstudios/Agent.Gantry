@@ -29,7 +29,6 @@ export interface PersistReplyTraceInput {
   guardrail?: GuardrailRecord;
   llmTurns?: readonly LlmTurnRecord[];
   command?: { name: string; ms: number; startedAt: number };
-  systemPrompt?: { hash: string; chars: number };
   now?: () => Date;
 }
 
@@ -57,10 +56,7 @@ export async function persistReplyTrace(
     if (timings.stages.length === 0) return;
 
     const payloadsJson = input.replyTrace.payloadsEnabled()
-      ? assemblePayloads(
-          assembleInput,
-          input.systemPrompt ? { systemPrompt: input.systemPrompt } : {},
-        )
+      ? assemblePayloads(assembleInput)
       : null;
 
     const createdAt = (input.now ? input.now() : new Date()).toISOString();

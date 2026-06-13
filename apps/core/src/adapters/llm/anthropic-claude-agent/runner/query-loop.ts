@@ -145,6 +145,25 @@ function messageContainsToolUse(message: unknown): boolean {
   );
 }
 
+/** Concatenated text of an assistant message (the turn's visible output). */
+function assistantOutputText(message: unknown): string {
+  const content = (message as { message?: { content?: unknown } }).message
+    ?.content;
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === 'object' &&
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+    ) {
+      parts.push((block as { text: string }).text);
+    }
+  }
+  return parts.join('');
+}
+
 export async function runQuery(
   prompt: string,
   mcpServerPath: string,
@@ -220,9 +239,11 @@ export async function runQuery(
   const primeToolAttempts: AgentRunnerToolAttemptOutput[] = [];
   // Per-turn LLM latency + token capture for the reply trace (best-effort).
   // Payloads (input/output text) only when GANTRY_TRACE_PAYLOADS=1.
-  const llmTurns = new LlmTurnAccumulator({
-    capturePayloads: process.env['GANTRY_TRACE_PAYLOADS']?.trim() === '1',
-  });
+  const capturePayloads = process.env['GANTRY_TRACE_PAYLOADS']?.trim() === '1';
+  // The run input prompt is identical for the whole run; attach it to the first
+  // turn only. Each turn still carries its own output text.
+  let capturedRunInput = false;
+  const llmTurns = new LlmTurnAccumulator({ capturePayloads });
   const heartbeat = startJobHeartbeat({
     agentInput,
     writeOutput,
@@ -373,7 +394,14 @@ export async function runQuery(
         llmTurns.onAssistant(
           message as Parameters<typeof llmTurns.onAssistant>[0],
           Date.now(),
+          capturePayloads
+            ? {
+                output: assistantOutputText(message),
+                ...(capturedRunInput ? {} : { input: prompt }),
+              }
+            : undefined,
         );
+        capturedRunInput = true;
         if (messageContainsToolUse(message)) {
           pendingPartialText = '';
         }

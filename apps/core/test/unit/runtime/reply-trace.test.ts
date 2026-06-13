@@ -193,12 +193,9 @@ describe('assemblePayloads', () => {
       'llm',
       'tool',
     ]);
-    const payloads = assemblePayloads(input, {
-      systemPrompt: { hash: 'abc', chars: 100 },
-    });
+    const payloads = assemblePayloads(input);
     // stage 0 = guardrail (no payload), 1 = llm, 2 = tool
     expect(payloads[1]).toMatchObject({
-      systemPrompt: { hash: 'abc', chars: 100 },
       input: 'turn input',
       output: 'turn output',
     });

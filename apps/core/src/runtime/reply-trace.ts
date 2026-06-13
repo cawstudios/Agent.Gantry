@@ -176,14 +176,13 @@ export function assembleTimings(input: AssembleTimingsInput): LatencyTimings {
 
 /**
  * Build the flag-gated `payloads_json`, keyed by stage index. For `tool` stages
- * this is `{ request, response }`; for `llm` stages `{ systemPrompt, input,
- * output }` (the large static system prompt is kept by hash + size rather than
- * duplicated verbatim per turn). Pass the SAME `AssembleTimingsInput` used for
- * `assembleTimings` so indices line up with the persisted `timings_json`.
+ * this is `{ request, response }`; for `llm` stages `{ input, output }` (the run
+ * input prompt is attached to the first turn; each turn carries its own output).
+ * Pass the SAME `AssembleTimingsInput` used for `assembleTimings` so indices
+ * line up with the persisted `timings_json`.
  */
 export function assemblePayloads(
   input: AssembleTimingsInput,
-  context: { systemPrompt?: { hash: string; chars: number } } = {},
 ): Record<number, unknown> {
   const { payloadSources } = buildStages(input);
   const payloads: Record<number, unknown> = {};
@@ -192,11 +191,7 @@ export function assemblePayloads(
     if (source.kind === 'tool') {
       payloads[index] = { request: source.request, response: source.response };
     } else {
-      payloads[index] = {
-        ...(context.systemPrompt ? { systemPrompt: context.systemPrompt } : {}),
-        input: source.input,
-        output: source.output,
-      };
+      payloads[index] = { input: source.input, output: source.output };
     }
   });
   return payloads;

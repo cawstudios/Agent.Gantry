@@ -237,7 +237,7 @@ function validateGuardrailUnresolved(
     ? parseStringValue(raw, `${pathPrefix}.unresolved`)
     : undefined;
   const ALL = ['clarify', 'allow', 'reject', 'inline', 'classifier'] as const;
-  if (present && !ALL.includes(value as never)) {
+  if (value !== undefined && !(ALL as readonly string[]).includes(value)) {
     throw new Error(
       `${pathPrefix}.unresolved must be one of ${ALL.join(', ')}`,
     );

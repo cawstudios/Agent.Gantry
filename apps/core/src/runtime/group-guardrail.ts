@@ -18,32 +18,18 @@ import {
 } from '../shared/message-cursor.js';
 import { isFlowLogEnabled } from '../shared/flow-log.js';
 import type { GroupProcessingDeps } from './group-processing-types.js';
+import type { GuardrailRecord } from './reply-trace.js';
 import { loadGuardrailContext } from './guardrail-context.js';
 import type { RuntimeMessageRepository } from '../domain/repositories/ops-repo.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 
-/**
- * Timed guardrail stage for the per-reply latency trace. Additive — carried
- * alongside the existing decision fields, never replacing them.
- */
-export interface GuardrailStageTrace {
-  ms: number;
-  startedAt: number;
-  detail: {
-    mode: string;
-    decision: string;
-    reason?: string;
-    inlineAttached: boolean;
-  };
-}
-
 export type PreAgentGuardrailResult =
-  | { handled: true; guardrailTrace?: GuardrailStageTrace }
+  | { handled: true; guardrailTrace?: GuardrailRecord }
   | {
       handled: false;
       systemPromptAppend?: string;
       guardrailReason?: string;
-      guardrailTrace?: GuardrailStageTrace;
+      guardrailTrace?: GuardrailRecord;
     };
 
 export async function handlePreAgentGuardrail(input: {
@@ -92,7 +78,7 @@ export async function handlePreAgentGuardrail(input: {
   // stage duration and a generic summary of the decision.
   const inlineAttached =
     decision.action === 'allow' && Boolean(decision.systemPromptAppend);
-  const guardrailTrace: GuardrailStageTrace = {
+  const guardrailTrace: GuardrailRecord = {
     ms: currentTimeMs() - guardrailStartedAt,
     startedAt: guardrailStartedAt,
     detail: {

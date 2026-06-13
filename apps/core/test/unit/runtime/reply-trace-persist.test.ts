@@ -106,7 +106,6 @@ describe('persistReplyTrace', () => {
       appId: 'app:test',
       outboundMessageId: 'outbound:abc',
       runHandle: 'gantry-run-1',
-      systemPrompt: { hash: 'h', chars: 10 },
     });
 
     expect(saved[0].payloadsJson).not.toBeNull();
