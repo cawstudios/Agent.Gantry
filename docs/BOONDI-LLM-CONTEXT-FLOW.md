@@ -6,9 +6,11 @@ what context can be cut for latency.
 The important split:
 
 - **Pre-agent guardrail** runs deterministic checks only.
-  In Boondi's default `mode: both` path there is no separate guardrail LLM:
-  unresolved turns fall through to the main Boondi run with an inline scope
-  block.
+  Boondi is configured `mode: deterministic` + `unresolved: inline`, so there is
+  no separate guardrail LLM: turns the deterministic stage does not resolve fall
+  through to the main Boondi run with an inline scope block. The block is
+  attached because `unresolved: inline` (config), not because the policy exports
+  `systemPromptAppend`.
 - **Main chat LLM** is the customer-facing Boondi Claude run.
 - **Memory LLMs** power `/digest-session`, `/dream`, and `/new` background
   archive extraction.
@@ -65,10 +67,11 @@ Can you help me plan something premium for my team next week?
 ```
 
 If deterministic screening cannot decide, Boondi does not call a guardrail
-classifier. Gantry allows the turn into the main Boondi LLM call and attaches
-the policy's inline scope block when starting the run. The inline block tells
-Boondi to silently reject off-topic/internal-probe requests, answer only the
-BSS part of mixed requests, and otherwise use the normal Boondi instructions.
+classifier — because it is configured `unresolved: inline` (not `classifier`).
+Gantry allows the turn into the main Boondi LLM call and attaches the policy's
+inline scope block when starting the run. The inline block tells Boondi to
+silently reject off-topic/internal-probe requests, answer only the BSS part of
+mixed requests, and otherwise use the normal Boondi instructions.
 
 Payload composition:
 
@@ -807,8 +810,9 @@ Implementation refs:
 
 High-signal facts:
 
-- Boondi does not use a separate guardrail LLM in the default `mode: both`
-  path; deterministic checks either handle the turn or allow the main chat run.
+- Boondi does not use a separate guardrail LLM (it is configured
+  `mode: deterministic` + `unresolved: inline`); deterministic checks either
+  handle the turn or allow the main chat run with the inline scope block.
 - Main chat carries a large static system prompt append.
 - Main chat always carried a memory context block in the run, even when all
   memory sections were empty.

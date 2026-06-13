@@ -618,20 +618,40 @@ For client deployments, agent prompt folders live in the `apps/` directory of th
 
 Reusable guided workflows can be uploaded as skill zips with `SKILL.md`, then approved and bound to agents.
 
-Agent-owned guardrails are opt-in per agent. The `mode` field controls which
-guardrail stages run; omit it to keep the default `both` behavior. Policies
-that provide an inline system prompt block use deterministic screening plus
-direct agent fallthrough in `both` mode instead of a separate classifier call.
+Agent-owned guardrails are opt-in per agent. Two fields describe a guarded turn
+explicitly:
+
+- `mode` — **which stages exist**: `both` (deterministic screen + classifier),
+  `deterministic` (screen only), or `classifier` (LLM every turn).
+- `unresolved` — **what happens to a turn the deterministic stage did not
+  resolve** (it returned `null`): `clarify`, `allow`, `reject`, `inline`, or
+  `classifier`.
+
+The pairing is validated at boot: `mode: both` takes `unresolved: classifier`
+(the default when both are omitted); `mode: deterministic` requires one of
+`clarify | allow | reject | inline`; `mode: classifier` takes no `unresolved`.
+The inline scope block (`policy.systemPromptAppend`) is attached **only** when
+`unresolved: inline` — never inferred from whether the policy exports that
+function.
 
 ```yaml
 agents:
-  boondi_support:
+  boondi_support: # deterministic screen; inconclusive turns carry an inline scope block
     name: Boondi Support
     plugins:
       guardrail:
         file: guardrails/guardrail.ts
         model: haiku
-        mode: both # both | deterministic | classifier
+        mode: deterministic
+        unresolved: inline
+  generic_support: # deterministic screen, then an LLM classifier for unresolved turns
+    name: Generic Support
+    plugins:
+      guardrail:
+        file: guardrails/guardrail.ts
+        model: haiku
+        mode: both
+        unresolved: classifier
 ```
 
 ## Contributing

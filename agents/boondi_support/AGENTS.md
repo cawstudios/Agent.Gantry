@@ -15,8 +15,10 @@
 - Keep `boondi-crm.get_open_records` reserved for bare returning greetings.
   Substantive order, product, and gifting turns should use the Shopify path and
   rely on background extraction for buying-interest capture.
-- Boondi guardrails must not rely on a separate classifier LLM in the default
-  path. Use deterministic pre-agent screening plus the inline scope block in the
-  main Boondi payload. Pre-agent deterministic replies should stay limited to
-  hard known cases such as a bare greeting, empty clarification, or off-topic /
-  internal-prompt rejection.
+- Boondi guardrails must not rely on a separate classifier LLM. Boondi is
+  configured `mode: deterministic` + `unresolved: inline`: deterministic
+  pre-agent screening plus the inline scope block in the main Boondi payload for
+  turns the deterministic stage does not resolve (the inline block is attached
+  because `unresolved: inline`, not because the policy exports it). Pre-agent
+  deterministic replies should stay limited to hard known cases such as a bare
+  greeting, empty clarification, or off-topic / internal-prompt rejection.

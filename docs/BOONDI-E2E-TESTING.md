@@ -335,8 +335,7 @@ Do **not** poll `gantry.outbound_deliveries` / `outbound_delivery_final_answers`
 
 ### 6a. Guardrail (pre-agent screen, runs in core)
 
-Config — `~/gantry/settings.yaml` (schema documented in
-`~/gantry/settings.example.yaml` and repo `settings.example.yaml`):
+Config — `~/gantry/settings.yaml`:
 
 ```yaml
 agents:
@@ -344,14 +343,19 @@ agents:
     plugins:
       guardrail:
         file: guardrails/guardrail.ts # exact file under the agent folder; alternates switchable here
-        model: haiku # used only by explicit classifier-mode fallback
-        mode: both # both | deterministic | classifier
+        model: haiku # used only on an explicit classifier path
+        mode: deterministic # which stages exist: both | deterministic | classifier
+        unresolved: inline # disposition for turns the deterministic stage did not resolve
 ```
 
-`mode: both` = free deterministic regex stage first
-(`evaluateDeterministic()`). Boondi's policy supplies an inline scope block, so
-unresolved allowed turns go directly to the main Boondi LLM call with the
-inline scope block attached. Decision shape:
+`mode: deterministic` runs the free deterministic regex stage
+(`evaluateDeterministic()`) only. For a turn it does **not** resolve (returns
+`null`), `unresolved: inline` attaches Boondi's inline scope block and sends the
+turn to the main Boondi LLM call carrying that block — so there is no separate
+guardrail LLM. The inline block is attached **because `unresolved: inline`**,
+not because the policy exports `systemPromptAppend`. (A classic classifier agent
+would instead be `mode: both` + `unresolved: classifier`, escalating unresolved
+turns to the LLM classifier.) Decision shape:
 `{action:'allow'}` or
 `{action:'direct_response', responseKind: greeting|scope_rejection|scope_clarification}`.
 
