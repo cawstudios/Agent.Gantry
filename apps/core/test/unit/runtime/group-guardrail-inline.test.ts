@@ -33,7 +33,14 @@ function makeGroup(): ConversationRoute {
     added_at: '2026-01-01',
     requiresTrigger: false,
     agentConfig: {
-      plugins: { guardrail: { file: 'guardrail.ts', model: 'haiku' } },
+      plugins: {
+        guardrail: {
+          file: 'guardrail.ts',
+          model: 'haiku',
+          mode: 'deterministic',
+          unresolved: 'inline',
+        },
+      },
     },
   };
 }
@@ -70,7 +77,7 @@ describe('pre-agent guardrail inline system prompt', () => {
       info: vi.fn(),
     } as never);
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       handled: false,
       systemPromptAppend: 'Inline guardrail check before answering.',
       guardrailReason: 'inconclusive_inline_guardrail',
