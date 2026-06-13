@@ -352,6 +352,18 @@ function renderAgentPluginsYaml(
     if (guardrail.mode && guardrail.mode !== 'both') {
       lines.push(`        mode: ${quoteYamlString(guardrail.mode)}`);
     }
+    // Emit `unresolved` except for the implicit `both → classifier` default
+    // (which the parser re-derives). Deterministic agents always print it.
+    if (
+      guardrail.unresolved &&
+      !(
+        guardrail.mode !== 'classifier' && guardrail.unresolved === 'classifier'
+      )
+    ) {
+      lines.push(
+        `        unresolved: ${quoteYamlString(guardrail.unresolved)}`,
+      );
+    }
   }
   if (hasExtraction) {
     lines.push(

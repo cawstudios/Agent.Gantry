@@ -215,6 +215,31 @@ describe('agent plugins settings (plugins.*)', () => {
     });
   });
 
+  it('round-trips deterministic + inline through render and parse', () => {
+    const parsed = parseRuntimeSettings(
+      agentYaml(
+        [
+          '    plugins:',
+          '      guardrail:',
+          '        file: guardrail.ts',
+          '        model: haiku',
+          '        mode: deterministic',
+          '        unresolved: inline',
+        ].join('\n'),
+      ),
+    );
+    const yaml = renderRuntimeSettingsYaml(parsed);
+    // quoteYamlString leaves simple alphanumeric scalars unquoted (same as the
+    // `mode:` line), so the emitted form is `unresolved: inline`.
+    expect(yaml).toContain('unresolved: inline');
+
+    const reparsed = parseRuntimeSettings(yaml);
+    expect(reparsed.agents.boondi_support.plugins?.guardrail).toMatchObject({
+      mode: 'deterministic',
+      unresolved: 'inline',
+    });
+  });
+
   it('defaults both + classifier when mode and unresolved are both omitted', () => {
     const parsed = parseRuntimeSettings(
       agentYaml(
