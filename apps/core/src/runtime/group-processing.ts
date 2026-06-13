@@ -28,7 +28,10 @@ import {
   formatOutboundForChannel,
 } from '../messaging/router.js';
 import type { AgentOutput } from './agent-spawn.js';
-import { handleSessionCommand } from '../session/session-commands.js';
+import {
+  extractSessionCommand,
+  handleSessionCommand,
+} from '../session/session-commands.js';
 import { loadAgentCommand } from '../application/commands/command-registry.js';
 import type { GroupProcessingDeps } from './group-processing-types.js';
 import { settleDeliveryAttempt } from '../jobs/delivery.js';
@@ -164,6 +167,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       group,
       triggerPattern: getTriggerPattern(group.trigger),
     });
+    const commandStartedAt = currentTimeMs();
     const cmdResult = await handleSessionCommand({
       missedMessages,
       groupName: group.name,
@@ -263,7 +267,44 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         }),
       },
     });
-    if (cmdResult.handled) return cmdResult.success;
+    if (cmdResult.handled) {
+      // Command-reply latency trace (best-effort): a single `command` stage on
+      // the command reply message. Runs after the reply was sent.
+      if (deps.replyTrace) {
+        const commandMs = currentTimeMs() - commandStartedAt;
+        const commandName =
+          extractSessionCommand(
+            (missedMessages.find(
+              (m) =>
+                extractSessionCommand(
+                  m.content,
+                  getTriggerPattern(group.trigger),
+                  group.agentConfig?.plugins?.commands ?? [],
+                ) !== null,
+            )?.content ?? ''),
+            getTriggerPattern(group.trigger),
+            group.agentConfig?.plugins?.commands ?? [],
+          )?.raw ?? 'command';
+        const cursor = await ops()
+          .getLastBotMessageCursor(chatJid)
+          .catch(() => undefined);
+        if (cursor) {
+          await persistReplyTrace({
+            replyTrace: deps.replyTrace,
+            kind: 'command',
+            chatJid,
+            appId: 'default',
+            outboundMessageId: cursor.id,
+            command: {
+              name: commandName,
+              ms: commandMs,
+              startedAt: commandStartedAt,
+            },
+          });
+        }
+      }
+      return cmdResult.success;
+    }
 
     if (
       !groupTurnHasRequiredTrigger({
