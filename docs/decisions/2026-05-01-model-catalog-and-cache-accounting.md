@@ -39,6 +39,14 @@ endpoint family, credential modes, supported workloads, and the internal
 the selected engine is rejected before runner spawn rather than re-routed to a
 different engine.
 
+> Superseded (2026-06-13): `agentEngine` is no longer a per-agent harness choice;
+> it is **derived from the model's provider** (Claude -> `anthropic_sdk`;
+> OpenAI/OpenRouter/future -> `deepagents`) and is a read-only diagnostic.
+> Resolution is `modelAlias -> provider -> executionRoute`; there is no incompatible
+> pairing to reject. The cache-accounting parts of this ADR are unchanged; only the
+> engine-as-a-choice framing is superseded. See the superseding section in
+> `docs/decisions/2026-06-12-agent-engine-selection.md`.
+
 Vocabulary:
 
 - `modelAlias`: the normal user-facing selector.

@@ -1,5 +1,14 @@
 # DeepAgents Agent Engine Handoff Plan
 
+> **Status note (2026-06-13): the user-selectable engine described below is
+> SUPERSEDED.** The engine is now **derived from the model's provider** (Claude ->
+> Anthropic SDK; everything else -> DeepAgents); there is no user engine selector.
+> OpenRouter moved onto the DeepAgents/OpenAI-compatible lane with prompt caching.
+> See the superseding section in
+> `docs/decisions/2026-06-12-agent-engine-selection.md`. This document is kept as
+> the original implementation reference and cleanup-search/test-plan source; it has
+> not been rewritten.
+
 Status: ENG-124 handoff plan, updated 2026-06-12 after the product decision that
 users must be able to choose between Anthropic SDK and DeepAgents. Implemented on
 `feature/deepagents-agent-engine` (packets A-G); the locked decisions are

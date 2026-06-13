@@ -22,9 +22,10 @@ export function createDefaultAgentExecutionAdapterRegistry(): AgentExecutionAdap
   ]);
 }
 
-// The memory engine is derived from the memory model's response family, so this
-// adapter needs no engine input: the route-aware client dispatches purely on the
-// family (anthropic -> Claude SDK, openai -> OpenAI direct).
+// The memory engine is derived from the memory model's provider, so this adapter
+// needs no engine input: the route-aware client dispatches provider-first
+// (DeepAgents-lane providers such as OpenRouter -> OpenAI direct), then falls
+// back to the response family (anthropic -> Claude SDK, openai -> OpenAI direct).
 export function createDefaultMemoryLlmClient(): MemoryLlmClient {
   return createRouteAwareMemoryLlmClient({
     anthropic: createAnthropicMemoryLlmClient(),

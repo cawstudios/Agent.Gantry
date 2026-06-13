@@ -1,5 +1,132 @@
 # Agent Engine Selection
 
+> **Status: the user-selectable engine decision below is SUPERSEDED (2026-06-13).**
+> The engine is now **derived from the model's provider**, not chosen. See
+> [Superseding decision (2026-06-13): provider-derived engine + OpenRouter
+> caching](#superseding-decision-2026-06-13-provider-derived-engine--openrouter-caching)
+> for the current design. The original decision is kept below for history.
+
+## Superseding decision (2026-06-13): provider-derived engine + OpenRouter caching
+
+### Why supersede
+
+The capability boundary is the deciding factor: **only the Anthropic Claude Agent
+SDK can perform Claude OAuth/subscription auth** — DeepAgents/LangChain cannot. So
+once a model's provider is known, its engine is fully determined; a separate
+user-facing engine choice adds a selector with exactly one valid value per
+provider and a class of "incompatible pairing" errors that can only arise from
+the selector existing. Removing the selector removes that error class and the
+now-dead Claude-on-DeepAgents lanes, and folds OpenRouter into the
+DeepAgents/OpenAI-compatible lane (which is what enables clean OpenRouter
+caching). This is a clean-cut change (pre-users; no shims).
+
+### Decision
+
+The **agent engine is derived, read-only**. The user picks the model (alias ->
+provider -> engine); the engine follows the resolved model's provider:
+
+| provider | derived engine | credential modes |
+| --- | --- | --- |
+| `anthropic` (Claude) | `anthropic_sdk` | `api_key` + `claude_code_oauth` |
+| `openai` | `deepagents` | `api_key` |
+| `openrouter` | `deepagents` (was `anthropic_sdk`) | `api_key` |
+| future (Groq/xAI/DeepSeek/Gemini/…) | `deepagents` unless Claude-native | `api_key` |
+
+- Single derivation point: `deriveAgentEngineForProvider(providerId)` in
+  `apps/core/src/shared/model-execution-route.ts`. Each provider declares one
+  derived `executionRoute` (engine + `executionProviderId`); `resolveExecutionRoute`
+  takes no `agentEngine` input. The engine x provider incompatibility branch and
+  its locked rejection copies are removed (they can no longer occur).
+- **Retired user-facing selectors (clean cut):** `defaults.agent_engine` +
+  `agents.<id>.agent_engine`, the `gantry agent engine <id> <engine>` CLI verb,
+  the `PATCH /v1/agents/:id` `agentEngine` write, and the `AGENT_ENGINE_CHANGED`
+  audit event. `memory.engine` and the `MEMORY_ENGINE_CHANGED` audit are retired
+  too (the `memory.engine` key is now rejected at settings validation); the memory
+  transport lane derives purely from the memory model's response family
+  (`memoryTransportLaneForResponseFamily`): anthropic -> Claude SDK memory client;
+  openai/openrouter -> OpenAI-compatible chat-completions memory client. The
+  now-dead Claude-on-DeepAgents memory client (`anthropic-memory-direct`) and the
+  `memory-engine-matrix` are removed.
+- **Kept as derived read-only diagnostics:** `agentEngine` on agent read
+  responses, `gantry model why`/agent list/show cell, model preview
+  `target: 'agent'`, and resolved-run audit (`agent_engine`/`execution_provider_id`)
+  — all computed from the resolved model's provider.
+- **Defensive backstop retained:** a `claude_code_oauth` credential can only ever
+  project to `anthropic_sdk`; the DeepAgents lane fails closed if it ever receives
+  one (`apps/core/src/adapters/llm/deepagents-langchain/credential-validation.ts`).
+  `anthropic_sdk` remains a provider-boundary sentinel exported from
+  `apps/core/src/shared/agent-engine.ts`.
+
+### Library-driven model construction
+
+The DeepAgents runner no longer sniffs env to infer the endpoint family. The host
+projects the resolved model's provider string (`GANTRY_DEEPAGENTS_MODEL_PROVIDER`)
+beside the model id and a single loopback gateway base-URL + run-scoped `gtw_`
+token. The runner
+(`apps/core/src/adapters/llm/deepagents-langchain/runner/model-factory.ts`) builds
+the LangChain instance from the provider string:
+
+- `openai` (and any other `initChatModel` provider):
+  `await initChatModel("openai:<id>", { apiKey, configuration: { baseURL } })`.
+- `openrouter`: `new ChatOpenRouter({ model: <id>, apiKey, baseURL: <gateway>/v1 })`
+  from `@langchain/openrouter` (`initChatModel` does not know `openrouter`).
+- The built `BaseChatModel` instance is passed to `createDeepAgent({ model })`.
+  Loopback-URL + `gtw_`-token guards and the runtime `model.profile` read are kept.
+- `anthropic` is not a DeepAgents provider (Claude is SDK-only); the builder throws.
+
+### OpenRouter as the DeepAgents lane (gateway + caching)
+
+OpenRouter is now OpenAI-chat-completions-compatible end to end:
+
+- **Gateway projection:** `openrouter` projects the DeepAgents/OpenAI-family
+  gateway env (`OPENAI_BASE_URL`/`OPENAI_API_KEY`, loopback base-URL + `gtw_`
+  token) and the `openrouter` provider string. The old Anthropic `/v1/messages`
+  OpenRouter projection is removed (OpenRouter is OpenAI-compatible only).
+- **Path allowlist + auth:** the gateway allows `/v1/chat/completions` for
+  DeepAgents-engine providers and keeps `bearer` auth (correct for OpenRouter);
+  `ChatOpenRouter` -> loopback `/openrouter` -> `openrouter.ai/api/v1/chat/completions`.
+- **Cache accounting (also fixes the OpenAI gpt lane):** the stream-normalizer
+  reads `prompt_tokens_details.cached_tokens` / `cache_write_tokens` off the final
+  usage chunk (with a LangChain `usage_metadata.input_token_details.cache_read`
+  fallback) and computes `cacheReadTokens` / `cacheWriteTokens` /
+  `totalBillableInputTokens` / `cacheProvider` / `cacheStatus` + the `contextUsage`
+  cache fields, replacing the previous hardcoded zeros.
+- **Sticky routing:** `ChatOpenRouter` receives a stable `session_id` (the durable
+  session id) so OpenRouter routes follow-up turns of the same conversation to the
+  same upstream provider and prompt-cache hits persist across turns. The OpenAI
+  lane has no `session_id` concept and is unaffected.
+- **Gated `cache_control` breakpoints:** the host projects
+  `GANTRY_DEEPAGENTS_CACHE_PROMPT_CONTROL` (`automatic` | `explicit` | `none`) from
+  the resolved model's cache descriptor. On `explicit` the runner injects ephemeral
+  `cache_control: { type: 'ephemeral' }` on the stable prefix (system prompt +
+  memory block content parts, <= 4 breakpoints). **Automatic-prefix providers
+  (Kimi/Moonshot via OpenRouter, OpenAI gpt) need no request shaping** and inject
+  nothing — explicit breakpoints are only for Anthropic/Gemini/Qwen sub-models
+  (none shipped today). The `openrouter` `cacheSupport` descriptor is corrected to
+  automatic provider-prefix caching to match.
+- **Library limitation note:** `@langchain/openrouter` 0.3.0 surfaces cache
+  *reads* but not *writes* on streamed chunks; the normalizer captures writes from
+  raw usage if a later version exposes them.
+
+### Surface impact (superseding change)
+
+| Surface | Impact | Reason |
+| --- | --- | --- |
+| Runtime behavior | Changed | Engine derived from the resolved model provider; no engine selector at spawn. |
+| `settings.yaml` | Changed | `defaults.agent_engine`, `agents.<id>.agent_engine`, and `memory.engine` removed (the latter now rejected at validation). |
+| Postgres/runtime projection | Read-only/observable | Run diagnostics still carry the derived `agent_engine`/`execution_provider_id`; no settable projection. |
+| Control API | Changed | Agent records expose derived `agentEngine` (read-only); `PATCH /v1/agents/:id` no longer accepts it. |
+| SDK/contracts | Changed | `UpdateAgentRequestSchema` drops `agentEngine`; `AgentResponseSchema` keeps it as a derived read-only field. |
+| CLI | Changed | `gantry agent engine` verb removed; engine cell/`why`/preview remain read-only derived. |
+| Channel/provider adapters | Unchanged by design | No engine authority in channels. |
+| Docs/prompts | Changed | README, credential-management, AGENTS model vocabulary, adapter AGENTS, HANDOFF, this ADR. |
+| Audit/events | Changed | `AGENT_ENGINE_CHANGED` + `MEMORY_ENGINE_CHANGED` removed; resolved-run engine diagnostics retained. |
+| Tests/verification | Changed | Provider-derived resolution, library-driven factory, OpenRouter gateway + caching, retired-selector rejection coverage. |
+
+---
+
+## Original decision (SUPERSEDED 2026-06-13): user-selected per-agent engine
+
 ## Context
 
 Gantry runs agents on the Anthropic Claude Agent SDK behind a provider-neutral

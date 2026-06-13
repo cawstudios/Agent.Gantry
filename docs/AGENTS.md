@@ -27,15 +27,20 @@
 - Continuity docs must preserve the clean-cut contract: unsupported old continuity rows fail closed and are not imported, backfilled, or repaired.
 - Memory tool docs must keep `memory_save` limited to canonical direct-save kinds (`preference`, `decision`, `fact`, `correction`, `constraint`) and state that common/global writes require approved admin or service authority.
 - SDK docs must describe `sessions.sendMessage` as durable acceptance into the runtime event stream. Do not imply `accepted` or `acceptedEventId` means synchronous model completion or provider/channel delivery success.
-- Model docs must use alias-first vocabulary: `modelAlias`, per-agent
-  `agentEngine` (`anthropic_sdk` or `deepagents`), `responseFamily`
-  (`anthropic` or `openai`), diagnostic `modelRoute`, read-only
-  `executionProviderId`, `credentialProfileRef`, and capabilities. OpenRouter is
-  route metadata, not a response family or top-level provider selector.
-- Job model docs must keep engine selection agent-owned. `job.model`, one-time
+- Model docs must use alias-first vocabulary: `modelAlias`, read-only derived
+  `agentEngine` (`anthropic_sdk` or `deepagents`, derived from the model provider —
+  not a settable field), `responseFamily` (`anthropic` or `openai`), diagnostic
+  `modelRoute`, read-only `executionProviderId`, `credentialProfileRef`, and
+  capabilities. The engine follows the provider (Claude -> `anthropic_sdk`;
+  OpenAI/OpenRouter/future -> `deepagents`); do not document an `agent_engine`
+  setting, `gantry agent engine` verb, or a `PATCH /v1/agents/:id` `agentEngine`
+  write. OpenRouter is its own provider on the DeepAgents/OpenAI-compatible lane,
+  not route metadata on an Anthropic alias.
+- Job model docs must keep engine derivation provider-owned. `job.model`, one-time
   job defaults, and recurring job defaults are approved aliases; jobs inherit
-  the bound agent's `agentEngine`. Do not document or add public `job.harness`,
-  job-level `agentEngine`, or job-level `executionProviderId` selectors.
+  the bound agent's derived `agentEngine`. Do not document or add public
+  `job.harness`, job-level `agentEngine`, or job-level `executionProviderId`
+  selectors.
 - DeepAgents or alternate-harness docs must keep provider-native tool names
   adapter-private. Gantry facade/tool names are the product contract, and docs
   should use the current singular `gantry model ...` CLI surface unless the plan

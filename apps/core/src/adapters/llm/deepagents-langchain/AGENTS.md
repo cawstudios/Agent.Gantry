@@ -1,26 +1,82 @@
 # DeepAgents (LangChain) Execution Adapter
 
-`deepagents:langchain` execution adapter + adapter-owned runner. Selected for
-agents whose engine is DeepAgents (`agent_engine: deepagents`) on OpenAI-endpoint
-and Anthropic-API-key model routes. This is an **approved provider-boundary
-path** (`.codex/architecture-map.json` + `architecture_rules.py`): DeepAgents /
-LangChain imports and `ANTHROPIC_`/`OPENAI_` env keys live only here.
+`deepagents:langchain` execution adapter + adapter-owned runner. Selected when the
+resolved model's provider derives the DeepAgents engine — the OpenAI and OpenRouter
+providers (and future non-Claude providers). The engine is **derived from the
+model provider**, not a settable `agent_engine` field; Claude (the `anthropic`
+provider) runs on the Anthropic SDK lane and never reaches this adapter. This is an
+**approved provider-boundary path** (`.codex/architecture-map.json` +
+`architecture_rules.py`): DeepAgents / LangChain / `@langchain/openrouter` imports
+and `OPENAI_`/`ANTHROPIC_` env keys live only here.
+
+## Model construction (library-driven, provider-driven)
+
+Model construction is **library-driven**, not env-sniffing. The host
+(`execution-adapter.ts`) projects the resolved model's provider string
+(`GANTRY_DEEPAGENTS_MODEL_PROVIDER`) beside the model id
+(`GANTRY_DEEPAGENTS_MODEL_ID`) and one loopback gateway base-URL + run-scoped
+`gtw_` token (carried in the gateway-projected `OPENAI_BASE_URL`/`OPENAI_API_KEY`
+modelCredentialEnv). `runner/model-factory.ts` selects the LangChain class from the
+provider string:
+
+- `openai` (and any other `initChatModel` provider):
+  `await initChatModel("openai:<id>", { apiKey, configuration: { baseURL }, streamUsage: true })`.
+- `openrouter`: `new ChatOpenRouter({ model: <id>, apiKey, baseURL: <gateway>/v1, streamUsage: true, sessionId? })`
+  from `@langchain/openrouter` (`initChatModel` does not know `openrouter`).
+  `ChatOpenRouter.buildUrl()` appends `/chat/completions` to `baseURL`, so the
+  factory passes `<gateway>/v1` -> loopback `/openrouter/v1/chat/completions` ->
+  `openrouter.ai/api/v1/chat/completions` (bearer auth).
+- `anthropic` is NOT a DeepAgents provider (Claude is SDK-only); the factory throws.
+
+The built `BaseChatModel` instance is passed to `createDeepAgent({ model })`.
+Loopback-URL + `gtw_`-token guards are enforced in the factory; the runtime
+`model.profile` (context window etc.) is read from the resolved instance.
+
+## OpenRouter prompt caching
+
+OpenRouter is the OpenAI-chat-completions-compatible lane, so prompt caching is
+correct-by-construction:
+
+- **Cache accounting** (`runner/stream-normalizer.ts`): reads
+  `prompt_tokens_details.cached_tokens` / `cache_write_tokens` off the final usage
+  chunk (with a LangChain `usage_metadata.input_token_details.cache_read` fallback)
+  and computes `cacheReadTokens` / `cacheWriteTokens` / `totalBillableInputTokens` /
+  `cacheProvider` / `cacheStatus` + the `contextUsage` cache fields. This also fixes
+  the OpenAI gpt lane (both replace the previous hardcoded zeros).
+- **Sticky routing** (`runner/model-factory.ts`): `ChatOpenRouter` receives a stable
+  `session_id` (the durable session id) on the request body so OpenRouter routes
+  follow-up turns to the same upstream provider and cache hits persist across turns.
+  The OpenAI lane has no `session_id` concept and is unaffected.
+- **Gated `cache_control` breakpoints** (`runner/cache-control.ts`): the host
+  projects `GANTRY_DEEPAGENTS_CACHE_PROMPT_CONTROL` (`automatic` | `explicit` |
+  `none`) from the model's cache descriptor. On `explicit` the runner injects
+  ephemeral `cache_control: { type: 'ephemeral' }` on the stable prefix (system
+  prompt + memory block content parts, <= 4 breakpoints). **Automatic-prefix
+  providers (Kimi/Moonshot via OpenRouter, OpenAI gpt) inject nothing** — explicit
+  breakpoints are only for Anthropic/Gemini/Qwen sub-models (none shipped today).
+- **Library limitation:** `@langchain/openrouter` 0.3.0 surfaces cache _reads_ but
+  not _writes_ on streamed chunks; the normalizer captures writes from raw usage if
+  a later version exposes them.
 
 ## Layout
 
 - `execution-adapter.ts` — `AgentExecutionAdapter`. Resolves the dist runner
   (`<runnerDistDir>/../adapters/llm/deepagents-langchain/runner/index.js`),
-  validates the credential projection, projects gateway model env, points the
-  runner at an adapter-owned sessions dir.
-- `credential-validation.ts` — credential-mode guard. Selected only for this
-  engine, so it enforces `supportedCredentialModes: ['api_key']` here: Claude
-  OAuth is rejected with the locked copy; missing Model Access uses the
-  setup-required copy.
+  validates the credential projection, projects gateway model env (including
+  `GANTRY_DEEPAGENTS_MODEL_PROVIDER`, `GANTRY_DEEPAGENTS_MODEL_ID`, and
+  `GANTRY_DEEPAGENTS_CACHE_PROMPT_CONTROL`), points the runner at an adapter-owned
+  sessions dir.
+- `credential-validation.ts` — credential-mode guard / defensive backstop. The
+  engine is derived from the provider, so an OAuth pairing can't be configured;
+  this still enforces `supportedCredentialModes: ['api_key']` here as a fail-closed
+  boundary: Claude OAuth is rejected with the locked copy; missing Model Access uses
+  the setup-required copy.
 - `model-credential-env.ts` — allowlist (`OPENAI_*`, `ANTHROPIC_*`,
   `NODE_EXTRA_CA_CERTS`) projected to `runnerInputPatch.modelCredentialEnv` only.
-- `runner/` — the child process. `model-factory.ts` builds `ChatOpenAI`
-  (`configuration.baseURL`) / `ChatAnthropic` (`anthropicApiUrl`, env is NOT read
-  by ChatAnthropic) explicitly from gateway env. `stream-normalizer.ts` is a pure
+- `runner/` — the child process. `model-factory.ts` builds the LangChain instance
+  from the projected provider string (`initChatModel("openai:<id>", ...)` /
+  `ChatOpenRouter`) — see "Model construction" above. `cache-control.ts` applies the
+  gated `cache_control` breakpoints. `stream-normalizer.ts` is a pure
   function over `streamEvents(..., {version:'v2'})` → neutral runner frames
   (unit-tested without network). `session-store.ts` is the adapter-private live
   session projection. `deep-agent-runner.ts` wires `createDeepAgent`.

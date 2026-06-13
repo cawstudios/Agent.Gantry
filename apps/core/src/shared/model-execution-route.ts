@@ -1,5 +1,5 @@
 import type { AgentEngine } from './agent-engine.js';
-import { DEFAULT_AGENT_ENGINE } from './agent-engine.js';
+import { DEFAULT_AGENT_ENGINE, DEEPAGENTS_ENGINE } from './agent-engine.js';
 import type {
   ModelCatalogEntry,
   ModelExecutionProviderId,
@@ -66,20 +66,35 @@ export function executionRoutesForEntry(
   ];
 }
 
-// Diagnostic memory transport lane for a model's response family. Memory is
-// system-owned host work dispatched purely on the model's family: the default
-// family uses the native SDK memory client, the secondary family uses the
+// Diagnostic label for the memory transport a model resolves to. Mirrors the
+// route-aware memory client's dispatch: provider takes precedence over family,
+// so a DeepAgents-lane provider (e.g. OpenRouter, nominal family 'anthropic')
+// reports 'openai_direct' because it speaks chat/completions. Otherwise the
+// default family uses the native SDK client and the secondary family the
 // OpenAI-compatible direct client. Returns null for an unknown family.
 export type MemoryTransportLane = 'native_sdk' | 'openai_direct';
 const DEFAULT_MEMORY_RESPONSE_FAMILY = 'anthropic';
 const SECONDARY_MEMORY_RESPONSE_FAMILY = 'openai';
-export function memoryTransportLaneForResponseFamily(
-  responseFamily: string | null | undefined,
-): MemoryTransportLane | null {
-  if (responseFamily === SECONDARY_MEMORY_RESPONSE_FAMILY) {
+export function memoryTransportLaneForModel(input: {
+  providerId?: string | null;
+  responseFamily: string | null | undefined;
+}): MemoryTransportLane | null {
+  if (input.providerId) {
+    const provider = getModelProviderDefinition(input.providerId);
+    if (
+      provider &&
+      provider.executionRoute.engine === DEEPAGENTS_ENGINE &&
+      provider.responseFamily !== SECONDARY_MEMORY_RESPONSE_FAMILY
+    ) {
+      return 'openai_direct';
+    }
+  }
+  if (input.responseFamily === SECONDARY_MEMORY_RESPONSE_FAMILY) {
     return 'openai_direct';
   }
-  if (responseFamily === DEFAULT_MEMORY_RESPONSE_FAMILY) return 'native_sdk';
+  if (input.responseFamily === DEFAULT_MEMORY_RESPONSE_FAMILY) {
+    return 'native_sdk';
+  }
   return null;
 }
 

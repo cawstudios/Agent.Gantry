@@ -71,4 +71,19 @@ describe('memoryModelPreview', () => {
       diagnosticLane: 'openai_direct',
     });
   });
+
+  it('reports openai_direct for OpenRouter despite its nominal anthropic family', () => {
+    // OpenRouter runs on the DeepAgents engine and speaks chat/completions, so
+    // its memory lane is openai_direct even though responseFamily is 'anthropic'
+    // — the diagnostic must match the route-aware client's provider-first dispatch.
+    const result = memoryModelPreview(ctxWith('kimi'), {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.body).toMatchObject({
+      engine: DEEPAGENTS_ENGINE,
+      engineLabel: 'DeepAgents',
+      responseFamily: 'anthropic',
+      diagnosticLane: 'openai_direct',
+    });
+  });
 });

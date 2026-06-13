@@ -17,7 +17,7 @@ import { resolveModelCacheSupport } from '../../../shared/model-cache-support.js
 import {
   deriveAgentEngineForProvider,
   executionRoutesForEntry,
-  memoryTransportLaneForResponseFamily,
+  memoryTransportLaneForModel,
 } from '../../../shared/model-execution-route.js';
 import {
   agentEngineLabel,
@@ -374,7 +374,10 @@ export function memoryModelPreview(
   const engine = slot.model
     ? deriveAgentEngineForProvider(slot.model.modelRoute.id)
     : DEFAULT_AGENT_ENGINE;
-  const diagnosticLane = memoryTransportLaneForResponseFamily(responseFamily);
+  const diagnosticLane = memoryTransportLaneForModel({
+    providerId: slot.model?.modelRoute.id ?? null,
+    responseFamily,
+  });
   return {
     ok: true,
     body: {

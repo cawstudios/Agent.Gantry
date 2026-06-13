@@ -91,7 +91,6 @@ gantry provider doctor
 gantry conversation approvers <conversation-id> [--allow <userId,userId>]
 gantry agent list
 gantry agent add <jid|chat-id> [--name <name>]
-gantry agent engine <jid|folder> <anthropic_sdk|deepagents>
 gantry agent access show <jid|folder>
 gantry agent access apply <jid|folder> --file <path|->
 gantry settings validate
@@ -146,7 +145,6 @@ Human-editable runtime settings live in `~/gantry/settings.yaml`. Validate edits
 defaults:
   name: Default Agent
   model: opus
-  agent_engine: anthropic_sdk
   jobs:
     one_time_model: haiku
     recurring_model: sonnet
@@ -607,22 +605,22 @@ Use these as standalone chat messages:
 
 Gantry uses a provider-neutral catalog. Normal users choose providers and aliases; provider slugs and SDK environment variables are adapter details.
 
-Each agent also has a durable **agent engine**. `anthropic_sdk` (display label `Anthropic SDK`) is the system default and the Claude OAuth/subscription lane; `deepagents` (display label `DeepAgents`) is the API-key engine for supported OpenAI-endpoint and Anthropic-endpoint catalog models. A run resolves `modelAlias + agentEngine -> executionRoute`: the model alias chooses the model, its provider route chooses the endpoint family, and the agent engine chooses the harness adapter. Jobs and conversations inherit the bound agent's engine; there is no job- or conversation-level engine selector. The internal `executionProviderId` stays read-only diagnostic.
+The **agent engine** is derived from the model's provider, not chosen. You pick the model (alias -> provider -> engine); the engine follows. Claude (the `anthropic` provider) runs on `anthropic_sdk` (display label `Anthropic SDK`) — the only lane that supports Claude OAuth/subscription credentials, and it also serves Claude API-key. Everything else (OpenAI, OpenRouter, future providers) runs on `deepagents` (display label `DeepAgents`), the universal API-key harness. There is no `agent_engine` setting, CLI verb, or API field: the engine is a read-only **derived diagnostic** surfaced on agent read responses, `gantry agent list`/`show`, `gantry model why <alias> --agent <id>`, model preview, and resolved-run audit (with the internal `executionProviderId`).
 
-- Set it with `gantry agent engine <id> <anthropic_sdk|deepagents>`, the Control API `PATCH /v1/agents/:id` `agentEngine` field, or `defaults.agent_engine` / `agents.<id>.agent_engine` in `settings.yaml`. `gantry agent list` and `gantry agent show <id>` display the effective engine, and `gantry model why <alias> --agent <id>` shows the model alias, endpoint family, credential profile, agent engine, and diagnostic `executionProviderId`.
-- Incompatible pairings are rejected before the run spawns, never silently re-routed: an OpenAI-endpoint model under Anthropic SDK, Claude OAuth/subscription credentials under DeepAgents, and any model whose provider route has no execution route for the selected engine each fail with explicit copy.
-- For DeepAgents-lane chat models, the catalog declares identity and route only; the context window, output limits, and capability flags are reported at runtime from the LangChain model profile, and pricing is intentionally not declared.
+- `gantry agent list` and `gantry agent show <id>` display the derived engine, and `gantry model why <alias> --agent <id>` shows the model alias, endpoint family, credential profile, derived engine, and diagnostic `executionProviderId`.
+- Because the engine follows the provider, an incompatible engine/model pairing cannot occur. A defensive backstop at the credential boundary still guarantees Claude OAuth/subscription credentials only ever reach the Anthropic SDK lane.
+- For DeepAgents-lane chat models, the catalog declares identity and route only; the context window, output limits, and capability flags are reported at runtime from the LangChain model profile, and pricing is intentionally not declared. Model construction is library-driven: the DeepAgents runner builds the chat model via LangChain `initChatModel("openai:<id>", ...)` for the OpenAI lane and `@langchain/openrouter` `ChatOpenRouter` for OpenRouter, rather than a hand-branched factory.
 
 - Anthropic preset: chat `opus`; job defaults inherit chat; memory uses preset-managed extractor `haiku`, dreaming `sonnet`, consolidation `sonnet`
 - OpenRouter preset: chat defaults to `kimi`; job defaults inherit chat; memory extractor, dreaming, and consolidation use `kimi`
 - Catalog choices: Anthropic `opus`, `opus-4.7`, `opus-4.6`, `sonnet`, `sonnet-4.6`, `haiku`, `haiku-4.5`; OpenRouter `kimi`, `kimi-k2.6`, `kimi-2.6`
 - Job defaults: `agent.one_time_job_default_model` and `agent.recurring_job_default_model` inherit `agent.default_model` when empty
 - Memory task defaults are preset-managed. Use `gantry model memory` to inspect them and `gantry model reset memory` or `PATCH /v1/models/defaults` with `memory: null` to reapply preset-managed defaults.
-- Memory runs on its own engine, `memory.engine` in `settings.yaml` (`anthropic_sdk` default, or `deepagents`), governing extraction, dreaming, and consolidation. With `memory.engine: deepagents` plus OpenAI memory model aliases, memory runs with no Anthropic models. `gantry model memory` shows `Memory engine: <label>`; an incompatible engine/model pairing is rejected at settings validation.
+- Memory (extraction, dreaming, consolidation) has no engine setting either (the retired `memory.engine` key is now rejected at settings validation). The memory transport lane is derived from the memory model's provider: an Anthropic memory model uses the Claude Agent SDK memory client; OpenAI and OpenRouter memory models use the OpenAI-compatible chat-completions memory client. Choose OpenAI/OpenRouter memory model aliases and memory runs with no Anthropic models. `gantry model memory` shows the derived `Memory engine: <label>`.
 - Use `gantry model chat|jobs|memory` and `gantry model why ...` to preview what will actually run before changing defaults. SDK and Control API callers use `client.models.defaults.get()`, `client.models.defaults.update()`, and `client.models.preview()` over `GET /v1/models/defaults`, `PATCH /v1/models/defaults`, and `POST /v1/models/preview`.
 - The generated agent SDK settings JSON includes `model` and `availableModels`; memory hooks are not installed in runtime materialization.
 
-The model catalog is centralized in `apps/core/src/shared/model-catalog.ts`. OpenRouter is selected by provider or catalog alias; the current adapter projects it through the Claude Agent SDK-compatible OpenRouter endpoint with brokered Model Access credentials.
+The model catalog is centralized in `apps/core/src/shared/model-catalog.ts`. OpenRouter is selected by provider or catalog alias and runs on the DeepAgents/OpenAI-compatible lane: `ChatOpenRouter` reaches OpenRouter via the brokered Gantry loopback gateway (`/v1/chat/completions`, bearer auth) with Model Access credentials. OpenRouter supports prompt caching — automatic-prefix providers such as Kimi cache without request shaping, and the runner accounts cache reads/writes from the streamed usage and uses sticky session routing so cache hits persist across turns.
 
 ## Project Layout
 

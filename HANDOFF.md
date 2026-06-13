@@ -1,3 +1,60 @@
+# HANDOFF — provider-derived engine + OpenRouter caching (2026-06-13)
+
+> Branch: `feature/deepagents-agent-engine`. This section is additive; the
+> agent-engine and deployment-modes handoffs below are unchanged (kept as
+> history — the user-selectable engine they describe is now superseded).
+>
+> **What shipped (4 commits on `71f23b6f..HEAD`).** The engine is now **derived
+> from the model's provider, not chosen.** The user picks the model
+> (alias -> provider -> engine); Claude (`anthropic`) -> `anthropic_sdk` (the only
+> Claude OAuth/subscription lane, also API-key); OpenAI/OpenRouter/future ->
+> `deepagents`. Engine is a read-only derived diagnostic.
+>
+> - `9b4f781b` — derive-engine refactor. Single derivation point
+>   `deriveAgentEngineForProvider`; `resolveExecutionRoute(entry)` takes no
+>   `agentEngine` input; the engine x provider incompatibility branch + locked
+>   copies removed. Clean-cut removal of the `agent_engine` + `memory.engine`
+>   settings (parse/render/import/export/validate/project), the `gantry agent
+>   engine` CLI verb, the `PATCH /v1/agents/:id` `agentEngine` write, the
+>   `AGENT_ENGINE_CHANGED` + `MEMORY_ENGINE_CHANGED` audit events,
+>   `memory-engine-matrix`, and the now-dead `anthropic-memory-direct` memory
+>   client. Memory router dispatches purely on the memory model's response family
+>   (anthropic -> Claude SDK; openai/openrouter -> OpenAI-compatible). Derived
+>   engine still shown in agent read responses, `model why`/list/show, model
+>   preview, and resolved-run audit. (Also folds in the in-progress
+>   startup-timing + pre-spawn admission instrumentation.)
+> - `cbd4729d` — library-driven model construction + OpenRouter DeepAgents lane.
+>   Runner builds models via `initChatModel("openai:<id>", ...)` and
+>   `@langchain/openrouter` `ChatOpenRouter` (no env-sniffing factory); host
+>   projects `GANTRY_DEEPAGENTS_MODEL_PROVIDER`. OpenRouter is the
+>   DeepAgents/OpenAI-compatible lane end to end (gateway projects
+>   `OPENAI_BASE_URL`/`OPENAI_API_KEY`, allows `/v1/chat/completions`, bearer;
+>   `ChatOpenRouter` -> `openrouter.ai/api/v1/chat/completions`). OpenRouter
+>   `cacheSupport` corrected to automatic provider-prefix caching; OpenRouter
+>   memory routes through the OpenAI-compatible client. Adds `@langchain/openrouter`.
+> - `0465f244` — DeepAgents runner prompt-cache accounting + sticky routing +
+>   gated breakpoints. Stream-normalizer reads
+>   `prompt_tokens_details.cached_tokens`/`cache_write_tokens` (fixes the OpenAI
+>   gpt lane too); `ChatOpenRouter` gets a stable `session_id`; host projects
+>   `GANTRY_DEEPAGENTS_CACHE_PROMPT_CONTROL` and the runner injects ephemeral
+>   `cache_control` only for explicit-cache providers (automatic providers — Kimi,
+>   OpenAI — inject nothing).
+> - (Packet 7, this session) — docs + cleanup: README, ADR
+>   `2026-06-12-agent-engine-selection.md` (superseding section), credential-
+>   management, root + docs AGENTS model vocabulary, adapter AGENTS, this handoff,
+>   and the handoff-plan status note.
+>
+> **Decision:** `docs/decisions/2026-06-12-agent-engine-selection.md` —
+> "Superseding decision (2026-06-13): provider-derived engine + OpenRouter caching".
+>
+> **Known library limitation:** `@langchain/openrouter` 0.3.0 surfaces cache
+> *reads* but not *writes* on streamed chunks (normalizer captures writes if a
+> later version exposes them).
+>
+> **Remaining (by design):** explicit `cache_control` breakpoints are wired but no
+> shipped model needs them today (no Anthropic/Gemini/Qwen sub-models on the
+> OpenRouter lane); DeepAgents shell/filesystem authority stays disabled.
+
 # HANDOFF — agent-engine branch (2026-06-12)
 
 > Branch: `feature/deepagents-agent-engine`. This section is additive; the

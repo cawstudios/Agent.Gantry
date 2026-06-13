@@ -136,31 +136,37 @@ mode, `PATCH` rotates fields for the existing auth mode, and all read/mutation
 responses return only redacted status, fingerprints, configured field names,
 and mode metadata.
 
-The selected credential mode is constrained by the agent engine. DeepAgents is
-the API-key engine: it runs OpenAI-endpoint and Anthropic-API-key-endpoint routes
-through the Gantry Model Gateway and does not support Claude OAuth/subscription
-credentials. Anthropic SDK is the Claude OAuth/subscription lane and also runs
-Anthropic API-key models. A run that pairs DeepAgents with a Claude
-OAuth/subscription credential is rejected before spawn with `DeepAgents does not
-support Claude OAuth/subscription credentials in Gantry. Choose Anthropic SDK or
-configure Anthropic API-key Model Access.`; a run that pairs Anthropic SDK with
-an OpenAI-endpoint model is rejected with `Model <alias> uses the OpenAI
-endpoint, which is not supported by Anthropic SDK. Choose DeepAgents or an
-Anthropic-compatible model.` Neither pairing is silently re-routed.
+The credential modes follow from the model's provider, because the engine is
+**derived from the provider** (no user engine selector):
 
-Host-side memory (extraction, dreaming, consolidation) has its own engine,
-`memory.engine` in `settings.yaml` (`anthropic_sdk` default, or `deepagents`),
-governing all three memory workloads. The same engine x model-family matrix
-applies, validated at settings load and enforced again at memory query dispatch:
-Anthropic SDK + an Anthropic-family memory model uses the Claude Agent SDK memory
-client; DeepAgents + an OpenAI-family memory model uses the direct
-chat-completions client; DeepAgents + an Anthropic-API-key memory model uses a
-direct Anthropic Messages client; Anthropic SDK + an OpenAI-family memory model
-is rejected with the OpenAI-endpoint copy above. A DeepAgents memory engine with
-Claude OAuth/subscription credentials is rejected when the gateway resolves the
-credential mode with the same DeepAgents-OAuth copy above. A deployment that
-configures `memory.engine: deepagents` with OpenAI memory model aliases runs
-memory with no Anthropic models at all.
+| provider | derived engine | credential modes |
+| --- | --- | --- |
+| `anthropic` (Claude) | `anthropic_sdk` | `api_key` + `claude_code_oauth` |
+| `openai` | `deepagents` | `api_key` |
+| `openrouter` | `deepagents` | `api_key` |
+
+Anthropic SDK is the only Claude OAuth/subscription lane and also runs Anthropic
+API-key models. DeepAgents is the universal API-key engine for OpenAI- and
+OpenRouter-endpoint routes through the Gantry Model Gateway and does not support
+Claude OAuth/subscription credentials. Because the engine follows the provider,
+an incompatible engine/model pairing cannot be configured. A defensive backstop at
+the credential boundary still guarantees a Claude OAuth/subscription credential can
+only ever project to the Anthropic SDK lane; the DeepAgents lane fails closed if it
+ever resolves one (`DeepAgents does not support Claude OAuth/subscription
+credentials in Gantry. Choose Anthropic SDK or configure Anthropic API-key Model
+Access.`).
+
+Host-side memory (extraction, dreaming, consolidation) has no engine selector
+either (the retired `memory.engine` key is rejected at settings validation). The
+memory transport lane is derived at query dispatch
+(`route-aware-memory-llm-client.ts`): an Anthropic-family memory model uses the
+Claude Agent SDK memory client; an OpenAI-family memory model uses the
+OpenAI-compatible direct chat-completions client. Provider takes precedence over
+the nominal family — OpenRouter's nominal response family is `anthropic`, but
+because it runs on the DeepAgents/OpenAI-compatible engine it dispatches to the
+OpenAI-compatible client (over the brokered OpenRouter gateway projection). A
+deployment that selects OpenAI/OpenRouter memory model aliases runs memory with no
+Anthropic models at all.
 
 Agents do not receive every raw secret value from Gantry. Runtime code projects
 only the selected capability's declared credential names. Attached skills do
@@ -205,7 +211,6 @@ Gantry model credentials, never in Gantry `.env` or process env.
 | `agent.one_time_job_default_model`                            | `settings.yaml`                                          |
 | `agent.recurring_job_default_model`                           | `settings.yaml`                                          |
 | `memory.llm.models.*`                                         | `settings.yaml`                                          |
-| `memory.engine`                                               | `settings.yaml`                                          |
 | Conversation approvers                                        | `settings.yaml` and Postgres conversation approver rows  |
 | `storage.postgres.url_env`                                    | `settings.yaml` advanced override                        |
 | `GANTRY_DATABASE_URL`                                         | `RuntimeSecretProvider` / local `.env`                   |

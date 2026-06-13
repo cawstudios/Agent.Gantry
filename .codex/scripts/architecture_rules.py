@@ -260,7 +260,6 @@ PROVIDER_BOUNDARY_TOKENS: tuple[tuple[str, re.Pattern[str]], ...] = (
 PROVIDER_BOUNDARY_DEFAULT_APPROVED_PATHS = (
     "apps/core/src/adapters/llm/anthropic-claude-agent",
     "apps/core/src/adapters/llm/deepagents-langchain",
-    "apps/core/src/adapters/llm/anthropic-memory-direct",
 )
 PROVIDER_BOUNDARY_ALLOWED_APPROVED_PATHS = set(PROVIDER_BOUNDARY_DEFAULT_APPROVED_PATHS)
 PROVIDER_BOUNDARY_DISALLOWED_BROAD_PATHS = (
