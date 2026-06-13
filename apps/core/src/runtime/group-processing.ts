@@ -335,6 +335,29 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let traceRunHandle: string | undefined;
     let traceAppId: string | undefined;
     let traceTurns: NonNullable<AgentOutput['turns']> = [];
+    // Persist the per-reply trace as soon as the turn's reply is finalized
+    // (one-shot, idempotent) so the latency badge appears promptly instead of
+    // waiting for the warm session to close. The post-run block is a backstop.
+    let replyTracePersisted = false;
+    const persistReplyTraceForTurn = async (): Promise<void> => {
+      if (replyTracePersisted || !deps.replyTrace) return;
+      if (!(guardrailTrace || traceTurns.length > 0)) return;
+      const cursor = await ops()
+        .getLastBotMessageCursor(chatJid)
+        .catch(() => undefined);
+      if (!cursor) return;
+      replyTracePersisted = true;
+      await persistReplyTrace({
+        replyTrace: deps.replyTrace,
+        kind: 'reply',
+        chatJid,
+        appId: traceAppId ?? 'default',
+        outboundMessageId: cursor.id,
+        runHandle: traceRunHandle,
+        ...(guardrailTrace ? { guardrail: guardrailTrace } : {}),
+        ...(traceTurns.length > 0 ? { llmTurns: traceTurns } : {}),
+      });
+    };
     if (guardrailResult.handled) {
       // direct_response (guardrail-canned) reply: it never spawns the agent, so
       // its trace is just the guardrail stage, keyed to the canned outbound msg.
@@ -726,6 +749,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         await setTypingState(false);
         awaitingResponseReceipt = true;
         resetIdleTimer();
+        // Reply is finalized + committed at this boundary — persist the trace
+        // promptly (one-shot) rather than waiting for the warm run to close.
+        await persistReplyTraceForTurn();
       }
 
       if (isAgentTurnCompleteMarker(result)) {
@@ -740,6 +766,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         startNextStreamingMessage();
         await setTypingState(false);
         resetIdleTimer();
+        // Reply is finalized + committed here — persist the trace promptly
+        // (one-shot), so the latency badge does not wait for the run to close.
+        await persistReplyTraceForTurn();
       }
 
       if (result.status === 'error') {
@@ -891,29 +920,15 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     }
     await setTypingState(false);
 
-    // Best-effort per-reply latency trace, keyed to the outbound reply message.
-    // Runs AFTER the reply was sent/finalized; any failure is swallowed inside
-    // persistReplyTrace and can never affect the already-delivered reply.
-    if (deps.replyTrace && (guardrailTrace || traceTurns.length > 0)) {
-      const cursor = await ops()
-        .getLastBotMessageCursor(chatJid)
-        .catch(() => undefined);
-      if (cursor) {
-        await persistReplyTrace({
-          replyTrace: deps.replyTrace,
-          kind: 'reply',
-          chatJid,
-          appId: traceAppId ?? 'default',
-          outboundMessageId: cursor.id,
-          runHandle: traceRunHandle,
-          ...(guardrailTrace ? { guardrail: guardrailTrace } : {}),
-          ...(traceTurns.length > 0 ? { llmTurns: traceTurns } : {}),
-        });
-      } else if (traceRunHandle) {
-        // No outbound message to attach to — still drain so the collector never
-        // leaks records for a completed run.
-        deps.replyTrace.drain(traceRunHandle);
-      }
+    // Backstop for the per-reply latency trace: the turn-complete marker
+    // normally persists it promptly, but persist here too (idempotent one-shot)
+    // for paths that never hit that marker (non-streaming, early exits). Any
+    // failure is swallowed inside persistReplyTrace and can never affect the
+    // already-delivered reply. Drain any leftover MCP records so a completed run
+    // cannot leak them when there was no outbound message to attach to.
+    await persistReplyTraceForTurn();
+    if (!replyTracePersisted && traceRunHandle) {
+      deps.replyTrace?.drain(traceRunHandle);
     }
 
     return resultOk;
