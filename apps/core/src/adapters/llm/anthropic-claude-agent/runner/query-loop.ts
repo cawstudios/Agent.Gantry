@@ -513,7 +513,17 @@ export async function runQuery(
         const event = (message as { event?: unknown }).event as
           | {
               type?: string;
-              delta?: { type?: string; text?: string };
+              delta?: {
+                type?: string;
+                text?: string;
+                stop_reason?: string | null;
+              };
+              usage?: {
+                input_tokens?: number;
+                output_tokens?: number;
+                cache_read_input_tokens?: number;
+                cache_creation_input_tokens?: number;
+              };
             }
           | undefined;
         if (event?.type === 'content_block_delta') {
@@ -522,6 +532,13 @@ export async function runQuery(
             sawPartialTextSinceLastResult = true;
             pendingPartialText += delta.text;
           }
+        }
+        // The message_delta event carries the message's FINAL token usage (esp.
+        // output_tokens — the assistant event only had a mid-stream snapshot).
+        // Apply it to the open LLM turn so the trace shows accurate per-turn
+        // tokens. Best-effort.
+        if (event?.type === 'message_delta') {
+          llmTurns.onFinalUsage(event.usage, event.delta?.stop_reason);
         }
       }
       if (message.type === 'result') {

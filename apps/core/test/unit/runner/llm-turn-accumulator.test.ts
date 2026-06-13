@@ -105,4 +105,52 @@ describe('LlmTurnAccumulator', () => {
     acc.closeOpenTurn(100);
     expect(acc.turns()).toEqual([]);
   });
+
+  it('merges assistant events that share a message id into one turn (text + tool_use)', () => {
+    // One Anthropic message is emitted by the SDK as two assistant events — a
+    // text block and a tool_use block — sharing the same message.id. They must
+    // collapse into ONE turn, not two (the empty tool_use one is a phantom).
+    const acc = new LlmTurnAccumulator({ capturePayloads: true });
+    acc.onAssistant({ message: { id: 'msg_1', usage: usage() } }, 100, {
+      output: 'hello',
+      input: 'PROMPT',
+    });
+    acc.onAssistant({ message: { id: 'msg_1', usage: usage() } }, 150, {
+      output: '',
+    });
+    acc.closeOpenTurn(200);
+    const turns = acc.turns();
+    expect(turns.length).toBe(1);
+    expect(turns[0].output).toBe('hello');
+    expect(turns[0].input).toBe('PROMPT');
+    expect(turns[0].ms).toBe(100); // 200 - 100 (the message's first event)
+  });
+
+  it('finalizes the open turn tokens + stop_reason from the message_delta usage', () => {
+    // The assistant event carries only a mid-stream usage snapshot (out=1); the
+    // authoritative final output_tokens arrive in the message_delta.
+    const acc = new LlmTurnAccumulator();
+    acc.onAssistant(
+      { message: { id: 'msg_1', usage: usage({ output_tokens: 1 }) } },
+      0,
+    );
+    acc.onFinalUsage(
+      usage({
+        output_tokens: 134,
+        input_tokens: 1,
+        cache_read_input_tokens: 9824,
+        cache_creation_input_tokens: 435,
+      }),
+      'end_turn',
+    );
+    acc.closeOpenTurn(10);
+    const t = acc.turns()[0];
+    expect(t.detail.tokens).toEqual({
+      in: 1,
+      out: 134,
+      cacheRead: 9824,
+      cacheWrite: 435,
+    });
+    expect(t.detail.stopReason).toBe('end_turn');
+  });
 });
