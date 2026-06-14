@@ -419,13 +419,22 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       });
     };
     if (guardrailResult.handled) {
-      // direct_response (guardrail-canned) reply: it never spawns the agent, so
-      // its trace is just the guardrail stage, keyed to the canned outbound msg.
+      // direct_response (guardrail-canned) reply: it never spawns the agent. Give
+      // it a real window (driving inbound ingress -> canned outbound send), same
+      // as an agent reply, so the report is openable even when the deterministic
+      // guardrail runs in ~0ms — a guardrail-only, zero-window timeline collapses
+      // to no sections and would be skipped (badge not clickable).
       if (deps.replyTrace && guardrailTrace) {
         const cursor = await ops()
           .getLastBotMessageCursor(chatJid)
           .catch(() => undefined);
         if (cursor) {
+          const drivingIngressIso = await ops()
+            .getLastInboundIngressAtOrBefore(
+              chatJid,
+              new Date(guardrailTrace.startedAt).toISOString(),
+            )
+            .catch(() => undefined);
           await persistReplyTrace({
             replyTrace: deps.replyTrace,
             kind: 'reply',
@@ -433,6 +442,20 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             appId: 'default',
             outboundMessageId: cursor.id,
             guardrail: guardrailTrace,
+            ...(drivingIngressIso
+              ? { windowStart: new Date(drivingIngressIso).getTime() }
+              : {}),
+            ...(cursor.sendCompletedAt
+              ? { windowEnd: new Date(cursor.sendCompletedAt).getTime() }
+              : {}),
+            ...(cursor.sendStartedAt && cursor.sendCompletedAt
+              ? {
+                  send: {
+                    startedAt: new Date(cursor.sendStartedAt).getTime(),
+                    endedAt: new Date(cursor.sendCompletedAt).getTime(),
+                  },
+                }
+              : {}),
           });
         }
       }
