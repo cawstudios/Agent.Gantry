@@ -1274,6 +1274,8 @@ describe('createChannelWiring', () => {
         external_message_id: '171.123',
         delivery_status: 'sent',
         delivered_at: expect.any(String),
+        send_started_at: expect.any(String),
+        send_completed_at: expect.any(String),
       }),
     );
   });

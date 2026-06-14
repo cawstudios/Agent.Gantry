@@ -443,10 +443,13 @@ export function createChannelWiring(
     }
 
     let result: MessageDeliveryResult | undefined;
+    const sendStartedAt = nowIso();
+    let sendCompletedAt: string | undefined;
     try {
       const delivery = options.messageOptions
         ? await channel.sendMessage(jid, formatted, options.messageOptions)
         : await channel.sendMessage(jid, formatted);
+      sendCompletedAt = nowIso();
       result = delivery as MessageDeliveryResult | undefined;
     } catch (err) {
       const partial = isPartialMessageDeliveryError(err);
@@ -539,6 +542,8 @@ export function createChannelWiring(
           delivered_at: partial ? nowIso() : undefined,
           delivery_error: sanitizeDeliveryError(err, provider),
           delivery_retry_tail: sanitizedRetryTail,
+          send_started_at: sendStartedAt,
+          send_completed_at: partial ? nowIso() : undefined,
         });
       } catch (persistErr) {
         resolved.logger.error(
@@ -610,6 +615,8 @@ export function createChannelWiring(
         external_message_id: result?.externalMessageId,
         delivery_status: 'sent',
         delivered_at: nowIso(),
+        send_started_at: sendStartedAt,
+        send_completed_at: sendCompletedAt,
       });
     } catch (err) {
       const ambiguousError =
