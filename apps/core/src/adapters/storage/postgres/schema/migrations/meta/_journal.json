@@ -519,6 +519,13 @@
       "when": 1781381261679,
       "tag": "0074_message_traces",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1781381261680,
+      "tag": "0075_message_timeline_columns",
+      "breakpoints": true
     }
   ]
 }

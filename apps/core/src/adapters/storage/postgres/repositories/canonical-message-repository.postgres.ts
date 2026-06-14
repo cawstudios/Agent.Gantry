@@ -130,6 +130,9 @@ export class PostgresCanonicalMessageRepository {
           deliveryStatus: msg.delivery_status ?? null,
           deliveredAt: msg.delivered_at ?? null,
           deliveryError: msg.delivery_error ?? null,
+          ingressAt: msg.ingress_at ?? null,
+          sendStartedAt: msg.send_started_at ?? null,
+          sendCompletedAt: msg.send_completed_at ?? null,
         })
         .onConflictDoUpdate({
           target: pgSchema.messagesPostgres.id,
@@ -143,6 +146,9 @@ export class PostgresCanonicalMessageRepository {
             deliveryStatus: msg.delivery_status ?? null,
             deliveredAt: msg.delivered_at ?? null,
             deliveryError: msg.delivery_error ?? null,
+            ingressAt: msg.ingress_at ?? null,
+            sendStartedAt: msg.send_started_at ?? null,
+            sendCompletedAt: msg.send_completed_at ?? null,
           },
         });
       await tx

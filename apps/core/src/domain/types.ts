@@ -169,6 +169,11 @@ export interface NewMessage {
   delivery_status?: MessageDeliveryStatus;
   delivered_at?: string;
   delivery_error?: string;
+  /** Wall-clock instant the channel gateway first observed this inbound (ISO). */
+  ingress_at?: string;
+  /** Outbound send bracket (ISO): set when the channel send is attempted. */
+  send_started_at?: string;
+  send_completed_at?: string;
   delivery_retry_tail?: {
     canonicalText: string;
     providerPayload?: unknown;

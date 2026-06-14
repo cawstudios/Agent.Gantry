@@ -57,6 +57,15 @@ export const messagesPostgres = pgTable(
       mode: 'string',
     }),
     deliveryError: text('delivery_error'),
+    ingressAt: timestamp('ingress_at', { withTimezone: true, mode: 'string' }),
+    sendStartedAt: timestamp('send_started_at', {
+      withTimezone: true,
+      mode: 'string',
+    }),
+    sendCompletedAt: timestamp('send_completed_at', {
+      withTimezone: true,
+      mode: 'string',
+    }),
   },
   (table) => ({
     conversationCursorIdx: index('idx_messages_conversation_cursor').on(
