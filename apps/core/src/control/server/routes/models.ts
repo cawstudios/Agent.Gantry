@@ -34,6 +34,7 @@ import { authenticate, type ApiKeyRecord } from '../auth.js';
 
 function modelToResponse(
   entry: ReturnType<typeof listModelCatalogEntries>[number],
+  configuredProviders?: Set<string>,
 ) {
   return {
     id: entry.id,
@@ -62,6 +63,13 @@ function modelToResponse(
     cacheSupport: resolveModelCacheSupport(entry),
     supportsThinking: entry.supportsThinking,
     supportsTools: entry.supportsTools,
+    inputUsdPerMillionTokens: entry.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: entry.outputUsdPerMillionTokens,
+    // Availability only when the list endpoint passes the configured set
+    // (modelRoute.id is the provider id the credential is keyed on).
+    ...(configuredProviders
+      ? { available: configuredProviders.has(entry.modelRoute.id) }
+      : {}),
     source: entry.source,
     experimental: entry.experimental === true,
   };
@@ -685,11 +693,17 @@ export async function handleModelRoutes(
   }
 
   if (req.method === 'GET') {
-    if (!authorizeControlRequest(req, res, ctx.keys, ['sessions:read'])) {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['sessions:read']);
+    if (!auth) {
       return true;
     }
+    const configuredProviders = new Set(
+      await ctx.getActiveModelCredentialProviderIds(auth.appId as AppId),
+    );
     sendJson(res, 200, {
-      models: listModelCatalogEntries().map(modelToResponse),
+      models: listModelCatalogEntries().map((entry) =>
+        modelToResponse(entry, configuredProviders),
+      ),
     });
     return true;
   }

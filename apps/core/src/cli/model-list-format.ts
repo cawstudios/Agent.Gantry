@@ -121,6 +121,7 @@ export function formatModelList(
     rows.push(
       '',
       'Model families (provider auto-selected by configured key)',
+      'Reorder members or rank by price with `cheapest` via settings.yaml model_families.<family>.',
       familyHeader,
       familyHeader.replace(/[^|]+/g, '---'),
       ...listModelFamilies().map((family) => {

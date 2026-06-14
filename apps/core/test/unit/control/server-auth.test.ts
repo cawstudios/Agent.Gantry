@@ -1156,6 +1156,12 @@ describe('control server runtime hardening', () => {
               'chat',
               'memory_extractor',
             ]),
+            // Cost is surfaced from the curated catalog pricing...
+            inputUsdPerMillionTokens: expect.any(Number),
+            outputUsdPerMillionTokens: expect.any(Number),
+            // ...and credential-aware availability is present on the list
+            // endpoint (false here: no OpenRouter credential configured).
+            available: false,
           }),
         ]),
       );

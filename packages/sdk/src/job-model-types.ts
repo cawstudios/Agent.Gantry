@@ -268,6 +268,15 @@ export interface ModelRecord {
   };
   supportsThinking?: boolean;
   supportsTools?: boolean;
+  /** Curated per-million-token pricing (USD); omitted when no curated price. */
+  inputUsdPerMillionTokens?: number;
+  outputUsdPerMillionTokens?: number;
+  /**
+   * Credential-aware availability for the requesting app: true when the model's
+   * provider has an active Model Access credential. Present only on the model
+   * list endpoint; omitted when a model is embedded in a default slot.
+   */
+  available?: boolean;
   source: {
     label: string;
     url: string;

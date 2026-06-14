@@ -494,6 +494,14 @@ export const ModelRecordSchema = z.object({
   cacheSupport: ModelCacheSupportSchema,
   supportsThinking: z.boolean().optional(),
   supportsTools: z.boolean().optional(),
+  // Curated per-million-token pricing (USD). Optional: some entries carry no
+  // curated price (the library reports none), in which case the field is omitted.
+  inputUsdPerMillionTokens: z.number().nonnegative().optional(),
+  outputUsdPerMillionTokens: z.number().nonnegative().optional(),
+  // Credential-aware availability for the requesting app: true when the model's
+  // provider has an active Model Access credential. Omitted on responses that
+  // are not scoped to a configured-provider set (e.g. model embedded in a slot).
+  available: z.boolean().optional(),
   source: z.object({
     label: z.string(),
     url: z.string(),
