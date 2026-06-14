@@ -196,9 +196,14 @@ export async function runQuery(
   // continuation as it is piped in. Consumed by the first turn that answers it
   // and cleared, so a turn's tool-loop follow-ons carry no input.
   let pendingTurnInput: string | undefined = prompt;
+  // Warm continuation: the instant this turn's input is delivered to the model
+  // (pushed to the SDK stream). Emitted per result so core can split the warm
+  // leading span into real pickup (queue) + the model's first-token wait.
+  let pendingTurnDispatchedAt: number | undefined;
   const steeringGate = new SteeringDeliveryGate((text) => {
     log(`Piping IPC message at turn boundary (${text.length} chars)`);
     pendingTurnInput = text;
+    pendingTurnDispatchedAt = Date.now();
     stream.pushContent(text);
   });
   const emitInteractionBoundary = () => {
@@ -601,6 +606,9 @@ export async function runQuery(
           ...(turns.length > 0 ? { turns } : {}),
           ...(firstSdkMessageAt !== undefined
             ? { runnerStartup: { queryDispatchedAt, firstSdkMessageAt } }
+            : {}),
+          ...(pendingTurnDispatchedAt !== undefined
+            ? { dispatchedAt: pendingTurnDispatchedAt }
             : {}),
           ...(usage
             ? {

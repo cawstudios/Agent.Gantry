@@ -93,6 +93,8 @@ export interface AgentOutput {
   turns?: AgentOutputLlmTurn[];
   /** Run-level process-startup marks for the latency timeline (best-effort). */
   runnerStartup?: { queryDispatchedAt?: number; firstSdkMessageAt: number };
+  /** Warm continuation: when this reply's input was delivered to the model. */
+  dispatchedAt?: number;
 }
 
 export interface AgentOutputRuntimeEvent {

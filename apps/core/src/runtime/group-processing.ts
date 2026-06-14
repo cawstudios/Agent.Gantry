@@ -344,10 +344,11 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     // the post-run block is a backstop for replies whose marker never fired.
     let traceTurns: NonNullable<AgentOutput['turns']> = [];
     let traceStartup: AgentOutput['runnerStartup'];
-    // Warm continuation: dispatch instant of the turn being generated, set by
-    // startUserVisibleTurn (the continuation handler). Splits a warm reply's
-    // leading span into real pickup (queue) + model warm-up (TTFT).
-    let lastTurnDispatchedAtMs: number | undefined;
+    // Warm continuation: dispatch instant of the reply being generated, taken
+    // from the runner envelope (result.dispatchedAt = when the continuation was
+    // delivered to the model). Splits a warm reply's leading span into real
+    // pickup (queue) + model warm-up (TTFT).
+    let traceDispatchedAt: number | undefined;
     let persistedTurnCount = 0;
     let lastPersistedTraceCursorId: string | undefined;
     const persistReplyTraceForTurn = async (): Promise<void> => {
@@ -420,8 +421,8 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
               },
             }
           : {}),
-        ...(!isFirstReply && lastTurnDispatchedAtMs !== undefined
-          ? { dispatchedAt: lastTurnDispatchedAtMs }
+        ...(!isFirstReply && traceDispatchedAt !== undefined
+          ? { dispatchedAt: traceDispatchedAt }
           : {}),
       });
     };
@@ -566,7 +567,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       await sendDoneProgress(state);
     };
     const startUserVisibleTurn = () => {
-      lastTurnDispatchedAtMs = currentTimeMs();
       progressGeneration = streamGeneration = streamingGenerationCounter += 1;
       activeGenerationHasOutput = false;
       resetActiveElapsed();
@@ -784,6 +784,8 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         traceTurns = result.turns;
       }
       if (result.runnerStartup) traceStartup = result.runnerStartup;
+      if (result.dispatchedAt !== undefined)
+        traceDispatchedAt = result.dispatchedAt;
       if (awaitingResponseReceipt && !result.interactionBoundary) {
         awaitingResponseReceipt = false;
         await resumeActiveElapsed();
