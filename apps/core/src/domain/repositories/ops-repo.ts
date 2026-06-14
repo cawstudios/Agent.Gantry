@@ -134,9 +134,15 @@ export interface RuntimeMessageRepository {
     options?: { threadId?: string | null },
   ): Promise<NewMessage[]>;
   getMessageThreadIds(conversationJid: string): Promise<Array<string | null>>;
-  getLastBotMessageCursor(
-    conversationJid: string,
-  ): Promise<{ timestamp: string; id: string; sendStartedAt?: string; sendCompletedAt?: string } | undefined>;
+  getLastBotMessageCursor(conversationJid: string): Promise<
+    | {
+        timestamp: string;
+        id: string;
+        sendStartedAt?: string;
+        sendCompletedAt?: string;
+      }
+    | undefined
+  >;
   getLastBotMessageTimestamp(
     conversationJid: string,
   ): Promise<string | undefined>;

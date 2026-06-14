@@ -100,9 +100,15 @@ export class CanonicalMessageOpsService {
     return this.repository.listThreadIds(chatJid);
   }
 
-  async getLastBotMessageCursor(
-    chatJid: string,
-  ): Promise<{ timestamp: string; id: string; sendStartedAt?: string; sendCompletedAt?: string } | undefined> {
+  async getLastBotMessageCursor(chatJid: string): Promise<
+    | {
+        timestamp: string;
+        id: string;
+        sendStartedAt?: string;
+        sendCompletedAt?: string;
+      }
+    | undefined
+  > {
     const row = await this.repository.getLastBotMessageRow(chatJid);
     const msg = row ? this.mapMessage(row) : undefined;
     if (!msg) return undefined;
@@ -110,7 +116,9 @@ export class CanonicalMessageOpsService {
       timestamp: msg.timestamp,
       id: msg.id,
       ...(msg.send_started_at ? { sendStartedAt: msg.send_started_at } : {}),
-      ...(msg.send_completed_at ? { sendCompletedAt: msg.send_completed_at } : {}),
+      ...(msg.send_completed_at
+        ? { sendCompletedAt: msg.send_completed_at }
+        : {}),
     };
   }
 

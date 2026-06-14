@@ -1,4 +1,7 @@
-import type { LatencyTimeline, LatencyTimings } from '../../../../runtime/reply-trace.js';
+import type {
+  LatencyTimeline,
+  LatencyTimings,
+} from '../../../../runtime/reply-trace.js';
 import { messageTracesPostgres } from '../schema/message-traces.js';
 import type { CanonicalDb } from './canonical-graph-repository.postgres.js';
 

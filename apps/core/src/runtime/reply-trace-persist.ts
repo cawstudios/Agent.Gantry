@@ -51,7 +51,9 @@ export async function persistReplyTrace(
       ? input.replyTrace.drain(input.runHandle)
       : [];
     const assembleInput = {
-      ...(input.windowStart !== undefined ? { windowStart: input.windowStart } : {}),
+      ...(input.windowStart !== undefined
+        ? { windowStart: input.windowStart }
+        : {}),
       ...(input.windowEnd !== undefined ? { windowEnd: input.windowEnd } : {}),
       ...(input.guardrail ? { guardrail: input.guardrail } : {}),
       ...(input.startup ? { startup: input.startup } : {}),

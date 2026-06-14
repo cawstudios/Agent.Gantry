@@ -74,7 +74,9 @@ describe('persistReplyTrace', () => {
     // v2 timeline: sections exist, version === 2
     expect(saved[0].timingsJson.version).toBe(2);
     expect(saved[0].totalMs).toBeGreaterThan(0);
-    const sections = (saved[0].timingsJson as { sections: Array<{ kind: string }> }).sections;
+    const sections = (
+      saved[0].timingsJson as { sections: Array<{ kind: string }> }
+    ).sections;
     expect(sections.map((s) => s.kind)).toContain('guardrail');
     expect(sections.map((s) => s.kind)).toContain('llm');
     expect(sections.map((s) => s.kind)).toContain('tool');
@@ -171,7 +173,11 @@ describe('persistReplyTrace', () => {
       command: { name: '/new', ms: 4, startedAt: 0 },
     });
     expect(saved[0].kind).toBe('command');
-    const sections = (saved[0].timingsJson as { sections: Array<{ kind: string; label: string }> }).sections;
+    const sections = (
+      saved[0].timingsJson as {
+        sections: Array<{ kind: string; label: string }>;
+      }
+    ).sections;
     expect(sections[0]).toMatchObject({
       kind: 'command',
       label: '/new',
@@ -217,7 +223,11 @@ describe('persistReplyTrace', () => {
     expect(row.timingsJson.version).toBe(2);
     expect(row.totalMs).toBe(windowEnd - windowStart); // 1500
 
-    const timeline = row.timingsJson as { version: 2; totalMs: number; sections: Array<{ kind: string; ms: number }> };
+    const timeline = row.timingsJson as {
+      version: 2;
+      totalMs: number;
+      sections: Array<{ kind: string; ms: number }>;
+    };
     // sections must sum to totalMs
     const sectionsSum = timeline.sections.reduce((s, x) => s + x.ms, 0);
     expect(sectionsSum).toBe(row.totalMs);
