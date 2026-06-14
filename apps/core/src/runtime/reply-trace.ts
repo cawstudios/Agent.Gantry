@@ -197,6 +197,222 @@ export function assemblePayloads(
   return payloads;
 }
 
+export type TimelineSectionKind =
+  | 'queue'
+  | 'guardrail'
+  | 'startup'
+  | 'model_wait'
+  | 'llm'
+  | 'tool'
+  | 'send'
+  | 'command'
+  | 'gap';
+
+export interface TimelineSection {
+  kind: TimelineSectionKind;
+  /** Generic short label; the admin maps kind -> display string. */
+  label: string;
+  ms: number;
+  startedAt: number;
+  detail: Record<string, unknown>;
+}
+
+export interface LatencyTimeline {
+  version: 2;
+  windowStart: number;
+  windowEnd: number;
+  /** windowEnd - windowStart; the sections sum to exactly this. */
+  totalMs: number;
+  sections: TimelineSection[];
+}
+
+export interface AssembleTimelineInput {
+  /** Driving inbound's ingress instant (ms epoch). */
+  windowStart?: number;
+  /** Outbound send-completed instant (ms epoch). */
+  windowEnd?: number;
+  guardrail?: GuardrailRecord;
+  /** Agent-process startup: run-invoke -> first SDK message ready. */
+  startup?: { startedAt: number; readyAt: number };
+  llmTurns?: readonly LlmTurnRecord[];
+  toolCalls?: readonly ToolCallRecord[];
+  /** Outbound send bracket (ms epoch). */
+  send?: { startedAt: number; endedAt: number };
+  command?: { name: string; ms: number; startedAt: number };
+}
+
+type NamedSpanKind = Exclude<
+  TimelineSectionKind,
+  'queue' | 'model_wait' | 'gap'
+>;
+
+interface NamedSpan {
+  kind: NamedSpanKind;
+  label: string;
+  start: number;
+  end: number;
+  detail: Record<string, unknown>;
+  payload?: StagePayloadSource;
+}
+
+/** Ordered, time-sorted named spans from the capture sources (no gaps yet). */
+function buildNamedSpans(input: AssembleTimelineInput): NamedSpan[] {
+  const spans: NamedSpan[] = [];
+  if (input.command) {
+    spans.push({
+      kind: 'command',
+      label: input.command.name,
+      start: input.command.startedAt,
+      end: input.command.startedAt + input.command.ms,
+      detail: { name: input.command.name },
+    });
+  }
+  if (input.guardrail) {
+    spans.push({
+      kind: 'guardrail',
+      label: 'guardrail',
+      start: input.guardrail.startedAt,
+      end: input.guardrail.startedAt + input.guardrail.ms,
+      detail: input.guardrail.detail,
+    });
+  }
+  if (input.startup && input.startup.readyAt > input.startup.startedAt) {
+    spans.push({
+      kind: 'startup',
+      label: 'startup',
+      start: input.startup.startedAt,
+      end: input.startup.readyAt,
+      detail: {},
+    });
+  }
+  (input.llmTurns ?? []).forEach((turn, i) => {
+    spans.push({
+      kind: 'llm',
+      label: `main LLM · turn ${i + 1}`,
+      start: turn.startedAt,
+      end: turn.startedAt + turn.ms,
+      detail: turn.detail,
+      payload: { kind: 'llm', input: turn.input, output: turn.output },
+    });
+  });
+  (input.toolCalls ?? []).forEach((call) => {
+    spans.push({
+      kind: 'tool',
+      label: call.tool,
+      start: call.startedAt,
+      end: call.startedAt + call.ms,
+      detail: {
+        server: call.server,
+        tool: call.tool,
+        ok: call.ok,
+        ...(call.status !== undefined ? { status: call.status } : {}),
+        requestBytes: call.requestBytes,
+        responseBytes: call.responseBytes,
+      },
+      payload: { kind: 'tool', request: call.request, response: call.response },
+    });
+  });
+  if (input.send && input.send.endedAt > input.send.startedAt) {
+    spans.push({
+      kind: 'send',
+      label: 'send',
+      start: input.send.startedAt,
+      end: input.send.endedAt,
+      detail: {},
+    });
+  }
+  return spans.sort((a, b) => a.start - b.start);
+}
+
+interface BuiltTimeline {
+  timeline: LatencyTimeline;
+  /** Aligned 1:1 with timeline.sections by index; undefined where no payload. */
+  payloadSources: (StagePayloadSource | undefined)[];
+}
+
+/** Core partition routine shared by assembleTimeline + assembleTimelinePayloads. */
+function buildTimeline(input: AssembleTimelineInput): BuiltTimeline {
+  const spans = buildNamedSpans(input);
+  const earliest = spans.length ? spans[0]!.start : (input.windowStart ?? 0);
+  const latest = spans.length
+    ? Math.max(...spans.map((s) => s.end))
+    : (input.windowEnd ?? 0);
+  const windowStart = input.windowStart ?? earliest;
+  const windowEnd = Math.max(input.windowEnd ?? latest, windowStart);
+
+  const sections: TimelineSection[] = [];
+  const payloadSources: (StagePayloadSource | undefined)[] = [];
+  let cursor = windowStart;
+
+  const pushGap = (gapStart: number, gapEnd: number, nextKind?: NamedSpanKind) => {
+    const ms = gapEnd - gapStart;
+    if (ms <= 0) return;
+    // The leading gap (still at windowStart) is the queue; a gap right before an llm turn is model-wait.
+    const kind: TimelineSectionKind =
+      gapStart <= windowStart
+        ? 'queue'
+        : nextKind === 'llm'
+          ? 'model_wait'
+          : 'gap';
+    const label =
+      kind === 'queue' ? 'queue' : kind === 'model_wait' ? 'model wait' : 'gap';
+    sections.push({ kind, label, ms, startedAt: gapStart, detail: {} });
+    payloadSources.push(undefined);
+  };
+
+  for (const span of spans) {
+    const start = Math.min(Math.max(span.start, cursor), windowEnd);
+    const end = Math.min(Math.max(span.end, start), windowEnd);
+    if (start > cursor) pushGap(cursor, start, span.kind);
+    if (end > start) {
+      sections.push({
+        kind: span.kind,
+        label: span.label,
+        ms: end - start,
+        startedAt: start,
+        detail: span.detail,
+      });
+      payloadSources.push(span.payload);
+      cursor = end;
+    }
+  }
+  if (cursor < windowEnd) pushGap(cursor, windowEnd);
+
+  return {
+    timeline: {
+      version: 2,
+      windowStart,
+      windowEnd,
+      totalMs: windowEnd - windowStart,
+      sections,
+    },
+    payloadSources,
+  };
+}
+
+/** Build the always-written v2 `timings_json`. Pure, best-effort, never throws. */
+export function assembleTimeline(
+  input: AssembleTimelineInput,
+): LatencyTimeline {
+  return buildTimeline(input).timeline;
+}
+
+/** Flag-gated payloads, keyed by the v2 section index (aligns with assembleTimeline). */
+export function assembleTimelinePayloads(
+  input: AssembleTimelineInput,
+): Record<number, unknown> {
+  const { payloadSources } = buildTimeline(input);
+  const payloads: Record<number, unknown> = {};
+  payloadSources.forEach((source, index) => {
+    if (!source) return;
+    payloads[index] =
+      source.kind === 'tool'
+        ? { request: source.request, response: source.response }
+        : { input: source.input, output: source.output };
+  });
+  return payloads;
+}
+
 export interface TurnTraceSliceInput {
   /** The cumulative LLM-turn list the child emits — grows across a warm run. */
   allTurns: readonly LlmTurnRecord[];

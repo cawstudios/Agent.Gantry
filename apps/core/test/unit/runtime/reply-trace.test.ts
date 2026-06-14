@@ -3,6 +3,8 @@ import {
   RunTraceCollector,
   assembleTimings,
   assemblePayloads,
+  assembleTimeline,
+  assembleTimelinePayloads,
   selectTurnTraceSlice,
   type GuardrailRecord,
   type LlmTurnRecord,
@@ -220,6 +222,145 @@ describe('assembleTimings', () => {
       },
     ]);
     expect(t.totalMs).toBe(4);
+  });
+});
+
+describe('assembleTimeline (v2)', () => {
+  const W0 = 1_000_000; // windowStart (ingress)
+  it('partitions the window contiguously and sums to windowMs', () => {
+    const t = assembleTimeline({
+      windowStart: W0,
+      windowEnd: W0 + 10_000,
+      guardrail: {
+        ms: 500,
+        startedAt: W0 + 1_000,
+        detail: {
+          mode: 'deterministic',
+          decision: 'allow',
+          inlineAttached: false,
+        },
+      },
+      startup: { startedAt: W0 + 1_500, readyAt: W0 + 3_000 },
+      llmTurns: [
+        { ms: 2_000, startedAt: W0 + 4_000, detail: { model: 'sonnet' } },
+      ],
+      send: { startedAt: W0 + 9_000, endedAt: W0 + 10_000 },
+    });
+    expect(t.version).toBe(2);
+    expect(t.totalMs).toBe(10_000);
+    expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(10_000);
+    // queue + guardrail + startup + model_wait + llm + (gap) + send present
+    const kinds = t.sections.map((s) => s.kind);
+    expect(kinds[0]).toBe('queue');
+    expect(kinds).toContain('guardrail');
+    expect(kinds).toContain('startup');
+    expect(kinds).toContain('model_wait');
+    expect(kinds).toContain('llm');
+    expect(kinds).toContain('send');
+  });
+
+  it('labels the gap before an llm turn as model_wait and others as gap', () => {
+    const t = assembleTimeline({
+      windowStart: W0,
+      windowEnd: W0 + 6_000,
+      llmTurns: [
+        { ms: 1_000, startedAt: W0 + 1_000, detail: {} },
+        { ms: 1_000, startedAt: W0 + 4_000, detail: {} },
+      ],
+      toolCalls: [
+        {
+          server: 'shopify-api',
+          tool: 'get_x',
+          ms: 1_000,
+          ok: true,
+          startedAt: W0 + 2_000,
+          requestBytes: 1,
+          responseBytes: 1,
+        },
+      ],
+    });
+    const kinds = t.sections.map((s) => s.kind);
+    expect(kinds).toContain('model_wait');
+    expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(6_000);
+  });
+
+  it('falls back to the span envelope when window anchors are missing', () => {
+    const t = assembleTimeline({
+      llmTurns: [{ ms: 2_000, startedAt: W0 + 1_000, detail: {} }],
+    });
+    expect(t.windowStart).toBe(W0 + 1_000);
+    expect(t.windowEnd).toBe(W0 + 3_000);
+    expect(t.totalMs).toBe(2_000);
+    expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(2_000);
+  });
+
+  it('clamps overlaps so sections never exceed the window', () => {
+    const t = assembleTimeline({
+      windowStart: W0,
+      windowEnd: W0 + 3_000,
+      toolCalls: [
+        {
+          server: 's',
+          tool: 't',
+          ms: 9_999,
+          ok: true,
+          startedAt: W0 + 1_000,
+          requestBytes: 0,
+          responseBytes: 0,
+        },
+      ],
+    });
+    expect(t.totalMs).toBe(3_000);
+    expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(3_000);
+    expect(t.sections.every((s) => s.ms >= 0)).toBe(true);
+  });
+
+  it('handles empty input without throwing', () => {
+    const t = assembleTimeline({});
+    expect(t.version).toBe(2);
+    expect(t.totalMs).toBe(0);
+    expect(t.sections).toEqual([]);
+  });
+
+  it('produces no sections for a zero-length window', () => {
+    const t = assembleTimeline({ windowStart: 1_000_000, windowEnd: 1_000_000 });
+    expect(t.totalMs).toBe(0);
+    expect(t.sections).toEqual([]);
+  });
+
+  it('aligns payloads to the output section index for llm/tool sections', () => {
+    const input = {
+      windowStart: W0,
+      windowEnd: W0 + 5_000,
+      llmTurns: [
+        {
+          ms: 1_000,
+          startedAt: W0 + 1_000,
+          detail: {},
+          input: 'hi',
+          output: 'yo',
+        },
+      ],
+      toolCalls: [
+        {
+          server: 's',
+          tool: 't',
+          ms: 1_000,
+          ok: true,
+          startedAt: W0 + 3_000,
+          requestBytes: 0,
+          responseBytes: 0,
+          request: { a: 1 },
+          response: { b: 2 },
+        },
+      ],
+    };
+    const t = assembleTimeline(input);
+    const p = assembleTimelinePayloads(input);
+    const llmIdx = t.sections.findIndex((s) => s.kind === 'llm');
+    const toolIdx = t.sections.findIndex((s) => s.kind === 'tool');
+    expect(p[llmIdx]).toEqual({ input: 'hi', output: 'yo' });
+    expect(p[toolIdx]).toEqual({ request: { a: 1 }, response: { b: 2 } });
   });
 });
 
