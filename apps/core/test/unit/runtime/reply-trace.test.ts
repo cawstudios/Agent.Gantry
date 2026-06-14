@@ -365,6 +365,31 @@ describe('assembleTimeline (v2)', () => {
     expect(p[llmIdx]).toEqual({ input: 'hi', output: 'yo' });
     expect(p[toolIdx]).toEqual({ request: { a: 1 }, response: { b: 2 } });
   });
+
+  it('does not duplicate the leading gap when a 0ms named span is dropped', () => {
+    // Guardrail-only canned reply: a deterministic guardrail that runs in 0ms,
+    // with a real window + send. The 0ms guardrail span is dropped, but the
+    // cursor must still advance so the leading `queue` is not duplicated and the
+    // sections still sum to the window (regression for the double-queue bug).
+    const t = assembleTimeline({
+      windowStart: W0,
+      windowEnd: W0 + 522,
+      guardrail: {
+        ms: 0,
+        startedAt: W0 + 521,
+        detail: {
+          mode: 'deterministic',
+          decision: 'direct_response',
+          inlineAttached: false,
+        },
+      },
+      send: { startedAt: W0 + 521, endedAt: W0 + 522 },
+    });
+    expect(t.totalMs).toBe(522);
+    expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(522);
+    expect(t.sections.filter((s) => s.kind === 'queue').length).toBe(1);
+    expect(t.sections.map((s) => s.kind)).toEqual(['queue', 'send']);
+  });
 });
 
 describe('assemblePayloads', () => {

@@ -377,8 +377,13 @@ function buildTimeline(input: AssembleTimelineInput): BuiltTimeline {
         detail: span.detail,
       });
       payloadSources.push(span.payload);
-      cursor = end;
     }
+    // Always advance past this span — even a dropped 0ms named span — so the
+    // NEXT gap measures from here, not from the old cursor. Without this a
+    // dropped span (e.g. a 0ms deterministic guardrail) leaves the cursor at
+    // windowStart and the next gap re-spans the window, duplicating `queue` and
+    // breaking the sum-to-total invariant.
+    cursor = Math.max(cursor, end);
   }
   if (cursor < windowEnd) pushGap(cursor, windowEnd);
 
