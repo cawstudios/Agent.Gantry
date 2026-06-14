@@ -238,6 +238,8 @@ export async function runQuery(
   };
   setTimeout(pollRuntimeSignalsDuringQuery, IPC_POLL_MS);
   let lastAssistantUuid: string | undefined;
+  let queryDispatchedAt: number | undefined;
+  let firstSdkMessageAt: number | undefined;
   let messageCount = 0;
   let resultCount = 0;
   let sawPartialTextSinceLastResult = false;
@@ -312,6 +314,7 @@ export async function runQuery(
   });
   // MEASUREMENT-ONLY: just before the SDK spawns the Claude Code CLI subprocess.
   timingMark('before_sdk_query');
+  queryDispatchedAt = Date.now();
   const sdkQuery = query({
     prompt: stream,
     options: {
@@ -382,7 +385,10 @@ export async function runQuery(
       messageCount++;
       // MEASUREMENT-ONLY: first message from the SDK == CLI subprocess booted &
       // MCP servers connected (system/init). Diff from before_sdk_query.
-      if (messageCount === 1) timingMark('first_sdk_message');
+      if (messageCount === 1) {
+        timingMark('first_sdk_message');
+        firstSdkMessageAt = Date.now();
+      }
       heartbeat.markActivity();
       const msgType =
         message.type === 'system'
@@ -593,6 +599,9 @@ export async function runQuery(
           ...(primeToolAttempts.length > 0 ? { primeToolAttempts } : {}),
           ...(continuedByFollowup ? { continuedByFollowup: true } : {}),
           ...(turns.length > 0 ? { turns } : {}),
+          ...(firstSdkMessageAt !== undefined
+            ? { runnerStartup: { queryDispatchedAt, firstSdkMessageAt } }
+            : {}),
           ...(usage
             ? {
                 usage,

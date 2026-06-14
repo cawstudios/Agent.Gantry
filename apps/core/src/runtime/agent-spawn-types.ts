@@ -91,6 +91,8 @@ export interface AgentOutput {
   runtimeEvents?: AgentOutputRuntimeEvent[];
   /** Per-turn LLM timing + usage for the latency trace (best-effort). */
   turns?: AgentOutputLlmTurn[];
+  /** Run-level process-startup marks for the latency timeline (best-effort). */
+  runnerStartup?: { queryDispatchedAt?: number; firstSdkMessageAt: number };
 }
 
 export interface AgentOutputRuntimeEvent {

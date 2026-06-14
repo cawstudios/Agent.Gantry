@@ -86,6 +86,8 @@ export interface AgentRunnerOutput {
   primeToolAttempts?: AgentRunnerToolAttemptOutput[];
   /** Per-turn LLM timing + usage for the latency trace (best-effort). */
   turns?: AgentRunnerLlmTurn[];
+  /** Run-level process-startup marks for the latency timeline (best-effort). */
+  runnerStartup?: { queryDispatchedAt?: number; firstSdkMessageAt: number };
 }
 
 export interface AgentRunnerToolAttemptOutput {
