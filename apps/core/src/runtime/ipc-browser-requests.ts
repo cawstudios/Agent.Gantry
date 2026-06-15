@@ -13,20 +13,22 @@ import {
   isBrowserIpcAuthorized,
 } from './ipc-auth.js';
 import { parseBrowserIpcRequest } from './ipc-parsing.js';
+import type { ParsedBrowserIpcRequest } from './ipc-parsing.js';
 import {
   processBrowserIpcRequest,
   writeBrowserIpcResponse,
 } from './ipc-browser-handler.js';
 import type { IpcDeps } from './ipc-domain-types.js';
 import { canProcessIpcFile } from './ipc-rate-limit.js';
+import {
+  releaseBrowserInFlight,
+  tryAcquireBrowserInFlight,
+} from './ipc-browser-inflight.js';
 
 interface IpcBrowserRequestLogger {
   warn: (obj: Record<string, unknown>, message: string) => void;
   error: (obj: Record<string, unknown>, message: string) => void;
 }
-
-const MAX_IN_FLIGHT_BROWSER_IPC = 4;
-let inFlightBrowserIpc = 0;
 
 export function processBrowserRequestDirectory(input: {
   ipcBaseDir: string;
@@ -63,6 +65,101 @@ export function processBrowserRequestDirectory(input: {
       { err, sourceAgentFolder },
       'Error reading browser IPC requests directory',
     );
+  }
+}
+
+/**
+ * Run a parsed browser IPC request through the backend and the (router-aware)
+ * response writer. Shared by the fs watcher (which passes `file`/`claimedPath`
+ * so the on-disk request can be unlinked / archived) and the socket dispatcher
+ * (which passes neither — there is no backing file). The fs cleanup is therefore
+ * guarded with `if (claimedPath)` / `if (file)` so the socket path is a no-op
+ * there, while the watcher path stays byte-identical.
+ *
+ * The caller is responsible for the shared browser in-flight accounting and the
+ * rate-limit gate (the fs and socket carriers mirror each other below).
+ */
+export async function runBrowserIpcRequest(input: {
+  request: ParsedBrowserIpcRequest;
+  sourceAgentFolder: string;
+  browserIpcAuthorized: boolean;
+  ipcBaseDir: string;
+  deps: IpcDeps;
+  logger: IpcBrowserRequestLogger;
+  file?: string;
+  claimedPath?: string;
+}): Promise<void> {
+  const {
+    request,
+    sourceAgentFolder,
+    browserIpcAuthorized,
+    ipcBaseDir,
+    deps,
+    logger,
+    file,
+    claimedPath,
+  } = input;
+  try {
+    const response = await processBrowserIpcRequest(request, {
+      sourceAgentFolder,
+      browserProfileName: resolveConversationBrowserProfile({
+        workspaceKey: sourceAgentFolder,
+        conversationId: request.chatJid,
+      }),
+      browserIpcAuthorized,
+      getFileArtifactStore: deps.getFileArtifactStore,
+      callBrowserTool: deps.callBrowserTool,
+      publishBrowserJobActivity: deps.publishBrowserJobActivity,
+      closeBrowserToolBackends: deps.closeBrowserToolBackends,
+      getBrowserUsageSettings: deps.getBrowserUsageSettings,
+      timeoutMs: request.timeoutMs,
+      deadlineAtMs: request.deadlineAtMs,
+    });
+    writeBrowserIpcResponse(
+      ipcBaseDir,
+      sourceAgentFolder,
+      {
+        requestId: request.requestId,
+        ok: response.ok,
+        data: response.data,
+        error: response.error,
+      },
+      getIpcResponseSigningPrivateKey(
+        sourceAgentFolder,
+        request.threadId,
+        request.responseKeyId,
+      ),
+    );
+    if (claimedPath) fs.unlinkSync(claimedPath);
+  } catch (err) {
+    logger.error(
+      { file, sourceAgentFolder, err },
+      'Error processing browser IPC request',
+    );
+    try {
+      writeBrowserIpcResponse(
+        ipcBaseDir,
+        sourceAgentFolder,
+        {
+          requestId: request.requestId,
+          ok: false,
+          error: 'Failed to process browser request',
+        },
+        getIpcResponseSigningPrivateKey(
+          sourceAgentFolder,
+          request.threadId,
+          request.responseKeyId,
+        ),
+      );
+    } catch (writeErr) {
+      logger.warn(
+        { sourceAgentFolder, requestId: request.requestId, err: writeErr },
+        'Failed to write browser IPC error fallback',
+      );
+    }
+    if (file && claimedPath) {
+      archiveIpcErrorFile(ipcBaseDir, sourceAgentFolder, file, claimedPath);
+    }
   }
 }
 
@@ -105,74 +202,21 @@ function processOneBrowserRequest(input: {
     ) {
       throw new Error('Browser IPC rate limit exceeded');
     }
-    if (inFlightBrowserIpc >= MAX_IN_FLIGHT_BROWSER_IPC) {
+    if (!tryAcquireBrowserInFlight()) {
       throw new Error('Browser IPC concurrency limit exceeded');
     }
-    inFlightBrowserIpc += 1;
-    void processBrowserIpcRequest(request, {
+    void runBrowserIpcRequest({
+      request,
       sourceAgentFolder,
-      browserProfileName: resolveConversationBrowserProfile({
-        workspaceKey: sourceAgentFolder,
-        conversationId: request.chatJid,
-      }),
       browserIpcAuthorized,
-      getFileArtifactStore: deps.getFileArtifactStore,
-      callBrowserTool: deps.callBrowserTool,
-      publishBrowserJobActivity: deps.publishBrowserJobActivity,
-      closeBrowserToolBackends: deps.closeBrowserToolBackends,
-      getBrowserUsageSettings: deps.getBrowserUsageSettings,
-      timeoutMs: request.timeoutMs,
-      deadlineAtMs: request.deadlineAtMs,
-    })
-      .then((response) => {
-        writeBrowserIpcResponse(
-          ipcBaseDir,
-          sourceAgentFolder,
-          {
-            requestId: request.requestId,
-            ok: response.ok,
-            data: response.data,
-            error: response.error,
-          },
-          getIpcResponseSigningPrivateKey(
-            sourceAgentFolder,
-            request.threadId,
-            request.responseKeyId,
-          ),
-        );
-        fs.unlinkSync(claimedPath);
-      })
-      .catch((err) => {
-        logger.error(
-          { file, sourceAgentFolder, err },
-          'Error processing browser IPC request',
-        );
-        try {
-          writeBrowserIpcResponse(
-            ipcBaseDir,
-            sourceAgentFolder,
-            {
-              requestId: request.requestId,
-              ok: false,
-              error: 'Failed to process browser request',
-            },
-            getIpcResponseSigningPrivateKey(
-              sourceAgentFolder,
-              request.threadId,
-              request.responseKeyId,
-            ),
-          );
-        } catch (writeErr) {
-          logger.warn(
-            { sourceAgentFolder, requestId: request.requestId, err: writeErr },
-            'Failed to write browser IPC error fallback',
-          );
-        }
-        archiveIpcErrorFile(ipcBaseDir, sourceAgentFolder, file, claimedPath);
-      })
-      .finally(() => {
-        inFlightBrowserIpc -= 1;
-      });
+      ipcBaseDir,
+      deps,
+      logger,
+      file,
+      claimedPath,
+    }).finally(() => {
+      releaseBrowserInFlight();
+    });
   } catch (err) {
     if (requestId) {
       writeBrowserFailureResponse({
@@ -192,7 +236,14 @@ function processOneBrowserRequest(input: {
   }
 }
 
-function writeBrowserFailureResponse(input: {
+/**
+ * Emit the signed "failed to process" browser response (routed to a registered
+ * responder when one exists, else written as a file). Exported so the socket
+ * dispatcher can mirror the fs watcher's cap-exceeded path exactly: a request
+ * that hits the shared in-flight cap settles the grandchild with the same signed
+ * `{ ok:false }` response it would receive on fs.
+ */
+export function writeBrowserFailureResponse(input: {
   ipcBaseDir: string;
   sourceAgentFolder: string;
   requestId: string;

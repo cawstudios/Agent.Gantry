@@ -8,6 +8,7 @@ import {
 
 import { DATA_DIR } from '../config/index.js';
 import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
+import { takeIpcResponder } from './ipc-response-router.js';
 import { nowMs } from '../shared/time/datetime.js';
 import {
   ensurePrivateDirSync,
@@ -570,6 +571,21 @@ export function writeBrowserIpcResponse(
   const signature = signIpcResponsePayload(privateKeyPem, payload);
   if (!signature) return;
   payload.signature = signature;
+  // Router-aware delivery (Pillar 1, Phase 5.3c): when the socket server has
+  // registered a responder for this request, hand it the exact signed object and
+  // skip the file write. With no responder registered the behaviour is
+  // byte-identical to the pre-router filesystem path. The fail-closed early
+  // return above (no signing key) happens BEFORE the responder is taken,
+  // mirroring the memory/user_question writers — so a no-key call leaves the
+  // responder registered to time out.
+  const responder = takeIpcResponder(
+    sourceAgentFolder,
+    `browser-${response.requestId}`,
+  );
+  if (responder) {
+    responder(payload);
+    return;
+  }
   writePrivateFileSync(tmpPath, JSON.stringify(payload, null, 2));
   fs.renameSync(tmpPath, responsePath);
 }

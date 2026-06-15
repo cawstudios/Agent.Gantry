@@ -18,6 +18,7 @@ import {
 import { writeTaskIpcResponse } from '@core/jobs/ipc-shared.js';
 import { writeMemoryResponse } from '@core/memory/memory-ipc.js';
 import { writeUserQuestionIpcResponse } from '@core/runtime/ipc-interaction-handler.js';
+import { writeBrowserIpcResponse } from '@core/runtime/ipc-browser-handler.js';
 import { getIpcResponseSigningPrivateKey } from '@core/runtime/ipc-auth.js';
 import type { MemoryIpcResponse } from '@gantry/contracts';
 
@@ -607,5 +608,160 @@ describe('writeUserQuestionIpcResponse — router integration', () => {
     expect(fs.existsSync(filePath)).toBe(false);
     expect(responder).not.toHaveBeenCalled();
     expect(hasIpcResponder(FOLDER, `userq-${requestId}`)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: writeBrowserIpcResponse routing behaviour (Pillar 1, 5.3c)
+// ---------------------------------------------------------------------------
+
+describe('writeBrowserIpcResponse — router integration', () => {
+  let envelope: ReturnType<typeof setupSigningKey>;
+
+  function ipcBaseDir(): string {
+    return path.join(process.env.GANTRY_HOME as string, 'data', 'ipc');
+  }
+
+  function browserResponsePath(folder: string, requestId: string): string {
+    return path.join(
+      ipcBaseDir(),
+      folder,
+      'browser-responses',
+      `${requestId}.json`,
+    );
+  }
+
+  function signingKeyFor(): string | undefined {
+    return getIpcResponseSigningPrivateKey(
+      FOLDER,
+      undefined,
+      envelope.responseKeyId,
+    );
+  }
+
+  beforeEach(() => {
+    envelope = setupSigningKey(FOLDER);
+  });
+
+  afterEach(() => {
+    clearIpcResponders();
+  });
+
+  // 1 — Equivalence: no responder → signed file written, byte-shape as before.
+  it('writes the signed browser response file when no responder is registered', () => {
+    const requestId = `browser-eq-${Date.now()}`;
+    const filePath = browserResponsePath(FOLDER, requestId);
+
+    writeBrowserIpcResponse(
+      ipcBaseDir(),
+      FOLDER,
+      { requestId, ok: true, data: { running: true } },
+      signingKeyFor(),
+    );
+
+    expect(fs.existsSync(filePath)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    expect(parsed.ok).toBe(true);
+    expect(parsed.requestId).toBe(requestId);
+    expect(parsed.data).toEqual({ running: true });
+    expect(typeof parsed.signature).toBe('string');
+
+    const { signature, ...withoutSig } = parsed;
+    expect(
+      verifyIpcResponsePayload(
+        envelope.responseVerifyKey,
+        withoutSig as Record<string, unknown>,
+        signature as string,
+      ),
+    ).toBe(true);
+  });
+
+  // 2 — Socket delivery: responder receives the signed object, no file created.
+  it('calls the registered responder with the signed object and creates no file', () => {
+    const requestId = `browser-sock-${Date.now()}`;
+    const filePath = browserResponsePath(FOLDER, requestId);
+    const received: Record<string, unknown>[] = [];
+
+    registerIpcResponder(FOLDER, `browser-${requestId}`, (signed) => {
+      received.push(signed);
+    });
+
+    writeBrowserIpcResponse(
+      ipcBaseDir(),
+      FOLDER,
+      { requestId, ok: true, data: { running: true } },
+      signingKeyFor(),
+    );
+
+    expect(received).toHaveLength(1);
+    expect(fs.existsSync(filePath)).toBe(false);
+
+    const signed = received[0];
+    expect(signed.ok).toBe(true);
+    expect(signed.requestId).toBe(requestId);
+    expect(signed.data).toEqual({ running: true });
+    expect(typeof signed.signature).toBe('string');
+
+    const { signature, ...withoutSig } = signed;
+    expect(
+      verifyIpcResponsePayload(
+        envelope.responseVerifyKey,
+        withoutSig as Record<string, unknown>,
+        signature as string,
+      ),
+    ).toBe(true);
+
+    // Single-shot: consumed after delivery.
+    expect(hasIpcResponder(FOLDER, `browser-${requestId}`)).toBe(false);
+  });
+
+  // 3 — Fallback after take: second write (no re-register) writes the file.
+  it('falls back to file write on a second call after the responder was consumed', () => {
+    const requestId = `browser-fallback-${Date.now()}`;
+    const filePath = browserResponsePath(FOLDER, requestId);
+
+    registerIpcResponder(FOLDER, `browser-${requestId}`, vi.fn());
+
+    writeBrowserIpcResponse(
+      ipcBaseDir(),
+      FOLDER,
+      { requestId, ok: true, data: {} },
+      signingKeyFor(),
+    );
+    expect(fs.existsSync(filePath)).toBe(false);
+
+    writeBrowserIpcResponse(
+      ipcBaseDir(),
+      FOLDER,
+      { requestId, ok: true, data: {} },
+      signingKeyFor(),
+    );
+    expect(fs.existsSync(filePath)).toBe(true);
+  });
+
+  // 4 — Fail-closed: no signing key → neither file nor responder consumed.
+  it('does not write a file or call the responder when no signing key is available', () => {
+    const requestId = `browser-failclosed-${Date.now()}`;
+    const filePath = browserResponsePath(FOLDER, requestId);
+    const responder = vi.fn();
+
+    registerIpcResponder(FOLDER, `browser-${requestId}`, responder);
+
+    // No signing key → the fail-closed early return happens BEFORE the responder
+    // is taken (mirrors the memory/user_question writers), leaving it registered
+    // to time out.
+    writeBrowserIpcResponse(
+      ipcBaseDir(),
+      FOLDER,
+      { requestId, ok: true, data: { running: true } },
+      undefined,
+    );
+
+    expect(fs.existsSync(filePath)).toBe(false);
+    expect(responder).not.toHaveBeenCalled();
+    expect(hasIpcResponder(FOLDER, `browser-${requestId}`)).toBe(true);
   });
 });

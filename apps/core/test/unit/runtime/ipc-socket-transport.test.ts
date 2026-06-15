@@ -24,10 +24,30 @@ vi.mock('@core/memory/memory-ipc.js', async (importActual) => {
   return { ...actual, processMemoryRequest: vi.fn() };
 });
 
+// Partially mock the browser handler: processBrowserIpcRequest is stubbed so the
+// test controls the backend response (and its timing, for the in-flight cap)
+// WITHOUT standing up Chrome/CDP, but writeBrowserIpcResponse stays REAL so the
+// response-router → signed-resp-frame path is exercised end to end (exactly as
+// the memory test keeps writeMemoryResponse real). runBrowserIpcRequest in
+// ipc-browser-requests.ts consumes both from this module, so the socket
+// dispatcher runs the real router-aware writer.
+vi.mock('@core/runtime/ipc-browser-handler.js', async (importActual) => {
+  const actual =
+    await importActual<typeof import('@core/runtime/ipc-browser-handler.js')>();
+  return { ...actual, processBrowserIpcRequest: vi.fn() };
+});
+
 import { processTaskIpc } from '@core/jobs/ipc-handler.js';
 import { writeTaskIpcResponse } from '@core/jobs/ipc-shared.js';
 import { processMemoryRequest } from '@core/memory/memory-ipc.js';
-import { computeMemoryIpcAuthToken } from '@core/runtime/ipc-auth.js';
+import { processBrowserIpcRequest } from '@core/runtime/ipc-browser-handler.js';
+import {
+  computeBrowserIpcAuthToken,
+  computeMemoryIpcAuthToken,
+  registerBrowserIpcAuthorization,
+  revokeBrowserIpcAuthorization,
+} from '@core/runtime/ipc-auth.js';
+import { clearBrowserInFlight } from '@core/runtime/ipc-browser-inflight.js';
 import { normalizeMemoryIpcActions } from '@core/shared/memory-ipc-actions.js';
 import type { MemoryIpcResponse } from '@gantry/contracts';
 import {
@@ -52,6 +72,7 @@ import { clearIpcRateLimitState } from '@core/runtime/ipc-rate-limit.js';
 
 const processTaskIpcMock = vi.mocked(processTaskIpc);
 const processMemoryRequestMock = vi.mocked(processMemoryRequest);
+const processBrowserIpcRequestMock = vi.mocked(processBrowserIpcRequest);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -379,6 +400,44 @@ function buildMessagePayload(
   });
 }
 
+// --- Browser envelopes -----------------------------------------------------
+// The browser channel has its OWN chat-scoped HMAC token
+// (computeBrowserIpcAuthToken), bound to the folder + chatJid + thread. The
+// signed request must carry context.chatJid (required by the parser) and a
+// responseKeyId. This mirrors the grandchild's buildSignedBrowserEnvelope.
+function browserAuthToken(
+  folder: string,
+  chatJid: string,
+  threadId: string | undefined,
+): string {
+  return computeBrowserIpcAuthToken(folder, chatJid, threadId ?? null);
+}
+
+function buildBrowserPayload(
+  browserToken: string,
+  responseKeyId: string,
+  opts: {
+    requestId: string;
+    action?: string;
+    threadId?: string;
+    chatJid?: string;
+    payload?: Record<string, unknown>;
+    timeoutMs?: number;
+  },
+): Record<string, unknown> {
+  return createSignedIpcRequestEnvelope(browserToken, {
+    requestId: opts.requestId,
+    action: opts.action ?? 'navigate',
+    payload: opts.payload ?? { url: 'https://example.test' },
+    context: {
+      chatJid: opts.chatJid ?? CHAT_JID,
+      ...(opts.threadId ? { threadId: opts.threadId } : {}),
+      ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+      responseKeyId,
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Test lifecycle
 // ---------------------------------------------------------------------------
@@ -395,9 +454,11 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipc-socket-transport-'));
   processTaskIpcMock.mockReset();
   processMemoryRequestMock.mockReset();
+  processBrowserIpcRequestMock.mockReset();
   clearIpcResponders();
   clearConsumedIpcRequestIds();
   clearIpcRateLimitState();
+  clearBrowserInFlight();
 });
 
 afterEach(async () => {
@@ -409,6 +470,7 @@ afterEach(async () => {
   clearIpcResponders();
   clearConsumedIpcRequestIds();
   clearIpcRateLimitState();
+  clearBrowserInFlight();
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch {
@@ -693,10 +755,11 @@ describe('ipc-socket-server task dispatch', () => {
     const auth = makeAuth(FOLDER, THREAD_ID);
     const client = await handshake(handle, auth);
 
-    // `browser` is not yet cut over to the socket, so it remains the explicit
-    // unsupported-channel reject (memory now has its own dispatcher).
+    // `permission` is not yet cut over to the socket, so it remains the explicit
+    // unsupported-channel reject (task/memory/user_question/browser now each have
+    // their own dispatcher).
     client.sendReq(
-      'browser',
+      'permission',
       buildTaskPayload(auth.authToken, auth.responseKeyId, {
         taskId: 'b1',
         type: 'noop',
@@ -1224,6 +1287,316 @@ describe('ipc-socket-server message dispatch', () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(sendMessage).not.toHaveBeenCalled();
     expect(client.isClosed).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Browser dispatch (Pillar 1, Phase 5.3c)
+//
+// processBrowserIpcRequest is mocked (no Chrome/CDP); writeBrowserIpcResponse is
+// REAL, so the server's dispatchBrowser → registerIpcResponder →
+// writeBrowserIpcResponse → signed-resp-frame path runs end to end. The browser
+// channel keeps its OWN chat-scoped HMAC token + replay scope, re-verified here
+// by the real parseBrowserIpcRequest exactly as the fs watcher does. The browser
+// grant (registerBrowserIpcAuthorization) is keyed by (folder, chatJid, thread).
+// ---------------------------------------------------------------------------
+
+describe('ipc-socket-server browser dispatch', () => {
+  async function handshake(
+    handle: IpcSocketServerHandle,
+    auth: ReturnType<typeof makeAuth>,
+    threadId = THREAD_ID,
+  ): Promise<FakeWorkerClient> {
+    const client = await connect(handle);
+    client.sendHello(
+      buildHelloPayload(auth.authToken, { folder: FOLDER, threadId }),
+      'hs',
+    );
+    const welcome = await client.waitForId('hs');
+    expect(welcome.ctrl).toBe('welcome');
+    return client;
+  }
+
+  function grantBrowser(threadId = THREAD_ID): () => void {
+    registerBrowserIpcAuthorization({
+      workspaceKey: FOLDER,
+      chatJid: CHAT_JID,
+      threadId,
+    });
+    return () =>
+      revokeBrowserIpcAuthorization({
+        workspaceKey: FOLDER,
+        chatJid: CHAT_JID,
+        threadId,
+      });
+  }
+
+  it('B1. browser req → signed resp frame (router + ed25519 end to end)', async () => {
+    processBrowserIpcRequestMock.mockResolvedValue({
+      ok: true,
+      data: { content: 'navigated' },
+    });
+    const revoke = grantBrowser();
+    try {
+      const handle = await startServer(buildDeps());
+      const auth = makeAuth(FOLDER, THREAD_ID);
+      const browserToken = browserAuthToken(FOLDER, CHAT_JID, THREAD_ID);
+      const client = await handshake(handle, auth);
+
+      client.sendReq(
+        'browser',
+        buildBrowserPayload(browserToken, auth.responseKeyId, {
+          requestId: 'browser-7',
+          action: 'navigate',
+          threadId: THREAD_ID,
+        }),
+        'req-browser-7',
+      );
+
+      const resp = await client.waitForId('req-browser-7');
+      expect(resp.type).toBe('resp');
+      expect(resp.channel).toBe('browser');
+      const { signature, ...payloadWithoutSig } = resp.payload as {
+        signature?: string;
+      } & Record<string, unknown>;
+      expect(typeof signature).toBe('string');
+      expect(
+        verifyIpcResponsePayload(
+          auth.responseVerifyKey,
+          payloadWithoutSig,
+          signature,
+        ),
+      ).toBe(true);
+      expect(payloadWithoutSig.ok).toBe(true);
+      expect(payloadWithoutSig.requestId).toBe('browser-7');
+      expect(payloadWithoutSig.data).toEqual({ content: 'navigated' });
+
+      // The handler ran exactly once, with the trusted parsed request + the
+      // resolved browser grant (authorized=true since we registered it).
+      expect(processBrowserIpcRequestMock).toHaveBeenCalledTimes(1);
+      const [reqArg, ctxArg] = processBrowserIpcRequestMock.mock.calls[0];
+      expect(reqArg).toEqual(
+        expect.objectContaining({ requestId: 'browser-7', action: 'navigate' }),
+      );
+      expect(ctxArg).toEqual(
+        expect.objectContaining({
+          sourceAgentFolder: FOLDER,
+          browserIpcAuthorized: true,
+        }),
+      );
+
+      // No browser-responses file was written — the responder consumed it.
+      const responsesDir = path.join(
+        process.env.GANTRY_HOME as string,
+        'data',
+        'ipc',
+        FOLDER,
+        'browser-responses',
+      );
+      expect(fs.existsSync(path.join(responsesDir, 'browser-7.json'))).toBe(
+        false,
+      );
+    } finally {
+      revoke();
+    }
+  });
+
+  it('B2. forged browser req (wrong token) → invalid_request, connection survives', async () => {
+    processBrowserIpcRequestMock.mockResolvedValue({
+      ok: true,
+      data: { content: 'ok' },
+    });
+    const revoke = grantBrowser();
+    try {
+      const handle = await startServer(buildDeps());
+      const auth = makeAuth(FOLDER, THREAD_ID);
+      const client = await handshake(handle, auth);
+
+      // Sign with a browser token bound to a DIFFERENT folder → signature
+      // mismatch → parseBrowserIpcRequest throws → invalid_request.
+      const wrongToken = browserAuthToken('group-evil', CHAT_JID, THREAD_ID);
+      client.sendReq(
+        'browser',
+        buildBrowserPayload(wrongToken, auth.responseKeyId, {
+          requestId: 'browser-bad',
+          threadId: THREAD_ID,
+        }),
+        'req-browser-bad',
+      );
+
+      const resp = await client.waitForId('req-browser-bad');
+      expect(resp.type).toBe('resp');
+      expect((resp.payload as { ok?: boolean }).ok).toBe(false);
+      expect((resp.payload as { code?: string }).code).toBe('invalid_request');
+      expect(processBrowserIpcRequestMock).not.toHaveBeenCalled();
+      expect(client.isClosed).toBe(false);
+
+      // Connection still usable: a valid browser req now gets a signed response.
+      const browserToken = browserAuthToken(FOLDER, CHAT_JID, THREAD_ID);
+      client.sendReq(
+        'browser',
+        buildBrowserPayload(browserToken, auth.responseKeyId, {
+          requestId: 'browser-ok',
+          threadId: THREAD_ID,
+        }),
+        'req-browser-ok',
+      );
+      const ok = await client.waitForId('req-browser-ok');
+      expect(ok.channel).toBe('browser');
+      expect((ok.payload as { ok?: boolean }).ok).toBe(true);
+    } finally {
+      revoke();
+    }
+  });
+
+  it('B3. replay of the same browser req is rejected the second time', async () => {
+    let calls = 0;
+    processBrowserIpcRequestMock.mockImplementation(async () => {
+      calls += 1;
+      return { ok: true, data: { content: 'first' } };
+    });
+    const revoke = grantBrowser();
+    try {
+      const handle = await startServer(buildDeps());
+      const auth = makeAuth(FOLDER, THREAD_ID);
+      const browserToken = browserAuthToken(FOLDER, CHAT_JID, THREAD_ID);
+      const client = await handshake(handle, auth);
+
+      const payload = buildBrowserPayload(browserToken, auth.responseKeyId, {
+        requestId: 'browser-replay',
+        threadId: THREAD_ID,
+      });
+
+      client.sendReq('browser', payload, 'req-first');
+      const first = await client.waitForId('req-first');
+      expect((first.payload as { ok?: boolean }).ok).toBe(true);
+
+      // Re-send the byte-identical signed payload → the browser replay guard
+      // (requestId already consumed) rejects it.
+      client.sendReq('browser', payload, 'req-second');
+      const second = await client.waitForId('req-second');
+      expect((second.payload as { ok?: boolean }).ok).toBe(false);
+      expect((second.payload as { code?: string }).code).toBe(
+        'invalid_request',
+      );
+      expect(calls).toBe(1);
+    } finally {
+      revoke();
+    }
+  });
+
+  it('B4. authorized browser rate limit → rate_limited resp, connection survives', async () => {
+    processBrowserIpcRequestMock.mockResolvedValue({ ok: true, data: {} });
+    const { canProcessIpcFile } =
+      await import('@core/runtime/ipc-rate-limit.js');
+    for (let i = 0; i < 300; i += 1) canProcessIpcFile(FOLDER, 'browser');
+
+    const revoke = grantBrowser();
+    try {
+      const handle = await startServer(buildDeps());
+      const auth = makeAuth(FOLDER, THREAD_ID);
+      const browserToken = browserAuthToken(FOLDER, CHAT_JID, THREAD_ID);
+      const client = await handshake(handle, auth);
+
+      client.sendReq(
+        'browser',
+        buildBrowserPayload(browserToken, auth.responseKeyId, {
+          requestId: 'browser-rl',
+          threadId: THREAD_ID,
+        }),
+        'req-browser-rl',
+      );
+
+      const resp = await client.waitForId('req-browser-rl');
+      expect(resp.type).toBe('resp');
+      expect((resp.payload as { ok?: boolean }).ok).toBe(false);
+      expect((resp.payload as { code?: string }).code).toBe('rate_limited');
+      expect(processBrowserIpcRequestMock).not.toHaveBeenCalled();
+      expect(client.isClosed).toBe(false);
+    } finally {
+      revoke();
+    }
+  });
+
+  it('B5. the 5th concurrent browser req hits the shared cap-4 → signed {ok:false}, connection survives', async () => {
+    // Gate every browser handler call on a release we control, so we can hold 4
+    // in flight and watch the 5th hit the shared cap. The 5th request's signed
+    // failure response is delivered to its responder (mirroring the fs watcher's
+    // concurrency-limit path) without ever reaching the (still-blocked) handler.
+    const releases: Array<() => void> = [];
+    let started = 0;
+    processBrowserIpcRequestMock.mockImplementation(async () => {
+      started += 1;
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return { ok: true, data: { content: 'done' } };
+    });
+
+    const revoke = grantBrowser();
+    try {
+      const handle = await startServer(buildDeps());
+      const auth = makeAuth(FOLDER, THREAD_ID);
+      const browserToken = browserAuthToken(FOLDER, CHAT_JID, THREAD_ID);
+      const client = await handshake(handle, auth);
+
+      // Fire 4 requests that acquire the whole cap and block in the handler.
+      for (let i = 0; i < 4; i += 1) {
+        client.sendReq(
+          'browser',
+          buildBrowserPayload(browserToken, auth.responseKeyId, {
+            requestId: `browser-hold-${i}`,
+            threadId: THREAD_ID,
+          }),
+          `req-hold-${i}`,
+        );
+      }
+      // Wait until all 4 are actually inside the (blocked) handler.
+      const deadline = Date.now() + 3000;
+      while (started < 4 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(started).toBe(4);
+
+      // The 5th request hits the shared cap: it gets a signed {ok:false} resp
+      // and never reaches the handler.
+      client.sendReq(
+        'browser',
+        buildBrowserPayload(browserToken, auth.responseKeyId, {
+          requestId: 'browser-over-cap',
+          threadId: THREAD_ID,
+        }),
+        'req-over-cap',
+      );
+      const capped = await client.waitForId('req-over-cap');
+      expect(capped.type).toBe('resp');
+      expect(capped.channel).toBe('browser');
+      // Signed failure response (router-delivered) — the verified payload says
+      // ok:false, exactly as the fs watcher's writeBrowserFailureResponse emits.
+      const { signature, ...cappedPayload } = capped.payload as {
+        signature?: string;
+      } & Record<string, unknown>;
+      expect(typeof signature).toBe('string');
+      expect(
+        verifyIpcResponsePayload(
+          auth.responseVerifyKey,
+          cappedPayload,
+          signature,
+        ),
+      ).toBe(true);
+      expect(cappedPayload.ok).toBe(false);
+      expect(cappedPayload.requestId).toBe('browser-over-cap');
+      expect(started).toBe(4); // handler never ran for the 5th
+      expect(client.isClosed).toBe(false);
+
+      // Drain the 4 held handlers so their responses settle and the cap frees.
+      for (const release of releases.splice(0)) release();
+      for (let i = 0; i < 4; i += 1) {
+        const ok = await client.waitForId(`req-hold-${i}`);
+        expect((ok.payload as { ok?: boolean }).ok).toBe(true);
+      }
+    } finally {
+      for (const release of releases.splice(0)) release();
+      revoke();
+    }
   });
 });
 

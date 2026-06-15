@@ -30,11 +30,15 @@ import {
 import { canProcessIpcFile } from './ipc-rate-limit.js';
 import { parseTaskIpcData } from './ipc-task-parsing.js';
 import {
+  parseBrowserIpcRequest,
   parseIpcMessage,
   parseMemoryIpcRequest,
   parseUserQuestionIpcRequest,
 } from './ipc-parsing.js';
-import { getIpcResponseSigningPrivateKey } from './ipc-auth.js';
+import {
+  getIpcResponseSigningPrivateKey,
+  isBrowserIpcAuthorized,
+} from './ipc-auth.js';
 import { processTaskIpc } from '../jobs/ipc-handler.js';
 import {
   processMemoryRequest,
@@ -49,6 +53,14 @@ import {
   releaseInteractionInFlight,
   tryAdmitInteractionInFlight,
 } from './ipc-interaction-inflight.js';
+import {
+  releaseBrowserInFlight,
+  tryAcquireBrowserInFlight,
+} from './ipc-browser-inflight.js';
+import {
+  runBrowserIpcRequest,
+  writeBrowserFailureResponse,
+} from './ipc-browser-requests.js';
 import type { IpcDeps } from './ipc-domain-types.js';
 import { type IpcWireChannel, type IpcWireFrame } from '../shared/ipc-wire.js';
 
@@ -219,6 +231,11 @@ export async function startIpcSocketServer(
       return;
     }
 
+    if (channel === 'browser') {
+      await dispatchBrowser(frame, conn, folder);
+      return;
+    }
+
     if (channel === 'message') {
       // Fire-and-forget; no response frame.
       if (!canProcessIpcFile(folder, 'messages')) {
@@ -253,8 +270,8 @@ export async function startIpcSocketServer(
       return;
     }
 
-    // browser/permission/etc. are cut over in a later phase by making their
-    // writers router-aware. Until then: explicit reject.
+    // permission/etc. are cut over in a later phase by making their writers
+    // router-aware. Until then: explicit reject.
     conn.send(transportError(frame.id, channel, 'unsupported_channel'));
   }
 
@@ -512,6 +529,119 @@ export async function startIpcSocketServer(
       logger.error({ err, folder }, 'user_question handler threw');
     } finally {
       releaseInteractionInFlight(inFlightKey);
+      const after = state.get(conn);
+      if (after && after.inFlight > 0) after.inFlight -= 1;
+    }
+  }
+
+  async function dispatchBrowser(
+    frame: IpcWireFrame,
+    conn: IpcConnection,
+    folder: string,
+  ): Promise<void> {
+    let request;
+    try {
+      // parseBrowserIpcRequest re-verifies the chat-scoped browser HMAC token,
+      // freshness, and replay (and requires context.chatJid) — a forged,
+      // replayed, or malformed frame throws here (fail-closed); the connection
+      // survives. The chatJid binding the parser enforces is what scopes the
+      // browser grant + the cross-conversation profile below.
+      request = parseBrowserIpcRequest(frame.payload, folder);
+    } catch (err) {
+      conn.send(transportError(frame.id, 'browser', 'invalid_request'));
+      logger.warn({ err, folder }, 'rejected browser frame');
+      return;
+    }
+
+    // Resolve the browser grant exactly as the fs watcher does: it is keyed by
+    // (folder, chatJid, threadId), so the parser's verified chatJid binds the
+    // grant to the asking conversation.
+    const browserIpcAuthorized = isBrowserIpcAuthorized({
+      workspaceKey: folder,
+      chatJid: request.chatJid,
+      threadId: request.threadId,
+    });
+
+    // Rate-limit gate — mirror the watcher's CONDITIONAL charge: only an
+    // authorized request is metered against the (folder,'browser') bucket. An
+    // unauthorized request is not charged (it still runs, and the handler
+    // returns the unauthorized error), so the socket path matches fs.
+    if (browserIpcAuthorized && !canProcessIpcFile(folder, 'browser')) {
+      conn.send(transportError(frame.id, 'browser', 'rate_limited'));
+      return;
+    }
+
+    const browserKey = `browser-${request.requestId}`;
+    // Register a responder so the handler's (router-aware) writeBrowserIpc-
+    // Response — and the cap-exceeded failure path — are delivered as a frame
+    // instead of a browser-responses/<requestId>.json file write.
+    registerIpcResponder(folder, browserKey, (signed) => {
+      conn.send({
+        v: 1,
+        type: 'resp',
+        channel: 'browser',
+        id: frame.id,
+        payload: signed,
+      });
+    });
+
+    // Honour the SHARED browser in-flight cap (4) across the fs watcher and the
+    // socket. When the cap is hit, mirror the watcher's thrown concurrency path:
+    // emit the signed "failed to process" response (routed to the responder) so
+    // the grandchild settles exactly as it would on fs.
+    if (!tryAcquireBrowserInFlight()) {
+      writeBrowserFailureResponse({
+        ipcBaseDir,
+        sourceAgentFolder: folder,
+        requestId: request.requestId,
+        ...(request.threadId ? { authThreadId: request.threadId } : {}),
+        ...(request.responseKeyId
+          ? { responseKeyId: request.responseKeyId }
+          : {}),
+        logger,
+      });
+      // If the failure writer was fail-closed (no signing key) the responder is
+      // still registered; clear it and settle at the transport layer so the
+      // request does not hang until the client deadline.
+      const pending = takeIpcResponder(folder, browserKey);
+      if (pending) {
+        conn.send(transportError(frame.id, 'browser', 'busy'));
+      }
+      return;
+    }
+
+    const st = state.get(conn);
+    if (st) st.inFlight += 1;
+    try {
+      // No file/claimedPath on the socket path: the handler runs the backend +
+      // browser grant lifecycle and calls the router-aware writer, which
+      // delivers the signed response to the responder above. On internal failure
+      // it writes the signed "failed to process" fallback (also routed).
+      await runBrowserIpcRequest({
+        request,
+        sourceAgentFolder: folder,
+        browserIpcAuthorized,
+        ipcBaseDir,
+        deps,
+        logger,
+      });
+      // Fail-closed guard: if neither the success nor the failure write consumed
+      // the responder (e.g. no signing key), settle the request so it does not
+      // hang until the client deadline.
+      const pending = takeIpcResponder(folder, browserKey);
+      if (pending) {
+        conn.send(transportError(frame.id, 'browser', 'internal_error'));
+      }
+    } catch (err) {
+      // runBrowserIpcRequest catches its own errors, but guard the transport
+      // regardless: clear any still-registered responder and settle.
+      const pending = takeIpcResponder(folder, browserKey);
+      if (pending) {
+        conn.send(transportError(frame.id, 'browser', 'internal_error'));
+      }
+      logger.error({ err, folder }, 'browser handler threw');
+    } finally {
+      releaseBrowserInFlight();
       const after = state.get(conn);
       if (after && after.inFlight > 0) after.inFlight -= 1;
     }

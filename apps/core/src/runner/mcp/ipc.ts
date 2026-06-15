@@ -324,23 +324,28 @@ export async function requestMemoryAction(
   return { ok: false, error: formatMemoryTimeoutError(timeoutMs) };
 }
 
-export async function requestBrowserAction(
-  action: BrowserBackendAction,
-  payload: Record<string, unknown>,
-  options: { timeoutMs?: number; publicToolName?: string } = {},
-): Promise<{
+export interface BrowserActionResult {
   ok: boolean;
   data?: unknown;
   error?: string;
-}> {
-  ensurePrivateDirSync(BROWSER_REQUESTS_DIR);
-  ensurePrivateDirSync(BROWSER_RESPONSES_DIR);
+}
 
-  const timeoutMs = options.timeoutMs ?? 30_000;
-  const requestId = makeIpcId('browser');
-  const reqPath = path.join(BROWSER_REQUESTS_DIR, `${requestId}.json`);
-  const tmpReqPath = `${reqPath}.tmp`;
-
+/**
+ * Build the signed browser IPC envelope (chat-scoped browser HMAC token) WITHOUT
+ * writing it anywhere. This is the exact payload the fs path persists to
+ * BROWSER_REQUESTS_DIR and the socket path sends as a `browser` request frame,
+ * so the host re-verifies it identically (same browser token, chatJid binding,
+ * freshness/replay scope) whether it arrived as a file or a frame.
+ *
+ * `requestId` is reused as the socket request/response correlation id.
+ */
+function buildSignedBrowserEnvelope(
+  requestId: string,
+  action: BrowserBackendAction,
+  payload: Record<string, unknown>,
+  timeoutMs: number,
+  publicToolName: string | undefined,
+): Record<string, unknown> {
   const requestPayload = {
     requestId,
     action,
@@ -357,17 +362,109 @@ export async function requestBrowserAction(
       ...(threadId ? { threadId } : {}),
       ...(appId ? { appId } : {}),
       ...(agentId ? { agentId } : {}),
-      ...(options.publicToolName
-        ? { publicToolName: options.publicToolName }
-        : {}),
+      ...(publicToolName ? { publicToolName } : {}),
       ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
     },
     expiresAt: new Date(currentTimeMs() + timeoutMs).toISOString(),
   };
-  const requestEnvelope = createSignedIpcRequestEnvelope(
-    BROWSER_IPC_AUTH_TOKEN,
-    requestPayload,
+  return createSignedIpcRequestEnvelope(BROWSER_IPC_AUTH_TOKEN, requestPayload);
+}
+
+/**
+ * Map a verified socket `browser` resp payload to the same shape the fs path
+ * returns. The payload still carries `requestId`/`signature` (already verified by
+ * the client); we keep only the fields requestBrowserAction surfaces.
+ */
+function browserResultFromSocketResponse(
+  resp: Record<string, unknown>,
+): BrowserActionResult {
+  return {
+    ok: Boolean(resp.ok),
+    ...(Object.prototype.hasOwnProperty.call(resp, 'data')
+      ? { data: resp.data }
+      : {}),
+    ...(typeof resp.error === 'string' ? { error: resp.error } : {}),
+  };
+}
+
+/**
+ * Pure classification of a failed socket `browser` request, mirroring
+ * classifyMemorySocketError. Browser has no `null` (timeout) return: instead the
+ * fs path's deadline outcome is `{ ok:false, error: <timeout> }`, so:
+ *  - timeout              → that same deadline result (do NOT replay via fs).
+ *  - transient transport  → fall back to the durable fs mailbox (write+poll) so
+ *                           a flaky socket never fails a browser action fs would
+ *                           complete.
+ *  - other {ok:false}     → a real signed handler rejection / bad_signature /
+ *                           server transport error (invalid_request /
+ *                           internal_error / rate_limited) → surface as
+ *                           {ok:false}.
+ */
+export function classifyBrowserSocketError(
+  err: unknown,
+  timeoutMs: number,
+): { kind: 'result'; result: BrowserActionResult } | { kind: 'fallback' } {
+  if (!(err instanceof IpcRequestError)) {
+    // Unexpected non-protocol error → fall back to fs rather than fail hard.
+    return { kind: 'fallback' };
+  }
+  if (err.code === 'timeout') {
+    return {
+      kind: 'result',
+      result: {
+        ok: false,
+        error: `Browser IPC timeout after ${formatDuration(timeoutMs)} waiting for browser service response`,
+      },
+    };
+  }
+  if (SOCKET_FALLBACK_CODES.has(err.code)) return { kind: 'fallback' };
+  return { kind: 'result', result: { ok: false, error: err.message } };
+}
+
+export async function requestBrowserAction(
+  action: BrowserBackendAction,
+  payload: Record<string, unknown>,
+  options: { timeoutMs?: number; publicToolName?: string } = {},
+): Promise<BrowserActionResult> {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const requestId = makeIpcId('browser');
+  const requestEnvelope = buildSignedBrowserEnvelope(
+    requestId,
+    action,
+    payload,
+    timeoutMs,
+    options.publicToolName,
   );
+
+  // Socket/dual mode: route over the same mcp-role connection the runner uses,
+  // reusing the byte-identical signed envelope. The server enforces the shared
+  // cap-4 browser concurrency; a transient failure falls back to the durable fs
+  // mailbox below so a flaky socket never fails a browser action the fs path
+  // would complete.
+  const client = getTaskSocketClient();
+  if (client) {
+    const connected = await ensureTaskSocketConnected(client);
+    if (connected) {
+      try {
+        const resp = await client.request('browser', requestEnvelope, {
+          id: requestId,
+          timeoutMs,
+        });
+        return browserResultFromSocketResponse(resp);
+      } catch (err) {
+        const disposition = classifyBrowserSocketError(err, timeoutMs);
+        if (disposition.kind === 'result') return disposition.result;
+        // 'fallback' → fall through to the durable fs mailbox below.
+      }
+    }
+    // connect failed or transient request failure → fs fallback.
+  }
+
+  ensurePrivateDirSync(BROWSER_REQUESTS_DIR);
+  ensurePrivateDirSync(BROWSER_RESPONSES_DIR);
+
+  const reqPath = path.join(BROWSER_REQUESTS_DIR, `${requestId}.json`);
+  const tmpReqPath = `${reqPath}.tmp`;
   writePrivateFileSync(tmpReqPath, JSON.stringify(requestEnvelope, null, 2));
   fs.renameSync(tmpReqPath, reqPath);
 
@@ -578,7 +675,7 @@ export interface TaskSocketClientLike {
   readonly connected: boolean;
   connect(): Promise<void>;
   request(
-    channel: 'task' | 'memory' | 'user_question',
+    channel: 'task' | 'memory' | 'user_question' | 'browser',
     signedPayload: Record<string, unknown>,
     opts?: { id?: string; timeoutMs?: number },
   ): Promise<Record<string, unknown>>;
