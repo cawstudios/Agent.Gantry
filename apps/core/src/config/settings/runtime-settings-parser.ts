@@ -18,6 +18,9 @@ import {
   DEFAULT_MODEL_GATEWAY_BIND_HOST,
   DEFAULT_STORAGE_POSTGRES_SCHEMA,
   DEFAULT_STORAGE_POSTGRES_URL_ENV,
+  DEFAULT_WARM_POOL_ENABLED,
+  DEFAULT_WARM_POOL_IDLE_TTL_MS,
+  DEFAULT_WARM_POOL_SIZE,
 } from './runtime-settings-defaults.js';
 import { parseMcpServers } from './runtime-settings-mcp-parser.js';
 import type {
@@ -686,6 +689,11 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
       maxRetries: 5,
       baseRetryMs: 5000,
     },
+    warmPool: {
+      enabled: DEFAULT_WARM_POOL_ENABLED,
+      size: DEFAULT_WARM_POOL_SIZE,
+      idleTtlMs: DEFAULT_WARM_POOL_IDLE_TTL_MS,
+    },
   };
   if (raw === undefined) return defaults;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -693,9 +701,9 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
   }
   const map = raw as Record<string, unknown>;
   for (const key of Object.keys(map)) {
-    if (key !== 'queue') {
+    if (key !== 'queue' && key !== 'warm_pool') {
       throw new Error(
-        `runtime.${key} is not supported. Configure runtime.queue.*.`,
+        `runtime.${key} is not supported. Configure runtime.queue.* or runtime.warm_pool.*.`,
       );
     }
   }
@@ -721,6 +729,23 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
       );
     }
   }
+  const warmPoolRaw = map.warm_pool;
+  if (
+    warmPoolRaw !== undefined &&
+    (typeof warmPoolRaw !== 'object' ||
+      warmPoolRaw === null ||
+      Array.isArray(warmPoolRaw))
+  ) {
+    throw new Error('runtime.warm_pool must be a mapping');
+  }
+  const warmPool = (warmPoolRaw || {}) as Record<string, unknown>;
+  for (const key of Object.keys(warmPool)) {
+    if (key !== 'enabled' && key !== 'size' && key !== 'idle_ttl_ms') {
+      throw new Error(
+        `runtime.warm_pool.${key} is not supported. Configure enabled, size, or idle_ttl_ms.`,
+      );
+    }
+  }
   return {
     queue: {
       maxMessageRuns: parsePositiveIntegerValue(
@@ -742,6 +767,23 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
         queue.base_retry_ms,
         'runtime.queue.base_retry_ms',
         defaults.queue.baseRetryMs,
+      ),
+    },
+    warmPool: {
+      enabled: parseBooleanValue(
+        warmPool.enabled,
+        'runtime.warm_pool.enabled',
+        defaults.warmPool.enabled,
+      ),
+      size: parsePositiveIntegerValue(
+        warmPool.size,
+        'runtime.warm_pool.size',
+        defaults.warmPool.size,
+      ),
+      idleTtlMs: parsePositiveIntegerValue(
+        warmPool.idle_ttl_ms,
+        'runtime.warm_pool.idle_ttl_ms',
+        defaults.warmPool.idleTtlMs,
       ),
     },
   };

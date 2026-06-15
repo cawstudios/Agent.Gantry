@@ -226,6 +226,31 @@ agents:
     expect(parsed.runtime.queue).toEqual(settings.runtime.queue);
   });
 
+  it('defaults, renders, and parses runtime warm pool policy', () => {
+    const settings = createDefaultRuntimeSettings();
+    expect(settings.runtime.warmPool).toEqual({
+      enabled: false,
+      size: 1,
+      idleTtlMs: 240_000,
+    });
+
+    settings.runtime.warmPool = {
+      enabled: true,
+      size: 2,
+      idleTtlMs: 120_000,
+    };
+
+    const yaml = renderRuntimeSettingsYaml(settings);
+    expect(yaml).toContain('runtime:');
+    expect(yaml).toContain('warm_pool:');
+    expect(yaml).toContain('enabled: true');
+    expect(yaml).toContain('size: 2');
+    expect(yaml).toContain('idle_ttl_ms: 120000');
+
+    const parsed = parseRuntimeSettings(yaml);
+    expect(parsed.runtime.warmPool).toEqual(settings.runtime.warmPool);
+  });
+
   it('defaults, renders, and parses neutral browser usage policy', () => {
     const settings = createDefaultRuntimeSettings();
     expect(settings.browser.usage).toEqual({
@@ -382,6 +407,16 @@ agents:
     max_jobb_runs: 4
 `),
     ).toThrow('runtime.queue.max_jobb_runs is not supported');
+  });
+
+  it('rejects unsupported runtime warm pool keys', () => {
+    expect(() =>
+      parseRuntimeSettings(`runtime:
+  warm_pool:
+    enabled: true
+    warmed_workers: 2
+`),
+    ).toThrow('runtime.warm_pool.warmed_workers is not supported');
   });
 
   it('rejects duplicate settings keys before schema normalization', () => {

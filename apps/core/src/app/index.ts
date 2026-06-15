@@ -51,6 +51,7 @@ export async function startGantryRuntime(
   hydrateDynamicRuntimeEnv([
     'GANTRY_FLOW_LOG',
     'GANTRY_OUTBOUND_DRYRUN',
+    'GANTRY_WARM_POOL',
     'GANTRY_TEST_OPERATOR_PHONE',
     'GANTRY_TEST_CALLER_IDENTITY_PHONE',
     // Developer-only child-runner switch (fails safe to dist when no source

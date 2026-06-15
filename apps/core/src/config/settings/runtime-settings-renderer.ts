@@ -26,6 +26,9 @@ import {
   DEFAULT_OPENAI_DAILY_EMBED_LIMIT,
   DEFAULT_STORAGE_POSTGRES_SCHEMA,
   DEFAULT_STORAGE_POSTGRES_URL_ENV,
+  DEFAULT_WARM_POOL_ENABLED,
+  DEFAULT_WARM_POOL_IDLE_TTL_MS,
+  DEFAULT_WARM_POOL_SIZE,
   getPresetManagedMemoryDefaults,
 } from './runtime-settings-defaults.js';
 import type {
@@ -637,7 +640,10 @@ function isDefaultRuntime(runtime: RuntimeSettings['runtime']): boolean {
     runtime.queue.maxMessageRuns === 3 &&
     runtime.queue.maxJobRuns === 4 &&
     runtime.queue.maxRetries === 5 &&
-    runtime.queue.baseRetryMs === 5000
+    runtime.queue.baseRetryMs === 5000 &&
+    runtime.warmPool.enabled === DEFAULT_WARM_POOL_ENABLED &&
+    runtime.warmPool.size === DEFAULT_WARM_POOL_SIZE &&
+    runtime.warmPool.idleTtlMs === DEFAULT_WARM_POOL_IDLE_TTL_MS
   );
 }
 
@@ -719,6 +725,10 @@ function renderRuntimeProcessYaml(
     `    max_job_runs: ${runtime.queue.maxJobRuns}`,
     `    max_retries: ${runtime.queue.maxRetries}`,
     `    base_retry_ms: ${runtime.queue.baseRetryMs}`,
+    '  warm_pool:',
+    `    enabled: ${runtime.warmPool.enabled ? 'true' : 'false'}`,
+    `    size: ${runtime.warmPool.size}`,
+    `    idle_ttl_ms: ${runtime.warmPool.idleTtlMs}`,
     '',
   );
 }

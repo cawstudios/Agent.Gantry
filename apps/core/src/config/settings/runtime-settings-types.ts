@@ -222,8 +222,15 @@ export interface RuntimeQueueSettings {
   baseRetryMs: number;
 }
 
+export interface RuntimeWarmPoolSettings {
+  enabled: boolean;
+  size: number;
+  idleTtlMs: number;
+}
+
 export interface RuntimeProcessSettings {
   queue: RuntimeQueueSettings;
+  warmPool: RuntimeWarmPoolSettings;
 }
 
 export type RuntimeBrowserUsagePolicyMode = 'audit' | 'enforce';

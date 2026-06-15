@@ -50,6 +50,9 @@ export const DEFAULT_BROWSER_USAGE_MODE = 'audit';
 export const DEFAULT_BROWSER_USAGE_WINDOW_MS = 60_000;
 export const DEFAULT_BROWSER_USAGE_MAX_ACTIONS_PER_WINDOW = 120;
 export const DEFAULT_BROWSER_USAGE_MAX_CONCURRENT_PER_SITE = 1;
+export const DEFAULT_WARM_POOL_ENABLED = false;
+export const DEFAULT_WARM_POOL_SIZE = 1;
+export const DEFAULT_WARM_POOL_IDLE_TTL_MS = 240_000;
 
 export function getDefaultMemoryBackfillSettings(): RuntimeMemoryBackfillSettings {
   return {
@@ -132,6 +135,11 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
       maxJobRuns: 4,
       maxRetries: 5,
       baseRetryMs: 5000,
+    },
+    warmPool: {
+      enabled: DEFAULT_WARM_POOL_ENABLED,
+      size: DEFAULT_WARM_POOL_SIZE,
+      idleTtlMs: DEFAULT_WARM_POOL_IDLE_TTL_MS,
     },
   };
   const browser: RuntimeBrowserSettings = {

@@ -172,6 +172,14 @@ export function getRuntimeQueueConfig() {
     baseRetryMs: queue.baseRetryMs,
   };
 }
+export function getRuntimeWarmPoolConfig(env: NodeJS.ProcessEnv = process.env) {
+  const warmPool = getRuntimeSettingsForConfig().runtime.warmPool;
+  return {
+    enabled: env.GANTRY_WARM_POOL === '1' || warmPool.enabled,
+    size: warmPool.size,
+    idleTtlMs: warmPool.idleTtlMs,
+  };
+}
 
 export const STORE_DIR = path.resolve(RUNTIME_ROOT, 'store');
 export const AGENTS_DIR = path.resolve(RUNTIME_ROOT, 'agents');
