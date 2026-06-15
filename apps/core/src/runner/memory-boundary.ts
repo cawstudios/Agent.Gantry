@@ -15,16 +15,27 @@ interface MemoryBoundaryPermissionOpts {
   blockedPath?: string;
 }
 
+export interface ComposeSystemPromptAppendOptions {
+  /**
+   * Warm/generic boot (Pillar 2 §2.3 fix #1): force the durable-memory boundary
+   * policy into the shared prefix even when this customer has no memory block,
+   * so the cached system-prompt prefix is byte-identical across customers (the
+   * cache anchor). Default false ⇒ the COLD path keeps the historical behavior
+   * of including the policy only when a memory block is present — preserving
+   * pool-off byte-for-byte equivalence.
+   */
+  forceBoundaryPolicy?: boolean;
+}
+
 export function composeSystemPromptAppend(
   compiledPrompt: string | undefined,
-  // Retained for call-site clarity; the boundary policy is now UNCONDITIONAL
-  // (Pillar 2 Fix #1) so the cached system-prompt prefix is byte-identical
-  // whether or not a customer has a memory block. The durable memory itself is
-  // still injected only when present (as the first user message, elsewhere).
-  _hasMemoryContext: boolean,
+  hasMemoryContext: boolean,
+  opts?: ComposeSystemPromptAppendOptions,
 ): string | undefined {
+  const includeBoundaryPolicy =
+    hasMemoryContext || Boolean(opts?.forceBoundaryPolicy);
   const parts = [
-    MEMORY_CONTEXT_SYSTEM_POLICY,
+    includeBoundaryPolicy ? MEMORY_CONTEXT_SYSTEM_POLICY : '',
     compiledPrompt?.trim() || '',
   ].filter(Boolean);
   return parts.length > 0 ? parts.join('\n\n') : undefined;

@@ -71,6 +71,10 @@ export function buildRunnerSystemPrompt(
         .filter(Boolean)
         .join('\n\n'),
       Boolean(memoryBlock),
+      // Generic boot forces the boundary policy into the shared prefix so it is
+      // byte-identical across customers (Fix #1). The cold path keeps the policy
+      // gated on memory presence ⇒ pool-off prompt stays byte-for-byte as today.
+      { forceBoundaryPolicy: options.genericBoot ?? false },
     ),
   );
 }

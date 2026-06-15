@@ -18,14 +18,35 @@ function baseInput(
 }
 
 describe('boot-generic prefix (Pillar 2 §2.3)', () => {
-  // Fix #1: the durable-memory boundary policy must be UNCONDITIONAL so the
-  // cached system-prompt prefix is byte-identical whether or not a customer has
-  // a memory block (a per-customer prefix perturber otherwise).
-  it('boundary policy is unconditional (byte-identical prefix regardless of memory)', () => {
-    const withMem = composeSystemPromptAppend('PREFIX', true);
-    const noMem = composeSystemPromptAppend('PREFIX', false);
-    expect(noMem).toBe(withMem); // policy always present
+  // Fix #1: on a GENERIC/WARM boot the durable-memory boundary policy is forced
+  // unconditional so the cached system-prompt prefix is byte-identical whether
+  // or not a customer has a memory block (the cache anchor). Outside generic
+  // boot (the cold path) it stays gated on memory presence — see below.
+  it('generic boot forces the boundary policy (byte-identical prefix regardless of memory)', () => {
+    const withMem = composeSystemPromptAppend('PREFIX', true, {
+      forceBoundaryPolicy: true,
+    });
+    const noMem = composeSystemPromptAppend('PREFIX', false, {
+      forceBoundaryPolicy: true,
+    });
+    expect(noMem).toBe(withMem); // policy always present under generic boot
     expect(noMem).toContain('Gantry Durable Memory Boundary');
+  });
+
+  // Cold path (forceBoundaryPolicy not set) with NO memory: the policy is
+  // ABSENT — this restores today's pool-off behavior and keeps the cold prompt
+  // byte-identical to pre-Pillar-2.
+  it('cold path with no memory OMITS the boundary policy (pool-off equivalence)', () => {
+    const noMem = composeSystemPromptAppend('PREFIX', false);
+    expect(noMem).not.toContain('Gantry Durable Memory Boundary');
+    expect(noMem).toBe('PREFIX');
+  });
+
+  // Cold path with memory present: the policy IS included (unchanged behavior).
+  it('cold path with memory includes the boundary policy (unchanged)', () => {
+    const withMem = composeSystemPromptAppend('PREFIX', true);
+    expect(withMem).toContain('Gantry Durable Memory Boundary');
+    expect(withMem).toContain('PREFIX');
   });
 
   // Fix #2: a generic boot must NOT bake the per-customer guardrail append into
