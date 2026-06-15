@@ -8,7 +8,7 @@ import {
   type ModelRouteId,
   type ModelWorkload,
 } from '../../shared/model-catalog.js';
-import type { AgentEngine } from '../../shared/agent-engine.js';
+import type { AgentEngine, AgentHarness } from '../../shared/agent-engine.js';
 import { resolveExecutionRoute } from '../../shared/model-execution-route.js';
 
 export interface ResolvedLlmProfile {
@@ -42,7 +42,8 @@ export type LlmProfileResolution =
         | 'unknown'
         | 'raw-provider-id'
         | 'unsupported-workload'
-        | 'unknown-provider';
+        | 'unknown-provider'
+        | 'incompatible-harness';
       message: string;
     };
 
@@ -50,6 +51,7 @@ export class LlmProfileResolutionService {
   resolve(input: {
     profile: LlmProfile;
     workload: ModelWorkload;
+    agentHarness?: AgentHarness;
   }): LlmProfileResolution {
     const resolved = resolveModelSelectionForWorkload(
       input.profile.modelAlias,
@@ -65,11 +67,12 @@ export class LlmProfileResolutionService {
     }
     const executionRoute = resolveExecutionRoute({
       entry: resolved.entry,
+      agentHarness: input.agentHarness,
     });
     if (!executionRoute.ok) {
       return {
         ok: false,
-        reason: 'unknown-provider',
+        reason: executionRoute.reason,
         message: executionRoute.message,
       };
     }

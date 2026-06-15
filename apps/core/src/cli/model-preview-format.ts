@@ -1,7 +1,7 @@
 import type { ModelPreviewResponse } from './model-preview-types.js';
 
 // Human-readable `gantry model why` output. Covers chat/job/memory scopes and
-// the `--agent <id>` engine/route preview (agent engine, credential profile,
+// the `--agent <id>` harness/route preview (agent harness, credential profile,
 // diagnostic executionProviderId, and the locked incompatibility copy).
 export function formatPreviewWhy(preview: ModelPreviewResponse): string {
   const selection = preview.selection;
@@ -21,10 +21,8 @@ export function formatPreviewWhy(preview: ModelPreviewResponse): string {
     `source: ${selection?.source ?? 'unknown'}`,
     `mode: ${selection?.inherited ? 'inherited' : 'explicit'}`,
   ];
-  if (preview.agentEngineLabel || preview.agentEngine) {
-    lines.push(
-      `agent engine: ${preview.agentEngineLabel ?? preview.agentEngine}`,
-    );
+  if (preview.agentHarness) {
+    lines.push(`agent harness: ${preview.agentHarness}`);
   }
   if (selection?.model?.responseFamily)
     lines.push(`response family: ${selection.model.responseFamily}`);

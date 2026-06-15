@@ -17,6 +17,14 @@ export const AGENT_ENGINES = [DEFAULT_AGENT_ENGINE, DEEPAGENTS_ENGINE] as const;
 
 export type AgentEngine = (typeof AGENT_ENGINES)[number];
 
+export const AUTO_AGENT_HARNESS = 'auto';
+export const AGENT_HARNESSES = [
+  AUTO_AGENT_HARNESS,
+  DEFAULT_AGENT_ENGINE,
+  DEEPAGENTS_ENGINE,
+] as const;
+export type AgentHarness = (typeof AGENT_HARNESSES)[number];
+
 const AGENT_ENGINE_LABELS: Record<AgentEngine, string> = {
   [DEFAULT_AGENT_ENGINE]: 'Anthropic SDK',
   [DEEPAGENTS_ENGINE]: 'DeepAgents',
@@ -30,5 +38,12 @@ export function isAgentEngine(value: unknown): value is AgentEngine {
   return (
     typeof value === 'string' &&
     (AGENT_ENGINES as readonly string[]).includes(value)
+  );
+}
+
+export function isAgentHarness(value: unknown): value is AgentHarness {
+  return (
+    typeof value === 'string' &&
+    (AGENT_HARNESSES as readonly string[]).includes(value)
   );
 }

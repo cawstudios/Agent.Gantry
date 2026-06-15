@@ -7,7 +7,6 @@ import {
   executionRoutesForEntry,
   resolveExecutionRoute,
 } from '../../../shared/model-execution-route.js';
-import { agentEngineLabel } from '../../../shared/agent-engine.js';
 import type { ControlRouteContext } from '../handler-context.js';
 
 export type AgentModelPreviewResult =
@@ -44,13 +43,11 @@ function modelRecord(
   };
 }
 
-// `gantry model why <alias> --agent <id>` preview. Resolves the model alias and
-// derives its execution route from the model's provider, surfacing the endpoint
-// family, credential profile, derived agent engine, and diagnostic
-// executionProviderId. The engine is read-only: it follows the provider, so an
-// agent's engine for a given model is fully determined by the model.
+// `gantry model why <alias> --agent <id>` preview. Resolves the model alias
+// against the agent's selected harness, surfacing endpoint family, credential
+// profile, and diagnostic executionProviderId.
 export function agentModelPreview(
-  _ctx: ControlRouteContext,
+  ctx: ControlRouteContext,
   body: Record<string, unknown>,
 ): AgentModelPreviewResult {
   const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : '';
@@ -75,7 +72,8 @@ export function agentModelPreview(
     };
   }
   const entry = resolution.entry;
-  const route = resolveExecutionRoute({ entry });
+  const agentHarness = ctx.getSelectedAgentHarness(agentFolder);
+  const route = resolveExecutionRoute({ entry, agentHarness });
   if (!route.ok) {
     return {
       ok: false,
@@ -84,26 +82,24 @@ export function agentModelPreview(
       message: route.message,
     };
   }
-  const agentEngine = route.value.engine;
   return {
     ok: true,
     body: {
       target: 'agent',
       agentId: agentFolder,
-      agentEngine,
-      agentEngineLabel: agentEngineLabel(agentEngine),
+      agentHarness,
       credentialProfile: entry.credentialProfileRef,
       selection: {
         configuredAlias: null,
         effectiveAlias: resolution.alias,
-        source: `agent ${agentFolder} engine ${agentEngine}`,
+        source: `agent ${agentFolder} harness ${agentHarness}`,
         inherited: false,
         workload: 'chat',
         model: modelRecord(entry),
       },
       executionProviderId: route.value.executionProviderId,
       why: [
-        `agent ${agentFolder} runs ${agentEngineLabel(agentEngine)} on the ${entry.responseFamily} endpoint`,
+        `agent ${agentFolder} uses ${agentHarness} harness on the ${entry.responseFamily} endpoint`,
       ],
     },
   };

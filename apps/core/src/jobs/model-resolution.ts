@@ -28,7 +28,12 @@ export function resolveJobExecutionProviderId(input: {
   const resolution = input.resolvedModel.resolution;
   let routed: ExecutionProviderId | undefined;
   if (resolution?.ok) {
-    const route = resolveExecutionRoute({ entry: resolution.entry });
+    const route =
+      input.resolvedModel.routeResolution ??
+      resolveExecutionRoute({
+        entry: resolution.entry,
+        agentHarness: input.resolvedModel.agentHarness,
+      });
     if (route.ok) {
       routed = route.value.executionProviderId as ExecutionProviderId;
     }
@@ -67,7 +72,12 @@ function resolvedRunDiagnostics(resolved: ResolvedJobModel) {
   let executionProviderId: string | null = null;
   let supportedCredentialModes: readonly string[] = [];
   if (resolved.resolution?.ok) {
-    const route = resolveExecutionRoute({ entry: resolved.resolution.entry });
+    const route =
+      resolved.routeResolution ??
+      resolveExecutionRoute({
+        entry: resolved.resolution.entry,
+        agentHarness: resolved.agentHarness,
+      });
     if (route.ok) {
       executionProviderId = route.value.executionProviderId;
       supportedCredentialModes = route.value.supportedCredentialModes;
@@ -75,6 +85,7 @@ function resolvedRunDiagnostics(resolved: ResolvedJobModel) {
   }
   return {
     agent_engine: resolved.agentEngine,
+    agent_harness: resolved.agentHarness,
     response_family: provider?.responseFamily ?? null,
     execution_provider_id: executionProviderId,
     // Non-secret credential-mode metadata: which credential modes this resolved

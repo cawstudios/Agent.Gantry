@@ -69,13 +69,13 @@ describe('provider-derived execution route', () => {
   it('surfaces the derived route as a one-element diagnostic array', () => {
     expect(executionRoutesForEntry(entryFor('opus'))).toEqual([
       {
-        engine: DEFAULT_AGENT_ENGINE,
+        harness: DEFAULT_AGENT_ENGINE,
         executionProviderId: 'anthropic:claude-agent-sdk',
       },
     ]);
     expect(executionRoutesForEntry(entryFor('kimi'))).toEqual([
       {
-        engine: DEEPAGENTS_ENGINE,
+        harness: DEEPAGENTS_ENGINE,
         executionProviderId: 'deepagents:langchain',
       },
     ]);

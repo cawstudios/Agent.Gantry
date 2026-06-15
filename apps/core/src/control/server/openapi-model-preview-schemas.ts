@@ -1,21 +1,16 @@
-import { AgentEngineSchema } from '@gantry/contracts';
+import { AgentHarnessSchema } from '@gantry/contracts';
 
 import type { JsonSchema } from './openapi-route-helpers.js';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
 
-// Engine enum is sourced from the contracts schema so the provider literals stay
-// in the approved contracts module and never appear in this adapter file.
-const agentEngineEnum = [...AgentEngineSchema.options];
+const agentHarnessEnum = [...AgentHarnessSchema.options];
 
-// Derived (read-only) effective engine: it follows the resolved model's
-// provider and is not settable. Raw executionProviderId stays
-// internal/diagnostic.
-export const agentEngineProp: JsonSchema = {
+export const agentHarnessProp: JsonSchema = {
   type: 'string',
-  enum: agentEngineEnum,
+  enum: agentHarnessEnum,
   description:
-    'Public agent engine, derived (read-only) from the resolved model provider and not settable. Raw executionProviderId stays internal.',
+    'Public agent harness. auto preserves provider-derived behavior; explicit values are user intent validated against the selected model.',
 };
 
 export const modelPreviewSchemas: Record<string, JsonSchema> = {
@@ -57,10 +52,7 @@ export const modelPreviewSchemas: Record<string, JsonSchema> = {
         type: 'string',
         enum: ['extractor', 'dreaming', 'consolidation'],
       },
-      // agentEngine is the derived (read-only) engine diagnostic that follows the
-      // resolved model's provider; executionProviderId is the internal diagnostic.
-      agentEngine: { type: 'string', enum: agentEngineEnum },
-      agentEngineLabel: { type: 'string' },
+      agentHarness: { type: 'string', enum: agentHarnessEnum },
       credentialProfile: { type: 'string' },
       executionProviderId: { type: 'string' },
       incompatible: { type: 'string' },

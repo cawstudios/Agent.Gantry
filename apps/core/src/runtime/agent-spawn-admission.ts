@@ -17,7 +17,10 @@ export function validateAgentPreSpawnAdmission(input: {
   securityEnv: NodeJS.ProcessEnv;
 }): string | null {
   return (
-    validateRunnerAllowedTools(input.agentInput.toolPolicyRules ?? []) ??
+    validateRunnerAllowedTools(
+      input.agentInput.toolPolicyRules ?? [],
+      input.agentInput.runtimeAccess ?? [],
+    ) ??
     deepAgentsShellFilesystemGuard({
       engine: input.agentEngine,
       toolPolicyRules: input.agentInput.toolPolicyRules,

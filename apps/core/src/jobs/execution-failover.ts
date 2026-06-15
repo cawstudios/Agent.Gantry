@@ -1,4 +1,5 @@
 import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
+import type { AgentHarness } from '../shared/agent-engine.js';
 import type {
   AgentInput,
   AgentOutput,
@@ -35,6 +36,7 @@ export async function runJobAgentWithFailover(input: {
   streamHandler: (output: AgentOutput) => Promise<void>;
   runOptions: RunAgentOptions;
   fallbackProviderId: ExecutionProviderId;
+  agentHarness?: AgentHarness;
   hasStreamedOutput: () => boolean;
   // Called before each failover re-spawn so the caller can reconcile the run's
   // recorded provider metadata with the failover target, reset per-attempt error
@@ -73,6 +75,7 @@ export async function runJobAgentWithFailover(input: {
     const toProviderId = executionProviderIdForCandidate(
       toModel,
       input.fallbackProviderId,
+      input.agentHarness,
     );
     const fromModel =
       input.candidates[attempt] ?? input.firstModel ?? '(default)';

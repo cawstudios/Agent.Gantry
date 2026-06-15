@@ -43,9 +43,6 @@ vi.mock('@core/config/index.js', async () => {
   const modelDefaultsModule =
     await import('@core/config/settings/model-defaults.js');
   const yoloPolicy = await import('@core/shared/yolo-mode-policy.js');
-  const modelCatalogModule = await import('@core/shared/model-catalog.js');
-  const executionRouteModule =
-    await import('@core/shared/model-execution-route.js');
   const toPublic = () => {
     const settings = settingsModule.loadRuntimeSettings(runtimeHome);
     return {
@@ -109,19 +106,14 @@ vi.mock('@core/config/index.js', async () => {
     getRuntimeSettingsForConfig: vi.fn(() =>
       settingsModule.loadRuntimeSettings(runtimeHome),
     ),
-    getEffectiveAgentEngine: vi.fn((agentFolder?: string) => {
+    getSelectedAgentHarness: vi.fn((agentFolder?: string) => {
       const settings = settingsModule.loadRuntimeSettings(runtimeHome);
-      const effectiveModel = (
-        (agentFolder ? settings.agents?.[agentFolder]?.model : undefined) ||
-        settings.agent.defaultModel ||
-        'opus'
-      ).trim();
-      const resolved = modelCatalogModule.resolveModelSelectionForWorkload(
-        effectiveModel,
-        'chat',
-      );
-      return executionRouteModule.deriveAgentEngineForProvider(
-        resolved.ok ? resolved.entry.modelRoute.id : '',
+      return (
+        (agentFolder
+          ? settings.agents?.[agentFolder]?.agentHarness
+          : undefined) ??
+        settings.agent.agentHarness ??
+        'auto'
       );
     }),
     getPublicRuntimeSettings: toPublic,
@@ -1135,7 +1127,7 @@ describe('control server runtime hardening', () => {
             responseFamily: 'anthropic',
             executionRoutes: [
               {
-                engine: 'deepagents',
+                harness: 'deepagents',
                 executionProviderId: 'deepagents:langchain',
               },
             ],

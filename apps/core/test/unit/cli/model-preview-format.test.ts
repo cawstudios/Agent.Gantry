@@ -4,10 +4,6 @@ import {
   formatPreviewWhy,
   parseAgentFlag,
 } from '@core/cli/model-preview-format.js';
-import {
-  DEEPAGENTS_ENGINE,
-  DEFAULT_AGENT_ENGINE,
-} from '@core/shared/agent-engine.js';
 
 describe('parseAgentFlag', () => {
   it('returns undefined when the flag is absent', () => {
@@ -26,25 +22,27 @@ describe('parseAgentFlag', () => {
   });
 });
 
-describe('formatPreviewWhy for an agent engine/route preview', () => {
-  it('renders engine, credential profile, and executionProviderId', () => {
+describe('formatPreviewWhy for an agent harness/route preview', () => {
+  it('renders harness, credential profile, and executionProviderId', () => {
     const output = formatPreviewWhy({
       target: 'agent',
       agentId: 'main_agent',
-      agentEngine: DEEPAGENTS_ENGINE,
-      agentEngineLabel: 'DeepAgents',
+      agentHarness: 'deepagents',
       credentialProfile: 'anthropic-default',
       executionProviderId: 'deepagents:langchain',
       selection: {
         effectiveAlias: 'opus',
-        source: 'agent main_agent engine deepagents',
+        source: 'agent main_agent harness deepagents',
         inherited: false,
         model: { displayName: 'Opus 4.8', responseFamily: 'anthropic' },
       },
-      why: ['agent main_agent runs DeepAgents on the anthropic endpoint'],
+      why: [
+        'agent main_agent uses deepagents harness on the anthropic endpoint',
+      ],
     });
     expect(output).toContain('Why agent main_agent uses this model');
-    expect(output).toContain('agent engine: DeepAgents');
+    expect(output).toContain('agent harness: deepagents');
+    expect(output).not.toContain('agent engine:');
     expect(output).toContain('response family: anthropic');
     expect(output).toContain('credential profile: anthropic-default');
     expect(output).toContain('execution provider id: deepagents:langchain');
@@ -55,8 +53,7 @@ describe('formatPreviewWhy for an agent engine/route preview', () => {
     const output = formatPreviewWhy({
       target: 'agent',
       agentId: 'main_agent',
-      agentEngine: DEFAULT_AGENT_ENGINE,
-      agentEngineLabel: 'Anthropic SDK',
+      agentHarness: 'anthropic_sdk',
       credentialProfile: 'openai-default',
       incompatible:
         'Model gpt uses the OpenAI endpoint, which is not supported by Anthropic SDK. Choose DeepAgents or an Anthropic-compatible model.',

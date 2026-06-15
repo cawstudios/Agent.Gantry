@@ -105,6 +105,29 @@ describe('job model resolution', () => {
     );
   });
 
+  it('rejects incompatible explicit agent harness before job spawn', () => {
+    const resolved = resolveJobModel(
+      { model: 'kimi', schedule_type: 'manual' } as never,
+      { model: 'kimi', source: 'system default' },
+      'anthropic_sdk',
+    );
+
+    expect(resolved.routeResolution).toMatchObject({
+      ok: false,
+      reason: 'incompatible-harness',
+    });
+    expect(jobStartedModelPayload(resolved)).toMatchObject({
+      agent_harness: 'anthropic_sdk',
+      execution_provider_id: null,
+    });
+    expect(() =>
+      resolveJobExecutionProviderId({
+        resolvedModel: resolved,
+        executionAdapter: { id: 'deepagents:langchain' },
+      }),
+    ).not.toThrow();
+  });
+
   it('resolves a job whose model is a family alias credential-driven by app providers', () => {
     // The job-seam rewrite (jobs/execution.ts) maps the family alias to a
     // concrete member using the job app's configured providers, then resolves

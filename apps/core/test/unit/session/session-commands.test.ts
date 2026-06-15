@@ -194,6 +194,28 @@ describe('extractSessionCommand', () => {
     });
   });
 
+  it('detects explicit mention-friendly !new alias for Slack', () => {
+    expect(extractSessionCommand('@Andy !new', trigger)).toEqual({
+      kind: 'new',
+      raw: '/new',
+    });
+    const slackTrigger = /(?:^|\s)<@U123BOT>?(?=\s|$|[,.!?;:])/i;
+    expect(extractSessionCommand('<@U123BOT> !new', slackTrigger)).toEqual({
+      kind: 'new',
+      raw: '/new',
+    });
+    expect(extractSessionCommand('<@UOTHER> !new', slackTrigger)).toBeNull();
+  });
+
+  it('does not treat natural new-session text as commands', () => {
+    expect(extractSessionCommand('@Andy new', trigger)).toBeNull();
+    expect(extractSessionCommand('@Andy new chat', trigger)).toBeNull();
+    expect(extractSessionCommand('@Andy reset chat', trigger)).toBeNull();
+    expect(extractSessionCommand('@Andy start fresh', trigger)).toBeNull();
+    expect(extractSessionCommand('new', trigger)).toBeNull();
+    expect(extractSessionCommand('!new', trigger)).toBeNull();
+  });
+
   it('rejects /new with extra text', () => {
     expect(extractSessionCommand('/new later', trigger)).toBeNull();
   });
@@ -213,6 +235,58 @@ describe('extractSessionCommand', () => {
     expect(extractSessionCommand('/memory-status', trigger)).toEqual({
       kind: 'memory_status',
       raw: '/memory-status',
+    });
+  });
+
+  it('detects mention-friendly utility aliases for Slack', () => {
+    expect(extractSessionCommand('@Andy !commands', trigger)).toEqual({
+      kind: 'commands',
+      raw: '/commands',
+    });
+    expect(extractSessionCommand('@Andy !help', trigger)).toEqual({
+      kind: 'commands',
+      raw: '/commands',
+    });
+    expect(extractSessionCommand('@Andy !status', trigger)).toEqual({
+      kind: 'status',
+      raw: '/status',
+    });
+    expect(extractSessionCommand('@Andy !memory-status', trigger)).toEqual({
+      kind: 'memory_status',
+      raw: '/memory-status',
+    });
+    expect(extractSessionCommand('@Andy !compact', trigger)).toEqual({
+      kind: 'compact',
+      raw: '/compact',
+    });
+    expect(extractSessionCommand('@Andy !stop', trigger)).toEqual({
+      kind: 'stop',
+      raw: '/stop',
+    });
+  });
+
+  it('detects mention-friendly model and thinking aliases for Slack', () => {
+    expect(extractSessionCommand('@Andy !models', trigger)).toEqual({
+      kind: 'models_list',
+      raw: '/models',
+    });
+    expect(extractSessionCommand('@Andy !model', trigger)).toEqual({
+      kind: 'model_show',
+      raw: '/model',
+    });
+    expect(extractSessionCommand('@Andy !model haiku', trigger)).toEqual({
+      kind: 'model_set',
+      raw: '/model haiku',
+      value: 'haiku',
+    });
+    expect(extractSessionCommand('@Andy !model default', trigger)).toEqual({
+      kind: 'model_default',
+      raw: '/model default',
+    });
+    expect(extractSessionCommand('@Andy !thinking high', trigger)).toEqual({
+      kind: 'thinking_set',
+      raw: '/thinking high',
+      value: { mode: 'adaptive', effort: 'high' },
     });
   });
 
@@ -325,7 +399,9 @@ describe('handleSessionCommand', () => {
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.runAgent).not.toHaveBeenCalled();
     expect(deps.sendMessage).toHaveBeenCalledWith(
-      expect.stringContaining('/commands - List available chat commands.'),
+      expect.stringContaining(
+        '/commands or !commands - List available chat commands.',
+      ),
     );
     expect(deps.sendMessage).toHaveBeenCalledWith(
       expect.stringContaining('/model <alias>'),

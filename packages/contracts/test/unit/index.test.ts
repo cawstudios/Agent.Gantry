@@ -6,7 +6,7 @@ import type {
 
 import {
   AgentCapabilitiesResponseSchema,
-  AgentEngineSchema,
+  AgentHarnessSchema,
   AgentResponseSchema,
   UpdateAgentRequestSchema,
   AgentConversationBindingRequestSchema,
@@ -233,7 +233,7 @@ describe('contracts package', () => {
               responseFamily: 'anthropic',
               executionRoutes: [
                 {
-                  engine: 'deepagents',
+                  harness: 'deepagents',
                   executionProviderId: 'deepagents:langchain',
                 },
               ],
@@ -402,29 +402,30 @@ describe('contracts package', () => {
       agentId: 'main_agent',
       modelAlias: 'gpt',
     });
-    // target 'agent' response carries the derived (read-only) engine diagnostics.
+    // target 'agent' response carries the selected public harness diagnostics.
     expect(
       ModelPreviewResponseSchema.parse({
         target: 'agent',
         agentId: 'main_agent',
-        agentEngine: 'deepagents',
-        agentEngineLabel: 'DeepAgents',
+        agentHarness: 'deepagents',
         credentialProfile: 'openai',
         executionProviderId: 'deepagents:langchain',
         selection: {
           configuredAlias: null,
           effectiveAlias: 'gpt',
-          source: 'agent main_agent engine deepagents',
+          source: 'agent main_agent harness deepagents',
           inherited: false,
           workload: 'chat',
           model: null,
         },
-        why: ['agent main_agent runs DeepAgents on the openai endpoint'],
+        why: [
+          'agent main_agent uses deepagents harness on the openai endpoint',
+        ],
       }),
     ).toMatchObject({
       target: 'agent',
       agentId: 'main_agent',
-      agentEngine: 'deepagents',
+      agentHarness: 'deepagents',
       executionProviderId: 'deepagents:langchain',
     });
     expect(
@@ -617,12 +618,16 @@ describe('contracts package', () => {
         appId: 'app-1',
         name: 'Operator',
         status: 'active',
-        agentEngine: 'deepagents',
+        agentHarness: 'deepagents',
         createdAt: iso,
         updatedAt: iso,
       }),
-    ).toMatchObject({ id: 'agent-1', appId: 'app-1', agentEngine: 'deepagents' });
-    // agentEngine is a required effective field on the response and is enum-bound.
+    ).toMatchObject({
+      id: 'agent-1',
+      appId: 'app-1',
+      agentHarness: 'deepagents',
+    });
+    // agentHarness is a required public field on the response and is enum-bound.
     expectInvalid(AgentResponseSchema, {
       id: 'agent-1',
       appId: 'app-1',
@@ -636,7 +641,7 @@ describe('contracts package', () => {
       appId: 'app-1',
       name: 'Operator',
       status: 'active',
-      agentEngine: 'langchain',
+      agentHarness: 'langchain',
       createdAt: iso,
       updatedAt: iso,
     });
@@ -645,18 +650,28 @@ describe('contracts package', () => {
       appId: 'app-1',
       name: 'Operator',
       status: 'bad',
-      agentEngine: 'deepagents',
+      agentHarness: 'deepagents',
       createdAt: iso,
       updatedAt: iso,
     });
-    expect(AgentEngineSchema.options).toHaveLength(2);
-    expect(AgentEngineSchema.options).toContain('deepagents');
+    expect(AgentHarnessSchema.options).toEqual([
+      'auto',
+      'anthropic_sdk',
+      'deepagents',
+    ]);
     expect(
-      CreateAgentRequestSchema.parse({ appId: 'app-1', name: 'Operator' }),
-    ).toEqual({ appId: 'app-1', name: 'Operator' });
+      CreateAgentRequestSchema.parse({
+        appId: 'app-1',
+        name: 'Operator',
+        agentHarness: 'auto',
+      }),
+    ).toEqual({ appId: 'app-1', name: 'Operator', agentHarness: 'auto' });
     expect(UpdateAgentRequestSchema.parse({ name: 'Operator' })).toEqual({
       name: 'Operator',
     });
+    expect(
+      UpdateAgentRequestSchema.parse({ agentHarness: 'anthropic_sdk' }),
+    ).toEqual({ agentHarness: 'anthropic_sdk' });
     expect(UpdateAgentRequestSchema.parse({ status: 'active' })).toEqual({
       status: 'active',
     });
@@ -673,7 +688,6 @@ describe('contracts package', () => {
       'runtimeLimits',
       'metadata',
       'agentEngine',
-      'agentHarness',
       'executionProviderId',
       'unexpectedField',
     ];
@@ -1343,7 +1357,7 @@ describe('contracts package', () => {
             appId: 'app-1',
             name: 'Operator',
             status: 'active',
-            agentEngine: 'deepagents',
+            agentHarness: 'deepagents',
             createdAt: iso,
             updatedAt: iso,
           },

@@ -401,7 +401,7 @@ export function memoryModelPreview(
       diagnosticLane,
       why: [
         `memory ${task} uses preset-managed settings from ${slot.source}`,
-        `memory engine: ${agentEngineLabel(engine)}`,
+        `memory transport: ${agentEngineLabel(engine)}`,
       ],
     },
   };

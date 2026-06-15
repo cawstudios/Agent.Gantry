@@ -7,6 +7,7 @@ import type { AgentPersona } from '../../shared/agent-persona.js';
 import type { AgentRelationshipMode } from '../../shared/agent-relationship-mode.js';
 import type { YoloModeSettings } from '../../shared/yolo-mode-policy.js';
 import type { EgressSettings } from '../../shared/egress-policy.js';
+import type { AgentHarness } from '../../shared/agent-engine.js';
 
 export interface RuntimeProviderSettings {
   enabled: boolean;
@@ -95,6 +96,7 @@ export interface RuntimeStorageSettings {
 export interface RuntimeAgentSettings {
   name: string;
   defaultModel: string;
+  agentHarness: AgentHarness;
   oneTimeJobDefaultModel: string;
   recurringJobDefaultModel: string;
   sessions: {
@@ -153,6 +155,7 @@ export interface RuntimeConfiguredAgent {
   persona?: AgentPersona;
   relationshipMode?: AgentRelationshipMode;
   model?: string;
+  agentHarness?: AgentHarness;
   oneTimeJobDefaultModel?: string;
   recurringJobDefaultModel?: string;
   bindings: Record<string, RuntimeConfiguredAgentBinding>;

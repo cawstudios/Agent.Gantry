@@ -3,12 +3,11 @@ export interface ModelPreviewResponse {
   jobId?: string;
   agentId?: string;
   scope?: string;
-  // Resolved-route diagnostics for `why <alias> --agent <id>`. `agentEngine` is
-  // the agent's effective engine; `executionProviderId` is the internal
-  // diagnostic adapter the engine+route pair runs on; `credentialProfile` is the
-  // bound credential profile ref. `incompatible` carries the locked pair copy.
-  agentEngine?: string;
-  agentEngineLabel?: string;
+  // Resolved-route diagnostics for `why <alias> --agent <id>`. `agentHarness`
+  // is the selected public harness; `executionProviderId` is the internal
+  // diagnostic adapter the route runs on; `credentialProfile` is the bound
+  // credential profile ref. `incompatible` carries the locked pair copy.
+  agentHarness?: string;
   executionProviderId?: string;
   credentialProfile?: string;
   incompatible?: string;

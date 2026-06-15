@@ -203,11 +203,10 @@ export interface ModelRecord {
   aliases: string[];
   recommendedAlias: string;
   responseFamily: string;
-  // Read-only diagnostic: the derived execution route (engine + adapter) for
-  // this model's provider, as a one-element array. The engine follows the
-  // provider; it is not selectable.
+  // Read-only support matrix: the public harness that can run this model and
+  // its internal execution provider diagnostic.
   executionRoutes: Array<{
-    engine: string;
+    harness: string;
     executionProviderId: string;
   }>;
   credentialProfileRef: string;
@@ -359,12 +358,11 @@ export interface ModelPreviewResponse {
   scope?: string;
   kind?: 'one-time' | 'recurring';
   task?: 'extractor' | 'dreaming' | 'consolidation';
-  // Resolved-route diagnostics for target 'agent'. `agentEngine` is the public
-  // engine value; `executionProviderId` is the internal read-only diagnostic;
-  // `incompatible` carries the locked plan copy when the model/engine pairing is
-  // unsupported.
-  agentEngine?: string;
-  agentEngineLabel?: string;
+  // Resolved-route diagnostics for target 'agent'. `agentHarness` is the public
+  // selected harness; `executionProviderId` is the internal read-only
+  // diagnostic; `incompatible` carries the locked plan copy when the
+  // model/harness pairing is unsupported.
+  agentHarness?: string;
   credentialProfile?: string;
   executionProviderId?: string;
   incompatible?: string;

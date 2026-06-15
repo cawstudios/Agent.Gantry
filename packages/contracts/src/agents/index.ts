@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import {
-  AgentEngineSchema,
+  AgentHarnessSchema,
   ContractMetadataSchema,
   IsoDateTimeSchema,
   LlmProfileRefSchema,
@@ -84,6 +84,7 @@ export const CreateAgentRequestSchema = z
   .object({
     appId: z.string(),
     name: z.string().min(1),
+    agentHarness: AgentHarnessSchema.optional(),
   })
   .strict();
 export type CreateAgentRequest = z.infer<typeof CreateAgentRequestSchema>;
@@ -92,6 +93,7 @@ export const UpdateAgentRequestSchema = z
   .object({
     name: z.string().min(1).optional(),
     status: AgentStatusSchema.optional(),
+    agentHarness: AgentHarnessSchema.optional(),
   })
   .strict();
 export type UpdateAgentRequest = z.infer<typeof UpdateAgentRequestSchema>;
@@ -102,9 +104,7 @@ export const AgentResponseSchema = z.object({
   name: z.string(),
   description: z.string().nullable().optional(),
   status: AgentStatusSchema,
-  // Engine derived from the resolved model's provider (read-only diagnostic).
-  // The raw executionProviderId stays internal and never appears here.
-  agentEngine: AgentEngineSchema,
+  agentHarness: AgentHarnessSchema,
   currentConfigVersionId: z.string().nullable().optional(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,

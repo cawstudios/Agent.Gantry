@@ -66,6 +66,9 @@ function renderDefaultsYaml(
   lines.push(
     `  model: ${quoteYamlString(agent.defaultModel || SYSTEM_DEFAULT_MODEL_ALIAS)}`,
   );
+  if (agent.agentHarness !== 'auto') {
+    lines.push(`  agent_harness: ${quoteYamlString(agent.agentHarness)}`);
+  }
   if (agent.oneTimeJobDefaultModel || agent.recurringJobDefaultModel) {
     lines.push('  jobs:');
     if (agent.oneTimeJobDefaultModel) {
@@ -216,6 +219,9 @@ function renderConfiguredAgentsYaml(
     }
     if (agent.model) {
       lines.push(`    model: ${quoteYamlString(agent.model)}`);
+    }
+    if (agent.agentHarness) {
+      lines.push(`    agent_harness: ${quoteYamlString(agent.agentHarness)}`);
     }
     if (agent.oneTimeJobDefaultModel) {
       lines.push(

@@ -5,11 +5,9 @@
 > `docs/decisions/2026-06-12-agent-engine-selection.md`. That older decision is
 > now historical context for how `auto` behaves, not the active public contract.
 
-> **Implementation status (2026-06-15): planned target, not fully live.**
-> The accepted strategy below defines the target contract. The current runtime,
-> README, SDK docs, and credential architecture still describe the active state:
-> `agentEngine` is provider-derived/read-only, and the current `settings.yaml`
-> parser/API do not yet accept `agent_harness`/`agentHarness` writes.
+> **Implementation status (2026-06-15): public harness slice live.**
+> `agentHarness` / `agent_harness` is now the public selector across
+> settings/API/CLI/contracts. Remaining DeepAgents parity work is listed below.
 
 ## Context
 
@@ -36,23 +34,23 @@ The durable public user intent is **agent harness**, not agent engine.
   resolved model/provider/credential mode before runner spawn. Incompatible
   combinations fail closed and are never silently re-routed to another harness.
 - Claude OAuth/subscription credentials are Anthropic-SDK-only.
-- `agentEngine` remains the effective read-only diagnostic after resolution.
 - `executionProviderId` remains internal/read-only diagnostic.
+- Internal runtime/audit diagnostics may still use `agent_engine`; it is not a
+  public settings/API/CLI/SDK selector or response field.
 
-This is the accepted target strategy. Implementation is incomplete until the
-public settings/API/CLI/MCP write surfaces, resolver/admission gate, jobs/live
-inheritance, DeepAgents delegation wrapper, Gantry filesystem facades, skill/MCP
-projection, host-enforced evidence receipts, and cleanup/full verification gates
-land together.
+This is the accepted strategy. The public settings/API/CLI/contracts slice has
+landed; full DeepAgents parity is incomplete until reviewed Gantry MCP/admin
+settings writes, job inheritance, DeepAgents delegation wrapper, Gantry
+filesystem facades, skill/MCP projection, host-enforced evidence receipts, and
+cleanup/full verification gates land together.
 
 ### Current Implementation Boundary
 
 As of 2026-06-15:
 
-- `agent_harness` and writable `agentHarness` are planned-only.
-- Active setup/settings parsing still derives the effective read-only
-  `agentEngine` from the selected model provider.
-- `agentEngine` must not be reintroduced as a writable public selector.
+- `agent_harness` and writable `agentHarness` are live public settings/API/CLI
+  contract.
+- `agentEngine` must not be reintroduced as a public selector or read field.
 - Jobs and conversations do not have their own harness selector in either the
   current implementation or the accepted target strategy.
 - DeepAgents parity must not be claimed until the blockers in this decision and
@@ -60,11 +58,9 @@ As of 2026-06-15:
 
 Known blockers before full parity can be claimed:
 
-- public `agentHarness` implementation across `settings.yaml`, Control API, SDK,
-  CLI, and reviewed Gantry MCP/admin settings tools;
-- resolver/admission that rejects incompatible harness/model/credential/sandbox
-  combinations before runner spawn;
-- jobs/live-turn inheritance through the same resolver;
+- reviewed Gantry MCP/admin settings tools for `agentHarness` writes;
+- credential/sandbox compatibility rejection before runner spawn;
+- job inheritance through the same resolver;
 - DeepAgents delegation wrapper for `AgentDelegation`, with raw `task` and
   `write_todos` hidden until covered;
 - Gantry filesystem facades for file search/read/edit/write, with protected-path
@@ -82,11 +78,11 @@ Known blockers before full parity can be claimed:
 
 Setup and agent editing surfaces must expose exactly these choices:
 
-| Option | Value | Description |
-| --- | --- | --- |
-| Auto | `auto` | Gantry chooses the safest compatible harness for the selected model. |
-| Anthropic SDK | `anthropic_sdk` | Use the Claude Agent SDK for Claude-native execution. |
-| DeepAgents | `deepagents` | Use DeepAgents for advanced planning, skills, filesystem workflows, and internal delegation under Gantry permissions. |
+| Option        | Value           | Description                                                                                                           |
+| ------------- | --------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Auto          | `auto`          | Gantry chooses the safest compatible harness for the selected model.                                                  |
+| Anthropic SDK | `anthropic_sdk` | Use the Claude Agent SDK for Claude-native execution.                                                                 |
+| DeepAgents    | `deepagents`    | Use DeepAgents for advanced planning, skills, filesystem workflows, and internal delegation under Gantry permissions. |
 
 Locked invalid copy:
 
@@ -123,20 +119,20 @@ The matrix below describes the accepted implementation target, not the current
 live repo state. Surfaces marked `Changed` remain pending until their
 corresponding implementation slice is merged and verified.
 
-| Surface | Impact | Reason |
-| --- | --- | --- |
-| Runtime behavior | Changed | Run admission resolves `agentHarness + modelAlias + credential mode` into the effective `agentEngine`; explicit incompatible harnesses fail before runner spawn. |
-| `settings.yaml` | Changed | Adds `defaults.agent_harness` and `agents.<id>.agent_harness` as non-secret desired-state fields; `auto` is the default. |
-| Postgres/runtime projection | Changed | Runtime projection may carry selected `agentHarness` and resolved diagnostics, but settings remain durable authority. |
-| Control API | Changed | Agent reads/writes expose `agentHarness`; reads keep effective `agentEngine` and internal `executionProviderId` read-only. |
-| SDK/contracts | Changed | Contracts add `AgentHarness = auto | anthropic_sdk | deepagents`; `agentEngine` remains output-only effective state. |
-| CLI | Changed | Setup and agent configuration commands expose `agent_harness`; model/status/why surfaces show read-only effective `agentEngine`. |
-| Gantry MCP tools/admin skill | Changed | Reviewed settings desired-state updates may request `agent_harness`; admin tools never grant raw provider or filesystem authority. |
-| Channel adapters | Read-only/observable | Slack, Teams, Telegram, WhatsApp, Web, and App channels render the same approvals/receipts and gain no channel-specific authority. |
-| LLM/provider adapters | Changed | DeepAgents harness support changes model-gateway routing, MCP projection, credential projection, and adapter admission while keeping raw provider credentials hidden. |
-| Docs/prompts | Changed | Architecture, credential, setup, and decision docs must use `agentHarness` for user intent and keep older `agentEngine` selector text historical. |
-| Audit/events | Changed | Audit records include selected `agentHarness`, effective `agentEngine`, credential mode without secrets, and `executionProviderId` as diagnostic evidence. |
-| Tests/verification | Changed | Unit, contract, integration, and cleanup-search coverage must prove settings/API/CLI/MCP writes, compatibility rejection, diagnostics, and authority boundaries. |
+| Surface                      | Impact               | Reason                                                                                                                                                                |
+| ---------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --------------------------------------------- |
+| Runtime behavior             | Changed              | Run admission resolves `agentHarness + modelAlias + credential mode` into the internal execution route; explicit incompatible harnesses fail before runner spawn.     |
+| `settings.yaml`              | Changed              | Adds `defaults.agent_harness` and `agents.<id>.agent_harness` as non-secret desired-state fields; `auto` is the default.                                              |
+| Postgres/runtime projection  | Changed              | Runtime projection may carry selected `agentHarness` and resolved diagnostics, but settings remain durable authority.                                                 |
+| Control API                  | Changed              | Agent reads/writes expose `agentHarness`; `executionProviderId` remains internal/read-only diagnostic where route diagnostics already exist.                          |
+| SDK/contracts                | Changed              | Contracts expose `AgentHarness = auto                                                                                                                                 | anthropic_sdk | deepagents`; public `agentEngine` is removed. |
+| CLI                          | Changed              | Agent configuration commands expose `agent_harness`; model/status/why surfaces show selected `agentHarness`.                                                          |
+| Gantry MCP tools/admin skill | Changed              | Reviewed settings desired-state updates may request `agent_harness`; admin tools never grant raw provider or filesystem authority.                                    |
+| Channel adapters             | Read-only/observable | Slack, Teams, Telegram, WhatsApp, Web, and App channels render the same approvals/receipts and gain no channel-specific authority.                                    |
+| LLM/provider adapters        | Changed              | DeepAgents harness support changes model-gateway routing, MCP projection, credential projection, and adapter admission while keeping raw provider credentials hidden. |
+| Docs/prompts                 | Changed              | Architecture, credential, setup, and decision docs must use `agentHarness` for user intent and keep older `agentEngine` selector text historical.                     |
+| Audit/events                 | Changed              | Audit records may include selected `agentHarness`, internal `agent_engine`, credential mode without secrets, and `executionProviderId` as diagnostic evidence.        |
+| Tests/verification           | Changed              | Unit, contract, integration, and cleanup-search coverage must prove settings/API/CLI/MCP writes, compatibility rejection, diagnostics, and authority boundaries.      |
 
 ## Acceptance Criteria
 
@@ -150,9 +146,9 @@ implementation already satisfies the target contract.
 2. API, SDK, CLI, setup, and reviewed Gantry MCP/admin settings paths can set
    `agentHarness`; all of them update `settings.yaml` as durable desired state
    rather than making Postgres the only source of truth.
-3. Agent read/status/model-why responses show selected `agentHarness`, effective
-   read-only `agentEngine`, and internal/read-only `executionProviderId` where
-   diagnostics already expose execution routing.
+3. Agent read/status/model-why responses show selected `agentHarness` and
+   internal/read-only `executionProviderId` where diagnostics already expose
+   execution routing.
 4. `auto` resolves exactly like the 2026-06-13 provider-derived behavior.
 5. Explicit `anthropic_sdk` and `deepagents` fail closed before runner spawn
    when the resolved model/provider/credential mode is incompatible, using the
@@ -240,10 +236,11 @@ Expected cleanup interpretation:
 - `agent_engine` may remain in run diagnostics, historical ADRs, database
   column names that are diagnostic-only, and tests that prove old writable
   settings are rejected.
-- `agentEngine` remains in read responses and diagnostics only.
+- `agentEngine` must not remain in active public settings/API/CLI/SDK docs or
+  contracts.
 - `defaults.agent_engine`, `agents.<id>.agent_engine`, `gantry agent engine`,
-  writable API/SDK `agentEngine`, and model-created durable subagent authority
-  must not remain as active public contract.
+  writable/read API/SDK `agentEngine`, and model-created durable subagent
+  authority must not remain as active public contract.
 
 ## Alternatives Considered
 

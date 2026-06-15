@@ -36,6 +36,10 @@ import {
 } from '../handler-context.js';
 import { readJson, sendError, sendJson } from '../http.js';
 import { nowIso } from '../../../shared/time/datetime.js';
+import {
+  loadRuntimeSettings,
+  writeDesiredRuntimeSettings,
+} from '../../../config/settings/runtime-settings.js';
 
 const PROFILE_JSON_BODY_MAX_BYTES = MAX_PROFILE_CONTENT_BYTES * 6 + 64 * 1024;
 
@@ -142,8 +146,9 @@ export async function handleAgentRoutes(
       return true;
     }
     const now = nowIso();
+    const folder = randomUUID();
     const agent: Agent = {
-      id: `agent:${randomUUID()}` as AgentId,
+      id: `agent:${folder}` as AgentId,
       appId: auth.appId as AppId,
       name: parsed.data.name.trim(),
       status: 'active',
@@ -151,6 +156,12 @@ export async function handleAgentRoutes(
       updatedAt: now,
     };
     await getRuntimeStorage().repositories.agents.saveAgent(agent);
+    if (parsed.data.agentHarness) {
+      await writeAgentHarnessSetting(ctx.runtimeHome, folder, {
+        name: agent.name,
+        agentHarness: parsed.data.agentHarness,
+      });
+    }
     await ctx.syncSettingsFromProjection(auth.appId as AppId);
     sendJson(res, 201, agentToResponse(ctx, agent));
     return true;
@@ -358,7 +369,25 @@ export async function handleAgentRoutes(
       status: parsed.data.status ?? agent.status,
       updatedAt: nowIso(),
     };
+    if (parsed.data.agentHarness && updated.status !== 'active') {
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'agentHarness can only be updated for active agents.',
+      );
+      return true;
+    }
     await repository.saveAgent(updated);
+    if (parsed.data.agentHarness && updated.status === 'active') {
+      const folder = folderForAgentId(updated.id);
+      if (folder) {
+        await writeAgentHarnessSetting(ctx.runtimeHome, folder, {
+          name: updated.name,
+          agentHarness: parsed.data.agentHarness,
+        });
+      }
+    }
     await ctx.syncSettingsFromProjection(auth.appId as AppId);
     sendJson(res, 200, agentToResponse(ctx, updated));
     return true;
@@ -390,24 +419,46 @@ async function resolveProfileAgentFolder(
   return folder;
 }
 
-// The effective engine is the per-agent override else the configured default;
-// it is always resolvable from settings.yaml, so the response carries it as a
-// required field. The raw executionProviderId stays internal/diagnostic. The
-// engine read is injected via the route context so this adapter stays free of
-// direct config-layer imports.
 function agentToResponse(ctx: ControlRouteContext, agent: Agent) {
+  const folder = folderForAgentId(agent.id) ?? undefined;
   return {
     id: agent.id,
     appId: agent.appId,
     name: agent.name,
     status: agent.status,
-    agentEngine: ctx.getEffectiveAgentEngine(
-      folderForAgentId(agent.id) ?? undefined,
-    ),
+    agentHarness: ctx.getSelectedAgentHarness(folder),
     currentConfigVersionId: agent.currentConfigVersionId,
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
   };
+}
+
+async function writeAgentHarnessSetting(
+  runtimeHome: string,
+  folder: string,
+  input: {
+    name: string;
+    agentHarness: 'auto' | 'anthropic_sdk' | 'deepagents';
+  },
+): Promise<void> {
+  const settings = loadRuntimeSettings(runtimeHome);
+  const previousSettings = structuredClone(settings);
+  const existing = settings.agents[folder];
+  settings.agents[folder] = {
+    ...existing,
+    name: input.name,
+    folder,
+    bindings: existing?.bindings ?? {},
+    sources: existing?.sources ?? { skills: [], mcpServers: [], tools: [] },
+    capabilities: existing?.capabilities ?? [],
+    accessPreset: existing?.accessPreset ?? 'full',
+    agentHarness: input.agentHarness,
+  };
+  await writeDesiredRuntimeSettings({
+    runtimeHome,
+    settings,
+    previousSettings,
+  });
 }
 
 async function agentBoundConversations(input: {

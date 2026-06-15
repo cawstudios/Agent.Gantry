@@ -2,7 +2,7 @@ import type { JsonSchema } from './openapi-route-helpers.js';
 import { listModelPresets } from '../../shared/model-catalog.js';
 import { modelCredentialSchemas } from './openapi-model-credential-schemas.js';
 import {
-  agentEngineProp,
+  agentHarnessProp,
   modelPreviewSchemas,
 } from './openapi-model-preview-schemas.js';
 
@@ -25,13 +25,13 @@ const arrayEnvelope = (name: string, itemRef: string): JsonSchema =>
 export const openApiSchemas: Record<string, JsonSchema> = {
   Agent: {
     type: 'object',
-    required: ['id', 'appId', 'name', 'status', 'agentEngine', 'createdAt', 'updatedAt'], // prettier-ignore
+    required: ['id', 'appId', 'name', 'status', 'agentHarness', 'createdAt', 'updatedAt'], // prettier-ignore
     properties: {
       id: { type: 'string', example: 'agent:main' },
       appId: { type: 'string', example: 'default' },
       name: { type: 'string', example: 'Support Agent' },
       status: { type: 'string', enum: ['active', 'disabled'] },
-      agentEngine: agentEngineProp,
+      agentHarness: agentHarnessProp,
       currentConfigVersionId: { type: ['string', 'null'] },
       createdAt: isoDateTime,
       updatedAt: isoDateTime,
@@ -45,6 +45,7 @@ export const openApiSchemas: Record<string, JsonSchema> = {
     properties: {
       appId: { type: 'string', example: 'default' },
       name: { type: 'string', minLength: 1 },
+      agentHarness: agentHarnessProp,
     },
   },
   AgentUpdateRequest: {
@@ -53,6 +54,7 @@ export const openApiSchemas: Record<string, JsonSchema> = {
     properties: {
       name: { type: 'string', minLength: 1 },
       status: { type: 'string', enum: ['active', 'disabled'] },
+      agentHarness: agentHarnessProp,
     },
   },
   AgentAdminSummaryResponse: {
@@ -301,9 +303,9 @@ export const openApiSchemas: Record<string, JsonSchema> = {
         type: 'array',
         items: {
           type: 'object',
-          required: ['engine', 'executionProviderId'],
+          required: ['harness', 'executionProviderId'],
           properties: {
-            engine: { type: 'string' },
+            harness: { type: 'string' },
             executionProviderId: { type: 'string' },
           },
         },

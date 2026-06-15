@@ -139,25 +139,22 @@ mode, `PATCH` rotates fields for the existing auth mode, and all read/mutation
 responses return only redacted status, fingerprints, configured field names,
 and mode metadata.
 
-The active credential modes follow from the model's provider. Today the
-effective `agentEngine` remains provider-derived and read-only, and the current
-`settings.yaml` parser does not accept `agent_harness`.
+The active credential modes follow from the model's provider and selected
+agent harness. The agent harness contract is recorded in
+`docs/decisions/2026-06-14-agent-harness-selection.md`. `agentHarness` is
+durable user/admin intent with values `auto`, `anthropic_sdk`, and
+`deepagents`; in `settings.yaml`, the key is `agent_harness`. `auto` derives the
+internal execution lane from the model provider, while explicit
+`anthropic_sdk` or `deepagents` is honored only when the selected model is
+compatible and otherwise fails before runner spawn:
 
-The planned agent harness contract is recorded in
-`docs/decisions/2026-06-14-agent-harness-selection.md`. In that future state,
-`agentHarness` is durable user/admin intent with values `auto`,
-`anthropic_sdk`, and `deepagents`; in `settings.yaml`, the key will be
-`agent_harness`. `auto` derives the effective read-only `agentEngine` from the
-model provider, while explicit `anthropic_sdk` or `deepagents` is honored only
-when the selected model is compatible and otherwise fails before runner spawn:
-
-| provider             | planned `auto` effective engine | planned compatible explicit `agentHarness` | credential modes                 |
-| -------------------- | ----------------------- | ---------------------------------- | -------------------------------- |
-| `anthropic` (Claude) | `anthropic_sdk`         | `anthropic_sdk`                    | `api_key` + `claude_code_oauth`  |
-| `openai`             | `deepagents`            | `deepagents`                       | `api_key`                        |
-| `openrouter`         | `deepagents`            | `deepagents`                       | `api_key`                        |
-| `bedrock`            | `deepagents`            | `deepagents`                       | `bedrock_api_key`                |
-| `vertex`             | `deepagents`            | `deepagents`                       | `service_account`                |
+| provider             | `auto` harness lane | compatible explicit `agentHarness` | credential modes                |
+| -------------------- | ------------------- | ---------------------------------- | ------------------------------- |
+| `anthropic` (Claude) | `anthropic_sdk`     | `anthropic_sdk`                    | `api_key` + `claude_code_oauth` |
+| `openai`             | `deepagents`        | `deepagents`                       | `api_key`                       |
+| `openrouter`         | `deepagents`        | `deepagents`                       | `api_key`                       |
+| `bedrock`            | `deepagents`        | `deepagents`                       | `bedrock_api_key`               |
+| `vertex`             | `deepagents`        | `deepagents`                       | `service_account`               |
 
 Anthropic SDK is the only Claude OAuth/subscription lane and also runs Anthropic
 API-key models. DeepAgents is the OpenAI-compatible harness for OpenAI,
@@ -169,8 +166,7 @@ non-OpenAI Bedrock API-family lane. Vertex `service_account` mode mints a
 host-side OAuth token for the global Vertex OpenAI-compatible endpoint.
 Bedrock API keys, service-account JSON, and minted OAuth tokens are never
 projected to the runner.
-When the planned `agentHarness` contract lands, `agentHarness: auto` will
-derive from the provider and explicit harness choices will be validated before
+`agentHarness: auto` derives from the provider and explicit harness choices are validated before
 runner spawn so incompatible model/harness pairings fail before any model SDK
 process starts. A defensive backstop at the credential boundary still
 guarantees a Claude OAuth/subscription credential can only ever project to the

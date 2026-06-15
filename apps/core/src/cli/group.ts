@@ -21,6 +21,7 @@ import {
 } from './main-agent.js';
 import { RuntimeGroupDb } from './runtime-group-db.js';
 import { runAccess } from './group-access.js';
+import { runHarness } from './group-harness.js';
 import { runList } from './group-list.js';
 import { runProfile } from './agent-profile.js';
 import { verifyTelegramChatAccess } from './telegram.js';
@@ -37,7 +38,7 @@ import {
   conversationIdsForProvider,
   ensureGroupFiles,
   findConversationIdForAgent,
-  formatAgentEngineLine,
+  formatAgentHarnessLine,
   isInteractiveTerminal,
   listGroupsWithJid,
   loadDatabase,
@@ -116,7 +117,7 @@ async function runInfo(
       `Folder: ${found.group.folder}`,
       `Trigger: ${found.group.trigger}`,
       `Requires Trigger: ${found.group.requiresTrigger === false ? 'no' : 'yes'}`,
-      formatAgentEngineLine(settings, found.group.folder),
+      formatAgentHarnessLine(settings, found.group.folder),
       `Added At: ${found.group.added_at}`,
       '',
       formatAgentToolAccess(
@@ -758,6 +759,8 @@ export async function runAgentCommand(
       return runPolicyShow(runtimeHome, rest);
     case 'access':
       return runAccess(runtimeHome, rest);
+    case 'harness':
+      return runHarness(runtimeHome, rest);
     case 'profile':
       return runProfile(runtimeHome, rest);
     default:

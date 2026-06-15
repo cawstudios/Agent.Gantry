@@ -5,7 +5,6 @@ import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ControlRouteContext } from '@core/control/server/handler-context.js';
-import { DEFAULT_AGENT_ENGINE } from '@core/shared/agent-engine.js';
 import type { Scope } from '@core/control/server/auth.js';
 import type {
   ModelCredential,
@@ -397,7 +396,7 @@ function mockContext(
     countPendingAccessRequests: async () => 0,
     listControlPlaneJobs: async () => [],
     syncSettingsFromProjection: async () => undefined,
-    getEffectiveAgentEngine: () => DEFAULT_AGENT_ENGINE,
+    getSelectedAgentHarness: () => 'auto',
   };
 }
 

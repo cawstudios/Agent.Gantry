@@ -27,27 +27,21 @@
 - Continuity docs must preserve the clean-cut contract: unsupported old continuity rows fail closed and are not imported, backfilled, or repaired.
 - Memory tool docs must keep `memory_save` limited to canonical direct-save kinds (`preference`, `decision`, `fact`, `correction`, `constraint`) and state that common/global writes require approved admin or service authority.
 - SDK docs must describe `sessions.sendMessage` as durable acceptance into the runtime event stream. Do not imply `accepted` or `acceptedEventId` means synchronous model completion or provider/channel delivery success.
-- Model docs must use alias-first vocabulary and distinguish current behavior
-  from target harness-selection behavior. Current live docs may describe
-  `modelAlias`, read-only effective `agentEngine`, `responseFamily`
-  (`anthropic` or `openai`), diagnostic `modelRoute`, read-only
-  `executionProviderId`, `credentialProfileRef`, and capabilities; the current
-  parser/API/CLI still reject writable `agentHarness` and `agent_harness`.
-  Planned strategy docs, or the implementation slice that lands harness
-  selection, may use durable `agentHarness` (`auto`, `anthropic_sdk`, or
-  `deepagents`) and the `settings.yaml` key `agent_harness`. In that target
-  contract, `auto` preserves provider-derived behavior (Claude ->
+- Model docs must use alias-first vocabulary and the live public harness
+  selector: `modelAlias`, durable `agentHarness` (`auto`, `anthropic_sdk`, or
+  `deepagents`), `responseFamily` (`anthropic` or `openai`), diagnostic
+  `modelRoute`, read-only `executionProviderId`, `credentialProfileRef`, and
+  capabilities. `settings.yaml` uses `agent_harness`. `auto` preserves
+  provider-derived behavior (Claude ->
   `anthropic_sdk`; OpenAI/OpenRouter/Bedrock/Vertex/future OpenAI-compatible
   providers -> `deepagents`); explicit `anthropic_sdk` or `deepagents` records
   user intent and must fail before runner spawn when the selected model is
   incompatible. OpenRouter is its own provider on the DeepAgents/OpenAI-compatible
   lane, not route metadata on an Anthropic alias.
 - Job model docs must keep harness selection agent-owned. `job.model`, one-time
-  job defaults, and recurring job defaults are approved aliases. Current docs
-  may say jobs inherit only model aliases and the bound agent's effective
-  read-only `agentEngine`; target harness-selection docs may say jobs inherit
-  the bound agent's `agentHarness`. Do not document or add public `job.harness`,
-  job-level `agentHarness`, job-level `agentEngine`, conversation-level
+  job defaults, and recurring job defaults are approved aliases. Jobs inherit
+  model aliases and the bound agent's `agentHarness`. Do not document or add
+  public `job.harness`, job-level `agentHarness`, job-level `agentEngine`, conversation-level
   `agentHarness`, or job/conversation-level `executionProviderId` selectors.
 - DeepAgents or alternate-harness docs must keep provider-native tool names
   adapter-private. Gantry facade/tool names are the product contract, and docs

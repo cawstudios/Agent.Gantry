@@ -9,6 +9,7 @@ import {
   getDeploymentMode,
   getRuntimeSettingsForConfig,
   getEffectiveModelConfig,
+  getSelectedAgentHarness,
 } from '../config/index.js';
 import { resolveAgentAccessPolicy } from '../config/profiles.js';
 import { logger } from '../infrastructure/logging/logger.js';
@@ -101,6 +102,17 @@ export type {
   AgentOutput,
 } from './agent-spawn-types.js';
 
+function uniqueStrings(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
 export async function spawnAgent(
   group: ConversationRoute,
   input: AgentInput,
@@ -139,6 +151,7 @@ export async function spawnAgent(
     group.folder,
   );
   const requestedModel = input.model || modelConfig.model;
+  const agentHarness = getSelectedAgentHarness(group.folder);
   // Credential-driven model-family selection (live path): a family alias is
   // rewritten to the concrete member whose provider has a configured credential.
   const familyResolvedModel = await rewriteModelFamilyAliasForApp({
@@ -170,6 +183,7 @@ export async function spawnAgent(
   const resolvedModel = llmProfileResolutionService.resolve({
     profile: runtimeLlmProfile,
     workload: modelWorkload,
+    agentHarness,
   });
   hostStartup.finish('modelResolutionMs', modelResolutionStarted);
   if (!resolvedModel.ok) {
@@ -354,6 +368,7 @@ export async function spawnAgent(
     const attachedMcpSourceIds = input.attachedMcpSourceIds ?? [];
     let reviewedMcpToolNames: string[] = [];
     let allMcpCapabilities: MaterializedMcpCapability[] = [];
+    let selectedMcpServerNames: string[] = [];
     let effectiveRuntimeAccess = input.runtimeAccess ?? [];
     await hostStartup.measureAsync('mcpProjectionMs', async () => {
       const mcpSourceRecords =
@@ -367,6 +382,14 @@ export async function spawnAgent(
               serverIds: attachedMcpSourceIds as never,
             })
           : [];
+      selectedMcpServerNames = uniqueStrings([
+        ...mcpSourceRecords.map((record) => record.definition.name),
+        ...attachedMcpSourceIds.map((sourceId) =>
+          sourceId.startsWith('mcp:')
+            ? sourceId.slice('mcp:'.length)
+            : sourceId,
+        ),
+      ]);
       const projection = resolveRunnerMcpProjection(agentEngine, {
         runtimeAccess: input.runtimeAccess ?? [],
         mcpSourceRecords,
@@ -493,12 +516,9 @@ export async function spawnAgent(
       'extra',
     );
     if (runnerSandboxProviderId === 'sandbox_runtime') {
-      runnerTempDir = path.join(
-        hostRuntime.workspaceIpcDir,
-        'tmp',
-        processName,
-      );
-      fs.mkdirSync(runnerTempDir, { recursive: true, mode: 0o700 });
+      const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+      runnerTempDir = path.join('/tmp', `gantry-srt-${suffix}`);
+      fs.mkdirSync(runnerTempDir, { recursive: false, mode: 0o700 });
       const providerToolTempDirLeaf =
         preparedExecution.sandboxRuntime?.toolTempDirLeaf;
       if (providerToolTempDirLeaf) {
@@ -662,6 +682,15 @@ export async function spawnAgent(
       env.GANTRY_MCP_ALLOWED_TOOLS_JSON = JSON.stringify(reviewedMcpToolNames);
       env.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON =
         env.GANTRY_MCP_ALLOWED_TOOLS_JSON;
+    }
+    const runnerVisibleMcpServerNames = uniqueStrings([
+      ...selectedMcpServerNames,
+      ...allMcpCapabilities.map((capability) => capability.name),
+    ]);
+    if (runnerVisibleMcpServerNames.length > 0) {
+      env.GANTRY_SELECTED_MCP_SERVERS_JSON = JSON.stringify(
+        runnerVisibleMcpServerNames,
+      );
     }
     const protectedFilesystemDenyReadPaths = [
       ...(preparedExecution.protectedFilesystemDenyReadPaths ??

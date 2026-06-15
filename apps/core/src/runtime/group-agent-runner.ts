@@ -26,11 +26,16 @@ import {
 } from './session-resume-runtime.js';
 import { createRuntimeModelStatusAccess } from './model-status-store.js';
 import { recordRuntimeModelUsage } from './model-status-output.js';
+import {
+  buildProviderSessionAccessFingerprint,
+  providerSessionAccessFingerprintMatches,
+} from './provider-session-access-fingerprint.js';
 import { buildBoundedMemoryRecallQuery } from '../memory/app-memory-recall-query.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import { isRuntimeEventType } from '../domain/events/runtime-event-types.js';
 import { resolveRuntimeExecutionProviderId } from './execution-provider-id.js';
 import { resolveExecutionRoute } from '../shared/model-execution-route.js';
+import { getSelectedAgentHarness } from '../config/index.js';
 import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 import {
   resolveTurnFailoverCandidates,
@@ -243,10 +248,14 @@ export function createGroupAgentRunner(input: {
     const initialModelSelection = defaultModelStatusSelection(
       group.agentConfig?.model ?? DEFAULT_MODEL_ALIAS,
     );
+    const agentHarness = getSelectedAgentHarness(group.folder);
     // Live-turn lease execution provider must match the runner's engine-resolved
     // route. The engine is derived from the resolved model's provider.
     const liveTurnRoute = initialModelSelection.model
-      ? resolveExecutionRoute({ entry: initialModelSelection.model })
+      ? resolveExecutionRoute({
+          entry: initialModelSelection.model,
+          agentHarness,
+        })
       : undefined;
     // Per-candidate during model-family failover: starts at the chat-default
     // model's provider and is reassigned to the active candidate's provider when
@@ -293,6 +302,8 @@ export function createGroupAgentRunner(input: {
     const liveRunFenced = !!options?.existingRunLeaseToken;
     let latestProviderSessionId =
       turnContext?.externalSessionId?.trim() || undefined;
+    let resumeProviderSessionId = turnContext?.providerSessionId ?? undefined;
+    let resumeExternalSessionId = turnContext?.externalSessionId ?? undefined;
     const updateRunProviderMetadata = async (input: {
       providerRunId?: string | null;
       providerSessionId?: string | null;
@@ -343,6 +354,7 @@ export function createGroupAgentRunner(input: {
           memoryUserId: options?.memoryContext?.userId,
           expectedAgentSessionId: turnContext.agentSessionId,
           expectedAgentSessionResetAt: turnContext.agentSessionResetAt ?? null,
+          accessFingerprint: currentAccessFingerprint,
         },
       );
       if (persisted === false) {
@@ -462,6 +474,41 @@ export function createGroupAgentRunner(input: {
       turnContext,
       configuredToolPolicy.toolPolicyRules,
     );
+    const currentAccessFingerprint = buildProviderSessionAccessFingerprint({
+      toolPolicyRules: configuredToolPolicy.toolPolicyRules,
+      runtimeAccess: configuredToolPolicy.runtimeAccess,
+      attachedSkillSourceIds: selectedSkillContext.ids,
+      attachedMcpSourceIds,
+      semanticCapabilities,
+    });
+    if (
+      turnContext?.providerSessionId &&
+      turnContext.externalSessionId &&
+      !providerSessionAccessFingerprintMatches(
+        turnContext.providerSessionAccessFingerprint,
+        currentAccessFingerprint,
+      )
+    ) {
+      if (ops().expireProviderSession) {
+        await ops().expireProviderSession?.({
+          providerSessionId: turnContext.providerSessionId,
+          agentSessionId: turnContext.agentSessionId,
+          provider: executionProviderId,
+          externalSessionId: turnContext.externalSessionId,
+        });
+      }
+      latestProviderSessionId = undefined;
+      resumeProviderSessionId = undefined;
+      resumeExternalSessionId = undefined;
+      runtimeLogger.warn(
+        {
+          group: group.name,
+          agentId: turnContext.agentId,
+          agentSessionId: turnContext.agentSessionId,
+        },
+        'Expired provider session because runtime access projection changed',
+      );
+    }
     const memoryContextBlock = [
       turnContext?.memoryContextBlock,
       approvedSkillContextBlock,
@@ -474,7 +521,7 @@ export function createGroupAgentRunner(input: {
         ? await ops().createSessionAgentRun?.({
             agentSessionId: turnContext.agentSessionId,
             executionProviderId,
-            providerSessionId: turnContext.providerSessionId,
+            providerSessionId: resumeProviderSessionId,
             cause:
               options?.memoryContext?.source === 'command'
                 ? 'control'
@@ -609,8 +656,8 @@ export function createGroupAgentRunner(input: {
       const firstModel = failoverCandidates[0];
       let output = await invokeAgent({
         memoryContextBlock,
-        resumeSessionId: turnContext?.externalSessionId,
         ...(firstModel ? { model: firstModel } : {}),
+        resumeSessionId: resumeExternalSessionId,
       });
       const activeExecutionAdapter = resolveAgentExecutionAdapter({
         executionProviderId,
@@ -625,6 +672,7 @@ export function createGroupAgentRunner(input: {
         missingProviderSession &&
         (await expireTurnProviderSession(output.error ?? 'missing session'))
       ) {
+        resumeExternalSessionId = undefined;
         output = await invokeAgent({
           memoryContextBlock,
           ...(firstModel ? { model: firstModel } : {}),
@@ -638,6 +686,7 @@ export function createGroupAgentRunner(input: {
         candidates: failoverCandidates,
         initialOutput: output,
         fallbackProviderId: executionProviderId,
+        agentHarness,
         hasStreamedOutput: () => (streamedResult.snapshot()?.length ?? 0) > 0,
         invoke: (model) => invokeAgent({ memoryContextBlock, model }),
         onFailover: (toProviderId, details) => {

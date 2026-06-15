@@ -14,7 +14,7 @@ import type {
   ModelPresetId,
   ModelWorkload,
 } from '../../shared/model-catalog.js';
-import type { AgentEngine } from '../../shared/agent-engine.js';
+import type { AgentHarness } from '../../shared/agent-engine.js';
 import { authenticate, type ApiKeyRecord, type Scope } from './auth.js';
 import { sendError } from './http.js';
 import type { RateLimiter } from './rate-limit.js';
@@ -117,12 +117,7 @@ export type ControlRouteContext = {
   }) => Promise<void>;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
   syncSettingsFromProjection: (appId: AppId) => Promise<void>;
-  /**
-   * Engine derived from the agent's effective model provider (read-only
-   * diagnostic). Injected from the runtime/config layer so the control adapter
-   * exposes it without importing config directly.
-   */
-  getEffectiveAgentEngine: (agentFolder?: string) => AgentEngine;
+  getSelectedAgentHarness: (agentFolder?: string) => AgentHarness;
 };
 
 export function authorizeControlRequest(

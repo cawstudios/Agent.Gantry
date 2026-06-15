@@ -349,9 +349,10 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   async function getOrRecoverCursor(chatJid: string): Promise<string> {
     const existing = lastAgentTimestamp[chatJid];
     if (existing) return existing;
-
     const parsed = parseThreadQueueKey(chatJid);
-    if (parsed.threadId) return '';
+    if (parsed.threadId) {
+      return '';
+    }
 
     const baseChatJid = parsed.chatJid;
     const baseExisting = lastAgentTimestamp[baseChatJid];
@@ -520,6 +521,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       closeStdin: (chatJid) => queue.closeStdin(chatJid),
       notifyIdle: (chatJid) => queue.notifyIdle(chatJid),
       stopGroup: (chatJid) => queue.stopGroup(chatJid),
+      isShuttingDown: () => queue.isShuttingDown(),
       registerProcess: (
         groupJid,
         proc,

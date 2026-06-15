@@ -1,6 +1,7 @@
 import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
 import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
+import type { AgentHarness } from '../shared/agent-engine.js';
 import { resolveModelSelection } from '../shared/model-catalog.js';
 import { resolveExecutionRoute } from '../shared/model-execution-route.js';
 import {
@@ -45,10 +46,11 @@ export async function resolveTurnFailoverCandidates(input: {
 export function executionProviderIdForCandidate(
   alias: string,
   fallback: ExecutionProviderId,
+  agentHarness?: AgentHarness,
 ): ExecutionProviderId {
   const resolved = resolveModelSelection(alias);
   if (!resolved.ok) return fallback;
-  const route = resolveExecutionRoute({ entry: resolved.entry });
+  const route = resolveExecutionRoute({ entry: resolved.entry, agentHarness });
   return route.ok
     ? (route.value.executionProviderId as ExecutionProviderId)
     : fallback;
@@ -156,6 +158,7 @@ export async function runFamilyFailoverLoop<
   candidates: readonly string[];
   initialOutput: O;
   fallbackProviderId: ExecutionProviderId;
+  agentHarness?: AgentHarness;
   hasStreamedOutput: () => boolean;
   invoke: (model: string) => Promise<O>;
   onFailover: (
@@ -182,6 +185,7 @@ export async function runFamilyFailoverLoop<
     const toProviderId = executionProviderIdForCandidate(
       toModel,
       input.fallbackProviderId,
+      input.agentHarness,
     );
     const fromModel = input.candidates[attempt] ?? '(default)';
     const fromProviderId = input.onFailover(toProviderId, {

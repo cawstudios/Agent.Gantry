@@ -75,11 +75,73 @@ function parseThinkingCommand(text: string): SessionCommand | null {
   return null;
 }
 
+function parseMentionFriendlySessionCommand(
+  text: string,
+): SessionCommand | null {
+  if (!text.startsWith('!')) return null;
+
+  const commandText = text.slice(1).trim();
+  if (commandText === 'commands' || commandText === 'help') {
+    return { kind: 'commands', raw: '/commands' };
+  }
+  if (commandText === 'compact') {
+    return { kind: 'compact', raw: '/compact' };
+  }
+  if (commandText === 'new') {
+    return { kind: 'new', raw: '/new' };
+  }
+  if (commandText === 'stop') {
+    return { kind: 'stop', raw: '/stop' };
+  }
+  if (commandText === 'dream') return { kind: 'dream', raw: '/dream' };
+  if (commandText === 'memory-status') {
+    return { kind: 'memory_status', raw: '/memory-status' };
+  }
+  if (commandText === 'models') return { kind: 'models_list', raw: '/models' };
+  if (commandText === 'status') return { kind: 'status', raw: '/status' };
+  if (commandText === 'model') return { kind: 'model_show', raw: '/model' };
+
+  const modelMatch = commandText.match(/^model\s+(.+)$/);
+  if (modelMatch) {
+    const value = modelMatch[1].trim();
+    if (value === 'default') {
+      return { kind: 'model_default', raw: '/model default' };
+    }
+    const whyMatch = value.match(/^why\s+(.+)$/);
+    if (whyMatch) {
+      const whyValue = whyMatch[1].trim();
+      return {
+        kind: 'model_why',
+        raw: `/model why ${whyValue}`,
+        value: whyValue,
+      };
+    }
+    return {
+      kind: 'model_set',
+      raw: `/model ${value}`,
+      value,
+    };
+  }
+
+  const thinkingMatch = commandText.match(/^thinking(?:\s+(.+))?$/);
+  if (thinkingMatch) {
+    return parseThinkingCommand(
+      thinkingMatch[1] ? `/thinking ${thinkingMatch[1].trim()}` : '/thinking',
+    );
+  }
+
+  return null;
+}
+
 export function extractSessionCommand(
   content: string,
   triggerPattern: RegExp,
 ): SessionCommand | null {
   let text = content.trim();
+  const hasTriggerPrefix = new RegExp(
+    triggerPattern.source,
+    triggerPattern.flags.replace(/g/g, ''),
+  ).test(text);
   text = text.replace(triggerPattern, '').trim();
   if (text === '/commands') return { kind: 'commands', raw: '/commands' };
   if (text === '/compact') return { kind: 'compact', raw: '/compact' };
@@ -131,6 +193,11 @@ export function extractSessionCommand(
 
   const thinking = parseThinkingCommand(text);
   if (thinking) return thinking;
+
+  if (hasTriggerPrefix) {
+    const mentionFriendly = parseMentionFriendlySessionCommand(text);
+    if (mentionFriendly) return mentionFriendly;
+  }
 
   return null;
 }

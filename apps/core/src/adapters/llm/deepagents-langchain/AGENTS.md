@@ -1,13 +1,12 @@
 # DeepAgents (LangChain) Execution Adapter
 
 `deepagents:langchain` execution adapter + adapter-owned runner. It is the
-DeepAgents harness implementation for Gantry. Today, `agentHarness: auto`
+DeepAgents harness implementation for Gantry. `agentHarness: auto`
 reaches this adapter when the resolved model route derives the DeepAgents lane:
-OpenAI, OpenRouter, Bedrock, Vertex, and other OpenAI-compatible providers. The
-full-parity plan adds public durable `agentHarness` / `agent_harness` selection
-with values `auto`, `anthropic_sdk`, and `deepagents`; `agentEngine` remains the
-effective read-only diagnostic after `auto` resolves, and `executionProviderId`
-stays internal/read-only diagnostic detail. Claude OAuth/subscription is
+OpenAI, OpenRouter, Bedrock, Vertex, and other OpenAI-compatible providers.
+Public durable `agentHarness` / `agent_harness` values are `auto`,
+`anthropic_sdk`, and `deepagents`; `executionProviderId` stays internal/read-only
+diagnostic detail. Claude OAuth/subscription is
 Anthropic-SDK-only. This is an **approved provider-boundary path**
 (`.codex/architecture-map.json` + `architecture_rules.py`): DeepAgents /
 LangChain / `@langchain/openrouter` imports and `OPENAI_`/`ANTHROPIC_` env keys

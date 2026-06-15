@@ -340,6 +340,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         deps.queue.closeStdin(queueJid);
       }, IDLE_TIMEOUT);
     };
+    resetIdleTimer();
 
     let typingActive = false;
     const setTypingState = (isTyping: boolean) => (
@@ -421,6 +422,13 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         ).catch(() => undefined);
       }
     };
+    const sendWaitingForUserResponseProgress = async () => {
+      if (!supportsProgress) return;
+      await sendProgressToChannel(
+        `Waiting for your response (${formatElapsed(activeElapsedMs())}).`,
+        buildProgressOptions({ replaceOnly: true }),
+      ).catch(() => undefined);
+    };
     const { sendResponseReceipt } = createResponseProgressSenders({
       supportsProgress,
       activeThreadId,
@@ -442,6 +450,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     progressHeartbeat = startGroupProgressHeartbeats({
       supportsProgress,
       isTypingActive: () => typingActive,
+      hasVisibleOutput: () => activeGenerationHasOutput,
       getLastAgentProgressAt: () => lastAgentProgressAt,
       getElapsedMs: activeElapsedMs,
       chatJid,
@@ -562,10 +571,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       pausedAt = currentTimeMs();
       progressHeartbeat?.pause();
       if (supportsProgress) {
-        await sendProgressToChannel(
-          `Waiting for your response (${formatElapsed(activeElapsedMs())}).`,
-          buildProgressOptions({ replaceOnly: true }),
-        ).catch(() => undefined);
+        await sendWaitingForUserResponseProgress();
       }
       clearBackgroundDemoteTimer();
       backgroundDemoteTimer = setTimeout(() => {
@@ -767,6 +773,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         queueJid,
         previousCursor,
         deps,
+        isShuttingDown: deps.queue.isShuttingDown,
         logger,
       });
     } else {
@@ -811,11 +818,14 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             : sawTerminalDeliveryFailure
               ? 'failed'
               : 'completed';
+    const completedWhileAwaitingUserResponse =
+      finalProgressState === 'completed' && awaitingResponseReceipt;
     if (
-      finalProgressState !== 'completed' ||
-      !sentAnyTurnDoneProgress ||
-      (activeGenerationHasOutput &&
-        sentTurnDoneProgressGeneration !== progressGeneration)
+      !completedWhileAwaitingUserResponse &&
+      (finalProgressState !== 'completed' ||
+        !sentAnyTurnDoneProgress ||
+        (activeGenerationHasOutput &&
+          sentTurnDoneProgressGeneration !== progressGeneration))
     ) {
       await sendDoneProgress(finalProgressState);
     }

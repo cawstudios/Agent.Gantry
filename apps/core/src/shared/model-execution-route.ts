@@ -1,5 +1,9 @@
-import type { AgentEngine } from './agent-engine.js';
-import { DEFAULT_AGENT_ENGINE, DEEPAGENTS_ENGINE } from './agent-engine.js';
+import type { AgentEngine, AgentHarness } from './agent-engine.js';
+import {
+  AUTO_AGENT_HARNESS,
+  DEFAULT_AGENT_ENGINE,
+  DEEPAGENTS_ENGINE,
+} from './agent-engine.js';
 import type {
   ModelCatalogEntry,
   ModelExecutionProviderId,
@@ -19,7 +23,11 @@ export interface ResolvedExecutionRoute {
 
 export type ExecutionRouteResolution =
   | { ok: true; value: ResolvedExecutionRoute }
-  | { ok: false; reason: 'unknown-provider'; message: string };
+  | {
+      ok: false;
+      reason: 'unknown-provider' | 'incompatible-harness';
+      message: string;
+    };
 
 // Resolves `modelAlias -> executionRoute`. The engine is no longer chosen: it is
 // derived from the resolved entry's provider, which carries the single execution
@@ -28,6 +36,7 @@ export type ExecutionRouteResolution =
 // `supportedCredentialModes`.
 export function resolveExecutionRoute(input: {
   entry: ModelCatalogEntry;
+  agentHarness?: AgentHarness;
 }): ExecutionRouteResolution {
   const { entry } = input;
   const provider = getModelProviderDefinition(entry.modelRoute.id);
@@ -39,6 +48,14 @@ export function resolveExecutionRoute(input: {
     };
   }
   const route = provider.executionRoute;
+  const agentHarness = input.agentHarness ?? AUTO_AGENT_HARNESS;
+  if (agentHarness !== AUTO_AGENT_HARNESS && agentHarness !== route.engine) {
+    return {
+      ok: false,
+      reason: 'incompatible-harness',
+      message: `Model ${entry.recommendedAlias} cannot run with agent harness ${agentHarness}.`,
+    };
+  }
   return {
     ok: true,
     value: {
@@ -55,12 +72,12 @@ export function resolveExecutionRoute(input: {
 // array for an unknown provider so the response field stays well-formed.
 export function executionRoutesForEntry(
   entry: ModelCatalogEntry,
-): { engine: AgentEngine; executionProviderId: ModelExecutionProviderId }[] {
+): { harness: AgentEngine; executionProviderId: ModelExecutionProviderId }[] {
   const provider = getModelProviderDefinition(entry.modelRoute.id);
   if (!provider) return [];
   return [
     {
-      engine: provider.executionRoute.engine,
+      harness: provider.executionRoute.engine,
       executionProviderId: provider.executionRoute.executionProviderId,
     },
   ];

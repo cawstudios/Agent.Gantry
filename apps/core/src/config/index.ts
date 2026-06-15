@@ -5,8 +5,10 @@ import {
   resolveModelSelectionForWorkload,
   DEFAULT_SETUP_MODEL_ALIAS,
 } from '../shared/model-catalog.js';
-import { deriveAgentEngineForProvider } from '../shared/model-execution-route.js';
-import type { AgentEngine } from '../shared/agent-engine.js';
+import {
+  AUTO_AGENT_HARNESS,
+  type AgentHarness,
+} from '../shared/agent-engine.js';
 import {
   envConfig,
   envValue,
@@ -122,6 +124,7 @@ function getPublicConfiguredAgents(settings: RuntimeSettings) {
         persona: agent.persona,
         relationshipMode: agent.relationshipMode,
         model: agent.model,
+        agentHarness: agent.agentHarness,
         oneTimeJobDefaultModel: agent.oneTimeJobDefaultModel,
         recurringJobDefaultModel: agent.recurringJobDefaultModel,
         bindings: agent.bindings,
@@ -142,6 +145,7 @@ export function getPublicRuntimeSettings() {
     agent: {
       name: settings.agent.name,
       defaultModel: settings.agent.defaultModel,
+      agentHarness: settings.agent.agentHarness,
       oneTimeJobDefaultModel: settings.agent.oneTimeJobDefaultModel,
       recurringJobDefaultModel: settings.agent.recurringJobDefaultModel,
     },
@@ -406,18 +410,15 @@ export function getEffectiveModelConfig(
   return getDefaultModelConfig(kind, agentFolder);
 }
 
-// Derived (read-only) agent engine: the engine follows the agent's effective
-// model provider. There is no per-agent engine selector; this resolves the
-// agent's effective model and derives the engine from its provider so control
-// read responses and diagnostics can surface it.
-export function getEffectiveAgentEngine(agentFolder?: string): AgentEngine {
-  const effectiveModel = (
-    getDefaultModelConfig('interactive', agentFolder).model ||
-    DEFAULT_SETUP_MODEL_ALIAS
-  ).trim();
-  const resolved = resolveModelSelectionForWorkload(effectiveModel, 'chat');
-  return deriveAgentEngineForProvider(
-    resolved.ok ? resolved.entry.modelRoute.id : '',
+export function getSelectedAgentHarness(agentFolder?: string): AgentHarness {
+  const settings = getRuntimeSettingsForConfig();
+  const configuredAgent = agentFolder
+    ? settings.agents[agentFolder]
+    : undefined;
+  return (
+    configuredAgent?.agentHarness ??
+    settings.agent.agentHarness ??
+    AUTO_AGENT_HARNESS
   );
 }
 
@@ -431,7 +432,13 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 export function buildTriggerPattern(trigger: string): RegExp {
-  return new RegExp(`^${escapeRegex(trigger.trim())}\\b`, 'i');
+  const normalizedTrigger = trigger.trim();
+  const slackMentionMatch = normalizedTrigger.match(/^<@([A-Z0-9]+)>?$/i);
+  if (slackMentionMatch) {
+    const mention = `<@${escapeRegex(slackMentionMatch[1])}>?`;
+    return new RegExp(`(?:^|\\s)${mention}(?=\\s|$|[,.!?;:])`, 'i');
+  }
+  return new RegExp(`^${escapeRegex(normalizedTrigger)}\\b`, 'i');
 }
 export const DEFAULT_TRIGGER = `@${ASSISTANT_NAME}`;
 export function getTriggerPattern(trigger?: string): RegExp {

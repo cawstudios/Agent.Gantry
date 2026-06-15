@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import {
-  AgentEngineSchema,
+  AgentHarnessSchema,
   ContractMetadataSchema,
   IsoDateTimeSchema,
 } from '../contract-primitives.js';
@@ -441,12 +441,11 @@ export const ModelRecordSchema = z.object({
   aliases: z.array(z.string()),
   recommendedAlias: z.string(),
   responseFamily: z.string(),
-  // Read-only diagnostic: execution adapter per agent engine. Resolution is
-  // modelAlias + agentEngine -> executionRoute.
+  // Read-only route support: which public harness values can run this model.
   executionRoutes: z.array(
     z
       .object({
-        engine: AgentEngineSchema,
+        harness: z.enum(['anthropic_sdk', 'deepagents']),
         executionProviderId: z.string(),
       })
       .strict(),
@@ -615,12 +614,11 @@ export const ModelPreviewResponseSchema = z
     scope: z.string().optional(),
     kind: z.enum(['one-time', 'recurring']).optional(),
     task: z.enum(['extractor', 'dreaming', 'consolidation']).optional(),
-    // Agent-only fields (target 'agent'): the derived (read-only) engine and its
-    // diagnostics for the resolved model. Optional so chat/job/memory previews
-    // still validate.
+    // Agent-only fields (target 'agent'): the selected harness and diagnostics
+    // for the resolved model. Optional so chat/job/memory previews still
+    // validate.
     agentId: z.string().optional(),
-    agentEngine: AgentEngineSchema.optional(),
-    agentEngineLabel: z.string().optional(),
+    agentHarness: AgentHarnessSchema.optional(),
     credentialProfile: z.string().optional(),
     executionProviderId: z.string().optional(),
     incompatible: z.string().optional(),

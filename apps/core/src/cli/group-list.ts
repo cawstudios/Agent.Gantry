@@ -9,14 +9,12 @@ import {
 import { getProviderIds } from './provider-utils.js';
 import { RuntimeGroupDb } from './runtime-group-db.js';
 import { listGroupsWithJid, loadDatabase } from './group-helpers.js';
-import { formatAgentEngineCell } from './group-engine.js';
+import { formatAgentHarnessCell } from './group-engine.js';
 
 const errorMessage = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
 
-// `gantry agent list` — registered agents with their effective engine. The
-// engine cell annotates `(default)` when the agent inherits the configured
-// default rather than carrying a per-agent override.
+// `gantry agent list` — registered agents with their selected harness.
 export async function runList(runtimeHome: string): Promise<number> {
   let db: RuntimeGroupDb | null = null;
   try {
@@ -53,7 +51,7 @@ export async function runList(runtimeHome: string): Promise<number> {
     const lines = [
       'Registered agents:',
       '',
-      'JID | Name | Folder | Trigger | Requires Trigger | Agent Engine',
+      'JID | Name | Folder | Trigger | Requires Trigger | Agent Harness',
     ];
 
     for (const entry of groups) {
@@ -64,7 +62,7 @@ export async function runList(runtimeHome: string): Promise<number> {
           entry.group.folder,
           entry.group.trigger,
           entry.group.requiresTrigger === false ? 'no' : 'yes',
-          formatAgentEngineCell(settings, entry.group.folder),
+          formatAgentHarnessCell(settings, entry.group.folder),
         ].join(' | '),
       );
     }

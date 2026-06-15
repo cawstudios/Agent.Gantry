@@ -102,6 +102,7 @@ export interface GroupProcessingDeps {
     closeStdin: (chatJid: string) => void;
     notifyIdle: (chatJid: string) => void;
     stopGroup?: (chatJid: string) => boolean;
+    isShuttingDown?: () => boolean;
     registerProcess: (
       groupJid: string,
       proc: ChildProcess,

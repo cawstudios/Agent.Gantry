@@ -1,4 +1,9 @@
 import {
+  AUTO_AGENT_HARNESS,
+  isAgentHarness,
+  type AgentHarness,
+} from '../../shared/agent-engine.js';
+import {
   getProvider,
   listChannelProviders,
   normalizeProviderId,
@@ -53,6 +58,20 @@ function parseStringArrayValue(raw: unknown, pathPrefix: string): string[] {
       }),
     ),
   ];
+}
+
+function parseAgentHarnessValue(
+  raw: unknown,
+  pathPrefix: string,
+  fallback: AgentHarness = AUTO_AGENT_HARNESS,
+): AgentHarness {
+  if (raw === undefined) return fallback;
+  if (!isAgentHarness(raw)) {
+    throw new Error(
+      `${pathPrefix} must be one of auto, anthropic_sdk, or deepagents`,
+    );
+  }
+  return raw;
 }
 
 function parseOptionalStringValue(
@@ -586,6 +605,7 @@ function parseAgentSettings(raw: unknown): RuntimeAgentSettings {
     return {
       name: DEFAULT_AGENT_NAME,
       defaultModel: '',
+      agentHarness: AUTO_AGENT_HARNESS,
       oneTimeJobDefaultModel: '',
       recurringJobDefaultModel: '',
       sessions: {
@@ -602,12 +622,13 @@ function parseAgentSettings(raw: unknown): RuntimeAgentSettings {
     if (
       key !== 'name' &&
       key !== 'default_model' &&
+      key !== 'agent_harness' &&
       key !== 'one_time_job_default_model' &&
       key !== 'recurring_job_default_model' &&
       key !== 'sessions'
     ) {
       throw new Error(
-        `agent.${key} is not supported. Configure agent.name, agent.default_model, agent.one_time_job_default_model, agent.recurring_job_default_model, or agent.sessions.*.`,
+        `agent.${key} is not supported. Configure agent.name, agent.default_model, agent.agent_harness, agent.one_time_job_default_model, agent.recurring_job_default_model, or agent.sessions.*.`,
       );
     }
   }
@@ -636,6 +657,10 @@ function parseAgentSettings(raw: unknown): RuntimeAgentSettings {
         : typeof map.default_model === 'string'
           ? map.default_model.trim()
           : parseStringValue(map.default_model, 'agent.default_model'),
+    agentHarness: parseAgentHarnessValue(
+      map.agent_harness,
+      'agent.agent_harness',
+    ),
     oneTimeJobDefaultModel:
       map.one_time_job_default_model === undefined
         ? ''

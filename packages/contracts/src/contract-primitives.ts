@@ -32,12 +32,15 @@ export const SchemaDescriptorSchema = z.object({
 });
 export type SchemaDescriptor = z.infer<typeof SchemaDescriptorSchema>;
 
-// Derived agent-engine vocabulary. Display labels are "Anthropic SDK" and
-// "DeepAgents". The engine is no longer user-selectable: it is derived from the
-// resolved model's provider and surfaced only as a read-only diagnostic. The
-// runtime mirrors this enum in apps/core/src/shared/agent-engine.ts.
-export const AgentEngineSchema = z.enum(['anthropic_sdk', 'deepagents']);
-export type AgentEngine = z.infer<typeof AgentEngineSchema>;
+// Public agent-harness vocabulary. `auto` preserves provider-derived behavior;
+// explicit values are user intent and are validated against the selected model
+// before runner spawn.
+export const AgentHarnessSchema = z.enum([
+  'auto',
+  'anthropic_sdk',
+  'deepagents',
+]);
+export type AgentHarness = z.infer<typeof AgentHarnessSchema>;
 
 export const LlmProfileRefSchema = z.object({
   id: z.string().optional(),

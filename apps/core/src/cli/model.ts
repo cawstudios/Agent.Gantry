@@ -572,8 +572,8 @@ export async function runModelCommand(
 
   if (action === 'why') {
     // `gantry model why <alias> --agent <id>` resolves a model alias against an
-    // agent's effective engine and shows the endpoint family, credential
-    // profile, agent engine, and diagnostic executionProviderId for the
+    // agent's selected harness and shows the endpoint family, credential
+    // profile, agent harness, and diagnostic executionProviderId for the
     // resolved route. Incompatibility surfaces the locked copy, not a stack.
     const agentId = parseAgentFlag(args);
     if (agentId !== undefined) {

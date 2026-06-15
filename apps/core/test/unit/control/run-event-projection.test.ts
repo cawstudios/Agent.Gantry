@@ -54,7 +54,7 @@ describe('run event projection', () => {
     });
   });
 
-  it('A8: surfaces agent_engine and execution_provider_id diagnostics from JOB_STARTED', () => {
+  it('A8: strips internal agent_engine while surfacing execution_provider_id diagnostics', () => {
     const projected = projectRuntimeEventToRunEvent({
       ...event(RUNTIME_EVENT_TYPES.JOB_STARTED),
       payload: {
@@ -64,12 +64,12 @@ describe('run event projection', () => {
     });
 
     expect(projected.payload).toMatchObject({
-      agent_engine: 'deepagents',
       execution_provider_id: 'deepagents:langchain',
     });
+    expect(projected.payload).not.toHaveProperty('agent_engine');
   });
 
-  it('A8: normalizes camelCase engine diagnostics into the snake_case view shape', () => {
+  it('A8: strips camelCase agentEngine while normalizing executionProviderId', () => {
     const projected = projectRuntimeEventToRunEvent({
       ...event(RUNTIME_EVENT_TYPES.JOB_STARTED),
       payload: {
@@ -79,8 +79,9 @@ describe('run event projection', () => {
     });
 
     expect(projected.payload).toMatchObject({
-      agent_engine: 'deepagents',
       execution_provider_id: 'deepagents:langchain',
     });
+    expect(projected.payload).not.toHaveProperty('agentEngine');
+    expect(projected.payload).not.toHaveProperty('agent_engine');
   });
 });

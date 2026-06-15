@@ -4,6 +4,7 @@ import {
   ASSISTANT_NAME,
   getEffectiveModelConfig,
   getRuntimeSettingsForConfig,
+  getSelectedAgentHarness,
 } from '../config/index.js';
 import type { Job } from '../domain/types.js';
 import { logger } from '../infrastructure/logging/logger.js';
@@ -144,9 +145,11 @@ export async function runJob(
     familyOrder: getRuntimeSettingsForConfig().modelFamilies,
   });
   const jobModelForResolution = jobFailoverCandidates[0] ?? '';
+  const agentHarness = getSelectedAgentHarness(execution.group.folder);
   const resolvedModel = resolveJobModel(
     { ...currentJob, model: jobModelForResolution || currentJob.model },
     getEffectiveModelConfig(undefined, jobModelUseKind, execution.group.folder),
+    agentHarness,
   );
   const eventControl = getRuntimeControlRepository();
   const preflightAppSession = await resolveAppSessionForJob(
@@ -238,7 +241,10 @@ export async function runJob(
       ...jobStartedModelPayload(resolvedModel),
     });
     let result: string | null = null;
-    let error: string | null = null;
+    let error: string | null =
+      resolvedModel.routeResolution && !resolvedModel.routeResolution.ok
+        ? resolvedModel.routeResolution.message
+        : null;
     const diagnostics = createJobRunDiagnostics();
     let pausedForSetupDuringRun = false;
     let setupStateForSetupPause: NonNullable<Job['setup_state']> | undefined;
@@ -440,6 +446,7 @@ export async function runJob(
               spawn: deps.runAgent ?? spawnAgent,
               runOptions,
               fallbackProviderId: executionProviderId,
+              agentHarness,
               hasStreamedOutput: () => hasStreamedResult,
               // Same lease, no re-claim: reconcile recorded provider metadata,
               // reset per-attempt error, emit RUN_FAILOVER (live-lane parity),

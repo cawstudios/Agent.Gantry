@@ -7,11 +7,6 @@ import { AgentAccessRequestSchema } from '@gantry/contracts';
 import { requiredModelCredentialProviders } from '@core/application/model-resolution/required-model-credential-providers.js';
 import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings.js';
 import type { ControlRouteContext } from '@core/control/server/handler-context.js';
-import {
-  AGENT_ENGINES,
-  DEEPAGENTS_ENGINE,
-  DEFAULT_AGENT_ENGINE,
-} from '@core/shared/agent-engine.js';
 import { getGantryOpenApiDocument } from '@core/control/server/openapi.js';
 import { handleAgentRoutes } from '@core/control/server/routes/agents.js';
 import { handleCapabilityCatalogRoutes } from '@core/control/server/routes/capability-catalog.js';
@@ -255,7 +250,7 @@ function mockContext(): ControlRouteContext {
     countPendingAccessRequests: async () => 0,
     listControlPlaneJobs: async () => [],
     syncSettingsFromProjection: async () => undefined,
-    getEffectiveAgentEngine: () => DEFAULT_AGENT_ENGINE,
+    getSelectedAgentHarness: () => 'auto',
   };
 }
 
@@ -585,30 +580,28 @@ describe('control OpenAPI documentation', () => {
     expect(spec.paths['/v1/models/preview']?.post).toMatchObject({
       'x-gantry-required-scopes': ['sessions:read', 'jobs:read'],
     });
-    // Agent read exposes the derived engine; the update request no longer
-    // accepts it. Model preview exposes the agent target plus derived
-    // engine + executionProviderId diagnostics.
-    const engineEnum = [...AGENT_ENGINES];
-    expect(spec.components.schemas.Agent.required).toContain('agentEngine');
-    expect(spec.components.schemas.Agent.properties.agentEngine).toMatchObject({
-      type: 'string',
-      enum: engineEnum,
-    });
+    const harnessEnum = ['auto', 'anthropic_sdk', 'deepagents'];
+    expect(spec.components.schemas.Agent.required).toContain('agentHarness');
+    expect(spec.components.schemas.Agent.properties.agentHarness).toMatchObject(
+      {
+        type: 'string',
+        enum: harnessEnum,
+      },
+    );
     expect(
-      spec.components.schemas.AgentUpdateRequest.properties.agentEngine,
-    ).toBeUndefined();
+      spec.components.schemas.AgentUpdateRequest.properties.agentHarness,
+    ).toMatchObject({ type: 'string', enum: harnessEnum });
     expect(
       spec.components.schemas.ModelPreviewRequest.properties.target.enum,
     ).toContain('agent');
     expect(
       spec.components.schemas.ModelPreviewResponse.properties,
     ).toMatchObject({
-      agentEngine: { type: 'string', enum: engineEnum },
+      agentHarness: { type: 'string', enum: harnessEnum },
       credentialProfile: { type: 'string' },
       executionProviderId: { type: 'string' },
       incompatible: { type: 'string' },
     });
-    expect(engineEnum).toEqual([DEFAULT_AGENT_ENGINE, DEEPAGENTS_ENGINE]);
     expect(
       spec.paths['/v1/guided-actions/execute']?.post.description,
     ).toContain('resume_job execution also requires jobs:write');
@@ -664,6 +657,7 @@ describe('control OpenAPI documentation', () => {
       additionalProperties: false,
     });
     expect(Object.keys(createAgentRequest.properties).sort()).toEqual([
+      'agentHarness',
       'appId',
       'name',
     ]);
@@ -671,6 +665,7 @@ describe('control OpenAPI documentation', () => {
       additionalProperties: false,
     });
     expect(Object.keys(updateAgentRequest.properties).sort()).toEqual([
+      'agentHarness',
       'name',
       'status',
     ]);
