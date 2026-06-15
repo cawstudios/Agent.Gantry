@@ -59,6 +59,7 @@ async function loadIpcModule(tempRoot: string, responseVerifyKey: string) {
   vi.stubEnv('GANTRY_IPC_DIR', tempRoot);
   vi.stubEnv('GANTRY_IPC_AUTH_TOKEN', 'mcp-test-auth-token');
   vi.stubEnv('GANTRY_BROWSER_IPC_AUTH_TOKEN', 'browser-test-auth-token');
+  vi.stubEnv('GANTRY_MEMORY_IPC_AUTH_TOKEN', 'memory-test-auth-token');
   vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', responseVerifyKey);
   vi.stubEnv('GANTRY_IPC_RESPONSE_KEY_ID', 'mcp-test-response-key-id');
   vi.stubEnv('GANTRY_CHAT_JID', 'tg:team');
@@ -95,6 +96,110 @@ describe('runner MCP IPC ids', () => {
 });
 
 describe('runner MCP browser IPC signature verification', () => {
+  it('signs bound warm-worker IPC requests with bind-delivered tokens', async () => {
+    const tempRoot = makeTempRoot();
+    const { publicKey } = generateKeyPairSync('ed25519');
+    const responseVerifyKey = publicKey
+      .export({ format: 'pem', type: 'spki' })
+      .toString();
+
+    const { requestBrowserAction, requestMemoryAction, writeIpcFile } =
+      await loadIpcModule(tempRoot, responseVerifyKey);
+    fs.writeFileSync(
+      path.join(tempRoot, 'bound-identity.json'),
+      JSON.stringify({
+        chatJid: 'tg:bound',
+        threadId: 'thread-bound',
+        memoryUserId: 'user-bound',
+        ipcAuthToken: 'bound-ipc-auth-token',
+        browserIpcAuthToken: 'bound-browser-auth-token',
+        memoryIpcAuthToken: 'bound-memory-auth-token',
+        ipcResponseKeyId: 'bound-response-key-id',
+        ipcResponseVerifyKey: responseVerifyKey,
+      }),
+    );
+
+    const taskDir = path.join(tempRoot, 'tasks');
+    const taskFile = writeIpcFile(taskDir, { type: 'task', payload: {} });
+    const taskRequest = JSON.parse(
+      fs.readFileSync(path.join(taskDir, taskFile), 'utf-8'),
+    ) as Record<string, unknown>;
+    const taskPayload = { ...taskRequest };
+    delete taskPayload.signature;
+    expect(taskRequest).toMatchObject({
+      context: {
+        threadId: 'thread-bound',
+        responseKeyId: 'bound-response-key-id',
+      },
+    });
+    expect(taskRequest.signature).toBe(
+      signPayloadWithAuthToken('bound-ipc-auth-token', taskPayload),
+    );
+
+    const browserPromise = requestBrowserAction('status', {});
+    const browserRequestId = await waitForRequestId(
+      path.join(tempRoot, 'browser-requests'),
+    );
+    const browserPath = path.join(
+      tempRoot,
+      'browser-requests',
+      `${browserRequestId}.json`,
+    );
+    const browserRequest = JSON.parse(
+      fs.readFileSync(browserPath, 'utf-8'),
+    ) as Record<string, unknown>;
+    const browserPayload = { ...browserRequest };
+    delete browserPayload.signature;
+    expect(browserRequest).toMatchObject({
+      context: {
+        chatJid: 'tg:bound',
+        threadId: 'thread-bound',
+        responseKeyId: 'bound-response-key-id',
+      },
+    });
+    expect(browserRequest.signature).toBe(
+      signPayloadWithAuthToken('bound-browser-auth-token', browserPayload),
+    );
+    fs.writeFileSync(
+      path.join(tempRoot, 'browser-responses', `${browserRequestId}.json`),
+      JSON.stringify({ requestId: browserRequestId, ok: false, error: 'done' }),
+    );
+    await browserPromise;
+
+    const memoryPromise = requestMemoryAction('memory_search', {
+      query: 'status',
+    });
+    const memoryRequestId = await waitForRequestId(
+      path.join(tempRoot, 'memory-requests'),
+    );
+    const memoryPath = path.join(
+      tempRoot,
+      'memory-requests',
+      `${memoryRequestId}.json`,
+    );
+    const memoryRequest = JSON.parse(
+      fs.readFileSync(memoryPath, 'utf-8'),
+    ) as Record<string, unknown>;
+    const memoryPayload = { ...memoryRequest };
+    delete memoryPayload.signature;
+    expect(memoryRequest).toMatchObject({
+      context: {
+        chatJid: 'tg:bound',
+        threadId: 'thread-bound',
+        userId: 'user-bound',
+        responseKeyId: 'bound-response-key-id',
+      },
+    });
+    expect(memoryRequest.signature).toBe(
+      signPayloadWithAuthToken('bound-memory-auth-token', memoryPayload),
+    );
+    fs.writeFileSync(
+      path.join(tempRoot, 'memory-responses', `${memoryRequestId}.json`),
+      JSON.stringify({ requestId: memoryRequestId, ok: false, error: 'done' }),
+    );
+    await memoryPromise;
+  });
+
   it('signs browser requests with the chat-scoped browser IPC token', async () => {
     const tempRoot = makeTempRoot();
     const { publicKey } = generateKeyPairSync('ed25519');

@@ -22,6 +22,7 @@ import type { AgentExecutionAdapter } from '../application/agent-execution/agent
 import type { AgentExecutionAdapterRegistry } from '../application/agent-execution/agent-execution-adapter-registry.js';
 import type { SemanticCapabilityDefinition } from '../shared/semantic-capabilities.js';
 import type {
+  SharedBootRecipe,
   WarmPoolKey,
   WarmWorkerHandle,
 } from '../application/agent-execution/warm-pool-capable.js';
@@ -127,6 +128,7 @@ export interface AgentProcessMetadata {
 
 export interface WarmPoolRuntime {
   acquire(key: WarmPoolKey): WarmWorkerHandle | null;
+  prewarm?(recipe: SharedBootRecipe, count: number): Promise<void>;
   release(handle: WarmWorkerHandle): Promise<void>;
   reapOrphans?(): Promise<number>;
   shutdown?(): Promise<void>;

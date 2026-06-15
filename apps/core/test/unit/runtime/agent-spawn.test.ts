@@ -241,6 +241,7 @@ import type {
   AgentExecutionAdapterPrepareInput,
 } from '@core/application/agent-execution/agent-execution-adapter.js';
 import type {
+  SharedBootRecipe,
   WarmPoolCapable,
   WarmWorkerHandle,
 } from '@core/application/agent-execution/warm-pool-capable.js';
@@ -868,7 +869,10 @@ describe('agent-spawn timeout behavior', () => {
         runHandle: expect.any(String),
         ipcDir: '/tmp/warm-worker/ipc',
         ipcInputDir: '/tmp/warm-worker/ipc/input/generic',
-        memoryIpcAuthToken: 'warm-memory-token',
+        ipcAuthToken: expect.any(String),
+        memoryIpcAuthToken: expect.any(String),
+        ipcResponseKeyId: expect.any(String),
+        ipcResponseVerifyKey: expect.any(String),
       }),
     );
     expect(onProcess).toHaveBeenCalledWith(
@@ -938,6 +942,177 @@ describe('agent-spawn timeout behavior', () => {
     expect(warmPool.acquire).toHaveBeenCalledTimes(1);
     expect(warmAdapter.bind).not.toHaveBeenCalled();
     expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('schedules a generic prewarm after an empty-pool cold fallback', async () => {
+    vi.mocked(getRuntimeWarmPoolConfig).mockReturnValue({
+      enabled: true,
+      size: 2,
+      idleTtlMs: 240_000,
+    });
+    const prewarm = vi.fn(async () => undefined);
+    const warmPool: WarmPoolRuntime = {
+      acquire: vi.fn(() => null),
+      prewarm,
+      release: vi.fn(async () => undefined),
+    };
+    const warmHandle: WarmWorkerHandle = {
+      id: 'unused-warm-worker',
+      key: 'warm-key',
+      bornAt: 100,
+      bound: false,
+    };
+    const warmAdapter: WarmPoolCapable = {
+      ...testExecutionAdapter,
+      prewarm: vi.fn(async () => warmHandle),
+      recycle: vi.fn(),
+      bind: vi.fn(async () => ({
+        handle: warmHandle,
+        process: createFakeProcess() as unknown as ChildProcess,
+        runHandle: 'unused-warm-run',
+      })),
+    };
+    const resultPromise = spawnTestAgent(
+      testGroup,
+      {
+        ...testInput,
+        appId: 'app-one',
+        agentId: 'agent-one',
+        threadId: 'thread-customer',
+        memoryUserId: 'user-customer',
+        memoryContextBlock: 'Customer memory must bind later',
+      },
+      vi.fn(),
+      undefined,
+      {
+        executionAdapter: warmAdapter,
+        warmPool,
+      },
+    );
+
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'served cold while prewarming',
+    });
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      status: 'success',
+      result: 'served cold while prewarming',
+    });
+    await vi.waitFor(() => expect(prewarm).toHaveBeenCalledTimes(1));
+    const [recipe, count] = prewarm.mock.calls[0] as [SharedBootRecipe, number];
+    expect(count).toBe(2);
+    expect(recipe.runnerProcessName).toMatch(/^gantry-warm-test-group-/);
+    expect(recipe.runnerInput).toEqual(
+      expect.objectContaining({
+        chatJid: '',
+        prompt: '',
+        warmGenericBoot: true,
+      }),
+    );
+    expect(JSON.stringify(recipe.runnerInput)).not.toContain('test@g.us');
+    expect(JSON.stringify(recipe.runnerInput)).not.toContain(
+      'Customer memory must bind later',
+    );
+    expect(recipe.runnerEnv).toEqual(
+      expect.objectContaining({
+        GANTRY_CHAT_JID: '',
+        GANTRY_THREAD_ID: '',
+        GANTRY_MEMORY_USER_ID: '',
+        GANTRY_IPC_INPUT_DIR: expect.stringContaining('/warm-pool/'),
+      }),
+    );
+    expect(recipe.cleanup).toEqual(expect.any(Function));
+  });
+
+  it('does not pool direct MCP servers that require config-time caller identity', async () => {
+    vi.mocked(getRuntimeWarmPoolConfig).mockReturnValue({
+      enabled: true,
+      size: 1,
+      idleTtlMs: 240_000,
+    });
+    process.env.CRM_IDENTITY_SECRET = 'test_secret_thirty_two_bytes_long_xx';
+    const prewarm = vi.fn(async () => undefined);
+    const warmPool: WarmPoolRuntime = {
+      acquire: vi.fn(() => ({
+        id: 'warm-worker-with-static-identity-risk',
+        key: 'warm-key',
+        bornAt: 100,
+        bound: false,
+      })),
+      prewarm,
+      release: vi.fn(async () => undefined),
+    };
+    const warmHandle: WarmWorkerHandle = {
+      id: 'unused-warm-worker',
+      key: 'warm-key',
+      bornAt: 100,
+      bound: false,
+    };
+    const warmAdapter: WarmPoolCapable = {
+      ...testExecutionAdapter,
+      prewarm: vi.fn(async () => warmHandle),
+      recycle: vi.fn(),
+      bind: vi.fn(async () => ({
+        handle: warmHandle,
+        process: createFakeProcess() as unknown as ChildProcess,
+        runHandle: 'unused-warm-run',
+      })),
+    };
+    const repository = new SpawnMcpRepository([
+      mcpHttpRecord({
+        id: 'mcp:crm',
+        name: 'crm-api',
+        callerIdentity: {
+          mode: 'required',
+          headerName: 'x-caller-identity',
+          signingRef: 'CRM_IDENTITY_SECRET',
+          source: { kind: 'conversation_jid_phone', jidPrefix: 'wa:' },
+        },
+      }),
+    ]);
+    try {
+      const resultPromise = spawnTestAgent(
+        testGroup,
+        {
+          ...testInput,
+          appId: 'app-one',
+          agentId: 'agent-one',
+          chatJid: 'wa:919654405340',
+          attachedMcpSourceIds: ['mcp:crm'],
+        },
+        vi.fn(),
+        undefined,
+        {
+          executionAdapter: warmAdapter,
+          warmPool,
+          mcpServerRepository: repository,
+          capabilitySecretRepository: new SpawnCapabilitySecretRepository({}),
+          mcpContext: { appId: 'app-one', agentId: 'agent-one' },
+        },
+      );
+
+      await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+      emitOutputMarker(fakeProc, {
+        status: 'success',
+        result: 'served cold for static identity MCP',
+      });
+      fakeProc.emit('close', 0);
+      await vi.advanceTimersByTimeAsync(10);
+
+      await expect(resultPromise).resolves.toMatchObject({
+        status: 'success',
+        result: 'served cold for static identity MCP',
+      });
+      expect(warmPool.acquire).not.toHaveBeenCalled();
+      expect(prewarm).not.toHaveBeenCalled();
+      expect(warmAdapter.bind).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.CRM_IDENTITY_SECRET;
+    }
   });
 
   it('recycles the warm handle and falls back cold when bind fails', async () => {

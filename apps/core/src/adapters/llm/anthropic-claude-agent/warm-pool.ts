@@ -13,6 +13,10 @@ import type {
   SharedBootRecipe,
   WarmWorkerHandle,
 } from '../../../application/agent-execution/warm-pool-capable.js';
+import {
+  ensurePrivateDirSync,
+  writePrivateFileSync,
+} from '../../../shared/private-fs.js';
 
 const READY_MARKER = 'awaiting bind';
 const DEFAULT_READY_TIMEOUT_MS = 30_000;
@@ -24,6 +28,7 @@ type SpawnFunction = typeof nodeSpawn;
 interface WarmWorkerRecord {
   readonly handle: WarmWorkerHandle;
   readonly process: ChildProcess;
+  readonly cleanup?: () => Promise<void> | void;
 }
 
 export interface BindTransport {
@@ -33,10 +38,10 @@ export interface BindTransport {
 export class IpcDirectoryBindTransport implements BindTransport {
   async deliver(scope: ConversationBindScope): Promise<void> {
     writeBoundIdentityFile(scope.ipcDir, this.boundIdentity(scope));
-    fs.mkdirSync(scope.ipcInputDir, { recursive: true });
+    ensurePrivateDirSync(scope.ipcInputDir);
     const bindPath = path.join(scope.ipcInputDir, BIND_FILE_NAME);
     const tmpPath = `${bindPath}.tmp`;
-    fs.writeFileSync(
+    writePrivateFileSync(
       tmpPath,
       JSON.stringify({
         type: 'bind',
@@ -49,6 +54,13 @@ export class IpcDirectoryBindTransport implements BindTransport {
             : {}),
           ...(scope.threadId ? { threadId: scope.threadId } : {}),
           ...(scope.memoryUserId ? { memoryUserId: scope.memoryUserId } : {}),
+          ipcAuthToken: scope.ipcAuthToken,
+          ...(scope.browserIpcAuthToken
+            ? { browserIpcAuthToken: scope.browserIpcAuthToken }
+            : {}),
+          memoryIpcAuthToken: scope.memoryIpcAuthToken,
+          ipcResponseKeyId: scope.ipcResponseKeyId,
+          ipcResponseVerifyKey: scope.ipcResponseVerifyKey,
         },
       }),
     );
@@ -60,6 +72,13 @@ export class IpcDirectoryBindTransport implements BindTransport {
       chatJid: scope.chatJid,
       ...(scope.threadId ? { threadId: scope.threadId } : {}),
       ...(scope.memoryUserId ? { memoryUserId: scope.memoryUserId } : {}),
+      ipcAuthToken: scope.ipcAuthToken,
+      ...(scope.browserIpcAuthToken
+        ? { browserIpcAuthToken: scope.browserIpcAuthToken }
+        : {}),
+      memoryIpcAuthToken: scope.memoryIpcAuthToken,
+      ipcResponseKeyId: scope.ipcResponseKeyId,
+      ipcResponseVerifyKey: scope.ipcResponseVerifyKey,
     };
   }
 }
@@ -132,19 +151,26 @@ export class AnthropicWarmPoolController {
         : {}),
       bound: false,
     };
-    this.workers.set(handle.id, { handle, process });
+    this.workers.set(handle.id, { handle, process, cleanup: recipe.cleanup });
     const ready = this.waitForReady(handle, process);
-    process.stdin?.write(
-      JSON.stringify({
-        ...runnerInput,
-        prompt: '',
-        compiledSystemPrompt: recipe.compiledSystemPrompt,
-        warmGenericBoot: true,
-      }),
-    );
-    process.stdin?.end();
-    await ready;
-    return handle;
+    try {
+      process.stdin?.write(
+        JSON.stringify({
+          ...runnerInput,
+          prompt: '',
+          compiledSystemPrompt: recipe.compiledSystemPrompt,
+          warmGenericBoot: true,
+        }),
+      );
+      process.stdin?.end();
+      await ready;
+      return handle;
+    } catch (err) {
+      this.workers.delete(handle.id);
+      this.terminate(process);
+      await recipe.cleanup?.();
+      throw err;
+    }
   }
 
   async bind(
@@ -171,7 +197,11 @@ export class AnthropicWarmPoolController {
     const worker = this.workers.get(handle.id);
     this.workers.delete(handle.id);
     if (!worker) return;
-    this.terminate(worker.process);
+    try {
+      this.terminate(worker.process);
+    } finally {
+      await worker.cleanup?.();
+    }
   }
 
   async prewarmCaches(handle: WarmWorkerHandle): Promise<void> {

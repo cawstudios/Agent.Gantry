@@ -72,7 +72,11 @@ function makeScope(root = makeTempRoot()): ConversationBindScope {
     runHandle: 'run-bound-1',
     ipcDir: path.join(root, 'ipc'),
     ipcInputDir: path.join(root, 'ipc', 'input', 'conv-wa-111'),
+    ipcAuthToken: 'ipc-token',
+    browserIpcAuthToken: 'browser-token',
     memoryIpcAuthToken: 'memory-token',
+    ipcResponseKeyId: 'response-key-id',
+    ipcResponseVerifyKey: 'response-verify-key',
   };
 }
 
@@ -209,7 +213,12 @@ describe('Anthropic warm pool adapter', () => {
         chatJid: 'wa:111',
         firstMessage: 'do you have kaju katli?',
         guardrailPreface: 'Stay on catalog.',
+        browserIpcAuthToken: 'browser-token',
+        ipcAuthToken: 'ipc-token',
+        ipcResponseKeyId: 'response-key-id',
+        ipcResponseVerifyKey: 'response-verify-key',
         memoryBlock: 'MEM-111',
+        memoryIpcAuthToken: 'memory-token',
         memoryUserId: 'user-1',
         threadId: 'thread-1',
       },
@@ -219,6 +228,11 @@ describe('Anthropic warm pool adapter', () => {
     );
     expect(boundIdentity).toEqual({
       chatJid: 'wa:111',
+      browserIpcAuthToken: 'browser-token',
+      ipcAuthToken: 'ipc-token',
+      ipcResponseKeyId: 'response-key-id',
+      ipcResponseVerifyKey: 'response-verify-key',
+      memoryIpcAuthToken: 'memory-token',
       memoryUserId: 'user-1',
       threadId: 'thread-1',
     });
@@ -230,15 +244,21 @@ describe('Anthropic warm pool adapter', () => {
 
   it('recycles a warm worker by terminating the child process and removing the handle', async () => {
     const child = makeChild();
+    const cleanup = vi.fn(async () => undefined);
     const controller = new AnthropicWarmPoolController({
       spawn: vi.fn(() => child),
       now: () => 1_000,
     });
-    const handle = await prewarmReady(controller, makeRecipe(), child);
+    const handle = await prewarmReady(
+      controller,
+      { ...makeRecipe(), cleanup },
+      child,
+    );
 
     await controller.recycle(handle);
 
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(cleanup).toHaveBeenCalledTimes(1);
     await expect(controller.bind(handle, makeScope())).rejects.toThrow(
       'not found',
     );

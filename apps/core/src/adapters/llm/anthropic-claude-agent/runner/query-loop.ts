@@ -212,6 +212,11 @@ async function dispatchWarmQuery(args: {
       chatJid: scope.chatJid,
       threadId: scope.threadId,
       memoryUserId: scope.memoryUserId,
+      ipcAuthToken: scope.ipcAuthToken,
+      browserIpcAuthToken: scope.browserIpcAuthToken,
+      memoryIpcAuthToken: scope.memoryIpcAuthToken,
+      ipcResponseKeyId: scope.ipcResponseKeyId,
+      ipcResponseVerifyKey: scope.ipcResponseVerifyKey,
     });
   }
   // The guardrail preface + memory block ride the FIRST user message (not the

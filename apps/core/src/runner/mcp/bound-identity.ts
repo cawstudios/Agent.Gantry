@@ -22,11 +22,20 @@
  */
 import fs from 'fs';
 import path from 'path';
+import {
+  ensurePrivateDirSync,
+  writePrivateFileSync,
+} from '../../shared/private-fs.js';
 
 export interface BoundIdentity {
   chatJid: string;
   threadId?: string;
   memoryUserId?: string;
+  ipcAuthToken?: string;
+  browserIpcAuthToken?: string;
+  memoryIpcAuthToken?: string;
+  ipcResponseKeyId?: string;
+  ipcResponseVerifyKey?: string;
 }
 
 export interface BoundIdentitySource {
@@ -44,6 +53,12 @@ function envIdentity(): BoundIdentity {
     chatJid: process.env.GANTRY_CHAT_JID?.trim() ?? '',
     threadId: process.env.GANTRY_THREAD_ID?.trim() || undefined,
     memoryUserId: process.env.GANTRY_MEMORY_USER_ID?.trim() || undefined,
+    ipcAuthToken: process.env.GANTRY_IPC_AUTH_TOKEN || undefined,
+    browserIpcAuthToken: process.env.GANTRY_BROWSER_IPC_AUTH_TOKEN || undefined,
+    memoryIpcAuthToken: process.env.GANTRY_MEMORY_IPC_AUTH_TOKEN || undefined,
+    ipcResponseKeyId: process.env.GANTRY_IPC_RESPONSE_KEY_ID || undefined,
+    ipcResponseVerifyKey:
+      process.env.GANTRY_IPC_RESPONSE_VERIFY_KEY || undefined,
   };
 }
 
@@ -77,6 +92,30 @@ function fileSource(): BoundIdentity | undefined {
         typeof parsed.memoryUserId === 'string' && parsed.memoryUserId.trim()
           ? parsed.memoryUserId
           : undefined,
+      ipcAuthToken:
+        typeof parsed.ipcAuthToken === 'string' && parsed.ipcAuthToken.trim()
+          ? parsed.ipcAuthToken
+          : undefined,
+      browserIpcAuthToken:
+        typeof parsed.browserIpcAuthToken === 'string' &&
+        parsed.browserIpcAuthToken.trim()
+          ? parsed.browserIpcAuthToken
+          : undefined,
+      memoryIpcAuthToken:
+        typeof parsed.memoryIpcAuthToken === 'string' &&
+        parsed.memoryIpcAuthToken.trim()
+          ? parsed.memoryIpcAuthToken
+          : undefined,
+      ipcResponseKeyId:
+        typeof parsed.ipcResponseKeyId === 'string' &&
+        parsed.ipcResponseKeyId.trim()
+          ? parsed.ipcResponseKeyId
+          : undefined,
+      ipcResponseVerifyKey:
+        typeof parsed.ipcResponseVerifyKey === 'string' &&
+        parsed.ipcResponseVerifyKey.trim()
+          ? parsed.ipcResponseVerifyKey
+          : undefined,
     };
   } catch {
     return undefined;
@@ -105,6 +144,11 @@ export function getBoundIdentity(): BoundIdentity {
   return envIdentity();
 }
 
+/** The current runtime scope: bound warm scope when present, else env scope. */
+export function getBoundRuntimeScope(): BoundIdentity {
+  return getBoundIdentity();
+}
+
 /** The current customer chatJid (bound when present, else spawn-env constant). */
 export function getBoundChatJid(): string {
   return getBoundIdentity().chatJid;
@@ -120,9 +164,9 @@ export function writeBoundIdentityFile(
   ipcDir: string,
   identity: BoundIdentity,
 ): void {
-  fs.mkdirSync(ipcDir, { recursive: true });
+  ensurePrivateDirSync(ipcDir);
   const filePath = path.join(ipcDir, BOUND_IDENTITY_FILE);
   const tmpPath = `${filePath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(identity, null, 2));
+  writePrivateFileSync(tmpPath, JSON.stringify(identity, null, 2));
   fs.renameSync(tmpPath, filePath);
 }

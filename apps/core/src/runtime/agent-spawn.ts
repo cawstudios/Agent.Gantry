@@ -71,10 +71,12 @@ import { writeRunnerMcpConfigFile } from './agent-spawn-mcp-config.js';
 import {
   hasWarmPoolCapability,
   poolKeyOf,
+  type SharedBootRecipe,
 } from '../application/agent-execution/warm-pool-capable.js';
 import { isPoolEligible } from './warm-pool-eligibility.js';
 type RunnerAgentInput = AgentInput & {
   modelCredentialEnv?: Record<string, string>;
+  warmGenericBoot?: boolean;
 };
 
 const PROTECTED_FILESYSTEM_PATHS_ENV = 'GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON';
@@ -780,6 +782,11 @@ export async function spawnAgent(
       isPoolEligible(input) &&
       hasWarmPoolCapability(executionAdapter)
     ) {
+      const hasConfigTimeCallerIdentityMcp = allMcpCapabilitiesForRunner.some(
+        (capability) =>
+          capability.callerIdentity &&
+          capability.callerIdentity.mode !== 'disabled',
+      );
       const key = poolKeyOf({
         providerId: preparedExecution.providerId,
         appId: runnerAppId,
@@ -794,7 +801,249 @@ export async function spawnAgent(
         thinking: group.agentConfig?.thinking,
         systemPromptVersion: promptVersionHash(compiledSystemPrompt),
       });
-      const handle = warmPool.acquire(key);
+      const createWarmPrewarmRecipe = async (): Promise<SharedBootRecipe> => {
+        const warmProcessName = `gantry-warm-${safeName}-${currentTimeMs()}-${randomUUID().slice(0, 8)}`;
+        const warmIpcInputDir = path.join(
+          hostRuntime.groupIpcDir,
+          'warm-pool',
+          warmProcessName,
+          'input',
+        );
+        const warmRunnerInput: RunnerAgentInput = {
+          ...runnerInput,
+          prompt: '',
+          chatJid: '',
+          threadId: undefined,
+          memoryUserId: undefined,
+          sessionId: undefined,
+          memoryContextBlock: '',
+          guardrailSystemPromptAppend: undefined,
+          warmGenericBoot: true,
+        };
+        let warmHostCredentials:
+          | Awaited<ReturnType<typeof getHostRuntimeCredentialEnv>>
+          | undefined;
+        let warmPreparedExecution:
+          | Awaited<ReturnType<typeof executionAdapter.prepare>>
+          | undefined;
+        let warmMcpConfigPath: string | undefined;
+        let warmEgressGateway:
+          | Awaited<ReturnType<typeof ensureEgressGateway>>
+          | undefined;
+        const warmIpcAuth = createIpcAuthEnvelope(group.folder, undefined, {
+          appId: runnerAppId,
+          agentId: input.agentId,
+        });
+        let cleaned = false;
+        const cleanup = async (): Promise<void> => {
+          if (cleaned) return;
+          cleaned = true;
+          cleanupRunnerMcpConfigFile(warmMcpConfigPath);
+          if (warmEgressGateway) {
+            await closeEgressGateway(warmEgressGateway);
+          }
+          await warmHostCredentials?.revoke?.();
+          warmPreparedExecution?.cleanup();
+          revokeIpcResponseSigningKey(
+            warmIpcAuth.responseKeyId,
+            group.folder,
+            undefined,
+          );
+        };
+        try {
+          warmHostCredentials = await getHostRuntimeCredentialEnv(
+            agentIdentifier,
+            options?.credentialBroker,
+            {
+              purpose: 'model_runtime',
+              runContext: warmRunnerInput,
+              modelRouteId: effectiveModelEntry?.modelRoute.id,
+            },
+          );
+          warmPreparedExecution = await executionAdapter.prepare({
+            group,
+            input: warmRunnerInput,
+            hostRuntime,
+            groupDir,
+            effectiveModel,
+            effectiveModelEntry,
+            modelCredentialProjection: {
+              env: warmHostCredentials.env,
+              credentialProviders: warmHostCredentials.credentialProviders,
+              brokerProfile: warmHostCredentials.brokerProfile,
+              brokerApplied: warmHostCredentials.brokerApplied,
+              proxy: warmHostCredentials.proxy,
+            },
+            browserIpcEnabled,
+            packageRootFromRunner: (runnerPath) =>
+              resolvePackageRootFromSourceDir(path.dirname(runnerPath)),
+            options,
+          });
+          const warmUpstreamProxyUrl =
+            warmHostCredentials.proxy?.https || warmHostCredentials.proxy?.http;
+          warmEgressGateway = await ensureEgressGateway({
+            key: `${runnerAppId}:${input.agentId || group.folder}:${warmProcessName}`,
+            settings: getRuntimeSettingsForConfig().permissions.egress,
+            principal: {
+              appId: runnerAppId,
+              ...(input.agentId ? { agentId: input.agentId } : {}),
+            },
+            ...(warmUpstreamProxyUrl
+              ? {
+                  upstreamProxy: {
+                    url: warmUpstreamProxyUrl,
+                    provider: warmHostCredentials.brokerProfile,
+                  },
+                }
+              : {}),
+            ...(options?.publishRuntimeEvent
+              ? { publishRuntimeEvent: options.publishRuntimeEvent }
+              : {}),
+          });
+          const warmRunnerInputPatch =
+            warmPreparedExecution.runnerInputPatch ?? {};
+          warmRunnerInputPatch.modelCredentialEnv ??= {};
+          warmRunnerInputPatch.modelCredentialEnv.HTTP_PROXY =
+            warmEgressGateway.proxyUrl;
+          warmRunnerInputPatch.modelCredentialEnv.HTTPS_PROXY =
+            warmEgressGateway.proxyUrl;
+          warmRunnerInputPatch.modelCredentialEnv.http_proxy =
+            warmEgressGateway.proxyUrl;
+          warmRunnerInputPatch.modelCredentialEnv.https_proxy =
+            warmEgressGateway.proxyUrl;
+          warmRunnerInputPatch.modelCredentialEnv.NODE_USE_ENV_PROXY = '1';
+          warmRunnerInput.modelCredentialEnv =
+            warmRunnerInputPatch.modelCredentialEnv;
+          if (warmRunnerInputPatch.semanticCapabilities) {
+            warmRunnerInput.semanticCapabilities =
+              warmRunnerInputPatch.semanticCapabilities;
+          }
+          const warmEnv: NodeJS.ProcessEnv = {
+            ...env,
+            ...pickPreparedExecutionEnv(warmPreparedExecution.env),
+            GANTRY_AGENT_RUN_HANDLE: warmProcessName,
+            GANTRY_IPC_INPUT_DIR: warmIpcInputDir,
+            GANTRY_IPC_AUTH_TOKEN: warmIpcAuth.authToken,
+            GANTRY_CHAT_JID: '',
+            GANTRY_THREAD_ID: '',
+            GANTRY_MEMORY_USER_ID: '',
+            GANTRY_MEMORY_IPC_AUTH_TOKEN: computeMemoryIpcAuthToken(
+              group.folder,
+              {
+                defaultScope: input.memoryDefaultScope || 'group',
+                allowedActions: memoryIpcAllowedActions,
+                reviewerIsControlApprover:
+                  input.memoryReviewerIsControlApprover,
+              },
+            ),
+            GANTRY_IPC_RESPONSE_VERIFY_KEY: warmIpcAuth.responseVerifyKey,
+            GANTRY_IPC_RESPONSE_KEY_ID: warmIpcAuth.responseKeyId,
+            GANTRY_EGRESS_PROXY_URL: warmEgressGateway.proxyUrl,
+            GANTRY_WARM_POOL_BOOT: 'generic',
+          };
+          if (browserIpcEnabled) {
+            warmEnv.GANTRY_BROWSER_IPC_AUTH_TOKEN = computeBrowserIpcAuthToken(
+              group.folder,
+              '',
+            );
+          } else {
+            delete warmEnv.GANTRY_BROWSER_IPC_AUTH_TOKEN;
+          }
+          delete warmEnv.GANTRY_MCP_CONFIG_FILE;
+          delete warmEnv.GANTRY_MCP_ALLOWED_TOOLS_JSON;
+          delete warmEnv.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON;
+          warmMcpConfigPath =
+            allMcpCapabilitiesForRunner.length > 0
+              ? writeRunnerMcpConfigFile(
+                  hostRuntime.groupIpcDir,
+                  allMcpCapabilitiesForRunner,
+                )
+              : undefined;
+          if (warmMcpConfigPath) {
+            warmEnv.GANTRY_MCP_CONFIG_FILE = warmMcpConfigPath;
+            warmEnv.GANTRY_MCP_ALLOWED_TOOLS_JSON = JSON.stringify(
+              allMcpCapabilitiesForRunner.flatMap(
+                (capability) => capability.allowedToolNames,
+              ),
+            );
+            warmEnv.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON = JSON.stringify(
+              allMcpCapabilitiesForRunner.flatMap(
+                (capability) => capability.autoApproveToolNames,
+              ),
+            );
+          }
+          const warmProtectedFilesystemDenyReadPaths = [
+            ...(warmPreparedExecution.protectedFilesystemDenyReadPaths ??
+              warmPreparedExecution.protectedFilesystemPaths),
+            ...(warmMcpConfigPath ? [warmMcpConfigPath] : []),
+          ];
+          const warmProtectedFilesystemDenyWritePaths = [
+            ...(warmPreparedExecution.protectedFilesystemDenyWritePaths ??
+              warmPreparedExecution.protectedFilesystemPaths),
+            ...localCliCredentialPaths,
+            ...(warmMcpConfigPath ? [warmMcpConfigPath] : []),
+          ];
+          warmEnv[PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV] = JSON.stringify(
+            warmProtectedFilesystemDenyReadPaths,
+          );
+          warmEnv[PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV] = JSON.stringify(
+            warmProtectedFilesystemDenyWritePaths,
+          );
+          warmEnv[PROTECTED_FILESYSTEM_PATHS_ENV] = JSON.stringify(
+            warmProtectedFilesystemDenyWritePaths,
+          );
+          applyAgentEgressNoProxyEnv(warmEnv);
+          const warmRunnerInputRecord: Record<string, unknown> = {
+            ...warmRunnerInput,
+          };
+          return {
+            providerId: warmPreparedExecution.providerId,
+            appId: runnerAppId,
+            agentId: input.agentId || compileAgentId,
+            persona: compilePersona,
+            model: effectiveModel,
+            toolSurface: {
+              gantryMcp: input.gantryMcpToolSurface,
+              native: input.nativeToolSurface,
+            },
+            mcpSet: attachedMcpSourceIds,
+            thinking: group.agentConfig?.thinking,
+            systemPromptVersion: promptVersionHash(compiledSystemPrompt),
+            key,
+            cwd: hostRuntime.groupDir,
+            compiledSystemPrompt,
+            runnerCommand: command,
+            runnerArgs: warmPreparedExecution.runnerArgs,
+            runnerEnv: warmEnv,
+            runnerInput: warmRunnerInputRecord,
+            runnerProcessName: warmProcessName,
+            cleanup,
+          };
+        } catch (err) {
+          await cleanup();
+          throw err;
+        }
+      };
+      const scheduleWarmPrewarm = (): void => {
+        if (!warmPool.prewarm || hasConfigTimeCallerIdentityMcp) return;
+        void (async () => {
+          const recipe = await createWarmPrewarmRecipe();
+          try {
+            await warmPool.prewarm!(recipe, warmPoolConfig.size);
+          } catch (err) {
+            await recipe.cleanup?.();
+            throw err;
+          }
+        })().catch((err) => {
+          logger.warn(
+            { err, group: group.name, key },
+            'Failed to prewarm warm-pool worker after empty-pool fallback',
+          );
+        });
+      };
+      const handle = hasConfigTimeCallerIdentityMcp
+        ? null
+        : warmPool.acquire(key);
       if (handle) {
         try {
           const bound = await executionAdapter.bind(handle, {
@@ -814,10 +1063,13 @@ export async function spawnAgent(
             runHandle: processName,
             ipcDir: handle.ipcDir ?? hostRuntime.groupIpcDir,
             ipcInputDir: handle.ipcInputDir ?? ipcInputDir,
-            memoryIpcAuthToken:
-              handle.memoryIpcAuthToken ??
-              env.GANTRY_MEMORY_IPC_AUTH_TOKEN ??
-              '',
+            ipcAuthToken: ipcAuth.authToken,
+            ...(env.GANTRY_BROWSER_IPC_AUTH_TOKEN
+              ? { browserIpcAuthToken: env.GANTRY_BROWSER_IPC_AUTH_TOKEN }
+              : {}),
+            memoryIpcAuthToken: env.GANTRY_MEMORY_IPC_AUTH_TOKEN ?? '',
+            ipcResponseKeyId: ipcAuth.responseKeyId,
+            ipcResponseVerifyKey: ipcAuth.responseVerifyKey,
             egressPrincipal: `${runnerAppId}:${input.agentId || group.folder}:${processName}`,
           });
           let pooledReleaseCalled = false;
@@ -868,6 +1120,8 @@ export async function spawnAgent(
             'Warm worker bind failed; falling back to cold spawn',
           );
         }
+      } else {
+        scheduleWarmPrewarm();
       }
     }
 

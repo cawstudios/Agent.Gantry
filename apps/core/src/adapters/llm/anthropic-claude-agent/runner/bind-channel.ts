@@ -39,6 +39,11 @@ export interface ConversationBindScope {
     cacheRead?: number;
     cacheWrite?: number;
   };
+  ipcAuthToken?: string;
+  browserIpcAuthToken?: string;
+  memoryIpcAuthToken?: string;
+  ipcResponseKeyId?: string;
+  ipcResponseVerifyKey?: string;
 }
 
 export interface AwaitBindOptions {
@@ -85,6 +90,24 @@ function parseBindScope(raw: string): ConversationBindScope | undefined {
       usage:
         scope.usage && typeof scope.usage === 'object'
           ? scope.usage
+          : undefined,
+      ipcAuthToken:
+        typeof scope.ipcAuthToken === 'string' ? scope.ipcAuthToken : undefined,
+      browserIpcAuthToken:
+        typeof scope.browserIpcAuthToken === 'string'
+          ? scope.browserIpcAuthToken
+          : undefined,
+      memoryIpcAuthToken:
+        typeof scope.memoryIpcAuthToken === 'string'
+          ? scope.memoryIpcAuthToken
+          : undefined,
+      ipcResponseKeyId:
+        typeof scope.ipcResponseKeyId === 'string'
+          ? scope.ipcResponseKeyId
+          : undefined,
+      ipcResponseVerifyKey:
+        typeof scope.ipcResponseVerifyKey === 'string'
+          ? scope.ipcResponseVerifyKey
           : undefined,
     };
   } catch {

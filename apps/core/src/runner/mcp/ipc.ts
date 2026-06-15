@@ -33,7 +33,7 @@ import {
 // carry the BOUND customer scope (chatJid/thread/memoryUser), so a generic
 // worker's memory token is recomputed for its bound customer and server-
 // validated. Cold path: the accessors return the spawn-env constants.
-import { getBoundChatJid, getBoundIdentity } from './bound-identity.js';
+import { getBoundChatJid, getBoundRuntimeScope } from './bound-identity.js';
 import {
   createSignedIpcRequestEnvelope,
   verifyIpcResponsePayload,
@@ -67,13 +67,15 @@ export function writeIpcFile(dir: string, data: object): string {
     !Array.isArray(data.context)
       ? (data.context as Record<string, unknown>)
       : {};
-  const boundThreadId = getBoundIdentity().threadId;
+  const boundScope = getBoundRuntimeScope();
+  const boundThreadId = boundScope.threadId;
+  const responseKeyId = boundScope.ipcResponseKeyId ?? IPC_RESPONSE_KEY_ID;
   const requestContext = {
     ...existingContext,
     ...(appId ? { appId } : {}),
     ...(agentId ? { agentId } : {}),
     ...(boundThreadId ? { threadId: boundThreadId } : {}),
-    ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
+    ...(responseKeyId ? { responseKeyId } : {}),
   };
   const payload = {
     ...data,
@@ -81,7 +83,10 @@ export function writeIpcFile(dir: string, data: object): string {
       ? { context: requestContext }
       : {}),
   };
-  const envelope = createSignedIpcRequestEnvelope(IPC_AUTH_TOKEN, payload);
+  const envelope = createSignedIpcRequestEnvelope(
+    boundScope.ipcAuthToken ?? IPC_AUTH_TOKEN,
+    payload,
+  );
   writePrivateFileSync(tempPath, JSON.stringify(envelope, null, 2));
   fs.renameSync(tempPath, filepath);
 
@@ -92,10 +97,12 @@ export function hasValidIpcResponseSignature(
   raw: Record<string, unknown>,
   payload: Record<string, unknown>,
 ): boolean {
-  if (!IPC_RESPONSE_VERIFY_KEY) return false;
+  const verifyKey =
+    getBoundRuntimeScope().ipcResponseVerifyKey ?? IPC_RESPONSE_VERIFY_KEY;
+  if (!verifyKey) return false;
   const signature =
     typeof raw.signature === 'string' ? raw.signature.trim() : '';
-  return verifyIpcResponsePayload(IPC_RESPONSE_VERIFY_KEY, payload, signature);
+  return verifyIpcResponsePayload(verifyKey, payload, signature);
 }
 
 export async function requestMemoryAction(
@@ -114,7 +121,8 @@ export async function requestMemoryAction(
   const requestId = makeIpcId('mem');
   const reqPath = path.join(MEMORY_REQUESTS_DIR, `${requestId}.json`);
   const tmpReqPath = `${reqPath}.tmp`;
-  const boundIdentity = getBoundIdentity();
+  const boundIdentity = getBoundRuntimeScope();
+  const responseKeyId = boundIdentity.ipcResponseKeyId ?? IPC_RESPONSE_KEY_ID;
   const requestPayload = {
     requestId,
     action,
@@ -125,7 +133,7 @@ export async function requestMemoryAction(
       ...(boundIdentity.memoryUserId
         ? { userId: boundIdentity.memoryUserId }
         : {}),
-      ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
+      ...(responseKeyId ? { responseKeyId } : {}),
       defaultScope: memoryDefaultScope,
       allowedActions: memoryIpcAllowedActions,
       reviewerIsControlApprover: memoryReviewerIsControlApprover,
@@ -133,7 +141,7 @@ export async function requestMemoryAction(
     expiresAt: new Date(currentTimeMs() + timeoutMs).toISOString(),
   };
   const requestEnvelope = createSignedIpcRequestEnvelope(
-    MEMORY_IPC_AUTH_TOKEN,
+    boundIdentity.memoryIpcAuthToken ?? MEMORY_IPC_AUTH_TOKEN,
     requestPayload,
   );
   writePrivateFileSync(tmpReqPath, JSON.stringify(requestEnvelope, null, 2));
@@ -216,7 +224,9 @@ export async function requestBrowserAction(
   const reqPath = path.join(BROWSER_REQUESTS_DIR, `${requestId}.json`);
   const tmpReqPath = `${reqPath}.tmp`;
 
-  const { threadId } = getBoundIdentity();
+  const boundScope = getBoundRuntimeScope();
+  const { threadId } = boundScope;
+  const responseKeyId = boundScope.ipcResponseKeyId ?? IPC_RESPONSE_KEY_ID;
   const requestPayload = {
     requestId,
     action,
@@ -236,12 +246,12 @@ export async function requestBrowserAction(
       ...(options.publicToolName
         ? { publicToolName: options.publicToolName }
         : {}),
-      ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
+      ...(responseKeyId ? { responseKeyId } : {}),
     },
     expiresAt: new Date(currentTimeMs() + timeoutMs).toISOString(),
   };
   const requestEnvelope = createSignedIpcRequestEnvelope(
-    BROWSER_IPC_AUTH_TOKEN,
+    boundScope.browserIpcAuthToken ?? BROWSER_IPC_AUTH_TOKEN,
     requestPayload,
   );
   writePrivateFileSync(tmpReqPath, JSON.stringify(requestEnvelope, null, 2));
