@@ -30,6 +30,11 @@ export interface SharedBootRecipe extends WarmPoolKeyInput {
   key: WarmPoolKey;
   cwd: string;
   compiledSystemPrompt?: string;
+  runnerCommand?: string;
+  runnerArgs?: readonly string[];
+  runnerEnv?: NodeJS.ProcessEnv;
+  runnerInput?: Record<string, unknown>;
+  runnerProcessName?: string;
 }
 
 export interface ConversationBindScope {
@@ -43,6 +48,7 @@ export interface ConversationBindScope {
   firstMessage: string;
   guardrailPreface?: string;
   runHandle: string;
+  ipcDir: string;
   ipcInputDir: string;
   memoryIpcAuthToken: string;
   egressPrincipal?: string;

@@ -14,6 +14,13 @@ import type {
   AgentExecutionProviderId,
   PreparedAgentExecution,
 } from '../../../application/agent-execution/agent-execution-adapter.js';
+import type {
+  BoundRun,
+  ConversationBindScope,
+  SharedBootRecipe,
+  WarmPoolCapable,
+  WarmWorkerHandle,
+} from '../../../application/agent-execution/warm-pool-capable.js';
 import {
   materializeClaudeRuntime,
   projectClaudeModelCredentialEnv,
@@ -32,6 +39,10 @@ import {
   GANTRY_CLAUDE_SDK_SKILLS_ENV,
   claudeSdkSkillNamesForMaterializedSkills,
 } from './native-sdk-skills.js';
+import {
+  AnthropicWarmPoolController,
+  type AnthropicWarmPoolOptions,
+} from './warm-pool.js';
 
 const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
 const ANTHROPIC_MODEL_ENV = 'ANTHROPIC_MODEL';
@@ -39,8 +50,15 @@ const GANTRY_EFFECTIVE_MODEL_SOURCE_ENV = 'GANTRY_EFFECTIVE_MODEL_SOURCE';
 const GANTRY_MCP_SERVER_PATH_ENV = 'GANTRY_MCP_SERVER_PATH';
 const GANTRY_SKILL_ACTIONS_ENV = 'GANTRY_SKILL_ACTIONS_JSON';
 
-export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapter {
+export class AnthropicClaudeAgentExecutionAdapter
+  implements AgentExecutionAdapter, WarmPoolCapable
+{
   readonly id = 'anthropic:claude-agent-sdk' as AgentExecutionProviderId;
+  private readonly warmPool: AnthropicWarmPoolController;
+
+  constructor(warmPoolOptions?: AnthropicWarmPoolOptions) {
+    this.warmPool = new AnthropicWarmPoolController(warmPoolOptions);
+  }
 
   async prepare(
     input: AgentExecutionAdapterPrepareInput,
@@ -267,6 +285,21 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
       model: effectiveModelEntry,
       projection: modelCredentialProjection,
     });
+  }
+
+  prewarm(shared: SharedBootRecipe): Promise<WarmWorkerHandle> {
+    return this.warmPool.prewarm(shared);
+  }
+
+  bind(
+    handle: WarmWorkerHandle,
+    scope: ConversationBindScope,
+  ): Promise<BoundRun> {
+    return this.warmPool.bind(handle, scope);
+  }
+
+  recycle(handle: WarmWorkerHandle): Promise<void> {
+    return this.warmPool.recycle(handle);
   }
 }
 
