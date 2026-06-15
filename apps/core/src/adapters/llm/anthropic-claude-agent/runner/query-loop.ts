@@ -29,10 +29,19 @@ import {
 } from './filesystem-sandbox.js';
 import { createSafetyPreToolUseHook } from './protected-capability-hook.js';
 import {
+  AGENT_ID,
+  APP_ID,
   discoverAdditionalDirectories,
+  GROUP_FOLDER,
+  IPC_AUTH_TOKEN,
   IPC_POLL_MS,
+  RUN_HANDLE,
+  THREAD_ID,
   WORKSPACE_GROUP_DIR,
 } from './runtime-env.js';
+import { IpcSocketClient } from '../../../../shared/ipc-socket-client.js';
+import type { IpcWireFrame } from '../../../../shared/ipc-wire.js';
+import { createSignedIpcRequestEnvelope } from './ipc-signing.js';
 import {
   buildRunnerSystemPrompt,
   includeGitInstructionsForPersona,
@@ -164,6 +173,38 @@ function assistantOutputText(message: unknown): string {
   return parts.join('');
 }
 
+/**
+ * Routes a single push frame received over the runner's IPC socket to the same
+ * effects the fs poll produces:
+ *   - `continuation` (with a string `text`) → steering accept (== drainIpcInput).
+ *   - `close` channel, OR a continuation carrying `payload.close === true`
+ *     → the shouldClose() body: close the gate and end the stream.
+ *
+ * Returns whether this frame requested a close (so the caller can stop polling),
+ * leaving the close mechanics to the injected `onClose` callback. Factored out as
+ * a pure function so the routing can be unit-tested without a live socket/SDK.
+ */
+export function routeRunnerPushFrame(
+  frame: IpcWireFrame,
+  handlers: {
+    acceptSteering: (text: string) => void;
+    onClose: () => void;
+  },
+): { closed: boolean } {
+  const payload = (frame.payload ?? {}) as {
+    text?: unknown;
+    close?: unknown;
+  };
+  if (frame.channel === 'close' || payload.close === true) {
+    handlers.onClose();
+    return { closed: true };
+  }
+  if (frame.channel === 'continuation' && typeof payload.text === 'string') {
+    handlers.acceptSteering(payload.text);
+  }
+  return { closed: false };
+}
+
 export async function runQuery(
   prompt: string,
   mcpServerPath: string,
@@ -206,6 +247,70 @@ export async function runQuery(
     pendingTurnDispatchedAt = Date.now();
     stream.pushContent(text);
   });
+  // The exact shouldClose() close body — close the gate (so no further
+  // continuation can be accepted) then end the SDK stream. Shared by the fs poll
+  // sentinel and the socket close push so both carriers behave identically (R4:
+  // close wins; gate.closed guards any post-close continuation).
+  const closeQueryStream = () => {
+    closedDuringQuery = true;
+    steeringGate.close();
+    stream.end();
+    ipcPolling = false;
+  };
+  // Socket fast-path for continuation/close (Pillar 1). Only when the transport
+  // is socket/dual AND this is an interactive run (scheduled runs never open a
+  // socket) AND a socket path is configured. The socket is authoritative while
+  // connected (its onPush mirrors drainIpcInput/shouldClose exactly); the fs
+  // polls are skipped only while connected, so a connect gap/drop falls straight
+  // back to the durable fs mailbox (R1/R3). connect() failure is non-fatal — the
+  // run stays entirely on fs polls.
+  const ipcTransport = process.env.GANTRY_IPC_TRANSPORT;
+  const ipcSocketPath = process.env.GANTRY_IPC_SOCKET_PATH;
+  const useSocketIpc =
+    (ipcTransport === 'socket' || ipcTransport === 'dual') &&
+    enableIpcFollowups &&
+    !!ipcSocketPath;
+  let ipcSocketClient: IpcSocketClient | undefined;
+  if (useSocketIpc && ipcSocketPath) {
+    ipcSocketClient = new IpcSocketClient({
+      socketPath: ipcSocketPath,
+      buildHello: () =>
+        createSignedIpcRequestEnvelope(IPC_AUTH_TOKEN, {
+          kind: 'hello',
+          role: 'runner',
+          runHandle: RUN_HANDLE,
+          folder: GROUP_FOLDER || agentInput.groupFolder,
+          context: {
+            threadId: THREAD_ID || null,
+            appId: APP_ID || null,
+            agentId: AGENT_ID || null,
+          },
+        }),
+      onPush: (frame) => {
+        const { closed } = routeRunnerPushFrame(frame, {
+          // SAME call drainIpcInput makes (steering accept at a turn boundary).
+          acceptSteering: (text) => {
+            const delivery = steeringGate.accept(text);
+            if (delivery === 'buffered') {
+              log(
+                `Buffering IPC message until query turn boundary (${text.length} chars)`,
+              );
+            }
+          },
+          onClose: () => {
+            log('Close push received over IPC socket, ending stream');
+            closeQueryStream();
+          },
+        });
+        if (closed) {
+          // Stop reacting to further pushes after a close (mirror the fs poll).
+          ipcSocketClient?.close();
+          ipcSocketClient = undefined;
+        }
+      },
+      reconnect: { enabled: true },
+    });
+  }
   const emitInteractionBoundary = () => {
     writeOutput({
       status: 'success',
@@ -216,26 +321,31 @@ export async function runQuery(
   };
   const pollRuntimeSignalsDuringQuery = () => {
     if (!ipcPolling) return;
+    // Interaction boundaries stay on the fs side-channel regardless of transport.
     const interactionBoundaries = drainInteractionBoundaries();
     for (let i = 0; i < interactionBoundaries; i += 1) {
       emitInteractionBoundary();
     }
-    if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
-      closedDuringQuery = true;
-      steeringGate.close();
-      stream.end();
-      ipcPolling = false;
-      return;
-    }
-    if (enableIpcFollowups) {
-      const messages = drainIpcInput();
-      for (const text of messages) {
-        const delivery = steeringGate.accept(text);
-        if (delivery === 'buffered') {
-          log(
-            `Buffering IPC message until query turn boundary (${text.length} chars)`,
-          );
+    // When the socket is authoritative (connected), it carries continuation +
+    // close; skip the fs polls so a message is never delivered twice (R3). On a
+    // connect gap/drop the socket is not connected, so we keep the fs polls
+    // exactly as today and the durable mailbox is consumed (R1).
+    const socketAuthoritative = useSocketIpc && !!ipcSocketClient?.connected;
+    if (!socketAuthoritative) {
+      if (shouldClose()) {
+        log('Close sentinel detected during query, ending stream');
+        closeQueryStream();
+        return;
+      }
+      if (enableIpcFollowups) {
+        const messages = drainIpcInput();
+        for (const text of messages) {
+          const delivery = steeringGate.accept(text);
+          if (delivery === 'buffered') {
+            log(
+              `Buffering IPC message until query turn boundary (${text.length} chars)`,
+            );
+          }
         }
       }
     }
@@ -319,6 +429,21 @@ export async function runQuery(
     externalMcpAlwaysAllowedTools,
     isScheduledJob: agentInput.isScheduledJob,
   });
+  // Open the continuation/close fast-path socket before the SDK query starts so
+  // a follow-up that lands during model_wait is pushed straight to the gate. The
+  // connect is best-effort: on any failure we log and proceed entirely on the fs
+  // polls (the socket is never required, R1/R7). A late connect is fine too — the
+  // poll gate switches to socket-authoritative the moment `connected` flips true.
+  if (ipcSocketClient) {
+    try {
+      await ipcSocketClient.connect();
+      log('Runner IPC socket connected (continuation/close fast-path)');
+    } catch (err) {
+      log(
+        `Runner IPC socket connect failed, staying on fs polls: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
   // MEASUREMENT-ONLY: just before the SDK spawns the Claude Code CLI subprocess.
   timingMark('before_sdk_query');
   queryDispatchedAt = Date.now();
@@ -634,6 +759,8 @@ export async function runQuery(
     ipcPolling = false;
     heartbeat.stop();
     steeringGate.close();
+    ipcSocketClient?.close();
+    ipcSocketClient = undefined;
   }
   // Give the last deferred context-usage emission a bounded chance to land
   // before the process exits; never stall shutdown on a hung CLI.

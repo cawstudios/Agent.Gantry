@@ -27,6 +27,12 @@ export const IPC_AUTH_TOKEN = process.env.GANTRY_IPC_AUTH_TOKEN || '';
 export const APP_ID = process.env.GANTRY_APP_ID?.trim() || '';
 export const AGENT_ID = process.env.GANTRY_AGENT_ID?.trim() || '';
 export const CHAT_JID = process.env.GANTRY_CHAT_JID?.trim() || '';
+// The runner's spawn handle (== GroupState.runHandle == this run's continuation
+// lookup key) and thread id. Carried in env for the socket hello scope so the
+// core can resolve THIS run's live connection for continuation/close pushes.
+export const RUN_HANDLE = process.env.GANTRY_AGENT_RUN_HANDLE || '';
+export const THREAD_ID = process.env.GANTRY_THREAD_ID || '';
+export const GROUP_FOLDER = process.env.GANTRY_GROUP_FOLDER?.trim() || '';
 export const JOB_ID = process.env.GANTRY_JOB_ID?.trim() || '';
 export const JOB_NAME = process.env.GANTRY_JOB_NAME?.trim() || '';
 export const JOB_RUN_ID = process.env.GANTRY_JOB_RUN_ID?.trim() || '';

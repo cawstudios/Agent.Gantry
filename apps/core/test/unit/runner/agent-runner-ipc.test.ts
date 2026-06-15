@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { createHash, generateKeyPairSync } from 'crypto';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -10,6 +10,14 @@ import {
   GANTRY_CLAUDE_SDK_SKILLS_ENV,
   SDK_NATIVE_SKILL_OVERRIDES,
 } from '@core/adapters/llm/anthropic-claude-agent/native-sdk-skills.js';
+import {
+  startIpcSocketServer,
+  type IpcSocketServerHandle,
+} from '@core/runtime/ipc-socket-server.js';
+import type { IpcDeps } from '@core/runtime/ipc-domain-types.js';
+import type { ConversationRoute } from '@core/domain/types.js';
+import { createIpcAuthEnvelope } from '@core/runtime/ipc-auth.js';
+import { makeSocketContinuationDelivery } from '@core/runtime/continuation-delivery.js';
 
 const tempRoots: string[] = [];
 
@@ -314,6 +322,21 @@ function createRunnerFixture(): {
     path.resolve('apps/core/src/shared/gantry-home.ts'),
     path.join(sharedDir, 'gantry-home.ts'),
   );
+  // Socket transport (Pillar 1): the runner's query-loop statically imports the
+  // IPC socket client, whose dependency closure is exactly these four shared
+  // files (no further internal imports). Copy them so the real spawned runner
+  // can resolve the module in the temp source tree.
+  for (const file of [
+    'ipc-socket-client.ts',
+    'ipc-connection.ts',
+    'ipc-frame.ts',
+    'ipc-wire.ts',
+  ]) {
+    fs.copyFileSync(
+      path.resolve('apps/core/src/shared', file),
+      path.join(sharedDir, file),
+    );
+  }
   fs.writeFileSync(
     path.join(sdkDir, 'package.json'),
     JSON.stringify({ type: 'module', main: 'index.js' }),
@@ -670,6 +693,42 @@ export async function* query({ prompt, options }) {
           fs.writeFileSync(path.join(process.env.GANTRY_IPC_INPUT_DIR, '_close'), '');
         }, 20);
       }
+      return;
+    }
+
+    if (process.env.TEST_SOCKET_CONTINUATION === '1') {
+      // Socket transport (Pillar 1) real-child proof. The runner has connected
+      // to the in-test core socket server. We drive the same turn-boundary path
+      // the fs continuation test uses, but the follow-up arrives as a SOCKET
+      // PUSH (the test delivers it via the server connection), NOT a file.
+      const markerDir = path.join(process.env.GANTRY_IPC_DIR, 'test-markers');
+      fs.mkdirSync(markerDir, { recursive: true });
+      const writeMarker = (name, value) =>
+        fs.writeFileSync(path.join(markerDir, name), JSON.stringify(value));
+
+      // 1. Signal the test that the runner is mid-query (connected, gate live).
+      //    The test waits for this, then pushes the continuation over the socket.
+      writeMarker('ready.json', { ready: true });
+      // 2. Yield a result → the runner marks a turn boundary, flushing any
+      //    buffered (socket-pushed) steering into the SDK stream.
+      yield { type: 'result', subtype: 'success', result: 'runner-ok' };
+      // 3. Read the flushed continuation off the stream — proof the pushed text
+      //    arrived as steering input. Record it + a marker for the test.
+      const cont = await nextWithTimeout(iterator, 8000);
+      if (cont && !cont.done) {
+        call.streamMessages.push(cont.value.message.content);
+        writeMarker('continuation-received.json', {
+          text: cont.value.message.content,
+        });
+      } else {
+        writeMarker('continuation-received.json', { text: null });
+      }
+      // 4. Now wait for the stream to END — the test pushes a close over the
+      //    socket, which closes the gate and ends the stream (done === true).
+      const closed = await nextWithTimeout(iterator, 8000);
+      call.streamEnded = Boolean(closed?.done);
+      writeMarker('closed.json', { streamEnded: call.streamEnded });
+      appendRecord(call);
       return;
     }
 
@@ -2616,6 +2675,230 @@ describe('agent-runner IPC lifecycle', () => {
           decisionClassification: 'user_reject',
         }),
       );
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Socket transport (Pillar 1) — real spawned runner over a real core socket
+// server. Proves: runner connects (role 'runner', this run handle) → a
+// continuation pushed via the server arrives as steering input → a close push
+// ends the run. The fs continuation tests above stay green (equivalence).
+// ---------------------------------------------------------------------------
+
+const SOCKET_FOLDER = 'team';
+const SOCKET_CHAT_JID = 'tg:team';
+const SOCKET_THREAD_ID = 'thread-socket-1';
+const SOCKET_RUN_HANDLE = 'runner-socket-run';
+
+function buildSocketDeps(): IpcDeps {
+  const routes: Record<string, ConversationRoute> = {
+    [SOCKET_CHAT_JID]: {
+      name: 'Socket Team',
+      folder: SOCKET_FOLDER,
+      trigger: '',
+      added_at: new Date().toISOString(),
+    },
+  };
+  return {
+    sendMessage: async () => undefined,
+    conversationRoutes: () => routes,
+    registerGroup: () => undefined,
+    syncGroups: async () => undefined,
+    getAvailableGroups: () => [],
+    writeGroupsSnapshot: () => undefined,
+    onSchedulerChanged: () => undefined,
+    requestPermissionApproval: async () => ({}) as never,
+    requestUserAnswer: async () => ({}) as never,
+    opsRepository: {} as never,
+  } as unknown as IpcDeps;
+}
+
+function spawnRunner(
+  fixture: ReturnType<typeof createRunnerFixture>,
+  input: Record<string, unknown>,
+  extraEnv: Record<string, string>,
+): {
+  child: ChildProcess;
+  stdoutRef: { value: string };
+  stderrRef: { value: string };
+  exit: Promise<number | null>;
+} {
+  const child = spawn(
+    process.execPath,
+    [path.resolve('node_modules/tsx/dist/cli.mjs'), fixture.runnerPath],
+    {
+      cwd: fixture.root,
+      env: {
+        ...process.env,
+        GANTRY_IPC_DIR: fixture.ipcDir,
+        GANTRY_IPC_INPUT_DIR: fixture.inputDir,
+        GANTRY_IPC_RESPONSE_VERIFY_KEY: fixture.responseVerifyKey,
+        TEST_IPC_RESPONSE_SIGNING_KEY: fixture.responseSigningKey,
+        GANTRY_WORKSPACE_GROUP_DIR: path.join(fixture.root, 'group'),
+        GANTRY_WORKSPACE_EXTRA_DIR: path.join(fixture.root, 'extra'),
+        TEST_SDK_RECORD_PATH: fixture.recordPath,
+        ...extraEnv,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  );
+  const stdoutRef = { value: '' };
+  const stderrRef = { value: '' };
+  child.stdout?.on('data', (chunk) => {
+    stdoutRef.value += String(chunk);
+  });
+  child.stderr?.on('data', (chunk) => {
+    stderrRef.value += String(chunk);
+  });
+  child.stdin?.end(JSON.stringify(input));
+  const exit = new Promise<number | null>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('exit', (code) => resolve(code));
+  });
+  return { child, stdoutRef, stderrRef, exit };
+}
+
+async function waitForMarker(
+  markerDir: string,
+  name: string,
+  timeoutMs: number,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  const target = path.join(markerDir, name);
+  while (Date.now() < deadline) {
+    if (fs.existsSync(target)) {
+      try {
+        return JSON.parse(fs.readFileSync(target, 'utf-8'));
+      } catch {
+        /* marker mid-write; retry */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`timed out waiting for marker ${name} in ${markerDir}`);
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+describe('agent-runner socket transport continuation', () => {
+  let socketServer: IpcSocketServerHandle | undefined;
+
+  afterEach(async () => {
+    if (socketServer) {
+      await socketServer.stop().catch(() => undefined);
+      socketServer = undefined;
+    }
+  });
+
+  it(
+    'receives a continuation push as steering and ends on a close push',
+    async () => {
+      const fixture = createRunnerFixture();
+      const markerDir = path.join(fixture.ipcDir, 'test-markers');
+      const socketPath = path.join(fixture.root, 'core.sock');
+
+      // Real core socket server (in-test) routing the runner's folder.
+      const handle = await startIpcSocketServer(buildSocketDeps(), {
+        socketPath,
+      });
+      if (!handle) throw new Error('socket server failed to start');
+      socketServer = handle;
+
+      // A valid auth token for the folder/thread the runner will claim — the
+      // runner signs its hello with this (HMAC over the derived token).
+      const auth = createIpcAuthEnvelope(SOCKET_FOLDER, SOCKET_THREAD_ID);
+
+      const { child, stdoutRef, stderrRef, exit } = spawnRunner(
+        fixture,
+        baseInput({ threadId: SOCKET_THREAD_ID }),
+        {
+          GANTRY_IPC_AUTH_TOKEN: auth.authToken,
+          GANTRY_IPC_TRANSPORT: 'socket',
+          GANTRY_IPC_SOCKET_PATH: socketPath,
+          GANTRY_GROUP_FOLDER: SOCKET_FOLDER,
+          GANTRY_THREAD_ID: SOCKET_THREAD_ID,
+          GANTRY_AGENT_RUN_HANDLE: SOCKET_RUN_HANDLE,
+          TEST_SOCKET_CONTINUATION: '1',
+        },
+      );
+
+      try {
+        // The runner connected (hello accepted, welcome received) → its
+        // connection is bound to the folder with the run handle on its scope.
+        await waitFor(
+          () =>
+            handle
+              .connectionsForFolder(SOCKET_FOLDER)
+              .some(
+                (c) =>
+                  c.scope?.role === 'runner' &&
+                  c.scope?.runHandle === SOCKET_RUN_HANDLE,
+              ),
+          12_000,
+          'runner socket connection',
+        );
+
+        // The fake SDK signals it is mid-query (gate live, first result about
+        // to flush). Now push the continuation through the SAME production seam
+        // core uses (makeSocketContinuationDelivery → push frame).
+        await waitForMarker(markerDir, 'ready.json', 12_000);
+        const delivery = makeSocketContinuationDelivery(
+          handle.connectionsForFolder.bind(handle),
+        );
+        const delivered = delivery.deliverContinuation(
+          {
+            groupFolder: SOCKET_FOLDER,
+            chatJid: SOCKET_CHAT_JID,
+            threadId: SOCKET_THREAD_ID,
+            runHandle: SOCKET_RUN_HANDLE,
+          },
+          'socket follow-up please',
+          1,
+        );
+        expect(delivered).toBe(true);
+
+        // The runner delivered the pushed text into the SDK stream as steering.
+        const received = await waitForMarker(
+          markerDir,
+          'continuation-received.json',
+          12_000,
+        );
+        expect(received.text).toBe('socket follow-up please');
+
+        // Push a close → the runner closes the gate and ends the stream.
+        delivery.deliverClose({
+          groupFolder: SOCKET_FOLDER,
+          chatJid: SOCKET_CHAT_JID,
+          threadId: SOCKET_THREAD_ID,
+          runHandle: SOCKET_RUN_HANDLE,
+        });
+
+        const closed = await waitForMarker(markerDir, 'closed.json', 12_000);
+        expect(closed.streamEnded).toBe(true);
+
+        const exitCode = await exit;
+        expect(exitCode, `${stderrRef.value}\n${stdoutRef.value}`).toBe(0);
+
+        // The pushed continuation was recorded as a stream (steering) message.
+        const call = readRecord(fixture.recordPath).calls[0];
+        expect(call?.streamMessages).toContain('socket follow-up please');
+        expect(call?.streamEnded).toBe(true);
+      } finally {
+        if (child.exitCode === null) child.kill('SIGKILL');
+      }
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
