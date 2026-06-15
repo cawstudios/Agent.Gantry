@@ -119,9 +119,6 @@ export interface GantryMcpToolSelectionOptions extends MemoryIpcActionSelectionO
   // When true, omit authority-changing request tools from the projected surface
   // (fixed-image worker / no-permission-tools mode).
   excludeAuthorityTools?: boolean;
-  // When true, keep normal action tools but remove request_access so an
-  // already-attached source cannot keep asking for the same capability.
-  suppressRequestPermission?: boolean;
 }
 
 export function gantryMcpFullToolName(toolName: string): string {
@@ -140,7 +137,6 @@ export function selectedGantryMcpToolNames(
   options: GantryMcpToolSelectionOptions = {},
 ): string[] {
   const names = new Set<string>(DEFAULT_GANTRY_MCP_TOOL_NAMES);
-  if (options.suppressRequestPermission) names.delete('request_access');
   if (isBrowserSelected(configuredTools)) {
     for (const toolName of GATED_GANTRY_MCP_TOOL_NAMES) names.add(toolName);
   }
@@ -153,7 +149,6 @@ export function selectedGantryMcpToolNames(
     const name = gantryMcpToolNameFromFullName(configuredTool);
     if (
       name &&
-      !(options.suppressRequestPermission && name === 'request_access') &&
       !(GATED_GANTRY_MCP_TOOL_NAMES as readonly string[]).includes(name)
     ) {
       names.add(name);

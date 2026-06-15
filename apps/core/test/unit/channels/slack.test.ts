@@ -118,6 +118,7 @@ import {
   buildPermissionPromptContentBlocks,
   buildPermissionReceiptBlocks,
 } from '@core/channels/slack/permission-blocks.js';
+import { SLACK_PERMISSION_DECISION_ACTION_IDS } from '@core/channels/slack/permission-action-id.js';
 
 function createOpts(
   controlAllowlist = {
@@ -1066,8 +1067,11 @@ describe('Slack channel', () => {
     expect(new Set(actionIds).size).toBe(actionIds.length);
     expect(actionIds).toContain('gantry_perm_decision_allow_once');
 
+    for (const actionId of SLACK_PERMISSION_DECISION_ACTION_IDS) {
+      expect(appRef.current.actionHandlers.has(actionId)).toBe(true);
+    }
     const actionHandler = appRef.current.actionHandlers.get(
-      'gantry_perm_decision',
+      'gantry_perm_decision_allow_once',
     );
     await actionHandler?.({
       ack: vi.fn().mockResolvedValue(undefined),

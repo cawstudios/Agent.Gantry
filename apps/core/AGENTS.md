@@ -102,6 +102,12 @@
 - Permission approval timeout must stay human-scale by default (300000ms), resolve `PERMISSION_APPROVAL_TIMEOUT_MS` before `GANTRY_PERMISSION_TIMEOUT_MS`, and preserve runtime `.env` fallback for shared timeout consumers.
 - Permission approval prompts and receipts must stay scan-readable and auditable: format tool inputs with typed sections, show long commands with head/tail truncation, keep persistent rules in Details/audit using safe rule summaries, and keep receipts tied to the exact approved action.
 - Keep the architecture simple, do not over complicate
+- MCP source inventory, requestable semantic capabilities, and selected
+  `capability:<id>` authority must stay separate in runner projections.
+  Attaching an MCP source or listing a capability in the catalog must not hide
+  `request_access`; duplicate source/capability requests should be rejected by
+  the request tool handlers using selected authority checks that include both
+  startup configured tools and live tool rules for the active run.
 - Search Anthropic SDK in node modules and do not reinvent what already exists.
 - User-triggered `/dream` in threaded Slack/Teams/Telegram topic routes must carry the active thread id into `runDreamingForGroup`/`triggerDreaming`; maintenance dedupe keys should include thread scope only for thread-scoped runs, while background/system dreaming remains group-scoped.
 - Outbound delivery settlement must reject receipt rows whose `deliveryId`/`itemId` do not match the authenticated claim target, and recovery dispatch must always send to canonical delivery `conversationId`/`threadId` while treating provider destination hints as conflict checks only.

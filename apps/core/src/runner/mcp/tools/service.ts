@@ -6,7 +6,7 @@ import {
   attachedMcpSourceIds,
   capabilityStatusText,
   chatJid,
-  configuredAllowedTools,
+  currentConfiguredAllowedTools,
   deploymentMode,
   isAdminMcpToolEnabled,
   lockedAccessPreset,
@@ -164,14 +164,19 @@ export function registerServiceTools(server: McpServer): void {
   registerAccessRequestTool(server, submitCapabilityReviewTask, {
     listCapabilities: () => availableSemanticCapabilities,
     isCapabilitySelected: (capabilityId) =>
-      configuredAllowedTools.includes(`capability:${capabilityId}`),
+      currentConfiguredAllowedTools().includes(`capability:${capabilityId}`),
     validateRunCommandFallback: () => {
+      const currentAllowedTools = currentConfiguredAllowedTools();
       const selectedMcpCapabilityIds = availableSemanticCapabilities
-        .filter((capability) =>
-          capability.implementationBindings.some(
-            (binding) =>
-              binding.kind === 'mcp_tool' || Boolean(binding.mcpTool),
-          ),
+        .filter(
+          (capability) =>
+            currentAllowedTools.includes(
+              `capability:${capability.capabilityId}`,
+            ) &&
+            capability.implementationBindings.some(
+              (binding) =>
+                binding.kind === 'mcp_tool' || Boolean(binding.mcpTool),
+            ),
         )
         .map((capability) => capability.capabilityId)
         .sort();
@@ -676,12 +681,11 @@ function existingMcpSourceForRequest(name: string):
 function selectedMcpCapabilitiesForSource(serverName: string): string[] {
   const requestedName = normalizeMcpServerName(serverName);
   if (!requestedName) return [];
+  const currentAllowedTools = currentConfiguredAllowedTools();
   return availableSemanticCapabilities
     .filter((capability) => {
       if (
-        !configuredAllowedTools.includes(
-          `capability:${capability.capabilityId}`,
-        )
+        !currentAllowedTools.includes(`capability:${capability.capabilityId}`)
       ) {
         return false;
       }

@@ -122,6 +122,17 @@ export function currentEnabledAdminMcpTools(): Set<AdminMcpToolName> {
   return enabled;
 }
 
+export function currentConfiguredAllowedTools(): string[] {
+  const allowed = new Set(configuredAllowedTools);
+  for (const rule of readLiveToolRules({
+    ipcDir: IPC_DIR,
+    runHandle: process.env.GANTRY_AGENT_RUN_HANDLE,
+  })) {
+    allowed.add(rule);
+  }
+  return [...allowed];
+}
+
 function parseConfiguredAllowedTools(raw: string | undefined): string[] {
   return parseJsonStringArray(raw);
 }
@@ -193,6 +204,7 @@ function parseEnabledAdminMcpTools(
 
 export function capabilityStatusText(): string {
   const currentAdminTools = currentEnabledAdminMcpTools();
+  const currentAllowedTools = currentConfiguredAllowedTools();
   const selectedSkillStatusItems =
     selectedSkillDisplays.length > 0
       ? selectedSkillDisplays
@@ -216,7 +228,7 @@ export function capabilityStatusText(): string {
       toolName.startsWith('scheduler_'),
   );
   const requestableBrowserTools = buildRequestableBrowserToolAccess({
-    configuredTools: configuredAllowedTools,
+    configuredTools: currentAllowedTools,
   });
   // Locked agents get a provisioned-only view: no access-model ladder, no
   // requestable admin/browser/tool enumeration, no Tool Access block.
@@ -329,13 +341,13 @@ export function capabilityStatusText(): string {
     return lines.join('\n');
   }
   const view = buildAgentToolAccessView({
-    configuredTools: configuredAllowedTools,
+    configuredTools: currentAllowedTools,
     defaultTools: normalActionToolNames
       .filter((toolName) => !ADMIN_MCP_TOOL_NAMES.includes(toolName as never))
       .map(gantryMcpFullToolName),
     availableButGatedTools: PERMISSION_GATED_NATIVE_TOOLS.filter(
       (toolName) =>
-        !configuredAllowedTools.some(
+        !currentAllowedTools.some(
           (configured) =>
             configured === toolName || configured.startsWith(`${toolName}(`),
         ),
@@ -358,13 +370,16 @@ function displayMcpSourceName(sourceId: string): string {
 }
 
 function selectedMcpCapabilitiesForSource(serverName: string): string[] {
+  const currentAllowedTools = currentConfiguredAllowedTools();
   return availableSemanticCapabilities
-    .filter((capability) =>
-      capability.implementationBindings.some((binding) => {
-        if (binding.kind !== 'mcp_tool' && !binding.mcpTool) return false;
-        const match = /^mcp__(.+?)__/.exec(binding.mcpTool ?? '');
-        return match?.[1] === serverName;
-      }),
+    .filter(
+      (capability) =>
+        currentAllowedTools.includes(`capability:${capability.capabilityId}`) &&
+        capability.implementationBindings.some((binding) => {
+          if (binding.kind !== 'mcp_tool' && !binding.mcpTool) return false;
+          const match = /^mcp__(.+?)__/.exec(binding.mcpTool ?? '');
+          return match?.[1] === serverName;
+        }),
     )
     .map((capability) => capability.capabilityId)
     .sort();

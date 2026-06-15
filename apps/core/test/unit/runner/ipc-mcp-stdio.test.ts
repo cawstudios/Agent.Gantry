@@ -497,6 +497,38 @@ async function runMcpFixture(
   return { exitCode, stderr };
 }
 
+function writeLiveToolRules(
+  fixture: ReturnType<typeof createMcpFixture>,
+  rules: readonly string[],
+): void {
+  const liveRuleDir = path.join(fixture.ipcDir, 'live-tool-rules');
+  fs.mkdirSync(liveRuleDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(liveRuleDir, 'mcp-test-run.json'),
+    JSON.stringify(rules),
+  );
+}
+
+function cawAtsMcpCapability(mcpTool: string): Record<string, unknown> {
+  const allowedToolPattern = mcpTool.split('__').pop() || 'ats_list_positions';
+  return {
+    capabilityId: 'mcp.caw-ats.access',
+    version: '1',
+    displayName: 'caw-ats MCP access',
+    category: 'MCP',
+    risk: 'write',
+    can: 'Call approved tools on the caw-ats MCP server.',
+    cannot: 'Call unapproved MCP tools or receive raw credentials.',
+    credentialSource: 'none',
+    implementationBindings: [{ kind: 'mcp_tool', mcpTool }],
+    source: {
+      source: 'mcp',
+      serverName: 'caw-ats',
+      allowedToolPatterns: [allowedToolPattern],
+    },
+  };
+}
+
 describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
   it('consumes ask_user_question responses, formats answers, and unlinks the response file', async () => {
     const fixture = createMcpFixture();
@@ -667,12 +699,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
 
   it('activates admin MCP tools from live persistent approval rules', async () => {
     const fixture = createMcpFixture();
-    const liveRuleDir = path.join(fixture.ipcDir, 'live-tool-rules');
-    fs.mkdirSync(liveRuleDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(liveRuleDir, 'mcp-test-run.json'),
-      JSON.stringify(['mcp__gantry__service_restart']),
-    );
+    writeLiveToolRules(fixture, ['mcp__gantry__service_restart']);
 
     const result = await runMcpFixture(fixture, 'service_restart', {});
     expect(result.exitCode, result.stderr).toBe(0);
@@ -1096,28 +1123,11 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
           ],
         }),
         GANTRY_SELECTED_MCP_SERVERS_JSON: '["mcp:caw-ats"]',
+        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: JSON.stringify([
+          'capability:mcp.caw-ats.access',
+        ]),
         GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
-          {
-            capabilityId: 'mcp.caw-ats.access',
-            version: '1',
-            displayName: 'caw-ats MCP access',
-            category: 'MCP',
-            risk: 'write',
-            can: 'Call approved tools on the caw-ats MCP server.',
-            cannot: 'Call unapproved MCP tools or receive raw credentials.',
-            credentialSource: 'none',
-            implementationBindings: [
-              {
-                kind: 'mcp_tool',
-                mcpTool: 'mcp__caw-ats__ats_list_positions',
-              },
-            ],
-            source: {
-              source: 'mcp',
-              serverName: 'caw-ats',
-              allowedToolPatterns: ['ats_list_positions'],
-            },
-          },
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_positions'),
         ]),
       },
     );
@@ -1136,7 +1146,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     );
   });
 
-  it('rejects request_access run_command fallbacks when MCP access is selected', async () => {
+  it('allows request_access run_command fallbacks when MCP access is only requestable', async () => {
     const fixture = createMcpFixture();
 
     const result = await runMcpFixture(
@@ -1149,27 +1159,52 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
       },
       {
         GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
-          {
-            capabilityId: 'mcp.caw-ats.access',
-            version: '1',
-            displayName: 'caw-ats MCP access',
-            category: 'MCP',
-            risk: 'write',
-            can: 'Call approved tools on the caw-ats MCP server.',
-            cannot: 'Call unapproved MCP tools or receive raw credentials.',
-            credentialSource: 'none',
-            implementationBindings: [
-              {
-                kind: 'mcp_tool',
-                mcpTool: 'mcp__caw-ats__ats_list_positions',
-              },
-            ],
-            source: {
-              source: 'mcp',
-              serverName: 'caw-ats',
-              allowedToolPatterns: ['ats_list_positions'],
-            },
-          },
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_positions'),
+        ]),
+      },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
+    expect(record.result.isError).not.toBe(true);
+    expect(record.result.content[0].text).toContain('Scheduler task confirmed');
+    const taskDir = path.join(fixture.ipcDir, 'tasks');
+    const taskFiles = fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : [];
+    expect(taskFiles).toHaveLength(1);
+    const task = JSON.parse(
+      fs.readFileSync(path.join(taskDir, taskFiles[0]), 'utf-8'),
+    );
+    expect(task).toMatchObject({
+      type: 'request_permission',
+      targetJid: 'tg:team',
+      chatJid: 'tg:team',
+      payload: {
+        permissionKind: 'tool',
+        toolName: 'RunCommand',
+        rule: "jq '.[1].content' -r",
+        temporaryOnly: true,
+        reason: 'List Manipal projects from caw-ats.',
+      },
+    });
+  });
+
+  it('rejects request_access run_command fallbacks when MCP access is selected', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(
+      fixture,
+      'request_access',
+      {
+        target: { kind: 'run_command', argvPattern: "jq '.[1].content' -r" },
+        reason: 'List Manipal projects from caw-ats.',
+        temporaryOnly: true,
+      },
+      {
+        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: JSON.stringify([
+          'capability:mcp.caw-ats.access',
+        ]),
+        GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_positions'),
         ]),
       },
     );
@@ -1190,6 +1225,38 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
     expect(fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : []).toEqual([]);
   });
 
+  it('rejects request_access run_command fallbacks when MCP access is live-selected', async () => {
+    const fixture = createMcpFixture();
+    writeLiveToolRules(fixture, ['capability:mcp.caw-ats.access']);
+
+    const result = await runMcpFixture(
+      fixture,
+      'request_access',
+      {
+        target: { kind: 'run_command', argvPattern: "jq '.[1].content' -r" },
+        reason: 'List Manipal projects from caw-ats.',
+        temporaryOnly: true,
+      },
+      {
+        GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_positions'),
+        ]),
+      },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
+    expect(record.result.isError).toBe(true);
+    expect(record.result.content[0].text).toContain(
+      'RunCommand/Bash permission is not available as a fallback',
+    );
+    expect(record.result.content[0].text).toContain(
+      'Selected MCP capabilities: mcp.caw-ats.access',
+    );
+    const taskDir = path.join(fixture.ipcDir, 'tasks');
+    expect(fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : []).toEqual([]);
+  });
+
   it('rejects duplicate request_access capability requests when capability is already selected', async () => {
     const fixture = createMcpFixture();
 
@@ -1205,27 +1272,38 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
           'capability:mcp.caw-ats.access',
         ]),
         GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
-          {
-            capabilityId: 'mcp.caw-ats.access',
-            version: '1',
-            displayName: 'caw-ats MCP access',
-            category: 'MCP',
-            risk: 'write',
-            can: 'Call approved tools on the caw-ats MCP server.',
-            cannot: 'Call unapproved MCP tools or receive raw credentials.',
-            credentialSource: 'none',
-            implementationBindings: [
-              {
-                kind: 'mcp_tool',
-                mcpTool: 'mcp__caw-ats__ats_list_client_projects',
-              },
-            ],
-            source: {
-              source: 'mcp',
-              serverName: 'caw-ats',
-              allowedToolPatterns: ['ats_list_client_projects'],
-            },
-          },
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_client_projects'),
+        ]),
+      },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
+    expect(record.result.isError).toBe(true);
+    expect(record.result.content[0].text).toContain(
+      'already selected for this run',
+    );
+    expect(record.result.content[0].text).toContain(
+      'use mcp_list_tools to inspect the ready source, then mcp_call_tool',
+    );
+    const taskDir = path.join(fixture.ipcDir, 'tasks');
+    expect(fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : []).toEqual([]);
+  });
+
+  it('rejects duplicate request_access capability requests when capability is live-selected', async () => {
+    const fixture = createMcpFixture();
+    writeLiveToolRules(fixture, ['capability:mcp.caw-ats.access']);
+
+    const result = await runMcpFixture(
+      fixture,
+      'request_access',
+      {
+        target: { kind: 'capability', id: 'mcp.caw-ats.access' },
+        reason: 'List Flipspaces projects from caw-ats.',
+      },
+      {
+        GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_client_projects'),
         ]),
       },
     );
@@ -1263,27 +1341,7 @@ describe('agent-runner MCP stdio tools', { timeout: 35_000 }, () => {
           'capability:mcp.caw-ats.access',
         ]),
         GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
-          {
-            capabilityId: 'mcp.caw-ats.access',
-            version: '1',
-            displayName: 'caw-ats MCP access',
-            category: 'MCP',
-            risk: 'write',
-            can: 'Call approved tools on the caw-ats MCP server.',
-            cannot: 'Call unapproved MCP tools or receive raw credentials.',
-            credentialSource: 'none',
-            implementationBindings: [
-              {
-                kind: 'mcp_tool',
-                mcpTool: 'mcp__caw-ats__ats_list_client_projects',
-              },
-            ],
-            source: {
-              source: 'mcp',
-              serverName: 'caw-ats',
-              allowedToolPatterns: ['ats_list_client_projects'],
-            },
-          },
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_client_projects'),
         ]),
       },
     );
