@@ -18,11 +18,19 @@ interface WarmPoolEntry {
   retryTimer?: ReturnType<typeof setTimeout>;
 }
 
+export const WARM_POOL_ORPHAN_MARKER = 'gantry-warm-pool-worker';
+
+export interface WarmPoolOrphanReaper {
+  reap(marker: string): Promise<number>;
+}
+
 export interface WarmPoolManagerOptions {
   capability: WarmPoolCapable;
   clock?: () => number;
   maxConcurrentPrewarm?: number;
   replacementBackoffMs?: number;
+  orphanMarker?: string;
+  orphanReaper?: WarmPoolOrphanReaper;
 }
 
 export class WarmPoolManager {
@@ -30,9 +38,12 @@ export class WarmPoolManager {
   private readonly clock: () => number;
   private readonly maxConcurrentPrewarm: number;
   private readonly replacementBackoffMs: number;
+  private readonly orphanMarker: string;
+  private readonly orphanReaper?: WarmPoolOrphanReaper;
   private readonly entries = new Map<WarmPoolKey, WarmPoolEntry>();
   private activePrewarms = 0;
   private readonly prewarmWaiters: Array<() => void> = [];
+  private shuttingDown = false;
 
   constructor(options: WarmPoolManagerOptions) {
     this.capability = options.capability;
@@ -40,9 +51,12 @@ export class WarmPoolManager {
     this.maxConcurrentPrewarm =
       options.maxConcurrentPrewarm ?? Number.POSITIVE_INFINITY;
     this.replacementBackoffMs = options.replacementBackoffMs ?? 1_000;
+    this.orphanMarker = options.orphanMarker ?? WARM_POOL_ORPHAN_MARKER;
+    this.orphanReaper = options.orphanReaper;
   }
 
   async prewarm(recipe: SharedBootRecipe, count: number): Promise<void> {
+    if (this.shuttingDown) return;
     if (count <= 0) return;
     const entry = this.entryFor(recipe);
     entry.targetSize = Math.max(entry.targetSize, count);
@@ -64,6 +78,7 @@ export class WarmPoolManager {
   }
 
   async replenish(key: WarmPoolKey): Promise<void> {
+    if (this.shuttingDown) return;
     const entry = this.entries.get(key);
     if (!entry) return;
     const missing = entry.targetSize - entry.idle.length - entry.prewarming;
@@ -114,6 +129,7 @@ export class WarmPoolManager {
   }
 
   async shutdown(): Promise<void> {
+    this.shuttingDown = true;
     const entries = Array.from(this.entries.values());
     for (const entry of entries) {
       if (entry.retryTimer) clearTimeout(entry.retryTimer);
@@ -123,6 +139,11 @@ export class WarmPoolManager {
     await Promise.all(
       idleWorkers.map((worker) => this.capability.recycle(worker.handle)),
     );
+  }
+
+  async reapOrphans(): Promise<number> {
+    if (!this.orphanReaper) return 0;
+    return this.orphanReaper.reap(this.orphanMarker);
   }
 
   private entryFor(recipe: SharedBootRecipe): WarmPoolEntry {
@@ -148,7 +169,12 @@ export class WarmPoolManager {
       const handle = await this.withPrewarmSlot(() =>
         this.capability.prewarm(entry.recipe),
       );
+      if (!handle) return;
       handle.bound = false;
+      if (this.shuttingDown || this.entries.get(entry.recipe.key) !== entry) {
+        await this.capability.recycle(handle);
+        return;
+      }
       entry.idle.push({ handle, idleSince: this.clock() });
     } finally {
       entry.prewarming -= 1;
@@ -164,6 +190,7 @@ export class WarmPoolManager {
   }
 
   private scheduleReplenish(key: WarmPoolKey): void {
+    if (this.shuttingDown) return;
     const entry = this.entries.get(key);
     if (!entry || entry.retryTimer) return;
     entry.retryTimer = setTimeout(() => {
@@ -172,10 +199,13 @@ export class WarmPoolManager {
     }, this.replacementBackoffMs);
   }
 
-  private async withPrewarmSlot<T>(operation: () => Promise<T>): Promise<T> {
+  private async withPrewarmSlot<T>(
+    operation: () => Promise<T>,
+  ): Promise<T | undefined> {
     if (this.activePrewarms >= this.maxConcurrentPrewarm) {
       await new Promise<void>((resolve) => this.prewarmWaiters.push(resolve));
     }
+    if (this.shuttingDown) return undefined;
     this.activePrewarms += 1;
     try {
       return await operation();

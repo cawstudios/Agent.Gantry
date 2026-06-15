@@ -260,4 +260,76 @@ describe('WarmPoolManager', () => {
     expect(manager.acquire(recipe.key)?.id).toBe('worker-3');
     expect(manager.acquire(recipe.key)?.id).toBe('worker-4');
   });
+
+  it('shutdown recycles all idle warm workers', async () => {
+    let now = 1_000;
+    const { capability, recycled } = makeCapability(() => now);
+    const manager = new WarmPoolManager({ capability, clock: () => now });
+    const recipe = makeRecipe();
+    await manager.prewarm(recipe, 2);
+
+    await manager.shutdown();
+
+    expect(recycled.map((handle) => handle.id)).toEqual([
+      'worker-1',
+      'worker-2',
+    ]);
+    expect(manager.size(recipe.key)).toBe(0);
+  });
+
+  it('shutdown recycles a worker that finishes booting after shutdown starts', async () => {
+    let now = 1_000;
+    let releasePrewarm: (() => void) | undefined;
+    const recycled: WarmWorkerHandle[] = [];
+    const capability: WarmPoolCapable = {
+      id: 'anthropic:claude-agent-sdk',
+      prepare: async () => {
+        throw new Error('not used');
+      },
+      prewarm: vi.fn(async (recipe) => {
+        await new Promise<void>((resolve) => {
+          releasePrewarm = resolve;
+        });
+        return {
+          id: 'worker-1',
+          key: recipe.key,
+          bornAt: now,
+          bound: false,
+        };
+      }),
+      bind: async (): Promise<BoundRun> => {
+        throw new Error('not used');
+      },
+      recycle: vi.fn(async (handle) => {
+        recycled.push(handle);
+      }),
+    };
+    const manager = new WarmPoolManager({ capability, clock: () => now });
+    const recipe = makeRecipe();
+
+    const prewarm = manager.prewarm(recipe, 1);
+    await vi.waitFor(() => expect(capability.prewarm).toHaveBeenCalledTimes(1));
+    await manager.shutdown();
+    releasePrewarm?.();
+    await prewarm;
+
+    expect(recycled.map((handle) => handle.id)).toEqual(['worker-1']);
+    expect(manager.size(recipe.key)).toBe(0);
+  });
+
+  it('reaps previously tagged warm workers through the injected boot-time reaper', async () => {
+    let now = 1_000;
+    const { capability } = makeCapability(() => now);
+    const reap = vi.fn(async () => 2);
+    const manager = new WarmPoolManager({
+      capability,
+      clock: () => now,
+      orphanMarker: 'gantry-warm-pool:test',
+      orphanReaper: { reap },
+    });
+
+    await expect(manager.reapOrphans()).resolves.toBe(2);
+
+    expect(reap).toHaveBeenCalledWith('gantry-warm-pool:test');
+  });
 });
