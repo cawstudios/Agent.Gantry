@@ -91,6 +91,35 @@ describe('runStartup', () => {
     expect(result.runtimeSettings).toBe(runtimeSettings);
   });
 
+  it('reaps orphaned warm workers during startup when a pool is configured', async () => {
+    const reapOrphans = vi.fn(async () => 2);
+    const app = makeApp({
+      warmPool: {
+        acquire: vi.fn(() => null),
+        release: vi.fn(async () => undefined),
+        reapOrphans,
+      },
+    } as any);
+
+    await runStartup(app, {
+      ensureRuntimeLayoutDirectories: vi.fn(),
+      initializeRuntimeStorage: vi.fn(async () => ({}) as any),
+      loadRuntimeSettings: vi.fn(
+        () =>
+          ({
+            providers: {},
+            storage: {
+              postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
+            },
+            memory: {},
+          }) as any,
+      ),
+      logger: { info: vi.fn(), warn: vi.fn() },
+    });
+
+    expect(reapOrphans).toHaveBeenCalledOnce();
+  });
+
   it('creates an internal default agent for a fresh runtime with no registered groups', async () => {
     const groups: Record<string, any> = {};
     const app = makeApp({

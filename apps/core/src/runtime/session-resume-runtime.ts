@@ -339,6 +339,7 @@ export function buildRuntimeRunOptions(input: {
   publishRuntimeEvent?: RunAgentOptions['publishRuntimeEvent'];
   executionAdapter?: RunAgentOptions['executionAdapter'];
   executionAdapters?: RunAgentOptions['executionAdapters'];
+  warmPool?: RunAgentOptions['warmPool'];
   skillContext?: {
     appId: string;
     agentId: string;
@@ -397,6 +398,7 @@ export function buildRuntimeRunOptions(input: {
     ...(input.executionAdapters
       ? { executionAdapters: input.executionAdapters }
       : {}),
+    ...(input.warmPool ? { warmPool: input.warmPool } : {}),
   };
   return Object.keys(options).length > 0 ? options : undefined;
 }

@@ -52,3 +52,7 @@ session ID`, expire that provider session and retry the same turn once without
   but it is not evidence about realistic warm follow-up retention. Use a bounded
   longer value such as `20000` for warm-retention latency checks, and keep the
   30-minute default in mind when reasoning about production resource tradeoffs.
+- Warm-pool runtime code must stay provider-neutral. `runtime/warm-pool-manager`
+  may drive only the optional capability verbs (`prewarm`, `acquire`, `release`,
+  `healthCheck`, `shutdown`); SDK, MCP, query-loop, and runner-specific details
+  belong in the execution adapter.

@@ -21,6 +21,7 @@ export interface InstallShutdownHandlersOptions {
   closeOutboundDeliveryRecovery?: () => Promise<void>;
   closeSettingsWatcher?: () => void;
   closeBrowserToolBackends?: () => Promise<void>;
+  closeWarmPool?: () => Promise<void>;
 }
 
 function makeDefaultDeps(): ShutdownDeps {
@@ -46,6 +47,16 @@ export function installShutdownHandlers(
   const shutdown = async (signal: string) => {
     resolved.logger.info({ signal }, 'Shutdown signal received');
     await options.queue.shutdown(10000);
+    if (options.closeWarmPool) {
+      try {
+        await options.closeWarmPool();
+      } catch (err) {
+        resolved.logger.warn(
+          { err },
+          'Failed to close warm-pool workers during shutdown',
+        );
+      }
+    }
     if (options.closeBrowserToolBackends) {
       try {
         await options.closeBrowserToolBackends();

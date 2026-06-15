@@ -3270,6 +3270,30 @@ describe('createGroupProcessor', () => {
       expect(mockSpawnAgent.mock.calls[0][1]).not.toHaveProperty('sessionId');
     });
 
+    it('passes the warm pool runtime through to spawnAgent options', async () => {
+      const group = makeGroup({
+        folder: 'my-group',
+        requiresTrigger: false,
+      });
+      const warmPool = {
+        acquire: vi.fn(() => null),
+        release: vi.fn(async () => undefined),
+      };
+      const { deps } = setupHappyPath({ group });
+      deps.warmPool = warmPool;
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(mockSpawnAgent).toHaveBeenCalledWith(
+        group,
+        expect.any(Object),
+        expect.any(Function),
+        expect.any(Function),
+        expect.objectContaining({ warmPool }),
+      );
+    });
+
     it('passes channel conversation kind to getAgentTurnContext', async () => {
       const group = makeGroup({
         folder: 'my-group',

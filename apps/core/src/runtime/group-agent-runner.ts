@@ -485,6 +485,7 @@ export function createGroupAgentRunner(input: {
         publishRuntimeEvent: deps.publishRuntimeEvent,
         executionAdapter: deps.executionAdapter,
         executionAdapters: deps.executionAdapters,
+        warmPool: deps.warmPool,
         turnContext,
       });
       const expireTurnProviderSession = async (

@@ -2,6 +2,7 @@ import {
   ASSISTANT_NAME,
   getCredentialBrokerRuntimeConfig,
   getRuntimeQueueConfig,
+  getRuntimeWarmPoolConfig,
 } from '../../config/index.js';
 import {
   createAgentCredentialBroker,
@@ -53,8 +54,11 @@ import {
 } from '../../adapters/llm/default-runtime-adapters.js';
 import type { AgentExecutionAdapter } from '../../application/agent-execution/agent-execution-adapter.js';
 import type { AgentExecutionAdapterRegistry } from '../../application/agent-execution/agent-execution-adapter-registry.js';
+import { hasWarmPoolCapability } from '../../application/agent-execution/warm-pool-capable.js';
 import { registerMemoryLlmClient } from '../../memory/memory-llm-port.js';
 import { runClaudeQuery } from '../../adapters/llm/anthropic-claude-agent/memory-query.js';
+import { WarmPoolManager } from '../../runtime/warm-pool-manager.js';
+import type { WarmPoolRuntime } from '../../runtime/agent-spawn-types.js';
 
 export type RuntimeAppRepository = RuntimeRouterStateRepository &
   RuntimeMessageRepository &
@@ -65,6 +69,7 @@ export type RuntimeAppRepository = RuntimeRouterStateRepository &
 export interface RuntimeApp {
   executionAdapter: AgentExecutionAdapter;
   executionAdapters: AgentExecutionAdapterRegistry;
+  warmPool?: WarmPoolRuntime;
   queue: GroupQueue;
   // The guardrail classifier used on the agent-spawn path. Exposed so the
   // message loop can apply the same guardrail to the continuation path.
@@ -140,9 +145,23 @@ export interface RuntimeAppOptions {
   guardrailClassifier?: GroupProcessingDeps['guardrailClassifier'];
   executionAdapter?: AgentExecutionAdapter;
   executionAdapters?: AgentExecutionAdapterRegistry;
+  warmPool?: WarmPoolRuntime;
   opsRepository?: RuntimeAppRepository;
   /** Per-reply latency trace (best-effort). Injected at boot; absent in tests. */
   replyTrace?: GroupProcessingDeps['replyTrace'];
+}
+
+function createConfiguredWarmPool(
+  executionAdapter: AgentExecutionAdapter,
+): WarmPoolRuntime | undefined {
+  const config = getRuntimeWarmPoolConfig();
+  if (!config.enabled || !hasWarmPoolCapability(executionAdapter)) {
+    return undefined;
+  }
+  return new WarmPoolManager({
+    capability: executionAdapter,
+    maxConcurrentPrewarm: Math.max(1, config.size),
+  });
 }
 
 export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
@@ -174,6 +193,8 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   if (!executionAdapter) {
     throw new Error('Runtime requires at least one model execution adapter.');
   }
+  const warmPool =
+    options.warmPool ?? createConfiguredWarmPool(executionAdapter);
   registerMemoryLlmClient(createDefaultMemoryLlmClient());
   const mcpDnsValidationCache = new RemoteMcpDnsValidationCache();
   let credentialBrokerPromise:
@@ -578,11 +599,13 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     guardrailClassifier,
     executionAdapter,
     executionAdapters,
+    warmPool,
   });
 
   return {
     executionAdapter,
     executionAdapters,
+    ...(warmPool ? { warmPool } : {}),
     queue,
     guardrailClassifier,
     loadState,

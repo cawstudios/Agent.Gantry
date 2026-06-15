@@ -12,7 +12,10 @@ import type {
   RuntimeMessageRepository,
 } from '../domain/repositories/ops-repo.js';
 import type { AvailableGroup, spawnAgent } from './agent-spawn.js';
-import type { PooledWarmWorkerRun } from './agent-spawn-types.js';
+import type {
+  PooledWarmWorkerRun,
+  WarmPoolRuntime,
+} from './agent-spawn-types.js';
 import type { AgentCredentialBroker } from '../domain/ports/agent-credential-broker.js';
 import type { SkillArtifactStore } from '../domain/ports/skill-artifact-store.js';
 import type {
@@ -144,6 +147,7 @@ export interface GroupProcessingDeps {
   guardrailClassifier?: GuardrailClassifier;
   executionAdapter?: AgentExecutionAdapter;
   executionAdapters?: AgentExecutionAdapterRegistry;
+  warmPool?: WarmPoolRuntime;
   opsRepository?: GroupProcessingRepository;
   getRuntimeRepository?: () => GroupProcessingRepository;
   /** Per-reply latency trace (best-effort; absent in tests that don't trace). */

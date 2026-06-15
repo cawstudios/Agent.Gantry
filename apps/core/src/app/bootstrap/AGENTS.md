@@ -11,3 +11,7 @@
 - For already-known inbound direct conversations, enqueue the exact chat queue
   immediately after `storeMessage` succeeds so normal webhook turns do not wait
   for the poll loop. Keep the auto-registration case on the deferred path above.
+- Optional runtime-owned worker pools belong in bootstrap composition, not in
+  `GroupQueue`: construct them only behind their default-off config/capability
+  gates, pass them through `GroupProcessingDeps`, reap prior-process orphans
+  during startup, and close idle workers during shutdown.

@@ -128,6 +128,8 @@ export interface AgentProcessMetadata {
 export interface WarmPoolRuntime {
   acquire(key: WarmPoolKey): WarmWorkerHandle | null;
   release(handle: WarmWorkerHandle): Promise<void>;
+  reapOrphans?(): Promise<number>;
+  shutdown?(): Promise<void>;
 }
 
 export interface RunAgentOptions {

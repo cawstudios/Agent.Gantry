@@ -39,6 +39,27 @@ function makeDefaultDeps(): StartupDeps {
   };
 }
 
+async function reapWarmPoolOrphans(
+  app: RuntimeApp,
+  logger: StartupDeps['logger'],
+): Promise<void> {
+  if (!app.warmPool?.reapOrphans) return;
+  try {
+    const reaped = await app.warmPool.reapOrphans();
+    if (reaped > 0) {
+      logger.info(
+        { reaped },
+        'Reaped orphaned warm-pool workers from a previous runtime',
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { err },
+      'Failed to reap orphaned warm-pool workers during startup',
+    );
+  }
+}
+
 export async function runStartup(
   app: RuntimeApp,
   deps: Partial<StartupDeps> = {},
@@ -112,6 +133,7 @@ export async function runStartup(
   app.setProviderSettings(runtimeSettings.providers);
   app.setAgentsSettings(runtimeSettings.agents);
   assertInteraktInboundRoutingConfigured(runtimeSettings, resolved.logger);
+  await reapWarmPoolOrphans(app, resolved.logger);
   await app.loadState();
   await ensureFreshRuntimeHasDefaultAgent(
     app,

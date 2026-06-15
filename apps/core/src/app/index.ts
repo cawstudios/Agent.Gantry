@@ -143,6 +143,9 @@ export async function startGantryRuntime(
     closeScheduler: stopSchedulerLoop,
     closeOutboundDeliveryRecovery: stopOutboundDeliveryRecoveryLoop,
     closeSettingsWatcher: settingsWatcher.close,
+    closeWarmPool: app.warmPool?.shutdown
+      ? () => app.warmPool!.shutdown!()
+      : undefined,
     closeBrowserToolBackends: async () =>
       (await loadBrowserToolModule()).closeBrowserToolBackends(),
   });

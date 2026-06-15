@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ConversationRoute } from '@core/domain/types.js';
+import type { WarmPoolRuntime } from '@core/runtime/agent-spawn-types.js';
 
 function makeGroup(
   overrides: Partial<ConversationRoute> = {},
@@ -216,5 +217,20 @@ describe('runtime app credential binding', () => {
         2,
       ),
     });
+  });
+
+  it('wires the warm pool runtime into group processing when provided', async () => {
+    const { createRuntimeApp, createGroupProcessor } =
+      await loadRuntimeAppWithGroupProcessorSpy();
+    const warmPool: WarmPoolRuntime = {
+      acquire: vi.fn(() => null),
+      release: vi.fn(async () => undefined),
+    };
+
+    const app = createRuntimeApp({ warmPool });
+    const capturedDeps = vi.mocked(createGroupProcessor).mock.calls[0]?.[0];
+
+    expect(app.warmPool).toBe(warmPool);
+    expect(capturedDeps?.warmPool).toBe(warmPool);
   });
 });
