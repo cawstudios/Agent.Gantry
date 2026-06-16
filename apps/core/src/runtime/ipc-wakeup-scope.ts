@@ -50,8 +50,7 @@ export class IpcWakeupScopeTracker {
     return {
       scope,
       shouldProcessRequestLane: (sourceAgentFolder, lane) =>
-        scope === 'all' ||
-        Boolean(wakeHints.get(sourceAgentFolder)?.has(lane)),
+        scope === 'all' || Boolean(wakeHints.get(sourceAgentFolder)?.has(lane)),
     };
   }
 
