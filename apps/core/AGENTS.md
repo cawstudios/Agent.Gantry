@@ -26,6 +26,7 @@
 - Provider adapter registration must be explicit at bootstrap/composition; do not hide provider coupling behind concatenated dynamic imports from runtime or memory code.
 - Execution adapters may project provider process metadata such as `modelCredentialEnv`, but must not patch host-owned authority or continuity fields such as allowed tools, selected MCP servers, session id, chat id, or thread id after runtime validation.
 - Claude runtime materialization owns generated Claude config paths and protected-path projection; host spawn code should consume the execution adapter result instead of naming `.claude` settings or skills as durable inputs.
+- Anthropic Claude runtime materialization must receive the exact selected Gantry skill ids for the run. No selected skills means `query({ options: { skills: [] } })`; Browser may add only the generated `gantry-browser` skill when the canonical Browser capability is selected. Do not materialize bundled or artifact skills merely because they exist on disk or are enabled elsewhere.
 - Claude Agent SDK boundary env assertions must include `GANTRY_MEMORY_IPC_ACTIONS_JSON` in MCP server env (capability allowlist projection) and keep it out of top-level SDK process env.
 - Control HTTP route changes must have route-level coverage for encoded ids, app ownership checks, and pre-mutation authorization.
 - Control API bearer auth is JSON-only: use `GANTRY_CONTROL_API_KEYS_JSON` entries with explicit `kid`, `token`, `appId`, and `scopes`; do not reintroduce `GANTRY_CONTROL_API_KEY` or implicit all-scope local auth.

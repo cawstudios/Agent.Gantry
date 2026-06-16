@@ -377,7 +377,7 @@ describe('Claude Agent SDK boundary integration', () => {
       'hello from Gantry',
       env.mcpServerPath,
       runnerInput(),
-      { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR },
+      sdkProcessEnv(),
       'sonnet',
       undefined,
       undefined,
@@ -618,6 +618,31 @@ describe('Claude Agent SDK boundary integration', () => {
     expect(call?.options.systemPrompt.append).not.toContain(
       'prior user preference',
     );
+  });
+
+  it('passes an explicit empty SDK skills list when Gantry selected no skills', async () => {
+    const env = prepareRuntimeEnv();
+    vi.stubEnv(GANTRY_CLAUDE_SDK_SKILLS_ENV, JSON.stringify([]));
+    const { runQuery } = await importRunQuery();
+
+    await runQuery(
+      'hello from Gantry',
+      env.mcpServerPath,
+      runnerInput(),
+      { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR },
+      'sonnet',
+      undefined,
+      undefined,
+    );
+
+    const call = sdkState.calls[0];
+    expect(call?.options).toMatchObject({
+      settingSources: [],
+      strictMcpConfig: true,
+      skills: [],
+    });
+    expect(call?.options.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('1');
+    expect(call?.options.env.ENABLE_CLAUDEAI_MCP_SERVERS).toBe('false');
   });
 
   it('fails closed when Claude init reports the required Gantry MCP server is unavailable', async () => {
