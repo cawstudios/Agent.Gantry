@@ -166,7 +166,6 @@ export interface LiveLatencyBenchmarkSummaryInput {
 
 export interface StartupDiagnosticToLiveLatencyMetricsOptions {
   acceptedToRunnerStartMs?: number;
-  evidenceSource?: LiveLatencyStartupDiagnosticEvidenceSourceOption;
 }
 
 export interface LiveLatencyBenchmarkDiagnosticProjection {
@@ -198,7 +197,6 @@ export interface SyntheticLiveLatencyBenchmarkInput {
     string,
     readonly Record<string, unknown>[]
   >;
-  startupDiagnosticEvidenceSource?: LiveLatencyStartupDiagnosticEvidenceSourceOption;
   reportArtifactPath?: string;
   syntheticLatenciesMs?: Partial<
     Record<LiveLatencyBenchmarkMetricName, number>
@@ -271,10 +269,6 @@ const LIVE_LATENCY_READINESS_ALLOWED_EVIDENCE_SOURCES: Record<
   modelConstructionMs: ['runner_origin'],
 };
 
-type LiveLatencyStartupDiagnosticEvidenceSourceOption =
-  | 'fixture_seeded'
-  | 'diagnostic_origin';
-
 const BEFORE_FIRST_VISIBLE_SYNTHETIC_METRICS = [
   'hydrationLagMs',
   'bridgeLagMs',
@@ -327,54 +321,12 @@ function assignMeasuredMetric(
   projection.metricEvidenceSources[metricName] = evidenceSource;
 }
 
-function startupDiagnosticEvidenceSource(input: {
-  payload: Record<string, unknown>;
-  metricName: LiveLatencyBenchmarkMetricName;
-  requestedEvidenceSource: LiveLatencyStartupDiagnosticEvidenceSourceOption;
-}): LiveLatencyBenchmarkMetricEvidenceSource {
-  if (input.requestedEvidenceSource !== 'diagnostic_origin')
-    return 'fixture_seeded';
-
-  const diagnostic =
-    typeof input.payload.diagnostic === 'string'
-      ? input.payload.diagnostic
-      : '';
-  if (diagnostic === 'host_startup_projection') {
-    return 'runtime_origin';
-  }
-  if (diagnostic === 'runner_startup') {
-    return 'runner_origin';
-  }
-  if (diagnostic === 'runner_process_timing') {
-    if (
-      input.metricName === 'toolListingFilteringMs' ||
-      input.metricName === 'sandboxTemplateMs' ||
-      input.metricName === 'sandboxSpecMs'
-    ) {
-      return 'runtime_origin';
-    }
-    return 'runner_origin';
-  }
-  return 'fixture_seeded';
-}
-
 function assignStartupDiagnosticMetric(
   projection: LiveLatencyBenchmarkDiagnosticProjection,
-  payload: Record<string, unknown>,
   metricName: LiveLatencyBenchmarkMetricName,
   value: unknown,
-  requestedEvidenceSource: LiveLatencyStartupDiagnosticEvidenceSourceOption,
 ): void {
-  assignMeasuredMetric(
-    projection,
-    metricName,
-    value,
-    startupDiagnosticEvidenceSource({
-      payload,
-      metricName,
-      requestedEvidenceSource,
-    }),
-  );
+  assignMeasuredMetric(projection, metricName, value, 'fixture_seeded');
 }
 
 export function startupDiagnosticToLiveLatencyMetrics(
@@ -386,7 +338,6 @@ export function startupDiagnosticToLiveLatencyMetrics(
     metricSources: {},
     metricEvidenceSources: {},
   };
-  const requestedEvidenceSource = options.evidenceSource ?? 'fixture_seeded';
   const phases = readObject(payload.phases);
   const hostPhases = readObject(payload.hostPhases);
   const startupTiming = readObject(payload.startupTiming);
@@ -394,95 +345,71 @@ export function startupDiagnosticToLiveLatencyMetrics(
 
   assignStartupDiagnosticMetric(
     projection,
-    payload,
     'checkpointLoadMs',
     payload.checkpointLoadMs,
-    requestedEvidenceSource,
   );
   assignStartupDiagnosticMetric(
     projection,
-    payload,
     'checkpointWriteMs',
     payload.checkpointWriteMs,
-    requestedEvidenceSource,
   );
 
   if (phases) {
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'modelConstructionMs',
       phases.modelBuildMs,
-      requestedEvidenceSource,
     );
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'mcpClientStartupMs',
       phases.mcpConnectMs,
-      requestedEvidenceSource,
     );
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'permissionHitlSetupMs',
       phases.permissionEnvMs,
-      requestedEvidenceSource,
     );
   }
 
   if (hostPhases) {
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'toolListingFilteringMs',
       hostPhases.mcpProjectionMs,
-      requestedEvidenceSource,
     );
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'sandboxTemplateMs',
       hostPhases.sandboxTemplateMs,
-      requestedEvidenceSource,
     );
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'sandboxSpecMs',
       hostPhases.sandboxSpecMs,
-      requestedEvidenceSource,
     );
   }
 
   if (startupTiming) {
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'sandboxStartMs',
       startupTiming.sandboxStartCallMs,
-      requestedEvidenceSource,
     );
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'sandboxTemplateMs',
       startupTimingHostPhases?.sandboxTemplateMs,
-      requestedEvidenceSource,
     );
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'sandboxSpecMs',
       startupTimingHostPhases?.sandboxSpecMs,
-      requestedEvidenceSource,
     );
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'toolListingFilteringMs',
       startupTimingHostPhases?.mcpProjectionMs,
-      requestedEvidenceSource,
     );
   }
 
@@ -498,10 +425,8 @@ export function startupDiagnosticToLiveLatencyMetrics(
   ) {
     assignStartupDiagnosticMetric(
       projection,
-      payload,
       'acceptedToFirstVisibleMs',
       acceptedToRunnerStartMs + runnerFirstVisibleMs,
-      requestedEvidenceSource,
     );
   }
 
@@ -1004,8 +929,6 @@ export async function runSyntheticLiveLatencyBenchmark(
     for (const diagnostic of diagnostics ?? []) {
       const projection = startupDiagnosticToLiveLatencyMetrics(diagnostic, {
         acceptedToRunnerStartMs: sample.metrics.admissionLagMs,
-        evidenceSource:
-          input.startupDiagnosticEvidenceSource ?? 'fixture_seeded',
       });
       Object.assign(sample.metrics, projection.metrics);
       sample.metricEvidenceSources = {

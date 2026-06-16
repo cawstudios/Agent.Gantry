@@ -8,9 +8,16 @@ import {
   DEFAULT_APP_ID,
   DEFAULT_LLM_PROFILE_ID,
 } from '@core/adapters/storage/postgres/seeds.js';
+import { buildDeepAgentStartupDiagnosticEvent } from '@core/adapters/llm/deepagents-langchain/runner/startup-diagnostic.js';
 import type { AppId } from '@core/domain/app/app.js';
-import type { AgentRunId } from '@core/domain/events/events.js';
-import { RUNTIME_EVENT_TYPES } from '@core/domain/events/runtime-event-types.js';
+import type {
+  AgentRunId,
+  RuntimeEventPublishInput,
+} from '@core/domain/events/events.js';
+import { DEEPAGENTS_ENGINE } from '@core/shared/agent-engine.js';
+import { buildRunnerHostStartupDiagnosticEvent } from '@core/runtime/agent-spawn-startup-diagnostic.js';
+import { publishRunnerProcessStartupDiagnostic } from '@core/runtime/agent-spawn-process-diagnostic.js';
+import type { RunnerProcessSpec } from '@core/runtime/agent-spawn-types.js';
 
 import {
   LIVE_LATENCY_BENCHMARK_METRIC_NAMES,
@@ -25,6 +32,9 @@ import {
 
 const maybeDescribe = hasPostgresIntegrationDatabase ? describe : describe.skip;
 const BENCHMARK_RUN_ID = 'live-latency-benchmark-itest';
+const BENCHMARK_PROVIDER_CONNECTION_ID =
+  'provider-connection:live-latency-benchmark';
+const BENCHMARK_CONVERSATION_ID = 'conversation:live-latency-benchmark';
 
 function itemRunIdsByItemId(
   benchmarkRunId: string,
@@ -36,6 +46,147 @@ function itemRunIdsByItemId(
       `agent-run:${benchmarkRunId}:${index}`,
     ]),
   );
+}
+
+async function publishStartupDiagnostics(input: {
+  runtime: PostgresIntegrationRuntime;
+  appId: AppId;
+  runId: string;
+}): Promise<void> {
+  const publishRuntimeEvent = (event: RuntimeEventPublishInput) =>
+    input.runtime.storageRuntime.runtimeEvents.publish(event);
+  await publishRuntimeEvent(
+    buildRunnerHostStartupDiagnosticEvent({
+      appId: input.appId,
+      agentId: DEFAULT_AGENT_ID,
+      runId: input.runId,
+      conversationId: BENCHMARK_CONVERSATION_ID,
+      agentEngine: DEEPAGENTS_ENGINE,
+      executionProviderId: 'deepagents:langchain',
+      hostPhases: {
+        mcpProjectionMs: 12,
+        sandboxSpecMs: 4,
+      },
+      toolPolicyRuleCount: 0,
+      gantryMcpToolCount: 0,
+      attachedMcpSourceCount: 0,
+      projectedMcpSourceCount: 0,
+      selectedMcpServerCount: 0,
+      materializedMcpServerCount: 0,
+      runnerVisibleMcpServerCount: 0,
+      reviewedMcpToolCount: 0,
+      mcpConfigProjected: false,
+      mcpTransportCounts: { stdio: 0, http: 0, sse: 0 },
+      selectedSkillSourceCount: 0,
+      selectedSkillDisplayCount: 0,
+      selectedSkillSecretEnvCount: 0,
+      semanticCapabilityCount: 0,
+      runtimeAccessCount: 0,
+      browserIpcEnabled: false,
+      memoryIpcActionCount: 0,
+      deepAgentCheckpointerConfigured: true,
+      sandbox: {
+        provider: 'direct',
+        enforcing: false,
+        allowedNetworkHostCount: 0,
+        protectedReadPathCount: 0,
+        protectedWritePathCount: 0,
+        localCliCredentialPathCount: 0,
+        warmTemplateAvailable: false,
+        warmTemplateCacheHit: false,
+      },
+      egress: {
+        proxyConfigured: false,
+        upstreamProxyConfigured: false,
+      },
+      credentials: {
+        brokerApplied: true,
+        credentialProviderCount: 1,
+        modelCredentialEnvKeyCount: 1,
+      },
+      prompt: {
+        compiledSystemPromptChars: 0,
+      },
+    }),
+  );
+  await publishRuntimeEvent(
+    buildDeepAgentStartupDiagnosticEvent({
+      agentInput: {
+        appId: input.appId,
+        agentId: DEFAULT_AGENT_ID,
+        runId: input.runId,
+        prompt: 'benchmark',
+        workspaceFolder: '/tmp/gantry-live-latency-benchmark',
+        chatJid: BENCHMARK_CONVERSATION_ID,
+      },
+      modelProvider: 'openai',
+      modelId: 'benchmark-model',
+      endpointFamily: 'openai',
+      timing: {
+        totalMs: 40,
+        firstVisibleOutputMs: 21,
+        toolStartCount: 0,
+        phases: {
+          modelBuildMs: 3,
+          mcpConnectMs: 5,
+          permissionEnvMs: 1,
+        },
+      },
+      selectedAllowedToolCount: 0,
+      connectedToolCount: 0,
+      systemPromptChars: 0,
+      memoryContextChars: 0,
+      turnMessageCount: 1,
+      cacheMode: 'none',
+      checkpointerConfigured: true,
+      checkpointTiming: {
+        loadCount: 1,
+        loadMs: 9,
+        writeCount: 1,
+        writeMs: 18,
+      },
+      scheduledJob: false,
+    }) as RuntimeEventPublishInput,
+  );
+  const runnerProcessEvents: Promise<unknown>[] = [];
+  publishRunnerProcessStartupDiagnostic({
+    spec: {
+      input: {
+        appId: input.appId,
+        agentId: DEFAULT_AGENT_ID,
+        runId: input.runId,
+        prompt: 'benchmark',
+        workspaceFolder: '/tmp/gantry-live-latency-benchmark',
+        chatJid: BENCHMARK_CONVERSATION_ID,
+      },
+      options: {
+        publishRuntimeEvent: (event) => {
+          const published = publishRuntimeEvent(event);
+          runnerProcessEvents.push(published);
+          return published;
+        },
+        runnerSandboxProvider: {
+          id: 'direct',
+          enforcing: false,
+        },
+      },
+    } as RunnerProcessSpec,
+    code: 0,
+    signal: null,
+    hadStreamingOutput: true,
+    timedOut: false,
+    timeoutReason: 'timeout',
+    startupTiming: {
+      hostPreSpawnMs: 1,
+      sandboxStartCallMs: 6,
+      firstVisibleOutputMs: 31,
+      hostPhases: {
+        mcpProjectionMs: 12,
+        sandboxSpecMs: 4,
+      },
+    },
+  });
+  await Promise.all(runnerProcessEvents);
 }
 
 maybeDescribe('live latency benchmark (Postgres)', () => {
@@ -53,6 +204,32 @@ maybeDescribe('live latency benchmark (Postgres)', () => {
 
   it('rolls up 300 durable live admissions with required startup and UX fields', async () => {
     const appId = DEFAULT_APP_ID as AppId;
+    await runtime.repositories.providerConnections.saveProviderConnection({
+      id: BENCHMARK_PROVIDER_CONNECTION_ID as never,
+      appId,
+      providerId: 'telegram' as never,
+      externalInstallationRef: {
+        kind: 'provider_connection',
+        value: BENCHMARK_PROVIDER_CONNECTION_ID,
+      },
+      label: 'Live Latency Benchmark',
+      status: 'active',
+      config: {},
+      runtimeSecretRefs: [],
+      createdAt: '2026-06-16T00:00:00.000Z',
+      updatedAt: '2026-06-16T00:00:00.000Z',
+    });
+    await runtime.repositories.conversations.saveConversation({
+      id: BENCHMARK_CONVERSATION_ID as never,
+      appId,
+      providerConnectionId: BENCHMARK_PROVIDER_CONNECTION_ID as never,
+      externalRef: { kind: 'conversation', value: BENCHMARK_CONVERSATION_ID },
+      kind: 'group',
+      title: 'Live Latency Benchmark',
+      status: 'active',
+      createdAt: '2026-06-16T00:00:00.000Z',
+      updatedAt: '2026-06-16T00:00:00.000Z',
+    });
     const runIdsByItemId = itemRunIdsByItemId(BENCHMARK_RUN_ID, 300);
     const now = new Date().toISOString();
     for (const runId of runIdsByItemId.values()) {
@@ -69,69 +246,7 @@ maybeDescribe('live latency benchmark (Postgres)', () => {
         createdAt: now,
         startedAt: now,
       });
-      await runtime.repositories.runtimeEvents.appendRuntimeEvent({
-        appId,
-        runId: runId as AgentRunId,
-        eventType: RUNTIME_EVENT_TYPES.RUN_STARTUP_DIAGNOSTIC,
-        actor: 'runtime',
-        responseMode: 'none',
-        payload: {
-          provider: 'host',
-          diagnostic: 'host_startup_projection',
-          hostPhases: {
-            mcpProjectionMs: 12,
-            sandboxSpecMs: 4,
-          },
-        },
-      });
-      await runtime.repositories.runtimeEvents.appendRuntimeEvent({
-        appId,
-        runId: runId as AgentRunId,
-        eventType: RUNTIME_EVENT_TYPES.RUN_STARTUP_DIAGNOSTIC,
-        actor: 'runtime',
-        responseMode: 'none',
-        payload: {
-          provider: 'deepagents',
-          diagnostic: 'runner_startup',
-          checkpointLoadMs: 9,
-          checkpointWriteMs: 18,
-          firstVisibleOutputMs: 21,
-          phases: {
-            modelBuildMs: 3,
-            mcpConnectMs: 5,
-            permissionEnvMs: 1,
-          },
-        },
-      });
-      await runtime.repositories.runtimeEvents.appendRuntimeEvent({
-        appId,
-        runId: runId as AgentRunId,
-        eventType: RUNTIME_EVENT_TYPES.RUN_STARTUP_DIAGNOSTIC,
-        actor: 'runtime',
-        responseMode: 'none',
-        payload: {
-          provider: 'host',
-          diagnostic: 'runner_process_timing',
-          sandbox: {
-            provider: 'direct',
-            enforcing: false,
-          },
-          exit: {
-            code: 0,
-            signal: null,
-            timedOut: false,
-            hadStreamingOutput: true,
-          },
-          startupTiming: {
-            sandboxStartCallMs: 6,
-            firstVisibleOutputMs: 31,
-            hostPhases: {
-              mcpProjectionMs: 12,
-              sandboxSpecMs: 4,
-            },
-          },
-        },
-      });
+      await publishStartupDiagnostics({ runtime, appId, runId });
     }
     const startupDiagnosticsByItemId =
       await loadLiveLatencyStartupDiagnosticsFromRuntimeEvents({
@@ -223,6 +338,42 @@ maybeDescribe('live latency benchmark (Postgres)', () => {
     expect(report.measuredMetricNames).toContain('checkpointLoadMs');
     expect(report.measuredMetricNames).not.toContain('sandboxStartMs');
     expect(report.readiness.passed).toBe(false);
+    expect(report.readiness.failedMetricNames).toEqual(
+      expect.arrayContaining([
+        'acceptedToFirstVisibleMs',
+        'mcpClientStartupMs',
+        'toolListingFilteringMs',
+        'permissionHitlSetupMs',
+        'sandboxSpecMs',
+        'sandboxStartMs',
+        'modelConstructionMs',
+      ]),
+    );
+    expect(report.readiness.failureReasons).toEqual(
+      expect.arrayContaining(['synthetic_metric', 'untrusted_evidence_source']),
+    );
+    const fixtureSeededStartupReadinessMetrics = [
+      'acceptedToFirstVisibleMs',
+      'mcpClientStartupMs',
+      'toolListingFilteringMs',
+      'permissionHitlSetupMs',
+      'sandboxSpecMs',
+      'sandboxStartMs',
+      'modelConstructionMs',
+    ] as const;
+    for (const metricName of fixtureSeededStartupReadinessMetrics) {
+      expect(report.readiness.metrics[metricName]).toMatchObject({
+        source: 'synthetic',
+        count: 300,
+        evidenceSourceCounts: {
+          fixture_seeded: 300,
+        },
+        failureReasons: expect.arrayContaining([
+          'synthetic_metric',
+          'untrusted_evidence_source',
+        ]),
+      });
+    }
     expect(report.deferredCount).toBe(0);
     expect(report.degradedCount).toBe(0);
     expect(report.failureCount).toBe(0);
@@ -238,6 +389,10 @@ maybeDescribe('live latency benchmark (Postgres)', () => {
         syntheticMetricNames: expect.not.arrayContaining(['checkpointLoadMs']),
         readiness: {
           passed: false,
+          failedMetricNames: expect.arrayContaining([
+            'acceptedToFirstVisibleMs',
+            'sandboxStartMs',
+          ]),
         },
       },
     });

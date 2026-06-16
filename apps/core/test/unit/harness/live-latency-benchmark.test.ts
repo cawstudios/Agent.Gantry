@@ -481,7 +481,7 @@ describe('live latency benchmark harness', () => {
     );
   });
 
-  it('passes readiness through the benchmark runner with mixed diagnostic-origin evidence', async () => {
+  it('keeps diagnostic-shaped fixture payloads out of readiness', async () => {
     const diagnosticsByItemId = new Map(
       Array.from({ length: 300 }, (_, index) => [
         `mixed-origin:admission:${index}`,
@@ -527,26 +527,31 @@ describe('live latency benchmark harness', () => {
       claimBatchSize: 25,
       benchmarkRunId: 'mixed-origin',
       startupDiagnosticsByItemId: diagnosticsByItemId,
-      startupDiagnosticEvidenceSource: 'diagnostic_origin',
       sleepMs: async () => undefined,
     });
 
-    expect(report.readiness.passed).toBe(true);
-    expect(report.readiness.failedMetricNames).toEqual([]);
-    expect(report.measuredMetricNames).toEqual(
-      expect.arrayContaining([...LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES]),
+    expect(report.readiness.passed).toBe(false);
+    expect(report.readiness.failedMetricNames).toEqual(
+      expect.arrayContaining([
+        'acceptedToFirstVisibleMs',
+        'mcpClientStartupMs',
+        'toolListingFilteringMs',
+        'sandboxSpecMs',
+        'sandboxStartMs',
+        'modelConstructionMs',
+      ]),
     );
     expect(
       report.readiness.metrics.acceptedToFirstVisibleMs.evidenceSourceCounts
-        .runner_origin,
+        .fixture_seeded,
     ).toBe(300);
     expect(
       report.readiness.metrics.toolListingFilteringMs.evidenceSourceCounts
-        .runtime_origin,
+        .fixture_seeded,
     ).toBe(300);
     expect(
       report.readiness.metrics.sandboxSpecMs.evidenceSourceCounts
-        .runtime_origin,
+        .fixture_seeded,
     ).toBe(300);
   });
 
@@ -727,7 +732,7 @@ describe('live latency benchmark harness', () => {
     });
   });
 
-  it('classifies startup diagnostics from diagnostic shape when requested', () => {
+  it('does not trust diagnostic shape as readiness evidence', () => {
     const projection = startupDiagnosticToLiveLatencyMetrics(
       {
         provider: 'host',
@@ -741,14 +746,14 @@ describe('live latency benchmark harness', () => {
           },
         },
       },
-      { acceptedToRunnerStartMs: 9, evidenceSource: 'diagnostic_origin' },
+      { acceptedToRunnerStartMs: 9 },
     );
 
     expect(projection.metricEvidenceSources).toMatchObject({
-      acceptedToFirstVisibleMs: 'runner_origin',
-      toolListingFilteringMs: 'runtime_origin',
-      sandboxSpecMs: 'runtime_origin',
-      sandboxStartMs: 'runner_origin',
+      acceptedToFirstVisibleMs: 'fixture_seeded',
+      toolListingFilteringMs: 'fixture_seeded',
+      sandboxSpecMs: 'fixture_seeded',
+      sandboxStartMs: 'fixture_seeded',
     });
   });
 
