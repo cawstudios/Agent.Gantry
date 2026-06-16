@@ -589,7 +589,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
         // Process permission request/response IPC for this group
         try {
           if (
-            shouldProcessRequestLane(sourceAgentFolder, 'permission-requests') &&
+            shouldProcessRequestLane(
+              sourceAgentFolder,
+              'permission-requests',
+            ) &&
             runnerControlPort.isTrustedRequestDir(
               sourceAgentFolder,
               'permission-requests',
