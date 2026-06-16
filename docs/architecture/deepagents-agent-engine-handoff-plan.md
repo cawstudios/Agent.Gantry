@@ -81,7 +81,12 @@ Related lifecycle plan:
   `start_async_task`, `check_async_task`, `update_async_task`,
   `cancel_async_task`, or `list_async_tasks` as product-facing authority before
   that plan's durable lifecycle, permission, HITL, rejoin, receipt, sandbox,
-  MCP, skill-scope, and verification slices are implemented.
+  MCP, skill-scope, robustness, telemetry, and verification slices are
+  implemented.
+- Larger future slices are tracked in
+  `docs/architecture/task-lifecycle-future-slices/` so they are not lost while
+  the immediate wrapper remains scoped to neutral `task.*` event
+  normalization.
 
 ## Exact UX Contract
 
