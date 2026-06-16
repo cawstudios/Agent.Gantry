@@ -250,7 +250,14 @@ describe('assembleTimeline (v2)', () => {
     expect(t.totalMs).toBe(10_000);
     expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(10_000);
     const kinds = t.sections.map((s) => s.kind);
-    expect(kinds).toEqual(['queue', 'guardrail', 'startup', 'llm', 'gap', 'send']);
+    expect(kinds).toEqual([
+      'queue',
+      'guardrail',
+      'startup',
+      'llm',
+      'gap',
+      'send',
+    ]);
     const llm = t.sections.find((s) => s.kind === 'llm')!;
     expect(llm.startedAt).toBe(W0 + 3_000);
     expect(llm.ms).toBe(3_000);
@@ -410,7 +417,12 @@ describe('assembleTimeline (v2)', () => {
     });
     expect(t.totalMs).toBe(5000);
     expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(5000);
-    expect(t.sections.map((s) => s.kind)).toEqual(['queue', 'llm', 'gap', 'send']);
+    expect(t.sections.map((s) => s.kind)).toEqual([
+      'queue',
+      'llm',
+      'gap',
+      'send',
+    ]);
     expect(t.sections.find((s) => s.kind === 'queue')!.ms).toBe(300);
     const llm = t.sections.find((s) => s.kind === 'llm')!;
     expect(llm.startedAt).toBe(W0 + 300);
@@ -431,7 +443,9 @@ describe('assembleTimeline (v2)', () => {
     });
     expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(3000);
     expect(t.sections.filter((s) => s.kind === 'queue').length).toBe(1);
-    expect(t.sections.find((s) => s.kind === 'llm')!.detail.providerWaitMs).toBeUndefined();
+    expect(
+      t.sections.find((s) => s.kind === 'llm')!.detail.providerWaitMs,
+    ).toBeUndefined();
   });
 });
 

@@ -634,7 +634,9 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     );
     const executionProviderId = (initialModelSelection.model
       ?.executionProviderId ??
-      resolveRuntimeExecutionProviderId(executionAdapter)) as ExecutionProviderId;
+      resolveRuntimeExecutionProviderId(
+        executionAdapter,
+      )) as ExecutionProviderId;
     const sessionContext = await storage.ops.getAgentTurnContext?.({
       agentFolder: group.folder,
       executionProviderId,

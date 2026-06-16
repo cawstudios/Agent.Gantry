@@ -355,8 +355,7 @@ function buildTimeline(input: AssembleTimelineInput): BuiltTimeline {
     // The leading gap (still at windowStart) is queue time; other unnamed spans
     // are runtime hand-off/overhead. Provider first-response wait is folded into
     // the following LLM section instead of emitted as its own architecture stage.
-    const kind: TimelineSectionKind =
-      gapStart <= windowStart ? 'queue' : 'gap';
+    const kind: TimelineSectionKind = gapStart <= windowStart ? 'queue' : 'gap';
     const label = kind === 'queue' ? 'queue' : 'gap';
     sections.push({ kind, label, ms, startedAt: gapStart, detail: {} });
     payloadSources.push(undefined);

@@ -172,10 +172,9 @@ describe('Boondi regression scenarios', () => {
       process.env.GANTRY_HOME = runtimeHome;
       fs.writeFileSync(
         path.join(runtimeHome, '.env'),
-        [
-          'OTHER_KEY=ignored',
-          'GANTRY_TEST_OPERATOR_PHONE="919654405340"',
-        ].join('\n'),
+        ['OTHER_KEY=ignored', 'GANTRY_TEST_OPERATOR_PHONE="919654405340"'].join(
+          '\n',
+        ),
       );
 
       const phonesModule = (await import(

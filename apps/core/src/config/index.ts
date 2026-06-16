@@ -447,7 +447,10 @@ export const TIMEZONE = resolveConfigTimezone();
 
 // ── IPC transport config ──────────────────────────────────────────────────────
 export const IPC_TRANSPORT = 'socket' as const;
-function parseNonNegativeInteger(raw: string | undefined, fallback: number): number {
+function parseNonNegativeInteger(
+  raw: string | undefined,
+  fallback: number,
+): number {
   const parsed = parseInt(raw?.trim() ?? '', 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
@@ -473,13 +476,12 @@ export const IPC_EVENT_PIPE: boolean = parseBooleanEnv(
   process.env.GANTRY_IPC_EVENT_PIPE || envConfig.GANTRY_IPC_EVENT_PIPE,
   false,
 );
-export const IPC_EVENT_PIPE_DEBOUNCE_MS: number =
-  parseNonNegativeInteger(
-    process.env.GANTRY_IPC_EVENT_PIPE_DEBOUNCE_MS ||
-      envConfig.GANTRY_IPC_EVENT_PIPE_DEBOUNCE_MS ||
-      '',
-    0,
-  );
+export const IPC_EVENT_PIPE_DEBOUNCE_MS: number = parseNonNegativeInteger(
+  process.env.GANTRY_IPC_EVENT_PIPE_DEBOUNCE_MS ||
+    envConfig.GANTRY_IPC_EVENT_PIPE_DEBOUNCE_MS ||
+    '',
+  0,
+);
 export const IPC_SHUTDOWN_KILL: boolean = parseBooleanEnv(
   process.env.GANTRY_IPC_SHUTDOWN_KILL || envConfig.GANTRY_IPC_SHUTDOWN_KILL,
   false,

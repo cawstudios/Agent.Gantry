@@ -18,7 +18,8 @@ async function loadHandlers(runtimeHome: string) {
   vi.resetModules();
   vi.stubEnv('GANTRY_HOME', runtimeHome);
   const ipcAuth = await import('@core/runtime/ipc-auth.js');
-  const ipcResponseRouter = await import('@core/runtime/ipc-response-router.js');
+  const ipcResponseRouter =
+    await import('@core/runtime/ipc-response-router.js');
   const handlers = await import('@core/jobs/ipc-runtime-admin-handlers.js');
   return {
     ...handlers,

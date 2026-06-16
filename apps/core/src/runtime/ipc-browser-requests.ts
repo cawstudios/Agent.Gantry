@@ -1,7 +1,5 @@
 import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
-import {
-  getIpcResponseSigningPrivateKey,
-} from './ipc-auth.js';
+import { getIpcResponseSigningPrivateKey } from './ipc-auth.js';
 import type { ParsedBrowserIpcRequest } from './ipc-parsing.js';
 import {
   processBrowserIpcRequest,
@@ -86,7 +84,7 @@ export async function runBrowserIpcRequest(input: {
           request.responseKeyId,
         ),
       );
-  } catch (writeErr) {
+    } catch (writeErr) {
       logger.warn(
         { sourceAgentFolder, requestId: request.requestId, err: writeErr },
         'Failed to emit browser IPC error response',
@@ -126,7 +124,7 @@ export function writeBrowserFailureResponse(input: {
         responseKeyId,
       ),
     );
-    } catch (writeErr) {
+  } catch (writeErr) {
     logger.warn(
       { sourceAgentFolder, requestId, err: writeErr },
       'Failed to emit browser IPC error response',

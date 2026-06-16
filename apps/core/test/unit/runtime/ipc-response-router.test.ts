@@ -2,9 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MemoryIpcResponse } from '@gantry/contracts';
 
-import {
-  verifyIpcResponsePayload,
-} from '@core/infrastructure/ipc/response-signing.js';
+import { verifyIpcResponsePayload } from '@core/infrastructure/ipc/response-signing.js';
 import {
   createIpcAuthEnvelope,
   getIpcResponseSigningPrivateKey,

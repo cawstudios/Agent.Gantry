@@ -326,7 +326,6 @@ describe('sendTaskRequest (socket mode, injected fake client)', () => {
     });
     expect(fs.existsSync(TASKS_DIR)).toBe(false);
   });
-
 });
 
 // ---------------------------------------------------------------------------

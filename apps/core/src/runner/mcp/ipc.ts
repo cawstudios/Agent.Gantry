@@ -183,9 +183,9 @@ export function classifyMemorySocketError(
  *  - other {ok:false}     → a server transport error (invalid_request /
  *                           internal_error / rate_limited / busy) as text.
  */
-export function classifyUserQuestionSocketError(err: unknown):
-  | { kind: 'timeout' }
-  | { kind: 'result'; text: string } {
+export function classifyUserQuestionSocketError(
+  err: unknown,
+): { kind: 'timeout' } | { kind: 'result'; text: string } {
   if (!(err instanceof IpcRequestError)) {
     return {
       kind: 'result',
@@ -469,7 +469,7 @@ function getTaskSocketClient(): TaskSocketClientLike | undefined {
       buildSignedTaskEnvelope({
         kind: 'hello',
         role: 'mcp',
-        ...(getBoundRuntimeScope().runHandle ?? runHandle
+        ...((getBoundRuntimeScope().runHandle ?? runHandle)
           ? { runHandle: getBoundRuntimeScope().runHandle ?? runHandle }
           : {}),
         folder: groupFolder,
@@ -533,9 +533,7 @@ async function ensureTaskSocketConnected(
 export function classifyTaskSocketError(
   taskId: string,
   err: unknown,
-):
-  | { kind: 'null' }
-  | { kind: 'response'; response: TaskResponseEnvelope } {
+): { kind: 'null' } | { kind: 'response'; response: TaskResponseEnvelope } {
   if (!(err instanceof IpcRequestError)) {
     return {
       kind: 'response',

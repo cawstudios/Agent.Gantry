@@ -21,7 +21,8 @@ async function loadAdminHandlers(runtimeHome: string) {
     getRuntimeStorage: vi.fn(() => ({ repositories: {} })),
   }));
   const ipcAuth = await import('@core/runtime/ipc-auth.js');
-  const ipcResponseRouter = await import('@core/runtime/ipc-response-router.js');
+  const ipcResponseRouter =
+    await import('@core/runtime/ipc-response-router.js');
   const handlers = await import('@core/jobs/ipc-admin-handlers.js');
   return {
     ...handlers,

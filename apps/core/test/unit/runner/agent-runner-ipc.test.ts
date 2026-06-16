@@ -1368,7 +1368,6 @@ describe('agent-runner IPC lifecycle', () => {
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
-
 });
 
 const SOCKET_FOLDER = 'team';
@@ -1575,5 +1574,4 @@ describe('agent-runner socket transport continuation', () => {
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
-
 });

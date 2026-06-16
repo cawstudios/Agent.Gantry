@@ -35,13 +35,9 @@ describe('permission approval socket IPC boundary', () => {
 
     vi.resetModules();
     const { setActiveRunnerSocketClient } =
-      await import(
-        '@core/adapters/llm/anthropic-claude-agent/runner/active-runner-socket.js'
-      );
+      await import('@core/adapters/llm/anthropic-claude-agent/runner/active-runner-socket.js');
     const { requestPermissionApproval } =
-      await import(
-        '@core/adapters/llm/anthropic-claude-agent/runner/permission-callback.js'
-      );
+      await import('@core/adapters/llm/anthropic-claude-agent/runner/permission-callback.js');
 
     setActiveRunnerSocketClient({
       connected: true,
@@ -134,13 +130,9 @@ describe('permission approval socket IPC boundary', () => {
 
     vi.resetModules();
     const { setActiveRunnerSocketClient } =
-      await import(
-        '@core/adapters/llm/anthropic-claude-agent/runner/active-runner-socket.js'
-      );
+      await import('@core/adapters/llm/anthropic-claude-agent/runner/active-runner-socket.js');
     const { requestPermissionApproval } =
-      await import(
-        '@core/adapters/llm/anthropic-claude-agent/runner/permission-callback.js'
-      );
+      await import('@core/adapters/llm/anthropic-claude-agent/runner/permission-callback.js');
 
     setActiveRunnerSocketClient({
       connected: true,

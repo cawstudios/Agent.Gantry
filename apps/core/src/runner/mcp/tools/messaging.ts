@@ -146,7 +146,9 @@ export function registerMessagingTools(server: McpServer): void {
           };
         }
       }
-      return textResult('Message delivery failed: IPC socket is not connected.');
+      return textResult(
+        'Message delivery failed: IPC socket is not connected.',
+      );
     },
   );
 
@@ -251,7 +253,9 @@ export function registerMessagingTools(server: McpServer): void {
           }
         }
       }
-      return textResult('Question delivery failed: IPC socket is not connected.');
+      return textResult(
+        'Question delivery failed: IPC socket is not connected.',
+      );
     },
   );
 }

@@ -1103,15 +1103,12 @@ describe('agent-spawn timeout behavior', () => {
     const prewarm = vi.fn(async () => undefined);
     const warmProc = createFakeProcess();
     const warmPool: WarmPoolRuntime = {
-      acquire: vi
-        .fn()
-        .mockReturnValueOnce(null)
-        .mockReturnValueOnce({
-          id: 'warmed-after-fill',
-          key: 'warm-key',
-          bornAt: 100,
-          bound: false,
-        }),
+      acquire: vi.fn().mockReturnValueOnce(null).mockReturnValueOnce({
+        id: 'warmed-after-fill',
+        key: 'warm-key',
+        bornAt: 100,
+        bound: false,
+      }),
       prewarm,
       release: vi.fn(async () => undefined),
     };
