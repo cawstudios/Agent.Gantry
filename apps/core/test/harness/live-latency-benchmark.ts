@@ -42,6 +42,36 @@ export type LiveLatencyBenchmarkMetricName =
 
 export type LiveLatencyBenchmarkMetricSource = 'measured' | 'synthetic';
 
+export const LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES = [
+  'acceptedToFirstVisibleMs',
+  'admissionLagMs',
+  'dbPoolWaitMs',
+  'lockWaitMs',
+  'mcpClientStartupMs',
+  'toolListingFilteringMs',
+  'permissionHitlSetupMs',
+  'sandboxSpecMs',
+  'sandboxStartMs',
+  'modelConstructionMs',
+] as const satisfies readonly LiveLatencyBenchmarkMetricName[];
+
+export type LiveLatencyReadinessRequiredMetricName =
+  (typeof LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES)[number];
+
+export type LiveLatencyBenchmarkMetricEvidenceSource =
+  | 'benchmark_observed'
+  | 'runtime_origin'
+  | 'runner_origin'
+  | 'fixture_seeded'
+  | 'synthetic';
+
+export type LiveLatencyBenchmarkMetricEvidenceSources = Partial<
+  Record<
+    LiveLatencyBenchmarkMetricName,
+    LiveLatencyBenchmarkMetricEvidenceSource
+  >
+>;
+
 export type LiveLatencyBenchmarkMetricValues = Partial<
   Record<LiveLatencyBenchmarkMetricName, number>
 >;
@@ -49,6 +79,7 @@ export type LiveLatencyBenchmarkMetricValues = Partial<
 export interface LiveLatencyBenchmarkSample {
   id: string;
   metrics: LiveLatencyBenchmarkMetricValues;
+  metricEvidenceSources?: LiveLatencyBenchmarkMetricEvidenceSources;
 }
 
 export interface LiveLatencyBenchmarkMetricSummary {
@@ -77,6 +108,41 @@ export interface LiveLatencyBenchmarkReport {
   deferredCount: number;
   degradedCount: number;
   failureCount: number;
+  readiness: LiveLatencyBenchmarkReadinessReport;
+}
+
+export type LiveLatencyBenchmarkReadinessFailureReason =
+  | 'missing_metric'
+  | 'synthetic_metric'
+  | 'untrusted_evidence_source'
+  | 'first_visible_slo_failed'
+  | 'benchmark_deferred'
+  | 'benchmark_degraded'
+  | 'benchmark_failure';
+
+export interface LiveLatencyBenchmarkReadinessMetric {
+  metricName: LiveLatencyReadinessRequiredMetricName;
+  ready: boolean;
+  source: LiveLatencyBenchmarkMetricSource;
+  count: number;
+  missing: number;
+  evidenceSourceCounts: Partial<
+    Record<LiveLatencyBenchmarkMetricEvidenceSource, number>
+  >;
+  allowedEvidenceSources: LiveLatencyBenchmarkMetricEvidenceSource[];
+  failureReasons: LiveLatencyBenchmarkReadinessFailureReason[];
+}
+
+export interface LiveLatencyBenchmarkReadinessReport {
+  passed: boolean;
+  requiredMetricNames: LiveLatencyReadinessRequiredMetricName[];
+  failedMetricNames: LiveLatencyReadinessRequiredMetricName[];
+  failureReasons: LiveLatencyBenchmarkReadinessFailureReason[];
+  metrics: Record<
+    LiveLatencyReadinessRequiredMetricName,
+    LiveLatencyBenchmarkReadinessMetric
+  >;
+  nonReadinessSyntheticMetricNames: LiveLatencyBenchmarkMetricName[];
 }
 
 export interface LiveLatencyBenchmarkReportArtifact {
@@ -100,6 +166,7 @@ export interface LiveLatencyBenchmarkSummaryInput {
 
 export interface StartupDiagnosticToLiveLatencyMetricsOptions {
   acceptedToRunnerStartMs?: number;
+  evidenceSource?: LiveLatencyStartupDiagnosticEvidenceSourceOption;
 }
 
 export interface LiveLatencyBenchmarkDiagnosticProjection {
@@ -107,6 +174,7 @@ export interface LiveLatencyBenchmarkDiagnosticProjection {
   metricSources: Partial<
     Record<LiveLatencyBenchmarkMetricName, LiveLatencyBenchmarkMetricSource>
   >;
+  metricEvidenceSources: LiveLatencyBenchmarkMetricEvidenceSources;
 }
 
 export interface LiveLatencyStartupDiagnosticsFromRuntimeEventsInput {
@@ -130,6 +198,7 @@ export interface SyntheticLiveLatencyBenchmarkInput {
     string,
     readonly Record<string, unknown>[]
   >;
+  startupDiagnosticEvidenceSource?: LiveLatencyStartupDiagnosticEvidenceSourceOption;
   reportArtifactPath?: string;
   syntheticLatenciesMs?: Partial<
     Record<LiveLatencyBenchmarkMetricName, number>
@@ -186,6 +255,26 @@ const DEFAULT_METRIC_SOURCES: Record<
   notifyLagMs: 'synthetic',
 };
 
+const LIVE_LATENCY_READINESS_ALLOWED_EVIDENCE_SOURCES: Record<
+  LiveLatencyReadinessRequiredMetricName,
+  readonly LiveLatencyBenchmarkMetricEvidenceSource[]
+> = {
+  acceptedToFirstVisibleMs: ['runner_origin'],
+  admissionLagMs: ['benchmark_observed'],
+  dbPoolWaitMs: ['benchmark_observed'],
+  lockWaitMs: ['benchmark_observed'],
+  mcpClientStartupMs: ['runner_origin'],
+  toolListingFilteringMs: ['runtime_origin'],
+  permissionHitlSetupMs: ['runner_origin'],
+  sandboxSpecMs: ['runtime_origin'],
+  sandboxStartMs: ['runner_origin'],
+  modelConstructionMs: ['runner_origin'],
+};
+
+type LiveLatencyStartupDiagnosticEvidenceSourceOption =
+  | 'fixture_seeded'
+  | 'diagnostic_origin';
+
 const BEFORE_FIRST_VISIBLE_SYNTHETIC_METRICS = [
   'hydrationLagMs',
   'bridgeLagMs',
@@ -229,11 +318,63 @@ function assignMeasuredMetric(
   projection: LiveLatencyBenchmarkDiagnosticProjection,
   metricName: LiveLatencyBenchmarkMetricName,
   value: unknown,
+  evidenceSource: LiveLatencyBenchmarkMetricEvidenceSource,
 ): void {
   const normalized = normalizeMetricValue(value);
   if (normalized === undefined) return;
   projection.metrics[metricName] = normalized;
   projection.metricSources[metricName] = 'measured';
+  projection.metricEvidenceSources[metricName] = evidenceSource;
+}
+
+function startupDiagnosticEvidenceSource(input: {
+  payload: Record<string, unknown>;
+  metricName: LiveLatencyBenchmarkMetricName;
+  requestedEvidenceSource: LiveLatencyStartupDiagnosticEvidenceSourceOption;
+}): LiveLatencyBenchmarkMetricEvidenceSource {
+  if (input.requestedEvidenceSource !== 'diagnostic_origin')
+    return 'fixture_seeded';
+
+  const diagnostic =
+    typeof input.payload.diagnostic === 'string'
+      ? input.payload.diagnostic
+      : '';
+  if (diagnostic === 'host_startup_projection') {
+    return 'runtime_origin';
+  }
+  if (diagnostic === 'runner_startup') {
+    return 'runner_origin';
+  }
+  if (diagnostic === 'runner_process_timing') {
+    if (
+      input.metricName === 'toolListingFilteringMs' ||
+      input.metricName === 'sandboxTemplateMs' ||
+      input.metricName === 'sandboxSpecMs'
+    ) {
+      return 'runtime_origin';
+    }
+    return 'runner_origin';
+  }
+  return 'fixture_seeded';
+}
+
+function assignStartupDiagnosticMetric(
+  projection: LiveLatencyBenchmarkDiagnosticProjection,
+  payload: Record<string, unknown>,
+  metricName: LiveLatencyBenchmarkMetricName,
+  value: unknown,
+  requestedEvidenceSource: LiveLatencyStartupDiagnosticEvidenceSourceOption,
+): void {
+  assignMeasuredMetric(
+    projection,
+    metricName,
+    value,
+    startupDiagnosticEvidenceSource({
+      payload,
+      metricName,
+      requestedEvidenceSource,
+    }),
+  );
 }
 
 export function startupDiagnosticToLiveLatencyMetrics(
@@ -243,71 +384,105 @@ export function startupDiagnosticToLiveLatencyMetrics(
   const projection: LiveLatencyBenchmarkDiagnosticProjection = {
     metrics: {},
     metricSources: {},
+    metricEvidenceSources: {},
   };
+  const requestedEvidenceSource = options.evidenceSource ?? 'fixture_seeded';
   const phases = readObject(payload.phases);
   const hostPhases = readObject(payload.hostPhases);
   const startupTiming = readObject(payload.startupTiming);
   const startupTimingHostPhases = readObject(startupTiming?.hostPhases);
 
-  assignMeasuredMetric(
+  assignStartupDiagnosticMetric(
     projection,
+    payload,
     'checkpointLoadMs',
     payload.checkpointLoadMs,
+    requestedEvidenceSource,
   );
-  assignMeasuredMetric(
+  assignStartupDiagnosticMetric(
     projection,
+    payload,
     'checkpointWriteMs',
     payload.checkpointWriteMs,
+    requestedEvidenceSource,
   );
 
   if (phases) {
-    assignMeasuredMetric(
+    assignStartupDiagnosticMetric(
       projection,
+      payload,
       'modelConstructionMs',
       phases.modelBuildMs,
+      requestedEvidenceSource,
     );
-    assignMeasuredMetric(projection, 'mcpClientStartupMs', phases.mcpConnectMs);
-    assignMeasuredMetric(
+    assignStartupDiagnosticMetric(
       projection,
+      payload,
+      'mcpClientStartupMs',
+      phases.mcpConnectMs,
+      requestedEvidenceSource,
+    );
+    assignStartupDiagnosticMetric(
+      projection,
+      payload,
       'permissionHitlSetupMs',
       phases.permissionEnvMs,
+      requestedEvidenceSource,
     );
   }
 
   if (hostPhases) {
-    assignMeasuredMetric(
+    assignStartupDiagnosticMetric(
       projection,
+      payload,
       'toolListingFilteringMs',
       hostPhases.mcpProjectionMs,
+      requestedEvidenceSource,
     );
-    assignMeasuredMetric(
+    assignStartupDiagnosticMetric(
       projection,
+      payload,
       'sandboxTemplateMs',
       hostPhases.sandboxTemplateMs,
+      requestedEvidenceSource,
     );
-    assignMeasuredMetric(projection, 'sandboxSpecMs', hostPhases.sandboxSpecMs);
+    assignStartupDiagnosticMetric(
+      projection,
+      payload,
+      'sandboxSpecMs',
+      hostPhases.sandboxSpecMs,
+      requestedEvidenceSource,
+    );
   }
 
   if (startupTiming) {
-    assignMeasuredMetric(
+    assignStartupDiagnosticMetric(
       projection,
+      payload,
       'sandboxStartMs',
       startupTiming.sandboxStartCallMs,
+      requestedEvidenceSource,
     );
-    assignMeasuredMetric(
+    assignStartupDiagnosticMetric(
       projection,
+      payload,
       'sandboxTemplateMs',
       startupTimingHostPhases?.sandboxTemplateMs,
+      requestedEvidenceSource,
     );
-    assignMeasuredMetric(
+    assignStartupDiagnosticMetric(
       projection,
+      payload,
       'sandboxSpecMs',
       startupTimingHostPhases?.sandboxSpecMs,
+      requestedEvidenceSource,
     );
-    assignMeasuredMetric(
+    assignStartupDiagnosticMetric(
       projection,
+      payload,
       'toolListingFilteringMs',
       startupTimingHostPhases?.mcpProjectionMs,
+      requestedEvidenceSource,
     );
   }
 
@@ -321,10 +496,12 @@ export function startupDiagnosticToLiveLatencyMetrics(
     acceptedToRunnerStartMs !== undefined &&
     runnerFirstVisibleMs !== undefined
   ) {
-    assignMeasuredMetric(
+    assignStartupDiagnosticMetric(
       projection,
+      payload,
       'acceptedToFirstVisibleMs',
       acceptedToRunnerStartMs + runnerFirstVisibleMs,
+      requestedEvidenceSource,
     );
   }
 
@@ -418,6 +595,172 @@ function summarizeMetric(input: {
   };
 }
 
+function countMetricEvidenceSources(input: {
+  samples: LiveLatencyBenchmarkSample[];
+  metricName: LiveLatencyBenchmarkMetricName;
+}): Partial<Record<LiveLatencyBenchmarkMetricEvidenceSource, number>> {
+  const counts: Partial<
+    Record<LiveLatencyBenchmarkMetricEvidenceSource, number>
+  > = {};
+  for (const sample of input.samples) {
+    const source = sample.metricEvidenceSources?.[input.metricName];
+    if (!source) continue;
+    counts[source] = (counts[source] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function readinessMetricHasTrustedEvidence(input: {
+  samples: LiveLatencyBenchmarkSample[];
+  metricName: LiveLatencyReadinessRequiredMetricName;
+}): boolean {
+  if (input.samples.length === 0) return false;
+  const allowedEvidenceSources =
+    LIVE_LATENCY_READINESS_ALLOWED_EVIDENCE_SOURCES[input.metricName];
+  return input.samples.every((sample) => {
+    const value = normalizeMetricValue(sample.metrics[input.metricName]);
+    if (value === undefined) return false;
+    const evidenceSource = sample.metricEvidenceSources?.[input.metricName];
+    return (
+      evidenceSource !== undefined &&
+      allowedEvidenceSources.includes(evidenceSource)
+    );
+  });
+}
+
+function effectiveMetricSources(input: {
+  samples: LiveLatencyBenchmarkSample[];
+  metricSources: Record<
+    LiveLatencyBenchmarkMetricName,
+    LiveLatencyBenchmarkMetricSource
+  >;
+}): Record<LiveLatencyBenchmarkMetricName, LiveLatencyBenchmarkMetricSource> {
+  const sources = { ...input.metricSources };
+  for (const metricName of LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES) {
+    if (
+      sources[metricName] === 'measured' &&
+      !readinessMetricHasTrustedEvidence({
+        samples: input.samples,
+        metricName,
+      })
+    ) {
+      sources[metricName] = 'synthetic';
+    }
+  }
+  return sources;
+}
+
+function readinessFailureReasons(input: {
+  summary: LiveLatencyBenchmarkMetricSummary;
+  evidenceSourceCounts: Partial<
+    Record<LiveLatencyBenchmarkMetricEvidenceSource, number>
+  >;
+  sampleCount: number;
+  allowedEvidenceSources: readonly LiveLatencyBenchmarkMetricEvidenceSource[];
+}): LiveLatencyBenchmarkReadinessFailureReason[] {
+  const reasons: LiveLatencyBenchmarkReadinessFailureReason[] = [];
+  if (input.summary.count !== input.sampleCount || input.summary.missing > 0) {
+    reasons.push('missing_metric');
+  }
+  if (input.summary.source !== 'measured') {
+    reasons.push('synthetic_metric');
+  }
+  const allowedCount = input.allowedEvidenceSources.reduce(
+    (total, source) => total + (input.evidenceSourceCounts[source] ?? 0),
+    0,
+  );
+  if (allowedCount !== input.sampleCount) {
+    reasons.push('untrusted_evidence_source');
+  }
+  return reasons;
+}
+
+function uniqueReasons(
+  reasons: LiveLatencyBenchmarkReadinessFailureReason[],
+): LiveLatencyBenchmarkReadinessFailureReason[] {
+  return [...new Set(reasons)];
+}
+
+function summarizeReadiness(input: {
+  samples: LiveLatencyBenchmarkSample[];
+  metrics: Record<
+    LiveLatencyBenchmarkMetricName,
+    LiveLatencyBenchmarkMetricSummary
+  >;
+  syntheticMetricNames: LiveLatencyBenchmarkMetricName[];
+  passedFirstVisibleSlo: boolean;
+  deferredCount: number;
+  degradedCount: number;
+  failureCount: number;
+}): LiveLatencyBenchmarkReadinessReport {
+  const metricEntries = LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES.map(
+    (
+      metricName,
+    ): [
+      LiveLatencyReadinessRequiredMetricName,
+      LiveLatencyBenchmarkReadinessMetric,
+    ] => {
+      const summary = input.metrics[metricName];
+      const allowedEvidenceSources =
+        LIVE_LATENCY_READINESS_ALLOWED_EVIDENCE_SOURCES[metricName];
+      const evidenceSourceCounts = countMetricEvidenceSources({
+        samples: input.samples,
+        metricName,
+      });
+      const failureReasons = readinessFailureReasons({
+        summary,
+        evidenceSourceCounts,
+        sampleCount: input.samples.length,
+        allowedEvidenceSources,
+      });
+      return [
+        metricName,
+        {
+          metricName,
+          ready: failureReasons.length === 0,
+          source: summary.source,
+          count: summary.count,
+          missing: summary.missing,
+          evidenceSourceCounts,
+          allowedEvidenceSources: [...allowedEvidenceSources],
+          failureReasons,
+        },
+      ];
+    },
+  );
+  const metrics = Object.fromEntries(metricEntries) as Record<
+    LiveLatencyReadinessRequiredMetricName,
+    LiveLatencyBenchmarkReadinessMetric
+  >;
+  const failedMetricNames = LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES.filter(
+    (metricName) => !metrics[metricName].ready,
+  );
+  const globalFailureReasons: LiveLatencyBenchmarkReadinessFailureReason[] = [];
+  if (!input.passedFirstVisibleSlo) {
+    globalFailureReasons.push('first_visible_slo_failed');
+  }
+  if (input.deferredCount > 0) globalFailureReasons.push('benchmark_deferred');
+  if (input.degradedCount > 0) globalFailureReasons.push('benchmark_degraded');
+  if (input.failureCount > 0) globalFailureReasons.push('benchmark_failure');
+
+  return {
+    passed: failedMetricNames.length === 0 && globalFailureReasons.length === 0,
+    requiredMetricNames: [...LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES],
+    failedMetricNames,
+    failureReasons: uniqueReasons([
+      ...globalFailureReasons,
+      ...Object.values(metrics).flatMap((metric) => metric.failureReasons),
+    ]),
+    metrics,
+    nonReadinessSyntheticMetricNames: input.syntheticMetricNames.filter(
+      (metricName) =>
+        !LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES.includes(
+          metricName as LiveLatencyReadinessRequiredMetricName,
+        ),
+    ),
+  };
+}
+
 export function summarizeLiveLatencyBenchmark(
   input: LiveLatencyBenchmarkSummaryInput,
 ): LiveLatencyBenchmarkReport {
@@ -427,13 +770,17 @@ export function summarizeLiveLatencyBenchmark(
     ...DEFAULT_METRIC_SOURCES,
     ...(input.metricSources ?? {}),
   };
+  const reportMetricSources = effectiveMetricSources({
+    samples: input.samples,
+    metricSources,
+  });
   const metrics = Object.fromEntries(
     LIVE_LATENCY_BENCHMARK_METRIC_NAMES.map((metricName) => [
       metricName,
       summarizeMetric({
         samples: input.samples,
         metricName,
-        source: metricSources[metricName],
+        source: reportMetricSources[metricName],
       }),
     ]),
   ) as Record<
@@ -442,25 +789,41 @@ export function summarizeLiveLatencyBenchmark(
   >;
 
   const firstVisibleP95 = metrics.acceptedToFirstVisibleMs.p95;
+  const passedFirstVisibleSlo =
+    firstVisibleP95 !== null && firstVisibleP95 <= firstVisibleSloMs;
+  const measuredMetricNames = LIVE_LATENCY_BENCHMARK_METRIC_NAMES.filter(
+    (metricName) => reportMetricSources[metricName] === 'measured',
+  );
+  const syntheticMetricNames = LIVE_LATENCY_BENCHMARK_METRIC_NAMES.filter(
+    (metricName) => reportMetricSources[metricName] === 'synthetic',
+  );
+  const missingMetricNames = LIVE_LATENCY_BENCHMARK_METRIC_NAMES.filter(
+    (metricName) => metrics[metricName].count === 0,
+  );
+  const deferredCount = input.deferredCount ?? 0;
+  const degradedCount = input.degradedCount ?? 0;
+  const failureCount = input.failureCount ?? 0;
   return {
     concurrency: input.concurrency,
     sampleCount: input.samples.length,
     firstVisibleSloMs,
-    passedFirstVisibleSlo:
-      firstVisibleP95 !== null && firstVisibleP95 <= firstVisibleSloMs,
+    passedFirstVisibleSlo,
     metrics,
-    measuredMetricNames: LIVE_LATENCY_BENCHMARK_METRIC_NAMES.filter(
-      (metricName) => metricSources[metricName] === 'measured',
-    ),
-    syntheticMetricNames: LIVE_LATENCY_BENCHMARK_METRIC_NAMES.filter(
-      (metricName) => metricSources[metricName] === 'synthetic',
-    ),
-    missingMetricNames: LIVE_LATENCY_BENCHMARK_METRIC_NAMES.filter(
-      (metricName) => metrics[metricName].count === 0,
-    ),
-    deferredCount: input.deferredCount ?? 0,
-    degradedCount: input.degradedCount ?? 0,
-    failureCount: input.failureCount ?? 0,
+    measuredMetricNames,
+    syntheticMetricNames,
+    missingMetricNames,
+    deferredCount,
+    degradedCount,
+    failureCount,
+    readiness: summarizeReadiness({
+      samples: input.samples,
+      metrics,
+      syntheticMetricNames,
+      passedFirstVisibleSlo,
+      deferredCount,
+      degradedCount,
+      failureCount,
+    }),
   };
 }
 
@@ -587,6 +950,10 @@ export async function runSyntheticLiveLatencyBenchmark(
           dbPoolWaitMs: enqueueEndedAtMs - enqueueStartedAtMs,
           notifyLagMs: metricLatency(syntheticLatencies, 'notifyLagMs'),
         },
+        metricEvidenceSources: {
+          dbPoolWaitMs: 'benchmark_observed',
+          notifyLagMs: 'synthetic',
+        },
       });
     }),
   );
@@ -622,18 +989,29 @@ export async function runSyntheticLiveLatencyBenchmark(
         syntheticLatencies,
         metricName,
       );
+      sample.metricEvidenceSources ??= {};
+      sample.metricEvidenceSources[metricName] = 'synthetic';
     }
 
     const firstVisibleAtMs = nowMs() + syntheticStartupMs;
     sample.metrics.acceptedToFirstVisibleMs = firstVisibleAtMs - acceptedAtMs;
     sample.metrics.admissionLagMs = nowMs() - acceptedAtMs;
+    sample.metricEvidenceSources ??= {};
+    sample.metricEvidenceSources.acceptedToFirstVisibleMs = 'synthetic';
+    sample.metricEvidenceSources.admissionLagMs = 'benchmark_observed';
     const diagnostics = input.startupDiagnosticsByItemId?.get(inputItem.id);
     const measuredMetricsForSample = new Set<LiveLatencyBenchmarkMetricName>();
     for (const diagnostic of diagnostics ?? []) {
       const projection = startupDiagnosticToLiveLatencyMetrics(diagnostic, {
         acceptedToRunnerStartMs: sample.metrics.admissionLagMs,
+        evidenceSource:
+          input.startupDiagnosticEvidenceSource ?? 'fixture_seeded',
       });
       Object.assign(sample.metrics, projection.metrics);
+      sample.metricEvidenceSources = {
+        ...(sample.metricEvidenceSources ?? {}),
+        ...projection.metricEvidenceSources,
+      };
       for (const metricName of Object.keys(
         projection.metricSources,
       ) as LiveLatencyBenchmarkMetricName[]) {
@@ -685,6 +1063,8 @@ export async function runSyntheticLiveLatencyBenchmark(
         const sample = samplesByItemId.get(item.id);
         if (sample) {
           sample.metrics.lockWaitMs = claimEndedAtMs - claimStartedAtMs;
+          sample.metricEvidenceSources ??= {};
+          sample.metricEvidenceSources.lockWaitMs = 'benchmark_observed';
         }
         await settleClaimedItem(item);
       }

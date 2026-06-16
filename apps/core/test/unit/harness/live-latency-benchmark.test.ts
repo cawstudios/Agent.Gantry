@@ -11,14 +11,18 @@ import type {
 
 import {
   LIVE_LATENCY_BENCHMARK_METRIC_NAMES,
+  LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES,
   loadLiveLatencyStartupDiagnosticsFromRuntimeEvents,
   liveLatencyBenchmarkReportArtifactPath,
   runSyntheticLiveLatencyBenchmark,
   startupDiagnosticToLiveLatencyMetrics,
   summarizeLiveLatencyBenchmark,
   writeLiveLatencyBenchmarkReportArtifact,
+  type LiveLatencyBenchmarkMetricEvidenceSources,
+  type LiveLatencyBenchmarkMetricSource,
   type LiveLatencyBenchmarkMetricValues,
   type LiveLatencyBenchmarkSample,
+  type LiveLatencyReadinessRequiredMetricName,
 } from '../../harness/live-latency-benchmark.js';
 
 function completeMetrics(base: number): LiveLatencyBenchmarkMetricValues {
@@ -33,8 +37,46 @@ function completeMetrics(base: number): LiveLatencyBenchmarkMetricValues {
 function sample(
   id: string,
   metrics: LiveLatencyBenchmarkMetricValues,
+  metricEvidenceSources?: LiveLatencyBenchmarkMetricEvidenceSources,
 ): LiveLatencyBenchmarkSample {
-  return { id, metrics };
+  return { id, metrics, metricEvidenceSources };
+}
+
+function readinessEvidenceSources(
+  overrides: Partial<LiveLatencyBenchmarkMetricEvidenceSources> = {},
+): LiveLatencyBenchmarkMetricEvidenceSources {
+  return {
+    acceptedToFirstVisibleMs: 'runner_origin',
+    admissionLagMs: 'benchmark_observed',
+    dbPoolWaitMs: 'benchmark_observed',
+    lockWaitMs: 'benchmark_observed',
+    mcpClientStartupMs: 'runner_origin',
+    toolListingFilteringMs: 'runtime_origin',
+    permissionHitlSetupMs: 'runner_origin',
+    sandboxSpecMs: 'runtime_origin',
+    sandboxStartMs: 'runner_origin',
+    modelConstructionMs: 'runner_origin',
+    ...overrides,
+  };
+}
+
+function measuredReadinessMetricSources(): Partial<
+  Record<
+    LiveLatencyReadinessRequiredMetricName,
+    LiveLatencyBenchmarkMetricSource
+  >
+> {
+  return Object.fromEntries(
+    LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES.map((metricName) => [
+      metricName,
+      'measured',
+    ]),
+  ) as Partial<
+    Record<
+      LiveLatencyReadinessRequiredMetricName,
+      LiveLatencyBenchmarkMetricSource
+    >
+  >;
 }
 
 function createMemoryLiveAdmissions(): LiveAdmissionWorkItemRepository {
@@ -192,7 +234,7 @@ describe('live latency benchmark harness', () => {
       p50: 200,
       p95: 400,
       p99: 400,
-      source: 'measured',
+      source: 'synthetic',
     });
     expect(report.metrics.checkpointLoadMs).toMatchObject({
       count: 4,
@@ -246,7 +288,7 @@ describe('live latency benchmark harness', () => {
           metrics: {
             acceptedToFirstVisibleMs: expect.objectContaining({
               p95: 42,
-              source: 'measured',
+              source: 'synthetic',
             }),
           },
         },
@@ -345,6 +387,229 @@ describe('live latency benchmark harness', () => {
     expect(report.missingMetricNames).toContain('checkpointLoadMs');
   });
 
+  it('fails readiness when required metrics are still synthetic', () => {
+    const report = summarizeLiveLatencyBenchmark({
+      concurrency: 1,
+      samples: [
+        sample('one', {
+          ...completeMetrics(1),
+          acceptedToFirstVisibleMs: 42,
+        }),
+      ],
+    });
+
+    expect(report.passedFirstVisibleSlo).toBe(true);
+    expect(report.readiness.passed).toBe(false);
+    expect(report.readiness.failedMetricNames).toContain('mcpClientStartupMs');
+    expect(report.readiness.metrics.mcpClientStartupMs.failureReasons).toEqual(
+      expect.arrayContaining(['synthetic_metric']),
+    );
+    expect(report.readiness.nonReadinessSyntheticMetricNames).toContain(
+      'hydrationLagMs',
+    );
+  });
+
+  it('fails readiness when a required metric is missing from one sample', () => {
+    const metrics = completeMetrics(1);
+    delete metrics.modelConstructionMs;
+
+    const report = summarizeLiveLatencyBenchmark({
+      concurrency: 1,
+      samples: [sample('one', metrics, readinessEvidenceSources())],
+      metricSources: measuredReadinessMetricSources(),
+    });
+
+    expect(report.readiness.passed).toBe(false);
+    expect(report.readiness.failedMetricNames).toContain('modelConstructionMs');
+    expect(report.readiness.metrics.modelConstructionMs.failureReasons).toEqual(
+      expect.arrayContaining(['missing_metric']),
+    );
+  });
+
+  it('fails readiness when measured startup metrics are fixture seeded', () => {
+    const seededEvidence = Object.fromEntries(
+      LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES.map((metricName) => [
+        metricName,
+        'fixture_seeded',
+      ]),
+    ) as LiveLatencyBenchmarkMetricEvidenceSources;
+    const report = summarizeLiveLatencyBenchmark({
+      concurrency: 1,
+      samples: [sample('one', completeMetrics(1), seededEvidence)],
+      metricSources: measuredReadinessMetricSources(),
+    });
+
+    expect(report.readiness.passed).toBe(false);
+    expect(report.readiness.failedMetricNames).toContain(
+      'acceptedToFirstVisibleMs',
+    );
+    expect(
+      report.readiness.metrics.acceptedToFirstVisibleMs.failureReasons,
+    ).toEqual(expect.arrayContaining(['untrusted_evidence_source']));
+    expect(
+      report.readiness.metrics.acceptedToFirstVisibleMs.evidenceSourceCounts
+        .fixture_seeded,
+    ).toBe(1);
+  });
+
+  it('passes readiness only when all required metrics have trusted measured evidence', () => {
+    const samples = Array.from({ length: 300 }, (_, index) =>
+      sample(
+        `sample-${index}`,
+        {
+          ...completeMetrics(index + 1),
+          acceptedToFirstVisibleMs: 100 + index,
+        },
+        readinessEvidenceSources(),
+      ),
+    );
+
+    const report = summarizeLiveLatencyBenchmark({
+      concurrency: 300,
+      samples,
+      metricSources: measuredReadinessMetricSources(),
+      firstVisibleSloMs: 5_000,
+    });
+
+    expect(report.readiness.passed).toBe(true);
+    expect(report.readiness.failedMetricNames).toEqual([]);
+    expect(report.readiness.requiredMetricNames).toEqual(
+      LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES,
+    );
+    expect(report.readiness.nonReadinessSyntheticMetricNames).toContain(
+      'hydrationLagMs',
+    );
+  });
+
+  it('passes readiness through the benchmark runner with mixed diagnostic-origin evidence', async () => {
+    const diagnosticsByItemId = new Map(
+      Array.from({ length: 300 }, (_, index) => [
+        `mixed-origin:admission:${index}`,
+        [
+          {
+            provider: 'host',
+            diagnostic: 'host_startup_projection',
+            hostPhases: {
+              mcpProjectionMs: 12,
+              sandboxSpecMs: 4,
+            },
+          },
+          {
+            provider: 'deepagents',
+            diagnostic: 'runner_startup',
+            firstVisibleOutputMs: 21,
+            phases: {
+              modelBuildMs: 3,
+              mcpConnectMs: 5,
+              permissionEnvMs: 1,
+            },
+          },
+          {
+            provider: 'host',
+            diagnostic: 'runner_process_timing',
+            startupTiming: {
+              sandboxStartCallMs: 6,
+              firstVisibleOutputMs: 31,
+              hostPhases: {
+                mcpProjectionMs: 12,
+                sandboxSpecMs: 4,
+              },
+            },
+          },
+        ],
+      ]),
+    );
+
+    const report = await runSyntheticLiveLatencyBenchmark({
+      liveAdmissions: createMemoryLiveAdmissions(),
+      concurrency: 300,
+      workerCount: 12,
+      claimBatchSize: 25,
+      benchmarkRunId: 'mixed-origin',
+      startupDiagnosticsByItemId: diagnosticsByItemId,
+      startupDiagnosticEvidenceSource: 'diagnostic_origin',
+      sleepMs: async () => undefined,
+    });
+
+    expect(report.readiness.passed).toBe(true);
+    expect(report.readiness.failedMetricNames).toEqual([]);
+    expect(report.measuredMetricNames).toEqual(
+      expect.arrayContaining([...LIVE_LATENCY_READINESS_REQUIRED_METRIC_NAMES]),
+    );
+    expect(
+      report.readiness.metrics.acceptedToFirstVisibleMs.evidenceSourceCounts
+        .runner_origin,
+    ).toBe(300);
+    expect(
+      report.readiness.metrics.toolListingFilteringMs.evidenceSourceCounts
+        .runtime_origin,
+    ).toBe(300);
+    expect(
+      report.readiness.metrics.sandboxSpecMs.evidenceSourceCounts
+        .runtime_origin,
+    ).toBe(300);
+  });
+
+  it('does not mark fixture-seeded readiness metrics as measured report evidence', async () => {
+    const report = await runSyntheticLiveLatencyBenchmark({
+      liveAdmissions: createMemoryLiveAdmissions(),
+      concurrency: 1,
+      workerCount: 1,
+      claimBatchSize: 1,
+      benchmarkRunId: 'fixture-seeded',
+      startupDiagnosticsByItemId: new Map([
+        [
+          'fixture-seeded:admission:0',
+          [
+            {
+              provider: 'deepagents',
+              diagnostic: 'runner_startup',
+              firstVisibleOutputMs: 21,
+              phases: {
+                modelBuildMs: 3,
+                mcpConnectMs: 5,
+                permissionEnvMs: 1,
+              },
+            },
+          ],
+        ],
+      ]),
+      sleepMs: async () => undefined,
+    });
+
+    expect(report.passedFirstVisibleSlo).toBe(true);
+    expect(report.readiness.passed).toBe(false);
+    expect(report.metrics.mcpClientStartupMs.source).toBe('synthetic');
+    expect(report.measuredMetricNames).not.toContain('mcpClientStartupMs');
+    expect(report.readiness.metrics.mcpClientStartupMs.failureReasons).toEqual(
+      expect.arrayContaining(['synthetic_metric', 'untrusted_evidence_source']),
+    );
+  });
+
+  it('fails readiness for deferred or degraded benchmark samples', () => {
+    const report = summarizeLiveLatencyBenchmark({
+      concurrency: 1,
+      samples: [
+        sample(
+          'one',
+          {
+            ...completeMetrics(1),
+            acceptedToFirstVisibleMs: 42,
+          },
+          readinessEvidenceSources(),
+        ),
+      ],
+      metricSources: measuredReadinessMetricSources(),
+      deferredCount: 1,
+      degradedCount: 1,
+    });
+
+    expect(report.readiness.passed).toBe(false);
+    expect(report.readiness.failureReasons).toEqual(
+      expect.arrayContaining(['benchmark_deferred', 'benchmark_degraded']),
+    );
+  });
+
   it('maps DeepAgents startup diagnostics into measured benchmark metrics', () => {
     const projection = startupDiagnosticToLiveLatencyMetrics(
       {
@@ -380,6 +645,14 @@ describe('live latency benchmark harness', () => {
       mcpClientStartupMs: 'measured',
       permissionHitlSetupMs: 'measured',
     });
+    expect(projection.metricEvidenceSources).toMatchObject({
+      acceptedToFirstVisibleMs: 'fixture_seeded',
+      checkpointLoadMs: 'fixture_seeded',
+      checkpointWriteMs: 'fixture_seeded',
+      modelConstructionMs: 'fixture_seeded',
+      mcpClientStartupMs: 'fixture_seeded',
+      permissionHitlSetupMs: 'fixture_seeded',
+    });
     expect(projection.metrics.bridgeLagMs).toBeUndefined();
   });
 
@@ -404,6 +677,11 @@ describe('live latency benchmark harness', () => {
       toolListingFilteringMs: 'measured',
       sandboxTemplateMs: 'measured',
       sandboxSpecMs: 'measured',
+    });
+    expect(projection.metricEvidenceSources).toMatchObject({
+      toolListingFilteringMs: 'fixture_seeded',
+      sandboxTemplateMs: 'fixture_seeded',
+      sandboxSpecMs: 'fixture_seeded',
     });
     expect(projection.metrics.hydrationLagMs).toBeUndefined();
   });
@@ -439,6 +717,38 @@ describe('live latency benchmark harness', () => {
       toolListingFilteringMs: 'measured',
       sandboxTemplateMs: 'measured',
       sandboxSpecMs: 'measured',
+    });
+    expect(projection.metricEvidenceSources).toMatchObject({
+      acceptedToFirstVisibleMs: 'fixture_seeded',
+      sandboxStartMs: 'fixture_seeded',
+      toolListingFilteringMs: 'fixture_seeded',
+      sandboxTemplateMs: 'fixture_seeded',
+      sandboxSpecMs: 'fixture_seeded',
+    });
+  });
+
+  it('classifies startup diagnostics from diagnostic shape when requested', () => {
+    const projection = startupDiagnosticToLiveLatencyMetrics(
+      {
+        provider: 'host',
+        diagnostic: 'runner_process_timing',
+        startupTiming: {
+          sandboxStartCallMs: 6,
+          firstVisibleOutputMs: 31,
+          hostPhases: {
+            mcpProjectionMs: 12,
+            sandboxSpecMs: 4,
+          },
+        },
+      },
+      { acceptedToRunnerStartMs: 9, evidenceSource: 'diagnostic_origin' },
+    );
+
+    expect(projection.metricEvidenceSources).toMatchObject({
+      acceptedToFirstVisibleMs: 'runner_origin',
+      toolListingFilteringMs: 'runtime_origin',
+      sandboxSpecMs: 'runtime_origin',
+      sandboxStartMs: 'runner_origin',
     });
   });
 

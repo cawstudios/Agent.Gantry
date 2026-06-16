@@ -203,25 +203,26 @@ maybeDescribe('live latency benchmark (Postgres)', () => {
     });
     expect(report.metrics.mcpClientStartupMs).toMatchObject({
       p95: 5,
-      source: 'measured',
+      source: 'synthetic',
     });
     expect(report.metrics.toolListingFilteringMs).toMatchObject({
       p95: 12,
-      source: 'measured',
+      source: 'synthetic',
     });
     expect(report.metrics.sandboxSpecMs).toMatchObject({
       p95: 4,
-      source: 'measured',
+      source: 'synthetic',
     });
     expect(report.metrics.sandboxStartMs).toMatchObject({
       p95: 6,
-      source: 'measured',
+      source: 'synthetic',
     });
     expect(report.syntheticMetricNames).not.toContain('checkpointLoadMs');
-    expect(report.syntheticMetricNames).not.toContain('sandboxStartMs');
+    expect(report.syntheticMetricNames).toContain('sandboxStartMs');
     expect(report.measuredMetricNames).toContain('admissionLagMs');
     expect(report.measuredMetricNames).toContain('checkpointLoadMs');
-    expect(report.measuredMetricNames).toContain('sandboxStartMs');
+    expect(report.measuredMetricNames).not.toContain('sandboxStartMs');
+    expect(report.readiness.passed).toBe(false);
     expect(report.deferredCount).toBe(0);
     expect(report.degradedCount).toBe(0);
     expect(report.failureCount).toBe(0);
@@ -233,20 +234,17 @@ maybeDescribe('live latency benchmark (Postgres)', () => {
       benchmarkRunId: BENCHMARK_RUN_ID,
       report: {
         sampleCount: 300,
-        measuredMetricNames: expect.arrayContaining([
-          'checkpointLoadMs',
-          'sandboxStartMs',
-        ]),
-        syntheticMetricNames: expect.not.arrayContaining([
-          'checkpointLoadMs',
-          'sandboxStartMs',
-        ]),
+        measuredMetricNames: expect.arrayContaining(['checkpointLoadMs']),
+        syntheticMetricNames: expect.not.arrayContaining(['checkpointLoadMs']),
+        readiness: {
+          passed: false,
+        },
       },
     });
     expect(artifact.generatedAt).toEqual(expect.any(String));
     expect(artifact.report.metrics.sandboxStartMs).toMatchObject({
       p95: 6,
-      source: 'measured',
+      source: 'synthetic',
     });
   });
 });
