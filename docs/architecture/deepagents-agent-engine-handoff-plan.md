@@ -72,6 +72,17 @@ Full parity is blocked until all of these implementation slices are complete:
   provider authority, raw DeepAgents tools, and old selector paths are absent
   from active surfaces.
 
+Related lifecycle plan:
+
+- `docs/architecture/neutral-task-lifecycle-wrapper-plan.md` owns the
+  provider-neutral lifecycle plan for DeepAgents synchronous/default delegation,
+  DeepAgents async subagents, and Anthropic SDK native `Agent`/`Task`
+  projection. Do not implement DeepAgents raw `task`, `write_todos`,
+  `start_async_task`, `check_async_task`, `update_async_task`,
+  `cancel_async_task`, or `list_async_tasks` as product-facing authority before
+  that plan's durable lifecycle, permission, HITL, rejoin, receipt, sandbox,
+  MCP, skill-scope, and verification slices are implemented.
+
 ## Exact UX Contract
 
 This is the target UX contract. The option labels, values, descriptions, and
