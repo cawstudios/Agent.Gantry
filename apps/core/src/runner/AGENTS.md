@@ -70,3 +70,6 @@
   response files can wake the runner through `fs.watch` while retaining bounded
   polling as a fallback. Do not add new raw sleep/poll loops for signed
   permission, memory, browser, or task response files.
+- Live runner signal drains should use the shared `RuntimeSignalPump` so
+  follow-up messages, `_close`, and interaction-boundary files wake the active
+  run through `fs.watch`; fallback polling is only missed-event recovery.

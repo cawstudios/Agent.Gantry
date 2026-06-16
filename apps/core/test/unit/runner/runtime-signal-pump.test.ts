@@ -2,7 +2,7 @@ import type { FSWatcher } from 'fs';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { startRuntimeSignalPump } from '@core/adapters/llm/anthropic-claude-agent/runner/runtime-signal-pump.js';
+import { startRuntimeSignalPump } from '@core/runner/runtime-signal-pump.js';
 
 type WatchListener = (
   eventType: string,

@@ -64,7 +64,7 @@ import {
   decideClaudeSdkToolSearch,
   toolSearchStartupRuntimeEvent,
 } from './tool-search-decision.js';
-import { startRuntimeSignalPump } from './runtime-signal-pump.js';
+import { startRuntimeSignalPump } from '../../../../runner/runtime-signal-pump.js';
 
 interface RunQueryOptions {
   enableIpcFollowups?: boolean;

@@ -141,9 +141,10 @@ async function runInteractive(agentInput: DeepAgentRunnerInput): Promise<void> {
     agentInput.sessionId ?? DeepAgentSessionStore.newSessionId();
   let checkpointer: DeepAgentCheckpointSaver | undefined;
   const checkpointTiming = createDeepAgentCheckpointTiming({ nowMs });
-  // Live-turn control parity: the poll loop watches the neutral IPC-input dir for
-  // a `_close` sentinel (host /stop or close-stdin) and for mid-stream follow-up
-  // messages. A close aborts the in-flight LangGraph stream via its signal.
+  // Live-turn control parity: the shared signal pump watches the neutral
+  // IPC-input dir for a `_close` sentinel (host /stop or close-stdin) and for
+  // mid-stream follow-up messages. A close aborts the in-flight LangGraph stream
+  // via its signal.
   const liveControl = startDeepAgentLiveControl({ log });
   try {
     if (!agentInput.deepAgentCheckpointer) {

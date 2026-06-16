@@ -25,7 +25,7 @@ export interface RuntimeSignalPumpDeps {
 export function startRuntimeSignalPump(input: {
   fallbackPollMs: number;
   inputDir: string;
-  interactionBoundaryDir: string;
+  interactionBoundaryDir?: string;
   processSignals: () => boolean;
   deps?: RuntimeSignalPumpDeps;
 }): RuntimeSignalPump {
@@ -100,7 +100,15 @@ export function startRuntimeSignalPump(input: {
     schedule(0);
   };
 
-  for (const dir of [input.inputDir, input.interactionBoundaryDir]) {
+  const watchDirs = [
+    ...new Set(
+      [input.inputDir, input.interactionBoundaryDir].filter(
+        (dir): dir is string => Boolean(dir),
+      ),
+    ),
+  ];
+
+  for (const dir of watchDirs) {
     try {
       mkdirSync(dir, { recursive: true });
       const watcher = watch(

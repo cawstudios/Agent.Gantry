@@ -245,8 +245,9 @@ newSessionId, sessionInit:true}` so the host persists the provider session
   `run.startup_diagnostic` payload count/timing-only: no prompts, raw schemas,
   tool args, paths, base URLs, or credentials. Tool readiness and tool activity
   diagnostics use elapsed milliseconds and counts, not raw tool inputs.
-- Live-turn control parity (`runner/live-control.ts`): a poll loop watches the
-  neutral IPC-input dir while a turn is in flight. A `_close` sentinel (host
+- Live-turn control parity (`runner/live-control.ts`): the shared runner
+  `RuntimeSignalPump` watches the neutral IPC-input dir while a turn is in
+  flight; fallback polling is missed-event recovery only. A `_close` sentinel (host
   `/stop` or close-stdin, both written by `continuation-input.ts`) aborts the
   in-flight LangGraph stream via an `AbortSignal` threaded into `streamEvents`.
   On a close-driven termination the runner returns WITHOUT emitting a completion
