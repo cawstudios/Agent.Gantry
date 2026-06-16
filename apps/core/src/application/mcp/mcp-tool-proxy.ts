@@ -30,11 +30,11 @@ import { logger } from '../../infrastructure/logging/logger.js';
 import { flowLog } from '../../shared/flow-log.js';
 
 const MCP_PROXY_TIMEOUT_MS = 60_000;
-const MCP_PROXY_CLIENT_IDLE_MS = 120_000;
+const MCP_PROXY_CLIENT_IDLE_MS = 0;
 
 type CachedMcpClient = {
   client: Client;
-  idleTimer: ReturnType<typeof setTimeout>;
+  idleTimer?: ReturnType<typeof setTimeout>;
 };
 
 const clientCache = new Map<string, CachedMcpClient>();
@@ -51,6 +51,7 @@ export class McpToolProxy {
       // logs attribute each MCP call to its conversation even when the signing
       // identity is remapped to a shared test number. Off in production.
       conversationJid?: string;
+      callerIdentityJidForServer?: (serverName: string, jid: string) => string;
       lookupHostname?: HostnameLookup;
       dnsValidationCache?: RemoteMcpDnsValidationCache;
     },
@@ -122,13 +123,14 @@ export class McpToolProxy {
       );
     }
     const client = await this.connect(capability);
+    const callerIdentityJid = this.callerIdentityJidForServer(input.serverName);
     // Flow trace: callerIdentityJid is the identity the request is signed with
     // (shows the test number when the dev override is active).
     flowLog(logger, 'mcp.request', {
       serverName: input.serverName,
       toolName: input.toolName,
       chatJid: this.options.conversationJid,
-      callerIdentityJid: this.options.callerIdentityJid,
+      callerIdentityJid,
       arguments: input.arguments ?? {},
     });
     try {
@@ -189,8 +191,16 @@ export class McpToolProxy {
     return projectMcpProxyCallerIdentity({
       capabilities,
       callerIdentityJid: this.options.callerIdentityJid,
+      callerIdentityJidForCapability: (capability) =>
+        this.callerIdentityJidForServer(capability.name),
       credentialEnv: this.options.credentialEnv ?? {},
     });
+  }
+
+  private callerIdentityJidForServer(serverName: string): string | undefined {
+    const jid = this.options.callerIdentityJid;
+    if (!jid) return undefined;
+    return this.options.callerIdentityJidForServer?.(serverName, jid) ?? jid;
   }
 
   private async connect(
@@ -199,7 +209,10 @@ export class McpToolProxy {
     const cacheKey = mcpClientCacheKey(capability);
     const cached = clientCache.get(cacheKey);
     if (cached) {
-      clearTimeout(cached.idleTimer);
+      if (cached.idleTimer) {
+        clearTimeout(cached.idleTimer);
+        cached.idleTimer = undefined;
+      }
       return cached.client;
     }
     const client = new Client(
@@ -208,12 +221,7 @@ export class McpToolProxy {
     );
     const transport = await this.createTransport(capability);
     await client.connect(transport, { timeout: MCP_PROXY_TIMEOUT_MS });
-    clientCache.set(cacheKey, {
-      client,
-      idleTimer: setTimeout(() => {
-        void closeCachedClient(capability);
-      }, MCP_PROXY_CLIENT_IDLE_MS),
-    });
+    clientCache.set(cacheKey, { client });
     return client;
   }
 
@@ -255,6 +263,9 @@ export class McpToolProxy {
 export function projectMcpProxyCallerIdentity(input: {
   capabilities: readonly MaterializedMcpCapability[];
   callerIdentityJid?: string;
+  callerIdentityJidForCapability?: (
+    capability: MaterializedMcpCapability,
+  ) => string | undefined;
   credentialEnv: Record<string, string>;
 }): MaterializedMcpCapability[] {
   if (
@@ -266,28 +277,42 @@ export function projectMcpProxyCallerIdentity(input: {
   ) {
     return [...input.capabilities];
   }
-  if (!input.callerIdentityJid) {
-    throw new ApplicationError(
-      'FORBIDDEN',
-      CUSTOMER_IDENTITY_MISMATCH_MESSAGE,
-      {
-        details: [
-          'MCP caller identity projection requires a source conversation JID.',
-        ],
-      },
-    );
-  }
-  const projection = projectCallerIdentityHeaders({
-    capabilities: input.capabilities,
-    chatJid: input.callerIdentityJid,
-    credentialEnv: input.credentialEnv,
-  });
-  if (!projection.ok) {
-    throw new ApplicationError('FORBIDDEN', projection.error, {
-      details: [projection.internalError],
+  const projected: MaterializedMcpCapability[] = [];
+  for (const capability of input.capabilities) {
+    if (
+      !capability.callerIdentity ||
+      capability.callerIdentity.mode === 'disabled'
+    ) {
+      projected.push(capability);
+      continue;
+    }
+    const callerIdentityJid =
+      input.callerIdentityJidForCapability?.(capability) ??
+      input.callerIdentityJid;
+    if (!callerIdentityJid) {
+      throw new ApplicationError(
+        'FORBIDDEN',
+        CUSTOMER_IDENTITY_MISMATCH_MESSAGE,
+        {
+          details: [
+            'MCP caller identity projection requires a source conversation JID.',
+          ],
+        },
+      );
+    }
+    const projection = projectCallerIdentityHeaders({
+      capabilities: [capability],
+      chatJid: callerIdentityJid,
+      credentialEnv: input.credentialEnv,
     });
+    if (!projection.ok) {
+      throw new ApplicationError('FORBIDDEN', projection.error, {
+        details: [projection.internalError],
+      });
+    }
+    projected.push(...projection.capabilities);
   }
-  return projection.capabilities;
+  return projected;
 }
 
 function isToolAllowed(
@@ -318,7 +343,14 @@ function scheduleClientIdleClose(capability: MaterializedMcpCapability): void {
   const cacheKey = mcpClientCacheKey(capability);
   const cached = clientCache.get(cacheKey);
   if (!cached) return;
-  clearTimeout(cached.idleTimer);
+  if (cached.idleTimer) {
+    clearTimeout(cached.idleTimer);
+    cached.idleTimer = undefined;
+  }
+  if (MCP_PROXY_CLIENT_IDLE_MS <= 0) {
+    void closeCachedClient(capability);
+    return;
+  }
   cached.idleTimer = setTimeout(() => {
     void closeCachedClient(capability);
   }, MCP_PROXY_CLIENT_IDLE_MS);
@@ -331,7 +363,7 @@ async function closeCachedClient(
   const cached = clientCache.get(cacheKey);
   if (!cached) return;
   clientCache.delete(cacheKey);
-  clearTimeout(cached.idleTimer);
+  if (cached.idleTimer) clearTimeout(cached.idleTimer);
   await cached.client.close();
 }
 

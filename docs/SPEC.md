@@ -39,8 +39,8 @@ A provider-neutral and channel-neutral agent runtime with multi-channel support,
 │         │                                                             │
 │         ▼                                                             │
 │  ┌──────────────────┐    ┌──────────────────┐    ┌───────────────┐   │
-│  │  Message Loop    │    │  Scheduler Loop  │    │  IPC Watcher  │   │
-│  │  (polls Postgres)│    │  (pg-boss jobs)  │    │  (file-based) │   │
+│  │ Event Wakeups    │    │  Scheduler Loop  │    │ Socket IPC    │   │
+│  │ + recovery       │    │  (pg-boss jobs)  │    │  server       │   │
 │  └────────┬─────────┘    └────────┬─────────┘    └───────────────┘   │
 │           │                       │                                   │
 │           └───────────┬───────────┘                                   │
@@ -110,7 +110,7 @@ graph LR
 
     subgraph Execution["Host Runtime Execution"]
         CR[Agent Runner Process]
-        IPC[IPC Watcher]
+        IPC[Socket IPC Server]
     end
 
     %% Flow
@@ -118,7 +118,7 @@ graph LR
     ML --> GQ
     GQ -->|ordered work| GP
     GP -->|spawn| CR
-    CR -->|filesystem IPC| IPC
+    CR -->|socket IPC| IPC
     IPC -->|host-owned actions| CW
     GP -->|send/stream/progress| CW
     CW -->|adapter output| Channels
@@ -269,7 +269,7 @@ gantry/
 ├── data/                          # Application state (gitignored)
 │   ├── artifacts/                 # Provider artifact backend for single-node deployments
 │   ├── env/env                    # Copy of .env for runtime loading
-│   └── ipc/                       # Runtime IPC (messages/, tasks/)
+│   └── ipc/                       # Runtime socket IPC state
 │
 ├── logs/                          # Runtime logs (gitignored)
 │   ├── gantry.log               # Host stdout
@@ -292,7 +292,6 @@ import { getGantryHome } from './gantry-home.js';
 import { ensureRuntimeSettings } from './settings/runtime-settings.js';
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
-export const POLL_INTERVAL = 2000;
 
 // Paths are absolute and resolve from the configured runtime home.
 const GANTRY_HOME = getGantryHome(process.env.GANTRY_HOME);
@@ -302,7 +301,6 @@ export const DATA_DIR = path.resolve(GANTRY_HOME, 'data');
 // Default model aliases are non-secret configuration in settings.yaml.
 export const getConfiguredDefaultModel = () =>
   ensureRuntimeSettings(GANTRY_HOME).agent.defaultModel;
-export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep runtime worker alive after last result
 
 export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
@@ -632,7 +630,7 @@ Sessions enable conversation continuity from Gantry-owned Postgres state.
 3. Runtime stores chat metadata and the message in Postgres
    │
    ▼
-4. Message loop polls Postgres or recovers pending messages after restart
+4. Runtime event wakeup enqueues the conversation, with restart recovery for pending messages
    │
    ▼
 5. Message loop checks:
@@ -859,10 +857,9 @@ When Gantry starts, it:
 5. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `connect()` on each
 6. Once at least one channel is connected:
    - Starts the scheduler loop
-   - Starts the IPC watcher for runtime messages
+   - Starts the socket IPC server for runner/tool requests
    - Sets up the per-group queue with `processGroupMessages`
    - Recovers any unprocessed messages from before shutdown
-   - Starts the message polling loop
 
 ### Service Lifecycle
 

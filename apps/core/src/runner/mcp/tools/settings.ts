@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { nowIso } from '../../../shared/time/datetime.js';
-import { chatJid, threadId } from '../context.js';
+import { getBoundChatJid, getBoundThreadId } from '../bound-identity.js';
 import { sendTaskRequest } from '../ipc.js';
 import type { AdminMcpToolName } from '../../../shared/admin-mcp-tools.js';
 import { humanizeTechnicalIdentifier } from '../../../shared/user-visible-messages.js';
@@ -22,13 +22,14 @@ export function registerSettingsTools(
         return adminToolUnavailable('settings_desired_state');
       }
       const taskId = makeIpcId('settings-desired-state');
+      const chatJid = getBoundChatJid();
       const response = await sendTaskRequest(
         {
           type: 'settings_desired_state',
           taskId,
           targetJid: chatJid,
           chatJid,
-          authThreadId: threadId,
+          authThreadId: getBoundThreadId(),
           timestamp: nowIso(),
         },
         { timeoutMs: 20_000 },
@@ -81,13 +82,14 @@ export function registerSettingsTools(
         return adminToolUnavailable('request_settings_update');
       }
       const taskId = makeIpcId('settings-update');
+      const chatJid = getBoundChatJid();
       const response = await sendTaskRequest(
         {
           type: 'request_settings_update',
           taskId,
           targetJid: chatJid,
           chatJid,
-          authThreadId: threadId,
+          authThreadId: getBoundThreadId(),
           payload: {
             replacementYaml: args.replacementYaml,
             expectedRevision: args.expectedRevision,

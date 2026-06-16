@@ -37,3 +37,11 @@
   `000`-prefixed dev operator conversations only behind that flag, and let
   dry-run send allowance plus session-command allowance share the same
   predicate.
+- IPC socket clients with response verification configured must fail closed on
+  any non-error response missing a string signature. Unsigned `{ ok: false }`
+  transport errors may still reject with their carried code, but unsigned
+  success payloads are never trusted.
+- IPC connection parsing should reject malformed full wire frames per frame and
+  continue whenever the length-prefix stream remains recoverable. Keep
+  unrecoverable decoder errors such as oversized declared frames connection
+  fatal.

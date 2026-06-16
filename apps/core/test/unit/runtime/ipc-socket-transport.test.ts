@@ -45,10 +45,12 @@ import {
   computeBrowserIpcAuthToken,
   computeIpcAuthToken,
   computeMemoryIpcAuthToken,
+  getIpcResponseSigningPrivateKey,
   registerBrowserIpcAuthorization,
   revokeBrowserIpcAuthorization,
 } from '@core/runtime/ipc-auth.js';
 import { clearBrowserInFlight } from '@core/runtime/ipc-browser-inflight.js';
+import { clearInteractionInFlight } from '@core/runtime/ipc-interaction-inflight.js';
 import { normalizeMemoryIpcActions } from '@core/shared/memory-ipc-actions.js';
 import type { MemoryIpcResponse } from '@gantry/contracts';
 import {
@@ -70,6 +72,7 @@ import {
 import { clearIpcResponders } from '@core/runtime/ipc-response-router.js';
 import { clearConsumedIpcRequestIds } from '@core/runtime/ipc-auth-validation.js';
 import { clearIpcRateLimitState } from '@core/runtime/ipc-rate-limit.js';
+import { appendLiveToolRules } from '@core/shared/live-tool-rules.js';
 
 const processTaskIpcMock = vi.mocked(processTaskIpc);
 const processMemoryRequestMock = vi.mocked(processMemoryRequest);
@@ -183,6 +186,11 @@ class FakeWorkerClient {
     this.socket.write(encodeFrame(body));
   }
 
+  sendRawObject(frame: Record<string, unknown>): void {
+    const body = Buffer.from(JSON.stringify(frame), 'utf8');
+    this.socket.write(encodeFrame(body));
+  }
+
   /** Send a raw (non-frame-encoded) buffer to corrupt the wire. */
   sendBytes(buf: Buffer): void {
     this.socket.write(buf);
@@ -235,6 +243,19 @@ class FakeWorkerClient {
     }
   }
 
+  async waitForFrameMatching(
+    predicate: (frame: IpcWireFrame) => boolean,
+    timeoutMs = 5000,
+  ): Promise<IpcWireFrame> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('waitForFrameMatching timeout');
+      const frame = await this.nextFrame(remaining);
+      if (predicate(frame)) return frame;
+    }
+  }
+
   /** Resolve once the socket closes (server-side destroy). */
   waitClose(timeoutMs = 5000): Promise<void> {
     if (this.closed) return Promise.resolve();
@@ -255,6 +276,18 @@ class FakeWorkerClient {
   }
 }
 
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 3000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('waitFor timeout');
+}
+
 // ---------------------------------------------------------------------------
 // Envelope builders (shared auth context across hello + task payloads)
 // ---------------------------------------------------------------------------
@@ -269,6 +302,9 @@ function buildHelloPayload(
     folder: string;
     role?: 'runner' | 'mcp';
     threadId?: string;
+    responseKeyId?: string;
+    appId?: string;
+    agentId?: string;
     runHandle?: string;
     expiresAt?: string;
   },
@@ -278,7 +314,12 @@ function buildHelloPayload(
     role: opts.role ?? 'runner',
     runHandle: opts.runHandle ?? 'run-1',
     folder: opts.folder,
-    context: { threadId: opts.threadId ?? null },
+    context: {
+      threadId: opts.threadId ?? null,
+      ...(opts.responseKeyId ? { responseKeyId: opts.responseKeyId } : {}),
+      ...(opts.appId ? { appId: opts.appId } : {}),
+      ...(opts.agentId ? { agentId: opts.agentId } : {}),
+    },
     ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
   });
 }
@@ -399,8 +440,9 @@ function permissionAuthToken(
   folder: string,
   threadId: string | undefined,
   appId: string,
+  agentId?: string,
 ): string {
-  return computeIpcAuthToken(folder, threadId ?? null, { appId });
+  return computeIpcAuthToken(folder, threadId ?? null, { appId, agentId });
 }
 
 function buildPermissionPayload(
@@ -412,17 +454,20 @@ function buildPermissionPayload(
     targetJid?: string;
     toolName?: string;
     appId?: string;
+    agentId?: string;
     responseNonce?: string;
     jobId?: string;
     runId?: string;
   },
 ): Record<string, unknown> {
   const appId = opts.appId ?? 'default';
+  const agentId = opts.agentId;
   const folder = opts.folder ?? FOLDER;
-  const token = permissionAuthToken(folder, opts.threadId, appId);
+  const token = permissionAuthToken(folder, opts.threadId, appId, agentId);
   return createSignedIpcRequestEnvelope(token, {
     requestId: opts.requestId,
     appId,
+    ...(agentId ? { agentId } : {}),
     responseNonce: opts.responseNonce ?? 'nonce-1',
     sourceAgentFolder: folder,
     ...(opts.targetJid !== undefined ? { targetJid: opts.targetJid } : {}),
@@ -432,6 +477,7 @@ function buildPermissionPayload(
     toolInput: { command: 'ls' },
     context: {
       appId,
+      ...(agentId ? { agentId } : {}),
       ...(opts.targetJid !== undefined ? { chatJid: opts.targetJid } : {}),
       ...(opts.jobId ? { jobId: opts.jobId } : {}),
       ...(opts.runId ? { runId: opts.runId } : {}),
@@ -515,6 +561,7 @@ beforeEach(() => {
   clearConsumedIpcRequestIds();
   clearIpcRateLimitState();
   clearBrowserInFlight();
+  clearInteractionInFlight();
 });
 
 afterEach(async () => {
@@ -527,6 +574,7 @@ afterEach(async () => {
   clearConsumedIpcRequestIds();
   clearIpcRateLimitState();
   clearBrowserInFlight();
+  clearInteractionInFlight();
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch {
@@ -568,6 +616,7 @@ describe('ipc-socket-server handshake', () => {
       buildHelloPayload(auth.authToken, {
         folder: FOLDER,
         threadId: THREAD_ID,
+        role: 'mcp',
       }),
       'hello-1',
     );
@@ -671,7 +720,11 @@ describe('ipc-socket-server task dispatch', () => {
   ): Promise<FakeWorkerClient> {
     const client = await connect(handle);
     client.sendHello(
-      buildHelloPayload(auth.authToken, { folder: FOLDER, threadId }),
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId,
+        role: 'mcp',
+      }),
       'hs',
     );
     const welcome = await client.waitForId('hs');
@@ -806,15 +859,13 @@ describe('ipc-socket-server task dispatch', () => {
     expect(handlerCalls).toBe(1);
   });
 
-  it('6. unsupported channel → {ok:false, unsupported_channel}, connection survives', async () => {
+  it('6. client-origin continuation req → unsupported_channel, connection survives', async () => {
     const handle = await startServer(buildDeps());
     const auth = makeAuth(FOLDER, THREAD_ID);
     const client = await handshake(handle, auth);
 
-    // All req→resp channels (task/memory/user_question/permission/browser) plus
-    // the fire-and-forget message channel are now dispatched. `continuation` is a
-    // server→worker PUSH channel, so a client `req` on it is genuinely
-    // unsupported and takes the explicit reject path.
+    // `continuation` is a server→worker PUSH channel. A client `req` on it is
+    // rejected at the protocol channel gate before dispatch.
     client.sendReq(
       'continuation',
       buildTaskPayload(auth.authToken, auth.responseKeyId, {
@@ -872,7 +923,7 @@ describe('ipc-socket-server task dispatch', () => {
 // the server's dispatchMemory → registerIpcResponder → writeMemoryResponse →
 // signed-resp-frame path runs end to end. The memory channel keeps its OWN auth
 // (memory HMAC token + replay scope + allowedActions), re-verified here by the
-// real parseMemoryIpcRequest exactly as the fs watcher does.
+// real parseMemoryIpcRequest.
 // ---------------------------------------------------------------------------
 
 describe('ipc-socket-server memory dispatch', () => {
@@ -883,7 +934,11 @@ describe('ipc-socket-server memory dispatch', () => {
   ): Promise<FakeWorkerClient> {
     const client = await connect(handle);
     client.sendHello(
-      buildHelloPayload(auth.authToken, { folder: FOLDER, threadId }),
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId,
+        role: 'mcp',
+      }),
       'hs',
     );
     const welcome = await client.waitForId('hs');
@@ -1072,7 +1127,7 @@ describe('ipc-socket-server memory dispatch', () => {
 // server runs the REAL processUserQuestionInteractionIpc → router-aware
 // writeUserQuestionIpcResponse → signed-resp-frame path end to end. The
 // user_question channel shares the folder/thread auth token (re-verified by the
-// real parseUserQuestionIpcRequest exactly as the fs watcher does).
+// real parseUserQuestionIpcRequest).
 // ---------------------------------------------------------------------------
 
 describe('ipc-socket-server user_question dispatch', () => {
@@ -1083,7 +1138,11 @@ describe('ipc-socket-server user_question dispatch', () => {
   ): Promise<FakeWorkerClient> {
     const client = await connect(handle);
     client.sendHello(
-      buildHelloPayload(auth.authToken, { folder: FOLDER, threadId }),
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId,
+        role: 'mcp',
+      }),
       'hs',
     );
     const welcome = await client.waitForId('hs');
@@ -1269,7 +1328,7 @@ describe('ipc-socket-server user_question dispatch', () => {
 // decision; the server runs the REAL processPermissionInteractionIpc →
 // router-aware writePermissionIpcResponse → signed-resp-frame path end to end.
 // The permission channel shares the folder/thread auth token (re-verified by the
-// real parsePermissionIpcRequest exactly as the fs watcher does) and adds the
+// real parsePermissionIpcRequest) and adds the
 // permission-specific authz: the targetJid folder-ownership check + the
 // scheduled-job execution-context binding (validatePermissionIpcJobExecution-
 // Target). Idempotency: an exact byte-identical replay is rejected by the
@@ -1284,7 +1343,11 @@ describe('ipc-socket-server permission dispatch', () => {
   ): Promise<FakeWorkerClient> {
     const client = await connect(handle);
     client.sendHello(
-      buildHelloPayload(auth.authToken, { folder: FOLDER, threadId }),
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId,
+        role: 'runner',
+      }),
       'hs',
     );
     const welcome = await client.waitForId('hs');
@@ -1407,6 +1470,99 @@ describe('ipc-socket-server permission dispatch', () => {
     expect((ok.payload as { requestId?: string }).requestId).toBe('perm-ok');
   });
 
+  it('P2b. valid same-folder request with different bound app/agent/thread scope is rejected', async () => {
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: true,
+      mode: 'allow_once' as const,
+    }));
+    const handle = await startServer(
+      buildDeps({ requestPermissionApproval } as never),
+    );
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const boundHelloToken = computeIpcAuthToken(FOLDER, THREAD_ID, {
+      appId: 'default',
+      agentId: 'agent-a',
+    });
+    const client = await connect(handle);
+    client.sendHello(
+      buildHelloPayload(boundHelloToken, {
+        folder: FOLDER,
+        threadId: THREAD_ID,
+        role: 'runner',
+        appId: 'default',
+        agentId: 'agent-a',
+      }),
+      'hs-bound-agent',
+    );
+    await client.waitForId('hs-bound-agent');
+
+    for (const mismatch of [
+      {
+        label: 'app',
+        requestId: 'perm-scope-app-mismatch',
+        threadId: THREAD_ID,
+        appId: 'other-app',
+        agentId: 'agent-a',
+      },
+      {
+        label: 'agent',
+        requestId: 'perm-scope-agent-mismatch',
+        threadId: THREAD_ID,
+        appId: 'default',
+        agentId: 'agent-b',
+      },
+      {
+        label: 'thread',
+        requestId: 'perm-scope-thread-mismatch',
+        threadId: 'thread-other',
+        appId: 'default',
+        agentId: 'agent-a',
+      },
+    ]) {
+      client.sendReq(
+        'permission',
+        buildPermissionPayload(auth.responseKeyId, {
+          requestId: mismatch.requestId,
+          threadId: mismatch.threadId,
+          targetJid: CHAT_JID,
+          appId: mismatch.appId,
+          agentId: mismatch.agentId,
+        }),
+        `req-${mismatch.label}-scope-mismatch`,
+      );
+
+      const rejected = await client.waitForId(
+        `req-${mismatch.label}-scope-mismatch`,
+      );
+      expect(rejected.type).toBe('resp');
+      expect(rejected.channel).toBe('permission');
+      expect(rejected.payload).toEqual({
+        ok: false,
+        code: 'invalid_request',
+        transport: true,
+      });
+    }
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(client.isClosed).toBe(false);
+
+    client.sendReq(
+      'permission',
+      buildPermissionPayload(auth.responseKeyId, {
+        requestId: 'perm-scope-ok',
+        threadId: THREAD_ID,
+        targetJid: CHAT_JID,
+        appId: 'default',
+        agentId: 'agent-a',
+      }),
+      'req-perm-scope-ok',
+    );
+    const ok = await client.waitForId('req-perm-scope-ok');
+    expect((ok.payload as { requestId?: string }).requestId).toBe(
+      'perm-scope-ok',
+    );
+    expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
+  });
+
   it('P3. replay of the same permission req is rejected the second time (idempotent)', async () => {
     let calls = 0;
     const requestPermissionApproval = vi.fn(async () => {
@@ -1470,6 +1626,63 @@ describe('ipc-socket-server permission dispatch', () => {
     expect(client.isClosed).toBe(false);
   });
 
+  it('P4b. shared permission in-flight cap is reserved before awaited job binding validation', async () => {
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: true,
+      mode: 'allow_once' as const,
+    }));
+    const blockedJobLookup = new Promise<never>(() => {
+      /* park validation until test teardown */
+    });
+    const opsRepository = {
+      getJobById: vi.fn(() => blockedJobLookup),
+      getJobRunById: vi.fn(async () => ({ id: 'run-1', job_id: 'job-1' })),
+    };
+    const handle = await startServer(
+      buildDeps({ requestPermissionApproval, opsRepository } as never),
+      { maxInFlightPerConnection: 200 },
+    );
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const client = await handshake(handle, auth);
+
+    for (let i = 0; i < 100; i += 1) {
+      client.sendReq(
+        'permission',
+        buildPermissionPayload(auth.responseKeyId, {
+          requestId: `perm-cap-${i}`,
+          threadId: THREAD_ID,
+          targetJid: CHAT_JID,
+          jobId: 'job-1',
+          runId: 'run-1',
+        }),
+        `req-perm-cap-${i}`,
+      );
+    }
+
+    client.sendReq(
+      'permission',
+      buildPermissionPayload(auth.responseKeyId, {
+        requestId: 'perm-cap-over',
+        threadId: THREAD_ID,
+        targetJid: CHAT_JID,
+        jobId: 'job-1',
+        runId: 'run-1',
+      }),
+      'req-perm-cap-over',
+    );
+
+    const capped = await client.waitForId('req-perm-cap-over', 1000);
+    expect(capped.type).toBe('resp');
+    expect(capped.channel).toBe('permission');
+    expect((capped.payload as { requestId?: string }).requestId).toBe(
+      'perm-cap-over',
+    );
+    expect((capped.payload as { approved?: boolean }).approved).toBe(false);
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(opsRepository.getJobById).toHaveBeenCalledTimes(100);
+    expect(client.isClosed).toBe(false);
+  });
+
   it('P5. permission targetJid not owned by the folder → signed denial, dep never runs', async () => {
     const requestPermissionApproval = vi.fn(async () => ({ approved: true }));
     const handle = await startServer(
@@ -1480,7 +1693,7 @@ describe('ipc-socket-server permission dispatch', () => {
 
     // A targetJid the folder does NOT own → the folder-ownership check throws
     // BEFORE the approval flow; a signed denial is routed back so the request
-    // settles (mirrors the fs watcher's writePermissionInteractionFailure).
+    // settles through the same signed failure writer.
     client.sendReq(
       'permission',
       buildPermissionPayload(auth.responseKeyId, {
@@ -1622,6 +1835,45 @@ describe('ipc-socket-server permission dispatch', () => {
     expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
     expect(client.isClosed).toBe(false);
   });
+
+  it('P8. mcp-role connections cannot use the runner-only permission channel', async () => {
+    const requestPermissionApproval = vi.fn(async () => ({ approved: true }));
+    const handle = await startServer(
+      buildDeps({ requestPermissionApproval } as never),
+    );
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const client = await connect(handle);
+    client.sendHello(
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        role: 'mcp',
+        threadId: THREAD_ID,
+      }),
+      'hs-mcp',
+    );
+    await client.waitForId('hs-mcp');
+
+    client.sendReq(
+      'permission',
+      buildPermissionPayload(auth.responseKeyId, {
+        requestId: 'perm-wrong-role',
+        threadId: THREAD_ID,
+        targetJid: CHAT_JID,
+      }),
+      'req-perm-wrong-role',
+    );
+
+    const resp = await client.waitForId('req-perm-wrong-role');
+    expect(resp.type).toBe('resp');
+    expect(resp.channel).toBe('permission');
+    expect(resp.payload).toEqual({
+      ok: false,
+      code: 'unauthorized_channel_role',
+      transport: true,
+    });
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(client.isClosed).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1640,7 +1892,11 @@ describe('ipc-socket-server message dispatch', () => {
   ): Promise<FakeWorkerClient> {
     const client = await connect(handle);
     client.sendHello(
-      buildHelloPayload(auth.authToken, { folder: FOLDER, threadId }),
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId,
+        role: 'mcp',
+      }),
       'hs',
     );
     const welcome = await client.waitForId('hs');
@@ -1716,7 +1972,7 @@ describe('ipc-socket-server message dispatch', () => {
 // REAL, so the server's dispatchBrowser → registerIpcResponder →
 // writeBrowserIpcResponse → signed-resp-frame path runs end to end. The browser
 // channel keeps its OWN chat-scoped HMAC token + replay scope, re-verified here
-// by the real parseBrowserIpcRequest exactly as the fs watcher does. The browser
+// by the real parseBrowserIpcRequest. The browser
 // grant (registerBrowserIpcAuthorization) is keyed by (folder, chatJid, thread).
 // ---------------------------------------------------------------------------
 
@@ -1728,7 +1984,11 @@ describe('ipc-socket-server browser dispatch', () => {
   ): Promise<FakeWorkerClient> {
     const client = await connect(handle);
     client.sendHello(
-      buildHelloPayload(auth.authToken, { folder: FOLDER, threadId }),
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId,
+        role: 'mcp',
+      }),
       'hs',
     );
     const welcome = await client.waitForId('hs');
@@ -1940,8 +2200,8 @@ describe('ipc-socket-server browser dispatch', () => {
   it('B5. the 5th concurrent browser req hits the shared cap-4 → signed {ok:false}, connection survives', async () => {
     // Gate every browser handler call on a release we control, so we can hold 4
     // in flight and watch the 5th hit the shared cap. The 5th request's signed
-    // failure response is delivered to its responder (mirroring the fs watcher's
-    // concurrency-limit path) without ever reaching the (still-blocked) handler.
+    // failure response is delivered to its responder without ever reaching the
+    // still-blocked handler.
     const releases: Array<() => void> = [];
     let started = 0;
     processBrowserIpcRequestMock.mockImplementation(async () => {
@@ -1989,7 +2249,7 @@ describe('ipc-socket-server browser dispatch', () => {
       expect(capped.type).toBe('resp');
       expect(capped.channel).toBe('browser');
       // Signed failure response (router-delivered) — the verified payload says
-      // ok:false, exactly as the fs watcher's writeBrowserFailureResponse emits.
+      // ok:false.
       const { signature, ...cappedPayload } = capped.payload as {
         signature?: string;
       } & Record<string, unknown>;
@@ -2020,25 +2280,95 @@ describe('ipc-socket-server browser dispatch', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 8. Bad/malformed frame → connection closes, server survives
+// 8. Bad/malformed frame → frame rejected, connection and server survive
 // ---------------------------------------------------------------------------
 
 describe('ipc-socket-server resilience', () => {
-  it('8. a malformed wire frame closes that connection but the server survives', async () => {
+  it('8. a malformed full wire frame does not close the connection or block later frames', async () => {
     const handle = await startServer(buildDeps());
-    const bad = await connect(handle);
+    const client = await connect(handle);
     // Frame header says 5 bytes, body is invalid JSON "{{{{{".
     const body = Buffer.from('{{{{{', 'utf8');
     const header = Buffer.alloc(4);
     header.writeUInt32BE(body.length, 0);
-    bad.sendBytes(Buffer.concat([header, body]));
+    client.sendBytes(Buffer.concat([header, body]));
 
-    await bad.waitClose();
-    expect(bad.isClosed).toBe(true);
-
-    // A SECOND client can still connect and complete the handshake.
-    const good = await connect(handle);
     const auth = makeAuth(FOLDER, THREAD_ID);
+    client.sendHello(
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId: THREAD_ID,
+        role: 'mcp',
+      }),
+      'hs-after-bad-frame',
+    );
+
+    const welcome = await client.waitForId('hs-after-bad-frame');
+    expect(welcome.ctrl).toBe('welcome');
+    expect(client.isClosed).toBe(false);
+    expect(handle.connectionsForFolder(FOLDER).length).toBe(1);
+  });
+
+  it('8b. an invalid post-handshake frame does not purge an in-flight request', async () => {
+    let releaseTask: (() => void) | undefined;
+    processTaskIpcMock.mockImplementation(
+      async (data) =>
+        new Promise<void>((resolve) => {
+          releaseTask = () => {
+            writeTaskIpcResponse(
+              FOLDER,
+              data.taskId,
+              { ok: true, message: 'survived bad neighbor' },
+              data.authThreadId,
+              data.responseKeyId,
+            );
+            resolve();
+          };
+        }),
+    );
+
+    const handle = await startServer(buildDeps());
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const client = await connect(handle);
+    client.sendHello(
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId: THREAD_ID,
+        role: 'mcp',
+      }),
+      'hs',
+    );
+    await client.waitForId('hs');
+
+    client.sendReq(
+      'task',
+      buildTaskPayload(auth.authToken, auth.responseKeyId, {
+        taskId: 'task-inflight',
+        type: 'scheduler_list_jobs',
+        threadId: THREAD_ID,
+      }),
+      'req-inflight',
+    );
+
+    const badBody = Buffer.from('{{{{{', 'utf8');
+    client.sendBytes(encodeFrame(badBody));
+
+    await vi.waitFor(() => {
+      expect(processTaskIpcMock).toHaveBeenCalledTimes(1);
+      expect(releaseTask).toBeDefined();
+    });
+    const release = releaseTask;
+    release?.();
+    const resp = await client.waitForId('req-inflight');
+    expect((resp.payload as { ok?: boolean }).ok).toBe(true);
+    expect((resp.payload as { message?: string }).message).toBe(
+      'survived bad neighbor',
+    );
+    expect(client.isClosed).toBe(false);
+    expect(handle.connectionsForFolder(FOLDER).length).toBe(1);
+
+    // A SECOND client can also still connect and complete the handshake.
+    const good = await connect(handle);
     good.sendHello(
       buildHelloPayload(auth.authToken, {
         folder: FOLDER,
@@ -2048,6 +2378,213 @@ describe('ipc-socket-server resilience', () => {
     );
     const welcome = await good.waitForId('hs2');
     expect(welcome.ctrl).toBe('welcome');
+  });
+
+  it('8c. parser-level bad version gets a typed reject and the connection stays usable', async () => {
+    processTaskIpcMock.mockImplementation(async (data) => {
+      writeTaskIpcResponse(
+        FOLDER,
+        data.taskId,
+        { ok: true, message: 'still usable' },
+        data.authThreadId,
+        data.responseKeyId,
+      );
+    });
+
+    const handle = await startServer(buildDeps());
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const client = await connect(handle);
+    client.sendHello(
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId: THREAD_ID,
+        role: 'mcp',
+      }),
+      'hs',
+    );
+    await client.waitForId('hs');
+
+    client.sendRawObject({
+      v: 2,
+      type: 'req',
+      channel: 'task',
+      id: 'bad-version',
+      payload: {},
+    });
+
+    const reject = await client.waitForId('bad-version');
+    expect(reject.type).toBe('resp');
+    expect(reject.channel).toBe('task');
+    expect(reject.payload).toEqual({
+      ok: false,
+      code: 'bad_version',
+      transport: true,
+    });
+    expect(client.isClosed).toBe(false);
+
+    client.sendReq(
+      'task',
+      buildTaskPayload(auth.authToken, auth.responseKeyId, {
+        taskId: 'task-after-bad-version',
+        type: 'scheduler_list_jobs',
+        threadId: THREAD_ID,
+      }),
+      'req-after-bad-version',
+    );
+    const ok = await client.waitForId('req-after-bad-version');
+    expect((ok.payload as { ok?: boolean }).ok).toBe(true);
+    expect((ok.payload as { message?: string }).message).toBe('still usable');
+  });
+
+  it('8d. unexpected post-handshake worker frames get a typed reject and the connection stays usable', async () => {
+    processTaskIpcMock.mockImplementation(async (data) => {
+      writeTaskIpcResponse(
+        FOLDER,
+        data.taskId,
+        { ok: true, message: 'still usable after unexpected frame' },
+        data.authThreadId,
+        data.responseKeyId,
+      );
+    });
+
+    const handle = await startServer(buildDeps());
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const client = await connect(handle);
+    client.sendHello(
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId: THREAD_ID,
+        role: 'mcp',
+      }),
+      'hs',
+    );
+    await client.waitForId('hs');
+
+    client.sendRawObject({
+      v: 1,
+      type: 'resp',
+      channel: 'task',
+      id: 'unexpected-resp',
+      payload: { ok: true },
+    });
+
+    const reject = await client.waitForId('unexpected-resp');
+    expect(reject.type).toBe('resp');
+    expect(reject.channel).toBe('task');
+    expect(reject.payload).toEqual({
+      ok: false,
+      code: 'unexpected_frame_type',
+      transport: true,
+    });
+    expect(client.isClosed).toBe(false);
+
+    client.sendReq(
+      'task',
+      buildTaskPayload(auth.authToken, auth.responseKeyId, {
+        taskId: 'task-after-unexpected-resp',
+        type: 'scheduler_list_jobs',
+        threadId: THREAD_ID,
+      }),
+      'req-after-unexpected-resp',
+    );
+    const ok = await client.waitForId('req-after-unexpected-resp');
+    expect((ok.payload as { ok?: boolean }).ok).toBe(true);
+    expect((ok.payload as { message?: string }).message).toBe(
+      'still usable after unexpected frame',
+    );
+  });
+});
+
+describe('ipc-socket-server live_tool_rules push', () => {
+  async function handshakeWithRun(
+    handle: IpcSocketServerHandle,
+    auth: ReturnType<typeof makeAuth>,
+    runHandle = 'run-1',
+    role: 'runner' | 'mcp' = 'runner',
+  ): Promise<FakeWorkerClient> {
+    const client = await connect(handle);
+    client.sendHello(
+      buildHelloPayload(auth.authToken, {
+        folder: FOLDER,
+        threadId: THREAD_ID,
+        runHandle,
+        role,
+      }),
+      'hs',
+    );
+    const welcome = await client.waitForId('hs');
+    expect(welcome.ctrl).toBe('welcome');
+    return client;
+  }
+
+  it('L1. sends current live tool rules on connect and pushes later updates', async () => {
+    const groupIpcDir = path.join(tmpDir, FOLDER);
+    appendLiveToolRules({
+      ipcDir: groupIpcDir,
+      runHandle: 'run-1',
+      rules: ['FileRead'],
+    });
+
+    const handle = await startServer(buildDeps(), { ipcBaseDir: tmpDir });
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const client = await handshakeWithRun(handle, auth, 'run-1');
+
+    const initial = await client.nextFrame();
+    expect(initial.type).toBe('push');
+    expect(initial.channel).toBe('live_tool_rules');
+    expect(initial.payload).toEqual({
+      runHandle: 'run-1',
+      rules: ['FileRead'],
+    });
+
+    appendLiveToolRules({
+      ipcDir: groupIpcDir,
+      runHandle: 'run-1',
+      rules: ['RunCommand(npm test *)'],
+    });
+
+    const update = await client.nextFrame();
+    expect(update.type).toBe('push');
+    expect(update.channel).toBe('live_tool_rules');
+    expect(update.payload).toEqual({
+      runHandle: 'run-1',
+      rules: ['FileRead', 'RunCommand(npm test *)'],
+    });
+  });
+
+  it('L2. mcp-role connections with a runHandle receive live rule snapshot and updates', async () => {
+    const groupIpcDir = path.join(tmpDir, FOLDER);
+    appendLiveToolRules({
+      ipcDir: groupIpcDir,
+      runHandle: 'run-mcp',
+      rules: ['mcp_list_tools'],
+    });
+
+    const handle = await startServer(buildDeps(), { ipcBaseDir: tmpDir });
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const client = await handshakeWithRun(handle, auth, 'run-mcp', 'mcp');
+
+    const initial = await client.nextFrame();
+    expect(initial.type).toBe('push');
+    expect(initial.channel).toBe('live_tool_rules');
+    expect(initial.payload).toEqual({
+      runHandle: 'run-mcp',
+      rules: ['mcp_list_tools'],
+    });
+
+    appendLiveToolRules({
+      ipcDir: groupIpcDir,
+      runHandle: 'run-mcp',
+      rules: ['mcp_call_tool'],
+    });
+
+    const update = await client.nextFrame();
+    expect(update.type).toBe('push');
+    expect(update.channel).toBe('live_tool_rules');
+    expect(update.payload).toEqual({
+      runHandle: 'run-mcp',
+      rules: ['mcp_list_tools', 'mcp_call_tool'],
+    });
   });
 });
 
@@ -2070,5 +2607,92 @@ describe('ipc-socket-server single-instance', () => {
     server = undefined;
     expect(fs.existsSync(socketPathFor())).toBe(false);
     expect(fs.existsSync(`${socketPathFor()}.owner`)).toBe(false);
+  });
+
+  it('9b. stop sends ctrl:drain to active runner connections before closing', async () => {
+    const deps = buildDeps();
+    const handle = await startServer(deps);
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const signedHello = buildHelloPayload(auth.authToken, {
+      folder: FOLDER,
+      role: 'runner',
+      threadId: THREAD_ID,
+      runHandle: 'run-drain',
+    });
+    const client = await FakeWorkerClient.connect(handle.socketPath);
+    client.sendHello(signedHello);
+    const welcome = await client.waitForId('hello-1');
+    expect(welcome.ctrl).toBe('welcome');
+
+    const stopping = handle.stop();
+    const drain = await client.waitForFrameMatching(
+      (frame) => frame.type === 'ctrl' && frame.ctrl === 'drain',
+    );
+
+    expect(drain).toMatchObject({
+      v: 1,
+      type: 'ctrl',
+      channel: null,
+      ctrl: 'drain',
+    });
+    await stopping;
+    server = undefined;
+  });
+
+  it('9c. runner connection drop revokes the run response signing key', async () => {
+    const handle = await startServer(buildDeps());
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    expect(
+      getIpcResponseSigningPrivateKey(FOLDER, THREAD_ID, auth.responseKeyId),
+    ).toBeTruthy();
+    const signedHello = buildHelloPayload(auth.authToken, {
+      folder: FOLDER,
+      role: 'runner',
+      threadId: THREAD_ID,
+      responseKeyId: auth.responseKeyId,
+      runHandle: 'run-revoke',
+    });
+    const client = await FakeWorkerClient.connect(handle.socketPath);
+    clients.push(client);
+    client.sendHello(signedHello);
+    const welcome = await client.waitForId('hello-1');
+    expect(welcome.ctrl).toBe('welcome');
+
+    client.destroy();
+    await client.waitClose();
+
+    await waitFor(
+      () =>
+        getIpcResponseSigningPrivateKey(
+          FOLDER,
+          THREAD_ID,
+          auth.responseKeyId,
+        ) === undefined,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. Peer UID defense-in-depth
+// ---------------------------------------------------------------------------
+
+describe('ipc-socket-server peer uid check', () => {
+  it('10. rejects a connection when the peer uid provider returns a different uid', async () => {
+    const currentUid = process.getuid?.() ?? 501;
+    const handle = await startServer(buildDeps(), {
+      peerUidProvider: () => currentUid + 1,
+    });
+    const auth = makeAuth(FOLDER, THREAD_ID);
+    const signedHello = buildHelloPayload(auth.authToken, {
+      folder: FOLDER,
+      role: 'runner',
+      threadId: THREAD_ID,
+      runHandle: 'run-peer-uid',
+    });
+    const client = await connect(handle);
+
+    client.sendHello(signedHello);
+
+    await client.waitClose();
   });
 });

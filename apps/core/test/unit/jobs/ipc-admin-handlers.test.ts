@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const runtimeHomes: string[] = [];
+const taskResponses = new Map<string, Record<string, unknown>>();
 
 async function loadAdminHandlers(runtimeHome: string) {
   vi.resetModules();
@@ -20,6 +21,7 @@ async function loadAdminHandlers(runtimeHome: string) {
     getRuntimeStorage: vi.fn(() => ({ repositories: {} })),
   }));
   const ipcAuth = await import('@core/runtime/ipc-auth.js');
+  const ipcResponseRouter = await import('@core/runtime/ipc-response-router.js');
   const handlers = await import('@core/jobs/ipc-admin-handlers.js');
   return {
     ...handlers,
@@ -30,6 +32,13 @@ async function loadAdminHandlers(runtimeHome: string) {
       threadId?: string,
     ) => {
       const envelope = ipcAuth.createIpcAuthEnvelope('main_agent', threadId);
+      ipcResponseRouter.registerIpcResponder(
+        'main_agent',
+        `task-${taskId}`,
+        (signed) => {
+          taskResponses.set(taskId, signed);
+        },
+      );
       return {
         taskId,
         appId: 'app:test',
@@ -42,19 +51,10 @@ async function loadAdminHandlers(runtimeHome: string) {
 }
 
 function readResponse(runtimeHome: string, taskId: string) {
-  return JSON.parse(
-    fs.readFileSync(
-      path.join(
-        runtimeHome,
-        'data',
-        'ipc',
-        'main_agent',
-        'task-responses',
-        `task-${taskId}.json`,
-      ),
-      'utf-8',
-    ),
-  );
+  void runtimeHome;
+  const response = taskResponses.get(taskId);
+  if (!response) throw new Error(`Missing task response: ${taskId}`);
+  return response;
 }
 
 function depsWithAdminTools(
@@ -89,6 +89,7 @@ function depsWithAdminTools(
 }
 
 afterEach(() => {
+  taskResponses.clear();
   vi.unstubAllEnvs();
   vi.doUnmock('@core/config/index.js');
   vi.doUnmock('@core/adapters/storage/postgres/runtime-store.js');

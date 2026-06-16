@@ -15,6 +15,12 @@
 - Keep `boondi-crm.get_open_records` reserved for bare returning greetings.
   Substantive order, product, and gifting turns should use the Shopify path and
   rely on background extraction for buying-interest capture.
+- Explicit phone/email/order lookups that are not clearly for someone else must
+  reach the Shopify MCP first; do not let Boondi pre-deny them in the prompt.
+  The MCP privacy guard owns the allow/deny decision.
+- For bare returning greetings, if `boondi-crm.get_open_records` returns any
+  open record, the reply must include a concrete returned detail instead of a
+  generic welcome.
 - Boondi guardrails must not rely on a separate classifier LLM. Boondi is
   configured `mode: deterministic` + `unresolved: inline`: deterministic
   pre-agent screening plus the inline scope block in the main Boondi payload for

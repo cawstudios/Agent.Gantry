@@ -1,7 +1,6 @@
 import {
   getTriggerPattern,
   MAX_MESSAGES_PER_PROMPT,
-  POLL_INTERVAL,
   TIMEZONE,
 } from '../config/index.js';
 import {
@@ -37,16 +36,9 @@ import {
 } from '../shared/thread-queue-key.js';
 import { resolveNonSelfSenderIds } from './session-resume-runtime.js';
 import { isTestOperatorJid } from '../shared/test-mode.js';
-import { IDLE_SWEEP_INTERVAL_MS } from './idle-session-sweep.js';
 
 export interface MessageLoopDeps {
   getConversationRoutes: () => Record<string, ConversationRoute>;
-  /**
-   * Optional background pass that extracts durable memory from idle sessions of
-   * opt-in agents. Run throttled and non-blocking from the poll loop; absent for
-   * callers/tests that don't exercise idle extraction.
-   */
-  runIdleSweep?: () => Promise<void>;
   getLastTimestamp: () => string;
   setLastTimestamp: (timestamp: string) => void;
   getOrRecoverCursor: (chatJid: string) => Promise<string> | string;
@@ -377,48 +369,6 @@ export async function runMessagePollingTick(
     }
   } catch (err) {
     logger.error({ err }, 'Error in message loop');
-  }
-}
-
-/**
- * Builds the throttled, non-blocking trigger for the idle-session memory sweep.
- * Call the returned function once per poll tick: it starts a sweep at most once
- * per {@link IDLE_SWEEP_INTERVAL_MS}, and never while one is still in flight, so
- * a sweep that outlasts the interval just delays the next start rather than
- * overlapping with itself. Spacing is measured start-to-start. When no sweep is
- * wired (tests, or callers that haven't opted into idle extraction) the trigger
- * is a no-op.
- */
-function createThrottledIdleSweep(
-  runIdleSweep: MessageLoopDeps['runIdleSweep'],
-): () => void {
-  if (!runIdleSweep) return () => {};
-  const sweep = runIdleSweep; // capture the narrowed (non-undefined) value
-  let lastSweepAt = 0;
-  let sweepInFlight = false;
-  return function triggerIdleSweepIfDue(): void {
-    if (sweepInFlight) return;
-    const now = Date.now();
-    if (now - lastSweepAt < IDLE_SWEEP_INTERVAL_MS) return;
-    lastSweepAt = now;
-    sweepInFlight = true;
-    // Background: never block customer message processing on extraction.
-    void sweep()
-      .catch((err) => logger.warn({ err }, 'Idle session sweep failed'))
-      .finally(() => {
-        sweepInFlight = false;
-      });
-  };
-}
-
-export async function startMessagePollingLoop(
-  deps: MessageLoopDeps,
-): Promise<never> {
-  const triggerIdleSweepIfDue = createThrottledIdleSweep(deps.runIdleSweep);
-  while (true) {
-    await runMessagePollingTick(deps);
-    triggerIdleSweepIfDue();
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
   }
 }
 

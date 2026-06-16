@@ -6,7 +6,10 @@ import type {
 import type { RuntimeApp } from './runtime-app.js';
 import type { AsyncTaskQueue } from './async-task-queue.js';
 import type { ChannelWiringDeps } from './channel-wiring-types.js';
-import { POLL_INTERVAL } from '../../config/index.js';
+import {
+  IPC_EVENT_PIPE,
+  IPC_EVENT_PIPE_DEBOUNCE_MS,
+} from '../../config/index.js';
 
 type ChannelPersistenceRepository = RuntimeChatMetadataRepository &
   RuntimeMessageRepository;
@@ -19,6 +22,8 @@ interface ChannelPersistenceHandlerDeps {
   persistenceQueue: AsyncTaskQueue;
   enqueueMessageCheck?: (chatJid: string) => void;
   autoRegisteredMessageCheckDelayMs?: number;
+  eventPipeEnabled?: boolean;
+  eventPipeDebounceMs?: number;
 }
 
 interface EnsureConversationRouteResult {
@@ -171,9 +176,12 @@ export function createChannelPersistenceHandlers({
   ops,
   persistenceQueue,
   enqueueMessageCheck,
-  autoRegisteredMessageCheckDelayMs = POLL_INTERVAL * 2,
+  autoRegisteredMessageCheckDelayMs = 0,
+  eventPipeEnabled = IPC_EVENT_PIPE,
+  eventPipeDebounceMs = IPC_EVENT_PIPE_DEBOUNCE_MS,
 }: ChannelPersistenceHandlerDeps) {
   const chatIsGroup = new Map<string, boolean>();
+  const eventPipeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   const ensureConfiguredConversationRoute = async (
     chatJid: string,
@@ -206,6 +214,58 @@ export function createChannelPersistenceHandlers({
 
   const enqueuePersistedInboundMessageCheck =
     enqueueMessageCheck ?? app.queue?.enqueueMessageCheck?.bind(app.queue);
+
+  const wakePersistedInboundMessageCheck = (
+    chatJid: string,
+    route: EnsureConversationRouteResult,
+  ): void => {
+    if (!enqueuePersistedInboundMessageCheck) return;
+    if (route.autoRegistered) {
+      if (autoRegisteredMessageCheckDelayMs <= 0) {
+        enqueuePersistedInboundMessageCheck(chatJid);
+      } else {
+        const timer = setTimeout(
+          () => enqueuePersistedInboundMessageCheck(chatJid),
+          autoRegisteredMessageCheckDelayMs,
+        );
+        if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+          (timer as { unref(): void }).unref();
+        }
+      }
+      return;
+    }
+
+    if (!eventPipeEnabled) {
+      enqueuePersistedInboundMessageCheck(chatJid);
+      return;
+    }
+
+    const existing = eventPipeTimers.get(chatJid);
+    if (existing) clearTimeout(existing);
+    const delayMs = Math.max(0, eventPipeDebounceMs);
+    const timer = setTimeout(() => {
+      eventPipeTimers.delete(chatJid);
+      enqueuePersistedInboundMessageCheck(chatJid);
+    }, delayMs);
+    if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+      (timer as { unref(): void }).unref();
+    }
+    eventPipeTimers.set(chatJid, timer);
+  };
+
+  const prewarmAfterPersistence = async (
+    chatJid: string,
+    route: EnsureConversationRouteResult,
+  ): Promise<void> => {
+    if (!route.autoRegistered) return;
+    const folder = app.getConversationRoutes()[chatJid]?.folder;
+    await app.prewarmAgentForConversationRoute(chatJid).catch((err) => {
+      resolved.logger.warn(
+        { err, chatJid, folder },
+        'Failed to prewarm auto-registered Interakt direct conversation',
+      );
+    });
+  };
 
   return {
     ensureMessageRoute: async (chatJid: string, msg: NewMessage) =>
@@ -253,23 +313,9 @@ export function createChannelPersistenceHandlers({
           'Persistence queue full; waiting to enqueue message persistence',
         ),
       );
-      if (
-        !msg.is_from_me &&
-        !msg.is_bot_message &&
-        enqueuePersistedInboundMessageCheck
-      ) {
-        if (route.autoRegistered) {
-          if (autoRegisteredMessageCheckDelayMs <= 0) {
-            enqueuePersistedInboundMessageCheck(chatJid);
-          } else {
-            setTimeout(
-              () => enqueuePersistedInboundMessageCheck(chatJid),
-              autoRegisteredMessageCheckDelayMs,
-            );
-          }
-        } else {
-          enqueuePersistedInboundMessageCheck(chatJid);
-        }
+      if (!msg.is_from_me && !msg.is_bot_message) {
+        await prewarmAfterPersistence(chatJid, route);
+        wakePersistedInboundMessageCheck(chatJid, route);
       }
     },
     onChatMetadata: async (

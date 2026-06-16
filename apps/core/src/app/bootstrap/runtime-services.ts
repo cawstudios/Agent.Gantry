@@ -1,6 +1,7 @@
 import {
+  DATA_DIR,
   DEFAULT_TRIGGER,
-  IPC_TRANSPORT,
+  IPC_REPLAY_PERSIST,
   getCredentialBrokerRuntimeConfig,
   getRuntimeSettingsForConfig,
 } from '../../config/index.js';
@@ -15,16 +16,18 @@ import {
 import { logger } from '../../infrastructure/logging/logger.js';
 import type { NewMessage } from '../../domain/types.js';
 import type { HostnameLookup } from '../../domain/network/public-address-policy.js';
+import path from 'node:path';
 import { writeGroupsSnapshot } from '../../runtime/agent-spawn.js';
-import { startIpcWatcher, type IpcDeps } from '../../runtime/ipc.js';
+import type { IpcDeps } from '../../runtime/ipc.js';
+import { initConsumedIpcRequestReplayPersistence } from '../../runtime/ipc-auth-validation.js';
+import { ensurePrivateDirSync } from '../../shared/private-fs.js';
 import {
   startIpcSocketServer,
   type IpcSocketServerHandle,
 } from '../../runtime/ipc-socket-server.js';
 import { makeSocketContinuationDelivery } from '../../runtime/continuation-delivery.js';
-// prettier-ignore
-import { recoverPendingMessages, startMessagePollingLoop } from '../../runtime/message-loop.js';
-import { createIdleSessionSweeper } from '../../runtime/idle-session-sweep.js';
+import { makeSocketWarmBindDelivery } from '../../runtime/warm-bind-delivery.js';
+import { recoverPendingMessages } from '../../runtime/message-loop.js';
 // prettier-ignore
 import { requestSchedulerSync, startSchedulerLoop } from '../../jobs/scheduler.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -71,14 +74,11 @@ import { nowIso, nowMs as currentTimeMs } from '../../shared/time/datetime.js';
 type RuntimeBootstrapRepository = RuntimeAppRepository & RuntimeJobRepository;
 interface Deps {
   startSchedulerLoop: typeof startSchedulerLoop;
-  startIpcWatcher: typeof startIpcWatcher;
   startIpcSocketServer: typeof startIpcSocketServer;
   makeSocketContinuationDelivery: typeof makeSocketContinuationDelivery;
-  ipcTransport: typeof IPC_TRANSPORT;
   writeGroupsSnapshot: typeof writeGroupsSnapshot;
   opsRepository: RuntimeBootstrapRepository;
   recoverPendingMessages: typeof recoverPendingMessages;
-  startMessagePollingLoop: typeof startMessagePollingLoop;
   logger: Pick<typeof logger, 'info' | 'warn' | 'fatal'>;
   mcpHostnameLookup?: HostnameLookup;
   collectSessionMemory: SessionMemoryCollector;
@@ -107,28 +107,25 @@ type RuntimeServicesDefaults = Omit<
   Deps,
   'opsRepository' | 'getToolRepository' | 'getPermissionRepository'
 >;
+
 export type RuntimeServicesOptions = {
   app: RuntimeApp;
   channelWiring: ChannelWiring;
   /**
-   * Populated with the live IPC socket-server handle when `IPC_TRANSPORT` is
-   * 'socket' or 'dual' and this core wins the socket election. The caller
-   * (`app/index.ts`) bridges it into `installShutdownHandlers` so the server is
-   * stopped on shutdown — symmetric with `controlServerRef`. Left untouched in
-   * 'fs' mode (default) and when the election is lost (handle is undefined).
+   * Populated with the live IPC socket-server handle when this core wins the
+   * socket election. The caller (`app/index.ts`) bridges it into
+   * `installShutdownHandlers` so the server is stopped on shutdown — symmetric
+   * with `controlServerRef`. Left untouched when the election is lost.
    */
   socketServerRef?: { current?: IpcSocketServerHandle };
 };
 function makeDefaultDeps(): RuntimeServicesDefaults {
   return {
     startSchedulerLoop,
-    startIpcWatcher,
     startIpcSocketServer,
     makeSocketContinuationDelivery,
-    ipcTransport: IPC_TRANSPORT,
     writeGroupsSnapshot,
     recoverPendingMessages,
-    startMessagePollingLoop,
     logger,
     collectSessionMemory: collectRuntimeSessionMemory,
     startOutboundDeliveryRecoveryLoop,
@@ -280,24 +277,41 @@ export async function startRuntimeServices(
     recordReplyToolCall: resolved.recordReplyToolCall,
   };
 
-  // IPC transport selection. Default 'fs' starts only the filesystem watcher —
-  // byte-for-byte today's behavior. 'socket' starts only the event-IPC socket
-  // server; 'dual' starts both (file fallback + push). The socket server
-  // self-elects: when another core already owns the socket it returns
-  // undefined, in which case continuations stay on the durable fs mailbox.
-  if (resolved.ipcTransport === 'fs' || resolved.ipcTransport === 'dual') {
-    resolved.startIpcWatcher(ipcDeps);
-  }
-  if (resolved.ipcTransport === 'socket' || resolved.ipcTransport === 'dual') {
-    const socketServer = await resolved.startIpcSocketServer(ipcDeps);
-    if (socketServer) {
-      if (socketServerRef) socketServerRef.current = socketServer;
-      app.queue.setContinuationDelivery(
-        resolved.makeSocketContinuationDelivery((folder) =>
-          socketServer.connectionsForFolder(folder),
-        ),
+  // I-3 (GANTRY_IPC_REPLAY_PERSIST, default off): load + prune the persisted
+  // consumed-requestId replay set so a captured request cannot be replayed
+  // across this restart within its 5-min expiry, then enable write-through for
+  // newly consumed ids. When the flag is OFF this is skipped entirely — the set
+  // is in-memory only, byte-identical to today. Best-effort: never block boot.
+  if (IPC_REPLAY_PERSIST) {
+    try {
+      const ipcBaseDir = path.join(DATA_DIR, 'ipc');
+      ensurePrivateDirSync(ipcBaseDir);
+      initConsumedIpcRequestReplayPersistence(
+        path.join(ipcBaseDir, '.replay-consumed.jsonl'),
       );
+    } catch (err) {
+      resolved.logger.warn({ err }, 'IPC replay-set persistence init failed');
     }
+  }
+
+  const socketServer = await resolved.startIpcSocketServer(ipcDeps);
+  if (socketServer) {
+    if (socketServerRef) socketServerRef.current = socketServer;
+    app.queue.setContinuationDelivery(
+      resolved.makeSocketContinuationDelivery((folder) =>
+        socketServer.connectionsForFolder(folder),
+      ),
+    );
+    const bindAwareAdapter = app.executionAdapter as {
+      setWarmBindDelivery?: (
+        delivery: ReturnType<typeof makeSocketWarmBindDelivery>,
+      ) => void;
+    };
+    bindAwareAdapter.setWarmBindDelivery?.(
+      makeSocketWarmBindDelivery((folder) =>
+        socketServer.connectionsForFolder(folder),
+      ),
+    );
   }
   syncGroupSnapshots();
   app.queue.setProcessMessagesFn((chatJid) =>
@@ -720,44 +734,4 @@ export async function startRuntimeServices(
   await startScheduler();
 
   resolved.logger.info(`Gantry running (default trigger: ${DEFAULT_TRIGGER})`);
-
-  resolved
-    .startMessagePollingLoop({
-      getConversationRoutes: () => app.getConversationRoutes(),
-      getLastTimestamp: () => app.getLastTimestamp(),
-      setLastTimestamp: (timestamp) => {
-        app.setLastTimestamp(timestamp);
-      },
-      getOrRecoverCursor: app.getOrRecoverCursor,
-      setAgentCursor: (chatJid, timestamp) => {
-        app.setAgentCursor(chatJid, timestamp);
-      },
-      saveState: app.saveState,
-      hasChannel: (chatJid) => channelWiring.hasChannel(chatJid),
-      setTyping: (chatJid, isTyping) =>
-        channelWiring.setTyping(chatJid, isTyping),
-      sendProgressUpdate: (chatJid, text, options) =>
-        channelWiring.sendProgressUpdate(chatJid, text, options),
-      sendChannelMessage: (chatJid, text, options) =>
-        channelWiring.sendMessage(chatJid, text, {
-          durability: 'required',
-          ...(options?.threadId
-            ? { messageOptions: { threadId: options.threadId } }
-            : {}),
-        }),
-      guardrailClassifier: app.guardrailClassifier,
-      queue: app.queue,
-      handleActiveControlCommand,
-      opsRepository: resolved.opsRepository,
-      runIdleSweep: createIdleSessionSweeper({
-        collectSessionMemory: resolved.collectSessionMemory,
-        concurrency: getRuntimeSettingsForConfig().memory.idleSweepConcurrency,
-        extractionTimeoutMs:
-          getRuntimeSettingsForConfig().memory.idleSweepExtractionTimeoutMs,
-      }),
-    })
-    .catch((err) => {
-      resolved.logger.fatal({ err }, 'Message loop crashed unexpectedly');
-      resolved.exit(1);
-    });
 }

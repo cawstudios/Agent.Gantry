@@ -25,7 +25,6 @@ const mockCustomerVisibleGuardrailResponse = vi.fn();
 
 vi.mock('@core/config/index.js', () => ({
   getTriggerPattern: () => /@Andy/i,
-  POLL_INTERVAL: 100,
   MAX_MESSAGES_PER_PROMPT: 50,
   TIMEZONE: 'UTC',
 }));

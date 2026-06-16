@@ -5,20 +5,6 @@ import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// continuation-input is mocked so an accidental fs fallback (no matching live
-// runner connection) is OBSERVABLE rather than silently writing the real
-// DATA_DIR mailbox. Every ordering/isolation assertion below targets the
-// socket-push path, which never calls these writers — so any call here is a
-// FINDING (the delivery did not resolve the runner connection it should have).
-vi.mock('@core/runtime/continuation-input.js', () => ({
-  writeContinuationInput: vi.fn(),
-  writeCloseSignal: vi.fn(),
-}));
-
-import {
-  writeContinuationInput,
-  writeCloseSignal,
-} from '@core/runtime/continuation-input.js';
 import { makeSocketContinuationDelivery } from '@core/runtime/continuation-delivery.js';
 import {
   startIpcSocketServer,
@@ -37,9 +23,6 @@ import {
 import { clearIpcResponders } from '@core/runtime/ipc-response-router.js';
 import { clearConsumedIpcRequestIds } from '@core/runtime/ipc-auth-validation.js';
 import { clearIpcRateLimitState } from '@core/runtime/ipc-rate-limit.js';
-
-const writeContinuationInputMock = vi.mocked(writeContinuationInput);
-const writeCloseSignalMock = vi.mocked(writeCloseSignal);
 
 // ---------------------------------------------------------------------------
 // Fixtures — K folders, each owning one chat jid. The socket carrier resolves
@@ -229,6 +212,67 @@ class FakeWorkerClient {
     });
   }
 
+  continuationPushes(): IpcWireFrame[] {
+    return this.pushes.filter((frame) => frame.channel === 'continuation');
+  }
+
+  deliveryPushes(): IpcWireFrame[] {
+    return this.pushes.filter(
+      (frame) => frame.channel === 'continuation' || frame.channel === 'close',
+    );
+  }
+
+  async waitForContinuationPushCount(
+    n: number,
+    timeoutMs = 5000,
+  ): Promise<void> {
+    if (this.continuationPushes().length >= n) return;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pushWaiters = this.pushWaiters.filter((w) => w !== check);
+        reject(
+          new Error(
+            `waitForContinuationPushCount(${n}) timeout — got ${
+              this.continuationPushes().length
+            }`,
+          ),
+        );
+      }, timeoutMs);
+      const check = () => {
+        if (this.continuationPushes().length >= n) {
+          clearTimeout(timer);
+          this.pushWaiters = this.pushWaiters.filter((w) => w !== check);
+          resolve();
+        }
+      };
+      this.pushWaiters.push(check);
+    });
+  }
+
+  async waitForDeliveryPushCount(n: number, timeoutMs = 5000): Promise<void> {
+    if (this.deliveryPushes().length >= n) return;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pushWaiters = this.pushWaiters.filter((w) => w !== check);
+        reject(
+          new Error(
+            `waitForDeliveryPushCount(${n}) timeout — got ${
+              this.deliveryPushes().length
+            }`,
+          ),
+        );
+      }, timeoutMs);
+      const check = () => {
+        if (this.deliveryPushes().length >= n) {
+          clearTimeout(timer);
+          this.pushWaiters = this.pushWaiters.filter((w) => w !== check);
+          resolve();
+        }
+      };
+      this.pushWaiters.push(check);
+    });
+  }
+
   destroy(): void {
     this.socket.destroy();
   }
@@ -261,8 +305,6 @@ function socketPathFor(name = 'core.sock'): string {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipc-socket-ordering-'));
-  writeContinuationInputMock.mockReset();
-  writeCloseSignalMock.mockReset();
   clearIpcResponders();
   clearConsumedIpcRequestIds();
   clearIpcRateLimitState();
@@ -358,21 +400,17 @@ describe('ipc-socket continuation ordering & isolation', () => {
       expect(ok).toBe(true);
     }
 
-    await runner.waitForPushCount(N);
+    await runner.waitForContinuationPushCount(N);
 
-    expect(runner.pushes.length).toBe(N);
-    runner.pushes.forEach((frame, i) => {
+    const pushes = runner.continuationPushes();
+    expect(pushes.length).toBe(N);
+    pushes.forEach((frame, i) => {
       expect(frame.type).toBe('push');
       expect(frame.channel).toBe('continuation');
       const payload = frame.payload as { text?: string; sequence?: number };
-      // Received order === sent order: text and sequence both monotonic.
       expect(payload.text).toBe(`msg-${i}`);
       expect(payload.sequence).toBe(i);
     });
-
-    // No fs fallback fired on the live-push path.
-    expect(writeContinuationInputMock).not.toHaveBeenCalled();
-    expect(writeCloseSignalMock).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -407,11 +445,12 @@ describe('ipc-socket continuation ordering & isolation', () => {
       );
     }
 
-    await runner.waitForPushCount(N);
-    expect(runner.pushes.length).toBe(N);
+    await runner.waitForContinuationPushCount(N);
+    const pushes = runner.continuationPushes();
+    expect(pushes.length).toBe(N);
 
     // The received sequence values are strictly increasing in arrival order.
-    const seqs = runner.pushes.map(
+    const seqs = pushes.map(
       (f) => (f.payload as { sequence?: number }).sequence as number,
     );
     for (let i = 1; i < seqs.length; i += 1) {
@@ -419,8 +458,6 @@ describe('ipc-socket continuation ordering & isolation', () => {
     }
     // And it is exactly 0..N-1 in order (no drops, no reordering).
     expect(seqs).toEqual(Array.from({ length: N }, (_, i) => i));
-
-    expect(writeContinuationInputMock).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -467,23 +504,18 @@ describe('ipc-socket continuation ordering & isolation', () => {
     }
 
     // Each connection must receive EXACTLY its own M messages, in order.
-    await Promise.all(runners.map((r) => r.waitForPushCount(M)));
+    await Promise.all(runners.map((r) => r.waitForContinuationPushCount(M)));
 
     for (let k = 0; k < K; k += 1) {
-      const pushes = runners[k].pushes;
+      const pushes = runners[k].continuationPushes();
       expect(pushes.length).toBe(M);
       pushes.forEach((frame, round) => {
         expect(frame.channel).toBe('continuation');
         const payload = frame.payload as { text?: string; sequence?: number };
-        // Zero cross-conversation bleed: every frame on conn k is conv-k's, and
-        // its per-conversation order (sequence) is intact.
         expect(payload.text).toBe(`conv${k}-msg${round}`);
         expect(payload.sequence).toBe(round);
       });
     }
-
-    // No fs fallback anywhere — every delivery hit a live matched connection.
-    expect(writeContinuationInputMock).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -522,18 +554,18 @@ describe('ipc-socket continuation ordering & isolation', () => {
     );
     expect(ok).toBe(true);
 
-    await connA.waitForPushCount(1);
-    expect(connA.pushes.length).toBe(1);
-    expect((connA.pushes[0].payload as { text?: string }).text).toBe(
-      'only-for-A',
-    );
+    await connA.waitForContinuationPushCount(1);
+    const pushesA = connA.continuationPushes();
+    expect(pushesA.length).toBe(1);
+    expect((pushesA[0].payload as { sequence?: number }).sequence).toBe(0);
+    expect((pushesA[0].payload as { text?: string }).text).toBe('only-for-A');
 
     // rh2 must receive nothing. Give the event loop a few turns to surface any
     // erroneous delivery, then assert connB stayed empty.
-    await expect(connB.waitForPushCount(1, 200)).rejects.toThrow(/timeout/);
-    expect(connB.pushes.length).toBe(0);
-
-    expect(writeContinuationInputMock).not.toHaveBeenCalled();
+    await expect(connB.waitForContinuationPushCount(1, 200)).rejects.toThrow(
+      /timeout/,
+    );
+    expect(connB.continuationPushes().length).toBe(0);
   });
 
   // -------------------------------------------------------------------------
@@ -561,19 +593,21 @@ describe('ipc-socket continuation ordering & isolation', () => {
     d.deliverContinuation(target, 'c1', 1);
     d.deliverClose(target);
 
-    // 3 push frames total: 2 continuations then 1 close, in that exact order.
-    await runner.waitForPushCount(3);
-    expect(runner.pushes.length).toBe(3);
+    // 3 delivery push frames total: 2 continuations then 1 close, in that exact
+    // order. Other runner push channels, such as live_tool_rules, are not part of
+    // the continuation carrier under test.
+    await runner.waitForDeliveryPushCount(3);
+    const pushes = runner.deliveryPushes();
+    expect(pushes.length).toBe(3);
 
-    expect(runner.pushes[0].channel).toBe('continuation');
-    expect((runner.pushes[0].payload as { text?: string }).text).toBe('c0');
-    expect(runner.pushes[1].channel).toBe('continuation');
-    expect((runner.pushes[1].payload as { text?: string }).text).toBe('c1');
+    expect(pushes[0].channel).toBe('continuation');
+    expect((pushes[0].payload as { sequence?: number }).sequence).toBe(0);
+    expect((pushes[0].payload as { text?: string }).text).toBe('c0');
+    expect(pushes[1].channel).toBe('continuation');
+    expect((pushes[1].payload as { sequence?: number }).sequence).toBe(1);
+    expect((pushes[1].payload as { text?: string }).text).toBe('c1');
     // The close lands LAST — never before a continuation that was sent earlier.
-    expect(runner.pushes[2].channel).toBe('close');
-    expect(runner.pushes[2].type).toBe('push');
-
-    expect(writeContinuationInputMock).not.toHaveBeenCalled();
-    expect(writeCloseSignalMock).not.toHaveBeenCalled();
+    expect(pushes[2].channel).toBe('close');
+    expect(pushes[2].type).toBe('push');
   });
 });

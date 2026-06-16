@@ -113,12 +113,12 @@ to the total.
 
 | Section label | What it measures | Mark source |
 |---|---|---|
-| **Waiting in queue** | Persisted inbound waited before processing (≤500ms poll + any debounce + concurrency wait) | start = webhook-receipt (new); end = processing start `group-processing.ts:171`; poll = `message-loop.ts:421` (POLL_INTERVAL=500, `config/index.ts:31`); auto-registered debounce 2×poll `channel-persistence-handlers.ts:261` |
+| **Waiting in queue** | Persisted inbound waited before processing (event-pipe debounce, queue contention, or recovery catch-up; no steady-state polling wait) | start = webhook-receipt; end = processing start `group-processing.ts`; event wake = `channel-persistence-handlers.ts`; queue handoff = `group-queue.ts` |
 | **Safety check (guardrail)** | Pre-agent screening | exists — `group-guardrail.ts:68`–`83` |
-| **Starting the assistant** | Cold spawn (node + runner + CLI + MCP connect) or warm hand-off to a live child | diagnostic only today — `timing-probe.ts` marks `before_sdk_query` (`query-loop.ts:314`) / `first_sdk_message` (`query-loop.ts:385`); promote into the trace |
-| **Model warm-up (time to first token)** | Request dispatched → first token, per LLM turn (queue, prompt upload, cache-read) | **new** — gap between `query-loop.ts:314` and `message_start` at `query-loop.ts:543` |
+| **Assistant startup** | Cold spawn only: node + runner + CLI + MCP connect. Warm-pool hits should not emit this section. | `timing-probe.ts` marks `before_sdk_query` / `first_sdk_message` |
+| **Model response wait** | Request dispatched → first assistant event, per LLM turn (provider queue, prompt upload, cache read, model compute) | gap between SDK query dispatch and first assistant message in `query-loop.ts` |
 | **Generating reply** | `message_start → assistant`, per turn | exists (reuse) — `llm-turn-accumulator.ts` |
-| **Tool call** (e.g. `get_gifting_context`) | MCP round-trip incl. IPC | exists — `ipc-admin-handlers.ts:326`–`349` |
+| **Tool call** (e.g. `get_gifting_context`) | MCP round-trip incl. socket IPC | tool spans from core MCP proxy and runner-observed SDK tool calls |
 | **Sending the reply** | Final text → Interakt send API returns | **new** — bracket `interakt-api.ts:63` |
 | **Other / hand-off** | Residual between marks, so nothing is hidden | computed remainder |
 
@@ -170,11 +170,10 @@ the existing enum (`guardrail | llm | tool | command`):
 
 | kind | meaning |
 |---|---|
-| `queue` | inbound `ingress_at` → processing pickup (poll + debounce + concurrency) |
+| `queue` | inbound `ingress_at` → processing pickup (event wake/debounce/concurrency/recovery catch-up; no steady-state polling wait) |
 | `guardrail` | pre-agent screen (existing) |
-| `startup` | agent process becomes ready: cold spawn **or** warm hand-off |
-| `model_wait` | request dispatched → first token, per LLM turn (TTFT) |
-| `llm` | generation `message_start → assistant`, per turn (existing) |
+| `startup` | cold assistant process becomes ready: node + runner + CLI + MCP connect |
+| `llm` | request dispatched/ready → assistant generation, per turn (existing); `detail.providerWaitMs` records first-response wait and `detail.generationMs` records generation time when both marks are available |
 | `tool` | MCP tool round-trip (existing) |
 | `send` | outbound dispatch to the channel (`send_started_at → send_completed_at`) |
 | `gap` | unattributed remainder between marks ("Other / hand-off") |
@@ -223,8 +222,8 @@ in the admin without a schema change.
   `reply-trace-persist.ts:55`. `selectTurnTraceSlice` (`reply-trace.ts:229`) keeps
   it idempotent and slices cumulative turns per reply.
 - **Warm continuation:** a reply produced by an already-live child has no spawn;
-  its timeline shows a "warm hand-off" segment instead of "Starting the assistant".
-  The report adapts to whichever marks exist.
+  its timeline has no `startup` section and splits the lead-in into queue pickup
+  plus LLM `providerWaitMs` detail. The report adapts to whichever marks exist.
 - **Batched inbounds:** when several customer messages are coalesced into one
   prompt, the start anchor is the **latest** driving inbound's `ingress_at` for that
   reply (§13.F — matches customer-felt responsiveness and the current badge).
@@ -281,9 +280,10 @@ the runbook.
 6. Open `http://localhost:3000/?c=conversation:wa:000000905`, click the reply's
    latency badge to open the **latency report**, and **take a screenshot**.
 7. Verify in the screenshot: every expected section is present and labeled
-   (Waiting in queue · guardrail · Starting the assistant · Model warm-up ·
-   Generating reply · Tool call · Sending the reply · Other), and the existing
-   per-stage detail (model/tokens/cache/bytes/payloads) still renders.
+   (Waiting in queue · Safety check · Assistant startup when cold · Generating
+   reply · Tool call · Sending the reply · Other), and
+   the existing per-stage detail (model/tokens/cache/bytes/payloads) still
+   renders.
 
 **Reconcile to wall clock (the acceptance gate):**
 8. Independent wall clock from the flow log (§9, `GANTRY_FLOW_LOG=1`): webhook-ACK
@@ -292,8 +292,8 @@ the runbook.
    (within a few ms), with no unexplained remainder beyond the "Other" bucket.
    Iterate until they reconcile exactly.
 10. Repeat once on a **warm continuation** turn (no cold spawn) to confirm the
-    timeline adapts — shows a "warm hand-off" segment instead of "Starting the
-    assistant".
+    timeline adapts — no `startup` section, with queue pickup separated from the
+    following LLM section's `providerWaitMs` detail.
 
 ---
 
@@ -316,11 +316,11 @@ so no ordering race with an in-memory collector. Gives precise diagnosis —
 "hand-off before send" (gap) vs. "send round-trip" (`send` section) are separated.
 `windowEnd = send_completed_at`.
 
-**C. `startup` is one section with optional `detail.phases[]`.** Top-level taxonomy
-stays stable (one `startup` kind), but the cold-spawn sub-marks already produced by
-`timing-probe.ts` (node / runner / CLI / MCP-connect) are promoted into
-`detail.phases[]` when present, so the admin can drill in without any future schema
-change. Warm hand-off is a single span with no sub-phases. Lossless and stable.
+**C. `startup` is cold-spawn only and may carry optional `detail.phases[]`.**
+Top-level taxonomy stays stable (one `startup` kind), but the cold-spawn sub-marks
+already produced by `timing-probe.ts` (node / runner / CLI / MCP-connect) are
+promoted into `detail.phases[]` when present, so the admin can drill in without any
+future schema change. Warm-pool hits do not emit a `startup` section.
 
 **D. v2 is a clean break — no v1 compatibility layer.** Dev trace data is disposable
 (runbook §8 reset), so we do not dual-render or backfill v1. The `version` field is
@@ -329,9 +329,9 @@ for unknown versions). This removes ongoing compat maintenance.
 
 **E. Section labels live in the admin; core emits `kind`s.** The kind→label/color map
 stays in `LatencyReport.tsx`, so wording can change without touching core. Chosen
-v1 wording: queue→"Waiting in queue", guardrail→"Safety check", startup→"Starting
-the assistant", model_wait→"Model warm-up", llm→"Generating reply", tool→"Tool
-call", send→"Sending the reply", gap→"Hand-off / overhead".
+v1 wording: queue→"Waiting in queue", guardrail→"Safety check", startup→"Assistant
+startup", llm→"Generating reply", tool→"Tool call", send→"Sending the reply",
+gap→"Hand-off / overhead".
 
 **F. Batch anchor = the latest driving inbound.** When several inbounds are coalesced
 into one prompt, `windowStart` = `ingress_at` of the **most recent** inbound for that

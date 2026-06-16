@@ -1,12 +1,13 @@
-import { randomUUID } from 'crypto';
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from './ipc-frame.js';
 import {
   encodeWireFrame,
+  IpcWireError,
   parseWireFrame,
   type IpcWireFrame,
 } from './ipc-wire.js';
 
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
+export const DEFAULT_PARTIAL_FRAME_TIMEOUT_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -30,6 +31,7 @@ export interface IpcConnectionScope {
   sourceAgentFolder: string;
   role: 'runner' | 'mcp';
   threadId?: string | null;
+  responseKeyId?: string | null;
   appId?: string | null;
   agentId?: string | null;
   runHandle?: string | null;
@@ -44,12 +46,24 @@ export interface IpcConnectionOptions {
   heartbeatIntervalMs?: number;
   /** How many consecutive missed pongs before we close. Default: 2. */
   maxMissedPongs?: number;
+  /** Bound for an incomplete length-prefixed frame. Default: 10 000 ms. */
+  partialFrameTimeoutMs?: number;
   /** Called for every non-ping/pong frame received on this connection. */
   onFrame: (frame: IpcWireFrame, conn: IpcConnection) => void;
   /** Called exactly once when the connection closes, with the reason string. */
   onClose: (reason: string, conn: IpcConnection) => void;
   /** Called for parse/protocol errors and socket-level errors. */
   onError?: (err: Error, conn: IpcConnection) => void;
+  /**
+   * Called after a full length-prefixed frame failed wire-schema parsing.
+   * The stream boundary is recoverable here, so owners can reply with a typed
+   * per-frame rejection while the connection continues.
+   */
+  onInvalidFrame?: (
+    err: IpcWireError,
+    raw: Record<string, unknown> | undefined,
+    conn: IpcConnection,
+  ) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,13 +76,20 @@ export class IpcConnection {
   private readonly maxBytes: number | undefined;
   private readonly heartbeatIntervalMs: number;
   private readonly maxMissedPongs: number;
+  private readonly partialFrameTimeoutMs: number;
   private readonly _onFrame: (frame: IpcWireFrame, conn: IpcConnection) => void;
   private readonly _onClose: (reason: string, conn: IpcConnection) => void;
   private readonly _onError?: (err: Error, conn: IpcConnection) => void;
+  private readonly _onInvalidFrame?: (
+    err: IpcWireError,
+    raw: Record<string, unknown> | undefined,
+    conn: IpcConnection,
+  ) => void;
 
   private _closed = false;
   private _scope: IpcConnectionScope | undefined;
   private _heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  private _partialFrameTimer: ReturnType<typeof setTimeout> | undefined;
   private _missedPongs = 0;
 
   constructor(opts: IpcConnectionOptions) {
@@ -77,9 +98,12 @@ export class IpcConnection {
     this.heartbeatIntervalMs =
       opts.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     this.maxMissedPongs = opts.maxMissedPongs ?? 2;
+    this.partialFrameTimeoutMs =
+      opts.partialFrameTimeoutMs ?? DEFAULT_PARTIAL_FRAME_TIMEOUT_MS;
     this._onFrame = opts.onFrame;
     this._onClose = opts.onClose;
     this._onError = opts.onError;
+    this._onInvalidFrame = opts.onInvalidFrame;
 
     this.decoder = new FrameDecoder(
       opts.maxBytes != null ? { maxBytes: opts.maxBytes } : {},
@@ -172,11 +196,41 @@ export class IpcConnection {
       clearInterval(this._heartbeatTimer);
       this._heartbeatTimer = undefined;
     }
+    if (this._partialFrameTimer !== undefined) {
+      clearTimeout(this._partialFrameTimer);
+      this._partialFrameTimer = undefined;
+    }
 
     try {
       this.socket.destroy();
     } catch {
       // swallow
+    }
+
+    this._onClose(reason, this);
+  }
+
+  end(reason: string): void {
+    if (this._closed) return;
+    this._closed = true;
+
+    if (this._heartbeatTimer !== undefined) {
+      clearInterval(this._heartbeatTimer);
+      this._heartbeatTimer = undefined;
+    }
+    if (this._partialFrameTimer !== undefined) {
+      clearTimeout(this._partialFrameTimer);
+      this._partialFrameTimer = undefined;
+    }
+
+    try {
+      this.socket.end();
+    } catch {
+      try {
+        this.socket.destroy();
+      } catch {
+        // swallow
+      }
     }
 
     this._onClose(reason, this);
@@ -200,17 +254,21 @@ export class IpcConnection {
       }
       return;
     }
+    this._updatePartialFrameTimer();
 
     for (const body of bodies) {
       if (this._closed) return;
 
       let frame: IpcWireFrame;
+      const rawText = body.toString('utf8');
       try {
-        frame = parseWireFrame(body.toString('utf8'));
+        frame = parseWireFrame(rawText);
       } catch (err) {
         this._onError?.(err as Error, this);
-        this.destroy('protocol_error');
-        return;
+        if (err instanceof IpcWireError) {
+          this._onInvalidFrame?.(err, parseRawFrameObject(rawText), this);
+        }
+        continue;
       }
 
       // Handle heartbeat control frames internally; never forward them.
@@ -235,4 +293,36 @@ export class IpcConnection {
       this._onFrame(frame, this);
     }
   }
+
+  private _updatePartialFrameTimer(): void {
+    if (this._closed) return;
+    if (this.decoder.buffered === 0) {
+      if (this._partialFrameTimer !== undefined) {
+        clearTimeout(this._partialFrameTimer);
+        this._partialFrameTimer = undefined;
+      }
+      return;
+    }
+    if (this._partialFrameTimer !== undefined) return;
+
+    const timer = setTimeout(() => {
+      this.destroy('frame_timeout');
+    }, this.partialFrameTimeoutMs);
+    if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+      (timer as { unref(): void }).unref();
+    }
+    this._partialFrameTimer = timer;
+  }
+}
+
+function parseRawFrameObject(raw: string): Record<string, unknown> | undefined {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+  } catch {
+    // Malformed JSON has no reliable id/channel to reply to.
+  }
+  return undefined;
 }

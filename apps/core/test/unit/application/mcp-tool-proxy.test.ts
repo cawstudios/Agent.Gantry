@@ -97,6 +97,33 @@ describe('projectMcpProxyCallerIdentity', () => {
     expect(capability).toEqual(input);
   });
 
+  it('can resolve caller identity per MCP server', () => {
+    const [shopify, crm] = projectMcpProxyCallerIdentity({
+      capabilities: [
+        httpCap({ name: 'shopify-api' }),
+        httpCap({
+          name: 'boondi-crm',
+          config: { type: 'http', url: 'http://127.0.0.1:8082/mcp' },
+        }),
+      ],
+      callerIdentityJid: 'wa:000000050',
+      callerIdentityJidForCapability: (capability) =>
+        capability.name === 'shopify-api' ? 'wa:918097288633' : 'wa:000000050',
+      credentialEnv: { MCP_IDENTITY_SECRET: TEST_SECRET },
+    });
+
+    expect(
+      (shopify?.config as { headers?: Record<string, string> }).headers?.[
+        'X-Caller-Identity'
+      ],
+    ).toMatch(/^phone:\+918097288633;ts:\d+;sig:[0-9a-f]+$/);
+    expect(
+      (crm?.config as { headers?: Record<string, string> }).headers?.[
+        'X-Caller-Identity'
+      ],
+    ).toMatch(/^phone:\+000000050;ts:\d+;sig:[0-9a-f]+$/);
+  });
+
   it('returns only customer-safe wording when proxy identity projection fails', () => {
     expect(() =>
       projectMcpProxyCallerIdentity({

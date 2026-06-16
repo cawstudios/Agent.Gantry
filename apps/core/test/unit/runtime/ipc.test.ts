@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ConversationRoute } from '@core/domain/types.js';
 import {
-  isPendingIpcJsonFile,
   isTrustedRegisteredIpcFolder,
   resolveIpcFoldersFromGroups,
   resolveIpcTargetJidForSourceGroup,
@@ -96,13 +95,5 @@ describe('isTrustedRegisteredIpcFolder', () => {
     fs.symlinkSync(target, path.join(ipcRoot, 'linked_group'), 'dir');
 
     expect(isTrustedRegisteredIpcFolder(ipcRoot, 'linked_group')).toBe(false);
-  });
-});
-
-describe('isPendingIpcJsonFile', () => {
-  it('excludes in-flight claimed request files from poll scans', () => {
-    expect(isPendingIpcJsonFile('perm-1.json')).toBe(true);
-    expect(isPendingIpcJsonFile('.processing-123-perm-1.json')).toBe(false);
-    expect(isPendingIpcJsonFile('perm-1.json.tmp')).toBe(false);
   });
 });

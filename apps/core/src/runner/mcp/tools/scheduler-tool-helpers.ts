@@ -1,5 +1,5 @@
 import { nowIso } from '../../../shared/time/datetime.js';
-import { chatJid, threadId } from '../context.js';
+import { getBoundChatJid, getBoundThreadId } from '../bound-identity.js';
 import { formatTaskFailureLines } from '../formatting.js';
 import { sendTaskRequest, type TaskResponseEnvelope } from '../ipc.js';
 import { makeIpcId } from '../ipc-ids.js';
@@ -21,6 +21,7 @@ export async function requestSchedulerData(
   timeoutMs = 20_000,
 ): Promise<TaskResponseEnvelope | null> {
   const taskId = makeIpcId(type.replace(/_/g, '-'));
+  const chatJid = getBoundChatJid();
   return sendTaskRequest(
     {
       type,
@@ -28,7 +29,7 @@ export async function requestSchedulerData(
       ...payload,
       targetJid: chatJid,
       chatJid,
-      authThreadId: threadId,
+      authThreadId: getBoundThreadId(),
       timestamp: nowIso(),
     },
     { timeoutMs },
@@ -82,6 +83,7 @@ export async function submitSchedulerMutationTask(input: {
   successText: string;
   timeoutMs?: number;
 }): Promise<SchedulerMutationResult> {
+  const chatJid = getBoundChatJid();
   const response = await sendTaskRequest(
     {
       type: input.taskType,
@@ -89,7 +91,7 @@ export async function submitSchedulerMutationTask(input: {
       ...input.payload,
       targetJid: chatJid,
       chatJid,
-      authThreadId: threadId,
+      authThreadId: getBoundThreadId(),
       timestamp: nowIso(),
     },
     { timeoutMs: input.timeoutMs ?? 20_000 },
@@ -228,6 +230,8 @@ export function canonicalTargetFromArgs(
   }>;
   error?: string;
 } {
+  const chatJid = getBoundChatJid();
+  const threadId = getBoundThreadId();
   const defaultExecutionContext = {
     conversationJid: chatJid,
     threadId: threadId ?? null,

@@ -1,0 +1,242 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]:
+          - img [ref=e7]
+          - generic [ref=e12]:
+            - heading "Boondi Conversations" [level=1] [ref=e13]
+            - paragraph [ref=e14]: WhatsApp support inbox · 1 chat · 4 messages
+        - generic [ref=e15]:
+          - navigation [ref=e16]:
+            - link "Conversations" [ref=e17] [cursor=pointer]:
+              - /url: /
+            - link "Leads" [ref=e18] [cursor=pointer]:
+              - /url: /leads
+          - generic [ref=e19]:
+            - switch "Turn auto-refresh off" [checked] [ref=e20] [cursor=pointer]:
+              - generic [ref=e23]: Auto-refresh
+            - generic [ref=e28]: Live
+          - generic [ref=e29]: Updated just now
+          - button "Refresh" [ref=e30] [cursor=pointer]:
+            - img [ref=e31]
+            - generic [ref=e33]: Refresh
+    - generic [ref=e34]:
+      - complementary [ref=e35]:
+        - generic [ref=e36]:
+          - generic [ref=e37]:
+            - generic [ref=e38]:
+              - generic:
+                - img
+              - textbox "Search name or phone number" [ref=e39]
+            - button "New dev chat" [ref=e84] [cursor=pointer]
+          - generic [ref=e40]: 1 conversation
+        - list [ref=e85]:
+          - listitem [ref=e86]:
+            - 'button "Latency Suite 9:55 PM Boondi: Here''s your last order: *Order #109260* 📅 Placed: 28 May 2026 🛍️ Choco Butterscotch Barks (200g) × 2 💰 Total: ₹2,360 (discount code BSS200 applied) ✅ Status: Delivered Anything else you''d like to know about this order? 4 +000000044" [ref=e87] [cursor=pointer]':
+              - generic [ref=e88]: LS
+              - generic [ref=e89]:
+                - generic [ref=e90]:
+                  - generic [ref=e91]: Latency Suite
+                  - generic [ref=e92]: 9:55 PM
+                - generic [ref=e93]:
+                  - generic [ref=e94]: "Boondi: Here's your last order: *Order #109260* 📅 Placed: 28 May 2026 🛍️ Choco Butterscotch Barks (200g) × 2 💰 Total: ₹2,360 (discount code BSS200 applied) ✅ Status: Delivered Anything else you'd like to know about this order?"
+                  - generic [ref=e95]: "4"
+                - generic [ref=e96]: "+000000044"
+      - generic [ref=e97]:
+        - generic [ref=e98]:
+          - generic [ref=e99]: LS
+          - generic [ref=e100]:
+            - generic [ref=e101]: Latency Suite
+            - generic [ref=e102]: +000000044 · 4 messages
+          - generic [ref=e103]:
+            - generic [ref=e104]: 2 from customer
+            - generic [ref=e105]: 2 from Boondi
+        - generic [ref=e108]:
+          - generic [ref=e110]: Today
+          - generic [ref=e113]:
+            - generic [ref=e114]: /new
+            - generic [ref=e116]: 9:55 PM
+          - generic [ref=e118]:
+            - generic [ref=e119]:
+              - generic [ref=e120]: Started a fresh session.
+              - generic [ref=e121]:
+                - generic [ref=e122]: 9:55 PM
+                - generic "sent" [ref=e123]:
+                  - img [ref=e124]
+            - generic [ref=e127]:
+              - button "Open latency report" [ref=e128] [cursor=pointer]:
+                - img [ref=e129]
+                - text: took <1s
+              - button "Add comment" [ref=e132] [cursor=pointer]
+          - generic [ref=e135]:
+            - generic [ref=e136]: Check my last order?
+            - generic [ref=e138]: 9:55 PM
+          - generic [ref=e140]:
+            - generic [ref=e141]:
+              - generic [ref=e142]:
+                - text: "Here's your last order:"
+                - strong [ref=e143]: "Order #109260"
+                - text: "📅 Placed: 28 May 2026 🛍️ Choco Butterscotch Barks (200g) × 2 💰 Total: ₹2,360 (discount code BSS200 applied) ✅ Status: Delivered Anything else you'd like to know about this order?"
+              - generic [ref=e144]:
+                - generic [ref=e145]: 9:55 PM
+                - generic "sent" [ref=e146]:
+                  - img [ref=e147]
+            - generic [ref=e150]:
+              - button "Open latency report" [active] [ref=e151] [cursor=pointer]:
+                - img [ref=e152]
+                - text: took 9s
+              - button "Add comment" [ref=e155] [cursor=pointer]
+        - generic [ref=e156]:
+          - textbox "Operator message" [ref=e158]
+          - button "Send" [disabled] [ref=e159]
+        - dialog "Reply latency report" [ref=e171]:
+          - generic [ref=e172]:
+            - generic [ref=e173]:
+              - generic [ref=e174]:
+                - heading "Reply latency" [level=2] [ref=e175]
+                - generic "End-to-end wall-clock time for this reply — the same number as the badge. Sections below sum to this total." [ref=e176]: 9.1 s
+              - paragraph [ref=e177]: End-to-end across 8 sections — sums to the total.
+            - generic "Full request/response payloads were captured (GANTRY_TRACE_PAYLOADS=1) and can be expanded per stage." [ref=e178]: Payloads on
+            - button "Close" [ref=e180] [cursor=pointer]:
+              - generic [ref=e181]: x
+          - generic [ref=e182]:
+            - img "Latency waterfall" [ref=e183]:
+              - generic "queue · 101 ms" [ref=e184]
+              - generic "guardrail · 3 ms" [ref=e185]
+              - generic "main LLM · turn 1 · 3.6 s" [ref=e186]
+              - generic "gap · 20 ms" [ref=e187]
+              - generic "get_recent_orders_with_details · 1.5 s" [ref=e188]
+              - generic "main LLM · turn 2 · 3.8 s" [ref=e189]
+              - generic "gap · 86 ms" [ref=e190]
+              - generic "send · 1 ms" [ref=e191]
+            - generic [ref=e192]:
+              - generic [ref=e193]: Waiting in queue
+              - generic [ref=e195]: Safety check
+              - generic [ref=e197]: Main LLM
+              - generic [ref=e199]: Tool call
+              - generic [ref=e201]: Sending the reply
+              - generic [ref=e203]: Hand-off / overhead
+            - generic [ref=e205]:
+              - button "queue Waiting in queue 101 ms 1%" [disabled] [ref=e207]:
+                - generic [ref=e210]:
+                  - generic [ref=e211]: queue
+                  - generic [ref=e212]: Waiting in queue
+                - generic [ref=e213]:
+                  - generic [ref=e214]: 101 ms
+                  - generic [ref=e215]: 1%
+              - button "guardrail Safety check deterministic allow inline attached obvious_bss_topic 3 ms 0%" [disabled] [ref=e217]:
+                - generic [ref=e219]:
+                  - generic [ref=e220]:
+                    - generic [ref=e221]: guardrail
+                    - generic [ref=e222]: Safety check
+                  - generic [ref=e223]:
+                    - generic [ref=e224]: deterministic
+                    - generic [ref=e225]: allow
+                    - generic [ref=e226]: inline attached
+                    - generic [ref=e227]: obvious_bss_topic
+                - generic [ref=e228]:
+                  - generic [ref=e229]: 3 ms
+                  - generic [ref=e230]: 0%
+              - button "main LLM · turn 1 Main LLM claude-sonnet-4-6 tool_use wait 2.4 s gen 1.2 s in 3 out 125 cache r 3,100 cache w 5,982 3.6 s 40%" [ref=e232] [cursor=pointer]:
+                - generic [ref=e234]:
+                  - generic [ref=e235]:
+                    - generic [ref=e236]: main LLM · turn 1
+                    - generic [ref=e237]: Main LLM
+                  - generic [ref=e238]:
+                    - generic [ref=e239]: claude-sonnet-4-6
+                    - generic [ref=e240]: tool_use
+                    - generic [ref=e241]: wait 2.4 s
+                    - generic [ref=e242]: gen 1.2 s
+                    - generic [ref=e243]:
+                      - generic [ref=e244]:
+                        - generic [ref=e245]: in
+                        - generic [ref=e246]: "3"
+                      - generic [ref=e247]:
+                        - generic [ref=e248]: out
+                        - generic [ref=e249]: "125"
+                      - generic [ref=e250]:
+                        - generic [ref=e251]: cache r
+                        - generic [ref=e252]: 3,100
+                      - generic [ref=e253]:
+                        - generic [ref=e254]: cache w
+                        - generic [ref=e255]: 5,982
+                - generic [ref=e256]:
+                  - generic [ref=e257]: 3.6 s
+                  - generic [ref=e258]: 40%
+                  - generic [ref=e259]: ›
+              - button "gap Hand-off / overhead 20 ms 0%" [disabled] [ref=e261]:
+                - generic [ref=e264]:
+                  - generic [ref=e265]: gap
+                  - generic [ref=e266]: Hand-off / overhead
+                - generic [ref=e267]:
+                  - generic [ref=e268]: 20 ms
+                  - generic [ref=e269]: 0%
+              - button "get_recent_orders_with_details Tool call shopify-api ok 11 B → 697 B 1.5 s 17%" [ref=e271] [cursor=pointer]:
+                - generic [ref=e273]:
+                  - generic [ref=e274]:
+                    - generic [ref=e275]: get_recent_orders_with_details
+                    - generic [ref=e276]: Tool call
+                  - generic [ref=e277]:
+                    - generic [ref=e278]: shopify-api
+                    - generic [ref=e279]: ok
+                    - generic [ref=e280]: 11 B → 697 B
+                - generic [ref=e281]:
+                  - generic [ref=e282]: 1.5 s
+                  - generic [ref=e283]: 17%
+                  - generic [ref=e284]: ›
+              - button "main LLM · turn 2 Main LLM claude-sonnet-4-6 end_turn wait 2.6 s gen 1.1 s in 1 out 97 cache r 9,082 cache w 418 3.8 s 41%" [ref=e286] [cursor=pointer]:
+                - generic [ref=e288]:
+                  - generic [ref=e289]:
+                    - generic [ref=e290]: main LLM · turn 2
+                    - generic [ref=e291]: Main LLM
+                  - generic [ref=e292]:
+                    - generic [ref=e293]: claude-sonnet-4-6
+                    - generic [ref=e294]: end_turn
+                    - generic [ref=e295]: wait 2.6 s
+                    - generic [ref=e296]: gen 1.1 s
+                    - generic [ref=e297]:
+                      - generic [ref=e298]:
+                        - generic [ref=e299]: in
+                        - generic [ref=e300]: "1"
+                      - generic [ref=e301]:
+                        - generic [ref=e302]: out
+                        - generic [ref=e303]: "97"
+                      - generic [ref=e304]:
+                        - generic [ref=e305]: cache r
+                        - generic [ref=e306]: 9,082
+                      - generic [ref=e307]:
+                        - generic [ref=e308]: cache w
+                        - generic [ref=e309]: "418"
+                - generic [ref=e310]:
+                  - generic [ref=e311]: 3.8 s
+                  - generic [ref=e312]: 41%
+                  - generic [ref=e313]: ›
+              - button "gap Hand-off / overhead 86 ms 1%" [disabled] [ref=e315]:
+                - generic [ref=e318]:
+                  - generic [ref=e319]: gap
+                  - generic [ref=e320]: Hand-off / overhead
+                - generic [ref=e321]:
+                  - generic [ref=e322]: 86 ms
+                  - generic [ref=e323]: 1%
+              - button "send Sending the reply 1 ms 0%" [disabled] [ref=e325]:
+                - generic [ref=e328]:
+                  - generic [ref=e329]: send
+                  - generic [ref=e330]: Sending the reply
+                - generic [ref=e331]:
+                  - generic [ref=e332]: 1 ms
+                  - generic [ref=e333]: 0%
+      - complementary [ref=e79]:
+        - generic [ref=e80]:
+          - heading "Customer profile" [level=2] [ref=e81]
+          - paragraph [ref=e82]: What Boondi knows · read-only
+        - generic [ref=e83]:
+          - generic [ref=e160]:
+            - generic [ref=e161]: LS
+            - generic [ref=e162]:
+              - generic [ref=e163]: Latency Suite
+              - generic [ref=e164]: "+000000044"
+          - generic [ref=e165]: No open opportunities yet.
+          - heading "Saved details" [level=3] [ref=e167]
+          - generic [ref=e168]: No saved details yet.
+  - alert [ref=e169]

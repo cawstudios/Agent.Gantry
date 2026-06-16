@@ -17,13 +17,6 @@
       "breakpoints": true
     },
     {
-      "idx": 2,
-      "version": "7",
-      "when": 1776903000000,
-      "tag": "0002_messages_poll_cursor_index",
-      "breakpoints": true
-    },
-    {
       "idx": 3,
       "version": "7",
       "when": 1776989400000,

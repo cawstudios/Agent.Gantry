@@ -19,11 +19,12 @@ import { startControlServer } from '../control/server/index.js';
 import { stopSchedulerLoop } from '../jobs/scheduler.js';
 import { stopOutboundDeliveryRecoveryLoop } from '../jobs/outbound-delivery-recovery.js';
 import { publishBrowserJobActivityEvent } from '../jobs/browser-activity-events.js';
-import { GANTRY_HOME } from '../config/index.js';
+import { GANTRY_HOME, getRuntimeWarmPoolConfig } from '../config/index.js';
 import { hydrateDynamicRuntimeEnv } from '../config/env/index.js';
 import { getBrowserStatus } from '../runtime/browser-capability.js';
 import type { IpcSocketServerHandle } from '../runtime/ipc-socket-server.js';
 import { startSettingsReloadWatcher } from '../runtime/settings-reload-watcher.js';
+import { startWarmPoolMaintenance } from '../runtime/warm-pool-maintenance.js';
 import {
   formatRuntimePreflightFailure,
   validateRuntimePreflightWithStorage,
@@ -52,6 +53,7 @@ export async function startGantryRuntime(
   hydrateDynamicRuntimeEnv([
     'GANTRY_FLOW_LOG',
     'GANTRY_OUTBOUND_DRYRUN',
+    'GANTRY_WARM_POOL',
     'GANTRY_TEST_OPERATOR_PHONE',
     'GANTRY_TEST_CALLER_IDENTITY_PHONE',
     // Developer-only child-runner switch (fails safe to dist when no source
@@ -90,10 +92,9 @@ export async function startGantryRuntime(
       close: () => Promise<void>;
     };
   } = {};
-  // Populated by startRuntimeServices when IPC_TRANSPORT is 'socket'/'dual' and
-  // this core wins the socket election (undefined otherwise — fs mode or
-  // election lost). Bridged into installShutdownHandlers below to stop the
-  // server on shutdown; null-safe when no server was started.
+  // Populated by startRuntimeServices when this core wins the socket election.
+  // Bridged into installShutdownHandlers below to stop the server on shutdown;
+  // null-safe when no server was started.
   const socketServerRef: { current?: IpcSocketServerHandle } = {};
   app.setChannelRuntime({
     hasChannel: channelWiring.hasChannel,
@@ -118,6 +119,11 @@ export async function startGantryRuntime(
     app,
     ops: storage.ops,
     repositories: storage.repositories,
+  });
+  const warmPoolMaintenance = startWarmPoolMaintenance({
+    warmPool: app.warmPool,
+    idleTtlMs: getRuntimeWarmPoolConfig().idleTtlMs,
+    logger,
   });
   const browserToolModulePath = [
     '..',
@@ -151,6 +157,12 @@ export async function startGantryRuntime(
     closeScheduler: stopSchedulerLoop,
     closeOutboundDeliveryRecovery: stopOutboundDeliveryRecoveryLoop,
     closeSettingsWatcher: settingsWatcher.close,
+    closeWarmPool: app.warmPool
+      ? async () => {
+          warmPoolMaintenance.close();
+          await app.warmPool!.shutdown?.();
+        }
+      : undefined,
     closeBrowserToolBackends: async () =>
       (await loadBrowserToolModule()).closeBrowserToolBackends(),
   });

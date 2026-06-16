@@ -18,11 +18,6 @@ function requirePathEnv(name: string): string {
 export const WORKSPACE_GROUP_DIR = requirePathEnv('GANTRY_WORKSPACE_GROUP_DIR');
 export const WORKSPACE_EXTRA_DIR = requirePathEnv('GANTRY_WORKSPACE_EXTRA_DIR');
 export const IPC_BASE_DIR = requirePathEnv('GANTRY_IPC_DIR');
-export const IPC_INPUT_DIR = requirePathEnv('GANTRY_IPC_INPUT_DIR');
-export const IPC_INTERACTION_BOUNDARY_DIR = path.join(
-  IPC_BASE_DIR,
-  'interaction-boundaries',
-);
 export const IPC_AUTH_TOKEN = process.env.GANTRY_IPC_AUTH_TOKEN || '';
 export const APP_ID = process.env.GANTRY_APP_ID?.trim() || '';
 export const AGENT_ID = process.env.GANTRY_AGENT_ID?.trim() || '';
@@ -42,8 +37,6 @@ export const IPC_RESPONSE_KEY_ID = process.env.GANTRY_IPC_RESPONSE_KEY_ID || '';
 export const PERMISSION_REQUEST_TIMEOUT_MS = getPermissionTimeoutMs(
   JOB_ID ? 'autonomous' : 'interactive',
 );
-export const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
-export const IPC_POLL_MS = 500;
 
 function copyEnv(
   target: Record<string, string | undefined>,

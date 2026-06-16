@@ -1,7 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MemoryIpcAction } from '@gantry/contracts';
 import { z } from 'zod';
-import { groupFolder, memoryDefaultScope, memoryUserId } from '../context.js';
+import { groupFolder, memoryDefaultScope } from '../context.js';
+// Warm-pool (F4): the memory scope owner is the BOUND customer (bind-delivered),
+// not the spawn-env constant. Cold path: the accessor returns the env constant.
+import { getBoundIdentity } from '../bound-identity.js';
 import {
   formatMemoryReviewDecisionResponse,
   formatMemoryReviewPendingResponse,
@@ -121,7 +124,10 @@ export function registerMemoryTools(server: McpServer): void {
     async (args) => {
       const response = await requestMemoryAction(
         'memory_save',
-        buildMemorySavePayload(args, { memoryDefaultScope, memoryUserId }),
+        buildMemorySavePayload(args, {
+          memoryDefaultScope,
+          memoryUserId: getBoundIdentity().memoryUserId,
+        }),
       );
       if (!response.ok) {
         return {
@@ -207,7 +213,10 @@ export function registerMemoryTools(server: McpServer): void {
     async (args) => {
       const response = await requestMemoryAction(
         'procedure_save',
-        buildProcedureSavePayload(args, { memoryDefaultScope, memoryUserId }),
+        buildProcedureSavePayload(args, {
+          memoryDefaultScope,
+          memoryUserId: getBoundIdentity().memoryUserId,
+        }),
       );
       if (!response.ok) {
         return {

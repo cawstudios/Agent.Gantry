@@ -161,7 +161,7 @@ describe('Boondi regression scenarios', () => {
     expect([...phonesModule.phonesFromEnvValue(' , \n\t ')]).toEqual([]);
   });
 
-  it('includes scenario phones and runtime .env operator phones without reading the real home', async () => {
+  it('allows 000-prefixed fake phones when an operator phone is configured', async () => {
     const oldHome = process.env.GANTRY_HOME;
     const oldOperatorPhones = process.env.GANTRY_TEST_OPERATOR_PHONE;
     const runtimeHome = fs.mkdtempSync(
@@ -174,7 +174,7 @@ describe('Boondi regression scenarios', () => {
         path.join(runtimeHome, '.env'),
         [
           'OTHER_KEY=ignored',
-          'GANTRY_TEST_OPERATOR_PHONE="000000001, 000000999"',
+          'GANTRY_TEST_OPERATOR_PHONE="919654405340"',
         ].join('\n'),
       );
 
@@ -188,15 +188,16 @@ describe('Boondi regression scenarios', () => {
       };
 
       expect(phonesModule.configuredOperatorPhones()).toEqual(
-        new Set(['000000001', '000000999']),
+        new Set(['919654405340']),
       );
       expect(phonesModule.ALL_TEST_PHONES).toContain('000000059');
       expect(phonesModule.ALL_TEST_PHONES).toContain('000000901');
       expect(phonesModule.OPERATOR_LIST.split(',')).toEqual(
-        expect.arrayContaining(['000000001', '000000059', '000000999']),
+        expect.arrayContaining(['000000001', '000000059', '919654405340']),
       );
       expect(phonesModule.isAllowedTestPhone('000-000-999')).toBe(true);
-      expect(phonesModule.isAllowedTestPhone('919654405340')).toBe(false);
+      expect(phonesModule.isAllowedTestPhone('919654405340')).toBe(true);
+      expect(phonesModule.isAllowedTestPhone('919999999999')).toBe(false);
     } finally {
       if (oldHome === undefined) delete process.env.GANTRY_HOME;
       else process.env.GANTRY_HOME = oldHome;

@@ -12,6 +12,7 @@ export interface ShopifyMcpEnv {
   clientSecret: string;
   apiVersion: string;
   port: number;
+  graphqlTimeoutMs: number;
   refreshLeadTimeMs: number;
   logLevel: 'debug' | 'info' | 'warn' | 'error' | 'fatal';
   logFormat: 'json' | 'text';
@@ -163,6 +164,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): ShopifyMcpEnv 
     mode,
     ...credentials,
     port: parsePort(source.SHOPIFY_MCP_PORT, 8081),
+    graphqlTimeoutMs: parsePositiveInt(
+      'SHOPIFY_GRAPHQL_TIMEOUT_MS',
+      source.SHOPIFY_GRAPHQL_TIMEOUT_MS,
+      8_000,
+    ),
     refreshLeadTimeMs: parsePositiveInt(
       'SHOPIFY_TOKEN_REFRESH_LEAD_MS',
       source.SHOPIFY_TOKEN_REFRESH_LEAD_MS,

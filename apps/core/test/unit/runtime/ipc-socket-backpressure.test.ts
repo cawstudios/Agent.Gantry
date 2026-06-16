@@ -18,7 +18,10 @@ vi.mock('@core/jobs/ipc-handler.js', () => ({
 
 import { processTaskIpc } from '@core/jobs/ipc-handler.js';
 import { writeTaskIpcResponse } from '@core/jobs/ipc-shared.js';
-import { createIpcAuthEnvelope } from '@core/runtime/ipc-auth.js';
+import {
+  computeIpcAuthToken,
+  createIpcAuthEnvelope,
+} from '@core/runtime/ipc-auth.js';
 import {
   startIpcSocketServer,
   type IpcSocketServerHandle,
@@ -42,6 +45,7 @@ import {
   canProcessIpcFile,
   clearIpcRateLimitState,
 } from '@core/runtime/ipc-rate-limit.js';
+import { clearInteractionInFlight } from '@core/runtime/ipc-interaction-inflight.js';
 
 const processTaskIpcMock = vi.mocked(processTaskIpc);
 
@@ -280,7 +284,7 @@ function buildHelloPayload(
 ): Record<string, unknown> {
   return createSignedIpcRequestEnvelope(authToken, {
     kind: 'hello',
-    role: opts.role ?? 'runner',
+    role: opts.role ?? 'mcp',
     runHandle: opts.runHandle ?? 'run-1',
     folder: opts.folder,
     context: { threadId: opts.threadId ?? null },
@@ -297,6 +301,43 @@ function buildTaskPayload(
     taskId: opts.taskId,
     context: {
       threadId: opts.threadId ?? null,
+      responseKeyId,
+    },
+  });
+}
+
+function buildPermissionPayload(
+  responseKeyId: string,
+  opts: {
+    requestId: string;
+    folder?: string;
+    threadId?: string;
+    targetJid?: string;
+    appId?: string;
+    responseNonce?: string;
+    jobId?: string;
+    runId?: string;
+  },
+): Record<string, unknown> {
+  const appId = opts.appId ?? 'default';
+  const folder = opts.folder ?? FOLDER_A;
+  const token = computeIpcAuthToken(folder, opts.threadId, { appId });
+  return createSignedIpcRequestEnvelope(token, {
+    requestId: opts.requestId,
+    appId,
+    responseNonce: opts.responseNonce ?? `${opts.requestId}-nonce`,
+    sourceAgentFolder: folder,
+    ...(opts.targetJid !== undefined ? { targetJid: opts.targetJid } : {}),
+    ...(opts.jobId ? { jobId: opts.jobId } : {}),
+    ...(opts.runId ? { runId: opts.runId } : {}),
+    toolName: 'Bash',
+    toolInput: { command: 'ls' },
+    context: {
+      appId,
+      ...(opts.targetJid !== undefined ? { chatJid: opts.targetJid } : {}),
+      ...(opts.jobId ? { jobId: opts.jobId } : {}),
+      ...(opts.runId ? { runId: opts.runId } : {}),
+      ...(opts.threadId ? { threadId: opts.threadId } : {}),
       responseKeyId,
     },
   });
@@ -320,6 +361,7 @@ beforeEach(() => {
   clearIpcResponders();
   clearConsumedIpcRequestIds();
   clearIpcRateLimitState();
+  clearInteractionInFlight();
 });
 
 afterEach(async () => {
@@ -331,6 +373,7 @@ afterEach(async () => {
   clearIpcResponders();
   clearConsumedIpcRequestIds();
   clearIpcRateLimitState();
+  clearInteractionInFlight();
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch {
@@ -362,13 +405,16 @@ async function connect(
 async function handshake(
   handle: IpcSocketServerHandle,
   auth: ReturnType<typeof makeAuth>,
-  opts: { folder: string; threadId?: string } = { folder: FOLDER_A },
+  opts: { folder: string; role?: 'runner' | 'mcp'; threadId?: string } = {
+    folder: FOLDER_A,
+  },
 ): Promise<FakeWorkerClient> {
   const client = await connect(handle);
   const id = `hs-${Math.random().toString(36).slice(2)}`;
   client.sendHello(
     buildHelloPayload(auth.authToken, {
       folder: opts.folder,
+      role: opts.role,
       threadId: opts.threadId ?? THREAD_ID,
     }),
     id,
@@ -521,6 +567,84 @@ describe('ipc-socket-backpressure: in-flight cap', () => {
     );
     const recovered = await client.waitForId('req-after-recover');
     expect((recovered.payload as { ok?: boolean }).ok).toBe(true);
+  });
+
+  it('1b. reserves a permission in-flight slot before scheduled-job validation awaits', async () => {
+    const releases: Array<() => void> = [];
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: true,
+      mode: 'allow_once' as const,
+    }));
+    const opsRepository = {
+      getJobById: vi.fn(
+        async () =>
+          new Promise((resolve) => {
+            releases.push(() =>
+              resolve({
+                id: 'job-1',
+                group_scope: FOLDER_A,
+                execution_context: {
+                  conversationJid: CHAT_JID_A,
+                  groupScope: FOLDER_A,
+                  threadId: THREAD_ID,
+                },
+              }),
+            );
+          }),
+      ),
+      getJobRunById: vi.fn(async () => ({ id: 'run-1', job_id: 'job-1' })),
+    };
+    const handle = await startServer(
+      buildDeps({ requestPermissionApproval, opsRepository } as never),
+      { maxInFlightPerConnection: 1 },
+    );
+    const auth = makeAuth(FOLDER_A, THREAD_ID);
+    const client = await handshake(handle, auth, {
+      folder: FOLDER_A,
+      role: 'runner',
+    });
+
+    try {
+      client.sendReq(
+        'permission',
+        buildPermissionPayload(auth.responseKeyId, {
+          requestId: 'perm-held',
+          threadId: THREAD_ID,
+          targetJid: CHAT_JID_A,
+          jobId: 'job-1',
+          runId: 'run-1',
+        }),
+        'req-perm-held',
+      );
+
+      await vi.waitFor(() => {
+        expect(opsRepository.getJobById).toHaveBeenCalledTimes(1);
+      });
+
+      client.sendReq(
+        'permission',
+        buildPermissionPayload(auth.responseKeyId, {
+          requestId: 'perm-over-cap',
+          threadId: THREAD_ID,
+          targetJid: CHAT_JID_A,
+          jobId: 'job-1',
+          runId: 'run-1',
+        }),
+        'req-perm-over-cap',
+      );
+
+      const busy = await client_collectBusy(client, 'req-perm-over-cap');
+      expect(busy.code).toBe('busy');
+      expect(opsRepository.getJobById).toHaveBeenCalledTimes(1);
+      expect(requestPermissionApproval).not.toHaveBeenCalled();
+
+      for (const release of releases.splice(0)) release();
+      const held = await client.waitForId('req-perm-held');
+      expect((held.payload as { approved?: boolean }).approved).toBe(true);
+      expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
+    } finally {
+      for (const release of releases.splice(0)) release();
+    }
   });
 });
 
@@ -686,22 +810,19 @@ describe('ipc-socket-backpressure: rate limit', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Bad frames vs the authorized bucket (parity with fs).  [spec edge-case 26:
+// 4. Bad frames vs the authorized bucket.  [spec edge-case 26:
 //    "bad frames don't charge the authorized bucket (current behavior
 //    preserved)" — note the qualifier "authorized bucket": that is the
-//    CONDITIONAL browser charge. For the TASK channel both the fs watcher
-//    (ipc.ts:404 → canProcessIpcFile, THEN ipc.ts:409 → parseTaskIpcData) and
-//    the socket (ipc-socket-server.ts:323 → canProcessIpcFile, THEN :335 →
-//    parseTaskIpcData) charge-BEFORE-parse, so a bad task payload DOES consume a
-//    token on BOTH transports. We assert that equivalence (the release gate),
+//    CONDITIONAL browser charge. For the TASK channel, the socket path charges
+//    BEFORE parse, so a bad task payload DOES consume a token. We assert that
+//    behavior (the release gate),
 //    plus the key invariant: a flood of bad frames neither crashes the server
 //    nor starves a concurrent VALID request on another connection.]
 //
 //    Two distinct kinds of "bad frame":
-//      (a) malformed WIRE frame (bad JSON / bad shape) — rejected at the wire
-//          layer (parseWireFrame throws → protocol_error → that connection is
-//          destroyed) BEFORE dispatch, so it never charges any bucket. This is
-//          the existing transport-test case 8 behaviour.
+//      (a) malformed WIRE frame (bad JSON / bad shape) — rejected per frame at
+//          the wire layer BEFORE dispatch, so the connection survives and no
+//          authorized bucket is charged.
 //      (b) structurally-valid wire frame whose TASK PAYLOAD fails
 //          parseTaskIpcData (forged HMAC) — survives the wire layer, reaches
 //          dispatchTask, gets an `invalid_request` resp, the connection SURVIVES,
@@ -709,7 +830,7 @@ describe('ipc-socket-backpressure: rate limit', () => {
 // ---------------------------------------------------------------------------
 
 describe('ipc-socket-backpressure: bad frames vs authorized bucket', () => {
-  it('4a. a flood of malformed-wire frames each drops its own connection; the server + a concurrent valid req on another connection survive', async () => {
+  it('4a. a flood of malformed-wire frames is rejected per-frame; the connection, server, and authorized buckets survive', async () => {
     processTaskIpcMock.mockImplementation(async (data) => {
       writeTaskIpcResponse(
         FOLDER_B,
@@ -725,22 +846,36 @@ describe('ipc-socket-backpressure: bad frames vs authorized bucket', () => {
     const authB = makeAuth(FOLDER_B, THREAD_ID);
     const survivor = await handshake(handle, authB, { folder: FOLDER_B });
 
-    // Flood: 12 throwaway connections each send a malformed wire frame (header
-    // claims a body length, body is invalid JSON). Each is destroyed by the wire
-    // layer (protocol_error); none crashes the server.
+    // Flood: one authorized folder-A connection sends 12 malformed full wire
+    // frames. Each is rejected before dispatch; the connection is not destroyed
+    // and no channel-specific bucket is charged.
+    const authA = makeAuth(FOLDER_A, THREAD_ID);
+    const attacker = await handshake(handle, authA, { folder: FOLDER_A });
     const floodCount = 12;
     for (let i = 0; i < floodCount; i += 1) {
-      const bad = await connect(handle);
       const body = Buffer.from('{not-json' + i, 'utf8');
-      const header = Buffer.alloc(4);
-      header.writeUInt32BE(body.length, 0);
-      bad.sendBytes(Buffer.concat([header, body]));
-      await bad.waitClose();
-      expect(bad.isClosed).toBe(true);
+      attacker.sendBytes(encodeFrame(body));
     }
 
-    // The server survived the flood: the pre-existing healthy connection still
-    // services a valid request end to end.
+    // The attacker connection is still usable after the malformed frames.
+    attacker.sendReq(
+      'continuation',
+      buildTaskPayload(authA.authToken, authA.responseKeyId, {
+        taskId: 'unsupported-after-malformed',
+        threadId: THREAD_ID,
+      }),
+      'req-unsupported-after-malformed',
+    );
+    const unsupported = await attacker.waitForId(
+      'req-unsupported-after-malformed',
+    );
+    expect((unsupported.payload as { code?: string }).code).toBe(
+      'unsupported_channel',
+    );
+    expect(attacker.isClosed).toBe(false);
+
+    // The server survived the flood: the healthy connection still services a
+    // valid request end to end.
     survivor.sendReq(
       'task',
       buildTaskPayload(authB.authToken, authB.responseKeyId, {
@@ -758,6 +893,12 @@ describe('ipc-socket-backpressure: bad frames vs authorized bucket', () => {
       folder: FOLDER_A,
     });
     expect(fresh.isClosed).toBe(false);
+
+    // Malformed wire frames never reached dispatchTask, so the folder-A task
+    // bucket still has its full allowance available.
+    let remaining = 0;
+    while (canProcessIpcFile(FOLDER_A, 'tasks')) remaining += 1;
+    expect(remaining).toBe(RATE_LIMIT_MAX);
   });
 
   it('4b. a flood of valid-wire/bad-payload task frames survives the connection, does not starve another connection, and charges the bucket (charge-before-parse parity with fs)', async () => {
@@ -826,11 +967,9 @@ describe('ipc-socket-backpressure: bad frames vs authorized bucket', () => {
       expect(hasIpcResponder(FOLDER_A, `task-bad-${i}`)).toBe(false);
     }
 
-    // CHARGE-BEFORE-PARSE PARITY WITH FS: the socket task path calls
-    // canProcessIpcFile(folder,'tasks') BEFORE parseTaskIpcData (ipc-socket-
-    // server.ts:323 then :335), exactly like the fs watcher (ipc.ts:404 then
-    // :409). So each of the `floodCount` bad frames consumed a (group-a,'tasks')
-    // token even though it never parsed. We prove the bucket was charged by
+    // CHARGE-BEFORE-PARSE: the socket task path calls canProcessIpcFile before
+    // parseTaskIpcData. So each of the `floodCount` bad frames consumed a
+    // (group-a,'tasks') token even though it never parsed. We prove that by
     // measuring how many tokens remain in this window: the limiter must now be
     // exactly `floodCount` tokens lower than a fresh bucket.
     let remaining = 0;

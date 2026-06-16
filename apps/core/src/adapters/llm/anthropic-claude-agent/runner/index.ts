@@ -4,20 +4,14 @@
  *
  * Input protocol:
  *   Stdin: Full agent input JSON (read until EOF)
- *   IPC:   Follow-up messages written as JSON files to GANTRY_IPC_INPUT_DIR
- *          Files: {type:"message", text:"..."}.json, polled and consumed
- *          Sentinel: GANTRY_IPC_INPUT_DIR/_close signals session end
+ *   IPC:   Follow-up messages and warm binds arrive as signed socket pushes.
  *
  * Stdout protocol:
  *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
  *   Multiple results may be emitted. Final marker after loop ends signals completion.
  */
 
-import {
-  drainIpcInput,
-  prepareInteractiveIpcInputDir,
-  shouldClose,
-} from './ipc-input.js';
+import { isWarmGenericBoot } from './bind-channel.js';
 import { readStdin } from './input.js';
 import { log } from './logging.js';
 import {
@@ -87,8 +81,23 @@ async function main(): Promise<void> {
   }
   log(`Configured thinking: ${configuredThinking.description}`);
 
-  if (!agentInput.isScheduledJob) {
-    prepareInteractiveIpcInputDir();
+  // Warm-pool two-phase entry (F3): a generic worker has no boot-time prompt and
+  // must wait for a socket bind after the generic startup() boot. Run the
+  // interactive loop directly in warm mode; the bound first message + memory
+  // arrive at bind.
+  if (isWarmGenericBoot(agentInput)) {
+    log('Booting warm generic worker (two-phase: startup → bind → run)');
+    await runInteractiveQueryLoop({
+      prompt: '',
+      mcpServerPath,
+      agentInput,
+      sdkEnv,
+      configuredModel: configuredModel.model,
+      configuredThinking: configuredThinking.thinking,
+      configuredEffort: configuredThinking.effort,
+      warmGenericBoot: true,
+    });
+    return;
   }
 
   const prompt = buildInitialPrompt(agentInput);
@@ -142,15 +151,6 @@ function buildInitialPrompt(agentInput: AgentRunnerInput): string {
   let prompt = agentInput.prompt;
   if (agentInput.isScheduledJob) {
     prompt = `${SCHEDULED_JOB_REPORT_INSTRUCTIONS}\n\n${AUTONOMOUS_TOOL_CONTRACT_INSTRUCTIONS}\n\n${autonomousToolContract(agentInput.allowedTools)}\n\n${toolAccessRequirementContract(agentInput.toolAccessRequirements)}\n\n${prompt}`;
-  }
-  if (!agentInput.isScheduledJob) {
-    const pending = drainIpcInput();
-    if (pending.length > 0) {
-      log(
-        `Draining ${pending.length} pending IPC messages into initial prompt`,
-      );
-      prompt += '\n' + pending.join('\n');
-    }
   }
   return prompt;
 }
@@ -241,12 +241,15 @@ async function runInteractiveQueryLoop(opts: {
   configuredModel?: string;
   configuredThinking?: Parameters<typeof runQuery>[5];
   configuredEffort?: Parameters<typeof runQuery>[6];
+  warmGenericBoot?: boolean;
 }): Promise<void> {
   let diagnosticSessionId: string | undefined;
 
   try {
     log(
-      `Starting live streaming query with ${opts.agentInput.sessionId ? 'resumed SDK session' : 'new persistent SDK session'}...`,
+      opts.warmGenericBoot
+        ? 'Starting warm generic boot (startup → bind → new persistent SDK session)...'
+        : `Starting live streaming query with ${opts.agentInput.sessionId ? 'resumed SDK session' : 'new persistent SDK session'}...`,
     );
     const queryResult = await runQuery(
       opts.prompt,
@@ -256,16 +259,19 @@ async function runInteractiveQueryLoop(opts: {
       opts.configuredModel,
       opts.configuredThinking,
       opts.configuredEffort,
-      { enableIpcFollowups: true, persistSdkSession: true },
+      {
+        enableIpcFollowups: true,
+        persistSdkSession: true,
+        warmGenericBoot: opts.warmGenericBoot ?? false,
+      },
     );
     if (queryResult.newSessionId) {
       diagnosticSessionId = queryResult.newSessionId;
     }
     if (queryResult.closedDuringQuery) {
-      log('Close sentinel consumed during query, exiting');
+      log('Close push consumed during query, exiting');
       return;
     }
-    shouldClose();
     writeOutput({
       status: 'success',
       result: null,

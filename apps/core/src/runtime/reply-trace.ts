@@ -201,7 +201,6 @@ export type TimelineSectionKind =
   | 'queue'
   | 'guardrail'
   | 'startup'
-  | 'model_wait'
   | 'llm'
   | 'tool'
   | 'send'
@@ -242,16 +241,15 @@ export interface AssembleTimelineInput {
   /**
    * Warm continuation only: the instant this turn's generation was dispatched to
    * the live agent (ms epoch). Splits the leading pre-generation span into real
-   * pickup (`queue`, windowStart->dispatchedAt) and the model's first-token wait
-   * (`model_wait`, dispatchedAt->first token). Cold replies use startup instead.
+   * pickup (`queue`, windowStart->dispatchedAt). Provider first-response wait is
+   * folded into the following LLM section as detail, keeping the timeline
+   * architecture-level rather than exposing provider internals as a separate
+   * stage.
    */
   dispatchedAt?: number;
 }
 
-type NamedSpanKind = Exclude<
-  TimelineSectionKind,
-  'queue' | 'model_wait' | 'gap'
->;
+type NamedSpanKind = Exclude<TimelineSectionKind, 'queue' | 'gap'>;
 
 interface NamedSpan {
   kind: NamedSpanKind;
@@ -286,7 +284,7 @@ function buildNamedSpans(input: AssembleTimelineInput): NamedSpan[] {
   if (input.startup && input.startup.readyAt > input.startup.startedAt) {
     spans.push({
       kind: 'startup',
-      label: 'startup',
+      label: 'assistant startup',
       start: input.startup.startedAt,
       end: input.startup.readyAt,
       detail: {},
@@ -351,31 +349,24 @@ function buildTimeline(input: AssembleTimelineInput): BuiltTimeline {
   const payloadSources: (StagePayloadSource | undefined)[] = [];
   let cursor = windowStart;
 
-  const pushGap = (
-    gapStart: number,
-    gapEnd: number,
-    nextKind?: NamedSpanKind,
-  ) => {
+  const pushGap = (gapStart: number, gapEnd: number) => {
     const ms = gapEnd - gapStart;
     if (ms <= 0) return;
-    // The leading gap (still at windowStart) is the queue; a gap right before an llm turn is model-wait.
+    // The leading gap (still at windowStart) is queue time; other unnamed spans
+    // are runtime hand-off/overhead. Provider first-response wait is folded into
+    // the following LLM section instead of emitted as its own architecture stage.
     const kind: TimelineSectionKind =
-      gapStart <= windowStart
-        ? 'queue'
-        : nextKind === 'llm'
-          ? 'model_wait'
-          : 'gap';
-    const label =
-      kind === 'queue' ? 'queue' : kind === 'model_wait' ? 'model wait' : 'gap';
+      gapStart <= windowStart ? 'queue' : 'gap';
+    const label = kind === 'queue' ? 'queue' : 'gap';
     sections.push({ kind, label, ms, startedAt: gapStart, detail: {} });
     payloadSources.push(undefined);
   };
 
   // Warm continuation: no startup span exists, so the whole pre-generation span
-  // would otherwise be labelled `queue`. Split it at the dispatch instant into
-  // real pickup (`queue`) and the model's first-token wait (`model_wait`) — the
-  // same split a cold reply gets via startup + model_wait. Bounded so a stale or
-  // out-of-range dispatch mark is ignored (falls back to a single queue).
+  // would otherwise be labelled `queue`. Split it at the dispatch instant so the
+  // true pickup remains queue and the provider first-response wait folds into the
+  // first LLM section. Bounded so a stale or out-of-range dispatch mark is
+  // ignored (falls back to a single queue).
   const firstSpanStart = spans.length ? spans[0]!.start : windowEnd;
   if (
     input.dispatchedAt !== undefined &&
@@ -390,14 +381,26 @@ function buildTimeline(input: AssembleTimelineInput): BuiltTimeline {
   for (const span of spans) {
     const start = Math.min(Math.max(span.start, cursor), windowEnd);
     const end = Math.min(Math.max(span.end, start), windowEnd);
-    if (start > cursor) pushGap(cursor, start, span.kind);
+    const canFoldProviderWait =
+      span.kind === 'llm' && end > start && cursor > windowStart;
+    const providerWaitMs = canFoldProviderWait ? start - cursor : 0;
+    const sectionStartedAt =
+      canFoldProviderWait && providerWaitMs > 0 ? cursor : start;
+    if (start > cursor && !canFoldProviderWait) pushGap(cursor, start);
     if (end > start) {
       sections.push({
         kind: span.kind,
         label: span.label,
-        ms: end - start,
-        startedAt: start,
-        detail: span.detail,
+        ms: end - sectionStartedAt,
+        startedAt: sectionStartedAt,
+        detail:
+          span.kind === 'llm' && providerWaitMs > 0
+            ? {
+                ...span.detail,
+                providerWaitMs,
+                generationMs: end - start,
+              }
+            : span.detail,
       });
       payloadSources.push(span.payload);
     }

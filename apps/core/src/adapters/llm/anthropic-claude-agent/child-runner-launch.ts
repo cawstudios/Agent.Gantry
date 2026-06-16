@@ -44,6 +44,8 @@ export interface BuildChildRunnerLaunchInput {
   /** Raw env values (caller passes process.env entries). */
   fromSourceFlag: string | undefined;
   inspectPortRaw: string | undefined;
+  /** Absolute tsx loader specifier; avoids resolving bare `tsx` from agent cwd. */
+  tsxImportSpecifier?: string | undefined;
 }
 
 function isTruthyFlag(value: string | undefined): boolean {
@@ -106,7 +108,10 @@ export function buildChildRunnerLaunch(
   }
 
   const inspectPort = resolveInspectPort(input.inspectPortRaw);
-  const runnerArgs: string[] = ['--import', 'tsx'];
+  const runnerArgs: string[] = [
+    '--import',
+    input.tsxImportSpecifier?.trim() || 'tsx',
+  ];
   if (inspectPort !== null) {
     // 127.0.0.1 keeps the inspector loopback-only. Plain --inspect attaches
     // without pausing the child; swap to the --inspect-brk line below to pause on

@@ -2,7 +2,7 @@ import { ChildProcess } from 'child_process';
 
 import { logger } from '../infrastructure/logging/logger.js';
 import {
-  fsContinuationDelivery,
+  unavailableContinuationDelivery,
   type ContinuationDelivery,
   type ContinuationTarget,
 } from './continuation-delivery.js';
@@ -11,6 +11,7 @@ import {
   normalizeThreadQueueId,
   parseThreadQueueKey,
 } from '../shared/thread-queue-key.js';
+import type { PooledWarmWorkerRun } from './agent-spawn-types.js';
 
 type QueueKind = 'message' | 'task';
 type ContinuationOptions = {
@@ -19,6 +20,7 @@ type ContinuationOptions = {
 };
 type RegisterProcessOptions = {
   requiredContinuationUserId?: string | null;
+  pooledWarmWorker?: PooledWarmWorkerRun;
 };
 type ContinuationHandler = () => void;
 
@@ -48,12 +50,18 @@ export interface GroupQueueOptions {
   maxJobRuns?: number;
   setTimeoutFn?: typeof setTimeout;
   /**
-   * Carrier for continuation follow-ups + close signals. Defaults to the
-   * filesystem mailbox (today's behavior, byte-identical). The socket server
-   * (started after the queue is built) swaps in a push carrier via
-   * {@link GroupQueue.setContinuationDelivery}.
+   * Carrier for continuation follow-ups + close signals. The queue starts with
+   * a fail-closed carrier until the socket server injects the live event
+   * transport via {@link GroupQueue.setContinuationDelivery}.
    */
   continuationDelivery?: ContinuationDelivery;
+  /**
+   * I-1 (GANTRY_IPC_SHUTDOWN_KILL, default off): when true, {@link GroupQueue.shutdown}
+   * SIGKILLs any tracked runner process still alive AFTER the grace window
+   * (deterministic shutdown). When false (default) such stragglers are merely
+   * detached and left to next-boot recovery — today's exact behavior.
+   */
+  killStragglersAfterGrace?: boolean;
 }
 
 interface GroupState {
@@ -68,6 +76,7 @@ interface GroupState {
   groupFolder: string | null;
   threadId: string | null;
   requiredContinuationUserId: string | null;
+  pooledWarmWorker: PooledWarmWorkerRun | null;
   retryCount: number;
   continuationHandler: ContinuationHandler | null;
 }
@@ -87,6 +96,7 @@ export class GroupQueue {
     null;
   private shuttingDown = false;
   private activeRuns = new Set<Promise<void>>();
+  private readonly killStragglersAfterGrace: boolean;
 
   constructor(options: GroupQueueOptions = {}) {
     this.policy = {
@@ -103,7 +113,8 @@ export class GroupQueue {
     };
     this.setTimeoutFn = options.setTimeoutFn ?? setTimeout;
     this.continuationDelivery =
-      options.continuationDelivery ?? fsContinuationDelivery;
+      options.continuationDelivery ?? unavailableContinuationDelivery;
+    this.killStragglersAfterGrace = options.killStragglersAfterGrace ?? false;
   }
 
   getPolicy(): GroupQueuePolicy {
@@ -125,6 +136,7 @@ export class GroupQueue {
         groupFolder: null,
         threadId: null,
         requiredContinuationUserId: null,
+        pooledWarmWorker: null,
         retryCount: 0,
         continuationHandler: null,
       };
@@ -348,6 +360,7 @@ export class GroupQueue {
     state.threadId = normalizeThreadQueueId(threadId) || null;
     state.requiredContinuationUserId =
       options.requiredContinuationUserId?.trim() || null;
+    state.pooledWarmWorker = options.pooledWarmWorker ?? null;
     const aliases = Array.isArray(stopAliasJids)
       ? stopAliasJids
       : stopAliasJids
@@ -508,14 +521,19 @@ export class GroupQueue {
       logger.error({ groupJid, err }, 'Error processing messages for group');
       this.scheduleRetry(groupJid, state);
     } finally {
+      const pooledWarmWorker = state.pooledWarmWorker;
       state.active = false;
       state.process = null;
       state.runHandle = null;
       state.groupFolder = null;
       state.threadId = null;
       state.requiredContinuationUserId = null;
+      state.pooledWarmWorker = null;
       state.continuationHandler = null;
       this.activeMessageCount--;
+      if (pooledWarmWorker) {
+        await this.releasePooledWarmWorker(groupJid, pooledWarmWorker);
+      }
       this.removeStopAliasForQueueJid(groupJid);
       this.drainGroup(groupJid);
     }
@@ -545,6 +563,7 @@ export class GroupQueue {
     } catch (err) {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
+      const pooledWarmWorker = state.pooledWarmWorker;
       state.active = false;
       state.isTaskRun = false;
       state.runningTaskId = null;
@@ -553,9 +572,27 @@ export class GroupQueue {
       state.groupFolder = null;
       state.threadId = null;
       state.requiredContinuationUserId = null;
+      state.pooledWarmWorker = null;
       this.activeTaskCount--;
+      if (pooledWarmWorker) {
+        await this.releasePooledWarmWorker(groupJid, pooledWarmWorker);
+      }
       this.removeStopAliasForQueueJid(groupJid);
       this.drainGroup(groupJid);
+    }
+  }
+
+  private async releasePooledWarmWorker(
+    groupJid: string,
+    pooledWarmWorker: PooledWarmWorkerRun,
+  ): Promise<void> {
+    try {
+      await pooledWarmWorker.release();
+    } catch (err) {
+      logger.warn(
+        { groupJid, err, workerId: pooledWarmWorker.handle.id },
+        'Failed to release pooled warm worker after run teardown',
+      );
     }
   }
 
@@ -690,6 +727,44 @@ export class GroupQueue {
       'GroupQueue shutting down (active message runs signaled to close)',
     );
     await this.waitForActiveRuns(gracePeriodMs);
+    this.killStragglersAfterShutdownGrace();
+  }
+
+  /**
+   * I-1 (GANTRY_IPC_SHUTDOWN_KILL): after the shutdown grace, any tracked runner
+   * process still alive is a straggler. When the flag is OFF (default) we leave
+   * it detached — today's exact behavior, recovered on next boot. When ON we
+   * SIGKILL it so shutdown is deterministic. Mirrors group-queue-stop's
+   * process-group-first, fall-back-to-pid kill, but with SIGKILL (the runner was
+   * already SIGTERM-equivalent-signaled via closeStdin; this is the hard escalation).
+   */
+  private killStragglersAfterShutdownGrace(): void {
+    if (!this.killStragglersAfterGrace) return;
+    for (const [groupJid, state] of this.groups) {
+      const proc = state.process;
+      if (!proc || proc.killed) continue;
+      const pid = proc.pid;
+      try {
+        if (typeof pid === 'number' && pid > 0) {
+          try {
+            process.kill(-pid, 'SIGKILL');
+          } catch {
+            process.kill(pid, 'SIGKILL');
+          }
+        } else {
+          proc.kill('SIGKILL');
+        }
+        logger.warn(
+          { groupJid, pid, runHandle: state.runHandle },
+          'SIGKILLed straggler runner after shutdown grace (GANTRY_IPC_SHUTDOWN_KILL)',
+        );
+      } catch (err) {
+        logger.warn(
+          { groupJid, pid, runHandle: state.runHandle, err },
+          'Failed to SIGKILL straggler runner after shutdown grace',
+        );
+      }
+    }
   }
 }
 

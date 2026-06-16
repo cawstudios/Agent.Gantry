@@ -5,6 +5,7 @@ import { applyTestCallerIdentityOverride } from '@core/application/mcp/test-call
 describe('applyTestCallerIdentityOverride', () => {
   afterEach(() => {
     delete process.env.GANTRY_TEST_CALLER_IDENTITY_PHONE;
+    delete process.env.GANTRY_TEST_CALLER_IDENTITY_MCP_SERVERS;
     delete process.env.GANTRY_TEST_OPERATOR_PHONE;
   });
 
@@ -37,5 +38,37 @@ describe('applyTestCallerIdentityOverride', () => {
     expect(applyTestCallerIdentityOverride('wa:919999999999')).toBe(
       'wa:918097288633',
     );
+  });
+
+  it('only applies to configured MCP server names when serverName is supplied', () => {
+    process.env.GANTRY_TEST_CALLER_IDENTITY_PHONE = '918097288633';
+
+    expect(
+      applyTestCallerIdentityOverride('wa:000000050', {
+        serverName: 'shopify-api',
+      }),
+    ).toBe('wa:918097288633');
+    expect(
+      applyTestCallerIdentityOverride('wa:000000050', {
+        serverName: 'boondi-crm',
+      }),
+    ).toBe('wa:000000050');
+  });
+
+  it('honors GANTRY_TEST_CALLER_IDENTITY_MCP_SERVERS', () => {
+    process.env.GANTRY_TEST_CALLER_IDENTITY_PHONE = '918097288633';
+    process.env.GANTRY_TEST_CALLER_IDENTITY_MCP_SERVERS =
+      'shopify-api custom-store';
+
+    expect(
+      applyTestCallerIdentityOverride('wa:000000050', {
+        serverName: 'custom-store',
+      }),
+    ).toBe('wa:918097288633');
+    expect(
+      applyTestCallerIdentityOverride('wa:000000050', {
+        serverName: 'boondi-crm',
+      }),
+    ).toBe('wa:000000050');
   });
 });

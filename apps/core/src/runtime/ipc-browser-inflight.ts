@@ -1,11 +1,7 @@
 // Shared browser in-flight accounting.
 //
-// Both the fs watcher (runtime/ipc-browser-requests.ts) and the socket server's
-// browser dispatcher draw on this ONE counter so the global cap of 4 concurrent
-// browser IPC requests is enforced regardless of which transport a request
-// arrived on. Promoting it out of ipc-browser-requests.ts (where it used to be a
-// private module-level number) keeps the socket path from launching a 5th
-// concurrent browser action while the fs path already holds 4 (and vice-versa).
+// The socket browser dispatcher draws on this one counter so the global cap of
+// 4 concurrent browser IPC requests is enforced across all socket connections.
 //
 // Browser concurrency is intentionally a small numeric counter (not a keyed Set
 // like the interaction cap): the original watcher gated purely on a count, with
@@ -20,7 +16,7 @@ let inFlightBrowserIpc = 0;
  * Try to admit a browser request under the global concurrency cap. Returns true
  * and increments the counter on success (the caller MUST call
  * releaseBrowserInFlight when the handler settles); returns false when the cap
- * is already reached (mirrors the watcher's `inFlightBrowserIpc >= MAX` throw).
+ * is already reached.
  */
 export function tryAcquireBrowserInFlight(): boolean {
   if (inFlightBrowserIpc >= MAX_IN_FLIGHT_BROWSER_IPC) return false;

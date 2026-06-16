@@ -1,5 +1,6 @@
 import path from 'path';
 import type net from 'net';
+import { randomUUID } from 'crypto';
 
 import {
   DATA_DIR,
@@ -40,6 +41,7 @@ import { validatePermissionIpcJobExecutionTarget } from './ipc.js';
 import {
   getIpcResponseSigningPrivateKey,
   isBrowserIpcAuthorized,
+  revokeIpcResponseSigningKey,
 } from './ipc-auth.js';
 import { processTaskIpc } from '../jobs/ipc-handler.js';
 import {
@@ -66,7 +68,16 @@ import {
   writeBrowserFailureResponse,
 } from './ipc-browser-requests.js';
 import type { IpcDeps } from './ipc-domain-types.js';
-import { type IpcWireChannel, type IpcWireFrame } from '../shared/ipc-wire.js';
+import {
+  isIpcWireChannel,
+  type IpcWireChannel,
+  type IpcWireFrame,
+  type IpcWireError,
+} from '../shared/ipc-wire.js';
+import {
+  readLiveToolRules,
+  subscribeLiveToolRules,
+} from '../shared/live-tool-rules.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -86,6 +97,13 @@ export interface IpcSocketServerOptions {
   handshakeTimeoutMs?: number;
   /** Max concurrent in-flight requests per connection. Default 64. */
   maxInFlightPerConnection?: number;
+  /**
+   * Optional platform peer-credential helper. Node does not expose SO_PEERCRED /
+   * getpeereid natively; when a helper is unavailable it should return
+   * undefined and the 0o700 socket directory + signed handshake remain the
+   * primary isolation. A returned UID must match the core process UID.
+   */
+  peerUidProvider?: (socket: net.Socket) => number | undefined;
 }
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5000;
@@ -122,7 +140,7 @@ function transportError(
     type: 'resp',
     channel,
     id,
-    payload: { ok: false, code },
+    payload: { ok: false, code, transport: true },
   };
 }
 
@@ -130,6 +148,73 @@ function coerceOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function roleCanSendRequest(
+  role: IpcConnectionScope['role'],
+  channel: IpcWireChannel | null,
+): boolean {
+  if (role === 'runner') return channel === 'permission';
+  return (
+    channel === 'task' ||
+    channel === 'memory' ||
+    channel === 'browser' ||
+    channel === 'user_question' ||
+    channel === 'message'
+  );
+}
+
+function isSupportedRequestChannel(
+  channel: IpcWireChannel | null,
+): channel is Exclude<
+  IpcWireChannel,
+  'continuation' | 'close' | 'bind' | 'live_tool_rules'
+> {
+  return (
+    channel === 'task' ||
+    channel === 'memory' ||
+    channel === 'browser' ||
+    channel === 'user_question' ||
+    channel === 'message' ||
+    channel === 'permission'
+  );
+}
+
+interface ParsedSocketScopeBinding {
+  threadId?: string | null;
+  appId?: string | null;
+  agentId?: string | null;
+}
+
+function normalizeScopeString(
+  value: string | null | undefined,
+): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function assertBoundScopeMatches(
+  scope: IpcConnectionScope | undefined,
+  actual: ParsedSocketScopeBinding,
+  label: string,
+): void {
+  if (!scope) throw new Error(`${label} connection scope is missing`);
+  const expectedThreadId = normalizeScopeString(scope.threadId);
+  const expectedAppId = normalizeScopeString(scope.appId);
+  const expectedAgentId = normalizeScopeString(scope.agentId);
+  const actualThreadId = normalizeScopeString(actual.threadId);
+  const actualAppId = normalizeScopeString(actual.appId);
+  const actualAgentId = normalizeScopeString(actual.agentId);
+  if (expectedThreadId && actualThreadId !== expectedThreadId) {
+    throw new Error(`${label} threadId does not match connection scope`);
+  }
+  if (expectedAppId && actualAppId !== expectedAppId) {
+    throw new Error(`${label} appId does not match connection scope`);
+  }
+  if (expectedAgentId && actualAgentId !== expectedAgentId) {
+    throw new Error(`${label} agentId does not match connection scope`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +230,7 @@ export async function startIpcSocketServer(
   const handshakeTimeoutMs =
     opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
   const maxInFlight = opts.maxInFlightPerConnection ?? DEFAULT_MAX_IN_FLIGHT;
+  const expectedPeerUid = process.getuid?.();
 
   const connections = new Set<IpcConnection>();
   const byFolder = new Map<string, Set<IpcConnection>>();
@@ -172,6 +258,55 @@ export async function startIpcSocketServer(
     if (st.inFlight > 0) st.inFlight -= 1;
     st.responderKeys.delete(responderKey);
   }
+
+  function groupIpcDir(folder: string): string {
+    return path.join(ipcBaseDir, folder);
+  }
+
+  function sendLiveToolRulesSnapshot(
+    conn: IpcConnection,
+    runHandle: string,
+    rules: readonly string[],
+  ): void {
+    conn.send({
+      v: 1,
+      type: 'push',
+      channel: 'live_tool_rules',
+      id: `live-tool-rules:${runHandle}`,
+      payload: { runHandle, rules: [...rules] },
+    });
+  }
+
+  function sendCurrentLiveToolRules(conn: IpcConnection): void {
+    const scope = conn.scope;
+    const runHandle = scope?.runHandle?.trim();
+    if (
+      !scope ||
+      (scope.role !== 'runner' && scope.role !== 'mcp') ||
+      !runHandle
+    ) {
+      return;
+    }
+    sendLiveToolRulesSnapshot(
+      conn,
+      runHandle,
+      readLiveToolRules({
+        ipcDir: groupIpcDir(scope.sourceAgentFolder),
+        runHandle,
+      }),
+    );
+  }
+
+  const unsubscribeLiveToolRules = subscribeLiveToolRules((snapshot) => {
+    const changedDir = path.resolve(snapshot.ipcDir);
+    for (const [folder, set] of byFolder) {
+      if (path.resolve(groupIpcDir(folder)) !== changedDir) continue;
+      for (const conn of set) {
+        if (conn.scope?.runHandle !== snapshot.runHandle) continue;
+        sendLiveToolRulesSnapshot(conn, snapshot.runHandle, snapshot.rules);
+      }
+    }
+  });
 
   // -------------------------------------------------------------------------
   // Handshake validation — low-level token possession check. Returns the bound
@@ -204,6 +339,7 @@ export async function startIpcSocketServer(
         ? (payload.context as Record<string, unknown>)
         : {};
     const threadId = coerceOptionalString(context.threadId);
+    const responseKeyId = coerceOptionalString(context.responseKeyId);
     const appId = coerceOptionalString(context.appId);
     const agentId = coerceOptionalString(context.agentId);
 
@@ -232,6 +368,7 @@ export async function startIpcSocketServer(
       sourceAgentFolder: folder,
       role,
       threadId,
+      responseKeyId,
       appId,
       agentId,
       runHandle,
@@ -284,6 +421,11 @@ export async function startIpcSocketServer(
       let data;
       try {
         data = parseIpcMessage(frame.payload, folder);
+        assertBoundScopeMatches(
+          conn.scope,
+          { threadId: data.threadId },
+          'IPC message',
+        );
       } catch (err) {
         logger.warn({ err, folder }, 'rejected message frame');
         return;
@@ -321,9 +463,8 @@ export async function startIpcSocketServer(
     folder: string,
   ): Promise<void> {
     if (!canProcessIpcFile(folder, 'tasks')) {
-      // Unsigned transport-level error: the client treats an error resp as a
-      // failed request, mirroring writeTaskIpcResponse({ok:false}) which the fs
-      // path also emits unsigned in some error cases.
+      // Unsigned transport-level error: the client treats an error response as
+      // a failed request without invoking the domain task handler.
       conn.send(transportError(frame.id, 'task', 'rate_limited'));
       return;
     }
@@ -333,6 +474,15 @@ export async function startIpcSocketServer(
       // parseTaskIpcData re-verifies HMAC/freshness/replay/scope — a forged,
       // replayed, or cross-folder frame throws here (fail-closed).
       data = parseTaskIpcData(frame.payload, folder);
+      assertBoundScopeMatches(
+        conn.scope,
+        {
+          threadId: data.authThreadId ?? data.threadId,
+          appId: data.appId,
+          agentId: data.agentId,
+        },
+        'IPC task',
+      );
     } catch (err) {
       conn.send(transportError(frame.id, 'task', 'invalid_request'));
       logger.warn({ err, folder }, 'rejected task frame');
@@ -340,8 +490,7 @@ export async function startIpcSocketServer(
     }
 
     const taskKey = `task-${data.taskId}`;
-    // Register a responder so the existing handler's writeTaskIpcResponse is
-    // delivered as a frame instead of a file write.
+    // Register a responder so writeTaskIpcResponse delivers a socket frame.
     registerIpcResponder(folder, taskKey, (signed) => {
       conn.send({
         v: 1,
@@ -374,7 +523,7 @@ export async function startIpcSocketServer(
     folder: string,
   ): Promise<void> {
     if (!canProcessIpcFile(folder, 'memory')) {
-      // Unsigned transport-level error mirroring the fs path's rate-limit drop.
+      // Unsigned transport-level error for the socket rate-limit gate.
       conn.send(transportError(frame.id, 'memory', 'rate_limited'));
       return;
     }
@@ -385,6 +534,11 @@ export async function startIpcSocketServer(
       // re-checks allowedActions — a forged, replayed, or disallowed-action
       // frame throws here (fail-closed); the connection survives.
       request = parseMemoryIpcRequest(frame.payload, folder);
+      assertBoundScopeMatches(
+        conn.scope,
+        { threadId: request.context?.threadId },
+        'memory IPC',
+      );
     } catch (err) {
       conn.send(transportError(frame.id, 'memory', 'invalid_request'));
       logger.warn({ err, folder }, 'rejected memory frame');
@@ -393,8 +547,7 @@ export async function startIpcSocketServer(
 
     const memoryKey = `memory-${request.requestId}`;
     const threadId = request.context?.threadId;
-    // Register a responder so the handler's writeMemoryResponse is delivered as
-    // a frame instead of a memory-responses/<requestId>.json file write.
+    // Register a responder so writeMemoryResponse delivers a socket frame.
     registerIpcResponder(folder, memoryKey, (signed) => {
       conn.send({
         v: 1,
@@ -445,10 +598,8 @@ export async function startIpcSocketServer(
 
   /**
    * The default JID owned by `folder` — the first conversation route bound to
-   * it. Mirrors the fs watcher's `folderTargetJid` fallback so an absent
-   * `targetJid` resolves to the same conversation on both transports. The
-   * grandchild always stamps the asking conversation's jid, so this is only a
-   * defensive fallback (the parser preserves the stamped targetJid).
+   * it. The child normally stamps the asking conversation's jid, so this is a
+   * defensive default when a frame omits `targetJid`.
    */
   function folderDefaultJid(folder: string): string | undefined {
     for (const [jid, route] of Object.entries(deps.conversationRoutes())) {
@@ -463,7 +614,7 @@ export async function startIpcSocketServer(
     folder: string,
   ): Promise<void> {
     if (!canProcessIpcFile(folder, 'user-question')) {
-      // Unsigned transport-level error mirroring the fs path's rate-limit drop.
+      // Unsigned transport-level error for the socket rate-limit gate.
       conn.send(transportError(frame.id, 'user_question', 'rate_limited'));
       return;
     }
@@ -474,6 +625,15 @@ export async function startIpcSocketServer(
       // forged, replayed, or malformed frame throws here (fail-closed); the
       // connection survives.
       request = parseUserQuestionIpcRequest(frame.payload, folder);
+      assertBoundScopeMatches(
+        conn.scope,
+        {
+          threadId: request.threadId,
+          appId: request.appId,
+          agentId: request.agentId,
+        },
+        'user question IPC',
+      );
     } catch (err) {
       conn.send(transportError(frame.id, 'user_question', 'invalid_request'));
       logger.warn({ err, folder }, 'rejected user_question frame');
@@ -481,15 +641,14 @@ export async function startIpcSocketServer(
     }
 
     // Cross-conversation routing: keep the asking conversation's jid (stamped by
-    // the grandchild and preserved by the parser); fall back to the folder's
-    // default jid only when absent — byte-identical to the fs watcher.
+    // the child and preserved by the parser); fall back to the folder default
+    // only when absent.
     request.targetJid = request.targetJid || folderDefaultJid(folder);
 
     const userqKey = `userq-${request.requestId}`;
     const threadId = request.threadId;
-    // Register a responder so the handler's (router-aware) writeUserQuestion-
-    // IpcResponse — and the failure-response path — are delivered as a frame
-    // instead of a user-answers/<requestId>.json file write.
+    // Register a responder so writeUserQuestionIpcResponse and the failure path
+    // deliver socket frames.
     registerIpcResponder(folder, userqKey, (signed) => {
       conn.send({
         v: 1,
@@ -500,9 +659,9 @@ export async function startIpcSocketServer(
       });
     });
 
-    // Honour the SHARED interaction in-flight cap + duplicate guard (the same
-    // accounting the fs watcher uses), so a request already in flight via either
-    // transport is not processed twice and the global cap of 100 is enforced.
+    // Honour the shared interaction in-flight cap + duplicate guard so a
+    // request already in flight is not processed twice and the global cap of 100
+    // is enforced.
     const inFlightKey = interactionInFlightKey({
       sourceAgentFolder: folder,
       kind: 'user-question',
@@ -511,9 +670,8 @@ export async function startIpcSocketServer(
     });
     const admission = tryAdmitInteractionInFlight(inFlightKey);
     if (!admission.ok) {
-      // Mirror the fs watcher's thrown cap/duplicate path: emit a signed
-      // empty-answers failure response (routed to the responder above) so the
-      // grandchild's pending request settles exactly as it would on fs.
+      // Emit a signed empty-answers failure response through the registered
+      // responder so the child's pending request settles.
       writeUserQuestionInteractionFailure({
         ipcBaseDir,
         sourceAgentFolder: folder,
@@ -536,10 +694,10 @@ export async function startIpcSocketServer(
 
     beginInFlight(conn, userqKey);
     try {
-      // No file/claimedPath on the socket path: the handler runs the approval
-      // flow and calls the router-aware writer, which delivers the signed
-      // response to the responder above. On internal failure it writes the
-      // signed empty-answers fallback (also routed to the responder).
+      // The handler runs the approval flow and calls the router-aware writer,
+      // which delivers the signed response to the responder above. On internal
+      // failure it writes the signed empty-answers fallback through the same
+      // responder.
       await processUserQuestionInteractionIpc({
         request,
         sourceAgentFolder: folder,
@@ -570,9 +728,8 @@ export async function startIpcSocketServer(
 
   /**
    * The set of JIDs owned by `folder` — every conversation route bound to it.
-   * Mirrors the fs watcher's `folderTargetJids` ownership check: a permission
-   * request whose stamped targetJid is not in this set is cross-conversation
-   * bleed and is rejected, exactly as on the fs path.
+   * A permission request whose stamped targetJid is not in this set is
+   * cross-conversation bleed and is rejected.
    */
   function folderOwnedJids(folder: string): Set<string> {
     const owned = new Set<string>();
@@ -588,7 +745,7 @@ export async function startIpcSocketServer(
     folder: string,
   ): Promise<void> {
     if (!canProcessIpcFile(folder, 'permission')) {
-      // Unsigned transport-level error mirroring the fs path's rate-limit drop.
+      // Unsigned transport-level error for the socket rate-limit gate.
       conn.send(transportError(frame.id, 'permission', 'rate_limited'));
       return;
     }
@@ -601,83 +758,26 @@ export async function startIpcSocketServer(
       // consumed-requestId guard inside this parse, which is also the socket
       // idempotency guarantee against a re-sent permission request.
       request = parsePermissionIpcRequest(frame.payload, folder);
+      assertBoundScopeMatches(
+        conn.scope,
+        {
+          threadId: request.threadId,
+          appId: request.appId,
+          agentId: request.agentId,
+        },
+        'permission IPC',
+      );
     } catch (err) {
       conn.send(transportError(frame.id, 'permission', 'invalid_request'));
       logger.warn({ err, folder }, 'rejected permission frame');
       return;
     }
 
-    try {
-      // Folder-owns-JID authz: the asking conversation's jid (stamped by the
-      // grandchild and preserved by the parser) must belong to this folder —
-      // byte-identical to the fs watcher's folderTargetJids check.
-      if (
-        request.targetJid &&
-        !folderOwnedJids(folder).has(request.targetJid)
-      ) {
-        throw new Error(
-          'Permission IPC target does not belong to the requesting agent folder',
-        );
-      }
-      // Scheduled-job exec-context binding: when the request carries a jobId,
-      // the job's canonical execution_context (folder/jid/thread/run) must match
-      // — identical to the fs watcher.
-      await validatePermissionIpcJobExecutionTarget({
-        request,
-        sourceAgentFolder: folder,
-        deps,
-      });
-    } catch (err) {
-      // The fs watcher writes a signed denial fallback for these binding
-      // failures (so the grandchild's pending request settles as denied) and
-      // archives the file. On the socket there is no file: emit the signed
-      // denial to a responder so the request settles exactly as on fs.
-      registerIpcResponder(
-        folder,
-        `permission-${request.requestId}`,
-        (signed) => {
-          conn.send({
-            v: 1,
-            type: 'resp',
-            channel: 'permission',
-            id: frame.id,
-            payload: signed,
-          });
-        },
-      );
-      writePermissionInteractionFailure({
-        ipcBaseDir,
-        sourceAgentFolder: folder,
-        requestId: request.requestId,
-        ...(request.responseNonce
-          ? { responseNonce: request.responseNonce }
-          : {}),
-        ...(request.threadId ? { threadId: request.threadId } : {}),
-        ...(request.responseKeyId
-          ? { responseKeyId: request.responseKeyId }
-          : {}),
-        logger,
-      });
-      const pending = takeIpcResponder(
-        folder,
-        `permission-${request.requestId}`,
-      );
-      if (pending) {
-        conn.send(transportError(frame.id, 'permission', 'invalid_request'));
-      }
-      logger.warn({ err, folder }, 'rejected permission frame (binding)');
-      return;
-    }
-
-    // Cross-conversation routing: keep the stamped jid; fall back to the
-    // folder's default jid only when absent — byte-identical to the fs watcher.
-    request.targetJid = request.targetJid || folderDefaultJid(folder);
-
     const permissionKey = `permission-${request.requestId}`;
     const threadId = request.threadId;
-    // Register a responder so the handler's (router-aware) writePermissionIpc-
-    // Response — and the failure-response path — are delivered as a frame
-    // instead of a permission-responses/<requestId>.json file write.
+    // Register the responder and reserve the per-connection slot before any
+    // awaited validation. That keeps the onFrame cap check effective even when
+    // scheduled-job binding validation blocks on repository I/O.
     registerIpcResponder(folder, permissionKey, (signed) => {
       conn.send({
         v: 1,
@@ -687,14 +787,11 @@ export async function startIpcSocketServer(
         payload: signed,
       });
     });
+    beginInFlight(conn, permissionKey);
 
-    // Honour the SHARED interaction in-flight cap + duplicate guard (the same
-    // accounting the fs watcher uses), so a request already in flight via either
-    // transport is not processed twice and the global cap of 100 is enforced.
-    // This is also the response-exists analogue: a second in-flight request with
-    // the same (folder,thread,requestId) is refused here, and an exact replay was
-    // already rejected by the parser, so the single-shot responder above is never
-    // double-registered for a live request.
+    // Honour the shared interaction in-flight cap + duplicate guard before any
+    // awaited validation so many scheduled-job permission requests cannot all
+    // park in repository I/O before consuming interaction capacity.
     const inFlightKey = interactionInFlightKey({
       sourceAgentFolder: folder,
       kind: 'permission',
@@ -703,9 +800,8 @@ export async function startIpcSocketServer(
     });
     const admission = tryAdmitInteractionInFlight(inFlightKey);
     if (!admission.ok) {
-      // Mirror the fs watcher's thrown cap/duplicate path: emit a signed denial
-      // response (routed to the responder above) so the grandchild's pending
-      // request settles exactly as it would on fs.
+      // Emit a signed denial response through the registered responder so the
+      // child's pending request settles.
       writePermissionInteractionFailure({
         ipcBaseDir,
         sourceAgentFolder: folder,
@@ -726,15 +822,62 @@ export async function startIpcSocketServer(
       if (pending) {
         conn.send(transportError(frame.id, 'permission', 'busy'));
       }
+      endInFlight(conn, permissionKey);
       return;
     }
 
-    beginInFlight(conn, permissionKey);
     try {
-      // No file/claimedPath on the socket path: the handler runs the approval
-      // flow + persistence/recovery and calls the router-aware writer, which
-      // delivers the signed response to the responder above. On internal failure
-      // it writes the signed denial fallback (also routed to the responder).
+      // Folder-owns-JID authz: the asking conversation's jid (stamped by the
+      // child and preserved by the parser) must belong to this folder.
+      if (
+        request.targetJid &&
+        !folderOwnedJids(folder).has(request.targetJid)
+      ) {
+        throw new Error(
+          'Permission IPC target does not belong to the requesting agent folder',
+        );
+      }
+      // Scheduled-job exec-context binding: when the request carries a jobId,
+      // the job's canonical execution_context (folder/jid/thread/run) must match.
+      await validatePermissionIpcJobExecutionTarget({
+        request,
+        sourceAgentFolder: folder,
+        deps,
+      });
+    } catch (err) {
+      // Emit a signed denial through the registered responder so binding
+      // failures settle the child's pending request as denied.
+      writePermissionInteractionFailure({
+        ipcBaseDir,
+        sourceAgentFolder: folder,
+        requestId: request.requestId,
+        ...(request.responseNonce
+          ? { responseNonce: request.responseNonce }
+          : {}),
+        ...(request.threadId ? { threadId: request.threadId } : {}),
+        ...(request.responseKeyId
+          ? { responseKeyId: request.responseKeyId }
+          : {}),
+        logger,
+      });
+      const pending = takeIpcResponder(folder, permissionKey);
+      if (pending) {
+        conn.send(transportError(frame.id, 'permission', 'invalid_request'));
+      }
+      releaseInteractionInFlight(inFlightKey);
+      endInFlight(conn, permissionKey);
+      logger.warn({ err, folder }, 'rejected permission frame (binding)');
+      return;
+    }
+
+    // Cross-conversation routing: keep the stamped jid; fall back to the
+    // folder's default jid only when absent.
+    request.targetJid = request.targetJid || folderDefaultJid(folder);
+
+    try {
+      // The handler runs approval, persistence, and recovery, then calls the
+      // router-aware writer. On internal failure it writes the signed denial
+      // fallback through the same responder.
       await processPermissionInteractionIpc({
         request,
         sourceAgentFolder: folder,
@@ -776,34 +919,40 @@ export async function startIpcSocketServer(
       // survives. The chatJid binding the parser enforces is what scopes the
       // browser grant + the cross-conversation profile below.
       request = parseBrowserIpcRequest(frame.payload, folder);
+      assertBoundScopeMatches(
+        conn.scope,
+        {
+          threadId: request.threadId,
+          appId: request.appId,
+          agentId: request.agentId,
+        },
+        'browser IPC',
+      );
     } catch (err) {
       conn.send(transportError(frame.id, 'browser', 'invalid_request'));
       logger.warn({ err, folder }, 'rejected browser frame');
       return;
     }
 
-    // Resolve the browser grant exactly as the fs watcher does: it is keyed by
-    // (folder, chatJid, threadId), so the parser's verified chatJid binds the
-    // grant to the asking conversation.
+    // Resolve the browser grant by (folder, chatJid, threadId), so the parser's
+    // verified chatJid binds the grant to the asking conversation.
     const browserIpcAuthorized = isBrowserIpcAuthorized({
       workspaceKey: folder,
       chatJid: request.chatJid,
       threadId: request.threadId,
     });
 
-    // Rate-limit gate — mirror the watcher's CONDITIONAL charge: only an
-    // authorized request is metered against the (folder,'browser') bucket. An
-    // unauthorized request is not charged (it still runs, and the handler
-    // returns the unauthorized error), so the socket path matches fs.
+    // Rate-limit gate: only an authorized request is metered against the
+    // (folder,'browser') bucket. An unauthorized request is not charged; the
+    // handler returns the unauthorized error.
     if (browserIpcAuthorized && !canProcessIpcFile(folder, 'browser')) {
       conn.send(transportError(frame.id, 'browser', 'rate_limited'));
       return;
     }
 
     const browserKey = `browser-${request.requestId}`;
-    // Register a responder so the handler's (router-aware) writeBrowserIpc-
-    // Response — and the cap-exceeded failure path — are delivered as a frame
-    // instead of a browser-responses/<requestId>.json file write.
+    // Register a responder so writeBrowserIpcResponse and the cap-exceeded path
+    // deliver socket frames.
     registerIpcResponder(folder, browserKey, (signed) => {
       conn.send({
         v: 1,
@@ -814,10 +963,9 @@ export async function startIpcSocketServer(
       });
     });
 
-    // Honour the SHARED browser in-flight cap (4) across the fs watcher and the
-    // socket. When the cap is hit, mirror the watcher's thrown concurrency path:
-    // emit the signed "failed to process" response (routed to the responder) so
-    // the grandchild settles exactly as it would on fs.
+    // Honour the shared browser in-flight cap (4). When the cap is hit, emit the
+    // signed "failed to process" response through the registered responder so
+    // the child's pending request settles.
     if (!tryAcquireBrowserInFlight()) {
       writeBrowserFailureResponse({
         ipcBaseDir,
@@ -841,10 +989,9 @@ export async function startIpcSocketServer(
 
     beginInFlight(conn, browserKey);
     try {
-      // No file/claimedPath on the socket path: the handler runs the backend +
-      // browser grant lifecycle and calls the router-aware writer, which
-      // delivers the signed response to the responder above. On internal failure
-      // it writes the signed "failed to process" fallback (also routed).
+      // The handler runs the backend + browser grant lifecycle and calls the
+      // router-aware writer. On internal failure it writes the signed "failed to
+      // process" fallback through the same responder.
       await runBrowserIpcRequest({
         request,
         sourceAgentFolder: folder,
@@ -911,12 +1058,25 @@ export async function startIpcSocketServer(
         id: frame.id,
         payload: {},
       });
+      sendCurrentLiveToolRules(conn);
       conn.startHeartbeat();
       return;
     }
 
     // Handshaked.
     if (frame.type === 'req') {
+      if (!isSupportedRequestChannel(frame.channel)) {
+        conn.send(
+          transportError(frame.id, frame.channel, 'unsupported_channel'),
+        );
+        return;
+      }
+      if (!roleCanSendRequest(conn.scope.role, frame.channel)) {
+        conn.send(
+          transportError(frame.id, frame.channel, 'unauthorized_channel_role'),
+        );
+        return;
+      }
       const st = state.get(conn);
       if (st && st.inFlight >= maxInFlight) {
         // Backpressure: refuse the request and signal busy (D6).
@@ -944,11 +1104,14 @@ export async function startIpcSocketServer(
       return;
     }
 
-    // resp/push from a worker, or any other unexpected frame: log + ignore.
+    // resp/push from a worker, or any other unexpected frame: typed reject and
+    // keep the connection alive. This mirrors malformed-frame behavior at the
+    // protocol layer without letting one bad frame poison the whole stream.
     logger.debug(
       { type: frame.type, channel: frame.channel },
       'ignoring unexpected frame from worker',
     );
+    conn.send(transportError(frame.id, frame.channel, 'unexpected_frame_type'));
   }
 
   // -------------------------------------------------------------------------
@@ -987,11 +1150,13 @@ export async function startIpcSocketServer(
       st.responderKeys.clear();
       st.inFlight = 0;
     }
-    // NOTE: the ed25519 response signing key is SPAWN-scoped, not
-    // connection-scoped — it is minted at spawn and revoked in agent-spawn's
-    // `finally` at run end (see ipc-auth.ts revokeIpcResponseSigningKey). A
-    // transient connection drop + reconnect+retry within the SAME run must still
-    // be able to sign responses, so the key is deliberately NOT revoked on drop.
+    if (conn.scope?.role === 'runner') {
+      revokeIpcResponseSigningKey(
+        conn.scope.responseKeyId ?? undefined,
+        conn.scope.sourceAgentFolder,
+        conn.scope.threadId,
+      );
+    }
   }
 
   function onError(err: Error, conn: IpcConnection): void {
@@ -1001,10 +1166,39 @@ export async function startIpcSocketServer(
     );
   }
 
+  function onInvalidFrame(
+    err: IpcWireError,
+    raw: Record<string, unknown> | undefined,
+    conn: IpcConnection,
+  ): void {
+    const id = typeof raw?.id === 'string' && raw.id ? raw.id : undefined;
+    if (!id || id.length > 128) return;
+    const channel = isIpcWireChannel(raw?.channel) ? raw.channel : null;
+    conn.send(transportError(id, channel, err.reason));
+  }
+
   // -------------------------------------------------------------------------
   // onConnection
   // -------------------------------------------------------------------------
   function onConnection(socket: net.Socket): void {
+    if (opts.peerUidProvider && typeof expectedPeerUid === 'number') {
+      let peerUid: number | undefined;
+      try {
+        peerUid = opts.peerUidProvider(socket);
+      } catch (err) {
+        logger.warn({ err }, 'IPC peer uid check failed');
+        socket.destroy();
+        return;
+      }
+      if (typeof peerUid === 'number' && peerUid !== expectedPeerUid) {
+        logger.warn(
+          { peerUid, expectedPeerUid },
+          'IPC peer uid mismatch; closing connection',
+        );
+        socket.destroy();
+        return;
+      }
+    }
     const conn = new IpcConnection({
       socket,
       maxBytes: IPC_FRAME_MAX_BYTES,
@@ -1012,6 +1206,7 @@ export async function startIpcSocketServer(
       onFrame,
       onClose,
       onError,
+      onInvalidFrame,
     });
     const handshakeTimer = setTimeout(() => {
       if (conn.scope === undefined && !conn.closed) {
@@ -1038,6 +1233,7 @@ export async function startIpcSocketServer(
   // -------------------------------------------------------------------------
   const outcome = await bindIpcSocket({ socketPath, onConnection });
   if (!outcome.ok) {
+    unsubscribeLiveToolRules();
     // Another core owns the socket (single instance) — do NOT throw.
     logger.info(
       { socketPath, reason: outcome.reason },
@@ -1048,8 +1244,19 @@ export async function startIpcSocketServer(
   const bound: SocketBindResult = outcome.bound;
 
   async function stop(): Promise<void> {
-    for (const conn of connections) {
-      conn.destroy('server_stopping');
+    unsubscribeLiveToolRules();
+    for (const conn of [...connections]) {
+      if (conn.scope?.role === 'runner') {
+        conn.send({
+          v: 1,
+          type: 'ctrl',
+          channel: null,
+          ctrl: 'drain',
+          id: randomUUID(),
+          payload: {},
+        });
+      }
+      conn.end('server_stopping');
     }
     connections.clear();
     byFolder.clear();

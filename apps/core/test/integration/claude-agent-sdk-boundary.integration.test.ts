@@ -21,7 +21,6 @@ const sdkState = vi.hoisted(() => ({
     | 'mcp-failed'
     | 'mcp-missing'
     | 'mcp-metadata-omitted'
-    | 'active-followup'
     | 'memory-denial'
     | 'agent-model-denial'
     | 'agent-input-field-denial'
@@ -96,27 +95,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     const first = await nextWithTimeout(iterator, 1_000);
     if (first && !first.done) {
       call.streamMessages.push(first.value.message.content);
-    }
-
-    if (sdkState.mode === 'active-followup') {
-      const fs = await import('node:fs');
-      const path = await import('node:path');
-      const inputDir = process.env.GANTRY_IPC_INPUT_DIR || '';
-      fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(inputDir, '001-followup.json'),
-        JSON.stringify({
-          type: 'message',
-          text: 'follow-up while Claude is still running',
-        }),
-      );
-      await delay(700);
-      yield { type: 'result', subtype: 'success', result: 'ok' };
-      const next = await nextWithTimeout(iterator, 1_500);
-      if (next && !next.done) {
-        call.streamMessages.push(next.value.message.content);
-      }
-      return;
     }
 
     if (sdkState.mode === 'memory-denial') {
@@ -257,14 +235,11 @@ function prepareRuntimeEnv(): {
   const groupDir = path.join(root, 'workspace', 'group');
   const extraDir = path.join(root, 'workspace', 'extra');
   const ipcDir = path.join(root, 'ipc', 'group');
-  const inputDir = path.join(ipcDir, 'input');
   fs.mkdirSync(groupDir, { recursive: true });
   fs.mkdirSync(extraDir, { recursive: true });
-  fs.mkdirSync(inputDir, { recursive: true });
   vi.stubEnv('GANTRY_WORKSPACE_GROUP_DIR', groupDir);
   vi.stubEnv('GANTRY_WORKSPACE_EXTRA_DIR', extraDir);
   vi.stubEnv('GANTRY_IPC_DIR', ipcDir);
-  vi.stubEnv('GANTRY_IPC_INPUT_DIR', inputDir);
   vi.stubEnv('GANTRY_IPC_AUTH_TOKEN', 'runner-ipc-token');
   vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', 'runner-response-verify-key');
   vi.stubEnv('ANTHROPIC_API_KEY', 'raw-provider-key');
@@ -332,8 +307,7 @@ describe('Claude Agent SDK boundary integration', () => {
 
     expect(outputs.map((output) => output.result)).toEqual([
       null,
-      'Hello ',
-      'world',
+      'Hello world',
       null,
     ]);
   });
@@ -688,29 +662,6 @@ describe('Claude Agent SDK boundary integration', () => {
       closedDuringQuery: false,
     });
   });
-
-  it('pipes active IPC follow-up input into the same Claude SDK stream', async () => {
-    const env = prepareRuntimeEnv();
-    sdkState.mode = 'active-followup';
-    const { runQuery } = await importRunQuery();
-
-    await expect(
-      runQuery(
-        'initial prompt',
-        env.mcpServerPath,
-        runnerInput(),
-        {},
-        undefined,
-        undefined,
-        undefined,
-      ),
-    ).resolves.toMatchObject({ newSessionId: 'claude-session-boundary' });
-
-    expect(sdkState.calls[0]?.streamMessages).toEqual([
-      'initial prompt',
-      'follow-up while Claude is still running',
-    ]);
-  }, 5_000);
 
   it('does not let untrusted memory grant risky Claude tool use', async () => {
     const env = prepareRuntimeEnv();

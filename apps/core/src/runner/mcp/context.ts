@@ -1,4 +1,3 @@
-import path from 'path';
 import {
   applyGantryMcpToolSurface,
   gantryMcpFullToolName,
@@ -34,13 +33,6 @@ function requirePathEnv(name: string): string {
 }
 
 export const IPC_DIR = requirePathEnv('GANTRY_IPC_DIR');
-export const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
-export const TASKS_DIR = path.join(IPC_DIR, 'tasks');
-export const MEMORY_REQUESTS_DIR = path.join(IPC_DIR, 'memory-requests');
-export const MEMORY_RESPONSES_DIR = path.join(IPC_DIR, 'memory-responses');
-export const BROWSER_REQUESTS_DIR = path.join(IPC_DIR, 'browser-requests');
-export const BROWSER_RESPONSES_DIR = path.join(IPC_DIR, 'browser-responses');
-export const TASK_RESPONSES_DIR = path.join(IPC_DIR, 'task-responses');
 export const IPC_AUTH_TOKEN = process.env.GANTRY_IPC_AUTH_TOKEN || '';
 export const BROWSER_IPC_AUTH_TOKEN =
   process.env.GANTRY_BROWSER_IPC_AUTH_TOKEN || IPC_AUTH_TOKEN;
@@ -50,14 +42,22 @@ export const IPC_RESPONSE_VERIFY_KEY =
   process.env.GANTRY_IPC_RESPONSE_VERIFY_KEY || '';
 export const IPC_RESPONSE_KEY_ID = process.env.GANTRY_IPC_RESPONSE_KEY_ID || '';
 
-export const chatJid = process.env.GANTRY_CHAT_JID!;
+// Warm-pool (Pillar 2, D-P2-2(a), F4): the per-customer identity (chatJid /
+// threadId / memoryUserId) is intentionally NOT exported as a spawn-env constant
+// here, because a pooled worker boots GENERIC and binds its customer at runtime.
+// MCP readers source that identity via the bound-identity accessor
+// (`getBoundChatJid` / `getBoundThreadId` / `getBoundIdentity` in
+// `bound-identity.js`), which returns the runtime-bound value when present and
+// otherwise falls back to `envIdentity()` inside `bound-identity.ts` (which reads
+// `GANTRY_CHAT_JID` / `GANTRY_THREAD_ID` / `GANTRY_MEMORY_USER_ID` directly on
+// the cold path). The remaining spawn-env consts below are run-wide, not
+// per-customer, so they stay as constants.
 export const groupFolder = process.env.GANTRY_GROUP_FOLDER!;
 export const appId = process.env.GANTRY_APP_ID?.trim() || undefined;
 export const agentId = process.env.GANTRY_AGENT_ID?.trim() || undefined;
 export const jobId = process.env.GANTRY_JOB_ID?.trim() || undefined;
-export const threadId = process.env.GANTRY_THREAD_ID?.trim() || undefined;
-export const memoryUserId =
-  process.env.GANTRY_MEMORY_USER_ID?.trim() || undefined;
+export const runHandle =
+  process.env.GANTRY_AGENT_RUN_HANDLE?.trim() || undefined;
 export const memoryDefaultScope =
   process.env.GANTRY_MEMORY_DEFAULT_SCOPE === 'user' ? 'user' : 'group';
 export const memoryReviewerIsControlApprover =
@@ -98,7 +98,7 @@ export function currentEnabledAdminMcpTools(): Set<AdminMcpToolName> {
   const enabled = new Set(enabledAdminMcpTools);
   for (const rule of readLiveToolRules({
     ipcDir: IPC_DIR,
-    runHandle: process.env.GANTRY_AGENT_RUN_HANDLE,
+    runHandle,
   })) {
     const adminToolName = adminMcpToolNameFromFullName(rule);
     if (adminToolName) enabled.add(adminToolName);

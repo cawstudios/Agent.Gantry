@@ -343,13 +343,16 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     // runs as soon as a reply is finalized so the latency badge appears promptly;
     // the post-run block is a backstop for replies whose marker never fired.
     let traceTurns: NonNullable<AgentOutput['turns']> = [];
+    let traceRunnerToolCalls: NonNullable<AgentOutput['toolCalls']> = [];
     let traceStartup: AgentOutput['runnerStartup'];
+    let traceWarmBound = false;
     // Warm continuation: dispatch instant of the reply being generated, taken
     // from the runner envelope (result.dispatchedAt = when the continuation was
     // delivered to the model). Splits a warm reply's leading span into real
-    // pickup (queue) + model warm-up (TTFT).
+    // pickup (queue) + provider first-response wait.
     let traceDispatchedAt: number | undefined;
     let persistedTurnCount = 0;
+    let persistedRunnerToolCallCount = 0;
     let lastPersistedTraceCursorId: string | undefined;
     const persistReplyTraceForTurn = async (): Promise<void> => {
       if (!deps.replyTrace || traceTurns.length <= persistedTurnCount) return;
@@ -373,6 +376,10 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       lastPersistedTraceCursorId = cursor.id;
       const isFirstReply = persistedTurnCount === 0;
       persistedTurnCount = slice.nextPersistedTurnCount;
+      const runnerToolCalls = traceRunnerToolCalls.slice(
+        persistedRunnerToolCallCount,
+      );
+      persistedRunnerToolCallCount = traceRunnerToolCalls.length;
       // Window start = THIS reply's driving inbound ingress, re-read per reply.
       // A warm run serves many replies under one processGroupMessages, so a
       // value captured once at run start would freeze at the run's first message
@@ -401,6 +408,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         runHandle: traceRunHandle,
         ...(slice.guardrail ? { guardrail: slice.guardrail } : {}),
         llmTurns: slice.llmTurns,
+        ...(runnerToolCalls.length > 0 ? { toolCalls: runnerToolCalls } : {}),
         ...(windowStart !== undefined ? { windowStart } : {}),
         ...(cursor.sendCompletedAt
           ? { windowEnd: new Date(cursor.sendCompletedAt).getTime() }
@@ -413,7 +421,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
               },
             }
           : {}),
-        ...(isFirstReply && traceStartup
+        ...(isFirstReply && !traceWarmBound && traceStartup
           ? {
               startup: {
                 startedAt: agentRunStartedAt,
@@ -421,7 +429,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
               },
             }
           : {}),
-        ...(!isFirstReply && traceDispatchedAt !== undefined
+        ...((!isFirstReply || traceWarmBound) && traceDispatchedAt !== undefined
           ? { dispatchedAt: traceDispatchedAt }
           : {}),
       });
@@ -783,7 +791,11 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       if (result.turns && result.turns.length > 0) {
         traceTurns = result.turns;
       }
+      if (result.toolCalls && result.toolCalls.length > 0) {
+        traceRunnerToolCalls = result.toolCalls;
+      }
       if (result.runnerStartup) traceStartup = result.runnerStartup;
+      if (result.warmBound) traceWarmBound = true;
       if (result.dispatchedAt !== undefined)
         traceDispatchedAt = result.dispatchedAt;
       if (awaitingResponseReceipt && !result.interactionBoundary) {

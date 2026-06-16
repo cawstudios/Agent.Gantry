@@ -1,10 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { AgentMcpServerBinding } from '../../domain/mcp/mcp-servers.js';
-import type {
-  AgentSkillBinding,
-  SkillCatalogItem,
-} from '../../domain/skills/skills.js';
+import type { AgentSkillBinding } from '../../domain/skills/skills.js';
 import type {
   AgentToolBinding,
   AgentToolSource,
@@ -68,10 +65,6 @@ export function activeSources(
 export function readableActiveCapabilities(
   toolBindings: AgentToolBinding[],
   toolCatalogById: Map<unknown, { name: string; inputSchema?: unknown }>,
-  options: {
-    skillBindings?: AgentSkillBinding[];
-    skillCatalogById?: Map<unknown, SkillCatalogItem>;
-  } = {},
 ): RuntimeConfiguredAgentCapability[] {
   const rawCapabilities = toolBindings
     .filter((item) => item.status === 'active')

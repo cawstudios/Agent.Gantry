@@ -6,9 +6,12 @@ import { execFileSync } from 'child_process';
 import { logger } from '../infrastructure/logging/logger.js';
 import {
   ensurePrivateDirSync,
+  PRIVATE_FILE_MODE,
   writePrivateFileSync,
 } from '../shared/private-fs.js';
 import { isPlainObject, toTrimmedString } from '../shared/object.js';
+import { encodeFrame, FrameDecoder } from '../shared/ipc-frame.js';
+import { encodeWireFrame, parseWireFrame } from '../shared/ipc-wire.js';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -28,9 +31,7 @@ export type SocketBindOutcome =
       detail?: string;
     };
 
-// ─── PID liveness / recycle detection (mirrors ipc-filesystem.ts) ─────────────
-// These are NOT exported from ipc-filesystem.ts, so we replicate them here
-// faithfully, matching the exact logic.
+// ─── PID liveness / recycle detection ─────────────────────────────────────────
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -116,32 +117,72 @@ const PROBE_TIMEOUT_MS = 500;
  */
 function probeSocketLiveness(socketPath: string): Promise<boolean> {
   return new Promise((resolve) => {
+    let settled = false;
+    const decoder = new FrameDecoder();
     const probe = net.connect(socketPath);
+    const pingId = `bind-probe-${process.pid}-${Date.now()}`;
+
+    const settle = (live: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      probe.destroy();
+      resolve(live);
+    };
 
     const timer = setTimeout(() => {
-      probe.destroy();
       // Timed out — conservative: treat as live
-      resolve(true);
+      settle(true);
     }, PROBE_TIMEOUT_MS);
 
     probe.once('connect', () => {
-      clearTimeout(timer);
-      probe.destroy();
-      resolve(true);
+      probe.write(
+        encodeFrame(
+          Buffer.from(
+            encodeWireFrame({
+              v: 1,
+              type: 'ctrl',
+              channel: null,
+              ctrl: 'ping',
+              id: pingId,
+              payload: {},
+            }),
+            'utf8',
+          ),
+        ),
+      );
+    });
+
+    probe.on('data', (chunk: Buffer) => {
+      try {
+        for (const body of decoder.push(chunk)) {
+          const frame = parseWireFrame(body.toString('utf8'));
+          if (
+            frame.type === 'ctrl' &&
+            frame.ctrl === 'pong' &&
+            frame.id === pingId
+          ) {
+            settle(true);
+            return;
+          }
+        }
+      } catch {
+        // Any unexpected probe response is uncertain; do not steal the socket.
+        settle(true);
+      }
     });
 
     probe.once('error', (err) => {
-      clearTimeout(timer);
-      probe.destroy();
+      if (settled) return;
       const code =
         err && typeof err === 'object' && 'code' in err
           ? String((err as NodeJS.ErrnoException).code)
           : '';
       if (code === 'ECONNREFUSED' || code === 'ENOENT' || code === 'ENOTSOCK') {
-        resolve(false); // stale/corrupt socket file
+        settle(false); // stale/corrupt socket file
       } else {
         // Unexpected error — conservative
-        resolve(true);
+        settle(true);
       }
     });
   });
@@ -209,6 +250,14 @@ function unlinkStaleFiles(socketPath: string, ownerPath: string): void {
   }
 }
 
+function hardenSocketFile(socketPath: string): void {
+  const st = fs.lstatSync(socketPath);
+  if (st.isSymbolicLink()) {
+    throw new Error(`Refusing to use IPC socket symlink: ${socketPath}`);
+  }
+  fs.chmodSync(socketPath, PRIVATE_FILE_MODE);
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -249,6 +298,7 @@ export async function bindIpcSocket(opts: {
 
   if (firstResult !== 'EADDRINUSE') {
     // Success on first try
+    hardenSocketFile(socketPath);
     writeOwnerAndAttach(server, ownerPath, onConnection, nowIso);
     return { ok: true, bound: { server, socketPath, ownerPath } };
   }
@@ -280,6 +330,7 @@ export async function bindIpcSocket(opts: {
   }
 
   // Retry succeeded
+  hardenSocketFile(socketPath);
   writeOwnerAndAttach(server, ownerPath, onConnection, nowIso);
   return { ok: true, bound: { server, socketPath, ownerPath } };
 }

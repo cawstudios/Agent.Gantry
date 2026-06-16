@@ -19,6 +19,7 @@ function makeApp(overrides: Partial<RuntimeApp> = {}): RuntimeApp {
     ensureCredentialBindingsForConversationRoutes: vi.fn(async () => {}),
     clearSessionForChatJid: vi.fn(async () => {}),
     processGroupMessages: vi.fn(),
+    prewarmAgentForConversationRoute: vi.fn(async () => true),
     getConversationRoutes: vi.fn(() => ({
       'app:default': {
         name: 'Default Agent',
@@ -89,6 +90,141 @@ describe('runStartup', () => {
       'ensure-credentials',
     ]);
     expect(result.runtimeSettings).toBe(runtimeSettings);
+  });
+
+  it('reaps orphaned warm workers during startup when a pool is configured', async () => {
+    const reapOrphans = vi.fn(async () => 2);
+    const app = makeApp({
+      warmPool: {
+        acquire: vi.fn(() => null),
+        release: vi.fn(async () => undefined),
+        reapOrphans,
+      },
+    } as any);
+
+    await runStartup(app, {
+      ensureRuntimeLayoutDirectories: vi.fn(),
+      initializeRuntimeStorage: vi.fn(async () => ({}) as any),
+      loadRuntimeSettings: vi.fn(
+        () =>
+          ({
+            providers: {},
+            storage: {
+              postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
+            },
+            memory: {},
+          }) as any,
+      ),
+      logger: { info: vi.fn(), warn: vi.fn() },
+    });
+
+    expect(reapOrphans).toHaveBeenCalledOnce();
+  });
+
+  it('prewarms configured routes after startup credential bindings are ready', async () => {
+    const prewarm = vi.fn(async () => true);
+    const order: string[] = [];
+    const app = makeApp({
+      warmPool: {
+        acquire: vi.fn(() => null),
+        prewarm: vi.fn(async () => undefined),
+        release: vi.fn(async () => undefined),
+      },
+      getConversationRoutes: vi.fn(() => ({
+        'app:default': {
+          name: 'Default Agent',
+          folder: 'main_agent',
+          trigger: '@Default Agent',
+          added_at: '2026-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+        },
+        'wa:customer': {
+          name: 'Customer',
+          folder: 'boondi_support',
+          trigger: '@Boondi',
+          added_at: '2026-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+        },
+      })),
+      ensureCredentialBindingsForConversationRoutes: vi.fn(async () => {
+        order.push('credentials');
+      }),
+      prewarmAgentForConversationRoute: vi.fn(async (chatJid) => {
+        order.push(`prewarm:${chatJid}`);
+        return prewarm(chatJid);
+      }),
+    });
+
+    await runStartup(app, {
+      ensureRuntimeLayoutDirectories: vi.fn(),
+      initializeRuntimeStorage: vi.fn(async () => ({}) as any),
+      loadRuntimeSettings: vi.fn(
+        () =>
+          ({
+            providers: {},
+            storage: {
+              postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
+            },
+            memory: {},
+          }) as any,
+      ),
+      logger: { info: vi.fn(), warn: vi.fn() },
+    });
+
+    expect(order).toEqual([
+      'credentials',
+      'prewarm:app:default',
+      'prewarm:wa:customer',
+    ]);
+    expect(prewarm).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not block runtime startup on warm-pool prewarm completion', async () => {
+    const prewarmStarted = vi.fn();
+    const app = makeApp({
+      warmPool: {
+        acquire: vi.fn(() => null),
+        prewarm: vi.fn(async () => undefined),
+        release: vi.fn(async () => undefined),
+      },
+      getConversationRoutes: vi.fn(() => ({
+        'wa:customer': {
+          name: 'Customer',
+          folder: 'boondi_support',
+          trigger: '@Boondi',
+          added_at: '2026-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+        },
+      })),
+      prewarmAgentForConversationRoute: vi.fn((chatJid) => {
+        prewarmStarted(chatJid);
+        return new Promise<boolean>(() => {});
+      }),
+    });
+
+    const result = await Promise.race([
+      runStartup(app, {
+        ensureRuntimeLayoutDirectories: vi.fn(),
+        initializeRuntimeStorage: vi.fn(async () => ({}) as any),
+        loadRuntimeSettings: vi.fn(
+          () =>
+            ({
+              providers: {},
+              storage: {
+                postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
+              },
+              memory: {},
+            }) as any,
+        ),
+        logger: { info: vi.fn(), warn: vi.fn() },
+      }).then(() => 'startup-returned' as const),
+      new Promise<'timed-out'>((resolve) =>
+        setTimeout(() => resolve('timed-out'), 50),
+      ),
+    ]);
+
+    expect(result).toBe('startup-returned');
+    expect(prewarmStarted).toHaveBeenCalledWith('wa:customer');
   });
 
   it('creates an internal default agent for a fresh runtime with no registered groups', async () => {

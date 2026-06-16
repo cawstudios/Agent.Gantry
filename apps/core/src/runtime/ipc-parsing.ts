@@ -503,11 +503,12 @@ export function parseUserQuestionIpcRequest(
   sourceAgentFolder: string,
 ): UserQuestionRequest {
   if (!isPlainObject(raw)) throw new Error('Invalid user question IPC payload');
-  const { authThreadId: threadId, responseKeyId } = validateIpcAuthRequest(
-    raw,
-    sourceAgentFolder,
-    'user question IPC',
-  );
+  const {
+    authThreadId: threadId,
+    appId,
+    agentId,
+    responseKeyId,
+  } = validateIpcAuthRequest(raw, sourceAgentFolder, 'user question IPC');
   if (!responseKeyId) {
     throw new Error('user question IPC responseKeyId is required');
   }
@@ -584,6 +585,8 @@ export function parseUserQuestionIpcRequest(
     requestId,
     sourceAgentFolder,
     ...(targetJid ? { targetJid } : {}),
+    ...(appId ? { appId } : {}),
+    ...(agentId ? { agentId } : {}),
     ...(threadId ? { threadId } : {}),
     ...(responseKeyId ? { responseKeyId } : {}),
     questions,

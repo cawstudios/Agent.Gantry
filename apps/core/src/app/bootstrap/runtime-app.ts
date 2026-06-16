@@ -2,6 +2,7 @@ import {
   ASSISTANT_NAME,
   getCredentialBrokerRuntimeConfig,
   getRuntimeQueueConfig,
+  getRuntimeWarmPoolConfig,
 } from '../../config/index.js';
 import {
   createAgentCredentialBroker,
@@ -24,6 +25,13 @@ import type {
 import { RemoteMcpDnsValidationCache } from '../../application/mcp/mcp-server-policy.js';
 import { createGroupProcessor } from '../../runtime/group-processing.js';
 import type { GroupProcessingDeps } from '../../runtime/group-processing-types.js';
+import {
+  memoryScopeForConversationKind,
+  resolveTurnSemanticCapabilities,
+  resolveTurnSelectedMcpServerIds,
+  resolveTurnSelectedSkillContext,
+  resolveTurnToolPolicy,
+} from '../../runtime/group-run-context.js';
 import { listAvailableGroups } from '../../runtime/group-registry.js';
 import { GroupQueue } from '../../runtime/group-queue.js';
 import { parseThreadQueueKey } from '../../shared/thread-queue-key.js';
@@ -53,8 +61,17 @@ import {
 } from '../../adapters/llm/default-runtime-adapters.js';
 import type { AgentExecutionAdapter } from '../../application/agent-execution/agent-execution-adapter.js';
 import type { AgentExecutionAdapterRegistry } from '../../application/agent-execution/agent-execution-adapter-registry.js';
+import type { ExecutionProviderId } from '../../domain/sessions/sessions.js';
+import { hasWarmPoolCapability } from '../../application/agent-execution/warm-pool-capable.js';
 import { registerMemoryLlmClient } from '../../memory/memory-llm-port.js';
 import { runClaudeQuery } from '../../adapters/llm/anthropic-claude-agent/memory-query.js';
+import { WarmPoolManager } from '../../runtime/warm-pool-manager.js';
+import { ProcessWarmPoolOrphanReaper } from '../../runtime/warm-pool-orphan-reaper.js';
+import type { WarmPoolRuntime } from '../../runtime/agent-spawn-types.js';
+import { spawnAgent } from '../../runtime/agent-spawn.js';
+import { promptProfileAgentIdForFolder } from '../../application/agents/prompt-profile-service.js';
+import { defaultModelStatusSelection } from '../../session/session-model-status.js';
+import { resolveRuntimeExecutionProviderId } from '../../runtime/execution-provider-id.js';
 
 export type RuntimeAppRepository = RuntimeRouterStateRepository &
   RuntimeMessageRepository &
@@ -65,6 +82,7 @@ export type RuntimeAppRepository = RuntimeRouterStateRepository &
 export interface RuntimeApp {
   executionAdapter: AgentExecutionAdapter;
   executionAdapters: AgentExecutionAdapterRegistry;
+  warmPool?: WarmPoolRuntime;
   queue: GroupQueue;
   // The guardrail classifier used on the agent-spawn path. Exposed so the
   // message loop can apply the same guardrail to the continuation path.
@@ -103,6 +121,7 @@ export interface RuntimeApp {
     chatJid: string,
     options?: { queued?: boolean },
   ) => Promise<boolean>;
+  prewarmAgentForConversationRoute: (chatJid: string) => Promise<boolean>;
   getConversationRoutes: () => Record<string, ConversationRoute>;
   getLastTimestamp: () => string;
   setLastTimestamp: (timestamp: string) => void;
@@ -140,9 +159,24 @@ export interface RuntimeAppOptions {
   guardrailClassifier?: GroupProcessingDeps['guardrailClassifier'];
   executionAdapter?: AgentExecutionAdapter;
   executionAdapters?: AgentExecutionAdapterRegistry;
+  warmPool?: WarmPoolRuntime;
   opsRepository?: RuntimeAppRepository;
   /** Per-reply latency trace (best-effort). Injected at boot; absent in tests. */
   replyTrace?: GroupProcessingDeps['replyTrace'];
+}
+
+function createConfiguredWarmPool(
+  executionAdapter: AgentExecutionAdapter,
+): WarmPoolRuntime | undefined {
+  const config = getRuntimeWarmPoolConfig();
+  if (!config.enabled || !hasWarmPoolCapability(executionAdapter)) {
+    return undefined;
+  }
+  return new WarmPoolManager({
+    capability: executionAdapter,
+    maxConcurrentPrewarm: Math.max(1, config.size),
+    orphanReaper: new ProcessWarmPoolOrphanReaper(),
+  });
 }
 
 export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
@@ -174,6 +208,8 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   if (!executionAdapter) {
     throw new Error('Runtime requires at least one model execution adapter.');
   }
+  const warmPool =
+    options.warmPool ?? createConfiguredWarmPool(executionAdapter);
   registerMemoryLlmClient(createDefaultMemoryLlmClient());
   const mcpDnsValidationCache = new RemoteMcpDnsValidationCache();
   let credentialBrokerPromise:
@@ -578,11 +614,116 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     guardrailClassifier,
     executionAdapter,
     executionAdapters,
+    warmPool,
   });
+
+  async function prewarmAgentForConversationRoute(
+    chatJid: string,
+  ): Promise<boolean> {
+    const warmPoolConfig = getRuntimeWarmPoolConfig();
+    if (!warmPoolConfig.enabled || !warmPool) return false;
+    const group = conversationRoutes[chatJid];
+    if (!group) return false;
+
+    const appId = 'default';
+    const agentId = promptProfileAgentIdForFolder(group.folder);
+    const turnContext = { appId, agentId };
+    const storage = getRuntimeStorage();
+    const initialModelSelection = defaultModelStatusSelection(
+      group.agentConfig?.model ?? 'opus',
+    );
+    const executionProviderId = (initialModelSelection.model
+      ?.executionProviderId ??
+      resolveRuntimeExecutionProviderId(executionAdapter)) as ExecutionProviderId;
+    const sessionContext = await storage.ops.getAgentTurnContext?.({
+      agentFolder: group.folder,
+      executionProviderId,
+      conversationJid: chatJid,
+      conversationKind: group.conversationKind,
+      hydrateMemory: false,
+    });
+    const deps = {
+      getToolRepository: () => storage.repositories.tools,
+      getSkillRepository: () => storage.repositories.skills,
+      getMcpServerRepository: () => storage.repositories.mcpServers,
+    };
+    const [configuredToolPolicy, selectedSkillContext, semanticCapabilities] =
+      await Promise.all([
+        resolveTurnToolPolicy(deps, turnContext),
+        resolveTurnSelectedSkillContext(deps, turnContext),
+        resolveTurnSemanticCapabilities(deps, turnContext),
+      ]);
+    const attachedMcpSourceIds = await resolveTurnSelectedMcpServerIds(
+      deps,
+      turnContext,
+      configuredToolPolicy.allowedTools,
+    );
+    const credentialBroker = await getCredentialBroker();
+    const output = await spawnAgent(
+      group,
+      {
+        prompt: '',
+        appId,
+        agentId,
+        chatJid,
+        groupFolder: group.folder,
+        memoryDefaultScope: memoryScopeForConversationKind(
+          group.conversationKind,
+        ),
+        persona: group.agentConfig?.persona,
+        allowedTools: configuredToolPolicy.allowedTools,
+        gantryMcpToolSurface: group.agentConfig?.toolSurface?.gantryMcp,
+        nativeToolSurface: group.agentConfig?.toolSurface?.native,
+        runtimeAccess: configuredToolPolicy.runtimeAccess,
+        attachedSkillSourceIds: selectedSkillContext.ids,
+        selectedSkillDisplays: selectedSkillContext.displays,
+        attachedMcpSourceIds,
+        semanticCapabilities,
+        assistantName: group.trigger || ASSISTANT_NAME,
+        thinking: group.agentConfig?.thinking,
+        ...(sessionContext?.externalSessionId
+          ? { sessionId: sessionContext.externalSessionId }
+          : {}),
+      },
+      () => {},
+      undefined,
+      {
+        ...(credentialBroker ? { credentialBroker } : {}),
+        skillRepository: storage.repositories.skills,
+        skillArtifactStore: getRuntimeSkillArtifactStore(),
+        skillContext: turnContext,
+        mcpServerRepository: storage.repositories.mcpServers,
+        capabilitySecretRepository: storage.repositories.capabilitySecrets,
+        mcpContext: turnContext,
+        mcpHostnameLookup: options.mcpHostnameLookup?.(),
+        mcpDnsValidationCache,
+        ...(options.publishRuntimeEvent
+          ? { publishRuntimeEvent: options.publishRuntimeEvent }
+          : {}),
+        executionAdapter,
+        executionAdapters,
+        warmPool,
+        warmPoolPrewarmOnly: true,
+      },
+    );
+    if (output.status === 'error') {
+      logger.warn(
+        { group: group.name, error: output.error },
+        'Warm-pool startup prewarm failed',
+      );
+      return false;
+    }
+    logger.info(
+      { group: group.name, chatJid },
+      'Warm-pool route prewarm ready',
+    );
+    return true;
+  }
 
   return {
     executionAdapter,
     executionAdapters,
+    ...(warmPool ? { warmPool } : {}),
     queue,
     guardrailClassifier,
     loadState,
@@ -600,6 +741,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     clearSessionForChatJid,
     processGroupMessages: (chatJid, options) =>
       groupProcessor.processGroupMessages(chatJid, options),
+    prewarmAgentForConversationRoute,
     getConversationRoutes: () => conversationRoutes,
     getLastTimestamp: () => lastTimestamp,
     setLastTimestamp: (timestamp) => {

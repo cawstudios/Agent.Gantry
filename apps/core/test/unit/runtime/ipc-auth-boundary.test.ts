@@ -15,7 +15,7 @@ import {
   verifyIpcResponsePayload,
 } from '@core/infrastructure/ipc/response-signing.js';
 import {
-  stopIpcWatcher,
+  resetIpcRuntimeState,
   validateIpcAuthRequest,
   validatePermissionIpcJobExecutionTarget,
 } from '@core/runtime/ipc.js';
@@ -97,7 +97,7 @@ function signedMemoryPayload(
 
 describe('validateIpcAuthRequest', () => {
   afterEach(() => {
-    stopIpcWatcher();
+    resetIpcRuntimeState();
   });
 
   it('accepts a signed fresh request and returns the trusted thread binding', () => {

@@ -2,11 +2,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   appendLiveToolRules,
+  clearLiveToolRuleCachesForTest,
   readLiveToolRules,
+  replaceCachedLiveToolRules,
 } from '@core/shared/live-tool-rules.js';
 import {
   PRIVATE_DIR_MODE,
@@ -18,6 +20,10 @@ function mode(filePath: string): number {
 }
 
 describe('live tool rules', () => {
+  afterEach(() => {
+    clearLiveToolRuleCachesForTest();
+  });
+
   it('stores same-run tool grants in private files', () => {
     const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-tools-'));
 
@@ -45,5 +51,36 @@ describe('live tool rules', () => {
       }),
     ).toEqual([]);
     expect(fs.existsSync(path.join(ipcDir, 'live-tool-rules'))).toBe(false);
+  });
+
+  it('returns a socket-pushed cache when the authoritative file is absent', () => {
+    replaceCachedLiveToolRules({
+      runHandle: 'run_1',
+      rules: ['FileRead', 'RunCommand(npm test *)'],
+    });
+
+    expect(
+      readLiveToolRules({
+        ipcDir: path.join(os.tmpdir(), 'missing-live-tool-rules'),
+        runHandle: 'run_1',
+      }),
+    ).toEqual(['FileRead', 'RunCommand(npm test *)']);
+  });
+
+  it('keeps the private file authoritative over a stale socket-pushed cache', () => {
+    const ipcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-tools-'));
+    replaceCachedLiveToolRules({
+      runHandle: 'run_1',
+      rules: ['FileRead'],
+    });
+    appendLiveToolRules({
+      ipcDir,
+      runHandle: 'run_1',
+      rules: ['RunCommand(npm test *)'],
+    });
+
+    expect(readLiveToolRules({ ipcDir, runHandle: 'run_1' })).toEqual([
+      'RunCommand(npm test *)',
+    ]);
   });
 });

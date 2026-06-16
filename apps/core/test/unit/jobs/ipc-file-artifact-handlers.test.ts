@@ -8,11 +8,13 @@ import type { FileArtifact } from '@core/domain/file-artifacts/file-artifact.js'
 import { appendLiveToolRules } from '@core/shared/live-tool-rules.js';
 
 const runtimeHomes: string[] = [];
+const taskResponses = new Map<string, Record<string, unknown>>();
 
 async function loadFileArtifactHandlers(runtimeHome: string) {
   vi.resetModules();
   vi.stubEnv('GANTRY_HOME', runtimeHome);
   const ipcAuth = await import('@core/runtime/ipc-auth.js');
+  const ipcResponseRouter = await import('@core/runtime/ipc-response-router.js');
   const handlers = await import('@core/jobs/ipc-file-artifact-handlers.js');
   return {
     ...handlers,
@@ -22,6 +24,13 @@ async function loadFileArtifactHandlers(runtimeHome: string) {
       threadId?: string,
     ) => {
       const envelope = ipcAuth.createIpcAuthEnvelope('main_agent', threadId);
+      ipcResponseRouter.registerIpcResponder(
+        'main_agent',
+        `task-${taskId}`,
+        (signed) => {
+          taskResponses.set(taskId, signed);
+        },
+      );
       return {
         taskId,
         appId: 'app:test',
@@ -36,19 +45,10 @@ async function loadFileArtifactHandlers(runtimeHome: string) {
 }
 
 function readResponse(runtimeHome: string, taskId: string) {
-  return JSON.parse(
-    fs.readFileSync(
-      path.join(
-        runtimeHome,
-        'data',
-        'ipc',
-        'main_agent',
-        'task-responses',
-        `task-${taskId}.json`,
-      ),
-      'utf-8',
-    ),
-  );
+  void runtimeHome;
+  const response = taskResponses.get(taskId);
+  if (!response) throw new Error(`Missing task response: ${taskId}`);
+  return response;
 }
 
 function makeArtifact(input: {
@@ -102,6 +102,7 @@ function contextFor(input: {
 }
 
 afterEach(() => {
+  taskResponses.clear();
   vi.unstubAllEnvs();
   for (const runtimeHome of runtimeHomes.splice(0)) {
     fs.rmSync(runtimeHome, { recursive: true, force: true });

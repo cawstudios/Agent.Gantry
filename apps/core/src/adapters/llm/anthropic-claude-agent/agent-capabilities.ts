@@ -54,8 +54,8 @@ export interface AgentCapabilityContext {
   semanticCapabilities?: readonly SemanticCapabilityDefinition[];
   ipcDir?: string;
   ipcAuthToken?: string;
-  ipcTransport?: string;
   ipcSocketPath?: string;
+  boundIdentityFile?: string;
   browserIpcAuthToken?: string;
   memoryIpcAuthToken?: string;
   ipcResponseVerifyKey?: string;
@@ -102,11 +102,6 @@ const CONFIGURABLE_NATIVE_SDK_TOOL_NAMES = new Set<string>([
 const GANTRY_MCP_ALLOWED_TOOLS = DEFAULT_GANTRY_MCP_TOOL_NAMES.map(
   gantryMcpFullToolName,
 );
-
-const DEFAULT_ALLOWED_TOOLS = [
-  ...SAFE_NATIVE_SDK_TOOLS,
-  ...GANTRY_MCP_ALLOWED_TOOLS,
-] as const;
 
 // The default allow-list, with each surface narrowed to its per-agent keep-list
 // when configured: the gantry MCP portion to `tool_surface.gantry_mcp`, the
@@ -220,6 +215,9 @@ const gantryMcpProvider: AgentCapabilityProvider = {
         ? { GANTRY_AGENT_RUN_HANDLE: process.env.GANTRY_AGENT_RUN_HANDLE }
         : {}),
       GANTRY_CHAT_JID: ctx.chatJid,
+      ...(ctx.boundIdentityFile
+        ? { GANTRY_BOUND_IDENTITY_FILE: ctx.boundIdentityFile }
+        : {}),
       GANTRY_GROUP_FOLDER: ctx.groupFolder,
       GANTRY_THREAD_ID: ctx.threadId || '',
       GANTRY_MEMORY_USER_ID: ctx.memoryUserId || '',
@@ -267,7 +265,6 @@ const gantryMcpProvider: AgentCapabilityProvider = {
       ),
       ...(ctx.ipcDir ? { GANTRY_IPC_DIR: ctx.ipcDir } : {}),
       ...(ctx.ipcAuthToken ? { GANTRY_IPC_AUTH_TOKEN: ctx.ipcAuthToken } : {}),
-      ...(ctx.ipcTransport ? { GANTRY_IPC_TRANSPORT: ctx.ipcTransport } : {}),
       ...(ctx.ipcSocketPath
         ? { GANTRY_IPC_SOCKET_PATH: ctx.ipcSocketPath }
         : {}),

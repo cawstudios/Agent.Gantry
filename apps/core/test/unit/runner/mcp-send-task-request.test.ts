@@ -4,6 +4,7 @@ import path from 'path';
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { createIpcResponseSigningKeyPair } from '@core/infrastructure/ipc/response-signing.js';
 import { IpcRequestError } from '@core/shared/ipc-socket-client.js';
 import type {
   TaskResponseEnvelope,
@@ -15,11 +16,11 @@ import type {
 // static (hoisted) import order can't evaluate context.ts before the env.
 const IPC_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-send-task-'));
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const responseSigningKey = createIpcResponseSigningKeyPair();
 
 let sendTaskRequest: typeof import('@agent-runner-src/mcp/ipc.js').sendTaskRequest;
 let classifyTaskSocketError: typeof import('@agent-runner-src/mcp/ipc.js').classifyTaskSocketError;
 let buildSignedTaskEnvelope: typeof import('@agent-runner-src/mcp/ipc.js').buildSignedTaskEnvelope;
-let waitForTaskResponse: typeof import('@agent-runner-src/mcp/ipc.js').waitForTaskResponse;
 let __setTaskSocketClientForTest: typeof import('@agent-runner-src/mcp/ipc.js').__setTaskSocketClientForTest;
 
 beforeAll(async () => {
@@ -32,23 +33,19 @@ beforeAll(async () => {
   // HMAC-signing path (an empty token would legitimately omit the signature).
   process.env.GANTRY_IPC_AUTH_TOKEN =
     process.env.GANTRY_IPC_AUTH_TOKEN ?? 'mcp-task-test-token';
+  process.env.GANTRY_IPC_RESPONSE_VERIFY_KEY = responseSigningKey.publicKeyPem;
   const mod = await import('@agent-runner-src/mcp/ipc.js');
   sendTaskRequest = mod.sendTaskRequest;
   classifyTaskSocketError = mod.classifyTaskSocketError;
   buildSignedTaskEnvelope = mod.buildSignedTaskEnvelope;
-  waitForTaskResponse = mod.waitForTaskResponse;
   __setTaskSocketClientForTest = mod.__setTaskSocketClientForTest;
 });
 
 afterEach(() => {
   __setTaskSocketClientForTest(undefined);
   vi.restoreAllMocks();
-  // Clear any task request/response files between tests.
+  // Clear any legacy task request files between tests.
   fs.rmSync(TASKS_DIR, { recursive: true, force: true });
-  fs.rmSync(path.join(IPC_DIR, 'task-responses'), {
-    recursive: true,
-    force: true,
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -65,19 +62,30 @@ describe('classifyTaskSocketError', () => {
   });
 
   it.each(['connection_lost', 'not_connected', 'busy'])(
-    'maps transient code %s to a fs fallback',
+    'maps transient code %s to a bounded task error',
     (code) => {
       const d = classifyTaskSocketError(
         'task-1',
         new IpcRequestError('x', code),
       );
-      expect(d).toEqual({ kind: 'fallback' });
+      expect(d).toEqual({
+        kind: 'response',
+        response: { taskId: 'task-1', ok: false, code, error: 'x' },
+      });
     },
   );
 
-  it('maps a non-protocol error to a fs fallback (never fails hard)', () => {
+  it('maps a non-protocol error to a bounded task error', () => {
     const d = classifyTaskSocketError('task-1', new Error('boom'));
-    expect(d).toEqual({ kind: 'fallback' });
+    expect(d).toEqual({
+      kind: 'response',
+      response: {
+        taskId: 'task-1',
+        ok: false,
+        code: 'socket_error',
+        error: 'boom',
+      },
+    });
   });
 
   it.each([
@@ -102,62 +110,23 @@ describe('classifyTaskSocketError', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sendTaskRequest — fs default path (no socket client).
+// sendTaskRequest — socket-only boundary (no socket client).
 // ---------------------------------------------------------------------------
 
-describe('sendTaskRequest (fs mode)', () => {
-  it('writes a signed task file and reads back the signed response (round-trip shape)', async () => {
-    __setTaskSocketClientForTest(null); // force fs path explicitly
-
-    const taskId = 'fs-task-1';
-    // Drive the wait + a concurrent fs responder. waitForTaskResponse polls the
-    // task-responses dir; we drop a response file shortly after the request.
-    const responsesDir = path.join(IPC_DIR, 'task-responses');
-    const pending = sendTaskRequest(
-      { type: 'noop', taskId, chatJid: 'tg:team' },
-      { timeoutMs: 3000 },
-    );
-
-    // The request file is written synchronously inside sendTaskRequest before
-    // the first poll await; confirm it landed under TASKS_DIR.
-    await vi.waitFor(() => {
-      expect(fs.existsSync(TASKS_DIR)).toBe(true);
-      expect(fs.readdirSync(TASKS_DIR).length).toBeGreaterThan(0);
-    });
-    const reqFile = fs.readdirSync(TASKS_DIR)[0];
-    const reqEnvelope = JSON.parse(
-      fs.readFileSync(path.join(TASKS_DIR, reqFile), 'utf-8'),
-    );
-    expect(reqEnvelope.type).toBe('noop');
-    expect(reqEnvelope.taskId).toBe(taskId);
-    // buildSignedTaskEnvelope stamped requestId/nonce/expiresAt.
-    expect(typeof reqEnvelope.requestId).toBe('string');
-    expect(typeof reqEnvelope.nonce).toBe('string');
-
-    // The fs response path verifies an ed25519 signature; with no verify key
-    // configured an unsigned payload fails the check and yields {ok:false,
-    // 'Invalid task response signature'} — which still proves the read/parse
-    // round-trip and the no-leak of the request file.
-    fs.mkdirSync(responsesDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(responsesDir, `task-${taskId}.json`),
-      JSON.stringify({ taskId, ok: true, message: 'ok' }),
-    );
-
-    const resp = await pending;
-    expect(resp?.taskId).toBe(taskId);
-    // Unsigned → signature check fails → ok:false with the signature error.
-    expect(resp?.ok).toBe(false);
-    expect(resp?.error).toContain('signature');
-  });
-
-  it('returns null on fs timeout', async () => {
+describe('sendTaskRequest (socket-only boundary)', () => {
+  it('returns a bounded error and writes no task file when no socket client is available', async () => {
     __setTaskSocketClientForTest(null);
     const resp = await sendTaskRequest(
-      { type: 'noop', taskId: 'fs-timeout-1' },
+      { type: 'noop', taskId: 'no-client-1' },
       { timeoutMs: 60 },
     );
-    expect(resp).toBeNull();
+    expect(resp).toEqual<TaskResponseEnvelope>({
+      taskId: 'no-client-1',
+      ok: false,
+      code: 'not_connected',
+      error: 'IPC socket is not connected',
+    });
+    expect(fs.existsSync(TASKS_DIR)).toBe(false);
   });
 });
 
@@ -261,7 +230,7 @@ describe('sendTaskRequest (socket mode, injected fake client)', () => {
     );
 
     expect(resp).toBeNull();
-    expect(fs.existsSync(TASKS_DIR)).toBe(false); // no fs fallback on timeout
+    expect(fs.existsSync(TASKS_DIR)).toBe(false); // no request file on timeout
   });
 
   it('returns a reconstructed {ok:false} for a signed handler rejection', async () => {
@@ -288,7 +257,7 @@ describe('sendTaskRequest (socket mode, injected fake client)', () => {
     expect(fs.existsSync(TASKS_DIR)).toBe(false); // a real rejection is final
   });
 
-  it('falls back to the fs path on a transient socket failure (connection_lost)', async () => {
+  it('returns a bounded error and writes no task file on a transient socket failure', async () => {
     const fake = new FakeTaskSocketClient({
       onRequest: async () => {
         throw new IpcRequestError('connection lost: drop', 'connection_lost');
@@ -297,29 +266,22 @@ describe('sendTaskRequest (socket mode, injected fake client)', () => {
     __setTaskSocketClientForTest(fake);
 
     const pending = sendTaskRequest(
-      { type: 'noop', taskId: 'sock-fallback' },
+      { type: 'noop', taskId: 'sock-drop' },
       { timeoutMs: 3000 },
     );
 
-    // The fs fallback writes a request file; satisfy its poll with a response.
-    await vi.waitFor(() => {
-      expect(fs.existsSync(TASKS_DIR)).toBe(true);
-      expect(fs.readdirSync(TASKS_DIR).length).toBeGreaterThan(0);
-    });
-    const responsesDir = path.join(IPC_DIR, 'task-responses');
-    fs.mkdirSync(responsesDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(responsesDir, 'task-sock-fallback.json'),
-      JSON.stringify({ taskId: 'sock-fallback', ok: true }),
-    );
-
     const resp = await pending;
-    // The fs path ran (request file was written, response read back).
-    expect(resp?.taskId).toBe('sock-fallback');
+    expect(resp).toEqual<TaskResponseEnvelope>({
+      taskId: 'sock-drop',
+      ok: false,
+      code: 'connection_lost',
+      error: 'connection lost: drop',
+    });
     expect(fake.requestCalls).toHaveLength(1); // socket was attempted first
+    expect(fs.existsSync(TASKS_DIR)).toBe(false);
   });
 
-  it('falls back to the fs path when the socket connect fails', async () => {
+  it('returns a bounded error and writes no task file when the socket connect fails', async () => {
     const fake = new FakeTaskSocketClient({
       connectFails: true,
       onRequest: async () => ({ ok: true }),
@@ -331,22 +293,40 @@ describe('sendTaskRequest (socket mode, injected fake client)', () => {
       { timeoutMs: 3000 },
     );
 
-    await vi.waitFor(() => {
-      expect(fs.existsSync(TASKS_DIR)).toBe(true);
-      expect(fs.readdirSync(TASKS_DIR).length).toBeGreaterThan(0);
-    });
-    const responsesDir = path.join(IPC_DIR, 'task-responses');
-    fs.mkdirSync(responsesDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(responsesDir, 'task-connect-fail.json'),
-      JSON.stringify({ taskId: 'connect-fail', ok: true }),
-    );
-
     const resp = await pending;
-    expect(resp?.taskId).toBe('connect-fail');
+    expect(resp).toEqual<TaskResponseEnvelope>({
+      taskId: 'connect-fail',
+      ok: false,
+      code: 'not_connected',
+      error: 'IPC socket is not connected',
+    });
     expect(fake.connectCalls).toBe(1);
     expect(fake.requestCalls).toHaveLength(0); // never reached request()
+    expect(fs.existsSync(TASKS_DIR)).toBe(false);
   });
+
+  it('does not write a task request file on connection_lost', async () => {
+    const fake = new FakeTaskSocketClient({
+      onRequest: async () => {
+        throw new IpcRequestError('connection lost: drop', 'connection_lost');
+      },
+    });
+    __setTaskSocketClientForTest(fake);
+
+    const resp = await sendTaskRequest(
+      { type: 'noop', taskId: 'pure-socket-drop' },
+      { timeoutMs: 60 },
+    );
+
+    expect(resp).toEqual<TaskResponseEnvelope>({
+      taskId: 'pure-socket-drop',
+      ok: false,
+      code: 'connection_lost',
+      error: 'connection lost: drop',
+    });
+    expect(fs.existsSync(TASKS_DIR)).toBe(false);
+  });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -366,10 +346,5 @@ describe('buildSignedTaskEnvelope', () => {
     expect(typeof env.requestId).toBe('string');
     expect(typeof env.nonce).toBe('string');
     expect(typeof env.expiresAt).toBe('string');
-  });
-
-  it('round-trips through waitForTaskResponse parsing (exported helpers wired)', () => {
-    // Smoke: the helpers are exported from the module surface Task D relies on.
-    expect(typeof waitForTaskResponse).toBe('function');
   });
 });

@@ -249,17 +249,18 @@ describe('assembleTimeline (v2)', () => {
     expect(t.version).toBe(2);
     expect(t.totalMs).toBe(10_000);
     expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(10_000);
-    // queue + guardrail + startup + model_wait + llm + (gap) + send present
     const kinds = t.sections.map((s) => s.kind);
-    expect(kinds[0]).toBe('queue');
-    expect(kinds).toContain('guardrail');
-    expect(kinds).toContain('startup');
-    expect(kinds).toContain('model_wait');
-    expect(kinds).toContain('llm');
-    expect(kinds).toContain('send');
+    expect(kinds).toEqual(['queue', 'guardrail', 'startup', 'llm', 'gap', 'send']);
+    const llm = t.sections.find((s) => s.kind === 'llm')!;
+    expect(llm.startedAt).toBe(W0 + 3_000);
+    expect(llm.ms).toBe(3_000);
+    expect(llm.detail).toMatchObject({
+      providerWaitMs: 1_000,
+      generationMs: 2_000,
+    });
   });
 
-  it('labels the gap before an llm turn as model_wait and others as gap', () => {
+  it('folds provider wait into llm sections and keeps non-llm handoffs as gap', () => {
     const t = assembleTimeline({
       windowStart: W0,
       windowEnd: W0 + 6_000,
@@ -280,7 +281,14 @@ describe('assembleTimeline (v2)', () => {
       ],
     });
     const kinds = t.sections.map((s) => s.kind);
-    expect(kinds).toContain('model_wait');
+    expect(kinds).toEqual(['queue', 'llm', 'tool', 'llm', 'gap']);
+    const secondLlm = t.sections.filter((s) => s.kind === 'llm')[1]!;
+    expect(secondLlm.startedAt).toBe(W0 + 3_000);
+    expect(secondLlm.ms).toBe(2_000);
+    expect(secondLlm.detail).toMatchObject({
+      providerWaitMs: 1_000,
+      generationMs: 1_000,
+    });
     expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(6_000);
   });
 
@@ -391,7 +399,7 @@ describe('assembleTimeline (v2)', () => {
     expect(t.sections.map((s) => s.kind)).toEqual(['queue', 'send']);
   });
 
-  it('splits a warm continuation into queue (pickup) + model_wait (TTFT)', () => {
+  it('splits a warm continuation into queue pickup and llm provider response wait detail', () => {
     // Warm: no startup span. dispatchedAt lies between ingress and first token.
     const t = assembleTimeline({
       windowStart: W0,
@@ -402,15 +410,15 @@ describe('assembleTimeline (v2)', () => {
     });
     expect(t.totalMs).toBe(5000);
     expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(5000);
-    expect(t.sections.map((s) => s.kind)).toEqual([
-      'queue',
-      'model_wait',
-      'llm',
-      'gap',
-      'send',
-    ]);
+    expect(t.sections.map((s) => s.kind)).toEqual(['queue', 'llm', 'gap', 'send']);
     expect(t.sections.find((s) => s.kind === 'queue')!.ms).toBe(300);
-    expect(t.sections.find((s) => s.kind === 'model_wait')!.ms).toBe(2200);
+    const llm = t.sections.find((s) => s.kind === 'llm')!;
+    expect(llm.startedAt).toBe(W0 + 300);
+    expect(llm.ms).toBe(4200);
+    expect(llm.detail).toMatchObject({
+      providerWaitMs: 2200,
+      generationMs: 2000,
+    });
   });
 
   it('ignores an out-of-range dispatch mark (single queue, no bogus split)', () => {
@@ -423,7 +431,7 @@ describe('assembleTimeline (v2)', () => {
     });
     expect(t.sections.reduce((s, x) => s + x.ms, 0)).toBe(3000);
     expect(t.sections.filter((s) => s.kind === 'queue').length).toBe(1);
-    expect(t.sections.some((s) => s.kind === 'model_wait')).toBe(false);
+    expect(t.sections.find((s) => s.kind === 'llm')!.detail.providerWaitMs).toBeUndefined();
   });
 });
 

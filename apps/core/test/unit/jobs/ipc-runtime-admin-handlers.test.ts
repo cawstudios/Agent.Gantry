@@ -12,11 +12,13 @@ import {
 import { renderRuntimeSettingsYaml } from '@core/config/settings/runtime-settings-renderer.js';
 
 const runtimeHomes: string[] = [];
+const taskResponses = new Map<string, Record<string, unknown>>();
 
 async function loadHandlers(runtimeHome: string) {
   vi.resetModules();
   vi.stubEnv('GANTRY_HOME', runtimeHome);
   const ipcAuth = await import('@core/runtime/ipc-auth.js');
+  const ipcResponseRouter = await import('@core/runtime/ipc-response-router.js');
   const handlers = await import('@core/jobs/ipc-runtime-admin-handlers.js');
   return {
     ...handlers,
@@ -26,6 +28,13 @@ async function loadHandlers(runtimeHome: string) {
       threadId?: string,
     ) => {
       const envelope = ipcAuth.createIpcAuthEnvelope('main_agent', threadId);
+      ipcResponseRouter.registerIpcResponder(
+        'main_agent',
+        `task-${taskId}`,
+        (signed) => {
+          taskResponses.set(taskId, signed);
+        },
+      );
       return {
         taskId,
         appId: 'app:test',
@@ -38,33 +47,16 @@ async function loadHandlers(runtimeHome: string) {
 }
 
 function readResponse(runtimeHome: string, taskId: string) {
-  return JSON.parse(
-    fs.readFileSync(
-      path.join(
-        runtimeHome,
-        'data',
-        'ipc',
-        'main_agent',
-        'task-responses',
-        `task-${taskId}.json`,
-      ),
-      'utf-8',
-    ),
-  );
+  void runtimeHome;
+  const response = taskResponses.get(taskId);
+  if (!response) throw new Error(`Missing task response: ${taskId}`);
+  return response;
 }
 
 async function waitForResponse(runtimeHome: string, taskId: string) {
   const started = Date.now();
   while (Date.now() - started < 1000) {
-    const responsePath = path.join(
-      runtimeHome,
-      'data',
-      'ipc',
-      'main_agent',
-      'task-responses',
-      `task-${taskId}.json`,
-    );
-    if (fs.existsSync(responsePath)) return readResponse(runtimeHome, taskId);
+    if (taskResponses.has(taskId)) return readResponse(runtimeHome, taskId);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`Timed out waiting for task response: ${taskId}`);
@@ -93,6 +85,7 @@ function depsWithAdminTools(
 }
 
 afterEach(() => {
+  taskResponses.clear();
   vi.unstubAllEnvs();
   vi.doUnmock('@core/adapters/storage/postgres/runtime-store.js');
   vi.doUnmock('@core/config/preflight.js');

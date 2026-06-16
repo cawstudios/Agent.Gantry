@@ -760,6 +760,57 @@ describe('agent capability composition', () => {
     expect(profile.alwaysAllowedTools).toEqual([]);
   });
 
+  it('keeps loopback HTTP MCP servers behind the Gantry facade', () => {
+    const profile = composeAgentCapabilities({
+      mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      chatJid: 'wa:919654405340',
+      groupFolder: 'boondi_support',
+      externalMcpServers: {
+        shopify: {
+          type: 'http',
+          url: 'http://127.0.0.1:18081/mcp',
+          headers: {
+            'X-Caller-Identity': 'phone:+919654405340;ts=1;sig=static',
+          },
+        },
+      },
+      externalMcpAllowedTools: [
+        'mcp__shopify__search_products',
+        'mcp__shopify__*',
+      ],
+      externalMcpAlwaysAllowedTools: ['mcp__shopify__search_products'],
+      configuredAllowedTools: ['mcp__gantry__mcp_call_tool'],
+      attachedMcpSourceIds: ['mcp:shopify'],
+    });
+
+    expect(profile.mcpServers.shopify).toBeUndefined();
+    expect(profile.allowedTools).not.toContain('mcp__shopify__search_products');
+    expect(profile.allowedTools).toContain('mcp__gantry__mcp_call_tool');
+    expect(profile.mcpServers.gantry?.env).toEqual(
+      expect.objectContaining({
+        GANTRY_SELECTED_MCP_SERVERS_JSON: JSON.stringify(['mcp:shopify']),
+      }),
+    );
+  });
+
+  it('passes the warm bound-identity file to the Gantry MCP server env', () => {
+    const profile = composeAgentCapabilities({
+      mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      chatJid: '',
+      groupFolder: 'boondi_support',
+      boundIdentityFile: '/tmp/gantry-bound-identity.json',
+      configuredAllowedTools: ['mcp__gantry__mcp_call_tool'],
+      attachedMcpSourceIds: ['mcp:shopify'],
+    });
+
+    expect(profile.mcpServers.gantry?.env).toEqual(
+      expect.objectContaining({
+        GANTRY_CHAT_JID: '',
+        GANTRY_BOUND_IDENTITY_FILE: '/tmp/gantry-bound-identity.json',
+      }),
+    );
+  });
+
   it('does not expose raw runtime browser MCP servers as configured MCP input', () => {
     const hostPrivateServerName = `${'browser'}_${'backend'}`;
     const hiddenRuntimeServerName = `${'agent'}_${'browser'}`;
@@ -809,31 +860,26 @@ describe('agent capability composition', () => {
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
   });
 
-  it('projects ipcTransport and ipcSocketPath into gantry MCP env when present', () => {
+  it('projects ipcSocketPath into gantry MCP env when present', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'wa:123',
       groupFolder: 'boondi',
-      ipcTransport: 'socket',
       ipcSocketPath: '/tmp/gantry/ipc/core.sock',
     });
 
-    expect(profile.mcpServers.gantry?.env?.GANTRY_IPC_TRANSPORT).toBe('socket');
     expect(profile.mcpServers.gantry?.env?.GANTRY_IPC_SOCKET_PATH).toBe(
       '/tmp/gantry/ipc/core.sock',
     );
   });
 
-  it('omits ipcTransport and ipcSocketPath from gantry MCP env when absent', () => {
+  it('omits ipcSocketPath from gantry MCP env when absent', () => {
     const profile = composeAgentCapabilities({
       mcpServerPath: '/tmp/ipc-mcp-stdio.js',
       chatJid: 'wa:123',
       groupFolder: 'boondi',
     });
 
-    expect(
-      profile.mcpServers.gantry?.env?.GANTRY_IPC_TRANSPORT,
-    ).toBeUndefined();
     expect(
       profile.mcpServers.gantry?.env?.GANTRY_IPC_SOCKET_PATH,
     ).toBeUndefined();

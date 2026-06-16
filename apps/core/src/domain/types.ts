@@ -459,6 +459,8 @@ export interface UserQuestionRequest {
   requestId: string;
   sourceAgentFolder: string;
   targetJid?: string;
+  appId?: string;
+  agentId?: string;
   threadId?: string;
   responseKeyId?: string;
   questions: UserQuestionItem[];

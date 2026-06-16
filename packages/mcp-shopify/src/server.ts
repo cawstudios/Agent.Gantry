@@ -70,6 +70,7 @@ export function buildMcpServer(
     apiVersion: env.apiVersion,
     tokenManager,
     logger,
+    graphqlTimeoutMs: env.graphqlTimeoutMs,
   });
   const identityCache =
     env.identityCacheTtlMs > 0
@@ -138,6 +139,7 @@ export async function startHttpServer(
     apiVersion: env.apiVersion,
     tokenManager,
     logger,
+    graphqlTimeoutMs: env.graphqlTimeoutMs,
   });
   const identityCache =
     env.identityCacheTtlMs > 0

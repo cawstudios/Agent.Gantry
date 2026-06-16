@@ -89,6 +89,18 @@ describe('loadEnv — SHOPIFY_ENV switch', () => {
     expect(env.requireVerifiedIdentity).toBe(false);
   });
 
+  it('reads Shopify GraphQL timeout with an 8s default', () => {
+    expect(loadEnv({ ...DEV_VARS } as NodeJS.ProcessEnv).graphqlTimeoutMs).toBe(
+      8000,
+    );
+    expect(
+      loadEnv({
+        ...DEV_VARS,
+        SHOPIFY_GRAPHQL_TIMEOUT_MS: '2500',
+      } as NodeJS.ProcessEnv).graphqlTimeoutMs,
+    ).toBe(2500);
+  });
+
   it('rejects required customer identity mode without a signing secret', () => {
     expect(() =>
       loadEnv({

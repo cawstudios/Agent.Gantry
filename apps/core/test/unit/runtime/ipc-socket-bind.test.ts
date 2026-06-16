@@ -10,6 +10,8 @@ import {
   releaseIpcSocket,
 } from '@core/runtime/ipc-socket-bind.js';
 import type { SocketBindResult } from '@core/runtime/ipc-socket-bind.js';
+import { encodeFrame, FrameDecoder } from '@core/shared/ipc-frame.js';
+import { encodeWireFrame, parseWireFrame } from '@core/shared/ipc-wire.js';
 
 // ------- helpers --------------------------------------------------------
 
@@ -105,6 +107,7 @@ describe('bindIpcSocket', () => {
     expect(bound.socketPath).toBe(socketPath);
     expect(bound.ownerPath).toBe(`${socketPath}.owner`);
     expect(bound.server.listening).toBe(true);
+    expect(fs.statSync(bound.socketPath).mode & 0o777).toBe(0o600);
 
     // Owner file written with this pid
     const raw = fs.readFileSync(bound.ownerPath, 'utf-8');
@@ -128,7 +131,7 @@ describe('bindIpcSocket', () => {
 
     const first = await bindIpcSocket({
       socketPath,
-      onConnection: () => undefined,
+      onConnection: (socket) => socket.destroy(),
     });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
@@ -143,6 +146,52 @@ describe('bindIpcSocket', () => {
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.reason).toBe('live_owner');
+  });
+
+  it('2b. live owner probe sends ctrl:ping and refuses when owner answers ctrl:pong', async () => {
+    const socketPath = path.join(tmpDir, 'ping-owned.sock');
+    const decoder = new FrameDecoder();
+    let sawPing = false;
+    const owner = net.createServer((socket) => {
+      socket.on('data', (chunk: Buffer) => {
+        for (const body of decoder.push(chunk)) {
+          const frame = parseWireFrame(body.toString('utf8'));
+          if (frame.type !== 'ctrl' || frame.ctrl !== 'ping') continue;
+          sawPing = true;
+          socket.write(
+            encodeFrame(
+              Buffer.from(
+                encodeWireFrame({
+                  v: 1,
+                  type: 'ctrl',
+                  channel: null,
+                  ctrl: 'pong',
+                  id: frame.id,
+                  payload: {},
+                }),
+                'utf8',
+              ),
+            ),
+          );
+        }
+      });
+    });
+    await new Promise<void>((resolve) => owner.listen(socketPath, resolve));
+
+    try {
+      const result = await bindIpcSocket({
+        socketPath,
+        onConnection: () => undefined,
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toBe('live_owner');
+      expect(sawPing).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => owner.close(() => resolve()));
+      fs.rmSync(socketPath, { force: true });
+    }
   });
 
   it('3. stale socket rebind (dead pid): connect-probe ECONNREFUSED + dead pid → unlink + rebind {ok:true}', async () => {

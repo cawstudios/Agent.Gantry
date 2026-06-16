@@ -4,6 +4,7 @@ import { IpcDeps } from '../runtime/ipc-domain-types.js';
 export interface TaskIpcData {
   type: string;
   appId?: string;
+  agentId?: string;
   authThreadId?: string;
   responseKeyId?: string;
   taskId?: string;

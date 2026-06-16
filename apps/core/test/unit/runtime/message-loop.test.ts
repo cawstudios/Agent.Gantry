@@ -17,7 +17,6 @@ const mockCustomerVisibleGuardrailResponse = vi.fn();
 
 vi.mock('@core/config/index.js', () => ({
   getTriggerPattern: (...args: unknown[]) => mockGetTriggerPattern(...args),
-  POLL_INTERVAL: 100,
   MAX_MESSAGES_PER_PROMPT: 50,
   TIMEZONE: 'UTC',
 }));
@@ -430,7 +429,7 @@ describe('thread queue routing', () => {
   });
 });
 
-describe('startMessagePollingLoop', () => {
+describe('runMessagePollingTick', () => {
   it('processes new messages and pipes them to the queue', async () => {
     const msg = {
       id: 1,
@@ -452,24 +451,16 @@ describe('startMessagePollingLoop', () => {
     mockGetMessagesSince.mockReturnValue([msg]);
 
     const deps = makeDeps();
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    // Run one iteration then abort
-    const controller = new AbortController();
-    const loopPromise = startMessagePollingLoop(deps);
-
-    // Give it time to process one iteration
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.sentTo).toContain('group@g.us');
     expect(decodeGroupMessageCursor(deps.cursors['group@g.us'])).toEqual({
       timestamp: '2024-01-01T00:00:01.000Z',
       id: '1',
     });
-
-    // We can't cleanly stop the infinite loop in tests, so we just verify behavior
-    // The loop will be cleaned up when the test ends
   });
 
   it('skips groups with no channel', async () => {
@@ -492,11 +483,10 @@ describe('startMessagePollingLoop', () => {
     });
 
     const deps = makeDeps({ hasChannel: () => false });
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.sentTo).toHaveLength(0);
   });
@@ -529,11 +519,10 @@ describe('startMessagePollingLoop', () => {
         isGroupActive: () => false,
       },
     });
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.enqueued).toContain('group@g.us');
   });
@@ -560,11 +549,10 @@ describe('startMessagePollingLoop', () => {
     mockIsSessionCommandAllowed.mockReturnValue(true);
 
     const deps = makeDeps();
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.closedStdin).toContain('group@g.us');
     expect(deps.enqueued).toContain('group@g.us');
@@ -592,11 +580,10 @@ describe('startMessagePollingLoop', () => {
     mockIsSessionCommandAllowed.mockReturnValue(true);
 
     const deps = makeDeps();
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.stoppedGroups).toContain('group@g.us');
     expect(deps.closedStdin).toHaveLength(0);
@@ -633,32 +620,12 @@ describe('startMessagePollingLoop', () => {
         },
       }),
     });
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.sentTo).toHaveLength(0);
-  });
-
-  it('recovers from errors in the loop body', async () => {
-    // First call throws, second returns empty
-    mockGetNewMessages
-      .mockImplementationOnce(() => {
-        throw new Error('db connection lost');
-      })
-      .mockReturnValue({ messages: [], newTimestamp: '' });
-
-    const deps = makeDeps();
-    const { startMessagePollingLoop } =
-      await import('@core/runtime/message-loop.js');
-
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 250));
-
-    // Loop should survive the error and keep running
-    expect(mockGetNewMessages.mock.calls.length).toBeGreaterThan(1);
   });
 
   it('groups multiple messages by chat_jid (covers existing.push branch)', async () => {
@@ -688,11 +655,10 @@ describe('startMessagePollingLoop', () => {
     mockGetMessagesSince.mockReturnValue([msg1, msg2]);
 
     const deps = makeDeps();
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     // Both messages were grouped under the same JID and sent together
     expect(deps.sentTo).toContain('group@g.us');
@@ -703,7 +669,7 @@ describe('startMessagePollingLoop', () => {
     });
   });
 
-  it('catches setTyping rejection without crashing the loop', async () => {
+  it('catches setTyping rejection without failing the tick', async () => {
     const msg = {
       id: '1',
       chat_jid: 'group@g.us',
@@ -724,11 +690,10 @@ describe('startMessagePollingLoop', () => {
     const deps = makeDeps({
       setTyping: setTypingMock,
     });
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     // setTyping was called and rejected, but the loop survived
     expect(setTypingMock).toHaveBeenCalledWith('group@g.us', true);
@@ -758,11 +723,10 @@ describe('startMessagePollingLoop', () => {
       setTyping: setTypingMock,
       sendProgressUpdate: sendProgressUpdateMock,
     });
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(setTypingMock).toHaveBeenCalledWith('group@g.us', true);
     expect(sendProgressUpdateMock).not.toHaveBeenCalled();
@@ -786,11 +750,10 @@ describe('startMessagePollingLoop', () => {
 
     // The registered groups only contain group@g.us, not unknown@g.us
     const deps = makeDeps();
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.sentTo).toHaveLength(0);
     expect(deps.enqueued).toHaveLength(0);
@@ -815,11 +778,10 @@ describe('startMessagePollingLoop', () => {
     mockIsSessionCommandAllowed.mockReturnValue(false);
 
     const deps = makeDeps();
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     // closeStdin should NOT be called when the command is not allowed
     expect(deps.closedStdin).toHaveLength(0);
@@ -846,11 +808,10 @@ describe('startMessagePollingLoop', () => {
     mockGetMessagesSince.mockReturnValue([]);
 
     const deps = makeDeps();
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     // formatMessages should be called with the original groupMessages
     expect(mockFormatMessages).toHaveBeenCalledWith([msg], 'UTC');
@@ -919,11 +880,10 @@ describe('startMessagePollingLoop', () => {
         },
       }),
     });
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.sentTo).toContain('group@g.us');
   });
@@ -956,11 +916,10 @@ describe('startMessagePollingLoop', () => {
         },
       }),
     });
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.sentTo).toContain('group@g.us');
   });
@@ -993,11 +952,10 @@ describe('startMessagePollingLoop', () => {
         },
       }),
     });
-    const { startMessagePollingLoop } =
+    const { runMessagePollingTick } =
       await import('@core/runtime/message-loop.js');
 
-    const loopPromise = startMessagePollingLoop(deps);
-    await new Promise((r) => setTimeout(r, 50));
+    await runMessagePollingTick(deps);
 
     expect(deps.sentTo).toHaveLength(0);
   });

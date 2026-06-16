@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 import { ARTIFACTS_DIR, RUNTIME_SETTINGS_PATH } from '../../../config/index.js';
 import { logger } from '../../../infrastructure/logging/logger.js';
@@ -14,6 +16,14 @@ import type {
   AgentExecutionProviderId,
   PreparedAgentExecution,
 } from '../../../application/agent-execution/agent-execution-adapter.js';
+import type {
+  BoundRun,
+  ConversationBindScope,
+  SharedBootRecipe,
+  WarmPoolCapable,
+  WarmBindDelivery,
+  WarmWorkerHandle,
+} from '../../../application/agent-execution/warm-pool-capable.js';
 import {
   materializeClaudeRuntime,
   projectClaudeModelCredentialEnv,
@@ -32,15 +42,28 @@ import {
   GANTRY_CLAUDE_SDK_SKILLS_ENV,
   claudeSdkSkillNamesForMaterializedSkills,
 } from './native-sdk-skills.js';
+import {
+  AnthropicWarmPoolController,
+  type AnthropicWarmPoolOptions,
+} from './warm-pool.js';
 
 const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
 const ANTHROPIC_MODEL_ENV = 'ANTHROPIC_MODEL';
 const GANTRY_EFFECTIVE_MODEL_SOURCE_ENV = 'GANTRY_EFFECTIVE_MODEL_SOURCE';
 const GANTRY_MCP_SERVER_PATH_ENV = 'GANTRY_MCP_SERVER_PATH';
 const GANTRY_SKILL_ACTIONS_ENV = 'GANTRY_SKILL_ACTIONS_JSON';
+const requireFromHere = createRequire(import.meta.url);
+const TSX_IMPORT_SPECIFIER = pathToFileURL(requireFromHere.resolve('tsx')).href;
 
-export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapter {
+export class AnthropicClaudeAgentExecutionAdapter
+  implements AgentExecutionAdapter, WarmPoolCapable
+{
   readonly id = 'anthropic:claude-agent-sdk' as AgentExecutionProviderId;
+  private readonly warmPool: AnthropicWarmPoolController;
+
+  constructor(warmPoolOptions?: AnthropicWarmPoolOptions) {
+    this.warmPool = new AnthropicWarmPoolController(warmPoolOptions);
+  }
 
   async prepare(
     input: AgentExecutionAdapterPrepareInput,
@@ -202,6 +225,7 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
       sourceExists,
       fromSourceFlag: process.env[CHILD_RUNNER_FROM_SOURCE_ENV],
       inspectPortRaw: process.env[CHILD_RUNNER_INSPECT_PORT_ENV],
+      tsxImportSpecifier: TSX_IMPORT_SPECIFIER,
     });
 
     if (launch.mode === 'source') {
@@ -267,6 +291,33 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
       model: effectiveModelEntry,
       projection: modelCredentialProjection,
     });
+  }
+
+  prewarm(shared: SharedBootRecipe): Promise<WarmWorkerHandle> {
+    return this.warmPool.prewarm(shared);
+  }
+
+  bind(
+    handle: WarmWorkerHandle,
+    scope: ConversationBindScope,
+  ): Promise<BoundRun> {
+    return this.warmPool.bind(handle, scope);
+  }
+
+  recycle(handle: WarmWorkerHandle): Promise<void> {
+    return this.warmPool.recycle(handle);
+  }
+
+  prewarmCaches(handle: WarmWorkerHandle): Promise<void> {
+    return this.warmPool.prewarmCaches(handle);
+  }
+
+  healthCheck(handle: WarmWorkerHandle): Promise<boolean> {
+    return this.warmPool.healthCheck(handle);
+  }
+
+  setWarmBindDelivery(delivery: WarmBindDelivery): void {
+    this.warmPool.setWarmBindDelivery(delivery);
   }
 }
 

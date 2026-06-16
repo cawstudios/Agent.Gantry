@@ -86,7 +86,7 @@ function buildHelloPayload(
 ): Record<string, unknown> {
   return createSignedIpcRequestEnvelope(authToken, {
     kind: 'hello',
-    role: opts.role ?? 'runner',
+    role: opts.role ?? 'mcp',
     runHandle: opts.runHandle ?? 'run-1',
     folder: opts.folder,
     context: { threadId: opts.threadId ?? null },
@@ -171,7 +171,12 @@ function makeClient(
     folder: string;
     threadId: string;
     verifyKey: string;
-    reconnect: { enabled: boolean; baseDelayMs?: number; maxDelayMs?: number };
+    reconnect: {
+      enabled: boolean;
+      baseDelayMs?: number;
+      maxDelayMs?: number;
+      replayPending?: boolean;
+    };
   }> = {},
 ): IpcSocketClient {
   const verifyKey = overrides.verifyKey ?? auth.responseVerifyKey;
@@ -420,12 +425,15 @@ describe('IpcSocketClient drop + reconnect', () => {
       threadId: THREAD_ID,
     });
     const pending = client.request('task', payload, { timeoutMs: 10_000 });
+    const pendingRejected = expect(pending).rejects.toMatchObject({
+      code: 'connection_lost',
+    });
 
     // Drop the connection by stopping the server.
     await server!.stop();
     server = undefined;
 
-    await expect(pending).rejects.toMatchObject({ code: 'connection_lost' });
+    await pendingRejected;
 
     // Restart the server on the SAME socket path; the client should reconnect.
     respondOnce('after-reconnect');
@@ -447,6 +455,88 @@ describe('IpcSocketClient drop + reconnect', () => {
     const resp = await client.request('task', payload2);
     expect(resp.ok).toBe(true);
     expect(resp.message).toBe('after-reconnect');
+  });
+
+  it('pure-socket replayPending replays in-flight request with the same frame id after reconnect', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = new IpcSocketClient({
+      socketPath: '/unused.sock',
+      buildHello: () => ({ kind: 'hello' }),
+      connectFn: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket as unknown as net.Socket;
+      },
+      reconnect: {
+        enabled: true,
+        baseDelayMs: 1,
+        maxDelayMs: 1,
+        replayPending: true,
+      },
+      randomFn: () => 0,
+    });
+
+    const connecting = client.connect();
+    const firstSocket = sockets[0]!;
+    const firstHello = parseWritten(firstSocket.written.at(-1)!);
+    feed(firstSocket, {
+      v: 1,
+      type: 'ctrl',
+      channel: null,
+      ctrl: 'welcome',
+      id: firstHello.id,
+      payload: {},
+    });
+    await connecting;
+
+    const signedPayload = { signed: 'payload', nonce: 'n1' };
+    const pending = client.request('task', signedPayload, {
+      id: 'same-request-id',
+      timeoutMs: 10_000,
+    });
+    const firstReq = parseWritten(firstSocket.written.at(-1)!);
+    expect(firstReq).toMatchObject({
+      type: 'req',
+      channel: 'task',
+      id: 'same-request-id',
+      payload: signedPayload,
+    });
+
+    firstSocket.destroy();
+    await waitFor(() => sockets.length === 2);
+
+    const secondSocket = sockets[1]!;
+    const secondHello = parseWritten(secondSocket.written.at(-1)!);
+    feed(secondSocket, {
+      v: 1,
+      type: 'ctrl',
+      channel: null,
+      ctrl: 'welcome',
+      id: secondHello.id,
+      payload: {},
+    });
+    await waitFor(() => secondSocket.written.length >= 2);
+
+    const replayedReq = parseWritten(secondSocket.written.at(-1)!);
+    expect(replayedReq).toMatchObject({
+      type: 'req',
+      channel: 'task',
+      id: 'same-request-id',
+      payload: signedPayload,
+    });
+
+    feed(secondSocket, {
+      v: 1,
+      type: 'resp',
+      channel: 'task',
+      id: 'same-request-id',
+      payload: { ok: true, message: 'replayed' },
+    });
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      message: 'replayed',
+    });
+    client.close();
   });
 });
 
@@ -568,6 +658,136 @@ describe('IpcSocketClient push routing (fake socket)', () => {
     await expect(pending).rejects.toMatchObject({ code: 'busy' });
     client.close();
   });
+
+  // confirmedIssue #2 / spec S3 invariant 2: a trusted-socket-no-signature
+  // SUCCESS response is forbidden. With verifyResponse configured, a resp whose
+  // ok !== false and that carries NO signature field must fail-CLOSED (reject
+  // with bad_signature), exactly like the fs verifier — it must NOT fail-OPEN.
+  it('fail-closed: a success resp with NO signature + verifyResponse set rejects with bad_signature', async () => {
+    const fake = new FakeSocket();
+    let verifyCalls = 0;
+    const client = new IpcSocketClient({
+      socketPath: '/unused.sock',
+      buildHello: () => ({ kind: 'hello' }),
+      connectFn: () => fake as unknown as net.Socket,
+      // A real verifier is wired; it must never be reached for an unsigned
+      // success resp because the missing signature is itself the failure.
+      verifyResponse: () => {
+        verifyCalls += 1;
+        return true;
+      },
+    });
+    const connecting = client.connect();
+    const helloFrame = parseWritten(fake.written.at(-1)!);
+    feed(fake, {
+      v: 1,
+      type: 'ctrl',
+      channel: null,
+      ctrl: 'welcome',
+      id: helloFrame.id,
+      payload: {},
+    });
+    await connecting;
+
+    const pending = client.request('task', { foo: 'bar' }, { id: 'nosig-req' });
+    // SUCCESS resp (ok !== false) with NO signature field whatsoever.
+    feed(fake, {
+      v: 1,
+      type: 'resp',
+      channel: 'task',
+      id: 'nosig-req',
+      payload: { ok: true, message: 'unsigned-success' },
+    });
+
+    await expect(pending).rejects.toMatchObject({
+      name: 'IpcRequestError',
+      code: 'bad_signature',
+    });
+    // The verifier was never even called: a missing signature is the failure.
+    expect(verifyCalls).toBe(0);
+    client.close();
+  });
+
+  it('fail-closed: an application error resp with NO signature + verifyResponse set rejects with bad_signature', async () => {
+    const fake = new FakeSocket();
+    let verifyCalls = 0;
+    const client = new IpcSocketClient({
+      socketPath: '/unused.sock',
+      buildHello: () => ({ kind: 'hello' }),
+      connectFn: () => fake as unknown as net.Socket,
+      verifyResponse: () => {
+        verifyCalls += 1;
+        return true;
+      },
+    });
+    const connecting = client.connect();
+    const helloFrame = parseWritten(fake.written.at(-1)!);
+    feed(fake, {
+      v: 1,
+      type: 'ctrl',
+      channel: null,
+      ctrl: 'welcome',
+      id: helloFrame.id,
+      payload: {},
+    });
+    await connecting;
+
+    const pending = client.request('task', { foo: 'bar' }, { id: 'err-nosig' });
+    feed(fake, {
+      v: 1,
+      type: 'resp',
+      channel: 'task',
+      id: 'err-nosig',
+      payload: { ok: false, code: 'handler_failed' },
+    });
+
+    await expect(pending).rejects.toMatchObject({
+      name: 'IpcRequestError',
+      code: 'bad_signature',
+    });
+    expect(verifyCalls).toBe(0);
+    client.close();
+  });
+
+  // The marked transport-error path (ok === false, transport === true, emitted
+  // UNSIGNED by the server) must still settle as a rejection regardless of
+  // signature. Unmarked application failures remain fail-closed above.
+  it('marked unsigned transport error (ok:false, no signature) still rejects with its carried code', async () => {
+    const fake = new FakeSocket();
+    const client = new IpcSocketClient({
+      socketPath: '/unused.sock',
+      buildHello: () => ({ kind: 'hello' }),
+      connectFn: () => fake as unknown as net.Socket,
+      verifyResponse: () => true,
+    });
+    const connecting = client.connect();
+    const helloFrame = parseWritten(fake.written.at(-1)!);
+    feed(fake, {
+      v: 1,
+      type: 'ctrl',
+      channel: null,
+      ctrl: 'welcome',
+      id: helloFrame.id,
+      payload: {},
+    });
+    await connecting;
+
+    const pending = client.request('task', { foo: 'bar' }, { id: 'terr-req' });
+    // Mirrors server transportError(): unsigned { ok: false, code, transport }.
+    feed(fake, {
+      v: 1,
+      type: 'resp',
+      channel: 'task',
+      id: 'terr-req',
+      payload: { ok: false, code: 'invalid_request', transport: true },
+    });
+
+    await expect(pending).rejects.toMatchObject({
+      name: 'IpcRequestError',
+      code: 'invalid_request',
+    });
+    client.close();
+  });
 });
 
 // Decode a frame we wrote into the fake socket (single frame per write here).
@@ -577,4 +797,16 @@ import { parseWireFrame } from '@core/shared/ipc-wire.js';
 function parseWritten(buf: Buffer): IpcWireFrame {
   const bodies = new FrameDecoder().push(buf);
   return parseWireFrame(bodies[0]!.toString('utf8'));
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 1000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  expect(predicate()).toBe(true);
 }

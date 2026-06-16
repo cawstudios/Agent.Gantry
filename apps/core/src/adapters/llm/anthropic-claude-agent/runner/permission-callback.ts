@@ -1,27 +1,25 @@
-import fs from 'fs';
-import path from 'path';
 import { randomUUID } from 'crypto';
-import { nowIso, nowMs, sleep } from '../../../../shared/time/datetime.js';
-import { formatDuration } from '../../../../shared/human-format.js';
+import { nowIso } from '../../../../shared/time/datetime.js';
 import { isPlainObject } from '../../../../shared/object.js';
 import { persistentPermissionUpdates } from '../../../../shared/permission-tool-rules.js';
 import { stableSha256Json } from '../../../../shared/stable-hash.js';
+// Warm-pool (F4): the approval-target fallback must be the BOUND customer jid
+// (bind-delivered), not the generic boot env, so a pooled worker's permission
+// prompts route to its customer. Cold path: returns the env constant.
+import { getBoundRuntimeScope } from '../../../../runner/mcp/bound-identity.js';
 import { hasValidIpcResponseSignature } from './ipc-signing.js';
 import { createSignedIpcRequestEnvelope } from './ipc-signing.js';
-import { IpcRequestError } from '../../../../shared/ipc-socket-client.js';
 import { getActiveRunnerSocketClient } from './active-runner-socket.js';
 import type { SemanticCapabilityDefinition } from '../../../../shared/semantic-capabilities.js';
 import {
   IPC_AUTH_TOKEN,
   AGENT_ID,
   APP_ID,
-  CHAT_JID,
   JOB_ID,
   JOB_NAME,
   JOB_RUN_ID,
   IPC_RESPONSE_KEY_ID,
   PERMISSION_REQUEST_TIMEOUT_MS,
-  resolveGroupIpcDir,
 } from './runtime-env.js';
 import type { PermissionDecision } from './types.js';
 
@@ -86,9 +84,7 @@ function canSharePermissionDecision(decision: PermissionDecision): boolean {
  * Map an already-parsed permission response object (`raw`, the signed payload as
  * written by writePermissionIpcResponse) to a sanitized PermissionDecision.
  *
- * This is the SINGLE source of truth shared by both carriers: the fs poll (which
- * reads `raw` from permission-responses/<id>.json) and the socket branch (which
- * receives `raw` as the verified resp frame payload). It reconstructs the exact
+ * This is the SINGLE source of truth for socket responses. It reconstructs the exact
  * signed field-set/order, re-checks the requestId + responseNonce binding, and
  * verifies the ed25519 signature — so a socket response is validated
  * byte-for-byte identically to a file response. Returns a denial decision on any
@@ -197,36 +193,18 @@ function decisionFromVerifiedPermissionResponse(
   };
 }
 
-/**
- * Codes that mean "the socket did not deliver this permission request" — a
- * transient issue the durable fs write+poll can still complete. We fall back to
- * the fs path so a flaky/absent socket never fails a permission the fs path
- * would finish. `timeout` and `busy` (server in-flight backpressure) are also
- * safe to retry via fs — the request file is idempotent (same requestId).
- */
-const PERMISSION_SOCKET_FALLBACK_CODES = new Set([
-  'connection_lost',
-  'not_connected',
-  'busy',
-  'timeout',
-]);
+function deniedSocketPermissionDecision(reason: string): PermissionDecision {
+  return {
+    approved: false,
+    reason,
+    decisionClassification: 'user_reject',
+  };
+}
 
-/**
- * Classify a failed socket `permission` request. Permission is interactive AND
- * idempotent (the same signed request file can be re-presented), so:
- *  - transient transport / timeout / busy → fall back to the durable fs path.
- *  - a verified signed {ok:false} or bad_signature → that is a real
- *    transport-level rejection (e.g. invalid_request / internal_error); fall
- *    back to fs too, so the durable path still gets its chance rather than
- *    failing the tool call on a single socket hiccup.
- */
-function shouldFallBackToFsForPermission(err: unknown): boolean {
-  if (!(err instanceof IpcRequestError)) return true;
-  if (PERMISSION_SOCKET_FALLBACK_CODES.has(err.code)) return true;
-  // Any other protocol error (invalid_request/internal_error/bad_signature/…)
-  // also falls back to the durable fs path — never hang, never hard-fail on a
-  // socket-only error when fs can still resolve the request.
-  return true;
+function socketPermissionFailureReason(err: unknown): string {
+  return err instanceof Error
+    ? err.message
+    : 'Permission socket request failed';
 }
 
 export async function requestPermissionApproval(options: {
@@ -255,7 +233,13 @@ export async function requestPermissionApproval(options: {
   try {
     const appId = options.appId?.trim() || APP_ID || DEFAULT_RUNNER_APP_ID;
     const agentId = options.agentId?.trim() || AGENT_ID;
-    const targetJid = options.targetJid?.trim() || CHAT_JID;
+    // `getBoundChatJid()` already returns the bound jid when present and falls
+    // back to the spawn-env chatJid (trimmed) when unbound, so the old extra
+    // `|| CHAT_JID` operand was dead — dropped. Cold path is byte-for-byte
+    // unchanged (envIdentity() now trims GANTRY_CHAT_JID just like CHAT_JID did).
+    const boundScope = getBoundRuntimeScope();
+    const targetJid = options.targetJid?.trim() || boundScope.chatJid;
+    const authThreadId = options.threadId ?? boundScope.threadId;
     const agentFolder = options[AGENT_FOLDER_OPTION_KEY];
     const requestFingerprint = permissionRequestFingerprint(options);
     const batchKey = timedGrantBatchKey({
@@ -277,6 +261,7 @@ export async function requestPermissionApproval(options: {
       appId,
       agentId,
       targetJid,
+      ...(authThreadId ? { threadId: authThreadId } : {}),
     });
     inFlightTimedGrantRequests.set(batchKey, currentRequest);
     try {
@@ -324,19 +309,11 @@ async function requestPermissionApprovalInner(options: {
     const appId = options.appId;
     const agentId = options.agentId;
     const targetJid = options.targetJid;
+    const boundScope = getBoundRuntimeScope();
+    const authThreadId = options.threadId ?? boundScope.threadId;
     const agentFolder = options[AGENT_FOLDER_OPTION_KEY];
-    const groupIpcDir = resolveGroupIpcDir(agentFolder);
-    const permissionRequestsDir = path.join(groupIpcDir, 'permission-requests');
-    const permissionResponsesDir = path.join(
-      groupIpcDir,
-      'permission-responses',
-    );
-    fs.mkdirSync(permissionRequestsDir, { recursive: true });
-    fs.mkdirSync(permissionResponsesDir, { recursive: true });
     const requestId = `perm-${randomUUID()}`;
     const responseNonce = randomUUID();
-    const requestPath = path.join(permissionRequestsDir, `${requestId}.json`);
-    const requestTmpPath = `${requestPath}.tmp`;
     const payload = {
       requestId,
       appId,
@@ -374,7 +351,7 @@ async function requestPermissionApprovalInner(options: {
               options.semanticCapabilityDefinitions,
           }
         : {}),
-      ...(options.threadId ? { threadId: options.threadId } : {}),
+      ...(authThreadId ? { threadId: authThreadId } : {}),
       context: {
         appId,
         ...(agentId ? { agentId } : {}),
@@ -382,92 +359,53 @@ async function requestPermissionApprovalInner(options: {
         ...(JOB_ID ? { jobId: JOB_ID } : {}),
         ...(JOB_NAME ? { jobName: JOB_NAME } : {}),
         ...(JOB_RUN_ID ? { runId: JOB_RUN_ID } : {}),
-        ...(options.threadId ? { threadId: options.threadId } : {}),
-        ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
+        ...(authThreadId ? { threadId: authThreadId } : {}),
+        ...((boundScope.ipcResponseKeyId ?? IPC_RESPONSE_KEY_ID)
+          ? {
+              responseKeyId: boundScope.ipcResponseKeyId ?? IPC_RESPONSE_KEY_ID,
+            }
+          : {}),
       },
       timestamp: nowIso(),
     };
-    const envelope = createSignedIpcRequestEnvelope(IPC_AUTH_TOKEN, payload);
+    const envelope = createSignedIpcRequestEnvelope(
+      boundScope.ipcAuthToken ?? IPC_AUTH_TOKEN,
+      payload,
+    );
+    const socketClient = getActiveRunnerSocketClient();
 
-    // Socket fast-path (Pillar 1, Phase 5.3d): when the run's runner socket
-    // client is connected, send the SAME signed envelope over that ONE runner
-    // connection (the same one that receives continuation/close pushes — never a
-    // second connection) and await the signed decision. The client verifies the
-    // ed25519 response signature fail-closed; we then run the SAME
-    // verify+sanitize as the fs poll. A transient/timeout/busy failure (or any
-    // socket-only error) falls back to the durable fs write+poll below — the
-    // request file is idempotent (same requestId), so permission never hangs and
-    // never hard-fails on a socket hiccup. Scheduled jobs are non-interactive,
-    // so no runner socket exists for them: they take the fs path unchanged.
-    if (PERMISSION_REQUEST_TIMEOUT_MS > 0) {
-      const socketClient = getActiveRunnerSocketClient();
-      if (socketClient?.connected) {
-        try {
-          const resp = await socketClient.request('permission', envelope, {
-            id: requestId,
-            timeoutMs: PERMISSION_REQUEST_TIMEOUT_MS,
-          });
-          // The client already verified the signature; the shared mapper
-          // re-checks requestId/nonce binding + re-verifies, then sanitizes.
-          return decisionFromVerifiedPermissionResponse(
-            resp,
-            requestId,
-            responseNonce,
-          );
-        } catch (err) {
-          if (!shouldFallBackToFsForPermission(err)) {
-            // Unreachable today (the classifier always falls back), but kept so a
-            // future hard-fail disposition is explicit rather than silently
-            // dropping into fs.
-            throw err;
-          }
-          // Fall through to the durable fs write+poll below.
-        }
-      }
-    }
-
-    fs.writeFileSync(requestTmpPath, JSON.stringify(envelope, null, 2));
-    fs.renameSync(requestTmpPath, requestPath);
-
+    // Socket-only path: when the run's runner socket client is connected, send
+    // the SAME signed envelope
+    // over that ONE runner connection (the same one that receives
+    // continuation/close pushes — never a second connection) and await the
+    // signed decision. The client verifies the ed25519 response signature
+    // fail-closed; we then re-check requestId/nonce binding + re-verify, then
+    // sanitize.
     if (PERMISSION_REQUEST_TIMEOUT_MS <= 0) {
-      return {
-        approved: false,
-        reason:
-          'Permission request was sent to the host. Unattended jobs do not wait for approval during the active tool call; approve the requested capability before retrying the scheduled run.',
-        decisionClassification: 'user_reject',
-      };
+      return deniedSocketPermissionDecision(
+        'Permission socket approval is disabled because permission waiting is disabled.',
+      );
     }
-
-    const responsePath = path.join(permissionResponsesDir, `${requestId}.json`);
-    const deadline = nowMs() + PERMISSION_REQUEST_TIMEOUT_MS;
-    while (nowMs() < deadline) {
-      if (fs.existsSync(responsePath)) {
-        try {
-          const raw = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
-          fs.unlinkSync(responsePath);
-          // Shared verify+sanitize (byte-identical to the socket branch).
-          return decisionFromVerifiedPermissionResponse(
-            raw,
-            requestId,
-            responseNonce,
-          );
-        } catch (err) {
-          return {
-            approved: false,
-            reason:
-              err instanceof Error
-                ? err.message
-                : 'Failed to read permission response',
-          };
-        }
-      }
-      await sleep(100);
+    if (!socketClient?.connected) {
+      return deniedSocketPermissionDecision(
+        'Permission socket is not connected.',
+      );
     }
-    return {
-      approved: false,
-      reason: `Timed out waiting ${formatDuration(PERMISSION_REQUEST_TIMEOUT_MS)} for host permission approval. The host watchdog denied this tool call; retry only if the channel is healthy or request a persistent capability rule.`,
-      decisionClassification: 'user_reject',
-    };
+    try {
+      const resp = await socketClient.request('permission', envelope, {
+        id: requestId,
+        timeoutMs: PERMISSION_REQUEST_TIMEOUT_MS,
+      });
+      return decisionFromVerifiedPermissionResponse(
+        resp,
+        requestId,
+        responseNonce,
+      );
+    } catch (err) {
+      return deniedSocketPermissionDecision(
+        `Permission socket request failed: ${socketPermissionFailureReason(err)}`,
+      );
+    }
   } catch (err) {
     return {
       approved: false,

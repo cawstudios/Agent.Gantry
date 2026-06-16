@@ -53,6 +53,10 @@ import {
   writeBrowserIpcResponse,
 } from '@core/runtime/ipc-browser-handler.js';
 import {
+  clearIpcResponders,
+  registerIpcResponder,
+} from '@core/runtime/ipc-response-router.js';
+import {
   closeBrowser,
   ensureBrowserReady,
   getBrowserStatus,
@@ -62,10 +66,6 @@ import {
   ensureBrowserTarget,
   foregroundBrowserTarget,
 } from '@core/runtime/browser-cdp-targets.js';
-function fileMode(filePath: string): number {
-  return fs.statSync(filePath).mode & 0o777;
-}
-
 describe('ipc-browser-handler', () => {
   let tempDir: string;
 
@@ -78,6 +78,7 @@ describe('ipc-browser-handler', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    clearIpcResponders();
     resetBrowserUsageGovernorForTests();
   });
 
@@ -1696,8 +1697,13 @@ describe('ipc-browser-handler', () => {
     expect(response.error).toContain('Unsupported browser IPC action');
   });
 
-  it('writes browser response files atomically', () => {
+  it('delivers browser responses to a registered socket responder', () => {
     const keys = createIpcResponseSigningKeyPair();
+    const delivered: Array<Record<string, unknown>> = [];
+    registerIpcResponder('grp', 'browser-req-4', (signed) => {
+      delivered.push(signed);
+    });
+
     writeBrowserIpcResponse(
       tempDir,
       'grp',
@@ -1709,25 +1715,22 @@ describe('ipc-browser-handler', () => {
       keys.privateKeyPem,
     );
 
-    const responsePath = path.join(
-      tempDir,
-      'grp',
-      'browser-responses',
-      'req-4.json',
-    );
-    const payload = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+    expect(delivered).toHaveLength(1);
+    const payload = delivered[0];
     expect(payload).toMatchObject({
       requestId: 'req-4',
       ok: true,
       data: { running: true },
     });
-    expect(fileMode(path.dirname(responsePath))).toBe(0o700);
-    expect(fileMode(responsePath)).toBe(0o600);
     expect(getBrowserStatus).not.toHaveBeenCalled();
   });
 
   it('signs browser responses with the MCP client verification shape', () => {
     const keys = createIpcResponseSigningKeyPair();
+    const delivered: Array<Record<string, unknown>> = [];
+    registerIpcResponder('grp', 'browser-req-5', (signed) => {
+      delivered.push(signed);
+    });
 
     writeBrowserIpcResponse(
       tempDir,
@@ -1740,13 +1743,8 @@ describe('ipc-browser-handler', () => {
       keys.privateKeyPem,
     );
 
-    const responsePath = path.join(
-      tempDir,
-      'grp',
-      'browser-responses',
-      'req-5.json',
-    );
-    const response = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+    expect(delivered).toHaveLength(1);
+    const response = delivered[0];
     const runnerVerificationPayload = {
       ok: true,
       requestId: 'req-5',
@@ -1762,19 +1760,18 @@ describe('ipc-browser-handler', () => {
     ).toBe(true);
   });
 
-  it('does not write browser responses without a run response signing key', () => {
+  it('does not deliver browser responses without a run response signing key', () => {
+    const delivered: Array<Record<string, unknown>> = [];
+    registerIpcResponder('grp', 'browser-req-5', (signed) => {
+      delivered.push(signed);
+    });
+
     writeBrowserIpcResponse(tempDir, 'grp', {
       requestId: 'req-5',
       ok: true,
       data: { running: true },
     });
 
-    const responsePath = path.join(
-      tempDir,
-      'grp',
-      'browser-responses',
-      'req-5.json',
-    );
-    expect(fs.existsSync(responsePath)).toBe(false);
+    expect(delivered).toHaveLength(0);
   });
 });

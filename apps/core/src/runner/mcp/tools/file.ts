@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { FileArtifactDescriptor } from '../../../domain/file-artifacts/file-artifact.js';
-import { chatJid } from '../context.js';
+import { getBoundChatJid } from '../bound-identity.js';
 import { makeIpcId } from '../ipc-ids.js';
 import { sendTaskRequest } from '../ipc.js';
 
@@ -82,6 +82,7 @@ async function requestHostFileArtifactAction(
   args: z.infer<z.ZodObject<typeof fileToolSchema>>,
 ): Promise<string> {
   const taskId = makeIpcId('file-artifact');
+  const chatJid = getBoundChatJid();
   const response = await sendTaskRequest(
     {
       type: 'file_artifact',

@@ -1,15 +1,18 @@
 import { createHmac, randomUUID, verify as cryptoVerify } from 'crypto';
 import { IPC_RESPONSE_VERIFY_KEY } from './runtime-env.js';
 import { nowMs as currentTimeMs } from '../../../../shared/time/datetime.js';
+import { getBoundRuntimeScope } from '../../../../runner/mcp/bound-identity.js';
 
 export function hasValidIpcResponseSignature(
   raw: Record<string, unknown>,
   payload: Record<string, unknown>,
 ): boolean {
-  if (!IPC_RESPONSE_VERIFY_KEY) return false;
+  const verifyKey =
+    getBoundRuntimeScope().ipcResponseVerifyKey ?? IPC_RESPONSE_VERIFY_KEY;
+  if (!verifyKey) return false;
   const signature =
     typeof raw.signature === 'string' ? raw.signature.trim() : '';
-  return verifyIpcResponsePayload(IPC_RESPONSE_VERIFY_KEY, payload, signature);
+  return verifyIpcResponsePayload(verifyKey, payload, signature);
 }
 
 export function createSignedIpcRequestEnvelope(

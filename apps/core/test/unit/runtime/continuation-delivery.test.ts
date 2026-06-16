@@ -5,22 +5,7 @@ import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// continuation-input is mocked so the FALLBACK path (no live runner connection)
-// can be asserted without touching the real DATA_DIR mailbox. The socket-push
-// path never calls these — it sends a frame instead.
-vi.mock('@core/runtime/continuation-input.js', () => ({
-  writeContinuationInput: vi.fn(),
-  writeCloseSignal: vi.fn(),
-}));
-
-import {
-  writeContinuationInput,
-  writeCloseSignal,
-} from '@core/runtime/continuation-input.js';
-import {
-  fsContinuationDelivery,
-  makeSocketContinuationDelivery,
-} from '@core/runtime/continuation-delivery.js';
+import { makeSocketContinuationDelivery } from '@core/runtime/continuation-delivery.js';
 import {
   startIpcSocketServer,
   type IpcSocketServerHandle,
@@ -38,9 +23,6 @@ import {
 import { clearIpcResponders } from '@core/runtime/ipc-response-router.js';
 import { clearConsumedIpcRequestIds } from '@core/runtime/ipc-auth-validation.js';
 import { clearIpcRateLimitState } from '@core/runtime/ipc-rate-limit.js';
-
-const writeContinuationInputMock = vi.mocked(writeContinuationInput);
-const writeCloseSignalMock = vi.mocked(writeCloseSignal);
 
 // ---------------------------------------------------------------------------
 // Fixtures — one folder owning one chat jid (mirrors ipc-socket-transport).
@@ -184,6 +166,20 @@ class FakeWorkerClient {
     }
   }
 
+  async nextPushOnChannel(
+    channel: IpcWireFrame['channel'],
+    timeoutMs = 5000,
+  ): Promise<IpcWireFrame> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0)
+        throw new Error(`nextPushOnChannel(${channel}) timeout`);
+      const frame = await this.nextPush(remaining);
+      if (frame.channel === channel) return frame;
+    }
+  }
+
   destroy(): void {
     this.socket.destroy();
   }
@@ -216,8 +212,6 @@ function socketPathFor(name = 'core.sock'): string {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'continuation-delivery-'));
-  writeContinuationInputMock.mockReset();
-  writeCloseSignalMock.mockReset();
   clearIpcResponders();
   clearConsumedIpcRequestIds();
   clearIpcRateLimitState();
@@ -264,42 +258,11 @@ async function handshakeRunner(
 }
 
 // ---------------------------------------------------------------------------
-// fsContinuationDelivery — exercises the shared default carrier directly.
-// ---------------------------------------------------------------------------
-
-describe('fsContinuationDelivery', () => {
-  it('writes via the fs writers and returns true', () => {
-    const ok = fsContinuationDelivery.deliverContinuation(
-      { groupFolder: 'f', chatJid: 'wa:1', threadId: 't', runHandle: null },
-      'hello',
-      3,
-    );
-    expect(ok).toBe(true);
-    expect(writeContinuationInputMock).toHaveBeenCalledWith(
-      'f',
-      'wa:1',
-      'hello',
-      3,
-      't',
-    );
-
-    fsContinuationDelivery.deliverClose({
-      groupFolder: 'f',
-      chatJid: 'wa:1',
-      threadId: null,
-      runHandle: null,
-    });
-    // threadId:null is passed as undefined (matching today's writeCloseSignal).
-    expect(writeCloseSignalMock).toHaveBeenCalledWith('f', 'wa:1', undefined);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // makeSocketContinuationDelivery — push to a runHandle-matched runner.
 // ---------------------------------------------------------------------------
 
 describe('makeSocketContinuationDelivery (socket transport)', () => {
-  it('pushes continuation + close frames to the matching runner connection', async () => {
+  it('sends continuation text over the socket and writes no filesystem mailbox', async () => {
     const handle = await startServer();
     const runner = await handshakeRunner(handle);
 
@@ -319,10 +282,14 @@ describe('makeSocketContinuationDelivery (socket transport)', () => {
     );
     expect(delivered).toBe(true);
 
-    const contFrame = await runner.nextPush();
+    const contFrame = await runner.nextPushOnChannel('continuation');
     expect(contFrame.type).toBe('push');
     expect(contFrame.channel).toBe('continuation');
-    expect(contFrame.payload).toMatchObject({ text: 'hello', threadId: null });
+    expect(contFrame.payload).toMatchObject({
+      threadId: null,
+      sequence: 0,
+      text: 'hello',
+    });
 
     d.deliverClose({
       groupFolder: FOLDER,
@@ -330,17 +297,37 @@ describe('makeSocketContinuationDelivery (socket transport)', () => {
       threadId: null,
       runHandle: RUN_HANDLE,
     });
-    const closeFrame = await runner.nextPush();
+    const closeFrame = await runner.nextPushOnChannel('close');
     expect(closeFrame.type).toBe('push');
     expect(closeFrame.channel).toBe('close');
     expect(closeFrame.payload).toMatchObject({ threadId: null });
-
-    // No fs fallback occurred on the live-push path.
-    expect(writeContinuationInputMock).not.toHaveBeenCalled();
-    expect(writeCloseSignalMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to fs writers when no runHandle-matched connection exists (R1)', async () => {
+  it('does not write a fallback when a matched connection drops asynchronously', async () => {
+    const handle = await startServer();
+    const runner = await handshakeRunner(handle);
+
+    const d = makeSocketContinuationDelivery((folder) =>
+      handle.connectionsForFolder(folder),
+    );
+
+    runner.destroy();
+
+    const delivered = d.deliverContinuation(
+      {
+        groupFolder: FOLDER,
+        chatJid: 'wa:1',
+        threadId: null,
+        runHandle: RUN_HANDLE,
+      },
+      'survives-the-drop',
+      7,
+    );
+
+    expect(delivered).toBe(true);
+  });
+
+  it('returns false when no runHandle-matched connection exists', async () => {
     const handle = await startServer();
     // A runner IS connected, but under RUN_HANDLE — we target a different one.
     await handshakeRunner(handle);
@@ -359,15 +346,7 @@ describe('makeSocketContinuationDelivery (socket transport)', () => {
       'hello',
       5,
     );
-    // Fallback still reports delivered (durable mailbox write succeeded).
-    expect(delivered).toBe(true);
-    expect(writeContinuationInputMock).toHaveBeenCalledWith(
-      FOLDER,
-      'wa:1',
-      'hello',
-      5,
-      undefined,
-    );
+    expect(delivered).toBe(false);
 
     d.deliverClose({
       groupFolder: FOLDER,
@@ -375,27 +354,15 @@ describe('makeSocketContinuationDelivery (socket transport)', () => {
       threadId: null,
       runHandle: 'nope',
     });
-    expect(writeCloseSignalMock).toHaveBeenCalledWith(
-      FOLDER,
-      'wa:1',
-      undefined,
-    );
   });
 
-  it('falls back to fs when runHandle is null (no live run to resolve)', () => {
+  it('returns false when runHandle is null', () => {
     const d = makeSocketContinuationDelivery(() => []);
     const delivered = d.deliverContinuation(
       { groupFolder: FOLDER, chatJid: 'wa:1', threadId: 't', runHandle: null },
       'hi',
       1,
     );
-    expect(delivered).toBe(true);
-    expect(writeContinuationInputMock).toHaveBeenCalledWith(
-      FOLDER,
-      'wa:1',
-      'hi',
-      1,
-      't',
-    );
+    expect(delivered).toBe(false);
   });
 });

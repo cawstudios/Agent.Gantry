@@ -30,7 +30,7 @@ describe('ensureGroupIpcLayout', () => {
     }
   });
 
-  it('creates all IPC subdirectories', async () => {
+  it('creates only the private group IPC root', async () => {
     const root = makeTmpRoot(roots);
     const ipcDir = path.join(root, 'group-ipc');
 
@@ -38,25 +38,8 @@ describe('ensureGroupIpcLayout', () => {
       await import('@core/runtime/agent-spawn-layout.js');
     ensureGroupIpcLayout(ipcDir);
 
-    expect(fs.readdirSync(ipcDir).sort()).toEqual([
-      'browser-requests',
-      'browser-responses',
-      'input',
-      'interaction-boundaries',
-      'memory-requests',
-      'memory-responses',
-      'messages',
-      'permission-requests',
-      'permission-responses',
-      'task-responses',
-      'tasks',
-      'user-answers',
-      'user-questions',
-    ]);
+    expect(fs.readdirSync(ipcDir)).toEqual([]);
     expect(fileMode(ipcDir)).toBe(0o700);
-    for (const name of fs.readdirSync(ipcDir)) {
-      expect(fileMode(path.join(ipcDir, name))).toBe(0o700);
-    }
   });
 
   it('is idempotent', async () => {
@@ -68,7 +51,8 @@ describe('ensureGroupIpcLayout', () => {
     ensureGroupIpcLayout(ipcDir);
     ensureGroupIpcLayout(ipcDir);
 
-    expect(fs.statSync(path.join(ipcDir, 'messages')).isDirectory()).toBe(true);
+    expect(fs.statSync(ipcDir).isDirectory()).toBe(true);
+    expect(fs.readdirSync(ipcDir)).toEqual([]);
   });
 });
 

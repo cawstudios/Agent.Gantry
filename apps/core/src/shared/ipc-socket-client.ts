@@ -26,6 +26,12 @@ export interface IpcSocketClientReconnect {
   baseDelayMs?: number;
   maxDelayMs?: number;
   maxAttempts?: number;
+  /**
+   * Pure-socket mode keeps in-flight request frames across a transient
+   * connection drop and replays them after the next successful handshake with
+   * the same frame id.
+   */
+  replayPending?: boolean;
 }
 
 export interface IpcSocketClientOptions {
@@ -49,6 +55,8 @@ export interface IpcSocketClientOptions {
    * engine does not handle itself.
    */
   onPush?: (frame: IpcWireFrame) => void;
+  /** Called after every successful hello/welcome, including reconnects. */
+  onConnect?: () => void;
   /** Reconnect policy. Default { enabled: false }. */
   reconnect?: IpcSocketClientReconnect;
   /**
@@ -79,6 +87,7 @@ interface PendingRequest {
   resolve: (payload: Record<string, unknown>) => void;
   reject: (err: IpcRequestError) => void;
   timer: ReturnType<typeof setTimeout>;
+  frame: IpcWireFrame;
 }
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
@@ -98,6 +107,7 @@ export class IpcSocketClient {
     signature: string,
   ) => boolean;
   private readonly onPush?: (frame: IpcWireFrame) => void;
+  private readonly onConnect?: () => void;
   private readonly reconnectCfg: IpcSocketClientReconnect;
   private readonly unrefSocket: boolean;
   private readonly connectTimeoutMs: number;
@@ -124,6 +134,7 @@ export class IpcSocketClient {
     this.buildHello = opts.buildHello;
     this.verifyResponse = opts.verifyResponse;
     this.onPush = opts.onPush;
+    this.onConnect = opts.onConnect;
     this.reconnectCfg = opts.reconnect ?? { enabled: false };
     this.unrefSocket = opts.unref ?? false;
     this.connectTimeoutMs = opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
@@ -234,6 +245,13 @@ export class IpcSocketClient {
     }
     const id = opts?.id ?? randomUUID();
     const timeoutMs = opts?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const frame: IpcWireFrame = {
+      v: 1,
+      type: 'req',
+      channel,
+      id,
+      payload: signedPayload,
+    };
 
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -243,15 +261,9 @@ export class IpcSocketClient {
       if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
         (timer as { unref(): void }).unref();
       }
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, frame });
 
-      this.conn!.send({
-        v: 1,
-        type: 'req',
-        channel,
-        id,
-        payload: signedPayload,
-      });
+      this.conn!.send(frame);
     });
   }
 
@@ -331,6 +343,17 @@ export class IpcSocketClient {
     this.connectResolve = undefined;
     this.connectReject = undefined;
     resolve?.();
+    this.onConnect?.();
+    this.replayPendingFrames();
+  }
+
+  private replayPendingFrames(): void {
+    if (!this.reconnectCfg.replayPending || !this.conn || !this._connected) {
+      return;
+    }
+    for (const entry of this.pending.values()) {
+      this.conn.send(entry.frame);
+    }
   }
 
   private handleResp(frame: IpcWireFrame): void {
@@ -339,8 +362,26 @@ export class IpcSocketClient {
 
     const payload = frame.payload as Record<string, unknown>;
 
-    // Fail-closed signature check (only when a signature is present).
-    if (this.verifyResponse && typeof payload.signature === 'string') {
+    // Fail-closed signature check. A signed handler response is the ONLY
+    // trusted application shape: when verifyResponse is configured, every
+    // application resp, success OR failure, MUST carry a verifiable signature.
+    // A missing/non-string signature is itself a verification failure, exactly
+    // mirroring the fs path.
+    //
+    // Core-generated transport rejects are the only unsigned exception. They
+    // are emitted by the socket server before application handlers run and are
+    // explicitly marked so an unsigned application-level ok:false cannot
+    // masquerade as transport failure.
+    const isTransportReject =
+      payload.ok === false && payload.transport === true;
+    if (this.verifyResponse && !isTransportReject) {
+      if (typeof payload.signature !== 'string') {
+        this.settleReject(
+          frame.id,
+          new IpcRequestError('missing response signature', 'bad_signature'),
+        );
+        return;
+      }
       const { signature, ...withoutSig } = payload as {
         signature?: string;
       } & Record<string, unknown>;
@@ -398,11 +439,16 @@ export class IpcSocketClient {
       );
     }
 
-    // Reject ALL pending requests — never auto-resend (a consumed requestId
-    // would be replay-rejected; the caller retries the whole run with fresh ids).
-    this.rejectAllPending(reason);
+    const keepPendingForReplay =
+      this.reconnectCfg.enabled &&
+      this.reconnectCfg.replayPending === true &&
+      !this.explicitlyClosed;
+    const reconnectScheduled = this.scheduleReconnectIfNeeded();
+    if (keepPendingForReplay && reconnectScheduled) {
+      return;
+    }
 
-    this.scheduleReconnectIfNeeded();
+    this.rejectAllPending(reason);
   }
 
   private rejectAllPending(reason: string): void {
@@ -415,10 +461,10 @@ export class IpcSocketClient {
     }
   }
 
-  private scheduleReconnectIfNeeded(): void {
-    if (!this.reconnectCfg.enabled || this.explicitlyClosed) return;
+  private scheduleReconnectIfNeeded(): boolean {
+    if (!this.reconnectCfg.enabled || this.explicitlyClosed) return false;
     const maxAttempts = this.reconnectCfg.maxAttempts ?? Infinity;
-    if (this.reconnectAttempts >= maxAttempts) return;
+    if (this.reconnectAttempts >= maxAttempts) return false;
 
     const base = this.reconnectCfg.baseDelayMs ?? DEFAULT_RECONNECT_BASE_MS;
     const max = this.reconnectCfg.maxDelayMs ?? DEFAULT_RECONNECT_MAX_MS;
@@ -442,5 +488,6 @@ export class IpcSocketClient {
     ) {
       (this.reconnectTimer as { unref(): void }).unref();
     }
+    return true;
   }
 }

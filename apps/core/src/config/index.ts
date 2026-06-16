@@ -29,7 +29,6 @@ import { resolvePermissionApprovalTimeoutMs } from '../shared/permission-timeout
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 export * from './memory.js';
 export { syncRuntimeSettingsFromProjection } from './settings/restart-sync.js';
-export const POLL_INTERVAL = 500;
 export type ControlEnvKey =
   | 'GANTRY_CONTROL_API_KEYS_JSON'
   | 'GANTRY_CONTROL_HOST'
@@ -171,6 +170,16 @@ export function getRuntimeQueueConfig() {
     maxJobRuns: queue.maxJobRuns,
     maxRetries: queue.maxRetries,
     baseRetryMs: queue.baseRetryMs,
+    // I-1 (default off): SIGKILL post-grace stragglers on shutdown.
+    killStragglersAfterGrace: IPC_SHUTDOWN_KILL,
+  };
+}
+export function getRuntimeWarmPoolConfig(env: NodeJS.ProcessEnv = process.env) {
+  const warmPool = getRuntimeSettingsForConfig().runtime.warmPool;
+  return {
+    enabled: env.GANTRY_WARM_POOL === '1' || warmPool.enabled,
+    size: warmPool.size,
+    idleTtlMs: warmPool.idleTtlMs,
   };
 }
 
@@ -408,7 +417,6 @@ export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
 );
-export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep the agent run alive after last result
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -438,17 +446,11 @@ function resolveConfigTimezone(): string {
 export const TIMEZONE = resolveConfigTimezone();
 
 // ── IPC transport config ──────────────────────────────────────────────────────
-const IPC_TRANSPORT_VALUES = ['fs', 'socket', 'dual'] as const;
-type IpcTransport = (typeof IPC_TRANSPORT_VALUES)[number];
-function parseIpcTransport(raw: string | undefined): IpcTransport {
-  const v = raw?.trim() ?? '';
-  return (IPC_TRANSPORT_VALUES as readonly string[]).includes(v)
-    ? (v as IpcTransport)
-    : 'fs';
+export const IPC_TRANSPORT = 'socket' as const;
+function parseNonNegativeInteger(raw: string | undefined, fallback: number): number {
+  const parsed = parseInt(raw?.trim() ?? '', 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
-export const IPC_TRANSPORT: IpcTransport = parseIpcTransport(
-  process.env.GANTRY_IPC_TRANSPORT || envConfig.GANTRY_IPC_TRANSPORT,
-);
 export const IPC_SOCKET_PATH: string =
   process.env.GANTRY_IPC_SOCKET_PATH?.trim() ||
   envConfig.GANTRY_IPC_SOCKET_PATH?.trim() ||
@@ -467,30 +469,19 @@ export const IPC_HEARTBEAT_INTERVAL_MS: number =
       '',
     10,
   ) || 10000;
-export const IPC_RECONCILE_INTERVAL_MS: number =
-  parseInt(
-    process.env.GANTRY_IPC_RECONCILE_INTERVAL_MS ||
-      envConfig.GANTRY_IPC_RECONCILE_INTERVAL_MS ||
-      '',
-    10,
-  ) || 5000;
 export const IPC_EVENT_PIPE: boolean = parseBooleanEnv(
   process.env.GANTRY_IPC_EVENT_PIPE || envConfig.GANTRY_IPC_EVENT_PIPE,
   false,
 );
 export const IPC_EVENT_PIPE_DEBOUNCE_MS: number =
-  parseInt(
+  parseNonNegativeInteger(
     process.env.GANTRY_IPC_EVENT_PIPE_DEBOUNCE_MS ||
       envConfig.GANTRY_IPC_EVENT_PIPE_DEBOUNCE_MS ||
       '',
-    10,
-  ) || 500;
+    0,
+  );
 export const IPC_SHUTDOWN_KILL: boolean = parseBooleanEnv(
   process.env.GANTRY_IPC_SHUTDOWN_KILL || envConfig.GANTRY_IPC_SHUTDOWN_KILL,
-  false,
-);
-export const IPC_ORPHAN_SWEEP: boolean = parseBooleanEnv(
-  process.env.GANTRY_IPC_ORPHAN_SWEEP || envConfig.GANTRY_IPC_ORPHAN_SWEEP,
   false,
 );
 export const IPC_REPLAY_PERSIST: boolean = parseBooleanEnv(

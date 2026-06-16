@@ -37,13 +37,14 @@ const ctrl: IpcWireFrame = {
   payload: {},
 };
 // Continuation-push seam (Task A): the socket transport delivers continuation
-// follow-ups and close signals as `type:'push'` frames on these channels.
+// follow-ups and close signals as `type:'push'` frames on these channels. The
+// continuation push carries the message text plus threadId/sequence metadata.
 const continuationPush: IpcWireFrame = {
   v: 1,
   type: 'push',
   channel: 'continuation',
   id: 'cont-1',
-  payload: { text: 'hi', threadId: null },
+  payload: { threadId: null, sequence: 0 },
 };
 const closePush: IpcWireFrame = {
   v: 1,

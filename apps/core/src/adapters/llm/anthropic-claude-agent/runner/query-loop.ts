@@ -1,21 +1,29 @@
 import {
   query,
+  startup,
   type EffortLevel,
+  type Options,
+  type Query,
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 import { composeAgentCapabilities } from '../agent-capabilities.js';
+import {
+  acceptSocketBindPayload,
+  awaitBind,
+  type ConversationBindScope,
+} from './bind-channel.js';
+import {
+  setInMemoryBoundIdentity,
+  writeBoundIdentityFile,
+  writeBoundIdentityFilePath,
+} from '../../../../runner/mcp/bound-identity.js';
 import {
   SDK_NATIVE_SKILL_DISABLE_ENV,
   SDK_NATIVE_SKILL_OVERRIDES,
   readClaudeSdkSkillNamesFromEnv,
 } from '../native-sdk-skills.js';
 import { MessageStream } from './message-stream.js';
-import {
-  drainInteractionBoundaries,
-  drainIpcInput,
-  shouldClose,
-} from './ipc-input.js';
 import { SteeringDeliveryGate } from './steering-delivery-gate.js';
 import { log } from './logging.js';
 import { writeOutput } from './output.js';
@@ -34,18 +42,19 @@ import {
   discoverAdditionalDirectories,
   GROUP_FOLDER,
   IPC_AUTH_TOKEN,
-  IPC_POLL_MS,
+  IPC_RESPONSE_KEY_ID,
+  IPC_RESPONSE_VERIFY_KEY,
   RUN_HANDLE,
   THREAD_ID,
   WORKSPACE_GROUP_DIR,
 } from './runtime-env.js';
 import { IpcSocketClient } from '../../../../shared/ipc-socket-client.js';
 import type { IpcWireFrame } from '../../../../shared/ipc-wire.js';
+import { replaceCachedLiveToolRulesFromPayload } from '../../../../shared/live-tool-rules.js';
 import {
   createSignedIpcRequestEnvelope,
   verifyIpcResponsePayload,
 } from './ipc-signing.js';
-import { IPC_RESPONSE_VERIFY_KEY } from './runtime-env.js';
 import { setActiveRunnerSocketClient } from './active-runner-socket.js';
 import {
   buildRunnerSystemPrompt,
@@ -54,6 +63,7 @@ import {
 } from './system-prompt.js';
 import type {
   AgentRunnerInput,
+  AgentRunnerToolCall,
   AgentRunnerToolAttemptOutput,
 } from './types.js';
 import { normalizeModelUsage } from '../../../../shared/model-usage.js';
@@ -82,6 +92,11 @@ import { createCanUseToolCallback } from './tool-permission-gate.js';
 interface RunQueryOptions {
   enableIpcFollowups?: boolean;
   persistSdkSession?: boolean;
+  /**
+   * Warm-pool (Pillar 2): boot the SDK generic via `startup()`, await the
+   * per-customer bind, then run `warmQuery.query(stream)`.
+   */
+  warmGenericBoot?: boolean;
 }
 
 function localCliCredentialDirectoriesFromRuntimeAccess(
@@ -178,36 +193,255 @@ function assistantOutputText(message: unknown): string {
   return parts.join('');
 }
 
-/**
- * Routes a single push frame received over the runner's IPC socket to the same
- * effects the fs poll produces:
- *   - `continuation` (with a string `text`) → steering accept (== drainIpcInput).
- *   - `close` channel, OR a continuation carrying `payload.close === true`
- *     → the shouldClose() body: close the gate and end the stream.
- *
- * Returns whether this frame requested a close (so the caller can stop polling),
- * leaving the close mechanics to the injected `onClose` callback. Factored out as
- * a pure function so the routing can be unit-tested without a live socket/SDK.
- */
+function byteLength(value: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+  } catch {
+    return 0;
+  }
+}
+
+function plainObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function sdkToolIdentity(
+  name: string,
+  input: unknown,
+): { server: string; tool: string } {
+  const obj = plainObject(input);
+  const serverName = stringValue(obj?.serverName ?? obj?.server_name);
+  const toolName = stringValue(obj?.toolName ?? obj?.tool_name);
+  if (serverName && toolName) {
+    return { server: serverName, tool: toolName };
+  }
+
+  const mcpMatch = name.match(/^mcp__(.+?)__(.+)$/);
+  if (mcpMatch) {
+    return { server: mcpMatch[1]!, tool: mcpMatch[2]! };
+  }
+
+  return { server: 'sdk', tool: name };
+}
+
+function assistantToolUses(message: unknown): Array<{
+  id: string;
+  name: string;
+  input?: unknown;
+}> {
+  const content = (message as { message?: { content?: unknown } }).message
+    ?.content;
+  if (!Array.isArray(content)) return [];
+  const uses: Array<{ id: string; name: string; input?: unknown }> = [];
+  for (const block of content) {
+    const item = plainObject(block);
+    if (!item || item.type !== 'tool_use') continue;
+    const id = stringValue(item.id);
+    const name = stringValue(item.name);
+    if (!id || !name) continue;
+    uses.push({
+      id,
+      name,
+      ...(Object.prototype.hasOwnProperty.call(item, 'input')
+        ? { input: item.input }
+        : {}),
+    });
+  }
+  return uses;
+}
+
+function userToolResults(message: unknown): Array<{
+  id: string;
+  ok: boolean;
+  response?: unknown;
+}> {
+  const results: Array<{ id: string; ok: boolean; response?: unknown }> = [];
+  const content = (message as { message?: { content?: unknown } }).message
+    ?.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      const item = plainObject(block);
+      if (!item || item.type !== 'tool_result') continue;
+      const id = stringValue(item.tool_use_id);
+      if (!id) continue;
+      results.push({
+        id,
+        ok: item.is_error !== true,
+        ...(Object.prototype.hasOwnProperty.call(item, 'content')
+          ? { response: item.content }
+          : {}),
+      });
+    }
+  }
+
+  const parentId = stringValue(
+    (message as { parent_tool_use_id?: unknown }).parent_tool_use_id,
+  );
+  if (
+    parentId &&
+    !results.some((result) => result.id === parentId) &&
+    Object.prototype.hasOwnProperty.call(
+      message as Record<string, unknown>,
+      'tool_use_result',
+    )
+  ) {
+    results.push({
+      id: parentId,
+      ok: true,
+      response: (message as { tool_use_result?: unknown }).tool_use_result,
+    });
+  }
+  return results;
+}
+
+class SdkToolCallAccumulator {
+  private readonly open = new Map<
+    string,
+    {
+      startedAt: number;
+      server: string;
+      tool: string;
+      requestBytes: number;
+      request?: unknown;
+    }
+  >();
+  private readonly completed: AgentRunnerToolCall[] = [];
+
+  constructor(private readonly capturePayloads: boolean) {}
+
+  onAssistant(message: unknown, at: number): void {
+    for (const toolUse of assistantToolUses(message)) {
+      const identity = sdkToolIdentity(toolUse.name, toolUse.input);
+      this.open.set(toolUse.id, {
+        startedAt: at,
+        ...identity,
+        requestBytes: byteLength(toolUse.input),
+        ...(this.capturePayloads ? { request: toolUse.input } : {}),
+      });
+    }
+  }
+
+  onUser(message: unknown, at: number): void {
+    for (const result of userToolResults(message)) {
+      const open = this.open.get(result.id);
+      if (!open) continue;
+      this.open.delete(result.id);
+      this.completed.push({
+        server: open.server,
+        tool: open.tool,
+        startedAt: open.startedAt,
+        ms: Math.max(0, at - open.startedAt),
+        ok: result.ok,
+        requestBytes: open.requestBytes,
+        responseBytes: byteLength(result.response),
+        ...(this.capturePayloads ? { request: open.request } : {}),
+        ...(this.capturePayloads ? { response: result.response } : {}),
+      });
+    }
+  }
+
+  calls(): AgentRunnerToolCall[] {
+    return this.completed;
+  }
+}
+
 export function routeRunnerPushFrame(
   frame: IpcWireFrame,
   handlers: {
-    acceptSteering: (text: string) => void;
+    onContinuation: (text: string) => void;
     onClose: () => void;
   },
 ): { closed: boolean } {
-  const payload = (frame.payload ?? {}) as {
-    text?: unknown;
-    close?: unknown;
-  };
-  if (frame.channel === 'close' || payload.close === true) {
+  if (frame.type === 'ctrl' && frame.ctrl === 'drain') {
     handlers.onClose();
     return { closed: true };
   }
-  if (frame.channel === 'continuation' && typeof payload.text === 'string') {
-    handlers.acceptSteering(payload.text);
+  if (frame.channel === 'live_tool_rules') {
+    replaceCachedLiveToolRulesFromPayload(frame.payload);
+    return { closed: false };
   }
+  if (frame.channel === 'bind') {
+    acceptSocketBindPayload(frame.payload);
+    return { closed: false };
+  }
+  if (frame.channel === 'close') {
+    handlers.onClose();
+    return { closed: true };
+  }
+  if (frame.channel !== 'continuation') {
+    return { closed: false };
+  }
+  const text =
+    frame.payload &&
+    typeof frame.payload === 'object' &&
+    typeof (frame.payload as { text?: unknown }).text === 'string'
+      ? (frame.payload as { text: string }).text
+      : undefined;
+  if (text !== undefined) handlers.onContinuation(text);
   return { closed: false };
+}
+
+async function dispatchWarmQuery(args: {
+  sdkOptions: Options;
+  stream: MessageStream;
+  guardrailPreface?: string;
+  onBound: (scope: ConversationBindScope) => void;
+}): Promise<Query> {
+  const warm = await startup({ options: args.sdkOptions });
+  log('Warm worker booted generic via startup(); awaiting bind');
+  let scope: ConversationBindScope;
+  try {
+    scope = await awaitBind();
+  } catch (err) {
+    try {
+      warm.close();
+    } catch {
+      // Best-effort cleanup only.
+    }
+    throw err;
+  }
+
+  const boundIdentity = {
+    chatJid: scope.chatJid,
+    ...(scope.threadId ? { threadId: scope.threadId } : {}),
+    ...(scope.memoryUserId ? { memoryUserId: scope.memoryUserId } : {}),
+    ...(scope.runHandle ? { runHandle: scope.runHandle } : {}),
+    ...(scope.ipcAuthToken ? { ipcAuthToken: scope.ipcAuthToken } : {}),
+    ...(scope.browserIpcAuthToken
+      ? { browserIpcAuthToken: scope.browserIpcAuthToken }
+      : {}),
+    ...(scope.memoryIpcAuthToken
+      ? { memoryIpcAuthToken: scope.memoryIpcAuthToken }
+      : {}),
+    ...(scope.ipcResponseKeyId
+      ? { ipcResponseKeyId: scope.ipcResponseKeyId }
+      : {}),
+    ...(scope.ipcResponseVerifyKey
+      ? { ipcResponseVerifyKey: scope.ipcResponseVerifyKey }
+      : {}),
+  };
+  setInMemoryBoundIdentity(boundIdentity);
+  const boundIdentityFile = process.env.GANTRY_BOUND_IDENTITY_FILE?.trim();
+  if (boundIdentityFile) {
+    writeBoundIdentityFilePath(boundIdentityFile, boundIdentity);
+  } else if (process.env.GANTRY_IPC_DIR) {
+    const ipcDir = process.env.GANTRY_IPC_DIR;
+    writeBoundIdentityFile(ipcDir, boundIdentity);
+  }
+
+  const guardrailPreface = args.guardrailPreface?.trim();
+  const firstMessage = guardrailPreface
+    ? `${guardrailPreface}\n\n${scope.firstMessage}`
+    : scope.firstMessage;
+  args.stream.pushInitialPrompt(firstMessage, scope.memoryBlock || undefined);
+  args.onBound(scope);
+  return warm.query(args.stream);
 }
 
 export async function runQuery(
@@ -227,21 +461,27 @@ export async function runQuery(
 }> {
   const enableIpcFollowups = options.enableIpcFollowups ?? true;
   const persistSdkSession = options.persistSdkSession ?? true;
+  const warmGenericBoot = options.warmGenericBoot ?? false;
   const stream = new MessageStream();
   const queryRunId = randomUUID();
-  const memoryBlock = readMemoryContextBlock(agentInput);
-  stream.pushInitialPrompt(prompt, memoryBlock);
-  if (!enableIpcFollowups) {
-    stream.end();
+  const memoryBlock = warmGenericBoot ? '' : readMemoryContextBlock(agentInput);
+  if (!warmGenericBoot) {
+    stream.pushInitialPrompt(prompt, memoryBlock);
+    if (!enableIpcFollowups) {
+      stream.end();
+    }
   }
-  let ipcPolling = true;
   let closedDuringQuery = false;
   let newSessionId: string | undefined;
   // The customer message that drives the NEXT turn (for the reply trace's
   // per-turn input payload): the run prompt to begin with, then each warm-run
   // continuation as it is piped in. Consumed by the first turn that answers it
   // and cleared, so a turn's tool-loop follow-ons carry no input.
-  let pendingTurnInput: string | undefined = prompt;
+  let pendingTurnInput: string | undefined = warmGenericBoot
+    ? undefined
+    : prompt;
+  let warmBound = false;
+  let boundChatJid: string | undefined;
   // Warm continuation: the instant this turn's input is delivered to the model
   // (pushed to the SDK stream). Emitted per result so core can split the warm
   // leading span into real pickup (queue) + the model's first-token wait.
@@ -252,30 +492,15 @@ export async function runQuery(
     pendingTurnDispatchedAt = Date.now();
     stream.pushContent(text);
   });
-  // The exact shouldClose() close body — close the gate (so no further
-  // continuation can be accepted) then end the SDK stream. Shared by the fs poll
-  // sentinel and the socket close push so both carriers behave identically (R4:
-  // close wins; gate.closed guards any post-close continuation).
   const closeQueryStream = () => {
     closedDuringQuery = true;
     steeringGate.close();
     stream.end();
-    ipcPolling = false;
   };
-  // Socket fast-path for continuation/close (Pillar 1). Only when the transport
-  // is socket/dual AND this is an interactive run (scheduled runs never open a
-  // socket) AND a socket path is configured. The socket is authoritative while
-  // connected (its onPush mirrors drainIpcInput/shouldClose exactly); the fs
-  // polls are skipped only while connected, so a connect gap/drop falls straight
-  // back to the durable fs mailbox (R1/R3). connect() failure is non-fatal — the
-  // run stays entirely on fs polls.
-  const ipcTransport = process.env.GANTRY_IPC_TRANSPORT;
   const ipcSocketPath = process.env.GANTRY_IPC_SOCKET_PATH;
-  const useSocketIpc =
-    (ipcTransport === 'socket' || ipcTransport === 'dual') &&
-    enableIpcFollowups &&
-    !!ipcSocketPath;
+  const useSocketIpc = !!ipcSocketPath;
   let ipcSocketClient: IpcSocketClient | undefined;
+  let queryDispatchedAt: number | undefined;
   if (useSocketIpc && ipcSocketPath) {
     ipcSocketClient = new IpcSocketClient({
       socketPath: ipcSocketPath,
@@ -287,6 +512,7 @@ export async function runQuery(
           folder: GROUP_FOLDER || agentInput.groupFolder,
           context: {
             threadId: THREAD_ID || null,
+            responseKeyId: IPC_RESPONSE_KEY_ID || null,
             appId: APP_ID || null,
             agentId: AGENT_ID || null,
           },
@@ -294,13 +520,13 @@ export async function runQuery(
       // The runner connection also CARRIES the permission request→response
       // (Pillar 1, Phase 5.3d) via permission-callback.ts, which sends over this
       // SAME client. A signed permission resp is verified fail-closed here with
-      // the runner's ed25519 response-verify key (same key the fs poll uses).
+      // the runner's ed25519 response-verify key.
       verifyResponse: (p, sig) =>
         verifyIpcResponsePayload(IPC_RESPONSE_VERIFY_KEY, p, sig),
       onPush: (frame) => {
         const { closed } = routeRunnerPushFrame(frame, {
-          // SAME call drainIpcInput makes (steering accept at a turn boundary).
-          acceptSteering: (text) => {
+          onContinuation: (text) => {
+            if (!enableIpcFollowups) return;
             const delivery = steeringGate.accept(text);
             if (delivery === 'buffered') {
               log(
@@ -308,24 +534,23 @@ export async function runQuery(
               );
             }
           },
-          onClose: () => {
-            log('Close push received over IPC socket, ending stream');
-            closeQueryStream();
-          },
+          onClose: closeQueryStream,
         });
         if (closed) {
-          // Stop reacting to further pushes after a close (mirror the fs poll).
           setActiveRunnerSocketClient(undefined);
           ipcSocketClient?.close();
           ipcSocketClient = undefined;
         }
       },
-      reconnect: { enabled: true },
+      reconnect: {
+        enabled: true,
+        replayPending: true,
+      },
     });
     // Publish the run's runner client so the permission callback sends its
     // request over this SAME connection (one runner connection per run). It is
     // published before connect() resolves; the callback only uses it when
-    // `connected` is true and otherwise falls back to the durable fs path.
+    // `connected` is true and otherwise denies boundedly.
     setActiveRunnerSocketClient(ipcSocketClient);
   }
   const emitInteractionBoundary = () => {
@@ -336,41 +561,7 @@ export async function runQuery(
       interactionBoundary: 'user_interaction',
     });
   };
-  const pollRuntimeSignalsDuringQuery = () => {
-    if (!ipcPolling) return;
-    // Interaction boundaries stay on the fs side-channel regardless of transport.
-    const interactionBoundaries = drainInteractionBoundaries();
-    for (let i = 0; i < interactionBoundaries; i += 1) {
-      emitInteractionBoundary();
-    }
-    // When the socket is authoritative (connected), it carries continuation +
-    // close; skip the fs polls so a message is never delivered twice (R3). On a
-    // connect gap/drop the socket is not connected, so we keep the fs polls
-    // exactly as today and the durable mailbox is consumed (R1).
-    const socketAuthoritative = useSocketIpc && !!ipcSocketClient?.connected;
-    if (!socketAuthoritative) {
-      if (shouldClose()) {
-        log('Close sentinel detected during query, ending stream');
-        closeQueryStream();
-        return;
-      }
-      if (enableIpcFollowups) {
-        const messages = drainIpcInput();
-        for (const text of messages) {
-          const delivery = steeringGate.accept(text);
-          if (delivery === 'buffered') {
-            log(
-              `Buffering IPC message until query turn boundary (${text.length} chars)`,
-            );
-          }
-        }
-      }
-    }
-    setTimeout(pollRuntimeSignalsDuringQuery, IPC_POLL_MS);
-  };
-  setTimeout(pollRuntimeSignalsDuringQuery, IPC_POLL_MS);
   let lastAssistantUuid: string | undefined;
-  let queryDispatchedAt: number | undefined;
   let firstSdkMessageAt: number | undefined;
   let messageCount = 0;
   let resultCount = 0;
@@ -381,6 +572,7 @@ export async function runQuery(
   // Payloads (input/output text) only when GANTRY_TRACE_PAYLOADS=1.
   const capturePayloads = process.env['GANTRY_TRACE_PAYLOADS']?.trim() === '1';
   const llmTurns = new LlmTurnAccumulator({ capturePayloads });
+  const sdkToolCalls = new SdkToolCallAccumulator(capturePayloads);
   const heartbeat = startJobHeartbeat({
     agentInput,
     writeOutput,
@@ -389,9 +581,14 @@ export async function runQuery(
   const externalMcpServers = readExternalMcpServers();
   const externalMcpAllowedTools = readExternalMcpAllowedTools();
   const externalMcpAlwaysAllowedTools = readExternalMcpAlwaysAllowedTools();
-  const systemPrompt = buildRunnerSystemPrompt(agentInput, memoryBlock, {
-    approvedMcpServerNames: Object.keys(externalMcpServers),
-  });
+  const systemPrompt = buildRunnerSystemPrompt(
+    agentInput,
+    memoryBlock,
+    {
+      approvedMcpServerNames: Object.keys(externalMcpServers),
+    },
+    { genericBoot: warmGenericBoot },
+  );
   const localCliCredentialDirectories = [
     ...new Set([
       ...readLocalCliCredentialDirectories(),
@@ -435,8 +632,8 @@ export async function runQuery(
     semanticCapabilities: agentInput.semanticCapabilities,
     ipcDir: process.env.GANTRY_IPC_DIR,
     ipcAuthToken: process.env.GANTRY_IPC_AUTH_TOKEN,
-    ipcTransport: process.env.GANTRY_IPC_TRANSPORT,
     ipcSocketPath: process.env.GANTRY_IPC_SOCKET_PATH,
+    boundIdentityFile: process.env.GANTRY_BOUND_IDENTITY_FILE,
     browserIpcAuthToken: process.env.GANTRY_BROWSER_IPC_AUTH_TOKEN,
     memoryIpcAuthToken: process.env.GANTRY_MEMORY_IPC_AUTH_TOKEN,
     ipcResponseVerifyKey: process.env.GANTRY_IPC_RESPONSE_VERIFY_KEY,
@@ -446,81 +643,85 @@ export async function runQuery(
     externalMcpAlwaysAllowedTools,
     isScheduledJob: agentInput.isScheduledJob,
   });
-  // Open the continuation/close fast-path socket before the SDK query starts so
-  // a follow-up that lands during model_wait is pushed straight to the gate. The
-  // connect is best-effort: on any failure we log and proceed entirely on the fs
-  // polls (the socket is never required, R1/R7). A late connect is fine too — the
-  // poll gate switches to socket-authoritative the moment `connected` flips true.
   if (ipcSocketClient) {
     try {
       await ipcSocketClient.connect();
       log('Runner IPC socket connected (continuation/close fast-path)');
     } catch (err) {
       log(
-        `Runner IPC socket connect failed, staying on fs polls: ${err instanceof Error ? err.message : String(err)}`,
+        `Runner IPC socket connect failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
+  const sdkOptions: Options = {
+    model: configuredModel,
+    thinking: queryThinking,
+    effort: queryEffort,
+    cwd: WORKSPACE_GROUP_DIR,
+    additionalDirectories:
+      additionalDirectories.length > 0 ? additionalDirectories : undefined,
+    persistSession: persistSdkSession,
+    ...(persistSdkSession && agentInput.sessionId
+      ? { resume: agentInput.sessionId }
+      : {}),
+    systemPrompt,
+    settings: {
+      autoMemoryEnabled: false,
+      includeGitInstructions: includeGitInstructionsForPersona(
+        agentInput.persona,
+      ),
+      skillOverrides: SDK_NATIVE_SKILL_OVERRIDES,
+    },
+    skills: enabledSdkSkills,
+    tools: [...capabilities.availableTools],
+    allowedTools: [...capabilities.allowedTools],
+    disallowedTools: [...capabilities.disallowedTools],
+    env: isolatedSdkEnv,
+    sandbox: buildSdkFilesystemSandbox(protectedFilesystemDenyWritePaths, {
+      denyReadPaths: protectedFilesystemDenyReadPaths,
+      denyWritePaths: protectedFilesystemDenyWritePaths,
+    }),
+    permissionMode: capabilities.permissionMode,
+    hooks: {
+      PreToolUse: [
+        {
+          hooks: [createSafetyPreToolUseHook(memoryBlock)],
+          timeout: 5,
+        },
+      ],
+    },
+    canUseTool: createCanUseToolCallback({
+      agentInput,
+      sdkEnv: isolatedSdkEnv,
+      workspaceFolder,
+      memoryBlock,
+      configuredModel,
+      capabilities,
+      primeToolAttempts,
+      getNewSessionId: () => newSessionId,
+      emitInteractionBoundary,
+      recordToolActivity: (toolName) => heartbeat.recordToolActivity(toolName),
+    }),
+    settingSources: ['user'],
+    mcpServers: capabilities.mcpServers,
+    includePartialMessages: true,
+  };
   // MEASUREMENT-ONLY: just before the SDK spawns the Claude Code CLI subprocess.
   timingMark('before_sdk_query');
   queryDispatchedAt = Date.now();
-  const sdkQuery = query({
-    prompt: stream,
-    options: {
-      model: configuredModel,
-      thinking: queryThinking,
-      effort: queryEffort,
-      cwd: WORKSPACE_GROUP_DIR,
-      additionalDirectories:
-        additionalDirectories.length > 0 ? additionalDirectories : undefined,
-      persistSession: persistSdkSession,
-      ...(persistSdkSession && agentInput.sessionId
-        ? { resume: agentInput.sessionId }
-        : {}),
-      systemPrompt,
-      settings: {
-        autoMemoryEnabled: false,
-        includeGitInstructions: includeGitInstructionsForPersona(
-          agentInput.persona,
-        ),
-        skillOverrides: SDK_NATIVE_SKILL_OVERRIDES,
-      },
-      skills: enabledSdkSkills,
-      tools: [...capabilities.availableTools],
-      allowedTools: [...capabilities.allowedTools],
-      disallowedTools: [...capabilities.disallowedTools],
-      env: isolatedSdkEnv,
-      sandbox: buildSdkFilesystemSandbox(protectedFilesystemDenyWritePaths, {
-        denyReadPaths: protectedFilesystemDenyReadPaths,
-        denyWritePaths: protectedFilesystemDenyWritePaths,
-      }),
-      permissionMode: capabilities.permissionMode,
-      hooks: {
-        PreToolUse: [
-          {
-            hooks: [createSafetyPreToolUseHook(memoryBlock)],
-            timeout: 5,
-          },
-        ],
-      },
-      canUseTool: createCanUseToolCallback({
-        agentInput,
-        sdkEnv: isolatedSdkEnv,
-        workspaceFolder,
-        memoryBlock,
-        configuredModel,
-        capabilities,
-        primeToolAttempts,
-        getNewSessionId: () => newSessionId,
-        emitInteractionBoundary,
-        recordToolActivity: (toolName) =>
-          heartbeat.recordToolActivity(toolName),
-      }),
-      settingSources: ['user'],
-      mcpServers: capabilities.mcpServers,
-      includePartialMessages: true,
-    },
-  });
+  const sdkQuery = warmGenericBoot
+    ? await dispatchWarmQuery({
+        sdkOptions,
+        stream,
+        guardrailPreface: agentInput.guardrailSystemPromptAppend,
+        onBound: (scope) => {
+          warmBound = true;
+          boundChatJid = scope.chatJid;
+          pendingTurnInput = scope.firstMessage;
+          pendingTurnDispatchedAt = Date.now();
+        },
+      })
+    : query({ prompt: stream, options: sdkOptions });
   // Context usage is diagnostics-only (model-status store / session-command
   // display) but its fetch round-trips the CLI (0.7-4.1s measured). It is
   // emitted as a follow-up envelope so the reply envelope is never held back.
@@ -546,12 +747,13 @@ export async function runQuery(
       log(`[msg #${messageCount}] type=${msgType}`);
       if (message.type === 'assistant' && 'uuid' in message) {
         lastAssistantUuid = (message as { uuid: string }).uuid;
+        const assistantReceivedAt = Date.now();
         // Per-turn latency/usage capture (best-effort). Wall-clock Date.now()
         // is comparable with the core MCP-call timestamps on this single host,
         // so stages merge by start time across the child/core boundary.
         llmTurns.onAssistant(
           message as Parameters<typeof llmTurns.onAssistant>[0],
-          Date.now(),
+          assistantReceivedAt,
           capturePayloads
             ? {
                 output: assistantOutputText(message),
@@ -564,10 +766,14 @@ export async function runQuery(
               }
             : undefined,
         );
+        sdkToolCalls.onAssistant(message, assistantReceivedAt);
         pendingTurnInput = undefined;
         if (messageContainsToolUse(message)) {
           pendingPartialText = '';
         }
+      }
+      if (message.type === 'user') {
+        sdkToolCalls.onUser(message, Date.now());
       }
       if (message.type === 'system' && message.subtype === 'init') {
         newSessionId = message.session_id;
@@ -662,7 +868,7 @@ export async function runQuery(
                   agentId: agentInput.agentId,
                   runId: agentInput.runId,
                   jobId: agentInput.jobId,
-                  chatJid: agentInput.chatJid,
+                  chatJid: boundChatJid ?? agentInput.chatJid,
                   threadId: agentInput.threadId,
                 },
                 rateLimit,
@@ -732,6 +938,7 @@ export async function runQuery(
           fallbackModel: configuredModel,
         });
         const turns = llmTurns.turns();
+        const toolCalls = sdkToolCalls.calls();
         const continuedByFollowup = steeringGate.pendingCount() > 0;
         if (pendingPartialText) {
           writeOutput({
@@ -748,7 +955,9 @@ export async function runQuery(
           ...(primeToolAttempts.length > 0 ? { primeToolAttempts } : {}),
           ...(continuedByFollowup ? { continuedByFollowup: true } : {}),
           ...(turns.length > 0 ? { turns } : {}),
-          ...(firstSdkMessageAt !== undefined
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+          ...(warmBound ? { warmBound: true } : {}),
+          ...(!warmBound && firstSdkMessageAt !== undefined
             ? { runnerStartup: { queryDispatchedAt, firstSdkMessageAt } }
             : {}),
           ...(pendingTurnDispatchedAt !== undefined
@@ -773,11 +982,10 @@ export async function runQuery(
       }
     }
   } finally {
-    ipcPolling = false;
     heartbeat.stop();
     steeringGate.close();
     // Unpublish before close so a late permission callback never sends over a
-    // closing connection (it falls back to the durable fs path instead).
+    // closing connection.
     setActiveRunnerSocketClient(undefined);
     ipcSocketClient?.close();
     ipcSocketClient = undefined;

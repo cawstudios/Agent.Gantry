@@ -6,14 +6,13 @@ import {
   type AdminMcpToolName,
 } from '../../../shared/admin-mcp-tools.js';
 import {
-  chatJid,
   configuredAllowedTools,
   currentEnabledAdminMcpTools,
   attachedMcpSourceIds,
   selectedSkillDisplays,
   attachedSkillSourceIds,
-  threadId,
 } from '../context.js';
+import { getBoundChatJid, getBoundThreadId } from '../bound-identity.js';
 import { humanizeTechnicalIdentifier } from '../../../shared/user-visible-messages.js';
 import { sendTaskRequest } from '../ipc.js';
 import { makeIpcId } from '../ipc-ids.js';
@@ -63,6 +62,7 @@ export function registerAdminPermissionTools(
         return adminToolUnavailable('admin_permission_revoke');
       }
       const taskId = makeIpcId('admin-permission-revoke');
+      const chatJid = getBoundChatJid();
       const response = await sendTaskRequest(
         {
           type: 'admin_permission_revoke',
@@ -75,7 +75,7 @@ export function registerAdminPermissionTools(
           },
           targetJid: chatJid,
           chatJid,
-          authThreadId: threadId,
+          authThreadId: getBoundThreadId(),
           timestamp: nowIso(),
         },
         { timeoutMs: 20_000 },

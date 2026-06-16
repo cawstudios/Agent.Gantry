@@ -415,19 +415,19 @@ This section narrates the request half:
 sequenceDiagram
   participant Agent as "Claude Agent SDK"
   participant Mcp as "Gantry MCP server<br/>request_* tool"
-  participant Ipc as "Signed IPC dir"
+  participant Ipc as "Signed IPC socket"
   participant Host as "IPC interaction handler"
   participant Surface as "Channel adapter<br/>InteractionDescriptor"
   participant Approver as "conversation approver / Conversation approver"
 
   Agent->>Mcp: request_permission / request_skill_install /<br/>request_mcp_server / request_settings_update / ...
-  Mcp->>Ipc: writeIpcFile(TASKS_DIR, signed task)
-  Host->>Ipc: read + verify signature, validate origin
+  Mcp->>Ipc: send signed task frame
+  Host->>Ipc: receive + verify signature, validate origin
   Host->>Surface: render InteractionDescriptor in source conversation
   Surface->>Approver: native buttons / cards
   Approver-->>Surface: allow_once | allow_persistent_rule | cancel
   Surface->>Host: PermissionApprovalDecision
-  Host->>Ipc: write signed response
+  Host->>Ipc: send signed response frame
   Mcp-->>Agent: tool result (and skill bytes for in-flight proposals)
   Note over Mcp,Agent: capability activates on the next run<br/>(or in-session for skill proposals)
 ```

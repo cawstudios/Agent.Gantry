@@ -4,6 +4,7 @@ import {
   assembleTimelinePayloads,
   type GuardrailRecord,
   type LlmTurnRecord,
+  type ToolCallRecord,
 } from './reply-trace.js';
 import type { ReplyTracePort } from './group-processing-types.js';
 import type { MessageTraceKind } from '../adapters/storage/postgres/repositories/message-trace-repository.postgres.js';
@@ -28,6 +29,7 @@ export interface PersistReplyTraceInput {
   runHandle?: string;
   guardrail?: GuardrailRecord;
   llmTurns?: readonly LlmTurnRecord[];
+  toolCalls?: readonly ToolCallRecord[];
   command?: { name: string; ms: number; startedAt: number };
   windowStart?: number;
   windowEnd?: number;
@@ -36,6 +38,29 @@ export interface PersistReplyTraceInput {
   /** Warm continuation: when this turn's generation was dispatched (ms epoch). */
   dispatchedAt?: number;
   now?: () => Date;
+}
+
+function spanEnd(call: ToolCallRecord): number {
+  return call.startedAt + call.ms;
+}
+
+function overlaps(a: ToolCallRecord, b: ToolCallRecord): boolean {
+  return a.startedAt < spanEnd(b) && b.startedAt < spanEnd(a);
+}
+
+function mergeToolCalls(
+  coreCalls: readonly ToolCallRecord[],
+  runnerCalls: readonly ToolCallRecord[] | undefined,
+): ToolCallRecord[] {
+  if (!runnerCalls || runnerCalls.length === 0) return [...coreCalls];
+  const merged = [...coreCalls];
+  for (const runnerCall of runnerCalls) {
+    if (coreCalls.some((coreCall) => overlaps(coreCall, runnerCall))) {
+      continue;
+    }
+    merged.push(runnerCall);
+  }
+  return merged;
 }
 
 /**
@@ -49,9 +74,10 @@ export async function persistReplyTrace(
   input: PersistReplyTraceInput,
 ): Promise<void> {
   try {
-    const toolCalls = input.runHandle
+    const coreToolCalls = input.runHandle
       ? input.replyTrace.drain(input.runHandle)
       : [];
+    const toolCalls = mergeToolCalls(coreToolCalls, input.toolCalls);
     const assembleInput = {
       ...(input.windowStart !== undefined
         ? { windowStart: input.windowStart }

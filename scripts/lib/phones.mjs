@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 // Test phone numbers for the Boondi regression harness.
 //
-// INVARIANT: every number here MUST be in GANTRY_TEST_OPERATOR_PHONE
-// set during a test run. With that set, each number is:
+// INVARIANT: GANTRY_TEST_OPERATOR_PHONE must contain at least one real operator
+// number during a test run. With that set, each explicit operator number and any
+// 000-prefixed fake number is:
 //   • outbound-scoped — dry-run sends only to listed numbers. Replies are still
-//     PERSISTED so the dashboard shows both sides. A number NOT in the list is
-//     never sent to.
+//     PERSISTED so the dashboard shows both sides. A non-000 number NOT in the
+//     list is never sent to.
 //   • allowed to run /new (session reset between scenarios / lanes).
 //   • never a real customer — so these are deliberately FAKE numbers, NOT the
 //     operator's own WhatsApp (which would actually receive the test replies).
@@ -93,6 +94,10 @@ export function configuredOperatorPhones() {
   return phonesFromEnvValue(readRuntimeEnvValue('GANTRY_TEST_OPERATOR_PHONE'));
 }
 
+export function isDevTestPhone(phone) {
+  return normalizePhoneToken(phone)?.startsWith('000') === true;
+}
+
 // The static fake-number union expected for automated runs.
 export const ALL_TEST_PHONES = [...scenarioPhones(), ...ISOLATION_PHONES];
 export const OPERATOR_LIST = [
@@ -100,5 +105,8 @@ export const OPERATOR_LIST = [
 ].join(',');
 
 export function isAllowedTestPhone(phone) {
-  return configuredOperatorPhones().has(normalizePhoneToken(phone));
+  const configured = configuredOperatorPhones();
+  if (configured.size === 0) return false;
+  const normalized = normalizePhoneToken(phone);
+  return configured.has(normalized) || isDevTestPhone(normalized);
 }

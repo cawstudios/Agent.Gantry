@@ -206,21 +206,24 @@ describe('IpcConnection', () => {
     expect(onFrame).not.toHaveBeenCalled();
   });
 
-  // 7. Malformed inbound frame → onError + destroy('protocol_error')
-  it('fires onError and closes with protocol_error on a malformed frame body', () => {
-    const { sock, onError, onClose, conn } = makeConn();
-    // valid length-prefix wrapping invalid JSON
+  // 7. Malformed full frame → onError, but connection survives. The
+  // length-prefix decoder has already recovered the next frame boundary, so a
+  // bad JSON body must not tear down unrelated in-flight work.
+  it('reports a malformed frame body and continues with the next valid frame', () => {
+    const { sock, onFrame, onError, onClose, conn } = makeConn();
+    // Valid length-prefix wrapping invalid JSON, followed by a valid request.
     const badBody = Buffer.from('{not json', 'utf8');
-    sock.feed(encodeFrame(badBody));
+    sock.feed(Buffer.concat([encodeFrame(badBody), makeFramed(REQ_FRAME)]));
 
     expect(onError).toHaveBeenCalledOnce();
-    expect(onClose).toHaveBeenCalledOnce();
-    expect(onClose.mock.calls[0][0]).toBe('protocol_error');
-    expect(conn.closed).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(conn.closed).toBe(false);
+    expect(onFrame).toHaveBeenCalledOnce();
+    expect(onFrame.mock.calls[0][0]).toEqual(REQ_FRAME);
 
-    // subsequent send is a no-op
+    // Subsequent outbound sends still work because the connection survived.
     conn.send(REQ_FRAME);
-    expect(sock.outbound).toHaveLength(0);
+    expect(sock.outbound).toHaveLength(1);
   });
 
   // 8. Oversized inbound → destroy('frame_too_large')
@@ -233,6 +236,25 @@ describe('IpcConnection', () => {
 
     expect(onClose).toHaveBeenCalledOnce();
     expect(onClose.mock.calls[0][0]).toBe('frame_too_large');
+  });
+
+  it('destroys with frame_timeout when a declared frame never completes', () => {
+    vi.useFakeTimers();
+    try {
+      const { sock, onClose } = makeConn({ partialFrameTimeoutMs: 25 });
+      const header = Buffer.allocUnsafe(4);
+      header.writeUInt32BE(10, 0);
+
+      sock.feed(Buffer.concat([header, Buffer.from('ab')]));
+      expect(onClose).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(25);
+
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(onClose.mock.calls[0][0]).toBe('frame_timeout');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // 9. bindScope: set once; throws on second call; scope getter works

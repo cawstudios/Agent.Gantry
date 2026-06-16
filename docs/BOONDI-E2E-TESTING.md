@@ -51,7 +51,7 @@ Guardrail (pre-agent, in core)                agents/boondi_support/guardrails/g
    │  unresolved allowed turns fall through to Boondi with inline scope guardrail
    ▼
 Agent run (Claude Agent SDK)                  prompts: SOUL.md + CLAUDE.md (synced at BOOT)
-   │  mcp_call_tool → file-IPC → host proxy (X-Caller-Identity HMAC)
+   │  mcp_call_tool → socket IPC → host proxy (X-Caller-Identity HMAC)
    ├──► shopify-api  :8081   (packages/mcp-shopify)
    └──► boondi-crm   :8082   (packages/mcp-crm — get_open_records only)
    ▼
@@ -99,14 +99,15 @@ deduped). It does **not** gate inbound — any number's message gets processed.
 It gates two things:
 
 1. which numbers outbound may actually be sent to under dry-run (table above);
-2. the **session-command allowance** — only listed numbers may run slash
-   commands (`/new`, `/digest-session`, `/extract-leads-queries`, …).
+2. the **session-command allowance** — configured operator numbers and any
+   `000*` fake number may run slash commands (`/new`, `/digest-session`,
+   `/extract-leads-queries`, …).
 
-Current list: `919654405340` (operator's REAL WhatsApp — replies to it
-actually deliver) plus fake pools `000000001–000000059` and
-`000000901–000000906`. Special fakes: `000000050` is the seeded "returning
-customer" persona; `000000901–906` are the isolation-suite pool;
-`000000001–003` are fallback lane phones (`scripts/lib/phones.mjs`).
+Set this to the real operator number only, for example `919654405340`. Fake
+numbers starting with `000` are inferred by the runtime and do not need to be
+listed in `.env`. Special fakes: `000000050` is the seeded "returning customer"
+persona; `000000901–906` are the isolation-suite pool; `000000001–003` are
+fallback lane phones (`scripts/lib/phones.mjs`).
 
 ### `GANTRY_TEST_CALLER_IDENTITY_PHONE=918097288633` (.env ~line 209)
 
@@ -250,9 +251,9 @@ node -e 'import("./scripts/lib/webhook.mjs").then(async m => {
 ```
 
 It builds the minimal valid payload, signs the exact bytes, and **refuses
-`from` numbers not in `GANTRY_TEST_OPERATOR_PHONE`** (safety convention — the
-runtime itself would process any number but could never reply to an unlisted
-one under dry-run, which just wastes an LLM turn).
+non-operator, non-`000*` `from` numbers** (safety convention — the runtime itself
+would process any number but could never reply to an unlisted real number under
+dry-run, which just wastes an LLM turn).
 
 ### Raw curl equivalent (tested verbatim)
 
@@ -383,7 +384,7 @@ type-strippable, no enums).
   messages spawn the runner; with `GANTRY_CHILD_RUNNER_FROM_SOURCE=1` (set in
   dev) the child runs from TS source, otherwise from `dist/` — runner-side
   code changes need `npm run build` in that case.
-- Shopify/CRM tools go through `mcp_call_tool` → file-IPC → core's proxy,
+- Shopify/CRM tools go through `mcp_call_tool` → socket IPC → core's proxy,
   which signs `X-Caller-Identity` (HMAC, `MCP_IDENTITY_SECRET`, phone from the
   conversation JID, test override §2 applies) and enforces
   `allowed_tool_patterns` (settings.yaml `mcp_servers` block).
@@ -412,7 +413,8 @@ then writes a digest row: `gantry.agent_session_digests` with
 **Don't wait for timers in tests** — drive it with slash commands. A command
 is just a normal signed webhook message whose text IS the command (e.g.
 `sendWebhook({ text: '/new', from: '000000905' })`), and it works **only from
-numbers in `GANTRY_TEST_OPERATOR_PHONE`** (the session-command allowance).
+configured operator numbers or `000*` fake numbers** (the session-command
+allowance).
 These are the commands the Boondi workflow uses:
 
 | Command                  | What it does                                                                                                                                                                                                                                                                                                                                                                                             | Reply to expect                                                                                                                                         |
@@ -547,10 +549,9 @@ Location depends on launch: setup script → `$GANTRY_DEV_LOG` (default
    that is the LLM's blanket fallback for a FAILED TOOL CALL, not a real
    answer. Diagnose at the tool layer; two known causes that look identical:
 
-- **no `flow:mcp.request` in the log + ~70 s turn** → IPC watcher never
-  started (stale `~/gantry/data/ipc/.lock` from PID recycling; fixed in
-  `apps/core/src/runtime/ipc-filesystem.ts`, but the symptom signature is
-  worth knowing);
+- **no `flow:mcp.request` in the log + hung tool turn** → the runner did not
+  connect to the socket IPC server. Check `flow:warm_pool`, `flow:mcp.request`,
+  and socket bind logs before diagnosing the downstream tool.
 - **fast turn + mcp.request present + tool result `isError NOT_FOUND`** →
   Shopify Admin API 404: the app lost authorization on the shop
   (re-authorize in Shopify; token grant can still 200 while graphql.json
@@ -571,7 +572,7 @@ restart core. Runner-side TS changes need `npm run build` unless
 
 1. **Preflight** (§3 one-liner): 4710/8081/8082/3000 up; confirm
    `GANTRY_OUTBOUND_DRYRUN=1` + operator list on the live core process (§2).
-2. **Pick a fake listed number** (e.g. from `000000901–906`; avoid
+2. **Pick a `000*` fake number** (e.g. from `000000901–906`; avoid
    `000000050` unless testing the returning persona). Optionally reset it
    (§8) for a clean run — otherwise prior context is part of the scenario.
 3. **Send each customer turn** via `scripts/lib/webhook.mjs` (§4); after each

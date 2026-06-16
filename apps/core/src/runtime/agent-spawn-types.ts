@@ -21,6 +21,11 @@ import type { RuntimeEventPublishInput } from '../domain/events/events.js';
 import type { AgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter.js';
 import type { AgentExecutionAdapterRegistry } from '../application/agent-execution/agent-execution-adapter-registry.js';
 import type { SemanticCapabilityDefinition } from '../shared/semantic-capabilities.js';
+import type {
+  SharedBootRecipe,
+  WarmPoolKey,
+  WarmWorkerHandle,
+} from '../application/agent-execution/warm-pool-capable.js';
 
 export interface AgentInput {
   prompt: string;
@@ -77,6 +82,18 @@ export interface AgentOutputLlmTurn {
   output?: string;
 }
 
+export interface AgentOutputToolCall {
+  server: string;
+  tool: string;
+  ms: number;
+  ok: boolean;
+  startedAt: number;
+  requestBytes: number;
+  responseBytes: number;
+  request?: unknown;
+  response?: unknown;
+}
+
 export interface AgentOutput {
   status: 'success' | 'error';
   result: string | null;
@@ -91,8 +108,12 @@ export interface AgentOutput {
   runtimeEvents?: AgentOutputRuntimeEvent[];
   /** Per-turn LLM timing + usage for the latency trace (best-effort). */
   turns?: AgentOutputLlmTurn[];
+  /** SDK/direct-MCP tool spans for the latency trace (best-effort). */
+  toolCalls?: AgentOutputToolCall[];
   /** Run-level process-startup marks for the latency timeline (best-effort). */
   runnerStartup?: { queryDispatchedAt?: number; firstSdkMessageAt: number };
+  /** First reply was served from an already-started generic warm worker. */
+  warmBound?: boolean;
   /** Warm continuation: when this reply's input was delivered to the model. */
   dispatchedAt?: number;
 }
@@ -108,6 +129,25 @@ export interface AgentOutputRuntimeEvent {
   actor?: string;
   responseMode?: 'sse' | 'webhook' | 'both' | 'none';
   payload: unknown;
+}
+
+export interface PooledWarmWorkerRun {
+  handle: WarmWorkerHandle;
+  release: () => Promise<void>;
+}
+
+export interface AgentProcessMetadata {
+  pooledWarmWorker?: PooledWarmWorkerRun;
+}
+
+export interface WarmPoolRuntime {
+  acquire(key: WarmPoolKey): WarmWorkerHandle | null;
+  prewarm?(recipe: SharedBootRecipe, count: number): Promise<void>;
+  healthCheck?(key?: WarmPoolKey): Promise<void>;
+  evictIdle?(ttlMs: number): Promise<void>;
+  release(handle: WarmWorkerHandle): Promise<void>;
+  reapOrphans?(): Promise<number>;
+  shutdown?(): Promise<void>;
 }
 
 export interface RunAgentOptions {
@@ -132,6 +172,8 @@ export interface RunAgentOptions {
   ) => Promise<unknown> | unknown;
   executionAdapter?: AgentExecutionAdapter;
   executionAdapters?: AgentExecutionAdapterRegistry;
+  warmPool?: WarmPoolRuntime;
+  warmPoolPrewarmOnly?: boolean;
 }
 
 export interface HostRuntimeContext {
@@ -153,7 +195,11 @@ export interface RunnerProcessSpec {
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv | undefined;
-  onProcess: (proc: ChildProcess, runHandle: string) => void;
+  onProcess: (
+    proc: ChildProcess,
+    runHandle: string,
+    metadata?: AgentProcessMetadata,
+  ) => void;
   onOutput?: (output: AgentOutput) => Promise<void>;
   options?: RunAgentOptions;
   runnerLabel: string;
@@ -161,4 +207,9 @@ export interface RunnerProcessSpec {
   startTime: number;
   logsDir: string;
   runtimeDetails: string[];
+  boundProcess?: ChildProcess;
+  inputDelivery?: 'stdin' | 'external';
+  registeredRunHandle?: string;
+  processMetadata?: AgentProcessMetadata;
+  resolveOnTerminalOutput?: boolean;
 }

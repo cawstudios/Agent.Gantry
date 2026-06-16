@@ -1,16 +1,16 @@
 import { ChildProcess } from 'child_process';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 import {
   DATA_DIR,
-  IPC_TRANSPORT,
   ipcSocketPathFor,
   PERMISSION_APPROVAL_TIMEOUT_MS,
   TIMEZONE,
   getRuntimeSettingsForConfig,
   getEffectiveModelConfig,
+  getRuntimeWarmPoolConfig,
 } from '../config/index.js';
 import { runtimeEnvValueDynamic } from '../config/env/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
@@ -38,7 +38,6 @@ import {
   revokeBrowserIpcAuthorization,
   revokeIpcResponseSigningKey,
 } from './ipc-auth.js';
-import { getContinuationInputDir } from './continuation-input.js';
 import {
   PromptProfileService,
   promptProfileAgentIdForFolder,
@@ -48,6 +47,7 @@ import { applyAgentEgressNoProxyEnv } from '../shared/no-proxy.js';
 import { closeEgressGateway, ensureEgressGateway } from './egress-gateway.js';
 import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
 import {
+  AgentProcessMetadata,
   AgentInput,
   AgentOutput,
   RunAgentOptions,
@@ -68,8 +68,34 @@ import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 import { formatGeneratedRuntimePathPermissionError } from './generated-runtime-path-error.js';
 import { resolveAgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter-registry.js';
 import { writeRunnerMcpConfigFile } from './agent-spawn-mcp-config.js';
+import {
+  hasWarmPoolCapability,
+  poolKeyOf,
+  type SharedBootRecipe,
+} from '../application/agent-execution/warm-pool-capable.js';
+import { isPoolEligible } from './warm-pool-eligibility.js';
+
+function isSdkNativeMcpCapability(
+  capability: MaterializedMcpCapability,
+): boolean {
+  return capability.config.type !== 'http' && capability.config.type !== 'sse';
+}
+
+function isWarmMcpReadinessError(output: AgentOutput): boolean {
+  return (
+    output.status === 'error' &&
+    typeof output.error === 'string' &&
+    output.error.includes('Required Gantry MCP server')
+  );
+}
+
+function warmPoolKeyFingerprint(key: string): string {
+  return createHash('sha256').update(key).digest('hex').slice(0, 12);
+}
+
 type RunnerAgentInput = AgentInput & {
   modelCredentialEnv?: Record<string, string>;
+  warmGenericBoot?: boolean;
 };
 
 const PROTECTED_FILESYSTEM_PATHS_ENV = 'GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON';
@@ -242,10 +268,18 @@ function cleanupRunnerMcpConfigFile(configPath: string | undefined): void {
   }
 }
 
+function promptVersionHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 export async function spawnAgent(
   group: ConversationRoute,
   input: AgentInput,
-  onProcess: (proc: ChildProcess, runHandle: string) => void,
+  onProcess: (
+    proc: ChildProcess,
+    runHandle: string,
+    metadata?: AgentProcessMetadata,
+  ) => void,
   onOutput?: (output: AgentOutput) => Promise<void>,
   options?: RunAgentOptions,
 ): Promise<AgentOutput> {
@@ -456,14 +490,26 @@ export async function spawnAgent(
     appId: input.appId || DEFAULT_RUNNER_APP_ID,
     agentId: input.agentId,
   });
+  let deferRunnerResourceCleanup = false;
+  let runnerResourcesCleaned = false;
+  const cleanupRunnerResources = async (): Promise<void> => {
+    if (runnerResourcesCleaned) return;
+    runnerResourcesCleaned = true;
+    cleanupRunnerMcpConfigFile(mcpConfigPath);
+    if (egressGateway) {
+      await closeEgressGateway(egressGateway);
+    }
+    await hostCredentials.revoke?.();
+    preparedExecution.cleanup();
+    revokeIpcResponseSigningKey(
+      ipcAuth.responseKeyId,
+      group.folder,
+      input.threadId,
+    );
+  };
   try {
     const command = process.execPath;
     const args = preparedExecution.runnerArgs;
-    const ipcInputDir = getContinuationInputDir(
-      group.folder,
-      input.chatJid,
-      input.threadId,
-    );
     const runnerAppId = input.appId || DEFAULT_RUNNER_APP_ID;
     const mcpServerPath = path.join(
       hostRuntime.runnerDistDir,
@@ -599,9 +645,7 @@ export async function spawnAgent(
         'extra',
       ),
       GANTRY_IPC_DIR: hostRuntime.groupIpcDir,
-      GANTRY_IPC_INPUT_DIR: ipcInputDir,
       GANTRY_IPC_AUTH_TOKEN: ipcAuth.authToken,
-      GANTRY_IPC_TRANSPORT: IPC_TRANSPORT,
       GANTRY_IPC_SOCKET_PATH: ipcSocketPathFor(path.join(DATA_DIR, 'ipc')),
       GANTRY_CHAT_JID: input.chatJid,
       ...(input.jobId ? { GANTRY_JOB_ID: input.jobId } : {}),
@@ -645,7 +689,6 @@ export async function spawnAgent(
     const runtimeDetails = [
       `groupDir=${hostRuntime.groupDir}`,
       'globalDir=(none)',
-      `ipcInput=${ipcInputDir}`,
       `broker=${hostCredentials.brokerProfile}`,
       `brokerApplied=${hostCredentials.brokerApplied}`,
       `mcpServers=${allMcpCapabilitiesForRunner.map((capability) => capability.name).join(',') || '(none)'}`,
@@ -744,6 +787,445 @@ export async function spawnAgent(
         threadId: input.threadId,
       });
     }
+    const warmPoolConfig = getRuntimeWarmPoolConfig();
+    const warmPool = options?.warmPool;
+    if (
+      warmPoolConfig.enabled &&
+      warmPool &&
+      isPoolEligible(input) &&
+      hasWarmPoolCapability(executionAdapter)
+    ) {
+      const key = poolKeyOf({
+        providerId: preparedExecution.providerId,
+        appId: runnerAppId,
+        agentId: input.agentId || compileAgentId,
+        persona: compilePersona,
+        model: effectiveModel,
+        resumeSessionId: input.sessionId,
+        toolSurface: {
+          gantryMcp: input.gantryMcpToolSurface,
+          native: input.nativeToolSurface,
+        },
+        mcpSet: attachedMcpSourceIds,
+        thinking: group.agentConfig?.thinking,
+        systemPromptVersion: promptVersionHash(compiledSystemPrompt),
+      });
+      const createWarmPrewarmRecipe = async (): Promise<SharedBootRecipe> => {
+        // HTTP/SSE MCP servers are exposed to agents through Gantry's
+        // mcp_call_tool facade, which signs caller identity from the late-bound
+        // chat JID. Keep generic SDK boot config limited to SDK-native servers.
+        const warmMcpCapabilitiesForRunner = allMcpCapabilitiesForRunner.filter(
+          isSdkNativeMcpCapability,
+        );
+        const warmProcessName = `gantry-warm-${safeName}-${currentTimeMs()}-${randomUUID().slice(0, 8)}`;
+        const warmBoundIdentityFile = path.join(
+          hostRuntime.groupIpcDir,
+          'warm-pool',
+          warmProcessName,
+          'bound-identity.json',
+        );
+        const warmRunnerInput: RunnerAgentInput = {
+          ...runnerInput,
+          prompt: '',
+          chatJid: '',
+          threadId: undefined,
+          memoryUserId: undefined,
+          sessionId: input.sessionId,
+          memoryContextBlock: '',
+          guardrailSystemPromptAppend: undefined,
+          warmGenericBoot: true,
+        };
+        let warmHostCredentials:
+          | Awaited<ReturnType<typeof getHostRuntimeCredentialEnv>>
+          | undefined;
+        let warmPreparedExecution:
+          | Awaited<ReturnType<typeof executionAdapter.prepare>>
+          | undefined;
+        let warmMcpConfigPath: string | undefined;
+        let warmEgressGateway:
+          | Awaited<ReturnType<typeof ensureEgressGateway>>
+          | undefined;
+        const warmIpcAuth = createIpcAuthEnvelope(group.folder, undefined, {
+          appId: runnerAppId,
+          agentId: input.agentId,
+        });
+        let cleaned = false;
+        const cleanup = async (): Promise<void> => {
+          if (cleaned) return;
+          cleaned = true;
+          cleanupRunnerMcpConfigFile(warmMcpConfigPath);
+          if (warmEgressGateway) {
+            await closeEgressGateway(warmEgressGateway);
+          }
+          await warmHostCredentials?.revoke?.();
+          warmPreparedExecution?.cleanup();
+          revokeIpcResponseSigningKey(
+            warmIpcAuth.responseKeyId,
+            group.folder,
+            undefined,
+          );
+        };
+        try {
+          warmHostCredentials = await getHostRuntimeCredentialEnv(
+            agentIdentifier,
+            options?.credentialBroker,
+            {
+              purpose: 'model_runtime',
+              runContext: warmRunnerInput,
+              modelRouteId: effectiveModelEntry?.modelRoute.id,
+            },
+          );
+          warmPreparedExecution = await executionAdapter.prepare({
+            group,
+            input: warmRunnerInput,
+            hostRuntime,
+            groupDir,
+            effectiveModel,
+            effectiveModelEntry,
+            modelCredentialProjection: {
+              env: warmHostCredentials.env,
+              credentialProviders: warmHostCredentials.credentialProviders,
+              brokerProfile: warmHostCredentials.brokerProfile,
+              brokerApplied: warmHostCredentials.brokerApplied,
+              proxy: warmHostCredentials.proxy,
+            },
+            browserIpcEnabled,
+            packageRootFromRunner: (runnerPath) =>
+              resolvePackageRootFromSourceDir(path.dirname(runnerPath)),
+            options,
+          });
+          const warmUpstreamProxyUrl =
+            warmHostCredentials.proxy?.https || warmHostCredentials.proxy?.http;
+          warmEgressGateway = await ensureEgressGateway({
+            key: `${runnerAppId}:${input.agentId || group.folder}:${warmProcessName}`,
+            settings: getRuntimeSettingsForConfig().permissions.egress,
+            principal: {
+              appId: runnerAppId,
+              ...(input.agentId ? { agentId: input.agentId } : {}),
+            },
+            ...(warmUpstreamProxyUrl
+              ? {
+                  upstreamProxy: {
+                    url: warmUpstreamProxyUrl,
+                    provider: warmHostCredentials.brokerProfile,
+                  },
+                }
+              : {}),
+            ...(options?.publishRuntimeEvent
+              ? { publishRuntimeEvent: options.publishRuntimeEvent }
+              : {}),
+          });
+          const warmRunnerInputPatch =
+            warmPreparedExecution.runnerInputPatch ?? {};
+          warmRunnerInputPatch.modelCredentialEnv ??= {};
+          warmRunnerInputPatch.modelCredentialEnv.HTTP_PROXY =
+            warmEgressGateway.proxyUrl;
+          warmRunnerInputPatch.modelCredentialEnv.HTTPS_PROXY =
+            warmEgressGateway.proxyUrl;
+          warmRunnerInputPatch.modelCredentialEnv.http_proxy =
+            warmEgressGateway.proxyUrl;
+          warmRunnerInputPatch.modelCredentialEnv.https_proxy =
+            warmEgressGateway.proxyUrl;
+          warmRunnerInputPatch.modelCredentialEnv.NODE_USE_ENV_PROXY = '1';
+          warmRunnerInput.modelCredentialEnv =
+            warmRunnerInputPatch.modelCredentialEnv;
+          if (warmRunnerInputPatch.semanticCapabilities) {
+            warmRunnerInput.semanticCapabilities =
+              warmRunnerInputPatch.semanticCapabilities;
+          }
+          const warmEnv: NodeJS.ProcessEnv = {
+            ...env,
+            ...pickPreparedExecutionEnv(warmPreparedExecution.env),
+            GANTRY_AGENT_RUN_HANDLE: warmProcessName,
+            GANTRY_BOUND_IDENTITY_FILE: warmBoundIdentityFile,
+            GANTRY_IPC_AUTH_TOKEN: warmIpcAuth.authToken,
+            GANTRY_CHAT_JID: '',
+            GANTRY_THREAD_ID: '',
+            GANTRY_MEMORY_USER_ID: '',
+            GANTRY_MEMORY_IPC_AUTH_TOKEN: computeMemoryIpcAuthToken(
+              group.folder,
+              {
+                defaultScope: input.memoryDefaultScope || 'group',
+                allowedActions: memoryIpcAllowedActions,
+                reviewerIsControlApprover:
+                  input.memoryReviewerIsControlApprover,
+              },
+            ),
+            GANTRY_IPC_RESPONSE_VERIFY_KEY: warmIpcAuth.responseVerifyKey,
+            GANTRY_IPC_RESPONSE_KEY_ID: warmIpcAuth.responseKeyId,
+            GANTRY_EGRESS_PROXY_URL: warmEgressGateway.proxyUrl,
+            GANTRY_WARM_POOL_BOOT: 'generic',
+          };
+          if (browserIpcEnabled) {
+            warmEnv.GANTRY_BROWSER_IPC_AUTH_TOKEN = computeBrowserIpcAuthToken(
+              group.folder,
+              '',
+            );
+          } else {
+            delete warmEnv.GANTRY_BROWSER_IPC_AUTH_TOKEN;
+          }
+          delete warmEnv.GANTRY_MCP_CONFIG_FILE;
+          delete warmEnv.GANTRY_MCP_ALLOWED_TOOLS_JSON;
+          delete warmEnv.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON;
+          warmMcpConfigPath =
+            warmMcpCapabilitiesForRunner.length > 0
+              ? writeRunnerMcpConfigFile(
+                  hostRuntime.groupIpcDir,
+                  warmMcpCapabilitiesForRunner,
+                )
+              : undefined;
+          if (warmMcpConfigPath) {
+            warmEnv.GANTRY_MCP_CONFIG_FILE = warmMcpConfigPath;
+            warmEnv.GANTRY_MCP_ALLOWED_TOOLS_JSON = JSON.stringify(
+              warmMcpCapabilitiesForRunner.flatMap(
+                (capability) => capability.allowedToolNames,
+              ),
+            );
+            warmEnv.GANTRY_MCP_ALWAYS_ALLOWED_TOOLS_JSON = JSON.stringify(
+              warmMcpCapabilitiesForRunner.flatMap(
+                (capability) => capability.autoApproveToolNames,
+              ),
+            );
+          }
+          const warmProtectedFilesystemDenyReadPaths = [
+            ...(warmPreparedExecution.protectedFilesystemDenyReadPaths ??
+              warmPreparedExecution.protectedFilesystemPaths),
+            ...(warmMcpConfigPath ? [warmMcpConfigPath] : []),
+          ];
+          const warmProtectedFilesystemDenyWritePaths = [
+            ...(warmPreparedExecution.protectedFilesystemDenyWritePaths ??
+              warmPreparedExecution.protectedFilesystemPaths),
+            ...localCliCredentialPaths,
+            ...(warmMcpConfigPath ? [warmMcpConfigPath] : []),
+          ];
+          warmEnv[PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV] = JSON.stringify(
+            warmProtectedFilesystemDenyReadPaths,
+          );
+          warmEnv[PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV] = JSON.stringify(
+            warmProtectedFilesystemDenyWritePaths,
+          );
+          warmEnv[PROTECTED_FILESYSTEM_PATHS_ENV] = JSON.stringify(
+            warmProtectedFilesystemDenyWritePaths,
+          );
+          applyAgentEgressNoProxyEnv(warmEnv);
+          const warmRunnerInputRecord: Record<string, unknown> = {
+            ...warmRunnerInput,
+          };
+          return {
+            providerId: warmPreparedExecution.providerId,
+            appId: runnerAppId,
+            agentId: input.agentId || compileAgentId,
+            persona: compilePersona,
+            model: effectiveModel,
+            resumeSessionId: input.sessionId,
+            toolSurface: {
+              gantryMcp: input.gantryMcpToolSurface,
+              native: input.nativeToolSurface,
+            },
+            mcpSet: attachedMcpSourceIds,
+            thinking: group.agentConfig?.thinking,
+            systemPromptVersion: promptVersionHash(compiledSystemPrompt),
+            key,
+            cwd: hostRuntime.groupDir,
+            compiledSystemPrompt,
+            runnerCommand: command,
+            runnerArgs: warmPreparedExecution.runnerArgs,
+            runnerEnv: warmEnv,
+            runnerInput: warmRunnerInputRecord,
+            runnerProcessName: warmProcessName,
+            cleanup,
+            refresh: createWarmPrewarmRecipe,
+          };
+        } catch (err) {
+          await cleanup();
+          throw err;
+        }
+      };
+      const runWarmPrewarm = async (): Promise<void> => {
+        if (!warmPool.prewarm) return;
+        const recipe = await createWarmPrewarmRecipe();
+        try {
+          logger.info(
+            {
+              group: group.name,
+              chatJid: input.chatJid,
+              poolKey: warmPoolKeyFingerprint(key),
+              size: warmPoolConfig.size,
+            },
+            'Warm pool prewarm started',
+          );
+          await warmPool.prewarm(recipe, warmPoolConfig.size);
+          logger.info(
+            {
+              group: group.name,
+              chatJid: input.chatJid,
+              poolKey: warmPoolKeyFingerprint(key),
+              size: warmPoolConfig.size,
+            },
+            'Warm pool prewarm ready',
+          );
+        } catch (err) {
+          await recipe.cleanup?.();
+          throw err;
+        }
+      };
+      if (options?.warmPoolPrewarmOnly) {
+        await runWarmPrewarm();
+        return {
+          status: 'success',
+          result: null,
+        };
+      }
+      await warmPool.healthCheck?.(key);
+      let handle = warmPool.acquire(key);
+      if (!handle && warmPool.prewarm) {
+        logger.info(
+          {
+            group: group.name,
+            chatJid: input.chatJid,
+            poolKey: warmPoolKeyFingerprint(key),
+          },
+          'Warm pool empty; prewarming before run',
+        );
+        await runWarmPrewarm();
+        handle = warmPool.acquire(key);
+      }
+      if (handle) {
+        try {
+          logger.info(
+            {
+              group: group.name,
+              chatJid: input.chatJid,
+              workerId: handle.id,
+              poolKey: warmPoolKeyFingerprint(key),
+            },
+            'Warm worker acquired; binding to conversation',
+          );
+          const bound = await executionAdapter.bind(handle, {
+            groupFolder: group.folder,
+            appId: runnerAppId,
+            agentId: input.agentId || compileAgentId,
+            chatJid: input.chatJid,
+            ...(input.threadId ? { threadId: input.threadId } : {}),
+            ...(input.memoryUserId ? { memoryUserId: input.memoryUserId } : {}),
+            ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+            ...(input.memoryContextBlock
+              ? { memoryBlock: input.memoryContextBlock }
+              : {}),
+            firstMessage: input.prompt,
+            ...(input.guardrailSystemPromptAppend
+              ? { guardrailPreface: input.guardrailSystemPromptAppend }
+              : {}),
+            runHandle: processName,
+            ipcDir: handle.ipcDir ?? hostRuntime.groupIpcDir,
+            ipcAuthToken: ipcAuth.authToken,
+            ...(env.GANTRY_BROWSER_IPC_AUTH_TOKEN
+              ? { browserIpcAuthToken: env.GANTRY_BROWSER_IPC_AUTH_TOKEN }
+              : {}),
+            memoryIpcAuthToken: env.GANTRY_MEMORY_IPC_AUTH_TOKEN ?? '',
+            ipcResponseKeyId: ipcAuth.responseKeyId,
+            ipcResponseVerifyKey: ipcAuth.responseVerifyKey,
+            ...(handle.boundIdentityFile
+              ? { boundIdentityFile: handle.boundIdentityFile }
+              : {}),
+            egressPrincipal: `${runnerAppId}:${input.agentId || group.folder}:${processName}`,
+          });
+          logger.info(
+            {
+              group: group.name,
+              chatJid: input.chatJid,
+              workerId: bound.handle.id,
+              poolKey: warmPoolKeyFingerprint(key),
+            },
+            'Warm worker bound to conversation',
+          );
+          let pooledReleaseCalled = false;
+          const releasePooledWorker = async (): Promise<void> => {
+            if (pooledReleaseCalled) return;
+            pooledReleaseCalled = true;
+            try {
+              await warmPool.release(bound.handle);
+            } finally {
+              await cleanupRunnerResources();
+            }
+          };
+          let committedWarmOutput = false;
+          const warmOnOutput: typeof onOutput = onOutput
+            ? async (output) => {
+                if (!committedWarmOutput && isWarmMcpReadinessError(output)) {
+                  return;
+                }
+                committedWarmOutput = true;
+                await onOutput(output);
+              }
+            : undefined;
+          deferRunnerResourceCleanup = true;
+          const output = await executeRunnerProcess({
+            group,
+            input: runnerInput,
+            command,
+            args,
+            env,
+            onProcess,
+            onOutput: warmOnOutput,
+            options,
+            runnerLabel: 'Host agent',
+            processName,
+            startTime,
+            logsDir,
+            runtimeDetails,
+            boundProcess: bound.process,
+            inputDelivery: 'external',
+            registeredRunHandle: bound.runHandle,
+            resolveOnTerminalOutput: true,
+            processMetadata: {
+              pooledWarmWorker: {
+                handle: bound.handle,
+                release: releasePooledWorker,
+              },
+            },
+          });
+          if (!committedWarmOutput && isWarmMcpReadinessError(output)) {
+            await warmPool.release(bound.handle).catch((releaseErr) => {
+              logger.warn(
+                { err: releaseErr, workerId: bound.handle.id },
+                'Failed to recycle warm worker after MCP readiness failure',
+              );
+            });
+            deferRunnerResourceCleanup = false;
+            logger.warn(
+              {
+                workerId: bound.handle.id,
+                group: group.name,
+                error: output.error,
+              },
+              'Warm worker failed Gantry MCP readiness before output; falling back to cold spawn',
+            );
+          } else {
+            return output;
+          }
+        } catch (err) {
+          await warmPool.release(handle).catch((releaseErr) => {
+            logger.warn(
+              { err: releaseErr, workerId: handle.id },
+              'Failed to recycle warm worker after bind failure',
+            );
+          });
+          logger.warn(
+            { err, workerId: handle.id, group: group.name },
+            'Warm worker bind failed; falling back to cold spawn',
+          );
+        }
+      }
+    }
+
+    if (options?.warmPoolPrewarmOnly) {
+      return {
+        status: 'success',
+        result: null,
+      };
+    }
+
     const output = await executeRunnerProcess({
       group,
       input: runnerInput,
@@ -768,16 +1250,8 @@ export async function spawnAgent(
         threadId: input.threadId,
       });
     }
-    cleanupRunnerMcpConfigFile(mcpConfigPath);
-    if (egressGateway) {
-      await closeEgressGateway(egressGateway);
+    if (!deferRunnerResourceCleanup) {
+      await cleanupRunnerResources();
     }
-    await hostCredentials.revoke?.();
-    preparedExecution.cleanup();
-    revokeIpcResponseSigningKey(
-      ipcAuth.responseKeyId,
-      group.folder,
-      input.threadId,
-    );
   }
 }

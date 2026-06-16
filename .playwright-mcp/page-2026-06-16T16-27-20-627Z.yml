@@ -1,0 +1,46 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - img [ref=e7]
+        - generic [ref=e12]:
+          - heading "Boondi Conversations" [level=1] [ref=e13]
+          - paragraph [ref=e14]: WhatsApp support inbox · 0 chats · 0 messages
+      - generic [ref=e15]:
+        - navigation [ref=e16]:
+          - link "Conversations" [ref=e17] [cursor=pointer]:
+            - /url: /
+          - link "Leads" [ref=e18] [cursor=pointer]:
+            - /url: /leads
+        - generic [ref=e19]:
+          - switch "Turn auto-refresh off" [checked] [ref=e20] [cursor=pointer]:
+            - generic [ref=e23]: Auto-refresh
+          - generic [ref=e28]: Live
+        - generic [ref=e29]: Updated …
+        - button "Refresh" [ref=e30] [cursor=pointer]:
+          - img [ref=e31]
+          - generic [ref=e33]: Refresh
+  - generic [ref=e34]:
+    - complementary [ref=e35]:
+      - generic [ref=e36]:
+        - generic [ref=e38]:
+          - generic:
+            - img
+          - textbox "Search name or phone number" [ref=e39]
+        - generic [ref=e40]: 0 conversations
+      - list [ref=e42]:
+        - listitem [ref=e43]
+        - listitem [ref=e48]
+        - listitem [ref=e53]
+        - listitem [ref=e58]
+        - listitem [ref=e63]
+        - listitem [ref=e68]
+    - generic [ref=e73]:
+      - img [ref=e75]
+      - heading "Select a conversation" [level=2] [ref=e77]
+      - paragraph [ref=e78]: Pick a customer from the list to read the full WhatsApp thread between them and Boondi.
+    - complementary [ref=e79]:
+      - generic [ref=e80]:
+        - heading "Customer profile" [level=2] [ref=e81]
+        - paragraph [ref=e82]: What Boondi knows · read-only
+      - generic [ref=e83]: Select a conversation to see what Boondi remembers about the customer.

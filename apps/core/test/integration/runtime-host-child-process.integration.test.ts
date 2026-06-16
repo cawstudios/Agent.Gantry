@@ -72,7 +72,6 @@ process.stdin.on('end', () => {
       env: {
         groupDir: process.env.GANTRY_WORKSPACE_GROUP_DIR,
         ipcDir: process.env.GANTRY_IPC_DIR,
-        ipcInputDir: process.env.GANTRY_IPC_INPUT_DIR,
         authTokenPresent: Boolean(process.env.GANTRY_IPC_AUTH_TOKEN),
         brokerBaseUrlPresent: Boolean(process.env.ANTHROPIC_BASE_URL),
       },
@@ -145,21 +144,7 @@ describe('host child-process runtime smoke', () => {
     }));
     vi.doMock('@core/runtime/agent-spawn-layout.js', () => ({
       ensureGroupIpcLayout: (dir: string) => {
-        for (const subdir of [
-          'messages',
-          'tasks',
-          'input',
-          'permission-requests',
-          'permission-responses',
-          'user-questions',
-          'user-answers',
-          'memory-requests',
-          'memory-responses',
-          'browser-requests',
-          'browser-responses',
-        ]) {
-          fs.mkdirSync(path.join(dir, subdir), { recursive: true });
-        }
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       },
     }));
     vi.doMock('@core/application/agents/prompt-profile-service.js', () => {
@@ -258,15 +243,6 @@ describe('host child-process runtime smoke', () => {
       expect.objectContaining({
         groupDir,
         ipcDir: groupIpcDir,
-        // The continuation-input mailbox is namespaced PER CONVERSATION (chatJid)
-        // for concurrency isolation — see getContinuationInputNamespace in
-        // continuation-input.ts. For this DM (no threadId) it is
-        // `<ipc>/input/conv-<encodeURIComponent(chatJid)>`.
-        ipcInputDir: path.join(
-          groupIpcDir,
-          'input',
-          `conv-${encodeURIComponent('tg:main')}`,
-        ),
         authTokenPresent: true,
         brokerBaseUrlPresent: false,
       }),

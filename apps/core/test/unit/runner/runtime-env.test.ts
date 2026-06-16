@@ -12,7 +12,6 @@ async function loadRuntimeEnv(): Promise<
   process.env.GANTRY_WORKSPACE_GROUP_DIR = '/tmp/gantry/group';
   process.env.GANTRY_WORKSPACE_EXTRA_DIR = '/tmp/gantry/extra';
   process.env.GANTRY_IPC_DIR = '/tmp/gantry/ipc';
-  process.env.GANTRY_IPC_INPUT_DIR = '/tmp/gantry/ipc/input';
   return import('@core/adapters/llm/anthropic-claude-agent/runner/runtime-env.js');
 }
 
@@ -81,5 +80,20 @@ describe('Anthropic runner runtime env', () => {
     expect(sdkEnv.USER).toBeUndefined();
     expect(sdkEnv.USERNAME).toBeUndefined();
     expect(sdkEnv.LOGNAME).toBeUndefined();
+  });
+
+  it('does not pass Gantry IPC credentials or socket path to the SDK runner', async () => {
+    process.env.GANTRY_IPC_AUTH_TOKEN = 'ipc-token';
+    process.env.GANTRY_IPC_SOCKET_PATH = '/tmp/gantry/ipc/core.sock';
+    process.env.GANTRY_IPC_RESPONSE_VERIFY_KEY = 'verify-key';
+    process.env.GANTRY_IPC_RESPONSE_KEY_ID = 'key-id';
+    const { buildSdkEnv } = await loadRuntimeEnv();
+
+    const sdkEnv = buildSdkEnv();
+
+    expect(sdkEnv.GANTRY_IPC_AUTH_TOKEN).toBeUndefined();
+    expect(sdkEnv.GANTRY_IPC_SOCKET_PATH).toBeUndefined();
+    expect(sdkEnv.GANTRY_IPC_RESPONSE_VERIFY_KEY).toBeUndefined();
+    expect(sdkEnv.GANTRY_IPC_RESPONSE_KEY_ID).toBeUndefined();
   });
 });

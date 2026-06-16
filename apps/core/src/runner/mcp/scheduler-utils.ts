@@ -1,4 +1,4 @@
-import { threadId } from './context.js';
+import { getBoundThreadId } from './bound-identity.js';
 
 export const SCHEDULER_TARGET_SHORTCUTS = [
   'here',
@@ -22,6 +22,11 @@ export function resolveSchedulerShortcut(shortcut: SchedulerTargetShortcut): {
   threadId: string | null;
   error?: string;
 } {
+  // Read the thread id PER CALL from the bound identity (Pillar 2, F4): a
+  // generic-booted warm worker has no `GANTRY_THREAD_ID` spawn-env const, so it
+  // must resolve the BOUND customer thread; a recycled worker resolves its
+  // current bound thread. Falls back to the spawn-env const on the cold path.
+  const threadId = getBoundThreadId();
   if (shortcut === 'this_thread' || shortcut === 'this_topic') {
     if (!threadId) {
       return {

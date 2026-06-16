@@ -84,11 +84,11 @@ function makeAuth(folder: string, threadId: string | undefined) {
 
 function buildHelloPayload(
   authToken: string,
-  opts: { folder: string; threadId?: string },
+  opts: { folder: string; threadId?: string; role?: 'runner' | 'mcp' },
 ): Record<string, unknown> {
   return createSignedIpcRequestEnvelope(authToken, {
     kind: 'hello',
-    role: 'runner',
+    role: opts.role ?? 'mcp',
     runHandle: 'run-1',
     folder: opts.folder,
     context: { threadId: opts.threadId ?? null },
@@ -451,8 +451,8 @@ describe('ipc-socket failure injection', () => {
     await waitFor(() => handle.connectionsForFolder(FOLDER).length === 0);
 
     // Release the stuck handler AFTER the drop: writeTaskIpcResponse finds no
-    // responder (purged) so it would fall back to a file write — there is no
-    // live connection to deliver to, and crucially no crash.
+    // responder (purged), so there is no live connection to deliver to and
+    // crucially no crash.
     let releasedOk = true;
     try {
       releaseFirst?.();

@@ -1,14 +1,14 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { MemoryIpcResponse } from '@gantry/contracts';
+
 import {
-  createIpcResponseSigningKeyPair,
   verifyIpcResponsePayload,
 } from '@core/infrastructure/ipc/response-signing.js';
-import { createIpcAuthEnvelope } from '@core/runtime/ipc-auth.js';
+import {
+  createIpcAuthEnvelope,
+  getIpcResponseSigningPrivateKey,
+} from '@core/runtime/ipc-auth.js';
 import {
   clearIpcResponders,
   hasIpcResponder,
@@ -17,48 +17,34 @@ import {
 } from '@core/runtime/ipc-response-router.js';
 import { writeTaskIpcResponse } from '@core/jobs/ipc-shared.js';
 import { writeMemoryResponse } from '@core/memory/memory-ipc.js';
-import { writeUserQuestionIpcResponse } from '@core/runtime/ipc-interaction-handler.js';
+import {
+  writePermissionIpcResponse,
+  writeUserQuestionIpcResponse,
+} from '@core/runtime/ipc-interaction-handler.js';
 import { writeBrowserIpcResponse } from '@core/runtime/ipc-browser-handler.js';
-import { getIpcResponseSigningPrivateKey } from '@core/runtime/ipc-auth.js';
-import type { MemoryIpcResponse } from '@gantry/contracts';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const FOLDER = 'team';
 
-/**
- * Set up a real signing key pair registered via createIpcAuthEnvelope (which is
- * exactly what the IPC request path does before calling writeTaskIpcResponse).
- * Returns the envelope so tests can access the public key for verification.
- */
 function setupSigningKey(folder = FOLDER, threadId?: string) {
-  const envelope = createIpcAuthEnvelope(folder, threadId ?? null);
-  return envelope;
+  return createIpcAuthEnvelope(folder, threadId ?? null);
 }
 
-/**
- * Derive the task-response file path that writeTaskIpcResponse would produce,
- * given the current GANTRY_HOME (set by the global test setup to a temp dir).
- */
-function taskResponsePath(folder: string, taskId: string): string {
-  const gantryHome = process.env.GANTRY_HOME as string;
-  return path.join(
-    gantryHome,
-    'data',
-    'ipc',
-    folder,
-    'task-responses',
-    `task-${taskId}.json`,
-  );
+function expectValidSignature(
+  signed: Record<string, unknown>,
+  verifyKey: string,
+): void {
+  const { signature, ...withoutSig } = signed;
+  expect(typeof signature).toBe('string');
+  expect(
+    verifyIpcResponsePayload(
+      verifyKey,
+      withoutSig as Record<string, unknown>,
+      signature as string,
+    ),
+  ).toBe(true);
 }
 
-// ---------------------------------------------------------------------------
-// Pure router unit tests
-// ---------------------------------------------------------------------------
-
-describe('ipc-response-router — pure registry semantics', () => {
+describe('ipc-response-router registry', () => {
   afterEach(() => {
     clearIpcResponders();
   });
@@ -67,56 +53,18 @@ describe('ipc-response-router — pure registry semantics', () => {
     expect(takeIpcResponder('folder-a', 'task-x')).toBeUndefined();
   });
 
-  it('hasIpcResponder returns false when no responder is registered', () => {
-    expect(hasIpcResponder('folder-a', 'task-x')).toBe(false);
-  });
+  it('registers, replaces, consumes, isolates, and clears responders', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    registerIpcResponder('folder-a', 'task-x', first);
+    registerIpcResponder('folder-a', 'task-x', second);
 
-  it('registers a responder and hasIpcResponder returns true', () => {
-    const fn = vi.fn();
-    registerIpcResponder('folder-a', 'task-x', fn);
     expect(hasIpcResponder('folder-a', 'task-x')).toBe(true);
-  });
-
-  it('take returns the registered responder', () => {
-    const fn = vi.fn();
-    registerIpcResponder('folder-a', 'task-x', fn);
-    expect(takeIpcResponder('folder-a', 'task-x')).toBe(fn);
-  });
-
-  it('take removes the entry (single-shot)', () => {
-    const fn = vi.fn();
-    registerIpcResponder('folder-a', 'task-x', fn);
-    takeIpcResponder('folder-a', 'task-x');
-    expect(hasIpcResponder('folder-a', 'task-x')).toBe(false);
-    expect(takeIpcResponder('folder-a', 'task-x')).toBeUndefined();
-  });
-
-  it('overwrite: second register for same key replaces the first', () => {
-    const fn1 = vi.fn();
-    const fn2 = vi.fn();
-    registerIpcResponder('folder-a', 'task-x', fn1);
-    registerIpcResponder('folder-a', 'task-x', fn2);
-    expect(takeIpcResponder('folder-a', 'task-x')).toBe(fn2);
-  });
-
-  it('isolates by folder: different folders do not share entries', () => {
-    const fn = vi.fn();
-    registerIpcResponder('folder-a', 'task-x', fn);
     expect(hasIpcResponder('folder-b', 'task-x')).toBe(false);
-    expect(takeIpcResponder('folder-b', 'task-x')).toBeUndefined();
-    // original key still there
-    expect(takeIpcResponder('folder-a', 'task-x')).toBe(fn);
-  });
-
-  it('isolates by correlationId: different ids do not share entries', () => {
-    const fn = vi.fn();
-    registerIpcResponder('folder-a', 'task-x', fn);
     expect(hasIpcResponder('folder-a', 'task-y')).toBe(false);
-    expect(takeIpcResponder('folder-a', 'task-y')).toBeUndefined();
-    expect(takeIpcResponder('folder-a', 'task-x')).toBe(fn);
-  });
+    expect(takeIpcResponder('folder-a', 'task-x')).toBe(second);
+    expect(hasIpcResponder('folder-a', 'task-x')).toBe(false);
 
-  it('clearIpcResponders empties the map', () => {
     registerIpcResponder('folder-a', 'task-1', vi.fn());
     registerIpcResponder('folder-b', 'task-2', vi.fn());
     clearIpcResponders();
@@ -125,15 +73,10 @@ describe('ipc-response-router — pure registry semantics', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Integration: writeTaskIpcResponse routing behaviour
-// ---------------------------------------------------------------------------
-
-describe('writeTaskIpcResponse — router integration', () => {
+describe('socket-only IPC response writers', () => {
   let envelope: ReturnType<typeof setupSigningKey>;
 
   beforeEach(() => {
-    // Each test gets a fresh signing key registered in ipc-auth's in-memory map.
     envelope = setupSigningKey(FOLDER);
   });
 
@@ -141,49 +84,9 @@ describe('writeTaskIpcResponse — router integration', () => {
     clearIpcResponders();
   });
 
-  // 1 — Equivalence: no responder → file written, identical to baseline behaviour
-  it('writes the signed response file when no responder is registered', () => {
-    const taskId = `eq-${Date.now()}`;
-    const filePath = taskResponsePath(FOLDER, taskId);
-
-    writeTaskIpcResponse(
-      FOLDER,
-      taskId,
-      { ok: true, message: 'hello' },
-      undefined,
-      envelope.responseKeyId,
-    );
-
-    expect(fs.existsSync(filePath)).toBe(true);
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<
-      string,
-      unknown
-    >;
-
-    // Shape
-    expect(parsed.taskId).toBe(taskId);
-    expect(parsed.ok).toBe(true);
-    expect(parsed.message).toBe('hello');
-    expect(typeof parsed.timestamp).toBe('string');
-    expect(typeof parsed.signature).toBe('string');
-
-    // Cryptographic validity
-    const { signature, ...withoutSig } = parsed;
-    expect(
-      verifyIpcResponsePayload(
-        envelope.responseVerifyKey,
-        withoutSig as Record<string, unknown>,
-        signature as string,
-      ),
-    ).toBe(true);
-  });
-
-  // 2 — Socket delivery: responder receives the signed object, no file created
-  it('calls the registered responder with the signed object and creates no file', () => {
-    const taskId = `sock-${Date.now()}`;
-    const filePath = taskResponsePath(FOLDER, taskId);
+  it('delivers signed task responses to a registered socket responder', () => {
+    const taskId = 'task-1';
     const received: Record<string, unknown>[] = [];
-
     registerIpcResponder(FOLDER, `task-${taskId}`, (signed) => {
       received.push(signed);
     });
@@ -196,203 +99,52 @@ describe('writeTaskIpcResponse — router integration', () => {
       envelope.responseKeyId,
     );
 
-    // Responder called exactly once, no file
     expect(received).toHaveLength(1);
-    expect(fs.existsSync(filePath)).toBe(false);
-
-    // Shape matches the file case
-    const signed = received[0];
-    expect(signed.taskId).toBe(taskId);
-    expect(signed.ok).toBe(true);
-    expect(signed.message).toBe('socket');
-    expect(typeof signed.timestamp).toBe('string');
-    expect(typeof signed.signature).toBe('string');
-
-    // Cryptographic validity
-    const { signature, ...withoutSig } = signed;
-    expect(
-      verifyIpcResponsePayload(
-        envelope.responseVerifyKey,
-        withoutSig as Record<string, unknown>,
-        signature as string,
-      ),
-    ).toBe(true);
-
-    // Single-shot: has is false after the call
+    expect(received[0]).toMatchObject({
+      taskId,
+      ok: true,
+      message: 'socket',
+    });
+    expectValidSignature(received[0], envelope.responseVerifyKey);
     expect(hasIpcResponder(FOLDER, `task-${taskId}`)).toBe(false);
   });
 
-  // 3 — Fallback after take: second write (no re-register) writes the file
-  it('falls back to file write on a second call after the responder was consumed', () => {
-    const taskId = `fallback-${Date.now()}`;
-    const filePath = taskResponsePath(FOLDER, taskId);
-
-    registerIpcResponder(FOLDER, `task-${taskId}`, vi.fn());
-
-    // First call — routed to responder, no file
-    writeTaskIpcResponse(
-      FOLDER,
-      taskId,
-      { ok: true, message: 'first' },
-      undefined,
-      envelope.responseKeyId,
-    );
-    expect(fs.existsSync(filePath)).toBe(false);
-
-    // Second call — responder consumed; falls back to file
-    // We need a fresh signing key since the envelope may have been revoked or re-use is fine;
-    // the auth map still holds the key for this envelope.
-    writeTaskIpcResponse(
-      FOLDER,
-      taskId,
-      { ok: true, message: 'second' },
-      undefined,
-      envelope.responseKeyId,
-    );
-    expect(fs.existsSync(filePath)).toBe(true);
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<
-      string,
-      unknown
-    >;
-    expect(parsed.message).toBe('second');
+  it('throws for task responses when no socket responder is registered', () => {
+    expect(() =>
+      writeTaskIpcResponse(
+        FOLDER,
+        'task-missing',
+        { ok: true },
+        undefined,
+        envelope.responseKeyId,
+      ),
+    ).toThrow('No socket IPC responder registered for task response');
   });
 
-  // 4 — Fail-closed: no signing key → neither file nor responder
-  it('does not write a file or call the responder when no signing key is available', () => {
-    const taskId = `failclosed-${Date.now()}`;
-    const filePath = taskResponsePath(FOLDER, taskId);
+  it('keeps the task responder registered when response signing fails', () => {
     const responder = vi.fn();
+    registerIpcResponder(FOLDER, 'task-task-nosign', responder);
 
-    registerIpcResponder(FOLDER, `task-${taskId}`, responder);
-
-    // Deliberately pass a responseKeyId that has never been registered
     writeTaskIpcResponse(
       FOLDER,
-      taskId,
-      { ok: true, message: 'x' },
+      'task-nosign',
+      { ok: true },
       undefined,
       'nonexistent-key-id',
     );
 
-    expect(fs.existsSync(filePath)).toBe(false);
     expect(responder).not.toHaveBeenCalled();
+    expect(hasIpcResponder(FOLDER, 'task-task-nosign')).toBe(true);
   });
 
-  // 5 — Signed object handed to responder is byte-identical to what would be written to file
-  it('delivers byte-identical signed object to responder vs file', () => {
-    const taskIdFile = `byte-file-${Date.now()}`;
-    const taskIdSock = `byte-sock-${Date.now()}`;
-
-    // Write the file version first
-    writeTaskIpcResponse(
-      FOLDER,
-      taskIdFile,
-      { ok: true, message: 'compare' },
-      undefined,
-      envelope.responseKeyId,
-    );
-    const fileContent = JSON.parse(
-      fs.readFileSync(taskResponsePath(FOLDER, taskIdFile), 'utf-8'),
-    ) as Record<string, unknown>;
-
-    // Now capture socket version (need a fresh key since each writeTaskIpcResponse
-    // uses nowIso() for timestamp, so we only compare shape/keys, not exact values)
+  it('delivers signed memory responses to a registered socket responder', () => {
+    const requestId = 'memory-1';
     const received: Record<string, unknown>[] = [];
-    // New envelope for second call
-    const envelope2 = setupSigningKey(FOLDER);
-    registerIpcResponder(FOLDER, `task-${taskIdSock}`, (s) => received.push(s));
-    writeTaskIpcResponse(
-      FOLDER,
-      taskIdSock,
-      { ok: true, message: 'compare' },
-      undefined,
-      envelope2.responseKeyId,
-    );
-
-    const socketContent = received[0];
-
-    // Same top-level keys (order-independent)
-    expect(Object.keys(socketContent).sort()).toEqual(
-      Object.keys(fileContent).sort(),
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Integration: writeMemoryResponse routing behaviour (Pillar 1, Phase 5.3a)
-// ---------------------------------------------------------------------------
-
-describe('writeMemoryResponse — router integration', () => {
-  let envelope: ReturnType<typeof setupSigningKey>;
-
-  function memoryResponsePath(folder: string, requestId: string): string {
-    const gantryHome = process.env.GANTRY_HOME as string;
-    return path.join(
-      gantryHome,
-      'data',
-      'ipc',
-      folder,
-      'memory-responses',
-      `${requestId}.json`,
-    );
-  }
-
-  function signingKeyFor(): string | undefined {
-    return getIpcResponseSigningPrivateKey(
+    const signingKey = getIpcResponseSigningPrivateKey(
       FOLDER,
       undefined,
       envelope.responseKeyId,
     );
-  }
-
-  beforeEach(() => {
-    envelope = setupSigningKey(FOLDER);
-  });
-
-  afterEach(() => {
-    clearIpcResponders();
-  });
-
-  // 1 — Equivalence: no responder → signed file written, byte-shape as before.
-  it('writes the signed memory response file when no responder is registered', () => {
-    const requestId = `mem-eq-${Date.now()}`;
-    const filePath = memoryResponsePath(FOLDER, requestId);
-    const response: MemoryIpcResponse = {
-      ok: true,
-      requestId,
-      provider: 'postgres',
-      data: { results: [{ id: 'm-1' }] },
-    };
-
-    writeMemoryResponse(FOLDER, requestId, response, signingKeyFor());
-
-    expect(fs.existsSync(filePath)).toBe(true);
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<
-      string,
-      unknown
-    >;
-    expect(parsed.ok).toBe(true);
-    expect(parsed.requestId).toBe(requestId);
-    expect(parsed.provider).toBe('postgres');
-    expect(parsed.data).toEqual({ results: [{ id: 'm-1' }] });
-    expect(typeof parsed.signature).toBe('string');
-
-    const { signature, ...withoutSig } = parsed;
-    expect(
-      verifyIpcResponsePayload(
-        envelope.responseVerifyKey,
-        withoutSig as Record<string, unknown>,
-        signature as string,
-      ),
-    ).toBe(true);
-  });
-
-  // 2 — Socket delivery: responder receives the signed object, no file created.
-  it('calls the registered responder with the signed object and creates no file', () => {
-    const requestId = `mem-sock-${Date.now()}`;
-    const filePath = memoryResponsePath(FOLDER, requestId);
-    const received: Record<string, unknown>[] = [];
-
     registerIpcResponder(FOLDER, `memory-${requestId}`, (signed) => {
       received.push(signed);
     });
@@ -403,365 +155,157 @@ describe('writeMemoryResponse — router integration', () => {
       provider: 'postgres',
       data: { results: [] },
     };
-    writeMemoryResponse(FOLDER, requestId, response, signingKeyFor());
+    writeMemoryResponse(FOLDER, requestId, response, signingKey);
 
     expect(received).toHaveLength(1);
-    expect(fs.existsSync(filePath)).toBe(false);
+    expect(received[0]).toMatchObject(response);
+    expectValidSignature(received[0], envelope.responseVerifyKey);
+  });
 
-    const signed = received[0];
-    expect(signed.ok).toBe(true);
-    expect(signed.requestId).toBe(requestId);
-    expect(signed.provider).toBe('postgres');
-    expect(typeof signed.signature).toBe('string');
+  it('throws for memory responses when no socket responder is registered', () => {
+    const response: MemoryIpcResponse = {
+      ok: true,
+      requestId: 'memory-missing',
+      provider: 'postgres',
+    };
 
-    const { signature, ...withoutSig } = signed;
-    expect(
-      verifyIpcResponsePayload(
-        envelope.responseVerifyKey,
-        withoutSig as Record<string, unknown>,
-        signature as string,
+    expect(() =>
+      writeMemoryResponse(
+        FOLDER,
+        response.requestId,
+        response,
+        getIpcResponseSigningPrivateKey(
+          FOLDER,
+          undefined,
+          envelope.responseKeyId,
+        ),
       ),
-    ).toBe(true);
-
-    // Single-shot: consumed after delivery.
-    expect(hasIpcResponder(FOLDER, `memory-${requestId}`)).toBe(false);
+    ).toThrow('No socket IPC responder registered for memory response');
   });
 
-  // 3 — Fallback after take: second write (no re-register) writes the file.
-  it('falls back to file write on a second call after the responder was consumed', () => {
-    const requestId = `mem-fallback-${Date.now()}`;
-    const filePath = memoryResponsePath(FOLDER, requestId);
-    const response: MemoryIpcResponse = { ok: true, requestId, provider: 'p' };
-
-    registerIpcResponder(FOLDER, `memory-${requestId}`, vi.fn());
-
-    writeMemoryResponse(FOLDER, requestId, response, signingKeyFor());
-    expect(fs.existsSync(filePath)).toBe(false);
-
-    writeMemoryResponse(FOLDER, requestId, response, signingKeyFor());
-    expect(fs.existsSync(filePath)).toBe(true);
-  });
-
-  // 4 — Fail-closed: no signing key → neither file nor responder consumed.
-  it('does not write a file or call the responder when no signing key is available', () => {
-    const requestId = `mem-failclosed-${Date.now()}`;
-    const filePath = memoryResponsePath(FOLDER, requestId);
-    const responder = vi.fn();
-
-    registerIpcResponder(FOLDER, `memory-${requestId}`, responder);
-
-    // No signing key (undefined) → signIpcResponsePayload returns undefined →
-    // early return BEFORE the responder is taken (mirrors the task fail-closed
-    // path, where neither a file nor the responder is touched).
-    const response: MemoryIpcResponse = { ok: true, requestId, provider: 'p' };
-    writeMemoryResponse(FOLDER, requestId, response, undefined);
-
-    expect(fs.existsSync(filePath)).toBe(false);
-    expect(responder).not.toHaveBeenCalled();
-    // Responder still registered (not consumed) — the request will time out.
-    expect(hasIpcResponder(FOLDER, `memory-${requestId}`)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Integration: writeUserQuestionIpcResponse routing behaviour (Pillar 1, 5.3b)
-// ---------------------------------------------------------------------------
-
-describe('writeUserQuestionIpcResponse — router integration', () => {
-  let envelope: ReturnType<typeof setupSigningKey>;
-
-  function ipcBaseDir(): string {
-    return path.join(process.env.GANTRY_HOME as string, 'data', 'ipc');
-  }
-
-  function userAnswerPath(folder: string, requestId: string): string {
-    return path.join(ipcBaseDir(), folder, 'user-answers', `${requestId}.json`);
-  }
-
-  function signingKeyFor(): string | undefined {
-    return getIpcResponseSigningPrivateKey(
-      FOLDER,
-      undefined,
-      envelope.responseKeyId,
-    );
-  }
-
-  beforeEach(() => {
-    envelope = setupSigningKey(FOLDER);
-  });
-
-  afterEach(() => {
-    clearIpcResponders();
-  });
-
-  // 1 — Equivalence: no responder → signed file written, byte-shape as before.
-  it('writes the signed user-answer file when no responder is registered', () => {
-    const requestId = `userq-eq-${Date.now()}`;
-    const filePath = userAnswerPath(FOLDER, requestId);
-
-    writeUserQuestionIpcResponse(
-      ipcBaseDir(),
-      FOLDER,
-      { requestId, answers: { 'Ship now?': 'Yes' }, answeredBy: 'admin' },
-      signingKeyFor(),
-    );
-
-    expect(fs.existsSync(filePath)).toBe(true);
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<
-      string,
-      unknown
-    >;
-    expect(parsed.requestId).toBe(requestId);
-    expect(parsed.answers).toEqual({ 'Ship now?': 'Yes' });
-    expect(parsed.answeredBy).toBe('admin');
-    expect(typeof parsed.signature).toBe('string');
-
-    const { signature, ...withoutSig } = parsed;
-    expect(
-      verifyIpcResponsePayload(
-        envelope.responseVerifyKey,
-        withoutSig as Record<string, unknown>,
-        signature as string,
-      ),
-    ).toBe(true);
-  });
-
-  // 2 — Socket delivery: responder receives the signed object, no file created.
-  it('calls the registered responder with the signed object and creates no file', () => {
-    const requestId = `userq-sock-${Date.now()}`;
-    const filePath = userAnswerPath(FOLDER, requestId);
+  it('delivers signed permission responses to a registered socket responder', () => {
+    const requestId = 'perm-1';
     const received: Record<string, unknown>[] = [];
+    registerIpcResponder(FOLDER, `permission-${requestId}`, (signed) => {
+      received.push(signed);
+    });
 
+    writePermissionIpcResponse(
+      '/unused',
+      FOLDER,
+      { requestId, approved: true, mode: 'allow_once' },
+      getIpcResponseSigningPrivateKey(
+        FOLDER,
+        undefined,
+        envelope.responseKeyId,
+      ),
+    );
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      requestId,
+      approved: true,
+      mode: 'allow_once',
+    });
+    expectValidSignature(received[0], envelope.responseVerifyKey);
+  });
+
+  it('throws for permission responses when no socket responder is registered', () => {
+    expect(() =>
+      writePermissionIpcResponse(
+        '/unused',
+        FOLDER,
+        { requestId: 'perm-missing', approved: false },
+        getIpcResponseSigningPrivateKey(
+          FOLDER,
+          undefined,
+          envelope.responseKeyId,
+        ),
+      ),
+    ).toThrow('No socket IPC responder registered for permission response');
+  });
+
+  it('delivers signed user-question responses to a registered socket responder', () => {
+    const requestId = 'question-1';
+    const received: Record<string, unknown>[] = [];
     registerIpcResponder(FOLDER, `userq-${requestId}`, (signed) => {
       received.push(signed);
     });
 
     writeUserQuestionIpcResponse(
-      ipcBaseDir(),
+      '/unused',
       FOLDER,
-      { requestId, answers: { 'Deploy?': ['Staging', 'Canary'] } },
-      signingKeyFor(),
+      { requestId, answers: { Size: 'M' }, answeredBy: 'admin' },
+      getIpcResponseSigningPrivateKey(
+        FOLDER,
+        undefined,
+        envelope.responseKeyId,
+      ),
     );
 
     expect(received).toHaveLength(1);
-    expect(fs.existsSync(filePath)).toBe(false);
+    expect(received[0]).toMatchObject({
+      requestId,
+      answers: { Size: 'M' },
+      answeredBy: 'admin',
+    });
+    expectValidSignature(received[0], envelope.responseVerifyKey);
+  });
 
-    const signed = received[0];
-    expect(signed.requestId).toBe(requestId);
-    expect(signed.answers).toEqual({ 'Deploy?': ['Staging', 'Canary'] });
-    expect(typeof signed.signature).toBe('string');
-
-    const { signature, ...withoutSig } = signed;
-    expect(
-      verifyIpcResponsePayload(
-        envelope.responseVerifyKey,
-        withoutSig as Record<string, unknown>,
-        signature as string,
+  it('throws for user-question responses when no socket responder is registered', () => {
+    expect(() =>
+      writeUserQuestionIpcResponse(
+        '/unused',
+        FOLDER,
+        { requestId: 'question-missing', answers: {} },
+        getIpcResponseSigningPrivateKey(
+          FOLDER,
+          undefined,
+          envelope.responseKeyId,
+        ),
       ),
-    ).toBe(true);
-
-    // Single-shot: consumed after delivery.
-    expect(hasIpcResponder(FOLDER, `userq-${requestId}`)).toBe(false);
+    ).toThrow('No socket IPC responder registered for user-question response');
   });
 
-  // 3 — Fallback after take: second write (no re-register) writes the file.
-  it('falls back to file write on a second call after the responder was consumed', () => {
-    const requestId = `userq-fallback-${Date.now()}`;
-    const filePath = userAnswerPath(FOLDER, requestId);
-
-    registerIpcResponder(FOLDER, `userq-${requestId}`, vi.fn());
-
-    writeUserQuestionIpcResponse(
-      ipcBaseDir(),
-      FOLDER,
-      { requestId, answers: {} },
-      signingKeyFor(),
-    );
-    expect(fs.existsSync(filePath)).toBe(false);
-
-    writeUserQuestionIpcResponse(
-      ipcBaseDir(),
-      FOLDER,
-      { requestId, answers: {} },
-      signingKeyFor(),
-    );
-    expect(fs.existsSync(filePath)).toBe(true);
-  });
-
-  // 4 — Fail-closed: no signing key → neither file nor responder consumed.
-  it('does not write a file or call the responder when no signing key is available', () => {
-    const requestId = `userq-failclosed-${Date.now()}`;
-    const filePath = userAnswerPath(FOLDER, requestId);
-    const responder = vi.fn();
-
-    registerIpcResponder(FOLDER, `userq-${requestId}`, responder);
-
-    // No signing key → the fail-closed early return happens BEFORE the responder
-    // is taken (mirrors the memory writer), leaving it registered to time out.
-    writeUserQuestionIpcResponse(
-      ipcBaseDir(),
-      FOLDER,
-      { requestId, answers: { 'x?': 'y' } },
-      undefined,
-    );
-
-    expect(fs.existsSync(filePath)).toBe(false);
-    expect(responder).not.toHaveBeenCalled();
-    expect(hasIpcResponder(FOLDER, `userq-${requestId}`)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Integration: writeBrowserIpcResponse routing behaviour (Pillar 1, 5.3c)
-// ---------------------------------------------------------------------------
-
-describe('writeBrowserIpcResponse — router integration', () => {
-  let envelope: ReturnType<typeof setupSigningKey>;
-
-  function ipcBaseDir(): string {
-    return path.join(process.env.GANTRY_HOME as string, 'data', 'ipc');
-  }
-
-  function browserResponsePath(folder: string, requestId: string): string {
-    return path.join(
-      ipcBaseDir(),
-      folder,
-      'browser-responses',
-      `${requestId}.json`,
-    );
-  }
-
-  function signingKeyFor(): string | undefined {
-    return getIpcResponseSigningPrivateKey(
-      FOLDER,
-      undefined,
-      envelope.responseKeyId,
-    );
-  }
-
-  beforeEach(() => {
-    envelope = setupSigningKey(FOLDER);
-  });
-
-  afterEach(() => {
-    clearIpcResponders();
-  });
-
-  // 1 — Equivalence: no responder → signed file written, byte-shape as before.
-  it('writes the signed browser response file when no responder is registered', () => {
-    const requestId = `browser-eq-${Date.now()}`;
-    const filePath = browserResponsePath(FOLDER, requestId);
-
-    writeBrowserIpcResponse(
-      ipcBaseDir(),
-      FOLDER,
-      { requestId, ok: true, data: { running: true } },
-      signingKeyFor(),
-    );
-
-    expect(fs.existsSync(filePath)).toBe(true);
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<
-      string,
-      unknown
-    >;
-    expect(parsed.ok).toBe(true);
-    expect(parsed.requestId).toBe(requestId);
-    expect(parsed.data).toEqual({ running: true });
-    expect(typeof parsed.signature).toBe('string');
-
-    const { signature, ...withoutSig } = parsed;
-    expect(
-      verifyIpcResponsePayload(
-        envelope.responseVerifyKey,
-        withoutSig as Record<string, unknown>,
-        signature as string,
-      ),
-    ).toBe(true);
-  });
-
-  // 2 — Socket delivery: responder receives the signed object, no file created.
-  it('calls the registered responder with the signed object and creates no file', () => {
-    const requestId = `browser-sock-${Date.now()}`;
-    const filePath = browserResponsePath(FOLDER, requestId);
+  it('delivers signed browser responses to a registered socket responder', () => {
+    const requestId = 'browser-1';
     const received: Record<string, unknown>[] = [];
-
     registerIpcResponder(FOLDER, `browser-${requestId}`, (signed) => {
       received.push(signed);
     });
 
     writeBrowserIpcResponse(
-      ipcBaseDir(),
+      '/unused',
       FOLDER,
       { requestId, ok: true, data: { running: true } },
-      signingKeyFor(),
+      getIpcResponseSigningPrivateKey(
+        FOLDER,
+        undefined,
+        envelope.responseKeyId,
+      ),
     );
 
     expect(received).toHaveLength(1);
-    expect(fs.existsSync(filePath)).toBe(false);
+    expect(received[0]).toMatchObject({
+      requestId,
+      ok: true,
+      data: { running: true },
+    });
+    expectValidSignature(received[0], envelope.responseVerifyKey);
+  });
 
-    const signed = received[0];
-    expect(signed.ok).toBe(true);
-    expect(signed.requestId).toBe(requestId);
-    expect(signed.data).toEqual({ running: true });
-    expect(typeof signed.signature).toBe('string');
-
-    const { signature, ...withoutSig } = signed;
-    expect(
-      verifyIpcResponsePayload(
-        envelope.responseVerifyKey,
-        withoutSig as Record<string, unknown>,
-        signature as string,
+  it('throws for browser responses when no socket responder is registered', () => {
+    expect(() =>
+      writeBrowserIpcResponse(
+        '/unused',
+        FOLDER,
+        { requestId: 'browser-missing', ok: true },
+        getIpcResponseSigningPrivateKey(
+          FOLDER,
+          undefined,
+          envelope.responseKeyId,
+        ),
       ),
-    ).toBe(true);
-
-    // Single-shot: consumed after delivery.
-    expect(hasIpcResponder(FOLDER, `browser-${requestId}`)).toBe(false);
-  });
-
-  // 3 — Fallback after take: second write (no re-register) writes the file.
-  it('falls back to file write on a second call after the responder was consumed', () => {
-    const requestId = `browser-fallback-${Date.now()}`;
-    const filePath = browserResponsePath(FOLDER, requestId);
-
-    registerIpcResponder(FOLDER, `browser-${requestId}`, vi.fn());
-
-    writeBrowserIpcResponse(
-      ipcBaseDir(),
-      FOLDER,
-      { requestId, ok: true, data: {} },
-      signingKeyFor(),
-    );
-    expect(fs.existsSync(filePath)).toBe(false);
-
-    writeBrowserIpcResponse(
-      ipcBaseDir(),
-      FOLDER,
-      { requestId, ok: true, data: {} },
-      signingKeyFor(),
-    );
-    expect(fs.existsSync(filePath)).toBe(true);
-  });
-
-  // 4 — Fail-closed: no signing key → neither file nor responder consumed.
-  it('does not write a file or call the responder when no signing key is available', () => {
-    const requestId = `browser-failclosed-${Date.now()}`;
-    const filePath = browserResponsePath(FOLDER, requestId);
-    const responder = vi.fn();
-
-    registerIpcResponder(FOLDER, `browser-${requestId}`, responder);
-
-    // No signing key → the fail-closed early return happens BEFORE the responder
-    // is taken (mirrors the memory/user_question writers), leaving it registered
-    // to time out.
-    writeBrowserIpcResponse(
-      ipcBaseDir(),
-      FOLDER,
-      { requestId, ok: true, data: { running: true } },
-      undefined,
-    );
-
-    expect(fs.existsSync(filePath)).toBe(false);
-    expect(responder).not.toHaveBeenCalled();
-    expect(hasIpcResponder(FOLDER, `browser-${requestId}`)).toBe(true);
+    ).toThrow('No socket IPC responder registered for browser response');
   });
 });

@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import {
   MemoryIpcAction,
   MEMORY_IPC_ACTIONS,
@@ -10,11 +8,6 @@ import {
 import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
 import { takeIpcResponder } from '../runtime/ipc-response-router.js';
 import { nowMs } from '../shared/time/datetime.js';
-import {
-  ensurePrivateDirSync,
-  writePrivateFileSync,
-} from '../shared/private-fs.js';
-import { resolveGroupIpcPath } from '../platform/group-folder.js';
 import {
   DEFAULT_MEMORY_APP_ID,
   memoryAgentIdForGroupFolder,
@@ -588,12 +581,6 @@ export function writeMemoryResponse(
   privateKeyPem?: string,
 ): void {
   assertValidRequestId(requestId);
-  const ipcDir = resolveGroupIpcPath(groupFolder);
-  const responsesDir = path.join(ipcDir, 'memory-responses');
-  ensurePrivateDirSync(responsesDir);
-
-  const filePath = path.join(responsesDir, `${requestId}.json`);
-  const tmpPath = `${filePath}.tmp`;
   const payload: Record<string, unknown> = {
     ok: response.ok,
     requestId: response.requestId,
@@ -604,15 +591,12 @@ export function writeMemoryResponse(
   const signature = signIpcResponsePayload(privateKeyPem, payload);
   if (!signature) return;
   payload.signature = signature;
-  // Router-aware delivery (Pillar 1): when the socket server has registered a
-  // responder for this request, hand it the exact signed object and skip the
-  // file write. With no responder registered the behaviour is byte-identical to
-  // the pre-router filesystem path.
   const responder = takeIpcResponder(groupFolder, `memory-${requestId}`);
   if (responder) {
     responder(payload);
     return;
   }
-  writePrivateFileSync(tmpPath, JSON.stringify(payload, null, 2));
-  fs.renameSync(tmpPath, filePath);
+  throw new Error(
+    `No socket IPC responder registered for memory response ${groupFolder}/${requestId}`,
+  );
 }

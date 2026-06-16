@@ -11,6 +11,7 @@ export type IpcWireChannel =
   | 'message'
   | 'continuation'
   | 'close'
+  | 'bind'
   | 'live_tool_rules'
   | 'interaction_boundary';
 
@@ -49,6 +50,7 @@ const WIRE_CHANNELS: readonly IpcWireChannel[] = [
   'message',
   'continuation',
   'close',
+  'bind',
   'live_tool_rules',
   'interaction_boundary',
 ];

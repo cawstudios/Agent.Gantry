@@ -39,6 +39,12 @@ export interface AgentRunnerInput {
   compiledSystemPrompt?: string;
   guardrailSystemPromptAppend?: string;
   memoryContextBlock?: string;
+  /**
+   * Warm-pool (Pillar 2, F3): boot this worker GENERIC (no customer identity /
+   * first message at boot) via the SDK `startup()` primitive, then await a BIND
+   * over a non-stdin channel before running. Default off ⇒ today's cold path.
+   */
+  warmGenericBoot?: boolean;
   yoloMode?: YoloModeSettings;
   modelCredentialEnv?: Record<string, string>;
   runtimeAccess?: CapabilityRuntimeAccess[];
@@ -71,6 +77,23 @@ export interface AgentRunnerLlmTurn {
   output?: string;
 }
 
+/**
+ * One SDK-observed tool execution span. Core can also record Gantry MCP proxy
+ * calls; this runner-side span is a fallback for SDK/direct-MCP tool paths that
+ * otherwise appear only as a gap between assistant turns.
+ */
+export interface AgentRunnerToolCall {
+  server: string;
+  tool: string;
+  ms: number;
+  ok: boolean;
+  startedAt: number;
+  requestBytes: number;
+  responseBytes: number;
+  request?: unknown;
+  response?: unknown;
+}
+
 export interface AgentRunnerOutput {
   status: 'success' | 'error';
   result: string | null;
@@ -86,6 +109,8 @@ export interface AgentRunnerOutput {
   primeToolAttempts?: AgentRunnerToolAttemptOutput[];
   /** Per-turn LLM timing + usage for the latency trace (best-effort). */
   turns?: AgentRunnerLlmTurn[];
+  /** SDK/direct-MCP tool spans for the latency trace (best-effort). */
+  toolCalls?: AgentRunnerToolCall[];
   /** Run-level process-startup marks for the latency timeline (best-effort). */
   runnerStartup?: { queryDispatchedAt?: number; firstSdkMessageAt: number };
   /** Warm continuation: when this reply's input was delivered to the model. */

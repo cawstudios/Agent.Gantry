@@ -38,6 +38,9 @@ describe('installShutdownHandlers', () => {
     installShutdownHandlers(
       {
         queue,
+        closeWarmPool: vi.fn(async () => {
+          order.push('closeWarmPool');
+        }),
         closeBrowserToolBackends: vi.fn(async () => {
           order.push('closeBrowserToolBackends');
         }),
@@ -68,6 +71,7 @@ describe('installShutdownHandlers', () => {
     expect(order).toEqual([
       'log-signal',
       'queue.shutdown',
+      'closeWarmPool',
       'closeBrowserToolBackends',
       'closeAllBrowsers',
       'channel-a.disconnect',

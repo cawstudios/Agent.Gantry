@@ -485,6 +485,7 @@ export function createGroupAgentRunner(input: {
         publishRuntimeEvent: deps.publishRuntimeEvent,
         executionAdapter: deps.executionAdapter,
         executionAdapters: deps.executionAdapters,
+        warmPool: deps.warmPool,
         turnContext,
       });
       const expireTurnProviderSession = async (
@@ -550,7 +551,7 @@ export function createGroupAgentRunner(input: {
               : {}),
             [WORKSPACE_FOLDER_INPUT_KEY]: group.folder,
           } as Parameters<typeof runAgentImpl>[1],
-          (proc, runHandle) => {
+          (proc, runHandle, processMetadata) => {
             void updateRunProviderMetadata({ providerRunId: runHandle });
             // Surface the run handle for best-effort latency-trace drain. The
             // IPC proxy keys MCP-call records by this same handle.
@@ -561,8 +562,17 @@ export function createGroupAgentRunner(input: {
             }
             const registerOptions =
               memoryReviewerIsControlApprover && memoryReviewerUserId
-                ? { requiredContinuationUserId: memoryReviewerUserId }
-                : undefined;
+                ? {
+                    requiredContinuationUserId: memoryReviewerUserId,
+                    ...(processMetadata?.pooledWarmWorker
+                      ? {
+                          pooledWarmWorker: processMetadata.pooledWarmWorker,
+                        }
+                      : {}),
+                  }
+                : processMetadata?.pooledWarmWorker
+                  ? { pooledWarmWorker: processMetadata.pooledWarmWorker }
+                  : undefined;
             if (registerOptions) {
               deps.queue.registerProcess(
                 queueJid,

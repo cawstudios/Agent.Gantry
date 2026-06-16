@@ -122,9 +122,6 @@ describe('startRuntimeServices', () => {
         startSchedulerLoop: vi.fn(() => {
           order.push('startSchedulerLoop');
         }) as any,
-        startIpcWatcher: vi.fn(() => {
-          order.push('startIpcWatcher');
-        }) as any,
         writeGroupsSnapshot: vi.fn(() => {
           order.push('writeGroupsSnapshot');
         }) as any,
@@ -132,10 +129,6 @@ describe('startRuntimeServices', () => {
         getToolRepository: vi.fn(() => ({}) as any),
         recoverPendingMessages: vi.fn(() => {
           order.push('recoverPendingMessages');
-        }) as any,
-        startMessagePollingLoop: vi.fn(() => {
-          order.push('startMessagePollingLoop');
-          return new Promise<never>(() => {});
         }) as any,
         logger: {
           info: vi.fn(() => {
@@ -151,12 +144,10 @@ describe('startRuntimeServices', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(order).toEqual([
-      'startIpcWatcher',
       'recoverPendingMessages',
       'startSchedulerLoop',
       'writeGroupsSnapshot',
       'runtime-ready-log',
-      'startMessagePollingLoop',
     ]);
 
     expect((app.queue.setProcessMessagesFn as any).mock.calls).toHaveLength(1);
@@ -181,17 +172,11 @@ describe('startRuntimeServices', () => {
         startSchedulerLoop: vi.fn(() => {
           order.push('startSchedulerLoop');
         }) as any,
-        startIpcWatcher: vi.fn(() => {
-          order.push('startIpcWatcher');
-        }) as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
         getOutboundDeliveryRepository: vi.fn(() => ({}) as any),
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         startOutboundDeliveryRecoveryLoop: vi.fn(() => {
           order.push('startOutboundDeliveryRecoveryLoop');
         }) as any,
@@ -205,7 +190,6 @@ describe('startRuntimeServices', () => {
     );
 
     expect(order).toEqual([
-      'startIpcWatcher',
       'setDurableOutboundAttemptFactory',
       'startOutboundDeliveryRecoveryLoop',
       'startSchedulerLoop',
@@ -228,14 +212,10 @@ describe('startRuntimeServices', () => {
         startSchedulerLoop: vi.fn((deps) => {
           schedulerDeps = deps;
         }) as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -276,14 +256,11 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
-        recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn((deps) => {
+        recoverPendingMessages: vi.fn((deps) => {
           capturedDeps = deps;
-          return new Promise<never>(() => {});
         }) as any,
         logger: {
           info: vi.fn(),
@@ -346,14 +323,10 @@ describe('startRuntimeServices', () => {
         startSchedulerLoop: vi.fn((deps) => {
           schedulerDeps = deps;
         }) as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -394,15 +367,12 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: { getAgentTurnContext } as any,
         collectSessionMemory: collectSessionMemory as any,
         getToolRepository: vi.fn(() => ({}) as any),
-        recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn((deps) => {
+        recoverPendingMessages: vi.fn((deps) => {
           capturedDeps = deps;
-          return new Promise<never>(() => {});
         }) as any,
         logger: {
           info: vi.fn(),
@@ -495,7 +465,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -513,9 +482,6 @@ describe('startRuntimeServices', () => {
         startOutboundDeliveryRecoveryLoop:
           startOutboundDeliveryRecoveryLoop as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -597,7 +563,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -615,9 +580,6 @@ describe('startRuntimeServices', () => {
         startOutboundDeliveryRecoveryLoop:
           startOutboundDeliveryRecoveryLoop as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -681,7 +643,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -699,9 +660,6 @@ describe('startRuntimeServices', () => {
         startOutboundDeliveryRecoveryLoop:
           startOutboundDeliveryRecoveryLoop as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -780,7 +738,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -798,9 +755,6 @@ describe('startRuntimeServices', () => {
         startOutboundDeliveryRecoveryLoop:
           startOutboundDeliveryRecoveryLoop as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -899,7 +853,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -917,9 +870,6 @@ describe('startRuntimeServices', () => {
         startOutboundDeliveryRecoveryLoop:
           startOutboundDeliveryRecoveryLoop as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -981,7 +931,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -999,9 +948,6 @@ describe('startRuntimeServices', () => {
         startOutboundDeliveryRecoveryLoop:
           startOutboundDeliveryRecoveryLoop as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -1054,7 +1000,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -1071,9 +1016,6 @@ describe('startRuntimeServices', () => {
         startOutboundDeliveryRecoveryLoop:
           startOutboundDeliveryRecoveryLoop as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -1126,7 +1068,6 @@ describe('startRuntimeServices', () => {
       { app, channelWiring },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -1143,9 +1084,6 @@ describe('startRuntimeServices', () => {
         startOutboundDeliveryRecoveryLoop:
           startOutboundDeliveryRecoveryLoop as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -1198,7 +1136,6 @@ describe('startRuntimeServices', () => {
       { app, channelWiring },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -1215,9 +1152,6 @@ describe('startRuntimeServices', () => {
         startOutboundDeliveryRecoveryLoop:
           startOutboundDeliveryRecoveryLoop as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -1259,7 +1193,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -1294,9 +1227,6 @@ describe('startRuntimeServices', () => {
             }) as any,
         ),
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -1345,7 +1275,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -1377,9 +1306,6 @@ describe('startRuntimeServices', () => {
             }) as any,
         ),
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -1520,7 +1446,6 @@ describe('startRuntimeServices', () => {
       },
       {
         startSchedulerLoop: vi.fn() as any,
-        startIpcWatcher: vi.fn() as any,
         writeGroupsSnapshot: vi.fn() as any,
         opsRepository: {} as any,
         getToolRepository: vi.fn(() => ({}) as any),
@@ -1548,9 +1473,6 @@ describe('startRuntimeServices', () => {
           };
         }) as any,
         recoverPendingMessages: vi.fn() as any,
-        startMessagePollingLoop: vi.fn(
-          () => new Promise<never>(() => {}),
-        ) as any,
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -1632,52 +1554,45 @@ describe('startRuntimeServices — IPC transport selection', () => {
     };
   }
 
-  // Minimal deps that let startRuntimeServices reach the transport branch and
-  // then park in startMessagePollingLoop. Spies for the transport seam are
-  // overridable; everything else is a no-op.
+  // Minimal deps that let startRuntimeServices reach the transport branch.
+  // Spies for the transport seam are overridable; everything else is a no-op.
   function makeTransportDeps(
     overrides: Record<string, unknown> = {},
   ): Record<string, unknown> {
     return {
       startSchedulerLoop: vi.fn(),
-      startIpcWatcher: vi.fn(),
       writeGroupsSnapshot: vi.fn(),
       opsRepository: {} as any,
       getToolRepository: vi.fn(() => ({}) as any),
       recoverPendingMessages: vi.fn(),
-      startMessagePollingLoop: vi.fn(() => new Promise<never>(() => {})),
       logger: { info: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
       exit: vi.fn(),
       ...overrides,
     };
   }
 
-  it('fs mode (default): starts ONLY the watcher — no socket server, no continuation delivery', async () => {
+  it('always starts socket IPC and registers continuation delivery', async () => {
     const app = makeApp();
     const channelWiring = makeChannelWiring();
     const startIpcSocketServer = vi.fn(async () => makeFakeSocketServer());
     const makeSocketContinuationDelivery = vi.fn(() => ({}) as any);
-    const startIpcWatcher = vi.fn();
     const socketServerRef: { current?: unknown } = {};
 
     await startRuntimeServices(
       { app, channelWiring, socketServerRef: socketServerRef as any },
       makeTransportDeps({
         ipcTransport: 'fs',
-        startIpcWatcher,
         startIpcSocketServer,
         makeSocketContinuationDelivery,
       }) as any,
     );
-
-    expect(startIpcWatcher).toHaveBeenCalledTimes(1);
-    expect(startIpcSocketServer).not.toHaveBeenCalled();
-    expect(makeSocketContinuationDelivery).not.toHaveBeenCalled();
-    expect(app.queue.setContinuationDelivery).not.toHaveBeenCalled();
-    expect(socketServerRef.current).toBeUndefined();
+    expect(startIpcSocketServer).toHaveBeenCalledTimes(1);
+    expect(makeSocketContinuationDelivery).toHaveBeenCalledTimes(1);
+    expect(app.queue.setContinuationDelivery).toHaveBeenCalledTimes(1);
+    expect(socketServerRef.current).toBeDefined();
   });
 
-  it('socket mode: starts the socket server, registers continuation delivery, populates the ref — watcher NOT started', async () => {
+  it('populates the socket server ref when socket IPC starts', async () => {
     const app = makeApp();
     const channelWiring = makeChannelWiring();
     const fakeServer = makeFakeSocketServer();
@@ -1687,20 +1602,16 @@ describe('startRuntimeServices — IPC transport selection', () => {
       deliverClose: vi.fn(),
     };
     const makeSocketContinuationDelivery = vi.fn(() => fakeDelivery as any);
-    const startIpcWatcher = vi.fn();
     const socketServerRef: { current?: unknown } = {};
 
     await startRuntimeServices(
       { app, channelWiring, socketServerRef: socketServerRef as any },
       makeTransportDeps({
         ipcTransport: 'socket',
-        startIpcWatcher,
         startIpcSocketServer,
         makeSocketContinuationDelivery,
       }) as any,
     );
-
-    expect(startIpcWatcher).not.toHaveBeenCalled();
     expect(startIpcSocketServer).toHaveBeenCalledTimes(1);
     expect(socketServerRef.current).toBe(fakeServer);
     expect(makeSocketContinuationDelivery).toHaveBeenCalledTimes(1);
@@ -1716,45 +1627,18 @@ describe('startRuntimeServices — IPC transport selection', () => {
     expect(fakeServer.connectionsForFolder).toHaveBeenCalledWith('main');
   });
 
-  it('dual mode: starts BOTH the watcher and the socket server', async () => {
-    const app = makeApp();
-    const channelWiring = makeChannelWiring();
-    const fakeServer = makeFakeSocketServer();
-    const startIpcSocketServer = vi.fn(async () => fakeServer);
-    const makeSocketContinuationDelivery = vi.fn(() => ({}) as any);
-    const startIpcWatcher = vi.fn();
-    const socketServerRef: { current?: unknown } = {};
-
-    await startRuntimeServices(
-      { app, channelWiring, socketServerRef: socketServerRef as any },
-      makeTransportDeps({
-        ipcTransport: 'dual',
-        startIpcWatcher,
-        startIpcSocketServer,
-        makeSocketContinuationDelivery,
-      }) as any,
-    );
-
-    expect(startIpcWatcher).toHaveBeenCalledTimes(1);
-    expect(startIpcSocketServer).toHaveBeenCalledTimes(1);
-    expect(socketServerRef.current).toBe(fakeServer);
-    expect(app.queue.setContinuationDelivery).toHaveBeenCalledTimes(1);
-  });
-
   it('socket mode, election lost: no continuation delivery, ref stays undefined', async () => {
     const app = makeApp();
     const channelWiring = makeChannelWiring();
     // startIpcSocketServer returns undefined when another core owns the socket.
     const startIpcSocketServer = vi.fn(async () => undefined);
     const makeSocketContinuationDelivery = vi.fn(() => ({}) as any);
-    const startIpcWatcher = vi.fn();
     const socketServerRef: { current?: unknown } = {};
 
     await startRuntimeServices(
       { app, channelWiring, socketServerRef: socketServerRef as any },
       makeTransportDeps({
         ipcTransport: 'socket',
-        startIpcWatcher,
         startIpcSocketServer,
         makeSocketContinuationDelivery,
       }) as any,

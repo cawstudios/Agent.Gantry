@@ -21,12 +21,12 @@ Remove the **polling tax** from a reply. Measured against the two reference trac
 | ---------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | warm `queue`                       | **p50 934 ms** (measured; the 759 ms screenshot was an outlier) | **~450 ms** (carrier swap — behavior-identical; one poll, the message-loop DB tick, remains) → **< ~50 ms** (with the opt-in message-loop event-trigger, §20 I-R1, batching preserved) | the runner-side 500 ms IPC poll + carrier are removed with guaranteed equivalence; removing the *message-loop* 500 ms poll is the separate opt-in step |
 | `gap` (per tool call)              | 98–982 ms                                                       | **< ~30 ms**                                                                                                                                                                           | `mcp_call_tool` request delivered as a frame, picked up instantly instead of the 1000 ms core IPC-watcher poll                                         |
-| post-tool IPC tail in `model_wait` | ≤150 ms                                                         | **< ~15 ms**                                                                                                                                                                           | tool response delivered as a frame, not the 150 ms `waitForTaskResponse` poll                                                                          |
+| post-tool IPC tail in LLM `providerWaitMs` detail | ≤150 ms                                                         | **< ~15 ms**                                                                                                                                                                           | tool response delivered as a frame, not via the legacy response-file wait loop                                                                         |
 
 
 **Measured reality (2026-06-15, from `gantry.message_traces`):** the COLD queue is already fine — p50 44 ms / p99 323 ms (the 329 ms screenshot was an outlier), so there is nothing to trim there and **Pillar 3 (hot context / DB caching) is DROPPED**. The prize is the WARM queue (p50 934 ms = the two stacked 500 ms polls). The warm-queue **long tail (p90 3.5 s, p99 ~100 s) is run-slot saturation** (`MAX_MESSAGE_RUNS=3` + 30-min `IDLE_TIMEOUT` slot-holding + the per-conversation process model) — that is the **concurrency phase, explicitly OUT of Pillar 1 scope**. Pillar 1 fixes the warm-queue **p50**, not the tail.
 
-Also out of scope for Pillar 1: `startup` (cold spawn — Pillar 2) and the model-TTFT portion of `model_wait` (the LLM itself).
+Also out of scope for Pillar 1: `startup` (cold spawn — Pillar 2) and the model-TTFT portion of each LLM section's `providerWaitMs` detail (the LLM itself).
 
 ### 1.2 Robustness parity (non-negotiable)
 
@@ -55,7 +55,7 @@ Pillar 1 is accepted **only** by driving Boondi end-to-end through `docs/BOONDI-
 ### 2.1 Process topology
 
 ```
-core (node)                         ← holds GANTRY_IPC_AUTH_SECRET, all creds; IPC watcher + message-loop
+core (node)                         ← holds GANTRY_IPC_AUTH_SECRET, all creds; socket IPC server + event wakeups
  └─ agent-runner child (node, dist) ← spawned by core via process.execPath (agent-spawn.ts:458)
      └─ Claude Code CLI subprocess  ← SDK query() spawns it (query-loop.ts:323); IPC secrets STRIPPED from its env (runtime-env.ts:163-168)
          └─ gantry-MCP stdio grandchild (node, dist/runner/mcp/stdio.js)  ← env is an explicit allow-list (agent-capabilities.ts:210-281)
@@ -63,24 +63,25 @@ core (node)                         ← holds GANTRY_IPC_AUTH_SECRET, all creds;
 
 Two worker processes touch IPC: the **agent-runner** and the **gantry-MCP grandchild**. They are different code paths with byte-identical crypto (`runner/mcp/signing.ts` and `adapters/.../runner/ipc-signing.ts` are deliberate copies).
 
-### 2.2 The seams today (all filesystem + polling)
+### 2.2 Legacy seams removed by this pillar
 
 
-| Seam                                                 | Direction                                   | Medium                        | Poll                                                                  | Latency cost            |
+| Legacy seam                                          | Direction                                   | Former medium                 | Replacement                                                           | Latency cost removed    |
 | ---------------------------------------------------- | ------------------------------------------- | ----------------------------- | --------------------------------------------------------------------- | ----------------------- |
-| continuation `input/` + `_close`                     | core → agent-runner                         | files in per-conversation dir | runner 500 ms (`IPC_POLL_MS`) + message-loop 500 ms (`POLL_INTERVAL`) | warm `queue`            |
-| `tasks/` (`mcp_call_tool`, etc.) → `task-responses/` | gantry-MCP → core → gantry-MCP              | files                         | core watcher 1000 ms (`IPC_POLL_INTERVAL`); client 150 ms             | `gap` + post-tool tail  |
-| `memory-*`, `browser-*`                              | gantry-MCP ↔ core                           | files                         | core 1000 ms; client 100 ms                                           | (not on hot reply path) |
-| `permission-*`                                       | agent-runner ↔ core                         | files                         | core 1000 ms; client 100 ms                                           | interactive             |
-| `user-questions` → `user-answers`                    | gantry-MCP ↔ core                           | files                         | core 1000 ms; client 100 ms                                           | interactive             |
-| `messages/`                                          | gantry-MCP → core                           | files (fire-and-forget)       | core 1000 ms                                                          | outbound                |
-| `live-tool-rules/<runHandle>`                        | core → worker                               | file, read per tool decision  | event-ish (read on demand)                                            | per tool gate           |
-| `interaction-boundaries/`                            | gantry-MCP → agent-runner (worker-internal) | files, delete-to-ack          | runner 500 ms; producer 100 ms                                        | interactive flush       |
+| continuation input + close                           | core → agent-runner                         | per-conversation files        | socket push bound to the runner connection                            | warm `queue`            |
+| MCP task request/response                            | gantry-MCP → core → gantry-MCP              | task and response files       | socket request/response correlation                                   | `gap` + post-tool tail  |
+| memory/browser requests                              | gantry-MCP ↔ core                           | files                         | socket request/response correlation                                   | non-hot-path overhead   |
+| permission requests                                  | agent-runner ↔ core                         | files                         | socket request/response correlation                                   | interactive overhead    |
+| user question/answer exchange                        | gantry-MCP ↔ core                           | files                         | socket request/response correlation                                   | interactive overhead    |
+| outbound message notifications                       | gantry-MCP → core                           | fire-and-forget files         | socket push                                                           | outbound overhead       |
+| live tool rules                                      | core → worker                               | file read per decision        | socket-delivered rules plus runtime state                             | per-tool gate overhead  |
+| interaction boundaries                               | gantry-MCP → agent-runner (worker-internal) | files, delete-to-ack          | socket-delivered boundary acknowledgements                            | interactive flush       |
 
 
 ### 2.3 Full channel checklist (the transport MUST carry all of these)
 
-From the core-channel inventory. Each row links to its authoritative current implementation.
+From the core-channel inventory. Each row maps the durable channel contract to
+the socket implementation.
 
 1. `messages` (req-only, no response) — `ipc.ts:330`
 2. `tasks` → `task-responses` — subtypes: scheduler create/mutate/query, `scheduler_wait_for_events` (long-running), admin (`refresh_groups`, `register_agent`, `service_restart`, `settings_desired_state`, `request_settings_update`, `admin_permission_revoke`, `request_skill_install`, `request_skill_dependency_install`, `request_permission`, `request_skill_proposal`, `request_mcp_server`), `mcp_list_tools` (long-running), `mcp_call_tool` (long-running), file-artifact handlers — `ipc.ts:393`, `jobs/ipc-handler.ts:17`, `jobs/ipc-admin-handlers.ts:489`
@@ -88,11 +89,11 @@ From the core-channel inventory. Each row links to its authoritative current imp
 4. `browser-requests` → `browser-responses` (in-flight cap 4) — `ipc-browser-requests.ts:31`
 5. `permission-requests` → `permission-responses` (interaction cap 100, idempotent) — `ipc.ts:531`
 6. `user-questions` → `user-answers` (interaction cap 100) — `ipc.ts:643`
-7. `input/` continuation (core→runner, per-conversation, strict order) — `continuation-input.ts:45`
-8. `input/_close` sentinel (core→runner) — `continuation-input.ts:68`
+7. continuation delivery (core→runner, per-conversation, strict order) — `continuation-delivery.ts`
+8. close delivery (core→runner) — `continuation-delivery.ts`
 9. `live-tool-rules/<runHandle>` (core→worker, read per tool decision) — `shared/live-tool-rules.ts`
-10. `interaction-boundaries/` (gantry-MCP→agent-runner, delete-to-ack) — `runner/mcp/tools/messaging.ts:62`, `runner/.../ipc-input.ts:66`
-11. Infra: `ipc/.lock` (single-watcher election + PID-recycle recovery) — `ipc-filesystem.ts:203`; `ipc/errors/` (quarantine) — `ipc-filesystem.ts:69`
+10. interaction boundaries (gantry-MCP→agent-runner, acked over the runner connection) — `runner/mcp/tools/messaging.ts`, `runtime/warm-bind-delivery.ts`
+11. Infra: socket owner metadata and stale-listener recovery — `ipc-socket-server.ts`
 
 ---
 
@@ -177,7 +178,7 @@ Frame = uint32(len) ++ JSON({
 
 ### 5.5 Correlation & multiplexing
 
-- `id` correlates `resp` to `req`. The client keeps a `Map<id, pendingResolver>` (replacing the `waitForTaskResponse` poll loop). On `resp`, resolve; on connection drop, reject all pending with a typed error (→ client retry/abandon per §6.5).
+- `id` correlates `resp` to `req`. The client keeps a `Map<id, pendingResolver>` replacing the legacy response-file wait loop. On `resp`, resolve; on connection drop, reject all pending with a typed error (→ client retry/abandon per §6.5).
 - Core keeps per-connection in-flight accounting for caps/backpressure (§10).
 
 ---
@@ -186,10 +187,10 @@ Frame = uint32(len) ++ JSON({
 
 ### 6.1 Bind + single-instance election (replaces `ipc/.lock`)
 
-- Core `bind()`s the socket path. `EADDRINUSE` ⇒ run the **ported stale-socket recovery** (the analog of `recoverStaleIpcRootLock`):
+- Core `bind()`s the socket path. `EADDRINUSE` ⇒ run stale-socket recovery:
   - Try to `connect()` to the existing socket. If a live core answers a `ctrl:ping` ⇒ **another instance is alive** → do not steal, skip start (today's `pid_alive`/skip).
   - If connect fails (`ECONNREFUSED`/no listener) ⇒ socket is stale → `unlink` and rebind.
-  - **PID-recycle defense preserved:** keep a sidecar lock file `core.sock.owner` with `{pid, startedAt}` and apply the existing `isRecycledPid` logic (`ps -o lstart`, 60s skew, conservative-on-uncertainty) before unlinking, so we never steal from a live sibling whose PID was recycled (`ipc-filesystem.ts:156-167`). Retry-once race guard preserved (`ipc.ts:228-240`).
+  - **PID-recycle defense preserved:** keep a sidecar lock file `core.sock.owner` with `{pid, startedAt}` and apply the `ps -o lstart` skew check before unlinking, so we never steal from a live sibling whose PID was recycled. Retry-once race guard preserved.
 - Release on shutdown: close server, `unlink` socket, remove owner file (idempotent).
 
 ### 6.2 Client connect + handshake + scope binding
@@ -262,9 +263,9 @@ Every guarantee, its current anchor, and how the socket transport replicates it.
 | Request integrity = HMAC over full payload, channel-keyed, **server-recomputed**, constant-time                                          | `signing.ts:4-13`; `ipc-auth.ts:51-138`; `ipc-auth-validation.ts:175-200`                  | Reuse functions verbatim on the framed `payload`; recompute key from the **connection's bound scope**; ignore client-asserted token                              |
 | Response integrity = ed25519, private key core-only, per-spawn rotation, fail-closed, revoke on exit                                     | `response-signing.ts:12-37`; `ipc-auth.ts:161-201`                                         | Unchanged signing; key bound to the connection; revoked on connection close                                                                                      |
 | Replay defense = nonce + 5-min expiry + single-use scoped requestId set + TTL prune                                                      | `request-signing.ts:30-62`; `ipc-auth-validation.ts:155-292`                               | Kept. **A persistent connection does not remove replay risk** (a malicious in-process actor could resend a frame); the consumed-id set stays                     |
-| Symlink/ownership hardening (0o700/0o600, lstat asserts)                                                                                 | `private-fs.ts:7-45`; `ipc-filesystem.ts:20-27`                                            | Applied to the socket file + owner lock; `0o700` dir is the primary isolation (only core's uid can open the socket); optional peer-uid check as defense-in-depth |
+| Symlink/ownership hardening (0o700/0o600, lstat asserts)                                                                                 | `private-fs.ts`; socket owner checks                                                       | Applied to the socket file + owner lock; `0o700` dir is the primary isolation (only core's uid can open the socket); optional peer-uid check as defense-in-depth |
 | Per-(folder,channel) rate cap 300/60 s + 100 interaction in-flight + 4 browser in-flight                                                 | `ipc-rate-limit.ts`; `ipc.ts:33`; `ipc-browser-requests.ts:28`                             | Kept as explicit per-connection-scope counters (not replaced by raw backpressure)                                                                                |
-| Single-instance + PID-recycle-aware stale recovery (conservative)                                                                        | `ipc-filesystem.ts:156-214`; `ipc.ts:191-246`                                              | Ported to `EADDRINUSE` + connect-probe + owner-file `lstart`/skew logic                                                                                          |
+| Single-instance + PID-recycle-aware stale recovery (conservative)                                                                        | `ipc-socket-server.ts`; `ipc.ts`                                                           | Implemented with `EADDRINUSE` + connect-probe + owner-file `lstart`/skew logic                                                                                   |
 | Authorization scoping (folder-owned JIDs, context↔payload coherence, signed appId, same-channel target, job exec-context, browser grant) | `ipc.ts:107-158,346-364`; `ipc-auth-validation.ts:89-153`; `ipc-admin-handlers.ts:118-498` | Recompute scope server-side from the connection binding; never trust peer identity claims; all handler-side checks unchanged                                     |
 
 
@@ -377,7 +378,7 @@ Because payloads are byte-identical, these apply to the framed payload with at m
 
 - `ipc-auth-token.test.ts`, `ipc-auth-secret-source.test.ts`, `ipc-request-signing.test.ts`, `ipc-auth-boundary.test.ts` (the 1065-line boundary corpus: signed/fresh accept, tamper/expired/replay reject, per-channel parser hardening, response-key lifecycle, job exec-context).
 - `ipc-interaction-handler.test.ts` (signed responses, file modes, live-rule writing, secret redaction).
-- `continuation-input.test.ts` (per-conversation isolation), `steering-delivery-gate.test.ts` (turn-boundary buffering), `user-question-payload.test.ts` (targetJid guard).
+- `continuation-delivery.test.ts` (per-conversation isolation), `bind-channel.test.ts` (turn-boundary buffering), `user-question-payload.test.ts` (targetJid guard).
 - `reply-trace*.test.ts`, `mcp-trace-capture.test.ts` (trace capture intact).
 - `group-queue.test.ts` (concurrency caps, backoff, shutdown, FIFO) — the queue is unchanged; only `sendMessage`/`closeStdin` internals (frame vs file) get re-pointed; keep its FIFO + concurrency assertions.
 
@@ -479,8 +480,8 @@ Every row in §11 maps to at least one test above. A reviewer checklist (§11 nu
 
 (Each claim in this spec is grounded in these, per the read-only inventory pass on 2026-06-15.)
 
-- Core watcher & channels: `apps/core/src/runtime/ipc.ts`, `ipc-filesystem.ts`, `ipc-parsing.ts`, `ipc-task-parsing.ts`, `ipc-rate-limit.ts`, `ipc-interaction-processing.ts`, `ipc-browser-requests.ts`; `jobs/ipc-handler.ts`, `ipc-admin-handlers.ts`, `ipc-shared.ts`; `memory/memory-ipc.ts`.
-- Worker/client & lifecycle: `runner/mcp/ipc.ts`, `ipc-ids.ts`, `context.ts`, `stdio.ts`, `tools/service.ts`, `tools/messaging.ts`; `adapters/llm/anthropic-claude-agent/runner/{ipc-input,runtime-env,steering-delivery-gate,permission-callback,query-loop}.ts`; `runtime/continuation-input.ts`, `group-queue.ts`, `agent-spawn.ts`, `agent-spawn-process.ts`, `agent-spawn-layout.ts`, `agent-capabilities.ts`.
+- Core socket channels: `apps/core/src/runtime/ipc.ts`, `ipc-socket-server.ts`, `ipc-socket-bind.ts`, `ipc-parsing.ts`, `ipc-task-parsing.ts`, `ipc-interaction-processing.ts`, `ipc-browser-requests.ts`; `jobs/ipc-admin-handlers.ts`, `ipc-shared.ts`; `memory/memory-ipc.ts`.
+- Worker/client & lifecycle: `runner/mcp/ipc.ts`, `context.ts`, `stdio.ts`, `tools/service.ts`, `tools/messaging.ts`; `adapters/llm/anthropic-claude-agent/runner/{bind-channel,runtime-env,permission-callback,query-loop}.ts`; `runtime/continuation-delivery.ts`, `warm-bind-delivery.ts`, `group-queue.ts`, `agent-spawn.ts`, `agent-spawn-process.ts`, `agent-spawn-layout.ts`, `agent-capabilities.ts`.
 - Security: `runtime/ipc-auth.ts`, `ipc-auth-validation.ts`; `infrastructure/ipc/{request,response}-signing.ts`; `runner/mcp/signing.ts`, `adapters/.../runner/ipc-signing.ts`; `shared/private-fs.ts`.
 - Failure/recovery: `runtime/message-loop.ts`, `group-queue.ts`, `group-queue-stop.ts`, `app/bootstrap/{runtime-services,shutdown}.ts`; `config/index.ts`.
 - Tests & harnesses: `apps/core/test/unit/{runtime,runner,core,jobs}/…`, `apps/core/test/integration/…`, `apps/core/test/harness/…`.
@@ -608,7 +609,7 @@ Operator approved opting these in (2026-06-15). Each is **additive, behind its o
 | -------- | ----------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **I-R1** | Message-loop event-trigger → full warm-`queue` win (<50 ms) | `GANTRY_IPC_EVENT_PIPE`     | inbound continuation piped on arrival instead of waiting for the 500 ms tick                                                 | **User-facing → strictest gate.** MUST preserve batching via a debounce reproducing the ~500 ms window. Acceptance: §19 green, esp. S4 (warm follow-up) **plus a new rapid-burst case** proving two fast messages still batch into one reply, identical to `fs`. |
 | **I-1**  | SIGKILL stragglers after the 10 s shutdown grace            | `GANTRY_IPC_SHUTDOWN_KILL`  | deterministic kill of runs still alive after grace (today: detached, left to next-boot recovery)                             | Crash/shutdown edge only. §19 unaffected (runbook never exercises post-grace stragglers). Acceptance: a dedicated shutdown test; §19 still identical with it ON.                                                                                                 |
-| **I-2**  | Sweep orphaned in-flight state on boot                      | `GANTRY_IPC_ORPHAN_SWEEP`   | reclaim work a crash left mid-handle (today: orphaned `.processing-` files never swept)                                      | Recovery edge only. §19 unaffected. Acceptance: a crash-recovery test; strictly more robust, no happy-path change.                                                                                                                                               |
+| **I-2**  | Removed with socket-only cutover                             | n/a                         | legacy claim-file sweep no longer applies after deleting file-backed request handling                                         | No happy-path or recovery file scan remains; socket responders fail closed and active work is tied to live connections.                                                                                                                                          |
 | **I-3**  | Persist the replay window                                   | `GANTRY_IPC_REPLAY_PERSIST` | a captured request can't be replayed across a core restart within its 5 min `expiresAt` (today: in-memory, reset on restart) | Security edge only. §19 unaffected. Acceptance: a restart-replay test.                                                                                                                                                                                           |
 
 

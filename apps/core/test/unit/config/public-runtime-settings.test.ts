@@ -44,3 +44,25 @@ it('redacts owner-defined browser usage override sites from public settings', as
     maxConcurrentPerSite: 2,
   });
 });
+
+it('keeps warm pool disabled by default unless the runtime flag enables it', async () => {
+  const runtimeHome = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'gantry-settings-'),
+  );
+  runtimeHomes.push(runtimeHome);
+  vi.resetModules();
+  vi.stubEnv('GANTRY_HOME', runtimeHome);
+  await import('@core/config/settings/runtime-settings.js');
+  const config = await import('@core/config/index.js');
+
+  expect(config.getRuntimeWarmPoolConfig({})).toEqual({
+    enabled: false,
+    size: 1,
+    idleTtlMs: 240_000,
+  });
+  expect(config.getRuntimeWarmPoolConfig({ GANTRY_WARM_POOL: '1' })).toEqual({
+    enabled: true,
+    size: 1,
+    idleTtlMs: 240_000,
+  });
+});

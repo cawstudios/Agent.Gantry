@@ -52,3 +52,20 @@ session ID`, expire that provider session and retry the same turn once without
   but it is not evidence about realistic warm follow-up retention. Use a bounded
   longer value such as `20000` for warm-retention latency checks, and keep the
   30-minute default in mind when reasoning about production resource tradeoffs.
+- Warm-pool runtime code must stay provider-neutral. `runtime/warm-pool-manager`
+  may drive only the optional capability verbs (`prewarm`, `acquire`, `release`,
+  `healthCheck`, `shutdown`); SDK, MCP, query-loop, and runner-specific details
+  belong in the execution adapter.
+- Socket continuation delivery is the authoritative live carrier. Continuation
+  frames carry the message text directly, close frames close directly, and the
+  runtime must not restore filesystem mailbox writes or runner polling as a
+  fallback.
+- Socket dispatchers must reserve per-connection in-flight slots before the
+  first awaited handler, repository lookup, or binding validation. Otherwise the
+  on-frame cap check can admit multiple long-running requests through the same
+  connection before accounting catches up.
+- Event-driven IPC cutover defaults must not reintroduce filesystem latency:
+  socket transport is the only runtime transport and event-pipe debounce
+  defaults to immediate wakeup. For warm-pool-eligible no-session runs, an empty
+  pool should be filled and reacquired before considering any cold spawn path; do
+  not encode background-prewarm-while-serving-cold as the steady-state contract.

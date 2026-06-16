@@ -22,10 +22,6 @@ import {
   takeIpcResponder,
 } from '@core/runtime/ipc-response-router.js';
 
-function fileMode(filePath: string): number {
-  return fs.statSync(filePath).mode & 0o777;
-}
-
 function createEmptyJobRepository() {
   return {
     listJobs: vi.fn(async () => []),
@@ -105,8 +101,13 @@ describe('ipc-interaction-handler', () => {
     expect(requestUserAnswer).toHaveBeenCalledTimes(1);
   });
 
-  it('writes permission responses to permission-responses directory', () => {
+  it('delivers signed permission responses to registered socket responders', () => {
     const keys = createIpcResponseSigningKeyPair();
+    const delivered: Array<Record<string, unknown>> = [];
+    registerIpcResponder('grp', 'permission-perm-2', (signed) => {
+      delivered.push(signed);
+    });
+
     writePermissionIpcResponse(
       tempDir,
       'grp',
@@ -118,13 +119,8 @@ describe('ipc-interaction-handler', () => {
       keys.privateKeyPem,
     );
 
-    const responsePath = path.join(
-      tempDir,
-      'grp',
-      'permission-responses',
-      'perm-2.json',
-    );
-    const payload = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+    expect(delivered).toHaveLength(1);
+    const payload = delivered[0];
     expect(payload).toMatchObject({
       requestId: 'perm-2',
       approved: false,
@@ -137,12 +133,15 @@ describe('ipc-interaction-handler', () => {
         payload.signature,
       ),
     ).toBe(true);
-    expect(fileMode(path.dirname(responsePath))).toBe(0o700);
-    expect(fileMode(responsePath)).toBe(0o400);
   });
 
   it('writes persistent permission metadata for runner SDK responses', () => {
     const keys = createIpcResponseSigningKeyPair();
+    const delivered: Array<Record<string, unknown>> = [];
+    registerIpcResponder('grp', 'permission-perm-3', (signed) => {
+      delivered.push(signed);
+    });
+
     writePermissionIpcResponse(
       tempDir,
       'grp',
@@ -164,13 +163,8 @@ describe('ipc-interaction-handler', () => {
       keys.privateKeyPem,
     );
 
-    const responsePath = path.join(
-      tempDir,
-      'grp',
-      'permission-responses',
-      'perm-3.json',
-    );
-    const payload = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+    expect(delivered).toHaveLength(1);
+    const payload = delivered[0];
     expect(payload).toMatchObject({
       requestId: 'perm-3',
       approved: true,
@@ -274,8 +268,6 @@ describe('ipc-interaction-handler', () => {
   });
 
   it('writes persistent SDK permission approvals to the active run live-rule file', async () => {
-    const claimedPath = path.join(tempDir, 'claimed-permission.json');
-    fs.writeFileSync(claimedPath, '{}');
     const toolRepository = {
       getTool: vi.fn(async () => ({
         id: 'tool:mcp__gantry__service_restart',
@@ -322,8 +314,6 @@ describe('ipc-interaction-handler', () => {
         mirrorAgentToolRulesToSettings,
       },
       ipcBaseDir: tempDir,
-      file: 'claimed-permission.json',
-      claimedPath,
       logger: { warn: vi.fn(), error: vi.fn() },
     });
 
@@ -353,8 +343,6 @@ describe('ipc-interaction-handler', () => {
   });
 
   it('records persistent approvals at parent conversation scope while routing the receipt to the thread', async () => {
-    const claimedPath = path.join(tempDir, 'claimed-thread-permission.json');
-    fs.writeFileSync(claimedPath, '{}');
     const saveDecision = vi.fn(async () => undefined);
     const publishRuntimeEvent = vi.fn(async () => undefined);
     const sendMessage = vi.fn(async () => undefined);
@@ -412,8 +400,6 @@ describe('ipc-interaction-handler', () => {
         mirrorAgentToolRulesToSettings: vi.fn(async () => undefined),
       },
       ipcBaseDir: tempDir,
-      file: 'claimed-thread-permission.json',
-      claimedPath,
       logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
     });
 
@@ -442,8 +428,6 @@ describe('ipc-interaction-handler', () => {
   });
 
   it('persists skill action capability approvals and appends runtime command rules', async () => {
-    const claimedPath = path.join(tempDir, 'claimed-skill-action.json');
-    fs.writeFileSync(claimedPath, '{}');
     const skillCapability = {
       capabilityId: 'skill.linkedin-posting.publish',
       displayName: 'LinkedIn posting',
@@ -517,8 +501,6 @@ describe('ipc-interaction-handler', () => {
         mirrorAgentToolRulesToSettings,
       },
       ipcBaseDir: tempDir,
-      file: 'claimed-skill-action.json',
-      claimedPath,
       logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
     });
 
@@ -561,8 +543,10 @@ describe('ipc-interaction-handler', () => {
 
   it('strips live-rule updates from non-permanent permission IPC responses', async () => {
     const envelope = createIpcAuthEnvelope('main_agent', null);
-    const claimedPath = path.join(tempDir, 'claimed-allow-once.json');
-    fs.writeFileSync(claimedPath, '{}');
+    const delivered: Array<Record<string, unknown>> = [];
+    registerIpcResponder('main_agent', 'permission-perm-once', (signed) => {
+      delivered.push(signed);
+    });
 
     await processPermissionInteractionIpc({
       request: {
@@ -593,22 +577,11 @@ describe('ipc-interaction-handler', () => {
         })),
       },
       ipcBaseDir: tempDir,
-      file: 'claimed-allow-once.json',
-      claimedPath,
       logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
     });
 
-    const response = JSON.parse(
-      fs.readFileSync(
-        path.join(
-          tempDir,
-          'main_agent',
-          'permission-responses',
-          'perm-once.json',
-        ),
-        'utf-8',
-      ),
-    );
+    expect(delivered).toHaveLength(1);
+    const response = delivered[0];
     expect(response).toMatchObject({
       requestId: 'perm-once',
       approved: true,
@@ -629,8 +602,6 @@ describe('ipc-interaction-handler', () => {
   });
 
   it('emits structured permission events and redacted Bash command telemetry', async () => {
-    const claimedPath = path.join(tempDir, 'claimed-bash-permission.json');
-    fs.writeFileSync(claimedPath, '{}');
     const publishRuntimeEvent = vi.fn(async () => undefined);
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const command =
@@ -663,8 +634,6 @@ describe('ipc-interaction-handler', () => {
         publishRuntimeEvent,
       },
       ipcBaseDir: tempDir,
-      file: 'claimed-bash-permission.json',
-      claimedPath,
       logger,
     });
 
@@ -702,6 +671,10 @@ describe('ipc-interaction-handler', () => {
 
   it('sanitizes user answer keys and values when writing responses', () => {
     const keys = createIpcResponseSigningKeyPair();
+    const delivered: Array<Record<string, unknown>> = [];
+    registerIpcResponder('grp', 'userq-q-2', (signed) => {
+      delivered.push(signed);
+    });
     const answers = {
       mode: 'trigger',
       '': 'ignored',
@@ -719,8 +692,8 @@ describe('ipc-interaction-handler', () => {
       keys.privateKeyPem,
     );
 
-    const responsePath = path.join(tempDir, 'grp', 'user-answers', 'q-2.json');
-    const payload = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+    expect(delivered).toHaveLength(1);
+    const payload = delivered[0];
     expect(payload).toMatchObject({
       requestId: 'q-2',
       answers: {
@@ -729,7 +702,5 @@ describe('ipc-interaction-handler', () => {
       },
       answeredBy: 'user',
     });
-    expect(fileMode(path.dirname(responsePath))).toBe(0o700);
-    expect(fileMode(responsePath)).toBe(0o400);
   });
 });

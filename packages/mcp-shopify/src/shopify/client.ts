@@ -12,6 +12,7 @@ export interface ShopifyClientOptions {
   maxAttempts?: number;
   initialDelayMs?: number;
   maxDelayMs?: number;
+  graphqlTimeoutMs?: number;
 }
 
 interface GraphQLResponse<T> {
@@ -27,6 +28,7 @@ interface GraphQLResponse<T> {
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_INITIAL_DELAY = 250;
 const DEFAULT_MAX_DELAY = 8000;
+const DEFAULT_GRAPHQL_TIMEOUT_MS = 8000;
 
 const SCOPE_MISSING_HINTS = [
   'missing scope',
@@ -53,6 +55,7 @@ export class ShopifyClient {
   private readonly maxAttempts: number;
   private readonly initialDelayMs: number;
   private readonly maxDelayMs: number;
+  private readonly graphqlTimeoutMs: number;
 
   constructor(opts: ShopifyClientOptions) {
     this.shopDomain = opts.shopDomain;
@@ -63,6 +66,8 @@ export class ShopifyClient {
     this.maxAttempts = opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
     this.initialDelayMs = opts.initialDelayMs ?? DEFAULT_INITIAL_DELAY;
     this.maxDelayMs = opts.maxDelayMs ?? DEFAULT_MAX_DELAY;
+    this.graphqlTimeoutMs =
+      opts.graphqlTimeoutMs ?? DEFAULT_GRAPHQL_TIMEOUT_MS;
   }
 
   async graphql<T>(
@@ -87,9 +92,12 @@ export class ShopifyClient {
     const token = await this.tokenManager.getToken();
 
     let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.graphqlTimeoutMs);
     try {
       response = await this.fetchImpl(url, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           'X-Shopify-Access-Token': token,
@@ -98,10 +106,19 @@ export class ShopifyClient {
         body: JSON.stringify({ query, variables }),
       });
     } catch (err) {
+      if (controller.signal.aborted) {
+        throw new ShopifyAdapterError(
+          'TIMEOUT',
+          `Shopify GraphQL timed out after ${this.graphqlTimeoutMs}ms`,
+          { timeoutMs: this.graphqlTimeoutMs },
+        );
+      }
       throw new ShopifyAdapterError(
         'NETWORK_ERROR',
         `Shopify GraphQL network error: ${err instanceof Error ? err.message : String(err)}`,
       );
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (response.status === 401) {

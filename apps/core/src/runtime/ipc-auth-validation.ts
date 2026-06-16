@@ -1,3 +1,5 @@
+import fs from 'fs';
+
 import {
   IPC_REQUEST_MAX_AGE_MS,
   validateIpcRequestFreshness,
@@ -14,6 +16,8 @@ import {
   computeIpcAuthToken,
   computeMemoryIpcAuthToken,
 } from './ipc-auth.js';
+import { writePrivateFileSync } from '../shared/private-fs.js';
+import { logger } from '../infrastructure/logging/logger.js';
 
 interface IpcThreadBinding {
   appId?: string;
@@ -36,6 +40,112 @@ interface IpcMemoryBinding extends IpcThreadBinding {
 }
 
 const consumedIpcRequestIds = new Map<string, number>();
+
+// ---------------------------------------------------------------------------
+// I-3 (GANTRY_IPC_REPLAY_PERSIST, default off): persist the consumed-requestId
+// replay set (key → expiresAtMs) to a private 0o600 file so a captured request
+// cannot be replayed across a core restart within its 5-min expiry. When the
+// flag is OFF, `replayPersistPath` stays undefined and NOTHING is written or
+// read — the set is in-memory only, reset on restart, byte-identical to today.
+//
+// Storage is append-only JSONL (one {k,e} record per consumed id). Writes are
+// cheap (a single appended line, write-through). On load we read every record,
+// keep the max expiry per key, drop expired ones, AND rewrite the file
+// compacted so it cannot grow unbounded across restarts.
+// ---------------------------------------------------------------------------
+let replayPersistPath: string | undefined;
+
+function appendReplayRecord(key: string, expiresAt: number): void {
+  if (!replayPersistPath) return;
+  try {
+    writePrivateFileSync(
+      replayPersistPath,
+      `${JSON.stringify({ k: key, e: expiresAt })}\n`,
+      { flag: 'a' },
+    );
+  } catch (err) {
+    // A persist failure must never break request validation — the in-memory set
+    // still protects within this process lifetime.
+    logger.warn({ err }, 'Failed to persist consumed IPC requestId');
+  }
+}
+
+/** Single funnel for recording a consumed id: in-memory always; file iff enabled. */
+function recordConsumedIpcRequestId(key: string, expiresAt: number): void {
+  consumedIpcRequestIds.set(key, expiresAt);
+  appendReplayRecord(key, expiresAt);
+}
+
+/**
+ * I-3: enable replay-set persistence at boot. Loads + prunes any existing file
+ * into the in-memory set, then compacts the file to the surviving (unexpired)
+ * records. Idempotent and best-effort. Call ONLY when GANTRY_IPC_REPLAY_PERSIST
+ * is on; when off this is never called and behavior is unchanged.
+ */
+export function initConsumedIpcRequestReplayPersistence(
+  filePath: string,
+): void {
+  replayPersistPath = filePath;
+  let raw = '';
+  try {
+    raw = fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    const code =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: string }).code)
+        : '';
+    if (code !== 'ENOENT') {
+      logger.warn({ err, filePath }, 'Failed to read persisted IPC replay set');
+    }
+    // No file yet (fresh boot) — nothing to load; future writes create it.
+    return;
+  }
+  const now = nowMs();
+  let loaded = 0;
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const rec = JSON.parse(trimmed) as { k?: unknown; e?: unknown };
+      const k = typeof rec.k === 'string' ? rec.k : undefined;
+      const e =
+        typeof rec.e === 'number' && Number.isFinite(rec.e) ? rec.e : undefined;
+      if (!k || e === undefined) continue;
+      if (e <= now) continue; // expired → drop
+      const existing = consumedIpcRequestIds.get(k);
+      if (existing === undefined || e > existing) {
+        consumedIpcRequestIds.set(k, e);
+      }
+      loaded += 1;
+    } catch {
+      // Skip a corrupt line; never abort the load.
+    }
+  }
+  // Compact: rewrite the file to only the surviving records so it cannot grow
+  // unbounded across restarts.
+  try {
+    const compacted = [...consumedIpcRequestIds.entries()]
+      .map(([k, e]) => JSON.stringify({ k, e }))
+      .join('\n');
+    writePrivateFileSync(filePath, compacted ? `${compacted}\n` : '', {
+      flag: 'w',
+    });
+  } catch (err) {
+    logger.warn(
+      { err, filePath },
+      'Failed to compact persisted IPC replay set',
+    );
+  }
+  logger.info(
+    { filePath, loaded, live: consumedIpcRequestIds.size },
+    'Loaded persisted IPC replay set (GANTRY_IPC_REPLAY_PERSIST)',
+  );
+}
+
+/** Test seam: disable persistence + forget the path (does not delete the file). */
+export function disableConsumedIpcRequestReplayPersistence(): void {
+  replayPersistPath = undefined;
+}
 
 function readThreadIdField(value: unknown, label: string): string | undefined {
   const parsed = toTrimmedString(value, { maxLen: 255, allowEmpty: true });
@@ -194,7 +304,7 @@ export function validateIpcAuthRequest(
     if (consumedIpcRequestIds.has(replayKey)) {
       throw new Error(`Invalid ${label} replay`);
     }
-    consumedIpcRequestIds.set(replayKey, nowMs() + IPC_REQUEST_MAX_AGE_MS);
+    recordConsumedIpcRequestId(replayKey, nowMs() + IPC_REQUEST_MAX_AGE_MS);
   }
   return binding;
 }
@@ -233,7 +343,7 @@ export function validateBrowserIpcAuthRequest(
     if (consumedIpcRequestIds.has(replayKey)) {
       throw new Error(`Invalid ${label} replay`);
     }
-    consumedIpcRequestIds.set(replayKey, nowMs() + IPC_REQUEST_MAX_AGE_MS);
+    recordConsumedIpcRequestId(replayKey, nowMs() + IPC_REQUEST_MAX_AGE_MS);
   }
   return { ...binding, chatJid };
 }
@@ -288,7 +398,7 @@ export function validateMemoryIpcAuthRequest(
     if (consumedIpcRequestIds.has(replayKey)) {
       throw new Error(`Invalid ${label} replay`);
     }
-    consumedIpcRequestIds.set(replayKey, nowMs() + IPC_REQUEST_MAX_AGE_MS);
+    recordConsumedIpcRequestId(replayKey, nowMs() + IPC_REQUEST_MAX_AGE_MS);
   }
   return {
     ...binding,

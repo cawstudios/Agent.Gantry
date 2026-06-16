@@ -9,10 +9,26 @@
 // traffic it would swap EVERY caller's identity, so keep it unset except on a
 // dev/test instance. Unset in production => no-op.
 const TEST_PHONE_ENV = 'GANTRY_TEST_CALLER_IDENTITY_PHONE';
+const TEST_MCP_SERVERS_ENV = 'GANTRY_TEST_CALLER_IDENTITY_MCP_SERVERS';
+const DEFAULT_TEST_MCP_SERVERS = ['shopify-api'];
 
-export function applyTestCallerIdentityOverride(jid: string): string {
+function configuredOverrideServers(): Set<string> {
+  const raw = process.env[TEST_MCP_SERVERS_ENV]?.trim();
+  const values = raw
+    ? raw.split(/[\s,]+/).filter(Boolean)
+    : DEFAULT_TEST_MCP_SERVERS;
+  return new Set(values);
+}
+
+export function applyTestCallerIdentityOverride(
+  jid: string,
+  opts: { serverName?: string } = {},
+): string {
   const testPhone = process.env[TEST_PHONE_ENV]?.trim();
   if (!testPhone) return jid;
+  if (opts.serverName && !configuredOverrideServers().has(opts.serverName)) {
+    return jid;
+  }
   // Preserve the channel prefix (e.g. "wa:") and swap only the numeric suffix.
   const match = jid.match(/^(.*?)(\d+)$/);
   return match ? `${match[1]}${testPhone}` : jid;

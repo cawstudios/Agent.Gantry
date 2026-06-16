@@ -1,9 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-
-import { DATA_DIR } from '../config/index.js';
 import { nowIso } from '../shared/time/datetime.js';
-import { writeFileAtomic } from '../infrastructure/filesystem/paths.js';
 import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 import {
@@ -17,10 +12,6 @@ import { takeIpcResponder } from '../runtime/ipc-response-router.js';
 
 const TASK_IPC_RESPONSE_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 export { toTrimmedString };
-
-function writeJsonAtomic(filePath: string, value: unknown): void {
-  writeFileAtomic(filePath, JSON.stringify(value, null, 2));
-}
 
 export function writeTaskIpcResponse(
   sourceAgentFolder: string,
@@ -38,14 +29,6 @@ export function writeTaskIpcResponse(
 ): void {
   if (!taskId || !TASK_IPC_RESPONSE_ID_PATTERN.test(taskId)) return;
   if (!isValidGroupFolder(sourceAgentFolder)) return;
-  const responseDir = path.join(
-    DATA_DIR,
-    'ipc',
-    sourceAgentFolder,
-    'task-responses',
-  );
-  fs.mkdirSync(responseDir, { recursive: true });
-  const responsePath = path.join(responseDir, `task-${taskId}.json`);
   const responsePayload = {
     taskId,
     ...payload,
@@ -64,7 +47,9 @@ export function writeTaskIpcResponse(
     responder(signed);
     return;
   }
-  writeJsonAtomic(responsePath, signed);
+  throw new Error(
+    `No socket IPC responder registered for task response ${sourceAgentFolder}/${taskId}`,
+  );
 }
 
 export function createTaskResponder(

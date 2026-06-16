@@ -603,6 +603,46 @@ describe('GroupQueue', () => {
     expect(executionOrder[1]).toBe('messages');
   });
 
+  it('releases a pooled warm worker after message run teardown', async () => {
+    let resolveProcess: () => void;
+    const release = vi.fn(async () => undefined);
+    const processMessages = vi.fn(async () => {
+      queue.registerProcess(
+        'group1@g.us',
+        {} as any,
+        'run-1',
+        'test-group',
+        undefined,
+        undefined,
+        {
+          pooledWarmWorker: {
+            handle: {
+              id: 'warm-worker-1',
+              key: 'warm-key',
+              bornAt: 100,
+              bound: true,
+            },
+            release,
+          },
+        },
+      );
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(release).not.toHaveBeenCalled();
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   // --- Coverage for drainWaiting with messages (line 337) ---
 
   it('drainWaiting runs pending messages for waiting groups when slots free up', async () => {
@@ -705,6 +745,58 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- I-1 (GANTRY_IPC_SHUTDOWN_KILL): SIGKILL stragglers after the grace ---
+
+  it('shutdown does NOT kill a straggler when killStragglersAfterGrace is off (default = today)', async () => {
+    // Default queue (flag off). A tracked process still alive after the grace
+    // must be left detached — its kill() is never invoked. This is the
+    // off-case = today's behavior.
+    const kill = vi.fn();
+    const mockProcess = { killed: false, kill } as any;
+    queue.registerProcess('group1@g.us', mockProcess, 'run-active', 'team');
+
+    await queue.shutdown(0);
+
+    expect(kill).not.toHaveBeenCalled();
+    expect(mockProcess.killed).toBe(false);
+  });
+
+  it('shutdown SIGKILLs a still-alive tracked straggler after grace when killStragglersAfterGrace is on', async () => {
+    const killingQueue = new GroupQueue({ killStragglersAfterGrace: true });
+    // No pid → the kill escalation routes through proc.kill('SIGKILL'),
+    // keeping the test hermetic (no real OS process is signaled).
+    const kill = vi.fn();
+    const mockProcess = { killed: false, kill } as any;
+    killingQueue.registerProcess(
+      'group1@g.us',
+      mockProcess,
+      'run-active',
+      'team',
+    );
+
+    await killingQueue.shutdown(0);
+
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith('SIGKILL');
+  });
+
+  it('shutdown does not kill an already-killed straggler even when the flag is on', async () => {
+    const killingQueue = new GroupQueue({ killStragglersAfterGrace: true });
+    const kill = vi.fn();
+    // killed:true ⇒ the process already exited; the escalation must skip it.
+    const mockProcess = { killed: true, kill } as any;
+    killingQueue.registerProcess(
+      'group1@g.us',
+      mockProcess,
+      'run-active',
+      'team',
+    );
+
+    await killingQueue.shutdown(0);
+
+    expect(kill).not.toHaveBeenCalled();
   });
 
   it('shutdown waits for active runs within the grace period', async () => {
@@ -1514,6 +1606,7 @@ describe('GroupQueue', () => {
 
   it('stopGroup sends SIGTERM to the active process group', async () => {
     let resolveProcess: () => void;
+    const release = vi.fn(async () => undefined);
     const processMessages = vi.fn(async () => {
       await new Promise<void>((resolve) => {
         resolveProcess = resolve;
@@ -1525,7 +1618,25 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     const mockProcess = { pid: 4242, killed: false, kill: vi.fn() } as any;
-    queue.registerProcess('group1@g.us', mockProcess, 'run-1', 'team');
+    queue.registerProcess(
+      'group1@g.us',
+      mockProcess,
+      'run-1',
+      'team',
+      undefined,
+      undefined,
+      {
+        pooledWarmWorker: {
+          handle: {
+            id: 'warm-worker-stop',
+            key: 'warm-key',
+            bornAt: 100,
+            bound: true,
+          },
+          release,
+        },
+      },
+    );
 
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
     expect(queue.stopGroup('group1@g.us')).toBe(true);
@@ -1535,6 +1646,7 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it('stopGroup falls back to SIGTERM on the direct process when group kill fails', async () => {

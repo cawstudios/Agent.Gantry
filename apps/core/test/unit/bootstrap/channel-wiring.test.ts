@@ -127,6 +127,7 @@ function makeApp(
     setConversationRoutesForTest: vi.fn(),
     ensureCredentialBindingsForConversationRoutes: vi.fn(),
     processGroupMessages: vi.fn(),
+    prewarmAgentForConversationRoute: vi.fn(async () => true),
     getConversationRoutes: vi.fn(() => conversationRoutes),
     getLastTimestamp: vi.fn(() => ''),
     setLastTimestamp: vi.fn(),
@@ -622,7 +623,16 @@ describe('createChannelWiring', () => {
     });
     const storeMessage = vi.fn(async () => {});
     const enqueueMessageCheck = vi.fn();
+    let resolvePrewarm: ((value: boolean) => void) | undefined;
+    const prewarmAgentForConversationRoute = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolvePrewarm = resolve;
+        }),
+    );
     const info = vi.fn();
+    (app.prewarmAgentForConversationRoute as any) =
+      prewarmAgentForConversationRoute;
     const handlers = createChannelPersistenceHandlers({
       app,
       resolved: {
@@ -662,10 +672,33 @@ describe('createChannelWiring', () => {
       is_bot_message: false,
     };
 
-    await handlers.onMessage('wa:918097579999', msg);
+    const pending = handlers
+      .onMessage('wa:918097579999', msg)
+      .then(() => 'returned' as const);
 
+    const beforePrewarm = await Promise.race([
+      pending,
+      new Promise<'waiting'>((resolve) =>
+        setTimeout(() => resolve('waiting'), 50),
+      ),
+    ]);
+
+    expect(beforePrewarm).toBe('waiting');
     expect(storeMessage).toHaveBeenCalledWith(msg);
+    expect(prewarmAgentForConversationRoute).toHaveBeenCalledWith(
+      'wa:918097579999',
+    );
+    expect(enqueueMessageCheck).not.toHaveBeenCalled();
+
+    resolvePrewarm?.(true);
+    await expect(pending).resolves.toBe('returned');
     expect(enqueueMessageCheck).toHaveBeenCalledWith('wa:918097579999');
+    expect(storeMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      prewarmAgentForConversationRoute.mock.invocationCallOrder[0],
+    );
+    expect(
+      prewarmAgentForConversationRoute.mock.invocationCallOrder[0],
+    ).toBeLessThan(enqueueMessageCheck.mock.invocationCallOrder[0]);
     expect(storeMessage.mock.invocationCallOrder[0]).toBeLessThan(
       enqueueMessageCheck.mock.invocationCallOrder[0],
     );
@@ -751,6 +784,85 @@ describe('createChannelWiring', () => {
     expect(storeMessage.mock.invocationCallOrder[0]).toBeLessThan(
       enqueueMessageCheck.mock.invocationCallOrder[0],
     );
+  });
+
+  it('debounces event-pipe wakes for rapid inbound messages to preserve batching', async () => {
+    vi.useFakeTimers();
+    try {
+      const routes: Record<string, any> = {
+        'wa:918097570002': {
+          name: 'Boondi',
+          folder: 'boondi_support',
+          trigger: '@Boondi',
+          added_at: '2026-05-20T19:30:00.000Z',
+          requiresTrigger: false,
+          conversationKind: 'dm',
+        },
+      };
+      const app = makeApp(routes);
+      const storeMessage = vi.fn(async () => {});
+      const enqueueMessageCheck = vi.fn();
+      const handlers = createChannelPersistenceHandlers({
+        app,
+        resolved: {
+          providerIds: [],
+          loadSenderAllowlist: vi.fn(() => ({}) as any),
+          loadSenderControlAllowlist: vi.fn(() => ({}) as any),
+          shouldDropMessage: vi.fn(() => false),
+          isSenderAllowed: vi.fn(() => true),
+          isSenderControlAllowed: vi.fn(() => true),
+          shouldLogDenied: vi.fn(() => false),
+          asRemoteControlCommand: vi.fn(() => null),
+          handleRemoteControlCommand: vi.fn(async () => {}),
+          logger: {
+            info: vi.fn(),
+            warn: vi.fn(),
+            debug: vi.fn(),
+            error: vi.fn(),
+          },
+          opsRepository: { storeMessage } as any,
+        },
+        ops: () => ({ storeMessage, storeChatMetadata: vi.fn() }) as any,
+        findBoundChannel: vi.fn(),
+        persistenceQueue: new AsyncTaskQueue(4, 100),
+        enqueueMessageCheck,
+        eventPipeEnabled: true,
+        eventPipeDebounceMs: 500,
+      });
+
+      const baseMsg = {
+        chat_jid: 'wa:918097570002',
+        provider: 'interakt',
+        sender: '918097570002',
+        sender_name: 'Existing Customer',
+        timestamp: '2026-05-22T11:46:00.000Z',
+        is_from_me: false,
+        is_bot_message: false,
+      };
+
+      await handlers.onMessage('wa:918097570002', {
+        ...baseMsg,
+        id: 'wa-existing-route-1',
+        content: 'first',
+      });
+      await handlers.onMessage('wa:918097570002', {
+        ...baseMsg,
+        id: 'wa-existing-route-2',
+        content: 'second',
+      });
+
+      expect(storeMessage).toHaveBeenCalledTimes(2);
+      expect(enqueueMessageCheck).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(499);
+      expect(enqueueMessageCheck).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(enqueueMessageCheck).toHaveBeenCalledTimes(1);
+      expect(enqueueMessageCheck).toHaveBeenCalledWith('wa:918097570002');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does NOT use a non-wa:* isTemplate route for Interakt inbound (cross-channel guard)', async () => {

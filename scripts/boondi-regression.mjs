@@ -35,6 +35,7 @@ import {
   LANE_PHONES,
   RETURNING_PHONE,
   configuredOperatorPhones,
+  isDevTestPhone,
 } from './lib/phones.mjs';
 import {
   openClient,
@@ -836,9 +837,15 @@ async function main() {
   const scenarioShapeFailures = validateScenarioShape(all);
   const phoneFailures = all.flatMap((s) => {
     const failures = [];
-    if (s.phone && !configuredPhones.has(s.phone)) {
+    if (configuredPhones.size === 0) {
+      failures.push('GANTRY_TEST_OPERATOR_PHONE must contain an operator phone');
+    } else if (
+      s.phone &&
+      !configuredPhones.has(s.phone) &&
+      !isDevTestPhone(s.phone)
+    ) {
       failures.push(
-        `${s.name}: phone ${s.phone} is missing from GANTRY_TEST_OPERATOR_PHONE`,
+        `${s.name}: non-000 phone ${s.phone} is missing from GANTRY_TEST_OPERATOR_PHONE`,
       );
     }
     if (s.phone === '919654405340') {

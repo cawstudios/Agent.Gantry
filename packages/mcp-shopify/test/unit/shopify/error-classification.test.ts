@@ -150,4 +150,36 @@ describe('ShopifyClient error classification', () => {
     expect((err as ShopifyAdapterError).details).toHaveProperty('errors');
     tokenManager.stop();
   });
+
+  it('times out a stalled Shopify GraphQL request below the MCP transport ceiling', async () => {
+    const tm = buildClient().tokenManager;
+    let sawGraphqlAbortSignal = false;
+    const fetchImpl = (async (input: string | URL, init?: RequestInit) => {
+      if (input.toString().includes('/oauth/access_token')) {
+        return tokenResponse();
+      }
+      sawGraphqlAbortSignal = init?.signal instanceof AbortSignal;
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new Error('aborted'));
+        });
+      });
+    }) as unknown as typeof fetch;
+
+    const client = new ShopifyClient({
+      shopDomain: 'test.myshopify.com',
+      apiVersion: '2026-04',
+      tokenManager: tm,
+      fetchImpl,
+      maxAttempts: 1,
+      graphqlTimeoutMs: 5,
+    });
+
+    await expect(client.graphql('{ x }')).rejects.toMatchObject({
+      code: 'TIMEOUT',
+      details: { timeoutMs: 5 },
+    });
+    expect(sawGraphqlAbortSignal).toBe(true);
+    tm.stop();
+  });
 });

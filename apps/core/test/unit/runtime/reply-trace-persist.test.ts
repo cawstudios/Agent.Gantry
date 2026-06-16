@@ -238,4 +238,118 @@ describe('persistReplyTrace', () => {
     expect(kinds).toContain('llm');
     expect(kinds).toContain('send');
   });
+
+  it('uses runner-observed tool spans when no core MCP proxy span was captured', async () => {
+    const saved: MessageTraceRow[] = [];
+    const port = makePort(saved);
+
+    await persistReplyTrace({
+      replyTrace: port,
+      kind: 'reply',
+      chatJid: 'wa:tool',
+      appId: 'app:test',
+      outboundMessageId: 'outbound:tool',
+      windowStart: 0,
+      windowEnd: 1000,
+      llmTurns: [
+        {
+          startedAt: 100,
+          ms: 100,
+          detail: { model: 'sonnet', stopReason: 'tool_use' },
+        },
+        {
+          startedAt: 700,
+          ms: 100,
+          detail: { model: 'sonnet', stopReason: 'end_turn' },
+        },
+      ],
+      toolCalls: [
+        {
+          server: 'shopify-api',
+          tool: 'get_recent_orders_with_details',
+          startedAt: 250,
+          ms: 400,
+          ok: true,
+          requestBytes: 12,
+          responseBytes: 34,
+        },
+      ],
+      now: () => new Date('2026-06-14T00:00:00.000Z'),
+    });
+
+    const timeline = saved[0].timingsJson as {
+      sections: Array<{ kind: string; label: string; ms: number }>;
+    };
+    expect(timeline.sections.map((section) => section.kind)).toContain('tool');
+    expect(
+      timeline.sections.find((section) => section.kind === 'tool'),
+    ).toMatchObject({
+      label: 'get_recent_orders_with_details',
+      ms: 400,
+    });
+  });
+
+  it('does not double-count runner tool spans that overlap core proxy spans', async () => {
+    const saved: MessageTraceRow[] = [];
+    const port = makePort(saved, {
+      drain: () => [
+        {
+          server: 'shopify-api',
+          tool: 'get_recent_orders_with_details',
+          startedAt: 240,
+          ms: 420,
+          ok: true,
+          requestBytes: 12,
+          responseBytes: 34,
+        },
+      ],
+    });
+
+    await persistReplyTrace({
+      replyTrace: port,
+      kind: 'reply',
+      chatJid: 'wa:tool',
+      appId: 'app:test',
+      outboundMessageId: 'outbound:tool',
+      runHandle: 'gantry-run-tool',
+      windowStart: 0,
+      windowEnd: 1000,
+      llmTurns: [
+        {
+          startedAt: 100,
+          ms: 100,
+          detail: { model: 'sonnet', stopReason: 'tool_use' },
+        },
+        {
+          startedAt: 700,
+          ms: 100,
+          detail: { model: 'sonnet', stopReason: 'end_turn' },
+        },
+      ],
+      toolCalls: [
+        {
+          server: 'gantry',
+          tool: 'mcp_call_tool',
+          startedAt: 230,
+          ms: 450,
+          ok: true,
+          requestBytes: 12,
+          responseBytes: 34,
+        },
+      ],
+      now: () => new Date('2026-06-14T00:00:00.000Z'),
+    });
+
+    const timeline = saved[0].timingsJson as {
+      sections: Array<{ kind: string; label: string; ms: number }>;
+    };
+    const toolSections = timeline.sections.filter(
+      (section) => section.kind === 'tool',
+    );
+    expect(toolSections).toHaveLength(1);
+    expect(toolSections[0]).toMatchObject({
+      label: 'get_recent_orders_with_details',
+      ms: 420,
+    });
+  });
 });

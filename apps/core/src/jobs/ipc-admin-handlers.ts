@@ -931,10 +931,13 @@ async function createMcpProxyForSourceGroup(input: {
     tools: storage.repositories.tools,
     skills: storage.repositories.skills,
     credentialEnv,
-    // Dev-only: remaps the MCP caller identity to a test number when
-    // GANTRY_TEST_CALLER_IDENTITY_PHONE is set; no-op otherwise. Same-channel
-    // validation already ran on the real JID above, and outbound is unaffected.
-    callerIdentityJid: applyTestCallerIdentityOverride(input.callerIdentityJid),
+    callerIdentityJid: input.callerIdentityJid,
+    // Dev-only: remaps the MCP caller identity to a test number for configured
+    // MCP servers when GANTRY_TEST_CALLER_IDENTITY_PHONE is set; no-op otherwise.
+    // Same-channel validation already ran on the real JID above, and outbound is
+    // unaffected.
+    callerIdentityJidForServer: (serverName, jid) =>
+      applyTestCallerIdentityOverride(jid, { serverName }),
     // The real conversation JID (pre-override) for flow-trace attribution only.
     conversationJid: input.callerIdentityJid,
     lookupHostname: input.deps.mcpHostnameLookup,

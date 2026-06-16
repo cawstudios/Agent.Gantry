@@ -8,6 +8,7 @@ import {
 const DIST = '/root/dist/adapters/llm/anthropic-claude-agent/runner/index.js';
 const SRC =
   '/root/apps/core/src/adapters/llm/anthropic-claude-agent/runner/index.ts';
+const TSX = 'file:///root/node_modules/tsx/dist/loader.mjs';
 
 function input(
   patch: Partial<BuildChildRunnerLaunchInput> = {},
@@ -18,6 +19,7 @@ function input(
     sourceExists: true,
     fromSourceFlag: undefined,
     inspectPortRaw: undefined,
+    tsxImportSpecifier: TSX,
     ...patch,
   };
 }
@@ -43,7 +45,7 @@ describe('buildChildRunnerLaunch', () => {
     expect(launch.inspectPort).toBe(9230);
     expect(launch.runnerArgs).toEqual([
       '--import',
-      'tsx',
+      TSX,
       '--inspect=127.0.0.1:9230',
       SRC,
     ]);
@@ -70,8 +72,15 @@ describe('buildChildRunnerLaunch', () => {
     );
     expect(launch.mode).toBe('source');
     expect(launch.inspectPort).toBeUndefined();
-    expect(launch.runnerArgs).toEqual(['--import', 'tsx', SRC]);
+    expect(launch.runnerArgs).toEqual(['--import', TSX, SRC]);
     expect(launch.runnerArgs.some((a) => a.includes('--inspect'))).toBe(false);
+  });
+
+  it('falls back to bare tsx when no import specifier override is supplied', () => {
+    const launch = buildChildRunnerLaunch(
+      input({ fromSourceFlag: 'true', tsxImportSpecifier: undefined }),
+    );
+    expect(launch.runnerArgs[1]).toBe('tsx');
   });
 
   it('falls back to the default port when the override is invalid', () => {

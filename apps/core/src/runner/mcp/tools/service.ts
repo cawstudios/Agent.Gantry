@@ -4,10 +4,9 @@ import { nowIso } from '../../../shared/time/datetime.js';
 import {
   availableSemanticCapabilities,
   capabilityStatusText,
-  chatJid,
   isAdminMcpToolEnabled,
-  threadId,
 } from '../context.js';
+import { getBoundChatJid, getBoundThreadId } from '../bound-identity.js';
 import { sendTaskRequest } from '../ipc.js';
 import {
   MCP_PROXY_WAIT_MS,
@@ -327,9 +326,7 @@ export function registerServiceTools(server: McpServer): void {
         {
           type: 'request_mcp_server',
           taskId,
-          targetJid: chatJid,
-          chatJid,
-          authThreadId: threadId,
+          ...boundTaskRouting(),
           payload: {
             name: args.name,
             transport: args.transport,
@@ -389,9 +386,7 @@ export function registerServiceTools(server: McpServer): void {
         {
           type: 'mcp_list_tools',
           taskId,
-          targetJid: chatJid,
-          chatJid,
-          authThreadId: threadId,
+          ...boundTaskRouting(),
           payload: {
             serverName: args.serverName,
           },
@@ -449,9 +444,7 @@ export function registerServiceTools(server: McpServer): void {
           // RunTraceCollector by runHandle at capture and drains by the same key
           // at persist time. Matches the other capability IPC writers.
           runHandle: process.env.GANTRY_AGENT_RUN_HANDLE || undefined,
-          targetJid: chatJid,
-          chatJid,
-          authThreadId: threadId,
+          ...boundTaskRouting(),
           payload: {
             serverName: args.serverName,
             toolName: args.toolName,
@@ -496,8 +489,7 @@ export function registerServiceTools(server: McpServer): void {
         {
           type: 'service_restart',
           taskId,
-          targetJid: chatJid,
-          chatJid,
+          ...boundTaskRouting(),
           timestamp: nowIso(),
         },
         { timeoutMs: 20_000 },
@@ -571,8 +563,7 @@ The JID must be the current conversation. The folder name must be channel-prefix
           type: 'register_agent',
           taskId,
           jid: args.jid,
-          targetJid: chatJid,
-          chatJid,
+          ...boundTaskRouting(),
           name: args.name,
           folder: args.folder,
           trigger: args.trigger,
@@ -694,6 +685,20 @@ function isBrowserWrongLaneText(value: string): boolean {
   );
 }
 
+function boundTaskRouting(): {
+  targetJid: string;
+  chatJid: string;
+  authThreadId?: string;
+} {
+  const chatJid = getBoundChatJid();
+  const threadId = getBoundThreadId();
+  return {
+    targetJid: chatJid,
+    chatJid,
+    ...(threadId ? { authThreadId: threadId } : {}),
+  };
+}
+
 type CapabilityReviewToolName =
   | 'request_skill_install'
   | 'request_skill_dependency_install'
@@ -712,9 +717,7 @@ async function submitCapabilityReviewTask(
       runHandle: process.env.GANTRY_AGENT_RUN_HANDLE || undefined,
       jobId: process.env.GANTRY_JOB_ID || undefined,
       runId: process.env.GANTRY_JOB_RUN_ID || undefined,
-      targetJid: chatJid,
-      chatJid,
-      authThreadId: threadId,
+      ...boundTaskRouting(),
       payload,
       timestamp: nowIso(),
     },
@@ -785,9 +788,7 @@ function registerSkillProposalTool(
         {
           type: toolName,
           taskId,
-          targetJid: chatJid,
-          chatJid,
-          authThreadId: threadId,
+          ...boundTaskRouting(),
           payload: {
             files: args.files,
             reason: args.reason,
