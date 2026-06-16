@@ -14,6 +14,10 @@ import type { AgentMiddleware } from 'langchain';
 //     tool list is the v1 SAFEST option (the sub-run would inherit the same
 //     restricted toolset anyway, but Gantry has not policy-reviewed sub-run
 //     spawning, so it must not be reachable).
+//   - DeepAgents async-subagent middleware exposes start/check/update/cancel/list
+//     tools when async subagents are configured. Those are not part of the
+//     always-baked default stack, but they are raw provider delegation authority
+//     and must stay hidden until Gantry owns the durable task lifecycle wrapper.
 //   - `write_todos` mutates DeepAgents in-state todos, which are non-durable
 //     scratch state Gantry does not own; hiding it keeps the surface minimal.
 //   - the filesystem write tools (write_file/edit_file) are always hidden.
@@ -48,7 +52,20 @@ export const EXCLUDED_BUILTIN_DEEPAGENT_TOOL_NAMES = [
   ...EXCLUDED_FILESYSTEM_DEEPAGENT_TOOL_NAMES,
 ] as const;
 
-const EXCLUDED_SET = new Set<string>(EXCLUDED_BUILTIN_DEEPAGENT_TOOL_NAMES);
+export const EXCLUDED_ASYNC_SUBAGENT_DEEPAGENT_TOOL_NAMES = [
+  'start_async_task',
+  'check_async_task',
+  'update_async_task',
+  'cancel_async_task',
+  'list_async_tasks',
+] as const;
+
+export const EXCLUDED_RAW_DEEPAGENT_TOOL_NAMES = [
+  ...EXCLUDED_BUILTIN_DEEPAGENT_TOOL_NAMES,
+  ...EXCLUDED_ASYNC_SUBAGENT_DEEPAGENT_TOOL_NAMES,
+] as const;
+
+const EXCLUDED_SET = new Set<string>(EXCLUDED_RAW_DEEPAGENT_TOOL_NAMES);
 const SKILL_READ_TOOL_SET = new Set<string>(
   READONLY_SKILL_FILESYSTEM_DEEPAGENT_TOOL_NAMES,
 );

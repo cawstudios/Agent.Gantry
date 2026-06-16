@@ -5,8 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createBuiltinToolExclusionMiddleware,
+  EXCLUDED_ASYNC_SUBAGENT_DEEPAGENT_TOOL_NAMES,
   EXCLUDED_BUILTIN_DEEPAGENT_TOOL_NAMES,
   EXCLUDED_FILESYSTEM_DEEPAGENT_TOOL_NAMES,
+  EXCLUDED_RAW_DEEPAGENT_TOOL_NAMES,
   READONLY_SKILL_FILESYSTEM_DEEPAGENT_TOOL_NAMES,
   WRITE_FILESYSTEM_DEEPAGENT_TOOL_NAMES,
 } from '@core/adapters/llm/deepagents-langchain/runner/builtin-tool-exclusion.js';
@@ -88,7 +90,7 @@ function readDirFilesRecursive(dir: string): string[] {
 }
 
 describe('DeepAgents raw authority denial', () => {
-  it('excludes task, write_todos, and the six filesystem tools from the model-visible surface', async () => {
+  it('excludes raw built-in and async delegation tools from the model-visible surface', async () => {
     const middleware = createBuiltinToolExclusionMiddleware() as unknown as {
       name: string;
       wrapModelCall: (
@@ -104,6 +106,11 @@ describe('DeepAgents raw authority denial', () => {
         tools: [
           { name: 'task' },
           { name: 'write_todos' },
+          { name: 'start_async_task' },
+          { name: 'check_async_task' },
+          { name: 'update_async_task' },
+          { name: 'cancel_async_task' },
+          { name: 'list_async_tasks' },
           { name: 'ls' },
           { name: 'read_file' },
           { name: 'write_file' },
@@ -129,6 +136,11 @@ describe('DeepAgents raw authority denial', () => {
     for (const denied of [
       'task',
       'write_todos',
+      'start_async_task',
+      'check_async_task',
+      'update_async_task',
+      'cancel_async_task',
+      'list_async_tasks',
       'ls',
       'read_file',
       'write_file',
@@ -140,7 +152,7 @@ describe('DeepAgents raw authority denial', () => {
     }
   });
 
-  it('lists task, write_todos, and the filesystem tools as excluded builtin tool names', () => {
+  it('lists raw DeepAgents tool names as excluded by category', () => {
     expect([...EXCLUDED_BUILTIN_DEEPAGENT_TOOL_NAMES].sort()).toEqual([
       'edit_file',
       'glob',
@@ -148,6 +160,28 @@ describe('DeepAgents raw authority denial', () => {
       'ls',
       'read_file',
       'task',
+      'write_file',
+      'write_todos',
+    ]);
+    expect([...EXCLUDED_ASYNC_SUBAGENT_DEEPAGENT_TOOL_NAMES].sort()).toEqual([
+      'cancel_async_task',
+      'check_async_task',
+      'list_async_tasks',
+      'start_async_task',
+      'update_async_task',
+    ]);
+    expect([...EXCLUDED_RAW_DEEPAGENT_TOOL_NAMES].sort()).toEqual([
+      'cancel_async_task',
+      'check_async_task',
+      'edit_file',
+      'glob',
+      'grep',
+      'list_async_tasks',
+      'ls',
+      'read_file',
+      'start_async_task',
+      'task',
+      'update_async_task',
       'write_file',
       'write_todos',
     ]);
@@ -186,6 +220,11 @@ describe('DeepAgents raw authority denial', () => {
         tools: [
           { name: 'task' },
           { name: 'write_todos' },
+          { name: 'start_async_task' },
+          { name: 'check_async_task' },
+          { name: 'update_async_task' },
+          { name: 'cancel_async_task' },
+          { name: 'list_async_tasks' },
           { name: 'ls' },
           { name: 'read_file' },
           { name: 'write_file' },
