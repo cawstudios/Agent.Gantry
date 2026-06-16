@@ -49,11 +49,12 @@ type SandboxRuntimeGatewayOptions = {
   privateNetworkHostMappings?: readonly EgressGatewayPrivateHostMapping[];
 };
 
-const NO_RUNNER_SANDBOX_WARM_TEMPLATE_STATUS: RunnerSandboxWarmTemplateStatus = {
-  available: false,
-  cacheHit: false,
-  authorityFree: true,
-};
+const NO_RUNNER_SANDBOX_WARM_TEMPLATE_STATUS: RunnerSandboxWarmTemplateStatus =
+  {
+    available: false,
+    cacheHit: false,
+    authorityFree: true,
+  };
 
 export function resolveRunnerSandboxStartup(input: {
   provider?: RunnerSandboxProvider;
@@ -78,6 +79,17 @@ export function resolveRunnerSandboxStartup(input: {
         NO_RUNNER_SANDBOX_WARM_TEMPLATE_STATUS,
     ),
   };
+}
+
+export function uniqueStrings(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
 }
 
 export function prepareRunnerWorkspace(input: {

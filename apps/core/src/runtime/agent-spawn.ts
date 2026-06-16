@@ -45,7 +45,11 @@ import { applyAgentEgressNoProxyEnv } from '../shared/no-proxy.js';
 import { buildToolNetworkEnv } from '../shared/tool-network-env.js';
 import { closeEgressGateway, ensureEgressGateway } from './egress-gateway.js';
 import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
-import { AgentInput, AgentOutput, RunAgentOptions } from './agent-spawn-types.js';
+import {
+  AgentInput,
+  AgentOutput,
+  RunAgentOptions,
+} from './agent-spawn-types.js';
 import { selectedMemoryIpcActionsFromToolRules } from '../shared/memory-ipc-actions.js';
 import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-references.js';
 import { resolveMcpCredentialEnvForAgent } from '../application/capability-secrets/mcp-secret-projection.js';
@@ -89,23 +93,18 @@ import {
   sandboxRuntimeToolNetworkEnv,
   prepareRunnerWorkspace,
   resolveRunnerSandboxStartup,
+  uniqueStrings,
   buildRunnerSandboxSpawnInput,
   buildAndLogRunnerRuntimeDetails,
   type RunnerAgentInput,
 } from './agent-spawn-helpers.js';
 const DEFAULT_RUNNER_APP_ID = 'default';
 export { writeGroupsSnapshot } from './agent-spawn-snapshots.js';
-export type { AvailableGroup, AgentInput, AgentOutput } from './agent-spawn-types.js';
-function uniqueStrings(values: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const value of values) {
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    result.push(value);
-  }
-  return result;
-}
+export type {
+  AvailableGroup,
+  AgentInput,
+  AgentOutput,
+} from './agent-spawn-types.js';
 export async function spawnAgent(
   group: ConversationRoute,
   input: AgentInput,
@@ -396,7 +395,8 @@ export async function spawnAgent(
         memoryReviewerIsControlApprover: input.memoryReviewerIsControlApprover,
       },
     );
-    const upstreamProxyUrl = hostCredentials.proxy?.https || hostCredentials.proxy?.http;
+    const upstreamProxyUrl =
+      hostCredentials.proxy?.https || hostCredentials.proxy?.http;
     const runnerInputPatch = preparedExecution.runnerInputPatch ?? {};
     runnerInput.modelCredentialEnv = runnerInputPatch.modelCredentialEnv;
     const runtimeSandbox = getRuntimeSettingsForConfig().runtime.sandbox;
