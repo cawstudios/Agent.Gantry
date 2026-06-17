@@ -706,6 +706,163 @@ describe('GroupQueue', () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
+  it('releases an idle retained pooled worker when stopGroup succeeds without waiting for process close', async () => {
+    const release = vi.fn(async () => undefined);
+    const deliverClose = vi.fn();
+    queue.setContinuationDelivery({
+      deliverContinuation: vi.fn(() => true),
+      deliverClose,
+    });
+    const proc = Object.assign(new EventEmitter(), {
+      killed: false,
+      kill: vi.fn(() => true),
+    });
+    const processMessages = vi.fn(async () => {
+      queue.registerProcess(
+        'group1@g.us',
+        proc as any,
+        'run-1',
+        'test-group',
+        undefined,
+        undefined,
+        {
+          pooledWarmWorker: {
+            handle: {
+              id: 'warm-worker-1',
+              key: 'warm-key',
+              bornAt: 100,
+              bound: true,
+            },
+            release,
+          },
+        },
+      );
+      queue.notifyIdle('group1@g.us');
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.stopGroup('group1@g.us')).toBe(true);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(deliverClose).toHaveBeenCalledTimes(1);
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(queue.sendMessage('group1@g.us', 'late follow-up')).toBe(false);
+
+    proc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases an idle retained pooled worker when continuation delivery is unavailable', async () => {
+    const release = vi.fn(async () => undefined);
+    const deliverContinuation = vi.fn(() => false);
+    queue.setContinuationDelivery({
+      deliverContinuation,
+      deliverClose: vi.fn(),
+    });
+    const proc = Object.assign(new EventEmitter(), {
+      killed: false,
+    });
+    const processMessages = vi.fn(async () => {
+      queue.registerProcess(
+        'group1@g.us',
+        proc as any,
+        'run-1',
+        'test-group',
+        undefined,
+        undefined,
+        {
+          pooledWarmWorker: {
+            handle: {
+              id: 'warm-worker-1',
+              key: 'warm-key',
+              bornAt: 100,
+              bound: true,
+            },
+            release,
+          },
+        },
+      );
+      queue.notifyIdle('group1@g.us');
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.sendMessage('group1@g.us', 'follow-up')).toBe(false);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(deliverContinuation).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(queue.sendMessage('group1@g.us', 'late follow-up')).toBe(false);
+
+    proc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a retained pooled worker when fallback processing already marked the group active', async () => {
+    const release = vi.fn(async () => undefined);
+    const deliverContinuation = vi.fn(() => false);
+    queue.setContinuationDelivery({
+      deliverContinuation,
+      deliverClose: vi.fn(),
+    });
+    const proc = Object.assign(new EventEmitter(), {
+      killed: false,
+    });
+    let phase: 'retain' | 'fallback' = 'retain';
+    const processMessages = vi.fn(async () => {
+      if (phase === 'retain') {
+        queue.registerProcess(
+          'group1@g.us',
+          proc as any,
+          'run-1',
+          'test-group',
+          undefined,
+          undefined,
+          {
+            pooledWarmWorker: {
+              handle: {
+                id: 'warm-worker-1',
+                key: 'warm-key',
+                bornAt: 100,
+                bound: true,
+              },
+              release,
+            },
+          },
+        );
+        queue.notifyIdle('group1@g.us');
+        return true;
+      }
+
+      expect(queue.sendMessage('group1@g.us', 'follow-up')).toBe(false);
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    phase = 'fallback';
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(deliverContinuation).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(queue.getWorkerInventorySnapshot().activeMessageRuns).toBe(0);
+  });
+
   it('keeps a retained pooled worker alive when a DB-drain run pipes a continuation', async () => {
     const release = vi.fn(async () => undefined);
     const deliverContinuation = vi.fn(() => true);

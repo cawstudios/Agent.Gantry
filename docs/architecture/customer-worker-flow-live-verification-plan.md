@@ -2,7 +2,7 @@
 
 Date: 2026-06-18
 
-Status: execution in progress. Phase 0 baseline passed on 2026-06-18 IST.
+Status: execution in progress. Phase 0 and Phase 1 passed on 2026-06-18 IST.
 
 ## Phase Status Tracker
 
@@ -13,7 +13,7 @@ evidence.
 | Phase | Scope | Scenario count | Status | Evidence | Notes |
 | --- | --- | ---: | --- | --- | --- |
 | Phase 0 | Harness and baseline | baseline gate | Passed | 2026-06-18 IST baseline: core 4710, admin 3000, Shopify MCP 8081, CRM MCP 8082; one healthy runtime, 51 stale rows excluded, generic available 3, active 0, pending 0. | Admin Runtime and Conversations pages render; latency trace API reachable. |
-| Phase 1 | Single customer, single core, cache prewarm off | 4 | Not started | TBD | First message, follow-up, idle expiry, continuity marker. |
+| Phase 1 | Single customer, single core, cache prewarm off | 4 | Passed | 2026-06-18 IST live run `conversation:wa:000910000111`; inbound/outbound counts 4/4; outbound latency rows present; Shopify MCP requests succeeded on turns 1 and 3; current healthy runtime `runtime:32942` ended at generic available 3, bound active 0, active runs 0, pending 0. | Fixed stale retained-worker fallback: failed continuation now releases the pooled worker and clears stale idle cleanup before fallback. Follow-ups were answered through SDK session resume in fresh one-shot runners; post-turn same-process IPC continuation remains a known Phase 4/implementation gap. |
 | Phase 2 | Multiple customers, single core | 5 | Not started | TBD | Isolation, concurrency, capacity edge, duplicate provider redelivery. |
 | Phase 3 | Cache prewarm on | 2 | Not started | TBD | Prewarm complete before traffic and customer during prewarm. |
 | Phase 3.5 | MCP smoke | 1 | Not started | TBD | CRM and Shopify MCP live-traffic smoke. |
@@ -28,6 +28,9 @@ evidence.
 Phase 0 is four turns inside the scenario's required conversation set. Do not
 multiply every scenario by four conversations unless the scenario is explicitly
 about multi-customer isolation, concurrency, or capacity.
+When adjacent sub-scenarios are parts of the same customer lifecycle, one
+four-turn conversation may satisfy multiple named sub-scenarios if the evidence
+proves each expected behavior.
 
 ## Goal
 
@@ -72,7 +75,7 @@ runtime:
   warm_pool:
     enabled: true
     size: 3
-    idle_timeout_ms: 200000
+    idle_timeout_ms: 30000
     max_bound_workers: 3
     cache_prewarm_enabled: false
     cache_prewarm_concurrency: 1
@@ -85,7 +88,7 @@ runtime:
   warm_pool:
     enabled: true
     size: 3
-    idle_timeout_ms: 200000
+    idle_timeout_ms: 30000
     max_bound_workers: 3
     cache_prewarm_enabled: true
     cache_prewarm_concurrency: 1
@@ -96,9 +99,12 @@ Interpretation:
 - `size: 3` means each healthy core should maintain three generic warm runners
   for the tested warm-pool shape, unless the runtime is starting, draining, or
   unhealthy.
-- `idle_timeout_ms: 200000` means a conversation-bound runner should remain
+- `idle_timeout_ms: 30000` means a conversation-bound runner should remain
   alive for follow-ups after it becomes idle after replying. It is not measured
   from the customer's message timestamp.
+- Phase 1 intentionally reduced the earlier 200000 ms setting to 30000 ms to
+  keep idle/release verification fast. Later phases may raise it again when
+  testing longer customer gaps.
 - `cache_prewarm_enabled: false` means startup cache-prewarm model calls are
   skipped. It must not break chat correctness.
 - `cache_prewarm_enabled: true` means cache-prewarm work should happen before
@@ -157,6 +163,61 @@ Acceptance for a scenario requires all required turns to pass:
 - no duplicate outbound is produced for any inbound
 - runtime worker counts return to a truthful steady state after the scenario
 - latency/admin/API evidence is captured for every turn
+
+## Phase 1 Evidence Log
+
+Status: passed on 2026-06-18 IST.
+
+Runtime setup:
+
+- Core: one dev core on `127.0.0.1:4710`, runtime instance `runtime:32942`.
+- Admin: `127.0.0.1:3000`.
+- MCPs: `shopify-api` healthy on `127.0.0.1:8081`; `boondi-crm` healthy on
+  `127.0.0.1:8082`.
+- Outbound: `GANTRY_OUTBOUND_DRYRUN=1`.
+- Warm pool: `size: 3`, `max_bound_workers: 3`, `cache_prewarm_enabled: false`,
+  `idle_timeout_ms: 30000`.
+
+Live scenario:
+
+- Conversation id: `conversation:wa:000910000111`.
+- Synthetic customer: `000910000111`.
+- Signed inbound provider message ids:
+  `4fcef742-cbee-4134-be92-2f786a866418`,
+  `96dab3b2-b2ee-4bc5-ba4d-9ea56c467994`,
+  `2bd85633-afa2-4dfb-86ff-d58926976c52`,
+  `d877c861-cbe3-410e-bd2f-f93c9451512d`.
+- Persisted outbound message ids:
+  `message:wa:000910000111:outbound:d39ed9f8-74b9-4ceb-a3ff-3a421611ea84`
+  (`9680 ms`),
+  `message:wa:000910000111:outbound:50581d11-aeed-49da-888c-5a2ca53517c4`
+  (`3709 ms`),
+  `message:wa:000910000111:outbound:e153c10b-1198-4d79-9eba-539ec4663f24`
+  (`6844 ms`),
+  `message:wa:000910000111:outbound:fc53f35b-ace0-4b83-81e7-58cf3210790b`
+  (`4446 ms`).
+- Admin API transcript check: `8` messages, `4` inbound, `4` outbound.
+- MCP evidence: turn 1 called
+  `shopify-api.get_recent_orders_with_details({ "limit": 1 })`; turn 3 called
+  the same tool again for the "check again" follow-up. Both returned order
+  `#109260` with discount code `BSS200`.
+- Runtime inventory after the scenario for healthy instance `runtime:32942`:
+  `genericAvailable=3`, `genericStarting=0`, `boundActive=0`,
+  `boundIdle=0`, `activeMessageRuns=0`, `pendingConversationKeys=0`.
+
+Implementation findings from Phase 1:
+
+- Missing runtime wiring for `queue.sendMessage` meant follow-up delivery was
+  never attempted from the app-level group processor.
+- A retained warm-worker idle timer could survive failed continuation delivery
+  and kill the fallback run. The fallback path now clears preserved idle
+  cleanup before spawning a replacement.
+- Failed continuation delivery could leave a stale bound pooled worker in the
+  runtime inventory. The queue now releases the pooled worker when the retained
+  process is no longer reachable by the continuation carrier.
+- Current post-turn behavior still falls back to a resumed SDK session in a
+  fresh one-shot runner after the SDK query has completed. Same-process
+  post-turn IPC continuation is not proven yet and remains Phase 4 scope.
 
 ## Required Live Evidence Per Scenario
 
@@ -368,7 +429,7 @@ Config:
 ```yaml
 cache_prewarm_enabled: false
 size: 3
-idle_timeout_ms: 200000
+idle_timeout_ms: 30000
 ```
 
 ### Scenario 1.1: First Customer Message Uses A Warm Runner

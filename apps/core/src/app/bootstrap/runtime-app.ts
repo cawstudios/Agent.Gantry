@@ -629,6 +629,8 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     queue: {
       closeStdin: (chatJid) => queue.closeStdin(chatJid),
       notifyIdle: (chatJid) => queue.notifyIdle(chatJid),
+      sendMessage: (chatJid, text, sendOptions) =>
+        queue.sendMessage(chatJid, text, sendOptions),
       stopGroup: (chatJid) => queue.stopGroup(chatJid),
       registerProcess: (
         groupJid,

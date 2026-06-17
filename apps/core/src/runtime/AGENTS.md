@@ -120,6 +120,10 @@ session ID`, expire that provider session and retry the same turn once without
   must hand active-run accounting to that live continuation; do not release the
   pooled worker in the drain-run `finally` path before the runner reports idle
   or closes.
+- If a retained pooled worker rejects or cannot receive a socket continuation,
+  treat that worker as unreachable before fallback spawning continues: release
+  the pooled handle, clear retained process state, and cancel any preserved idle
+  cleanup for the old process so it cannot terminate the replacement run.
 - Socket continuation delivery is the authoritative live carrier. Continuation
   frames carry the message text directly, close frames close directly, and the
   runtime must not restore filesystem mailbox writes or runner polling as a

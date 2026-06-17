@@ -374,6 +374,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let traceRunnerToolCalls: NonNullable<AgentOutput['toolCalls']> = [];
     let traceStartup: AgentOutput['runnerStartup'];
     let traceWarmBound = false;
+    let traceRetainedRunner = false;
     let traceCachePrewarm: AgentOutput['cachePrewarmTrace'];
     // Warm continuation: dispatch instant of the reply being generated, taken
     // from the runner envelope (result.dispatchedAt = when the continuation was
@@ -525,6 +526,8 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       await deps.saveState();
       return true;
     }
+    idleRunnerCleanupByQueue.get(queueJid)?.();
+    idleRunnerCleanupByQueue.delete(queueJid);
     const recallQuery = buildMemoryRecallQueryFromMessages(missedMessages);
     const previousCursor = (await deps.getCursor(queueJid)) || '';
     deps.setCursor(queueJid, nextCursor);
@@ -863,6 +866,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       if (result.cachePrewarmTrace && !traceCachePrewarm) {
         traceCachePrewarm = result.cachePrewarmTrace;
       }
+      if (result.warmBound || result.dispatchedAt !== undefined) {
+        traceRetainedRunner = true;
+      }
       if (result.dispatchedAt !== undefined)
         traceDispatchedAt = result.dispatchedAt;
       if (awaitingResponseReceipt && !result.interactionBoundary) {
@@ -940,8 +946,8 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         startNextStreamingMessage();
         await setTypingState(false);
         resetIdleTimer({
-          preserveAfterRun: traceWarmBound,
-          stopRunnerOnTimeout: traceWarmBound,
+          preserveAfterRun: traceRetainedRunner,
+          stopRunnerOnTimeout: traceRetainedRunner,
         });
         // Reply is finalized + committed here — persist the trace promptly
         // (one-shot), so the latency badge does not wait for the run to close.
@@ -1011,6 +1017,12 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       await resumeActiveElapsed();
       if (output === 'success' && pendingIdleBoundary) {
         notifyTurnIdle();
+        if (traceRetainedRunner) {
+          resetIdleTimer({
+            preserveAfterRun: true,
+            stopRunnerOnTimeout: true,
+          });
+        }
       }
       cancelTurnUiTimers();
       unregisterContinuationHandler?.();

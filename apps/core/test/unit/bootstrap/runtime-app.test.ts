@@ -188,6 +188,18 @@ describe('runtime app credential binding', () => {
     );
   });
 
+  it('wires queue continuation delivery into group processing', async () => {
+    const { createRuntimeApp, createGroupProcessor } =
+      await loadRuntimeAppWithGroupProcessorSpy();
+    createRuntimeApp();
+    const capturedDeps = vi.mocked(createGroupProcessor).mock.calls[0]?.[0];
+
+    expect(capturedDeps?.queue.sendMessage).toEqual(expect.any(Function));
+    expect(capturedDeps?.queue.sendMessage?.('tg:primary', 'follow up')).toBe(
+      false,
+    );
+  });
+
   it('wires a default no-tools guardrail classifier into group processing', async () => {
     const { createRuntimeApp, createGroupProcessor, runClaudeQuery } =
       await loadRuntimeAppWithGroupProcessorSpy();
