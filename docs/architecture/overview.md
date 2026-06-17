@@ -693,18 +693,18 @@ CLI surface (the `usage()` block at `apps/core/src/cli/index.ts`):
 
 Control API surface (scopes from `apps/core/src/control/server/auth.ts`):
 
-| Domain        | Scopes                                                       | Routes                                                                |
-| ------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| Sessions      | `sessions:read`, `sessions:write`                            | `apps/core/src/control/server/routes/sessions.ts`                     |
-| Jobs          | `jobs:read`, `jobs:write`                                    | `apps/core/src/control/server/routes/jobs.ts`                         |
-| Providers     | `providers:read`, `providers:admin`                          | `apps/core/src/control/server/routes/provider-conversation-routes.ts` |
-| Conversations | `conversations:read`, `conversations:admin`, `messages:read` | conversation routes under `routes/`                                   |
-| Agents        | `agents:admin`                                               | agent routes                                                          |
-| Skills        | `skills:read`, `skills:admin`                                | skill routes                                                          |
-| MCP           | `mcp:read`, `mcp:admin`                                      | mcp routes                                                            |
-| Webhooks      | `webhooks:read`, `webhooks:write`                            | `apps/core/src/control/server/routes/webhooks.ts`                     |
-| Ingresses     | `ingresses:read`, `ingresses:write`                          | `apps/core/src/control/server/routes/external-ingress.ts`             |
-| Memory        | `memory:read`, `memory:admin`                                | memory routes                                                         |
+| Domain        | Scopes                                                                         | Routes                                                                |
+| ------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Sessions      | `sessions:read`, `sessions:write`                                              | `apps/core/src/control/server/routes/sessions.ts`                     |
+| Jobs          | `jobs:read`, `jobs:write`                                                      | `apps/core/src/control/server/routes/jobs.ts`                         |
+| Providers     | `providers:read`, `providers:admin`                                            | `apps/core/src/control/server/routes/provider-conversation-routes.ts` |
+| Conversations | `conversations:read`, `conversations:admin`, `messages:read`, `messages:admin` | conversation and message trace routes under `routes/`                 |
+| Agents        | `agents:admin`                                                                 | agent routes                                                          |
+| Skills        | `skills:read`, `skills:admin`                                                  | skill routes                                                          |
+| MCP           | `mcp:read`, `mcp:admin`                                                        | mcp routes                                                            |
+| Webhooks      | `webhooks:read`, `webhooks:write`                                              | `apps/core/src/control/server/routes/webhooks.ts`                     |
+| Ingresses     | `ingresses:read`, `ingresses:write`                                            | `apps/core/src/control/server/routes/external-ingress.ts`             |
+| Memory        | `memory:read`, `memory:admin`                                                  | memory routes                                                         |
 
 Agent-driven changes go through Gantry MCP `request_*` tools (§7) and produce
 the same writes after approval. The principle —

@@ -3,6 +3,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RuntimeSettingsResponse } from '@gantry/contracts';
 import type { RuntimeApp } from '../../app/bootstrap/runtime-app.js';
 import type { JobManagementServiceDeps } from '../../application/jobs/job-management-types.js';
+import type {
+  MessageTracePayloadRead,
+  ReadMessageTracePayloadsInput,
+} from '../../adapters/storage/postgres/repositories/message-trace-repository.postgres.js';
+import type { RuntimeEventPublishInput } from '../../domain/events/events.js';
 import type { AppId } from '../../domain/app/app.js';
 import type { WorkerInventorySnapshot } from '../../domain/ports/worker-inventory-repository.js';
 import type {
@@ -86,6 +91,10 @@ export type ControlRouteContext = {
   listWorkerInventorySnapshots?: (input: {
     appId: AppId;
   }) => Promise<WorkerInventorySnapshot[]>;
+  getMessageTracePayloads?: (
+    input: ReadMessageTracePayloadsInput,
+  ) => Promise<MessageTracePayloadRead | null>;
+  publishRuntimeEvent?: (event: RuntimeEventPublishInput) => Promise<unknown>;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
   syncSettingsFromProjection: (appId: AppId) => Promise<void>;
 };

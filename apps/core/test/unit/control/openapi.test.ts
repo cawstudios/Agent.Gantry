@@ -10,6 +10,7 @@ import { handleCredentialRoutes } from '@core/control/server/routes/credentials.
 import { handleExternalIngressRoutes } from '@core/control/server/routes/external-ingress.js';
 import { handleJobRoutes } from '@core/control/server/routes/jobs.js';
 import { handleMemoryRoutes } from '@core/control/server/routes/memory.js';
+import { handleMessageTraceRoutes } from '@core/control/server/routes/message-traces.js';
 import { handleMcpServerRoutes } from '@core/control/server/routes/mcp-servers.js';
 import { handleModelRoutes } from '@core/control/server/routes/models.js';
 import { handleOpenApiRoutes } from '@core/control/server/routes/openapi.js';
@@ -49,6 +50,7 @@ const expectedControlRoutes = [
   'GET /v1/conversations/{conversationId}/approvers',
   'PUT /v1/conversations/{conversationId}/approvers',
   'GET /v1/conversations/{conversationId}/messages',
+  'GET /v1/messages/{messageId}/trace-payloads',
   'GET /v1/conversations/{conversationId}/threads',
   'GET /v1/credentials/models',
   'DELETE /v1/credentials/models/{providerId}',
@@ -247,6 +249,7 @@ async function isRecognizedByRuntime(method: string, pathname: string) {
     () => handleAgentRoutes(req, res, ctx, pathname),
     () => handleCapabilityCatalogRoutes(req, res, ctx, pathname),
     () => handleSessionRoutes(req, res, ctx, url, pathname),
+    () => handleMessageTraceRoutes(req, res, ctx, url, pathname),
     () => handleProviderConversationRoutes(req, res, ctx, url, pathname),
     () => handleMemoryRoutes(req, res, ctx, url, pathname),
     () => handleModelRoutes(req, res, ctx, pathname),

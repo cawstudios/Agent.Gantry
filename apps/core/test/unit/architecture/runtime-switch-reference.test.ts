@@ -20,7 +20,6 @@ describe('runtime switch reference', () => {
     const doc = fs.readFileSync(switchReferencePath, 'utf8');
     const plan = fs.readFileSync(warmPoolPlanPath, 'utf8');
     const requiredHeaders = [
-      '| Switch | Owner surface | Default | Dev recommendation | Production recommendation | Restart requirement | Latency/correctness impact |',
       'runtime.queue.max_message_runs',
       'runtime.queue.max_job_runs',
       'runtime.queue.max_retries',
@@ -44,8 +43,12 @@ describe('runtime switch reference', () => {
       'BOONDI_CRM_RECONCILE_INTERVAL_MS',
       'GANTRY_TRACE_PAYLOADS',
       'GANTRY_CONTROL_API_KEYS_JSON',
+      'messages:admin',
     ];
 
+    expect(doc).toMatch(
+      /\|\s*Switch\s*\|\s*Owner surface\s*\|\s*Default\s*\|\s*Dev recommendation\s*\|\s*Production recommendation\s*\|\s*Restart requirement\s*\|\s*Latency\/correctness impact\s*\|/,
+    );
     for (const token of requiredHeaders) {
       expect(doc).toContain(token);
     }

@@ -34,6 +34,7 @@ export const RUNTIME_EVENT_TYPES = {
   CREDENTIAL_MODEL_USED: 'credential.model.used',
   MODEL_USAGE: 'model.usage',
   MODEL_RATE_LIMIT: 'model.rate_limit',
+  TRACE_PAYLOAD_READ: 'trace.payload_read',
   EGRESS_CONNECT: 'egress.connect',
   SANDBOX_BLOCKED: 'sandbox.blocked',
   OUTBOUND_FENCE: 'outbound.fence',

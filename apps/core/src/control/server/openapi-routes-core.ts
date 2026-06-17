@@ -460,6 +460,16 @@ export const coreOpenApiRouteDocs: RouteDoc[] = [
   ),
   doc(
     'get',
+    '/v1/messages/{messageId}/trace-payloads',
+    'getMessageTracePayloads',
+    'Conversations',
+    'Read exact trace payloads for a message',
+    'Returns lazily captured trace payloads for one message and records a runtime audit event for the exact-payload read.',
+    ['messages:admin'],
+    { parameters: [ids.message] },
+  ),
+  doc(
+    'get',
     '/v1/agents/{agentId}/conversation-bindings',
     'listAgentConversationBindings',
     'Conversations',

@@ -17,9 +17,11 @@ import {
 import { logger } from '../../infrastructure/logging/logger.js';
 import {
   getRuntimeControlRepository,
+  getRuntimeEventExchange,
   getRuntimeRepositories,
   getRuntimeStorage,
 } from '../../adapters/storage/postgres/runtime-store.js';
+import { PostgresMessageTraceRepository } from '../../adapters/storage/postgres/repositories/message-trace-repository.postgres.js';
 import { preflightModelPreset } from '../../adapters/llm/model-preset-preflight.js';
 import type { AppId } from '../../domain/app/app.js';
 import { canAccessApp, makeAppGroup } from './app-identity.js';
@@ -42,6 +44,7 @@ import { handleExternalIngressRoutes } from './routes/external-ingress.js';
 import { handleInteraktWebhookRoutes } from './routes/interakt-webhook.js';
 import { handleJobRoutes } from './routes/jobs.js';
 import { handleMemoryRoutes } from './routes/memory.js';
+import { handleMessageTraceRoutes } from './routes/message-traces.js';
 import { handleMcpServerRoutes } from './routes/mcp-servers.js';
 import { handleModelRoutes } from './routes/models.js';
 import { handleOpenApiRoutes } from './routes/openapi.js';
@@ -132,6 +135,7 @@ function createControlRequestHandler(ctx: ControlRouteContext) {
       if (await handleAgentRoutes(req, res, ctx, pathname)) return;
       if (await handleCapabilityCatalogRoutes(req, res, ctx, pathname)) return;
       if (await handleSessionRoutes(req, res, ctx, url, pathname)) return;
+      if (await handleMessageTraceRoutes(req, res, ctx, url, pathname)) return;
       if (await handleProviderConversationRoutes(req, res, ctx, url, pathname))
         return;
       if (await handleMemoryRoutes(req, res, ctx, url, pathname)) return;
@@ -223,6 +227,13 @@ export function startControlServer(input: {
     sendConversationIngressProjection: input.sendConversationIngressProjection,
     listWorkerInventorySnapshots: (listInput) =>
       getRuntimeStorage().workerInventorySnapshots.listSnapshots(listInput),
+    getMessageTracePayloads: (traceInput) =>
+      new PostgresMessageTraceRepository(
+        getRuntimeStorage().service.db,
+      ).readPayloads(traceInput),
+    publishRuntimeEvent: async (event) => {
+      await getRuntimeEventExchange().publish(event);
+    },
     getBrowserStatus: input.getBrowserStatus,
     syncSettingsFromProjection: (appId: AppId) =>
       syncRuntimeSettingsFromProjection({

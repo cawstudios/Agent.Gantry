@@ -12,6 +12,7 @@ export type Scope =
   | 'conversations:read'
   | 'conversations:admin'
   | 'messages:read'
+  | 'messages:admin'
   | 'agents:admin'
   | 'credentials:read'
   | 'credentials:admin'
@@ -48,6 +49,7 @@ export const CONTROL_API_SCOPES: readonly Scope[] = [
   'conversations:read',
   'conversations:admin',
   'messages:read',
+  'messages:admin',
   'agents:admin',
   'credentials:read',
   'credentials:admin',
