@@ -86,6 +86,7 @@ const PERMISSION_BACKGROUND_DEMOTE_MS = 120_000;
 type ProgressHeartbeat = ReturnType<typeof startGroupProgressHeartbeats>;
 type ActiveTurnUiCleanup = { token: symbol; cancel: () => void };
 const activeTurnUiCleanupByQueue = new Map<string, ActiveTurnUiCleanup>();
+const idleRunnerCleanupByQueue = new Map<string, () => void>();
 
 export function createGroupProcessor(deps: GroupProcessingDeps) {
   const collectSessionMemory = deps.collectSessionMemory;
@@ -518,6 +519,8 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       senderUserIds: resolveNonSelfSenderIds(missedMessages),
     });
     if (continuationAccepted) {
+      idleRunnerCleanupByQueue.get(queueJid)?.();
+      idleRunnerCleanupByQueue.delete(queueJid);
       deps.setCursor(queueJid, nextCursor);
       await deps.saveState();
       return true;
@@ -538,15 +541,38 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       logger,
     });
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    const resetIdleTimer = () => {
-      if (idleTimer) clearTimeout(idleTimer);
+    let preserveIdleTimerAfterRun = false;
+    let stopRunnerOnIdleTimeout = false;
+    const clearIdleTimer = () => {
+      if (!idleTimer) return;
+      clearTimeout(idleTimer);
+      idleTimer = null;
+      const current = idleRunnerCleanupByQueue.get(queueJid);
+      if (current === clearIdleTimer) idleRunnerCleanupByQueue.delete(queueJid);
+    };
+    const resetIdleTimer = (
+      options: {
+        preserveAfterRun?: boolean;
+        stopRunnerOnTimeout?: boolean;
+      } = {},
+    ) => {
+      clearIdleTimer();
+      preserveIdleTimerAfterRun = options.preserveAfterRun ?? false;
+      stopRunnerOnIdleTimeout = options.stopRunnerOnTimeout ?? false;
       idleTimer = setTimeout(() => {
         logger.debug(
           { group: group.name },
           'Idle timeout, closing agent runner stdin',
         );
+        if (stopRunnerOnIdleTimeout && deps.queue.stopGroup?.(queueJid)) {
+          return;
+        }
         deps.queue.closeStdin(queueJid);
       }, RUNNER_IDLE_TIMEOUT_MS);
+      idleTimer.unref?.();
+      if (preserveIdleTimerAfterRun) {
+        idleRunnerCleanupByQueue.set(queueJid, clearIdleTimer);
+      }
     };
 
     let typingActive = false;
@@ -913,7 +939,10 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         notifyTurnIdle();
         startNextStreamingMessage();
         await setTypingState(false);
-        resetIdleTimer();
+        resetIdleTimer({
+          preserveAfterRun: traceWarmBound,
+          stopRunnerOnTimeout: traceWarmBound,
+        });
         // Reply is finalized + committed here — persist the trace promptly
         // (one-shot), so the latency badge does not wait for the run to close.
         await persistReplyTraceForTurn();
@@ -989,7 +1018,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       if (activeCleanup?.token === turnUiToken) {
         activeTurnUiCleanupByQueue.delete(queueJid);
       }
-      if (idleTimer) clearTimeout(idleTimer);
+      if (!preserveIdleTimerAfterRun) clearIdleTimer();
     }
 
     let resultOk = true;

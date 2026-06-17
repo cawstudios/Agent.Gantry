@@ -698,6 +698,7 @@ describe('GroupQueue', () => {
 
     expect(release).not.toHaveBeenCalled();
     expect(queue.sendMessage('group1@g.us', 'follow-up')).toBe(true);
+    expect(queue.getWorkerInventorySnapshot().activeMessageRuns).toBe(1);
 
     proc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
@@ -764,6 +765,7 @@ describe('GroupQueue', () => {
     expect(release).not.toHaveBeenCalled();
 
     queue.notifyIdle('group1@g.us');
+    expect(queue.getWorkerInventorySnapshot().activeMessageRuns).toBe(0);
     proc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
 

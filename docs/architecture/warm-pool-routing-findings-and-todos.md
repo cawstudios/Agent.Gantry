@@ -2618,13 +2618,46 @@ Evidence:
     keeps generic prewarm capacity reusable across first replies and follow-ups
     with the same cache shape instead of fragmenting the pool per saved SDK
     session.
+  - Follow-up fix after the admin latency report: completed warm-bound runners
+    now keep the idle timeout alive after the streamed reply has already been
+    delivered, and terminal warm replies use the existing queue stop path at
+    idle timeout instead of relying only on a soft stdin close. This prevents
+    already-completed retained runners from occupying `max_bound_workers` for
+    ~50-60s and forcing later customers onto cold startup. Accepted
+    continuations cancel the preserved idle timer so the previous turn cannot
+    stop the active follow-up.
+  - Focused verification for the warm-runner reclaim fix passed:
+    `npx vitest run apps/core/test/unit/runtime/group-processing.test.ts --no-file-parallelism`,
+    `npx vitest run apps/core/test/unit/runtime/group-queue.test.ts --no-file-parallelism`,
+    and `npm run typecheck`.
+  - Fresh local stack verification after the reclaim fix reached
+    `READY core_ports=4710 core_codes=404 shopify=ok crm=ok`. A follow-up
+    `GANTRY_DEV_LOG=/tmp/gantry-capture.log LATENCY_TURN_TIMEOUT_MS=180000 node scripts/measure-latency.mjs --samples 2 --only T3,T4 --json /tmp/latency-suite-phase8-t3t4-reclaim-s2.json`
+    run showed T4 spawn-to-LLM delay stayed low (`88ms`, `81ms`), but customer
+    totals still had provider/model outliers (`T4` totals `11466ms` and
+    `69969ms`). Direct trace inspection showed the large remaining waits were
+    LLM provider waits, including one `llm` section with `providerWaitMs:
+    61254`; this is not cache-prewarm attribution.
+  - The same T3/T4 follow-up run still showed one startup section when the pool
+    was empty under the two-sample cadence. That remaining issue is capacity
+    sizing/top-up behavior under `runtime.warm_pool.max_bound_workers`, not
+    CRM/Shopify semantic behavior. Do not treat that as fixed until a larger
+    multi-sample run shows no customer-turn `startup` sections for warm-capable
+    replies.
+  - boondi-admin verification was operational, not a code delta: the existing
+    admin commit already had the runtime route/error fallbacks and `.env.local`
+    pointed at `http://127.0.0.1:4710`. A clean dev-server restart repaired the
+    `/leads` `missing required error components` page and `/runtime` Control API
+    fetch banner. Admin checks passed with `npm run build`, `npx tsc --noEmit`,
+    and
+    `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npx playwright test e2e/runtime-workers.spec.ts e2e/leads-memory.spec.ts --project=chromium`.
 Open follow-ups:
   - Continue Boondi latency measurement with `scripts/measure-latency.mjs` and
     boondi-admin `replySeconds` across multiple T1-T5 samples; the broad
     regression harness remains a correctness gate for visible replies, routing,
     guardrails, privacy, and tool calls. The next latency implementation item
-    is warm-pool depletion/top-up before the customer turn, not CRM/Shopify
-    behavior tuning.
+    is warm-pool capacity sizing/top-up before the customer turn plus provider
+    wait visibility, not CRM/Shopify behavior tuning.
   - Full Boondi semantic scenario gates are useful product regression checks,
     but they are not the current runtime-plumbing gate. For local server
     readiness, use the signed-webhook smoke plus MCP request/response evidence

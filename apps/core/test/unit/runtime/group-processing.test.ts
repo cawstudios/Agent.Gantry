@@ -1697,6 +1697,92 @@ describe('createGroupProcessor', () => {
       expect(deps.queue.closeStdin).not.toHaveBeenCalled();
     });
 
+    it('keeps warm-bound idle close timer after streamed run returns', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const messages = [makeMessage()];
+      const { deps } = setupHappyPath({ group, messages });
+      deps.queue.stopGroup = vi.fn(() => true);
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          if (onOutput) {
+            await onOutput({
+              status: 'success',
+              result: 'warm reply',
+              warmBound: true,
+            });
+            await onOutput({
+              status: 'success',
+              result: null,
+              warmBound: true,
+            });
+          }
+          return {
+            status: 'success',
+            result: null,
+          } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(deps.queue.closeStdin).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_800_000);
+
+      expect(deps.queue.stopGroup).toHaveBeenCalledWith('group1@g.us');
+      expect(deps.queue.closeStdin).not.toHaveBeenCalled();
+    });
+
+    it('cancels preserved warm-bound idle timer when a continuation is accepted', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const messages = [makeMessage()];
+      const { deps } = setupHappyPath({ group, messages });
+      deps.queue.stopGroup = vi.fn(() => true);
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({
+            status: 'success',
+            result: 'warm reply',
+            warmBound: true,
+          });
+          await onOutput?.({
+            status: 'success',
+            result: null,
+            warmBound: true,
+          });
+          return {
+            status: 'success',
+            result: null,
+          } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      deps.queue.sendMessage = vi.fn(() => true);
+      mockGetMessagesSince.mockReturnValue([makeMessage({ content: 'next' })]);
+
+      await processGroupMessages('group1@g.us');
+      await vi.advanceTimersByTimeAsync(1_800_000);
+
+      expect(deps.queue.sendMessage).toHaveBeenCalled();
+      expect(deps.queue.stopGroup).not.toHaveBeenCalled();
+      expect(deps.queue.closeStdin).not.toHaveBeenCalled();
+    });
+
     it('keeps typing heartbeat alive and posts elapsed progress for long runs', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const messages = [makeMessage()];

@@ -452,6 +452,8 @@ export class GroupQueue {
     ) {
       return false;
     }
+    const wasRetainedIdle = !state.active && state.idleWaiting;
+    if (wasRetainedIdle && !this.canStartMessageRun()) return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
     const target: ContinuationTarget = {
       groupFolder: state.groupFolder,
@@ -461,8 +463,6 @@ export class GroupQueue {
       threadId: state.threadId ?? null,
       runHandle: state.runHandle ?? null,
     };
-    const wasRetainedIdle = !state.active && state.idleWaiting;
-    if (wasRetainedIdle && !this.canStartMessageRun()) return false;
     try {
       const delivered = this.continuationDelivery.deliverContinuation(
         target,
