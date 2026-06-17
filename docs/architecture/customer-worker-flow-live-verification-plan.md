@@ -24,6 +24,11 @@ evidence.
 | Phase 8 | Repeated-flow soak | soak gate | Not started | TBD | Five customers, five turns each, at least 10 minutes. |
 | Phase 9 | Final real-customer acceptance | customer gate | Not started | TBD | Real customer-facing channel proof after engineering verification. |
 
+`Scenario count` is the named scenario count. Default live execution after
+Phase 0 is four turns inside the scenario's required conversation set. Do not
+multiply every scenario by four conversations unless the scenario is explicitly
+about multi-customer isolation, concurrency, or capacity.
+
 ## Goal
 
 Prove the customer-visible chat flow works correctly across warm runners,
@@ -120,9 +125,42 @@ Every scenario must be verified through the actual live flow:
 Unit tests are supporting evidence only. They do not satisfy acceptance by
 themselves.
 
+## Turn Count Rule
+
+Every named scenario after Phase 0 should exercise at least four customer turns
+unless the scenario explicitly has a smaller fixed shape, such as duplicate
+provider redelivery.
+
+Default rule:
+
+- For single-customer scenarios, use one fresh synthetic Boondi customer
+  conversation and drive four customer messages through that same conversation.
+- For multi-customer scenarios, use the minimum customer set needed by the
+  scenario and drive enough turns to prove routing, isolation, and worker state.
+- Do not run four independent conversations for every scenario by default. That
+  burns tokens without improving evidence for first-message, follow-up, idle
+  expiry, prewarm, or duplicate-redelivery behavior.
+
+Use multiple conversations only when the scenario is specifically testing one
+of these:
+
+- cross-customer isolation
+- concurrent customers
+- capacity edges
+- multi-core ownership
+- stale-worker/dashboard accounting across conversations
+
+Acceptance for a scenario requires all required turns to pass:
+
+- each inbound gets exactly one expected outbound reply
+- no customer receives another customer's context
+- no duplicate outbound is produced for any inbound
+- runtime worker counts return to a truthful steady state after the scenario
+- latency/admin/API evidence is captured for every turn
+
 ## Required Live Evidence Per Scenario
 
-For each scenario, capture:
+For each scenario turn, capture:
 
 - scenario id
 - runtime config used
