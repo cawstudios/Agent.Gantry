@@ -339,6 +339,49 @@ describe('WarmPoolManager', () => {
     expect(manager.size(recipe.key)).toBe(3);
   });
 
+  it('keeps successful workers when one target-size prewarm boot fails', async () => {
+    vi.useFakeTimers();
+    let now = 1_000;
+    let nextWorkerId = 0;
+    let prewarmCalls = 0;
+    const capability: WarmPoolCapable = {
+      id: 'anthropic:claude-agent-sdk',
+      prepare: async () => {
+        throw new Error('not used');
+      },
+      prewarm: vi.fn(async (recipe) => {
+        prewarmCalls += 1;
+        if (prewarmCalls === 1) throw new Error('worker startup timed out');
+        return {
+          id: `worker-${++nextWorkerId}`,
+          key: recipe.key,
+          bornAt: now,
+          bound: false,
+        };
+      }),
+      bind: async (): Promise<BoundRun> => {
+        throw new Error('not used');
+      },
+      recycle: vi.fn(async () => undefined),
+    };
+    const manager = new WarmPoolManager({
+      capability,
+      clock: () => now,
+      replacementBackoffMs: 50,
+    });
+    const recipe = makeRecipe();
+
+    await expect(manager.prewarm(recipe, 3)).resolves.toBeUndefined();
+
+    expect(manager.size(recipe.key)).toBe(2);
+    expect(capability.prewarm).toHaveBeenCalledTimes(3);
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(manager.size(recipe.key)).toBe(3);
+    expect(capability.prewarm).toHaveBeenCalledTimes(4);
+  });
+
   it('waits for cache prewarm before marking a worker idle', async () => {
     let now = 1_000;
     const { capability } = makeCapability(() => now);

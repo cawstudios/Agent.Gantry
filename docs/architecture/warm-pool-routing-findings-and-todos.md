@@ -2402,9 +2402,40 @@ Evidence:
   - Caveat:
     `GANTRY_RUNTIME_SMOKE_ENV=/tmp/gantry-runtime-smoke.env.2 BOONDI_SMOKE_SHOPIFY_PHONE=000000023 BOONDI_SMOKE_SHOPIFY_SECONDARY_PHONE=000000024 BOONDI_SMOKE_CRM_PHONE=000000051 SMOKE_CONCURRENCY=3 npm run smoke:boondi-runtime`
     hit warm-worker bind timeouts before retry/fallback output on core 4711.
-    Basic inbound/outbound/MCP plumbing is proven on both cores, but the
-    local three-warm-worker concurrency gate remains open as a Phase 8 runtime
-    concurrency item.
+    Basic inbound/outbound/MCP plumbing was already proven on both cores; the
+    root cause and closure for this concurrency caveat are captured below.
+  - The local three-warm-worker concurrency failure was caused by fail-fast
+    target-size replenishment: one generic warm worker boot timeout rejected the
+    shared `prewarm(size)` promise for every concurrent caller, even when sibling
+    warm workers later became usable. `WarmPoolManager` now waits for all target
+    boot attempts, retains successful workers on partial failure, and schedules
+    replenishment for the missing capacity; it still throws when every target
+    boot fails.
+  - Verification:
+    `npx vitest run -c vitest.unit.config.ts apps/core/test/unit/runtime/warm-pool-manager.test.ts --testNamePattern "keeps successful workers"`
+    first failed because partial prewarm rejected with
+    `worker startup timed out`, then passed after the replenishment fix.
+  - Verification:
+    `npx vitest run -c vitest.unit.config.ts apps/core/test/unit/runtime/warm-pool-manager.test.ts`
+    passed 20 tests after the replenishment fix.
+  - Verification:
+    `npx vitest run -c vitest.unit.config.ts apps/core/test/unit/runtime/agent-spawn.test.ts --testNamePattern "warm pool|warm worker|prewarm"`
+    passed 7 selected warm-spawn tests, and
+    `npx vitest run -c vitest.unit.config.ts apps/core/test/unit/bootstrap/startup.test.ts --testNamePattern "warm"`
+    passed 3 selected warm-startup tests.
+  - Verification:
+    `GANTRY_CORE_COUNT=2 npm run dev:boondi-runtime` reached
+    `READY core_ports=4710 4711 core_codes=404 404 shopify=ok crm=ok`, then
+    `GANTRY_RUNTIME_SMOKE_ENV=/tmp/gantry-runtime-smoke.env.2 BOONDI_SMOKE_SHOPIFY_PHONE=000000064 BOONDI_SMOKE_SHOPIFY_SECONDARY_PHONE=000000065 BOONDI_SMOKE_CRM_PHONE=000000050 SMOKE_CONCURRENCY=3 TURN_TIMEOUT_MS=240000 npm run smoke:boondi-runtime`
+    passed against core 4711 with all three cases reporting guardrail, MCP
+    request, MCP response, outbound dry-run, and duplicate inbound checks.
+  - Verification:
+    log scan across `/tmp/gantry-dev-1.log`, `/tmp/gantry-dev-2.log`,
+    `/tmp/mcp-shopify-dev.log`, and `/tmp/mcp-crm-dev.log` found no
+    `Timed out waiting 30000ms`, `Warm worker bind failed`, `Agent error`,
+    `Cannot connect to postgres`, `EADDRINUSE`, `runtime_events_run_id_fkey`,
+    or `unhandled` after the passing live run; ports 4710, 4711, 8081, and 8082
+    were free after stack shutdown.
   - The standard `npm run test:integration:postgres` command now includes the
     existing `runtime-worker-inventory.postgres.integration.test.ts`, so
     per-instance worker inventory persistence is part of the shared Postgres
@@ -2421,11 +2452,11 @@ Open follow-ups:
     readiness, use the signed-webhook smoke plus MCP request/response evidence
     above before chasing CRM/Shopify behavior details.
   - Chaos and multi-instance production-readiness gates still remain, including
-    local three-warm-worker concurrency under shared Postgres and
     inbound/outbound/MCP-focused end-to-end takeover, stale-fence,
-    graceful-shutdown, and durable-recovery checks. The real Postgres
-    notification bridge now has integration coverage, but the full
-    multi-instance runtime harness is still open.
+    graceful-shutdown, and durable-recovery checks. The local three-warm-worker
+    concurrency smoke now passes under shared Postgres, and the real Postgres
+    notification bridge has integration coverage, but the full multi-instance
+    runtime harness is still open.
 ```
 
 #### Summary (plain English)

@@ -248,9 +248,15 @@ export class WarmPoolManager {
   }
 
   private async bootMany(entry: WarmPoolEntry, count: number): Promise<void> {
-    await Promise.all(
+    const results = await Promise.allSettled(
       Array.from({ length: count }, async () => this.bootOne(entry)),
     );
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failures.length === 0) return;
+    if (failures.length === count) throw failures[0]!.reason;
+    this.scheduleReplenish(entry.recipe.key);
   }
 
   private async bootOne(entry: WarmPoolEntry): Promise<void> {

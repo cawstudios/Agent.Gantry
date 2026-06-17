@@ -85,6 +85,10 @@ session ID`, expire that provider session and retry the same turn once without
   cache-prewarm failure must not discard an otherwise bind-ready worker, and
   cache probes need their own low concurrency bound separate from process
   prewarm.
+- Target-size warm prewarm is capacity replenishment, not an all-or-nothing
+  transaction. If one generic boot fails while siblings succeed, retain the
+  successful workers, schedule replacement for the missing capacity, and throw
+  only when every target boot fails.
 - Prompt-cache shape keys describe cache-affecting runtime input, not every
   process-pool key dimension. Keep resume/session handles out of the cache
   shape while including the execution provider, credential profile, agent,
