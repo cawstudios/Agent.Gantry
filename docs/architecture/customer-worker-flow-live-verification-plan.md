@@ -2,8 +2,8 @@
 
 Date: 2026-06-18
 
-Status: execution in progress. Phase 0, Phase 1, and Phase 2 passed on
-2026-06-18 IST.
+Status: execution in progress. Phase 0, Phase 1, Phase 2, and Phase 3 passed
+on 2026-06-18 IST.
 
 ## Phase Status Tracker
 
@@ -16,7 +16,7 @@ evidence.
 | Phase 0   | Harness and baseline                            |  baseline gate | Passed      | 2026-06-18 IST baseline: core 4710, admin 3000, Shopify MCP 8081, CRM MCP 8082; one healthy runtime, 51 stale rows excluded, generic available 3, active 0, pending 0.                                                                                                                                                                                                        | Admin Runtime and Conversations pages render; latency trace API reachable.                                                                                                                                                                                                                                 |
 | Phase 1   | Single customer, single core, cache prewarm off |              4 | Passed      | 2026-06-18 IST live run `conversation:wa:000910000111`; inbound/outbound counts 4/4; outbound latency rows present; Shopify MCP requests succeeded on turns 1 and 3; current healthy runtime `runtime:32942` ended at generic available 3, bound active 0, active runs 0, pending 0.                                                                                          | Fixed stale retained-worker fallback: failed continuation now releases the pooled worker and clears stale idle cleanup before fallback. Follow-ups were answered through SDK session resume in fresh one-shot runners; post-turn same-process IPC continuation remains a known Phase 4/implementation gap. |
 | Phase 2   | Multiple customers, single core                 |              5 | Passed      | 2026-06-18 IST live runs `conversation:wa:000920000210`/`211` for A/B marker isolation, `203`/`204` for concurrent traffic, `205`-`208` for capacity edge, and `209` for duplicate redelivery; all expected replies persisted, duplicate redelivery produced one inbound and one outbound, final runtime drained to active 0, pending 0, generic available 3, bound active 0. | First marker wording was rejected by Boondi scope guardrail; reran with Boondi-scoped reference-marker wording and passed.                                                                                                                                                                                 |
-| Phase 3   | Cache prewarm on                                |              2 | Not started | TBD                                                                                                                                                                                                                                                                                                                                                                           | Prewarm complete before traffic and customer during prewarm.                                                                                                                                                                                                                                               |
+| Phase 3   | Cache prewarm on                                |              2 | Passed      | 2026-06-18 IST live runs `conversation:wa:000930000301` for prewarm-complete traffic and `conversation:wa:000930000302`-`305` for traffic while worker replacement/prewarm was in progress; all expected replies persisted, final runtime drained to active 0, pending 0, generic available 3.                                                                                | Startup prewarm completes before the control HTTP server accepts webhooks, so customer-during-startup-prewarm is not externally reachable in this build; replacement/replenishment during traffic was tested instead.                                                                                      |
 | Phase 3.5 | MCP smoke                                       |              1 | Not started | TBD                                                                                                                                                                                                                                                                                                                                                                           | CRM and Shopify MCP live-traffic smoke.                                                                                                                                                                                                                                                                    |
 | Phase 4   | Follow-up routing stress                        |              4 | Not started | TBD                                                                                                                                                                                                                                                                                                                                                                           | Rapid follow-ups, active-run follow-up, cold resume, five-turn loop.                                                                                                                                                                                                                                       |
 | Phase 5   | Two core processes                              |              5 | Not started | TBD                                                                                                                                                                                                                                                                                                                                                                           | Ownership, distribution, restart, post-restart continuity.                                                                                                                                                                                                                                                 |
@@ -314,6 +314,108 @@ Final Phase 2 drain snapshot:
 - `boundIdle=0`.
 - `availableTarget=3`.
 - Cache prewarm summary: `pending=0`, `succeeded=0`, `skipped=3`, `failed=0`.
+
+## Phase 3 Evidence Log
+
+Status: passed on 2026-06-18 IST.
+
+Runtime setup:
+
+- Core: one dev core on `127.0.0.1:4710`, restarted after enabling cache
+  prewarm.
+- Admin: `127.0.0.1:3000`.
+- MCPs: `shopify-api` healthy on `127.0.0.1:8081`; `boondi-crm` healthy on
+  `127.0.0.1:8082`.
+- Outbound: `GANTRY_OUTBOUND_DRYRUN=1`.
+- Warm pool: `size: 3`, `max_bound_workers: 3`, `cache_prewarm_enabled: true`,
+  `cache_prewarm_concurrency: 1`, `idle_timeout_ms: 30000`.
+
+Startup-order finding:
+
+- Code path: `apps/core/src/app/index.ts` awaits `prewarmWarmPoolRoutes(...)`
+  before connecting enabled channels and starting the control HTTP server.
+- Scope: `apps/core/src/app/bootstrap/startup.ts` awaits default Interakt route
+  prewarm and fire-and-forgets only prewarm of previously discovered existing
+  routes.
+- Result: a signed webhook cannot arrive during default startup prewarm because
+  the control HTTP server is not listening yet.
+- Acceptance interpretation: Scenario 3.2 was exercised as the reachable
+  equivalent, traffic while generic workers are consumed and replacement
+  prewarm/startup is in progress.
+
+Startup prewarm evidence:
+
+- Core logs showed `Warm pool prewarm started`, followed by
+  `Warm pool prewarm ready`, before the control server logged that it was
+  listening on `127.0.0.1:4710`.
+- Runtime precondition before traffic:
+  `genericAvailable=3`, `genericStarting=0`, `boundActive=0`,
+  `availableTarget=3`.
+- Cache prewarm summary before traffic:
+  `pending=0`, `succeeded=3`, `skipped=0`, `failed=0`.
+- The cache shape for `agent:boondi_support` showed `status=succeeded` with
+  `workers=3`.
+- The configured `cache_prewarm_concurrency=1` was in effect for this run; this
+  pass verified the final status but did not independently time every provider
+  model call to prove serialization.
+
+Scenario 3.1: prewarm complete before traffic.
+
+- Customer: `conversation:wa:000930000301`.
+- Inbound provider id: `phase3-prewarm-complete-1`.
+- Persisted outbound id:
+  `message:wa:000930000301:outbound:8542caa0-1ae7-4aba-9c58-5832c8fb8fe6`.
+- `replySeconds=2.462`.
+- Latency sections:
+  - `queue=83 ms`.
+  - `guardrail=1 ms`, with `obvious_bss_topic`.
+  - `main LLM=2274 ms`.
+  - `gap=104 ms`.
+- The reply latency report did not include a customer-visible
+  `cache_prewarm` section because prewarm had already succeeded before traffic.
+- Immediate post-reply runtime snapshot showed replacement activity:
+  `activeMessageRuns=1`, `genericAvailable=2`, `genericStarting=1`,
+  `boundActive=1`, cache prewarm `succeeded=3`.
+- After the replacement finished, runtime reached `activeMessageRuns=0`,
+  `pendingConversationKeys=0`, `genericAvailable=3`, `genericStarting=0`,
+  `boundActive=1`, cache prewarm `succeeded=4`.
+
+Scenario 3.2: traffic while workers are consumed and replacement starts.
+
+- Customers: `conversation:wa:000930000302`,
+  `conversation:wa:000930000303`, `conversation:wa:000930000304`, and
+  `conversation:wa:000930000305`.
+- Inbound provider ids: `phase3-prewarm-during-1`,
+  `phase3-prewarm-during-2`, `phase3-prewarm-during-3`, and
+  `phase3-prewarm-during-4`.
+- Runtime snapshot at five seconds:
+  `activeMessageRuns=3`, `pendingConversationKeys=1`,
+  `genericAvailable=1`, `genericStarting=1`, `boundActive=3`,
+  `availableTarget=3`, cache prewarm `succeeded=4`.
+- Persisted outbound ids:
+  `message:wa:000930000302:outbound:79d3e258-7a74-4879-93d7-d0bc76b1fe88`
+  (`7.275 s`),
+  `message:wa:000930000303:outbound:6147d43a-e33b-41b8-8396-8aa1d12f3403`
+  (`4.481 s`),
+  `message:wa:000930000304:outbound:15fa2961-73ca-4e3d-a7f0-ca3f8ef30158`
+  (`9.985 s`), and
+  `message:wa:000930000305:outbound:8200575d-6f6b-451d-8ea8-170b73b7b52d`
+  (`4.408 s`).
+- The fourth customer showed the expected capacity-saturated path explicitly in
+  the latency report: `queue=4437 ms`, `assistant startup=3689 ms`,
+  `main LLM=1770 ms`, and final `gap=80 ms`.
+- No customer hung; all four conversations received exactly one outbound reply.
+
+Final Phase 3 drain snapshot:
+
+- `activeMessageRuns=0`.
+- `pendingConversationKeys=0`.
+- `genericAvailable=3`.
+- `genericStarting=0`.
+- `boundActive=0`.
+- `boundIdle=0`.
+- `availableTarget=3`.
+- Cache prewarm summary: `pending=0`, `succeeded=3`, `skipped=0`, `failed=0`.
 
 ## Required Live Evidence Per Scenario
 
@@ -745,7 +847,7 @@ Config:
 cache_prewarm_enabled: true
 cache_prewarm_concurrency: 1
 size: 3
-idle_timeout_ms: 200000
+idle_timeout_ms: 30000
 ```
 
 ### Scenario 3.1: Prewarm Completes Before Traffic
