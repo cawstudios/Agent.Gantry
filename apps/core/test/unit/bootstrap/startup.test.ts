@@ -124,7 +124,7 @@ describe('runStartup', () => {
     expect(reapOrphans).toHaveBeenCalledOnce();
   });
 
-  it('prewarms configured routes when runtime services are ready', async () => {
+  it('prewarms configured customer routes without warming the internal default fallback', async () => {
     const prewarm = vi.fn(async () => true);
     const order: string[] = [];
     const runtimeSettings = {
@@ -167,8 +167,46 @@ describe('runStartup', () => {
       warn: vi.fn(),
     });
 
-    expect(order).toEqual(['prewarm:app:default', 'prewarm:wa:customer']);
-    expect(prewarm).toHaveBeenCalledTimes(2);
+    expect(order).toEqual(['prewarm:wa:customer']);
+    expect(prewarm).toHaveBeenCalledTimes(1);
+  });
+
+  it('prewarms the internal default fallback when it is the only route', async () => {
+    const prewarm = vi.fn(async () => true);
+    const runtimeSettings = {
+      providers: {},
+      storage: {
+        postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
+      },
+      memory: {},
+    } as any;
+    const app = makeApp({
+      warmPool: {
+        acquire: vi.fn(() => null),
+        prewarm: vi.fn(async () => undefined),
+        release: vi.fn(async () => undefined),
+      },
+      getConversationRoutes: vi.fn(() => ({
+        'app:default': {
+          name: 'Default Agent',
+          folder: 'main_agent',
+          trigger: '@Default Agent',
+          added_at: '2026-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+        },
+      })),
+      prewarmAgentForConversationRoute: vi.fn(async (chatJid) =>
+        prewarm(chatJid),
+      ),
+    });
+
+    await prewarmWarmPoolRoutes(app, runtimeSettings, {
+      info: vi.fn(),
+      warn: vi.fn(),
+    });
+
+    expect(prewarm).toHaveBeenCalledOnce();
+    expect(prewarm).toHaveBeenCalledWith('app:default');
   });
 
   it('prewarms providers.interakt.default_agent before any customer route exists', async () => {
@@ -216,6 +254,66 @@ describe('runStartup', () => {
             }
           : undefined,
       ),
+      projectConversationRoute: vi.fn(async (chatJid: string) => {
+        order.push(`project:${chatJid}`);
+      }),
+      unregisterConversationRoute: vi.fn(async (chatJid: string) => {
+        order.push(`unregister:${chatJid}`);
+      }),
+      prewarmAgentForConversationRoute: vi.fn(async (chatJid: string) => {
+        order.push(`prewarm:${chatJid}`);
+        return true;
+      }),
+    });
+
+    await prewarmWarmPoolRoutes(app, runtimeSettings, {
+      info: vi.fn(),
+      warn: vi.fn(),
+    });
+
+    expect(order).toEqual([
+      'project:wa:__interakt_default_agent__:boondi_support',
+      'prewarm:wa:__interakt_default_agent__:boondi_support',
+      'unregister:wa:__interakt_default_agent__:boondi_support',
+    ]);
+  });
+
+  it('does not warm app:default when providers.interakt.default_agent is configured', async () => {
+    const order: string[] = [];
+    const runtimeSettings = {
+      providers: {
+        interakt: { enabled: true, defaultAgent: 'boondi_support' },
+      },
+      agents: {
+        boondi_support: {
+          name: 'Boondi',
+          folder: 'boondi_support',
+          model: 'sonnet',
+          bindings: {},
+          sources: { skills: [], mcpServers: [] },
+          capabilities: [],
+        },
+      },
+      storage: {
+        postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
+      },
+      memory: {},
+    } as any;
+    const app = makeApp({
+      warmPool: {
+        acquire: vi.fn(() => null),
+        prewarm: vi.fn(async () => undefined),
+        release: vi.fn(async () => undefined),
+      },
+      getConversationRoutes: vi.fn(() => ({
+        'app:default': {
+          name: 'Default Agent',
+          folder: 'main_agent',
+          trigger: '@Default Agent',
+          added_at: '2026-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+        },
+      })),
       projectConversationRoute: vi.fn(async (chatJid: string) => {
         order.push(`project:${chatJid}`);
       }),

@@ -141,7 +141,19 @@ export async function prewarmWarmPoolRoutes(
   if (!app.warmPool?.prewarm) return;
   await prewarmInteraktDefaultAgentRoute(app, runtimeSettings, logger);
   const routes = Object.keys(app.getConversationRoutes());
+  const hasProviderDefaultAgent =
+    runtimeSettings.providers?.interakt?.enabled === true &&
+    Boolean(runtimeSettings.providers.interakt.defaultAgent);
+  const hasNonInternalRoute = routes.some(
+    (chatJid) => chatJid !== INTERNAL_DEFAULT_AGENT_JID,
+  );
   for (const chatJid of routes) {
+    if (
+      chatJid === INTERNAL_DEFAULT_AGENT_JID &&
+      (hasProviderDefaultAgent || hasNonInternalRoute)
+    ) {
+      continue;
+    }
     void app.prewarmAgentForConversationRoute(chatJid).catch((err) => {
       logger.warn(
         { err, chatJid },
