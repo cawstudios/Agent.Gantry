@@ -638,6 +638,10 @@ describe('Boondi regression scenarios', () => {
 
     expect(latencyRunner).not.toContain('console.log(\n  console.log(');
     expect(latencyRunner).toContain("`\\n${pad('scenario', 28)}");
+    expect(latencyRunner).toContain("${pad('spawn', 7)}");
+    expect(latencyRunner).toContain(
+      'spawn=${fmt(result.stages.spawnToLlmInputMs)}',
+    );
   });
 
   it('keeps latency slot isolation focused on live runtime turns', () => {

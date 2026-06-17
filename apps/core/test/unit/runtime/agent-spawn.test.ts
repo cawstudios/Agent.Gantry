@@ -1137,6 +1137,7 @@ describe('agent-spawn timeout behavior', () => {
         agentId: 'agent-one',
         threadId: 'thread-customer',
         memoryUserId: 'user-customer',
+        sessionId: 'provider-session-existing',
         memoryContextBlock: 'Customer memory must bind later',
       },
       onProcess,
@@ -1165,6 +1166,7 @@ describe('agent-spawn timeout behavior', () => {
       warmHandle,
       expect.objectContaining({
         chatJid: 'test@g.us',
+        sessionId: 'provider-session-existing',
         firstMessage: testInput.prompt,
         memoryBlock: 'Customer memory must bind later',
       }),
@@ -1181,6 +1183,9 @@ describe('agent-spawn timeout behavior', () => {
       }),
     );
     expect(JSON.stringify(recipe.runnerInput)).not.toContain('test@g.us');
+    expect(JSON.stringify(recipe.runnerInput)).not.toContain(
+      'provider-session-existing',
+    );
     expect(JSON.stringify(recipe.runnerInput)).not.toContain(
       'Customer memory must bind later',
     );
@@ -1520,7 +1525,7 @@ describe('agent-spawn timeout behavior', () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
-  it('uses a session-specific warm worker for saved provider sessions', async () => {
+  it('uses a generic warm worker for saved provider sessions and binds the session later', async () => {
     vi.mocked(getRuntimeWarmPoolConfig).mockReturnValue({
       enabled: true,
       size: 1,
@@ -1578,8 +1583,14 @@ describe('agent-spawn timeout behavior', () => {
       warmBound: true,
     });
     expect(warmPool.acquire).toHaveBeenCalledTimes(1);
-    expect(String(vi.mocked(warmPool.acquire).mock.calls[0][0])).toContain(
+    expect(String(vi.mocked(warmPool.acquire).mock.calls[0][0])).not.toContain(
       'provider-session-existing',
+    );
+    expect(warmAdapter.bind).toHaveBeenCalledWith(
+      warmHandle,
+      expect.objectContaining({
+        sessionId: 'provider-session-existing',
+      }),
     );
     expect(spawn).not.toHaveBeenCalled();
   });

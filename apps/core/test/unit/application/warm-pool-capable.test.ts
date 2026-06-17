@@ -39,7 +39,6 @@ describe('warm-pool capability contract', () => {
     ['agentId', { agentId: 'agent-2' }],
     ['persona', { persona: 'operations' }],
     ['model', { model: 'sonnet' }],
-    ['resumeSessionId', { resumeSessionId: 'claude-session-returning' }],
     ['toolSurface', { toolSurface: { gantryMcp: ['send_message'] } }],
     ['mcpSet', { mcpSet: ['mcp:shopify-api'] }],
     ['thinking', { thinking: { mode: 'enabled', effort: 'high' } }],
@@ -66,6 +65,17 @@ describe('warm-pool capability contract', () => {
     );
 
     expect(second).toBe(first);
+  });
+
+  it('does not partition generic worker pools by provider resume session', () => {
+    const base = baseKeyInput();
+
+    expect(
+      poolKeyOf({
+        ...base,
+        resumeSessionId: 'claude-session-returning',
+      }),
+    ).toBe(poolKeyOf(base));
   });
 
   it('builds cache shape keys from prompt-cache-affecting input only', () => {

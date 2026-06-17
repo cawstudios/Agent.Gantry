@@ -837,11 +837,11 @@ export async function spawnAgent(
           chatJid: '',
           threadId: undefined,
           memoryUserId: undefined,
-          sessionId: input.sessionId,
           memoryContextBlock: '',
           guardrailSystemPromptAppend: undefined,
           warmGenericBoot: true,
         };
+        delete warmRunnerInput.sessionId;
         let warmHostCredentials:
           | Awaited<ReturnType<typeof getHostRuntimeCredentialEnv>>
           | undefined;
@@ -951,7 +951,6 @@ export async function spawnAgent(
               agentId: input.agentId || compileAgentId,
               persona: compilePersona,
               model: effectiveModel,
-              resumeSessionId: input.sessionId,
               toolSurface: {
                 gantryMcp: input.gantryMcpToolSurface,
                 native: input.nativeToolSurface,
@@ -1041,7 +1040,6 @@ export async function spawnAgent(
             agentId: input.agentId || compileAgentId,
             persona: compilePersona,
             model: effectiveModel,
-            resumeSessionId: input.sessionId,
             toolSurface: {
               gantryMcp: input.gantryMcpToolSurface,
               native: input.nativeToolSurface,

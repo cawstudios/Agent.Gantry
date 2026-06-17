@@ -152,7 +152,6 @@ export function poolKeyOf(input: WarmPoolKeyInput): WarmPoolKey {
     agentId: input.agentId,
     persona: input.persona ?? null,
     model: input.model ?? null,
-    resumeSessionId: input.resumeSessionId ?? null,
     toolSurface: normalizeToolSurface(input.toolSurface),
     mcpSet: sortedList(input.mcpSet),
     thinking: normalizeThinking(input.thinking),

@@ -2588,11 +2588,43 @@ Evidence:
     `startup` section in the customer reply trace. Flow logs also showed the
     route warm-pool prewarm completed for `wa:000000043` before the customer
     message was processed.
+  - Full one-sample latency matrix against the same held stack passed:
+    `GANTRY_DEV_LOG=/tmp/gantry-capture.log LATENCY_TURN_TIMEOUT_MS=180000 node scripts/measure-latency.mjs --samples 1 --json /tmp/latency-suite-phase8-full-s1.json`.
+    Raw harness totals were: T1 greeting `708ms`, T2 policy `3883ms`, T3
+    product lookup `7827ms`, T4 warm follow-up `20450ms`, and T5 order status
+    `71785ms`. The same JSON recorded spawn-to-LLM delay as T2 `107ms`, T3
+    `115ms`, T4 `10858ms`, and T5 `116ms`; the T4 outlier was therefore hidden
+    by the old printed table, which did not show `spawnToLlmInputMs`.
+  - Admin/API and direct trace proof for the latest matrix outbounds matched
+    the live totals closely: `000000041` replySeconds `0.698` /
+    latencyTotal `605`, `000000042` `3.882` / `3886`, `000000043` `20.449` /
+    `20447`, and `000000044` `71.785` / `71784`.
+  - The "gap surged" hypothesis was not supported by persisted trace data.
+    Latest trace gap totals were `22ms` for `000000041`, `134ms` for
+    `000000042`, `181ms` for `000000043`, and `140ms` for `000000044`.
+    No latest customer reply trace contained a `cache_prewarm` section.
+  - T4/T5 remain latency problems, but the current evidence points elsewhere:
+    T4 saw warm-pool depletion/run-time prewarm before first LLM input, and T5
+    contained `startup:5142ms` plus a second `llm:60700ms` provider/model wait.
+    Flow logs showed `Warm pool empty; prewarming before run` for the T4/T5
+    sequence. This is a warm capacity/provider-time issue, not a trace-gap or
+    cache-prewarm-attribution issue.
+  - `scripts/measure-latency.mjs` now prints `spawn` in both the per-turn line
+    and summary table so future Phase 8 latency runs expose run-time
+    prewarm/bind delay without opening the JSON detail file.
+  - Warm-pool keying no longer includes the provider resume session id, and
+    generic warm boot input deletes `sessionId` before starting the SDK worker.
+    The provider session is now carried only in the later bind scope. This
+    keeps generic prewarm capacity reusable across first replies and follow-ups
+    with the same cache shape instead of fragmenting the pool per saved SDK
+    session.
 Open follow-ups:
   - Continue Boondi latency measurement with `scripts/measure-latency.mjs` and
-    boondi-admin `replySeconds` across the full T1-T5 matrix and multiple
-    samples; the broad regression harness remains a correctness gate for
-    visible replies, routing, guardrails, privacy, and tool calls.
+    boondi-admin `replySeconds` across multiple T1-T5 samples; the broad
+    regression harness remains a correctness gate for visible replies, routing,
+    guardrails, privacy, and tool calls. The next latency implementation item
+    is warm-pool depletion/top-up before the customer turn, not CRM/Shopify
+    behavior tuning.
   - Full Boondi semantic scenario gates are useful product regression checks,
     but they are not the current runtime-plumbing gate. For local server
     readiness, use the signed-webhook smoke plus MCP request/response evidence
