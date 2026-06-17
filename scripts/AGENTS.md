@@ -52,6 +52,9 @@
   Gantry core a distinct control port, log, smoke env file, and
   `GANTRY_IPC_SOCKET_PATH`; otherwise the shared runtime-home IPC socket
   election hides the second core's runner path and makes the smoke misleading.
+  Start and health-check each core sequentially: local cores share Postgres, and
+  concurrent readiness/migration startup can race before either control server
+  is available.
 - Keep `scripts/boondi-test-setup.sh` warning against anything other than
   `BOONDI_TEST_IDLE_TIMEOUT_MS=2500` for broad scenario suites, but raise both
   that variable and `runtime.runner.idle_timeout_ms`, for example to `20000`,

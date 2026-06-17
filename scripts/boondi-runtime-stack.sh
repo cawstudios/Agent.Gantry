@@ -22,7 +22,6 @@ CRM_DEV_LOG="${CRM_DEV_LOG:-/tmp/mcp-crm-dev.log}"
 GANTRY_CONTROL_PORT="${GANTRY_CONTROL_PORT:-4710}"
 SHOPIFY_PORT="${SHOPIFY_PORT:-8081}"
 CRM_PORT="${CRM_PORT:-8082}"
-CORE_URL="${CORE_URL:-http://127.0.0.1:4710/}"
 SHOPIFY_HEALTH_URL="${SHOPIFY_HEALTH_URL:-http://127.0.0.1:8081/healthz}"
 CRM_HEALTH_URL="${CRM_HEALTH_URL:-http://127.0.0.1:8082/healthz}"
 CALLER_IDENTITY_PHONE="${GANTRY_TEST_CALLER_IDENTITY_PHONE:-918097288633}"
@@ -82,6 +81,29 @@ write_smoke_env() {
     "$core_log" \
     "$token" >"$smoke_env"
   chmod 600 "$smoke_env"
+}
+
+wait_for_core_port() {
+  local core_port="$1"
+  local core_log="$2"
+  local core_pid="$3"
+
+  for _ in $(seq 1 60); do
+    core=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:${core_port}/" 2>/dev/null || true)
+    if [ -n "$core" ] && [ "$core" != "000" ]; then
+      return 0
+    fi
+    if ! kill -0 "$core_pid" 2>/dev/null; then
+      echo "Gantry core on ${core_port} exited before becoming healthy"
+      tail -80 "$core_log" 2>/dev/null || true
+      return 1
+    fi
+    sleep 1
+  done
+
+  echo "Gantry core on ${core_port} did not become healthy"
+  tail -80 "$core_log" 2>/dev/null || true
+  return 1
 }
 
 cleanup() {
@@ -168,7 +190,9 @@ for idx in $(seq 1 "$GANTRY_CORE_COUNT"); do
       GANTRY_TEST_CALLER_IDENTITY_PHONE="$CALLER_IDENTITY_PHONE" \
       node --enable-source-maps --import tsx "$ROOT/apps/core/src/index.ts"
   ) >"$core_log" 2>&1 &
-  CORE_PIDS+=("$!")
+  core_pid="$!"
+  CORE_PIDS+=("$core_pid")
+  wait_for_core_port "$core_port" "$core_log" "$core_pid"
 done
 
 echo "waiting for health..."
@@ -200,5 +224,5 @@ for _ in $(seq 1 60); do
 done
 
 echo "stack did not become healthy"
-echo "Logs: core=$GANTRY_DEV_LOG shopify=$SHOPIFY_DEV_LOG crm=$CRM_DEV_LOG"
+echo "Logs: core=${CORE_LOGS[*]} shopify=$SHOPIFY_DEV_LOG crm=$CRM_DEV_LOG"
 exit 1

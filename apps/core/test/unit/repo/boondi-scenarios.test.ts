@@ -571,7 +571,7 @@ describe('Boondi regression scenarios', () => {
     expect(stack).toContain('GANTRY_DEV_LOG');
     expect(stack).toContain('http://127.0.0.1:8081/healthz');
     expect(stack).toContain('http://127.0.0.1:8082/healthz');
-    expect(stack).toContain('http://127.0.0.1:4710/');
+    expect(stack).not.toContain('CORE_URL');
     expect(stack).toContain('kill "${CORE_PIDS[@]}" "$SHOPIFY_PID" "$CRM_PID"');
     expect(stack).toContain('npm run smoke:boondi-runtime');
     expect(pkg.scripts?.['dev:boondi-runtime']).toBe(
@@ -586,6 +586,8 @@ describe('Boondi regression scenarios', () => {
     expect(stack).toContain('GANTRY_RUNTIME_IPC_DIR');
     expect(stack).toContain('CORE_PIDS=()');
     expect(stack).toContain('CORE_SMOKE_ENVS=()');
+    expect(stack).toContain('wait_for_core_port()');
+    expect(stack).toContain('wait_for_core_port "$core_port"');
     expect(stack).toContain('core-${idx}.sock');
     expect(stack).toContain('GANTRY_IPC_SOCKET_PATH="$core_ipc_socket"');
     expect(stack).toContain('GANTRY_CONTROL_PORT="$core_port"');

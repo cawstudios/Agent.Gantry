@@ -2378,6 +2378,33 @@ Evidence:
   - Verification:
     `bash -n scripts/boondi-runtime-stack.sh && node --check scripts/boondi-runtime-smoke.mjs && node --check scripts/lib/runtime-smoke-env.mjs`
     passed after the multi-core stack update.
+  - Live two-core stack verification exposed a local harness startup race:
+    `GANTRY_CORE_COUNT=2 npm run dev:boondi-runtime` initially started both
+    core processes concurrently, and one core failed storage readiness while
+    both processes touched shared Postgres migration/readiness paths. The stack
+    script now starts each core and waits for its control port before launching
+    the next core, and the stale `CORE_URL` smoke switch was removed because
+    multi-core health probes are derived from each core's adjacent control port.
+  - Verification:
+    `GANTRY_CORE_COUNT=2 npm run dev:boondi-runtime` reached
+    `READY core_ports=4710 4711 core_codes=404 404 shopify=ok crm=ok` after
+    the sequential-startup fix.
+  - Verification:
+    `GANTRY_RUNTIME_SMOKE_ENV=/tmp/gantry-runtime-smoke.env.1 SMOKE_CONCURRENCY=3 npm run smoke:boondi-runtime`
+    passed against core 4710 for Shopify, Shopify secondary, and CRM cases with
+    guardrail, MCP request, MCP response, outbound dry-run, and duplicate
+    inbound checks.
+  - Verification:
+    `GANTRY_RUNTIME_SMOKE_ENV=/tmp/gantry-runtime-smoke.env.2 BOONDI_SMOKE_SHOPIFY_PHONE=000000031 BOONDI_SMOKE_SHOPIFY_SECONDARY_PHONE=000000032 BOONDI_SMOKE_CRM_PHONE=000000052 SMOKE_CONCURRENCY=1 TURN_TIMEOUT_MS=240000 npm run smoke:boondi-runtime`
+    passed against core 4711 for Shopify, Shopify secondary, and CRM cases with
+    guardrail, MCP request, MCP response, outbound dry-run, and duplicate
+    inbound checks.
+  - Caveat:
+    `GANTRY_RUNTIME_SMOKE_ENV=/tmp/gantry-runtime-smoke.env.2 BOONDI_SMOKE_SHOPIFY_PHONE=000000023 BOONDI_SMOKE_SHOPIFY_SECONDARY_PHONE=000000024 BOONDI_SMOKE_CRM_PHONE=000000051 SMOKE_CONCURRENCY=3 npm run smoke:boondi-runtime`
+    hit warm-worker bind timeouts before retry/fallback output on core 4711.
+    Basic inbound/outbound/MCP plumbing is proven on both cores, but the
+    local three-warm-worker concurrency gate remains open as a Phase 8 runtime
+    concurrency item.
   - The standard `npm run test:integration:postgres` command now includes the
     existing `runtime-worker-inventory.postgres.integration.test.ts`, so
     per-instance worker inventory persistence is part of the shared Postgres
