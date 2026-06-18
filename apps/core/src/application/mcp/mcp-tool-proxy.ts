@@ -368,10 +368,15 @@ export class McpToolProxy {
           { timeout: MCP_PROXY_TIMEOUT_MS },
         );
         const validationAudit = resultValidation.validate(result);
-        await finalize(
-          validationAudit.toolResultError ? 'failure' : 'success',
-          validationAudit,
-        );
+        try {
+          await finalize(
+            validationAudit.toolResultError ? 'failure' : 'success',
+            validationAudit,
+          );
+        } catch {
+          // A remote MCP tool already returned. Do not make completed external
+          // side effects look retryable because the post-call audit append failed.
+        }
         return result;
       } catch (err) {
         await closeCachedClient(capability);
@@ -381,9 +386,14 @@ export class McpToolProxy {
       }
     } catch (err) {
       if (!finalized) {
-        await finalize(classifyMcpToolAuditError(err), {
-          error: summarizeMcpToolError(err),
-        });
+        try {
+          await finalize(classifyMcpToolAuditError(err), {
+            error: summarizeMcpToolError(err),
+          });
+        } catch {
+          // Preserve the real tool/policy failure instead of replacing it with
+          // an audit-store failure.
+        }
       }
       throw err;
     }

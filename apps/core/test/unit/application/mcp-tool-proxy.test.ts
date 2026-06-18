@@ -1259,6 +1259,73 @@ describe('McpToolProxy', () => {
     );
   });
 
+  it('does not turn a completed MCP side effect into a retryable failure when durable audit append fails', async () => {
+    vi.useFakeTimers();
+    const appendAuditEvent = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('audit store unavailable'));
+    const proxy = new McpToolProxy(
+      mcpRepository({ remote: true, appendAuditEvent }),
+      {
+        tools: emptyToolRepository(),
+        liveToolRules: ['mcp__github__create_issue'],
+        lookupHostname: vi.fn(async () => [
+          { address: '93.184.216.34', family: 4 as const },
+        ]),
+      },
+    );
+    mcpSdkMocks.client.listTools.mockResolvedValueOnce({
+      tools: [{ name: 'create_issue' }],
+    });
+
+    await expect(
+      proxy.callTool({
+        appId: 'app-one' as never,
+        agentId: 'agent-one' as never,
+        serverName: 'github',
+        toolName: 'create_issue',
+        arguments: { title: 'Bug' },
+      }),
+    ).resolves.toEqual({ content: [] });
+    expect(mcpSdkMocks.client.callTool).toHaveBeenCalledTimes(1);
+    expect(appendAuditEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves the original MCP failure when failure audit append fails', async () => {
+    vi.useFakeTimers();
+    const appendAuditEvent = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('audit store unavailable'));
+    mcpSdkMocks.client.callTool.mockRejectedValueOnce(
+      new Error('upstream failure'),
+    );
+    mcpSdkMocks.client.listTools.mockResolvedValueOnce({
+      tools: [{ name: 'create_issue' }],
+    });
+    const proxy = new McpToolProxy(
+      mcpRepository({ remote: true, appendAuditEvent }),
+      {
+        tools: emptyToolRepository(),
+        liveToolRules: ['mcp__github__create_issue'],
+        lookupHostname: vi.fn(async () => [
+          { address: '93.184.216.34', family: 4 as const },
+        ]),
+      },
+    );
+
+    await expect(
+      proxy.callTool({
+        appId: 'app-one' as never,
+        agentId: 'agent-one' as never,
+        serverName: 'github',
+        toolName: 'create_issue',
+      }),
+    ).rejects.toThrow('upstream failure');
+    expect(appendAuditEvent).toHaveBeenCalledTimes(2);
+  });
+
   it('audits denied and failed MCP tool calls', async () => {
     const publishRuntimeEvent = vi.fn(async () => undefined);
     const deniedProxy = new McpToolProxy(mcpRepository(), {
