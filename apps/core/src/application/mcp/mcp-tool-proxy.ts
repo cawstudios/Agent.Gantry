@@ -321,6 +321,7 @@ export class McpToolProxy {
       });
       finalized = true;
     };
+    let toolReturned = false;
     try {
       const capabilities = await this.materializeReviewedCapabilities(input);
       const capability = capabilities.find(
@@ -367,6 +368,7 @@ export class McpToolProxy {
           undefined,
           { timeout: MCP_PROXY_TIMEOUT_MS },
         );
+        toolReturned = true;
         const validationAudit = resultValidation.validate(result);
         try {
           await finalize(
@@ -386,13 +388,19 @@ export class McpToolProxy {
       }
     } catch (err) {
       if (!finalized) {
-        try {
-          await finalize(classifyMcpToolAuditError(err), {
+        const finalizeFailure = () =>
+          finalize(classifyMcpToolAuditError(err), {
             error: summarizeMcpToolError(err),
           });
-        } catch {
-          // Preserve the real tool/policy failure instead of replacing it with
-          // an audit-store failure.
+        if (toolReturned) {
+          try {
+            await finalizeFailure();
+          } catch {
+            // Preserve the real post-call failure instead of replacing it with
+            // an audit-store failure after a remote MCP tool already returned.
+          }
+        } else {
+          await finalizeFailure();
         }
       }
       throw err;

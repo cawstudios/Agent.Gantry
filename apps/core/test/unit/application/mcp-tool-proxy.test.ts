@@ -1292,17 +1292,28 @@ describe('McpToolProxy', () => {
     expect(appendAuditEvent).toHaveBeenCalledTimes(2);
   });
 
-  it('preserves the original MCP failure when failure audit append fails', async () => {
+  it('preserves a post-return MCP validation failure when failure audit append fails', async () => {
     vi.useFakeTimers();
     const appendAuditEvent = vi
       .fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('audit store unavailable'));
-    mcpSdkMocks.client.callTool.mockRejectedValueOnce(
-      new Error('upstream failure'),
-    );
     mcpSdkMocks.client.listTools.mockResolvedValueOnce({
-      tools: [{ name: 'create_issue' }],
+      tools: [
+        {
+          name: 'create_issue',
+          outputSchema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['url'],
+            properties: { url: { type: 'string' } },
+          },
+        },
+      ],
+    });
+    mcpSdkMocks.client.callTool.mockResolvedValueOnce({
+      content: [],
+      structuredContent: { url: 123 },
     });
     const proxy = new McpToolProxy(
       mcpRepository({ remote: true, appendAuditEvent }),
@@ -1322,7 +1333,7 @@ describe('McpToolProxy', () => {
         serverName: 'github',
         toolName: 'create_issue',
       }),
-    ).rejects.toThrow('upstream failure');
+    ).rejects.toThrow(/structuredContent failed outputSchema validation/);
     expect(appendAuditEvent).toHaveBeenCalledTimes(2);
   });
 
