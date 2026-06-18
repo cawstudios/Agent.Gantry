@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
 import { generateKeyPairSync } from 'crypto';
+import { fileURLToPath } from 'url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -11,6 +12,10 @@ import { ALL_GANTRY_MCP_TOOL_NAMES } from '@agent-runner-src/gantry-mcp-tool-sur
 
 const MCP_FIXTURE_TIMEOUT_MS = 60_000;
 const tempRoots: string[] = [];
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../../..',
+);
 
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
@@ -35,7 +40,29 @@ function symlinkPackage(
     ...packageName.split('/'),
   );
   fs.mkdirSync(path.dirname(packagePath), { recursive: true });
-  fs.symlinkSync(path.resolve(target), packagePath, 'dir');
+  fs.symlinkSync(
+    path.isAbsolute(target) ? target : path.join(repoRoot, target),
+    packagePath,
+    'dir',
+  );
+}
+
+function copyBuiltContractsPackage(root: string): void {
+  const packagePath = path.join(
+    root,
+    'node_modules',
+    '@gantry',
+    'contracts',
+  );
+  fs.mkdirSync(packagePath, { recursive: true });
+  fs.copyFileSync(
+    path.join(repoRoot, 'packages/contracts/package.json'),
+    path.join(packagePath, 'package.json'),
+  );
+  copyDirectory(
+    path.join(repoRoot, 'packages/contracts/dist'),
+    path.join(packagePath, 'dist'),
+  );
 }
 
 function copyDirectory(source: string, destination: string): void {
@@ -276,7 +303,7 @@ function createMcpFixture(): {
   );
   symlinkPackage(root, 'zod', 'node_modules/zod');
   symlinkPackage(root, 'cron-parser', 'node_modules/cron-parser');
-  symlinkPackage(root, '@gantry/contracts', 'packages/contracts');
+  copyBuiltContractsPackage(root);
 
   fs.writeFileSync(
     path.join(sdkRoot, 'package.json'),
@@ -480,7 +507,7 @@ async function runMcpFixture(
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
   const child = spawn(
     process.execPath,
-    [path.resolve('node_modules/tsx/dist/cli.mjs'), fixture.serverPath],
+    [path.join(repoRoot, 'node_modules/tsx/dist/cli.mjs'), fixture.serverPath],
     {
       cwd: fixture.root,
       env: {

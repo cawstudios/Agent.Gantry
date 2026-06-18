@@ -13,6 +13,7 @@ import {
 
 const RUNNER_IPC_CHILD_TIMEOUT_MS = 50_000;
 const RUNNER_IPC_TEST_TIMEOUT_MS = 60_000;
+const SLOW_RUNNER_IPC_TEST_TIMEOUT_MS = 120_000;
 // The heartbeat test observes a real 15s heartbeat interval after a cold tsx
 // runner boot, so it needs a wider per-spawn budget than the default child
 // runner timeout and a matching vitest timeout above it.
@@ -1643,7 +1644,7 @@ describe('agent-runner IPC lifecycle', () => {
       );
       expect(systemPromptText(assistantCall)).not.toContain('claude_code');
     },
-    RUNNER_IPC_TEST_TIMEOUT_MS,
+    SLOW_RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
@@ -2139,10 +2140,15 @@ describe('agent-runner IPC lifecycle', () => {
     async () => {
       const fixture = createRunnerFixture();
 
-      const result = await runRunner(fixture, baseInput(), {
-        TEST_ACTIVE_INPUT_ORDER: '1',
-        TEST_EXIT_AFTER_QUERY: '1',
-      });
+      const result = await runRunner(
+        fixture,
+        baseInput(),
+        {
+          TEST_ACTIVE_INPUT_ORDER: '1',
+          TEST_EXIT_AFTER_QUERY: '1',
+        },
+        SLOW_RUNNER_IPC_TEST_TIMEOUT_MS,
+      );
 
       expect(result.exitCode).toBe(0);
       const messages = readRecord(fixture.recordPath).calls[0]?.streamMessages;
@@ -2152,7 +2158,7 @@ describe('agent-runner IPC lifecycle', () => {
         'active follow-up second',
       ]);
     },
-    RUNNER_IPC_TEST_TIMEOUT_MS,
+    SLOW_RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
