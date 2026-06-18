@@ -22,7 +22,7 @@ evidence.
 | Phase 2   | Multiple customers, single core                 |              5 | Passed      | 2026-06-18 IST fixed rerun used `conversation:wa:000960000201` and `conversation:wa:000960000202`; both persisted 4 inbound and 4 outbound replies; final replies remembered only their own markers `ALPHA-REKEY-201` and `BRAVO-REKEY-202`; no latency report included `assistant startup`; post-idle runtime active 0, pending 0, bound active 0. | Retained same-process continuation and isolation are now proven for two simultaneous natural 4x4 customer chats. Prior Phase 2 capacity and duplicate-redelivery evidence remains valid.                                                             |
 | Phase 3   | Cache prewarm on                                |              2 | Passed      | 2026-06-18 IST natural 4x4 rerun used `conversation:wa:000960000301`; cache prewarm was enabled and pre-traffic inventory showed `succeeded=3`, `skipped=0`; all 4 inbound and 4 outbound replies persisted; final reply remembered marker `PREWARM-ON-301`; no current latency report included `assistant startup` or `cache_prewarm`.             | Historical pre-fix rows can still contain raw `startup` sections, but the admin UI now folds that internal label into `runtime wait` while preserving raw backend traces. Startup prewarm completes before the control HTTP server accepts webhooks. |
 | Phase 3.5 | MCP smoke                                       |              1 | Passed      | 2026-06-18 IST seeded returning-customer rerun used `conversation:wa:000960000352`; all 4 live signed inbound messages and 4 live outbound replies persisted; traces showed `boondi-crm.get_open_records`, `shopify-api.get_recent_orders_with_details`, and `shopify-api.search_products`; post-idle runtime active 0, pending 0, bound active 0. | CRM and Shopify MCP live traffic are proven through live transcript, trace sections, flow logs, admin API, and runtime workers API.                                                                                                                   |
-| Phase 4   | Follow-up routing stress                        |              4 | Not started | TBD                                                                                                                                                                                                                                                                                                                                                 | Rapid follow-ups, active-run follow-up, cold resume, five-turn loop.                                                                                                                                                                                 |
+| Phase 4   | Follow-up routing stress                        |              4 | Passed      | Scenarios 4.1, 4.2, 4.3, and 4.4 passed on 2026-06-18 IST. 4.2 required a queue lifecycle fix so active-run follow-ups drain through the retained pooled worker. 4.4 used `conversation:wa:000960000405`, persisted 5 live inbound and 5 outbound replies, used one `agent_run`, and had no `startup` trace sections.                         | Follow-up routing stress is now proven for rapid follow-ups, active-run overlap, cold resume, and a five-turn same-customer loop. Admin API was not running because a separate Codex session owns admin UI work.                                     |
 | Phase 5   | Two core processes                              |              5 | Not started | TBD                                                                                                                                                                                                                                                                                                                                                 | Ownership, distribution, restart, post-restart continuity.                                                                                                                                                                                           |
 | Phase 6   | Dashboard truth                                 | dashboard gate | Not started | TBD                                                                                                                                                                                                                                                                                                                                                 | Must be checked across every scenario, then summarized here.                                                                                                                                                                                         |
 | Phase 7   | Failure recovery                                |              3 | Not started | TBD                                                                                                                                                                                                                                                                                                                                                 | Kill runner, MCP down/up, ungraceful core death.                                                                                                                                                                                                     |
@@ -1513,6 +1513,210 @@ Acceptance:
 
 - pass only if all five live turns complete cleanly
 - fail if the system works for early replies and then stops routing later
+
+## Phase 4 Evidence Log
+
+Status: in progress on 2026-06-18 IST.
+
+### Scenario 4.1 Evidence: Rapid Follow-Ups After First Reply
+
+Status: passed.
+
+- Customer: `conversation:wa:000960000401`.
+- Scenario marker: `RAPID-401`.
+- Live inbound provider message ids:
+  `phase4-1-1781745620074-1`, `phase4-1-1781745633415-2`, and
+  `phase4-1-1781745633418-3`.
+- The second and third inbound messages were sent three milliseconds apart after
+  the first outbound appeared.
+- Persisted transcript evidence:
+  three live inbound messages and three live outbound replies.
+- Persisted outbound message ids:
+  `message:wa:000960000401:outbound:a275d423-59e3-4383-a11e-18e79d817445`
+  (`totalMs=12380`),
+  `message:wa:000960000401:outbound:6f8fe82d-5490-4af3-adf0-08c0f811d3bf`
+  (`totalMs=11144`), and
+  `message:wa:000960000401:outbound:ec6870a0-bdb0-4fd7-9059-131dcd57c6ef`
+  (`totalMs=21929`).
+- Trace sections:
+  - First reply:
+    `queue`, `main LLM · turn 1`, `gap`, `get_open_records`,
+    `main LLM · turn 2`, `gap`.
+  - Second reply:
+    `queue`, `main LLM · turn 1`, `gap`, `search_products`,
+    `main LLM · turn 2`, `gap`.
+  - Third reply:
+    `queue`, `main LLM · turn 1`, `memory_save`,
+    `main LLM · turn 2`, `gap`.
+- Rapid-follow-up behavior:
+  the third inbound queued behind the second reply for `11122 ms` and then
+  completed normally; it did not start a duplicate same-customer active runner
+  or remain pending after the prior visible reply.
+- `assistant startup` check:
+  all three current latency traces had no `startup` section.
+- Post-run worker evidence from the authenticated runtime workers API:
+  `activeMessageRuns=0`, `pendingConversationKeys=0`,
+  `genericAvailable=3`, `genericStarting=0`, `boundActive=0`,
+  `availableTarget=3`.
+- Admin evidence:
+  the admin API on `127.0.0.1:3000` was not running during this capture because
+  a separate Codex session owns admin UI work. This scenario used direct
+  Postgres transcript/trace evidence plus authenticated core runtime API
+  evidence instead of starting or restarting the admin app.
+
+### Scenario 4.2 Evidence: Follow-Up While Runner Is Active
+
+Status: passed after queue lifecycle fix.
+
+Initial failed reproduction:
+
+- Customer: `conversation:wa:000960000402`.
+- Result before the fix:
+  two live inbound messages and two live outbound replies persisted, but the
+  second reply was handled by a second `agent_run` and its latency trace
+  included `assistant startup`.
+- Root cause:
+  while the first run was active, `enqueueMessageCheck` marked
+  `pendingMessages=true`. When the pooled worker reached idle, `GroupQueue`
+  refused to retain it because pending messages existed, cleared the process,
+  then drained the pending message as a cold resumed run.
+
+Code fix:
+
+- `GroupQueue` now retains an idle pooled worker even when pending messages are
+  waiting, then drains the same group so the pending batch can call
+  `queue.sendMessage(...)` against the retained socket.
+- Focused regression:
+  `apps/core/test/unit/runtime/group-queue.test.ts` now covers the active-run
+  pending-message case.
+- Focused verification:
+  `npx vitest run -c vitest.unit.config.ts apps/core/test/unit/runtime/group-queue.test.ts`
+  passed with 64 tests.
+
+Fixed live rerun:
+
+- Customer: `conversation:wa:000960000403`.
+- Scenario marker: `ACTIVE-403`.
+- Live inbound provider message ids:
+  `phase4-2-fixed-1781746358626-1` and
+  `phase4-2-fixed-1781746359644-2`.
+- The second inbound was sent one second after the first inbound, before the
+  first outbound completed.
+- Persisted transcript evidence:
+  two live inbound messages and two live outbound replies.
+- Persisted outbound message ids:
+  `message:wa:000960000403:outbound:b34cf340-57f0-48f5-b9d0-023c82ea61c8`
+  (`totalMs=19437`) and
+  `message:wa:000960000403:outbound:acdd18d7-2f84-49cb-ba53-f78de8b034f7`
+  (`totalMs=27653`).
+- Run evidence:
+  exactly one `agent_run` handled both messages:
+  `agent-run:b9b608e7-a041-4fcc-9196-68313a202266`,
+  provider run `gantry-boondi-support-1781746358803-c7e7c1c8`,
+  provider session `737ed4a0-481f-45bd-a713-4f56ff17eb2a`.
+- During the overlap window, runtime workers showed
+  `activeMessageRuns=1`, `pendingConversationKeys=1`,
+  `boundActive=1`, `genericAvailable=2`, `genericStarting=1`.
+- Trace sections:
+  - First reply:
+    `queue`, `guardrail`, `main LLM · turn 1`, `gap`,
+    `search_products`, `main LLM · turn 2`, `gap`,
+    `search_products`, `main LLM · turn 3`, `gap`.
+  - Second reply:
+    `queue`, `main LLM · turn 1`, `gap`, `search_products`,
+    `main LLM · turn 2`, `gap`, `send`.
+- `assistant startup` check:
+  both current latency traces had no `startup` section.
+- Post-idle worker evidence from the authenticated runtime workers API:
+  `activeMessageRuns=0`, `pendingConversationKeys=0`,
+  `genericAvailable=3`, `genericStarting=0`, `boundActive=0`,
+  `availableTarget=3`.
+
+### Scenario 4.3 Evidence: Cold Resume Does Not Become A Fake Bound Worker
+
+Status: passed.
+
+- Customer: `conversation:wa:000960000404`.
+- Scenario marker: `COLD-404`.
+- Live inbound provider message ids:
+  `phase4-3-1781746497225-1`, `phase4-3-1781746535296-2`, and
+  `phase4-3-1781746550768-3`.
+- Flow:
+  first inbound received a reply; the test waited past `idle_timeout_ms`; a
+  second inbound exercised the cold-resume path; a third inbound immediately
+  after the cold-resume reply verified routing did not hang behind a fake bound
+  worker.
+- Persisted transcript evidence:
+  three live inbound messages and three live outbound replies.
+- Persisted outbound message ids:
+  `message:wa:000960000404:outbound:753fedcb-219a-4db3-a3fa-734bfa5aa53f`
+  (`totalMs=2733`),
+  `message:wa:000960000404:outbound:feb7c2bf-f646-45d4-83f1-b33249a1a411`
+  (`totalMs=13911`), and
+  `message:wa:000960000404:outbound:2031cfee-832b-4b36-bd93-cb919019872a`
+  (`totalMs=5810`).
+- Runtime state after the idle-timeout wait:
+  `activeMessageRuns=0`, `pendingConversationKeys=0`, `boundActive=0`,
+  `genericAvailable=3`.
+- Cold-resume run evidence:
+  the second and third replies used the same persisted provider session
+  `7cd4dabd-2a80-4000-86f3-e51b694851b5`, but each was a separate one-shot
+  `agent_run` after the retained worker had been released.
+- Trace evidence:
+  the cold-resume replies contained `assistant startup`, which is expected for
+  this one-shot resume path. The important routing assertion is that
+  `boundActive=0` after the cold-resume reply and the immediate next inbound
+  still produced a reply instead of waiting behind an unusable retained worker.
+- Post-idle worker evidence from the authenticated runtime workers API:
+  `activeMessageRuns=0`, `pendingConversationKeys=0`,
+  `genericAvailable=3`, `genericStarting=0`, `boundActive=0`,
+  `availableTarget=3`.
+
+### Scenario 4.4 Evidence: Five-Turn Same-Customer Loop
+
+Status: passed.
+
+- Customer: `conversation:wa:000960000405`.
+- Scenario marker: `LOOP-405`.
+- Live inbound provider message ids:
+  `phase4-4-1781746665943-1`, `phase4-4-1781746669758-2`,
+  `phase4-4-1781746683473-3`, `phase4-4-1781746684280-4`, and
+  `phase4-4-1781746696108-5`.
+- Flow:
+  five normal customer messages in one conversation, with a rapid pair between
+  turns 3 and 4 and short waits elsewhere.
+- Persisted transcript evidence:
+  five live inbound messages and five live outbound replies.
+- Persisted outbound message ids:
+  `message:wa:000960000405:outbound:f1459a48-c29f-468b-a783-186d468182f1`
+  (`totalMs=3220`),
+  `message:wa:000960000405:outbound:bd24aecd-ebd1-41b4-9243-75be96290485`
+  (`totalMs=13532`),
+  `message:wa:000960000405:outbound:75117892-5dac-40e9-9d26-2b31ac8c028f`
+  (`totalMs=5209`),
+  `message:wa:000960000405:outbound:6fc82a29-407e-4f07-afd2-0856788b22a7`
+  (`totalMs=9163`), and
+  `message:wa:000960000405:outbound:9fa3db62-e4ba-481a-b0d9-51a6dc012dc3`
+  (`totalMs=4714`).
+- Run evidence:
+  exactly one `agent_run` handled all five turns:
+  `agent-run:ffb4e558-ed95-421b-b7cd-ea0d26efbc88`,
+  provider run `gantry-boondi-support-1781746666097-6afcf4fb`,
+  provider session `f2531810-ae30-42bb-97e1-27f1226db018`.
+- Trace evidence:
+  all five current latency traces had no `startup` section.
+- Queue behavior:
+  the rapid turn-4 inbound temporarily showed
+  `pendingConversationKeys=1` after reply 3 and `activeMessageRuns=1` after
+  reply 4 while the retained worker was finishing the queued continuation; both
+  cleared without intervention.
+- Customer-context check:
+  the final reply remembered the plan as 8 birthday gift boxes, around ₹1,500
+  each, chocolate direction, and nut-allergy safety constraint.
+- Post-idle worker evidence from the authenticated runtime workers API:
+  `activeMessageRuns=0`, `pendingConversationKeys=0`,
+  `genericAvailable=3`, `genericStarting=0`, `boundActive=0`,
+  `availableTarget=3`.
 
 ## Phase 5: Two Core Processes
 

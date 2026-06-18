@@ -607,7 +607,6 @@ export class GroupQueue {
         pooledWarmWorker !== null &&
         state.process !== null &&
         !state.process.killed &&
-        !state.pendingMessages &&
         state.pendingTasks.length === 0;
       const retainPooledContinuation =
         state.pooledContinuationActive &&
@@ -632,7 +631,11 @@ export class GroupQueue {
         state.active = false;
       }
       if (retainIdlePooledWorker) {
-        this.drainWaiting();
+        if (state.pendingMessages) {
+          this.drainGroup(groupJid);
+        } else {
+          this.drainWaiting();
+        }
         return;
       }
       state.process = null;
