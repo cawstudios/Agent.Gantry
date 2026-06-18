@@ -60,9 +60,10 @@ function mcpListToolsHandler(
     if (!requestedTargetJid) return;
     try {
       const listInput = mcpListToolsProxyInput(data.payload || {});
+      const agentId = agentIdForMcpTask(data, sourceAgentFolder);
       const proxy = await createMcpProxyForSourceGroup({
         appId: data.appId as never,
-        agentId: memoryAgentIdForWorkspaceFolder(sourceAgentFolder) as never,
+        agentId,
         deps,
         ipcDir: context.ipcBaseDir
           ? path.join(context.ipcBaseDir, sourceAgentFolder)
@@ -71,7 +72,7 @@ function mcpListToolsHandler(
       });
       const result = await proxy.listTools({
         appId: data.appId as never,
-        agentId: memoryAgentIdForWorkspaceFolder(sourceAgentFolder) as never,
+        agentId,
         ...listInput,
       });
       acceptData('Connected MCP tools listed for this agent.', result);
@@ -115,9 +116,10 @@ function mcpDescribeToolHandler(
         );
         return;
       }
+      const agentId = agentIdForMcpTask(data, sourceAgentFolder);
       const proxy = await createMcpProxyForSourceGroup({
         appId: data.appId as never,
-        agentId: memoryAgentIdForWorkspaceFolder(sourceAgentFolder) as never,
+        agentId,
         deps,
         ipcDir: context.ipcBaseDir
           ? path.join(context.ipcBaseDir, sourceAgentFolder)
@@ -126,7 +128,7 @@ function mcpDescribeToolHandler(
       });
       const result = await proxy.describeTool({
         appId: data.appId as never,
-        agentId: memoryAgentIdForWorkspaceFolder(sourceAgentFolder) as never,
+        agentId,
         serverName: detailInput.serverName,
         toolName: detailInput.toolName,
       });
@@ -186,9 +188,10 @@ function mcpCallToolHandler(
         return;
       }
       const { serverName, toolName } = callInput;
+      const agentId = agentIdForMcpTask(data, sourceAgentFolder);
       const proxy = await createMcpProxyForSourceGroup({
         appId: data.appId as never,
-        agentId: memoryAgentIdForWorkspaceFolder(sourceAgentFolder) as never,
+        agentId,
         deps,
         ipcDir: context.ipcBaseDir
           ? path.join(context.ipcBaseDir, sourceAgentFolder)
@@ -209,7 +212,7 @@ function mcpCallToolHandler(
       }
       const result = await proxy.callTool({
         appId: data.appId as never,
-        agentId: memoryAgentIdForWorkspaceFolder(sourceAgentFolder) as never,
+        agentId,
         serverName,
         toolName,
         arguments: callInput.arguments ?? {},
@@ -239,7 +242,7 @@ async function auditInvalidMcpCallRequest(input: {
     mcpServers,
     publishRuntimeEvent: input.deps.publishRuntimeEvent,
     appId: input.data.appId as never,
-    agentId: memoryAgentIdForWorkspaceFolder(input.sourceAgentFolder) as never,
+    agentId: agentIdForMcpTask(input.data, input.sourceAgentFolder),
     ...(input.data.runHandle ? { runHandle: input.data.runHandle } : {}),
     ...(input.callInput.serverName
       ? { serverName: input.callInput.serverName }
@@ -249,6 +252,14 @@ async function auditInvalidMcpCallRequest(input: {
     reason: input.reason,
     missingFields: input.callInput.missingFields,
   });
+}
+
+function agentIdForMcpTask(
+  data: Parameters<TaskHandler>[0]['data'],
+  sourceAgentFolder: string,
+) {
+  return (data.agentId ||
+    memoryAgentIdForWorkspaceFolder(sourceAgentFolder)) as never;
 }
 
 function validateSameChannelMcpTarget(input: {

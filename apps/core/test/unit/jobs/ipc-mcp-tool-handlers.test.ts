@@ -8,6 +8,42 @@ afterEach(() => {
 });
 
 describe('MCP IPC tool handlers', () => {
+  it('uses the signed runner agent id for MCP tool calls', async () => {
+    const callTool = vi.fn(async () => ({}));
+    const createProxy = vi.fn(async () => ({
+      callTool,
+      describeTool: vi.fn(),
+      listTools: vi.fn(),
+    }));
+    const { mcpCallToolHandler } = createMcpToolHandlers(createProxy as never);
+
+    await mcpCallToolHandler({
+      data: {
+        type: 'mcp_call_tool',
+        appId: 'app:test',
+        agentId: 'agent:signed',
+        chatJid: 'sl:C123',
+        targetJid: 'sl:C123',
+        payload: {
+          serverName: 'crm',
+          toolName: 'create_deal',
+          arguments: { name: 'Acme' },
+        },
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {} as never,
+      conversationBindings: {},
+      sourceAgentFolderJids: ['sl:C123'],
+    });
+
+    expect(createProxy).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'agent:signed' }),
+    );
+    expect(callTool).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'agent:signed' }),
+    );
+  });
+
   it('rejects side-effecting MCP calls when the run lease is stale', async () => {
     const callTool = vi.fn(async () => ({}));
     const createProxy = vi.fn(async () => ({
