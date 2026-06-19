@@ -196,7 +196,12 @@ services:
       disable: true
     volumes:
       - gantry-fleet-home:/var/lib/gantry
+    environment:
+      <<: *worker-env
+      GANTRY_SKIP_MIGRATIONS: '0'
     entrypoint:
+      - /usr/local/bin/gantry-entrypoint
+    command:
       - /bin/sh
       - -c
       - |-
@@ -218,8 +223,7 @@ services:
           '    url_env: GANTRY_DATABASE_URL' \
           '    schema: gantry' \
           > /var/lib/gantry/settings.yaml;
-        node /app/ops/docker/migrate.mjs;
-        node /app/dist/cli/index.js settings import --file /var/lib/gantry/settings.yaml --fleet
+        node /app/ops/docker/fleet-settings-seed.mjs /var/lib/gantry/settings.yaml
 
   # Control plane: full admin/settings API. Channels connect outbound-only; it
   # runs no live or job execution and no bakes, and does not register as a worker

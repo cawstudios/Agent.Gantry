@@ -51,7 +51,6 @@ configureDesiredSettingsStorageProvider(async () => {
     return {
       ops: storage.ops,
       repositories: storage.repositories,
-      close: closeRuntimeStorage,
     };
   } catch (err) {
     if (!isStorageUnavailableError(err)) throw err;

@@ -98,6 +98,7 @@ COPY --from=build /app/packages/sdk/package.json ./packages/sdk/package.json
 
 # Ops scripts: race-safe migration runner + entrypoint.
 COPY ops/docker/migrate.mjs ./ops/docker/migrate.mjs
+COPY ops/docker/fleet-settings-seed.mjs ./ops/docker/fleet-settings-seed.mjs
 COPY ops/docker/entrypoint.sh /usr/local/bin/gantry-entrypoint
 RUN chmod +x /usr/local/bin/gantry-entrypoint
 
