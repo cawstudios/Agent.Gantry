@@ -1,5 +1,10 @@
 # Shopify MCP
 
+Follow the Boondi guide `agents/boondi_support/docs/mcp-tool-design-guide.md`
+for every new or changed tool. Keep Shopify tools compact, identity-safe, and
+optimized for the common customer-support question before adding wider
+history/detail surfaces.
+
 ## Customer-Facing Privacy Denials
 
 - Customer identity and ownership denials must use plain customer-facing wording.

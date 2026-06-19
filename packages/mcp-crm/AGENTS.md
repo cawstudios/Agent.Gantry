@@ -1,5 +1,9 @@
 # Boondi CRM Connector
 
+- Follow the Boondi guide `agents/boondi_support/docs/mcp-tool-design-guide.md`
+  for every new or changed tool. Customer-facing CRM tools must default to
+  compact, verified-identity responses and avoid adding avoidable LLM/tool
+  loops.
 - Opportunity extraction is driven from session digests; regression checks must
   invoke the operator slash-command path and then assert
   `boondi_business_records`, not local replay scripts or customer-facing tool
