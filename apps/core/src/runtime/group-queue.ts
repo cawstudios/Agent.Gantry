@@ -79,7 +79,7 @@ interface GroupState {
   threadId: string | null;
   requiredContinuationUserId: string | null;
   pooledWarmWorker: PooledWarmWorkerRun | null;
-  pooledContinuationActive: boolean;
+  retainedContinuationActive: boolean;
   retryCount: number;
   continuationHandler: ContinuationHandler | null;
 }
@@ -156,7 +156,7 @@ export class GroupQueue {
         threadId: null,
         requiredContinuationUserId: null,
         pooledWarmWorker: null,
-        pooledContinuationActive: false,
+        retainedContinuationActive: false,
         retryCount: 0,
         continuationHandler: null,
       };
@@ -260,6 +260,23 @@ export class GroupQueue {
     return null;
   }
 
+  private canDrainIntoIdleLiveRun(state: GroupState): boolean {
+    return (
+      state.active &&
+      state.idleWaiting &&
+      !state.isTaskRun &&
+      state.process !== null &&
+      state.groupFolder !== null &&
+      state.pendingTasks.length === 0
+    );
+  }
+
+  private releaseActiveMessageSlotForIdleDrain(state: GroupState): void {
+    if (!state.active) return;
+    state.active = false;
+    this.activeMessageCount = Math.max(0, this.activeMessageCount - 1);
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
@@ -267,6 +284,15 @@ export class GroupQueue {
 
     if (state.active) {
       state.pendingMessages = true;
+      if (this.canDrainIntoIdleLiveRun(state)) {
+        this.releaseActiveMessageSlotForIdleDrain(state);
+        this.drainGroup(groupJid);
+        logger.debug(
+          { groupJid },
+          'Idle agent run active, message queued for continuation drain',
+        );
+        return;
+      }
       logger.debug({ groupJid }, 'Agent run active, message queued');
       return;
     }
@@ -400,17 +426,32 @@ export class GroupQueue {
    */
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
-    if (state.pooledContinuationActive) {
-      state.pooledContinuationActive = false;
-      state.active = false;
-      this.activeMessageCount = Math.max(0, this.activeMessageCount - 1);
+    if (state.retainedContinuationActive) {
+      state.retainedContinuationActive = false;
+      if (state.active) {
+        state.active = false;
+        this.activeMessageCount = Math.max(0, this.activeMessageCount - 1);
+      }
       state.idleWaiting = true;
+      if (state.pendingTasks.length > 0) {
+        this.closeStdin(groupJid);
+        return;
+      }
+      if (state.pendingMessages) {
+        this.drainGroup(groupJid);
+        return;
+      }
       this.drainWaiting();
       return;
     }
     state.idleWaiting = true;
     if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
+      return;
+    }
+    if (state.pendingMessages && this.canDrainIntoIdleLiveRun(state)) {
+      this.releaseActiveMessageSlotForIdleDrain(state);
+      this.drainGroup(groupJid);
     }
   }
 
@@ -459,7 +500,7 @@ export class GroupQueue {
     if (wasRetainedIdle && !this.canStartMessageRun()) {
       return false;
     }
-    const retainedIdleProcess = state.pooledWarmWorker ? state.process : null;
+    const retainedIdleProcess = state.idleWaiting ? state.process : null;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
     const target: ContinuationTarget = {
       groupFolder: state.groupFolder,
@@ -480,9 +521,7 @@ export class GroupQueue {
           state.active = true;
           this.activeMessageCount++;
         }
-        if (state.pooledWarmWorker) {
-          state.pooledContinuationActive = true;
-        }
+        state.retainedContinuationActive = true;
         state.continuationHandler?.();
       }
       if (!delivered && retainedIdleProcess) {
@@ -570,8 +609,16 @@ export class GroupQueue {
     reason: 'messages' | 'drain',
   ): Promise<void> {
     const state = this.getGroup(groupJid);
+    const preserveIdleWaiting =
+      reason === 'drain' &&
+      state.idleWaiting &&
+      state.process !== null &&
+      state.groupFolder !== null &&
+      !state.isTaskRun;
     state.active = true;
-    state.idleWaiting = false;
+    if (!preserveIdleWaiting) {
+      state.idleWaiting = false;
+    }
     state.isTaskRun = false;
     state.pendingMessages = false;
     this.activeMessageCount++;
@@ -602,25 +649,21 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       const pooledWarmWorker = state.pooledWarmWorker;
-      const retainIdlePooledWorker =
+      const retainIdleLiveRunner =
         state.idleWaiting &&
-        pooledWarmWorker !== null &&
         state.process !== null &&
         !state.process.killed &&
         state.pendingTasks.length === 0;
-      const retainPooledContinuation =
-        state.pooledContinuationActive &&
-        pooledWarmWorker !== null &&
+      const retainLiveContinuation =
+        state.retainedContinuationActive &&
         state.process !== null &&
-        !state.process.killed &&
-        !state.pendingMessages &&
-        state.pendingTasks.length === 0;
+        !state.process.killed;
       try {
         stopMessageRun?.();
       } catch (err) {
         logger.warn({ groupJid, err }, 'Failed to stop message-run lifecycle');
       }
-      if (retainPooledContinuation) {
+      if (retainLiveContinuation) {
         this.drainWaiting();
         return;
       }
@@ -630,7 +673,7 @@ export class GroupQueue {
       } else {
         state.active = false;
       }
-      if (retainIdlePooledWorker) {
+      if (retainIdleLiveRunner) {
         if (state.pendingMessages) {
           this.drainGroup(groupJid);
         } else {
@@ -644,7 +687,7 @@ export class GroupQueue {
       state.threadId = null;
       state.requiredContinuationUserId = null;
       state.pooledWarmWorker = null;
-      state.pooledContinuationActive = false;
+      state.retainedContinuationActive = false;
       state.idleWaiting = false;
       state.continuationHandler = null;
       if (pooledWarmWorker) {
@@ -662,12 +705,12 @@ export class GroupQueue {
     const state = this.groups.get(groupJid);
     if (
       !state ||
-      (state.active && !state.pooledContinuationActive) ||
+      (state.active && !state.retainedContinuationActive) ||
       state.process !== proc
     )
       return;
     const pooledWarmWorker = state.pooledWarmWorker;
-    if (state.pooledContinuationActive) {
+    if (state.retainedContinuationActive) {
       this.activeMessageCount = Math.max(0, this.activeMessageCount - 1);
     }
     state.active = false;
@@ -677,7 +720,7 @@ export class GroupQueue {
     state.threadId = null;
     state.requiredContinuationUserId = null;
     state.pooledWarmWorker = null;
-    state.pooledContinuationActive = false;
+    state.retainedContinuationActive = false;
     state.idleWaiting = false;
     state.continuationHandler = null;
     if (pooledWarmWorker) {
@@ -701,7 +744,7 @@ export class GroupQueue {
     state.threadId = null;
     state.requiredContinuationUserId = null;
     state.pooledWarmWorker = null;
-    state.pooledContinuationActive = false;
+    state.retainedContinuationActive = false;
     state.idleWaiting = false;
     state.continuationHandler = null;
     if (pooledWarmWorker) {
@@ -724,7 +767,7 @@ export class GroupQueue {
     state.threadId = null;
     state.requiredContinuationUserId = null;
     state.pooledWarmWorker = null;
-    state.pooledContinuationActive = false;
+    state.retainedContinuationActive = false;
     state.idleWaiting = false;
     state.continuationHandler = null;
     if (pooledWarmWorker) {

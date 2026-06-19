@@ -428,8 +428,16 @@ describe('GroupQueue', () => {
     const { deliverContinuation, deliverClose } =
       useSuccessfulContinuationDelivery();
     let resolveProcess: () => void;
+    let processCalls = 0;
 
     const processMessages = vi.fn(async () => {
+      processCalls += 1;
+      if (processCalls > 1) {
+        expect(queue.sendMessage('group1@g.us', 'persisted follow-up')).toBe(
+          true,
+        );
+        return true;
+      }
       await new Promise<void>((resolve) => {
         resolveProcess = resolve;
       });
@@ -448,25 +456,149 @@ describe('GroupQueue', () => {
     const piped = queue.sendMessage('group1@g.us', 'hello');
     expect(piped).toBe(true);
 
-    // enqueueMessageCheck while active records pending work without closing the
-    // stream; task runs still preempt when the live run is idle again.
+    // Persisted follow-ups wake an immediate drain and pipe into the same
+    // stream instead of waiting for idle timeout.
     deliverClose.mockClear();
     queue.notifyIdle('group1@g.us');
     queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
     expect(deliverClose).toHaveBeenCalledTimes(0);
-
-    deliverClose.mockClear();
-    const taskFn = vi.fn(async () => {});
-    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
-    expect(deliverClose).toHaveBeenCalledTimes(1);
     expect(deliverContinuation).toHaveBeenCalledWith(
       expect.objectContaining({ runHandle: 'run-1' }),
       'hello',
       0,
     );
+    expect(deliverContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({ runHandle: 'run-1' }),
+      'persisted follow-up',
+      1,
+    );
+
+    queue.notifyIdle('group1@g.us');
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('drains persisted follow-ups into an active idle-waiting live run', async () => {
+    const { deliverContinuation } = useSuccessfulContinuationDelivery();
+    let resolveProcess: () => void;
+    let processCalls = 0;
+
+    const processMessages = vi.fn(async () => {
+      processCalls += 1;
+      if (processCalls === 1) {
+        queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
+        queue.notifyIdle('group1@g.us');
+        await new Promise<void>((resolve) => {
+          resolveProcess = resolve;
+        });
+        return true;
+      }
+
+      expect(queue.sendMessage('group1@g.us', 'persisted follow-up')).toBe(
+        true,
+      );
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledTimes(1);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledTimes(2);
+    expect(deliverContinuation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ runHandle: 'run-1' }),
+      'persisted follow-up',
+      0,
+    );
+    expect(queue.getWorkerInventorySnapshot().activeMessageRuns).toBe(1);
+
+    queue.notifyIdle('group1@g.us');
+    expect(queue.getWorkerInventorySnapshot().activeMessageRuns).toBe(0);
+    expect(queue.sendMessage('group1@g.us', 'second follow-up')).toBe(true);
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('drains pending persisted follow-ups when an active live run reaches idle', async () => {
+    const { deliverContinuation } = useSuccessfulContinuationDelivery();
+    let resolveProcess: () => void;
+    let processCalls = 0;
+
+    const processMessages = vi.fn(async () => {
+      processCalls += 1;
+      if (processCalls === 1) {
+        queue.registerProcess('group1@g.us', {} as any, 'run-1', 'test-group');
+        queue.enqueueMessageCheck('group1@g.us');
+        queue.notifyIdle('group1@g.us');
+        await new Promise<void>((resolve) => {
+          resolveProcess = resolve;
+        });
+        return true;
+      }
+
+      expect(queue.sendMessage('group1@g.us', 'queued-before-idle')).toBe(
+        true,
+      );
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledTimes(2);
+    expect(deliverContinuation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ runHandle: 'run-1' }),
+      'queued-before-idle',
+      0,
+    );
+
+    queue.notifyIdle('group1@g.us');
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('retains a non-pooled idle live runner after message run teardown', async () => {
+    const { deliverContinuation } = useSuccessfulContinuationDelivery();
+    const proc = Object.assign(new EventEmitter(), {
+      killed: false,
+    });
+
+    const processMessages = vi.fn(async () => {
+      queue.registerProcess(
+        'group1@g.us',
+        proc as any,
+        'run-1',
+        'test-group',
+      );
+      queue.notifyIdle('group1@g.us');
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.getWorkerInventorySnapshot().activeMessageRuns).toBe(0);
+    expect(queue.sendMessage('group1@g.us', 'retained follow-up')).toBe(true);
+    expect(deliverContinuation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ runHandle: 'run-1' }),
+      'retained follow-up',
+      0,
+    );
+
+    queue.notifyIdle('group1@g.us');
+    proc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.sendMessage('group1@g.us', 'late follow-up')).toBe(false);
   });
 
   it('sendMessage resumes an idle-waiting live message run', async () => {

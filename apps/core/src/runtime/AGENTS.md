@@ -111,22 +111,26 @@ session ID`, expire that provider session and retry the same turn once without
   resume handle, so a returning conversation must either pipe to its retained
   live worker or cold-spawn with `resume`; using a generic worker here causes
   warm-bind session mismatches and retry churn.
-- Cold resumed message runs are one-shot. They may use IPC for permissions and
-  runtime callbacks, but must not stay open as retained continuation workers
-  after a customer-visible reply; otherwise a later inbound can sit pending
-  behind a cold process while generic warm workers are still available.
-- Sticky warm workers depend on live process state, not detached handle state.
-  If a pooled worker reaches an idle boundary, keep it only while the runner
-  process remains registered and release the pooled worker on process `close`.
+- Cold resumed message runs may stay open as retained continuation workers
+  after a customer-visible reply, bounded by `runtime.runner.idle_timeout_ms`.
+  A returning conversation should pay cold startup once after a long idle gap,
+  then pipe follow-ups into that same retained runner while it remains live.
+- Sticky runners depend on live process state, not detached handle state. If a
+  runner reaches an idle boundary, keep it only while the runner process remains
+  registered and release any pooled worker on process `close`.
+  Active-but-idle retained runners must not block persisted message wakeups:
+  the queue should hand off the active slot to an immediate DB-drain pass, try
+  socket continuation first, and preserve live runner bookkeeping when delivery
+  succeeds.
   Postgres-loaded follow-up batches should pipe through `queue.sendMessage`
   before spawning another agent when the live runner accepts the continuation.
-  A DB-drain run that successfully pipes a continuation into a pooled runner
-  must hand active-run accounting to that live continuation; do not release the
-  pooled worker in the drain-run `finally` path before the runner reports idle
-  or closes.
-- If a retained pooled worker rejects or cannot receive a socket continuation,
-  treat that worker as unreachable before fallback spawning continues: release
-  the pooled handle, clear retained process state, and cancel any preserved idle
+  A DB-drain run that successfully pipes a continuation into a retained runner
+  must hand active-run accounting to that live continuation; do not clear the
+  retained process, continuation handler, or pooled worker in the drain-run
+  `finally` path before the runner reports idle or closes.
+- If a retained runner rejects or cannot receive a socket continuation, treat
+  that runner as unreachable before fallback spawning continues: release any
+  pooled handle, clear retained process state, and cancel any preserved idle
   cleanup for the old process so it cannot terminate the replacement run.
 - Socket continuation delivery is the authoritative live carrier. Continuation
   frames carry the message text directly, close frames close directly, and the

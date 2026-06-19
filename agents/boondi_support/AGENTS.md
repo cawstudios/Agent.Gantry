@@ -32,3 +32,7 @@
   because `unresolved: inline`, not because the policy exports it). Pre-agent
   deterministic replies should stay limited to hard known cases such as a bare
   greeting, empty clarification, or off-topic / internal-prompt rejection.
+- Interakt webhook payloads provide customer identity such as name and phone;
+  Boondi prompts should use the message sender/customer name naturally,
+  including dev labels, and must not ask customers to repeat name or phone for
+  gifting handoffs.

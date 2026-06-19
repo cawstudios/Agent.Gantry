@@ -41,7 +41,7 @@ evidence.
 | Phase 2   | Multiple customers, single core                 |              5 | Passed      | 2026-06-18 IST fixed rerun used `conversation:wa:000960000201` and `conversation:wa:000960000202`; both persisted 4 inbound and 4 outbound replies; final replies remembered only their own markers `ALPHA-REKEY-201` and `BRAVO-REKEY-202`; no latency report included `assistant startup`; post-idle runtime active 0, pending 0, bound active 0. | Retained same-process continuation and isolation are now proven for two simultaneous natural 4x4 customer chats. Prior Phase 2 capacity and duplicate-redelivery evidence remains valid.                                                             |
 | Phase 3   | Cache prewarm on                                |              2 | Passed      | 2026-06-18 IST throwaway provider-cache implementation proof: `/tmp/gantry-dev-1.log:17` and `/tmp/gantry-dev-2.log:18` logged `Provider cache prewarm succeeded` with `cacheReadUnits=9601`; authenticated `/v1/runtime/workers` showed one shape with no cache-prewarm failures; customer model usage then showed cache reads around `14232`-`15085`; single-core sequential, single-core `SMOKE_CONCURRENCY=3`, two-core sequential, and two-core `SMOKE_CONCURRENCY=3` runtime smokes passed. | Historical pre-fix rows can still contain raw `startup` sections. The admin UI now renders startup explicitly as `Assistant startup`; it must not fold that time into `runtime wait`. Provider-cache prewarm completes before the control HTTP server accepts webhooks when startup prewarm is reachable. |
 | Phase 3.5 | MCP smoke                                       |              1 | Passed      | 2026-06-18 IST seeded returning-customer rerun used `conversation:wa:000960000352`; all 4 live signed inbound messages and 4 live outbound replies persisted; traces showed `boondi-crm.get_open_records`, `shopify-api.get_recent_orders_with_details`, and `shopify-api.search_products`; post-idle runtime active 0, pending 0, bound active 0. | CRM and Shopify MCP live traffic are proven through live transcript, trace sections, flow logs, admin API, and runtime workers API.                                                                                                                   |
-| Phase 4   | Follow-up routing stress                        |              4 | Passed      | Scenarios 4.1, 4.2, 4.3, and 4.4 passed on 2026-06-18 IST. 4.2 required a queue lifecycle fix so active-run follow-ups drain through the retained pooled worker. 4.4 used `conversation:wa:000960000405`, persisted 5 live inbound and 5 outbound replies, used one `agent_run`, and had no `startup` trace sections.                         | Follow-up routing stress is now proven for rapid follow-ups, active-run overlap, cold resume, and a five-turn same-customer loop. Admin API was not running because a separate Codex session owns admin UI work.                                     |
+| Phase 4   | Follow-up routing stress                        |              5 | Passed      | Scenarios 4.1, 4.2, 4.3, and 4.4 passed on 2026-06-18 IST. Scenario 4.5 passed as a focused regression on 2026-06-19 IST with `idle_timeout_ms=60000`: the post-idle resumed reply paid one `assistant startup`, and the immediate follow-up had no startup section with `queue=61 ms`.                         | Follow-up routing stress is now proven for rapid follow-ups, active-run overlap, cold resume, post-resume retained continuation, and a five-turn same-customer loop. Admin/API evidence should be preferred when available.                                     |
 | Phase 5   | Two core processes                              |              5 | Passed      | Scenarios 5.1 through 5.5 passed on 2026-06-18 IST. Two healthy cores exposed aggregate generic capacity `6`; `conversation:wa:000960000501` kept one owner while ingress alternated across ports; six-customer fanout split owners across both cores; restart scenarios recovered through persisted provider sessions.                         | Admin UI/API was intentionally not used because a separate Codex session owns admin UI work; evidence came from core workers API, DB rows, message traces, and logs.                                                                                 |
 | Phase 6   | Dashboard truth                                 | dashboard gate | Passed      | Admin API returned `200` for conversations and runtime workers after Phase 10. Runtime API and admin runtime API both showed two healthy instances, `genericAvailable=6`, `boundActive=0`, `activeMessageRuns=0`, `pendingConversationKeys=0`, and cache prewarm `skipped=6`. Latency UI regression in `boondi-admin` now forbids `runtime wait`. | Another session owns broader admin layout polish, but the data contract and latency report wording are verified.                                                                                                                                     |
 | Phase 7   | Failure recovery                                |              3 | Passed      | Scenarios 7.1 through 7.3 passed on 2026-06-18 IST. Runner kill used `conversation:wa:000960000701` with 4 inbound/4 outbound and stable provider session. Clean MCP outage/recovery used `conversation:wa:000960000722` with exactly 2 inbound/2 outbound. Core kill left `runtime:97799` stale and excluded; survivor handled 4x4 chat.       | Admin UI/API was intentionally not used because a separate Codex session owns admin UI work; evidence came from core workers API, DB rows, flow logs, and MCP health checks.                                                                        |
@@ -1652,6 +1652,46 @@ Acceptance:
 - pass only if all five live turns complete cleanly
 - fail if the system works for early replies and then stops routing later
 
+### Scenario 4.5: Post-Idle Resume Then Warm Follow-Up
+
+Purpose: prove a returning customer pays assistant startup once after the
+retained runner has expired, then gets warm continuation behavior for immediate
+follow-ups inside `runtime.runner.idle_timeout_ms`.
+
+Steps:
+
+1. Set `runtime.runner.idle_timeout_ms` to a known value for the run, such as
+   `60000`.
+2. Customer A sends a normal first gifting message and receives a reply.
+3. Wait longer than `runtime.runner.idle_timeout_ms` after the reply is
+   visible, so the retained runner is allowed to close.
+4. Customer A sends a continuation message.
+5. Confirm the resumed reply appears and its latency trace includes exactly one
+   `assistant startup` section.
+6. Immediately send another same-customer follow-up inside the idle timeout.
+7. Confirm that follow-up reply appears without any `assistant startup`
+   section and with low queue time.
+8. Capture admin/API transcript, latency stages, and runtime workers state.
+
+Expected:
+
+- The post-idle continuation cold-spawns or otherwise starts a fresh local
+  runner with provider-session resume, so one startup section is expected.
+- That resumed runner remains live and continuation-capable after its visible
+  reply until `runtime.runner.idle_timeout_ms`.
+- The immediate follow-up is piped into the same retained runner through socket
+  continuation, not parked behind `pendingMessages` until idle timeout.
+- The immediate follow-up trace must not include `assistant startup`.
+- The same conversation must not start a second simultaneous runner.
+- After settle, `activeMessageRuns=0` and `pendingConversationKeys=0`.
+
+Acceptance:
+
+- pass only if the resumed turn has one visible `assistant startup` section and
+  the immediate follow-up has no startup section
+- fail if the immediate follow-up waits for idle-timeout cleanup, has a large
+  queue section unexplained by normal concurrency, or includes assistant startup
+
 ## Phase 4 Evidence Log
 
 Status: in progress on 2026-06-18 IST.
@@ -1855,6 +1895,46 @@ Status: passed.
   `activeMessageRuns=0`, `pendingConversationKeys=0`,
   `genericAvailable=3`, `genericStarting=0`, `boundActive=0`,
   `availableTarget=3`.
+
+### Scenario 4.5 Evidence: Post-Idle Resume Then Warm Follow-Up
+
+Status: passed as a focused regression on 2026-06-19 IST.
+
+- Runtime: one dev core from the Pillar 1 worktree on `127.0.0.1:4710`.
+- Admin: `127.0.0.1:3000`.
+- Outbound: `GANTRY_OUTBOUND_DRYRUN=1`.
+- Config under test: `/Users/caw-d/gantry/settings.yaml` with
+  `runtime.runner.idle_timeout_ms=60000`.
+- Customer: `conversation:wa:000777660`.
+- Flow:
+  first inbound received a reply; the test waited `65s`, longer than
+  `idle_timeout_ms`; the second inbound exercised the cold provider-session
+  resume path; the third inbound was sent immediately after the resumed reply.
+- Live inbound provider ids:
+  `6aae4025-b6a2-4db8-a039-4d5ba15b5c12`,
+  `597adce9-24f2-4a12-b173-1e36e3e9c041`, and
+  `be7a0014-e781-4bc0-b298-0a2fec43bfe2`.
+- Persisted outbound ids and latency:
+  - Initial reply:
+    `message:wa:000777660:outbound:180d0685-715e-4585-90dc-6331aade2610`,
+    `replySeconds=4.169`, `totalMs=4168`, stages `queue=179 ms`,
+    `guardrail=1 ms`, `main LLM=3909 ms`, `gap=79 ms`.
+  - Post-idle resumed reply:
+    `message:wa:000777660:outbound:e193222e-622a-48f9-bc5e-9f21df914054`,
+    `replySeconds=3.606`, `totalMs=3606`, stages `queue=97 ms`,
+    `guardrail=2 ms`, `gap=10 ms`, `assistant startup=1133 ms`,
+    `main LLM=2266 ms`, `gap=98 ms`.
+  - Immediate warm follow-up:
+    `message:wa:000777660:outbound:a20f6b15-6a4b-4e4d-8e93-9d2b33286df0`,
+    `replySeconds=3.951`, `totalMs=3952`, stages `queue=61 ms`,
+    `main LLM=3789 ms`, `gap=102 ms`.
+- Acceptance interpretation:
+  the resumed turn correctly paid one assistant startup after the retained
+  runner had expired; the immediate follow-up had no startup section and did
+  not wait behind idle-timeout cleanup.
+- Runtime cleanup:
+  the temporary dev core was stopped after verification, and no process was left
+  listening on `127.0.0.1:4710`.
 
 ## Phase 5: Two Core Processes
 
