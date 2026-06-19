@@ -41,6 +41,7 @@ evidence.
 | Phase 2   | Multiple customers, single core                 |              5 | Passed      | 2026-06-18 IST fixed rerun used `conversation:wa:000960000201` and `conversation:wa:000960000202`; both persisted 4 inbound and 4 outbound replies; final replies remembered only their own markers `ALPHA-REKEY-201` and `BRAVO-REKEY-202`; no latency report included `assistant startup`; post-idle runtime active 0, pending 0, bound active 0. | Retained same-process continuation and isolation are now proven for two simultaneous natural 4x4 customer chats. Prior Phase 2 capacity and duplicate-redelivery evidence remains valid.                                                             |
 | Phase 3   | Cache prewarm on                                |              2 | Passed      | 2026-06-18 IST throwaway provider-cache implementation proof: `/tmp/gantry-dev-1.log:17` and `/tmp/gantry-dev-2.log:18` logged `Provider cache prewarm succeeded` with `cacheReadUnits=9601`; authenticated `/v1/runtime/workers` showed one shape with no cache-prewarm failures; customer model usage then showed cache reads around `14232`-`15085`; single-core sequential, single-core `SMOKE_CONCURRENCY=3`, two-core sequential, and two-core `SMOKE_CONCURRENCY=3` runtime smokes passed. | Historical pre-fix rows can still contain raw `startup` sections. The admin UI now renders startup explicitly as `Assistant startup`; it must not fold that time into `runtime wait`. Startup waits for the default Interakt route prewarm, but existing saved routes are prewarmed in the background. A user should still get a reply; the first reply can be slower if that route is not ready yet. |
 | Phase 3.5 | MCP smoke                                       |              1 | Passed      | 2026-06-18 IST seeded returning-customer rerun used `conversation:wa:000960000352`; all 4 live signed inbound messages and 4 live outbound replies persisted; traces showed `boondi-crm.get_open_records`, `shopify-api.get_recent_orders_with_details`, and `shopify-api.search_products`; post-idle runtime active 0, pending 0, bound active 0. | CRM and Shopify MCP live traffic are proven through live transcript, trace sections, flow logs, admin API, and runtime workers API.                                                                                                                   |
+| Phase 3.6 | CRM returning-customer prefetch                 |              8 | Passed      | 2026-06-20 IST live pre-run context regression used synthetic phones `000777040001` through `000777040007`; it covered no digest, digest with latest CRM record, same-conversation follow-up without duplicate prefetch, digest with no CRM record, CRM MCP unavailable, existing provider-session path, stale provider-session retry, and warm-pool bind. | Proves Boondi receives compact CRM context before the main LLM turn only when returning-customer evidence exists, and still replies when CRM prefetch is skipped, empty, or unavailable. Seeded test conversations must use canonical provider connection id `channel-providerConnection:default:interakt`; `interakt_default` is local legacy seed data only. |
 | Phase 4   | Follow-up routing stress                        |              5 | Passed      | Scenarios 4.1, 4.2, 4.3, and 4.4 passed on 2026-06-18 IST. Scenario 4.5 passed as a focused regression on 2026-06-19 IST with `idle_timeout_ms=60000`: the post-idle resumed reply paid one `assistant startup`, and the immediate follow-up had no startup section with `queue=61 ms`.                         | Follow-up routing stress is now proven for rapid follow-ups, active-run overlap, cold resume, post-resume retained continuation, and a five-turn same-customer loop. Admin/API evidence should be preferred when available.                                     |
 | Phase 5   | Two core processes                              |              5 | Passed      | Scenarios 5.1 through 5.5 passed on 2026-06-18 IST. Two healthy cores exposed aggregate generic capacity `6`; `conversation:wa:000960000501` kept one owner while ingress alternated across ports; six-customer fanout split owners across both cores; restart scenarios recovered through persisted provider sessions.                         | Admin UI/API was intentionally not used because a separate Codex session owns admin UI work; evidence came from core workers API, DB rows, message traces, and logs.                                                                                 |
 | Phase 6   | Dashboard truth                                 | dashboard gate | Passed      | Admin API returned `200` for conversations and runtime workers after Phase 10. Runtime API and admin runtime API both showed two healthy instances, `genericAvailable=6`, `boundActive=0`, `activeMessageRuns=0`, `pendingConversationKeys=0`, and cache prewarm `skipped=6`. Latency UI regression in `boondi-admin` now forbids `runtime wait`. | Another session owns broader admin layout polish, but the data contract and latency report wording are verified.                                                                                                                                     |
@@ -1018,6 +1019,62 @@ Admin-dev note:
 - A separate Codex session is now responsible for admin UI work; this phase did
   not require any further `boondi-admin` source edits.
 
+## Phase 3.6 Evidence Log
+
+Status: passed on 2026-06-20 IST.
+
+Runtime setup:
+
+- Core, Shopify MCP, and CRM MCP were started in dev mode from this checkout.
+- Core logs:
+  - cold/default paths: `/tmp/boondi-prefetch-core-live.log`
+  - warm-pool path: `/tmp/boondi-prefetch-core-warm-live.log`
+- CRM watcher used
+  `BOONDI_CRM_AGENT_ID=agent:disabled_for_prefetch_live` to avoid unrelated
+  digest extraction calls during the prefetch proof.
+- `runtime.warm_pool.enabled` was restored to `false` after the warm-pool
+  focused check.
+
+Scenario matrix:
+
+| Scenario | Phone | Evidence |
+| --- | --- | --- |
+| No digest, cold path | `000777040001` | No `get_last_query_or_lead` call appeared for `wa:000777040001`; Boondi replied with normal gifting qualification questions. |
+| Digest plus multiple CRM records | `000777040002` | Exactly one `boondi-crm.get_last_query_or_lead` call returned latest record `bcr_live_000777040002_latest`; the reply referenced birthday, sister, 12 gifts, ₹900, and Bandra instead of the older wedding row. |
+| Same-conversation follow-up | `000777040002` | The second turn continued context and did not trigger a second CRM prefetch for the phone; only the normal Shopify lookup occurred. |
+| Digest exists, no CRM record | `000777040003` | CRM prefetch returned `{"found":false}`; Boondi stayed generic and asked for missing details instead of inventing prior context. |
+| CRM MCP unavailable | `000777040004` | Runtime logged `boondi_crm_prefetch_failed { err: 'fetch failed' }`; customer still received a persisted reply. |
+| Existing normal provider session | `000777040005` | Fresh run used CRM context and wrote a new provider session id without requiring stale-session recovery. |
+| Real stale provider session | `000777040007` | First run used `resumed:true`, SDK returned `No conversation found`, runtime expired the stale provider session, retried with `resumed:false`, and replied using CRM context. |
+| Warm-pool bind | `000777040006` | Warm pool prewarmed, logged `Warm worker acquired; binding to conversation`, CRM prefetch returned compact record `bcr_live_000777040006`, and the reply referenced corporate gifting, 100 gifts, ₹850, and Bengaluru. |
+
+Key log anchors:
+
+- Latest CRM pass:
+  `flow:mcp.request serverName=boondi-crm toolName=get_last_query_or_lead chatJid=wa:000777040002`;
+  response contained `bcr_live_000777040002_latest`.
+- No CRM record:
+  `wa:000777040003` response contained `{"found":false}`.
+- CRM down:
+  `boondi_crm_prefetch_failed { provider: 'returning-customer-crm', err: 'fetch failed' }`.
+- Stale provider session:
+  first `flow:llm.input` for `wa:000777040007` had `resumed:true`;
+  retry `flow:llm.input` had `resumed:false`.
+- Warm pool:
+  `/tmp/boondi-prefetch-core-warm-live.log` showed
+  `Provider cache prewarm succeeded`, `Warm pool prewarm ready`, and
+  `Warm worker acquired; binding to conversation`.
+
+Harness data hygiene note:
+
+- Runtime-created Interakt conversations should use canonical provider
+  connection id `channel-providerConnection:default:interakt`.
+- Do not seed synthetic conversations with
+  `provider_connection_id = 'interakt_default'` unless the matching local
+  provider connection row also exists. Prefer fixing the seed data to the
+  canonical id; do not add a product code branch for this local legacy id
+  without first proving runtime-created conversations can produce it.
+
 ## Required Live Evidence Per Scenario
 
 For each scenario turn, capture:
@@ -1576,6 +1633,197 @@ Acceptance:
 
 - pass only if live transcript completes and trace shows MCP/tool evidence
 - fail if MCP availability is assumed only from process existence
+
+## Phase 3.6: CRM Returning-Customer Prefetch
+
+Purpose: prove Boondi receives compact CRM context before the main LLM turn
+when a returning-customer digest exists, without adding an LLM-driven extra
+tool call to every greeting.
+
+### Scenario 3.6.1: No Digest Skips CRM Prefetch
+
+Steps:
+
+1. Use a fresh synthetic phone with no prior digest or memory context.
+2. Send one live signed inbound greeting or gifting opener.
+3. Confirm inbound, outbound, and latency trace through admin/API.
+4. Confirm logs contain no `boondi-crm.get_last_query_or_lead` request for the
+   phone.
+
+Expected:
+
+- Customer receives exactly one reply.
+- Reply does not reference a prior lead, query, occasion, budget, or location.
+- No CRM prefetch is attempted.
+
+Acceptance:
+
+- pass only if the transcript completes and the absence of CRM prefetch is
+  proven by logs or trace evidence
+- fail if Boondi invents prior context or calls CRM without returning-customer
+  evidence
+
+### Scenario 3.6.2: Digest Fetches Latest CRM Record
+
+Steps:
+
+1. Use a synthetic phone with at least one digest and at least two CRM
+   query/lead records.
+2. Make the latest CRM record visibly different from the older record.
+3. Send one live signed inbound returning-customer greeting.
+4. Confirm exactly one `boondi-crm.get_last_query_or_lead` call happens before
+   the main customer reply.
+5. Confirm the reply references the latest record only.
+
+Expected:
+
+- Customer receives exactly one reply.
+- Prefetch response is compact and contains only LLM-useful fields.
+- Reply naturally references the latest query/lead and does not mention the
+  older record.
+
+Acceptance:
+
+- pass only if the CRM response id matches the latest expected record
+- fail if Boondi references an older record, calls a broad list tool, or needs a
+  second LLM-driven CRM call for the greeting
+
+### Scenario 3.6.3: Same-Conversation Follow-Up Avoids Duplicate Prefetch
+
+Steps:
+
+1. Continue the same conversation from Scenario 3.6.2.
+2. Send a follow-up after the first outbound reply appears.
+3. Confirm inbound, outbound, and trace evidence.
+4. Confirm no second CRM prefetch happens for the phone on that follow-up.
+
+Expected:
+
+- Follow-up preserves the returning-customer context.
+- The retained worker or resumed provider session carries conversation state.
+- CRM prefetch is not repeated for the same conversation turn sequence.
+
+Acceptance:
+
+- pass only if the second turn receives exactly one reply and no duplicate CRM
+  prefetch appears
+- fail if every follow-up repeats the pre-run CRM fetch
+
+### Scenario 3.6.4: Digest With No CRM Record Stays Generic
+
+Steps:
+
+1. Use a synthetic phone with returning-customer digest evidence but no matching
+   CRM query/lead record.
+2. Send one live signed inbound greeting or gifting opener.
+3. Confirm CRM prefetch returns `found:false`.
+4. Confirm the customer reply remains normal and does not invent missing CRM
+   details.
+
+Expected:
+
+- Customer receives exactly one reply.
+- Prefetch failure-to-find is silent to the customer.
+- Reply asks normal qualifying questions.
+
+Acceptance:
+
+- pass only if `found:false` is captured and the reply contains no fake prior
+  context
+- fail if an empty CRM result blocks the reply or causes hallucinated
+  personalization
+
+### Scenario 3.6.5: CRM MCP Failure Does Not Block Reply
+
+Steps:
+
+1. Use a synthetic returning-customer phone that would normally trigger CRM
+   prefetch.
+2. Stop or misroute CRM MCP before the inbound request.
+3. Send one live signed inbound message.
+4. Confirm the prefetch failure is logged.
+5. Confirm the customer still receives exactly one reply.
+
+Expected:
+
+- Runtime logs the CRM prefetch failure.
+- Boondi replies without exposing the internal CRM failure.
+- No conversation remains stuck in `activeMessageRuns` or
+  `pendingConversationKeys`.
+
+Acceptance:
+
+- pass only if the reply persists despite the CRM MCP failure
+- fail if CRM prefetch is on the critical path for customer reply completion
+
+### Scenario 3.6.6: Normal Provider Session Path Preserves Prefetch
+
+Steps:
+
+1. Use a returning-customer phone with digest evidence and CRM context.
+2. Send one live signed inbound message without forcing a stale provider
+   session id.
+3. Confirm the reply uses the CRM prefetch context.
+4. Confirm runtime persists the provider session id for later continuity.
+
+Expected:
+
+- Customer receives exactly one reply.
+- CRM prefetch context is available on the normal session creation path.
+- Provider session persistence succeeds without invoking stale-session retry.
+
+Acceptance:
+
+- pass only if the reply persists, CRM context is used, and a provider session
+  id is written for the conversation
+- fail if normal session creation loses pre-run context or requires a stale
+  retry to work
+
+### Scenario 3.6.7: Stale Provider Session Retry Preserves Prefetch
+
+Steps:
+
+1. Use a returning-customer phone with a deliberately stale provider session id.
+2. Send one live signed inbound message.
+3. Confirm the first LLM attempt resumes the stale session and fails with the
+   provider's stale-session error.
+4. Confirm runtime expires the stale session and retries without resume.
+5. Confirm the final reply still uses the CRM prefetch context.
+
+Expected:
+
+- Customer receives exactly one final reply.
+- Stale provider session retry does not lose returning-customer CRM context.
+- The retry does not produce duplicate outbound replies.
+
+Acceptance:
+
+- pass only if logs show stale-session expiry, retry without resume, and one
+  final outbound reply
+- fail if CRM context is lost after retry or duplicate replies appear
+
+### Scenario 3.6.8: Warm-Pool Bind Receives Prefetch
+
+Steps:
+
+1. Enable warm pool and cache prewarm for the focused check.
+2. Use a returning-customer phone with digest evidence and one latest CRM
+   query/lead record.
+3. Send one live signed inbound message.
+4. Confirm warm worker acquisition and bind logs.
+5. Confirm the bound warm path receives the compact CRM prefetch context.
+
+Expected:
+
+- Customer receives exactly one reply.
+- Warm-pool bind path and cold/default path receive equivalent pre-run context.
+- Warm-pool testing restores `runtime.warm_pool.enabled` to the original value
+  after the check.
+
+Acceptance:
+
+- pass only if warm bind logs and CRM prefetch response are both captured
+- fail if warm workers skip the pre-run CRM context or leak it across customers
 
 ## Phase 4: Follow-Up Routing Stress
 

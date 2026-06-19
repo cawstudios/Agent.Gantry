@@ -355,7 +355,17 @@ function renderAgentPluginsYaml(
     typeof plugins.memoryExtraction === 'string' &&
     plugins.memoryExtraction.length > 0;
   const skills = plugins.skills ?? [];
-  if (!guardrail && !hasExtraction && skills.length === 0) return;
+  const commands = plugins.commands ?? [];
+  const preRunContext = plugins.preRunContext ?? [];
+  if (
+    !guardrail &&
+    !hasExtraction &&
+    skills.length === 0 &&
+    commands.length === 0 &&
+    preRunContext.length === 0
+  ) {
+    return;
+  }
   lines.push('    plugins:');
   if (guardrail) {
     lines.push(
@@ -386,6 +396,18 @@ function renderAgentPluginsYaml(
     lines.push('      skills:');
     for (const skillId of skills) {
       lines.push(`        - ${quoteYamlString(skillId)}`);
+    }
+  }
+  if (commands.length > 0) {
+    lines.push('      commands:');
+    for (const commandName of commands) {
+      lines.push(`        - ${quoteYamlString(commandName)}`);
+    }
+  }
+  if (preRunContext.length > 0) {
+    lines.push('      pre_run_context:');
+    for (const providerName of preRunContext) {
+      lines.push(`        - ${quoteYamlString(providerName)}`);
     }
   }
 }

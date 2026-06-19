@@ -80,6 +80,41 @@ describe('agent plugins settings (plugins.*)', () => {
     });
   });
 
+  it('parses and renders pre-run context plugin declarations', () => {
+    const parsed = parseRuntimeSettings(
+      agentYaml(
+        [
+          '    plugins:',
+          '      commands:',
+          '        - extract-leads-queries',
+          '      pre_run_context:',
+          '        - returning-customer-crm',
+        ].join('\n'),
+      ),
+    );
+
+    expect(parsed.agents.boondi_support.plugins?.commands).toEqual([
+      'extract-leads-queries',
+    ]);
+    expect(parsed.agents.boondi_support.plugins?.preRunContext).toEqual([
+      'returning-customer-crm',
+    ]);
+
+    const yaml = renderRuntimeSettingsYaml(parsed);
+    expect(yaml).toContain('commands:');
+    expect(yaml).toContain('- extract-leads-queries');
+    expect(yaml).toContain('pre_run_context:');
+    expect(yaml).toContain('- returning-customer-crm');
+
+    const reparsed = parseRuntimeSettings(yaml);
+    expect(reparsed.agents.boondi_support.plugins?.commands).toEqual([
+      'extract-leads-queries',
+    ]);
+    expect(reparsed.agents.boondi_support.plugins?.preRunContext).toEqual([
+      'returning-customer-crm',
+    ]);
+  });
+
   it('defaults guardrail mode to both when omitted', () => {
     const parsed = parseRuntimeSettings(
       agentYaml(

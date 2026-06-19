@@ -152,6 +152,7 @@ export class CanonicalSessionOpsService {
     externalSessionId?: string;
     agentSessionResetAt?: string | null;
     memoryContextBlock?: string;
+    hasRecentSessionDigest?: boolean;
   }> {
     const context = await this.repository.getAgentTurnContext({
       groupFolder: input.groupFolder,
@@ -179,6 +180,9 @@ export class CanonicalSessionOpsService {
     return {
       ...context,
       memoryContextBlock: hydrated?.block || undefined,
+      hasRecentSessionDigest:
+        (hydrated?.continuityStatus.sections.recent_session_digests?.count ??
+          0) > 0,
     };
   }
 

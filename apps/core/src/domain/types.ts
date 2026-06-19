@@ -96,6 +96,13 @@ export interface AgentPluginsConfig {
    * collide with a built-in command.
    */
   commands?: string[];
+  /**
+   * Pre-run context provider names. Each maps to
+   * `<folder>/pre-run-context/<name>.{ts,js}` and may append verified
+   * server-side context before the first LLM input. Only listed providers are
+   * loaded; undeclared provider files are inert.
+   */
+  preRunContext?: string[];
 }
 
 /**

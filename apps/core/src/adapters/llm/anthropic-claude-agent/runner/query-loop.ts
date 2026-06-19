@@ -7,6 +7,7 @@ import {
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import { composeAgentCapabilities } from '../agent-capabilities.js';
 import {
   acceptSocketBindPayload,
@@ -588,7 +589,6 @@ export async function runQuery(
   const ipcSocketPath = process.env.GANTRY_IPC_SOCKET_PATH;
   const useSocketIpc = !!ipcSocketPath;
   let ipcSocketClient: IpcSocketClient | undefined;
-  let queryDispatchedAt: number | undefined;
   if (useSocketIpc && ipcSocketPath) {
     ipcSocketClient = new IpcSocketClient({
       socketPath: ipcSocketPath,
@@ -797,7 +797,7 @@ export async function runQuery(
   };
   // MEASUREMENT-ONLY: just before the SDK spawns the Claude Code CLI subprocess.
   timingMark('before_sdk_query');
-  queryDispatchedAt = Date.now();
+  const queryDispatchedAt = Date.now();
   const warmQueryResult = warmGenericBoot
     ? await dispatchWarmQuery({
         sdkOptions,
@@ -814,8 +814,44 @@ export async function runQuery(
       })
     : undefined;
   pendingCachePrewarmTrace = warmQueryResult?.cachePrewarmTrace;
-  const sdkQuery =
-    warmQueryResult?.query ?? query({ prompt: stream, options: sdkOptions });
+  const sdkQueryArgs = { prompt: stream, options: sdkOptions };
+  const sdkQueryArgsPayload = {
+    capturedAt: new Date().toISOString(),
+    path: warmQueryResult?.query ? 'warm_bound_worker' : 'cold_query',
+    prompt: pendingTurnInput,
+    options: sdkOptions,
+  };
+  const sdkQueryArgsLog = JSON.stringify(sdkQueryArgsPayload, null, 2);
+  log(
+    `[LLM_SDK_QUERY_ARGS] ${JSON.stringify({
+      path: warmQueryResult?.query ? 'warm_bound_worker' : 'cold_query',
+      prompt: pendingTurnInput,
+      options: sdkOptions,
+    })}`,
+  );
+  fs.appendFileSync(
+    process.env.GANTRY_LLM_PAYLOAD_LOG ||
+      '/tmp/gantry-llm-sdk-query-args.jsonl',
+    `${sdkQueryArgsLog}\n`,
+  );
+  const rootPayloadLogPath =
+    process.env.GANTRY_LLM_PAYLOAD_JSON ||
+    `${process.cwd()}/llm-sdk-query-args.json`;
+  let rootPayloadLog: unknown[] = [];
+  try {
+    rootPayloadLog = JSON.parse(
+      fs.readFileSync(rootPayloadLogPath, 'utf8'),
+    ) as unknown[];
+    if (!Array.isArray(rootPayloadLog)) rootPayloadLog = [];
+  } catch {
+    rootPayloadLog = [];
+  }
+  rootPayloadLog.push(sdkQueryArgsPayload);
+  fs.writeFileSync(
+    rootPayloadLogPath,
+    `${JSON.stringify(rootPayloadLog, null, 2)}\n`,
+  );
+  const sdkQuery = warmQueryResult?.query ?? query(sdkQueryArgs);
   // Context usage is diagnostics-only (model-status store / session-command
   // display) but its fetch round-trips the CLI (0.7-4.1s measured). It is
   // emitted as a follow-up envelope so the reply envelope is never held back.

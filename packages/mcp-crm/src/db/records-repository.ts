@@ -52,11 +52,13 @@ function rowToRecord(row: Row): BusinessRecord {
     budgetTotalInr: (row.budget_total_inr as number | null) ?? null,
     budgetRaw: (row.budget_raw as string | null) ?? null,
     locations: (row.locations as string | null) ?? null,
-    locationScope: (row.location_scope as BusinessRecord['locationScope']) ?? null,
+    locationScope:
+      (row.location_scope as BusinessRecord['locationScope']) ?? null,
     timeline: (row.timeline as string | null) ?? null,
     timelineDays: (row.timeline_days as number | null) ?? null,
     buyerType: (row.buyer_type as BusinessRecord['buyerType']) ?? null,
-    customisation: (row.customisation as BusinessRecord['customisation']) ?? null,
+    customisation:
+      (row.customisation as BusinessRecord['customisation']) ?? null,
     contactQuality:
       (row.contact_quality as BusinessRecord['contactQuality']) ?? null,
     score: (row.score as number | null) ?? null,
@@ -371,6 +373,20 @@ export class RecordsRepository {
       [phone],
     );
     return res.rows.map(rowToRecord);
+  }
+
+  // Newest OPEN opportunity for a compact returning-customer greeting.
+  async getLastOpenOpportunityByPhone(
+    phone: string,
+  ): Promise<BusinessRecord | null> {
+    const res = await this.pool.query(
+      `SELECT ${COLUMNS} FROM boondi_business_records
+        WHERE phone = $1 AND status IN ('query','qualifying','lead')
+        ORDER BY updated_at DESC
+        LIMIT 1`,
+      [phone],
+    );
+    return res.rows[0] ? rowToRecord(res.rows[0]) : null;
   }
 
   // Extractor write primitive: update the matched opportunity, else insert new.

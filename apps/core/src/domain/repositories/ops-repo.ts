@@ -266,6 +266,7 @@ export interface RuntimeAgentSessionRepository {
     providerSessionProvider?: string;
     externalSessionId?: string;
     memoryContextBlock?: string;
+    hasRecentSessionDigest?: boolean;
   }>;
   setSession(
     agentFolder: string,

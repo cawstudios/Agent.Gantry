@@ -17,6 +17,7 @@ import type { MessageTraceRow } from '@core/adapters/storage/postgres/repositori
 
 vi.mock('@core/config/index.js', () => ({
   ASSISTANT_NAME: 'Andy',
+  AGENTS_DIR: '/tmp/gantry-agents',
   MEMORY_MAINTENANCE_MAX_PENDING: 5_000,
   MAX_MESSAGES_PER_PROMPT: 50,
   RUNNER_IDLE_TIMEOUT_MS: 1_800_000,
@@ -87,9 +88,14 @@ const mockGetRecentJobRuns = vi.fn();
 const mockListRecentJobEvents = vi.fn();
 const mockSpawnAgent = vi.fn();
 const mockWriteGroupsSnapshot = vi.fn();
+const mockLoadAgentPreRunContextProvider = vi.fn();
 vi.mock('@core/runtime/agent-spawn.js', () => ({
   spawnAgent: (...args: unknown[]) => mockSpawnAgent(...args),
   writeGroupsSnapshot: (...args: unknown[]) => mockWriteGroupsSnapshot(...args),
+}));
+vi.mock('@core/application/pre-run-context/pre-run-context-registry.js', () => ({
+  loadAgentPreRunContextProvider: (...args: unknown[]) =>
+    mockLoadAgentPreRunContextProvider(...args),
 }));
 
 const mockHandleSessionCommand = vi.fn();
@@ -1262,6 +1268,62 @@ describe('createGroupProcessor', () => {
           id: 'anthropic:claude-agent-sdk',
         }),
       });
+    });
+
+    it('appends configured pre-run context to the first runner memory block', async () => {
+      const group = makeGroup({
+        requiresTrigger: false,
+        agentConfig: {
+          plugins: { preRunContext: ['returning-customer-crm'] },
+        },
+      } as Partial<ConversationRoute>);
+      const { deps } = setupHappyPath({ group });
+      const providerBuild = vi.fn(async (input: { hasRecentSessionDigest: boolean }) =>
+        input.hasRecentSessionDigest
+          ? '<boondi_crm_context>{"latestQueryOrLead":{"summaryBrief":"12 birthday boxes"}}</boondi_crm_context>'
+          : null,
+      );
+      mockLoadAgentPreRunContextProvider.mockResolvedValue({
+        name: 'returning-customer-crm',
+        build: providerBuild,
+      });
+      (deps.opsRepository as any).getAgentTurnContext = vi
+        .fn()
+        .mockResolvedValue({
+          appId: 'app:test',
+          agentId: 'agent:test',
+          agentSessionId: 'agent-session:1',
+          memoryContextBlock:
+            '<gantry_memory_context>memory</gantry_memory_context>',
+          hasRecentSessionDigest: true,
+        });
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(mockLoadAgentPreRunContextProvider).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'returning-customer-crm' }),
+      );
+      expect(providerBuild).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentFolder: group.folder,
+          conversationJid: 'group1@g.us',
+          hasRecentSessionDigest: true,
+        }),
+      );
+      expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
+        memoryContextBlock: expect.stringContaining(
+          '<gantry_memory_context>memory</gantry_memory_context>',
+        ),
+      });
+      expect(
+        (mockSpawnAgent.mock.calls[0][1] as { memoryContextBlock?: string })
+          .memoryContextBlock,
+      ).toContain('<boondi_crm_context>');
+      expect(
+        (mockSpawnAgent.mock.calls[0][1] as { memoryContextBlock?: string })
+          .memoryContextBlock,
+      ).toContain('12 birthday boxes');
     });
 
     it('expires a missing provider session and retries the turn without resume', async () => {

@@ -26,7 +26,9 @@ import {
 import { createRuntimeModelStatusAccess } from './model-status-store.js';
 import { recordRuntimeModelUsage } from './model-status-output.js';
 import { buildBoundedMemoryRecallQuery } from '../memory/app-memory-recall-query.js';
+import { loadAgentPreRunContextProvider } from '../application/pre-run-context/pre-run-context-registry.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
+import { resolveGroupFolderPath } from '../platform/group-folder.js';
 import { flowLog } from '../shared/flow-log.js';
 import {
   isRuntimeEventType,
@@ -34,6 +36,8 @@ import {
 } from '../domain/events/runtime-event-types.js';
 import { resolveRuntimeExecutionProviderId } from './execution-provider-id.js';
 import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
+import { buildPreRunContextBlock } from './pre-run-context-builder.js';
+import { createPreRunMcpCaller } from './pre-run-context-mcp.js';
 const DEFAULT_ASSISTANT_NAME = 'Gantry';
 const DEFAULT_MODEL_ALIAS = 'opus';
 const MEMORY_REVIEW_APPROVER_CACHE_TTL_MS = 60_000;
@@ -462,8 +466,55 @@ export function createGroupAgentRunner(input: {
       turnContext,
       configuredToolPolicy.allowedTools,
     );
+    const preRunContextBlock = await buildPreRunContextBlock({
+      providerNames: group.agentConfig?.plugins?.preRunContext,
+      loadProvider: (name) =>
+        loadAgentPreRunContextProvider({
+          agentFolderPath: resolveGroupFolderPath(group.folder),
+          name,
+        }),
+      input: {
+        agentFolder: group.folder,
+        ...(turnContext?.agentId ? { agentId: turnContext.agentId } : {}),
+        conversationJid: chatJid,
+        ...(group.conversationKind
+          ? { conversationKind: group.conversationKind }
+          : {}),
+        ...(options?.memoryContext?.userId
+          ? { memoryUserId: options.memoryContext.userId }
+          : {}),
+        hasRecentSessionDigest: Boolean(turnContext?.hasRecentSessionDigest),
+        ...(turnContext?.memoryContextBlock
+          ? { memoryContextBlock: turnContext.memoryContextBlock }
+          : {}),
+        callMcpTool: (call) => {
+          if (!turnContext?.appId || !turnContext.agentId) {
+            throw new Error('Pre-run MCP caller requires turn context');
+          }
+          return createPreRunMcpCaller({
+            mcpServers: deps.getMcpServerRepository?.(),
+            tools: deps.getToolRepository?.(),
+            skills: deps.getSkillRepository?.(),
+            capabilitySecretRepository: deps.getCapabilitySecretRepository?.(),
+            serverIds: attachedMcpSourceIds,
+            lookupHostname: deps.getMcpHostnameLookup?.(),
+            dnsValidationCache: deps.getMcpDnsValidationCache?.(),
+          })({
+            appId: turnContext.appId,
+            agentId: turnContext.agentId,
+            conversationJid: chatJid,
+            ...call,
+          });
+        },
+        log: {
+          info: (metadata, message) => runtimeLogger.info(metadata, message),
+          warn: (metadata, message) => runtimeLogger.warn(metadata, message),
+        },
+      },
+    });
     const memoryContextBlock = [
       turnContext?.memoryContextBlock,
+      preRunContextBlock,
       approvedSkillContextBlock,
     ]
       .filter((block): block is string => Boolean(block?.trim()))

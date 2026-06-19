@@ -322,10 +322,11 @@ function parseConfiguredAgentPlugins(
       key !== 'guardrail' &&
       key !== 'memory_extraction' &&
       key !== 'skills' &&
-      key !== 'commands'
+      key !== 'commands' &&
+      key !== 'pre_run_context'
     ) {
       throw new Error(
-        `${pathPrefix}.${key} is not supported. Configure guardrail, memory_extraction, skills, or commands.`,
+        `${pathPrefix}.${key} is not supported. Configure guardrail, memory_extraction, skills, commands, or pre_run_context.`,
       );
     }
   }
@@ -365,6 +366,25 @@ function parseConfiguredAgentPlugins(
       if (BUILTIN_COMMAND_NAMES.has(name)) {
         throw new Error(
           `${pathPrefix}.commands[${index}] "${name}" collides with a built-in command`,
+        );
+      }
+      return name;
+    });
+  }
+  if (map.pre_run_context !== undefined) {
+    if (!Array.isArray(map.pre_run_context)) {
+      throw new Error(
+        `${pathPrefix}.pre_run_context must be an array of provider names`,
+      );
+    }
+    plugins.preRunContext = map.pre_run_context.map((item, index) => {
+      const name = parseStringValue(
+        item,
+        `${pathPrefix}.pre_run_context[${index}]`,
+      );
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+        throw new Error(
+          `${pathPrefix}.pre_run_context[${index}] must be kebab-case (lowercase, hyphen-separated)`,
         );
       }
       return name;
@@ -707,7 +727,7 @@ export function parseConfiguredAgents(
         key !== 'capabilities'
       ) {
         throw new Error(
-          `${pathPrefix}.${key} is not supported. Configure name, persona, model, job model defaults, thinking, plugins (guardrail/memory_extraction/skills), memory (idle_end_minutes), tool_surface (gantry_mcp), bindings, sources, or capabilities.`,
+          `${pathPrefix}.${key} is not supported. Configure name, persona, model, job model defaults, thinking, plugins (guardrail/memory_extraction/skills/commands/pre_run_context), memory (idle_end_minutes), tool_surface (gantry_mcp), bindings, sources, or capabilities.`,
         );
       }
     }

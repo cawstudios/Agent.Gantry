@@ -655,6 +655,9 @@ export async function spawnAgent(
       ...(process.env.GANTRY_TRACE_PAYLOADS
         ? { GANTRY_TRACE_PAYLOADS: process.env.GANTRY_TRACE_PAYLOADS }
         : {}),
+      GANTRY_LLM_PAYLOAD_JSON:
+        process.env.GANTRY_LLM_PAYLOAD_JSON ||
+        path.join(process.cwd(), 'llm-sdk-query-args.json'),
       GANTRY_WORKSPACE_EXTRA_DIR: path.join(
         DATA_DIR,
         'sessions',
