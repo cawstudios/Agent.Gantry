@@ -11,11 +11,10 @@ describe('native SDK skills', () => {
 
   it('exposes the native Skill tool when multiple SDK skills are enabled under a restricted tool surface', () => {
     expect(
-      claudeSdkToolsForEnabledSkills(['ToolSearch'], [
-        'boondi-gifting',
-        'boondi-product-care',
-        'boondi-orders',
-      ]),
+      claudeSdkToolsForEnabledSkills(
+        ['ToolSearch'],
+        ['boondi-gifting', 'boondi-product-care', 'boondi-orders'],
+      ),
     ).toEqual(['ToolSearch', 'Skill']);
   });
 
