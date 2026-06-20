@@ -27,6 +27,10 @@ import {
 } from './scheduler-tool-helpers.js';
 import { schedulerAccessRequirementSchema } from './scheduler-capability-schema.js';
 import { normalizeSchedulerAccessRequirements } from './scheduler-access-requirements.js';
+import {
+  schedulerModelRecommendationSchema,
+  type SchedulerModelRecommendationArgs,
+} from './scheduler-model-recommendation-schema.js';
 const SCHEDULER_UPSERT_ARG_KEYS = new Set([
   'job_id',
   'name',
@@ -179,10 +183,29 @@ export function registerSchedulerTools(server: McpServer): void {
   server.tool(
     'scheduler_list_models',
     'List supported model aliases for one-time and recurring scheduler jobs.',
-    {},
-    async () => ({
-      content: [{ type: 'text' as const, text: formatModelCatalog() }],
-    }),
+    schedulerModelRecommendationSchema,
+    async (rawArgs) => {
+      const args = (rawArgs ?? {}) as SchedulerModelRecommendationArgs;
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: formatModelCatalog({
+              recommendation: args.workload
+                ? {
+                    workload: args.workload,
+                    agentHarness: args.agent_harness,
+                    estimatedContextTokens: args.estimated_context_tokens,
+                    requiresTools: args.requires_tools,
+                    priority: args.priority,
+                    currentAlias: args.current_alias,
+                  }
+                : undefined,
+            }),
+          },
+        ],
+      };
+    },
   );
   server.tool(
     'scheduler_upsert_job',

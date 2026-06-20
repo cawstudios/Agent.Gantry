@@ -4,7 +4,10 @@ import type {
   JobManagementServiceDeps,
 } from './job-management-types.js';
 import type { JobUpsertInput } from '../../domain/repositories/ops-repo.js';
-import { resolveRequestedJobModel } from './job-model-selection.js';
+import {
+  assertJobModelHarnessCompatible,
+  resolveRequestedJobModel,
+} from './job-model-selection.js';
 import {
   normalizeExecutionContext,
   normalizeNotificationRoutes,
@@ -50,10 +53,15 @@ export async function createManagedJob(
     runAt: input.runAt,
     schedule: input.schedule,
   });
-  const modelAlias = resolveRequestedJobModel(
-    input.modelAlias,
-    kind === 'recurring' ? 'recurring_job' : 'one_time_job',
-  );
+  const workload = kind === 'recurring' ? 'recurring_job' : 'one_time_job';
+  const modelAlias = resolveRequestedJobModel(input.modelAlias, workload);
+  const effectiveModelAlias =
+    modelAlias ?? resolveRequestedJobModel(input.effectiveModelAlias, workload);
+  assertJobModelHarnessCompatible({
+    modelAlias: effectiveModelAlias,
+    workload,
+    agentHarness: input.agentHarness,
+  });
   const jobId = deps.schedulePlanner.createManualJobId();
   const sessionBoundContext = {
     conversationJid: session.conversationJid,

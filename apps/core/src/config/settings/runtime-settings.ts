@@ -19,6 +19,7 @@ import {
 } from './runtime-settings-defaults.js';
 import { parseRuntimeSettings } from './runtime-settings-parser.js';
 import { renderRuntimeSettingsYaml } from './runtime-settings-renderer.js';
+import { modelAliasesToCatalogEntries } from './runtime-settings-model-aliases-parser.js';
 import {
   readRuntimeMemorySettingsSnapshot,
   readRuntimeStorageSettingsSnapshot,
@@ -42,6 +43,10 @@ import {
   toolRuleToSettingsCapability,
 } from './configured-capability-normalization.js';
 import { nowIso, nowMs as currentTimeMs } from '../../shared/time/datetime.js';
+import {
+  configureCustomModelCatalogEntries,
+  withCustomModelCatalogEntries,
+} from '../../shared/model-catalog.js';
 
 export {
   configureDesiredSettingsStorageProvider,
@@ -439,7 +444,25 @@ function stableSettingsId(
 
 export function loadRuntimeSettingsFromPath(filePath: string): RuntimeSettings {
   const raw = fs.readFileSync(filePath, 'utf-8');
-  return parseRuntimeSettings(raw);
+  const settings = parseRuntimeSettings(raw);
+  activateRuntimeModelAliases(settings);
+  return settings;
+}
+
+export function activateRuntimeModelAliases(settings: RuntimeSettings): void {
+  configureCustomModelCatalogEntries(
+    modelAliasesToCatalogEntries(settings.modelAliases),
+  );
+}
+
+export function withRuntimeModelAliases<T>(
+  settings: RuntimeSettings,
+  fn: () => T,
+): T {
+  return withCustomModelCatalogEntries(
+    modelAliasesToCatalogEntries(settings.modelAliases),
+    fn,
+  );
 }
 
 function ensureRuntimeSettingsLoaded(runtimeHome: string): {
@@ -451,11 +474,13 @@ function ensureRuntimeSettingsLoaded(runtimeHome: string): {
   if (!fs.existsSync(filePath)) {
     const defaults = createDefaultRuntimeSettings();
     saveRuntimeSettings(runtimeHome, defaults);
+    activateRuntimeModelAliases(defaults);
     return { settings: defaults, filePath };
   }
 
   const raw = fs.readFileSync(filePath, 'utf-8');
   const settings = parseRuntimeSettings(raw);
+  activateRuntimeModelAliases(settings);
   return { settings, filePath };
 }
 

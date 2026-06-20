@@ -23,6 +23,7 @@ import type {
 import type { Clock } from '../common/clock.js';
 import type { SchedulerCoordinationPort } from './scheduler-coordination-port.js';
 import type { JobReadinessBrowserStatus } from './job-readiness-service.js';
+import type { AgentHarness } from '../../shared/agent-engine.js';
 
 export type JobKind = 'manual' | 'once' | 'recurring';
 
@@ -161,6 +162,8 @@ export interface CreateManagedJobInput {
   runAt?: string;
   schedule?: { type?: unknown; value?: unknown };
   modelAlias?: unknown;
+  effectiveModelAlias?: string | null;
+  agentHarness?: AgentHarness;
   dryRun?: unknown;
 }
 
@@ -184,6 +187,7 @@ export interface UpsertJobFromIpcInput {
   maxConsecutiveFailures?: number;
   workspaceKey?: string;
   createdBy?: 'agent' | 'human';
+  agentHarness?: AgentHarness;
 }
 
 export interface ConversationBinding {
@@ -244,6 +248,7 @@ export interface ManagedJobListInput extends JobListInput {
 
 export interface ManagedJobUpdateInput extends JobLookupInput {
   patch: JobUpdatePatch;
+  agentHarness?: AgentHarness;
 }
 
 export type ManagedJobDeleteInput = JobLookupInput;

@@ -8,6 +8,7 @@ import type { AgentRelationshipMode } from '../../shared/agent-relationship-mode
 import type { YoloModeSettings } from '../../shared/yolo-mode-policy.js';
 import type { EgressSettings } from '../../shared/egress-policy.js';
 import type { AgentHarness } from '../../shared/agent-engine.js';
+import type { ModelWorkload } from '../../shared/model-catalog.js';
 
 export interface RuntimeProviderSettings {
   enabled: boolean;
@@ -262,6 +263,28 @@ export interface RuntimeLimitSettings {
   providers: Record<string, RuntimeProviderLimit>;
 }
 
+export interface RuntimeCustomModelAliasSource {
+  label: string;
+  url: string;
+  verifiedAt: string;
+}
+
+export interface RuntimeCustomModelAlias {
+  provider: string;
+  providerModelId: string;
+  displayName: string;
+  aliases: string[];
+  recommendedAlias: string;
+  supportedWorkloads: ModelWorkload[];
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  inputUsdPerMillionTokens?: number;
+  outputUsdPerMillionTokens?: number;
+  supportsThinking?: boolean;
+  supportsTools?: boolean;
+  source: RuntimeCustomModelAliasSource;
+}
+
 export interface RuntimeSettings {
   desiredState: RuntimeDesiredStateSettings;
   providers: Record<string, RuntimeProviderSettings>;
@@ -284,6 +307,9 @@ export interface RuntimeSettings {
   // absent/empty -> the hardcoded MODEL_FAMILIES order. Unknown tokens are
   // ignored at resolve time.
   modelFamilies: Record<string, string[]>;
+  // Optional settings-owned aliases for models exposed by existing providers.
+  // Values are non-secret metadata; provider credentials stay in Model Access.
+  modelAliases: Record<string, RuntimeCustomModelAlias>;
 }
 
 export interface RuntimeSettingsValidationFailure {

@@ -80,9 +80,9 @@ const DEEPAGENTS_MEMORY_WORKLOADS: readonly ModelWorkload[] = [
 ];
 
 const GROQ_SOURCE = {
-  label: 'Groq OpenAI-compatible chat completions',
-  url: 'https://console.groq.com/docs/openai',
-  verifiedAt: '2026-06-14',
+  label: 'Groq supported models',
+  url: 'https://console.groq.com/docs/models',
+  verifiedAt: '2026-06-19',
 };
 const DEEPSEEK_SOURCE = {
   label: 'DeepSeek API (OpenAI-compatible)',
@@ -106,8 +106,8 @@ const FIREWORKS_SOURCE = {
 };
 const CEREBRAS_SOURCE = {
   label: 'Cerebras Inference (OpenAI-compatible)',
-  url: 'https://inference-docs.cerebras.ai/models/overview',
-  verifiedAt: '2026-06-14',
+  url: 'https://inference-docs.cerebras.ai/models/openai-oss',
+  verifiedAt: '2026-06-19',
 };
 const PERPLEXITY_SOURCE = {
   label: 'Perplexity Sonar API',
@@ -360,10 +360,9 @@ export function buildOpenAiCompatibleCatalog(deps: {
       aliases: ['cerebras', 'cerebras-gpt-oss-120b'],
       recommendedAlias: 'cerebras',
       source: CEREBRAS_SOURCE,
-      // Price omitted: the public site exposes only subscription tiers, no
-      // per-token API rate for this id, so a per-token figure is unverifiable.
-      // Renders as `—`.
       contextWindowTokens: WINDOW_128K,
+      inputUsdPerMillionTokens: 0.35,
+      outputUsdPerMillionTokens: 0.75,
       cacheMode: OPENAI_PREFIX_CACHE_MODE,
       cacheTokenFields: NESTED_OPENAI_CACHE_FIELDS,
       supportedWorkloads: DEEPAGENTS_MEMORY_WORKLOADS,

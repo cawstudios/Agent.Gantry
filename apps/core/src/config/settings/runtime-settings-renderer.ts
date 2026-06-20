@@ -45,6 +45,7 @@ import type {
 } from './runtime-settings-types.js';
 import {
   renderLimitsSettingsYaml,
+  renderModelAliasesYaml,
   renderModelFamiliesYaml,
 } from './runtime-settings-optional-blocks-renderer.js';
 
@@ -712,6 +713,7 @@ export function renderRuntimeSettingsYaml(settings: RuntimeSettings): string {
   }
   renderLimitsSettingsYaml(lines, settings.limits);
   renderModelFamiliesYaml(lines, settings.modelFamilies);
+  renderModelAliasesYaml(lines, settings.modelAliases);
 
   return lines.join('\n');
 }

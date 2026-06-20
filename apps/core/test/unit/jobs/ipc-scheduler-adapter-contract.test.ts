@@ -58,6 +58,11 @@ import { schedulerCreateTaskHandlers } from '@core/jobs/ipc-scheduler-create-han
 import { schedulerMutateTaskHandlers } from '@core/jobs/ipc-scheduler-mutate-handlers.js';
 import { schedulerQueryTaskHandlers } from '@core/jobs/ipc-scheduler-query-handlers.js';
 import { schedulerAccessFromContext } from '@core/jobs/ipc-scheduler-access.js';
+import {
+  configureCustomModelCatalogEntries,
+  executableModelEntry,
+  providerRoute,
+} from '@core/shared/model-catalog.js';
 
 function adaptAppSession(session: any) {
   if (!session) return undefined;
@@ -149,6 +154,7 @@ describe('scheduler IPC adapter contracts', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    configureCustomModelCatalogEntries([]);
   });
 
   it('keeps missing upsert scheduleType as invalid_request', async () => {
@@ -445,12 +451,51 @@ describe('scheduler IPC adapter contracts', () => {
 
     expect(mocks.jobService.updateJob).toHaveBeenCalledWith({
       jobId: 'job-1',
+      agentHarness: 'auto',
       access: expect.any(Object),
       patch: { model: 'kimi-2.6' },
     });
     expect(mocks.responder.accept).toHaveBeenCalledWith(
       'Scheduler job updated (job-1).',
     );
+  });
+
+  it('defers scheduler update model workload validation to the job service', async () => {
+    configureCustomModelCatalogEntries([
+      executableModelEntry({
+        id: 'settings:recurring-only',
+        route: providerRoute('groq', 'llama-3.1-8b-instant'),
+        displayName: 'Recurring Only',
+        runnerModel: 'llama-3.1-8b-instant',
+        aliases: ['recurring-only'],
+        recommendedAlias: 'recurring-only',
+        source: {
+          label: 'settings.yaml model_aliases.recurring-only',
+          url: 'settings.yaml',
+          verifiedAt: 'custom',
+        },
+        cacheMode: 'none',
+        cacheTokenFields: [],
+        supportsTools: true,
+        supportedWorkloads: ['recurring_job'],
+      }),
+    ]);
+
+    await schedulerMutateTaskHandlers.scheduler_update_job(
+      makeContext({
+        type: 'scheduler_update_job',
+        jobId: 'job-1',
+        scheduleType: 'interval',
+        modelAlias: 'recurring-only',
+      }),
+    );
+
+    expect(mocks.jobService.updateJob).toHaveBeenCalledWith({
+      jobId: 'job-1',
+      agentHarness: 'auto',
+      access: expect.any(Object),
+      patch: { model: 'recurring-only', scheduleType: 'interval' },
+    });
   });
 
   it('passes scheduler update accessRequirements through to the job service', async () => {
@@ -466,6 +511,7 @@ describe('scheduler IPC adapter contracts', () => {
 
     expect(mocks.jobService.updateJob).toHaveBeenCalledWith({
       jobId: 'job-1',
+      agentHarness: 'auto',
       access: expect.any(Object),
       patch: {
         accessRequirements: [
@@ -486,6 +532,7 @@ describe('scheduler IPC adapter contracts', () => {
 
     expect(mocks.jobService.updateJob).toHaveBeenCalledWith({
       jobId: 'job-1',
+      agentHarness: 'auto',
       access: expect.any(Object),
       patch: { model: null },
     });
@@ -521,6 +568,7 @@ describe('scheduler IPC adapter contracts', () => {
 
     expect(mocks.jobService.updateJob).toHaveBeenCalledWith({
       jobId: 'job-1',
+      agentHarness: 'auto',
       access: expect.any(Object),
       patch: {},
     });

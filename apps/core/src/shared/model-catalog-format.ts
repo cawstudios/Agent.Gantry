@@ -1,8 +1,12 @@
 import {
-  MODEL_CATALOG,
+  listModelCatalogEntries,
   type ModelCatalogEntry,
   type ModelDefaultAliases,
 } from './model-catalog.js';
+import {
+  recommendModelAlias,
+  type ModelRecommendationInput,
+} from './model-recommendation.js';
 import { resolveModelCacheSupport } from './model-cache-support.js';
 import {
   listModelFamilies,
@@ -22,6 +26,7 @@ export interface ModelCatalogFormatOptions {
   configuredProviders?: Set<string>;
   // Optional settings-sourced family member-order override.
   familyOrder?: FamilyOrderOverrides;
+  recommendation?: ModelRecommendationInput;
 }
 
 export function formatTokenCount(tokens: number): string {
@@ -90,7 +95,20 @@ export function formatModelCatalog(
     header,
     header.replace(/[^|]+/g, '---'),
   ];
-  for (const entry of MODEL_CATALOG) {
+  if (options.recommendation) {
+    const recommendation = recommendModelAlias({
+      ...options.recommendation,
+      configuredProviders:
+        options.recommendation.configuredProviders ?? configuredProviders,
+    });
+    if (recommendation) {
+      lines.unshift(
+        `Recommended model: ${recommendation.alias}. Why: ${recommendation.reason}.`,
+        '',
+      );
+    }
+  }
+  for (const entry of listModelCatalogEntries()) {
     const cacheSupport = resolveModelCacheSupport(entry);
     const contextWindow = formatContextWindow(entry.contextWindowTokens);
     const cost = formatCostPerMillion(entry);

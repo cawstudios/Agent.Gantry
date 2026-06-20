@@ -1,7 +1,10 @@
 import {
+  resolveModelSelection,
   resolveModelSelectionForWorkload,
   type ModelWorkload,
 } from '../../shared/model-catalog.js';
+import type { AgentHarness } from '../../shared/agent-engine.js';
+import { resolveExecutionRoute } from '../../shared/model-execution-route.js';
 import { ApplicationError } from '../common/application-error.js';
 
 export type JobModelWorkload = Extract<
@@ -40,10 +43,38 @@ export function resolveRequestedJobModel(
   return undefined;
 }
 
-export function resolveRequestedJobModelPatch(
-  modelAlias: unknown,
-  workload: JobModelWorkload = 'one_time_job',
-): { specified: boolean; model?: string | null } {
+export function assertJobModelHarnessCompatible(input: {
+  modelAlias?: string | null;
+  workload: JobModelWorkload;
+  agentHarness?: AgentHarness;
+}): void {
+  if (!input.modelAlias) return;
+  const resolved = resolveModelSelectionForWorkload(
+    input.modelAlias,
+    input.workload,
+  );
+  if (!resolved.ok) {
+    throw new ApplicationError('INVALID_REQUEST', resolved.message);
+  }
+  if (input.agentHarness === undefined) {
+    throw new ApplicationError(
+      'INVALID_REQUEST',
+      'Agent harness is required to validate job model compatibility.',
+    );
+  }
+  const route = resolveExecutionRoute({
+    entry: resolved.entry,
+    agentHarness: input.agentHarness,
+  });
+  if (!route.ok) {
+    throw new ApplicationError('INVALID_REQUEST', route.message);
+  }
+}
+
+export function resolveRequestedJobModelPatch(modelAlias: unknown): {
+  specified: boolean;
+  model?: string | null;
+} {
   const aliasSpecified = modelAlias !== undefined;
   if (!aliasSpecified) return { specified: false };
   const value = modelAlias;
@@ -54,8 +85,18 @@ export function resolveRequestedJobModelPatch(
       'Use null to clear a job model.',
     );
   }
+  if (typeof value !== 'string') {
+    throw new ApplicationError(
+      'INVALID_REQUEST',
+      'Job model must be a supported model alias.',
+    );
+  }
+  const resolved = resolveModelSelection(value);
+  if (!resolved.ok) {
+    throw new ApplicationError('INVALID_REQUEST', resolved.message);
+  }
   return {
     specified: true,
-    model: resolveOptionalJobModel(value, workload),
+    model: resolved.alias,
   };
 }

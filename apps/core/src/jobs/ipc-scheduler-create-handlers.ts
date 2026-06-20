@@ -6,7 +6,10 @@ import { invalidateSystemJobRegistrationSignature } from './system-registration-
 import { createTaskResponder } from './ipc-shared.js';
 import { mapApplicationError } from './ipc-application-error.js';
 import { runtimeJobSchedulePlanner } from './job-schedule-planner.js';
-import { getDefaultModelConfig } from '../config/index.js';
+import {
+  getDefaultModelConfig,
+  getSelectedAgentHarness,
+} from '../config/index.js';
 import {
   findModelByRunnerModel,
   resolveModelSelectionForWorkload,
@@ -122,6 +125,7 @@ const schedulerUpsertJobHandler: TaskHandler = async (context) => {
       retryBackoffMs: data.retryBackoffMs,
       maxConsecutiveFailures: data.maxConsecutiveFailures,
       createdBy: data.createdBy,
+      agentHarness: getSelectedAgentHarness(sourceAgentFolder),
     });
 
     logger.info(

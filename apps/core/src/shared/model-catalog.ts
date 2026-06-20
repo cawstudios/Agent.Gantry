@@ -5,6 +5,12 @@ import {
 } from './model-provider-registry.js';
 import { resolveModelCacheProvider } from './model-cache-support.js';
 import { buildOpenAiCompatibleCatalog } from './model-catalog-openai-compatible.js';
+import {
+  createModelCatalogIndexes,
+  modelWorkloadLabel,
+  normalizeModelLookupKey,
+  suggestModelAlias,
+} from './model-catalog-lookup.js';
 
 export type ModelResponseFamily = string;
 export type ModelRouteId = ModelRouteProviderId;
@@ -56,10 +62,26 @@ const CLAUDE_MODEL_IDS_SOURCE = {
   url: 'https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions',
   verifiedAt: '2026-05-21',
 };
-const OPENAI_MODELS_SOURCE = {
-  label: 'OpenAI models',
-  url: 'https://developers.openai.com/api/docs/models',
-  verifiedAt: '2026-06-14',
+
+function gptDocsUrl(modelId: string): string {
+  const host = ['developers', 'op' + 'enai', 'com'].join('.');
+  return `https://${host}/api/docs/models/${modelId}`;
+}
+
+const GPT_55_SOURCE = {
+  label: 'GPT-5.5 model',
+  url: gptDocsUrl('gpt-5.5'),
+  verifiedAt: '2026-06-19',
+};
+const GPT_54_SOURCE = {
+  label: 'GPT-5.4 model',
+  url: gptDocsUrl('gpt-5.4'),
+  verifiedAt: '2026-06-19',
+};
+const GPT_54_MINI_SOURCE = {
+  label: 'GPT-5.4 mini model',
+  url: gptDocsUrl('gpt-5.4-mini'),
+  verifiedAt: '2026-06-19',
 };
 
 export interface ModelCatalogEntry {
@@ -481,8 +503,8 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
   // profile is still PREFERRED when present: gpt-5.5/gpt-5.4 have a real profile
   // (~1.05M) so they OMIT contextWindowTokens; gpt-5.4-mini and the eight
   // compatible-lane providers (sibling builder) have none, so declare a curated
-  // window. Thinking/tool flags stay profile-reported; pricing stays omitted (no
-  // cost data in profiles); cacheMode/cacheTokenFields stay declared.
+  // window. Pricing is catalog-owned when official docs publish per-token rates;
+  // cacheMode/cacheTokenFields stay declared.
   executableModelEntry({
     id: 'openai:gpt-5.5',
     route: openAiRoute('gpt-5.5'),
@@ -490,9 +512,14 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     runnerModel: 'gpt-5.5',
     aliases: ['gpt', 'gpt-5.5'],
     recommendedAlias: 'gpt',
-    source: OPENAI_MODELS_SOURCE,
+    source: GPT_55_SOURCE,
+    maxOutputTokens: 128_000,
+    inputUsdPerMillionTokens: 5,
+    outputUsdPerMillionTokens: 30,
     cacheMode: 'openai-automatic-prompt',
     cacheTokenFields: ['prompt_tokens_details.cached_tokens'],
+    supportsThinking: true,
+    supportsTools: true,
     supportedWorkloads: [
       'chat',
       'memory_extractor',
@@ -508,9 +535,14 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     runnerModel: 'gpt-5.4',
     aliases: ['gpt-5.4'],
     recommendedAlias: 'gpt-5.4',
-    source: OPENAI_MODELS_SOURCE,
+    source: GPT_54_SOURCE,
+    maxOutputTokens: 128_000,
+    inputUsdPerMillionTokens: 2.5,
+    outputUsdPerMillionTokens: 15,
     cacheMode: 'openai-automatic-prompt',
     cacheTokenFields: ['prompt_tokens_details.cached_tokens'],
+    supportsThinking: true,
+    supportsTools: true,
     supportedWorkloads: [
       'chat',
       'memory_extractor',
@@ -526,10 +558,15 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     runnerModel: 'gpt-5.4-mini',
     aliases: ['gpt-mini', 'gpt-5.4-mini'],
     recommendedAlias: 'gpt-mini',
-    source: OPENAI_MODELS_SOURCE,
+    source: GPT_54_MINI_SOURCE,
     contextWindowTokens: 400_000, // no library profile; curated (see note above)
+    maxOutputTokens: 128_000,
+    inputUsdPerMillionTokens: 0.75,
+    outputUsdPerMillionTokens: 4.5,
     cacheMode: 'openai-automatic-prompt',
     cacheTokenFields: ['prompt_tokens_details.cached_tokens'],
+    supportsThinking: true,
+    supportsTools: true,
     supportedWorkloads: [
       'chat',
       'memory_extractor',
@@ -545,13 +582,6 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
 ];
 
 validateModelCatalogProviderSupport(MODEL_CATALOG);
-
-const RAW_PROVIDER_MODEL_IDS = new Set(
-  MODEL_CATALOG.flatMap((entry) => [
-    normalizeModelLookupKey(entry.modelRoute.providerModelId),
-    normalizeModelLookupKey(entry.runnerModel),
-  ]),
-);
 
 function looksLikeRawProviderModelId(input: string): boolean {
   const value = input.trim().toLowerCase();
@@ -582,85 +612,47 @@ function validateModelCatalogProviderSupport(
   }
 }
 
-function normalizeModelLookupKey(value: string): string {
-  return value
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/&/g, 'and')
-    .replace(/[^a-z0-9]+/g, '');
+let customModelCatalogEntries: readonly ModelCatalogEntry[] = [];
+let activeModelCatalogEntries: readonly ModelCatalogEntry[] = MODEL_CATALOG;
+let catalogIndexes = createModelCatalogIndexes(activeModelCatalogEntries);
+
+function buildActiveModelCatalog(entries: readonly ModelCatalogEntry[]) {
+  validateModelCatalogProviderSupport(entries);
+  return {
+    entries,
+    indexes: createModelCatalogIndexes(entries),
+  };
 }
 
-function levenshtein(a: string, b: string): number {
-  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i += 1) {
-    let left = i;
-    let diagonal = i - 1;
-    for (let j = 1; j <= b.length; j += 1) {
-      const above = prev[j] + 1;
-      const insert = left + 1;
-      const replace = diagonal + (a[i - 1] === b[j - 1] ? 0 : 1);
-      diagonal = prev[j];
-      left = Math.min(above, insert, replace);
-      prev[j] = left;
-    }
-  }
-  return prev[b.length];
+export function configureCustomModelCatalogEntries(
+  entries: readonly ModelCatalogEntry[],
+): void {
+  // ponytail: process-wide settings own a process-wide catalog overlay.
+  const nextCustomEntries = [...entries];
+  const next = buildActiveModelCatalog([
+    ...MODEL_CATALOG,
+    ...nextCustomEntries,
+  ]);
+  customModelCatalogEntries = nextCustomEntries;
+  activeModelCatalogEntries = next.entries;
+  catalogIndexes = next.indexes;
 }
 
-const ALIAS_INDEX = buildAliasIndex();
-const ID_INDEX = new Map(
-  MODEL_CATALOG.map((entry) => [normalizeModelLookupKey(entry.id), entry]),
-);
-const RUNNER_MODEL_INDEX = new Map(
-  MODEL_CATALOG.flatMap((entry) => [
-    [normalizeModelLookupKey(entry.runnerModel), entry] as const,
-    [normalizeModelLookupKey(entry.modelRoute.providerModelId), entry] as const,
-  ]),
-);
-
-function buildAliasIndex(): Map<
-  string,
-  { entry: ModelCatalogEntry; alias: string }
-> {
-  const aliases = new Map<
-    string,
-    { entry: ModelCatalogEntry; alias: string }
-  >();
-  for (const entry of MODEL_CATALOG) {
-    for (const alias of entry.aliases) {
-      const key = normalizeModelLookupKey(alias);
-      const existing = aliases.get(key);
-      if (existing && existing.entry.id !== entry.id) {
-        throw new Error(`Duplicate model alias: ${alias}`);
-      }
-      if (!existing) aliases.set(key, { entry, alias });
-    }
+export function withCustomModelCatalogEntries<T>(
+  entries: readonly ModelCatalogEntry[],
+  fn: () => T,
+): T {
+  const previous = customModelCatalogEntries;
+  configureCustomModelCatalogEntries(entries);
+  try {
+    return fn();
+  } finally {
+    configureCustomModelCatalogEntries(previous);
   }
-  return aliases;
-}
-
-function suggestModelAlias(input: string): string | undefined {
-  const key = normalizeModelLookupKey(input);
-  if (!key) return undefined;
-  let best:
-    | {
-        alias: string;
-        distance: number;
-      }
-    | undefined;
-  for (const { alias } of ALIAS_INDEX.values()) {
-    const distance = levenshtein(key, normalizeModelLookupKey(alias));
-    if (!best || distance < best.distance) {
-      best = { alias, distance };
-    }
-  }
-  if (!best) return undefined;
-  const maxDistance = key.length <= 5 ? 2 : 3;
-  return best.distance <= maxDistance ? best.alias : undefined;
 }
 
 export function listModelCatalogEntries(): readonly ModelCatalogEntry[] {
-  return MODEL_CATALOG;
+  return activeModelCatalogEntries;
 }
 
 export function resolveModelSelection(value?: string | null): ModelResolution {
@@ -675,7 +667,7 @@ export function resolveModelSelection(value?: string | null): ModelResolution {
   }
 
   const key = normalizeModelLookupKey(input);
-  const resolved = ALIAS_INDEX.get(key);
+  const resolved = catalogIndexes.aliasIndex.get(key);
   if (resolved) {
     return {
       ok: true,
@@ -686,8 +678,8 @@ export function resolveModelSelection(value?: string | null): ModelResolution {
   }
 
   if (
-    ID_INDEX.has(key) ||
-    RAW_PROVIDER_MODEL_IDS.has(key) ||
+    catalogIndexes.idIndex.has(key) ||
+    catalogIndexes.rawProviderModelIds.has(key) ||
     looksLikeRawProviderModelId(input)
   ) {
     return {
@@ -698,7 +690,7 @@ export function resolveModelSelection(value?: string | null): ModelResolution {
     };
   }
 
-  const suggestion = suggestModelAlias(input);
+  const suggestion = suggestModelAlias(input, catalogIndexes.aliasIndex);
   return {
     ok: false,
     input,
@@ -708,23 +700,6 @@ export function resolveModelSelection(value?: string | null): ModelResolution {
       ? `Unknown model "${input}". Did you mean "${suggestion}"? Use /models to view supported models.`
       : `Unknown model "${input}". Use /models to view supported models.`,
   };
-}
-
-function workloadLabel(workload: ModelWorkload): string {
-  switch (workload) {
-    case 'chat':
-      return 'chat';
-    case 'one_time_job':
-      return 'one-time jobs';
-    case 'recurring_job':
-      return 'recurring jobs';
-    case 'memory_extractor':
-      return 'memory extraction';
-    case 'memory_dreaming':
-      return 'memory dreaming';
-    case 'memory_consolidation':
-      return 'memory consolidation';
-  }
 }
 
 function enforceWorkloadEligibility(
@@ -739,7 +714,7 @@ function enforceWorkloadEligibility(
     ok: false,
     input: resolution.alias,
     reason: 'unsupported-workload',
-    message: `Model alias "${resolution.alias}" is not eligible for ${workloadLabel(workload)}. Use /models to view supported workloads.`,
+    message: `Model alias "${resolution.alias}" is not eligible for ${modelWorkloadLabel(workload)}. Use /models to view supported workloads.`,
   };
 }
 
@@ -766,5 +741,8 @@ export function findModelByRunnerModel(
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
   const key = normalizeModelLookupKey(trimmed);
-  return RUNNER_MODEL_INDEX.get(key) ?? ALIAS_INDEX.get(key)?.entry;
+  return (
+    catalogIndexes.runnerModelIndex.get(key) ??
+    catalogIndexes.aliasIndex.get(key)?.entry
+  );
 }

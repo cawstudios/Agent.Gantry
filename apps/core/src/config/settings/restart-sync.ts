@@ -6,9 +6,11 @@ import type {
 import { SettingsDesiredStateService } from './desired-state-service.js';
 import {
   addAgentToolRulesToRuntimeSettings,
+  activateRuntimeModelAliases,
   loadRuntimeSettings,
   removeAgentToolRulesFromRuntimeSettings,
   saveRuntimeSettings,
+  withRuntimeModelAliases,
 } from './runtime-settings.js';
 import { normalizeConfiguredCapabilitiesInSettings } from './configured-capability-normalization.js';
 import { validateLoadedRuntimeSettings } from './runtime-settings-validation.js';
@@ -39,7 +41,9 @@ export async function applyRuntimeSettingsDesiredState(input: {
   });
   const settings = normalization.settings;
   const reconcileSettings = normalization.changed ? input.settings : settings;
-  const validation = validateLoadedRuntimeSettings(input.runtimeHome, settings);
+  const validation = withRuntimeModelAliases(settings, () =>
+    validateLoadedRuntimeSettings(input.runtimeHome, settings),
+  );
   if (!validation.ok) {
     throw new Error(
       [
@@ -53,6 +57,7 @@ export async function applyRuntimeSettingsDesiredState(input: {
     saveRuntimeSettings(input.runtimeHome, input.previousSettings);
     await service.reconcile(input.previousSettings);
     await input.reloadRuntimeState?.();
+    activateRuntimeModelAliases(input.previousSettings);
   };
   try {
     saveRuntimeSettings(input.runtimeHome, settings);
@@ -63,6 +68,7 @@ export async function applyRuntimeSettingsDesiredState(input: {
       );
     }
     await input.reloadRuntimeState?.();
+    activateRuntimeModelAliases(settings);
   } catch (err) {
     await rollback();
     throw err;

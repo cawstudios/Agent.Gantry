@@ -35,6 +35,7 @@ describe('job model resolution', () => {
       resolved_model_alias: 'sonnet',
       resolved_model_profile_id: 'anthropic:sonnet-4.6',
       model_source: 'job.model',
+      model_selection_reason: 'explicit job model alias',
       cache_policy: 'anthropic-prompt',
       context_window_tokens: 1000000,
     });
@@ -63,6 +64,8 @@ describe('job model resolution', () => {
       usage,
       resolved_model_alias: 'haiku',
       model_source: 'settings.yaml agent.one_time_job_default_model',
+      model_selection_reason:
+        'inherited from settings.yaml agent.one_time_job_default_model',
       cache_policy: 'anthropic-prompt',
     });
   });

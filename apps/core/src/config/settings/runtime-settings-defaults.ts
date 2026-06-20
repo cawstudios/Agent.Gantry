@@ -198,6 +198,7 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
     permissions,
     limits: { providers: {} },
     modelFamilies: {},
+    modelAliases: {},
   };
 }
 

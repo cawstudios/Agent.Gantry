@@ -8,7 +8,10 @@ import {
   listChannelProviders,
   normalizeProviderId,
 } from '../../channels/provider-registry.js';
-import { resolveModelSelectionForWorkload } from '../../shared/model-catalog.js';
+import {
+  resolveModelSelectionForWorkload,
+  withCustomModelCatalogEntries,
+} from '../../shared/model-catalog.js';
 import { parseSenderAllowlistConfig } from './sender-allowlist.js';
 import { parseSimpleYamlObject } from './yaml.js';
 import { normalizeCompactRuntimeSettingsRoot } from './runtime-settings-compact.js';
@@ -43,6 +46,10 @@ import { parseBrowserSettings } from './runtime-settings-browser-parser.js';
 import { parsePermissionSettings } from './runtime-settings-permissions-parser.js';
 import { parseLimitsSettings } from './runtime-settings-limits-parser.js';
 import { parseModelFamilies } from './runtime-settings-model-families-parser.js';
+import {
+  modelAliasesToCatalogEntries,
+  parseModelAliases,
+} from './runtime-settings-model-aliases-parser.js';
 import {
   containsControlCharacter,
   parseBooleanValue,
@@ -1022,61 +1029,68 @@ export function parseRuntimeSettingsObject(
       key !== 'browser' &&
       key !== 'permissions' &&
       key !== 'limits' &&
-      key !== 'model_families'
+      key !== 'model_families' &&
+      key !== 'model_aliases'
     ) {
       throw new Error(
-        `${key} is not supported. Supported root keys are defaults, desired_state, providers, provider_connections, conversations, bindings, agents, storage, agent, model_access, memory, runtime, browser, permissions, limits, and model_families.`,
+        `${key} is not supported. Supported root keys are defaults, desired_state, providers, provider_connections, conversations, bindings, agents, storage, agent, model_access, memory, runtime, browser, permissions, limits, model_families, and model_aliases.`,
       );
     }
   }
 
-  const desiredState = parseDesiredStateSettings(root.desired_state);
-  const providers = parseProviderSettings(root.providers);
-  const providerConnections = parseProviderConnections(
-    root.provider_connections,
-    providers,
-  );
-  const conversations = parseConversations(
-    root.conversations,
-    providerConnections,
-  );
-  const storage = parseStorageSettings(root.storage);
-  const parsedAgents = parseConfiguredAgents(root.agents);
-  const bindings = parseConfiguredBindings(
-    root.bindings,
-    parsedAgents,
-    conversations,
-  );
-  const agents = deriveAgentBindingsFromDesiredState({
-    agents: parsedAgents,
-    providerConnections,
-    conversations,
-    bindings,
-  });
-  const agent = parseAgentSettings(root.agent);
-  const credentialBroker = parseModelAccessSettings(root.model_access);
-  const memory = parseMemorySettings(root.memory);
-  const runtime = parseRuntimeProcessSettings(root.runtime);
-  const browser = parseBrowserSettings(root.browser);
-  const permissions = parsePermissionSettings(root.permissions);
-  const limits = parseLimitsSettings(root.limits);
-  const modelFamilies = parseModelFamilies(root.model_families);
+  const modelAliases = parseModelAliases(root.model_aliases);
+  const customModelEntries = modelAliasesToCatalogEntries(modelAliases);
 
-  return {
-    desiredState,
-    providers,
-    providerConnections,
-    conversations,
-    bindings,
-    agents,
-    storage,
-    agent,
-    credentialBroker,
-    memory,
-    runtime,
-    browser,
-    permissions,
-    limits,
-    modelFamilies,
-  };
+  return withCustomModelCatalogEntries(customModelEntries, () => {
+    const desiredState = parseDesiredStateSettings(root.desired_state);
+    const providers = parseProviderSettings(root.providers);
+    const providerConnections = parseProviderConnections(
+      root.provider_connections,
+      providers,
+    );
+    const conversations = parseConversations(
+      root.conversations,
+      providerConnections,
+    );
+    const storage = parseStorageSettings(root.storage);
+    const parsedAgents = parseConfiguredAgents(root.agents);
+    const bindings = parseConfiguredBindings(
+      root.bindings,
+      parsedAgents,
+      conversations,
+    );
+    const agents = deriveAgentBindingsFromDesiredState({
+      agents: parsedAgents,
+      providerConnections,
+      conversations,
+      bindings,
+    });
+    const agent = parseAgentSettings(root.agent);
+    const credentialBroker = parseModelAccessSettings(root.model_access);
+    const memory = parseMemorySettings(root.memory);
+    const runtime = parseRuntimeProcessSettings(root.runtime);
+    const browser = parseBrowserSettings(root.browser);
+    const permissions = parsePermissionSettings(root.permissions);
+    const limits = parseLimitsSettings(root.limits);
+    const modelFamilies = parseModelFamilies(root.model_families);
+
+    return {
+      desiredState,
+      providers,
+      providerConnections,
+      conversations,
+      bindings,
+      agents,
+      storage,
+      agent,
+      credentialBroker,
+      memory,
+      runtime,
+      browser,
+      permissions,
+      limits,
+      modelFamilies,
+      modelAliases,
+    };
+  });
 }

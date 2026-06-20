@@ -8,6 +8,10 @@ import type {
   SettingsDesiredStateRepositories,
 } from './desired-state-service.js';
 import { applyRuntimeSettingsDesiredState } from './restart-sync.js';
+import {
+  activateRuntimeModelAliases,
+  withRuntimeModelAliases,
+} from './runtime-settings.js';
 import { parseRuntimeSettingsObject } from './runtime-settings-parser.js';
 import { validateLoadedRuntimeSettings } from './runtime-settings-validation.js';
 import type { RuntimeSettings } from './runtime-settings-types.js';
@@ -22,7 +26,7 @@ import {
  * applied) by an older worker until it is upgraded (ADR-3 skew safety contract).
  * Bump this whenever a settings-schema change would break older readers.
  */
-export const CURRENT_SETTINGS_READER_VERSION = 2;
+export const CURRENT_SETTINGS_READER_VERSION = 3;
 
 export interface SettingsImportValidationResult {
   ok: boolean;
@@ -51,7 +55,9 @@ export async function validateSettingsForImport(
   settings: RuntimeSettings,
 ): Promise<SettingsImportValidationResult> {
   const errors: string[] = [];
-  const schema = validateLoadedRuntimeSettings(deps.runtimeHome, settings);
+  const schema = withRuntimeModelAliases(settings, () =>
+    validateLoadedRuntimeSettings(deps.runtimeHome, settings),
+  );
   if (!schema.ok && schema.failure) {
     errors.push(...schema.failure.details);
   }
@@ -94,6 +100,7 @@ export async function importWorkstationSettings(
     previousSettings: deps.previousSettings,
     reloadRuntimeState: deps.reloadRuntimeState,
   });
+  activateRuntimeModelAliases(settings);
 }
 
 export type FleetImportOutcome =
@@ -238,6 +245,9 @@ export function settingsToRevisionDocument(
       },
     },
     permissions: snakeRecord(settings.permissions),
+    model_aliases: mapRecord(settings.modelAliases, snakeRecord),
+    limits: mapRecord(settings.limits.providers, snakeRecord),
+    model_families: settings.modelFamilies,
   });
 }
 

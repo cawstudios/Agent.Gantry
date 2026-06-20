@@ -57,8 +57,17 @@ function modelAuditPayload(resolved: ResolvedJobModel) {
       : null,
     resolved_model_profile_id: resolved.entry?.id ?? null,
     model_source: resolved.source,
+    model_selection_reason: resolved.resolution?.ok
+      ? modelSelectionReason(resolved)
+      : null,
     cache_policy: resolved.entry?.cacheMode ?? 'unknown',
   };
+}
+
+function modelSelectionReason(resolved: ResolvedJobModel): string {
+  return resolved.source === 'job.model'
+    ? 'explicit job model alias'
+    : `inherited from ${resolved.source}`;
 }
 
 // Resolved-run diagnostics for the scheduled lane: the inherited agent engine,

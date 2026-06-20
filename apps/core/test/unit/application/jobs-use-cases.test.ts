@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { JobManagementService } from '@core/application/jobs/job-management-service.js';
 import { recheckSetupPausedJobsAfterCapabilityUpdate } from '@core/application/jobs/job-permission-recovery.js';
@@ -12,6 +12,16 @@ import type { JobControlPort } from '@core/application/jobs/job-management-types
 import type { RuntimeJobRepository } from '@core/domain/repositories/ops-repo.js';
 import type { Job, JobEvent, JobRun } from '@core/domain/types.js';
 import { runtimeJobSchedulePlanner } from '@core/jobs/job-schedule-planner.js';
+import { DEFAULT_AGENT_ENGINE } from '@core/shared/agent-engine.js';
+import {
+  configureCustomModelCatalogEntries,
+  executableModelEntry,
+  providerRoute,
+} from '@core/shared/model-catalog.js';
+
+afterEach(() => {
+  configureCustomModelCatalogEntries([]);
+});
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
@@ -160,6 +170,33 @@ describe('job application use cases', () => {
     ).rejects.toMatchObject({
       code: 'INVALID_REQUEST',
       message: 'Job prompt uses a reserved Gantry system namespace.',
+    });
+    expect(upsertJob).not.toHaveBeenCalled();
+  });
+
+  it('validates inherited managed job models against the bound agent harness', async () => {
+    const upsertJob = vi.fn(async () => ({ created: true }));
+    const service = new JobManagementService({
+      ops: {
+        upsertJob,
+      } as unknown as RuntimeJobRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      control: makeAppOneControl(),
+    });
+
+    await expect(
+      service.createJob({
+        appId: 'app-one',
+        name: 'Inherited model',
+        prompt: 'Run',
+        sessionId: 'session-app-one',
+        effectiveModelAlias: 'kimi',
+        agentHarness: DEFAULT_AGENT_ENGINE,
+      }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+      message: `Model kimi cannot run with agent harness ${DEFAULT_AGENT_ENGINE}.`,
     });
     expect(upsertJob).not.toHaveBeenCalled();
   });
@@ -714,6 +751,63 @@ describe('job application use cases', () => {
     expect(scheduler.requestSchedulerSync).toHaveBeenCalledWith('job-1');
   });
 
+  it('rejects schedule-only updates when the stored model cannot run that workload', async () => {
+    configureCustomModelCatalogEntries([
+      executableModelEntry({
+        id: 'settings:one-shot-only',
+        route: providerRoute('openrouter', 'acme/one-shot-only'),
+        displayName: 'One Shot Only',
+        runnerModel: 'acme/one-shot-only',
+        aliases: ['one-shot-only'],
+        recommendedAlias: 'one-shot-only',
+        source: {
+          label: 'Test settings model alias',
+          url: 'settings.yaml',
+          verifiedAt: 'custom',
+        },
+        cacheMode: 'none',
+        cacheTokenFields: [],
+        supportsTools: true,
+        supportedWorkloads: ['one_time_job'],
+        experimental: true,
+      }),
+    ]);
+    const ops = makeOps(
+      makeJob({
+        model: 'one-shot-only',
+        schedule_type: 'once',
+        schedule_value: '2026-05-01T12:00:00.000Z',
+      }),
+    );
+    const service = new JobManagementService({
+      ops: ops as RuntimeJobRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      control: makeAppOneControl(),
+      clock: { now: () => '2026-04-24T01:00:00.000Z' },
+    });
+
+    let thrown: unknown;
+    try {
+      await service.updateJob({
+        appId: 'app-one',
+        jobId: 'job-1',
+        patch: {
+          scheduleType: 'interval',
+          scheduleValue: '60000',
+        },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(
+      'Model alias "one-shot-only" is not eligible for recurring jobs. Use /models to view supported workloads.',
+    );
+    expect(ops.updateJob).not.toHaveBeenCalled();
+  });
+
   it('rejects job prompt updates using the reserved system prompt namespace', async () => {
     const ops = makeOps(makeJob());
     const service = new JobManagementService({
@@ -884,6 +978,7 @@ describe('job application use cases', () => {
     await service.updateJob({
       appId: 'app-one',
       jobId: 'job-1',
+      agentHarness: 'auto',
       patch: { model: 'kimi 2.6' },
     });
 
@@ -896,6 +991,7 @@ describe('job application use cases', () => {
       service.updateJob({
         appId: 'app-one',
         jobId: 'job-1',
+        agentHarness: 'auto',
         patch: { model: 'moonshotai/kimi-k2.6' },
       }),
     ).rejects.toMatchObject({
@@ -903,6 +999,34 @@ describe('job application use cases', () => {
       message:
         'Provider model ID "moonshotai/kimi-k2.6" is not accepted here. Use a model alias from /models.',
     });
+  });
+
+  it('requires the bound agent harness before accepting explicit job model updates', async () => {
+    const ops = makeOps(makeJob());
+    const service = new JobManagementService({
+      ops: ops as RuntimeJobRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+      control: makeAppOneControl(),
+      clock: { now: () => '2026-04-24T01:00:00.000Z' },
+    });
+
+    let thrown: unknown;
+    try {
+      await service.updateJob({
+        appId: 'app-one',
+        jobId: 'job-1',
+        patch: { model: 'sonnet' },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(
+      'Agent harness is required to validate job model compatibility.',
+    );
+    expect(ops.updateJob).not.toHaveBeenCalled();
   });
 
   it('applies resume semantics when patching status active', async () => {
@@ -1785,6 +1909,40 @@ describe('job application use cases', () => {
         ],
       }),
     );
+  });
+
+  it('rejects IPC scheduler job models incompatible with the bound agent harness', async () => {
+    const upsertJob = vi.fn(async () => ({ created: true }));
+    const service = new JobManagementService({
+      ops: {
+        getJobById: vi.fn(),
+        upsertJob,
+      } as unknown as RuntimeJobRepository,
+      scheduler: { requestSchedulerSync: vi.fn() },
+      schedulePlanner: runtimeJobSchedulePlanner,
+    });
+
+    await expect(
+      service.upsertJobFromIpc({
+        access: {
+          sourceAgentFolder: 'team',
+          originConversationJid: 'tg:team',
+          conversationBindings: {
+            'tg:team': { folder: 'team' },
+          },
+        },
+        name: 'Team digest',
+        prompt: 'Summarize updates',
+        modelAlias: 'kimi',
+        scheduleType: 'interval',
+        scheduleValue: '60000',
+        agentHarness: DEFAULT_AGENT_ENGINE,
+      }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+      message: `Model kimi cannot run with agent harness ${DEFAULT_AGENT_ENGINE}.`,
+    });
+    expect(upsertJob).not.toHaveBeenCalled();
   });
 
   it('rejects IPC scheduler jobs using reserved system namespaces', async () => {

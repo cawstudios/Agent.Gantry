@@ -154,6 +154,7 @@ export function getPublicRuntimeSettings() {
     providerConnections: settings.providerConnections,
     conversations: settings.conversations,
     bindings: settings.bindings,
+    modelAliases: settings.modelAliases,
     memory: {
       enabled: settings.memory.enabled,
       dreaming: {

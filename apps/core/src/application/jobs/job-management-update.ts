@@ -28,7 +28,10 @@ import {
   assertJobAppAccess,
   resolveAuthenticatedRouteContextForUpdate,
 } from './job-management-context-access.js';
-import { resolveOptionalJobModel } from './job-model-selection.js';
+import {
+  assertJobModelHarnessCompatible,
+  resolveOptionalJobModel,
+} from './job-model-selection.js';
 
 export async function updateManagedJob(
   deps: JobManagementServiceDeps,
@@ -41,13 +44,28 @@ export async function updateManagedJob(
   assertPublicJobNamespace({ jobId: job.id, prompt: patch.prompt });
   const targetWorkspaceKey = patch.workspaceKey ?? job.workspace_key;
   const targetScheduleType = patch.scheduleType ?? job.schedule_type;
+  const targetWorkload =
+    targetScheduleType === 'cron' || targetScheduleType === 'interval'
+      ? 'recurring_job'
+      : 'one_time_job';
   if (typeof patch.model === 'string') {
-    patch.model = resolveOptionalJobModel(
-      patch.model,
-      targetScheduleType === 'cron' || targetScheduleType === 'interval'
-        ? 'recurring_job'
-        : 'one_time_job',
-    );
+    patch.model = resolveOptionalJobModel(patch.model, targetWorkload);
+    assertJobModelHarnessCompatible({
+      modelAlias: patch.model,
+      workload: targetWorkload,
+      agentHarness: input.agentHarness,
+    });
+  } else if (
+    patch.scheduleType !== undefined &&
+    patch.model === undefined &&
+    job.model
+  ) {
+    const model = resolveOptionalJobModel(job.model, targetWorkload);
+    assertJobModelHarnessCompatible({
+      modelAlias: model,
+      workload: targetWorkload,
+      agentHarness: input.agentHarness,
+    });
   }
   const authenticatedContext = await resolveAuthenticatedRouteContextForUpdate({
     deps,

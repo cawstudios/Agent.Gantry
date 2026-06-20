@@ -11,6 +11,7 @@ import { runtimeJobSchedulePlanner } from './job-schedule-planner.js';
 import { invalidateSystemJobRegistrationSignature } from './system-registration-cache.js';
 import { resolveRequestedJobModelPatch } from '../application/jobs/job-model-selection.js';
 import { schedulerAccessFromContext } from './ipc-scheduler-access.js';
+import { getSelectedAgentHarness } from '../config/index.js';
 import { getRuntimeEventExchange } from '../adapters/storage/postgres/runtime-store.js';
 import {
   enqueueJobTrigger,
@@ -152,6 +153,7 @@ const schedulerUpdateJobHandler: TaskHandler = async (context) => {
       jobId,
       access: schedulerAccessFromContext(context),
       patch,
+      agentHarness: getSelectedAgentHarness(sourceAgentFolder),
     });
     invalidateSystemJobRegistrationSignature(context.deps.opsRepository);
     accept(

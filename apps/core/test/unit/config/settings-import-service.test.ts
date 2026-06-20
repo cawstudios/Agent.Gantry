@@ -170,6 +170,20 @@ describe('importFleetSettingsRevision', () => {
     settings.agent.name = 'Agent "quoted" \\ path';
     settings.agent.agentHarness = 'deepagents';
     settings.memory.llm.extractorMinConfidence = 0.73;
+    settings.modelAliases['fast-job'] = {
+      provider: 'groq',
+      providerModelId: 'llama-3.1-8b-instant',
+      displayName: 'Fast Job Model',
+      aliases: ['fast-job'],
+      recommendedAlias: 'fast-job',
+      supportedWorkloads: ['one_time_job'],
+      supportsTools: true,
+      source: {
+        label: 'Groq supported models',
+        url: 'https://console.groq.com/docs/models',
+        verifiedAt: '2026-06-19',
+      },
+    };
     settings.agents.researcher = {
       name: 'Researcher',
       folder: 'researcher',
@@ -217,6 +231,11 @@ describe('importFleetSettingsRevision', () => {
           .access as Record<string, unknown>
       ).preset,
     ).toBe('locked');
+    expect(
+      (document.model_aliases as Record<string, Record<string, unknown>>)[
+        'fast-job'
+      ].provider_model_id,
+    ).toBe('llama-3.1-8b-instant');
     const restored = settingsFromRevisionDocument(document);
     expect(restored.agent.name).toBe(settings.agent.name);
     expect(restored.agent.agentHarness).toBe('deepagents');
@@ -227,5 +246,8 @@ describe('importFleetSettingsRevision', () => {
     expect(restored.agents.researcher.capabilities).toEqual([
       { id: 'browser.use', version: '1' },
     ]);
+    expect(restored.modelAliases['fast-job']?.providerModelId).toBe(
+      'llama-3.1-8b-instant',
+    );
   });
 });

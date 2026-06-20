@@ -39,7 +39,10 @@ import type {
   ManagedJobTriggerInput,
   ManagedJobTriggerWaitInput,
 } from './job-management-types.js';
-import { resolveRequestedJobModel } from './job-model-selection.js';
+import {
+  assertJobModelHarnessCompatible,
+  resolveRequestedJobModel,
+} from './job-model-selection.js';
 // prettier-ignore
 import { requireJobControl, requireRuntimeEvents, requireTriggerQueue } from './job-management-require.js';
 import { runSchedulerJobNowFromMcp } from './job-management-run-now.js';
@@ -103,6 +106,14 @@ export class JobManagementService {
         ? 'recurring_job'
         : 'one_time_job',
     );
+    assertJobModelHarnessCompatible({
+      modelAlias,
+      workload:
+        scheduleType === 'cron' || scheduleType === 'interval'
+          ? 'recurring_job'
+          : 'one_time_job',
+      agentHarness: input.agentHarness,
+    });
     const workspaceKey = (
       input.workspaceKey || access.sourceAgentFolder
     ).trim();

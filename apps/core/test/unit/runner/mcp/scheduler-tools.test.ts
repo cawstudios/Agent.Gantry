@@ -40,7 +40,9 @@ describe('scheduler MCP tools', () => {
       await import('../../../../src/runner/mcp/tools/scheduler.js');
     const tools = new Map<
       string,
-      () => Promise<{ content: { text: string }[] }>
+      (
+        args?: Record<string, unknown>,
+      ) => Promise<{ content: { text: string }[] }>
     >();
     const server = {
       tool: (
@@ -64,6 +66,14 @@ describe('scheduler MCP tools', () => {
     expect(text).toContain('Kimi K2.6');
     expect(text).toContain('kimi-2.6 | Kimi K2.6');
     expect(text).toContain('Response family');
+
+    const recommended = await tools.get('scheduler_list_models')!({
+      workload: 'one_time_job',
+      priority: 'cheap',
+    });
+    expect(recommended.content[0].text).toContain(
+      'Recommended model: groq-fast. Why:',
+    );
   });
 
   it('delegates scheduler_list_models rendering to the model catalog formatter', async () => {
@@ -79,7 +89,9 @@ describe('scheduler MCP tools', () => {
 
     const tools = new Map<
       string,
-      () => Promise<{ content: { text: string }[] }>
+      (
+        args?: Record<string, unknown>,
+      ) => Promise<{ content: { text: string }[] }>
     >();
     const server = {
       tool: (
@@ -96,6 +108,9 @@ describe('scheduler MCP tools', () => {
 
     const response = await tools.get('scheduler_list_models')!();
     expect(formatModelCatalog).toHaveBeenCalledTimes(1);
+    expect(formatModelCatalog).toHaveBeenCalledWith({
+      recommendation: undefined,
+    });
     expect(response.content[0].text).toBe('mocked model catalog output');
   });
 

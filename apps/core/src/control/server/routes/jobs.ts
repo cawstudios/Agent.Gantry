@@ -322,6 +322,10 @@ export async function handleJobRoutes(
         modelAlias: resolvedModel.explicit
           ? resolvedModel.modelAlias
           : undefined,
+        effectiveModelAlias: resolvedModel.modelAlias,
+        agentHarness: ctx.getSelectedAgentHarness(
+          executionContext.workspaceKey,
+        ),
         dryRun: body.dryRun,
       });
       const runtimePreviewExecutionContext = {
@@ -514,27 +518,22 @@ export async function handleJobRoutes(
         sendError(res, 404, 'JOB_NOT_FOUND', 'Job not found');
         return true;
       }
-      const patchModelWorkload =
-        existingJob.schedule_type === 'cron' ||
-        existingJob.schedule_type === 'interval'
-          ? 'recurring_job'
-          : 'one_time_job';
-      const requestedModel = resolveRequestedJobModelPatch(
-        body.modelAlias,
-        patchModelWorkload,
-      );
+      const requestedModel = resolveRequestedJobModelPatch(body.modelAlias);
+      const patchExecutionContext =
+        body.executionContext !== undefined
+          ? requestExecutionContextToInternal(body.executionContext)
+          : undefined;
       const { job: updated } = await service.updateJob({
         appId: auth.appId,
         jobId: jobRoute.jobId,
+        agentHarness: ctx.getSelectedAgentHarness(
+          patchExecutionContext?.workspaceKey ?? existingJob.workspace_key,
+        ),
         patch: {
           ...(typeof body.name === 'string' ? { name: body.name } : {}),
           ...(typeof body.prompt === 'string' ? { prompt: body.prompt } : {}),
-          ...(body.executionContext !== undefined
-            ? {
-                executionContext: requestExecutionContextToInternal(
-                  body.executionContext,
-                ),
-              }
+          ...(patchExecutionContext
+            ? { executionContext: patchExecutionContext }
             : {}),
           ...(requestedModel.specified ? { model: requestedModel.model } : {}),
           ...(Array.isArray(body.notificationRoutes)

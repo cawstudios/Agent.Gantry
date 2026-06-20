@@ -47,9 +47,11 @@
   `model-catalog-openai-compatible.ts` — the catalog is the source of truth for
   window-aware compaction + context-usage reporting on those models (host
   projects it to the runner profile's `maxInputTokens`). The library profile is
-  preferred when present (gpt-5.5/gpt-5.4 OMIT the field). Pricing stays omitted
-  (no cost data in model profiles). `formatContextWindow` (`model-catalog-format.ts`)
-  renders the `/models` + `gantry model list` Context column ("1.0M"/"131K"/"—").
+  preferred when present (gpt-5.5/gpt-5.4 OMIT the field). Per-token pricing may
+  live in the catalog when verified from official provider docs; unknown pricing
+  must stay omitted and render as unknown. `formatContextWindow`
+  (`model-catalog-format.ts`) renders the `/models` + `gantry model list`
+  Context column ("1.0M"/"131K"/"—").
   Keep provider PROPER NOUNS (Gemini/Llama/OpenAI/Anthropic) OUT of comments in
   these two catalog files: the provider-specific-path checker counts those bare
   words and both files sit at their exact `maxViolations` cap.

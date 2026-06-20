@@ -1,15 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  configureCustomModelCatalogEntries,
   DEFAULT_SETUP_MODEL_ALIAS,
+  executableModelEntry,
   findModelByRunnerModel,
   listModelCatalogEntries,
   MEMORY_MODEL_DEFAULT_ALIASES,
+  providerRoute,
   resolveModelSelection,
   resolveModelSelectionForWorkload,
   resolveRunnerModel,
 } from '@core/shared/model-catalog.js';
+import { recommendModelAlias } from '@core/shared/model-recommendation.js';
 import { resolveModelCacheSupport } from '@core/shared/model-cache-support.js';
+import { DEFAULT_AGENT_ENGINE } from '@core/shared/agent-engine.js';
 import {
   formatContextWindow,
   formatCostPerMillion,
@@ -24,6 +29,10 @@ function rowFor(text: string, alias: string): string {
 }
 
 describe('model catalog resolution', () => {
+  afterEach(() => {
+    configureCustomModelCatalogEntries([]);
+  });
+
   it('keeps versioned aliases pinned while short aliases stay recommended', () => {
     expect(resolveModelSelection(' kimi 2.6 ')).toMatchObject({
       ok: true,
@@ -289,9 +298,8 @@ describe('model catalog resolution', () => {
     expect(formatCostPerMillion(groq)).toBe('$0.59/$0.79');
     const gemini = findModelByRunnerModel('gemini-2.5-pro')!;
     expect(formatCostPerMillion(gemini)).toBe('$1.25/$10');
-    // Omitted pricing renders as an em dash.
     const cerebras = findModelByRunnerModel('gpt-oss-120b')!;
-    expect(formatCostPerMillion(cerebras)).toBe('—');
+    expect(formatCostPerMillion(cerebras)).toBe('$0.35/$0.75');
   });
 
   it('renders a Cost column with curated prices and "—" when omitted', () => {
@@ -300,13 +308,130 @@ describe('model catalog resolution', () => {
     expect(rowFor(output, 'groq')).toContain('$0.59/$0.79');
     expect(rowFor(output, 'gemini')).toContain('$1.25/$10');
     expect(rowFor(output, 'grok')).toContain('$1.25/$2.5');
+    expect(rowFor(output, 'gpt')).toContain('$5/$30');
+    expect(rowFor(output, 'cerebras')).toContain('$0.35/$0.75');
     // SDK-lane Anthropic alias carries its declared price too.
     expect(rowFor(output, 'opus')).toContain('$5/$25');
     // Omitted prices render as an em dash: Perplexity (hybrid per-request fee),
-    // Cerebras (subscription-only), Fireworks DeepSeek v3p1 (unverifiable band).
+    // Fireworks DeepSeek v3p1 (unverifiable band).
     expect(rowFor(output, 'perplexity')).toContain('| — |');
-    expect(rowFor(output, 'cerebras')).toContain('| — |');
     expect(rowFor(output, 'fireworks')).toContain('| — |');
+  });
+
+  it('merges settings-owned aliases into the normal catalog path', () => {
+    configureCustomModelCatalogEntries([
+      executableModelEntry({
+        id: 'settings:fast-job',
+        route: providerRoute('groq', 'llama-3.1-8b-instant'),
+        displayName: 'Fast Job Model',
+        runnerModel: 'llama-3.1-8b-instant',
+        aliases: ['fast-job'],
+        recommendedAlias: 'fast-job',
+        source: {
+          label: 'settings.yaml model_aliases.fast-job',
+          url: 'settings.yaml',
+          verifiedAt: 'custom',
+        },
+        contextWindowTokens: 131_072,
+        inputUsdPerMillionTokens: 0.05,
+        outputUsdPerMillionTokens: 0.08,
+        cacheMode: 'none',
+        cacheTokenFields: [],
+        supportsTools: true,
+        supportedWorkloads: ['one_time_job', 'recurring_job'],
+      }),
+    ]);
+
+    expect(
+      resolveModelSelectionForWorkload('fast-job', 'one_time_job'),
+    ).toMatchObject({
+      ok: true,
+      alias: 'fast-job',
+    });
+    expect(formatModelCatalog()).toContain('fast-job | Fast Job Model');
+    expect(resolveRunnerModel('llama-3.1-8b-instant')).toBeUndefined();
+  });
+
+  it('leaves the active catalog intact when a custom alias overlay is invalid', () => {
+    configureCustomModelCatalogEntries([
+      executableModelEntry({
+        id: 'settings:fast-job',
+        route: providerRoute('groq', 'llama-3.1-8b-instant'),
+        displayName: 'Fast Job Model',
+        runnerModel: 'llama-3.1-8b-instant',
+        aliases: ['fast-job'],
+        recommendedAlias: 'fast-job',
+        source: {
+          label: 'settings.yaml model_aliases.fast-job',
+          url: 'settings.yaml',
+          verifiedAt: 'custom',
+        },
+        cacheMode: 'none',
+        cacheTokenFields: [],
+        supportsTools: true,
+        supportedWorkloads: ['one_time_job'],
+      }),
+    ]);
+
+    expect(() =>
+      configureCustomModelCatalogEntries([
+        executableModelEntry({
+          id: 'settings:bad-opus',
+          route: providerRoute('groq', 'llama-3.1-8b-instant'),
+          displayName: 'Bad Opus',
+          runnerModel: 'llama-3.1-8b-instant',
+          aliases: ['opus'],
+          recommendedAlias: 'opus',
+          source: {
+            label: 'settings.yaml model_aliases.bad-opus',
+            url: 'settings.yaml',
+            verifiedAt: 'custom',
+          },
+          cacheMode: 'none',
+          cacheTokenFields: [],
+          supportsTools: true,
+          supportedWorkloads: ['one_time_job'],
+        }),
+      ]),
+    ).toThrow(/Duplicate model alias: opus/);
+    expect(resolveModelSelection('fast-job')).toMatchObject({
+      ok: true,
+      alias: 'fast-job',
+    });
+  });
+
+  it('recommends models using deterministic filters and rankings', () => {
+    expect(
+      recommendModelAlias({
+        workload: 'one_time_job',
+        priority: 'cheap',
+        configuredProviders: new Set(['groq']),
+      }),
+    ).toMatchObject({ alias: 'groq-fast' });
+
+    const best = recommendModelAlias({
+      workload: 'chat',
+      agentHarness: 'deepagents',
+      requiresTools: true,
+      priority: 'best',
+    });
+    expect(best).toMatchObject({ alias: 'gpt' });
+    expect(best?.reason).toContain('supports chat');
+
+    const constrained = recommendModelAlias({
+      workload: 'one_time_job',
+      agentHarness: DEFAULT_AGENT_ENGINE,
+      currentAlias: 'kimi',
+      priority: 'balanced',
+    });
+    expect(constrained?.alias).not.toBe('kimi');
+    expect(
+      constrained?.rejected.some((item) =>
+        item.reason.includes(
+          `cannot run with agent harness ${DEFAULT_AGENT_ENGINE}`,
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('derives cache support from provider metadata and model route', () => {
@@ -518,12 +643,11 @@ describe('model usage normalization', () => {
   });
 
   it('leaves DeepAgents-lane cost undefined when the model has no curated price', () => {
-    // cerebras gpt-oss-120b omits pricing (subscription-only) -> no estimate.
     const usage = normalizeModelUsage({
       message: {
         usage: { prompt_tokens: 1000, completion_tokens: 500 },
       },
-      fallbackModel: 'gpt-oss-120b',
+      fallbackModel: 'sonar-pro',
     });
     expect(usage?.estimatedCostUsd).toBeUndefined();
   });

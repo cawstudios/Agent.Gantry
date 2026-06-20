@@ -11,6 +11,7 @@ import {
   mirrorAgentToolRulesToRuntimeSettings,
   parseRuntimeSettings,
   saveRuntimeSettings,
+  withRuntimeModelAliases,
 } from '@core/config/settings/runtime-settings.js';
 import { renderRuntimeSettingsYaml } from '@core/config/settings/runtime-settings-renderer.js';
 import { validateLoadedRuntimeSettings } from '@core/config/settings/runtime-settings-validation.js';
@@ -204,6 +205,77 @@ describe('runtime settings', () => {
     expect(yaml).toContain('llama-70b: ["together"]');
     const parsed = parseRuntimeSettings(yaml);
     expect(parsed.modelFamilies).toEqual(settings.modelFamilies);
+  });
+
+  it('renders, parses, and uses custom model aliases for agent models', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.modelAliases = {
+      'fast-job': {
+        provider: 'groq',
+        providerModelId: 'llama-3.1-8b-instant',
+        displayName: 'Fast Job Model',
+        aliases: ['fast-job'],
+        recommendedAlias: 'fast-job',
+        supportedWorkloads: ['chat', 'one_time_job', 'recurring_job'],
+        contextWindowTokens: 131_072,
+        inputUsdPerMillionTokens: 0.05,
+        outputUsdPerMillionTokens: 0.08,
+        supportsTools: true,
+        source: {
+          label: 'Groq supported models',
+          url: 'https://console.groq.com/docs/models',
+          verifiedAt: '2026-06-19',
+        },
+      },
+    };
+    settings.agents.worker = {
+      name: 'Worker',
+      folder: 'worker',
+      model: 'fast-job',
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [],
+      accessPreset: 'full',
+    };
+
+    const yaml = renderRuntimeSettingsYaml(settings);
+    expect(yaml).toContain('model_aliases:');
+    expect(yaml).toContain('provider_model_id: "llama-3.1-8b-instant"');
+
+    const parsed = parseRuntimeSettings(yaml);
+    expect(parsed.modelAliases['fast-job']).toMatchObject({
+      provider: 'groq',
+      providerModelId: 'llama-3.1-8b-instant',
+    });
+    expect(parsed.agents.worker.model).toBe('fast-job');
+    const validation = withRuntimeModelAliases(parsed, () =>
+      validateLoadedRuntimeSettings('/tmp/gantry-custom-model', parsed),
+    );
+    expect(validation.failure?.details.join('\n') ?? '').not.toContain(
+      'agents.worker.model is invalid',
+    );
+  });
+
+  it('rejects invalid custom model alias providers', () => {
+    expect(() =>
+      parseRuntimeSettings(`model_aliases:
+  missing:
+    provider: not-a-provider
+    provider_model_id: model-id
+`),
+    ).toThrow(/Model credential provider must be one of/);
+  });
+
+  it('keeps custom model tool support unknown unless declared', () => {
+    const parsed = parseRuntimeSettings(`model_aliases:
+  no-tools-claim:
+    provider: groq
+    provider_model_id: llama-3.1-8b-instant
+`);
+
+    expect(
+      parsed.modelAliases['no-tools-claim']?.supportsTools,
+    ).toBeUndefined();
   });
 
   it('rejects a non-array model_families value', () => {
