@@ -71,6 +71,7 @@ describe('status command formatting', () => {
           warmSpare: 'available',
         },
         backgroundJobs: { used: 1, capacity: 4 },
+        asyncTasks: { used: 2, capacity: 4 },
         host: { used: 2, budget: 8, cpuThreads: 8 },
       },
       sandboxWarmTemplate: {
@@ -91,6 +92,7 @@ describe('status command formatting', () => {
       Interactive capacity: 1/6
       Interactive backlog: 2, oldest 33s
       Background jobs: 1/4
+      Async tasks: 2/4
       Host capacity: 2/8, CPU threads 8
       Live warm spare: available
       Workspace: default

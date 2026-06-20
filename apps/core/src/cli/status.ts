@@ -32,6 +32,8 @@ import {
   type HostExecutionRuntimeClass,
 } from '../shared/host-capacity.js';
 
+const ASYNC_TASK_STATUS_CAPACITY = 4;
+
 export interface RuntimeCapacityStatus {
   interactive: {
     used: number;
@@ -41,6 +43,10 @@ export interface RuntimeCapacityStatus {
     warmSpare: 'available' | 'missing';
   };
   backgroundJobs: {
+    used: number;
+    capacity: number;
+  };
+  asyncTasks: {
     used: number;
     capacity: number;
   };
@@ -291,6 +297,9 @@ async function readRuntimeCapacityFromStorage(
           hostUsage.params,
         ),
       ]);
+      const activeAsyncTasks = await readActiveAsyncTaskCount(
+        storage.service.pool,
+      );
       const liveSlotsUsed = hostInteractiveUsed.rows[0]?.count ?? 0;
       const backgroundSlotsUsed = hostBackgroundUsed.rows[0]?.count ?? 0;
       const hostCapacity = resolveStatusHostCapacity({
@@ -312,6 +321,10 @@ async function readRuntimeCapacityFromStorage(
           used: backgroundSlotsUsed,
           capacity: hostCapacity.backgroundCapacity,
         },
+        asyncTasks: {
+          used: activeAsyncTasks,
+          capacity: ASYNC_TASK_STATUS_CAPACITY,
+        },
         host: {
           used: hostUsed.rows[0]?.count ?? 0,
           budget: hostCapacity.budget,
@@ -330,6 +343,24 @@ async function readRuntimeCapacityFromStorage(
     }
     return undefined;
   }
+}
+
+async function readActiveAsyncTaskCount(pool: {
+  query<T = unknown>(
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: T[] }>;
+}): Promise<number> {
+  const table = await pool.query<{ exists: boolean }>(
+    `SELECT to_regclass('agent_async_tasks') IS NOT NULL AS exists`,
+  );
+  if (!table.rows[0]?.exists) return 0;
+  const active = await pool.query<{ count: number }>(
+    `SELECT count(*)::int AS count
+     FROM agent_async_tasks
+     WHERE status IN ('queued', 'running', 'needs_attention')`,
+  );
+  return active.rows[0]?.count ?? 0;
 }
 
 function hostSlotUsageFilter(runtimeClass?: HostExecutionRuntimeClass): {
@@ -544,6 +575,7 @@ function insertRuntimeCapacityStatus(
     `Interactive capacity: ${capacity.interactive.used}/${capacity.interactive.capacity}`,
     `Interactive backlog: ${capacity.interactive.backlog}, oldest ${capacity.interactive.oldestBacklogSeconds}s`,
     `Background jobs: ${capacity.backgroundJobs.used}/${capacity.backgroundJobs.capacity}`,
+    `Async tasks: ${capacity.asyncTasks.used}/${capacity.asyncTasks.capacity}`,
     `Host capacity: ${capacity.host.used}/${capacity.host.budget}, CPU threads ${capacity.host.cpuThreads}`,
     `Live warm spare: ${capacity.interactive.warmSpare}`,
   );
