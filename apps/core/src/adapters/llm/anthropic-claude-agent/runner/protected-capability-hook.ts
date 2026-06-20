@@ -7,7 +7,7 @@ import {
   ToolExecutionClassifier,
   ToolExecutionPolicyService,
 } from '../../../../shared/tool-execution-policy-service.js';
-import { denyMemoryBoundaryToolUse } from '../../../../runner/memory-boundary.js';
+import { denyMemoryBoundaryToolUse } from '../../../../shared/memory-boundary.js';
 import { applyBashTrustEnv } from './bash-trust-env.js';
 
 const BLOCK_MESSAGE =

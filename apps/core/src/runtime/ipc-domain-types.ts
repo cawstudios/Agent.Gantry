@@ -22,9 +22,12 @@ import type {
   JobControlPort,
   JobManagementServiceDeps,
 } from '../application/jobs/job-management-types.js';
+import type { AsyncTaskRepository } from '../domain/ports/async-tasks.js';
+import type { RunnerSandboxProvider } from '../shared/runner-sandbox-provider.js';
 import type { BrowserBackendAction } from '../shared/browser-backend-actions.js';
 import type { BrowserSessionStatus } from './browser-capability-types.js';
 import type { BrowserUsageSettings } from './browser-usage-governor.js';
+import type { EgressSettings } from '../shared/egress-policy.js';
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
 import type { FileArtifactStore } from '../domain/ports/file-artifact-store.js';
 
@@ -58,19 +61,24 @@ export interface IpcDeps {
   opsRepository: RuntimeJobRepository;
   getToolRepository?: () => ToolCatalogRepository | undefined;
   getSkillRepository?: () => SkillCatalogRepository | undefined;
+  getAsyncTaskRepository?: () => AsyncTaskRepository | undefined;
   getMcpServerRepository?: () => McpServerRepository | undefined;
   getCapabilitySecretRepository?: () => CapabilitySecretRepository | undefined;
+  runnerSandboxProvider?: RunnerSandboxProvider;
   runApprovedCommand?: (input: {
     argv: string[];
     cwd: string;
     env: NodeJS.ProcessEnv;
     timeoutMs: number;
+    signal?: AbortSignal;
+    stdoutMaxBytes?: number;
     stderrMaxBytes?: number;
     redactOutput?: (value: string) => string;
-  }) => Promise<void>;
+  }) => Promise<{ stdout?: string; stderr?: string } | void>;
   getPermissionRepository?: () => PermissionRepository | undefined;
   getFileArtifactStore?: () => FileArtifactStore | undefined;
   publishRuntimeEvent?: (event: RuntimeEventPublishInput) => Promise<void>;
+  getEgressSettings?: () => EgressSettings;
   getJobControl?: () => JobControlPort | undefined;
   mirrorAgentToolRulesToSettings?: (
     sourceAgentFolder: string,

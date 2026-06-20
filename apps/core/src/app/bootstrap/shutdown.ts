@@ -24,6 +24,7 @@ export interface InstallShutdownHandlersOptions {
   closeScheduler?: () => Promise<void>;
   closeOutboundDeliveryRecovery?: () => Promise<void>;
   closeLiveTurnRecovery?: () => Promise<void>;
+  closeAsyncTaskRecovery?: () => Promise<void>;
   /** Stop admitting NEW live turns (active turns keep running). */
   closeLiveTurnAdmission?: () => void;
   /** Stop the live admission loop so no new run rows are created. */
@@ -96,6 +97,10 @@ export function installShutdownHandlers(
     await runStep(
       options.closeLiveTurnRecovery,
       'Failed to stop live-turn recovery during drain',
+    );
+    await runStep(
+      options.closeAsyncTaskRecovery,
+      'Failed to stop async task recovery during drain',
     );
 
     // Stop fleet worker subsystems once intake has stopped: the bake queue,

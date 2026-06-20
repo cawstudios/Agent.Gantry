@@ -8,6 +8,7 @@ import { registerSchedulerTools } from './tools/scheduler.js';
 import { registerServiceTools } from './tools/service.js';
 import { registerTaskLifecycleTools } from './tools/task-lifecycle.js';
 import {
+  ASYNC_TASK_GANTRY_MCP_TOOL_NAMES,
   NO_PERMISSION_HIDDEN_GANTRY_MCP_TOOL_NAMES,
   parseEnabledGantryMcpToolNames,
 } from '../gantry-mcp-tool-surface.js';
@@ -69,6 +70,7 @@ export function createGantryMcpServer(): McpServer {
     process.env.GANTRY_ADMIN_MCP_TOOLS_JSON,
     process.env.GANTRY_NO_PERMISSION_TOOLS,
     process.env.GANTRY_AGENT_ACCESS_PRESET === 'locked',
+    process.env.GANTRY_ASYNC_TASK_TOOLS_ENABLED,
   );
   const registeredHandlers = new Set<string>();
   const filteredServer = filteredToolRegistrar(
@@ -96,6 +98,7 @@ export function effectiveEnabledMcpToolNames(
   rawAdminToolNames: string | undefined,
   rawNoPermissionTools = process.env.GANTRY_NO_PERMISSION_TOOLS,
   lockedPreset = process.env.GANTRY_AGENT_ACCESS_PRESET === 'locked',
+  rawAsyncTaskToolsEnabled = process.env.GANTRY_ASYNC_TASK_TOOLS_ENABLED,
 ): Set<string> {
   const enabledTools = new Set(
     parseEnabledGantryMcpToolNames(rawToolNames, { lockedPreset }),
@@ -119,6 +122,11 @@ export function effectiveEnabledMcpToolNames(
     // previously selected admin tools so admin agents stay functional.
     if (!lockedPreset) {
       for (const toolName of selectedAdminTools) enabledTools.add(toolName);
+    }
+  }
+  if (rawAsyncTaskToolsEnabled !== '1') {
+    for (const toolName of ASYNC_TASK_GANTRY_MCP_TOOL_NAMES) {
+      enabledTools.delete(toolName);
     }
   }
   return enabledTools;

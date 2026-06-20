@@ -63,6 +63,7 @@ const MAX_OUTPUT_CHARS = 16_000;
 // Hard wall-clock cap for a single command. Mirrors a conservative interactive
 // budget; the model can re-issue with a narrower command if it needs more.
 const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
+const COMMAND_TERMINATE_GRACE_MS = 1_000;
 
 // Network/proxy + CA-trust env keys the child must carry so egress stays on the
 // Gantry egress gateway and TLS trust resolves — for EVERY client type, not just
@@ -227,51 +228,54 @@ async function runShellCommand(
   command: string,
   config: GantryShellToolConfig,
 ): Promise<string> {
+  if (config.signal?.aborted) {
+    return formatResult({
+      stdout: '',
+      stderr: '',
+      exitNote: 'Command aborted (run stopped).',
+    });
+  }
   return new Promise<string>((resolve) => {
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let exitNoteOverride: string | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
     const child = spawn('/bin/sh', ['-c', command], {
       cwd: config.cwd,
       env: buildShellChildEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     });
 
     const finish = (text: string) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       config.signal?.removeEventListener('abort', onAbort);
       resolve(text);
     };
 
-    const onAbort = () => {
-      child.kill('SIGKILL');
-      finish(
-        formatResult({
-          stdout,
-          stderr,
-          exitNote: 'Command aborted (run stopped).',
-        }),
-      );
+    const terminate = (exitNote: string) => {
+      if (exitNoteOverride) return;
+      exitNoteOverride = exitNote;
+      killShellProcessGroup(child, 'SIGTERM');
+      forceKillTimer = setTimeout(() => {
+        killShellProcessGroup(child, 'SIGKILL');
+      }, COMMAND_TERMINATE_GRACE_MS);
+      forceKillTimer.unref?.();
     };
 
+    const onAbort = () => terminate('Command aborted (run stopped).');
+
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(
-        formatResult({
-          stdout,
-          stderr,
-          exitNote: `Command timed out after ${DEFAULT_COMMAND_TIMEOUT_MS}ms and was killed.`,
-        }),
+      terminate(
+        `Command timed out after ${DEFAULT_COMMAND_TIMEOUT_MS}ms and was killed.`,
       );
     }, DEFAULT_COMMAND_TIMEOUT_MS);
 
     if (config.signal) {
-      if (config.signal.aborted) {
-        onAbort();
-        return;
-      }
       config.signal.addEventListener('abort', onAbort, { once: true });
     }
 
@@ -291,12 +295,31 @@ async function runShellCommand(
       );
     });
     child.on('close', (code, signalName) => {
-      const exitNote = signalName
-        ? `Command terminated by signal ${signalName}.`
-        : `Command exited with code ${code ?? 'null'}.`;
+      const exitNote =
+        exitNoteOverride ??
+        (signalName
+          ? `Command terminated by signal ${signalName}.`
+          : `Command exited with code ${code ?? 'null'}.`);
       finish(formatResult({ stdout, stderr, exitNote }));
     });
   });
+}
+
+function killShellProcessGroup(
+  child: ReturnType<typeof spawn>,
+  signal: NodeJS.Signals,
+): void {
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (err) {
+      const code =
+        err instanceof Error ? (err as NodeJS.ErrnoException).code : '';
+      if (code === 'ESRCH') return;
+    }
+  }
+  child.kill(signal);
 }
 
 function formatResult(input: {

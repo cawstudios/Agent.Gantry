@@ -28,6 +28,7 @@ import type { AgentExecutionAdapterRegistry } from '../application/agent-executi
 import type { RunnerSandboxProvider } from '../shared/runner-sandbox-provider.js';
 import type { BrowserSessionStatus } from '../runtime/browser-capability-types.js';
 import type { ProcessRole } from '../app/bootstrap/roles/process-role.js';
+import type { AsyncTaskRepository } from '../domain/ports/async-tasks.js';
 
 export interface SchedulerDependencies {
   /** Process role; persisted on the worker_instances row at registration. */
@@ -61,6 +62,7 @@ export interface SchedulerDependencies {
   getMcpDnsValidationCache?: () => RemoteMcpDnsValidationCache | undefined;
   getSkillArtifactStore?: () => SkillArtifactStore | undefined;
   getToolRepository?: () => ToolCatalogRepository | undefined;
+  getAsyncTaskRepository?: () => AsyncTaskRepository | undefined;
   getBrowserStatus?: (
     profileName: string,
   ) => Promise<JobReadinessBrowserStatus | undefined>;

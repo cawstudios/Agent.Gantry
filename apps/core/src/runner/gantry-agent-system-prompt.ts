@@ -1,4 +1,4 @@
-import { composeSystemPromptAppend } from './memory-boundary.js';
+import { composeSystemPromptAppend } from '../shared/memory-boundary.js';
 import {
   resolveAgentPersona,
   type AgentPersona,
@@ -48,7 +48,7 @@ const PUBLIC_CATALOG = [
   'Skills: selected skills and skill request tools',
   'MCP/apps: mcp_list_tools, mcp_describe_tool, mcp_call_tool, request_mcp_server',
   'Commands: RunCommand(<argv pattern>)',
-  'Tasks: todo_update',
+  'Tasks: todo_update; async_run_command/task_get/task_list/task_cancel only when mounted in this run',
   'Scheduler: scheduler_*',
   'Admin: settings, permission, restart, register-agent tools',
 ];
@@ -186,7 +186,7 @@ function gantryControlSection(): string {
     '## Gantry Control',
     'Use send_message for channel-visible updates and ask_user_question for decision-blocking questions.',
     'Use request_access for reviewed semantic capabilities, Browser, exact Gantry admin tools, provider/channel permissions, or scoped RunCommand(<argv pattern>) fallback.',
-    'Use todo_update for visible task state. Delegation is not a current runtime tool unless Gantry explicitly mounts a delegated-task executor.',
+    'Use todo_update for visible task state. If Gantry mounts async_run_command, use it for approved long-running commands, then task_get/task_list/task_cancel for status and control. Delegated subagents are not current runtime tools unless Gantry explicitly mounts a delegated-task executor.',
   ].join('\n');
 }
 

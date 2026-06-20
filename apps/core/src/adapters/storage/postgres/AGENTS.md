@@ -72,5 +72,8 @@
   `Grep`, or `WebFetch`; those belong inside execution adapter per-run harness
   projections.
 - Display-only agent todo state is not Postgres lifecycle state. Do not add
-  `todo_update` tables, delegated-task tables, provider task id correlation, or
-  read/cancel indexes until a real delegated executor and read model exist.
+  `todo_update` tables. Durable async command task rows are allowed only when
+  paired with row-before-run admission, a real host executor, scoped read/list/
+  cancel, abort propagation, terminal receipts, and restart recovery. Delegated
+  agent task rows and provider task id correlation still require a real
+  delegated-agent executor and read model.

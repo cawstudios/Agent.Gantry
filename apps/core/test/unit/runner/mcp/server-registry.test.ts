@@ -135,11 +135,37 @@ describe('effective enabled MCP tool projection', () => {
     // Safe baseline preserved.
     expect(enabled.has('send_message')).toBe(true);
     expect(enabled.has('ask_user_question')).toBe(true);
+    expect(enabled.has('async_run_command')).toBe(false);
+    expect(enabled.has('task_get')).toBe(false);
+    expect(enabled.has('task_list')).toBe(false);
+    expect(enabled.has('task_cancel')).toBe(false);
     expect(enabled.has('todo_update')).toBe(true);
     expect(enabled.has('delegate_task')).toBe(false);
-    expect(enabled.has('task_get')).toBe(false);
-    expect(enabled.has('task_cancel')).toBe(false);
     expect(enabled.has('memory_search')).toBe(true);
     expect(enabled.has('agent_profile_read')).toBe(true);
+  });
+
+  it('mounts async task controls only when the host enables the executor', async () => {
+    setIpcDir();
+    const { effectiveEnabledMcpToolNames } =
+      await import('@core/runner/mcp/server.js');
+
+    const enabled = effectiveEnabledMcpToolNames(
+      JSON.stringify([
+        'async_run_command',
+        'task_get',
+        'task_list',
+        'task_cancel',
+      ]),
+      undefined,
+      undefined,
+      false,
+      '1',
+    );
+
+    expect(enabled.has('async_run_command')).toBe(true);
+    expect(enabled.has('task_get')).toBe(true);
+    expect(enabled.has('task_list')).toBe(true);
+    expect(enabled.has('task_cancel')).toBe(true);
   });
 });

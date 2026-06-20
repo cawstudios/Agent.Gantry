@@ -10,7 +10,7 @@ import {
   yoloModeDenylistDenyReason,
   type YoloModeSettings,
 } from '../shared/yolo-mode-policy.js';
-import { denyMemoryBoundaryToolUse } from './memory-boundary.js';
+import { denyMemoryBoundaryToolUse } from '../shared/memory-boundary.js';
 
 // Provider-neutral runner-side tool gate decision core. Holds the order-sensitive
 // authority checks that every execution adapter shares:

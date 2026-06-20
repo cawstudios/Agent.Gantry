@@ -8,6 +8,7 @@ import {
   startRuntimeServices,
   beginDrainingLiveTurnAdmission,
   shutdownLiveTurnAuthority,
+  stopAsyncTaskRecoveryLoop,
   stopLiveTurnRecoveryLoop,
   stopMessagePollingLoop,
 } from './bootstrap/runtime-services.js';
@@ -208,6 +209,9 @@ export async function startGantryRuntime(
     closeLiveTurnRecovery: async () => {
       stopLiveTurnRecoveryLoop();
     },
+    closeAsyncTaskRecovery: async () => {
+      stopAsyncTaskRecoveryLoop();
+    },
     closeLiveTurnAuthority: shutdownLiveTurnAuthority,
     closeSettingsWatcher: settingsWatcher.close,
     closeLiveRecoveryCoordinatorLease: async () => {
@@ -261,6 +265,7 @@ export async function startGantryRuntime(
         opsRepository: storage.ops,
         getToolRepository: () => storage.repositories.tools,
         getSkillRepository: () => storage.repositories.skills,
+        getAsyncTaskRepository: () => storage.repositories.asyncTasks,
         getMcpServerRepository: () => storage.repositories.mcpServers,
         getCapabilitySecretRepository: () =>
           storage.repositories.capabilitySecrets,

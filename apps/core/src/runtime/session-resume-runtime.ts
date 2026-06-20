@@ -344,6 +344,7 @@ export function buildRuntimeRunOptions(input: {
   executionAdapter?: RunAgentOptions['executionAdapter'];
   executionAdapters?: RunAgentOptions['executionAdapters'];
   runnerSandboxProvider: RunAgentOptions['runnerSandboxProvider'];
+  asyncTaskRepositoryAvailable?: boolean;
   skillContext?: {
     appId: string;
     agentId: string;
@@ -404,6 +405,9 @@ export function buildRuntimeRunOptions(input: {
       ? { executionAdapters: input.executionAdapters }
       : {}),
     runnerSandboxProvider: input.runnerSandboxProvider,
+    ...(input.asyncTaskRepositoryAvailable
+      ? { asyncTaskRepositoryAvailable: true }
+      : {}),
   };
   return options;
 }

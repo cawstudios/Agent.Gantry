@@ -81,6 +81,7 @@ export async function connectGantryAndThirdPartyMcpTools(
   const projection = buildGantryMcpProjection({
     configuredAllowedTools: input.configuredAllowedTools,
     hideAuthorityTools: input.hideAuthorityTools,
+    memoryBlock: input.gate.memoryBlock,
     processEnv: process.env,
   });
 

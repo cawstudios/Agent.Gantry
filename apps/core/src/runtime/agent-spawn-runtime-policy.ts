@@ -27,6 +27,28 @@ export const LOCAL_CLI_CREDENTIAL_DIRS_ENV =
 export const SANDBOX_RUNTIME_MODEL_GATEWAY_HOST =
   'model-gateway.gantry.internal';
 
+export function writeProtectedFilesystemEnv(input: {
+  env: NodeJS.ProcessEnv;
+  protectedReadPaths: readonly string[];
+  protectedWritePaths: readonly string[];
+  localCliCredentialPaths: readonly string[];
+}): void {
+  input.env[PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV] = JSON.stringify(
+    input.protectedReadPaths,
+  );
+  input.env[PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV] = JSON.stringify(
+    input.protectedWritePaths,
+  );
+  input.env[PROTECTED_FILESYSTEM_PATHS_ENV] = JSON.stringify(
+    input.protectedWritePaths,
+  );
+  if (input.localCliCredentialPaths.length > 0) {
+    input.env[LOCAL_CLI_CREDENTIAL_DIRS_ENV] = JSON.stringify(
+      input.localCliCredentialPaths,
+    );
+  }
+}
+
 export interface SandboxRuntimeModelGatewayProjection {
   modelCredentialEnv?: Record<string, string>;
   allowedNetworkHosts: string[];

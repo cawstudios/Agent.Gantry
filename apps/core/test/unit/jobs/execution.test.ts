@@ -780,7 +780,7 @@ describe('jobs/execution', () => {
       expect(runtimeStoreMock.heartbeatRunLease).toHaveBeenCalledWith({
         runId: 'run-1',
         leaseToken: 'lease-token-1',
-        ttlMs: 60_000,
+        ttlMs: 40_000,
       });
       expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
         'run-1',

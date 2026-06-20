@@ -21,6 +21,7 @@ const BROWSER_GATEWAY_TOOL_NAME_SET = new Set<string>(
 export interface GantryMcpEnvInput {
   configuredAllowedTools: readonly string[];
   hideAuthorityTools: boolean;
+  memoryBlock?: string;
   processEnv: NodeJS.ProcessEnv;
 }
 
@@ -50,6 +51,7 @@ export function buildGantryMcpProjection(
     {
       excludeAuthorityTools: input.hideAuthorityTools,
       memoryReviewerIsControlApprover,
+      asyncTaskToolsEnabled: env.GANTRY_ASYNC_TASK_TOOLS_ENABLED === '1',
     },
   );
   // Browser gateway tools (browser_*) are reachable only when the host enabled
@@ -87,12 +89,16 @@ export function buildGantryMcpProjection(
     ...passthrough(env, 'GANTRY_MEMORY_USER_ID'),
     ...passthrough(env, 'GANTRY_MEMORY_DEFAULT_SCOPE'),
     ...passthrough(env, 'GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER'),
+    ...(env.GANTRY_ASYNC_TASK_TOOLS_ENABLED === '1' && input.memoryBlock
+      ? { GANTRY_MEMORY_CONTEXT_BLOCK: input.memoryBlock }
+      : {}),
     ...passthrough(env, 'GANTRY_MEMORY_IPC_AUTH_TOKEN'),
     ...passthrough(env, 'GANTRY_BROWSER_PROFILE_NAME'),
     ...passthrough(env, 'GANTRY_AGENT_ACCESS_PRESET'),
     ...passthrough(env, 'GANTRY_DEPLOYMENT_MODE'),
     ...passthrough(env, 'GANTRY_INTERACTIVE_PERMISSION_TIMEOUT_MS'),
     ...passthrough(env, 'GANTRY_PERMISSION_TIMEOUT_MS'),
+    ...passthrough(env, 'GANTRY_ASYNC_TASK_TOOLS_ENABLED'),
     GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: JSON.stringify(
       input.configuredAllowedTools,
     ),

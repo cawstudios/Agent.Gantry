@@ -130,6 +130,7 @@ export interface RunAgentOptions {
   executionAdapter?: AgentExecutionAdapter;
   executionAdapters?: AgentExecutionAdapterRegistry;
   runnerSandboxProvider: RunnerSandboxProvider;
+  asyncTaskRepositoryAvailable?: boolean;
 }
 
 export interface HostRuntimeContext {

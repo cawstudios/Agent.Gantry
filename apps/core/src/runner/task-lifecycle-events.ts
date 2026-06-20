@@ -7,6 +7,17 @@ export type TaskLifecycleEventKind =
   | 'updated'
   | 'notification';
 
+export type GantryTaskKind = 'async_command' | 'delegated_agent';
+
+export type GantryTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'needs_attention'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'timed_out';
+
 export interface TaskLifecycleContext {
   appId?: string;
   agentId?: string;
@@ -38,6 +49,7 @@ export interface TaskLifecycleEventInput {
   toolUseId?: string;
   description?: string;
   subagentType?: string;
+  taskKind?: GantryTaskKind;
   taskType?: string;
   workflowName?: string;
   skipTranscript?: boolean;
@@ -91,7 +103,7 @@ function payloadFor(
       ...defined({
         description: boundedText(input.description),
         subagentType: boundedText(input.subagentType),
-        taskType: boundedText(input.taskType),
+        taskKind: taskKind(input),
         workflowName: boundedText(input.workflowName),
       }),
       skipTranscript: input.skipTranscript === true,
@@ -103,6 +115,7 @@ function payloadFor(
       ...defined({
         description: boundedText(input.description),
         subagentType: boundedText(input.subagentType),
+        taskKind: taskKind(input),
         lastToolName: boundedText(input.lastToolName),
         summary: boundedText(input.summary),
         usage: sanitizedUsage(input.usage),
@@ -113,7 +126,7 @@ function payloadFor(
     return {
       ...base,
       patch: defined({
-        status: boundedText(input.patch?.status),
+        status: taskStatus(input.patch?.status),
         description: boundedText(input.patch?.description),
         endTime: input.patch?.endTime,
         totalPausedMs: input.patch?.totalPausedMs,
@@ -125,12 +138,73 @@ function payloadFor(
   return {
     ...base,
     ...defined({
-      status: boundedText(input.status),
+      status: taskStatus(input.status),
       summary: boundedText(input.summary),
       usage: sanitizedUsage(input.usage),
     }),
     skipTranscript: input.skipTranscript === true,
   };
+}
+
+function taskKind(input: TaskLifecycleEventInput): GantryTaskKind | undefined {
+  if (input.taskKind) return input.taskKind;
+  const normalized = input.taskType?.trim().toLowerCase();
+  if (
+    normalized === 'async_command' ||
+    normalized === 'local_bash' ||
+    normalized === 'bash' ||
+    normalized === 'run_command' ||
+    normalized === 'command'
+  ) {
+    return 'async_command';
+  }
+  if (
+    normalized === 'delegated_agent' ||
+    normalized === 'local_agent' ||
+    normalized === 'remote_agent' ||
+    normalized === 'agent' ||
+    normalized === 'subagent'
+  ) {
+    return 'delegated_agent';
+  }
+  return undefined;
+}
+
+function taskStatus(value: unknown): GantryTaskStatus | undefined {
+  if (typeof value !== 'string') return undefined;
+  switch (value.trim().toLowerCase()) {
+    case 'queued':
+    case 'pending':
+      return 'queued';
+    case 'running':
+    case 'started':
+    case 'in_progress':
+    case 'in-progress':
+      return 'running';
+    case 'needs_attention':
+    case 'needs-attention':
+    case 'blocked':
+      return 'needs_attention';
+    case 'completed':
+    case 'complete':
+    case 'success':
+    case 'succeeded':
+      return 'completed';
+    case 'failed':
+    case 'error':
+      return 'failed';
+    case 'cancelled':
+    case 'canceled':
+    case 'stopped':
+      return 'cancelled';
+    case 'timed_out':
+    case 'timed-out':
+    case 'timeout':
+    case 'timedout':
+      return 'timed_out';
+    default:
+      return undefined;
+  }
 }
 
 function boundedText(value: unknown): string | undefined {

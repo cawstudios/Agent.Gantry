@@ -460,7 +460,7 @@ describe('normalizeDeepAgentStream', () => {
           toolUseId: 'toolu-1',
           description: 'Research pricing',
           subagentType: 'general-purpose',
-          taskType: 'local_agent',
+          taskKind: 'delegated_agent',
           workflowName: 'pricing',
           skipTranscript: false,
         },

@@ -164,8 +164,8 @@ function createRunnerFixture(): {
     path.join(runnerDir, 'gantry-agent-system-prompt.ts'),
   );
   fs.copyFileSync(
-    path.resolve('apps/core/src/runner/memory-boundary.ts'),
-    path.join(runnerDir, 'memory-boundary.ts'),
+    path.resolve('apps/core/src/shared/memory-boundary.ts'),
+    path.join(sharedDir, 'memory-boundary.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/runner/runtime-signal-pump.ts'),
@@ -222,6 +222,10 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'model-catalog.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/model-catalog-lookup.ts'),
+    path.join(sharedDir, 'model-catalog-lookup.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/model-provider-registry.ts'),
     path.join(sharedDir, 'model-provider-registry.ts'),
   );
@@ -246,6 +250,14 @@ function createRunnerFixture(): {
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/model-catalog-format.ts'),
     path.join(sharedDir, 'model-catalog-format.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/model-recommendation.ts'),
+    path.join(sharedDir, 'model-recommendation.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/model-execution-route.ts'),
+    path.join(sharedDir, 'model-execution-route.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/model-families.ts'),
@@ -1225,7 +1237,7 @@ describe('agent-runner IPC lifecycle', () => {
             toolUseId: 'toolu_agent_1',
             description: 'Research pricing',
             subagentType: 'general-purpose',
-            taskType: 'local_agent',
+            taskKind: 'delegated_agent',
             workflowName: 'ignored-for-local-agent',
             skipTranscript: false,
           },

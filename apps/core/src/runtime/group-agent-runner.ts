@@ -69,6 +69,15 @@ function isStoppedByRequest(output: AgentOutput): boolean {
     /\bstopped by request\b/i.test(output.error ?? '')
   );
 }
+
+function hasAsyncTaskRepository(deps: GroupProcessingDeps): boolean {
+  try {
+    return Boolean(deps.getAsyncTaskRepository?.());
+  } catch {
+    return false;
+  }
+}
+
 function runtimeEventDedupKey(input: {
   eventType: string;
   appId?: string;
@@ -476,6 +485,7 @@ export function createGroupAgentRunner(input: {
         executionAdapter: deps.executionAdapter,
         executionAdapters: deps.executionAdapters,
         runnerSandboxProvider: deps.runnerSandboxProvider,
+        asyncTaskRepositoryAvailable: hasAsyncTaskRepository(deps),
         turnContext,
       });
       const expireTurnProviderSession = async (

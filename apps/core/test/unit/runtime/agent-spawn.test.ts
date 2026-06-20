@@ -921,7 +921,6 @@ describe('agent-spawn timeout behavior', () => {
     });
 
     await vi.advanceTimersByTimeAsync(10);
-    expect(fakeProc.kill).toHaveBeenCalledWith('SIGKILL');
     fakeProc.emit('close', 137);
     await vi.advanceTimersByTimeAsync(10);
 

@@ -94,6 +94,7 @@ import { prelaunchBrowserForJobRun } from './execution-browser-prelaunch.js';
 import { isTrustedSystemJob } from '../shared/system-job-identity.js';
 import { completeFailedRunFailsafe } from './run-failsafe.js';
 import { createRunProviderMetadataUpdater } from './run-provider-metadata.js';
+import { hasAsyncTaskRepository } from './async-command-task-helpers.js';
 import type {
   JobTurnContext,
   SchedulerDependencies,
@@ -427,6 +428,7 @@ export async function runJob(
               executionAdapter: deps.executionAdapter,
               executionAdapters: deps.executionAdapters,
               runnerSandboxProvider: deps.runnerSandboxProvider,
+              asyncTaskRepositoryAvailable: hasAsyncTaskRepository(deps),
               skillContext: {
                 appId: executionAppId,
                 agentId: executionAgentId,

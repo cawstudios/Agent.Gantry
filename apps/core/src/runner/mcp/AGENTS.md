@@ -12,7 +12,10 @@
   current-run authority before every tool execution.
 - Agent planning tools are Gantry facades: `todo_update` is a baseline
   non-authority render/update signal, not durable lifecycle storage. Do not
-  back display-only plan state with Postgres tables, and do not register
-  `delegate_task`, `task_get`, or `task_cancel` until both the canonical
-  `AgentDelegation` capability and a real Gantry delegated-task executor exist.
+  back display-only plan state with Postgres tables. Public task
+  status/cancel tools may be registered for `async_command` only after they
+  reach a full host-owned durable lifecycle: row-before-run admission, real
+  executor, scoped read/list/cancel, abort propagation, terminal receipts, and
+  restart recovery. `delegate_task` still requires the canonical
+  `AgentDelegation` capability and a real Gantry delegated-agent executor.
   Never expose provider-native task/todo/subagent tool names here.

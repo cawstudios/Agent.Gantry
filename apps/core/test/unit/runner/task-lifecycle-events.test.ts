@@ -87,6 +87,46 @@ describe('buildTaskLifecycleRuntimeEvent', () => {
     expect(JSON.stringify(event)).not.toContain('unknown');
   });
 
+  it('maps provider task vocabulary to public Gantry task fields', () => {
+    const started = buildTaskLifecycleRuntimeEvent(context, {
+      kind: 'started',
+      taskId: 'task-1',
+      taskType: 'local_agent',
+    });
+    const command = buildTaskLifecycleRuntimeEvent(context, {
+      kind: 'started',
+      taskId: 'task-2',
+      taskType: 'local_bash',
+    });
+    const cancelled = buildTaskLifecycleRuntimeEvent(context, {
+      kind: 'notification',
+      taskId: 'task-1',
+      status: 'stopped',
+    });
+
+    expect(started?.payload).toMatchObject({
+      taskId: 'task-1',
+      taskKind: 'delegated_agent',
+    });
+    expect(command?.payload).toMatchObject({
+      taskId: 'task-2',
+      taskKind: 'async_command',
+    });
+    expect(cancelled?.payload).toMatchObject({
+      taskId: 'task-1',
+      status: 'cancelled',
+    });
+    expect(JSON.stringify([started, command, cancelled])).not.toContain(
+      'local_agent',
+    );
+    expect(JSON.stringify([started, command, cancelled])).not.toContain(
+      'local_bash',
+    );
+    expect(JSON.stringify([started, command, cancelled])).not.toContain(
+      'stopped',
+    );
+  });
+
   it('bounds persisted lifecycle text fields', () => {
     const longText = 'x'.repeat(400);
     const started = buildTaskLifecycleRuntimeEvent(context, {
@@ -118,10 +158,10 @@ describe('buildTaskLifecycleRuntimeEvent', () => {
     });
     expect(updated?.payload).toMatchObject({
       patch: {
-        status: 'x'.repeat(300),
         description: 'x'.repeat(300),
       },
     });
+    expect(JSON.stringify(updated?.payload)).not.toContain('x'.repeat(301));
   });
 
   it('drops empty task ids so task.notification capability events stay distinct', () => {

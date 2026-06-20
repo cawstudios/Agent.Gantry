@@ -1,4 +1,6 @@
 import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -166,6 +168,43 @@ describe('Gantry DeepAgents shell tool', () => {
     expect(result).not.toContain('exited with code 0');
   });
 
+  it('returns immediately when the run signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const tool = makeTool({
+      rules: ['RunCommand(echo *)'],
+      signal: controller.signal,
+    });
+
+    const result = await invoke(tool, 'echo should-not-run');
+
+    expect(result).toContain('aborted');
+    expect(result).not.toContain('should-not-run');
+  });
+
+  it('kills the full shell process group on abort so background children do not outlive the command', async () => {
+    requestPermissionApprovalViaIpc.mockResolvedValue({ approved: true });
+    const controller = new AbortController();
+    const marker = path.join(
+      os.tmpdir(),
+      `gantry-shell-grandchild-${Date.now()}-${Math.random()}.txt`,
+    );
+    const tool = makeTool({
+      rules: [],
+      signal: controller.signal,
+    });
+    const pending = invoke(
+      tool,
+      `(sleep 0.3; echo leaked > ${shellQuote(marker)}) & wait`,
+    );
+    setTimeout(() => controller.abort(), 50);
+    const result = await pending;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(result).toContain('aborted');
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
   it('documents the network/proxy env keys the sandboxed child receives', () => {
     // The child env is a scrubbed allowlist that includes these proxy/CA keys
     // (agent-spawn populates them on the runner) so egress stays on the gateway —
@@ -242,4 +281,8 @@ describe('Gantry DeepAgents shell tool', () => {
 function restoreEnv(key: string, prior: string | undefined): void {
   if (prior === undefined) delete process.env[key];
   else process.env[key] = prior;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }

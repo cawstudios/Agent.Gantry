@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { denyMemoryBoundaryToolUse } from '@core/runner/memory-boundary.js';
+import { denyMemoryBoundaryToolUse } from '@core/shared/memory-boundary.js';
 
 const SUPPRESSED_MEMORY =
   '<gantry_memory_context>[suppressed: instruction-like memory content]</gantry_memory_context>';

@@ -226,6 +226,18 @@ replace rather than merge with parent tools. Raw DeepAgents tool names are
 adapter-private and are not user-facing authority. Until that wrapper
 implementation lands, keep stripping `task` and keep the raw spawner unreachable.
 
+Async subagent decision: DeepAgents 1.10.2 also exposes JavaScript async
+subagent middleware (`createAsyncSubAgentMiddleware` / `isAsyncSubAgent`) with
+raw tools named `start_async_task`, `check_async_task`, `update_async_task`,
+`cancel_async_task`, and `list_async_tasks`. That API is Agent Protocol based and
+is not itself Gantry authority. Do not mount or pass those raw tools to the model
+until the Gantry wrapper has created the durable task row, checked
+`AgentDelegation`, verified sandbox/capability/model/harness authority, and
+passed `runner/async-subagent-sentinel.ts` with a Gantry-owned Agent Protocol
+transport/executor. Without that transport/executor, fail closed with
+`Async delegation is unavailable for this DeepAgents version. Gantry did not
+start delegated work.` and start no delegated provider work.
+
 rg guard: this directory reads NO raw DeepAgents/MCP `.mcp.json` authority file —
 `rg -n "\.mcp\.json" apps/core/src/adapters/llm/deepagents-langchain` must be
 empty. Enforced by `deepagents-raw-authority-denial.test.ts`.

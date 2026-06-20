@@ -506,9 +506,11 @@ describe('Claude Agent SDK boundary integration', () => {
         'TaskList',
         'TaskUpdate',
         'TodoWrite',
-        'mcp__gantry__delegate_task',
+        'mcp__gantry__async_run_command',
         'mcp__gantry__task_get',
+        'mcp__gantry__task_list',
         'mcp__gantry__task_cancel',
+        'mcp__gantry__delegate_task',
       ]),
     );
     expect(call?.options.tools).toEqual(

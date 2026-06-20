@@ -5,9 +5,12 @@ import { nowIso } from '../../../shared/time/datetime.js';
 import {
   chatJid,
   jobRunId,
+  jobId,
   jobRunLeaseFencingVersion,
   jobRunLeaseToken,
   TASKS_DIR,
+  agentId,
+  appId,
   threadId,
 } from '../context.js';
 import { formatTaskFailureLines } from '../formatting.js';
@@ -15,6 +18,14 @@ import { waitForTaskResponse, writeIpcFile } from '../ipc.js';
 import { makeIpcId } from '../ipc-ids.js';
 
 const TASK_TOOL_TIMEOUT_MS = 20_000;
+const PROTECTED_FILESYSTEM_PATHS_ENV = 'GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON';
+const PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV =
+  'GANTRY_PROTECTED_FILESYSTEM_DENY_READ_PATHS_JSON';
+const PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV =
+  'GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON';
+const SANDBOX_ALLOWED_NETWORK_HOSTS_ENV =
+  'GANTRY_SANDBOX_ALLOWED_NETWORK_HOSTS_JSON';
+const SANDBOX_RESOURCE_LIMITS_ENV = 'GANTRY_SANDBOX_RESOURCE_LIMITS_JSON';
 
 const todoItemSchema = z.object({
   id: z.string().min(1).max(80),
@@ -33,7 +44,10 @@ async function submitTaskLifecycleRequest(input: {
   writeIpcFile(TASKS_DIR, {
     type: input.type,
     taskId,
+    ...(appId ? { appId } : {}),
+    ...(agentId ? { agentId } : {}),
     runHandle: process.env.GANTRY_AGENT_RUN_HANDLE || undefined,
+    ...(jobId ? { jobId } : {}),
     ...(jobRunId ? { runId: jobRunId } : {}),
     ...(jobRunLeaseToken ? { runLeaseToken: jobRunLeaseToken } : {}),
     ...(jobRunLeaseFencingVersion
@@ -75,6 +89,24 @@ async function submitTaskLifecycleRequest(input: {
   };
 }
 
+function readStringArrayEnv(...keys: string[]): string[] {
+  for (const key of keys) {
+    const value = process.env[key];
+    if (!value) continue;
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (item): item is string => typeof item === 'string',
+        );
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 function formatSuccessfulTaskResponse(response: {
   message?: string;
   data?: unknown;
@@ -85,6 +117,79 @@ function formatSuccessfulTaskResponse(response: {
 }
 
 export function registerTaskLifecycleTools(server: McpServer): void {
+  server.tool(
+    'async_run_command',
+    'Start an approved shell command as a durable background task. Use only for long-running commands that should continue while you inspect status with task_get or task_list. The host enforces selected RunCommand(...) capability rules before it creates the task.',
+    {
+      command: z.string().min(1).max(20_000),
+    },
+    async (args) =>
+      submitTaskLifecycleRequest({
+        type: 'async_run_command',
+        payload: {
+          command: args.command,
+          protectedFilesystemDenyReadPaths: readStringArrayEnv(
+            PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV,
+          ),
+          protectedFilesystemDenyWritePaths: readStringArrayEnv(
+            PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV,
+            PROTECTED_FILESYSTEM_PATHS_ENV,
+          ),
+          sandboxAllowedNetworkHosts: readStringArrayEnv(
+            SANDBOX_ALLOWED_NETWORK_HOSTS_ENV,
+          ),
+          egressProxyUrl: process.env.GANTRY_EGRESS_PROXY_URL,
+          sandboxResourceLimits: readJsonObjectEnv(SANDBOX_RESOURCE_LIMITS_ENV),
+          memoryBlock: process.env.GANTRY_MEMORY_CONTEXT_BLOCK,
+        },
+        timeoutMessage: 'Async command start timed out.',
+        fallbackError: 'Async command start failed.',
+      }),
+  );
+
+  server.tool(
+    'task_get',
+    'Read the current status and terminal receipt for one durable async task created by this agent in this conversation.',
+    {
+      taskId: z.string().min(1).max(160),
+    },
+    async (args) =>
+      submitTaskLifecycleRequest({
+        type: 'task_get',
+        payload: { taskId: args.taskId },
+        timeoutMessage: 'Task status read timed out.',
+        fallbackError: 'Task status read failed.',
+      }),
+  );
+
+  server.tool(
+    'task_list',
+    'List recent durable async tasks created by this agent in this conversation.',
+    {},
+    async () =>
+      submitTaskLifecycleRequest({
+        type: 'task_list',
+        payload: {},
+        timeoutMessage: 'Task list timed out.',
+        fallbackError: 'Task list failed.',
+      }),
+  );
+
+  server.tool(
+    'task_cancel',
+    'Cancel one running durable async task created by this agent in this conversation. Cancellation aborts the active command when it is still running.',
+    {
+      taskId: z.string().min(1).max(160),
+    },
+    async (args) =>
+      submitTaskLifecycleRequest({
+        type: 'task_cancel',
+        payload: { taskId: args.taskId },
+        timeoutMessage: 'Task cancel timed out.',
+        fallbackError: 'Task cancel failed.',
+      }),
+  );
+
   server.tool(
     'todo_update',
     'Publish and maintain a visible multi-step plan for this run, updating item status as work progresses; it renders as one live, in-place list per channel. This is display-only planning state only; it cannot grant tools, create permissions, change settings, or trigger work.',
@@ -103,4 +208,18 @@ export function registerTaskLifecycleTools(server: McpServer): void {
         fallbackError: 'Plan update failed.',
       }),
   );
+}
+
+function readJsonObjectEnv(key: string): Record<string, unknown> | undefined {
+  const value = process.env[key];
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }

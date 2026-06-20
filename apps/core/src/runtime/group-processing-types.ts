@@ -29,6 +29,7 @@ import type { AgentExecutionAdapterRegistry } from '../application/agent-executi
 import type { RunnerSandboxProvider } from '../shared/runner-sandbox-provider.js';
 import type { FamilyOrderOverrides } from '../shared/model-families.js';
 import type { AgentHarness } from '../shared/agent-engine.js';
+import type { AsyncTaskRepository } from '../domain/ports/async-tasks.js';
 
 export type GroupProcessingRepository = RuntimeAgentSessionRepository &
   RuntimeMessageRepository;
@@ -123,6 +124,7 @@ export interface GroupProcessingDeps {
   runAgent?: typeof spawnAgent;
   getCredentialBroker?: () => Promise<AgentCredentialBroker | undefined>;
   getToolRepository?: () => ToolCatalogRepository | undefined;
+  getAsyncTaskRepository?: () => AsyncTaskRepository | undefined;
   getSkillRepository?: () => SkillCatalogRepository | undefined;
   getMcpServerRepository?: () => McpServerRepository | undefined;
   getCapabilitySecretRepository?: () => CapabilitySecretRepository | undefined;

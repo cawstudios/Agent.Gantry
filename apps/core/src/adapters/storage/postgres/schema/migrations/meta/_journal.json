@@ -575,6 +575,13 @@
       "when": 1777284600000,
       "tag": "0083_mcp_inventory_audit_hot_path_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1777288200000,
+      "tag": "0084_agent_async_tasks",
+      "breakpoints": true
     }
   ]
 }

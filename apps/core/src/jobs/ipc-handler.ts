@@ -155,6 +155,15 @@ export async function processTaskIpc(
           return undefined;
         }
       }),
+    getAsyncTaskRepository:
+      deps.getAsyncTaskRepository ??
+      (() => {
+        try {
+          return getRuntimeStorage().repositories.asyncTasks;
+        } catch {
+          return undefined;
+        }
+      }),
     getPermissionRepository:
       deps.getPermissionRepository ??
       (() => {

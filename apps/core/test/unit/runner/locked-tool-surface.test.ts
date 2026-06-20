@@ -99,17 +99,25 @@ describe('locked tool surface mounting', () => {
     expect(hasAnyAuthorityOrAdminTool(names)).toBe(false);
   });
 
-  it('withholds delegation wrappers until a delegated-task executor exists', () => {
+  it('withholds async task controls unless the executor is enabled', () => {
     const defaultNames = selectedGantryMcpToolNames([]);
     expect(defaultNames).toContain('todo_update');
-    expect(defaultNames).not.toContain('delegate_task');
+    expect(defaultNames).not.toContain('async_run_command');
     expect(defaultNames).not.toContain('task_get');
+    expect(defaultNames).not.toContain('task_list');
     expect(defaultNames).not.toContain('task_cancel');
+    expect(defaultNames).not.toContain('delegate_task');
+
+    const enabledNames = selectedGantryMcpToolNames([], {
+      asyncTaskToolsEnabled: true,
+    });
+    expect(enabledNames).toContain('async_run_command');
+    expect(enabledNames).toContain('task_get');
+    expect(enabledNames).toContain('task_list');
+    expect(enabledNames).toContain('task_cancel');
 
     const delegatedNames = selectedGantryMcpToolNames(['AgentDelegation']);
     expect(delegatedNames).not.toContain('delegate_task');
-    expect(delegatedNames).not.toContain('task_get');
-    expect(delegatedNames).not.toContain('task_cancel');
 
     const explicitlyConfiguredNames = selectedGantryMcpToolNames([
       'mcp__gantry__delegate_task',
@@ -124,16 +132,18 @@ describe('locked tool surface mounting', () => {
       JSON.stringify(['delegate_task', 'task_get', 'task_cancel']),
     );
     expect(parsedNames.has('delegate_task')).toBe(false);
-    expect(parsedNames.has('task_get')).toBe(false);
-    expect(parsedNames.has('task_cancel')).toBe(false);
+    expect(parsedNames.has('task_get')).toBe(true);
+    expect(parsedNames.has('task_cancel')).toBe(true);
 
     const lockedNames = selectedGantryMcpToolNames(['AgentDelegation'], {
       excludeAuthorityTools: true,
     });
     expect(lockedNames).toContain('todo_update');
-    expect(lockedNames).not.toContain('delegate_task');
+    expect(lockedNames).not.toContain('async_run_command');
     expect(lockedNames).not.toContain('task_get');
+    expect(lockedNames).not.toContain('task_list');
     expect(lockedNames).not.toContain('task_cancel');
+    expect(lockedNames).not.toContain('delegate_task');
   });
 });
 

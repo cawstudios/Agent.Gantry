@@ -187,7 +187,7 @@ describe('prepareFleetSettings', () => {
       appId: 'default',
       revision: 10,
       settingsDocument: { agent: { name: 'Ada' } },
-      minReaderVersion: 3,
+      minReaderVersion: 999,
       createdBy: 'cli',
       note: null,
       createdAt: '2026-06-11T00:00:00.000Z',
@@ -206,8 +206,8 @@ describe('prepareFleetSettings', () => {
     expect(log.error).toHaveBeenCalledWith(
       expect.objectContaining({
         revision: 10,
-        minReaderVersion: 3,
-        readerVersion: 2,
+        minReaderVersion: 999,
+        readerVersion: expect.any(Number),
       }),
       expect.stringContaining('requires a newer reader version'),
     );

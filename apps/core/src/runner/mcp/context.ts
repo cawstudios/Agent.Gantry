@@ -1,5 +1,6 @@
 import path from 'path';
 import {
+  ASYNC_TASK_GANTRY_MCP_TOOL_NAMES,
   gantryMcpFullToolName,
   parseEnabledGantryMcpToolNames,
 } from '../gantry-mcp-tool-surface.js';
@@ -90,6 +91,9 @@ export const enabledGantryMcpTools = parseEnabledGantryMcpToolNames(
   process.env.GANTRY_MCP_TOOL_NAMES_JSON,
   { lockedPreset: lockedAccessPreset },
 );
+const asyncTaskToolNameSet = new Set<string>(ASYNC_TASK_GANTRY_MCP_TOOL_NAMES);
+const asyncTaskToolsEnabled =
+  process.env.GANTRY_ASYNC_TASK_TOOLS_ENABLED === '1';
 export const configuredAllowedTools = parseConfiguredAllowedTools(
   process.env.GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON,
 );
@@ -210,7 +214,9 @@ export function capabilityStatusText(): string {
       ? selectedSkillDisplays
       : attachedSkillSourceIds;
   const availableToolNames = [...enabledGantryMcpTools].filter(
-    (toolName) => !isAdminMcpToolName(toolName),
+    (toolName) =>
+      !isAdminMcpToolName(toolName) &&
+      (asyncTaskToolsEnabled || !asyncTaskToolNameSet.has(toolName)),
   );
   for (const adminToolName of currentAdminTools) {
     availableToolNames.push(adminToolName);
@@ -219,6 +225,10 @@ export function capabilityStatusText(): string {
     (toolName) =>
       toolName === 'send_message' ||
       toolName === 'ask_user_question' ||
+      toolName === 'async_run_command' ||
+      toolName === 'task_cancel' ||
+      toolName === 'task_get' ||
+      toolName === 'task_list' ||
       toolName === 'todo_update' ||
       toolName === 'memory_search' ||
       toolName === 'memory_save' ||

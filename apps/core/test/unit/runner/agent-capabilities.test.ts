@@ -6,6 +6,7 @@ import {
   type AgentCapabilityProvider,
 } from '@core/adapters/llm/anthropic-claude-agent/agent-capabilities.js';
 import {
+  ASYNC_TASK_GANTRY_MCP_TOOL_NAMES,
   BASELINE_GANTRY_MCP_TOOL_NAMES,
   DEFAULT_GANTRY_MCP_TOOL_NAMES,
   NO_PERMISSION_HIDDEN_GANTRY_MCP_TOOL_NAMES,
@@ -640,8 +641,6 @@ describe('agent capability composition', () => {
 
     expect(profile.allowedTools).not.toContain('Agent');
     expect(profile.allowedTools).not.toContain('mcp__gantry__delegate_task');
-    expect(profile.allowedTools).not.toContain('mcp__gantry__task_get');
-    expect(profile.allowedTools).not.toContain('mcp__gantry__task_cancel');
     expect(profile.allowedTools).not.toContain('Browser');
     expect(profile.allowedTools).not.toContain('ToolName(scope-pattern)');
     expect(profile.allowedTools).not.toContain('AgentDelegation');
@@ -676,6 +675,31 @@ describe('agent capability composition', () => {
     expect(
       profile.mcpServers.gantry?.env?.GANTRY_SELECTED_SKILL_DISPLAYS_JSON,
     ).toBe(JSON.stringify([]));
+  });
+
+  it('allows mounted async task tools when the runtime enables them', () => {
+    const profile = composeAgentCapabilities({
+      mcpServerPath: '/tmp/ipc-mcp-stdio.js',
+      appId: 'app-main',
+      agentId: 'agent:telegram_team',
+      chatJid: 'tg:team',
+      workspaceFolder: 'telegram_team',
+      ipcDir: '/tmp/ipc/team',
+      ipcAuthToken: 'token',
+      memoryIpcAuthToken: 'memory-token',
+      ipcResponseVerifyKey: 'verify-key',
+      ipcResponseKeyId: 'verify-key-id',
+      asyncTaskToolsEnabled: true,
+    });
+
+    for (const toolName of ASYNC_TASK_GANTRY_MCP_TOOL_NAMES) {
+      expect(profile.allowedTools).toContain(gantryMcpFullToolName(toolName));
+    }
+    expect(profile.mcpServers.gantry?.env?.GANTRY_MCP_TOOL_NAMES_JSON).toBe(
+      JSON.stringify(
+        selectedGantryMcpToolNames([], { asyncTaskToolsEnabled: true }),
+      ),
+    );
   });
 
   it('projects selected skills and MCP servers into capability_status environment', () => {

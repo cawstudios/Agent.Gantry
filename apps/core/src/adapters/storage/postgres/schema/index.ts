@@ -1,5 +1,6 @@
 export * from './apps.js';
 export * from './agents.js';
+export * from './async-tasks.js';
 export * from './browser.js';
 export * from './capability-secrets.js';
 export * from './providers.js';

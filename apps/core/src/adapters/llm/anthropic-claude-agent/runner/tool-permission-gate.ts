@@ -1,5 +1,5 @@
 import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk';
-import { denyMemoryBoundaryToolUse } from '../../../../runner/memory-boundary.js';
+import { denyMemoryBoundaryToolUse } from '../../../../shared/memory-boundary.js';
 import { denyProtectedCapabilityToolUse } from './protected-capability-guard.js';
 import { requestPermissionApproval } from './permission-callback.js';
 import type {
