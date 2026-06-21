@@ -11,6 +11,7 @@ import { registerSearchProducts } from './search-products.js';
 import { registerGetProduct } from './get-product.js';
 import { registerCheckInventory } from './check-inventory.js';
 import { registerValidateDiscountCode } from './validate-discount-code.js';
+import type { ProductCatalogCache } from './product-catalog-cache.js';
 import type { ProductSearchCache } from './product-search-cache.js';
 
 export const REGISTERED_TOOL_NAMES = [
@@ -42,6 +43,7 @@ export function assertReadOnlyToolNames(names: ReadonlyArray<string>): void {
 
 export interface RegisterAllToolsOptions {
   identityCache?: CustomerIdentityCache;
+  productCatalogCache?: ProductCatalogCache;
   productSearchCache?: ProductSearchCache;
   requireVerifiedIdentity?: boolean;
 }
@@ -76,6 +78,7 @@ export function registerAllTools(
     requireVerifiedIdentity: options.requireVerifiedIdentity ?? false,
   });
   registerSearchProducts(server, client, {
+    productCatalogCache: options.productCatalogCache,
     productSearchCache: options.productSearchCache,
   });
   registerGetProduct(server, client);

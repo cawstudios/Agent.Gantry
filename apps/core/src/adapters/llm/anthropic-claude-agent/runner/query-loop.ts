@@ -23,6 +23,7 @@ import {
   SDK_NATIVE_SKILL_DISABLE_ENV,
   SDK_NATIVE_SKILL_OVERRIDES,
   claudeSdkToolsForEnabledSkills,
+  readClaudeSdkProgressiveSkillNamesFromEnv,
   readClaudeSdkSkillNamesFromEnv,
 } from '../native-sdk-skills.js';
 import { MessageStream } from './message-stream.js';
@@ -676,6 +677,8 @@ export async function runQuery(
       id.startsWith('mcp:') ? id.slice(4) : id,
     ),
   ];
+  const enabledSdkSkills = readClaudeSdkSkillNamesFromEnv();
+  const progressiveSdkSkills = readClaudeSdkProgressiveSkillNamesFromEnv();
   const systemPrompt = buildRunnerSystemPrompt(
     agentInput,
     memoryBlock,
@@ -704,7 +707,6 @@ export async function runQuery(
     ...localCliCredentialDirectories,
   ];
   const workspaceFolder = agentInput.groupFolder;
-  const enabledSdkSkills = readClaudeSdkSkillNamesFromEnv();
   const isolatedSdkEnv = {
     ...sdkEnv,
     ...SDK_NATIVE_SKILL_DISABLE_ENV,
@@ -771,6 +773,7 @@ export async function runQuery(
     tools: claudeSdkToolsForEnabledSkills(
       capabilities.availableTools,
       enabledSdkSkills,
+      progressiveSdkSkills,
     ),
     allowedTools: [...capabilities.allowedTools],
     disallowedTools: [...capabilities.disallowedTools],

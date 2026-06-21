@@ -36,11 +36,13 @@ import {
   BundledClaudeSkillSource,
   CompositeSkillSource,
   RuntimeInstalledGantryBrowserSkillSource,
+  type ClaudeSkillSourceItem,
   type SkillSource,
 } from './claude-skill-materializer.js';
 import { skillActionSemanticCapability } from '../../../domain/skills/skill-action-permissions.js';
 import {
   GANTRY_CLAUDE_SDK_SKILLS_ENV,
+  GANTRY_CLAUDE_SDK_PROGRESSIVE_SKILLS_ENV,
   claudeSdkSkillNamesForMaterializedSkills,
 } from './native-sdk-skills.js';
 import {
@@ -59,6 +61,50 @@ const TSX_IMPORT_SPECIFIER = pathToFileURL(requireFromHere.resolve('tsx')).href;
 function materializationDirName(value: string): string {
   const sanitized = value.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 160);
   return sanitized || 'run';
+}
+
+function materializedSkillMarkdown(
+  skill: ClaudeSkillSourceItem,
+): string | undefined {
+  if (skill.assets) {
+    const skillAsset = skill.assets.find((asset) => asset.path === 'SKILL.md');
+    return skillAsset
+      ? Buffer.from(skillAsset.content).toString('utf-8')
+      : undefined;
+  }
+  if (skill.sourceDir) {
+    const skillPath = path.join(skill.sourceDir, 'SKILL.md');
+    return fs.existsSync(skillPath)
+      ? fs.readFileSync(skillPath, 'utf-8')
+      : undefined;
+  }
+  return undefined;
+}
+
+function skillFrontmatter(markdown: string | undefined): string {
+  if (!markdown) return '';
+  return /^---\s*\n([\s\S]*?)\n---(?:\n|$)/.exec(markdown)?.[1] ?? '';
+}
+
+function materializedSkillHasProgressiveDisclosure(
+  skill: ClaudeSkillSourceItem,
+): boolean {
+  return /(^|\n)disclosure:\s*progressive(\s|$)/.test(
+    skillFrontmatter(materializedSkillMarkdown(skill)),
+  );
+}
+
+function materializedProgressiveSkillNames(
+  skills: readonly ClaudeSkillSourceItem[],
+): string[] {
+  return [
+    ...new Set(
+      skills
+        .filter(materializedSkillHasProgressiveDisclosure)
+        .map((skill) => skill.materializedName || skill.name)
+        .filter((name) => name.trim().length > 0),
+    ),
+  ].sort();
 }
 
 export class AnthropicClaudeAgentExecutionAdapter
@@ -143,6 +189,11 @@ export class AnthropicClaudeAgentExecutionAdapter
       [CLAUDE_CONFIG_DIR_ENV]: materialization.claudeConfigDir,
       [GANTRY_CLAUDE_SDK_SKILLS_ENV]: JSON.stringify(
         claudeSdkSkillNamesForMaterializedSkills(
+          materialization.materializedSkills ?? [],
+        ),
+      ),
+      [GANTRY_CLAUDE_SDK_PROGRESSIVE_SKILLS_ENV]: JSON.stringify(
+        materializedProgressiveSkillNames(
           materialization.materializedSkills ?? [],
         ),
       ),

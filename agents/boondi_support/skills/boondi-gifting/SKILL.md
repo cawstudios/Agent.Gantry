@@ -1,7 +1,6 @@
 ---
 name: boondi-gifting
 description: Use for Bombay Sweet Shop gifting, gift recommendations, birthday/occasion gifts, wedding/event hampers, corporate gifting, GST/logo/branding, gift messages, branded sleeves, personalised boxes, special wrapping, and customisation routing.
-disclosure: progressive
 user_invocable: false
 ---
 

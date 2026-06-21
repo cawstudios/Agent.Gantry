@@ -31,7 +31,7 @@ function frontmatterValue(markdown: string, key: string): string | undefined {
 }
 
 describe('Boondi domain SDK skills', () => {
-  it('ships each domain as a real progressive skill folder', () => {
+  it('ships each domain as a real eager skill folder', () => {
     for (const skillId of BOONDI_DOMAIN_SKILL_IDS) {
       const skillPath = repoPath(
         'agents',
@@ -46,7 +46,7 @@ describe('Boondi domain SDK skills', () => {
 
       const markdown = readSkill(skillId);
       expect(frontmatterValue(markdown, 'name')).toBe(skillId);
-      expect(frontmatterValue(markdown, 'disclosure')).toBe('progressive');
+      expect(frontmatterValue(markdown, 'disclosure')).toBeUndefined();
       expect(frontmatterValue(markdown, 'user_invocable')).toBe('false');
       expect(
         frontmatterValue(markdown, 'description')?.length ?? 0,

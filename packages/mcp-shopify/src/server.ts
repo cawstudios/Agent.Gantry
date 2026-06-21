@@ -18,6 +18,10 @@ import {
 } from './identity/identity-header.js';
 import { runWithIdentity } from './identity/identity-context.js';
 import { ProductSearchCache } from './tools/product-search-cache.js';
+import {
+  loadProductCatalogFromShopify,
+  ProductCatalogCache,
+} from './tools/product-catalog-cache.js';
 
 function readHeader(req: IncomingMessage, name: string): string | undefined {
   const raw = req.headers[name.toLowerCase()];
@@ -84,12 +88,30 @@ export function buildMcpServer(
           refreshLeadMs: env.productSearchCacheRefreshLeadMs,
         })
       : undefined;
+  const productCatalogCache =
+    env.productSearchCacheTtlMs > 0 ? new ProductCatalogCache() : undefined;
+  if (productCatalogCache) {
+    void productCatalogCache
+      .refresh(() => loadProductCatalogFromShopify(client))
+      .then((result) => {
+        const log = result.status === 'refreshed' ? logger?.info : logger?.warn;
+        log?.(
+          {
+            status: result.status,
+            count: result.count,
+            error: result.error,
+          },
+          'shopify_product_catalog_refresh',
+        );
+      });
+  }
   const server = new McpServer({
     name: 'shopify-mcp',
     version: '0.1.0',
   });
   registerAllTools(server, client, {
     identityCache,
+    productCatalogCache,
     productSearchCache,
     requireVerifiedIdentity: env.requireVerifiedIdentity,
   });
@@ -161,6 +183,23 @@ export async function startHttpServer(
           refreshLeadMs: env.productSearchCacheRefreshLeadMs,
         })
       : undefined;
+  const productCatalogCache =
+    env.productSearchCacheTtlMs > 0 ? new ProductCatalogCache() : undefined;
+  if (productCatalogCache) {
+    void productCatalogCache
+      .refresh(() => loadProductCatalogFromShopify(client))
+      .then((result) => {
+        const log = result.status === 'refreshed' ? logger.info : logger.warn;
+        log(
+          {
+            status: result.status,
+            count: result.count,
+            error: result.error,
+          },
+          'shopify_product_catalog_refresh',
+        );
+      });
+  }
 
   const httpServer = createServer(
     async (req: IncomingMessage, res: ServerResponse) => {
@@ -225,6 +264,7 @@ export async function startHttpServer(
       });
       registerAllTools(server, client, {
         identityCache,
+        productCatalogCache,
         productSearchCache,
         requireVerifiedIdentity: env.requireVerifiedIdentity,
       });

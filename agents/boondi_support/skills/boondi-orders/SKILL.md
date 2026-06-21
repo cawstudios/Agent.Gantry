@@ -1,7 +1,6 @@
 ---
 name: boondi-orders
 description: Use for Bombay Sweet Shop checkout issues, payment failures, order status, ETA, tracking, delivery requests, order changes, cancellation, refund, complaints, invoice/GST, sender privacy, and delivered-not-received issues.
-disclosure: progressive
 user_invocable: false
 ---
 

@@ -7,314 +7,265 @@ import {
   graphqlOk,
   productByHandle,
   productInventoryByHandle,
-  productsEdges,
   variantInventory,
 } from '../../fixtures/responses.js';
-import { ProductSearchCache } from '../../../src/tools/product-search-cache.js';
+import { ProductCatalogCache } from '../../../src/tools/product-catalog-cache.js';
 
 describe('search_products', () => {
-  it('returns products filtered by tag and active status', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'diwali-gift-hamper',
-              title: 'Diwali Gift Hamper',
-              tags: ['diwali', 'gift'],
-              totalInventory: 12,
-              minPrice: '1499.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const harness = buildToolHarness(mock.fetch);
-    const result = await harness.call<{
-      products: Array<{ handle: string; available: boolean }>;
-    }>('search_products', { tag: 'diwali' });
-    expect(result.error).toBeUndefined();
-    expect(result.data?.products[0].handle).toBe('diwali-gift-hamper');
-    expect(result.data?.products[0].available).toBe(true);
-    harness.tokenManager.stop();
-  });
+  function buildCatalogHarness(
+    products: Array<{
+      handle: string;
+      title: string;
+      priceMin: string;
+      priceMax?: string;
+      currency?: string;
+      url?: string;
+      tags?: string[];
+    }>,
+  ) {
+    const mock = buildMockFetch({ graphqlResponses: [] });
+    const productCatalogCache = new ProductCatalogCache();
+    productCatalogCache.replace(
+      products.map((product) => ({
+        ...product,
+        priceMax: product.priceMax ?? product.priceMin,
+        currency: product.currency ?? 'INR',
+        url:
+          product.url ?? `https://shop.example.com/products/${product.handle}`,
+      })),
+    );
+    return {
+      mock,
+      harness: buildToolHarness(mock.fetch, { productCatalogCache }),
+    };
+  }
 
-  it('returns compact search summaries without bulky product fields', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'kaju-katli',
-              title: 'Kaju Katli Box',
-              description:
-                'A long product story that belongs on detail lookup.',
-              tags: ['show-search', 'active', 'contains-nuts'],
-              totalInventory: 12,
-              minPrice: '515.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const harness = buildToolHarness(mock.fetch);
+  it('returns lean cached catalog products without a Shopify customer-turn call', async () => {
+    const { mock, harness } = buildCatalogHarness([
+      {
+        handle: 'birthday-fudge',
+        title: 'Birthday Fudge Box',
+        priceMin: '450.00',
+        priceMax: '450.00',
+        currency: 'INR',
+        url: 'https://shop.example.com/products/birthday-fudge',
+      },
+    ]);
+
     const result = await harness.call<{
       products: Array<Record<string, unknown>>;
-    }>('search_products', { query: 'all sweets' });
-
-    expect(result.error).toBeUndefined();
-    expect(result.raw).not.toHaveProperty('customerReplyDraft');
-    expect(result.raw).not.toHaveProperty('replyContract');
-    expect(result.data?.products[0]).toEqual({
-      id: 'gid://shopify/Product/kaju-katli',
-      handle: 'kaju-katli',
-      title: 'Kaju Katli Box',
-      priceRange: {
-        minVariantPrice: '515.00',
-        maxVariantPrice: '515.00',
-        currencyCode: 'INR',
-      },
-      available: true,
-    });
-    expect(result.data?.products[0]).not.toHaveProperty('description');
-    expect(result.data?.products[0]).not.toHaveProperty('tags');
-    expect(result.data?.products[0]).not.toHaveProperty('images');
-    expect(result.data?.products[0]).not.toHaveProperty('onlineStoreUrl');
-    harness.tokenManager.stop();
-  });
-
-  it('directs product-detail questions to get_product instead of repeated search', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'kaju-katli',
-              title: 'Kaju Katli Box',
-              description:
-                'A long product story that belongs on detail lookup.',
-              tags: ['show-search', 'active', 'contains-nuts'],
-              totalInventory: 12,
-              minPrice: '515.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const harness = buildToolHarness(mock.fetch);
-    const result = await harness.call<{
-      replyContract?: {
-        status: string;
-        useCustomerReplyDraft: boolean;
-        mustCallGetProductBeforeAnswer: boolean;
-        mustNotSearchAgain: boolean;
-      };
-      nextTool?: {
-        name: string;
-        arguments: { id: string };
-        reason: string;
-      };
-      products: Array<{ id: string; handle: string }>;
-    }>('search_products', { query: 'Kaju Katli box pieces' });
-
-    expect(result.error).toBeUndefined();
-    expect(result.data?.replyContract).toEqual({
-      status: 'success',
-      useCustomerReplyDraft: false,
-      mustCallGetProductBeforeAnswer: true,
-      mustNotSearchAgain: true,
-    });
-    expect(result.data?.nextTool).toEqual({
-      name: 'get_product',
-      arguments: { id: 'gid://shopify/Product/kaju-katli' },
-      reason: expect.stringContaining('get_product is required'),
-    });
-    expect(result.data?.products[0]).toMatchObject({
-      id: 'gid://shopify/Product/kaju-katli',
-      handle: 'kaju-katli',
-    });
-    harness.tokenManager.stop();
-  });
-
-  it('filters results by priceMin / priceMax post-fetch', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'cheap-box',
-              title: 'Cheap',
-              minPrice: '300.00',
-              maxPrice: '300.00',
-            },
-            {
-              handle: 'in-band',
-              title: 'In band',
-              minPrice: '600.00',
-              maxPrice: '700.00',
-            },
-            {
-              handle: 'too-expensive',
-              title: 'Too expensive',
-              minPrice: '900.00',
-              maxPrice: '900.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const harness = buildToolHarness(mock.fetch);
-    const result = await harness.call<{
-      products: Array<{ handle: string }>;
-    }>('search_products', { priceMin: 500, priceMax: 800 });
-    expect(result.data?.products.map((p) => p.handle)).toEqual(['in-band']);
-    harness.tokenManager.stop();
-  });
-
-  it('defaults to a compact 3-product fetch and accepts maxPrice alias', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'under-budget',
-              title: 'Under budget',
-              minPrice: '350.00',
-              maxPrice: '350.00',
-            },
-            {
-              handle: 'over-budget',
-              title: 'Over budget',
-              minPrice: '900.00',
-              maxPrice: '900.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const harness = buildToolHarness(mock.fetch);
-    const result = await harness.call<{
-      products: Array<{ handle: string }>;
-    }>('search_products', { query: 'birthday gift', maxPrice: 500 });
-
-    expect(result.error).toBeUndefined();
-    expect(result.data?.products.map((p) => p.handle)).toEqual([
-      'under-budget',
-    ]);
-    const productCall = mock.calls.find((call) =>
-      call.url.includes('/graphql.json'),
-    );
-    expect(
-      (productCall!.body as { variables: { first: number; query: string } })
-        .variables,
-    ).toMatchObject({
-      first: 3,
-      query: expect.stringContaining('variants.price:<=500'),
-    });
-    harness.tokenManager.stop();
-  });
-
-  it('returns website-first reply facts for personal gifting product searches', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'three-layer-fudge',
-              title: "Bombay's 3-Layer Chocolate Fudge",
-              minPrice: '350.00',
-              maxPrice: '350.00',
-            },
-            {
-              handle: 'playing-cards',
-              title: 'Bombay Sweet Shop Playing Cards',
-              minPrice: '400.00',
-              maxPrice: '400.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const harness = buildToolHarness(mock.fetch);
-    const result = await harness.call<{
-      replyContract?: {
-        status: string;
-        mustLeadWithWebsiteOrdering: boolean;
-        mustNotGuaranteeLiveStock: boolean;
-        mustSuggestAtMostThreeProducts: boolean;
-        mustPresentProductsAsAlternatives: boolean;
-      };
-      replyFacts?: {
-        recommendation: {
-          route: string;
-          websiteFirst: boolean;
-          presentation: string;
-          maxSuggestions: number;
-          budgetMax?: number;
-        };
-      };
-      products: Array<{ title: string }>;
     }>('search_products', { query: 'birthday gift', priceMax: 500 });
 
     expect(result.error).toBeUndefined();
-    expect(result.raw).not.toHaveProperty('customerReplyDraft');
-    expect(result.data?.replyContract).toMatchObject({
-      status: 'success',
-      mustLeadWithWebsiteOrdering: true,
-      mustNotGuaranteeLiveStock: true,
-      mustSuggestAtMostThreeProducts: true,
-      mustPresentProductsAsAlternatives: true,
-    });
-    expect(result.data?.replyFacts).toEqual({
-      recommendation: {
-        route: 'personal_gifting',
-        websiteFirst: true,
-        presentation: 'alternatives',
-        maxSuggestions: 3,
-        budgetMax: 500,
+    expect(result.data?.products).toEqual([
+      {
+        title: 'Birthday Fudge Box',
+        priceMin: '450.00',
+        priceMax: '450.00',
+        currency: 'INR',
+        url: 'https://shop.example.com/products/birthday-fudge',
       },
-    });
-    expect(JSON.stringify(result.raw)).not.toMatch(/under your budget/i);
-    expect(JSON.stringify(result.raw)).not.toMatch(/available right now/i);
+    ]);
+    expect(result.data?.products[0]).not.toHaveProperty('handle');
+    expect(result.data?.products[0]).not.toHaveProperty('id');
+    expect(result.data?.products[0]).not.toHaveProperty('available');
+    expect(result.data?.products[0]).not.toHaveProperty('priceRange');
+    expect(result.raw).not.toHaveProperty('replyContract');
+    expect(result.raw).not.toHaveProperty('replyFacts');
+    expect(mock.graphqlCallCount()).toBe(0);
     harness.tokenManager.stop();
   });
 
-  it('caps personal gifting responses to three non-accessory products', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'saffron',
-              title: 'Saffron in Glass Bottle',
-              minPrice: '500.00',
-              maxPrice: '500.00',
-            },
-            {
-              handle: 'fudge',
-              title: "Bombay's 3-Layer Chocolate Fudge",
-              minPrice: '350.00',
-              maxPrice: '350.00',
-            },
-            {
-              handle: 'gift-bag',
-              title: 'Small Coral Gift Bag',
-              minPrice: '75.00',
-              maxPrice: '75.00',
-            },
-            {
-              handle: 'over-budget-snack-box',
-              title: 'Bombay Sweet Shop Snack Box',
-              minPrice: '990.00',
-              maxPrice: '990.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const harness = buildToolHarness(mock.fetch);
+  it('filters cached catalog products by tag and price band', async () => {
+    const { harness } = buildCatalogHarness([
+      {
+        handle: 'cheap-box',
+        title: 'Cheap',
+        priceMin: '300.00',
+        tags: ['diwali'],
+      },
+      {
+        handle: 'in-band',
+        title: 'In band',
+        priceMin: '600.00',
+        priceMax: '700.00',
+        tags: ['diwali'],
+      },
+      {
+        handle: 'wrong-tag',
+        title: 'Wrong tag',
+        priceMin: '600.00',
+        tags: ['birthday'],
+      },
+      {
+        handle: 'too-expensive',
+        title: 'Too expensive',
+        priceMin: '900.00',
+        tags: ['diwali'],
+      },
+    ]);
     const result = await harness.call<{
-      products: Array<{ handle: string }>;
+      products: Array<{ title: string }>;
+    }>('search_products', { tag: 'diwali', priceMin: 500, priceMax: 800 });
+    expect(result.data?.products.map((p) => p.title)).toEqual(['In band']);
+    harness.tokenManager.stop();
+  });
+
+  it('ranks exact product phrase matches before broad token matches', async () => {
+    const { harness } = buildCatalogHarness([
+      {
+        handle: 'kaju-marzipan-bon-bon-box',
+        title: 'Kaju Marzipan Bon Bon Box',
+        priceMin: '195.00',
+      },
+      {
+        handle: 'best-kaju-katli-chocolate-barfi',
+        title: 'Indie Bites - 54.5% Dark Chocolate Kaju Katli',
+        priceMin: '515.00',
+      },
+      {
+        handle: 'cheeky-kaju-bon-bons',
+        title: 'Cheeky Kaju Bon Bons Box of 9',
+        priceMin: '650.00',
+      },
+    ]);
+
+    const result = await harness.call<{
+      products: Array<{ title: string }>;
+    }>('search_products', { query: 'Kaju Katli', limit: 3 });
+
+    expect(result.data?.products.map((p) => p.title)).toEqual([
+      'Indie Bites - 54.5% Dark Chocolate Kaju Katli',
+      'Kaju Marzipan Bon Bon Box',
+      'Cheeky Kaju Bon Bons Box of 9',
+    ]);
+    harness.tokenManager.stop();
+  });
+
+  it('accepts maxPrice alias and broadens personal gift searches locally', async () => {
+    const { mock, harness } = buildCatalogHarness([
+      {
+        handle: 'under-budget',
+        title: 'Under budget',
+        priceMin: '350.00',
+      },
+      {
+        handle: 'over-budget',
+        title: 'Over budget',
+        priceMin: '900.00',
+      },
+    ]);
+    const result = await harness.call<{
+      products: Array<{ title: string }>;
+    }>('search_products', { query: 'birthday gift', maxPrice: 500 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.products.map((p) => p.title)).toEqual(['Under budget']);
+    expect(mock.graphqlCallCount()).toBe(0);
+    harness.tokenManager.stop();
+  });
+
+  it('infers an upper budget from free-text gift queries', async () => {
+    const { mock, harness } = buildCatalogHarness([
+      {
+        handle: 'under-budget',
+        title: 'Under Budget Birthday Box',
+        priceMin: '350.00',
+        tags: ['gift', 'birthday'],
+      },
+      {
+        handle: 'over-budget',
+        title: 'Premium Birthday Box',
+        priceMin: '900.00',
+        tags: ['gift', 'birthday'],
+      },
+    ]);
+    const result = await harness.call<{
+      products: Array<{ title: string }>;
+    }>('search_products', { query: 'gift under 500' });
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.products.map((p) => p.title)).toEqual([
+      'Under Budget Birthday Box',
+    ]);
+    expect(mock.graphqlCallCount()).toBe(0);
+    harness.tokenManager.stop();
+  });
+
+  it('falls back locally to non-accessory products for accessory-only personal gift matches', async () => {
+    const { mock, harness } = buildCatalogHarness([
+      {
+        handle: 'birthday-sleeve',
+        title: 'Happy Birthday Sleeve',
+        priceMin: '150.00',
+        tags: ['birthday', 'gift'],
+      },
+      {
+        handle: 'boondi-laddoo-box',
+        title: 'Bounty-ful Boondi Laddoo Box',
+        priceMin: '325.00',
+        tags: ['mithai', 'gift'],
+      },
+      {
+        handle: 'premium-box',
+        title: 'Premium Mithai Box',
+        priceMin: '900.00',
+        tags: ['mithai', 'gift'],
+      },
+    ]);
+    const result = await harness.call<{
+      products: Array<{ title: string }>;
+    }>('search_products', { query: 'gift birthday under 500', limit: 5 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.products.map((p) => p.title)).toEqual([
+      'Bounty-ful Boondi Laddoo Box',
+    ]);
+    expect(mock.graphqlCallCount()).toBe(0);
+    harness.tokenManager.stop();
+  });
+
+  it('caps personal gifting responses to three non-accessory cached products', async () => {
+    const { harness } = buildCatalogHarness([
+      {
+        handle: 'saffron',
+        title: 'Saffron in Glass Bottle',
+        priceMin: '500.00',
+        tags: ['roka', 'gift'],
+      },
+      {
+        handle: 'fudge',
+        title: "Bombay's 3-Layer Chocolate Fudge",
+        priceMin: '350.00',
+        tags: ['roka', 'gift'],
+      },
+      {
+        handle: 'gift-bag',
+        title: 'Small Coral Gift Bag',
+        priceMin: '75.00',
+        tags: ['roka', 'gift'],
+      },
+      {
+        handle: 'third-box',
+        title: 'Celebration Mithai Box',
+        priceMin: '700.00',
+        tags: ['roka', 'gift'],
+      },
+      {
+        handle: 'fourth-box',
+        title: 'Premium Mithai Box',
+        priceMin: '800.00',
+        tags: ['roka', 'gift'],
+      },
+      {
+        handle: 'over-budget-snack-box',
+        title: 'Bombay Sweet Shop Snack Box',
+        priceMin: '990.00',
+        tags: ['roka', 'gift'],
+      },
+    ]);
+    const result = await harness.call<{
+      products: Array<{ title: string }>;
     }>('search_products', {
       query: 'gifting roka mithai box celebration',
       priceMax: 900,
@@ -322,11 +273,14 @@ describe('search_products', () => {
     });
 
     expect(result.error).toBeUndefined();
-    expect(result.data?.products.map((p) => p.handle)).toEqual([
-      'saffron',
-      'fudge',
+    expect(result.data?.products.map((p) => p.title)).toEqual([
+      'Saffron in Glass Bottle',
+      "Bombay's 3-Layer Chocolate Fudge",
+      'Celebration Mithai Box',
     ]);
     expect(result.raw).not.toHaveProperty('customerReplyDraft');
+    expect(result.raw).not.toHaveProperty('replyContract');
+    expect(result.raw).not.toHaveProperty('replyFacts');
     expect(JSON.stringify(result.raw)).not.toMatch(/birthday/i);
     expect(JSON.stringify(result.raw)).not.toContain('Small Coral Gift Bag');
     expect(JSON.stringify(result.raw)).not.toContain(
@@ -335,218 +289,87 @@ describe('search_products', () => {
     harness.tokenManager.stop();
   });
 
-  it('does not attach personal gifting reply facts for bulk or event gifting searches', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'wedding-hamper',
-              title: 'Wedding Hamper',
-              minPrice: '900.00',
-              maxPrice: '900.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const harness = buildToolHarness(mock.fetch);
+  it('uses the requested limit for non-personal-gifting cached searches', async () => {
+    const { harness } = buildCatalogHarness([
+      {
+        handle: 'wedding-hamper',
+        title: 'Wedding Hamper',
+        priceMin: '900.00',
+        tags: ['wedding', 'gift'],
+      },
+      {
+        handle: 'wedding-box',
+        title: 'Wedding Box',
+        priceMin: '800.00',
+        tags: ['wedding', 'gift'],
+      },
+    ]);
     const result = await harness.call<{
-      products: Array<{ handle: string }>;
+      products: Array<{ title: string }>;
     }>('search_products', { query: 'gift hamper wedding', limit: 3 });
 
     expect(result.error).toBeUndefined();
     expect(result.raw).not.toHaveProperty('customerReplyDraft');
     expect(result.raw).not.toHaveProperty('replyContract');
-    expect(result.data?.products.map((p) => p.handle)).toEqual([
-      'wedding-hamper',
+    expect(result.data?.products.map((p) => p.title)).toEqual([
+      'Wedding Hamper',
+      'Wedding Box',
     ]);
     harness.tokenManager.stop();
   });
 
-  it('does not run broad gift-box fallback for bulk or event gifting searches', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [graphqlOk(productsEdges([]))],
-    });
-    const harness = buildToolHarness(mock.fetch);
-
+  it('returns safe empty products without live fallback when cache has no match', async () => {
+    const { mock, harness } = buildCatalogHarness([]);
     const result = await harness.call<{
-      products: Array<{ handle: string }>;
-    }>('search_products', {
-      query: 'corporate gift box with logo',
-      limit: 3,
-    });
-
-    expect(result.error).toBeUndefined();
-    expect(result.data?.products).toEqual([]);
-    expect(mock.graphqlCallCount()).toBe(1);
-    const graphqlQuery = (
-      mock.calls.find((call) => call.url.includes('/graphql.json'))!.body as {
-        variables: { query: string };
-      }
-    ).variables.query;
-    expect(graphqlQuery).toContain('corporate gift box with logo');
-    harness.tokenManager.stop();
-  });
-
-  it('caches product search results by normalized query and limit', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'cached-gift',
-              title: 'Cached Gift',
-              minPrice: '500.00',
-              maxPrice: '500.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const cache = new ProductSearchCache({
-      ttlMs: 86_400_000,
-      refreshLeadMs: 600_000,
-    });
-    const harness = buildToolHarness(mock.fetch, { productSearchCache: cache });
-
-    await harness.call('search_products', { query: 'gift', maxPrice: 500 });
-    const result = await harness.call<{
-      products: Array<{ handle: string }>;
-    }>('search_products', { query: 'gift', priceMax: 500 });
-
-    expect(result.error).toBeUndefined();
-    expect(result.data?.products.map((p) => p.handle)).toEqual(['cached-gift']);
-    expect(mock.graphqlCallCount()).toBe(1);
-    harness.tokenManager.stop();
-  });
-
-  it('returns cached search results while refreshing near expiry', async () => {
-    let now = 1_000;
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'old-gift',
-              title: 'Old Gift',
-              minPrice: '450.00',
-              maxPrice: '450.00',
-            },
-          ]),
-        ),
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'fresh-gift',
-              title: 'Fresh Gift',
-              minPrice: '450.00',
-              maxPrice: '450.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const cache = new ProductSearchCache({
-      ttlMs: 86_400_000,
-      refreshLeadMs: 600_000,
-      now: () => now,
-    });
-    const harness = buildToolHarness(mock.fetch, { productSearchCache: cache });
-
-    await harness.call('search_products', { query: 'gift', priceMax: 500 });
-    now = 86_400_000 - 600_000 + 1_000;
-    const staleWhileRefresh = await harness.call<{
-      products: Array<{ handle: string }>;
-    }>('search_products', { query: 'gift', priceMax: 500 });
-
-    expect(staleWhileRefresh.data?.products.map((p) => p.handle)).toEqual([
-      'old-gift',
-    ]);
-    await cache.waitForIdle();
-    expect(mock.graphqlCallCount()).toBe(2);
-
-    const refreshed = await harness.call<{
-      products: Array<{ handle: string }>;
-    }>('search_products', { query: 'gift', priceMax: 500 });
-    expect(refreshed.data?.products.map((p) => p.handle)).toEqual([
-      'fresh-gift',
-    ]);
-    harness.tokenManager.stop();
-  });
-
-  it('returns customer-safe no-match facts for empty search results', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [graphqlOk(productsEdges([]))],
-    });
-    const harness = buildToolHarness(mock.fetch);
-    const result = await harness.call<{
-      replyContract?: {
-        status: string;
-        mustNotUseHiccupWording: boolean;
-        emptyProductResult: boolean;
-      };
-      replyFacts?: {
-        emptyResult: {
-          target: string;
-        };
-      };
       products: Array<Record<string, unknown>>;
     }>('search_products', { query: 'durian cheesecake' });
 
     expect(result.error).toBeUndefined();
-    expect(
-      Object.keys(result.raw as Record<string, unknown>).slice(0, 2),
-    ).toEqual(['replyContract', 'replyFacts']);
+    expect(Object.keys(result.raw as Record<string, unknown>)).toEqual([
+      'products',
+    ]);
     expect(result.raw).not.toHaveProperty('customerReplyDraft');
     expect(result.data?.products).toEqual([]);
-    expect(result.data?.replyContract).toEqual({
-      status: 'success',
-      mustNotUseHiccupWording: true,
-      emptyProductResult: true,
-    });
-    expect(result.data?.replyFacts).toEqual({
-      emptyResult: {
-        target: 'durian cheesecake',
-      },
-    });
+    expect(mock.graphqlCallCount()).toBe(0);
     expect(JSON.stringify(result.raw)).not.toContain("I couldn't find");
     expect(JSON.stringify(result.raw)).not.toMatch(/checking/i);
     harness.tokenManager.stop();
   });
+});
 
-  it('falls back inside one tool call for common birthday gift wording', async () => {
-    const mock = buildMockFetch({
-      graphqlResponses: [
-        graphqlOk(productsEdges([])),
-        graphqlOk(
-          productsEdges([
-            {
-              handle: 'three-layer-fudge',
-              title: "Bombay's 3-Layer Chocolate Fudge",
-              minPrice: '350.00',
-              maxPrice: '350.00',
-            },
-          ]),
-        ),
-      ],
-    });
-    const harness = buildToolHarness(mock.fetch);
-    const result = await harness.call<{
-      products: Array<{ handle: string }>;
-      matchedQuery?: string;
-    }>('search_products', { query: 'gift birthday', priceMax: 500 });
-
-    expect(result.error).toBeUndefined();
-    expect(result.data?.products.map((p) => p.handle)).toEqual([
-      'three-layer-fudge',
+describe('ProductCatalogCache', () => {
+  it('preserves the last good catalog when refresh fails', async () => {
+    const cache = new ProductCatalogCache();
+    cache.replace([
+      {
+        handle: 'last-good',
+        title: 'Last Good Box',
+        priceMin: '500.00',
+        priceMax: '500.00',
+        currency: 'INR',
+        url: 'https://shop.example.com/products/last-good',
+      },
     ]);
-    expect(result.data?.matchedQuery).toBe('gift box');
-    const graphqlCalls = mock.calls.filter((call) =>
-      call.url.includes('/graphql.json'),
-    );
-    expect(graphqlCalls).toHaveLength(2);
-    harness.tokenManager.stop();
+
+    const result = await cache.refresh(async () => {
+      throw new Error('shopify timeout');
+    });
+
+    expect(result).toEqual({
+      status: 'failed',
+      count: 1,
+      error: 'shopify timeout',
+    });
+    expect(cache.list()).toEqual([
+      {
+        handle: 'last-good',
+        title: 'Last Good Box',
+        priceMin: '500.00',
+        priceMax: '500.00',
+        currency: 'INR',
+        url: 'https://shop.example.com/products/last-good',
+      },
+    ]);
   });
 });
 

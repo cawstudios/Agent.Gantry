@@ -16,7 +16,7 @@ import {
   buildProductQuery,
   compactProductSearchSummary,
   type ProductSearchSummary,
-} from './search-products.js';
+} from './product-search-summary.js';
 import type { ProductSearchCache } from './product-search-cache.js';
 import {
   jsonContent,

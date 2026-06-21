@@ -81,6 +81,25 @@ query SearchProducts($query: String!, $first: Int!) {
   }
 }`;
 
+export const LIST_PRODUCTS_FOR_CATALOG = `
+query ListProductsForCatalog($query: String!, $first: Int!, $after: String) {
+  products(first: $first, after: $after, query: $query) {
+    pageInfo { hasNextPage endCursor }
+    edges {
+      node {
+        handle
+        title
+        onlineStoreUrl
+        tags
+        priceRangeV2 {
+          minVariantPrice { ${MONEY_FIELDS} }
+          maxVariantPrice { ${MONEY_FIELDS} }
+        }
+      }
+    }
+  }
+}`;
+
 export const GET_PRODUCT_BY_HANDLE = `
 query GetProductByHandle($handle: String!) {
   productByHandle(handle: $handle) {

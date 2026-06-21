@@ -98,14 +98,24 @@ afterAll(() => {
 });
 
 describe.skipIf(!ENABLED)('live Shopify tool integration', () => {
-  it('search_products returns at least one active product', async () => {
+  function handleFromProductUrl(url: string): string {
+    const parsed = new URL(url);
+    const handle = parsed.pathname.split('/').filter(Boolean).at(-1);
+    if (!handle) throw new Error(`Product URL has no handle: ${url}`);
+    return handle;
+  }
+
+  it('search_products returns at least one lean product', async () => {
     const result = await harness.call('search_products', { limit: 5 });
     expect(result.error).toBeUndefined();
-    const products = (result.data as { products: Array<{ handle: string }> })
+    const products = (result.data as { products: Array<{ url: string }> })
       ?.products;
     expect(Array.isArray(products)).toBe(true);
     expect(products.length).toBeGreaterThanOrEqual(1);
-    expect(typeof products[0].handle).toBe('string');
+    expect(typeof products[0].url).toBe('string');
+    expect(products[0]).not.toHaveProperty('handle');
+    expect(products[0]).not.toHaveProperty('available');
+    expect(products[0]).not.toHaveProperty('priceRange');
   });
 
   it('search_products with a price band filters correctly', async () => {
@@ -117,20 +127,19 @@ describe.skipIf(!ENABLED)('live Shopify tool integration', () => {
     expect(result.error).toBeUndefined();
     const products = (
       result.data as {
-        products: Array<{ priceRange: { maxVariantPrice: string } }>;
+        products: Array<{ priceMax: string }>;
       }
     )?.products;
     for (const product of products) {
-      expect(
-        Number.parseFloat(product.priceRange.maxVariantPrice),
-      ).toBeLessThanOrEqual(100);
+      expect(Number.parseFloat(product.priceMax)).toBeLessThanOrEqual(100);
     }
   });
 
   it('get_product resolves a real handle', async () => {
     const search = await harness.call('search_products', { limit: 1 });
-    const handle = (search.data as { products: Array<{ handle: string }> })
-      .products[0].handle;
+    const url = (search.data as { products: Array<{ url: string }> })
+      .products[0].url;
+    const handle = handleFromProductUrl(url);
     const result = await harness.call('get_product', { handleOrId: handle });
     expect(result.error).toBeUndefined();
     const product = (result.data as { product: { handle: string } | null })
@@ -148,12 +157,11 @@ describe.skipIf(!ENABLED)('live Shopify tool integration', () => {
 
   it('check_inventory by productHandle returns total quantity', async () => {
     const search = await harness.call('search_products', { limit: 5 });
-    const products = (
-      search.data as { products: Array<{ handle: string; available: boolean }> }
-    ).products;
-    const inStock = products.find((p) => p.available) ?? products[0];
+    const products = (search.data as { products: Array<{ url: string }> })
+      .products;
+    const handle = handleFromProductUrl(products[0].url);
     const result = await harness.call('check_inventory', {
-      productHandle: inStock.handle,
+      productHandle: handle,
       requestedQuantity: 1,
     });
     expect(result.error).toBeUndefined();

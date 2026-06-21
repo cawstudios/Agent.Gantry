@@ -3,6 +3,7 @@ import { TokenManager } from '../../src/auth/token-manager.js';
 import { ShopifyClient } from '../../src/shopify/client.js';
 import { registerAllTools } from '../../src/tools/index.js';
 import type { CustomerIdentityCache } from '../../src/privacy/customer-identity-cache.js';
+import type { ProductCatalogCache } from '../../src/tools/product-catalog-cache.js';
 import type { ProductSearchCache } from '../../src/tools/product-search-cache.js';
 
 export type FetchImpl = (
@@ -41,6 +42,7 @@ export interface ToolHarness {
 
 export interface BuildHarnessOptions {
   identityCache?: CustomerIdentityCache;
+  productCatalogCache?: ProductCatalogCache;
   productSearchCache?: ProductSearchCache;
   requireVerifiedIdentity?: boolean;
 }
@@ -68,6 +70,7 @@ export function buildToolHarness(
   const server = new McpServer({ name: 'test', version: '0.0.0' });
   registerAllTools(server, client, {
     identityCache: options.identityCache,
+    productCatalogCache: options.productCatalogCache,
     productSearchCache: options.productSearchCache,
     requireVerifiedIdentity: options.requireVerifiedIdentity ?? false,
   });

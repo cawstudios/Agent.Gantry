@@ -1,7 +1,6 @@
 ---
 name: boondi-misc-policy
 description: Use for Bombay Sweet Shop franchise, partnership, jobs, careers, and non-customer policy questions. Do not use for opt-out, unsubscribe, repeated promotional-message complaints, or obvious spam.
-disclosure: progressive
 user_invocable: false
 ---
 
@@ -40,9 +39,14 @@ again.
 - Share franchise or careers information only from confirmed policy/source.
 - If confirmed policy says no franchise, decline politely and thank them.
 - If a jobs/careers route exists, share it concisely; otherwise capture role
-and location and route.
+  and location and route.
 - Do not invent website, store-visit, email, careers-link, application,
-franchise-fee, partnership-process, or hiring-status guidance.
+  franchise commercials, partnership steps, or hiring-status guidance.
+- For franchise interest without confirmed policy/source, say the team can
+  review the inquiry and ask for preferred city/location if useful. Use this
+  safe shape: "Thanks for your interest. I can share your franchise inquiry
+  with the team. Which city or location should I include?" Do not add any
+  other specifics.
 
 ## MCP Boundaries
 
@@ -50,7 +54,7 @@ franchise-fee, partnership-process, or hiring-status guidance.
 - Use an opt-out/source capability only if it exists and is approved for the
 agent.
 - Do not use Shopify or CRM customer-order tools for franchise/jobs/spam.
-- Use source data for current careers link/process or franchise policy.
+- Use source data for current careers route or franchise policy.
 
 ## Handoff Brief
 
@@ -65,5 +69,5 @@ When routing to team, pass only facts already known:
 ## Reply Checks
 
 - No false action confirmation.
-- No invented careers link, franchise policy, or partnership process.
+- No invented careers link, franchise policy, or partnership steps.
 - No internal words such as MCP, KB, source adapter, or trace.

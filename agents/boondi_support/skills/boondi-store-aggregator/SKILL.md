@@ -1,7 +1,6 @@
 ---
 name: boondi-store-aggregator
 description: Use for Bombay Sweet Shop cafe reservations, store address, phone, timings, nearest outlet, dine-in menu, soft serve, valet, in-store product availability, in-store bill/GST requests, and Swiggy/Zomato quality, missing item, availability, bill, invoice, or platform-order issues.
-disclosure: progressive
 user_invocable: false
 ---
 

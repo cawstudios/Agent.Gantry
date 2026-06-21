@@ -14,21 +14,21 @@ core restart.
 Gantry/Boondi:**
 
 1. **Dev mode only — never launchd.** Every server runs plain `npm run dev`,
-   driven by the `.env` in the gantry runtime folder (§3).
+  driven by the `.env` in the gantry runtime folder (§3).
 2. **Cluttered state? Take the fresh start.** When old sessions/backlogs/DB
-   noise get in the way, wipe everything with
+  noise get in the way, wipe everything with
    `bash agents/boondi_support/docs/reset-runtime/reset-gantry-runtime.sh --yes`
    — it preserves the Claude OAuth token automatically — then kill + restart
    the dev stack (§8).
 3. **Edit `~/gantry/settings.yaml` directly** to adjust and test
-   (idle timings, guardrail mode/model, thinking, …) — restart core to apply.
+  (idle timings, guardrail mode/model, thinking, …) — restart core to apply.
 4. **Confused while debugging? Read the logs first** — `GANTRY_FLOW_LOG=1` and
-   the `flow:` events trace every message through the pipeline (§9).
+  the `flow:` events trace every message through the pipeline (§9).
 5. **Maintain a clear boundary between Boondi and Gantry in every change.**
-   Gantry (`apps/core`, channel adapters, the plugin/command/skill registries)
+  Gantry (`apps/core`, channel adapters, the plugin/command/skill registries)
    is the generic runtime and stays agent-agnostic — never hardcode Boondi
    names, phones, prompts, or business logic into it. Boondi lives in its own
-   layer: `agents/boondi_support/*` (SOUL/CLAUDE/guardrails/commands/skills),
+   layer: `agents/boondi_support/`* (SOUL/CLAUDE/guardrails/commands/skills),
    its `agents.boondi_support` block in settings.yaml, the `packages/mcp-crm`
    and `packages/mcp-shopify` services, and the boondi-admin repo. Boondi-side
    plugin files stay self-contained with no imports from core (the existing
@@ -83,12 +83,14 @@ string `"1"` — keep them a bare `1` with no trailing comment.
 
 Code: `apps/core/src/app/bootstrap/channel-wiring.ts` dry-run branch.
 
+
 | DRYRUN    | number in operator list? | what happens to Boondi's reply                                                                   |
 | --------- | ------------------------ | ------------------------------------------------------------------------------------------------ |
 | `1`       | yes — real number        | **real Interakt send attempted** → actually delivers (self-routed x→x)                           |
 | `1`       | yes — fake number        | real send attempted → accepted-then-fails (or errors) at the provider; **reply still persisted** |
 | `1`       | no                       | **never sent at all**, reply persisted only                                                      |
 | `0`/unset | (irrelevant)             | **production: sends to every customer**                                                          |
+
 
 Every reply is persisted to `gantry.messages` regardless — that is why tests
 are visible in boondi-admin even when nothing is sent.
@@ -101,7 +103,7 @@ It gates two things:
 
 1. which numbers outbound may actually be sent to under dry-run (table above);
 2. the **session-command allowance** — configured operator numbers and any
-   `000*` fake number may run slash commands (`/new`, `/digest-session`,
+  `000`* fake number may run slash commands (`/new`, `/digest-session`,
    `/extract-leads-queries`, …).
 
 Set this to the real operator number only, for example `919654405340`. Fake
@@ -134,6 +136,7 @@ ps -wwE -o args= -p $(lsof -ti tcp:4710 -sTCP:LISTEN) | tr ' ' '\n' | grep -E '^
 
 ## 3. Service topology and health checks
 
+
 | Port | Service                                 | Source                                   | Health check                                                                          |
 | ---- | --------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
 | 4710 | gantry core (webhook receiver)          | `apps/core/src/index.ts`                 | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4710/` (any HTTP code ≠ 000) |
@@ -141,6 +144,7 @@ ps -wwE -o args= -p $(lsof -ti tcp:4710 -sTCP:LISTEN) | tr ' ' '\n' | grep -E '^
 | 8082 | boondi-crm MCP + digest watcher         | `packages/mcp-crm/src/index.ts`          | `curl -s http://127.0.0.1:8082/healthz` → `{"ok":true}`                               |
 | 3000 | boondi-admin panel                      | `~/Desktop/boondi-admin` (separate repo) | `curl -s http://localhost:3000/api/conversations`                                     |
 | 4040 | ngrok inspector (real Interakt traffic) | `ngrok http 4710`                        | `curl -s http://127.0.0.1:4040/api/tunnels`                                           |
+
 
 Quick "what's running": `for p in 4710 8081 8082 3000 4040; do lsof -ti tcp:$p -sTCP:LISTEN >/dev/null && echo "$p up" || echo "$p DOWN"; done`
 
@@ -156,7 +160,7 @@ and both MCPs self-load it. If port 4710 is ever held by a stale launchd job
 
 ```bash
 pkill -f "apps/core/src/index.ts" 2>/dev/null; pkill -f "packages/mcp-crm/src/index.ts" 2>/dev/null; pkill -f "packages/mcp-shopify/src/index.ts" 2>/dev/null; sleep 1
-for port in 4710 8081; do
+for port in 4710 8081 8082; do
   lsof -ti tcp:$port -sTCP:LISTEN | while read -r p; do kill -9 "$p"; done
 done
 lsof -ti tcp:4710 -sTCP:LISTEN >/dev/null 2>&1 \
@@ -164,7 +168,7 @@ lsof -ti tcp:4710 -sTCP:LISTEN >/dev/null 2>&1 \
   || echo "gantry core down, 4710 free"
 lsof -ti tcp:8081 -sTCP:LISTEN >/dev/null 2>&1 \
   && echo "8081 STILL HELD — stale shopify MCP?" \
-  || echo "shopify MCP down, 8081 free"
+  || echo "shopify MCP down, 8081 free" 
 ```
 
 Kills core + boondi-crm + shopify (127.0.0.1) and force-frees :4710 and :8081
@@ -194,16 +198,16 @@ Gotchas (will bite if ignored):
 
 - **One core at a time** — use the kill block above before starting.
 - **Launching from a Claude Code shell only:** the harness injects
-  `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`, and core's preflight rejects
-  `ANTHROPIC_BASE_URL` — prefix with
-  `env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL -u CLAUDE_CODE_OAUTH_TOKEN npm run dev`.
-  A normal user terminal needs nothing.
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`, and core's preflight rejects
+`ANTHROPIC_BASE_URL` — prefix with
+`env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL -u CLAUDE_CODE_OAUTH_TOKEN npm run dev`.
+A normal user terminal needs nothing.
 - **Flow-log evidence** (§9): when you need a file-backed flow log, start core
-  as `npm run dev > "${GANTRY_DEV_LOG:-/tmp/gantry-dev.log}" 2>&1 &` and use
-  that same file while debugging. Keep `runtime.runner.idle_timeout_ms` in
-  `settings.yaml` aligned with the behavior you are testing: short values force
-  cold/resumed-session behavior sooner, while longer values let immediate
-  follow-ups exercise the still-live `MessageStream` path.
+as `npm run dev > "${GANTRY_DEV_LOG:-/tmp/gantry-dev.log}" 2>&1 &` and use
+that same file while debugging. Keep `runtime.runner.idle_timeout_ms` in
+`settings.yaml` aligned with the behavior you are testing: short values force
+cold/resumed-session behavior sooner, while longer values let immediate
+follow-ups exercise the still-live `MessageStream` path.
 
 ---
 
@@ -226,12 +230,12 @@ A payload is processed as a customer message **only if all of these hold**
 (`apps/core/src/channels/interakt/channel.ts`):
 
 - `type == "message_received"` — everything else (`message_api_sent` /
-  `delivered` / `read` status callbacks) is ACKed and dropped;
+`delivered` / `read` status callbacks) is ACKed and dropped;
 - `data.message.chat_message_type == "CustomerMessage"` — `BusinessMessage`
-  (our own outbound echo) is dropped;
+(our own outbound echo) is dropped;
 - `data.message.message_content_type == "Text"` — media is not supported;
 - `data.customer.channel_phone_number` present (digits, no `+`) — this becomes
-  the conversation id `conversation:wa:<phone>`.
+the conversation id `conversation:wa:<phone>`.
 
 Dedup: `data.message.id` is unique per conversation — re-sending the same id
 ACKs 200 but is dropped at the DB constraint. Use a fresh UUID per message
@@ -297,11 +301,11 @@ guardrail reply **0.7 s**; agent turn with one Shopify lookup **21 s**;
 Budget — **poll every 5 s and proceed as soon as the reply lands**:
 
 - **simple chat turn: 50 s at most** — nothing by then ⇒ stop waiting and
-  debug (§9);
+debug (§9);
 - **slash-command replies (extraction stats etc.): 2 minutes at most** —
-  nothing by then ⇒ debug. (The command's own `timeoutMs` is 150 s in
-  `agents/boondi_support/commands/extract-leads-queries.ts`, so a straggler
-  "timed out" reply can still appear after you've moved on to debugging.)
+nothing by then ⇒ debug. (The command's own `timeoutMs` is 150 s in
+`agents/boondi_support/commands/extract-leads-queries.ts`, so a straggler
+"timed out" reply can still appear after you've moved on to debugging.)
 
 ### Poll target 1 — admin API (preferred; works whenever :3000 is up)
 
@@ -383,17 +387,17 @@ type-strippable, no enums).
 ### 6b. Agent (Claude Agent SDK)
 
 - Prompts: `SOUL.md` (persona) + `CLAUDE.md` (tool ops/output discipline) from
-  the agent folder, synced into the prompt profile **at core boot only**
-  (`syncAuthoredPromptsAtBoot`, `apps/core/src/app/bootstrap/startup.ts`) —
-  **editing them does nothing until a restart**.
+the agent folder, synced into the prompt profile **at core boot only**
+(`syncAuthoredPromptsAtBoot`, `apps/core/src/app/bootstrap/startup.ts`) —
+**editing them does nothing until a restart**.
 - Model: `sonnet`, thinking disabled (settings.yaml). Guardrail-allowed
-  messages spawn the runner; with `GANTRY_CHILD_RUNNER_FROM_SOURCE=1` (set in
-  dev) the child runs from TS source, otherwise from `dist/` — runner-side
-  code changes need `npm run build` in that case.
+messages spawn the runner; with `GANTRY_CHILD_RUNNER_FROM_SOURCE=1` (set in
+dev) the child runs from TS source, otherwise from `dist/` — runner-side
+code changes need `npm run build` in that case.
 - Shopify/CRM tools go through `mcp_call_tool` → socket IPC → core's proxy,
-  which signs `X-Caller-Identity` (HMAC, `MCP_IDENTITY_SECRET`, phone from the
-  conversation JID, test override §2 applies) and enforces
-  `allowed_tool_patterns` (settings.yaml `mcp_servers` block).
+which signs `X-Caller-Identity` (HMAC, `MCP_IDENTITY_SECRET`, phone from the
+conversation JID, test override §2 applies) and enforces
+`allowed_tool_patterns` (settings.yaml `mcp_servers` block).
 
 ### 6c. Background extraction (CRM + memory) and dreaming
 
@@ -403,23 +407,23 @@ then writes a digest row: `gantry.agent_session_digests` with
 `trigger='session-end'`. That digest fans out to:
 
 1. **Memory facts** (core): extraction prompt
-   `agents/boondi_support/memory_extractor/memory_extractor.md` →
+  `agents/boondi_support/memory_extractor/memory_extractor.md` →
    `gantry.memory_items` (keyed `agent_id='agent:boondi_support'`,
    `user_id=<phone>`). View: admin panel right pane or
    `/api/memory?phone=<phone>`.
 2. **CRM opportunities** (mcp-crm digest-watcher): polls digests behind cursor
-   `boondi_crm.boondi_digest_cursor` (interval
+  `boondi_crm.boondi_digest_cursor` (interval
    `BOONDI_CRM_RECONCILE_INTERVAL_MS`, default 240 s, test setup uses 10 s),
    runs one Agent-SDK extraction per digest →
    `boondi_crm.boondi_business_records` (status ladder
    query→qualifying→lead, bands P5–P1). View: `/leads` page or `/api/records`.
 3. **Dreaming** (nightly consolidation): settings.yaml `memory.dreaming`
-   enabled, default `cron: '15 3 * * *'`.
+  enabled, default `cron: '15 3 * * *'`.
 
 **Don't wait for timers in tests** — drive it with slash commands. A command
 is just a normal signed webhook message whose text IS the command (e.g.
 `sendWebhook({ text: '/new', from: '000000905' })`), and it works **only from
-configured operator numbers or `000*` fake numbers** (the session-command
+configured operator numbers or `000`* fake numbers** (the session-command
 allowance).
 These are the commands the Boondi workflow uses:
 
@@ -450,7 +454,7 @@ Separate Next.js repo at `**~/Desktop/boondi-admin`** (its own git repo,
 sibling of gantry on the Desktop; `npm run dev`, port 3000; DB session forced
 read-only). Boondi and the admin panel **work together as one system**: Boondi
 writes conversations/records/memory to Postgres, the panel reads them — so
-**open that repo whenever it helps\*\*: to understand exactly what a page or API
+**open that repo whenever it helps: to understand exactly what a page or API
 shows (queries live in `lib/queries.ts`), or to check and change something
 (fix a query, surface a column, extend an API) when a test or investigation
 needs it. The one invariant to preserve when changing it: the DB connection
@@ -461,13 +465,13 @@ proof the pipeline worked.** If a test ran but the panel shows nothing, the
 test did not pass, whatever the logs say.
 
 - `/` — WhatsApp-style two-pane chat list (10 s auto-refresh + on-focus).
-  Deep link to one conversation: `http://localhost:3000/?c=conversation:wa:<phone>`
+Deep link to one conversation: `http://localhost:3000/?c=conversation:wa:<phone>`
 - `/leads` — Leads tab (lead/handed_off/won/lost) vs Queries tab
-  (query/qualifying), with band/score/intent and links back to the chat.
+(query/qualifying), with band/score/intent and links back to the chat.
 - APIs (curl-able for assertions): `/api/conversations`,
-  `/api/messages?conversationId=conversation:wa:<phone>`,
-  `/api/memory?phone=<phone>` (memory facts + open records),
-  `/api/records` (all opportunities).
+`/api/messages?conversationId=conversation:wa:<phone>`,
+`/api/memory?phone=<phone>` (memory facts + open records),
+`/api/records` (all opportunities).
 
 Quirk: outbound `senderName` shows the bot/agent title ("Gantry"/"Boondi");
 customer names come from inbound `sender_display_name`.
@@ -476,11 +480,11 @@ customer names come from inbound `sender_display_name`.
 
 ## 8. Clean state
 
-- **Per-conversation session reset**: send `/new` from the same `000*` test
-  number when you only need a fresh agent session. This does not delete the DB
-  transcript, CRM rows, memory rows, or admin history; those remain evidence.
+- **Per-conversation session reset**: send `/new` from the same `000`* test
+number when you only need a fresh agent session. This does not delete the DB
+transcript, CRM rows, memory rows, or admin history; those remain evidence.
 - **Full fresh start** — when the DB/sessions/backlogs are cluttered and you
-  want a clean slate (no old conversations, digests, memory, jobs):
+want a clean slate (no old conversations, digests, memory, jobs):
   ```bash
   cd /Users/caw-d/Desktop/gantry
   # 1) kill the running stack (§3 kill block)
@@ -501,12 +505,12 @@ customer names come from inbound `sender_display_name`.
   container — restarting the Gantry dev servers afterwards (step 3) is on you,
   which is why the kill+restart is part of this flow.
 - There is no current checked-in per-phone reset helper in this worktree. For
-  Template_BA proof, use `agents/boondi_support/evals/run-template-ba-live.ts`
-  or drive the signed webhook manually, then poll admin/API/DB and quote the
-  exact evidence. If stale CRM rows appear, stop boondi-crm, use the full fresh
-  start above, restart the stack, and rerun the same signed webhook flow. Do not
-  loosen expectations until the flow log and CRM log prove the row came from the
-  current transcript.
+Template_BA proof, use `agents/boondi_support/evals/run-template-ba-live.ts`
+or drive the signed webhook manually, then poll admin/API/DB and quote the
+exact evidence. If stale CRM rows appear, stop boondi-crm, use the full fresh
+start above, restart the stack, and rerun the same signed webhook flow. Do not
+loosen expectations until the flow log and CRM log prove the row came from the
+current transcript.
 
 ---
 
@@ -531,31 +535,31 @@ diagnostic-only; do not enable it in normal runs.
 **No reply after 60 s — walk the chain:**
 
 1. Webhook ACK was 200? (401 = body/signature mismatch — sign the exact bytes;
-   503 = Interakt channel not enabled.)
+  503 = Interakt channel not enabled.)
 2. Inbound row visible in admin panel? No → payload was filtered: check
-   `type`/`chat_message_type`/`message_content_type`/`channel_phone_number`,
+  `type`/`chat_message_type`/`message_content_type`/`channel_phone_number`,
    or duplicate `message.id`.
 3. `flow:guardrail` event? `direct_response` means the canned reply IS the
-   reply (it's in the transcript).
+  reply (it's in the transcript).
 4. Agent never spawned / queue stuck → warm runs hogging active slots (30-min
-   `runtime.runner.idle_timeout_ms`, §3), or an orphaned second core
+  `runtime.runner.idle_timeout_ms`, §3), or an orphaned second core
    double-processing — one core only.
 5. Reply came back as vague hiccup text or lookup narration such as
-   **"fetching"** / **"let me check"** / **"small hiccup"** →
+  **"fetching"** / **"let me check"** / **"small hiccup"** →
    that is either the LLM's blanket fallback for a failed/unclear tool call or
    a prompt-contract miss, not a real answer. Diagnose at the tool layer and
    prompt/tool payload contract; two known causes that look identical:
 
 - **no `flow:mcp.request` in the log + hung tool turn** → the runner did not
-  connect to the socket IPC server. Check `flow:warm_pool`, `flow:mcp.request`,
-  and socket bind logs before diagnosing the downstream tool.
+connect to the socket IPC server. Check `flow:warm_pool`, `flow:mcp.request`,
+and socket bind logs before diagnosing the downstream tool.
 - **fast turn + mcp.request present + tool result `isError NOT_FOUND`** →
-  Shopify Admin API 404: the app lost authorization on the shop
-  (re-authorize in Shopify; token grant can still 200 while graphql.json
-  404s).
+Shopify Admin API 404: the app lost authorization on the shop
+(re-authorize in Shopify; token grant can still 200 while graphql.json
+404s).
 
-6. `delivery_status: failed` on the outbound row is **normal for fake
-   numbers** (provider rejects) and for real numbers outside WhatsApp's 24 h
+1. `delivery_status: failed` on the outbound row is **normal for fake
+  numbers** (provider rejects) and for real numbers outside WhatsApp's 24 h
    service window — the persisted text still proves the pipeline.
 
 **Config changes don't take effect?** `.env`, `settings.yaml`, `SOUL.md`,
@@ -568,49 +572,49 @@ restart core. Runner-side TS changes need `npm run build` unless
 ## 10. Recipe: "test scenario X"
 
 1. **Preflight** (§3 one-liner): 4710/8081/8082/3000 up; confirm
-   `GANTRY_OUTBOUND_DRYRUN=1` + operator list on the live core process (§2).
-2. **Pick a `000*` fake number** (e.g. from `000000901–906`; avoid
-   `000000050` unless testing the returning persona). Optionally reset it
+  `GANTRY_OUTBOUND_DRYRUN=1` + operator list on the live core process (§2).
+2. **Pick a `000`* fake number** (e.g. from `000000901–906`; avoid
+  `000000050` unless testing the returning persona). Optionally reset it
    (§8) for a clean run — otherwise prior context is part of the scenario.
 3. **Send each customer turn** via the raw signed webhook request (§4); after
-   each send, **poll every 5 s** (§5) until the outbound reply lands — chat
+  each send, **poll every 5 s** (§5) until the outbound reply lands — chat
    turns max 50 s, command replies max 2 min, then debug (§9). Reply arrived
    early ⇒ proceed immediately.
 4. **For CRM/memory assertions** don't wait for idle timers: send
-   `/digest-session` and `/extract-leads-queries` from
+  `/digest-session` and `/extract-leads-queries` from
    the same number (§6c), then check `/api/records` and
    `/api/memory?phone=…`.
 5. **Prove it in the admin panel** (§7): link
-   `http://localhost:3000/?c=conversation:wa:<phone>` (and `/leads` when
+  `http://localhost:3000/?c=conversation:wa:<phone>` (and `/leads` when
    relevant). Leave the transcript in place — no teardown `/new`.
 6. **Report**: quote the actual replies, timings, records created, and any
-   flow-log evidence.
+  flow-log evidence.
 
 ### Worked example — "check the conversation for number X and see why Boondi replied 'y' instead of 'z'"
 
 1. Transcript: `curl -s "http://localhost:3000/api/messages?conversationId=conversation:wa:X"`
-   — find the exact inbound turn and the reply around it (or the deep link in
+  — find the exact inbound turn and the reply around it (or the deep link in
    the browser).
 2. Was it the guardrail? A canned greeting/scope line in <1 s with no tool
-   activity = `direct_response` — check `flow:guardrail` for
+  activity = `direct_response` — check `flow:guardrail` for
    `guardrailDecision`/`guardrailReason`, then the rule in
    `agents/boondi_support/guardrails/guardrail.ts`.
 3. Was it a tool failure? "small hiccup"/escalation phrasing ⇒ §9 step 5 —
-   find `flow:mcp.request` for that turn and the tool result's error `code`;
+  find `flow:mcp.request` for that turn and the tool result's error `code`;
    `CLAUDE.md`'s error-code table maps codes to the exact customer phrasing.
 4. Was it the prompt? If the tool returned good data but the wording violates
-   expectations, the governing rules are `agents/boondi_support/CLAUDE.md`
+  expectations, the governing rules are `agents/boondi_support/CLAUDE.md`
    (output discipline, error table, identity rules) and `SOUL.md` (§ persona /
    restricted actions) — remember both apply only as of the last core restart.
 5. Was it memory/CRM context? `/api/memory?phone=X` shows what the agent was
-   recognizing; `get_open_records` results come from
+  recognizing; `get_open_records` results come from
    `boondi_crm.boondi_business_records`.
 
 ---
 
-_Verified live 2026-06-10: signed webhook from fake `000000905` → guardrail
+*Verified live 2026-06-10: signed webhook from fake `000000905` → guardrail
 allow → sonnet agent → Shopify catalogue lookup → reply persisted + visible in
 admin panel in 21 s (`deliveryStatus: sent`); bare "hi" from fresh `000000904`
 via raw curl → canned guardrail greeting in 0.7 s; `/extract-leads-queries` →
 ack + `Extracted: 1. Created: 1.` → `status:"query"` row in
-`boondi_crm.boondi_business_records`._
+`boondi_crm.boondi_business_records`.*

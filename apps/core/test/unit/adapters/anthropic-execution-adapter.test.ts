@@ -113,6 +113,65 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
     );
   });
 
+  it('passes only progressive materialized skills to the runner Skill tool whitelist', async () => {
+    mockMaterializeClaudeRuntime.mockResolvedValueOnce({
+      claudeConfigDir: '/tmp/gantry-runtime/.claude',
+      protectedFilesystemPaths: ['/tmp/gantry-runtime/.claude'],
+      materializedSkills: [
+        {
+          name: 'boondi-gifting',
+          sourceType: 'agent',
+          materializedName: 'boondi-gifting',
+          assets: [
+            {
+              path: 'SKILL.md',
+              content: Buffer.from(
+                [
+                  '---',
+                  'name: boondi-gifting',
+                  'description: Eager gifting guide',
+                  '---',
+                  '# Body',
+                ].join('\n'),
+              ),
+            },
+          ],
+        },
+        {
+          name: 'returns-kb',
+          sourceType: 'agent',
+          materializedName: 'returns-kb',
+          assets: [
+            {
+              path: 'SKILL.md',
+              content: Buffer.from(
+                [
+                  '---',
+                  'name: returns-kb',
+                  'description: Progressive returns guide',
+                  'disclosure: progressive',
+                  '---',
+                  '# Body',
+                ].join('\n'),
+              ),
+            },
+          ],
+        },
+      ],
+      cleanup: vi.fn(),
+    });
+    const adapter = new AnthropicClaudeAgentExecutionAdapter();
+
+    const prepared = await adapter.prepare(prepareInput());
+
+    expect(prepared.env.GANTRY_CLAUDE_SDK_SKILLS_JSON).toBe(
+      JSON.stringify(['boondi-gifting', 'returns-kb']),
+    );
+    expect(prepared.env.GANTRY_CLAUDE_SDK_PROGRESSIVE_SKILLS_JSON).toBe(
+      JSON.stringify(['returns-kb']),
+    );
+  });
+
   it('rejects materialized skill names that collide with Claude-native skills', async () => {
     mockMaterializeClaudeRuntime.mockResolvedValueOnce({
       claudeConfigDir: '/tmp/gantry-runtime/.claude',
