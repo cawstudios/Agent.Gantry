@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  claudeSdkToolsForEnabledSkills,
-} from '@core/adapters/llm/anthropic-claude-agent/native-sdk-skills.js';
+import { claudeSdkToolsForEnabledSkills } from '@core/adapters/llm/anthropic-claude-agent/native-sdk-skills.js';
 
 describe('native SDK skills', () => {
   it('does not expose the native Skill tool when SDK skills are eager', () => {
