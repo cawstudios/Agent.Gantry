@@ -398,15 +398,6 @@ describe('agent task lifecycle IPC handlers', () => {
       contextFor({
         data: taskData('async-start', 'async_run_command', {
           command: 'echo ok',
-          protectedFilesystemDenyReadPaths: ['/protected/read'],
-          protectedFilesystemDenyWritePaths: ['/protected/write'],
-          sandboxAllowedNetworkHosts: ['127.0.0.1:1234'],
-          egressProxyUrl: 'http://127.0.0.1:1234',
-          sandboxResourceLimits: {
-            cpuSeconds: 10,
-            memoryMb: 128,
-            maxProcesses: 8,
-          },
         }),
         deps,
       }),

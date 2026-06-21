@@ -18,14 +18,6 @@ import { waitForTaskResponse, writeIpcFile } from '../ipc.js';
 import { makeIpcId } from '../ipc-ids.js';
 
 const TASK_TOOL_TIMEOUT_MS = 20_000;
-const PROTECTED_FILESYSTEM_PATHS_ENV = 'GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON';
-const PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV =
-  'GANTRY_PROTECTED_FILESYSTEM_DENY_READ_PATHS_JSON';
-const PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV =
-  'GANTRY_PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_JSON';
-const SANDBOX_ALLOWED_NETWORK_HOSTS_ENV =
-  'GANTRY_SANDBOX_ALLOWED_NETWORK_HOSTS_JSON';
-const SANDBOX_RESOURCE_LIMITS_ENV = 'GANTRY_SANDBOX_RESOURCE_LIMITS_JSON';
 
 const todoItemSchema = z.object({
   id: z.string().min(1).max(80),
@@ -92,24 +84,6 @@ async function submitTaskLifecycleRequest(input: {
   };
 }
 
-function readStringArrayEnv(...keys: string[]): string[] {
-  for (const key of keys) {
-    const value = process.env[key];
-    if (!value) continue;
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) {
-        return parsed.filter(
-          (item): item is string => typeof item === 'string',
-        );
-      }
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
 function formatSuccessfulTaskResponse(response: {
   message?: string;
   data?: unknown;
@@ -129,22 +103,7 @@ export function registerTaskLifecycleTools(server: McpServer): void {
     async (args) =>
       submitTaskLifecycleRequest({
         type: 'async_run_command',
-        payload: {
-          command: args.command,
-          protectedFilesystemDenyReadPaths: readStringArrayEnv(
-            PROTECTED_FILESYSTEM_DENY_READ_PATHS_ENV,
-          ),
-          protectedFilesystemDenyWritePaths: readStringArrayEnv(
-            PROTECTED_FILESYSTEM_DENY_WRITE_PATHS_ENV,
-            PROTECTED_FILESYSTEM_PATHS_ENV,
-          ),
-          sandboxAllowedNetworkHosts: readStringArrayEnv(
-            SANDBOX_ALLOWED_NETWORK_HOSTS_ENV,
-          ),
-          egressProxyUrl: process.env.GANTRY_EGRESS_PROXY_URL,
-          sandboxResourceLimits: readJsonObjectEnv(SANDBOX_RESOURCE_LIMITS_ENV),
-          memoryBlock: process.env.GANTRY_MEMORY_CONTEXT_BLOCK,
-        },
+        payload: { command: args.command },
         timeoutMessage: 'Async command start timed out.',
         fallbackError: 'Async command start failed.',
       }),
@@ -250,18 +209,4 @@ export function registerTaskLifecycleTools(server: McpServer): void {
         fallbackError: 'Plan update failed.',
       }),
   );
-}
-
-function readJsonObjectEnv(key: string): Record<string, unknown> | undefined {
-  const value = process.env[key];
-  if (!value) return undefined;
-  try {
-    const parsed = JSON.parse(value);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    return undefined;
-  }
-  return undefined;
 }
