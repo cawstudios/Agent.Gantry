@@ -20,7 +20,7 @@ jobs:
       - name: Check AGENTS hygiene
         run: python3 .codex/scripts/check_agents_hygiene.py
       - name: Check LOCAL-35 phase refactor source line delta
-        if: ${{ github.event_name == 'pull_request' && (contains(join(github.event.pull_request.labels.*.name, ','), 'PR: Refactor') || contains(join(github.event.pull_request.labels.*.name, ','), 'refactor')) }}
+        if: "${{ github.event_name == 'pull_request' && (contains(toJson(github.event.pull_request.labels), 'PR: Refactor') || contains(toJson(github.event.pull_request.labels), 'refactor')) }}"
         run: python3 .codex/scripts/check_refactor_line_delta.py --check-diff --baseline-file docs/architecture/refactor-baseline.md
       - name: Compile factory scripts
         run: python3 -m compileall .codex/scripts
