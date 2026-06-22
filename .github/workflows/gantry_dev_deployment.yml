@@ -10,11 +10,11 @@ on:
 
 env:
   AWS_REGION: ap-south-1
-  ECS_CLUSTER: caw-aws-aps1-prod-ecs-ats-cluster
+  ECS_CLUSTER: caw-aws-aps1-dev-ecs-ats-cluster
   ECR_REPOSITORY: caw-aws-aps1-dev-ecr-ats-gantry-reagent
-  ECS_SERVICE: caw-aws-aps1-prod-ecs-ats-gantry-reagent-service
+  ECS_SERVICE: caw-aws-aps1-dev-ecs-ats-gantry-reagent-service
   TASK_NAME: caw-aws-aps1-dev-task_definition-ats-gantry-reagent
-  CONTAINER_NAME: caw-aws-aps1-prod-task_definition-ats-gantry-reagent-container
+  CONTAINER_NAME: caw-aws-aps1-dev-task_definition-ats-gantry-reagent-container
 
 
 jobs:
