@@ -13,6 +13,8 @@ import type {
   AsyncCommandProcessHandle,
   StartAsyncCommandTaskResult,
 } from './async-command-task-service.js';
+import { sanitizeOutboundLlmText } from '../shared/sensitive-material.js';
+import { nowIso } from '../shared/time/datetime.js';
 
 const OUTPUT_LIMIT = 1_000;
 const localAdmissionLocks = new WeakMap<AsyncTaskRepository, Promise<void>>();
@@ -144,6 +146,93 @@ export function commandSummary(command: string): string {
 
 export function truncate(value: string, limit = OUTPUT_LIMIT): string {
   return value.length <= limit ? value : `${value.slice(0, limit)}...`;
+}
+
+function outputTail(value: string, limit = OUTPUT_LIMIT): string {
+  return value.length <= limit ? value : `...${value.slice(-limit)}`;
+}
+
+export interface AsyncCommandOutputSnapshot {
+  stdoutTail?: string;
+  stderrTail?: string;
+}
+
+export async function persistProcessHandle(input: {
+  repository: AsyncTaskRepository;
+  task: AsyncTaskRecord;
+  handle: AsyncCommandProcessHandle;
+}): Promise<void> {
+  const latest = (await input.repository.getTask(input.task.id)) ?? input.task;
+  if (
+    latest.leaseToken !== input.task.leaseToken ||
+    latest.fencingVersion !== input.task.fencingVersion
+  ) {
+    throw new Error('Async command process owner is stale.');
+  }
+  const updated = await input.repository.transitionTask({
+    taskId: input.task.id,
+    leaseToken: input.task.leaseToken,
+    fencingVersion: input.task.fencingVersion,
+    status: 'running',
+    now: nowIso(),
+    heartbeatAt: nowIso(),
+    privateCorrelationJson: {
+      ...(isRecord(latest.privateCorrelationJson)
+        ? latest.privateCorrelationJson
+        : {}),
+      process: input.handle,
+    },
+  });
+  if (!updated) {
+    throw new Error('Failed to persist async command process handle.');
+  }
+}
+
+export async function persistInspectionSnapshot(input: {
+  repository: AsyncTaskRepository;
+  task: AsyncTaskRecord;
+  snapshot: AsyncCommandOutputSnapshot;
+}): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const latest = await input.repository.getTask(input.task.id);
+    if (
+      !latest ||
+      latest.status !== 'running' ||
+      latest.leaseToken !== input.task.leaseToken ||
+      latest.fencingVersion !== input.task.fencingVersion
+    ) {
+      return;
+    }
+    const now = nowIso();
+    const progress = isRecord(latest.privateCorrelationJson.progress)
+      ? latest.privateCorrelationJson.progress
+      : {};
+    const updated = await input.repository.transitionTask({
+      taskId: input.task.id,
+      leaseToken: input.task.leaseToken,
+      fencingVersion: input.task.fencingVersion,
+      status: 'running',
+      now,
+      heartbeatAt: now,
+      expectedPrivateCorrelationJson: latest.privateCorrelationJson,
+      privateCorrelationJson: {
+        ...(isRecord(latest.privateCorrelationJson)
+          ? latest.privateCorrelationJson
+          : {}),
+        progress: {
+          ...progress,
+          phase: 'running',
+          stdoutTail: outputTail(
+            sanitizeOutboundLlmText(input.snapshot.stdoutTail ?? '').text,
+          ),
+          stderrTail: outputTail(
+            sanitizeOutboundLlmText(input.snapshot.stderrTail ?? '').text,
+          ),
+        },
+      },
+    });
+    if (updated) return;
+  }
 }
 
 export function errorMessage(err: unknown): string {

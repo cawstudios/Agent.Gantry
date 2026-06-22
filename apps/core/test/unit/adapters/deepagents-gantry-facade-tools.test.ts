@@ -54,6 +54,7 @@ function makeTools(
   rules: string[] = [],
   toolNetworkEnv?: Record<string, string>,
   filesystemToolsEnabled = true,
+  extra: Partial<Parameters<typeof createGantryFacadeTools>[0]> = {},
 ) {
   return createGantryFacadeTools({
     workspaceFolder: 'main_agent',
@@ -65,6 +66,7 @@ function makeTools(
     lockedAccessPreset: false,
     filesystemToolsEnabled,
     cwd: root,
+    ...extra,
   });
 }
 
@@ -115,7 +117,10 @@ describe('Gantry DeepAgents facade tools', () => {
 
   it('projects Gantry public facade names and no raw DeepAgents filesystem tools', () => {
     const root = makeRoot();
-    const names = makeTools(root)
+    const names = makeTools(root, [], undefined, true, {
+      asyncTaskToolsEnabled: true,
+      delegateTaskTool: { name: 'delegate_task', invoke: vi.fn() } as never,
+    })
       .map((item) => item.name)
       .sort();
     expect(names).toEqual([...DEEPAGENTS_GANTRY_FACADE_TOOL_NAMES].sort());
@@ -228,6 +233,36 @@ describe('Gantry DeepAgents facade tools', () => {
       });
     },
   );
+
+  it('bridges AgentDelegation to Gantry delegate_task when authorized', async () => {
+    const root = makeRoot();
+    const delegateTaskTool = {
+      name: 'delegate_task',
+      invoke: vi.fn(async () => 'task task-1 started'),
+    };
+
+    const result = await invoke(
+      makeTools(root, ['AgentDelegation'], undefined, true, {
+        asyncTaskToolsEnabled: true,
+        delegateTaskTool: delegateTaskTool as never,
+      }),
+      'AgentDelegation',
+      { task: 'research accounts', context: 'from lead list' },
+    );
+
+    expect(result).toBe('task task-1 started');
+    expect(delegateTaskTool.invoke).toHaveBeenCalledWith({
+      objective: 'research accounts',
+      context: 'from lead list',
+    });
+  });
+
+  it('does not expose AgentDelegation until the Gantry delegate transport is mounted', () => {
+    const root = makeRoot();
+    expect(makeTools(root).map((item) => item.name)).not.toContain(
+      'AgentDelegation',
+    );
+  });
 
   it('writes and edits files through Gantry facade authority', async () => {
     const root = makeRoot();

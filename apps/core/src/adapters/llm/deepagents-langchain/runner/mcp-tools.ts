@@ -123,6 +123,9 @@ export async function connectGantryAndThirdPartyMcpTools(
   const gantryTools = (serverTools[GANTRY_SERVER_NAME] ?? []).filter((tool) =>
     selectedGantrySet.has(tool.name),
   );
+  const delegateTaskTool = gantryTools.find(
+    (tool) => tool.name === 'delegate_task',
+  );
   const facadeTools = createGantryFacadeTools({
     workspaceFolder: input.gate.workspaceFolder,
     memoryBlock: input.gate.memoryBlock,
@@ -131,6 +134,8 @@ export async function connectGantryAndThirdPartyMcpTools(
     gateContext: input.gate.gateContext,
     permissionEnv: input.gate.permissionEnv,
     lockedAccessPreset: input.gate.lockedAccessPreset,
+    asyncTaskToolsEnabled: projection.asyncTaskToolsEnabled,
+    delegateTaskTool,
     filesystemToolsEnabled: shouldProjectGantryFilesystemTools({
       filesystemEnabledEnv: process.env.GANTRY_DEEPAGENTS_FILESYSTEM_ENABLED,
     }),

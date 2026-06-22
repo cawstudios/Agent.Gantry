@@ -34,6 +34,7 @@ export interface GantryMcpProjection {
   // True only when the host enabled browser IPC for this run (browser gateway
   // tools must not be reachable otherwise).
   browserIpcEnabled: boolean;
+  asyncTaskToolsEnabled: boolean;
 }
 
 export function buildGantryMcpProjection(
@@ -45,13 +46,14 @@ export function buildGantryMcpProjection(
   const browserIpcEnabled =
     Boolean(env.GANTRY_BROWSER_IPC_AUTH_TOKEN?.trim()) &&
     input.configuredAllowedTools.some(isCanonicalBrowserCapabilityRule);
+  const asyncTaskToolsEnabled = env.GANTRY_ASYNC_TASK_TOOLS_ENABLED === '1';
 
   const selectedToolNamesBase = selectedGantryMcpToolNames(
     input.configuredAllowedTools,
     {
       excludeAuthorityTools: input.hideAuthorityTools,
       memoryReviewerIsControlApprover,
-      asyncTaskToolsEnabled: env.GANTRY_ASYNC_TASK_TOOLS_ENABLED === '1',
+      asyncTaskToolsEnabled,
     },
   );
   // Browser gateway tools (browser_*) are reachable only when the host enabled
@@ -127,6 +129,7 @@ export function buildGantryMcpProjection(
     env: serverEnv,
     selectedToolNames,
     browserIpcEnabled,
+    asyncTaskToolsEnabled,
   };
 }
 

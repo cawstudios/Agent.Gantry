@@ -58,6 +58,10 @@ export interface PublicAsyncTaskDto {
   blocker?: string | null;
   pendingSteeringCount?: number;
   consumedSteeringCount?: number;
+  heartbeatAt?: string | null;
+  elapsedMs?: number | null;
+  stdoutTail?: string | null;
+  stderrTail?: string | null;
   receiptLines: string[];
   allowedActions: Array<'get' | 'list' | 'cancel'>;
   createdAt: string;
@@ -168,6 +172,7 @@ export function toPublicAsyncTaskDto(
     outputSummary: task.outputSummary,
     errorSummary: task.errorSummary,
     ...publicProgress(task),
+    ...publicInspection(task),
     receiptLines: receiptLines(task.receiptJson),
     allowedActions: isAsyncTaskTerminal(task.status)
       ? ['get', 'list']
@@ -231,6 +236,38 @@ function publicProgress(
     consumedSteeringCount: steering.filter(
       (entry) => record(entry).status === 'consumed',
     ).length,
+  };
+}
+
+function publicInspection(
+  task: AsyncTaskRecord,
+): Pick<
+  PublicAsyncTaskDto,
+  'heartbeatAt' | 'elapsedMs' | 'stdoutTail' | 'stderrTail'
+> {
+  if (task.kind !== 'async_command' || task.status !== 'running') {
+    return {
+      heartbeatAt: null,
+      elapsedMs: null,
+      stdoutTail: null,
+      stderrTail: null,
+    };
+  }
+  const progress = record(task.privateCorrelationJson.progress);
+  const startedAt = task.startedAt ?? task.createdAt;
+  const startedMs = Date.parse(startedAt);
+  const endMs =
+    Date.parse(task.terminalAt ?? '') ||
+    Date.parse(task.heartbeatAt ?? '') ||
+    Date.parse(task.updatedAt) ||
+    Date.now();
+  const fallbackElapsedMs =
+    Number.isFinite(startedMs) && endMs >= startedMs ? endMs - startedMs : null;
+  return {
+    heartbeatAt: task.heartbeatAt ?? null,
+    elapsedMs: fallbackElapsedMs,
+    stdoutTail: stringValue(progress.stdoutTail),
+    stderrTail: stringValue(progress.stderrTail),
   };
 }
 

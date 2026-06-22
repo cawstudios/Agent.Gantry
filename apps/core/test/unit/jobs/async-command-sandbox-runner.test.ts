@@ -175,6 +175,36 @@ describe('async command sandbox runner', () => {
     expect(provider.start).toHaveBeenCalledOnce();
   });
 
+  it('emits bounded throttled output snapshots while the child is running', async () => {
+    vi.useFakeTimers();
+    const { provider, child } = makeProvider();
+    const snapshots: Array<{ stdoutTail?: string; stderrTail?: string }> = [];
+
+    const resultPromise = runSandboxedAsyncCommand(provider, {
+      ...baseInput(),
+      outputMaxBytes: 8,
+      onOutputSnapshot: (snapshot) => snapshots.push(snapshot),
+    });
+    await Promise.resolve();
+    child.stdout.write('123456789');
+    child.stderr.write('abcdefghi');
+    expect(snapshots).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(snapshots).toEqual([
+      {
+        stdoutTail: '23456789',
+        stderrTail: 'bcdefghi',
+      },
+    ]);
+    child.emit('close', 0, null);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(resultPromise).resolves.toEqual({
+      outputSummary: '23456789',
+      errorSummary: 'bcdefghi',
+    });
+  });
+
   it('fails closed without an enforcing sandbox and times out active children', async () => {
     await expect(
       runSandboxedAsyncCommand(makeProvider({ enforcing: false }).provider, {

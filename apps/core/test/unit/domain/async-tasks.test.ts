@@ -5,7 +5,10 @@ import {
   type AsyncTaskRecord,
 } from '../../../src/domain/ports/async-tasks.js';
 
-function task(receiptJson: AsyncTaskRecord['receiptJson']): AsyncTaskRecord {
+function task(
+  receiptJson: AsyncTaskRecord['receiptJson'],
+  overrides: Partial<AsyncTaskRecord> = {},
+): AsyncTaskRecord {
   return {
     id: 'task-1',
     appId: 'app-1',
@@ -22,6 +25,7 @@ function task(receiptJson: AsyncTaskRecord['receiptJson']): AsyncTaskRecord {
     updatedAt: '2026-06-22T00:00:00.000Z',
     terminalAt: '2026-06-22T00:00:00.000Z',
     receiptJson,
+    ...overrides,
   };
 }
 
@@ -58,5 +62,55 @@ describe('toPublicAsyncTaskDto', () => {
       'Delegated: no',
       'Needs attention: none',
     ]);
+  });
+
+  it('exposes only bounded public progress for running async commands', () => {
+    const dto = toPublicAsyncTaskDto(
+      task(null, {
+        status: 'running',
+        heartbeatAt: '2026-06-22T00:00:03.000Z',
+        terminalAt: null,
+        privateCorrelationJson: {
+          process: {
+            pid: 12345,
+            processGroupId: 12345,
+            detached: true,
+            platform: process.platform,
+            ownerPid: process.pid,
+            startedAt: '2026-06-22T00:00:00.000Z',
+          },
+          progress: {
+            phase: 'running',
+            stdoutTail: 'safe stdout tail',
+            stderrTail: 'safe stderr tail',
+            stdout: 'unbounded stdout must stay private',
+            stderr: 'unbounded stderr must stay private',
+            privateCorrelationJson: { nested: true },
+            leaseToken: 'nested-lease',
+            fencingVersion: 7,
+          },
+        },
+      }),
+    );
+
+    expect(dto).toMatchObject({
+      id: 'task-1',
+      kind: 'async_command',
+      status: 'running',
+      currentPhase: 'running',
+      heartbeatAt: '2026-06-22T00:00:03.000Z',
+      elapsedMs: expect.any(Number),
+      stdoutTail: 'safe stdout tail',
+      stderrTail: 'safe stderr tail',
+      allowedActions: ['get', 'list', 'cancel'],
+    });
+    expect(dto.elapsedMs).toBeGreaterThanOrEqual(0);
+    const publicJson = JSON.stringify(dto);
+    expect(publicJson).not.toContain('privateCorrelationJson');
+    expect(publicJson).not.toContain('process');
+    expect(publicJson).not.toContain('leaseToken');
+    expect(publicJson).not.toContain('fencingVersion');
+    expect(publicJson).not.toContain('unbounded stdout');
+    expect(publicJson).not.toContain('unbounded stderr');
   });
 });

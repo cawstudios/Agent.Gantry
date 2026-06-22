@@ -404,6 +404,28 @@ describe('agent task lifecycle IPC handlers', () => {
     );
 
     const taskId = await waitForStatus(repository, 'running');
+    const runningTask = repository.tasks.get(taskId);
+    expect(runningTask).toBeTruthy();
+    if (!runningTask) return;
+    repository.tasks.set(taskId, {
+      ...runningTask,
+      heartbeatAt: '2026-06-22T00:00:05.000Z',
+      startedAt: '2026-06-22T00:00:00.000Z',
+      privateCorrelationJson: {
+        ...runningTask.privateCorrelationJson,
+        progress: {
+          phase: 'running',
+          elapsedMs: 5_000,
+          stdoutTail: 'ipc stdout tail',
+          stderrTail: 'ipc stderr tail',
+          stdout: 'ipc private full stdout',
+          stderr: 'ipc private full stderr',
+          privateCorrelationJson: { nested: true },
+          leaseToken: 'nested-lease',
+          fencingVersion: 3,
+        },
+      },
+    });
     expect(readResponse(runtimeHome, 'async-start')).toMatchObject({
       ok: true,
       message: 'Started: echo ok',
@@ -432,8 +454,28 @@ describe('agent task lifecycle IPC handlers', () => {
     );
     expect(readResponse(runtimeHome, 'async-get')).toMatchObject({
       ok: true,
-      data: { id: taskId, status: 'running' },
+      data: {
+        id: taskId,
+        status: 'running',
+        kind: 'async_command',
+        currentPhase: 'running',
+        heartbeatAt: '2026-06-22T00:00:05.000Z',
+        elapsedMs: expect.any(Number),
+        stdoutTail: 'ipc stdout tail',
+        stderrTail: 'ipc stderr tail',
+        allowedActions: ['get', 'list', 'cancel'],
+      },
     });
+    expect(
+      readResponse(runtimeHome, 'async-get').data.elapsedMs,
+    ).toBeGreaterThanOrEqual(0);
+    const getJson = JSON.stringify(readResponse(runtimeHome, 'async-get'));
+    expect(getJson).not.toContain('privateCorrelationJson');
+    expect(getJson).not.toContain('process');
+    expect(getJson).not.toContain('leaseToken');
+    expect(getJson).not.toContain('fencingVersion');
+    expect(getJson).not.toContain('ipc private full stdout');
+    expect(getJson).not.toContain('ipc private full stderr');
 
     await agentTaskLifecycleHandlers.task_list(
       contextFor({

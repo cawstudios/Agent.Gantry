@@ -13,6 +13,7 @@ import type {
   AsyncCommandLaunchControl,
   AsyncCommandProcessHandle,
 } from './async-command-task-service.js';
+import type { AsyncCommandOutputSnapshot } from './async-command-task-helpers.js';
 
 const ASYNC_COMMAND_ENV_KEYS = [
   'HTTP_PROXY',
@@ -41,6 +42,7 @@ const ASYNC_COMMAND_ENV_KEYS = [
 ] as const;
 
 export const DEFAULT_ASYNC_COMMAND_TIMEOUT_MS = 120_000;
+const OUTPUT_SNAPSHOT_INTERVAL_MS = 1_000;
 export const DEFAULT_ASYNC_RESOURCE_LIMITS: RunnerSandboxResourceLimits = {
   cpuSeconds: 300,
   memoryMb: 1024,
@@ -70,6 +72,7 @@ export async function runSandboxedAsyncCommand(
     onProcessStarted?: (
       handle: AsyncCommandProcessHandle,
     ) => Promise<void> | void;
+    onOutputSnapshot?: (snapshot: AsyncCommandOutputSnapshot) => unknown;
     launchControl?: AsyncCommandLaunchControl;
   },
 ): Promise<{ outputSummary?: string; errorSummary?: string }> {
@@ -158,6 +161,7 @@ export async function runSandboxedAsyncCommand(
       settled = true;
       if (timer) clearTimeout(timer);
       if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (outputSnapshotTimer) clearTimeout(outputSnapshotTimer);
       input.signal.removeEventListener('abort', onAbort);
       fs.rmSync(configFilePath, { force: true });
       fn();
@@ -166,11 +170,38 @@ export async function runSandboxedAsyncCommand(
       timedOut = true;
       terminate();
     }, input.timeoutMs);
+    let outputSnapshotTimer: ReturnType<typeof setTimeout> | undefined;
+    let outputSnapshotInFlight = false;
+    let outputSnapshotPending = false;
+    const emitOutputSnapshot = () => {
+      outputSnapshotPending = false;
+      outputSnapshotInFlight = true;
+      Promise.resolve(
+        input.onOutputSnapshot?.({ stdoutTail: stdout, stderrTail: stderr }),
+      )
+        .catch(() => undefined)
+        .finally(() => {
+          outputSnapshotInFlight = false;
+          if (outputSnapshotPending && !settled) scheduleOutputSnapshot();
+        });
+    };
+    const scheduleOutputSnapshot = () => {
+      if (!input.onOutputSnapshot) return;
+      outputSnapshotPending = true;
+      if (outputSnapshotInFlight || outputSnapshotTimer) return;
+      outputSnapshotTimer = setTimeout(() => {
+        outputSnapshotTimer = undefined;
+        emitOutputSnapshot();
+      }, OUTPUT_SNAPSHOT_INTERVAL_MS);
+      outputSnapshotTimer.unref?.();
+    };
     child.stdout.on('data', (chunk) => {
       stdout = `${stdout}${String(chunk)}`.slice(-input.outputMaxBytes);
+      scheduleOutputSnapshot();
     });
     child.stderr.on('data', (chunk) => {
       stderr = `${stderr}${String(chunk)}`.slice(-input.outputMaxBytes);
+      scheduleOutputSnapshot();
     });
     child.on('error', (err) => settle(() => reject(err)));
     child.on('close', (code, signal) => {

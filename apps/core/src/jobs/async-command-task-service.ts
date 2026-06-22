@@ -29,14 +29,16 @@ import {
   cleanupLaunchControl,
   commandSummary,
   errorMessage,
-  isRecord,
   isTimeoutError,
+  persistInspectionSnapshot,
+  persistProcessHandle,
   readPersistedProcessHandle,
   taskInScope,
   taskTimestampMs,
   terminateProcessHandle,
   truncate,
   withLocalAdmissionLock,
+  type AsyncCommandOutputSnapshot,
 } from './async-command-task-helpers.js';
 import {
   cancelledReceipt,
@@ -97,6 +99,7 @@ export interface AsyncCommandRunner {
     onProcessStarted?: (
       handle: AsyncCommandProcessHandle,
     ) => Promise<void> | void;
+    onOutputSnapshot?: (snapshot: AsyncCommandOutputSnapshot) => unknown;
     launchControl?: AsyncCommandLaunchControl;
   }): Promise<AsyncCommandRunnerResult>;
 }
@@ -611,25 +614,14 @@ export class AsyncCommandTaskService {
         resourceLimits: input.resourceLimits,
         signal: controller.signal,
         launchControl,
-        onProcessStarted: async (handle) => {
-          const updated = await this.repository.transitionTask({
-            taskId: task.id,
-            leaseToken: task.leaseToken,
-            fencingVersion: task.fencingVersion,
-            status: 'running',
-            now: nowIso(),
-            heartbeatAt: nowIso(),
-            privateCorrelationJson: {
-              ...(isRecord(task.privateCorrelationJson)
-                ? task.privateCorrelationJson
-                : {}),
-              process: handle,
-            },
-          });
-          if (!updated) {
-            throw new Error('Failed to persist async command process handle.');
-          }
-        },
+        onOutputSnapshot: (snapshot) =>
+          persistInspectionSnapshot({
+            repository: this.repository,
+            task,
+            snapshot,
+          }),
+        onProcessStarted: (handle) =>
+          persistProcessHandle({ repository: this.repository, task, handle }),
         appId: task.appId,
         agentId: task.agentId,
         conversationId: task.conversationId ?? '',

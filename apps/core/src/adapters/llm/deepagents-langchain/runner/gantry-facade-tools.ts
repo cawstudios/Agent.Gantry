@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { tool } from '@langchain/core/tools';
 import type { StructuredToolInterface } from '@langchain/core/tools';
+import * as deepagentsProvider from 'deepagents';
+import deepagentsPackageJson from 'deepagents/package.json' with { type: 'json' };
 
 import {
   GANTRY_FACADE_EXACT_TOOL_NAMES,
@@ -32,11 +34,11 @@ import {
   writeFileNoFollow,
 } from './gantry-facade-file-safety.js';
 import type { ThirdPartyMcpGateConfig } from './third-party-mcp-gate.js';
+import { evaluateAgentDelegationAsyncBridge } from './agent-delegation-async-bridge.js';
+import { DEEPAGENTS_ASYNC_DELEGATION_UNAVAILABLE_MESSAGE } from './async-subagent-sentinel.js';
 
 export const DEEPAGENTS_GANTRY_FACADE_TOOL_NAMES =
-  GANTRY_FACADE_EXACT_TOOL_NAMES.filter(
-    (name) => name !== 'AgentDelegation',
-  ) as Exclude<GantryFacadeExactToolName, 'AgentDelegation'>[];
+  GANTRY_FACADE_EXACT_TOOL_NAMES;
 
 type DeepAgentsFacadeToolName =
   (typeof DEEPAGENTS_GANTRY_FACADE_TOOL_NAMES)[number];
@@ -57,6 +59,8 @@ export interface GantryFacadeToolsConfig {
   permissionEnv: PermissionIpcRuntimeEnv;
   lockedAccessPreset: boolean;
   filesystemToolsEnabled: boolean;
+  asyncTaskToolsEnabled?: boolean;
+  delegateTaskTool?: StructuredToolInterface;
   cwd?: string;
 }
 
@@ -73,8 +77,10 @@ export function createGantryFacadeTools(
   const policy = new ToolExecutionPolicyService();
   return DEEPAGENTS_GANTRY_FACADE_TOOL_NAMES.filter(
     (toolName) =>
-      config.filesystemToolsEnabled ||
-      !DEEPAGENTS_FILESYSTEM_FACADE_TOOL_NAMES.has(toolName),
+      (toolName !== 'AgentDelegation' ||
+        (config.asyncTaskToolsEnabled === true && config.delegateTaskTool)) &&
+      (config.filesystemToolsEnabled ||
+        !DEEPAGENTS_FILESYSTEM_FACADE_TOOL_NAMES.has(toolName)),
   ).map((toolName) =>
     createOneFacadeTool(toolName, config, classifier, policy),
   );
@@ -171,6 +177,8 @@ function policyToolRequest(
         toolName: 'Write',
         toolInput: { file_path: record.path, content: record.content },
       };
+    case 'AgentDelegation':
+      return { toolName: 'AgentDelegation', toolInput: input };
   }
 }
 
@@ -197,7 +205,40 @@ async function executeFacadeTool(
       return fileEdit(String(record.path), String(record.patch), config);
     case 'FileWrite':
       return fileWrite(String(record.path), String(record.content), config);
+    case 'AgentDelegation':
+      return agentDelegation(record, config);
   }
+}
+
+async function agentDelegation(
+  input: Record<string, unknown>,
+  config: GantryFacadeToolsConfig,
+): Promise<string> {
+  const bridge = evaluateAgentDelegationAsyncBridge({
+    intent: {
+      toolName: 'AgentDelegation',
+      task: String(input.task),
+    },
+    packageVersion: installedDeepAgentsVersion(),
+    providerModule: deepagentsProvider,
+    asyncTaskToolsEnabled: config.asyncTaskToolsEnabled === true,
+    sandboxReady: true,
+    agentDelegationAuthorized: true,
+    transportReady: Boolean(config.delegateTaskTool),
+  });
+  if (bridge.status !== 'ready' || !config.delegateTaskTool) {
+    return DEEPAGENTS_ASYNC_DELEGATION_UNAVAILABLE_MESSAGE;
+  }
+  const result = await config.delegateTaskTool.invoke({
+    objective: String(input.task),
+    ...(typeof input.context === 'string' ? { context: input.context } : {}),
+  } as never);
+  return typeof result === 'string' ? result : JSON.stringify(result);
+}
+
+function installedDeepAgentsVersion(): string {
+  const version = (deepagentsPackageJson as { version?: unknown }).version;
+  return typeof version === 'string' ? version : '';
 }
 
 async function webSearch(
@@ -632,5 +673,7 @@ function facadeDescription(toolName: DeepAgentsFacadeToolName): string {
       return 'Edit one approved host workspace file. Patch must be JSON {"oldText":"...","newText":"..."}.';
     case 'FileWrite':
       return 'Write one approved host workspace file by exact safe relative path.';
+    case 'AgentDelegation':
+      return 'Start a durable Gantry child agent task and inspect it with task_get/task_list.';
   }
 }
