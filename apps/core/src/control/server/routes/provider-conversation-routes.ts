@@ -128,6 +128,45 @@ export async function handleProviderConversationRoutes(
   url: URL,
   pathname: string,
 ): Promise<boolean> {
+  if (
+    pathname === '/v1/providers/teams/thread-replies' &&
+    req.method === 'POST'
+  ) {
+    const auth = authorizeControlRequest(req, res, ctx.keys, [
+      'conversations:admin',
+    ]);
+    if (!auth) return true;
+    const body = await readJson(req);
+    const parsed = parseTeamsThreadReplyRequest(body);
+    if (!parsed) {
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'Invalid Teams thread reply request',
+      );
+      return true;
+    }
+    const threadConversationId = teamsThreadConversationId(
+      parsed.conversationId,
+      parsed.replyToId,
+    );
+    const result = await ctx.app.sendChannelMessage(
+      normalizeTeamsJid(threadConversationId),
+      parsed.text,
+      { durability: 'best_effort' },
+    );
+    sendJson(res, 202, {
+      accepted: true,
+      conversationId: parsed.conversationId,
+      replyToId: parsed.replyToId,
+      teamsConversationId: threadConversationId,
+      teamsMessageId:
+        result?.externalMessageId ?? result?.externalMessageIds?.[0] ?? null,
+    });
+    return true;
+  }
+
   if (pathname === '/v1/providers' && req.method === 'GET') {
     const auth = authorizeControlRequest(req, res, ctx.keys, [
       'providers:read',
@@ -667,4 +706,44 @@ function jidForConversation(providerId: string, externalId: string): string {
     return trimmed;
   }
   return `${provider.jidPrefix}${trimmed}`;
+}
+
+function parseTeamsThreadReplyRequest(body: unknown): {
+  conversationId: string;
+  replyToId: string;
+  text: string;
+} | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const record = body as Record<string, unknown>;
+  const conversationId = readNonEmptyString(record.conversationId);
+  const replyToId = readNonEmptyString(record.replyToId);
+  const text = readNonEmptyString(record.text);
+  if (!conversationId || !replyToId || !text) return null;
+  return { conversationId, replyToId, text };
+}
+
+function teamsThreadConversationId(
+  conversationId: string,
+  replyToId: string,
+): string {
+  const canonical = canonicalTeamsConversationId(conversationId);
+  return canonical.includes(';messageid=')
+    ? canonical
+    : `${canonical};messageid=${replyToId}`;
+}
+
+function canonicalTeamsConversationId(conversationId: string): string {
+  return conversationId.startsWith('teams:')
+    ? conversationId.slice('teams:'.length).trim()
+    : conversationId.trim();
+}
+
+function normalizeTeamsJid(conversationId: string): string {
+  return conversationId.startsWith('teams:')
+    ? conversationId
+    : `teams:${conversationId}`;
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }

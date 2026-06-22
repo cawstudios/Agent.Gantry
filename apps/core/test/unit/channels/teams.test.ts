@@ -14,6 +14,12 @@ import {
   normalizeTeamsJid,
   teamsConversationIdFromJid,
 } from '@core/channels/teams.js';
+import {
+  _testExternalCardActions,
+  buildExternalCardActionGraphqlRequest,
+} from '@core/channels/teams-external-card-actions.js';
+import { signExternalCardActionForVerification } from '@core/control/server/routes/external-notification-card.js';
+import { _testTeamsBotFrameworkClient } from '@core/channels/teams-bot-framework-client.js';
 import type { ChannelOpts } from '@core/channels/channel-provider.js';
 import { configurePendingInteractionDurability } from '@core/application/interactions/pending-interaction-durability.js';
 
@@ -69,8 +75,94 @@ describe('Teams built-in provider', () => {
       'TEAMS_CLIENT_ID',
       'TEAMS_CLIENT_SECRET',
       'TEAMS_TENANT_ID',
+      'TEAMS_BOT_APP_ID',
+      'TEAMS_BOT_APP_PASSWORD',
     ]);
     expect(providerForJid('teams:19:abc@thread.v2')?.id).toBe('teams');
+  });
+});
+
+describe('Teams Bot Framework adapter helpers', () => {
+  it('formats adaptive card invoke responses with the Teams response body schema', () => {
+    expect(
+      _testTeamsBotFrameworkClient.createAdaptiveCardInvokeResponse(
+        200,
+        'application/vnd.microsoft.activity.message',
+        'Action received.',
+      ),
+    ).toEqual({
+      status: 200,
+      body: {
+        statusCode: 200,
+        type: 'application/vnd.microsoft.activity.message',
+        value: 'Action received.',
+      },
+    });
+  });
+
+  it('prefers Teams AAD object ids for sender authorization', () => {
+    expect(
+      _testTeamsBotFrameworkClient.getTeamsSender({
+        type: 'message',
+        from: {
+          id: 'teams-user-id',
+          name: 'Priya',
+          aadObjectId: 'aad-user-id',
+        } as never,
+      }),
+    ).toEqual({ id: 'aad-user-id', name: 'Priya', idKind: 'aad_object_id' });
+  });
+
+  it('reads tenant ids from Teams channel data', () => {
+    expect(
+      _testTeamsBotFrameworkClient.getTeamsTenantId({
+        type: 'message',
+        channelData: {
+          tenant: {
+            id: 'tenant-1',
+          },
+        },
+      }),
+    ).toBe('tenant-1');
+  });
+
+  it('builds redacted Teams activity diagnostics for invoke ingress', () => {
+    expect(
+      _testTeamsBotFrameworkClient.buildTeamsActivityDiagnostic({
+        type: 'invoke',
+        name: 'adaptiveCard/action',
+        conversation: {
+          id: '19:abc@thread.v2',
+          conversationType: 'channel',
+        },
+        from: {
+          id: 'teams-user-id',
+          aadObjectId: 'aad-user-id',
+        } as never,
+        channelData: {
+          tenant: {
+            id: 'tenant-1',
+          },
+        },
+        value: {
+          action: {
+            data: {
+              nonce: 'secret-nonce',
+            },
+          },
+          trigger: 'manual',
+        },
+      }),
+    ).toEqual({
+      activityType: 'invoke',
+      activityName: 'adaptiveCard/action',
+      conversationId: '19:abc@thread.v2',
+      conversationType: 'channel',
+      tenantId: 'tenant-1',
+      senderIdKind: 'aad_object_id',
+      hasValue: true,
+      valueKeys: ['action', 'trigger'],
+    });
   });
 });
 
@@ -91,6 +183,170 @@ describe('Teams JID helpers', () => {
 });
 
 describe('Teams Adaptive Card payloads', () => {
+  it('reads external card action payloads from Teams adaptiveCard/action invokes', () => {
+    const data = {
+      action: 'external_card_action',
+      integrationId: 'integration-test',
+      eventId: 'outbox-1',
+      resourceId: 'tender-1',
+      workspaceId: 'workspace-1',
+      sourceChannelId: '19:abc@thread.v2',
+      teamsTenantId: 'tenant-1',
+      actionType: 'watch',
+      platformOperation: 'mark_resource',
+      nonce: 'nonce-1',
+      expiresAt: '2026-05-01T00:00:00.000Z',
+      signature: 'signature',
+    };
+
+    const { action: _action, ...expectedAction } = data;
+    expect(
+      _testExternalCardActions.readExternalCardAction({
+        action: {
+          type: 'Action.Submit',
+          data,
+        },
+        trigger: 'manual',
+      }),
+    ).toEqual(expect.objectContaining(expectedAction));
+  });
+
+  it('explains external card action parse misses without logging payload values', () => {
+    expect(
+      _testExternalCardActions.describeExternalCardActionParseMiss({
+        action: {
+          type: 'Action.Submit',
+          data: {
+            action: 'external_card_action',
+            eventId: 'outbox-1',
+          },
+        },
+        trigger: 'manual',
+      }),
+    ).toEqual({
+      reason:
+        'missing_fields:integrationId,resourceId,workspaceId,sourceChannelId,teamsTenantId,actionType,platformOperation,nonce,expiresAt,signature',
+      valueKeys: ['action', 'trigger'],
+      dataKeys: ['action', 'eventId'],
+    });
+  });
+
+  it('calls external platform card actions with the conversation service actor and channel scope', () => {
+    const request = buildExternalCardActionGraphqlRequest({
+      action: {
+        integrationId: 'integration-test',
+        eventId: 'outbox-1',
+        resourceId: 'tender-1',
+        workspaceId: 'workspace-1',
+        sourceChannelId: '19:abc@thread.v2',
+        teamsTenantId: 'tenant-1',
+        actionType: 'watch',
+        platformOperation: 'mark_resource',
+        nonce: 'nonce-1',
+        expiresAt: '2026-05-01T00:00:00.000Z',
+        signature: 'signature',
+      },
+      actorId: 'teams-user-1',
+      teamsTenantId: 'tenant-1',
+      occurredAt: '2026-04-30T00:00:00.000Z',
+    });
+
+    expect(request.headers).toEqual(
+      expect.objectContaining({
+        authorization: 'Bearer service:agent_conversation',
+        'x-channel-id': '19:abc@thread.v2',
+        'x-integration-id': 'integration-test',
+      }),
+    );
+    expect(request.body.variables.input).toEqual(
+      expect.objectContaining({
+        integrationId: 'integration-test',
+        eventId: 'outbox-1',
+        resourceId: 'tender-1',
+        workspaceId: 'workspace-1',
+        sourceWorkspaceId: 'workspace-1',
+        sourceChannelId: '19:abc@thread.v2',
+        teamsTenantId: 'tenant-1',
+        platformOperation: 'mark_resource',
+        actorId: 'teams-user-1',
+        nonce: 'nonce-1',
+      }),
+    );
+  });
+
+  it('canonicalizes Teams invoke conversation ids with message suffixes', () => {
+    expect(
+      _testExternalCardActions.canonicalTeamsConversationId(
+        '19:abc@thread.tacv2;messageid=1779532839539',
+      ),
+    ).toBe('19:abc@thread.tacv2');
+    expect(
+      _testExternalCardActions.canonicalTeamsConversationId(
+        '19:abc@thread.tacv2',
+      ),
+    ).toBe('19:abc@thread.tacv2');
+  });
+
+  it('verifies external card actions when Teams rewrites equivalent expiresAt strings', () => {
+    const previousSecret = process.env.GANTRY_EXTERNAL_ACTION_SECRET;
+    process.env.GANTRY_EXTERNAL_ACTION_SECRET = 'secret';
+    const signature = signExternalCardActionForVerification({
+      secret: 'secret',
+      integrationId: 'integration-test',
+      eventId: 'outbox-1',
+      resourceId: 'tender-1',
+      workspaceId: 'workspace-1',
+      sourceChannelId: '19:abc@thread.v2',
+      teamsTenantId: 'tenant-1',
+      actionType: 'request_analysis',
+      platformOperation: 'requestAdminProcessingApproval',
+      signatureVersion: 'v2',
+      nonce: 'nonce-1',
+      expiresAt: '2099-01-01T00:00:00.550Z',
+    });
+
+    try {
+      expect(() =>
+        _testExternalCardActions.verifyExternalCardActionSignature({
+          integrationId: 'integration-test',
+          eventId: 'outbox-1',
+          resourceId: 'tender-1',
+          workspaceId: 'workspace-1',
+          sourceChannelId: '19:abc@thread.v2',
+          teamsTenantId: 'tenant-1',
+          actionType: 'request_analysis',
+          platformOperation: 'requestAdminProcessingApproval',
+          signatureVersion: 'v2',
+          nonce: 'nonce-1',
+          expiresAt: '2099-01-01T00:00:00.55Z',
+          signature,
+        }),
+      ).not.toThrow();
+      expect(() =>
+        _testExternalCardActions.verifyExternalCardActionSignature({
+          integrationId: 'integration-test',
+          eventId: 'outbox-1',
+          resourceId: 'tender-1',
+          workspaceId: 'workspace-1',
+          sourceChannelId: '19:abc@thread.v2',
+          teamsTenantId: 'tenant-1',
+          actionType: 'request_analysis',
+          platformOperation: 'markTenderWatching',
+          signatureVersion: 'v2',
+          nonce: 'nonce-1',
+          expiresAt: '2099-01-01T00:00:00.55Z',
+          signature,
+        }),
+      ).toThrow('Invalid card action signature');
+    } finally {
+      if (previousSecret === undefined) {
+        delete process.env.GANTRY_EXTERNAL_ACTION_SECRET;
+      } else {
+        process.env.GANTRY_EXTERNAL_ACTION_SECRET = previousSecret;
+      }
+    }
+  });
+
   it('builds Action.Execute allow-once and cancel actions', () => {
     const payload = buildTeamsApprovalDescriptorPayload({
       requestId: 'perm-1',

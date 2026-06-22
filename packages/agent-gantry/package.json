@@ -1,0 +1,53 @@
+{
+  "name": "@cawstudios/agent-gantry",
+  "version": "0.1.0",
+  "description": "Stable Gantry SDK facade for product-specific agent packages.",
+  "author": "Gantry Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cawstudios/Agent.Gantry.git",
+    "directory": "packages/agent-gantry"
+  },
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24 <26"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "scripts": {
+    "prebuild": "node scripts/patch-botframework-openid-fetch.mjs --root . --fallback-root ../..",
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "prepack": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "patch:botframework-openid-fetch": "node scripts/patch-botframework-openid-fetch.mjs --root . --fallback-root ../..",
+    "verify:botframework-openid-fetch": "node scripts/patch-botframework-openid-fetch.mjs --root . --fallback-root ../.. --verify",
+    "test": "npm run verify:botframework-openid-fetch && vitest run -c vitest.config.ts"
+  },
+  "dependencies": {
+    "botbuilder": "^4.23.3",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "@types/pg": "^8.15.5",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  }
+}

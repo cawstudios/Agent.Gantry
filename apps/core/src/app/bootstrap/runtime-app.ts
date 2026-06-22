@@ -17,6 +17,7 @@ import {
 import type { AgentCredentialBroker } from '../../domain/ports/agent-credential-broker.js';
 import { encodeGroupMessageCursor } from '../../shared/message-cursor.js';
 import { logger } from '../../infrastructure/logging/logger.js';
+import type { MessageSendOptions } from '../../domain/types.js';
 import { ConversationRoute, ThinkingOverride } from '../../domain/types.js';
 import { RemoteMcpDnsValidationCache } from '../../application/mcp/mcp-server-policy.js';
 import { createGroupProcessor } from '../../runtime/group-processing.js';
@@ -55,6 +56,7 @@ import {
 import type { AgentExecutionAdapter } from '../../application/agent-execution/agent-execution-adapter.js';
 import type { AgentExecutionAdapterRegistry } from '../../application/agent-execution/agent-execution-adapter-registry.js';
 import { registerMemoryLlmClient } from '../../memory/memory-llm-port.js';
+import type { MessageDeliveryResult } from '../../domain/types.js';
 import type { RunnerSandboxProvider } from '../../shared/runner-sandbox-provider.js';
 
 export type RuntimeAppRepository = RuntimeRouterStateRepository &
@@ -114,6 +116,20 @@ export interface RuntimeApp {
   setLastTimestamp: (timestamp: string) => void;
   setAgentCursor: (chatJid: string, timestamp: string) => void;
   setChannelRuntime: (runtime: GroupProcessingDeps['channelRuntime']) => void;
+  sendChannelMessage: (
+    chatJid: string,
+    rawText: string,
+    options?: MessageSendOptions & { durability?: 'required' | 'best_effort' },
+  ) => Promise<MessageDeliveryResult | void>;
+  sendChannelAdaptiveCard?: (
+    chatJid: string,
+    card: Parameters<
+      NonNullable<GroupProcessingDeps['channelRuntime']['sendAdaptiveCard']>
+    >[1],
+    options?: Parameters<
+      NonNullable<GroupProcessingDeps['channelRuntime']['sendAdaptiveCard']>
+    >[2],
+  ) => Promise<unknown>;
 }
 
 export interface RuntimeAppOptions {
@@ -609,6 +625,14 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     setChannelRuntime: (runtime) => {
       channelRuntime = runtime;
     },
+    sendChannelMessage: (chatJid, rawText, options) =>
+      channelRuntime.sendMessage(chatJid, rawText, options),
+    sendChannelAdaptiveCard: (chatJid, card, options) =>
+      channelRuntime.sendAdaptiveCard
+        ? channelRuntime.sendAdaptiveCard(chatJid, card, options)
+        : Promise.reject(
+            new Error(`Adaptive Card delivery is unavailable for ${chatJid}.`),
+          ),
   };
 }
 

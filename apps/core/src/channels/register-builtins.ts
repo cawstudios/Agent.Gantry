@@ -108,7 +108,7 @@ const slackProvider: Provider = {
 const teamsProvider: Provider = {
   id: 'teams',
   label: 'Teams',
-  controlCapabilityFlags: ['setup', 'discover', 'runtime-placeholder'],
+  controlCapabilityFlags: ['setup', 'discover', 'bot-framework-runtime'],
   jidPrefix: 'teams:',
   folderPrefix: 'teams_',
   isGroupJid: (jid: string) => jid.startsWith('teams:'),
@@ -116,8 +116,14 @@ const teamsProvider: Provider = {
   isEnabled: (settings) => isChannelEnabled(settings, 'teams'),
   create: createTeamsBuiltInChannel,
   setup: {
-    envKeys: ['TEAMS_CLIENT_ID', 'TEAMS_CLIENT_SECRET', 'TEAMS_TENANT_ID'],
-    describe: () => 'Microsoft Teams app auth',
+    envKeys: [
+      'TEAMS_CLIENT_ID',
+      'TEAMS_CLIENT_SECRET',
+      'TEAMS_TENANT_ID',
+      'TEAMS_BOT_APP_ID',
+      'TEAMS_BOT_APP_PASSWORD',
+    ],
+    describe: () => 'Microsoft Teams Graph discovery and Bot Framework',
     run: (ctx) => runBuiltInSetup('Teams', runTeamsSetup, ctx),
   },
 };

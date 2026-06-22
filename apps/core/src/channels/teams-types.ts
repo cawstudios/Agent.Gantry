@@ -14,6 +14,9 @@ export interface TeamsChannelCredentials {
   clientId: string;
   clientSecret: string;
   tenantId: string;
+  botAppId?: string;
+  botAppPassword?: string;
+  botTenantId?: string;
 }
 
 // Keep Microsoft SDK shapes behind this adapter-owned interface so domain,
@@ -30,6 +33,12 @@ export interface TeamsInboundMessage {
   };
   senderId?: string;
   senderName?: string;
+  senderIdKind?:
+    | 'aad_object_id'
+    | 'teams_user_id'
+    | 'user_principal_name'
+    | 'unknown';
+  tenantId?: string;
   timestamp?: string;
   threadId?: string;
   replyToId?: string;
@@ -141,5 +150,18 @@ export function readTeamsCredentials(
   const tenantId =
     secrets.getOptionalSecret({ env: 'TEAMS_TENANT_ID' })?.trim() || '';
   if (!clientId || !clientSecret || !tenantId) return null;
-  return { clientId, clientSecret, tenantId };
+  const botAppId =
+    secrets.getOptionalSecret({ env: 'TEAMS_BOT_APP_ID' })?.trim() || '';
+  const botAppPassword =
+    secrets.getOptionalSecret({ env: 'TEAMS_BOT_APP_PASSWORD' })?.trim() || '';
+  const botTenantId =
+    secrets.getOptionalSecret({ env: 'TEAMS_BOT_TENANT_ID' })?.trim() || '';
+  return {
+    clientId,
+    clientSecret,
+    tenantId,
+    ...(botAppId ? { botAppId } : {}),
+    ...(botAppPassword ? { botAppPassword } : {}),
+    ...(botTenantId ? { botTenantId } : {}),
+  };
 }

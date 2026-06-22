@@ -109,11 +109,19 @@ export async function startGantryRuntime(
     hasChannel: channelWiring.hasChannel,
     supportsStreaming: channelWiring.supportsStreaming,
     supportsProgress: channelWiring.supportsProgress,
-    sendMessage: (chatJid, rawText, options) =>
-      channelWiring.sendMessage(chatJid, rawText, {
-        durability: 'required',
-        messageOptions: options,
-      }),
+    sendMessage: (chatJid, rawText, options) => {
+      const runtimeOptions = options as
+        | (typeof options & { durability?: 'required' | 'best_effort' })
+        | undefined;
+      const { durability = 'required', ...messageOptions } =
+        runtimeOptions ?? {};
+      return channelWiring.sendMessage(chatJid, rawText, {
+        durability,
+        messageOptions,
+      });
+    },
+    sendAdaptiveCard: (chatJid, card, options) =>
+      channelWiring.sendAdaptiveCard(chatJid, card, options),
     sendStreamingChunk: channelWiring.sendStreamingChunk,
     resetStreaming: channelWiring.resetStreaming,
     setTyping: channelWiring.setTyping,

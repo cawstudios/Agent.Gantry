@@ -1,4 +1,5 @@
 import {
+  AdaptiveCardSink,
   GroupDiscoverySource,
   InteractionSurface,
   ProgressSink,
@@ -8,6 +9,14 @@ import {
 } from '../../domain/types.js';
 import { ChannelAdapter } from '../../channels/channel-provider.js';
 import type { AgentTodoSink } from '../../domain/ports/task-lifecycle.js';
+
+export function asAdaptiveCardSink(
+  channel: ChannelAdapter,
+): AdaptiveCardSink | undefined {
+  return typeof channel.sendAdaptiveCard === 'function'
+    ? (channel as unknown as AdaptiveCardSink)
+    : undefined;
+}
 
 export function asTypingSink(channel: ChannelAdapter): TypingSink | undefined {
   return typeof channel.setTyping === 'function'

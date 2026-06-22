@@ -1,6 +1,52 @@
 services:
+  gantry:
+    build:
+      context: .
+    image: gantry:local
+    container_name: gantry-runtime
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      onecli:
+        condition: service_healthy
+    environment:
+      GANTRY_HOME: /home/node/gantry
+      GANTRY_DATABASE_URL: postgresql://gantry_app:${GANTRY_DB_PASSWORD:-gantry_app_password}@postgres:5432/gantry?schema=gantry
+      ONECLI_DATABASE_URL: postgresql://onecli_app:${ONECLI_DB_PASSWORD:-onecli_app_password}@postgres:5432/gantry?schema=onecli
+      GANTRY_LOCAL_POSTGRES_HOSTS: postgres
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?Set SECRET_ENCRYPTION_KEY before starting Gantry}
+      GANTRY_IPC_AUTH_SECRET: ${GANTRY_IPC_AUTH_SECRET:?Set GANTRY_IPC_AUTH_SECRET before starting Gantry}
+      GANTRY_CONTROL_API_KEYS_JSON: ${GANTRY_CONTROL_API_KEYS_JSON:?Set GANTRY_CONTROL_API_KEYS_JSON before starting Gantry}
+      GANTRY_CONTROL_HOST: 0.0.0.0
+      GANTRY_CONTROL_PORT: ${GANTRY_CONTROL_PORT:-8787}
+      GANTRY_EXTERNAL_EVENT_SECRET: ${GANTRY_EXTERNAL_EVENT_SECRET:-}
+      GANTRY_EXTERNAL_DELIVERY_STATUS_URL: ${GANTRY_EXTERNAL_DELIVERY_STATUS_URL:-}
+      GANTRY_EXTERNAL_DELIVERY_STATUS_SECRET: ${GANTRY_EXTERNAL_DELIVERY_STATUS_SECRET:-}
+      GANTRY_EXTERNAL_DELIVERY_STATUS_TIMEOUT_MS: ${GANTRY_EXTERNAL_DELIVERY_STATUS_TIMEOUT_MS:-5000}
+      GANTRY_EXTERNAL_PLATFORM_GRAPHQL_URL: ${GANTRY_EXTERNAL_PLATFORM_GRAPHQL_URL:-}
+      GANTRY_EXTERNAL_PLATFORM_SERVICE_TOKEN: ${GANTRY_EXTERNAL_PLATFORM_SERVICE_TOKEN:-}
+      GANTRY_EXTERNAL_TEAMS_REPLY_URL: ${GANTRY_EXTERNAL_TEAMS_REPLY_URL:-}
+      GANTRY_EXTERNAL_TEAMS_REPLY_SECRET: ${GANTRY_EXTERNAL_TEAMS_REPLY_SECRET:-}
+      GANTRY_EXTERNAL_TEAMS_REPLY_TIMEOUT_MS: ${GANTRY_EXTERNAL_TEAMS_REPLY_TIMEOUT_MS:-5000}
+      GANTRY_EXTERNAL_ACTION_SECRET: ${GANTRY_EXTERNAL_ACTION_SECRET:-}
+      GANTRY_EXTERNAL_ACTION_TIMEOUT_MS: ${GANTRY_EXTERNAL_ACTION_TIMEOUT_MS:-5000}
+      TEAMS_CLIENT_ID: ${TEAMS_CLIENT_ID:-}
+      TEAMS_CLIENT_SECRET: ${TEAMS_CLIENT_SECRET:-}
+      TEAMS_TENANT_ID: ${TEAMS_TENANT_ID:-}
+      TEAMS_BOT_APP_ID: ${TEAMS_BOT_APP_ID:-}
+      TEAMS_BOT_APP_PASSWORD: ${TEAMS_BOT_APP_PASSWORD:-}
+      TEAMS_BOT_TENANT_ID: ${TEAMS_BOT_TENANT_ID:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      TZ: ${TZ:-UTC}
+    ports:
+      - '127.0.0.1:${GANTRY_CONTROL_PORT:-8787}:${GANTRY_CONTROL_PORT:-8787}'
+    volumes:
+      - gantry-home:/home/node/gantry
+
   postgres:
-    image: pgvector/pgvector:0.8.2-pg16-trixie@sha256:fce8fb583b92ef8af5150b373a96415d46a8cd38ba09b38efeea17c8b4c7d782
+    image: pgvector/pgvector:${POSTGRES_IMAGE_TAG:-0.8.2-pg16-trixie}
     container_name: gantry-postgres
     restart: unless-stopped
     environment:
@@ -12,9 +58,9 @@ services:
       GANTRY_SCHEMA: gantry
       PGBOSS_SCHEMA: pgboss
     ports:
-      - '127.0.0.1:5432:5432'
+      - '127.0.0.1:${GANTRY_POSTGRES_HOST_PORT:-15432}:5432'
     volumes:
-      - ${GANTRY_POSTGRES_DATA:-${HOME}/gantry/postgres}:/var/lib/postgresql/data
+      - ${GANTRY_POSTGRES_DATA:-gantry-postgres-data}:/var/lib/postgresql/data
       - ./ops/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres -d gantry']

@@ -393,7 +393,7 @@ Notes:
 - `gantry provider connect slack` auto-discovers accessible conversations and can register one directly.
 - Slack tool permission approvals are deny-by-default until approvers are listed on the target conversation in `settings.yaml`. Guided setup asks for comma-separated Slack member IDs like `U0123456789`; these users must be members of that conversation to approve tool permissions and answer interactive prompts.
 - Slack UX uses native Slack surfaces (threads, streaming updates, actions).
-- Teams setup uses Microsoft Teams app auth through `RuntimeSecretProvider` (`TEAMS_CLIENT_ID`, `TEAMS_CLIENT_SECRET`, `TEAMS_TENANT_ID`), discovers Teams channels through Microsoft Graph, and registers `teams:` conversation IDs. Live Teams message transport remains behind the `TeamsSdkClient` adapter seam; this checkout includes tested normalization and Adaptive Card approval scaffolding, but not a concrete Bot Framework transport.
+- Teams setup uses Microsoft Teams app auth through `RuntimeSecretProvider` (`TEAMS_CLIENT_ID`, `TEAMS_CLIENT_SECRET`, `TEAMS_TENANT_ID`), discovers Teams channels through Microsoft Graph, and registers `teams:` conversation IDs. Runtime messaging uses the Bot Framework endpoint `POST /v1/providers/teams/activities`; set `TEAMS_BOT_APP_ID`, `TEAMS_BOT_APP_PASSWORD`, and `TEAMS_BOT_TENANT_ID` only when the Azure Bot registration differs from the Graph discovery app.
 
 ### Capability Management
 
@@ -558,7 +558,7 @@ default) does everything. See
 
 Gantry is published as an obfuscated and minified npm package on CAW's GitHub Package Registry.
 
-Client agent projects follow the naming convention `<Client>.<Project>.Agent` (e.g., `Hunger.Boondi.Agent`, `Flamingo.Operon.Agent`, `Manipal.Tender.Agent`). These are monorepos. If the agent includes a web interface (e.g., Manipal's Tender CoPilot, Operon Contact Center), the web app and backend live in the same repo.
+Client agent projects follow the naming convention `<Client>.<Project>.Agent` (e.g., `Hunger.Boondi.Agent`, `Flamingo.Operon.Agent`, `Acme.Tender.Agent`). These are monorepos. If the agent includes a web interface (e.g., a tender copilot or contact center), the web app and backend live in the same repo.
 
 Inside each monorepo, the `apps/` folder contains the agent prompt folder(s) — the persona, skills, and configuration that define the agent's behavior.
 

@@ -1363,6 +1363,18 @@
     "maxViolations": 1
   },
   {
+    "file": "packages/agent-gantry/src/index.ts",
+    "rule": "wrapper_only_file",
+    "reason": "Embeddable Agent Gantry package root intentionally remains a small public export barrel for local file: consumers such as Agent.Tender.",
+    "removeByPhase": "agent-gantry-public-api-stabilization"
+  },
+  {
+    "file": "packages/agent-gantry/src/adapters/provider-exports.ts",
+    "rule": "wrapper_only_file",
+    "reason": "Provider adapter exports are isolated behind one narrow package barrel so the root public API can re-export them without carrying provider-specific text.",
+    "removeByPhase": "agent-gantry-public-api-stabilization"
+  },
+  {
     "file": "apps/core/src/adapters/storage/postgres/storage-service.ts",
     "rule": "provider_specific_path",
     "reason": "Storage service references the docker compose migrations folder path for local bootstrap; capped to this single provider-path token until the migrations source is provider-neutral.",
@@ -1374,6 +1386,34 @@
     "rule": "direct_risky_execution",
     "reason": "Toolchain bake runner spawns the registry-pinned npm install child process directly for bake jobs; capped to this single call until bake execution moves through the sandbox adapter.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/channels/teams-external-card-actions.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Incoming Teams external card action adapter reads runtime external platform hook configuration directly; capped to this one env access until the hook settings are injected through a channel adapter port.",
+    "removeByPhase": "teams-external-platform-adapter-cleanup",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/channels/teams-external-tender-chat.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Incoming Teams tender chat adapter reads runtime hook configuration directly; capped to this one env access until the hook settings are injected through a channel adapter port.",
+    "removeByPhase": "teams-external-platform-adapter-cleanup",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/control/server/routes/external-notification-card.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Incoming external notification route reads runtime signing configuration directly while rendering external platform cards; capped to this one env access until card settings are injected through route context.",
+    "removeByPhase": "teams-external-platform-adapter-cleanup",
+    "maxViolations": 1
+  },
+  {
+    "file": "apps/core/src/control/server/routes/external-platform-events.ts",
+    "rule": "forbidden_import_by_layer",
+    "reason": "Incoming external platform event route reads runtime signing and delivery configuration directly; capped to this one env access until external event settings are injected through route context.",
+    "removeByPhase": "teams-external-platform-adapter-cleanup",
     "maxViolations": 1
   },
   {

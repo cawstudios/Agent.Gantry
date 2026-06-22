@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   PostgresStorageService,
@@ -6,6 +6,10 @@ import {
   postgresMigrationsFolder,
   resolvePostgresPoolConfig,
 } from '@core/adapters/storage/postgres/storage-service.js';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('storage-service', () => {
   it('points migrations at the packaged schema migrations directory', () => {
@@ -67,6 +71,17 @@ describe('storage-service', () => {
       postgresUrlEnv: 'GANTRY_DATABASE_URL',
       postgresSchema: 'gantry',
       postgresPlaintextHostAllowlist: ['postgres'],
+    });
+    expect(service).toBeInstanceOf(PostgresStorageService);
+    await service.close();
+  });
+
+  it('accepts an env-configured local postgres hostname', async () => {
+    vi.stubEnv('GANTRY_LOCAL_POSTGRES_HOSTS', 'postgres.local');
+    const service = createStorageService({
+      postgresUrl: 'postgres://user:pass@postgres.local:5432/gantry',
+      postgresUrlEnv: 'GANTRY_DATABASE_URL',
+      postgresSchema: 'gantry',
     });
     expect(service).toBeInstanceOf(PostgresStorageService);
     await service.close();

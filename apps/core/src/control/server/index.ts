@@ -57,6 +57,10 @@ import { handleGuidedActionRoutes } from './routes/guided-actions.js';
 import { handleJobRoutes } from './routes/jobs.js';
 import { handleMemoryRoutes } from './routes/memory.js';
 import { handleMcpServerRoutes } from './routes/mcp-servers.js';
+import {
+  flushExternalPlatformEventDeliveries,
+  handleExternalPlatformEventRoutes,
+} from './routes/external-platform-events.js';
 import { handleModelRoutes } from './routes/models.js';
 import { handleOpenApiRoutes } from './routes/openapi.js';
 import { handleRunRoutes } from './routes/runs.js';
@@ -64,6 +68,7 @@ import { handleSessionRoutes } from './routes/sessions.js';
 import { handleSettingsRoutes } from './routes/settings.js';
 import { handleSkillRoutes } from './routes/skills.js';
 import { handleSystemRoutes } from './routes/system.js';
+import { handleTeamsActivityRoutes } from './routes/teams-activities.js';
 import { handleWebhookRoutes } from './routes/webhooks.js';
 import {
   deliverWebhookDelivery,
@@ -152,6 +157,9 @@ function createControlRequestHandler(
         sendControlError(res, 404, 'NOT_FOUND', 'Route not found');
         return;
       }
+      if (await handleTeamsActivityRoutes(req, res, pathname)) return;
+      if (await handleExternalPlatformEventRoutes(req, res, ctx, pathname))
+        return;
       if (await handleOpenApiRoutes(req, res, pathname)) return;
       if (await handleSystemRoutes(req, res, ctx, pathname)) return;
       if (await handleGuidedActionRoutes(req, res, ctx, pathname)) return;
@@ -414,6 +422,18 @@ export function startControlServer(input: {
         webhookFlushInFlight = false;
       });
   }, 1000);
+  let externalDeliveryFlushInFlight = false;
+  const externalDeliveryInterval = setInterval(() => {
+    if (externalDeliveryFlushInFlight) return;
+    externalDeliveryFlushInFlight = true;
+    void flushExternalPlatformEventDeliveries(ctx)
+      .catch((error) => {
+        logger.warn({ err: error }, 'Failed flushing External platform events');
+      })
+      .finally(() => {
+        externalDeliveryFlushInFlight = false;
+      });
+  }, 5000);
   let ingressMaintenanceInFlight = false;
   const ingressMaintenanceInterval = setInterval(() => {
     if (ingressMaintenanceInFlight) return;
@@ -436,6 +456,7 @@ export function startControlServer(input: {
   return {
     async close() {
       clearInterval(deliveryInterval);
+      clearInterval(externalDeliveryInterval);
       clearInterval(ingressMaintenanceInterval);
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
