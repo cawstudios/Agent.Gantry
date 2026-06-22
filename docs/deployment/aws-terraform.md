@@ -73,6 +73,17 @@ fleet worker with no revision stays red and logs the seed command). The
 migration pass, and workers skip the explicit pass. The entrypoint advisory lock
 makes concurrent migration safe regardless.
 
+For ECS deployments that mount an empty EBS/EFS runtime home directly into the
+Gantry container instead of running the compose `settings-seed` one-shot, the
+runtime image first-bootstraps a minimal `settings.yaml` when
+`GANTRY_BOOTSTRAP_SETTINGS_IF_MISSING=1` (the image default) and the runtime
+command is `node dist/index.js`. The bootstrap writes to `GANTRY_HOME`
+(`/var/lib/gantry` by default), derives the Postgres schema from
+`GANTRY_SETTINGS_POSTGRES_SCHEMA`, the `schema=` query parameter in
+`GANTRY_DATABASE_URL`, or `GANTRY_DB_SCHEMA`, and then seeds the initial fleet
+settings revision after migrations. Existing mounted `settings.yaml` files are
+left untouched.
+
 Expected sequence in the logs:
 
 ```

@@ -15,33 +15,43 @@ if (!settingsPath) {
 await initializeRuntimeStorage();
 try {
   const storage = getRuntimeStorage();
-  const settings = loadRuntimeSettingsFromPath(settingsPath);
-  const outcome = await importFleetSettingsRevision(
-    {
-      runtimeHome: process.env.GANTRY_HOME || '/var/lib/gantry',
-      ops: storage.ops,
-      repositories: storage.repositories,
-      appId: 'default',
-      settingsRevisions: storage.repositories.settingsRevisions,
-      pool: storage.service.pool,
-      createdBy: 'docker:fleet-settings-seed',
-    },
-    settings,
-  );
-
-  if (outcome.status === 'invalid') {
-    console.error('fleet settings seed failed validation:');
-    for (const error of outcome.errors) console.error(`- ${error}`);
-    process.exit(1);
-  }
-  if (outcome.status === 'conflict') {
-    console.error(
-      `fleet settings seed conflict: expected ${outcome.expectedRevision}, current ${outcome.actualRevision}`,
+  const existing =
+    await storage.repositories.settingsRevisions.getLatestSettingsRevision(
+      'default',
     );
-    process.exit(1);
-  }
+  if (existing) {
+    console.log(
+      `fleet settings revision ${existing.revision} already exists; seed skipped`,
+    );
+  } else {
+    const settings = loadRuntimeSettingsFromPath(settingsPath);
+    const outcome = await importFleetSettingsRevision(
+      {
+        runtimeHome: process.env.GANTRY_HOME || '/var/lib/gantry',
+        ops: storage.ops,
+        repositories: storage.repositories,
+        appId: 'default',
+        settingsRevisions: storage.repositories.settingsRevisions,
+        pool: storage.service.pool,
+        createdBy: 'docker:fleet-settings-seed',
+      },
+      settings,
+    );
 
-  console.log(`fleet settings revision ${outcome.revision} seeded`);
+    if (outcome.status === 'invalid') {
+      console.error('fleet settings seed failed validation:');
+      for (const error of outcome.errors) console.error(`- ${error}`);
+      process.exit(1);
+    }
+    if (outcome.status === 'conflict') {
+      console.error(
+        `fleet settings seed conflict: expected ${outcome.expectedRevision}, current ${outcome.actualRevision}`,
+      );
+      process.exit(1);
+    }
+
+    console.log(`fleet settings revision ${outcome.revision} seeded`);
+  }
 } finally {
   await closeRuntimeStorage();
 }

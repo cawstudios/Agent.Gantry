@@ -22,6 +22,69 @@ rand_hex_32() {
   node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
 }
 
+resolve_settings_schema() {
+  node <<'NODE'
+const explicit = process.env.GANTRY_SETTINGS_POSTGRES_SCHEMA?.trim();
+if (explicit) {
+  process.stdout.write(explicit);
+  process.exit(0);
+}
+const url = process.env.GANTRY_DATABASE_URL?.trim() || process.env.MIGRATION_DATABASE_URL?.trim() || '';
+if (url) {
+  try {
+    const schema = new URL(url).searchParams.get('schema')?.trim();
+    if (schema) {
+      process.stdout.write(schema);
+      process.exit(0);
+    }
+  } catch {
+    // Fall through to env/default; migrate.mjs will report malformed URLs.
+  }
+}
+process.stdout.write(process.env.GANTRY_DB_SCHEMA?.trim() || 'gantry');
+NODE
+}
+
+bootstrap_settings_if_missing() {
+  BOOTSTRAPPED_SETTINGS_FILE=0
+  BOOTSTRAPPED_SETTINGS_DEPLOYMENT_MODE=''
+  if [ "${GANTRY_BOOTSTRAP_SETTINGS_IF_MISSING:-0}" != "1" ]; then
+    return
+  fi
+  case "$*" in
+    *dist/index.js*) ;;
+    *) return ;;
+  esac
+
+  runtime_home="${GANTRY_HOME:-/var/lib/gantry}"
+  settings_file="${runtime_home}/settings.yaml"
+  if [ -f "$settings_file" ]; then
+    return
+  fi
+
+  mkdir -p "$runtime_home"
+  schema="$(resolve_settings_schema)"
+  deployment_mode="${GANTRY_BOOTSTRAP_DEPLOYMENT_MODE:-${GANTRY_DEPLOYMENT_MODE:-fleet}}"
+  sandbox_provider="${GANTRY_BOOTSTRAP_SANDBOX_PROVIDER:-sandbox_runtime}"
+  tmp_file="${settings_file}.tmp.$$"
+  umask 077
+  {
+    printf '%s\n' 'runtime:'
+    printf '  deployment_mode: %s\n' "$deployment_mode"
+    printf '%s\n' '  sandbox:'
+    printf '    provider: %s\n' "$sandbox_provider"
+    printf '%s\n' ''
+    printf '%s\n' 'storage:'
+    printf '%s\n' '  postgres:'
+    printf '%s\n' '    url_env: GANTRY_DATABASE_URL'
+    printf '    schema: %s\n' "$schema"
+  } >"$tmp_file"
+  mv "$tmp_file" "$settings_file"
+  BOOTSTRAPPED_SETTINGS_FILE=1
+  BOOTSTRAPPED_SETTINGS_DEPLOYMENT_MODE="$deployment_mode"
+  log "created bootstrap settings.yaml at ${settings_file} (schema=${schema}, deployment_mode=${deployment_mode})"
+}
+
 load_or_create_rehearsal_secrets() {
   secret_file="${GANTRY_FLEET_REHEARSAL_SECRETS_FILE:-/var/lib/gantry/fleet-rehearsal-secrets.env}"
   lock_dir="${secret_file}.lock"
@@ -63,6 +126,10 @@ if [ "${GANTRY_FLEET_REHEARSAL_AUTO_SECRETS:-0}" = "1" ]; then
   log "loaded shared rehearsal-only runtime secrets"
 fi
 
+BOOTSTRAPPED_SETTINGS_FILE=0
+BOOTSTRAPPED_SETTINGS_DEPLOYMENT_MODE=''
+bootstrap_settings_if_missing "$@"
+
 # ---------------------------------------------------------------------------
 # Migrations.
 #
@@ -91,6 +158,12 @@ else
   # Non-zero exit here aborts the container before the runtime starts.
   node /app/ops/docker/migrate.mjs
   log "migrations complete"
+fi
+
+if [ "$BOOTSTRAPPED_SETTINGS_FILE" = "1" ] && [ "$BOOTSTRAPPED_SETTINGS_DEPLOYMENT_MODE" = "fleet" ]; then
+  log "seeding initial fleet settings revision from bootstrap settings.yaml"
+  node /app/ops/docker/fleet-settings-seed.mjs "${GANTRY_HOME:-/var/lib/gantry}/settings.yaml"
+  log "fleet settings seed complete"
 fi
 
 # ---------------------------------------------------------------------------

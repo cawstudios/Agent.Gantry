@@ -56,7 +56,8 @@ RUN npm prune --omit=dev --ignore-scripts
 FROM ${NODE_IMAGE} AS runtime
 
 ENV NODE_ENV=production \
-    GANTRY_HOME=/var/lib/gantry
+    GANTRY_HOME=/var/lib/gantry \
+    GANTRY_BOOTSTRAP_SETTINGS_IF_MISSING=1
 
 # Skill-script interpreters. Skills are distributed as data artifacts in any
 # language; the image carries the interpreters their scripts need at runtime.
