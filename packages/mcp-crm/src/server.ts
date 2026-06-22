@@ -169,7 +169,13 @@ export async function startHttpServer(
   opts: StartHttpServerOptions,
 ): Promise<RunningHttpServer> {
   const { env, logger } = opts;
-  const pool = opts.pool ?? createPool(env.databaseUrl, env.dbSchema);
+  const pool =
+    opts.pool ??
+    createPool(
+      env.databaseUrl,
+      env.dbSchema,
+      env.crmLeadQueryExtractionWatcher.dbPoolSize,
+    );
   const repo = new RecordsRepository(pool);
 
   const httpServer = createServer(

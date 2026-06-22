@@ -39,8 +39,11 @@ describe('status command formatting', () => {
       embeddingModelSource: 'settings.yaml',
       dreamingEnabled: true,
       dreamingSource: 'settings.yaml',
+      workers: {
+        totalWorkers: 3,
+        warmReserveWorkers: 1,
+      },
       queuePolicy: {
-        maxMessageRuns: 3,
         maxJobRuns: 4,
         maxRetries: 5,
         baseRetryMs: 5000,

@@ -35,6 +35,14 @@ export interface BoondiCrmEnv {
     enabled: boolean;
     pollIntervalMs: number;
     model: string;
+    // Background-isolation knobs (settings-owned; no hardcoded code defaults).
+    // maxParallelExtractions = how many DISTINCT customers extract concurrently
+    // (mirrors memory.idle_sweep_concurrency); batchSize = digests fetched per
+    // cycle; dbPoolSize = mcp-crm Postgres pool size (must be >=
+    // maxParallelExtractions + 1 to leave a connection for the single-flight lease).
+    maxParallelExtractions: number;
+    batchSize: number;
+    dbPoolSize: number;
   };
   reconcileAgentId: string;
   // The Gantry APP id that owns the model_credentials row the connector decrypts
@@ -202,6 +210,29 @@ function parseWatcherPositiveMs(
   return parsed;
 }
 
+// Background-isolation knob defaults (only applied when the yaml key is absent).
+const DEFAULT_MAX_PARALLEL_EXTRACTIONS = 2;
+const DEFAULT_EXTRACTION_BATCH_SIZE = 25;
+const DEFAULT_DB_POOL_SIZE = 5;
+
+function parseWatcherBoundedInt(
+  value: string | undefined,
+  pathPrefix: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (value === undefined) return fallback;
+  if (!/^[0-9]+$/.test(value)) {
+    throw new Error(`${pathPrefix} must be an integer between ${min} and ${max}`);
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (parsed < min || parsed > max) {
+    throw new Error(`${pathPrefix} must be an integer between ${min} and ${max}`);
+  }
+  return parsed;
+}
+
 function rejectUnsupportedSettingsKeys(
   map: Record<string, string>,
   pathPrefix: string,
@@ -241,15 +272,49 @@ function readCrmLeadQueryExtractionWatcher(source: NodeJS.ProcessEnv):
     `${pathPrefix}.poll_interval_ms`,
   );
   const model = requiredSettingsField(`${pathPrefix}.model`, map.model);
+  const maxParallelExtractions = parseWatcherBoundedInt(
+    map.max_parallel_extractions,
+    `${pathPrefix}.max_parallel_extractions`,
+    DEFAULT_MAX_PARALLEL_EXTRACTIONS,
+    1,
+    50,
+  );
+  const batchSize = parseWatcherBoundedInt(
+    map.batch_size,
+    `${pathPrefix}.batch_size`,
+    DEFAULT_EXTRACTION_BATCH_SIZE,
+    1,
+    1000,
+  );
+  const dbPoolSize = parseWatcherBoundedInt(
+    map.db_pool_size,
+    `${pathPrefix}.db_pool_size`,
+    DEFAULT_DB_POOL_SIZE,
+    1,
+    50,
+  );
+  // The single-flight lease holds one connection for the whole cycle while the
+  // parallel lanes each need one; an undersized pool would deadlock the extractor.
+  if (dbPoolSize < maxParallelExtractions + 1) {
+    throw new Error(
+      `${pathPrefix}.db_pool_size (${dbPoolSize}) must be >= max_parallel_extractions + 1 (${maxParallelExtractions + 1}) so the single-flight lease and the parallel extraction lanes each get a connection`,
+    );
+  }
   rejectUnsupportedSettingsKeys(map, pathPrefix, [
     'enabled',
     'poll_interval_ms',
     'model',
+    'max_parallel_extractions',
+    'batch_size',
+    'db_pool_size',
   ]);
   return {
     enabled,
     pollIntervalMs,
     model,
+    maxParallelExtractions,
+    batchSize,
+    dbPoolSize,
   };
 }
 

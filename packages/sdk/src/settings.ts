@@ -58,8 +58,11 @@ export type RuntimeSettingsResponse = {
       };
     };
     runtime: {
+      workers: {
+        totalWorkers: number;
+        warmReserveWorkers: number;
+      };
       queue: {
-        maxMessageRuns: number;
         maxJobRuns: number;
         maxRetries: number;
         baseRetryMs: number;

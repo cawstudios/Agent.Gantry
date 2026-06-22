@@ -34,7 +34,6 @@ function snapshot(
       boundActive: 0,
       boundIdle: 0,
       boundDraining: 0,
-      maxBoundWorkers: 4,
       cachePrewarm: {
         pending: 0,
         succeeded: 1,

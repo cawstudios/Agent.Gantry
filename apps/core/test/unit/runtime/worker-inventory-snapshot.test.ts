@@ -16,7 +16,6 @@ const BASE_SNAPSHOT: WorkerInventorySnapshot = {
     boundActive: 2,
     boundIdle: 1,
     boundDraining: 0,
-    maxBoundWorkers: 100,
     cachePrewarm: {
       pending: 0,
       succeeded: 2,

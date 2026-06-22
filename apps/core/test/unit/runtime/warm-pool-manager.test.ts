@@ -110,7 +110,7 @@ describe('WarmPoolManager', () => {
     expect(manager.size(recipe.key)).toBe(0);
   });
 
-  it('tracks acquired workers as bound active and replenishes generic capacity', async () => {
+  it('does not overshoot the target while a worker is bound, and replenishes on release', async () => {
     let now = 1_000;
     const { capability } = makeCapability(() => now);
     const manager = new WarmPoolManager({ capability, clock: () => now });
@@ -125,42 +125,49 @@ describe('WarmPoolManager', () => {
       genericAvailable: 0,
       boundActive: 1,
     });
-    await vi.waitFor(() =>
-      expect(manager.inventory(recipe.key).genericAvailable).toBe(1),
-    );
-    expect(capability.prewarm).toHaveBeenCalledTimes(2);
+    // Overshoot fix: a bound worker counts against the target (idle + active <=
+    // target), so the pool must NOT boot a replacement while it is in use. The old
+    // bug re-booted the full target on top of the active worker (~2x processes).
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(manager.inventory(recipe.key).genericAvailable).toBe(0);
+    expect(capability.prewarm).toHaveBeenCalledTimes(1);
 
     await manager.release(acquired!);
 
+    // Releasing frees a slot, so the reserve refills back to the target.
+    await vi.waitFor(() =>
+      expect(manager.inventory(recipe.key).genericAvailable).toBe(1),
+    );
     expect(manager.inventory(recipe.key).boundActive).toBe(0);
-    expect(manager.inventory(recipe.key).genericAvailable).toBe(1);
+    expect(capability.prewarm).toHaveBeenCalledTimes(2);
   });
 
-  it('preserves generic workers when bound active workers are at the cap', async () => {
+  it('never exceeds its reserve: idle + bound active stays <= target (carve-out)', async () => {
     let now = 1_000;
     const { capability } = makeCapability(() => now);
-    const manager = new WarmPoolManager({
-      capability,
-      clock: () => now,
-      maxBoundWorkers: 1,
-    });
+    const manager = new WarmPoolManager({ capability, clock: () => now });
     const recipe = makeRecipe();
-    await manager.prewarm(recipe, 2);
+    await manager.prewarm(recipe, 2); // warm reserve = 2
 
     const first = manager.acquire(recipe.key);
     const second = manager.acquire(recipe.key);
 
     expect(first).not.toBeNull();
-    expect(second).toBeNull();
-    expect(manager.inventory(recipe.key)).toMatchObject({
-      availableTarget: 2,
-      genericAvailable: 1,
-      boundActive: 1,
-      maxBoundWorkers: 1,
-    });
+    expect(second).not.toBeNull();
+
+    // Both reserve workers are bound (idle 0 + active 2 == reserve 2). The pool
+    // must not boot more on top of them, and a 3rd concurrent acquire finds no
+    // idle worker (excess concurrency is handled by the queue gate + cold spawn,
+    // not by overshooting the warm reserve).
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const inv = manager.inventory(recipe.key);
+    expect(inv.boundActive).toBe(2);
+    expect(inv.genericAvailable).toBe(0);
+    expect(inv.genericAvailable + inv.boundActive).toBeLessThanOrEqual(2);
+    expect(capability.prewarm).toHaveBeenCalledTimes(2);
+    expect(manager.acquire(recipe.key)).toBeNull();
 
     await manager.release(first!);
-
     expect(manager.acquire(recipe.key)).not.toBeNull();
   });
 

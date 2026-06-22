@@ -45,7 +45,6 @@ const EMPTY_WARM_POOL_TOTALS: WorkerInventoryWarmPoolSnapshot = {
   boundActive: 0,
   boundIdle: 0,
   boundDraining: 0,
-  maxBoundWorkers: 0,
   cachePrewarm: {
     pending: 0,
     succeeded: 0,
@@ -72,7 +71,6 @@ function addWarmPoolTotals(
     boundActive: current.boundActive + next.boundActive,
     boundIdle: current.boundIdle + next.boundIdle,
     boundDraining: current.boundDraining + next.boundDraining,
-    maxBoundWorkers: current.maxBoundWorkers + next.maxBoundWorkers,
     cachePrewarm: addCachePrewarmTotals(
       current.cachePrewarm,
       next.cachePrewarm,

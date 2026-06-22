@@ -1,0 +1,7 @@
+# Gantry runtime settings YAML is parsed by a custom, strict parser
+# (apps/core/src/config/settings/yaml.ts) that does NOT support Prettier's
+# reformatting (e.g. wrapping a flow array onto the next line). Keep these out
+# of formatting so format-on-save cannot break the runtime settings parse.
+# ~/gantry/settings.yaml is symlinked to agents/boondi_support/settings.yaml.
+**/settings.yaml
+**/settings.example.yaml

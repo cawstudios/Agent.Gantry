@@ -6,6 +6,7 @@ import { startHttpServer } from './server.js';
 import { startDigestWatcher } from './watcher/index.js';
 import { createAnthropicExtractorLlm } from './extractor/llm-client.js';
 import { bootstrapGantryCredentials } from './gantry-credentials.js';
+import { resolveBackgroundToken } from './background-token.js';
 import { createPool } from './db/pool.js';
 
 // Public surface (also used by tests / the migrate + smoke scripts).
@@ -47,14 +48,27 @@ if (isEntry) {
     // forbidden runtime-secret names), so the package default
     // EnvRuntimeSecretProvider (process.env-backed) can read the key. A short-lived
     // pool scoped to the gantry schema reads the row, then is closed.
-    const credPool = createPool(env.databaseUrl, env.gantrySchema);
-    try {
-      await bootstrapGantryCredentials(credPool, {
-        appId: env.modelAppId,
-        log: bootLog,
+    // Token seam: a dedicated background token (.env) isolates the background
+    // rate budget and WINS; unset → shared Gantry credential (same token in dev).
+    const background = resolveBackgroundToken();
+    if (background.source === 'background_env' && background.token) {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = background.token;
+      bootLog('background_token_source', {
+        source: 'GANTRY_BACKGROUND_ANTHROPIC_TOKEN',
       });
-    } finally {
-      await credPool.end().catch(() => undefined);
+    } else {
+      // A short-lived pool scoped to the gantry schema reads the model_credentials
+      // row, then is closed.
+      const credPool = createPool(env.databaseUrl, env.gantrySchema, 2);
+      try {
+        await bootstrapGantryCredentials(credPool, {
+          appId: env.modelAppId,
+          log: bootLog,
+        });
+        bootLog('background_token_source', { source: 'gantry_credential_center' });
+      } finally {
+        await credPool.end().catch(() => undefined);
+      }
     }
     const logger = createLogger({
       level: env.logLevel,

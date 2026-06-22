@@ -196,7 +196,6 @@ function createConfiguredWarmPool(
   return new WarmPoolManager({
     capability: executionAdapter,
     maxConcurrentPrewarm: Math.max(1, config.size),
-    maxBoundWorkers: config.maxBoundWorkers,
     cachePrewarmEnabled: config.cachePrewarmEnabled,
     maxConcurrentCachePrewarm: config.cachePrewarmConcurrency,
     orphanReaper: new ProcessWarmPoolOrphanReaper(),
@@ -210,7 +209,6 @@ const EMPTY_WORKER_WARM_POOL_SNAPSHOT: WorkerInventoryWarmPoolSnapshot = {
   boundActive: 0,
   boundIdle: 0,
   boundDraining: 0,
-  maxBoundWorkers: 0,
   cachePrewarm: {
     pending: 0,
     succeeded: 0,

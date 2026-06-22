@@ -193,12 +193,14 @@ appropriate user/admin approval.
 | `model_access`                                 | Advanced user/admin                         | Gantry model gateway enablement and loopback bind host. Model provider credentials stay in Credential Center.                                                     |
 | `desired_state`                                | Admin/export flow                           | Reconcile/export mode switch for settings-owned desired state.                                                                                                    |
 
-Optional runtime queue tuning:
+Optional runtime worker/queue tuning:
 
 ```yaml
 runtime:
+  workers:
+    total_workers: 3 # max concurrent customer chats (and the process ceiling)
+    warm_reserve_workers: 1 # pre-booted runners kept warm, carved out of total
   queue:
-    max_message_runs: 3
     max_job_runs: 4
     max_retries: 5
     base_retry_ms: 5000

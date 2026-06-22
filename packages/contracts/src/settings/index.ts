@@ -153,9 +153,14 @@ export const RuntimeSettingsPublicSchema = z
       .strict(),
     runtime: z
       .object({
+        workers: z
+          .object({
+            totalWorkers: z.number().int().positive(),
+            warmReserveWorkers: z.number().int().nonnegative(),
+          })
+          .strict(),
         queue: z
           .object({
-            maxMessageRuns: z.number().int().positive(),
             maxJobRuns: z.number().int().positive(),
             maxRetries: z.number().int().nonnegative(),
             baseRetryMs: z.number().int().nonnegative(),

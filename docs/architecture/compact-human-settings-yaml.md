@@ -125,12 +125,17 @@ changes with `capability_search`, `propose_capability`, and
 approval flow succeeds. `request_permission` remains the exact one-off fallback,
 not the normal path for durable semantic authority.
 
-Optional queue tuning:
+Optional worker/queue tuning (two-knob live worker model: `total_workers` =
+max concurrent customer chats and the process ceiling; `warm_reserve_workers` =
+pre-booted runners kept warm-ready, carved out of total so
+`warm_reserve_workers <= total_workers`):
 
 ```yaml
 runtime:
+  workers:
+    total_workers: 3
+    warm_reserve_workers: 1
   queue:
-    max_message_runs: 3
     max_job_runs: 4
     max_retries: 5
     base_retry_ms: 5000

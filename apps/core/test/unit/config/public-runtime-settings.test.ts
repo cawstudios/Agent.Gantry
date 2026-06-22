@@ -59,7 +59,6 @@ it('keeps warm pool enablement settings-owned even when legacy env is set', asyn
     enabled: false,
     size: 1,
     idleTtlMs: 240_000,
-    maxBoundWorkers: 100,
     cachePrewarmEnabled: false,
     cachePrewarmConcurrency: 1,
   });
@@ -67,7 +66,6 @@ it('keeps warm pool enablement settings-owned even when legacy env is set', asyn
     enabled: false,
     size: 1,
     idleTtlMs: 240_000,
-    maxBoundWorkers: 100,
     cachePrewarmEnabled: false,
     cachePrewarmConcurrency: 1,
   });

@@ -34,12 +34,12 @@ import {
   DEFAULT_RUNNER_IDLE_TIMEOUT_MS,
   DEFAULT_STORAGE_POSTGRES_SCHEMA,
   DEFAULT_STORAGE_POSTGRES_URL_ENV,
+  DEFAULT_TOTAL_WORKERS,
+  DEFAULT_WARM_RESERVE_WORKERS,
   DEFAULT_WARM_POOL_CACHE_PREWARM_CONCURRENCY,
   DEFAULT_WARM_POOL_CACHE_PREWARM_ENABLED,
   DEFAULT_WARM_POOL_ENABLED,
   DEFAULT_WARM_POOL_IDLE_TTL_MS,
-  DEFAULT_WARM_POOL_MAX_BOUND_WORKERS,
-  DEFAULT_WARM_POOL_SIZE,
   getPresetManagedMemoryDefaults,
 } from './runtime-settings-defaults.js';
 import type {
@@ -333,6 +333,9 @@ function renderMcpServersYaml(
         `      enabled: ${watcher.enabled ? 'true' : 'false'}`,
         `      poll_interval_ms: ${watcher.pollIntervalMs}`,
         `      model: ${quoteYamlString(watcher.model)}`,
+        `      max_parallel_extractions: ${watcher.maxParallelExtractions}`,
+        `      batch_size: ${watcher.batchSize}`,
+        `      db_pool_size: ${watcher.dbPoolSize}`,
       );
     }
   }
@@ -690,14 +693,13 @@ function isDefaultMemory(memory: RuntimeMemorySettings): boolean {
 
 function isDefaultRuntime(runtime: RuntimeSettings['runtime']): boolean {
   return (
-    runtime.queue.maxMessageRuns === 3 &&
+    runtime.workers.totalWorkers === DEFAULT_TOTAL_WORKERS &&
+    runtime.workers.warmReserveWorkers === DEFAULT_WARM_RESERVE_WORKERS &&
     runtime.queue.maxJobRuns === 4 &&
     runtime.queue.maxRetries === 5 &&
     runtime.queue.baseRetryMs === 5000 &&
     runtime.warmPool.enabled === DEFAULT_WARM_POOL_ENABLED &&
-    runtime.warmPool.size === DEFAULT_WARM_POOL_SIZE &&
     runtime.warmPool.idleTtlMs === DEFAULT_WARM_POOL_IDLE_TTL_MS &&
-    runtime.warmPool.maxBoundWorkers === DEFAULT_WARM_POOL_MAX_BOUND_WORKERS &&
     runtime.warmPool.cachePrewarmEnabled ===
       DEFAULT_WARM_POOL_CACHE_PREWARM_ENABLED &&
     runtime.warmPool.cachePrewarmConcurrency ===
@@ -792,16 +794,19 @@ function renderRuntimeProcessYaml(
 ): void {
   lines.push(
     'runtime:',
+    '  # Two-knob live worker model: total_workers = max concurrent customer chats',
+    '  # (and the process ceiling); warm_reserve_workers = pre-booted runners kept',
+    '  # warm-ready, carved out of total (warm_reserve_workers <= total_workers).',
+    '  workers:',
+    `    total_workers: ${runtime.workers.totalWorkers}`,
+    `    warm_reserve_workers: ${runtime.workers.warmReserveWorkers}`,
     '  queue:',
-    `    max_message_runs: ${runtime.queue.maxMessageRuns}`,
     `    max_job_runs: ${runtime.queue.maxJobRuns}`,
     `    max_retries: ${runtime.queue.maxRetries}`,
     `    base_retry_ms: ${runtime.queue.baseRetryMs}`,
     '  warm_pool:',
     `    enabled: ${runtime.warmPool.enabled ? 'true' : 'false'}`,
-    `    size: ${runtime.warmPool.size}`,
     `    idle_ttl_ms: ${runtime.warmPool.idleTtlMs}`,
-    `    max_bound_workers: ${runtime.warmPool.maxBoundWorkers}`,
     `    cache_prewarm_enabled: ${runtime.warmPool.cachePrewarmEnabled ? 'true' : 'false'}`,
     `    cache_prewarm_concurrency: ${runtime.warmPool.cachePrewarmConcurrency}`,
     '  runner:',

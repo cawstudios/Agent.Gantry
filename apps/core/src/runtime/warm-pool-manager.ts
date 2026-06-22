@@ -5,7 +5,6 @@ import type {
   WarmWorkerCachePrewarmResult,
   WarmWorkerHandle,
 } from '../application/agent-execution/warm-pool-capable.js';
-import { DEFAULT_WARM_POOL_MAX_BOUND_WORKERS } from '../config/settings/runtime-settings-defaults.js';
 import type {
   WorkerInventoryCachePrewarmSnapshot,
   WorkerInventoryCachePrewarmStatus,
@@ -44,7 +43,6 @@ export interface WarmPoolInventorySnapshot {
   boundActive: number;
   boundIdle: number;
   boundDraining: number;
-  maxBoundWorkers: number;
   cachePrewarm: WorkerInventoryCachePrewarmSnapshot;
   cacheShapes: WorkerInventoryCacheShapeSnapshot[];
 }
@@ -60,7 +58,6 @@ export interface WarmPoolManagerOptions {
   cachePrewarmEnabled?: boolean;
   maxConcurrentCachePrewarm?: number;
   cachePrewarmTtlMs?: number;
-  maxBoundWorkers?: number;
   replacementBackoffMs?: number;
   orphanMarker?: string;
   orphanReaper?: WarmPoolOrphanReaper;
@@ -73,7 +70,6 @@ export class WarmPoolManager {
   private readonly cachePrewarmEnabled: boolean;
   private readonly maxConcurrentCachePrewarm: number;
   private readonly cachePrewarmTtlMs: number;
-  private readonly maxBoundWorkers: number;
   private readonly replacementBackoffMs: number;
   private readonly orphanMarker: string;
   private readonly orphanReaper?: WarmPoolOrphanReaper;
@@ -102,8 +98,6 @@ export class WarmPoolManager {
     this.maxConcurrentCachePrewarm = options.maxConcurrentCachePrewarm ?? 1;
     this.cachePrewarmTtlMs =
       options.cachePrewarmTtlMs ?? DEFAULT_CACHE_PREWARM_TTL_MS;
-    this.maxBoundWorkers =
-      options.maxBoundWorkers ?? DEFAULT_WARM_POOL_MAX_BOUND_WORKERS;
     this.replacementBackoffMs = options.replacementBackoffMs ?? 1_000;
     this.orphanMarker = options.orphanMarker ?? WARM_POOL_ORPHAN_MARKER;
     this.orphanReaper = options.orphanReaper;
@@ -118,7 +112,6 @@ export class WarmPoolManager {
   }
 
   acquire(key: WarmPoolKey): WarmWorkerHandle | null {
-    if (this.boundActiveCount() >= this.maxBoundWorkers) return null;
     const entry = this.entries.get(key);
     if (!entry) return null;
     const worker = entry.idle.shift();
@@ -149,7 +142,16 @@ export class WarmPoolManager {
   }
 
   private async replenishEntry(entry: WarmPoolEntry): Promise<void> {
-    const missing = entry.targetSize - entry.idle.length - entry.prewarming;
+    // Count IN-USE (active/bound) workers against the target, not just idle +
+    // prewarming. The warm reserve (targetSize) is the pool's PROCESS cap:
+    // idle + active warm workers must never exceed it. Without subtracting
+    // active, the pool re-boots the full reserve on top of every bound worker —
+    // the ~2x process overshoot this fixes.
+    const missing =
+      entry.targetSize -
+      entry.idle.length -
+      entry.prewarming -
+      entry.active.size;
     if (missing <= 0) return;
     await this.bootMany(entry, missing);
   }
@@ -215,7 +217,6 @@ export class WarmPoolManager {
         boundActive: snapshot.boundActive + entry.active.size,
         boundIdle: snapshot.boundIdle,
         boundDraining: snapshot.boundDraining,
-        maxBoundWorkers: this.maxBoundWorkers,
         cachePrewarm: addCachePrewarmCounts(
           snapshot.cachePrewarm,
           cachePrewarmCountsFor(handles),
@@ -225,7 +226,7 @@ export class WarmPoolManager {
           cacheShapeBucketsFor(handles),
         ),
       };
-    }, emptyInventorySnapshot(this.maxBoundWorkers));
+    }, emptyInventorySnapshot());
   }
 
   async shutdown(): Promise<void> {
@@ -330,13 +331,6 @@ export class WarmPoolManager {
       entry.retryTimer = undefined;
       void this.replenish(key).catch(() => this.scheduleReplenish(key));
     }, this.replacementBackoffMs);
-  }
-
-  private boundActiveCount(): number {
-    return Array.from(this.entries.values()).reduce(
-      (count, entry) => count + entry.active.size,
-      0,
-    );
   }
 
   private async prepareCache(handle: WarmWorkerHandle): Promise<void> {
@@ -526,9 +520,7 @@ function emptyCachePrewarmCounts(): WorkerInventoryCachePrewarmSnapshot {
   };
 }
 
-function emptyInventorySnapshot(
-  maxBoundWorkers: number,
-): WarmPoolInventorySnapshot {
+function emptyInventorySnapshot(): WarmPoolInventorySnapshot {
   return {
     availableTarget: 0,
     genericAvailable: 0,
@@ -536,7 +528,6 @@ function emptyInventorySnapshot(
     boundActive: 0,
     boundIdle: 0,
     boundDraining: 0,
-    maxBoundWorkers,
     cachePrewarm: emptyCachePrewarmCounts(),
     cacheShapes: [],
   };

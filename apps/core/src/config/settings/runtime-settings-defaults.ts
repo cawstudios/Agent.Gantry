@@ -50,10 +50,14 @@ export const DEFAULT_BROWSER_USAGE_MODE = 'audit';
 export const DEFAULT_BROWSER_USAGE_WINDOW_MS = 60_000;
 export const DEFAULT_BROWSER_USAGE_MAX_ACTIONS_PER_WINDOW = 120;
 export const DEFAULT_BROWSER_USAGE_MAX_CONCURRENT_PER_SITE = 1;
+// Two-knob live worker model (safe low defaults; tune in settings.yaml). The live
+// settings.yaml carries explicit values; these only apply when a runtime/workers
+// block is absent. total_workers = max concurrent chats; warm_reserve_workers =
+// warm-ready reserve carved out of total.
+export const DEFAULT_TOTAL_WORKERS = 3;
+export const DEFAULT_WARM_RESERVE_WORKERS = 1;
 export const DEFAULT_WARM_POOL_ENABLED = false;
-export const DEFAULT_WARM_POOL_SIZE = 1;
 export const DEFAULT_WARM_POOL_IDLE_TTL_MS = 240_000;
-export const DEFAULT_WARM_POOL_MAX_BOUND_WORKERS = 100;
 export const DEFAULT_WARM_POOL_CACHE_PREWARM_ENABLED = false;
 export const DEFAULT_WARM_POOL_CACHE_PREWARM_CONCURRENCY = 1;
 export const DEFAULT_RUNNER_IDLE_TIMEOUT_MS = 1_800_000;
@@ -141,17 +145,18 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
     idleSweepExtractionTimeoutMs: DEFAULT_IDLE_SWEEP_EXTRACTION_TIMEOUT_MS,
   };
   const runtime: RuntimeSettings['runtime'] = {
+    workers: {
+      totalWorkers: DEFAULT_TOTAL_WORKERS,
+      warmReserveWorkers: DEFAULT_WARM_RESERVE_WORKERS,
+    },
     queue: {
-      maxMessageRuns: 3,
       maxJobRuns: 4,
       maxRetries: 5,
       baseRetryMs: 5000,
     },
     warmPool: {
       enabled: DEFAULT_WARM_POOL_ENABLED,
-      size: DEFAULT_WARM_POOL_SIZE,
       idleTtlMs: DEFAULT_WARM_POOL_IDLE_TTL_MS,
-      maxBoundWorkers: DEFAULT_WARM_POOL_MAX_BOUND_WORKERS,
       cachePrewarmEnabled: DEFAULT_WARM_POOL_CACHE_PREWARM_ENABLED,
       cachePrewarmConcurrency: DEFAULT_WARM_POOL_CACHE_PREWARM_CONCURRENCY,
     },

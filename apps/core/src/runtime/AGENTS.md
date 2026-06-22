@@ -78,10 +78,15 @@ session ID`, expire that provider session and retry the same turn once without
 - Worker inventory cache visibility should stay aggregate-only in runtime:
   expose prewarm status counts and cache-shape/status buckets, not worker ids,
   prompt payloads, provider credentials, or customer transcript data.
-- `runtime.warm_pool.max_bound_workers` is the settings-owned cap for acquired
-  warm workers. Enforce it before removing an idle generic worker from the
-  pool; hitting the cap must leave persisted work schedulable instead of
-  dropping inbound messages or silently exceeding the bound-worker limit.
+- The live concurrency cap is `runtime.workers.total_workers` (the GroupQueue
+  message-run gate); the warm pool keeps at most
+  `runtime.workers.warm_reserve_workers` pre-booted runners, carved out of total
+  (`warm_reserve_workers <= total_workers`). Replenishment counts in-use
+  (acquired/bound) workers against the target, so idle + active warm never
+  overshoots the reserve. Concurrency beyond the warm reserve cold-spawns;
+  hitting `total_workers` must leave persisted work schedulable instead of
+  dropping inbound messages or silently exceeding the cap. (There is no separate
+  bound-worker cap knob — the gate subsumes it.)
 - Generic warm workers are idle only after optional cache prewarm reaches an
   explicit status. Record `succeeded`, `skipped`, or `failed` on the handle;
   cache-prewarm failure must not discard an otherwise bind-ready worker, and

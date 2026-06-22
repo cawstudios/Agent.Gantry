@@ -49,7 +49,16 @@ export async function findNewDigests(
   const params: unknown[] = [agentId];
   if (filter.conversationId) params.push(filter.conversationId);
   if (filter.since) params.push(filter.since);
-  params.push(filter.limit ?? 25);
+  // Batch size is settings-owned (yaml:
+  // crm_lead_query_extraction_watcher.batch_size, threaded through
+  // runDigestCycleOnce). No hardcoded default lives here anymore — the caller
+  // must specify the limit.
+  if (filter.limit === undefined) {
+    throw new Error(
+      'findNewDigests requires an explicit limit (settings-owned batch_size)',
+    );
+  }
+  params.push(filter.limit);
   const res = await pool.query(pendingDigestsSql(gantrySchema, filter), params);
   return res.rows.map((r) => ({
     digestId: r.digest_id as string,
@@ -62,6 +71,14 @@ export async function findNewDigests(
   }));
 }
 
+// Advance the per-conversation digest cursor — MONOTONICALLY. The watcher walks
+// each conversation's digests oldest-first and advances the cursor over a
+// gap-free prefix only (it stops at the first digest that does not fully
+// succeed). The `ON CONFLICT ... WHERE` guard makes this forward-only: a stale or
+// out-of-order advance is a no-op instead of dragging the cursor backward and
+// re-surfacing already-processed digests. This replaces the prior blind
+// overwrite, which (combined with advance-per-success) could bury a soft-failed
+// digest behind a later success.
 export async function advanceDigestCursor(
   pool: Pool,
   conversationId: string,
@@ -73,7 +90,8 @@ export async function advanceDigestCursor(
        VALUES ($1,$2,$3, now())
      ON CONFLICT (conversation_id) DO UPDATE
        SET last_digest_id = EXCLUDED.last_digest_id,
-           last_digest_at = EXCLUDED.last_digest_at, checked_at = now()`,
+           last_digest_at = EXCLUDED.last_digest_at, checked_at = now()
+     WHERE EXCLUDED.last_digest_at > boondi_digest_cursor.last_digest_at`,
     [conversationId, digestId, digestAt],
   );
 }

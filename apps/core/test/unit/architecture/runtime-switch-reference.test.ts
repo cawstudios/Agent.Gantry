@@ -20,14 +20,13 @@ describe('runtime switch reference', () => {
     const doc = fs.readFileSync(switchReferencePath, 'utf8');
     const plan = fs.readFileSync(warmPoolPlanPath, 'utf8');
     const requiredHeaders = [
-      'runtime.queue.max_message_runs',
+      'runtime.workers.total_workers',
+      'runtime.workers.warm_reserve_workers',
       'runtime.queue.max_job_runs',
       'runtime.queue.max_retries',
       'runtime.queue.base_retry_ms',
       'runtime.warm_pool.enabled',
-      'runtime.warm_pool.size',
       'runtime.warm_pool.idle_ttl_ms',
-      'runtime.warm_pool.max_bound_workers',
       'runtime.warm_pool.cache_prewarm_enabled',
       'runtime.warm_pool.cache_prewarm_concurrency',
       'runtime.runner.idle_timeout_ms',

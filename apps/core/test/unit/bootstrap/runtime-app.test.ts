@@ -262,7 +262,6 @@ describe('runtime app credential binding', () => {
         boundActive: 3,
         boundIdle: 0,
         boundDraining: 0,
-        maxBoundWorkers: 4,
         cachePrewarm: {
           pending: 0,
           succeeded: 1,
@@ -300,7 +299,6 @@ describe('runtime app credential binding', () => {
         boundActive: 3,
         boundIdle: 0,
         boundDraining: 0,
-        maxBoundWorkers: 4,
         cachePrewarm: {
           pending: 0,
           succeeded: 1,

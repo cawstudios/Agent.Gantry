@@ -1,0 +1,174 @@
+defaults:
+  model: opus
+
+desired_state:
+  authoritative: true
+
+runtime:
+  # Two-knob live worker model: total_workers = max concurrent customer chats
+  # (caps concurrent ACTIVE runs — not total live processes; retained idle-waiting
+  # runners add procs for runner.idle_timeout_ms); warm_reserve_workers =
+  # pre-booted runners kept warm-ready, carved out of total (<= total_workers).
+  # 3/3 = faithful migration of the prior max_message_runs:3 + warm_pool.size:3.
+  # Tune via a deliberate load test; the mechanism was smoke-proven at 2/2.
+  workers:
+    total_workers: 3
+    warm_reserve_workers: 3
+  queue:
+    max_job_runs: 3
+    max_retries: 3
+    base_retry_ms: 5000
+  runner:
+    idle_timeout_ms: 300000
+  warm_pool:
+    enabled: true
+    # How long an UNUSED warm worker may sit idle before recycle + re-prewarm
+    # (keeps pooled workers fresh). Distinct from runner.idle_timeout_ms above
+    # (which retains an already-USED runner for fast follow-ups).
+    idle_ttl_ms: 240000
+    cache_prewarm_enabled: true
+    cache_prewarm_concurrency: 1
+  ownership:
+    lease_ttl_ms: 45000
+    heartbeat_interval_ms: 15000
+    reconciler_interval_ms: 15000
+    reconciler_limit: 100
+    shutdown_claim_wait_ms: 1000
+  trace:
+    payload_retention_ms: 86400000
+    payload_cleanup_interval_ms: 3600000
+
+providers:
+  interakt:
+    enabled: true
+    default_agent: boondi_support
+
+agents:
+  boondi_support:
+    name: 'Boondi'
+    persona: sales
+    prompt_surface: customer_live
+    model: sonnet
+    # Capture-accuracy decision (2026-06-04, spec §9, from loop evidence): sonnet+
+    # thinking-off intermittently MISSED the silent lead/query capture on the softest
+    # cases (a single personal gift) and mis-timed query->lead upgrades on multi-turn
+    # qualification. Adaptive thinking scales reasoning to complexity — simple support
+    # replies stay fast, qualification turns get the budget to reliably decide capture/
+    # upgrade. The durable reconciler still backstops any residual miss.
+    thinking:
+      mode: disabled
+      effort: low
+    plugins:
+      guardrail:
+        file: guardrails/guardrail.ts
+        model: haiku
+        mode: deterministic # deterministic regex screen…
+        unresolved: inline # …and unresolved turns reach Boondi with the inline scope block (explicit, not inferred from the policy)
+      memory_extraction: memory_extractor/memory_extractor.md
+      skills:
+        - boondi-gifting
+        - boondi-product-care
+        - boondi-orders
+        - boondi-store-aggregator
+        - boondi-misc-policy
+      commands:
+        - extract-leads-queries
+      pre_run_context:
+        - returning-customer-crm
+    memory:
+      # Digest after quiet period; watcher polls for eligible ended chats.
+      digest_and_short_memory_watcher:
+        enabled: true
+        conversation_idle_after_ms: 120000
+        poll_interval_ms: 30000
+        model: haiku
+    tool_surface:
+      gantry_mcp: [mcp_call_tool, memory_search, memory_save]
+      # a customer-visible round on the native Skill tool. Keep only ToolSearch
+      # as a deferred-tool fallback; Shopify access is already loaded via
+      # gantry_mcp above.
+      native: [ToolSearch]
+    bindings: {}
+    sources:
+      mcp_servers:
+        - id: 'mcp:shopify-api'
+        - id: 'mcp:boondi-crm'
+
+mcp_servers:
+  'mcp:boondi-crm':
+    name: boondi-crm
+    transport: http
+    url: http://127.0.0.1:8082/mcp
+    risk_class: medium
+    caller_identity:
+      mode: required
+      header_name: X-Caller-Identity
+      signing_ref: MCP_IDENTITY_SECRET
+      source:
+        kind: conversation_jid_phone
+        jid_prefix: 'wa:'
+    allowed_tool_patterns: ['record_*', 'upgrade_*', 'update_*', 'get_*']
+    auto_approve_tool_patterns: ['record_*', 'upgrade_*', 'update_*', 'get_*']
+    # Polls finished digests and extracts CRM leads/queries. Background-isolation
+    # knobs are settings-owned (were hardcoded in code): max_parallel_extractions
+    # = distinct customers extracted concurrently; batch_size = digests per cycle;
+    # db_pool_size = mcp-crm Postgres pool (must be >= max_parallel_extractions + 1
+    # to leave a connection for the single-flight lease).
+    crm_lead_query_extraction_watcher:
+      enabled: true
+      poll_interval_ms: 30000
+      model: haiku
+      max_parallel_extractions: 2
+      batch_size: 25
+      db_pool_size: 5
+  'mcp:shopify-api':
+    name: shopify-api
+    transport: http
+    url: http://127.0.0.1:8081/mcp
+    risk_class: medium
+    caller_identity:
+      mode: required
+      header_name: X-Caller-Identity
+      signing_ref: MCP_IDENTITY_SECRET
+      source:
+        kind: conversation_jid_phone
+        jid_prefix: 'wa:'
+    # NOTE: keep flow arrays on ONE line — gantry's settings YAML parser
+    # (apps/core/src/config/settings/yaml.ts) does not support a key whose
+    # [...] value is wrapped onto the next line. This file is .prettierignore'd
+    # so format-on-save won't re-wrap it.
+    allowed_tool_patterns: ['lookup_*', 'get_*', 'list_*', 'search_*', 'check_*', 'validate_*']
+    auto_approve_tool_patterns: ['lookup_*', 'get_*', 'list_*', 'search_*', 'check_*', 'validate_*']
+
+# Memory pipeline. Dreaming = nightly background consolidation of extracted
+# evidence into durable memory_items (powers agent recall + the dashboard).
+# enabled + embeddings restate the engine defaults (memory on, embeddings off) —
+# the boot parser requires them whenever a memory block is present. Only dreaming
+# actually changes vs. the no-block defaults; llm model aliases stay default.
+memory:
+  enabled: true
+  embeddings:
+    enabled: false
+    provider: disabled
+  dreaming:
+    enabled: false
+    cron: '0 1 * * *'
+  # Parallel lanes for the background digest+memory sweep (idle-session boundary
+  # extraction): one pass writes the session digest AND extracts memory. Default
+  # is 3 — made explicit here so it's tunable (tune via load test).
+  idle_sweep_concurrency: 3
+  # Per-extraction deadline for that same digest+memory sweep (default 45000ms).
+  idle_sweep_extraction_timeout_ms: 45000
+
+# Per-turn <gantry_memory_context> hydration size (global agent defaults).
+# Latency/cost + cache-hygiene trim (2026-06-11): the recalled memories + digests
+# injected on every agent turn are query-scoped, so a smaller block means fewer
+# input tokens and less prefix-cache busting per turn. Defaults are 8 / 12000;
+# moderately trimmed to 6 / 8000. (Single-tenant runtime — effectively Boondi.)
+# A/B-validated: same 3 crm scenarios fail with these values OR the 8/12000
+# defaults (pre-existing extraction fragility, not caused by this trim);
+# conversation group stayed 22/22.
+agent:
+  sessions:
+    memory_item_limit: 6
+    max_memory_context_chars: 8000

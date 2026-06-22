@@ -41,8 +41,11 @@ export interface RuntimeStatusSummary {
   embeddingModelSource: string;
   dreamingEnabled: boolean;
   dreamingSource: string;
+  workers: {
+    totalWorkers: number;
+    warmReserveWorkers: number;
+  };
   queuePolicy: {
-    maxMessageRuns: number;
     maxJobRuns: number;
     maxRetries: number;
     baseRetryMs: number;
@@ -143,6 +146,7 @@ export async function collectRuntimeStatus(
     embeddingModelSource: memoryHealth.embeddingModelSource,
     dreamingEnabled: memoryHealth.dreamingEnabled,
     dreamingSource: memoryHealth.dreamingSource,
+    workers: settings.runtime.workers,
     queuePolicy: settings.runtime.queue,
   };
 }
@@ -214,7 +218,10 @@ export function formatRuntimeStatus(summary: RuntimeStatusSummary): string {
     `Dreaming: ${statusWord(summary.dreamingEnabled)} (source: ${summary.dreamingSource})`,
   );
   lines.push(
-    `Queue: messages=${summary.queuePolicy.maxMessageRuns} jobs=${summary.queuePolicy.maxJobRuns} retries=${summary.queuePolicy.maxRetries} base_retry_ms=${summary.queuePolicy.baseRetryMs}`,
+    `Workers: total=${summary.workers.totalWorkers} warm_reserve=${summary.workers.warmReserveWorkers}`,
+  );
+  lines.push(
+    `Queue: jobs=${summary.queuePolicy.maxJobRuns} retries=${summary.queuePolicy.maxRetries} base_retry_ms=${summary.queuePolicy.baseRetryMs}`,
   );
   lines.push(`Service (${summary.service.kind}): ${summary.service.status}`);
 

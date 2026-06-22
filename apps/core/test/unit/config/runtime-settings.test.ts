@@ -162,7 +162,54 @@ mcp_servers:
       enabled: true,
       pollIntervalMs: 30000,
       model: 'sonnet',
+      maxParallelExtractions: 2,
+      batchSize: 25,
+      dbPoolSize: 5,
     });
+  });
+
+  it('parses CRM watcher background-isolation knobs and rejects unsupported keys', () => {
+    const parsed = parseRuntimeSettings(`
+mcp_servers:
+  "mcp:boondi-crm":
+    name: boondi-crm
+    transport: http
+    url: http://127.0.0.1:8082/mcp
+    risk_class: medium
+    allowed_tool_patterns: ["record_*"]
+    auto_approve_tool_patterns: ["record_*"]
+    crm_lead_query_extraction_watcher:
+      enabled: true
+      poll_interval_ms: 30000
+      model: sonnet
+      max_parallel_extractions: 3
+      batch_size: 40
+      db_pool_size: 6
+`);
+    expect(
+      parsed.mcpServers['mcp:boondi-crm']?.crmLeadQueryExtractionWatcher,
+    ).toMatchObject({
+      maxParallelExtractions: 3,
+      batchSize: 40,
+      dbPoolSize: 6,
+    });
+    expect(() =>
+      parseRuntimeSettings(`
+mcp_servers:
+  "mcp:boondi-crm":
+    name: boondi-crm
+    transport: http
+    url: http://127.0.0.1:8082/mcp
+    risk_class: medium
+    allowed_tool_patterns: ["record_*"]
+    auto_approve_tool_patterns: ["record_*"]
+    crm_lead_query_extraction_watcher:
+      enabled: true
+      poll_interval_ms: 30000
+      model: sonnet
+      bogus_knob: 1
+`),
+    ).toThrow(/crm_lead_query_extraction_watcher\.bogus_knob is not supported/);
   });
 
   it('parses and renders the digest and short-memory watcher config', () => {
@@ -256,6 +303,9 @@ mcp_servers:
       enabled: false,
       pollIntervalMs: 30000,
       model: 'haiku',
+      maxParallelExtractions: 2,
+      batchSize: 25,
+      dbPoolSize: 5,
     });
   });
 
@@ -322,17 +372,20 @@ agents:
     );
   });
 
-  it('defaults, renders, and parses runtime queue policy', () => {
+  it('defaults, renders, and parses the two-knob worker model + queue policy', () => {
     const settings = createDefaultRuntimeSettings();
+    expect(settings.runtime.workers).toEqual({
+      totalWorkers: 3,
+      warmReserveWorkers: 1,
+    });
     expect(settings.runtime.queue).toEqual({
-      maxMessageRuns: 3,
       maxJobRuns: 4,
       maxRetries: 5,
       baseRetryMs: 5000,
     });
 
+    settings.runtime.workers = { totalWorkers: 6, warmReserveWorkers: 2 };
     settings.runtime.queue = {
-      maxMessageRuns: 6,
       maxJobRuns: 2,
       maxRetries: 1,
       baseRetryMs: 250,
@@ -340,31 +393,43 @@ agents:
 
     const yaml = renderRuntimeSettingsYaml(settings);
     expect(yaml).toContain('runtime:');
-    expect(yaml).toContain('max_message_runs: 6');
+    expect(yaml).toContain('total_workers: 6');
+    expect(yaml).toContain('warm_reserve_workers: 2');
     expect(yaml).toContain('max_job_runs: 2');
     expect(yaml).toContain('max_retries: 1');
     expect(yaml).toContain('base_retry_ms: 250');
+    // The replaced knob must leave no trace in rendered yaml.
+    expect(yaml).not.toContain('max_message_runs');
 
     const parsed = parseRuntimeSettings(yaml);
+    expect(parsed.runtime.workers).toEqual(settings.runtime.workers);
     expect(parsed.runtime.queue).toEqual(settings.runtime.queue);
+  });
+
+  it('rejects a warm reserve larger than total workers (carve-out invariant)', () => {
+    expect(() =>
+      parseRuntimeSettings(`runtime:
+  workers:
+    total_workers: 2
+    warm_reserve_workers: 3
+`),
+    ).toThrow(
+      /warm_reserve_workers \(3\) must not exceed .*total_workers \(2\)/,
+    );
   });
 
   it('defaults, renders, and parses runtime warm pool policy', () => {
     const settings = createDefaultRuntimeSettings();
     expect(settings.runtime.warmPool).toEqual({
       enabled: false,
-      size: 1,
       idleTtlMs: 240_000,
-      maxBoundWorkers: 100,
       cachePrewarmEnabled: false,
       cachePrewarmConcurrency: 1,
     });
 
     settings.runtime.warmPool = {
       enabled: true,
-      size: 2,
       idleTtlMs: 120_000,
-      maxBoundWorkers: 10,
       cachePrewarmEnabled: true,
       cachePrewarmConcurrency: 2,
     };
@@ -372,12 +437,11 @@ agents:
     const yaml = renderRuntimeSettingsYaml(settings);
     expect(yaml).toContain('runtime:');
     expect(yaml).toContain('warm_pool:');
-    expect(yaml).toContain('enabled: true');
-    expect(yaml).toContain('size: 2');
     expect(yaml).toContain('idle_ttl_ms: 120000');
-    expect(yaml).toContain('max_bound_workers: 10');
     expect(yaml).toContain('cache_prewarm_enabled: true');
     expect(yaml).toContain('cache_prewarm_concurrency: 2');
+    // size + max_bound_workers were removed entirely (warm reserve lives in workers).
+    expect(yaml).not.toContain('max_bound_workers');
 
     const parsed = parseRuntimeSettings(yaml);
     expect(parsed.runtime.warmPool).toEqual(settings.runtime.warmPool);
@@ -607,10 +671,30 @@ agents:
     expect(() =>
       parseRuntimeSettings(`runtime:
   queue:
-    max_message_runs: 3
     max_jobb_runs: 4
 `),
     ).toThrow('runtime.queue.max_jobb_runs is not supported');
+  });
+
+  it('rejects the removed max_message_runs queue knob', () => {
+    expect(() =>
+      parseRuntimeSettings(`runtime:
+  queue:
+    max_message_runs: 3
+`),
+    ).toThrow('runtime.queue.max_message_runs is not supported');
+  });
+
+  it('rejects unsupported runtime workers keys', () => {
+    expect(() =>
+      parseRuntimeSettings(`runtime:
+  workers:
+    total_workers: 2
+    warmish_workers: 1
+`),
+    ).toThrow(
+      'runtime.workers.warmish_workers is not supported. Configure total_workers or warm_reserve_workers.',
+    );
   });
 
   it('rejects unsupported runtime warm pool keys', () => {
@@ -621,8 +705,23 @@ agents:
     warmed_workers: 2
 `),
     ).toThrow(
-      'runtime.warm_pool.warmed_workers is not supported. Configure enabled, size, idle_ttl_ms, max_bound_workers, cache_prewarm_enabled, or cache_prewarm_concurrency.',
+      'runtime.warm_pool.warmed_workers is not supported. Configure enabled, idle_ttl_ms, cache_prewarm_enabled, or cache_prewarm_concurrency.',
     );
+  });
+
+  it('rejects the removed warm_pool.size and max_bound_workers knobs', () => {
+    expect(() =>
+      parseRuntimeSettings(`runtime:
+  warm_pool:
+    size: 2
+`),
+    ).toThrow('runtime.warm_pool.size is not supported');
+    expect(() =>
+      parseRuntimeSettings(`runtime:
+  warm_pool:
+    max_bound_workers: 10
+`),
+    ).toThrow('runtime.warm_pool.max_bound_workers is not supported');
   });
 
   it('rejects unsupported runtime runner keys', () => {

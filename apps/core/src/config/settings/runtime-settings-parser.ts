@@ -26,12 +26,12 @@ import {
   DEFAULT_RUNNER_IDLE_TIMEOUT_MS,
   DEFAULT_STORAGE_POSTGRES_SCHEMA,
   DEFAULT_STORAGE_POSTGRES_URL_ENV,
+  DEFAULT_TOTAL_WORKERS,
+  DEFAULT_WARM_RESERVE_WORKERS,
   DEFAULT_WARM_POOL_CACHE_PREWARM_CONCURRENCY,
   DEFAULT_WARM_POOL_CACHE_PREWARM_ENABLED,
   DEFAULT_WARM_POOL_ENABLED,
   DEFAULT_WARM_POOL_IDLE_TTL_MS,
-  DEFAULT_WARM_POOL_MAX_BOUND_WORKERS,
-  DEFAULT_WARM_POOL_SIZE,
 } from './runtime-settings-defaults.js';
 import { parseMcpServers } from './runtime-settings-mcp-parser.js';
 import type {
@@ -694,17 +694,18 @@ function parseAgentSettings(raw: unknown): RuntimeAgentSettings {
 
 function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
   const defaults: RuntimeProcessSettings = {
+    workers: {
+      totalWorkers: DEFAULT_TOTAL_WORKERS,
+      warmReserveWorkers: DEFAULT_WARM_RESERVE_WORKERS,
+    },
     queue: {
-      maxMessageRuns: 3,
       maxJobRuns: 4,
       maxRetries: 5,
       baseRetryMs: 5000,
     },
     warmPool: {
       enabled: DEFAULT_WARM_POOL_ENABLED,
-      size: DEFAULT_WARM_POOL_SIZE,
       idleTtlMs: DEFAULT_WARM_POOL_IDLE_TTL_MS,
-      maxBoundWorkers: DEFAULT_WARM_POOL_MAX_BOUND_WORKERS,
       cachePrewarmEnabled: DEFAULT_WARM_POOL_CACHE_PREWARM_ENABLED,
       cachePrewarmConcurrency: DEFAULT_WARM_POOL_CACHE_PREWARM_CONCURRENCY,
     },
@@ -731,6 +732,7 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
   const map = raw as Record<string, unknown>;
   for (const key of Object.keys(map)) {
     if (
+      key !== 'workers' &&
       key !== 'queue' &&
       key !== 'warm_pool' &&
       key !== 'runner' &&
@@ -738,7 +740,24 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
       key !== 'trace'
     ) {
       throw new Error(
-        `runtime.${key} is not supported. Configure runtime.queue.*, runtime.warm_pool.*, runtime.runner.*, runtime.ownership.*, or runtime.trace.*.`,
+        `runtime.${key} is not supported. Configure runtime.workers.*, runtime.queue.*, runtime.warm_pool.*, runtime.runner.*, runtime.ownership.*, or runtime.trace.*.`,
+      );
+    }
+  }
+  const workersRaw = map.workers;
+  if (
+    workersRaw !== undefined &&
+    (typeof workersRaw !== 'object' ||
+      workersRaw === null ||
+      Array.isArray(workersRaw))
+  ) {
+    throw new Error('runtime.workers must be a mapping');
+  }
+  const workers = (workersRaw || {}) as Record<string, unknown>;
+  for (const key of Object.keys(workers)) {
+    if (key !== 'total_workers' && key !== 'warm_reserve_workers') {
+      throw new Error(
+        `runtime.workers.${key} is not supported. Configure total_workers or warm_reserve_workers.`,
       );
     }
   }
@@ -754,13 +773,12 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
   const queue = (queueRaw || {}) as Record<string, unknown>;
   for (const key of Object.keys(queue)) {
     if (
-      key !== 'max_message_runs' &&
       key !== 'max_job_runs' &&
       key !== 'max_retries' &&
       key !== 'base_retry_ms'
     ) {
       throw new Error(
-        `runtime.queue.${key} is not supported. Configure max_message_runs, max_job_runs, max_retries, or base_retry_ms.`,
+        `runtime.queue.${key} is not supported. Configure max_job_runs, max_retries, or base_retry_ms. (Concurrency now lives in runtime.workers.total_workers.)`,
       );
     }
   }
@@ -777,14 +795,12 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
   for (const key of Object.keys(warmPool)) {
     if (
       key !== 'enabled' &&
-      key !== 'size' &&
       key !== 'idle_ttl_ms' &&
-      key !== 'max_bound_workers' &&
       key !== 'cache_prewarm_enabled' &&
       key !== 'cache_prewarm_concurrency'
     ) {
       throw new Error(
-        `runtime.warm_pool.${key} is not supported. Configure enabled, size, idle_ttl_ms, max_bound_workers, cache_prewarm_enabled, or cache_prewarm_concurrency.`,
+        `runtime.warm_pool.${key} is not supported. Configure enabled, idle_ttl_ms, cache_prewarm_enabled, or cache_prewarm_concurrency. (Warm reserve size now lives in runtime.workers.warm_reserve_workers.)`,
       );
     }
   }
@@ -848,13 +864,24 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
       );
     }
   }
+  const totalWorkers = parsePositiveIntegerValue(
+    workers.total_workers,
+    'runtime.workers.total_workers',
+    defaults.workers.totalWorkers,
+  );
+  const warmReserveWorkers = parseNonNegativeIntegerValue(
+    workers.warm_reserve_workers,
+    'runtime.workers.warm_reserve_workers',
+    defaults.workers.warmReserveWorkers,
+  );
+  if (warmReserveWorkers > totalWorkers) {
+    throw new Error(
+      `runtime.workers.warm_reserve_workers (${warmReserveWorkers}) must not exceed runtime.workers.total_workers (${totalWorkers}); the warm reserve is carved out of total.`,
+    );
+  }
   return {
+    workers: { totalWorkers, warmReserveWorkers },
     queue: {
-      maxMessageRuns: parsePositiveIntegerValue(
-        queue.max_message_runs,
-        'runtime.queue.max_message_runs',
-        defaults.queue.maxMessageRuns,
-      ),
       maxJobRuns: parsePositiveIntegerValue(
         queue.max_job_runs,
         'runtime.queue.max_job_runs',
@@ -877,20 +904,10 @@ function parseRuntimeProcessSettings(raw: unknown): RuntimeProcessSettings {
         'runtime.warm_pool.enabled',
         defaults.warmPool.enabled,
       ),
-      size: parsePositiveIntegerValue(
-        warmPool.size,
-        'runtime.warm_pool.size',
-        defaults.warmPool.size,
-      ),
       idleTtlMs: parsePositiveIntegerValue(
         warmPool.idle_ttl_ms,
         'runtime.warm_pool.idle_ttl_ms',
         defaults.warmPool.idleTtlMs,
-      ),
-      maxBoundWorkers: parsePositiveIntegerValue(
-        warmPool.max_bound_workers,
-        'runtime.warm_pool.max_bound_workers',
-        defaults.warmPool.maxBoundWorkers,
       ),
       cachePrewarmEnabled: parseBooleanValue(
         warmPool.cache_prewarm_enabled,

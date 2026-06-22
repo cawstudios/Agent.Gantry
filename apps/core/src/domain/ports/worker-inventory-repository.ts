@@ -24,7 +24,6 @@ export interface WorkerInventoryWarmPoolSnapshot {
   boundActive: number;
   boundIdle: number;
   boundDraining: number;
-  maxBoundWorkers: number;
   cachePrewarm: WorkerInventoryCachePrewarmSnapshot;
   cacheShapes: WorkerInventoryCacheShapeSnapshot[];
 }

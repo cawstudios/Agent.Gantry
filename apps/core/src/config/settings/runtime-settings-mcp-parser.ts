@@ -56,6 +56,33 @@ function parsePositiveMilliseconds(raw: unknown, pathPrefix: string): number {
   return raw;
 }
 
+// Background-isolation knob defaults (kept in sync with packages/mcp-crm/src/env.ts;
+// only applied when the yaml key is absent).
+const DEFAULT_CRM_MAX_PARALLEL_EXTRACTIONS = 2;
+const DEFAULT_CRM_EXTRACTION_BATCH_SIZE = 25;
+const DEFAULT_CRM_DB_POOL_SIZE = 5;
+
+function parseBoundedInteger(
+  raw: unknown,
+  pathPrefix: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (raw === undefined) return fallback;
+  if (
+    typeof raw !== 'number' ||
+    !Number.isInteger(raw) ||
+    raw < min ||
+    raw > max
+  ) {
+    throw new Error(
+      `${pathPrefix} must be an integer between ${min} and ${max}`,
+    );
+  }
+  return raw;
+}
+
 function parseCrmLeadQueryExtractionWatcher(
   raw: unknown,
   pathPrefix: string,
@@ -69,9 +96,16 @@ function parseCrmLeadQueryExtractionWatcher(
   const map = raw as Record<string, unknown>;
   const enabled = parseBooleanValue(map.enabled, `${pathPrefix}.enabled`);
   for (const key of Object.keys(map)) {
-    if (key !== 'enabled' && key !== 'poll_interval_ms' && key !== 'model') {
+    if (
+      key !== 'enabled' &&
+      key !== 'poll_interval_ms' &&
+      key !== 'model' &&
+      key !== 'max_parallel_extractions' &&
+      key !== 'batch_size' &&
+      key !== 'db_pool_size'
+    ) {
       throw new Error(
-        `${pathPrefix}.${key} is not supported. Configure enabled, poll_interval_ms, or model.`,
+        `${pathPrefix}.${key} is not supported. Configure enabled, poll_interval_ms, model, max_parallel_extractions, batch_size, or db_pool_size.`,
       );
     }
   }
@@ -87,6 +121,27 @@ function parseCrmLeadQueryExtractionWatcher(
       `${pathPrefix}.poll_interval_ms`,
     ),
     model,
+    maxParallelExtractions: parseBoundedInteger(
+      map.max_parallel_extractions,
+      `${pathPrefix}.max_parallel_extractions`,
+      DEFAULT_CRM_MAX_PARALLEL_EXTRACTIONS,
+      1,
+      50,
+    ),
+    batchSize: parseBoundedInteger(
+      map.batch_size,
+      `${pathPrefix}.batch_size`,
+      DEFAULT_CRM_EXTRACTION_BATCH_SIZE,
+      1,
+      1000,
+    ),
+    dbPoolSize: parseBoundedInteger(
+      map.db_pool_size,
+      `${pathPrefix}.db_pool_size`,
+      DEFAULT_CRM_DB_POOL_SIZE,
+      1,
+      50,
+    ),
   };
 }
 

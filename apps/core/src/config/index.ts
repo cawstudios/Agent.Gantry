@@ -164,12 +164,13 @@ export function getPublicRuntimeSettings() {
   };
 }
 export function getRuntimeQueueConfig() {
-  const queue = getRuntimeSettingsForConfig().runtime.queue;
+  const runtime = getRuntimeSettingsForConfig().runtime;
   return {
-    maxMessageRuns: queue.maxMessageRuns,
-    maxJobRuns: queue.maxJobRuns,
-    maxRetries: queue.maxRetries,
-    baseRetryMs: queue.baseRetryMs,
+    // Live concurrency gate = total_workers (max concurrent customer chats).
+    maxMessageRuns: runtime.workers.totalWorkers,
+    maxJobRuns: runtime.queue.maxJobRuns,
+    maxRetries: runtime.queue.maxRetries,
+    baseRetryMs: runtime.queue.baseRetryMs,
     // I-1 (default off): SIGKILL post-grace stragglers on shutdown.
     killStragglersAfterGrace: IPC_SHUTDOWN_KILL,
   };
@@ -177,14 +178,16 @@ export function getRuntimeQueueConfig() {
 export function getRuntimeWarmPoolConfig(
   _env: NodeJS.ProcessEnv = process.env,
 ) {
-  const warmPool = getRuntimeSettingsForConfig().runtime.warmPool;
+  const runtime = getRuntimeSettingsForConfig().runtime;
   return {
-    enabled: warmPool.enabled,
-    size: warmPool.size,
-    idleTtlMs: warmPool.idleTtlMs,
-    maxBoundWorkers: warmPool.maxBoundWorkers,
-    cachePrewarmEnabled: warmPool.cachePrewarmEnabled,
-    cachePrewarmConcurrency: warmPool.cachePrewarmConcurrency,
+    enabled: runtime.warmPool.enabled,
+    // Warm-ready reserve, carved out of total_workers (warm_reserve_workers <=
+    // total_workers, enforced at parse time). This is the pool's target idle size
+    // AND its process cap: idle + active warm workers never exceed it.
+    size: runtime.workers.warmReserveWorkers,
+    idleTtlMs: runtime.warmPool.idleTtlMs,
+    cachePrewarmEnabled: runtime.warmPool.cachePrewarmEnabled,
+    cachePrewarmConcurrency: runtime.warmPool.cachePrewarmConcurrency,
   };
 }
 export function getRuntimeRunnerConfig(_env: NodeJS.ProcessEnv = process.env) {

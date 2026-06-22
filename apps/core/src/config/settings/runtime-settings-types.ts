@@ -71,6 +71,11 @@ export interface RuntimeConfiguredMcpServer {
     enabled: boolean;
     pollIntervalMs: number;
     model: string;
+    // Background-isolation knobs (owned by the mcp-crm extractor; core carries
+    // them so settings.yaml round-trips). See packages/mcp-crm/src/env.ts.
+    maxParallelExtractions: number;
+    batchSize: number;
+    dbPoolSize: number;
   };
 }
 
@@ -223,8 +228,18 @@ export interface RuntimeCredentialBrokerSettings {
 
 export type { RuntimeMemorySettingsSnapshot, RuntimeStorageSettingsSnapshot };
 
+// Two-knob live worker model. `totalWorkers` = the maximum number of customer
+// chats handled concurrently on this core (the GroupQueue message-run gate, and
+// the process ceiling). `warmReserveWorkers` = how many pre-booted runners are
+// kept warm-ready, carved OUT OF total (so `warmReserveWorkers <= totalWorkers`).
+// These two knobs replaced three earlier ones (a separate message-run cap, a warm
+// pool size, and a bound-worker cap that was redundant with the gate).
+export interface RuntimeWorkersSettings {
+  totalWorkers: number;
+  warmReserveWorkers: number;
+}
+
 export interface RuntimeQueueSettings {
-  maxMessageRuns: number;
   maxJobRuns: number;
   maxRetries: number;
   baseRetryMs: number;
@@ -232,9 +247,7 @@ export interface RuntimeQueueSettings {
 
 export interface RuntimeWarmPoolSettings {
   enabled: boolean;
-  size: number;
   idleTtlMs: number;
-  maxBoundWorkers: number;
   cachePrewarmEnabled: boolean;
   cachePrewarmConcurrency: number;
 }
@@ -257,6 +270,7 @@ export interface RuntimeTraceSettings {
 }
 
 export interface RuntimeProcessSettings {
+  workers: RuntimeWorkersSettings;
   queue: RuntimeQueueSettings;
   warmPool: RuntimeWarmPoolSettings;
   runner: RuntimeRunnerSettings;
