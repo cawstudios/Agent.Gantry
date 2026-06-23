@@ -45,6 +45,13 @@ const fileArtifactStore = vi.hoisted(() => ({
   },
   async writeFileArtifact(input: any) {
     const key = `${input.appId}:${input.agentId}:${input.virtualScope}:${input.virtualPath}`;
+    const agentFolder = String(input.agentId).replace(/^agent:/, '');
+    const hasConversationRoute = Array.from(groupsStore.values()).some(
+      (group) => group.folder === agentFolder,
+    );
+    if (!hasConversationRoute) {
+      throw new Error(`missing conversation route for ${input.agentId}`);
+    }
     fileArtifacts.set(key, String(input.content));
     return {
       id: `file-artifact:test:${fileArtifacts.size}`,
@@ -512,6 +519,8 @@ describe('cli slack helpers', () => {
       runtimeHome,
       chatJid: 'sl:C0123456789',
       displayName: 'Kai Slack',
+      conversationDisplayName: 'recruiting-demo',
+      approverIds: ['U123'],
     });
 
     const claude =
@@ -525,6 +534,26 @@ describe('cli slack helpers', () => {
 
     expect(result.groupName).toBe('Kai Slack');
     expect(result.folder).toBe('main_agent');
+    expect(groupsStore.get('sl:C0123456789')).toEqual(
+      expect.objectContaining({
+        name: 'Kai Slack',
+        folder: 'main_agent',
+      }),
+    );
+    const settings = loadRuntimeSettings(runtimeHome);
+    expect(settings.conversations?.slack_default_c0123456789).toEqual(
+      expect.objectContaining({
+        displayName: 'recruiting-demo',
+        providerConnection: 'slack_default',
+        externalId: 'C0123456789',
+        controlApprovers: ['U123'],
+      }),
+    );
+    expect(settings.providerConnections?.slack_default).toEqual(
+      expect.objectContaining({
+        provider: 'slack',
+      }),
+    );
     expect(
       fs.existsSync(
         path.join(runtimeHome, 'agents', result.folder, 'CLAUDE.md'),

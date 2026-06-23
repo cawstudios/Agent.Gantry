@@ -366,6 +366,8 @@ export async function registerSlackMainGroup(options: {
   runtimeHome: string;
   chatJid: string;
   displayName: string;
+  conversationDisplayName?: string;
+  approverIds?: string[];
 }): Promise<{ folder: string; groupName: string }> {
   ensureRuntimeLayout(options.runtimeHome);
   const db = await openRuntimeGroupDb(options.runtimeHome);
@@ -378,12 +380,6 @@ export async function registerSlackMainGroup(options: {
 
     const groupName = normalizeDefaultAgentName(options.displayName);
 
-    await new PromptProfileService({
-      fileArtifactStore: () => db.getFileArtifactStore(),
-      mirrorProfileFile: createProfileFileMirrorWriter(options.runtimeHome),
-      mirrorFileExists: createProfileFileMirrorExists(options.runtimeHome),
-    }).ensureAgentDefaults({ agentFolder: folder, agentName: groupName });
-
     const route = {
       name: groupName,
       folder,
@@ -393,6 +389,12 @@ export async function registerSlackMainGroup(options: {
       agentConfig: existingGroup?.agentConfig,
     };
     await db.setConversationRoute(options.chatJid, route);
+    await new PromptProfileService({
+      fileArtifactStore: () => db.getFileArtifactStore(),
+      mirrorProfileFile: createProfileFileMirrorWriter(options.runtimeHome),
+      mirrorFileExists: createProfileFileMirrorExists(options.runtimeHome),
+    }).ensureAgentDefaults({ agentFolder: folder, agentName: groupName });
+
     const settings = loadRuntimeSettings(options.runtimeHome);
     const previousSettings = structuredClone(settings);
     ensureConfiguredConversationBinding(settings, {
@@ -400,9 +402,10 @@ export async function registerSlackMainGroup(options: {
       agentName: groupName,
       agentFolder: folder,
       jid: options.chatJid,
-      displayName: options.displayName,
+      displayName: options.conversationDisplayName || options.displayName,
       trigger: route.trigger,
       requiresTrigger: false,
+      approverIds: options.approverIds,
     });
     await writeDesiredRuntimeSettings({
       runtimeHome: options.runtimeHome,
@@ -532,6 +535,7 @@ export async function runSlackConnectCommand(
       runtimeHome,
       chatJid: normalizedChatJid,
       displayName: loadRuntimeSettings(runtimeHome).agent.name,
+      approverIds,
     });
     registeredFolder = registered.folder;
     conversationRouteName = registered.groupName;

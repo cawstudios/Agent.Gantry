@@ -119,10 +119,13 @@ export async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
   try {
     if (draft.primaryProvider === 'slack') {
       const conversationLabel = draft.slackDisplayName || draft.slackChatJid;
+      const approverIds = parseApproverIds(draft.slackPermissionApproverIds);
       const result = await registerSlackMainGroup({
         runtimeHome: draft.runtimeHome,
         chatJid: draft.slackChatJid,
         displayName: draft.agentName,
+        conversationDisplayName: conversationLabel,
+        approverIds,
       });
       const settings = loadRuntimeSettings(draft.runtimeHome);
       ensureConfiguredConversationBinding(settings, {
@@ -133,7 +136,7 @@ export async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
         displayName: conversationLabel,
         trigger: `@${result.groupName}`,
         requiresTrigger: false,
-        approverIds: parseApproverIds(draft.slackPermissionApproverIds),
+        approverIds,
       });
       saveRuntimeSettings(draft.runtimeHome, settings);
       draft.workspaceKey = result.folder;

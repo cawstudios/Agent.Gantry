@@ -469,8 +469,8 @@ export class PromptProfileService {
       limit: 1,
     });
     if (existing.length > 0) {
-      await this.reseedMirrorIfMissing(store, input);
-      return;
+      const recovered = await this.reseedMirrorIfMissing(store, input);
+      if (recovered) return;
     }
     await store.writeFileArtifact({
       appId: input.appId,
@@ -503,13 +503,13 @@ export class PromptProfileService {
       fileName: string;
       virtualPath: string;
     },
-  ): Promise<void> {
-    if (!this.mirrorProfileFile || !this.mirrorFileExists) return;
+  ): Promise<boolean> {
+    if (!this.mirrorProfileFile || !this.mirrorFileExists) return true;
     const present = await this.mirrorFileExists({
       agentFolder: input.agentFolder,
       fileName: input.fileName,
     });
-    if (present) return;
+    if (present) return true;
     try {
       const current = await store.readFileArtifact({
         appId: input.appId,
@@ -526,8 +526,9 @@ export class PromptProfileService {
         fileName: input.fileName,
         content,
       });
+      return true;
     } catch (err) {
-      if (err instanceof FileArtifactNotFoundError) return;
+      if (err instanceof FileArtifactNotFoundError) return false;
       throw err;
     }
   }
