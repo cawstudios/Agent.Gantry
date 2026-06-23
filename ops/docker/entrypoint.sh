@@ -41,7 +41,7 @@ if (explicit) {
   process.stdout.write(explicit);
   process.exit(0);
 }
-const url = process.env.GANTRY_DATABASE_URL?.trim() || process.env.MIGRATION_DATABASE_URL?.trim() || '';
+const url = process.env.MIGRATION_DATABASE_URL?.trim() || process.env.GANTRY_DATABASE_URL?.trim() || '';
 if (url) {
   try {
     const schema = new URL(url).searchParams.get('schema')?.trim();

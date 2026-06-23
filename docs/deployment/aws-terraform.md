@@ -81,15 +81,17 @@ runtime image first-bootstraps a minimal workstation `settings.yaml` when
 command is `node dist/index.js`. The bootstrap writes to `GANTRY_HOME`
 (`/var/lib/gantry` by default), derives the Postgres schema from
 `GANTRY_SETTINGS_POSTGRES_SCHEMA`, the `schema=` query parameter in
-`GANTRY_DATABASE_URL`, or `GANTRY_DB_SCHEMA`, falling back to `gantry`. The
-explicit migration pass uses the same schema precedence. Existing mounted
+`MIGRATION_DATABASE_URL` or `GANTRY_DATABASE_URL`, or `GANTRY_DB_SCHEMA`,
+falling back to `gantry`. The explicit migration pass uses the same schema
+precedence. Existing mounted
 `settings.yaml` files are left untouched. A fresh workstation bootstrap imports
 the generated file through the normal workstation settings path after
 migrations and mirrors the applied snapshot into `settings_revisions`.
-Workstation and fleet runtimes both materialize the latest settings revision
-back to local `settings.yaml`; fleet additionally treats `settings_revisions`
-as its boot authority. To seed a fleet desired-state revision from the
-bootstrap file, explicitly set
+Workstation keeps `settings.yaml` as the desired-state authority; it does not
+apply database revisions back to the file. Fleet materializes the latest
+settings revision back to local `settings.yaml` and treats
+`settings_revisions` as its boot authority. To seed a fleet desired-state
+revision from the bootstrap file, explicitly set
 `GANTRY_BOOTSTRAP_DEPLOYMENT_MODE=fleet`.
 
 Expected sequence in the logs:

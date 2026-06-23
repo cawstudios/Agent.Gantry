@@ -101,8 +101,8 @@ function resolveBootstrapSettingsSchema(): string {
   if (explicit) return explicit;
 
   const url =
-    runtimeEnvValueDynamic('GANTRY_DATABASE_URL').trim() ||
-    runtimeEnvValueDynamic('MIGRATION_DATABASE_URL').trim();
+    runtimeEnvValueDynamic('MIGRATION_DATABASE_URL').trim() ||
+    runtimeEnvValueDynamic('GANTRY_DATABASE_URL').trim();
   if (url) {
     try {
       const schema = new URL(url).searchParams.get('schema')?.trim();

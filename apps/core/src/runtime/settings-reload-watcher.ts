@@ -68,20 +68,30 @@ export function startSettingsReloadWatcher(
       }
 
       if (
-        options.settingsRevisions &&
-        (await settingsMatchesLatestRevision({
-          appId: options.appId ?? ('default' as AppId),
-          settings,
-          settingsRevisions: options.settingsRevisions,
-        }))
+        lastGoodSettings &&
+        settingsDocumentsMatch(settings, lastGoodSettings)
       ) {
-        lastGoodSettings = settings;
-        invalidateSenderAllowlistCache(filePath);
         logger.info(
           { filePath },
-          'settings.yaml reload matched latest settings revision; no duplicate revision appended',
+          'settings.yaml reload matched last good settings; no reload needed',
         );
         return;
+      }
+
+      let matchesLatestRevision = false;
+      if (options.settingsRevisions) {
+        try {
+          matchesLatestRevision = await settingsMatchesLatestRevision({
+            appId: options.appId ?? ('default' as AppId),
+            settings,
+            settingsRevisions: options.settingsRevisions,
+          });
+        } catch (err) {
+          logger.warn(
+            { err, filePath },
+            'settings revision lookup failed; continuing with local settings.yaml reload',
+          );
+        }
       }
 
       // The watcher is the workstation auto-importer: route validation, write,
@@ -96,14 +106,16 @@ export function startSettingsReloadWatcher(
             appId: options.appId,
             previousSettings: lastGoodSettings,
             reloadRuntimeState: () => options.app.loadState(),
-            revisionMirror: options.settingsRevisions
-              ? {
-                  settingsRevisions: options.settingsRevisions,
-                  pool: options.settingsRevisionPool,
-                  createdBy: 'settings.yaml:auto-import',
-                  logWarn: (context, message) => logger.warn(context, message),
-                }
-              : undefined,
+            revisionMirror:
+              options.settingsRevisions && !matchesLatestRevision
+                ? {
+                    settingsRevisions: options.settingsRevisions,
+                    pool: options.settingsRevisionPool,
+                    createdBy: 'settings.yaml:auto-import',
+                    logWarn: (context, message) =>
+                      logger.warn(context, message),
+                  }
+                : undefined,
           },
           settings,
         );
@@ -179,12 +191,23 @@ async function settingsMatchesLatestRevision(input: {
   );
 }
 
+function settingsDocumentsMatch(
+  left: ReturnType<typeof loadRuntimeSettings>,
+  right: ReturnType<typeof loadRuntimeSettings>,
+): boolean {
+  return (
+    stableJson(settingsToRevisionDocument(left)) ===
+    stableJson(settingsToRevisionDocument(right))
+  );
+}
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableJson).join(',')}]`;
   }
   if (value && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, nested]) => nested !== undefined)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`)
       .join(',')}}`;

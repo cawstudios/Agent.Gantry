@@ -36,6 +36,7 @@ let capabilityErrors: string[] = [];
 
 class FakeRevisionRepo implements SettingsRevisionRepository {
   rows: SettingsRevision[] = [];
+  appendError: Error | null = null;
 
   async appendSettingsRevision(input: {
     appId: string;
@@ -45,6 +46,7 @@ class FakeRevisionRepo implements SettingsRevisionRepository {
     note?: string | null;
     expectedRevision?: number | null;
   }): Promise<AppendSettingsRevisionResult> {
+    if (this.appendError) throw this.appendError;
     const currentRevision = this.rows.at(-1)?.revision ?? 0;
     if (
       input.expectedRevision !== undefined &&
@@ -132,6 +134,40 @@ describe('importFleetSettingsRevision', () => {
       (repo.rows[0]?.settingsDocument.agent as { name?: string }).name,
     ).toBe('Applied Agent');
     expect(applyRuntimeSettingsDesiredState).toHaveBeenCalledOnce();
+  });
+
+  it('workstation import keeps applied settings when revision mirror append fails', async () => {
+    capabilityErrors = [];
+    const appliedSettings = createDefaultRuntimeSettings();
+    applyRuntimeSettingsDesiredState.mockImplementation(
+      async () => appliedSettings,
+    );
+    const repo = new FakeRevisionRepo();
+    repo.appendError = new Error('settings revisions unavailable');
+    const logWarn = vi.fn();
+
+    const outcome = await importWorkstationSettings(
+      {
+        runtimeHome: '/tmp/gantry-import-test',
+        ops: {} as never,
+        repositories: {} as never,
+        appId: 'default' as never,
+        revisionMirror: {
+          settingsRevisions: repo,
+          createdBy: 'test:workstation',
+          logWarn,
+        },
+      },
+      createDefaultRuntimeSettings(),
+    );
+
+    expect(outcome).toEqual({});
+    expect(repo.rows).toHaveLength(0);
+    expect(applyRuntimeSettingsDesiredState).toHaveBeenCalled();
+    expect(logWarn).toHaveBeenCalledWith(
+      { err: repo.appendError },
+      'settings revision mirror failed after workstation settings applied',
+    );
   });
 
   it('appends a revision stamped with the current reader version', async () => {

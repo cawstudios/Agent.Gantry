@@ -174,8 +174,9 @@ async function runImport(
 
   const fleet = flags.fleet || getDeploymentMode() === 'fleet';
   if (!fleet) {
+    let outcome: Awaited<ReturnType<typeof importWorkstationSettings>>;
     try {
-      await importWorkstationSettings(
+      outcome = await importWorkstationSettings(
         {
           runtimeHome,
           ops: storage.ops,
@@ -187,6 +188,7 @@ async function runImport(
             pool: storage.service.pool,
             createdBy: 'cli:settings-import',
             note: flags.note ?? null,
+            logWarn: (_context, message) => p.log.warn(message),
           },
         },
         parsed,
@@ -197,9 +199,11 @@ async function runImport(
       );
       return 1;
     }
-    p.log.success(
-      `Imported ${flags.file} into settings.yaml and settings revisions (workstation).`,
-    );
+    const revisionText =
+      outcome.revision === undefined
+        ? ''
+        : ` and mirrored revision ${outcome.revision}`;
+    p.log.success(`Imported ${flags.file} into settings.yaml${revisionText}.`);
     return 0;
   }
 

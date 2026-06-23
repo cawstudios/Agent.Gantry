@@ -8,6 +8,7 @@ import {
   settingsFromRevisionDocument,
 } from '../../../config/settings/settings-import-service.js';
 import type { AppId } from '../../../domain/app/app.js';
+import { logger } from '../../../infrastructure/logging/logger.js';
 import type { RuntimeDeploymentMode } from '../../../shared/runtime-deployment-mode.js';
 import {
   authorizeControlRequest,
@@ -176,6 +177,7 @@ async function handleDesiredState(
               pool: storage.service.pool,
               createdBy: `control-api:${key.kid}`,
               note: typeof body.note === 'string' ? body.note : null,
+              logWarn: (context, message) => logger.warn(context, message),
             },
           },
           parsed,

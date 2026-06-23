@@ -89,4 +89,27 @@ describe('runtime storage bootstrap', () => {
       );
     });
   });
+
+  it('uses the migration URL schema when the runtime URL does not specify one', () => {
+    withCleanEnv(() => {
+      const runtimeHome = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'gantry-storage-bootstrap-'),
+      );
+      homes.push(runtimeHome);
+
+      process.env.GANTRY_BOOTSTRAP_SETTINGS_IF_MISSING = '1';
+      process.env.GANTRY_DATABASE_URL =
+        'postgres://user:pass@127.0.0.1:5432/gantry';
+      process.env.MIGRATION_DATABASE_URL =
+        'postgres://migrator:pass@127.0.0.1:5432/gantry?schema=migrated';
+
+      const config = resolveRuntimeStorageConfig(runtimeHome, runtimeHome);
+
+      expect(config.postgresSchema).toBe('migrated');
+      expect(config.postgresUrl).toBe(process.env.GANTRY_DATABASE_URL);
+      expect(fs.readFileSync(settingsFilePath(runtimeHome), 'utf-8')).toContain(
+        'schema: migrated',
+      );
+    });
+  });
 });
