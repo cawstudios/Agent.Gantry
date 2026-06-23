@@ -15,6 +15,7 @@ import { enqueueLiveAdmissionWorkItem } from './live-admission-work-item-reposit
 import {
   CANONICAL_APP_ID,
   type CanonicalDb,
+  type CanonicalExecutor,
   conversationIdForJid,
   jsonb,
   PostgresCanonicalGraphRepository,
@@ -109,151 +110,159 @@ export class PostgresCanonicalMessageRepository {
     msg: NewMessage,
     options: { liveAdmission?: MessageLiveAdmissionInput } = {},
   ): Promise<LiveAdmissionWorkItemEnqueueResult | undefined> {
-    return this.db.transaction(async (tx) => {
-      const providerId =
-        normalizeProviderId(msg.provider ?? providerIdForJid(msg.chat_jid)) ||
-        'app';
-      const conversationId = await this.graph.ensureConversation(
-        msg.chat_jid,
+    return this.db.transaction((tx) =>
+      this.saveMessageWithExecutor(tx, msg, options),
+    );
+  }
+
+  async saveMessageWithExecutor(
+    tx: CanonicalExecutor,
+    msg: NewMessage,
+    options: { liveAdmission?: MessageLiveAdmissionInput } = {},
+  ): Promise<LiveAdmissionWorkItemEnqueueResult | undefined> {
+    const providerId =
+      normalizeProviderId(msg.provider ?? providerIdForJid(msg.chat_jid)) ||
+      'app';
+    const conversationId = await this.graph.ensureConversation(
+      msg.chat_jid,
+      {
+        timestamp: msg.timestamp,
+        channel: providerId,
+      },
+      tx,
+    );
+    const canonicalThreadId = await this.graph.ensureThread(
+      msg.chat_jid,
+      msg.thread_id,
+      tx,
+      { channel: providerId },
+    );
+    const providerConnectionId =
+      (await this.graph.getConversationInstallationId(conversationId, tx)) ??
+      `channel-providerConnection:${CANONICAL_APP_ID}:${providerId}`;
+    const canonicalMessageId = messageIdFor(msg.chat_jid, msg.id);
+    const direction =
+      msg.is_from_me || msg.is_bot_message ? 'outbound' : 'inbound';
+    const externalMessageId =
+      msg.external_message_id ??
+      (direction === 'inbound' ? msg.id || null : null);
+    if (direction === 'inbound') {
+      await this.graph.ensureParticipant(
         {
+          conversationId,
+          providerId: providerId,
+          providerConnectionId,
+          externalUserId: msg.sender,
+          displayName: msg.sender_name,
           timestamp: msg.timestamp,
-          channel: providerId,
         },
         tx,
       );
-      const canonicalThreadId = await this.graph.ensureThread(
-        msg.chat_jid,
-        msg.thread_id,
-        tx,
-        { channel: providerId },
-      );
-      const providerConnectionId =
-        (await this.graph.getConversationInstallationId(conversationId, tx)) ??
-        `channel-providerConnection:${CANONICAL_APP_ID}:${providerId}`;
-      const canonicalMessageId = messageIdFor(msg.chat_jid, msg.id);
-      const direction =
-        msg.is_from_me || msg.is_bot_message ? 'outbound' : 'inbound';
-      const externalMessageId =
-        msg.external_message_id ??
-        (direction === 'inbound' ? msg.id || null : null);
-      if (direction === 'inbound') {
-        await this.graph.ensureParticipant(
-          {
-            conversationId,
-            providerId: providerId,
-            providerConnectionId,
-            externalUserId: msg.sender,
-            displayName: msg.sender_name,
-            timestamp: msg.timestamp,
-          },
-          tx,
-        );
-      }
-      await tx
-        .insert(pgSchema.messagesPostgres)
-        .values({
-          id: canonicalMessageId,
-          appId: CANONICAL_APP_ID,
-          providerId,
-          providerConnectionId,
-          conversationId,
-          threadId: canonicalThreadId,
+    }
+    await tx
+      .insert(pgSchema.messagesPostgres)
+      .values({
+        id: canonicalMessageId,
+        appId: CANONICAL_APP_ID,
+        providerId,
+        providerConnectionId,
+        conversationId,
+        threadId: canonicalThreadId,
+        externalMessageId,
+        externalRefJson: jsonb(externalRefForMessage(msg)),
+        direction,
+        senderUserId: msg.sender,
+        senderDisplayName: msg.sender_name,
+        trust: msg.is_bot_message ? 'system' : 'trusted',
+        createdAt: msg.timestamp,
+        receivedAt: msg.timestamp,
+        deliveryStatus: msg.delivery_status ?? null,
+        deliveredAt: msg.delivered_at ?? null,
+        deliveryError: msg.delivery_error ?? null,
+      })
+      .onConflictDoUpdate({
+        target: pgSchema.messagesPostgres.id,
+        set: {
           externalMessageId,
           externalRefJson: jsonb(externalRefForMessage(msg)),
           direction,
           senderUserId: msg.sender,
           senderDisplayName: msg.sender_name,
           trust: msg.is_bot_message ? 'system' : 'trusted',
-          createdAt: msg.timestamp,
-          receivedAt: msg.timestamp,
           deliveryStatus: msg.delivery_status ?? null,
           deliveredAt: msg.delivered_at ?? null,
           deliveryError: msg.delivery_error ?? null,
-        })
-        .onConflictDoUpdate({
-          target: pgSchema.messagesPostgres.id,
-          set: {
-            externalMessageId,
-            externalRefJson: jsonb(externalRefForMessage(msg)),
-            direction,
-            senderUserId: msg.sender,
-            senderDisplayName: msg.sender_name,
-            trust: msg.is_bot_message ? 'system' : 'trusted',
-            deliveryStatus: msg.delivery_status ?? null,
-            deliveredAt: msg.delivered_at ?? null,
-            deliveryError: msg.delivery_error ?? null,
-          },
-        });
-      await tx
-        .insert(pgSchema.messagePartsPostgres)
-        .values({
-          messageId: canonicalMessageId,
-          ordinal: 0,
-          kind: 'text',
-          payloadJson: jsonb({ kind: 'text', text: msg.content }),
-        })
-        .onConflictDoUpdate({
-          target: [
-            pgSchema.messagePartsPostgres.messageId,
-            pgSchema.messagePartsPostgres.ordinal,
-          ],
-          set: {
-            kind: sql`excluded.kind`,
-            payloadJson: sql`excluded.payload_json`,
-          },
-        });
-      await tx
-        .delete(pgSchema.messageAttachmentsPostgres)
-        .where(
-          eq(pgSchema.messageAttachmentsPostgres.messageId, canonicalMessageId),
-        );
-      if (msg.attachments && msg.attachments.length > 0) {
-        await tx.insert(pgSchema.messageAttachmentsPostgres).values(
-          msg.attachments.map((attachment, index) => ({
-            id:
-              attachment.id ??
-              `message-attachment:${canonicalMessageId}:${index}`,
-            messageId: canonicalMessageId,
-            kind: attachment.kind,
-            contentType: attachment.contentType ?? null,
-            sizeBytes: attachment.sizeBytes ?? null,
-            externalRefJson: attachment.externalId
-              ? jsonb({
-                  kind: 'message_attachment',
-                  value: attachment.externalId,
-                })
-              : null,
-            storageRef: attachment.storageRef ?? null,
-            trust: msg.is_bot_message ? 'system' : 'trusted',
-          })),
-        );
-      }
-      if (direction !== 'inbound' || !options.liveAdmission) {
-        return undefined;
-      }
-      const admission = options.liveAdmission;
-      return enqueueLiveAdmissionWorkItem(tx, {
-        id: liveAdmissionWorkItemId(admission.appId, canonicalMessageId),
-        appId: admission.appId,
-        agentId: admission.agentId
-          ? normalizeAgentIdForFolder(admission.agentId)
-          : null,
-        agentSessionId: admission.agentSessionId,
-        conversationId: msg.chat_jid,
-        threadId: msg.thread_id ?? null,
-        queueJid: makeThreadQueueKey(msg.chat_jid, msg.thread_id),
-        messageId: canonicalMessageId,
-        messageCursor: encodeGroupMessageCursor(toGroupMessageCursor(msg)),
-        senderUserId: msg.sender,
-        senderDisplayName: msg.sender_name,
-        idempotencyKey: liveAdmissionIdempotencyKey(
-          msg,
-          admission.appId,
-          providerId,
-        ),
-        triggerDecision: admission.triggerDecision,
-        now: admission.now ?? msg.timestamp,
+        },
       });
+    await tx
+      .insert(pgSchema.messagePartsPostgres)
+      .values({
+        messageId: canonicalMessageId,
+        ordinal: 0,
+        kind: 'text',
+        payloadJson: jsonb({ kind: 'text', text: msg.content }),
+      })
+      .onConflictDoUpdate({
+        target: [
+          pgSchema.messagePartsPostgres.messageId,
+          pgSchema.messagePartsPostgres.ordinal,
+        ],
+        set: {
+          kind: sql`excluded.kind`,
+          payloadJson: sql`excluded.payload_json`,
+        },
+      });
+    await tx
+      .delete(pgSchema.messageAttachmentsPostgres)
+      .where(
+        eq(pgSchema.messageAttachmentsPostgres.messageId, canonicalMessageId),
+      );
+    if (msg.attachments && msg.attachments.length > 0) {
+      await tx.insert(pgSchema.messageAttachmentsPostgres).values(
+        msg.attachments.map((attachment, index) => ({
+          id:
+            attachment.id ??
+            `message-attachment:${canonicalMessageId}:${index}`,
+          messageId: canonicalMessageId,
+          kind: attachment.kind,
+          contentType: attachment.contentType ?? null,
+          sizeBytes: attachment.sizeBytes ?? null,
+          externalRefJson: attachment.externalId
+            ? jsonb({
+                kind: 'message_attachment',
+                value: attachment.externalId,
+              })
+            : null,
+          storageRef: attachment.storageRef ?? null,
+          trust: msg.is_bot_message ? 'system' : 'trusted',
+        })),
+      );
+    }
+    if (direction !== 'inbound' || !options.liveAdmission) {
+      return undefined;
+    }
+    const admission = options.liveAdmission;
+    return enqueueLiveAdmissionWorkItem(tx, {
+      id: liveAdmissionWorkItemId(admission.appId, canonicalMessageId),
+      appId: admission.appId,
+      agentId: admission.agentId
+        ? normalizeAgentIdForFolder(admission.agentId)
+        : null,
+      agentSessionId: admission.agentSessionId,
+      conversationId: msg.chat_jid,
+      threadId: msg.thread_id ?? null,
+      queueJid: makeThreadQueueKey(msg.chat_jid, msg.thread_id),
+      messageId: canonicalMessageId,
+      messageCursor: encodeGroupMessageCursor(toGroupMessageCursor(msg)),
+      senderUserId: msg.sender,
+      senderDisplayName: msg.sender_name,
+      idempotencyKey: liveAdmissionIdempotencyKey(
+        msg,
+        admission.appId,
+        providerId,
+      ),
+      triggerDecision: admission.triggerDecision,
+      now: admission.now ?? msg.timestamp,
     });
   }
 

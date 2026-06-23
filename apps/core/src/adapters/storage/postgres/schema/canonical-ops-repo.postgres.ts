@@ -15,7 +15,10 @@ import type {
 } from '../../../../domain/sessions/sessions.js';
 import { assertSafeExecutionProviderId } from '../../../../domain/sessions/execution-provider-id.js';
 import type { RunLease } from '../../../../domain/ports/worker-coordination.js';
-import type { LiveAdmissionWorkItemNotifier } from '../../../../domain/ports/live-turns.js';
+import type {
+  LiveAdmissionWorkItemEnqueueResult,
+  LiveAdmissionWorkItemNotifier,
+} from '../../../../domain/ports/live-turns.js';
 import type {
   JobEventListFilters,
   JobListFilters,
@@ -162,12 +165,10 @@ export class PostgresRuntimeRepositoryBundle
     return this.messages.storeMessageWithLiveAdmission(msg, admission);
   }
 
-  async getNewMessages(
-    jids: string[],
-    lastCursor: string,
-    limit: number = 200,
-  ): Promise<{ messages: NewMessage[]; newTimestamp: string }> {
-    return this.messages.getNewMessages(jids, lastCursor, limit);
+  async notifyLiveAdmissionWorkItem(
+    result: LiveAdmissionWorkItemEnqueueResult,
+  ) {
+    return this.messages.notifyLiveAdmissionWorkItem(result);
   }
 
   async getMessagesSince(

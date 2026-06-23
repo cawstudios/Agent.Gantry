@@ -10,9 +10,9 @@ import { buildLiveTurnContinuation } from './live-turn-continuation.js';
 
 /**
  * WP2: the singleton lease is now a RECOVERY COORDINATOR election, not a live
- * host election. Message polling and live-turn admission run on every live
- * worker (distributed); only startup pending-message recovery and the periodic
- * recovery sweep are gated by this lease so they run on exactly one worker.
+ * host election. Live-turn admission runs on every live worker (distributed);
+ * only startup pending-message recovery and the periodic recovery sweep are
+ * gated by this lease so they run on exactly one worker.
  */
 export const LIVE_RECOVERY_COORDINATOR_LEASE_KEY =
   'runtime:live-recovery-coordinator:default';
@@ -183,7 +183,7 @@ export function startLiveRecoveryCoordinatorLeaseAcquisition(input: {
     }
     log.info(
       { attempt: attemptIndex },
-      'Another runtime is the live recovery coordinator; this worker keeps polling/admitting and stands by to coordinate recovery',
+      'Another runtime is the live recovery coordinator; this worker keeps admitting live turns and stands by to coordinate recovery',
     );
     scheduleRetry(attemptIndex + 1);
   };

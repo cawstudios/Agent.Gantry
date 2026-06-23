@@ -8,10 +8,9 @@ import {
 
 import { ConversationMessageIngressModule } from '../../application/external-ingress/conversation-message-ingress.js';
 import { providerIdForJid } from '../../channels/provider-registry.js';
-import {
-  EXTERNAL_INGRESS_RUNTIME_DISPATCH,
-  ExternalIngressModule,
-} from '../../application/external-ingress/external-ingress-module.js';
+import { DEFAULT_JOB_RUNTIME_APP_ID } from '../../application/jobs/job-access.js';
+import { ExternalIngressModule } from '../../application/external-ingress/external-ingress-module.js';
+import { EXTERNAL_INGRESS_RUNTIME_DISPATCH } from '../../application/external-ingress/runtime-dispatch.js';
 import { makeThreadQueueKey } from '../../shared/thread-queue-key.js';
 import { SessionInteractionModule } from '../../application/sessions/session-interaction-module.js';
 import {
@@ -33,11 +32,14 @@ export function createExternalIngressModule(
   ctx: ControlRouteContext,
 ): ExternalIngressModule {
   const control = getRuntimeControlRepository();
+  const liveAdmissionAppId =
+    ctx.liveTurnsEnabled === false ? null : DEFAULT_JOB_RUNTIME_APP_ID;
   const sessions = new SessionInteractionModule({
     control: adaptSessionControlPort(control),
     ops: getRuntimeRepositories(),
     repositories: getRuntimeStorage().repositories,
     runtimeEvents: getRuntimeEventExchange(),
+    liveAdmissionAppId,
     now: nowIso,
     createId: randomUUID,
     stableHash: (input) => createHash('sha256').update(input).digest('hex'),
@@ -46,6 +48,7 @@ export function createExternalIngressModule(
     conversations: getRuntimeStorage().repositories.conversations,
     ops: getRuntimeRepositories(),
     runtimeEvents: getRuntimeEventExchange(),
+    liveAdmissionAppId,
     isConversationRoutable: (conversationJid) =>
       Object.prototype.hasOwnProperty.call(
         ctx.app.getConversationRoutes(),
@@ -60,6 +63,8 @@ export function createExternalIngressModule(
   return new ExternalIngressModule({
     control,
     sessions,
+    registerSessionGroup: (registration) =>
+      ctx.app.registerGroup(registration.conversationJid, registration.group),
     conversationMessages,
     conversationProviderMessages: ctx.sendConversationIngressProjection
       ? {
@@ -86,10 +91,14 @@ export async function invokeExternalIngressForControl(
   const runtimeDispatch = (result as Record<PropertyKey, unknown>)[
     EXTERNAL_INGRESS_RUNTIME_DISPATCH
   ];
-  const runtimeEnqueue =
-    runtimeDispatch && typeof runtimeDispatch === 'object'
-      ? (runtimeDispatch as { enqueue?: { queueKey?: unknown } }).enqueue
-      : undefined;
+  const hasRuntimeDispatch =
+    runtimeDispatch !== null && typeof runtimeDispatch === 'object';
+  const runtimeEnqueue = hasRuntimeDispatch
+    ? (runtimeDispatch as { enqueue?: { queueKey?: unknown } }).enqueue
+    : undefined;
+  const localEnqueue =
+    !hasRuntimeDispatch ||
+    (runtimeDispatch as { localEnqueue?: unknown }).localEnqueue !== false;
   if (
     'registerGroup' in result &&
     result.registerGroup &&
@@ -104,6 +113,7 @@ export async function invokeExternalIngressForControl(
     );
   }
   if (
+    localEnqueue &&
     runtimeEnqueue &&
     typeof runtimeEnqueue === 'object' &&
     typeof runtimeEnqueue.queueKey === 'string'
@@ -111,6 +121,12 @@ export async function invokeExternalIngressForControl(
     ctx.app.queue.enqueueMessageCheck(runtimeEnqueue.queueKey);
   }
   if (
+    !hasRuntimeDispatch &&
+    !(
+      ctx.liveTurnsEnabled !== false &&
+      'targetKind' in result &&
+      result.targetKind === 'session_message'
+    ) &&
     'enqueue' in result &&
     result.enqueue &&
     typeof result.enqueue === 'object' &&

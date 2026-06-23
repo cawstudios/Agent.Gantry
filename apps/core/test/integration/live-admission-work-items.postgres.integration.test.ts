@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { quotePostgresIdentifier } from '@core/adapters/storage/postgres/storage-service.js';
+import { RUNTIME_EVENT_TYPES } from '@core/domain/events/runtime-event-types.js';
 import { nowMs, toIso } from '@core/shared/time/datetime.js';
 
 import {
@@ -612,5 +613,77 @@ maybeDescribe('live admission work items (Postgres)', () => {
       limit: 10,
     });
     expect(claimed.map((item) => item.id)).toContain(result?.item.id);
+  });
+
+  it('stores accepted runtime event and live admission atomically', async () => {
+    const message = {
+      id: 'msg-event-admission-1',
+      chat_jid: 'tg:live-admission-event-atomic',
+      provider: 'telegram',
+      sender: 'user-event-admission',
+      sender_name: 'Event Admission User',
+      content: 'accepted event and admission body',
+      timestamp: '2026-06-16T00:00:03.000Z',
+      is_from_me: false,
+      is_bot_message: false,
+    };
+
+    const result =
+      await runtime.storageRuntime.runtimeEvents.publishWithLiveAdmissionMessage(
+        {
+          appId: 'default' as never,
+          eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_INBOUND,
+          actor: 'sdk',
+          payload: {
+            messageId: message.id,
+            text: message.content,
+          },
+          createdAt: message.timestamp,
+        },
+        {
+          message,
+          liveAdmission: {
+            appId: 'default',
+            agentId: 'event_admission_agent',
+            triggerDecision: {
+              source: 'sdk_session',
+            },
+            now: message.timestamp,
+          },
+        },
+      );
+
+    expect(result.event).toMatchObject({
+      eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_INBOUND,
+      payload: {
+        messageId: message.id,
+        text: message.content,
+      },
+    });
+    expect(result.liveAdmissionResult?.item).toMatchObject({
+      state: 'queued',
+      messageId: 'message:tg:live-admission-event-atomic:msg-event-admission-1',
+    });
+    await expect(
+      runtime.ops.getMessagesSince('tg:live-admission-event-atomic', '', 10, {
+        threadId: null,
+      }),
+    ).resolves.toMatchObject([
+      {
+        id: 'msg-event-admission-1',
+        content: 'accepted event and admission body',
+      },
+    ]);
+
+    const claimed = await liveTurns.claimLiveAdmissionWorkItems({
+      appId: base.appId,
+      workerInstanceId: 'worker-event-admission',
+      claimToken: 'claim-token-event-admission',
+      claimExpiresAt: toIso(nowMs() + 60_000),
+      limit: 10,
+    });
+    expect(claimed.map((item) => item.id)).toContain(
+      result.liveAdmissionResult?.item.id,
+    );
   });
 });

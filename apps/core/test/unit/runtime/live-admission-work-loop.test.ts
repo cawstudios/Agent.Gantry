@@ -69,8 +69,6 @@ function makeDeps(enqueueMessageCheck: () => boolean): MessageLoopDeps {
         requiresTrigger: false,
       },
     }),
-    getLastTimestamp: () => '',
-    setLastTimestamp: vi.fn(),
     getOrRecoverCursor: () => '',
     setAgentCursor: vi.fn(),
     saveState: vi.fn(),
@@ -84,7 +82,6 @@ function makeDeps(enqueueMessageCheck: () => boolean): MessageLoopDeps {
     },
     opsRepository: {
       storeMessage: vi.fn(),
-      getNewMessages: vi.fn(),
       getMessagesSince: vi.fn(async () => [replayMessage]),
       getMessageThreadIds: vi.fn(),
       getLastBotMessageCursor: vi.fn(),
@@ -251,7 +248,7 @@ describe('startLiveAdmissionWorkLoop', () => {
     expect(
       claimLiveAdmissionWorkItems.mock.calls.length,
     ).toBeGreaterThanOrEqual(2);
-    expect(deps.opsRepository.getNewMessages).not.toHaveBeenCalled();
+    expect(deps.opsRepository.getMessagesSince).toHaveBeenCalled();
   });
 
   it('settles poison work items as failed after the retry limit', async () => {

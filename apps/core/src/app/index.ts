@@ -10,7 +10,7 @@ import {
   shutdownLiveTurnAuthority,
   stopAsyncTaskRecoveryLoop,
   stopLiveTurnRecoveryLoop,
-  stopMessagePollingLoop,
+  stopLiveAdmissionLoop,
 } from './bootstrap/runtime-services.js';
 import { installShutdownHandlers } from './bootstrap/shutdown.js';
 import { runStartup } from './bootstrap/startup.js';
@@ -206,7 +206,7 @@ export async function startGantryRuntime(
     closeScheduler: stopSchedulerLoop,
     closeOutboundDeliveryRecovery: stopOutboundDeliveryRecoveryLoop,
     closeLiveTurnAdmission: beginDrainingLiveTurnAdmission,
-    closeMessagePolling: stopMessagePollingLoop,
+    closeLiveAdmissionLoop: stopLiveAdmissionLoop,
     closeLiveTurnRecovery: async () => {
       stopLiveTurnRecoveryLoop();
     },
@@ -281,6 +281,8 @@ export async function startGantryRuntime(
           storage.repositories.workerCoordination,
         getLiveTurnRepository: () => storage.repositories.liveTurns,
         getLiveAdmissionWakeupSource: () => storage.liveAdmissionWakeupSource,
+        getLiveTurnCommandWakeupSource: () =>
+          storage.liveTurnCommandWakeupSource,
         getRuntimeDependencyRepository: () =>
           storage.repositories.runtimeDependencies,
         publishRuntimeEvent: async (event) => {
@@ -355,6 +357,7 @@ export async function startGantryRuntime(
       routeProfile: roleCaps.controlApi,
       processRole,
       liveExecution: roleCaps.liveExecution,
+      liveTurnsEnabled: runtimeSettings.runtime.liveTurns.enabled,
       // Locked contract: the workstation `all` role keeps the historical
       // readiness check set (no role-specific checks); split roles gate on
       // exactly the subsystems they run.

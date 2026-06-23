@@ -1,10 +1,12 @@
 import { ApplicationError } from '../common/application-error.js';
 import { JobManagementService } from '../jobs/job-management-service.js';
 import type { SessionInteractionModule } from '../sessions/session-interaction-module.js';
-import type {
-  ConversationMessageIngressModule,
-  ConversationMessageQueueIntent,
-} from './conversation-message-ingress.js';
+import type { ConversationMessageIngressModule } from './conversation-message-ingress.js';
+import {
+  EXTERNAL_INGRESS_RUNTIME_DISPATCH,
+  type SessionGroupRegistration,
+  toPublicSessionQueueIntent,
+} from './runtime-dispatch.js';
 import {
   type ExternalIngressSignaturePort,
   verifyExternalIngressRequestSignature,
@@ -118,14 +120,6 @@ type ExternalIngressInvocationRecord = {
   updatedAt: string;
 };
 
-export const EXTERNAL_INGRESS_RUNTIME_DISPATCH = Symbol(
-  'externalIngressRuntimeDispatch',
-);
-
-export type ExternalIngressRuntimeDispatch = {
-  enqueue?: ConversationMessageQueueIntent;
-};
-
 type ConversationMessageProjectionPort = {
   send(input: {
     conversationJid: string;
@@ -139,6 +133,9 @@ export class ExternalIngressModule {
     private readonly deps: {
       control: ExternalIngressControlPort;
       sessions: SessionInteractionModule;
+      registerSessionGroup?: (
+        registration: SessionGroupRegistration,
+      ) => Promise<void>;
       conversationMessages?: ConversationMessageIngressModule;
       conversationProviderMessages?: ConversationMessageProjectionPort;
       jobs: JobManagementService;
@@ -453,11 +450,7 @@ export class ExternalIngressModule {
   private async invokeSessionMessage(appId: string, target: IngressTarget) {
     const message = readString(target, 'message');
     let sessionId = readOptionalString(target, 'sessionId');
-    let registerGroup:
-      | Awaited<
-          ReturnType<SessionInteractionModule['ensureSession']>
-        >['registerGroup']
-      | undefined;
+    let registerGroup: SessionGroupRegistration | undefined;
     if (!sessionId) {
       const conversationId = readString(target, 'conversationId');
       const ensured = await this.deps.sessions.ensureSession({
@@ -479,6 +472,9 @@ export class ExternalIngressModule {
       correlationId: readOptionalString(target, 'correlationId') ?? null,
       responseMode: target.responseMode,
       webhookId: readOptionalString(target, 'webhookId'),
+      beforeDurableAdmission: registerGroup
+        ? () => this.deps.registerSessionGroup?.(registerGroup)
+        : undefined,
     });
     return {
       targetKind: 'session_message',
@@ -491,7 +487,11 @@ export class ExternalIngressModule {
         afterEventId: accepted.acceptedEventId,
       },
       ...(registerGroup ? { registerGroup } : {}),
-      enqueue: accepted.enqueue,
+      enqueue: toPublicSessionQueueIntent(accepted.enqueue),
+      [EXTERNAL_INGRESS_RUNTIME_DISPATCH]: {
+        enqueue: accepted.enqueue,
+        localEnqueue: !accepted.enqueue.durableAdmissionCreated,
+      },
     };
   }
 
@@ -534,6 +534,7 @@ export class ExternalIngressModule {
       acceptedEventId: accepted.acceptedEventId,
       [EXTERNAL_INGRESS_RUNTIME_DISPATCH]: {
         enqueue: accepted.enqueue,
+        localEnqueue: !accepted.enqueue.durableAdmissionCreated,
       },
     };
   }

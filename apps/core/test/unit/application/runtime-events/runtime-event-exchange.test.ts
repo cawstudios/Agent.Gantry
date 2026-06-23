@@ -101,6 +101,59 @@ describe('RuntimeEventExchange', () => {
     expect(notifier.notifiedEvents).toEqual([event]);
   });
 
+  it('can co-commit accepted messages and live admission before notifying subscribers', async () => {
+    const repository =
+      new MemoryRuntimeEventRepository() as MemoryRuntimeEventRepository & {
+        appendRuntimeEventAndStoreLiveAdmission: ReturnType<typeof vi.fn>;
+      };
+    repository.appendRuntimeEventAndStoreLiveAdmission = vi.fn(
+      async (input, admission) => {
+        const event = await repository.appendRuntimeEvent(input);
+        return {
+          event,
+          liveAdmissionResult: {
+            outcome: 'enqueued',
+            item: {
+              id: `admission:${admission.message.id}`,
+              state: 'queued',
+            },
+          },
+        };
+      },
+    );
+    const notifier = new InMemoryRuntimeEventNotifier();
+    const exchange = new RuntimeEventExchange(repository, notifier);
+
+    const result = await exchange.publishWithLiveAdmissionMessage(
+      {
+        appId: 'app:test' as never,
+        eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_INBOUND,
+        actor: 'sdk',
+        payload: { text: 'accepted' },
+      },
+      {
+        message: {
+          id: 'message-1',
+          chat_jid: 'app:test:conversation',
+          sender: 'sdk',
+          sender_name: 'SDK',
+          content: 'accepted',
+          timestamp: '2026-04-29T00:00:00.000Z',
+        },
+        liveAdmission: { appId: 'default' },
+      },
+    );
+
+    expect(
+      repository.appendRuntimeEventAndStoreLiveAdmission,
+    ).toHaveBeenCalledOnce();
+    expect(result.liveAdmissionResult?.item).toMatchObject({
+      id: 'admission:message-1',
+      state: 'queued',
+    });
+    expect(notifier.notifiedEvents).toEqual([result.event]);
+  });
+
   it('returns the durable event when the live wakeup notifier fails', async () => {
     const repository = new MemoryRuntimeEventRepository();
     const exchange = new RuntimeEventExchange(repository, {

@@ -6,11 +6,13 @@ import type {
   EventBusPublisherPort,
   EventBusPublishInput,
 } from '../../../../domain/events/event-bus.js';
+import type { NewMessage } from '../../../../domain/repositories/domain-types.js';
 import type {
   RuntimeEvent,
   RuntimeEventFilter,
   RuntimeEventPublishInput,
 } from '../../../../domain/events/events.js';
+import type { LiveAdmissionWorkItemEnqueueResult } from '../../../../domain/ports/live-turns.js';
 import { requireRuntimeEventType } from '../../../../domain/events/runtime-event-types.js';
 import type { RuntimeEventRepository } from '../../../../domain/ports/repositories.js';
 import { logger } from '../../../../infrastructure/logging/logger.js';
@@ -21,6 +23,10 @@ import type {
 } from './canonical-graph-repository.postgres.js';
 import { nowIso } from '../../../../shared/time/datetime.js';
 import { PostgresEventBusPublisher } from './event-bus-outbox.postgres.js';
+import {
+  type MessageLiveAdmissionInput,
+  PostgresCanonicalMessageRepository,
+} from './canonical-message-repository.postgres.js';
 
 type RuntimeEventRow = typeof pgSchema.runtimeEventsPostgres.$inferSelect;
 
@@ -94,6 +100,30 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
       await this.eventBus.publish(eventBusInputForRuntimeEvent(event), tx);
       await this.enqueueWebhookDeliveryIfNeeded(tx, event);
       return event;
+    });
+  }
+
+  async appendRuntimeEventAndStoreLiveAdmission(
+    input: RuntimeEventPublishInput,
+    admission: {
+      message: NewMessage;
+      liveAdmission: MessageLiveAdmissionInput;
+    },
+  ): Promise<{
+    event: RuntimeEvent;
+    liveAdmissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
+  }> {
+    const messages = new PostgresCanonicalMessageRepository(this.db);
+    return this.db.transaction(async (tx) => {
+      const liveAdmissionResult = await messages.saveMessageWithExecutor(
+        tx,
+        admission.message,
+        { liveAdmission: admission.liveAdmission },
+      );
+      const event = await this.insertRuntimeEvent(tx, input);
+      await this.eventBus.publish(eventBusInputForRuntimeEvent(event), tx);
+      await this.enqueueWebhookDeliveryIfNeeded(tx, event);
+      return { event, liveAdmissionResult };
     });
   }
 

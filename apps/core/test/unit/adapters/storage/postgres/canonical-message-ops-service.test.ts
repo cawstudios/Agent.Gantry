@@ -7,21 +7,6 @@ import {
 } from '@core/adapters/storage/postgres/repositories/canonical-message-repository.postgres.js';
 
 describe('CanonicalMessageOpsService', () => {
-  it('does not pass an after boundary for an empty global cursor', async () => {
-    const listInboundMessages = vi.fn().mockResolvedValue([]);
-    const service = new CanonicalMessageOpsService({
-      listInboundMessages,
-    } as unknown as PostgresCanonicalMessageRepository);
-
-    await service.getNewMessages(['tg:one'], '');
-
-    expect(listInboundMessages).toHaveBeenCalledWith({
-      jids: ['tg:one'],
-      after: undefined,
-      limit: 200,
-    });
-  });
-
   it('does not pass an after boundary for an empty group cursor', async () => {
     const listInboundMessages = vi.fn().mockResolvedValue([]);
     const service = new CanonicalMessageOpsService({

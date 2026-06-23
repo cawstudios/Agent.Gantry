@@ -21,8 +21,10 @@ import type { HostnameLookup } from '../../domain/network/public-address-policy.
 import { writeGroupsSnapshot } from '../../runtime/agent-spawn.js';
 import { startIpcWatcher, type IpcDeps } from '../../runtime/ipc.js';
 import { computeHostCapacityPlan } from '../../shared/host-capacity.js';
-// prettier-ignore
-import { recoverPendingMessages, startMessagePollingLoop, type MessageLoopDeps, type MessagePollingLoopHandle } from '../../runtime/message-loop.js';
+import {
+  recoverPendingMessages,
+  type MessageLoopDeps,
+} from '../../runtime/message-loop.js';
 // prettier-ignore
 import { markRoleHasNoJobExecution, requestSchedulerSync, startSchedulerLoop } from '../../jobs/scheduler.js';
 import { registerWorkerInstance } from '../../jobs/worker-identity.js';
@@ -33,6 +35,7 @@ import type { WorkerCoordinationRepository } from '../../domain/ports/worker-coo
 import type { RuntimeDependencyRepository } from '../../domain/ports/fleet-capability-state.js';
 import type {
   LiveAdmissionWakeupSource,
+  LiveTurnCommandWakeupSource,
   LiveTurnCoordinationRepository,
 } from '../../domain/ports/live-turns.js';
 import type {
@@ -103,7 +106,6 @@ interface Deps {
   writeGroupsSnapshot: typeof writeGroupsSnapshot;
   opsRepository: RuntimeBootstrapRepository;
   recoverPendingMessages: typeof recoverPendingMessages;
-  startMessagePollingLoop: typeof startMessagePollingLoop;
   logger: Pick<typeof logger, 'info' | 'warn' | 'fatal'>;
   mcpHostnameLookup?: HostnameLookup;
   collectSessionMemory: SessionMemoryCollector;
@@ -124,6 +126,9 @@ interface Deps {
     | undefined;
   getLiveTurnRepository?: () => LiveTurnCoordinationRepository | undefined;
   getLiveAdmissionWakeupSource?: () => LiveAdmissionWakeupSource | undefined;
+  getLiveTurnCommandWakeupSource?: () =>
+    | LiveTurnCommandWakeupSource
+    | undefined;
   /** Toolchain manifests for the live-turn recovery capability gate (fleet). */
   getRuntimeDependencyRepository?: () =>
     | RuntimeDependencyRepository
@@ -167,7 +172,6 @@ function makeDefaultDeps(): RuntimeServicesDefaults {
     startIpcWatcher,
     writeGroupsSnapshot,
     recoverPendingMessages,
-    startMessagePollingLoop,
     getDeploymentMode,
     logger,
     collectSessionMemory: collectRuntimeSessionMemory,
@@ -257,7 +261,7 @@ export function stopAsyncTaskRecoveryLoop(): void {
 
 let activeLiveTurnRecoveryLoop: LiveTurnRecoveryLoop | undefined;
 let activeLiveTurnAuthority: LiveTurnAuthority | undefined;
-let activeMessagePollingLoop: MessagePollingLoopHandle | undefined;
+let activeLiveAdmissionLoop: LiveExecutionServicesHandle['admissionLoop'];
 let activeWaitingStatusMonitor:
   | { oldestWaitingSeconds: () => number }
   | undefined;
@@ -283,11 +287,9 @@ export function stopLiveTurnRecoveryLoop(): void {
   activeLiveTurnRecoveryLoop?.stop();
   activeLiveTurnRecoveryLoop = undefined;
 }
-export async function stopMessagePollingLoop(
-  timeoutMs?: number,
-): Promise<void> {
-  const loop = activeMessagePollingLoop;
-  activeMessagePollingLoop = undefined;
+export async function stopLiveAdmissionLoop(timeoutMs?: number): Promise<void> {
+  const loop = activeLiveAdmissionLoop;
+  activeLiveAdmissionLoop = undefined;
   await loop?.stop({ drainDeadlineMs: timeoutMs });
 }
 export function beginDrainingLiveTurnAdmission(): void {
@@ -308,6 +310,7 @@ export async function startRuntimeServices(
         | 'getPermissionRepository'
         | 'getWorkerCoordinationRepository'
         | 'getLiveTurnRepository'
+        | 'getLiveTurnCommandWakeupSource'
       >
     >,
 ): Promise<void> {
@@ -348,13 +351,14 @@ export async function startRuntimeServices(
             queue: app.queue.getPolicy(),
             processRole,
           }).budget,
+        commandWakeupSource: resolved.getLiveTurnCommandWakeupSource?.(),
         warn: (context, message) => resolved.logger.warn(context, message),
       })
     : undefined;
   activeLiveTurnAuthority = liveTurnAuthority;
   if (liveTurnsEnabled && !liveTurnAuthority) {
     resolved.logger.warn(
-      'Live-turn admission is enabled, but durable live-turn repositories are unavailable; falling back to local queue admission',
+      'Live-turn admission is enabled, but durable live-turn repositories are unavailable; live admission will stay disabled for this role',
     );
   }
   const { isEligibleToRecoverLiveTurn, alertNoEligibleLiveTurnRecoverer } =
@@ -986,15 +990,13 @@ export async function startRuntimeServices(
   resolved.logger.info(`Gantry running (default trigger: ${DEFAULT_TRIGGER})`);
   if (!liveTurnsEnabled || !liveExecution) {
     resolved.logger.info(
-      'Live-turn execution disabled for this role; skipping live execution services (message polling, admission, recovery coordinator)',
+      'Live-turn execution disabled for this role; skipping live execution services (admission and recovery coordinator)',
     );
     return;
   }
 
   const messageLoopDeps: MessageLoopDeps = {
     getConversationRoutes: () => app.getConversationRoutes(),
-    getLastTimestamp: () => app.getLastTimestamp(),
-    setLastTimestamp: (timestamp) => app.setLastTimestamp(timestamp),
     getOrRecoverCursor: app.getOrRecoverCursor,
     setAgentCursor: (chatJid, timestamp) =>
       app.setAgentCursor(chatJid, timestamp),
@@ -1022,9 +1024,8 @@ export async function startRuntimeServices(
     isEligibleToRecoverLiveTurn,
     alertNoEligibleLiveTurnRecoverer,
     recoverPendingMessages: resolved.recoverPendingMessages,
-    startMessagePollingLoop: resolved.startMessagePollingLoop,
-    registerActivePollingLoop: (loop) => {
-      activeMessagePollingLoop = loop;
+    registerActiveAdmissionLoop: (loop) => {
+      activeLiveAdmissionLoop = loop;
     },
     registerActiveRecoveryLoop: (loop) => {
       activeLiveTurnRecoveryLoop = loop;

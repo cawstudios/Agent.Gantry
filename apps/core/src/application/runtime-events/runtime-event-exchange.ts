@@ -4,6 +4,8 @@ import type {
   RuntimeEventId,
   RuntimeEventPublishInput,
 } from '../../domain/events/events.js';
+import type { NewMessage } from '../../domain/types.js';
+import type { LiveAdmissionWorkItemEnqueueResult } from '../../domain/ports/live-turns.js';
 import {
   normalizeRuntimeEventConversationId,
   normalizeRuntimeEventThreadId,
@@ -22,6 +24,25 @@ export interface RuntimeEventSubscription {
   close(): void;
 }
 
+interface LiveAdmissionActivatingRuntimeEventRepository extends RuntimeEventRepository {
+  appendRuntimeEventAndStoreLiveAdmission?(
+    input: RuntimeEventPublishInput,
+    admission: {
+      message: NewMessage;
+      liveAdmission: {
+        appId: string;
+        agentId?: string | null;
+        agentSessionId?: string | null;
+        triggerDecision?: Record<string, unknown>;
+        now?: string;
+      };
+    },
+  ): Promise<{
+    event: RuntimeEvent;
+    liveAdmissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
+  }>;
+}
+
 export class RuntimeEventExchange {
   constructor(
     private readonly repository: RuntimeEventRepository,
@@ -38,6 +59,42 @@ export class RuntimeEventExchange {
       // Wakeups are best-effort; durable consumers recover by cursor polling.
     }
     return event;
+  }
+
+  async publishWithLiveAdmissionMessage(
+    input: RuntimeEventPublishInput,
+    admission: {
+      message: NewMessage;
+      liveAdmission: {
+        appId: string;
+        agentId?: string | null;
+        agentSessionId?: string | null;
+        triggerDecision?: Record<string, unknown>;
+        now?: string;
+      };
+    },
+  ): Promise<{
+    event: RuntimeEvent;
+    liveAdmissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
+  }> {
+    const repository = this
+      .repository as LiveAdmissionActivatingRuntimeEventRepository;
+    const normalized = normalizeRuntimeEventPublishInput(input);
+    if (!repository.appendRuntimeEventAndStoreLiveAdmission) {
+      throw new Error(
+        'Runtime event repository cannot atomically store live admission messages.',
+      );
+    }
+    const result = await repository.appendRuntimeEventAndStoreLiveAdmission(
+      normalized,
+      admission,
+    );
+    try {
+      await this.notifier.notify(result.event);
+    } catch {
+      // Wakeups are best-effort; durable consumers recover by cursor polling.
+    }
+    return result;
   }
 
   list(filter: RuntimeEventFilter): Promise<RuntimeEvent[]> {

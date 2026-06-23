@@ -3,16 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { startLiveExecutionServices } from '@core/app/bootstrap/live-execution.js';
 
 describe('startLiveExecutionServices', () => {
-  it('uses durable live admission claims instead of route-wide polling when available', () => {
+  it('uses durable live admission claims instead of route-wide scans', () => {
     const admissionStop = vi.fn();
     const admissionTrigger = vi.fn();
     const startLiveAdmissionWorkLoop = vi.fn(() => ({
       stop: admissionStop,
       trigger: admissionTrigger,
-      done: new Promise<void>(() => {}),
-    }));
-    const startMessagePollingLoop = vi.fn(() => ({
-      stop: vi.fn(),
       done: new Promise<void>(() => {}),
     }));
     const registeredLoops: unknown[] = [];
@@ -50,7 +46,6 @@ describe('startLiveExecutionServices', () => {
       isEligibleToRecoverLiveTurn: vi.fn(),
       alertNoEligibleLiveTurnRecoverer: undefined,
       recoverPendingMessages: vi.fn(),
-      startMessagePollingLoop,
       startLiveAdmissionWorkLoop,
       liveAdmissionWakeupSource: {
         subscribe: vi.fn((listener: () => void) => {
@@ -59,7 +54,7 @@ describe('startLiveExecutionServices', () => {
         }),
         close: vi.fn(),
       },
-      registerActivePollingLoop: (loop) => {
+      registerActiveAdmissionLoop: (loop) => {
         registeredLoops.push(loop);
       },
       registerActiveRecoveryLoop: vi.fn(),
@@ -75,16 +70,52 @@ describe('startLiveExecutionServices', () => {
         maxRetryCount: 7,
       }),
     );
-    expect(startMessagePollingLoop).not.toHaveBeenCalled();
     expect(registeredLoops).toHaveLength(1);
 
     subscribedWake?.();
     expect(admissionTrigger).toHaveBeenCalledOnce();
 
-    handle.stopPolling();
+    handle.stopAdmission();
     expect(unsubscribeWake).toHaveBeenCalledOnce();
     expect(admissionStop).toHaveBeenCalledOnce();
     expect(registeredLoops).toHaveLength(2);
     expect(registeredLoops[1]).toBeUndefined();
+  });
+
+  it('does not start live admission without durable claims', () => {
+    const warn = vi.fn();
+
+    const handle = startLiveExecutionServices({
+      app: {
+        getConversationRoutes: vi.fn(() => ({})),
+        processGroupMessages: vi.fn(),
+        getOrRecoverCursor: vi.fn(),
+        setAgentCursor: vi.fn(),
+        saveState: vi.fn(),
+        queue: {
+          getPolicy: vi.fn(() => ({ maxMessageRuns: 3, maxRetries: 7 })),
+          enqueueMessageCheck: vi.fn(() => true),
+        },
+      } as any,
+      appId: 'default',
+      liveTurnAuthority: undefined,
+      liveTurnLeaseDeps: undefined,
+      messageLoopDeps: {} as any,
+      recoveryCoordinator: undefined,
+      isEligibleToRecoverLiveTurn: vi.fn(),
+      alertNoEligibleLiveTurnRecoverer: undefined,
+      recoverPendingMessages: vi.fn(),
+      registerActiveAdmissionLoop: vi.fn(),
+      registerActiveRecoveryLoop: vi.fn(),
+      onPollingCrash: vi.fn(),
+      info: vi.fn(),
+      warn,
+    });
+
+    expect(handle.admissionLoop).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      { processRole: undefined },
+      'Live admission requires durable admission claims; live admission disabled for this role',
+    );
   });
 });

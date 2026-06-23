@@ -2,10 +2,8 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  EXTERNAL_INGRESS_RUNTIME_DISPATCH,
-  ExternalIngressModule,
-} from '@core/application/external-ingress/external-ingress-module.js';
+import { ExternalIngressModule } from '@core/application/external-ingress/external-ingress-module.js';
+import { EXTERNAL_INGRESS_RUNTIME_DISPATCH } from '@core/application/external-ingress/runtime-dispatch.js';
 import { signExternalIngressRequest } from '@core/application/external-ingress/signature.js';
 
 const signatureCrypto = {
@@ -139,7 +137,7 @@ function makeModule(overrides?: {
         sessionId: 'session-1',
       },
       registerGroup: {
-        chatJid: 'app:app-one:conv-1',
+        conversationJid: 'app:app-one:conv-1',
         group: {
           name: 'app-one:conv-1',
           folder: 'app_conv_1',
@@ -149,16 +147,20 @@ function makeModule(overrides?: {
         },
       },
     })),
-    acceptMessage: vi.fn(async () => ({
-      accepted: true,
-      messageId: 'message-1',
-      acceptedEventId: 101,
-      enqueue: {
-        chatJid: 'app:app-one:conv-1',
-        threadId: null,
-        queueKey: 'app:app-one:conv-1',
-      },
-    })),
+    acceptMessage: vi.fn(async (input) => {
+      await input.beforeDurableAdmission?.();
+      return {
+        accepted: true,
+        messageId: 'message-1',
+        acceptedEventId: 101,
+        enqueue: {
+          conversationJid: 'app:app-one:conv-1',
+          threadId: null,
+          queueKey: 'app:app-one:conv-1',
+          durableAdmissionCreated: input.durableLiveAdmission !== false,
+        },
+      };
+    }),
     ...overrides?.sessions,
   };
 
@@ -177,6 +179,7 @@ function makeModule(overrides?: {
         conversationJid: 'tg:-100',
         threadId: '42',
         queueKey: 'tg:-100::thread:42',
+        durableAdmissionCreated: true,
       },
     })),
     ...overrides?.conversationMessages,
@@ -189,10 +192,12 @@ function makeModule(overrides?: {
         ...overrides.conversationProviderMessages,
       } as ExternalIngressConversationProviderMessages)
     : undefined;
+  const registerSessionGroup = vi.fn(async () => undefined);
 
   const module = new ExternalIngressModule({
     control: control as never,
     sessions: sessions as never,
+    registerSessionGroup,
     conversationMessages: conversationMessages as never,
     conversationProviderMessages: conversationProviderMessages as never,
     jobs: jobs as never,
@@ -208,6 +213,7 @@ function makeModule(overrides?: {
     module,
     control,
     sessions,
+    registerSessionGroup,
     conversationMessages,
     conversationProviderMessages,
     jobs,
@@ -547,7 +553,7 @@ describe('ExternalIngressModule', () => {
   });
 
   it('ensures a session then accepts message for session_message targets', async () => {
-    const { module, control, sessions } = makeModule();
+    const { module, control, sessions, registerSessionGroup } = makeModule();
     const rawBody = JSON.stringify({
       target: {
         kind: 'session_message',
@@ -562,7 +568,8 @@ describe('ExternalIngressModule', () => {
       nonce: 'nonce-3',
     });
 
-    await expect(module.invoke(request)).resolves.toMatchObject({
+    const result = await module.invoke(request);
+    expect(result).toMatchObject({
       invocationId: 'invocation-new',
       duplicate: false,
       targetKind: 'session_message',
@@ -575,17 +582,31 @@ describe('ExternalIngressModule', () => {
         afterEventId: 101,
       },
       enqueue: {
-        chatJid: 'app:app-one:conv-1',
+        conversationJid: 'app:app-one:conv-1',
         threadId: null,
         queueKey: 'app:app-one:conv-1',
       },
       registerGroup: {
-        chatJid: 'app:app-one:conv-1',
+        conversationJid: 'app:app-one:conv-1',
         group: expect.objectContaining({
           folder: 'app_conv_1',
         }),
       },
     });
+    expect(
+      (result as Record<PropertyKey, unknown>)[
+        EXTERNAL_INGRESS_RUNTIME_DISPATCH
+      ],
+    ).toMatchObject({
+      localEnqueue: false,
+      enqueue: {
+        queueKey: 'app:app-one:conv-1',
+        durableAdmissionCreated: true,
+      },
+    });
+    expect(registerSessionGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationJid: 'app:app-one:conv-1' }),
+    );
     expect(sessions.ensureSession).toHaveBeenCalledWith({
       appId: 'app-one',
       conversationId: 'conv-1',
@@ -597,6 +618,7 @@ describe('ExternalIngressModule', () => {
         sessionId: 'session-1',
         message: 'launch now',
         threadId: 'thread-1',
+        beforeDurableAdmission: expect.any(Function),
       }),
     );
     expect(control.updateExternalIngressInvocation).toHaveBeenCalledWith(
@@ -661,8 +683,10 @@ describe('ExternalIngressModule', () => {
         EXTERNAL_INGRESS_RUNTIME_DISPATCH
       ],
     ).toMatchObject({
+      localEnqueue: false,
       enqueue: {
         queueKey: 'tg:-100::thread:42',
+        durableAdmissionCreated: true,
       },
     });
     expect(conversationMessages.acceptMessage).toHaveBeenCalledWith({
@@ -722,8 +746,10 @@ describe('ExternalIngressModule', () => {
         EXTERNAL_INGRESS_RUNTIME_DISPATCH
       ],
     ).toMatchObject({
+      localEnqueue: false,
       enqueue: {
         queueKey: 'tg:-100::thread:42',
+        durableAdmissionCreated: true,
       },
     });
   });

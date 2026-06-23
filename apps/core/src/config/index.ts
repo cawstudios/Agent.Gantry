@@ -42,7 +42,6 @@ export {
   loadRuntimeSettingsFromPath,
 } from './settings/runtime-settings.js';
 export type { RuntimeSettings } from './settings/runtime-settings-types.js';
-export const POLL_INTERVAL = 2000;
 export type ControlEnvKey =
   | 'GANTRY_CONTROL_API_KEYS_JSON'
   | 'GANTRY_CONTROL_HOST'

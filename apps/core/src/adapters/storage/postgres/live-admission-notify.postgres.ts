@@ -3,15 +3,23 @@ import type { Pool, PoolClient } from 'pg';
 import type {
   LiveAdmissionWakeupSource,
   LiveAdmissionWorkItemNotifier,
+  LiveTurnCommandNotifier,
+  LiveTurnCommandWakeupSource,
 } from '../../../domain/ports/live-turns.js';
 
 export const LIVE_ADMISSION_CHANNEL = 'gantry_live_admissions';
+export const LIVE_TURN_COMMAND_CHANNEL = 'gantry_live_turn_commands';
 
 const LISTEN_RECONNECT_DELAY_MS = 1_000;
 
 export interface LiveAdmissionWakeup {
   appId: string;
   workItemId: string;
+}
+
+export interface LiveTurnCommandWakeup {
+  liveTurnId: string;
+  commandId: string;
 }
 
 export class PostgresLiveAdmissionNotifier implements LiveAdmissionWorkItemNotifier {
@@ -38,7 +46,31 @@ export class PostgresLiveAdmissionNotifier implements LiveAdmissionWorkItemNotif
   }
 }
 
-export class PostgresLiveAdmissionWakeupSource implements LiveAdmissionWakeupSource {
+export class PostgresLiveTurnCommandNotifier implements LiveTurnCommandNotifier {
+  constructor(
+    private readonly pool: Pool,
+    private readonly logWarn?: (
+      context: Record<string, unknown>,
+      message: string,
+    ) => void,
+  ) {}
+
+  async notifyLiveTurnCommand(input: LiveTurnCommandWakeup): Promise<void> {
+    try {
+      await this.pool.query('SELECT pg_notify($1, $2)', [
+        LIVE_TURN_COMMAND_CHANNEL,
+        '',
+      ]);
+    } catch (err) {
+      this.logWarn?.(
+        { err, liveTurnId: input.liveTurnId, commandId: input.commandId },
+        'Failed to publish live-turn command wakeup; owner recovers by durable command replay',
+      );
+    }
+  }
+}
+
+class PostgresWakeupSource {
   private readonly listeners = new Set<() => void>();
   private clientPromise: Promise<PoolClient> | null = null;
   private client: PoolClient | null = null;
@@ -47,6 +79,9 @@ export class PostgresLiveAdmissionWakeupSource implements LiveAdmissionWakeupSou
 
   constructor(
     private readonly pool: Pool,
+    private readonly channel: string,
+    private readonly listenFailureMessage: string,
+    private readonly listenStartFailureMessage: string,
     private readonly logWarn?: (
       context: Record<string, unknown>,
       message: string,
@@ -72,7 +107,7 @@ export class PostgresLiveAdmissionWakeupSource implements LiveAdmissionWakeupSou
     const client = this.client;
     if (!client) return;
     try {
-      await client.query(`UNLISTEN ${LIVE_ADMISSION_CHANNEL}`);
+      await client.query(`UNLISTEN ${this.channel}`);
     } finally {
       client.removeAllListeners('notification');
       client.removeAllListeners('error');
@@ -101,16 +136,16 @@ export class PostgresLiveAdmissionWakeupSource implements LiveAdmissionWakeupSou
       }
       this.client = client;
       client.on('notification', (message) => {
-        if (message.channel !== LIVE_ADMISSION_CHANNEL) return;
+        if (message.channel !== this.channel) return;
         this.wakeListeners();
       });
       client.on('error', (err) => {
-        this.logWarn?.({ err }, 'Live admission LISTEN client failed');
+        this.logWarn?.({ err }, this.listenFailureMessage);
         this.handleClientFailure(client!, err);
       });
-      await client.query(`LISTEN ${LIVE_ADMISSION_CHANNEL}`);
+      await client.query(`LISTEN ${this.channel}`);
     } catch (err) {
-      this.logWarn?.({ err }, 'Failed to start live admission LISTEN client');
+      this.logWarn?.({ err }, this.listenStartFailureMessage);
       if (client) this.releaseClient(client, err);
       this.client = null;
       this.clientPromise = null;
@@ -159,5 +194,55 @@ export class PostgresLiveAdmissionWakeupSource implements LiveAdmissionWakeupSou
       void this.ensureListening();
     }, LISTEN_RECONNECT_DELAY_MS);
     this.reconnectTimer.unref?.();
+  }
+}
+
+export class PostgresLiveAdmissionWakeupSource implements LiveAdmissionWakeupSource {
+  private readonly source: PostgresWakeupSource;
+
+  constructor(
+    pool: Pool,
+    logWarn?: (context: Record<string, unknown>, message: string) => void,
+  ) {
+    this.source = new PostgresWakeupSource(
+      pool,
+      LIVE_ADMISSION_CHANNEL,
+      'Live admission LISTEN client failed',
+      'Failed to start live admission LISTEN client',
+      logWarn,
+    );
+  }
+
+  subscribe(listener: () => void): () => void {
+    return this.source.subscribe(listener);
+  }
+
+  close(): Promise<void> {
+    return this.source.close();
+  }
+}
+
+export class PostgresLiveTurnCommandWakeupSource implements LiveTurnCommandWakeupSource {
+  private readonly source: PostgresWakeupSource;
+
+  constructor(
+    pool: Pool,
+    logWarn?: (context: Record<string, unknown>, message: string) => void,
+  ) {
+    this.source = new PostgresWakeupSource(
+      pool,
+      LIVE_TURN_COMMAND_CHANNEL,
+      'Live-turn command LISTEN client failed',
+      'Failed to start live-turn command LISTEN client',
+      logWarn,
+    );
+  }
+
+  subscribe(listener: () => void): () => void {
+    return this.source.subscribe(listener);
+  }
+
+  close(): Promise<void> {
+    return this.source.close();
   }
 }

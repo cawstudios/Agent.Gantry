@@ -93,7 +93,10 @@ import { PostgresPendingAccessRequestsRepository } from './pending-access-reques
 import { PostgresWorkerCoordinationRepository } from './worker-coordination-repository.postgres.js';
 import type { WorkerCoordinationRepository } from '../../../../domain/ports/worker-coordination.js';
 import { PostgresLiveTurnRepository } from './live-turn-repository.postgres.js';
-import type { LiveTurnCoordinationRepository } from '../../../../domain/ports/live-turns.js';
+import type {
+  LiveTurnCommandNotifier,
+  LiveTurnCoordinationRepository,
+} from '../../../../domain/ports/live-turns.js';
 import { PostgresRuntimeDependencyRepository } from './runtime-dependency-repository.postgres.js';
 import { PostgresSettingsRevisionRepository } from './settings-revision-repository.postgres.js';
 import { PostgresAsyncTaskRepository } from './async-task-repository.postgres.js';
@@ -1675,6 +1678,7 @@ export class PostgresSandboxRepository implements SandboxRepository {
 export function createPostgresDomainRepositories(
   db: CanonicalDb,
   _pool?: Pool,
+  options: { liveTurnCommandNotifier?: LiveTurnCommandNotifier } = {},
 ): PostgresDomainRepositoryBundle {
   return {
     apps: new PostgresAppRepository(db),
@@ -1699,7 +1703,10 @@ export function createPostgresDomainRepositories(
     sandboxes: new PostgresSandboxRepository(db),
     outboundDeliveries: new PostgresOutboundDeliveryRepository(db),
     workerCoordination: new PostgresWorkerCoordinationRepository(db),
-    liveTurns: new PostgresLiveTurnRepository(db),
+    liveTurns: new PostgresLiveTurnRepository(
+      db,
+      options.liveTurnCommandNotifier,
+    ),
     runtimeDependencies: new PostgresRuntimeDependencyRepository(db),
     settingsRevisions: new PostgresSettingsRevisionRepository(db),
     asyncTasks: new PostgresAsyncTaskRepository(db),

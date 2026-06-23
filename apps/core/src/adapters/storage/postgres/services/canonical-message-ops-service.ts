@@ -3,12 +3,7 @@ import type {
   LiveAdmissionWorkItemEnqueueResult,
   LiveAdmissionWorkItemNotifier,
 } from '../../../../domain/ports/live-turns.js';
-import {
-  decodeGlobalMessageCursor,
-  decodeGroupMessageCursor,
-  encodeGlobalMessageCursor,
-  toGlobalMessageCursor,
-} from '../../../../shared/message-cursor.js';
+import { decodeGroupMessageCursor } from '../../../../shared/message-cursor.js';
 import type {
   CanonicalOpsMessageRow,
   MessageLiveAdmissionInput,
@@ -46,33 +41,18 @@ export class CanonicalMessageOpsService {
       liveAdmission: admission,
     });
     if (result) {
-      await this.liveAdmissionNotifier?.notifyLiveAdmissionWorkItem({
-        appId: result.item.appId,
-        workItemId: result.item.id,
-      });
+      await this.notifyLiveAdmissionWorkItem(result);
     }
     return result;
   }
 
-  async getNewMessages(
-    jids: string[],
-    lastCursor: string,
-    limit: number = 200,
-  ): Promise<{ messages: NewMessage[]; newTimestamp: string }> {
-    const cursor = decodeGlobalMessageCursor(lastCursor);
-    const rows = await this.repository.listInboundMessages({
-      jids,
-      after: hasCursorBoundary(cursor) ? cursor : undefined,
-      limit,
+  async notifyLiveAdmissionWorkItem(
+    result: LiveAdmissionWorkItemEnqueueResult,
+  ): Promise<void> {
+    await this.liveAdmissionNotifier?.notifyLiveAdmissionWorkItem({
+      appId: result.item.appId,
+      workItemId: result.item.id,
     });
-    const messages = rows.map((row) => this.mapMessage(row)).slice(0, limit);
-    const latest = messages[messages.length - 1];
-    return {
-      messages,
-      newTimestamp: latest
-        ? encodeGlobalMessageCursor(toGlobalMessageCursor(latest))
-        : lastCursor,
-    };
   }
 
   async getMessagesSince(

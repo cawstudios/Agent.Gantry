@@ -28,8 +28,6 @@ function makeApp(overrides: Partial<RuntimeApp> = {}): RuntimeApp {
         requiresTrigger: false,
       },
     })),
-    getLastTimestamp: vi.fn(() => ''),
-    setLastTimestamp: vi.fn(),
     setAgentCursor: vi.fn(),
     setChannelRuntime: vi.fn(),
     ...overrides,

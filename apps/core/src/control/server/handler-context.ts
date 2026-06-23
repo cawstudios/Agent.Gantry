@@ -69,6 +69,8 @@ export type ControlRouteContext = {
   processRole: ProcessRole;
   /** Whether this process role runs live execution (live readiness + gauges). */
   liveExecution: boolean;
+  /** Whether durable live-turn admission is enabled in runtime settings. */
+  liveTurnsEnabled?: boolean;
   /** Role-specific readiness checks that apply (derived from the role). */
   roleReadinessRequirements: ReadinessRoleRequirements;
   /**

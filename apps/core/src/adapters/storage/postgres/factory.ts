@@ -48,8 +48,13 @@ import type { AgentSession } from '../../../domain/sessions/sessions.js';
 import {
   PostgresLiveAdmissionNotifier,
   PostgresLiveAdmissionWakeupSource,
+  PostgresLiveTurnCommandNotifier,
+  PostgresLiveTurnCommandWakeupSource,
 } from './live-admission-notify.postgres.js';
-import type { LiveAdmissionWakeupSource } from '../../../domain/ports/live-turns.js';
+import type {
+  LiveAdmissionWakeupSource,
+  LiveTurnCommandWakeupSource,
+} from '../../../domain/ports/live-turns.js';
 
 const FILE_ARTIFACTS_DIR_NAME = 'files';
 
@@ -68,6 +73,7 @@ export interface StorageRuntime {
   runtimeEvents: RuntimeEventExchange;
   runtimeEventNotifier: PostgresRuntimeEventNotifier;
   liveAdmissionWakeupSource: LiveAdmissionWakeupSource;
+  liveTurnCommandWakeupSource: LiveTurnCommandWakeupSource;
   fileArtifacts: FileArtifactStore;
   skillArtifacts: SkillArtifactStore;
   browserProfileSnapshots: BrowserProfileSnapshotRepository;
@@ -106,13 +112,20 @@ export function createStorageRuntime(
   const service = createStorageService(config);
   const sessionSettings = getRuntimeSettingsForConfig().agent.sessions;
   const control = new PostgresControlPlaneRepository(service.db);
+  const liveTurnCommandNotifier = new PostgresLiveTurnCommandNotifier(
+    service.pool,
+  );
   const repositories = createPostgresDomainRepositories(
     service.db,
     service.pool,
+    { liveTurnCommandNotifier },
   );
   const runtimeEventNotifier = new PostgresRuntimeEventNotifier(service.pool);
   const liveAdmissionNotifier = new PostgresLiveAdmissionNotifier(service.pool);
   const liveAdmissionWakeupSource = new PostgresLiveAdmissionWakeupSource(
+    service.pool,
+  );
+  const liveTurnCommandWakeupSource = new PostgresLiveTurnCommandWakeupSource(
     service.pool,
   );
   const runtimeEvents = new RuntimeEventExchange(
@@ -149,6 +162,7 @@ export function createStorageRuntime(
     runtimeEvents,
     runtimeEventNotifier,
     liveAdmissionWakeupSource,
+    liveTurnCommandWakeupSource,
     fileArtifacts,
     skillArtifacts,
     browserProfileSnapshots,

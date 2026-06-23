@@ -223,6 +223,8 @@ export function startControlServer(input: {
   processRole?: ProcessRole;
   /** Whether this role runs live execution (live readiness + live gauges). */
   liveExecution?: boolean;
+  /** Whether durable live-turn admission is enabled in runtime settings. */
+  liveTurnsEnabled?: boolean;
   /** Role-specific readiness checks that apply (derived by the runtime caller). */
   roleReadinessRequirements?: ReadinessRoleRequirements;
   /** Runtime accessors injected from the runtime layer (DI; no cross-layer import here). */
@@ -300,6 +302,7 @@ export function startControlServer(input: {
     keys,
     processRole: input.processRole ?? 'all',
     liveExecution: input.liveExecution ?? true,
+    liveTurnsEnabled: input.liveTurnsEnabled ?? true,
     roleReadinessRequirements: input.roleReadinessRequirements ?? {
       // Default (workstation `all`): the historical check set, no role checks.
       requiresApiAuthConfigured: false,

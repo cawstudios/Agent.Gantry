@@ -44,7 +44,7 @@ no ALB traffic.
    │ admin/settings  │                       │ ┌──────────┐ ┌──────────┐  ...     │
    │ API; no exec;   │                       │ │ live wkr │ │ live wkr │          │
    │ not a worker    │                       │ └────┬─────┘ └────┬─────┘          │
-   └────────┬────────┘   distributed live    │      │ poll+admit every worker;   │
+   └────────┬────────┘   distributed live    │      │ claim+admit every worker;  │
             │            admission/execution └──────┼──────────────┼─────────────┘
             │                                       │              │
             │      ┌────────────────────────────────┘              │
@@ -64,11 +64,11 @@ no ALB traffic.
                                           └──────────────────────┘
 ```
 
-Live execution is horizontal: **every** live worker polls messages and admits
-live turns; the durable one-active-turn-per-scope claim is the only
-serialization point. A lease-elected **recovery coordinator** owns only startup
-pending-message recovery and the periodic recovery sweep — not the hot path. See
-[live-horizontal-execution.md](./live-horizontal-execution.md).
+Live execution is horizontal: **every** live worker claims durable live-admission
+work and admits live turns; the durable one-active-turn-per-scope claim is the
+only serialization point. A lease-elected **recovery coordinator** owns only
+startup pending-message recovery and the periodic recovery sweep — not the hot
+path. See [live-horizontal-execution.md](./live-horizontal-execution.md).
 
 ## Process Roles
 
@@ -145,7 +145,7 @@ operator-visible signal.
 | 3   | **Mixed-version workers mid-deploy**   | Both serve; lease fencing + image digest keep terminal writes correct; no split-brain on a run                                                                                                                                                                                                                                                   | Worker inventory shows mixed image digests; normal during deploy                                                                                                                   |
 | 4   | **Migration vs old worker**            | Additive-only migrations; one pg advisory lock (inside `migrate()`) serializes every migrator — entrypoint passes and runtime boot-time migrations alike, including boots with `GANTRY_SKIP_MIGRATIONS=1`; old worker runs against newer additive schema                                                                                         | Migration runs once (lock holder); losers wait; failure exits non-zero                                                                                                             |
 | 5   | **Bake artifact vs old worker**        | New artifact is replace-on-update; a worker still holding the prior artifact keeps serving until it reconciles (fetch → sha256 verify → atomic activate)                                                                                                                                                                                         | Capability advertised only after activate; hash mismatch → quarantine + `gantry artifacts quarantine rebake`                                                                       |
-| 6   | **Live worker drains during deploy**   | The draining worker stops admitting and finishes/hands off its owned turns; other live workers keep polling and admitting throughout. If the worker held the recovery-coordinator lease it releases it early and any live worker is re-elected; turns the previous coordinator never recovered resume on the new one at a higher fencing version | Live-turn `recovered` state for any turn that lost its owner; no global live-chat pause (only the draining worker's owned turns move). Coordinator failover RTO ≈ lease TTL (~30s) |
+| 6   | **Live worker drains during deploy**   | The draining worker stops admitting and finishes/hands off its owned turns; other live workers keep admitting throughout. If the worker held the recovery-coordinator lease it releases it early and any live worker is re-elected; turns the previous coordinator never recovered resume on the new one at a higher fencing version | Live-turn `recovered` state for any turn that lost its owner; no global live-chat pause (only the draining worker's owned turns move). Coordinator failover RTO ≈ lease TTL (~30s) |
 
 ## Security Posture vs Topology
 

@@ -2,6 +2,7 @@ import type {
   LiveTurnCommand,
   LiveTurn,
   LiveTurnAgentRunCompletion,
+  LiveTurnCommandWakeupSource,
   LiveTurnLeaseFence,
   LiveTurnScope,
 } from '../domain/ports/live-turns.js';
@@ -77,6 +78,7 @@ export type LiveTurnAdmission =
 
 export class LiveTurnAuthority {
   private readonly active = new Map<string, ActiveLiveTurnRegistration>();
+  private readonly unsubscribeCommandWakeup?: () => void;
   private draining = false;
 
   constructor(
@@ -87,9 +89,14 @@ export class LiveTurnAuthority {
       hostBudgetCapacity?: () => number;
       leaseTtlMs?: number;
       ownerPollMs?: number;
+      commandWakeupSource?: LiveTurnCommandWakeupSource;
       warn?: WarnLog;
     },
-  ) {}
+  ) {
+    this.unsubscribeCommandWakeup = deps.commandWakeupSource?.subscribe(() => {
+      this.tickActiveQueues();
+    });
+  }
 
   /**
    * Stop admitting new live turns during graceful drain. Already-active turns
@@ -520,6 +527,7 @@ export class LiveTurnAuthority {
   }
 
   async shutdown(): Promise<void> {
+    this.unsubscribeCommandWakeup?.();
     for (const [queueJid, registration] of [...this.active.entries()]) {
       await this.settleRegistration(
         queueJid,
@@ -626,6 +634,12 @@ export class LiveTurnAuthority {
         { err, queueJid, turnId: registration.turnId },
         'Live turn command drain failed',
       );
+    }
+  }
+
+  private tickActiveQueues(): void {
+    for (const queueJid of this.active.keys()) {
+      void this.tick(queueJid);
     }
   }
 

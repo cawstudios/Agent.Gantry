@@ -17,8 +17,7 @@ import type {
   LiveTurn,
   LiveTurnAgentRunCompletion,
   LiveTurnCommand,
-  LiveTurnCommandAppendResult,
-  LiveTurnCommandType,
+  LiveTurnCommandNotifier,
   LiveTurnCoordinationRepository,
   LiveTurnLeaseFence,
   LiveTurnScope,
@@ -42,9 +41,9 @@ import {
 } from './live-admission-work-item-repository.postgres.js';
 import { getOldestWaitingLiveAdmission as queryOldestWaitingLiveAdmission } from './live-waiting-admission-query.postgres.js';
 import {
-  findLiveTurnCommandByIdempotencyKey,
+  appendLiveTurnCommand as appendLiveTurnCommandRow,
   toLiveTurnCommand,
-  type LiveTurnCommandRow,
+  type AppendLiveTurnCommandInput,
 } from './live-turn-command-row.postgres.js';
 import {
   isUniqueViolation,
@@ -91,7 +90,10 @@ function toLiveTurn(row: LiveTurnRow): LiveTurn {
 }
 
 export class PostgresLiveTurnRepository implements LiveTurnCoordinationRepository {
-  constructor(private readonly db: CanonicalDb) {}
+  constructor(
+    private readonly db: CanonicalDb,
+    private readonly commandNotifier?: LiveTurnCommandNotifier,
+  ) {}
 
   async enqueueLiveAdmissionWorkItem(
     input: EnqueueLiveAdmissionWorkItemInput,
@@ -585,76 +587,8 @@ export class PostgresLiveTurnRepository implements LiveTurnCoordinationRepositor
     return queryOldestWaitingLiveAdmission(this.db, input);
   }
 
-  async appendLiveTurnCommand(input: {
-    id: string;
-    liveTurnId: string;
-    commandType: LiveTurnCommandType;
-    idempotencyKey: string;
-    payload?: Record<string, unknown>;
-    createdByWorkerId?: string | null;
-    now?: string;
-  }): Promise<LiveTurnCommandAppendResult> {
-    const now = input.now ?? currentIso();
-    const existing = await findLiveTurnCommandByIdempotencyKey(this.db, {
-      liveTurnId: input.liveTurnId,
-      idempotencyKey: input.idempotencyKey,
-    });
-    if (existing) return { outcome: 'replayed', command: existing };
-    try {
-      return await this.db.transaction(async (tx) => {
-        const turns = pgSchema.liveTurnsPostgres;
-        // Row-locking sequence allocation: the UPDATE serializes concurrent
-        // appends on the same turn, so seq order can never regress.
-        const allocated = await tx
-          .update(turns)
-          .set({
-            nextCommandSeq: sql`${turns.nextCommandSeq} + 1`,
-            updatedAt: now,
-          })
-          .where(
-            and(
-              eq(turns.id, input.liveTurnId),
-              notInArray(turns.state, TERMINAL_STATES),
-            ),
-          )
-          .returning({
-            nextCommandSeq: turns.nextCommandSeq,
-            scopeKey: turns.scopeKey,
-            fencingVersion: turns.fencingVersion,
-          });
-        const turn = allocated[0];
-        if (!turn) return { outcome: 'rejected', command: null };
-        const row: LiveTurnCommandRow = {
-          id: input.id,
-          liveTurnId: input.liveTurnId,
-          scopeKey: turn.scopeKey,
-          commandType: input.commandType,
-          seq: turn.nextCommandSeq - 1,
-          idempotencyKey: input.idempotencyKey,
-          payloadJson: input.payload ?? {},
-          status: 'pending',
-          fencingVersion: turn.fencingVersion,
-          createdByWorkerId: input.createdByWorkerId ?? null,
-          appliedByWorkerId: null,
-          rejectedReason: null,
-          createdAt: now,
-          appliedAt: null,
-        };
-        await tx.insert(pgSchema.liveTurnCommandsPostgres).values(row);
-        return { outcome: 'appended', command: toLiveTurnCommand(row) };
-      });
-    } catch (err) {
-      // A concurrent append with the same idempotency key rolls this
-      // transaction back (including the seq bump) via the unique index;
-      // return the winner's command.
-      if (!isUniqueViolation(err)) throw err;
-      const winner = await findLiveTurnCommandByIdempotencyKey(this.db, {
-        liveTurnId: input.liveTurnId,
-        idempotencyKey: input.idempotencyKey,
-      });
-      if (!winner) throw err;
-      return { outcome: 'replayed', command: winner };
-    }
+  async appendLiveTurnCommand(input: AppendLiveTurnCommandInput) {
+    return appendLiveTurnCommandRow(this.db, this.commandNotifier, input);
   }
 
   async listPendingLiveTurnCommands(input: {

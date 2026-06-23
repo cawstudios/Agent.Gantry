@@ -11,6 +11,7 @@ import type {
   RuntimeChatMetadataRepository,
   RuntimeMessageRepository,
 } from '../../domain/repositories/ops-repo.js';
+import type { LiveAdmissionWorkItemEnqueueResult } from '../../domain/ports/live-turns.js';
 import type {
   AgentRunRepository,
   AgentSessionRepository,
@@ -82,6 +83,7 @@ export type SessionInteractionDeps = {
     agentRuns: AgentRunRepository;
   };
   runtimeEvents: RuntimeEventExchange;
+  liveAdmissionAppId?: string | null;
   now: () => IsoTimestamp;
   createId: () => string;
   stableHash: (input: string) => string;
@@ -91,6 +93,7 @@ export type SessionQueueIntent = {
   conversationJid: string;
   threadId: string | null;
   queueKey: string;
+  durableAdmissionCreated: boolean;
 };
 
 export class SessionInteractionModule {
@@ -217,6 +220,8 @@ export class SessionInteractionModule {
     correlationId?: string | null;
     responseMode?: unknown;
     webhookId?: string | null;
+    durableLiveAdmission?: boolean;
+    beforeDurableAdmission?: () => Promise<void> | void;
   }): Promise<{
     accepted: true;
     messageId: string;
@@ -259,7 +264,6 @@ export class SessionInteractionModule {
       'app',
       true,
     );
-    await this.deps.ops.storeMessage(message);
     await this.deps.control.upsertAppResponseRoute({
       sessionId: session.sessionId,
       threadId,
@@ -267,7 +271,7 @@ export class SessionInteractionModule {
       webhookId,
       correlationId: input.correlationId ?? null,
     });
-    const accepted = await this.deps.runtimeEvents.publish({
+    const acceptedEvent: RuntimeEventPublishInput = {
       appId: session.appId as never,
       eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_INBOUND,
       payload: {
@@ -281,7 +285,45 @@ export class SessionInteractionModule {
       correlationId: input.correlationId ?? null,
       responseMode,
       webhookId,
-    });
+    };
+    let durableAdmissionCreated = false;
+    let admissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
+    let accepted: RuntimeEvent;
+    const runtimeEventsWithLiveAdmission = this.deps.runtimeEvents as {
+      publishWithLiveAdmissionMessage?: RuntimeEventExchange['publishWithLiveAdmissionMessage'];
+    };
+    const publishWithLiveAdmissionMessage =
+      runtimeEventsWithLiveAdmission.publishWithLiveAdmissionMessage?.bind(
+        this.deps.runtimeEvents,
+      );
+    const useDurableAdmission =
+      input.durableLiveAdmission !== false &&
+      publishWithLiveAdmissionMessage &&
+      this.deps.liveAdmissionAppId !== null;
+    if (useDurableAdmission) {
+      await input.beforeDurableAdmission?.();
+      const liveAdmissionAppId = this.deps.liveAdmissionAppId ?? session.appId;
+      const result = await publishWithLiveAdmissionMessage(acceptedEvent, {
+        message,
+        liveAdmission: {
+          appId: liveAdmissionAppId,
+          triggerDecision: {
+            source: 'sdk_session',
+            responseMode,
+          },
+          now,
+        },
+      });
+      accepted = result.event;
+      admissionResult = result.liveAdmissionResult;
+      durableAdmissionCreated = !!admissionResult;
+    } else {
+      await this.deps.ops.storeMessage(message);
+      accepted = await this.deps.runtimeEvents.publish(acceptedEvent);
+    }
+    if (admissionResult) {
+      await this.deps.ops.notifyLiveAdmissionWorkItem?.(admissionResult);
+    }
     return {
       accepted: true,
       messageId,
@@ -290,6 +332,7 @@ export class SessionInteractionModule {
         conversationJid: session.conversationJid,
         threadId,
         queueKey: makeSessionQueueKey(session.conversationJid, threadId),
+        durableAdmissionCreated,
       },
     };
   }

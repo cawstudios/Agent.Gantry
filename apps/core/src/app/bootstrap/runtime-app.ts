@@ -110,8 +110,6 @@ export interface RuntimeApp {
     },
   ) => Promise<boolean>;
   getConversationRoutes: () => Record<string, ConversationRoute>;
-  getLastTimestamp: () => string;
-  setLastTimestamp: (timestamp: string) => void;
   setAgentCursor: (chatJid: string, timestamp: string) => void;
   setChannelRuntime: (runtime: GroupProcessingDeps['channelRuntime']) => void;
 }
@@ -137,7 +135,6 @@ export interface RuntimeAppOptions {
 }
 
 export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
-  let lastTimestamp = '';
   let conversationRoutes: Record<string, ConversationRoute> = {};
   let lastAgentTimestamp: Record<string, string> = {};
   let stateSaveInFlight: Promise<void> | undefined;
@@ -317,12 +314,10 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
 
   async function loadState(): Promise<void> {
     const repository = ops();
-    const [loadedLastTimestamp, agentTs, loadedRoutes] = await Promise.all([
-      repository.getRouterState('last_timestamp'),
+    const [agentTs, loadedRoutes] = await Promise.all([
       repository.getRouterState('last_agent_timestamp'),
       repository.getAllConversationRoutes(),
     ]);
-    lastTimestamp = loadedLastTimestamp || '';
     try {
       lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
     } catch {
@@ -343,12 +338,8 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     stateSaveInFlight = (async () => {
       do {
         stateSaveDirty = false;
-        const timestamp = lastTimestamp;
         const agentTimestampJson = JSON.stringify(lastAgentTimestamp);
-        await Promise.all([
-          ops().setRouterState('last_timestamp', timestamp),
-          ops().setRouterState('last_agent_timestamp', agentTimestampJson),
-        ]);
+        await ops().setRouterState('last_agent_timestamp', agentTimestampJson);
       } while (stateSaveDirty);
     })().finally(() => {
       stateSaveInFlight = undefined;
@@ -602,10 +593,6 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     processGroupMessages: (chatJid, options) =>
       groupProcessor.processGroupMessages(chatJid, options),
     getConversationRoutes: () => conversationRoutes,
-    getLastTimestamp: () => lastTimestamp,
-    setLastTimestamp: (timestamp) => {
-      lastTimestamp = timestamp;
-    },
     setAgentCursor: (chatJid, timestamp) => {
       lastAgentTimestamp[chatJid] = timestamp;
     },

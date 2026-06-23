@@ -16,6 +16,7 @@ import {
   liveTurnSlotHolderId,
 } from '@core/application/live-turns/live-turn-lease-service.js';
 import type {
+  LiveTurnCommandWakeupSource,
   LiveTurnCoordinationRepository,
   LiveTurnScope,
 } from '@core/domain/ports/live-turns.js';
@@ -37,7 +38,31 @@ function makeScope(patch: Partial<LiveTurnScope> = {}): LiveTurnScope {
   };
 }
 
-function makeAuthority(workerInstanceId = 'w1') {
+function makeCommandWakeupSource(): {
+  source: LiveTurnCommandWakeupSource;
+  wake: () => void;
+} {
+  const listeners = new Set<() => void>();
+  return {
+    source: {
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      close: async () => undefined,
+    },
+    wake: () => {
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
+
+function makeAuthority(
+  workerInstanceId = 'w1',
+  commandWakeupSource?: LiveTurnCommandWakeupSource,
+) {
   const liveTurns = new FakeLiveTurns();
   const coordination = new FakeCoordination();
   liveTurns.coordination = coordination;
@@ -50,6 +75,7 @@ function makeAuthority(workerInstanceId = 'w1') {
     },
     slotCapacity: () => 3,
     leaseTtlMs: 60_000,
+    commandWakeupSource,
     warn: (_context, message) => warnings.push(message),
   });
   return { authority, liveTurns, coordination, warnings };
@@ -356,6 +382,119 @@ describe('LiveTurnAuthority', () => {
     expect(liveTurns.commands[0]?.status).toBe('applied');
     await authority.finalize(QUEUE_JID, 'completed');
     await authority.shutdown();
+  });
+
+  it('drains remote commands on command wakeup before the owner tick', async () => {
+    const wakeup = makeCommandWakeupSource();
+    const { authority, liveTurns } = makeAuthority('w1', wakeup.source);
+    await authority.admit({
+      queueJid: QUEUE_JID,
+      scope: makeScope(),
+      turnId: 'turn-1',
+      runId: 'run-1',
+    });
+    const { hooks, log } = makeHooks();
+    await authority.registerLocalRunner(QUEUE_JID, hooks);
+
+    await liveTurns.appendLiveTurnCommand({
+      id: 'remote-cmd-1',
+      liveTurnId: 'turn-1',
+      commandType: 'continuation',
+      idempotencyKey: 'continuation:remote',
+      payload: { text: 'remote follow-up', threadId: null },
+      createdByWorkerId: 'w2',
+    });
+    expect(log.continuations).toEqual([]);
+
+    wakeup.wake();
+
+    await vi.waitFor(
+      () =>
+        expect(log.continuations).toEqual([
+          { text: 'remote follow-up', sequence: 1 },
+        ]),
+      { timeout: 250 },
+    );
+    expect(liveTurns.commands[0]?.status).toBe('applied');
+    await authority.finalize(QUEUE_JID, 'completed');
+    await authority.shutdown();
+  });
+
+  it('checks ownership before applying wakeup commands', async () => {
+    const wakeup = makeCommandWakeupSource();
+    const { authority, liveTurns, coordination, warnings } = makeAuthority(
+      'w1',
+      wakeup.source,
+    );
+    const admission = await authority.admit({
+      queueJid: QUEUE_JID,
+      scope: makeScope(),
+      turnId: 'turn-1',
+      runId: 'run-1',
+    });
+    expect(admission.outcome).toBe('claimed');
+    if (admission.outcome !== 'claimed') return;
+    const { hooks, log } = makeHooks();
+    await authority.registerLocalRunner(QUEUE_JID, hooks);
+    await liveTurns.appendLiveTurnCommand({
+      id: 'remote-cmd-1',
+      liveTurnId: 'turn-1',
+      commandType: 'continuation',
+      idempotencyKey: 'continuation:remote',
+      payload: { text: 'remote follow-up', threadId: null },
+      createdByWorkerId: 'w2',
+    });
+    coordination.slots
+      .get(liveTurnSlotKey('w1'))
+      ?.delete(liveTurnSlotHolderId('turn-1', admission.fence.fencingVersion));
+
+    wakeup.wake();
+
+    await vi.waitFor(() => expect(log.stops).toBe(1), { timeout: 250 });
+    expect(log.continuations).toEqual([]);
+    expect(liveTurns.commands[0]?.status).toBe('pending');
+    expect(authority.ownsQueue(QUEUE_JID)).toBe(false);
+    expect(warnings).toContain(
+      'Live turn ownership lost; stopping local runner',
+    );
+    await authority.shutdown();
+  });
+
+  it('leaves remote commands pending when the wakeup is missed', async () => {
+    vi.useFakeTimers();
+    try {
+      const { authority, liveTurns } = makeAuthority('w1');
+      await authority.admit({
+        queueJid: QUEUE_JID,
+        scope: makeScope(),
+        turnId: 'turn-1',
+        runId: 'run-1',
+      });
+      const { hooks, log } = makeHooks();
+      await authority.registerLocalRunner(QUEUE_JID, hooks);
+      await liveTurns.appendLiveTurnCommand({
+        id: 'remote-cmd-1',
+        liveTurnId: 'turn-1',
+        commandType: 'continuation',
+        idempotencyKey: 'continuation:remote',
+        payload: { text: 'remote follow-up', threadId: null },
+        createdByWorkerId: 'w2',
+      });
+
+      await Promise.resolve();
+      expect(log.continuations).toEqual([]);
+      expect(liveTurns.commands[0]?.status).toBe('pending');
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(log.continuations).toEqual([
+        { text: 'remote follow-up', sequence: 1 },
+      ]);
+      expect(liveTurns.commands[0]?.status).toBe('applied');
+      await authority.finalize(QUEUE_JID, 'completed');
+      await authority.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('stops the local runner when the live-turn slot is lost', async () => {

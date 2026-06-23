@@ -142,8 +142,6 @@ function makeApp(conversationRoutes: Record<string, any> = {}): RuntimeApp {
     ensureCredentialBindingsForConversationRoutes: vi.fn(),
     processGroupMessages: vi.fn(),
     getConversationRoutes: vi.fn(() => conversationRoutes),
-    getLastTimestamp: vi.fn(() => ''),
-    setLastTimestamp: vi.fn(),
     setAgentCursor: vi.fn(),
     setChannelRuntime: vi.fn(),
   };

@@ -24,9 +24,7 @@ import {
 } from '../../runtime/live-turn-recovery.js';
 import {
   recoverPendingMessages as defaultRecoverPendingMessages,
-  startMessagePollingLoop as defaultStartMessagePollingLoop,
   type MessageLoopDeps,
-  type MessagePollingLoopHandle,
 } from '../../runtime/message-loop.js';
 import {
   startLiveAdmissionWorkLoop as defaultStartLiveAdmissionWorkLoop,
@@ -45,12 +43,6 @@ import { computeHostCapacityPlan } from '../../shared/host-capacity.js';
 
 type WarnLog = (context: Record<string, unknown>, message: string) => void;
 type InfoLog = (obj: string | Record<string, unknown>, msg?: string) => void;
-
-function isLiveAdmissionWorkLoopHandle(
-  loop: MessagePollingLoopHandle | LiveAdmissionWorkLoopHandle,
-): loop is LiveAdmissionWorkLoopHandle {
-  return typeof (loop as LiveAdmissionWorkLoopHandle).trigger === 'function';
-}
 
 /**
  * Browser teardown + cross-worker snapshot at live-turn finalize. Resolves the
@@ -390,14 +382,11 @@ export function buildLiveAdmissionProcessor(input: {
 
 export interface LiveExecutionServicesHandle {
   /** Stop the always-on admission loop (drain/handoff). */
-  stopPolling: () => void;
+  stopAdmission: () => void;
   /** Stop the recovery coordinator loop if this worker held it. */
   stopRecovery: () => void;
   /** Current admission loop handle (registered as the active loop for shutdown). */
-  pollingLoop:
-    | MessagePollingLoopHandle
-    | LiveAdmissionWorkLoopHandle
-    | undefined;
+  admissionLoop: LiveAdmissionWorkLoopHandle | undefined;
   /** Current recovery loop handle, set only while this worker is coordinator. */
   recoveryLoop: LiveTurnRecoveryLoop | undefined;
 }
@@ -451,11 +440,10 @@ export function startLiveExecutionServices(input: {
     | ((turn: LiveTurn) => Promise<void> | void)
     | undefined;
   recoverPendingMessages?: typeof defaultRecoverPendingMessages;
-  startMessagePollingLoop?: typeof defaultStartMessagePollingLoop;
   startLiveAdmissionWorkLoop?: typeof defaultStartLiveAdmissionWorkLoop;
   liveAdmissionWakeupSource?: LiveAdmissionWakeupSource;
-  registerActivePollingLoop: (
-    loop: MessagePollingLoopHandle | LiveAdmissionWorkLoopHandle | undefined,
+  registerActiveAdmissionLoop: (
+    loop: LiveAdmissionWorkLoopHandle | undefined,
   ) => void;
   registerActiveRecoveryLoop: (loop: LiveTurnRecoveryLoop | undefined) => void;
   /** Waiting-status monitor, started/stopped with the coordinator. */
@@ -472,7 +460,7 @@ export function startLiveExecutionServices(input: {
     recoveryCoordinator,
     isEligibleToRecoverLiveTurn,
     alertNoEligibleLiveTurnRecoverer,
-    registerActivePollingLoop,
+    registerActiveAdmissionLoop,
     registerActiveRecoveryLoop,
     waitingStatus,
     onPollingCrash,
@@ -481,15 +469,13 @@ export function startLiveExecutionServices(input: {
   } = input;
   const recoverPendingMessages =
     input.recoverPendingMessages ?? defaultRecoverPendingMessages;
-  const startMessagePollingLoop =
-    input.startMessagePollingLoop ?? defaultStartMessagePollingLoop;
   const startLiveAdmissionWorkLoop =
     input.startLiveAdmissionWorkLoop ?? defaultStartLiveAdmissionWorkLoop;
 
   const handle: LiveExecutionServicesHandle = {
-    pollingLoop: undefined,
+    admissionLoop: undefined,
     recoveryLoop: undefined,
-    stopPolling: () => undefined,
+    stopAdmission: () => undefined,
     stopRecovery: () => undefined,
   };
 
@@ -497,31 +483,32 @@ export function startLiveExecutionServices(input: {
     !!liveTurnLeaseDeps &&
     typeof liveTurnLeaseDeps.liveTurns.claimLiveAdmissionWorkItems ===
       'function';
-  // Always-on: live admission runs on every live worker. With the durable
-  // admission repository present, workers claim queue-scoped work items instead
-  // of scanning every route on POLL_INTERVAL. The old route-wide poller remains
-  // only for single-process/test embeddings that do not expose durable claims.
-  const pollingLoop = hasDurableAdmissionClaims
-    ? startLiveAdmissionWorkLoop({
-        liveAdmissions: liveTurnLeaseDeps.liveTurns,
-        appId: input.appId,
-        workerInstanceId: liveTurnLeaseDeps.workerInstanceId,
-        messageLoopDeps,
-        maxRetryCount: app.queue.getPolicy().maxRetries,
-        warn,
-      })
-    : startMessagePollingLoop(messageLoopDeps);
+  // Always-on: every live worker claims queue-scoped durable work items. There
+  // is intentionally no route-wide message scanner fallback.
+  if (!hasDurableAdmissionClaims) {
+    warn(
+      { processRole: input.processRole },
+      'Live admission requires durable admission claims; live admission disabled for this role',
+    );
+    return handle;
+  }
+  const admissionLoop = startLiveAdmissionWorkLoop({
+    liveAdmissions: liveTurnLeaseDeps.liveTurns,
+    appId: input.appId,
+    workerInstanceId: liveTurnLeaseDeps.workerInstanceId,
+    messageLoopDeps,
+    maxRetryCount: app.queue.getPolicy().maxRetries,
+    warn,
+  });
   const unsubscribeLiveAdmissionWakeup =
-    hasDurableAdmissionClaims && isLiveAdmissionWorkLoopHandle(pollingLoop)
-      ? input.liveAdmissionWakeupSource?.subscribe(() => pollingLoop.trigger())
-      : undefined;
-  handle.pollingLoop = pollingLoop;
-  registerActivePollingLoop(pollingLoop);
-  pollingLoop.done.catch((err) => onPollingCrash(err));
-  handle.stopPolling = () => {
+    input.liveAdmissionWakeupSource?.subscribe(() => admissionLoop.trigger());
+  handle.admissionLoop = admissionLoop;
+  registerActiveAdmissionLoop(admissionLoop);
+  admissionLoop.done.catch((err) => onPollingCrash(err));
+  handle.stopAdmission = () => {
     unsubscribeLiveAdmissionWakeup?.();
-    pollingLoop.stop();
-    registerActivePollingLoop(undefined);
+    admissionLoop.stop();
+    registerActiveAdmissionLoop(undefined);
   };
 
   // Lease-gated: recovery coordinator. Only the holder runs startup pending
@@ -562,8 +549,8 @@ export function startLiveExecutionServices(input: {
           onNoEligibleRecoverer: alertNoEligibleLiveTurnRecoverer,
           warn,
           // Recovered turns resume ON THE COORDINATOR: this worker adopts the
-          // turn locally and re-enqueues the message check so its own polling
-          // loop replays the pending message under the higher fencing version.
+          // turn locally and re-enqueues the message check so its owner drains
+          // pending input under the higher fencing version.
           resumeRecoveredTurn: async ({ turn, lease }) =>
             resumeRecoveredTurn({
               turn,
@@ -601,7 +588,7 @@ export function startLiveExecutionServices(input: {
     onLost: (err) => {
       warn(
         { err },
-        'Live-recovery-coordinator lease lost; stopping recovery coordinator (polling and admission continue)',
+        'Live-recovery-coordinator lease lost; stopping recovery coordinator (live admission continues)',
       );
       stopCoordinator();
     },

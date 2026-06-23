@@ -130,14 +130,9 @@ export interface RuntimeMessageRepository {
       now?: string;
     },
   ): Promise<LiveAdmissionWorkItemEnqueueResult | undefined>;
-  getNewMessages(
-    jids: string[],
-    lastCursor: string,
-    limit?: number,
-  ): Promise<{
-    messages: NewMessage[];
-    newTimestamp: string;
-  }>;
+  notifyLiveAdmissionWorkItem?(
+    result: LiveAdmissionWorkItemEnqueueResult,
+  ): Promise<void>;
   getMessagesSince(
     conversationJid: string,
     sinceCursor: string,

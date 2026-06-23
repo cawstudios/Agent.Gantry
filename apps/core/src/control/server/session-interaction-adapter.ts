@@ -10,17 +10,23 @@ import {
 import { adaptSessionControlPort } from './session-control-port.js';
 import type { ControlRouteContext } from './handler-context.js';
 import { nowIso } from '../../shared/time/datetime.js';
+import { DEFAULT_JOB_RUNTIME_APP_ID } from '../../application/jobs/job-access.js';
 
 export type SessionEventSubscription = Awaited<
   ReturnType<SessionInteractionModule['subscribeEvents']>
 >;
 
-export function createSessionInteractionModule(): SessionInteractionModule {
+export function createSessionInteractionModule(
+  input: {
+    liveAdmissionAppId?: string | null;
+  } = {},
+): SessionInteractionModule {
   return new SessionInteractionModule({
     control: adaptSessionControlPort(getRuntimeControlRepository()),
     ops: getRuntimeRepositories(),
     repositories: getRuntimeStorage().repositories,
     runtimeEvents: getRuntimeEventExchange(),
+    liveAdmissionAppId: input.liveAdmissionAppId,
     now: () => nowIso() as never,
     createId: randomUUID,
     stableHash: (input) => createHash('sha256').update(input).digest('hex'),
@@ -43,7 +49,12 @@ export async function acceptMessageForControl(
   ctx: ControlRouteContext,
   input: Parameters<SessionInteractionModule['acceptMessage']>[0],
 ): Promise<Awaited<ReturnType<SessionInteractionModule['acceptMessage']>>> {
-  const accepted = await createSessionInteractionModule().acceptMessage(input);
-  ctx.app.queue.enqueueMessageCheck(accepted.enqueue.queueKey);
+  const accepted = await createSessionInteractionModule({
+    liveAdmissionAppId:
+      ctx.liveTurnsEnabled === false ? null : DEFAULT_JOB_RUNTIME_APP_ID,
+  }).acceptMessage(input);
+  if (!accepted.enqueue.durableAdmissionCreated) {
+    ctx.app.queue.enqueueMessageCheck(accepted.enqueue.queueKey);
+  }
   return accepted;
 }

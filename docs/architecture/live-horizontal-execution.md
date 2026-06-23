@@ -95,7 +95,10 @@ drains pending commands in `seq` order and applies each to the local runner
 (IPC continuation write, stdin close, stop). **Apply marking is fenced by the
 owner's run lease** — a stale owner cannot consume a command the recovered owner
 must deliver. The drain is a serialized chain, so a command appended right
-before a drain request is always observed.
+before a drain request is always observed. Postgres `LISTEN/NOTIFY` wakes the
+owning worker after a durable command append, but the notification is only a
+hint; the command row and run-lease fence remain the authority, and the owner
+tick still recovers missed wakeups.
 
 `apps/core/src/runtime/live-turn-authority.ts` is the per-worker adapter that
 owns admission, the local runner-hook registry, the ownership tick (renew lease
@@ -108,12 +111,11 @@ Live execution is distributed: durable live-admission work claims, NEW
 live-turn admission, and owned-turn execution run on EVERY live-capable worker
 (`apps/core/src/app/bootstrap/live-execution.ts`
 `buildLiveAdmissionProcessor`/`startLiveExecutionServices`). There is no
-recovery lease gate on admission. When the live-turn repository exposes durable
-admission claims, workers process queue-scoped work items instead of scanning
-every route on `POLL_INTERVAL`; the old message poller is only a fallback for
-single-process/test embeddings without durable claims. Postgres `LISTEN/NOTIFY`
-wakes the durable admission loop with opaque work-item ids only; missed or
-coalesced notifications are recovered by claiming due durable rows. The durable
+recovery lease gate on admission. Live workers process queue-scoped durable work
+items instead of scanning every route. Production live roles require durable
+admission claims; there is no route-wide message scanner fallback. Postgres
+`LISTEN/NOTIFY` wakes the durable admission loop with opaque work-item ids only;
+missed or coalesced notifications are recovered by claiming due durable rows. The durable
 one-active-turn-per-scope claim (`uq_live_turns_active_scope`) is the
 serialization point: when two workers race the same scope, the loser routes its
 message to the owning turn's command inbox instead of starting a second run.
@@ -127,16 +129,17 @@ no non-terminal orphan run survives a lost race.
 
 Per-worker capacity: each live worker bounds concurrency with its own slot key
 `live:messages:<workerInstanceId>` (capacity `runtime.queue.max_message_runs`).
-A worker at capacity returns `no_capacity` and leaves the message re-pollable;
-another worker with free capacity claims the same scope next tick.
+A worker at capacity returns `no_capacity` and leaves the durable admission row
+due for a later claim; another worker with free capacity can claim the same
+scope after the next wakeup/backstop pass.
 
 The singleton advisory lease `runtime:live-recovery-coordinator:default`
 (`apps/core/src/app/bootstrap/live-recovery-coordinator.ts`) elects ONLY the recovery
 coordinator. It gates startup pending-message recovery and the periodic recovery
 sweep — nothing else.
 
-- **Standby:** a worker that loses the coordinator-lease race still polls,
-  admits, and executes live turns. It retries acquisition with bounded jittered
+- **Standby:** a worker that loses the coordinator-lease race still admits and
+  executes live turns. It retries acquisition with bounded jittered
   backoff (no throw, no crash loop); it just does not run the recovery sweep.
 - **Takeover:** when the holder drains it releases the lease early; a standby
   acquires it and starts the recovery coordinator (`startLiveExecutionServices`
@@ -145,7 +148,7 @@ sweep — nothing else.
   coordinator under a strictly higher fencing version; if the coordinator lacks
   slot capacity for a turn, that turn defers to the next sweep.
 - **Lease loss:** the holder stops only its recovery coordinator in-process and
-  re-enters standby acquisition. Its polling/admission keep running. Active turns
+  re-enters standby acquisition. Its live admission keeps running. Active turns
   are never torn down — they run under their fenced per-turn `run_leases` until
   they finish or the recovery sweep on the new coordinator reclaims them at a
   higher fencing version.

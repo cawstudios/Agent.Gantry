@@ -2,7 +2,6 @@ import {
   getTriggerPattern,
   MAX_MESSAGES_PER_PROMPT,
   MESSAGE_FETCH_PAGE_SIZE,
-  POLL_INTERVAL,
   TIMEZONE,
 } from '../config/index.js';
 import {
@@ -15,7 +14,10 @@ import {
   ProgressUpdateOptions,
   ConversationRoute,
 } from '../domain/types.js';
-import type { RuntimeMessageRepository } from '../domain/repositories/ops-repo.js';
+import type {
+  RuntimeConversationRouteRepository,
+  RuntimeMessageRepository,
+} from '../domain/repositories/ops-repo.js';
 import type { LiveAdmissionWorkItem } from '../domain/ports/live-turns.js';
 import { formatMessages } from '../messaging/router.js';
 import {
@@ -41,8 +43,6 @@ import { resolveNonSelfSenderIds } from './session-resume-runtime.js';
 
 export interface MessageLoopDeps {
   getConversationRoutes: () => Record<string, ConversationRoute>;
-  getLastTimestamp: () => string;
-  setLastTimestamp: (timestamp: string) => void;
   getOrRecoverCursor: (chatJid: string) => Promise<string> | string;
   setAgentCursor: (chatJid: string, timestamp: string) => void;
   saveState: () => Promise<void> | void;
@@ -77,7 +77,8 @@ export interface MessageLoopDeps {
     message: NewMessage;
     command: SessionCommand;
   }) => Promise<boolean> | boolean;
-  opsRepository?: RuntimeMessageRepository;
+  opsRepository?: RuntimeMessageRepository &
+    Partial<RuntimeConversationRouteRepository>;
 }
 
 export type MessageAdmissionProcessingResult =
@@ -87,11 +88,26 @@ export type MessageAdmissionProcessingResult =
 
 function resolveMessageRepository(
   deps: MessageLoopDeps,
-): RuntimeMessageRepository {
+): RuntimeMessageRepository & Partial<RuntimeConversationRouteRepository> {
   if (!deps.opsRepository) {
     throw new Error('Message loop requires a runtime message repository');
   }
   return deps.opsRepository;
+}
+
+async function resolveConversationRoute(
+  deps: MessageLoopDeps,
+  chatJid: string,
+): Promise<ConversationRoute | undefined> {
+  const conversationRoutes = deps.getConversationRoutes();
+  const route = conversationRoutes[chatJid];
+  if (route) return route;
+  const persistedRoute =
+    await deps.opsRepository?.getConversationRoute?.(chatJid);
+  if (persistedRoute) {
+    conversationRoutes[chatJid] = persistedRoute;
+  }
+  return persistedRoute;
 }
 
 function saveStateBestEffort(deps: MessageLoopDeps, chatJid: string): void {
@@ -119,9 +135,8 @@ async function processQueueMessages(
   },
 ): Promise<MessageAdmissionProcessingResult> {
   const opsRepository = resolveMessageRepository(deps);
-  const conversationRoutes = deps.getConversationRoutes();
   const { chatJid, threadId } = parseThreadQueueKey(queueJid);
-  const group = conversationRoutes[chatJid];
+  const group = await resolveConversationRoute(deps, chatJid);
   if (!group) return 'listener_degraded';
 
   if (!deps.hasChannel(chatJid)) {
@@ -295,97 +310,6 @@ export async function processLiveAdmissionWorkItem(
   const messages = replay.messages;
   if (messages.length === 0) return 'completed';
   return processQueueMessages(deps, item.queueJid, messages, replay);
-}
-
-export async function runMessagePollingTick(
-  deps: MessageLoopDeps,
-): Promise<void> {
-  try {
-    const opsRepository = resolveMessageRepository(deps);
-    const conversationRoutes = deps.getConversationRoutes();
-    const jids = Object.keys(conversationRoutes);
-    const lastTimestamp = deps.getLastTimestamp();
-    const { messages, newTimestamp } = await opsRepository.getNewMessages(
-      jids,
-      lastTimestamp,
-    );
-
-    if (newTimestamp !== lastTimestamp) {
-      deps.setLastTimestamp(newTimestamp);
-      if (messages.length > 0) {
-        await deps.saveState();
-      } else {
-        saveStateBestEffort(deps, '*');
-      }
-    }
-
-    if (messages.length > 0) {
-      logger.info({ count: messages.length }, 'New messages');
-
-      const messagesByGroup = new Map<string, NewMessage[]>();
-      for (const msg of messages) {
-        const queueJid = makeThreadQueueKey(msg.chat_jid, msg.thread_id);
-        const existing = messagesByGroup.get(queueJid);
-        if (existing) {
-          existing.push(msg);
-        } else {
-          messagesByGroup.set(queueJid, [msg]);
-        }
-      }
-
-      for (const [queueJid, groupMessages] of messagesByGroup) {
-        await processQueueMessages(deps, queueJid, groupMessages);
-      }
-    }
-  } catch (err) {
-    logger.error({ err }, 'Error in message loop');
-  }
-}
-
-export interface MessagePollingLoopHandle {
-  /** Stop the loop after the in-flight tick; cancels the pending poll delay. */
-  stop: (_options?: { drainDeadlineMs?: number }) => void;
-  /** Settles when the loop exits (only rejects on an unexpected crash). */
-  done: Promise<void>;
-}
-
-/**
- * Start the legacy route-wide live message polling loop. Production live
- * workers with durable live-admission claims use the queue-scoped admission work
- * loop instead; this poller remains for single-process/test embeddings and
- * fallback runtimes that do not expose durable admission claims. Role gating
- * happens in the bootstrap caller. The returned handle stops the loop for
- * graceful drain.
- */
-export function startMessagePollingLoop(
-  deps: MessageLoopDeps,
-): MessagePollingLoopHandle {
-  let stopped = false;
-  let cancelDelay: (() => void) | undefined;
-  const done = (async () => {
-    while (!stopped) {
-      await runMessagePollingTick(deps);
-      if (stopped) break;
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          cancelDelay = undefined;
-          resolve();
-        }, POLL_INTERVAL);
-        cancelDelay = () => {
-          cancelDelay = undefined;
-          clearTimeout(timer);
-          resolve();
-        };
-      });
-    }
-  })();
-  return {
-    stop: () => {
-      stopped = true;
-      cancelDelay?.();
-    },
-    done,
-  };
 }
 
 export async function recoverPendingMessages(

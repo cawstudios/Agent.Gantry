@@ -4,8 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   LIVE_ADMISSION_CHANNEL,
+  LIVE_TURN_COMMAND_CHANNEL,
   PostgresLiveAdmissionNotifier,
   PostgresLiveAdmissionWakeupSource,
+  PostgresLiveTurnCommandNotifier,
+  PostgresLiveTurnCommandWakeupSource,
 } from '@core/adapters/storage/postgres/live-admission-notify.postgres.js';
 
 describe('live admission Postgres wakeups', () => {
@@ -111,5 +114,49 @@ describe('live admission Postgres wakeups', () => {
     expect(client.release).toHaveBeenCalledWith(err);
 
     await source.close();
+  });
+
+  it('publishes a live-turn command wakeup without command payload data', async () => {
+    const query = vi.fn(async () => undefined);
+    const notifier = new PostgresLiveTurnCommandNotifier({ query } as any);
+
+    await notifier.notifyLiveTurnCommand({
+      liveTurnId: 'turn-1',
+      commandId: 'cmd-1',
+    });
+
+    expect(query).toHaveBeenCalledWith('SELECT pg_notify($1, $2)', [
+      LIVE_TURN_COMMAND_CHANNEL,
+      '',
+    ]);
+    expect(JSON.stringify(query.mock.calls)).not.toContain('cmd-1');
+    expect(JSON.stringify(query.mock.calls)).not.toContain('turn-1');
+  });
+
+  it('wakes live-turn command subscribers on LISTEN notification', async () => {
+    const client = Object.assign(new EventEmitter(), {
+      query: vi.fn(async () => undefined),
+      release: vi.fn(),
+    });
+    const source = new PostgresLiveTurnCommandWakeupSource({
+      connect: vi.fn(async () => client),
+    } as any);
+    const listener = vi.fn();
+
+    const unsubscribe = source.subscribe(listener);
+    await vi.waitFor(() =>
+      expect(client.query).toHaveBeenCalledWith(
+        `LISTEN ${LIVE_TURN_COMMAND_CHANNEL}`,
+      ),
+    );
+
+    client.emit('notification', { channel: LIVE_TURN_COMMAND_CHANNEL });
+    expect(listener).toHaveBeenCalledOnce();
+
+    unsubscribe();
+    await source.close();
+    expect(client.query).toHaveBeenCalledWith(
+      `UNLISTEN ${LIVE_TURN_COMMAND_CHANNEL}`,
+    );
   });
 });
