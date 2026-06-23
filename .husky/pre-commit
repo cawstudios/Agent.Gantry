@@ -6,4 +6,10 @@ if ! command -v npm >/dev/null 2>&1; then
   fi
 fi
 
+staged_files=$(git diff --cached --name-only --diff-filter=ACMR)
+
 npm run format:fix
+
+if [ -n "$staged_files" ]; then
+  printf '%s\n' "$staged_files" | xargs git add --
+fi

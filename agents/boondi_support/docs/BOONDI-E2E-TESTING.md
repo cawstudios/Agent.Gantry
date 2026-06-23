@@ -110,7 +110,7 @@ Set this to the real operator number only, for example `919654405340`. Fake
 numbers starting with `000` are inferred by the runtime and do not need to be
 listed in `.env`. Real customer numbers are processed inbound, but under
 dry-run they are persisted only unless they are explicitly configured test
-operator numbers. Fake `000*` numbers can attempt outbound under dry-run; the
+operator numbers. Fake `000`* numbers can attempt outbound under dry-run; the
 provider may reject them, but the reply is still persisted. Special fakes:
 `000000050` is the seeded "returning customer" persona; `000000901–906` are
 the isolation-suite pool.
@@ -169,6 +169,9 @@ lsof -ti tcp:4710 -sTCP:LISTEN >/dev/null 2>&1 \
 lsof -ti tcp:8081 -sTCP:LISTEN >/dev/null 2>&1 \
   && echo "8081 STILL HELD — stale shopify MCP?" \
   || echo "shopify MCP down, 8081 free" 
+lsof -ti tcp:8082 -sTCP:LISTEN >/dev/null 2>&1 \
+  && echo "8082 STILL HELD — stale crm MCP?" \
+  || echo "crm MCP down, 8082 free" 
 ```
 
 Kills core + boondi-crm + shopify (127.0.0.1) and force-frees :4710 and :8081
@@ -423,8 +426,8 @@ writes a digest row: `gantry.agent_session_digests` with
 
 **Don't wait for timers in tests** — drive it with slash commands. A command
 is just a normal signed webhook message whose text IS the command (e.g.
-`sendWebhook({ text: '/new', from: '000000905' })`), and it works **only from
-configured operator numbers or `000`* fake numbers** (the session-command
+`sendWebhook({ text: '/new', from: '000000905' })`), and it works *only from
+configured operator numbers or `000` fake numbers** (the session-command
 allowance).
 These are the commands the Boondi workflow uses:
 
@@ -573,7 +576,7 @@ restart core. Runner-side TS changes need `npm run build` unless
 
 1. **Preflight** (§3 one-liner): 4710/8081/8082/3000 up; confirm
   `GANTRY_OUTBOUND_DRYRUN=1` + operator list on the live core process (§2).
-2. **Pick a `000`* fake number** (e.g. from `000000901–906`; avoid
+2. *Pick a `000` fake number** (e.g. from `000000901–906`; avoid
   `000000050` unless testing the returning persona). Optionally reset it
    (§8) for a clean run — otherwise prior context is part of the scenario.
 3. **Send each customer turn** via the raw signed webhook request (§4); after

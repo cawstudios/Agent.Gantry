@@ -179,9 +179,8 @@ Anthropic API key** for UAT, not your personal Claude Code OAuth token (a client
 hammering a shared 5-hour window will see throttling and bad latency):
 
 ```bash
-node dist/cli/index.js credentials model set      # paste sk-ant-api... key
-node dist/cli/index.js model use-preset anthropic
-node dist/cli/index.js credentials model doctor   # verify
+node dist/cli/index.js credentials model set anthropic   # interactive: choose "API key" mode, paste sk-ant-api...
+node dist/cli/index.js credentials model status          # verify -> "anthropic: ready"
 ```
 
 ---
