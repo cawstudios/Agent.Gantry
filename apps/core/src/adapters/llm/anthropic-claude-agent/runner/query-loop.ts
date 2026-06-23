@@ -7,7 +7,6 @@ import {
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs';
 import { composeAgentCapabilities } from '../agent-capabilities.js';
 import {
   acceptSocketBindPayload,
