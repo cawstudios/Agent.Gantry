@@ -392,6 +392,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let activeGenerationHasOutput = false;
     let sentAnyTurnDoneProgress = false;
     let sentTurnDoneProgressGeneration: number | null = null;
+    let userVisibleTurnProgressReady: Promise<void> | null = null;
     const sendTurnDoneProgress = async (state: FinalProgressState) => {
       if (
         !activeGenerationHasOutput ||
@@ -414,7 +415,13 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         .catch((err) =>
           logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
         );
-      await sendRunningProgress();
+      const progressReady = sendRunningProgress().finally(() => {
+        if (userVisibleTurnProgressReady === progressReady) {
+          userVisibleTurnProgressReady = null;
+        }
+      });
+      userVisibleTurnProgressReady = progressReady;
+      await progressReady;
     };
     const sendWaitingForUserResponseProgress = async () => {
       if (!supportsProgress) return;
@@ -628,6 +635,8 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
           !activeGenerationHasOutput
         ) {
           await startUserVisibleTurn();
+        } else if (sentAnyTurnDoneProgress && !activeGenerationHasOutput) {
+          await userVisibleTurnProgressReady;
         }
         if (!typingActive) {
           await setTypingState(true);

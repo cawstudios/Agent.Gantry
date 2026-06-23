@@ -2652,6 +2652,75 @@ describe('createGroupProcessor', () => {
       await processGroupMessages('group1@g.us');
     });
 
+    it('waits for continuation-triggered follow-up progress before stream output', async () => {
+      let continuationHandler: (() => void) | undefined;
+      const followUpWorkingStarted = deferred();
+      const followUpWorkingSent = deferred();
+      let holdFollowUpWorking = false;
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+        sendProgressUpdate: vi.fn(async (_jid: string, text: string) => {
+          if (holdFollowUpWorking && text === '⏳ Working') {
+            followUpWorkingStarted.resolve();
+            await followUpWorkingSent.promise;
+          }
+        }),
+      });
+      const { deps } = setupHappyPath();
+      deps.channelRuntime = streamingChannel;
+      deps.queue = {
+        ...deps.queue,
+        registerContinuationHandler: vi.fn((_queueJid, handler) => {
+          continuationHandler = handler;
+          return () => {
+            if (continuationHandler === handler)
+              continuationHandler = undefined;
+          };
+        }),
+      };
+
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: ConversationRoute,
+          _input: unknown,
+          _onProc: unknown,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({ status: 'success', result: 'first turn' });
+          await onOutput?.({ status: 'success', result: null });
+          (
+            streamingChannel.sendStreamingChunk as ReturnType<typeof vi.fn>
+          ).mockClear();
+
+          holdFollowUpWorking = true;
+          continuationHandler?.();
+          await followUpWorkingStarted.promise;
+          const followUpOutput = onOutput?.({
+            status: 'success',
+            result: 'follow-up turn',
+          });
+          await Promise.resolve();
+          try {
+            expect(streamingChannel.sendStreamingChunk).not.toHaveBeenCalled();
+          } finally {
+            followUpWorkingSent.resolve();
+          }
+          await followUpOutput;
+          expect(streamingChannel.sendStreamingChunk).toHaveBeenCalledWith(
+            'group1@g.us',
+            'follow-up turn',
+            expect.objectContaining({ done: false }),
+          );
+
+          await onOutput?.({ status: 'success', result: null });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+    });
+
     it('keeps buffered follow-up work in one progress lifecycle', async () => {
       const streamingChannel = makeChannel({
         sendStreamingChunk: vi.fn().mockResolvedValue(true),
