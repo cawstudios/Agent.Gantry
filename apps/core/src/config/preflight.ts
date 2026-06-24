@@ -77,9 +77,7 @@ export async function validateRuntimePreflightWithStorage(
     return base;
   }
 
-  const storageReadiness = await inspectRuntimeStorageReadiness(runtimeHome, {
-    migrate: true,
-  });
+  const storageReadiness = await inspectRuntimeStorageReadiness(runtimeHome);
   if (storageReadiness.status === 'fail') {
     return {
       ok: false,

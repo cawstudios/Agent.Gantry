@@ -12,7 +12,6 @@ worker_ami_id = "ami-REPLACE_ME"
 
 # --- Secret REFERENCES (ARNs). Create the secret values first (see runbook). ---
 runtime_database_url_secret_arn = "arn:aws:secretsmanager:us-east-1:REPLACE_ME:secret:gantry/support/runtime-db-url-REPLACE"
-bootstrap_database_url_secret_arn = "arn:aws:secretsmanager:us-east-1:REPLACE_ME:secret:gantry/support/bootstrap-db-url-REPLACE"
 db_proxy_secret_arn             = "arn:aws:secretsmanager:us-east-1:REPLACE_ME:secret:gantry/support/db-proxy-runtime-role-REPLACE"
 
 secret_encryption_key_secret_arn        = "arn:aws:secretsmanager:us-east-1:REPLACE_ME:secret:gantry/support/secret-encryption-key-REPLACE"

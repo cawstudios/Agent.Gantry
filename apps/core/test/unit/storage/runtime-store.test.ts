@@ -1,16 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const originalSkipRuntimeMigrations =
-  process.env.GANTRY_SKIP_RUNTIME_MIGRATIONS;
-
-function restoreEnv() {
-  if (originalSkipRuntimeMigrations === undefined) {
-    delete process.env.GANTRY_SKIP_RUNTIME_MIGRATIONS;
-  } else {
-    process.env.GANTRY_SKIP_RUNTIME_MIGRATIONS = originalSkipRuntimeMigrations;
-  }
-}
-
 function makeStorageRuntime() {
   return {
     service: {
@@ -58,24 +47,11 @@ async function loadRuntimeStore() {
 
 describe('initializeRuntimeStorage', () => {
   afterEach(() => {
-    restoreEnv();
     vi.resetModules();
     vi.restoreAllMocks();
   });
 
-  it('runs migrations before checking readiness by default', async () => {
-    delete process.env.GANTRY_SKIP_RUNTIME_MIGRATIONS;
-    const { module, runtime } = await loadRuntimeStore();
-
-    await module.initializeRuntimeStorage();
-
-    expect(runtime.service.migrate).toHaveBeenCalledOnce();
-    expect(runtime.service.assertMigrationsCurrent).not.toHaveBeenCalled();
-    expect(runtime.service.healthCheck).toHaveBeenCalledOnce();
-  });
-
-  it('checks migration head when runtime boot migrations are skipped', async () => {
-    process.env.GANTRY_SKIP_RUNTIME_MIGRATIONS = '1';
+  it('checks migration head before checking readiness', async () => {
     const { module, runtime } = await loadRuntimeStore();
 
     await module.initializeRuntimeStorage();

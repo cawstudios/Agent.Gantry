@@ -62,12 +62,6 @@ variable "gantry_control_api_keys_json_secret_arn" {
   }
 }
 
-variable "bootstrap_database_url_secret_arn" {
-  description = "Optional Secrets Manager ARN of the first-boot database URL. Injected only into the control pool as GANTRY_BOOTSTRAP_DATABASE_URL so migrations can use a setup role without exposing that URL to live/job workers. Empty string makes control use GANTRY_DATABASE_URL for migrations."
-  type        = string
-  default     = ""
-}
-
 variable "additional_runtime_secret_refs" {
   description = "Extra runtime secrets to inject into workers as env vars: list of { env_name, secret_arn }. Use for channel/provider credentials and control API keys (e.g. { env_name = \"GANTRY_CONTROL_API_KEYS_JSON\", secret_arn = \"arn:...\" })."
   type = list(object({

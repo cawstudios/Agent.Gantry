@@ -1356,13 +1356,6 @@
     "maxViolations": 1
   },
   {
-    "file": "apps/core/src/adapters/storage/postgres/storage-service.ts",
-    "rule": "provider_specific_path",
-    "reason": "Storage service references the docker compose migrations folder path for local bootstrap; capped to this single provider-path token until the migrations source is provider-neutral.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 1
-  },
-  {
     "file": "apps/core/src/jobs/toolchain-bake-runner.ts",
     "rule": "direct_risky_execution",
     "reason": "Toolchain bake runner spawns the registry-pinned npm install child process directly for bake jobs; capped to this single call until bake execution moves through the sandbox adapter.",

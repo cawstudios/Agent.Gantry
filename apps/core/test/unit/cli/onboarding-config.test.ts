@@ -26,6 +26,14 @@ vi.mock('@core/cli/credentials.js', () => ({
   }),
 }));
 
+vi.mock('@core/postgres-migrate.js', () => ({
+  runPostgresMigrations: vi.fn(
+    async (input: { url: string; schema: string }) => {
+      events.push(`migrate:${input.schema}`);
+    },
+  ),
+}));
+
 vi.mock('@core/config/settings/runtime-settings.js', async (importOriginal) => {
   const actual =
     await importOriginal<
@@ -78,6 +86,7 @@ describe('persistOnboardingConfig', () => {
     });
 
     expect(events).toEqual([
+      'migrate:custom_schema',
       'write:custom_schema',
       'secret:TELEGRAM_BOT_TOKEN',
       'write:custom_schema',

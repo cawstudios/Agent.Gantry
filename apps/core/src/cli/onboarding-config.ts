@@ -19,6 +19,7 @@ import {
   type ModelPresetId,
 } from '../shared/model-catalog.js';
 import { gantryRuntimeSecretRef } from '../domain/ports/runtime-secret-provider.js';
+import { runPostgresMigrations } from '../postgres-migrate.js';
 import { storeRuntimeSecretInput } from './credentials.js';
 
 export interface OnboardingConfigInput {
@@ -96,6 +97,12 @@ export async function persistOnboardingConfig(
     throw new Error(
       `Selected model alias "${model.alias}" belongs to ${modelPresetId}, not ${preset}.`,
     );
+  }
+  if (input.postgresDatabaseUrl?.trim()) {
+    await runPostgresMigrations({
+      url: input.postgresDatabaseUrl.trim(),
+      schema: settings.storage.postgres.schema,
+    });
   }
   let previousSettingsForFinalWrite = previousSettings;
   const storesRuntimeSecrets = Boolean(

@@ -84,6 +84,10 @@ const fileArtifactStore = vi.hoisted(() => ({
     throw new Error('not used');
   },
 }));
+const strongEncryptionKey = Buffer.from(
+  '00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f',
+  'hex',
+).toString('base64');
 
 vi.mock('@core/cli/runtime-group-db.js', () => ({
   openRuntimeGroupDb: async () => ({
@@ -124,7 +128,11 @@ afterEach(() => {
   }
 });
 
-function mockRuntimeSecretStorage() {
+function mockRuntimeSecretStorage(runtimeHome: string) {
+  fs.writeFileSync(
+    path.join(runtimeHome, '.env'),
+    `SECRET_ENCRYPTION_KEY=${strongEncryptionKey}\n`,
+  );
   const storeRuntimeSecretInput = vi.fn(async () => undefined);
   vi.doMock('@core/cli/credentials.js', () => ({
     storeRuntimeSecretInput,
@@ -512,7 +520,7 @@ describe('cli slack helpers', () => {
     vi.doMock('@core/cli/slack-connect-chat-picker.js', () => ({
       chooseSlackChatForConnect: vi.fn(async () => ({ type: 'cancel' })),
     }));
-    mockRuntimeSecretStorage();
+    mockRuntimeSecretStorage(runtimeHome);
 
     const { runSlackConnectCommand } = await import('@core/cli/slack.js');
     const code = await runSlackConnectCommand(runtimeHome);
@@ -593,7 +601,7 @@ describe('cli slack helpers', () => {
         chatJid: 'sl:C0123456789',
       })),
     }));
-    const storeRuntimeSecretInput = mockRuntimeSecretStorage();
+    const storeRuntimeSecretInput = mockRuntimeSecretStorage(runtimeHome);
 
     const { runSlackConnectCommand } = await import('@core/cli/slack.js');
     const code = await runSlackConnectCommand(runtimeHome);

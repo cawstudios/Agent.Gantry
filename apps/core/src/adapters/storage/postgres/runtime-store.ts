@@ -59,17 +59,7 @@ export async function initializeRuntimeStorage(
 ): Promise<StorageRuntime> {
   const nextRuntime = createStorageRuntime(undefined, options);
   try {
-    const skipRuntimeMigrations =
-      process.env.GANTRY_SKIP_RUNTIME_MIGRATIONS?.trim() === '1';
-    if (skipRuntimeMigrations) {
-      logger.info(
-        { env: 'GANTRY_SKIP_RUNTIME_MIGRATIONS' },
-        'runtime storage migration skipped',
-      );
-      await nextRuntime.service.assertMigrationsCurrent();
-    } else {
-      await nextRuntime.service.migrate();
-    }
+    await nextRuntime.service.assertMigrationsCurrent();
     const capabilities = await nextRuntime.service.healthCheck();
     const failure = evaluatePostgresStorageCapabilities(capabilities);
     if (failure) {

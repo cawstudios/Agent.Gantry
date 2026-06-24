@@ -3,7 +3,10 @@ import os from 'os';
 import { spawn } from 'child_process';
 import path from 'path';
 
-import { getRuntimeEntryPath } from './package-paths.js';
+import {
+  getPostgresMigrateEntryPath,
+  getRuntimeEntryPath,
+} from './package-paths.js';
 import { detectPlatform, hasSystemdUser, tryExec } from './platform.js';
 import { buildServicePath } from '../../platform/service-path.js';
 import {
@@ -41,6 +44,7 @@ function resolveServiceKind(): ServiceKind {
 
 interface FallbackServiceMetadata {
   runtimeEntry: string;
+  migratorEntry: string;
 }
 
 function serviceMetaPath(runtimeHome: string): string {
@@ -50,9 +54,10 @@ function serviceMetaPath(runtimeHome: string): string {
 function writeFallbackServiceMetadata(
   runtimeHome: string,
   runtimeEntry: string,
+  migratorEntry: string,
 ): void {
   const metadata = JSON.stringify(
-    { runtimeEntry } satisfies FallbackServiceMetadata,
+    { runtimeEntry, migratorEntry } satisfies FallbackServiceMetadata,
     null,
     2,
   );
@@ -68,9 +73,39 @@ function readFallbackServiceMetadata(
     if (typeof parsed.runtimeEntry !== 'string') return null;
     const runtimeEntry = path.resolve(parsed.runtimeEntry);
     if (!fs.existsSync(runtimeEntry)) return null;
-    return { runtimeEntry };
+    const migratorEntry =
+      typeof (parsed as { migratorEntry?: unknown }).migratorEntry === 'string'
+        ? path.resolve((parsed as { migratorEntry: string }).migratorEntry)
+        : '';
+    if (!migratorEntry || !fs.existsSync(migratorEntry)) return null;
+    return { runtimeEntry, migratorEntry };
   } catch {
     return null;
+  }
+}
+
+function serviceEnv(runtimeHome: string): NodeJS.ProcessEnv {
+  return {
+    GANTRY_HOME: runtimeHome,
+    HOME: os.homedir(),
+    PATH: buildServicePath(os.homedir()),
+    ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+    ...(process.env.TEMP ? { TEMP: process.env.TEMP } : {}),
+    ...(process.env.TMP ? { TMP: process.env.TMP } : {}),
+    ...(process.env.TZ ? { TZ: process.env.TZ } : {}),
+    ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
+    ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
+  };
+}
+
+function runServiceMigration(runtimeHome: string, migratorEntry: string): void {
+  const result = tryExec(process.execPath, [migratorEntry], {
+    env: serviceEnv(runtimeHome),
+  });
+  if (!result.ok) {
+    throw new Error(
+      result.stderr || result.stdout || 'postgres migration failed',
+    );
   }
 }
 
@@ -197,7 +232,11 @@ function systemdPathValue(value: string, label: string): string {
   return value.replace(/%/g, '%%');
 }
 
-function writeSystemdUnit(runtimeHome: string, runtimeEntry: string): string {
+function writeSystemdUnit(
+  runtimeHome: string,
+  runtimeEntry: string,
+  migratorEntry: string,
+): string {
   const unitDir = path.join(os.homedir(), '.config', 'systemd', 'user');
   const unitPath = path.join(unitDir, 'gantry.service');
   fs.mkdirSync(unitDir, { recursive: true });
@@ -211,6 +250,7 @@ Type=simple
 Environment=${systemdQuote(`GANTRY_HOME=${runtimeHome}`, 'GANTRY_HOME')}
 Environment=${systemdQuote(`HOME=${os.homedir()}`, 'HOME')}
 Environment=${systemdQuote(`PATH=${servicePath}`, 'PATH')}
+ExecStartPre=${systemdQuote(process.execPath, 'node executable')} ${systemdQuote(migratorEntry, 'migration entry')}
 ExecStart=${systemdQuote(process.execPath, 'node executable')} ${systemdQuote(runtimeEntry, 'runtime entry')}
 WorkingDirectory=${systemdPathValue(runtimeHome, 'runtime home')}
 Restart=always
@@ -225,7 +265,11 @@ WantedBy=default.target
   return unitPath;
 }
 
-function writeNohupScript(runtimeHome: string, runtimeEntry: string): string {
+function writeNohupScript(
+  runtimeHome: string,
+  runtimeEntry: string,
+  migratorEntry: string,
+): string {
   const scriptPath = path.join(runtimeHome, 'start-gantry.sh');
   const pidPath = fallbackPidPath(runtimeHome);
   const script = `#!/bin/sh
@@ -238,6 +282,7 @@ if [ -f ${JSON.stringify(pidPath)} ]; then
     sleep 1
   fi
 fi
+GANTRY_HOME=${JSON.stringify(runtimeHome)} ${JSON.stringify(process.execPath)} ${JSON.stringify(migratorEntry)}
 GANTRY_HOME=${JSON.stringify(runtimeHome)} nohup ${JSON.stringify(process.execPath)} ${JSON.stringify(runtimeEntry)} \\
   >> ${JSON.stringify(runtimeLogPath(runtimeHome))} \\
   2>> ${JSON.stringify(runtimeErrorLogPath(runtimeHome))} &
@@ -254,13 +299,14 @@ export function installService(
   ensureRuntimeLayout(runtimeHome);
   ensureRuntimeSettings(runtimeHome);
   const runtimeEntry = getRuntimeEntryPath(importMetaUrl);
+  const migratorEntry = getPostgresMigrateEntryPath(importMetaUrl);
   const kind = resolveServiceKind();
 
   try {
-    writeFallbackServiceMetadata(runtimeHome, runtimeEntry);
+    writeFallbackServiceMetadata(runtimeHome, runtimeEntry, migratorEntry);
 
     if (kind === 'launchd') {
-      writeLaunchdPlist(runtimeHome, runtimeEntry);
+      writeLaunchdPlist(runtimeHome, runtimeEntry, migratorEntry);
       return {
         ok: true,
         kind,
@@ -269,7 +315,11 @@ export function installService(
     }
 
     if (kind === 'systemd-user') {
-      const unitPath = writeSystemdUnit(runtimeHome, runtimeEntry);
+      const unitPath = writeSystemdUnit(
+        runtimeHome,
+        runtimeEntry,
+        migratorEntry,
+      );
       const reload = tryExec('systemctl', ['--user', 'daemon-reload']);
       if (!reload.ok) {
         throw new Error(
@@ -290,7 +340,11 @@ export function installService(
     }
 
     if (kind === 'nohup') {
-      const scriptPath = writeNohupScript(runtimeHome, runtimeEntry);
+      const scriptPath = writeNohupScript(
+        runtimeHome,
+        runtimeEntry,
+        migratorEntry,
+      );
       return {
         ok: true,
         kind,
@@ -385,6 +439,7 @@ export function startService(runtimeHome: string): ServiceOutcome {
       };
     }
     clearFallbackPid(runtimeHome);
+    runServiceMigration(runtimeHome, metadata.migratorEntry);
 
     let stdoutFd: number | null = null;
     let stderrFd: number | null = null;
@@ -396,17 +451,7 @@ export function startService(runtimeHome: string): ServiceOutcome {
         detached: true,
         stdio: ['ignore', stdoutFd, stderrFd],
         windowsHide: true,
-        env: {
-          GANTRY_HOME: runtimeHome,
-          HOME: os.homedir(),
-          PATH: buildServicePath(os.homedir()),
-          ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
-          ...(process.env.TEMP ? { TEMP: process.env.TEMP } : {}),
-          ...(process.env.TMP ? { TMP: process.env.TMP } : {}),
-          ...(process.env.TZ ? { TZ: process.env.TZ } : {}),
-          ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
-          ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
-        },
+        env: serviceEnv(runtimeHome),
       });
       if (!child.pid) {
         throw new Error('failed to spawn background process');

@@ -28,10 +28,9 @@
 #   docker compose -f ops/docker/docker-compose.fleet.yml up --build \
 #     --scale live-worker=3 --scale job-worker=2
 #
-# The settings-seed one-shot runs the required first migration/import. Control
-# also runs the entrypoint migration pass as an idempotent no-op; workers skip
-# the explicit pass. The entrypoint advisory lock makes concurrent migration
-# safe regardless.
+# Every role runs the same entrypoint migration pass before runtime starts. The
+# settings-seed one-shot runs it first, then appends revision 1; later role
+# passes are idempotent no-ops protected by the same advisory lock.
 #
 # Only control publishes a host port (admin/API). Worker replicas take no host
 # port (they would collide under --scale) and are reachable on the internal
@@ -71,7 +70,7 @@ x-worker-base: &worker-base
     # settings key, seeded into desired state (see the seed step below), not an
     # env var. The process role is GANTRY_PROCESS_ROLE, set per service below.
     GANTRY_SECURITY_POSTURE: production
-    # Local rehearsal uses one DB role for runtime and bootstrap migrations.
+    # Local rehearsal uses one DB role for runtime and migrations.
     GANTRY_DATABASE_URL: >-
       postgres://gantry_app:${GANTRY_DB_PASSWORD:-gantry_app_password}@postgres:5432/gantry
     GANTRY_DB_SCHEMA: gantry
@@ -96,10 +95,6 @@ x-worker-base: &worker-base
     AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-gantry_minio}
     AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-gantry_minio_password}
     AWS_REGION: ${GANTRY_ARTIFACT_S3_REGION:-us-east-1}
-    # One explicit migrator: control migrates (GANTRY_SKIP_MIGRATIONS=0); the
-    # worker roles skip migration and rely on the seeded schema from control.
-    # Readiness still fails closed if the schema was not migrated.
-    GANTRY_SKIP_MIGRATIONS: '1'
   healthcheck:
     # Readiness gates traffic: 503 while migrations/settings load or while draining.
     test:
@@ -197,7 +192,6 @@ services:
       - gantry-fleet-home:/var/lib/gantry
     environment:
       <<: *worker-env
-      GANTRY_SKIP_MIGRATIONS: '0'
     entrypoint:
       - /usr/local/bin/gantry-entrypoint
     command:
@@ -227,15 +221,14 @@ services:
   # Control plane: full admin/settings API. Channels connect outbound-only; it
   # runs no live or job execution and no bakes, and does not register as a worker
   # instance. This is the single service whose control port is published for
-  # admin/API access during rehearsal. It depends on settings-seed (which already
-  # migrated), so its explicit migration pass is an idempotent, lock-safe no-op.
+  # admin/API access during rehearsal. Its explicit migration pass is an
+  # idempotent, lock-safe no-op after settings-seed.
   # Not scaled (one control plane).
   control:
     <<: *worker-base
     environment:
       <<: *worker-env
       GANTRY_PROCESS_ROLE: control
-      GANTRY_SKIP_MIGRATIONS: '0'
     ports:
       - '127.0.0.1:8080:8080'
 

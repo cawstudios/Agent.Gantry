@@ -26,6 +26,10 @@ export function getRuntimeEntryPath(importMetaUrl: string): string {
   return path.resolve(getDistRoot(importMetaUrl), 'index.js');
 }
 
+export function getPostgresMigrateEntryPath(importMetaUrl: string): string {
+  return path.resolve(getDistRoot(importMetaUrl), 'postgres-migrate.js');
+}
+
 export function assertRuntimeEntryExists(importMetaUrl: string): void {
   const runtimeEntry = getRuntimeEntryPath(importMetaUrl);
   if (!fs.existsSync(runtimeEntry)) {

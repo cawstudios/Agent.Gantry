@@ -6,8 +6,9 @@
     <string>com.gantry</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{{NODE_PATH}}</string>
-        <string>{{RUNTIME_ENTRY}}</string>
+        <string>/bin/sh</string>
+        <string>-lc</string>
+        <string>{{NODE_PATH}} {{MIGRATOR_ENTRY}} &amp;&amp; exec {{NODE_PATH}} {{RUNTIME_ENTRY}}</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{{RUNTIME_HOME}}</string>

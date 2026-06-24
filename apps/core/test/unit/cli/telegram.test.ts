@@ -71,6 +71,10 @@ const fileArtifactStore = vi.hoisted(() => ({
     throw new Error('not used');
   },
 }));
+const strongEncryptionKey = Buffer.from(
+  '00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f',
+  'hex',
+).toString('base64');
 
 vi.mock('@core/cli/runtime-group-db.js', () => ({
   openRuntimeGroupDb: async () => ({
@@ -110,7 +114,11 @@ afterEach(() => {
   }
 });
 
-function mockRuntimeSecretStorage() {
+function mockRuntimeSecretStorage(runtimeHome: string) {
+  fs.writeFileSync(
+    path.join(runtimeHome, '.env'),
+    `SECRET_ENCRYPTION_KEY=${strongEncryptionKey}\n`,
+  );
   const storeRuntimeSecretInput = vi.fn(async () => undefined);
   vi.doMock('@core/cli/credentials.js', () => ({
     storeRuntimeSecretInput,
@@ -484,7 +492,7 @@ describe('cli telegram helpers', () => {
     const runtimeHome = makeRuntimeHome();
     const outro = vi.fn();
     const text = vi.fn(async () => '');
-    const storeRuntimeSecretInput = mockRuntimeSecretStorage();
+    const storeRuntimeSecretInput = mockRuntimeSecretStorage(runtimeHome);
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,
@@ -554,7 +562,7 @@ describe('cli telegram helpers', () => {
     vi.resetModules();
     const runtimeHome = makeRuntimeHome();
     const select = vi.fn(async () => 'skip');
-    const storeRuntimeSecretInput = mockRuntimeSecretStorage();
+    const storeRuntimeSecretInput = mockRuntimeSecretStorage(runtimeHome);
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,
@@ -628,7 +636,7 @@ describe('cli telegram helpers', () => {
     const runtimeHome = makeRuntimeHome();
     const select = vi.fn(async () => 'tg:-100123');
     const text = vi.fn(async () => '5759865942');
-    mockRuntimeSecretStorage();
+    mockRuntimeSecretStorage(runtimeHome);
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,
@@ -716,7 +724,7 @@ describe('cli telegram helpers', () => {
       .fn()
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('5759865942');
-    mockRuntimeSecretStorage();
+    mockRuntimeSecretStorage(runtimeHome);
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,

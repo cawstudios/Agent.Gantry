@@ -69,11 +69,10 @@ The `settings-seed` one-shot service runs first: it writes a fleet-marked
 container entrypoint. Every role `depend_on`s it completing, so they boot in
 fleet mode with desired state already seeded and `/readyz` can go green (a
 fleet worker with no revision stays red and logs the seed command). The
-`settings-seed` service runs the required first migration/import
-(`GANTRY_SKIP_MIGRATIONS=0`); `control` also runs the idempotent entrypoint
-migration pass, and workers skip migration because the schema is already seeded.
-The entrypoint advisory lock makes concurrent migration safe regardless, and
-readiness fails closed if a worker starts before the schema exists.
+`settings-seed`, `control`, and worker services all run the same explicit
+entrypoint migration pass before runtime starts. The advisory lock makes
+concurrent migration deterministic, and runtime readiness fails closed if a
+worker starts before the schema exists or is current.
 
 For ECS deployments that mount an empty EBS/EFS runtime home directly into the
 Gantry container instead of running the compose `settings-seed` one-shot, the
@@ -82,9 +81,9 @@ runtime image first-bootstraps a minimal workstation `settings.yaml` when
 command is `node dist/index.js`. The bootstrap writes to `GANTRY_HOME`
 (`/var/lib/gantry` by default), derives the Postgres schema from
 `GANTRY_SETTINGS_POSTGRES_SCHEMA`, the `schema=` query parameter in
-`GANTRY_DATABASE_URL`, `GANTRY_BOOTSTRAP_DATABASE_URL`, or `GANTRY_DB_SCHEMA`,
-falling back to `gantry`. The explicit migration pass uses the same schema
-precedence. Existing mounted `settings.yaml` files are left untouched. A fresh
+`GANTRY_DATABASE_URL`, or `GANTRY_DB_SCHEMA`, falling back to `gantry`. The
+explicit migration pass uses `GANTRY_DATABASE_URL`. Existing mounted
+`settings.yaml` files are left untouched. A fresh
 workstation bootstrap imports the generated file through the normal workstation
 settings path after migrations and mirrors the applied snapshot into
 `settings_revisions`.
@@ -221,18 +220,9 @@ RUNTIME_DBURL_ARN=$(aws secretsmanager create-secret \
   --name gantry/fleet/runtime-db-url --secret-string "postgres://PLACEHOLDER" \
   --query ARN --output text)
 
-# Optional first-boot database URL. Use this when the runtime role should not
-# have schema/extension migration privileges. The control entrypoint receives it
-# as GANTRY_BOOTSTRAP_DATABASE_URL, runs migrations, then unsets it before the
-# long-lived runtime starts.
-BOOTSTRAP_DBURL_ARN=$(aws secretsmanager create-secret \
-  --name gantry/fleet/bootstrap-db-url --secret-string "postgres://PLACEHOLDER" \
-  --query ARN --output text)
-
 echo "DB_MASTER_ARN=$DB_MASTER_ARN"
 echo "DB_PROXY_ARN=$DB_PROXY_ARN"
 echo "RUNTIME_DBURL_ARN=$RUNTIME_DBURL_ARN"
-echo "BOOTSTRAP_DBURL_ARN=$BOOTSTRAP_DBURL_ARN"
 ```
 
 Optionally create channel/provider credential secrets and pass them via
@@ -326,18 +316,12 @@ ecs_service_names       = { control = "...", live-worker = "...", job-worker = "
 
 ### B.5 Point the database URL secrets at the proxy
 
-Now that `database_proxy_endpoint` is known, set the real runtime URL value and,
-if used, the first-boot bootstrap URL:
+Now that `database_proxy_endpoint` is known, set the real runtime URL value:
 
 ```bash
 PROXY=$(terraform output -raw database_proxy_endpoint)
 aws secretsmanager put-secret-value --secret-id "$RUNTIME_DBURL_ARN" \
   --secret-string "postgres://gantry_app:<runtime-password>@$PROXY:5432/gantry?sslmode=require"
-
-if [ -n "${BOOTSTRAP_DBURL_ARN:-}" ]; then
-  aws secretsmanager put-secret-value --secret-id "$BOOTSTRAP_DBURL_ARN" \
-    --secret-string "postgres://gantry_admin:<admin-password>@$PROXY:5432/gantry?sslmode=require"
-fi
 ```
 
 Then refresh every pool so each picks up the value (instance refresh, see
@@ -368,9 +352,9 @@ done
 > Note: the runtime DB role (`gantry_app`) is created by the database bootstrap.
 > On RDS, run the role/grant bootstrap once from a bastion (the same SQL as
 > `ops/postgres/init/001-gantry-bootstrap.sh`, adapted for RDS — the master user
-> is `gantry_admin`, not `postgres`). The optional bootstrap database URL should
-> use the setup/admin role that can run schema and extension migrations; the
-> runtime URL should use the normal Gantry app role.
+> is `gantry_admin`, not `postgres`). The runtime database URL is also the
+> migration URL, so grant that role the schema and extension privileges required
+> by Gantry migrations.
 
 ### B.6 Seed settings (locked support agents)
 

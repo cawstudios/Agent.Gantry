@@ -50,8 +50,8 @@ RUN npm prune --omit=dev --ignore-scripts
 
 # ---------------------------------------------------------------------------
 # Stage 3: runtime — minimal, non-root, production-only.
-# Contains: production node_modules, dist/ (incl. migration SQL), the built
-# contracts/sdk workspace dist, the ops migrate runner, and the entrypoint.
+# Contains: production node_modules, dist/ (incl. migration SQL and migrator),
+# the built contracts/sdk workspace dist, and the entrypoint.
 # ---------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runtime
 
@@ -104,8 +104,7 @@ COPY --from=build /app/packages/contracts/package.json ./packages/contracts/pack
 COPY --from=build /app/packages/sdk/dist ./packages/sdk/dist
 COPY --from=build /app/packages/sdk/package.json ./packages/sdk/package.json
 
-# Ops scripts: race-safe migration runner + entrypoint.
-COPY ops/docker/migrate.mjs ./ops/docker/migrate.mjs
+# Ops scripts: fleet settings seed + entrypoint.
 COPY ops/docker/fleet-settings-seed.mjs ./ops/docker/fleet-settings-seed.mjs
 COPY ops/docker/entrypoint.sh /usr/local/bin/gantry-entrypoint
 RUN chmod +x /usr/local/bin/gantry-entrypoint

@@ -32,14 +32,8 @@ locals {
     var.additional_runtime_secret_refs,
   )
 
-  bootstrap_runtime_refs = var.bootstrap_database_url_secret_arn != "" ? [
-    { env_name = "GANTRY_BOOTSTRAP_DATABASE_URL", secret_arn = var.bootstrap_database_url_secret_arn },
-  ] : []
-  control_runtime_refs = concat(local.base_runtime_refs, local.bootstrap_runtime_refs)
-
   # Distinct secret ARNs the worker role must be allowed to read.
-  worker_secret_arns    = distinct([for r in local.base_runtime_refs : r.secret_arn])
-  bootstrap_secret_arns = distinct([for r in local.bootstrap_runtime_refs : r.secret_arn])
+  worker_secret_arns = distinct([for r in local.base_runtime_refs : r.secret_arn])
 }
 
 module "network" {
@@ -62,14 +56,6 @@ module "secrets" {
   tags                = var.tags
 }
 
-module "bootstrap_secrets" {
-  source              = "../../modules/secrets"
-  name_prefix         = "${local.name_prefix}-bootstrap"
-  runtime_secret_arns = local.bootstrap_secret_arns
-  kms_key_arns        = var.secret_kms_key_arns
-  tags                = var.tags
-}
-
 module "control" {
   source            = "../../modules/control"
   name_prefix       = local.name_prefix
@@ -87,10 +73,7 @@ locals {
     module.storage.worker_browser_rw_policy_arn,
     module.secrets.runtime_secret_read_policy_arn,
   ])
-  control_instance_policy_arns = compact(concat(
-    local.worker_instance_policy_arns,
-    [module.bootstrap_secrets.runtime_secret_read_policy_arn],
-  ))
+  control_instance_policy_arns = local.worker_instance_policy_arns
 }
 
 # Control plane pool. Takes /v1/* from the ALB (control target group). Runs no
@@ -116,8 +99,7 @@ module "control_worker" {
   target_group_arns       = [module.control.control_target_group_arn]
   alb_security_group_id   = module.control.alb_security_group_id
   instance_policy_arns    = local.control_instance_policy_arns
-  runtime_secret_env_refs = local.control_runtime_refs
-  skip_migrations         = false
+  runtime_secret_env_refs = local.base_runtime_refs
   artifact_bucket_name    = module.storage.bucket_name
   tags                    = var.tags
 }
@@ -147,7 +129,6 @@ module "live_worker" {
   alb_security_group_id   = module.control.alb_security_group_id
   instance_policy_arns    = local.worker_instance_policy_arns
   runtime_secret_env_refs = local.base_runtime_refs
-  skip_migrations         = true
   artifact_bucket_name    = module.storage.bucket_name
   tags                    = var.tags
 }
@@ -178,7 +159,6 @@ module "job_worker" {
     [module.storage.bake_rw_policy_arn],
   )
   runtime_secret_env_refs = local.base_runtime_refs
-  skip_migrations         = true
   artifact_bucket_name    = module.storage.bucket_name
   tags                    = var.tags
 }

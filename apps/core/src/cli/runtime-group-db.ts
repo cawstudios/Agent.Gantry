@@ -107,12 +107,9 @@ function createProviderRuntimeGroupDb(runtime: StorageRuntime): RuntimeGroupDb {
 
 export async function openRuntimeGroupDb(
   runtimeHome: string,
-  options: { migrate?: boolean } = {},
 ): Promise<RuntimeGroupDb> {
   const config = resolveStorageConfig(runtimeHome);
   const runtime = createStorageRuntime(config);
-  if (options.migrate !== false) {
-    await runtime.service.migrate();
-  }
+  await runtime.service.assertMigrationsCurrent();
   return createProviderRuntimeGroupDb(runtime);
 }

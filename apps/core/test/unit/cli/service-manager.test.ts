@@ -50,10 +50,12 @@ async function loadServiceManagerWithMocks(
 
 function writeFallbackMetadata(runtimeHome: string): string {
   const runtimeEntry = path.join(runtimeHome, 'runtime-entry.js');
+  const migratorEntry = path.join(runtimeHome, 'postgres-migrate.js');
   fs.writeFileSync(runtimeEntry, 'console.log("ready");\n', 'utf-8');
+  fs.writeFileSync(migratorEntry, 'console.log("migrated");\n', 'utf-8');
   fs.writeFileSync(
     path.join(runtimeHome, 'service-meta.json'),
-    JSON.stringify({ runtimeEntry }, null, 2),
+    JSON.stringify({ runtimeEntry, migratorEntry }, null, 2),
     'utf-8',
   );
   return runtimeEntry;
@@ -97,7 +99,8 @@ describe('service manager background start', () => {
     expect(installedAt).toBeTruthy();
     expect(fs.existsSync(installedAt!)).toBe(true);
     const unit = fs.readFileSync(installedAt!, 'utf-8');
-    expect(unit).not.toContain('ExecStartPre=');
+    expect(unit).toContain('ExecStartPre=');
+    expect(unit).toContain('postgres-migrate.js');
     expect(unit).not.toContain('--local-services-start');
     expect(unit).toContain('Environment="GANTRY_HOME=');
     expect(unit).toContain(`WorkingDirectory=${runtimeHome}`);
@@ -151,7 +154,7 @@ describe('service manager background start', () => {
     ]);
   });
 
-  it('installs nohup service script without local services prestart on linux without systemd', async () => {
+  it('installs nohup service script with migration before runtime on linux without systemd', async () => {
     const runtimeHome = createRuntimeHome();
     const mod = await loadServiceManagerWithMocks(vi.fn(), undefined, {
       platform: 'linux',
@@ -168,6 +171,10 @@ describe('service manager background start', () => {
       'utf-8',
     );
     expect(script).not.toContain('--local-services-start');
+    expect(script).toContain('postgres-migrate.js');
+    expect(script.indexOf('postgres-migrate.js')).toBeLessThan(
+      script.indexOf('nohup'),
+    );
     expect(script).toContain('nohup');
   });
 
@@ -195,6 +202,7 @@ describe('service manager background start', () => {
     const plist = fs.readFileSync(plistPath, 'utf-8');
     expect(plist).toContain('<key>GANTRY_HOME</key>');
     expect(plist).toContain(`<string>${runtimeHome}</string>`);
+    expect(plist).toContain('postgres-migrate.js');
     expect(plist).not.toContain('--local-services-start');
     expect(plist).not.toContain('&quot;');
     expect(plist).not.toContain('<key>AGENT_ROOT</key>');
@@ -339,6 +347,29 @@ describe('service manager background start', () => {
     expect(unrefSpy).not.toHaveBeenCalled();
   });
 
+  it('does not spawn the fallback runtime when migration fails', async () => {
+    const runtimeHome = createRuntimeHome();
+    writeFallbackMetadata(runtimeHome);
+
+    const spawnMock = vi.fn();
+    const tryExecMock = vi.fn(() => ({
+      ok: false,
+      stdout: '',
+      stderr: 'migration failed',
+    }));
+    const { startService } = await loadServiceManagerWithMocks(
+      spawnMock,
+      tryExecMock,
+      { runtimeHome },
+    );
+
+    const outcome = startService(runtimeHome);
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.message).toContain('migration failed');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('writes pid before unref on successful start', async () => {
     const runtimeHome = createRuntimeHome();
     writeFallbackMetadata(runtimeHome);
@@ -348,9 +379,14 @@ describe('service manager background start', () => {
       pid: 5555,
       unref: unrefSpy,
     });
+    const tryExecMock = vi.fn().mockReturnValue({
+      ok: true,
+      stdout: '',
+      stderr: '',
+    });
     const { startService } = await loadServiceManagerWithMocks(
       spawnMock,
-      undefined,
+      tryExecMock,
       { runtimeHome },
     );
 
@@ -359,6 +395,16 @@ describe('service manager background start', () => {
 
     expect(outcome.ok).toBe(true);
     expect(unrefSpy).toHaveBeenCalledTimes(1);
+    expect(tryExecMock).toHaveBeenCalledWith(
+      process.execPath,
+      [expect.stringContaining('postgres-migrate.js')],
+      expect.objectContaining({
+        env: expect.objectContaining({ GANTRY_HOME: runtimeHome }),
+      }),
+    );
+    expect(tryExecMock.mock.invocationCallOrder[0]).toBeLessThan(
+      spawnMock.mock.invocationCallOrder[0],
+    );
 
     const pidCallIndex = writeSpy.mock.calls.findIndex(
       (call) => path.basename(String(call[0])) === 'gantry.pid',

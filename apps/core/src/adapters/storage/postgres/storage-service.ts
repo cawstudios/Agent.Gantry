@@ -33,8 +33,7 @@ const PGCRYPTO_EXTENSION_LOCK_NAMESPACE = 1_340_193_180;
 const PGCRYPTO_EXTENSION_LOCK_KEY = 1;
 const RUNTIME_POSTGRES_POOL_MAX = 20;
 // Cross-instance "run gantry migrations" lock. One identity serializes every
-// migrator using PostgresStorageService.migrate(), including container
-// entrypoint passes (ops/docker/migrate.mjs) and non-container runtime boots.
+// explicit migrator using PostgresStorageService.migrate().
 export const RUNTIME_MIGRATION_LOCK_NAMESPACE = 1_340_193_180;
 export const RUNTIME_MIGRATION_LOCK_KEY = 2;
 
@@ -59,6 +58,7 @@ export interface StorageCapabilities {
 
 export interface StorageService {
   migrate(): Promise<void>;
+  assertMigrationsCurrent(): Promise<void>;
   healthCheck(): Promise<StorageCapabilities>;
   close(): Promise<void>;
 }

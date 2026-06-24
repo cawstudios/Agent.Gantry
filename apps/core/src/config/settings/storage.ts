@@ -139,16 +139,5 @@ function resolveBootstrapSettingsSchema(): string {
       // Let the normal Postgres URL validation report malformed URLs.
     }
   }
-  const bootstrapUrl = runtimeEnvValueDynamic(
-    'GANTRY_BOOTSTRAP_DATABASE_URL',
-  ).trim();
-  if (bootstrapUrl) {
-    try {
-      const schema = new URL(bootstrapUrl).searchParams.get('schema')?.trim();
-      if (schema) return schema;
-    } catch {
-      // Let the normal Postgres URL validation report malformed URLs.
-    }
-  }
   return runtimeEnvValueDynamic('GANTRY_DB_SCHEMA').trim() || 'gantry';
 }

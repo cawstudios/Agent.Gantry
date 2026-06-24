@@ -156,6 +156,8 @@ async function runStatusCommand(
 
 async function runStartCommand(runtimeHome: string): Promise<number> {
   process.env.GANTRY_HOME = runtimeHome;
+  const { runPostgresMigrations } = await import('../postgres-migrate.js');
+  await runPostgresMigrations();
   const runtime = await import('../app/index.js');
   await runtime.startGantryRuntime();
   return 0;
@@ -366,6 +368,13 @@ async function runSmartEntrypoint(runtimeHome: string): Promise<number> {
     return runSetupCommand(runtimeHome);
   }
 
+  if (state?.status === 'in_progress') {
+    return runSetupCommand(runtimeHome);
+  }
+
+  const { runPostgresMigrations } = await import('../postgres-migrate.js');
+  await runPostgresMigrations();
+
   const { validateRuntimePreflightWithStorage } =
     await import('../config/preflight.js');
   const validation = await validateRuntimePreflightWithStorage(runtimeHome);
@@ -375,10 +384,6 @@ async function runSmartEntrypoint(runtimeHome: string): Promise<number> {
     validation.ok &&
     hasRuntimeConfig(runtimeHome) &&
     (await hasProcessableGroupForConfiguredChannel(runtimeHome));
-
-  if (state?.status === 'in_progress') {
-    return runSetupCommand(runtimeHome);
-  }
 
   if (!isReady) {
     return runSetupCommand(runtimeHome);

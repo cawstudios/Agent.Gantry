@@ -557,6 +557,8 @@ External systems that should not hold a control API key use signed external ingr
 
 Gantry currently supports a single runtime mode: host execution.
 Use `npm run dev` for local development and `npm start` for production start.
+`npm start` runs `npm run db:migrate` before the runtime process starts; service
+and container entrypoints run the same explicit migrator.
 
 Gantry deploys three ways from one image — **workstation** (single machine),
 **fleet** (role-differentiated pools behind an ALB), and the **locked support

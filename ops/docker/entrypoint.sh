@@ -2,7 +2,7 @@
 # Gantry container entrypoint.
 #
 # 1. Run database migrations under a Postgres advisory lock (race-safe across a
-#    rolling deploy), unless GANTRY_SKIP_MIGRATIONS=1.
+#    rolling deploy).
 # 2. exec the runtime as PID 1 so SIGTERM reaches it directly and graceful drain
 #    (control server: SIGTERM -> /readyz 503 -> drain -> exit) works correctly.
 #
@@ -41,18 +41,16 @@ if (explicit) {
   process.stdout.write(explicit);
   process.exit(0);
 }
-for (const name of ['GANTRY_DATABASE_URL', 'GANTRY_BOOTSTRAP_DATABASE_URL']) {
-  const url = process.env[name]?.trim() || '';
-  if (url) {
-    try {
-      const schema = new URL(url).searchParams.get('schema')?.trim();
-      if (schema) {
-        process.stdout.write(schema);
-        process.exit(0);
-      }
-    } catch {
-      // Fall through to env/default; migrate.mjs will report malformed URLs.
+const url = process.env.GANTRY_DATABASE_URL?.trim() || '';
+if (url) {
+  try {
+    const schema = new URL(url).searchParams.get('schema')?.trim();
+    if (schema) {
+      process.stdout.write(schema);
+      process.exit(0);
     }
+  } catch {
+    // Fall through to env/default; the migrator reports malformed URLs.
   }
 }
 process.stdout.write(process.env.GANTRY_DB_SCHEMA?.trim() || 'gantry');
@@ -194,33 +192,15 @@ bootstrap_settings_if_missing "$@"
 # ---------------------------------------------------------------------------
 # Migrations.
 #
-# Default: run explicit migrations before the runtime starts. The advisory lock
-# inside migrate() itself (storage-service) serializes every explicit migrator,
-# and migrate() is idempotent (drizzle tracks applied migrations), so N workers
-# booting at once is safe: the lock holder migrates, the rest block then find
-# nothing pending.
-#
-# GANTRY_SKIP_MIGRATIONS=1: skip both explicit and runtime boot migration. Use
-# this for worker roles where control or another one-shot migrator already
-# applied the schema. Readiness fails closed if required tables/extensions are
-# missing.
+# The advisory lock inside migrate() itself (storage-service) serializes every
+# explicit migrator, and migrate() is idempotent (drizzle tracks applied
+# migrations), so N workers booting at once is safe: the lock holder migrates,
+# the rest block then find nothing pending.
 # ---------------------------------------------------------------------------
-if [ "${GANTRY_SKIP_MIGRATIONS:-0}" = "1" ]; then
-  log "GANTRY_SKIP_MIGRATIONS=1 — skipping explicit migration step"
-  export GANTRY_SKIP_RUNTIME_MIGRATIONS="${GANTRY_SKIP_RUNTIME_MIGRATIONS:-1}"
-  unset GANTRY_BOOTSTRAP_DATABASE_URL
-else
-  if [ -n "${GANTRY_BOOTSTRAP_DATABASE_URL:-}" ]; then
-    log "running migrations (GANTRY_BOOTSTRAP_DATABASE_URL)"
-  else
-    log "running migrations (GANTRY_DATABASE_URL)"
-  fi
-  # Non-zero exit here aborts the container before the runtime starts.
-  node /app/ops/docker/migrate.mjs
-  export GANTRY_SKIP_RUNTIME_MIGRATIONS="${GANTRY_SKIP_RUNTIME_MIGRATIONS:-1}"
-  unset GANTRY_BOOTSTRAP_DATABASE_URL
-  log "migrations complete"
-fi
+log "running migrations (GANTRY_DATABASE_URL)"
+# Non-zero exit here aborts the container before the runtime starts.
+node /app/dist/postgres-migrate.js
+log "migrations complete"
 
 if [ "$BOOTSTRAPPED_SETTINGS_FILE" = "1" ] && [ "$BOOTSTRAPPED_SETTINGS_DEPLOYMENT_MODE" = "fleet" ]; then
   log "seeding initial fleet settings revision from bootstrap settings.yaml"

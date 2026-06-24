@@ -18,12 +18,6 @@ locals {
     ],
     var.additional_runtime_secret_refs,
   )
-  bootstrap_secret_refs = var.bootstrap_database_url_secret_arn != "" ? [
-    { env_name = "GANTRY_BOOTSTRAP_DATABASE_URL", secret_arn = var.bootstrap_database_url_secret_arn },
-  ] : []
-  bootstrap_secret_refs_by_role = {
-    (local.has_control ? "control" : "job-worker") = local.bootstrap_secret_refs
-  }
 }
 
 module "network" {
@@ -81,7 +75,6 @@ module "ecs" {
   control_port                    = var.control_port
   artifact_bucket_name            = module.storage.bucket_name
   runtime_secret_env_refs         = local.runtime_secret_refs
-  runtime_secret_env_refs_by_role = local.bootstrap_secret_refs_by_role
   secret_kms_key_arns             = var.secret_kms_key_arns
   task_policy_arns = [
     module.storage.worker_ro_policy_arn,

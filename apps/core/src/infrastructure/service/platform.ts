@@ -24,7 +24,7 @@ export function commandExists(command: string): boolean {
 export function tryExec(
   command: string,
   args: string[],
-  options: { input?: string } = {},
+  options: { input?: string; env?: NodeJS.ProcessEnv } = {},
 ): {
   ok: boolean;
   stdout: string;
@@ -32,6 +32,7 @@ export function tryExec(
 } {
   const result = spawnSync(command, args, {
     encoding: 'utf-8',
+    env: options.env,
     input: options.input,
     stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
   });

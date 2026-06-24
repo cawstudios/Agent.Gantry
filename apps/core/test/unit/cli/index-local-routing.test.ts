@@ -21,6 +21,7 @@ afterEach(() => {
   vi.doUnmock('@core/cli/provider.js');
   vi.doUnmock('@core/cli/local.js');
   vi.doUnmock('@core/app/index.js');
+  vi.doUnmock('@core/postgres-migrate.js');
   vi.doUnmock('@core/config/preflight.js');
   vi.doUnmock('@clack/prompts');
   for (const runtimeHome of runtimeHomes.splice(0)) {
@@ -136,10 +137,12 @@ describe('CLI local routing', () => {
       'agent:\n  name: broken\nagent:\n  name: duplicate\n',
     );
     const startGantryRuntime = vi.fn(async () => undefined);
+    const runPostgresMigrations = vi.fn(async () => undefined);
     const validateRuntimePreflightWithStorage = vi.fn(() => {
       throw new Error('CLI start should not preflight settings.yaml directly');
     });
     vi.doMock('@core/app/index.js', () => ({ startGantryRuntime }));
+    vi.doMock('@core/postgres-migrate.js', () => ({ runPostgresMigrations }));
     vi.doMock('@core/config/preflight.js', () => ({
       validateRuntimePreflightWithStorage,
       formatRuntimePreflightFailure: vi.fn(),
@@ -161,8 +164,56 @@ describe('CLI local routing', () => {
     const code = await main(['--runtime-home', runtimeHome, 'start']);
 
     expect(code).toBe(0);
+    expect(runPostgresMigrations).toHaveBeenCalledBefore(startGantryRuntime);
     expect(startGantryRuntime).toHaveBeenCalledWith();
     expect(validateRuntimePreflightWithStorage).not.toHaveBeenCalled();
+  });
+
+  it('runs migrations before smart CLI status checks', async () => {
+    const runtimeHome = makeRuntimeHome();
+    fs.writeFileSync(path.join(runtimeHome, 'settings.yaml'), 'agent: {}\n');
+    const runPostgresMigrations = vi.fn(async () => undefined);
+    const validateRuntimePreflightWithStorage = vi.fn(async () => ({
+      ok: true,
+    }));
+    const hasRuntimeConfig = vi.fn(() => true);
+    const hasProcessableGroupForConfiguredChannel = vi.fn(async () => true);
+    const collectRuntimeStatus = vi.fn(async () => ({ doctor: { ok: true } }));
+    const formatRuntimeStatus = vi.fn(() => 'ready');
+    const note = vi.fn();
+    vi.doMock('@core/postgres-migrate.js', () => ({ runPostgresMigrations }));
+    vi.doMock('@core/config/preflight.js', () => ({
+      validateRuntimePreflightWithStorage,
+    }));
+    vi.doMock('@core/cli/doctor.js', () => ({
+      hasRuntimeConfig,
+      hasProcessableGroupForConfiguredChannel,
+    }));
+    vi.doMock('@core/cli/status.js', () => ({
+      collectRuntimeStatus,
+      formatRuntimeStatus,
+    }));
+    vi.doMock('@clack/prompts', () => ({
+      isCancel: () => false,
+      note,
+      log: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), success: vi.fn() },
+      select: vi.fn(),
+      text: vi.fn(),
+      spinner: vi.fn(() => ({
+        start: vi.fn(),
+        stop: vi.fn(),
+        message: vi.fn(),
+      })),
+    }));
+
+    const { main } = await import('@core/cli/index.js');
+    const code = await main(['--runtime-home', runtimeHome]);
+
+    expect(code).toBe(0);
+    expect(runPostgresMigrations).toHaveBeenCalledBefore(
+      validateRuntimePreflightWithStorage,
+    );
+    expect(note).toHaveBeenCalledWith('ready', 'Status');
   });
 
   it('does not stop local Docker services from the Gantry CLI', async () => {

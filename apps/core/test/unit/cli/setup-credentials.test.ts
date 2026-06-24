@@ -41,6 +41,7 @@ async function loadCredentialsStep(
     createStorageRuntime: () => ({
       service: {
         migrate: vi.fn(async () => undefined),
+        assertMigrationsCurrent: vi.fn(async () => undefined),
         close: vi.fn(async () => undefined),
       },
       runtimeEventNotifier: { close: vi.fn(async () => undefined) },

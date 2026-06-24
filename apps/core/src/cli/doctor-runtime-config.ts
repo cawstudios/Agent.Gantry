@@ -22,10 +22,7 @@ export async function hasProcessableGroupForConfiguredChannelSettings(input: {
   runtimeHome: string;
   settings: RuntimeConfigSettings;
   env: Record<string, string>;
-  openRuntimeGroupDb: (
-    runtimeHome: string,
-    options: { migrate: false },
-  ) => Promise<{
+  openRuntimeGroupDb: (runtimeHome: string) => Promise<{
     countConversationRoutesByJidPrefix: (prefix: string) => Promise<number>;
     close: () => Promise<void>;
   }>;
@@ -44,9 +41,7 @@ export async function hasProcessableGroupForConfiguredChannelSettings(input: {
 
     let db: Awaited<ReturnType<typeof input.openRuntimeGroupDb>> | undefined;
     try {
-      db = await input.openRuntimeGroupDb(input.runtimeHome, {
-        migrate: false,
-      });
+      db = await input.openRuntimeGroupDb(input.runtimeHome);
       const count = await db.countConversationRoutesByJidPrefix(
         provider.jidPrefix,
       );

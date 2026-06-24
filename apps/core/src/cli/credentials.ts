@@ -86,7 +86,7 @@ async function withCredentialServices<T>(
     await import('../adapters/storage/postgres/factory.js');
   const storage = createStorageRuntime();
   try {
-    await storage.service.migrate();
+    await storage.service.assertMigrationsCurrent();
     return await fn({
       model: new ModelCredentialService(
         storage.repositories.modelCredentials,

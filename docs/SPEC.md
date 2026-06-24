@@ -408,6 +408,7 @@ Or edit the default in `apps/core/src/config/index.ts`. This changes:
 Files with `{{PLACEHOLDER}}` values need to be configured:
 
 - `{{RUNTIME_ENTRY}}` - Absolute path to the compiled Gantry runtime entry
+- `{{MIGRATOR_ENTRY}}` - Absolute path to the compiled Postgres migrator entry
 - `{{RUNTIME_HOME}}` - Runtime home, normally `~/gantry`
 - `{{NODE_PATH}}` - Path to node binary (detected via `which node`)
 - `{{HOME}}` - User's home directory
@@ -927,7 +928,7 @@ environment to find the runtime home and executable path.
     <array>
         <string>/bin/sh</string>
         <string>-lc</string>
-        <string>{{NODE_PATH}} {{RUNTIME_ENTRY}}</string>
+        <string>{{NODE_PATH}} {{MIGRATOR_ENTRY}} &amp;&amp; exec {{NODE_PATH}} {{RUNTIME_ENTRY}}</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{{RUNTIME_HOME}}</string>

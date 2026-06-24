@@ -60,12 +60,6 @@ variable "gantry_control_api_keys_json_secret_arn" {
   type        = string
 }
 
-variable "bootstrap_database_url_secret_arn" {
-  description = "Optional Secrets Manager ARN of the first-boot database URL. Injected only into the control ECS service as GANTRY_BOOTSTRAP_DATABASE_URL. Empty string makes control use GANTRY_DATABASE_URL for migrations."
-  type        = string
-  default     = ""
-}
-
 variable "additional_runtime_secret_refs" {
   description = "Extra runtime secrets to inject into ECS tasks as env vars: list of { env_name, secret_arn }."
   type = list(object({

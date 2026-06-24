@@ -36,11 +36,13 @@ export function launchdPlistPath(): string {
 export function writeLaunchdPlist(
   runtimeHome: string,
   runtimeEntry: string,
+  migratorEntry: string,
 ): void {
   const target = launchdPlistPath();
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const servicePath = buildServicePath(os.homedir());
-  const command = `${shellQuote(process.execPath)} ${shellQuote(runtimeEntry)}`;
+  const node = shellQuote(process.execPath);
+  const command = `${node} ${shellQuote(migratorEntry)} && exec ${node} ${shellQuote(runtimeEntry)}`;
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

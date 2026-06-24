@@ -27,11 +27,9 @@ deploy, and S3 access is split by role (bake vs worker).
 3. **Race-safe migration entrypoint.** The container entrypoint takes a **pg
    advisory lock** before migrating, so concurrent boots in a rolling deploy do
    not race migrations. Migrations are **additive-only** and run through
-   `GANTRY_BOOTSTRAP_DATABASE_URL` when configured, falling back to
-   `GANTRY_DATABASE_URL` for local/single-role installs. Production fleets should
-   keep normal runtime workers on the least-privileged `GANTRY_DATABASE_URL`
-   role. On contention the loser waits; on failure the entrypoint exits
-   non-zero.
+   `GANTRY_DATABASE_URL`. Production fleets should grant that role the minimum
+   privileges required for runtime access and migrations. On contention the
+   loser waits; on failure the entrypoint exits non-zero.
 
 4. **ASG + lifecycle hooks.** Workers run in an Auto Scaling Group wired to
    **lifecycle hooks** that drive graceful drain (SIGTERM → stop claiming → finish

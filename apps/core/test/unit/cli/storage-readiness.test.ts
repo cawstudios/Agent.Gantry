@@ -39,7 +39,7 @@ describe('inspectRuntimeStorageReadiness', () => {
     expect(result.nextAction).toContain('docker-compose.yml');
   });
 
-  it('runs migrations before health checks when requested', async () => {
+  it('checks migration head before health checks', async () => {
     const runtimeHome = createRuntimeHome();
     const settings = loadRuntimeSettings(runtimeHome);
     settings.storage.postgres.urlEnv = 'GANTRY_DATABASE_URL';
@@ -49,7 +49,7 @@ describe('inspectRuntimeStorageReadiness', () => {
       path.join(runtimeHome, '.env'),
       'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:5432/gantry\n',
     );
-    const migrate = vi.fn().mockResolvedValue(undefined);
+    const assertMigrationsCurrent = vi.fn().mockResolvedValue(undefined);
     const healthCheck = vi.fn().mockResolvedValue({
       lexicalSearch: true,
       vectorSearch: true,
@@ -61,7 +61,7 @@ describe('inspectRuntimeStorageReadiness', () => {
     const close = vi.fn().mockResolvedValue(undefined);
     vi.doMock('@core/adapters/storage/postgres/storage-service.js', () => ({
       createStorageService: vi.fn(() => ({
-        migrate,
+        assertMigrationsCurrent,
         healthCheck,
         close,
       })),
@@ -69,10 +69,10 @@ describe('inspectRuntimeStorageReadiness', () => {
     const { inspectRuntimeStorageReadiness: inspectWithMock } =
       await import('@core/adapters/storage/postgres/storage-readiness.js');
 
-    const result = await inspectWithMock(runtimeHome, { migrate: true });
+    const result = await inspectWithMock(runtimeHome);
 
     expect(result.status).toBe('pass');
-    expect(migrate).toHaveBeenCalledBefore(healthCheck);
+    expect(assertMigrationsCurrent).toHaveBeenCalledBefore(healthCheck);
     expect(close).toHaveBeenCalled();
   });
 
@@ -92,6 +92,7 @@ describe('inspectRuntimeStorageReadiness', () => {
     );
     const close = vi.fn().mockResolvedValue(undefined);
     const createStorageService = vi.fn(() => ({
+      assertMigrationsCurrent: vi.fn().mockResolvedValue(undefined),
       healthCheck: vi.fn().mockResolvedValue({
         lexicalSearch: true,
         vectorSearch: true,
@@ -135,6 +136,7 @@ describe('inspectRuntimeSecretReadiness', () => {
       },
     };
     saveRuntimeSettings(runtimeHome, settings);
+    const assertMigrationsCurrent = vi.fn(async () => undefined);
     const close = vi.fn(async () => undefined);
     vi.doMock('@core/adapters/storage/postgres/factory.js', () => ({
       createStorageRuntime: vi.fn(() => ({
@@ -143,7 +145,7 @@ describe('inspectRuntimeSecretReadiness', () => {
             getSecret: vi.fn(async () => null),
           },
         },
-        service: { close },
+        service: { assertMigrationsCurrent, close },
       })),
     }));
     const { inspectRuntimeSecretReadiness } =
@@ -159,6 +161,7 @@ describe('inspectRuntimeSecretReadiness', () => {
         'providers.slack.app_token runtime secret ref gantry-secret:SLACK_APP_TOKEN did not resolve.',
       ],
     });
+    expect(assertMigrationsCurrent).toHaveBeenCalled();
     expect(close).toHaveBeenCalled();
   });
 });

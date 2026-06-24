@@ -244,10 +244,6 @@ resource "aws_ecs_task_definition" "service" {
         [
           { name = "GANTRY_PROCESS_ROLE", value = each.value.role },
           { name = "GANTRY_CONTROL_PORT", value = tostring(var.control_port) },
-          {
-            name  = "GANTRY_SKIP_MIGRATIONS"
-            value = each.value.role == "control" || !contains(local.enabled_roles, "control") ? "0" : "1"
-          },
         ],
         [
           for name, value in local.common_environment : {

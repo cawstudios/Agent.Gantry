@@ -12,6 +12,7 @@ import {
 
 const createStorageRuntimeMock = vi.hoisted(() => vi.fn());
 const migrateMock = vi.hoisted(() => vi.fn(async () => {}));
+const assertMigrationsCurrentMock = vi.hoisted(() => vi.fn(async () => {}));
 const closeMock = vi.hoisted(() => vi.fn(async () => {}));
 const groupsStore = vi.hoisted(() => new Map<string, any>());
 
@@ -39,6 +40,7 @@ function configureMockRuntime(): void {
   createStorageRuntimeMock.mockImplementation(() => ({
     service: {
       migrate: migrateMock,
+      assertMigrationsCurrent: assertMigrationsCurrentMock,
       close: closeMock,
     },
     ops: {
@@ -58,6 +60,7 @@ function configureMockRuntime(): void {
 beforeEach(() => {
   groupsStore.clear();
   migrateMock.mockClear();
+  assertMigrationsCurrentMock.mockClear();
   closeMock.mockClear();
   createStorageRuntimeMock.mockReset();
   configureMockRuntime();
@@ -83,19 +86,20 @@ describe('runtime-group-db', () => {
     });
     await groupDb.close();
 
-    const reopened = await openRuntimeGroupDb(runtimeHome, { migrate: false });
+    const reopened = await openRuntimeGroupDb(runtimeHome);
     expect((await reopened.getAllConversationRoutes())['tg:123']?.folder).toBe(
       'main',
     );
     await reopened.close();
 
-    expect(migrateMock).toHaveBeenCalled();
+    expect(migrateMock).not.toHaveBeenCalled();
+    expect(assertMigrationsCurrentMock).toHaveBeenCalled();
     expect(closeMock).toHaveBeenCalled();
   });
 
   it('counts groups by JID prefix', async () => {
     const runtimeHome = createRuntimeHome();
-    const groupDb = await openRuntimeGroupDb(runtimeHome, { migrate: false });
+    const groupDb = await openRuntimeGroupDb(runtimeHome);
     await groupDb.setConversationRoute('tg:1', {
       name: 'A',
       folder: 'a',
@@ -115,7 +119,7 @@ describe('runtime-group-db', () => {
 
   it('rejects invalid folders before writing', async () => {
     const runtimeHome = createRuntimeHome();
-    const groupDb = await openRuntimeGroupDb(runtimeHome, { migrate: false });
+    const groupDb = await openRuntimeGroupDb(runtimeHome);
     await expect(
       groupDb.setConversationRoute('tg:999', {
         name: 'Invalid',
