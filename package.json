@@ -75,6 +75,7 @@
     "@anthropic-ai/sandbox-runtime": "0.0.52",
     "@anthropic-ai/sdk": "^0.100.1",
     "@aws-sdk/client-s3": "3.1066.0",
+    "@aws-sdk/client-secrets-manager": "^3.1066.0",
     "@clack/prompts": "^1.2.0",
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",

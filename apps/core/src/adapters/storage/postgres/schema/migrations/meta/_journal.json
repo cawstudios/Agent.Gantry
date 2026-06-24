@@ -596,6 +596,13 @@
       "when": 1777299000000,
       "tag": "0087_pattern_candidate",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1777302600000,
+      "tag": "0088_provider_runtime_secret_ref_object",
+      "breakpoints": true
     }
   ]
 }

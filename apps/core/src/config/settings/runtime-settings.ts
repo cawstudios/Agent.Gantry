@@ -47,6 +47,7 @@ import {
   configureCustomModelCatalogEntries,
   withCustomModelCatalogEntries,
 } from '../../shared/model-catalog.js';
+import { envRuntimeSecretRef } from '../../domain/ports/runtime-secret-provider.js';
 
 export {
   configureDesiredSettingsStorageProvider,
@@ -63,20 +64,20 @@ const DEFAULT_PROVIDER_CONNECTION_IDS: Record<string, string> = {
 
 const DEFAULT_RUNTIME_SECRET_REFS: Record<string, Record<string, string>> = {
   slack: {
-    bot_token: 'SLACK_BOT_TOKEN',
-    app_token: 'SLACK_APP_TOKEN',
+    bot_token: envRuntimeSecretRef('SLACK_BOT_TOKEN'),
+    app_token: envRuntimeSecretRef('SLACK_APP_TOKEN'),
   },
   discord: {
-    bot_token: 'DISCORD_BOT_TOKEN',
-    application_id: 'DISCORD_APPLICATION_ID',
+    bot_token: envRuntimeSecretRef('DISCORD_BOT_TOKEN'),
+    application_id: envRuntimeSecretRef('DISCORD_APPLICATION_ID'),
   },
   teams: {
-    client_id: 'TEAMS_CLIENT_ID',
-    client_secret: 'TEAMS_CLIENT_SECRET',
-    tenant_id: 'TEAMS_TENANT_ID',
+    client_id: envRuntimeSecretRef('TEAMS_CLIENT_ID'),
+    client_secret: envRuntimeSecretRef('TEAMS_CLIENT_SECRET'),
+    tenant_id: envRuntimeSecretRef('TEAMS_TENANT_ID'),
   },
   telegram: {
-    bot_token: 'TELEGRAM_BOT_TOKEN',
+    bot_token: envRuntimeSecretRef('TELEGRAM_BOT_TOKEN'),
   },
 };
 

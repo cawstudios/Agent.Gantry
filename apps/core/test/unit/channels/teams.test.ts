@@ -976,15 +976,54 @@ describe('TeamsChannel adapter scaffold', () => {
     );
   });
 
-  it('creates a channel only when runtime secrets and an SDK client are supplied', () => {
+  it('creates a channel only when runtime secrets and an SDK client are supplied', async () => {
     const sdkClient: TeamsSdkClient = {
       start: vi.fn(async () => {}),
       stop: vi.fn(async () => {}),
       sendMessage: vi.fn(async () => ({})),
     };
 
-    expect(createTeamsChannel(makeOpts(), { sdkClient })).toBeInstanceOf(
-      TeamsChannel,
-    );
+    await expect(
+      createTeamsChannel(makeOpts(), { sdkClient }),
+    ).resolves.toBeInstanceOf(TeamsChannel);
+  });
+
+  it('creates the runtime channel from configured runtime secret refs', async () => {
+    const sdkClient: TeamsSdkClient = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      sendMessage: vi.fn(async () => ({})),
+    };
+    const opts = makeOpts();
+    opts.runtimeSettings = () =>
+      ({
+        providers: { teams: { defaultConnection: 'teams_default' } },
+        providerConnections: {
+          teams_default: {
+            runtimeSecretRefs: {
+              client_id: 'gantry-secret:TEAMS_CLIENT_ID',
+              client_secret: 'gantry-secret:TEAMS_CLIENT_SECRET',
+              tenant_id: 'gantry-secret:TEAMS_TENANT_ID',
+            },
+          },
+        },
+      }) as never;
+    opts.runtimeSecrets = {
+      getSecret: vi.fn(),
+      getOptionalSecret: vi.fn(),
+      getOptionalSecretAsync: vi.fn(async (ref) =>
+        ref.ref === 'gantry-secret:TEAMS_CLIENT_ID'
+          ? 'client-id'
+          : ref.ref === 'gantry-secret:TEAMS_CLIENT_SECRET'
+            ? 'client-secret'
+            : ref.ref === 'gantry-secret:TEAMS_TENANT_ID'
+              ? 'tenant-id'
+              : undefined,
+      ),
+    };
+
+    await expect(
+      createTeamsChannel(opts, { sdkClient }),
+    ).resolves.toBeInstanceOf(TeamsChannel);
   });
 });

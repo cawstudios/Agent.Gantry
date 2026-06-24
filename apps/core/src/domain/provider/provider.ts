@@ -14,12 +14,13 @@ import type { IsoTimestamp } from '../../shared/time/primitives.js';
 export type ProviderId = BrandedId<'ProviderId'>;
 export type ProviderConnectionId = BrandedId<'ProviderConnectionId'>;
 export type ConversationApproverId = BrandedId<'ConversationApproverId'>;
+export type ProviderRuntimeSecretRefs = Record<string, string>;
 
 export interface Provider {
   id: ProviderId;
   displayName: string;
   capabilityFlags: string[];
-  allowedRuntimeSecretRefs?: string[];
+  allowedRuntimeSecretKeys?: string[];
   createdAt: IsoTimestamp;
 }
 
@@ -31,7 +32,7 @@ export interface ProviderConnection {
   label: string;
   status: 'active' | 'disabled';
   config: Record<string, unknown>;
-  runtimeSecretRefs: string[];
+  runtimeSecretRefs: ProviderRuntimeSecretRefs;
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;
 }

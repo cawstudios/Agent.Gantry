@@ -7,6 +7,8 @@ import type { FileArtifactStore } from '../domain/ports/file-artifact-store.js';
 import { readEnvFile } from '../config/env/file.js';
 import { envFilePath } from '../config/settings/runtime-home.js';
 import { ensureRuntimeSettings } from '../config/settings/runtime-settings.js';
+import type { RuntimeSecretProvider } from '../domain/ports/runtime-secret-provider.js';
+import { createRepositoryRuntimeSecretProvider } from '../adapters/credentials/repository-runtime-secret-provider.js';
 
 export interface RuntimeGroupDb {
   countConversationRoutesByJidPrefix(jidPrefix: string): Promise<number>;
@@ -20,6 +22,7 @@ export interface RuntimeGroupDb {
   deleteConversationRoute(jid: string): Promise<void>;
   deleteSession(workspaceFolder: string): Promise<void>;
   getFileArtifactStore(): FileArtifactStore;
+  getRuntimeSecrets?(): RuntimeSecretProvider;
   close(): Promise<void>;
 }
 
@@ -87,6 +90,13 @@ function createProviderRuntimeGroupDb(runtime: StorageRuntime): RuntimeGroupDb {
 
     getFileArtifactStore(): FileArtifactStore {
       return runtime.fileArtifacts;
+    },
+
+    getRuntimeSecrets(): RuntimeSecretProvider {
+      return createRepositoryRuntimeSecretProvider({
+        appId: 'default' as never,
+        repository: runtime.repositories.capabilitySecrets,
+      });
     },
 
     async close(): Promise<void> {

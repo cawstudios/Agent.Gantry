@@ -1,9 +1,18 @@
 import type { StorageService } from './storage-service.js';
 import { evaluatePostgresStorageCapabilities } from './readiness.js';
 import { fleetRehearsalPlaintextPostgresHosts } from './url.js';
+import { createRepositoryRuntimeSecretProvider } from '../../credentials/repository-runtime-secret-provider.js';
+import { getProvider } from '../../../channels/provider-registry.js';
 import { readEnvFile } from '../../../config/env/file.js';
 import { envFilePath } from '../../../config/settings/runtime-home.js';
 import { ensureRuntimeSettings } from '../../../config/settings/runtime-settings.js';
+import type { AppId } from '../../../domain/app/app.js';
+import {
+  getOptionalRuntimeSecret,
+  normalizeRuntimeSecretRefString,
+  parseRuntimeSecretRefString,
+} from '../../../domain/ports/runtime-secret-provider.js';
+import { runtimeSecretKeyForEnv } from '../../../domain/provider/provider-runtime-secret-keys.js';
 import { redactString } from '../../../infrastructure/logging/logger.js';
 
 export interface RuntimeStorageReadiness {
@@ -15,6 +24,23 @@ export interface RuntimeStorageReadiness {
 
 export interface RuntimeStorageReadinessOptions {
   migrate?: boolean;
+}
+
+interface RuntimeSecretReadinessSettings {
+  storage: {
+    postgres: {
+      urlEnv: string;
+      schema: string;
+    };
+  };
+  providers: Record<
+    string,
+    { enabled: boolean; defaultConnection?: string } | undefined
+  >;
+  providerConnections: Record<
+    string,
+    { runtimeSecretRefs: Record<string, string | undefined> } | undefined
+  >;
 }
 
 function defaultPostgresNextAction(): string {
@@ -110,5 +136,81 @@ export async function inspectRuntimeStorageReadiness(
     };
   } finally {
     await service.close();
+  }
+}
+
+export async function inspectRuntimeSecretReadiness(
+  runtimeHome: string,
+  settings: RuntimeSecretReadinessSettings,
+): Promise<RuntimeStorageReadiness> {
+  const refsToResolve: { providerId: string; refKey: string; ref: string }[] =
+    [];
+  for (const [providerId, providerSettings] of Object.entries(
+    settings.providers,
+  )) {
+    if (!providerSettings?.enabled) continue;
+    const provider = getProvider(providerId);
+    const connectionId = providerSettings.defaultConnection;
+    const refs = connectionId
+      ? settings.providerConnections[connectionId]?.runtimeSecretRefs
+      : undefined;
+    for (const envKey of provider?.setup.envKeys ?? []) {
+      const refKey = runtimeSecretKeyForEnv(providerId, envKey);
+      const rawRef = refs?.[refKey]?.trim();
+      if (!rawRef) continue;
+      const normalized = normalizeRuntimeSecretRefString(rawRef);
+      const parsed = parseRuntimeSecretRefString(normalized);
+      if (parsed.source === 'env') continue;
+      refsToResolve.push({ providerId, refKey, ref: normalized });
+    }
+  }
+  if (refsToResolve.length === 0) {
+    return {
+      status: 'pass',
+      message: 'No storage-backed runtime secret refs require validation.',
+    };
+  }
+
+  const env = readEnvFile(envFilePath(runtimeHome));
+  const postgresUrlEnv = settings.storage.postgres.urlEnv;
+  const postgresUrl =
+    env[postgresUrlEnv]?.trim() || process.env[postgresUrlEnv]?.trim() || '';
+  const { createStorageRuntime } = await import('./factory.js');
+  const storage = createStorageRuntime({
+    postgresUrl,
+    postgresUrlEnv,
+    postgresSchema: settings.storage.postgres.schema,
+    postgresPlaintextHostAllowlist: fleetRehearsalPlaintextPostgresHosts({
+      ...env,
+      ...process.env,
+    }),
+  });
+  try {
+    const secrets = createRepositoryRuntimeSecretProvider({
+      appId: 'default' as AppId,
+      repository: storage.repositories.capabilitySecrets,
+    });
+    const missing: string[] = [];
+    for (const ref of refsToResolve) {
+      const value = await getOptionalRuntimeSecret(secrets, { ref: ref.ref });
+      if (!value?.trim()) {
+        missing.push(
+          `providers.${ref.providerId}.${ref.refKey} runtime secret ref ${ref.ref} did not resolve.`,
+        );
+      }
+    }
+    if (missing.length === 0) {
+      return {
+        status: 'pass',
+        message: 'Runtime secret refs are ready.',
+      };
+    }
+    return {
+      status: 'fail',
+      message: 'Runtime secret preflight failed.',
+      details: missing,
+    };
+  } finally {
+    await storage.service.close();
   }
 }

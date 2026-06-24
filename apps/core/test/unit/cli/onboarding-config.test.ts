@@ -1,0 +1,117 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings-defaults.js';
+
+const events: string[] = [];
+const settingsWrites: Array<{
+  schema: string;
+  previousSchema?: string;
+  telegramEnabled: boolean;
+  telegramBotRef?: string;
+}> = [];
+
+vi.mock('@core/config/env/file.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
+  upsertEnvFile: vi.fn(),
+}));
+
+vi.mock('@core/config/settings/runtime-home.js', () => ({
+  envFilePath: vi.fn(() => '/tmp/gantry/.env'),
+  ensureRuntimeLayout: vi.fn(),
+}));
+
+vi.mock('@core/cli/credentials.js', () => ({
+  storeRuntimeSecretInput: vi.fn(async (input: { name: string }) => {
+    events.push(`secret:${input.name}`);
+  }),
+}));
+
+vi.mock('@core/config/settings/runtime-settings.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('@core/config/settings/runtime-settings.js')
+    >();
+  return {
+    ...actual,
+    loadRuntimeSettings: vi.fn(() => createDefaultRuntimeSettings()),
+    writeDesiredRuntimeSettings: vi.fn(
+      async (input: {
+        settings: ReturnType<typeof createDefaultRuntimeSettings>;
+        previousSettings?: ReturnType<typeof createDefaultRuntimeSettings>;
+      }) => {
+        events.push(`write:${input.settings.storage.postgres.schema}`);
+        settingsWrites.push({
+          schema: input.settings.storage.postgres.schema,
+          previousSchema: input.previousSettings?.storage.postgres.schema,
+          telegramEnabled: Boolean(input.settings.providers.telegram.enabled),
+          telegramBotRef:
+            input.settings.providerConnections.telegram_default
+              ?.runtimeSecretRefs.bot_token,
+        });
+        return { reconciled: false };
+      },
+    ),
+  };
+});
+
+describe('persistOnboardingConfig', () => {
+  beforeEach(() => {
+    events.length = 0;
+    settingsWrites.length = 0;
+  });
+
+  it('persists the selected storage schema before writing repository runtime secrets', async () => {
+    const { persistOnboardingConfig } =
+      await import('@core/cli/onboarding-config.js');
+
+    await persistOnboardingConfig({
+      runtimeHome: '/tmp/gantry',
+      postgresDatabaseUrl:
+        'postgres://user:pass@127.0.0.1:5432/gantry?schema=custom_schema',
+      postgresSchema: 'custom_schema',
+      primaryProvider: 'telegram',
+      telegramBotToken: '123456:abcdef',
+      credentialMode: 'none',
+      memoryEnabled: false,
+      embeddingsEnabled: false,
+      dreamingEnabled: false,
+    });
+
+    expect(events).toEqual([
+      'write:custom_schema',
+      'secret:TELEGRAM_BOT_TOKEN',
+      'write:custom_schema',
+    ]);
+    expect(settingsWrites[0]?.telegramEnabled).toBe(false);
+    expect(settingsWrites[0]?.telegramBotRef).toBeUndefined();
+    expect(settingsWrites[1]?.telegramEnabled).toBe(true);
+    expect(settingsWrites[1]?.telegramBotRef).toBe(
+      'gantry-secret:TELEGRAM_BOT_TOKEN',
+    );
+    expect(settingsWrites[1]?.previousSchema).toBe('custom_schema');
+  });
+
+  it('does not persist partial settings before model validation fails', async () => {
+    const { persistOnboardingConfig } =
+      await import('@core/cli/onboarding-config.js');
+
+    await expect(
+      persistOnboardingConfig({
+        runtimeHome: '/tmp/gantry',
+        postgresDatabaseUrl:
+          'postgres://user:pass@127.0.0.1:5432/gantry?schema=custom_schema',
+        postgresSchema: 'custom_schema',
+        primaryProvider: 'telegram',
+        telegramBotToken: '123456:abcdef',
+        modelAlias: 'not-a-model',
+        credentialMode: 'none',
+        memoryEnabled: false,
+        embeddingsEnabled: false,
+        dreamingEnabled: false,
+      }),
+    ).rejects.toThrow('Unknown model');
+
+    expect(events).toEqual([]);
+    expect(settingsWrites).toEqual([]);
+  });
+});

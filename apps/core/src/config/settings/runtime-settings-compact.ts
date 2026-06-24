@@ -1,3 +1,5 @@
+import { normalizeRuntimeSecretRefString } from '../../domain/ports/runtime-secret-provider.js';
+
 function isRecord(raw: unknown): raw is Record<string, unknown> {
   return typeof raw === 'object' && raw !== null && !Array.isArray(raw);
 }
@@ -41,7 +43,7 @@ function compactProviderToVerbose(
     map,
     `providers.${providerId}`,
     new Set(['enabled', 'default_connection', 'label']),
-    (key) => key.endsWith('_env'),
+    (key) => key.endsWith('_ref'),
   );
   const provider: Record<string, unknown> = {
     enabled: map.enabled,
@@ -49,9 +51,10 @@ function compactProviderToVerbose(
   };
   const secretRefs: Record<string, string> = {};
   for (const [key, value] of Object.entries(map)) {
-    if (!key.endsWith('_env')) continue;
+    if (!key.endsWith('_ref')) continue;
     if (typeof value === 'string' && value.trim()) {
-      secretRefs[key.slice(0, -'_env'.length)] = value.trim();
+      secretRefs[key.slice(0, -'_ref'.length)] =
+        normalizeRuntimeSecretRefString(value);
     }
   }
   if (map.label !== undefined || Object.keys(secretRefs).length > 0) {

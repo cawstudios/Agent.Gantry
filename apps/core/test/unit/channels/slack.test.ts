@@ -12,8 +12,6 @@ const currentControlAllowlist = vi.hoisted(() => ({
 vi.mock('@core/config/index.js', () => ({
   DEFAULT_TRIGGER: '@bot',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
-  getSlackBotToken: () => process.env.SLACK_BOT_TOKEN || '',
-  getSlackAppToken: () => process.env.SLACK_APP_TOKEN || '',
   getSlackPermissionApproverIds: (sourceAgentFolder?: string) => {
     const allowlist = currentControlAllowlist.current;
     const scoped =
@@ -178,6 +176,17 @@ function createOpts(
         },
       },
     })),
+    runtimeSecrets: {
+      getSecret(ref: { ref?: string; env?: string }) {
+        const value = this.getOptionalSecret(ref);
+        if (!value) throw new Error('missing secret');
+        return value;
+      },
+      getOptionalSecret(ref: { ref?: string; env?: string }) {
+        const name = String(ref.ref ?? ref.env ?? '').replace(/^env:/, '');
+        return process.env[name]?.trim();
+      },
+    },
   };
 }
 
@@ -218,26 +227,26 @@ describe('Slack channel', () => {
     vi.unstubAllGlobals();
   });
 
-  it('createSlackChannel returns null when tokens are missing', () => {
+  it('createSlackChannel returns null when tokens are missing', async () => {
     const savedBot = process.env.SLACK_BOT_TOKEN;
     const savedApp = process.env.SLACK_APP_TOKEN;
     delete process.env.SLACK_BOT_TOKEN;
     delete process.env.SLACK_APP_TOKEN;
     try {
-      expect(createSlackChannel(createOpts() as any)).toBeNull();
+      await expect(createSlackChannel(createOpts() as any)).resolves.toBeNull();
     } finally {
       if (savedBot !== undefined) process.env.SLACK_BOT_TOKEN = savedBot;
       if (savedApp !== undefined) process.env.SLACK_APP_TOKEN = savedApp;
     }
   });
 
-  it('createSlackChannel returns a channel when tokens are available', () => {
+  it('createSlackChannel returns a channel when tokens are available', async () => {
     const savedBot = process.env.SLACK_BOT_TOKEN;
     const savedApp = process.env.SLACK_APP_TOKEN;
     process.env.SLACK_BOT_TOKEN = 'xoxb-file-token';
     process.env.SLACK_APP_TOKEN = 'xapp-file-token';
     try {
-      const channel = createSlackChannel(createOpts() as any);
+      const channel = await createSlackChannel(createOpts() as any);
       expect(channel).toBeInstanceOf(SlackChannel);
     } finally {
       if (savedBot !== undefined) process.env.SLACK_BOT_TOKEN = savedBot;

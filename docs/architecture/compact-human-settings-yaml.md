@@ -29,7 +29,7 @@ providers:
   telegram:
     enabled: true
     label: 'Ravi Telegram Bot'
-    bot_token_env: TELEGRAM_BOT_TOKEN
+    bot_token_ref: gantry-secret:TELEGRAM_BOT_TOKEN
 
 agents:
   main_agent:

@@ -2,9 +2,12 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockListModelCredentials = vi.hoisted(() => vi.fn());
+const mockGetCapabilitySecret = vi.hoisted(() => vi.fn());
+const mockValidateTelegramBotToken = vi.hoisted(() => vi.fn());
+const mockInspectRuntimeSecretReadiness = vi.hoisted(() => vi.fn());
 
 vi.mock(
   '@core/application/model-credentials/model-credential-service.js',
@@ -58,11 +61,16 @@ vi.mock('@core/infrastructure/service/platform.js', () => ({
   hasSystemdUser: vi.fn(() => false),
 }));
 
+vi.mock('@core/cli/telegram.js', () => ({
+  validateTelegramBotToken: mockValidateTelegramBotToken,
+}));
+
 vi.mock('@core/adapters/storage/postgres/storage-readiness.js', () => ({
   inspectRuntimeStorageReadiness: vi.fn(async () => ({
     status: 'pass',
     message: 'Postgres is ready.',
   })),
+  inspectRuntimeSecretReadiness: mockInspectRuntimeSecretReadiness,
 }));
 
 vi.mock('@core/adapters/storage/postgres/factory.js', () => ({
@@ -76,6 +84,9 @@ vi.mock('@core/adapters/storage/postgres/factory.js', () => ({
     repositories: {
       modelCredentials: {
         listModelCredentials: mockListModelCredentials,
+      },
+      capabilitySecrets: {
+        getSecret: mockGetCapabilitySecret,
       },
     },
   })),
@@ -151,6 +162,9 @@ function makeRuntimeHome(options?: {
 
 afterEach(() => {
   mockListModelCredentials.mockReset();
+  mockGetCapabilitySecret.mockReset();
+  mockValidateTelegramBotToken.mockReset();
+  mockInspectRuntimeSecretReadiness.mockReset();
   vi.resetModules();
   for (const runtimeHome of runtimeHomes.splice(0)) {
     fs.rmSync(runtimeHome, { recursive: true, force: true });
@@ -158,6 +172,13 @@ afterEach(() => {
 });
 
 describe('doctor model credential readiness', () => {
+  beforeEach(() => {
+    mockInspectRuntimeSecretReadiness.mockResolvedValue({
+      status: 'pass',
+      message: 'Runtime secret refs are ready.',
+    });
+  });
+
   it('accepts the fleet rehearsal postgres service hostname in runtime storage checks', async () => {
     mockListModelCredentials.mockResolvedValue([]);
     const runtimeHome = makeRuntimeHome();
@@ -202,6 +223,141 @@ describe('doctor model credential readiness', () => {
         nextAction: expect.stringContaining(
           'gantry credentials model set anthropic',
         ),
+      }),
+    );
+  });
+
+  it('validates Telegram through stored runtime secrets when env token is absent', async () => {
+    mockListModelCredentials.mockResolvedValue([]);
+    mockGetCapabilitySecret.mockResolvedValue({
+      value: '123456:stored-token',
+    });
+    mockValidateTelegramBotToken.mockResolvedValue({
+      ok: true,
+      message: 'Telegram token is valid.',
+    });
+    const runtimeHome = makeRuntimeHome();
+    fs.writeFileSync(
+      path.join(runtimeHome, '.env'),
+      [
+        'GANTRY_DATABASE_URL=postgres://gantry_app:pass@localhost:15432/gantry',
+        `SECRET_ENCRYPTION_KEY=${strongEncryptionKey}`,
+        '',
+      ].join('\n'),
+    );
+    fs.writeFileSync(
+      path.join(runtimeHome, 'settings.yaml'),
+      [
+        'providers:',
+        '  telegram:',
+        '    enabled: true',
+        '    default_connection: telegram_default',
+        'provider_connections:',
+        '  telegram_default:',
+        '    provider: telegram',
+        '    label: Telegram',
+        '    runtime_secret_refs:',
+        '      bot_token: gantry-secret:TELEGRAM_BOT_TOKEN',
+        'storage:',
+        '  postgres:',
+        '    url_env: GANTRY_DATABASE_URL',
+        '    schema: gantry',
+        'model_access:',
+        '  enabled: true',
+        'memory:',
+        '  enabled: true',
+        '  embeddings:',
+        '    enabled: false',
+        '    provider: disabled',
+        '    model: text-embedding-3-small',
+        '  dreaming:',
+        '    enabled: false',
+        '    embeddings:',
+        '      enabled: false',
+        '      provider: disabled',
+        '      model: text-embedding-3-small',
+        '  llm:',
+        '    models:',
+        '      extractor: haiku',
+        '      dreaming: sonnet',
+        '      consolidation: sonnet',
+        '',
+      ].join('\n'),
+    );
+    const { runDoctorWithNetwork } = await import('@core/cli/doctor.js');
+
+    await runDoctorWithNetwork(import.meta.url, runtimeHome);
+
+    expect(mockGetCapabilitySecret).toHaveBeenCalledWith({
+      appId: 'default',
+      name: 'TELEGRAM_BOT_TOKEN',
+    });
+    expect(mockValidateTelegramBotToken).toHaveBeenCalledWith(
+      '123456:stored-token',
+      undefined,
+    );
+  });
+
+  it('does not pass unresolved stored Slack runtime secrets', async () => {
+    mockListModelCredentials.mockResolvedValue([]);
+    mockInspectRuntimeSecretReadiness.mockResolvedValue({
+      status: 'fail',
+      message: 'Runtime secret preflight failed.',
+      details: [
+        'providers.slack.bot_token runtime secret ref gantry-secret:SLACK_BOT_TOKEN did not resolve.',
+      ],
+    });
+    const runtimeHome = makeRuntimeHome();
+    fs.writeFileSync(
+      path.join(runtimeHome, 'settings.yaml'),
+      [
+        'providers:',
+        '  slack:',
+        '    enabled: true',
+        '    default_connection: slack_default',
+        'provider_connections:',
+        '  slack_default:',
+        '    provider: slack',
+        '    label: Slack',
+        '    runtime_secret_refs:',
+        '      bot_token: gantry-secret:SLACK_BOT_TOKEN',
+        '      app_token: gantry-secret:SLACK_APP_TOKEN',
+        'storage:',
+        '  postgres:',
+        '    url_env: GANTRY_DATABASE_URL',
+        '    schema: gantry',
+        'model_access:',
+        '  enabled: true',
+        'memory:',
+        '  enabled: true',
+        '  embeddings:',
+        '    enabled: false',
+        '    provider: disabled',
+        '    model: text-embedding-3-small',
+        '  dreaming:',
+        '    enabled: false',
+        '    embeddings:',
+        '      enabled: false',
+        '      provider: disabled',
+        '      model: text-embedding-3-small',
+        '  llm:',
+        '    models:',
+        '      extractor: haiku',
+        '      dreaming: sonnet',
+        '      consolidation: sonnet',
+        '',
+      ].join('\n'),
+    );
+    const { runDoctorWithNetwork } = await import('@core/cli/doctor.js');
+
+    const report = await runDoctorWithNetwork(import.meta.url, runtimeHome, {
+      validateTelegramToken: false,
+    });
+
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({
+        id: 'slack-tokens',
+        status: 'warn',
       }),
     );
   });

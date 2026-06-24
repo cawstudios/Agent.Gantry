@@ -1197,7 +1197,7 @@ describe('contracts package', () => {
         label: 'Workspace',
         status: 'active',
         config: { teamId: 'T123' },
-        runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+        runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
         createdAt: iso,
         updatedAt: iso,
       }),

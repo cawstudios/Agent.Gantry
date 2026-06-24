@@ -12,6 +12,7 @@ import {
 import {
   importWorkstationSettings,
   settingsToRevisionDocument,
+  stableJson,
   type SettingsRevisionMirror,
 } from '../config/settings/settings-import-service.js';
 import { invalidateSenderAllowlistCache } from '../platform/sender-allowlist.js';
@@ -40,6 +41,7 @@ export function startSettingsReloadWatcher(
   let lastGoodSettings: ReturnType<typeof loadRuntimeSettings> | undefined;
   let reloadInFlight: Promise<void> | undefined;
   let reloadQueued = false;
+  let retryTimer: NodeJS.Timeout | undefined;
 
   try {
     lastGoodSettings = loadRuntimeSettings(options.runtimeHome);
@@ -49,6 +51,17 @@ export function startSettingsReloadWatcher(
       'Initial settings snapshot unavailable for reload watcher',
     );
   }
+
+  const scheduleReloadRetry = () => {
+    if (retryTimer) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      void reload().catch((err) =>
+        logger.warn({ err, filePath }, 'retried settings.yaml reload failed'),
+      );
+    }, options.pollIntervalMs ?? 5000);
+    retryTimer.unref?.();
+  };
 
   const reload = async () => {
     if (reloadInFlight) {
@@ -79,18 +92,25 @@ export function startSettingsReloadWatcher(
       }
 
       let matchesLatestRevision = false;
+      let latestRevision = 0;
       if (options.settingsRevisions) {
         try {
-          matchesLatestRevision = await settingsMatchesLatestRevision({
-            appId: options.appId ?? ('default' as AppId),
-            settings,
-            settingsRevisions: options.settingsRevisions,
-          });
+          const latest =
+            await options.settingsRevisions.getLatestSettingsRevision(
+              options.appId ?? ('default' as AppId),
+            );
+          latestRevision = latest?.revision ?? 0;
+          matchesLatestRevision = latest
+            ? stableJson(latest.settingsDocument) ===
+              stableJson(settingsToRevisionDocument(settings))
+            : false;
         } catch (err) {
           logger.warn(
             { err, filePath },
-            'settings revision lookup failed; continuing with local settings.yaml reload',
+            'settings revision lookup failed; keeping last good settings',
           );
+          scheduleReloadRetry();
+          return;
         }
       }
 
@@ -116,6 +136,11 @@ export function startSettingsReloadWatcher(
                       logger.warn(context, message),
                   }
                 : undefined,
+            revisionMirrorRequired:
+              options.settingsRevisions !== undefined && !matchesLatestRevision,
+            expectedRevision: !matchesLatestRevision
+              ? latestRevision
+              : undefined,
           },
           settings,
         );
@@ -163,6 +188,10 @@ export function startSettingsReloadWatcher(
       ) {
         return;
       }
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
       void reload().catch((err) =>
         logger.warn({ err, filePath }, 'settings.yaml reload failed'),
       );
@@ -171,24 +200,10 @@ export function startSettingsReloadWatcher(
 
   return {
     close: () => {
+      if (retryTimer) clearTimeout(retryTimer);
       fs.unwatchFile(filePath);
     },
   };
-}
-
-async function settingsMatchesLatestRevision(input: {
-  appId: AppId;
-  settings: ReturnType<typeof loadRuntimeSettings>;
-  settingsRevisions: SettingsRevisionRepository;
-}): Promise<boolean> {
-  const latest = await input.settingsRevisions.getLatestSettingsRevision(
-    input.appId,
-  );
-  if (!latest) return false;
-  return (
-    stableJson(latest.settingsDocument) ===
-    stableJson(settingsToRevisionDocument(input.settings))
-  );
 }
 
 function settingsDocumentsMatch(
@@ -199,18 +214,4 @@ function settingsDocumentsMatch(
     stableJson(settingsToRevisionDocument(left)) ===
     stableJson(settingsToRevisionDocument(right))
   );
-}
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJson).join(',')}]`;
-  }
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([, nested]) => nested !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value);
 }

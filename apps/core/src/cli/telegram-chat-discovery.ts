@@ -150,7 +150,8 @@ export async function listTelegramRecentChats(options: {
       ok: false,
       chats: [],
       message: 'Telegram token is empty.',
-      nextAction: 'Set TELEGRAM_BOT_TOKEN before auto-discovery.',
+      nextAction:
+        'Run `gantry provider connect telegram` or configure the Telegram bot_token runtime secret ref.',
     };
   }
 

@@ -5,8 +5,6 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { afterEach, vi } from 'vitest';
 
-import { readEnvFile } from '@core/config/env/file.js';
-import { envFilePath } from '@core/config/settings/runtime-home.js';
 import {
   loadRuntimeSettings,
   saveRuntimeSettings,
@@ -111,6 +109,14 @@ afterEach(() => {
     if (runtimeHome) fs.rmSync(runtimeHome, { recursive: true, force: true });
   }
 });
+
+function mockRuntimeSecretStorage() {
+  const storeRuntimeSecretInput = vi.fn(async () => undefined);
+  vi.doMock('@core/cli/credentials.js', () => ({
+    storeRuntimeSecretInput,
+  }));
+  return storeRuntimeSecretInput;
+}
 
 describe('cli telegram helpers', () => {
   function makeRuntimeHome(): string {
@@ -478,11 +484,13 @@ describe('cli telegram helpers', () => {
     const runtimeHome = makeRuntimeHome();
     const outro = vi.fn();
     const text = vi.fn(async () => '');
+    const storeRuntimeSecretInput = mockRuntimeSecretStorage();
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,
       note: vi.fn(),
       password: vi.fn(async () => 'telegram-token'),
+      select: vi.fn(async () => 'gantry'),
       text,
       outro,
       log: {
@@ -522,14 +530,17 @@ describe('cli telegram helpers', () => {
     const code = await runTelegramConnectCommand(runtimeHome);
 
     expect(code).toBe(0);
-    expect(readEnvFile(envFilePath(runtimeHome)).TELEGRAM_BOT_TOKEN).toBe(
-      'telegram-token',
-    );
+    expect(storeRuntimeSecretInput).toHaveBeenCalledWith({
+      runtimeHome,
+      name: 'TELEGRAM_BOT_TOKEN',
+      value: 'telegram-token',
+      actor: 'cli:telegram-connect',
+    });
     expect(loadRuntimeSettings(runtimeHome).providers.telegram.enabled).toBe(
       true,
     );
     expect(outro).toHaveBeenCalledWith(
-      'Telegram token saved. Next: run `gantry provider connect telegram` to register a conversation.',
+      'Telegram connected. Secret stored encrypted in Gantry. Next: run `gantry provider connect telegram` to register a conversation.',
     );
     expect(text).toHaveBeenCalledTimes(1);
     expect(text).toHaveBeenCalledWith(
@@ -543,6 +554,7 @@ describe('cli telegram helpers', () => {
     vi.resetModules();
     const runtimeHome = makeRuntimeHome();
     const select = vi.fn(async () => 'skip');
+    const storeRuntimeSecretInput = mockRuntimeSecretStorage();
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,
@@ -603,9 +615,12 @@ describe('cli telegram helpers', () => {
         ]),
       }),
     );
-    expect(readEnvFile(envFilePath(runtimeHome)).TELEGRAM_BOT_TOKEN).toBe(
-      'telegram-token',
-    );
+    expect(storeRuntimeSecretInput).toHaveBeenCalledWith({
+      runtimeHome,
+      name: 'TELEGRAM_BOT_TOKEN',
+      value: 'telegram-token',
+      actor: 'cli:telegram-connect',
+    });
   });
 
   it('telegram connect enables session admin commands for an explicitly entered sender', async () => {
@@ -613,6 +628,7 @@ describe('cli telegram helpers', () => {
     const runtimeHome = makeRuntimeHome();
     const select = vi.fn(async () => 'tg:-100123');
     const text = vi.fn(async () => '5759865942');
+    mockRuntimeSecretStorage();
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,
@@ -700,6 +716,7 @@ describe('cli telegram helpers', () => {
       .fn()
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('5759865942');
+    mockRuntimeSecretStorage();
 
     vi.doMock('@clack/prompts', () => ({
       isCancel: () => false,

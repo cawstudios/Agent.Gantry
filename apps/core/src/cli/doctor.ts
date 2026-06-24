@@ -23,7 +23,7 @@ import {
 } from '../config/settings/runtime-home.js';
 import {
   ensureRuntimeSettings,
-  RuntimeSettings,
+  type RuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 import { validateTelegramBotToken } from './telegram.js';
 import { inspectMemoryHealth } from './memory-health.js';
@@ -33,11 +33,21 @@ import {
 } from '../adapters/storage/postgres/url.js';
 import { inspectRuntimeStorageReadiness } from '../adapters/storage/postgres/storage-readiness.js';
 import { validateRuntimeEnvPolicy } from '../config/source-classification.js';
-import { openRuntimeGroupDb } from './runtime-group-db.js';
 import { inspectModelCredentialReadiness } from './model-credential-readiness.js';
 import type { GuidedActionRef } from '../application/guided-actions/guided-action-model.js';
 import { inspectRunnerSandbox } from './doctor-runner-sandbox.js';
 import { hasValidEncryptionSecret } from '../shared/security-posture.js';
+import {
+  hasRuntimeCredentialConfigured,
+  resolveRuntimeEnvValue,
+} from './runtime-credential-check.js';
+import { collectUnresolvedRuntimeSecretProviderIds } from './runtime-secret-status.js';
+import { resolveTelegramTokenForDoctor } from './telegram-doctor-token.js';
+import { openRuntimeGroupDb } from './runtime-group-db.js';
+import {
+  hasConfiguredChannelProvider,
+  hasProcessableGroupForConfiguredChannelSettings,
+} from './doctor-runtime-config.js';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 
@@ -57,16 +67,40 @@ export interface DoctorReport {
   checks: DoctorCheck[];
 }
 
-function resolveRuntimeEnvValue(
-  env: Record<string, string>,
-  key: string,
-): string {
-  return env[key]?.trim() || process.env[key]?.trim() || '';
-}
-
 export interface DoctorNetworkOptions {
   validateTelegramToken?: boolean;
   telegramTimeoutMs?: number;
+}
+
+interface DoctorRuntimeSecretOptions {
+  unresolvedRuntimeSecretProviderIds?: Set<string>;
+}
+
+export function hasRuntimeConfig(runtimeHome: string): boolean {
+  try {
+    return hasConfiguredChannelProvider(ensureRuntimeSettings(runtimeHome));
+  } catch {
+    return false;
+  }
+}
+
+export async function hasProcessableGroupForConfiguredChannel(
+  runtimeHome: string,
+): Promise<boolean> {
+  let settings: ReturnType<typeof ensureRuntimeSettings>;
+  try {
+    settings = ensureRuntimeSettings(runtimeHome);
+  } catch {
+    return false;
+  }
+
+  const env = readEnvFile(envFilePath(runtimeHome));
+  return hasProcessableGroupForConfiguredChannelSettings({
+    runtimeHome,
+    settings,
+    env,
+    openRuntimeGroupDb,
+  });
 }
 
 function statusLabel(status: DoctorStatus): string {
@@ -109,6 +143,7 @@ function loadSettingsForDoctor(runtimeHome: string): {
 export function runDoctor(
   importMetaUrl: string,
   runtimeHome: string,
+  runtimeSecretOptions: DoctorRuntimeSecretOptions = {},
 ): DoctorReport {
   const checks: DoctorCheck[] = [];
 
@@ -376,14 +411,22 @@ export function runDoctor(
   const sandboxCheck = inspectRunnerSandbox(settings);
   if (sandboxCheck) add(checks, sandboxCheck);
   const credentialMode = settings?.credentialBroker.mode || 'gantry';
+  const unresolvedRuntimeSecretProviderIds =
+    runtimeSecretOptions.unresolvedRuntimeSecretProviderIds;
 
   for (const provider of providers) {
     const enabled = settings?.providers[provider.id]?.enabled ?? false;
-    const configuredKeys = provider.setup.envKeys.filter((envKey) =>
-      Boolean(resolveRuntimeEnvValue(env, envKey)),
-    );
+    const credentialConfigured = (envKey: string) =>
+      hasRuntimeCredentialConfigured({
+        settings,
+        env,
+        providerId: provider.id,
+        envKey,
+        unresolvedRuntimeSecretProviderIds,
+      });
+    const configuredKeys = provider.setup.envKeys.filter(credentialConfigured);
     const missingKeys = provider.setup.envKeys.filter(
-      (envKey) => !resolveRuntimeEnvValue(env, envKey),
+      (envKey) => !credentialConfigured(envKey),
     );
     const envCheckId =
       provider.id === 'telegram'
@@ -412,10 +455,10 @@ export function runDoctor(
         status: 'pass',
         message:
           provider.id === 'telegram'
-            ? 'Telegram token is configured.'
+            ? 'Telegram token reference is configured.'
             : provider.id === 'slack'
-              ? 'Slack bot/app tokens are configured.'
-              : `${provider.label} credentials are configured.`,
+              ? 'Slack bot/app token references are configured.'
+              : `${provider.label} credential references are configured.`,
       });
     } else {
       const partialConfigured = configuredKeys.length > 0;
@@ -425,10 +468,10 @@ export function runDoctor(
         status: 'warn',
         message:
           provider.id === 'telegram'
-            ? `Telegram token is missing in ${envPath}.`
+            ? 'Telegram token reference is missing.'
             : provider.id === 'slack' && partialConfigured
               ? 'Slack token setup is incomplete (both bot and app tokens are required).'
-              : `${provider.label} credentials are missing in ${envPath}.`,
+              : `${provider.label} credential references are missing.`,
         nextAction: `Run \`gantry provider connect ${provider.id}\` to configure ${provider.label}.`,
         action: {
           type: 'connect_provider',
@@ -547,18 +590,26 @@ export async function runDoctorWithNetwork(
   runtimeHome: string,
   options: DoctorNetworkOptions = {},
 ): Promise<DoctorReport> {
-  let report = runDoctor(importMetaUrl, runtimeHome);
+  const settings = loadSettingsForDoctor(runtimeHome).settings;
+  const unresolvedRuntimeSecretProviderIds = settings
+    ? await collectUnresolvedRuntimeSecretProviderIds(runtimeHome, settings)
+    : undefined;
+  let report = runDoctor(importMetaUrl, runtimeHome, {
+    unresolvedRuntimeSecretProviderIds,
+  });
   const validateTelegramToken = options.validateTelegramToken !== false;
   if (validateTelegramToken) {
     const telegramProvider = getProvider('telegram');
     if (telegramProvider) {
-      const settings = loadSettingsForDoctor(runtimeHome).settings;
       if (settings?.providers[telegramProvider.id]?.enabled) {
         const env = readEnvFile(envFilePath(runtimeHome));
-        const token = resolveRuntimeEnvValue(env, 'TELEGRAM_BOT_TOKEN');
-        if (token) {
+        const token = await resolveTelegramTokenForDoctor({
+          settings,
+          env,
+        });
+        if (token.token) {
           const validation = await validateTelegramBotToken(
-            token,
+            token.token,
             options.telegramTimeoutMs,
           );
           if (validation.ok) {
@@ -584,6 +635,21 @@ export async function runDoctorWithNetwork(
               },
             });
           }
+        } else if (token.unresolvedStoredRef) {
+          const telegramTokenNextAction =
+            'Run `gantry provider connect telegram` to refresh the Telegram token.';
+          report = addToReport(report, {
+            id: 'telegram-token-api',
+            title: 'Telegram Token API Validation',
+            status: 'warn',
+            message:
+              'Telegram token reference is configured but the secret value could not be resolved.',
+            nextAction: telegramTokenNextAction,
+            action: {
+              type: 'connect_provider',
+              label: telegramTokenNextAction,
+            },
+          });
         }
       }
     }
@@ -603,7 +669,6 @@ export async function runDoctorWithNetwork(
       : undefined,
   });
 
-  const settings = loadSettingsForDoctor(runtimeHome).settings;
   if (settings) {
     report = addToReport(
       report,
@@ -632,48 +697,4 @@ export function formatDoctorReport(report: DoctorReport): string {
       : `Doctor found ${report.blockingFailures} blocking issue(s) and ${report.warnings} warning(s).`,
   );
   return lines.join('\n');
-}
-
-export function hasRuntimeConfig(runtimeHome: string): boolean {
-  try {
-    const settings = ensureRuntimeSettings(runtimeHome);
-    return listConnectableChannelProviders().some(
-      (provider) => settings.providers[provider.id]?.enabled,
-    );
-  } catch {
-    return false;
-  }
-}
-export async function hasProcessableGroupForConfiguredChannel(
-  runtimeHome: string,
-): Promise<boolean> {
-  let settings: RuntimeSettings;
-  try {
-    settings = ensureRuntimeSettings(runtimeHome);
-  } catch {
-    return false;
-  }
-
-  const env = readEnvFile(envFilePath(runtimeHome));
-
-  for (const provider of listConnectableChannelProviders()) {
-    if (!settings.providers[provider.id]?.enabled) continue;
-    const hasRequiredCredentials = provider.setup.envKeys.every((envKey) =>
-      Boolean(resolveRuntimeEnvValue(env, envKey)),
-    );
-    if (!hasRequiredCredentials) continue;
-    let db: Awaited<ReturnType<typeof openRuntimeGroupDb>> | undefined;
-    try {
-      db = await openRuntimeGroupDb(runtimeHome, { migrate: false });
-      const count = await db.countConversationRoutesByJidPrefix(
-        provider.jidPrefix,
-      );
-      if (count > 0) return true;
-    } catch {
-      continue;
-    } finally {
-      await db?.close();
-    }
-  }
-  return false;
 }

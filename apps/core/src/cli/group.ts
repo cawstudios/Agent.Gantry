@@ -25,6 +25,8 @@ import { runHarness } from './group-harness.js';
 import { runList } from './group-list.js';
 import { runProfile } from './agent-profile.js';
 import { verifyTelegramChatAccess } from './telegram.js';
+import { EnvRuntimeSecretProvider } from '../adapters/credentials/env-runtime-secret-provider.js';
+import { getProviderRuntimeSecret } from '../channels/provider-runtime-secrets.js';
 import {
   parseGroupAddArgs,
   parseGroupPolicyArgs,
@@ -184,13 +186,25 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
     let displayName = parsed.name?.trim() || '';
     let chatProbeMessage = '';
 
+    const settings = loadRuntimeSettings(runtimeHome);
+
     if (normalized.startsWith('tg:')) {
-      const env = readEnvFile(envFilePath(runtimeHome));
-      const token = env.TELEGRAM_BOT_TOKEN?.trim() || '';
+      const token = await getProviderRuntimeSecret({
+        providerId: 'telegram',
+        key: 'bot_token',
+        defaultEnvName: 'TELEGRAM_BOT_TOKEN',
+        settings,
+        secrets:
+          db.getRuntimeSecrets?.() ??
+          new EnvRuntimeSecretProvider({
+            ...process.env,
+            ...readEnvFile(envFilePath(runtimeHome)),
+          }),
+      });
       if (!token) {
-        p.log.error('TELEGRAM_BOT_TOKEN is missing.');
+        p.log.error('Telegram bot token runtime secret is missing.');
         p.log.info(
-          'Next action: run `gantry config set TELEGRAM_BOT_TOKEN <token>` first.',
+          'Next action: run `gantry provider connect telegram` or configure provider_connections.telegram_default.runtime_secret_refs.bot_token.',
         );
         return 1;
       }
@@ -240,7 +254,6 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
       return 1;
     }
 
-    const settings = loadRuntimeSettings(runtimeHome);
     const previousSettings = structuredClone(settings);
     const requiresTrigger = parsed.requiresTrigger ?? true;
     const defaultTrigger = defaultTriggerForAgentName(

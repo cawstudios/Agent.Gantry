@@ -1,6 +1,13 @@
 import type { AppId } from '../../domain/app/app.js';
-import { applyRuntimeSettingsDesiredState } from './restart-sync.js';
-import { saveRuntimeSettings } from './runtime-settings.js';
+import type { SettingsRevisionRepository } from '../../domain/ports/fleet-capability-state.js';
+import {
+  loadRuntimeSettings,
+  saveRuntimeSettings,
+} from './runtime-settings.js';
+import {
+  importWorkstationSettings,
+  type SettingsRevisionMirror,
+} from './settings-import-service.js';
 import type {
   SettingsDesiredStateOps,
   SettingsDesiredStateRepositories,
@@ -10,52 +17,84 @@ import type { RuntimeSettings } from './runtime-settings-types.js';
 export interface DesiredSettingsWriteStorage {
   ops: SettingsDesiredStateOps;
   repositories: SettingsDesiredStateRepositories;
+  settingsRevisions?: SettingsRevisionRepository;
+  pool?: SettingsRevisionMirror['pool'];
   close?: () => Promise<void>;
 }
 
 let storageProvider:
-  | (() => Promise<DesiredSettingsWriteStorage | undefined>)
+  | ((input?: {
+      settings?: RuntimeSettings;
+    }) => Promise<DesiredSettingsWriteStorage | undefined>)
   | undefined;
 
 export function configureDesiredSettingsStorageProvider(
   provider:
-    | (() => Promise<DesiredSettingsWriteStorage | undefined>)
+    | ((input?: {
+        settings?: RuntimeSettings;
+      }) => Promise<DesiredSettingsWriteStorage | undefined>)
     | undefined,
 ): void {
   storageProvider = provider;
 }
 
 /**
- * Single desired-state write path that gracefully degrades.
+ * Single desired-state write path.
  *
- * When runtime storage is reachable, the settings are reconciled through the
- * owner (`applyRuntimeSettingsDesiredState`). When storage is absent (offline
- * CLI, no Postgres), the settings are written to settings.yaml only; the
- * running runtime reconciles on reload. Once reconciliation starts, failures
- * must propagate so invalid desired state is not persisted as a YAML-only
- * fallback.
+ * Postgres `settings_revisions` is the durable authority for managed runtime
+ * settings. The local `settings.yaml` file is updated by the shared import path
+ * after the revision append succeeds.
  */
 export async function writeDesiredRuntimeSettings(input: {
   runtimeHome: string;
   settings: RuntimeSettings;
   previousSettings?: RuntimeSettings;
   appId?: AppId;
+  createdBy?: string;
 }): Promise<{ reconciled: boolean }> {
-  const storage = storageProvider ? await storageProvider() : undefined;
-  if (!storage) {
+  const deploymentMode = input.settings.runtime.deploymentMode;
+  if (!storageProvider) {
     saveRuntimeSettings(input.runtimeHome, input.settings);
     return { reconciled: false };
   }
-
+  const storage = await storageProvider({ settings: input.settings });
+  if (!storage) {
+    throw new Error(
+      'Settings mutation requires runtime storage so settings_revisions can be durably appended.',
+    );
+  }
+  if (!deploymentMode) {
+    await storage.close?.();
+    throw new Error(
+      'Settings mutation requires runtime.deploymentMode when runtime storage is available.',
+    );
+  }
+  if (!storage.settingsRevisions) {
+    await storage.close?.();
+    throw new Error(
+      'Settings mutation requires the settings revisions repository.',
+    );
+  }
   try {
-    await applyRuntimeSettingsDesiredState({
-      runtimeHome: input.runtimeHome,
-      settings: input.settings,
-      previousSettings: input.previousSettings,
-      appId: input.appId ?? ('default' as AppId),
-      ops: storage.ops,
-      repositories: storage.repositories,
-    });
+    const appId = input.appId ?? ('default' as AppId);
+    const previousSettings =
+      input.previousSettings ?? loadRuntimeSettings(input.runtimeHome);
+    await importWorkstationSettings(
+      {
+        runtimeHome: input.runtimeHome,
+        ops: storage.ops,
+        repositories: storage.repositories,
+        appId,
+        previousSettings,
+        revisionMirror: {
+          settingsRevisions: storage.settingsRevisions,
+          pool: storage.pool,
+          createdBy: input.createdBy ?? 'cli:desired-settings-write',
+        },
+        revisionMirrorRequired: true,
+      },
+      input.settings,
+    );
     return { reconciled: true };
   } finally {
     await storage.close?.();

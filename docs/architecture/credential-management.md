@@ -10,10 +10,10 @@ Gantry uses four source lanes:
 
 - `settings.yaml` stores non-secret configuration, such as model gateway
   mode, channel enablement, schemas, allowlists, and model selections.
-- `RuntimeSecretProvider` resolves runtime-owned secrets. The local/personal
-  implementation reads runtime `.env` and process env for values such as
-  database URLs, channel bot tokens, webhook/control secrets, and the stable
-  credential encryption key.
+- `RuntimeSecretProvider` resolves runtime-owned secrets from explicit refs.
+  Supported runtime refs are `env:<NAME>` (runtime `.env` or process env),
+  `gantry-secret:<NAME>` (encrypted Gantry secret rows), and
+  `aws-sm:<name-or-arn>` (AWS Secrets Manager).
 - Gantry Credential Center stores capability env var values for selected skills, MCP
   servers, and reviewed tools. Values are encrypted in Postgres and projected
   only when a selected capability declares the matching env var or credential
@@ -55,8 +55,10 @@ Runtime-owned secrets are never injected into an agent runner. They are checked
 by runtime preflight, doctor, channel setup, storage readiness, and credential
 encryption readiness.
 
-Runtime `.env` and process env are valid for these local/personal secrets. They
-must not contain non-secret settings such as model access state or gateway URLs.
+Guided provider setup stores channel credentials as encrypted
+`gantry-secret:` refs by default. Runtime `.env` and process env remain valid
+only when settings explicitly reference `env:<NAME>`; they must not contain
+non-secret settings such as model access state or gateway URLs.
 
 ## Capability Credentials
 
@@ -227,25 +229,22 @@ credentials, never in Gantry `.env` or process env.
 | ------------------------------------------------------------- | ------------------------------------------------------- |
 | `model_access.enabled`                                        | `settings.yaml` advanced override                       |
 | `model_access.gateway.bind_host`                              | `settings.yaml` advanced override                       |
-| `agent.name`                                                  | `settings.yaml`                                         |
-| `agent.default_model`                                         | `settings.yaml`                                         |
-| `agent.one_time_job_default_model`                            | `settings.yaml`                                         |
-| `agent.recurring_job_default_model`                           | `settings.yaml`                                         |
-| `memory.llm.models.*`                                         | `settings.yaml`                                         |
-| Conversation approvers                                        | `settings.yaml` and Postgres conversation approver rows |
+| `agent.name`                                                  | settings revisions, rendered to `settings.yaml`         |
+| `agent.default_model`                                         | settings revisions, rendered to `settings.yaml`         |
+| `agent.one_time_job_default_model`                            | settings revisions, rendered to `settings.yaml`         |
+| `agent.recurring_job_default_model`                           | settings revisions, rendered to `settings.yaml`         |
+| `memory.llm.models.*`                                         | settings revisions, rendered to `settings.yaml`         |
+| Conversation approvers                                        | settings revisions and Postgres conversation rows       |
 | `storage.postgres.url_env`                                    | `settings.yaml` advanced override                       |
-| `GANTRY_DATABASE_URL`                                         | `RuntimeSecretProvider` / local `.env`                  |
-| `TELEGRAM_BOT_TOKEN`                                          | `RuntimeSecretProvider` / local `.env`                  |
-| `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                          | `RuntimeSecretProvider` / local `.env`                  |
-| `SECRET_ENCRYPTION_KEY`                                       | `RuntimeSecretProvider` / local `.env`                  |
+| `GANTRY_DATABASE_URL`                                         | `RuntimeSecretProvider`, usually `env:GANTRY_DATABASE_URL` |
+| Channel bot/app tokens                                        | `RuntimeSecretProvider`, usually `gantry-secret:<NAME>` |
+| `SECRET_ENCRYPTION_KEY`                                       | `RuntimeSecretProvider`, usually `env:SECRET_ENCRYPTION_KEY` |
 | Skill, MCP, and reviewed tool env vars                        | Gantry Credentials (`gantry credentials access ...`)    |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` | Gantry model credentials                                |
 | `CLAUDE_CODE_OAUTH_TOKEN`                                     | Gantry model credentials                                |
 
-Planned key placement after parser/API/CLI support lands:
-`defaults.agent_harness` and `agents.<id>.agent_harness` will live in
-`settings.yaml` as non-secret user/admin intent. They are not accepted by the
-current parser.
+`defaults.agent_harness` and `agents.<id>.agent_harness` live in settings
+revisions as non-secret user/admin intent and are rendered to `settings.yaml`.
 
 Model env keys such as `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL`, and
 `ANTHROPIC_DEFAULT_*_MODEL` are child-process adapter projections. Gantry
@@ -266,10 +265,10 @@ receives the upstream OpenRouter API key or direct OpenRouter base URL.
   a loopback model gateway.
 - `false`: development mode with no model gateway injection.
 
-Future Vault, Kubernetes Secrets, AWS Secrets Manager, GCP Secret Manager,
-Azure Key Vault, or custom integrations must implement typed repositories or
-providers behind Gantry Credential Center. They must not add ad hoc runtime
-`.env` fallbacks for agent credentials.
+Future Vault, Kubernetes Secrets, GCP Secret Manager, Azure Key Vault, or
+custom integrations must implement typed runtime secret providers or Gantry
+Credential Center repositories. They must not add ad hoc runtime `.env`
+fallbacks for agent credentials.
 
 ## Gantry Model Gateway
 

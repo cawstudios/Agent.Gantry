@@ -10,7 +10,7 @@ import {
 import {
   applyModelPreset,
   loadRuntimeSettings,
-  saveRuntimeSettings,
+  writeDesiredRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 import {
   DEFAULT_MODEL_PRESET_ID,
@@ -18,6 +18,8 @@ import {
   resolveModelSelectionForWorkload,
   type ModelPresetId,
 } from '../shared/model-catalog.js';
+import { gantryRuntimeSecretRef } from '../domain/ports/runtime-secret-provider.js';
+import { storeRuntimeSecretInput } from './credentials.js';
 
 export interface OnboardingConfigInput {
   runtimeHome: string;
@@ -38,7 +40,9 @@ export interface OnboardingConfigInput {
   dreamingEnabled: boolean;
 }
 
-export function persistOnboardingConfig(input: OnboardingConfigInput): void {
+export async function persistOnboardingConfig(
+  input: OnboardingConfigInput,
+): Promise<void> {
   ensureRuntimeLayout(input.runtimeHome);
 
   const envPath = envFilePath(input.runtimeHome);
@@ -54,10 +58,6 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
     : randomBytes(32).toString('base64');
 
   upsertEnvFile(envPath, {
-    TELEGRAM_BOT_TOKEN: input.telegramBotToken?.trim() || null,
-    SLACK_BOT_TOKEN: input.slackBotToken?.trim() || null,
-    SLACK_APP_TOKEN: input.slackAppToken?.trim() || null,
-    SLACK_PERMISSION_APPROVER_IDS: null,
     CLAUDE_CODE_OAUTH_TOKEN: null,
     ANTHROPIC_API_KEY: null,
     ANTHROPIC_AUTH_TOKEN: null,
@@ -71,8 +71,13 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
       : null,
     OPENAI_API_KEY: null,
   });
+  if (input.postgresDatabaseUrl?.trim()) {
+    process.env.GANTRY_DATABASE_URL = input.postgresDatabaseUrl.trim();
+    process.env.SECRET_ENCRYPTION_KEY = credentialSecretEncryptionKey;
+  }
 
   const settings = loadRuntimeSettings(input.runtimeHome);
+  const previousSettings = structuredClone(settings);
   if (input.agentName?.trim()) {
     settings.agent.name = input.agentName.trim();
   }
@@ -92,6 +97,20 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
       `Selected model alias "${model.alias}" belongs to ${modelPresetId}, not ${preset}.`,
     );
   }
+  let previousSettingsForFinalWrite = previousSettings;
+  const storesRuntimeSecrets = Boolean(
+    input.telegramBotToken?.trim() ||
+    (input.slackBotToken?.trim() && input.slackAppToken?.trim()),
+  );
+  if (storesRuntimeSecrets) {
+    await writeDesiredRuntimeSettings({
+      runtimeHome: input.runtimeHome,
+      settings,
+      previousSettings,
+      createdBy: 'cli:onboarding',
+    });
+    previousSettingsForFinalWrite = structuredClone(settings);
+  }
   applyModelPreset(settings, preset);
   if (model.alias) {
     settings.agent.defaultModel = model.alias;
@@ -103,6 +122,63 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
     input.primaryProvider === 'slack' &&
     Boolean(input.slackBotToken) &&
     Boolean(input.slackAppToken);
+  const secretWrites: Promise<void>[] = [];
+  if (input.telegramBotToken?.trim()) {
+    secretWrites.push(
+      storeRuntimeSecretInput({
+        runtimeHome: input.runtimeHome,
+        name: 'TELEGRAM_BOT_TOKEN',
+        value: input.telegramBotToken.trim(),
+        actor: 'cli:onboarding',
+      }),
+    );
+    settings.providers.telegram.defaultConnection ||= 'telegram_default';
+    settings.providerConnections[
+      settings.providers.telegram.defaultConnection
+    ] = {
+      provider: 'telegram',
+      label:
+        settings.providerConnections[
+          settings.providers.telegram.defaultConnection
+        ]?.label || 'Telegram Default',
+      runtimeSecretRefs: {
+        ...(settings.providerConnections[
+          settings.providers.telegram.defaultConnection
+        ]?.runtimeSecretRefs || {}),
+        bot_token: gantryRuntimeSecretRef('TELEGRAM_BOT_TOKEN'),
+      },
+    };
+  }
+  if (input.slackBotToken?.trim() && input.slackAppToken?.trim()) {
+    secretWrites.push(
+      storeRuntimeSecretInput({
+        runtimeHome: input.runtimeHome,
+        name: 'SLACK_BOT_TOKEN',
+        value: input.slackBotToken.trim(),
+        actor: 'cli:onboarding',
+      }),
+      storeRuntimeSecretInput({
+        runtimeHome: input.runtimeHome,
+        name: 'SLACK_APP_TOKEN',
+        value: input.slackAppToken.trim(),
+        actor: 'cli:onboarding',
+      }),
+    );
+    settings.providers.slack.defaultConnection ||= 'slack_default';
+    settings.providerConnections[settings.providers.slack.defaultConnection] = {
+      provider: 'slack',
+      label:
+        settings.providerConnections[settings.providers.slack.defaultConnection]
+          ?.label || 'Slack Default',
+      runtimeSecretRefs: {
+        ...(settings.providerConnections[
+          settings.providers.slack.defaultConnection
+        ]?.runtimeSecretRefs || {}),
+        bot_token: gantryRuntimeSecretRef('SLACK_BOT_TOKEN'),
+        app_token: gantryRuntimeSecretRef('SLACK_APP_TOKEN'),
+      },
+    };
+  }
   settings.memory = {
     ...settings.memory,
     enabled: input.memoryEnabled,
@@ -117,7 +193,19 @@ export function persistOnboardingConfig(input: OnboardingConfigInput): void {
       enabled: input.memoryEnabled && input.dreamingEnabled,
     },
   };
-  saveRuntimeSettings(input.runtimeHome, settings);
+  await Promise.all(secretWrites);
+  await writeDesiredRuntimeSettings({
+    runtimeHome: input.runtimeHome,
+    settings,
+    previousSettings: previousSettingsForFinalWrite,
+    createdBy: 'cli:onboarding',
+  });
+  upsertEnvFile(envPath, {
+    TELEGRAM_BOT_TOKEN: null,
+    SLACK_BOT_TOKEN: null,
+    SLACK_APP_TOKEN: null,
+    SLACK_PERMISSION_APPROVER_IDS: null,
+  });
 }
 
 function isValidCredentialEncryptionKey(raw: string): boolean {

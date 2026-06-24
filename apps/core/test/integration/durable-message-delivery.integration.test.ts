@@ -57,7 +57,7 @@ maybeDescribe('durable message delivery persistence', () => {
       label: 'Durable Slack',
       status: 'active',
       config: { workspace: 'durable' },
-      runtimeSecretRefs: [],
+      runtimeSecretRefs: {},
       createdAt: now,
       updatedAt: now,
     });

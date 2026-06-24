@@ -9,7 +9,7 @@ import {
   UpdateProviderConnectionRequestSchema,
 } from '@gantry/contracts';
 
-import { EnvRuntimeSecretProvider } from '../../../adapters/credentials/env-runtime-secret-provider.js';
+import { createRepositoryRuntimeSecretProvider } from '../../../adapters/credentials/repository-runtime-secret-provider.js';
 import { RuntimeSecretConversationMembershipValidator } from '../../../channels/conversation-membership-validation.js';
 import {
   BuiltInControlChannelProviderCatalog,
@@ -77,10 +77,14 @@ interface RuntimeConversationRouteState {
 
 const providers = new BuiltInControlChannelProviderCatalog();
 
-function services() {
+function services(appId: AppId = 'default' as AppId) {
   const repositories = getRuntimeStorage().repositories;
   const ids = { generate: randomUUID };
   const clock = { now: nowIso };
+  const runtimeSecrets = createRepositoryRuntimeSecretProvider({
+    appId,
+    repository: repositories.capabilitySecrets,
+  });
   return {
     providerConnections: new ProviderConnectionControlService({
       providerConnections: repositories.providerConnections,
@@ -91,9 +95,7 @@ function services() {
     discovery: new DiscoverProviderConversationsService({
       providerConnections: repositories.providerConnections,
       conversations: repositories.conversations,
-      discovery: new RuntimeSecretConversationDiscovery(
-        new EnvRuntimeSecretProvider(),
-      ),
+      discovery: new RuntimeSecretConversationDiscovery(runtimeSecrets),
       ids,
       clock,
     }),
@@ -295,7 +297,9 @@ export async function handleProviderConversationRoutes(
       return true;
     }
     try {
-      const conversations = await services().discovery.execute({
+      const conversations = await services(
+        auth.appId as AppId,
+      ).discovery.execute({
         appId: auth.appId as AppId,
         providerConnectionId:
           providerConnectionRoute.providerConnectionId as ProviderConnectionId,
@@ -400,7 +404,10 @@ export async function handleProviderConversationRoutes(
           conversations: getRuntimeStorage().repositories.conversations,
         },
         new RuntimeSecretConversationMembershipValidator(
-          new EnvRuntimeSecretProvider(),
+          createRepositoryRuntimeSecretProvider({
+            appId: auth.appId as AppId,
+            repository: getRuntimeStorage().repositories.capabilitySecrets,
+          }),
         ),
       ).replaceControlAllowlist({
         appId: auth.appId as AppId,

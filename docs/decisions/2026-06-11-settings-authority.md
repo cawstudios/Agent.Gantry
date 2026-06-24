@@ -4,22 +4,25 @@
 
 [2026-04-17 — Settings And Runtime Truth](./2026-04-17-settings-runtime-truth.md)
 established `settings.yaml` as the canonical desired-state surface, watched live
-and mutated by CLI and reviewed admin tools. That contract is correct for a
-single host. It does not work for a `fleet`
+and mutated by CLI and reviewed admin tools. That contract worked for a single
+host but made Postgres a projection instead of the durable desired-state
+authority. It also does not work for a `fleet`
 ([2026-06-11-deployment-modes.md](./2026-06-11-deployment-modes.md)): N immutable
 workers cannot each own and watch a local file, and a future fleet management UI
 needs a desired-state API, not file edits.
 
-The user resolved this with gate revision 2 (CEO plan adopted revision 2): **one
-desired-state service, two surfaces** — keep YAML for workstation, add a
-control-API desired-state surface for fleet, with **one mutation path and one
-validation**. No authority fork.
+The user resolved this with gate revision 2 (CEO plan adopted revision 2), then
+expanded it on 2026-06-24 to cover workstation/personal too: **one
+desired-state service, one revisioned authority, multiple surfaces**. YAML stays
+as the canonical readable copy and import/export surface; Postgres
+`settings_revisions` is the durable desired-state authority. No authority fork.
 
 ## Decision
 
-1. **One desired-state service, two surfaces.**
-   - **Workstation:** `settings.yaml` watcher becomes an **auto-importer**. A
-     valid file change is imported through the same desired-state service.
+1. **One desired-state service, multiple surfaces.**
+   - **Workstation/personal:** `settings.yaml` watcher is an **auto-importer**.
+     A valid file change appends a `settings_revisions` row first, then Gantry
+     syncs the canonical YAML copy and runtime projection.
    - **Fleet/org:** **control-API desired-state CRUD endpoints** are the mutation
      surface. A future management UI builds on these endpoints — the **UI is out
      of scope, the API is in scope** for this plan. `settings.yaml`
@@ -40,30 +43,33 @@ validation**. No authority fork.
    a **poll fallback** guarantees convergence if a NOTIFY is dropped. (This reuses
    the existing pg_notify-with-reconnect path noted in the plan's reuse points.)
 
-5. **First boot with no revision** is a red `/readyz` with a log line naming the
-   seed command, not a crash.
+5. **First boot with no revision** imports existing/default workstation YAML into
+   revision `1`; fleet workers with no revision stay red `/readyz` with a log
+   line naming the seed command, not a crash.
 
-## Supersedes (Fleet Mode Only)
+## Supersedes
 
 This ADR supersedes the following clauses of
 [2026-04-17 — Settings And Runtime Truth](./2026-04-17-settings-runtime-truth.md)
-**for `fleet` mode only**. **Workstation behavior is unchanged** — every clause
-below still holds as written for workstation.
+for managed workstation/personal and fleet runtimes.
 
 - **Clause 2** (`settings.yaml` is the canonical runtime behavior surface):
-  superseded for fleet — the canonical surface in fleet is the desired-state
-  service fronted by the control API; `settings.yaml` is bootstrap/backup tooling.
+  superseded — the canonical authority is `settings_revisions`; `settings.yaml`
+  is the canonical human-readable copy plus bootstrap/import/export surface.
 - **Consequence "Runtime watches `settings.yaml`; valid safe changes reconcile
-  live"**: superseded for fleet — the watcher is disabled as a watcher; import
-  runs only on explicit CLI invocation. Distribution to workers is via
-  `settings_revisions` + pg_notify, not a file watch.
-- **Consequence "CLI mutation commands update `settings.yaml`"**: in fleet, CLI
-  and API mutations go through the desired-state service and produce a revision;
-  the YAML file is no longer the source of truth that workers read.
+  live"**: in workstation, the watcher imports valid edits into a revision before
+  local reconcile; in fleet, the watcher is disabled and import runs only on
+  explicit CLI invocation. Distribution to workers is via `settings_revisions` +
+  pg_notify, not a file watch.
+- **Consequence "CLI mutation commands update `settings.yaml`"**: CLI and API
+  mutations go through the desired-state service and produce a revision; the YAML
+  file is no longer the source of truth that startup reads.
 
-Everything else in 2026-04-17 (secret/`.env` boundary, `model_access.*` scope,
-agent/conversation key ownership, additive reconciliation, reviewed admin-tool
-mediation) is **unchanged in both modes**.
+The `model_access.*` scope, agent/conversation key ownership, additive
+reconciliation, and reviewed admin-tool mediation from 2026-04-17 remain
+unchanged. The secret boundary is refined by this PR: settings store runtime
+secret refs (`env:`, `gantry-secret:`, `aws-sm:`), not raw secret values, and
+`.env` is only one runtime-secret source.
 
 ## Alternatives Considered
 
@@ -80,10 +86,11 @@ mediation) is **unchanged in both modes**.
 
 ## Consequences
 
-- Workstation operators see no change: edit `settings.yaml`, it reconciles live.
+- Workstation operators can still edit `settings.yaml`, but the edit is imported
+  into Postgres first and then synced back to canonical YAML.
 - Fleet operators mutate desired state through the control API (and seed/back up
-  via `settings import`/`settings export`); workers converge via
-  revision + NOTIFY + poll.
+  via `settings import`/`settings export`); workers converge via revision +
+  NOTIFY + poll.
 - The `settings_revisions.min_reader_version` contract makes mixed-version
   rolling deploys safe; the upgrade/skew matrix in
   [deployment-profiles.md](../architecture/deployment-profiles.md) enumerates the
@@ -93,13 +100,13 @@ mediation) is **unchanged in both modes**.
 
 ## Rollback Or Migration Notes
 
-- `settings_revisions` is an additive migration; workstation deployments that
-  never write a revision are unaffected.
-- Reverting a bad fleet revision is writing a corrected revision (additive); there
-  is no destructive rollback.
+- `settings_revisions` is additive; managed workstation bootstraps the first
+  revision from existing/default YAML when no revision exists.
+- Reverting a bad revision is writing a corrected revision (additive); there is
+  no destructive rollback.
 - Switching a deployment from fleet back to workstation re-enables the file
-  watcher; `settings export` reproduces a `settings.yaml` from current desired
-  state.
+  watcher as an import surface; `settings export` reproduces `settings.yaml`
+  from current desired state.
 
 ## See Also
 

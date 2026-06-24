@@ -108,7 +108,9 @@ Example:
       "can": "Publish prepared content through the approved skill action.",
       "cannot": "Read unrelated accounts or receive raw credentials.",
       "requiredEnvVars": ["PUBLISHER_ACCESS_TOKEN"],
-      "commandTemplates": ["python3 ${skillRoot}/publish.py --file /tmp/content.md"],
+      "commandTemplates": [
+        "python3 ${skillRoot}/publish.py --file /tmp/content.md"
+      ],
       "networkHosts": ["api.publisher.com:443", "www.publisher.com:443"]
     }
   ]
@@ -228,6 +230,7 @@ Gantry's built-in MCP tools.
 
   Remote servers may still make their own downstream calls that are outside
   local sandbox visibility; the review UX states this.
+
 - `stdio_template` servers carry the declared hosts as reviewed inventory into
   the materialized capability, but current-session stdio execution remains
   **fail-closed**: Gantry has no OS-level sandbox to spawn an arbitrary
@@ -248,18 +251,19 @@ does not grant every tool. Each agent binding carries an optional
 `allowedToolPatterns` subset of the server definition's reviewed patterns, so the
 same server can be read-only for one agent and read+write for another without
 duplicating the definition. An empty subset inherits the definition's full set; a
-binding can only narrow, never widen beyond what was reviewed. The scope is the
-durable truth in `settings.yaml` under the agent's `mcp_servers` source ref
-(`tools: [read_*]`), reconciled into the Postgres binding and intersected at
-materialization so the proxy only exposes the agent's allowed operations. Set it
-with `gantry mcp connect --agent-tool <pattern>` or the agent access API.
+binding can only narrow, never widen beyond what was reviewed. The scope is
+stored in desired-state revisions and rendered into `settings.yaml` under the
+agent's `mcp_servers` source ref (`tools: [read_*]`), reconciled into the
+Postgres binding and intersected at materialization so the proxy only exposes
+the agent's allowed operations. Set it with
+`gantry mcp connect --agent-tool <pattern>` or the agent access API.
 
 ## Administration Model
 
 The deterministic ownership rule is:
 
-- `settings.yaml` exposes two separate agent views: `sources` and
-  `capabilities`.
+- Desired-state revisions expose two separate agent views in the canonical YAML
+  copy: `sources` and `capabilities`.
 - `sources` lists attached, reviewed resources such as skills, MCP servers,
   built-in tools, adapters, and local CLIs. A source is visible inventory for
   the agent, not execution authority.
@@ -270,9 +274,9 @@ The deterministic ownership rule is:
   bodies, generated manifests, or provider credentials.
 - Runtime rejects legacy agent grant fields such as `tools`, `skills`,
   old direct tool/skill/MCP id lists and nested legacy capability buckets.
-- Postgres stores the runtime projection, catalog rows, artifact metadata,
-  audit, and execution state. It is not the durable source of truth for fields
-  represented in `settings.yaml`.
+- Postgres stores desired-state revisions, the runtime projection, catalog rows,
+  artifact metadata, audit, and execution state. `settings.yaml` is the readable
+  copy for desired-state fields, not an independent authority.
 - Conversations own bound agents, default/routing metadata, sessions, sender
   policy, trigger policy, and control approver allowlists.
 - Conversation sender policy is separate from conversation membership and
@@ -320,27 +324,27 @@ when the underlying skill, MCP server, or local CLI is not yet connected. The
 source-specific tools below are setup/proxy implementation surfaces; they do not
 become durable authority by themselves.
 
-| Tool                               | Use                                                                                                                                                                                                          | Never use for                                                                                                   |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `send_message`                     | Progress updates or direct channel messages while the agent is still running.                                                                                                                                | Persistent capability changes.                                                                                  |
-| `ask_user_question`                | Structured choices with content, options, single-select, multi-select, preview/details, and channel-native buttons.                                                                                          | Open-ended chat or approval of persistent capabilities.                                                         |
-| `continuity_summary`               | Summarizes current durable continuity, staged memory candidates, reviewed memory state, dreaming status, and last injected context.                                                                          | Treating memory or continuity content as instruction or tool authority.                                         |
-| `file`                             | Lists, reads, writes, or promotes Gantry FileArtifacts by virtual scope/path while hiding host filesystem paths and storage refs; full host tool id `mcp__gantry__file`.                                     | Arbitrary host filesystem reads/writes or bypassing approved file facades.                                      |
-| `request_skill_install`            | Skill source setup using staged `SKILL.md` package files or an approved installer command that imports the resulting package in host-controlled staging.                                                      | Treating skill setup as approval to run risky skill actions, installing silently, or editing skill directories directly. |
-| `request_skill_proposal`           | Skill source setup for agent-created or modified `SKILL.md` bundles.                                                                                                                                         | Treating proposed skill files as durable action authority or writing directly to `.agents/skills`, provider skill folders, or agent-local `skills/`. |
-| `request_skill_dependency_install` | Host-installed dependencies needed by a reviewed skill source.                                                                                                                                               | Running dependency commands from the agent.                                                                     |
-| `request_mcp_server`               | Third-party MCP source setup with a reviewed `stdio_template`, sandbox profile, expected tool patterns, credential needs, and reason.                                                                        | Treating server connection as approval for every MCP operation, editing `.mcp.json`, or editing Claude `mcpServers`. |
-| `request_access target.kind=capability`   | Requests an approved reviewed semantic capability by id.                                                                                                                                                    | Capability proposals, broad raw commands, or changing permission settings directly.                             |
-| `request_access target.kind=run_command`  | Requests a scoped temporary exact-command fallback when no reviewed capability fits.                                                                                                                        | Durable CLI authority, exact SDK/native tools, provider-specific implementation names, Browser internals, or third-party MCP tool ids. |
-| `settings_desired_state`           | Selected-capability reading of the current local desired-state settings before proposing a reviewed config change.                                                                                           | Unselected access, mutating settings, or exposing raw secrets.                                                  |
-| `request_settings_update`          | Selected-capability reviewed host-side edits to non-secret local `settings.yaml` desired state.                                                                                                              | Unselected access, direct file edits, raw provider secrets, skill source injection, or MCP definitions.         |
-| `admin_permission_list`            | Selected-capability inventory of current-agent persistent Gantry MCP grants.                                                                                                                                 | Cross-agent grant discovery, raw secret inspection, or broad admin wildcard discovery.                          |
-| `admin_permission_revoke`          | Selected-capability revocation of one current-agent persistent Gantry MCP grant.                                                                                                                             | Revoking grants for another agent or bypassing review for new grants.                                           |
-| `mcp_list_tools`                   | Refreshes connected third-party MCP source inventory through the Gantry proxy.                                                                                                                               | Discovering unconnected servers or treating third-party tool names as durable Gantry authority.                 |
-| `mcp_describe_tool`                | Fetches untrusted schema/details for one tool from a connected third-party MCP source.                                                                                                                       | Broad tool discovery, execution authority, or trusting MCP annotations as grants.                               |
-| `mcp_call_tool`                    | Backend/proxy call path for connected third-party MCP tools when reviewed current-run capability access covers the exact action.                                                                              | Direct MCP server execution, raw `.mcp.json` edits, raw third-party MCP tool grants, or unconnected tools.      |
-| `service_restart`                  | Selected-capability restart after approved config or capability changes that require host restart.                                                                                                           | Restarting to activate unapproved changes.                                                                      |
-| `register_agent`                   | Selected-capability binding of a new channel conversation to an agent.                                                                                                                                       | Letting an unselected agent bind arbitrary chats.                                                               |
+| Tool                                     | Use                                                                                                                                                                      | Never use for                                                                                                                                        |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `send_message`                           | Progress updates or direct channel messages while the agent is still running.                                                                                            | Persistent capability changes.                                                                                                                       |
+| `ask_user_question`                      | Structured choices with content, options, single-select, multi-select, preview/details, and channel-native buttons.                                                      | Open-ended chat or approval of persistent capabilities.                                                                                              |
+| `continuity_summary`                     | Summarizes current durable continuity, staged memory candidates, reviewed memory state, dreaming status, and last injected context.                                      | Treating memory or continuity content as instruction or tool authority.                                                                              |
+| `file`                                   | Lists, reads, writes, or promotes Gantry FileArtifacts by virtual scope/path while hiding host filesystem paths and storage refs; full host tool id `mcp__gantry__file`. | Arbitrary host filesystem reads/writes or bypassing approved file facades.                                                                           |
+| `request_skill_install`                  | Skill source setup using staged `SKILL.md` package files or an approved installer command that imports the resulting package in host-controlled staging.                 | Treating skill setup as approval to run risky skill actions, installing silently, or editing skill directories directly.                             |
+| `request_skill_proposal`                 | Skill source setup for agent-created or modified `SKILL.md` bundles.                                                                                                     | Treating proposed skill files as durable action authority or writing directly to `.agents/skills`, provider skill folders, or agent-local `skills/`. |
+| `request_skill_dependency_install`       | Host-installed dependencies needed by a reviewed skill source.                                                                                                           | Running dependency commands from the agent.                                                                                                          |
+| `request_mcp_server`                     | Third-party MCP source setup with a reviewed `stdio_template`, sandbox profile, expected tool patterns, credential needs, and reason.                                    | Treating server connection as approval for every MCP operation, editing `.mcp.json`, or editing Claude `mcpServers`.                                 |
+| `request_access target.kind=capability`  | Requests an approved reviewed semantic capability by id.                                                                                                                 | Capability proposals, broad raw commands, or changing permission settings directly.                                                                  |
+| `request_access target.kind=run_command` | Requests a scoped temporary exact-command fallback when no reviewed capability fits.                                                                                     | Durable CLI authority, exact SDK/native tools, provider-specific implementation names, Browser internals, or third-party MCP tool ids.               |
+| `settings_desired_state`                 | Selected-capability reading of the current local desired-state settings before proposing a reviewed config change.                                                       | Unselected access, mutating settings, or exposing raw secrets.                                                                                       |
+| `request_settings_update`                | Selected-capability reviewed host-side edits to non-secret local `settings.yaml` desired state.                                                                          | Unselected access, direct file edits, raw provider secrets, skill source injection, or MCP definitions.                                              |
+| `admin_permission_list`                  | Selected-capability inventory of current-agent persistent Gantry MCP grants.                                                                                             | Cross-agent grant discovery, raw secret inspection, or broad admin wildcard discovery.                                                               |
+| `admin_permission_revoke`                | Selected-capability revocation of one current-agent persistent Gantry MCP grant.                                                                                         | Revoking grants for another agent or bypassing review for new grants.                                                                                |
+| `mcp_list_tools`                         | Refreshes connected third-party MCP source inventory through the Gantry proxy.                                                                                           | Discovering unconnected servers or treating third-party tool names as durable Gantry authority.                                                      |
+| `mcp_describe_tool`                      | Fetches untrusted schema/details for one tool from a connected third-party MCP source.                                                                                   | Broad tool discovery, execution authority, or trusting MCP annotations as grants.                                                                    |
+| `mcp_call_tool`                          | Backend/proxy call path for connected third-party MCP tools when reviewed current-run capability access covers the exact action.                                         | Direct MCP server execution, raw `.mcp.json` edits, raw third-party MCP tool grants, or unconnected tools.                                           |
+| `service_restart`                        | Selected-capability restart after approved config or capability changes that require host restart.                                                                       | Restarting to activate unapproved changes.                                                                                                           |
+| `register_agent`                         | Selected-capability binding of a new channel conversation to an agent.                                                                                                   | Letting an unselected agent bind arbitrary chats.                                                                                                    |
 
 ## Capability Types
 
@@ -357,20 +361,20 @@ become durable authority by themselves.
 
 ## Durable Model
 
-`settings.yaml` owns the durable local list of user-manageable agent sources
-and capabilities under `agents.<agent>.sources` and
-`agents.<agent>.capabilities`. Settings-side changes are validated, written,
-reconciled into Postgres by replacement, and reloaded immediately where safe;
-they do not rely only on the file watcher.
+`settings_revisions` owns the durable local list of user-manageable agent
+sources and capabilities rendered under `agents.<agent>.sources` and
+`agents.<agent>.capabilities` in `settings.yaml`. Settings-side changes are
+validated, revisioned, synced to YAML, reconciled into Postgres by replacement,
+and reloaded immediately where safe; they do not rely only on the file watcher.
 
 Postgres is the runtime capability projection and catalog store. It owns
 definitions, agent bindings, config-version links, Gantry Credential reference
 names, encrypted capability secret values, permission decisions, audit events,
 and disablement state.
 
-Agent-owned persistent grants are mirrored into `settings.yaml` as readable
-`agents.<id>.access.selections` entries. Prefer reviewed semantic capabilities
-for app workflows. `request_access target.kind=run_command` is intentionally
+Agent-owned persistent grants are revisioned and mirrored into `settings.yaml`
+as readable `agents.<id>.access.selections` entries. Prefer reviewed semantic
+capabilities for app workflows. `request_access target.kind=run_command` is intentionally
 narrow and should be converted into an approved capability definition when it
 needs to survive beyond a one-off command fallback. Durable fallback authority
 is limited to semantic capabilities, canonical `browser.use`, exact Gantry file/web
@@ -397,11 +401,11 @@ interpreter wildcard scopes, and destructive redirects are one-time approval
 only and must not be synthesized as durable `RunCommand(...)` rules.
 
 Control API capability replacement and other DB/admin-side capability writes
-must export the readable Postgres projection back into `settings.yaml`, then
-validate, reconcile, and reload. Persistent `Always allow` permission approvals
-must fail closed if settings cannot be updated; any new active binding is rolled
-back so DB-only persistent grants do not survive as hidden authority. Empty
-non-authoritative settings may continue to observe preexisting DB-only
+must append a desired-state revision, export the readable projection back into
+`settings.yaml`, then validate, reconcile, and reload. Persistent `Always allow`
+permission approvals must fail closed if settings cannot be updated; any new
+active binding is rolled back so DB-only persistent grants do not survive as
+hidden authority. Empty non-authoritative settings may continue to observe preexisting DB-only
 capabilities, but any declared settings access list replaces stale active
 Postgres tool, skill, and MCP bindings for that agent.
 
@@ -423,7 +427,8 @@ request_mcp_server { "name": "github", "transport": "stdio_template", "templateI
 ```
 
 Approved requests update the target agent's durable selected capabilities or
-attached sources and export the readable access projection to `settings.yaml`.
+attached sources in a settings revision and export the readable access
+projection to `settings.yaml`.
 Tool permission approval can resume the blocked active tool call immediately:
 `Allow once` is current-run only and does not create durable semantic
 authority, while `Always allow` stores either the approved semantic capability,
@@ -687,7 +692,7 @@ Sections:
 The v1 simplification keeps each surface honest within its current boundary. Two
 extensions are explicitly deferred rather than faked:
 
-| Deferred surface | Status | Reason |
-| --- | --- | --- |
+| Deferred surface                                                                                                | Status   | Reason                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Per-agent pending/expired requests in `Needs attention` (and the expired-request branch of `Suggested cleanup`) | Deferred | `PendingAccessRequestsRepository` only exposes app-wide `countPendingAccessRequests({ appId })`. Populating these rows needs a new `listPendingForAgent({ appId, agentId })` listing contract on the repository port and its Postgres adapter. Until then the summary passes `pendingRequests` empty and the section renders with no per-agent rows. The summary must never substitute the app-wide count for a per-agent blocker. |
-| Reusing `AgentAccessSummary` inside the agent-facing `admin_permission_list` MCP output | Deferred | The unified summary is computed in the control/application layer; the runner/MCP tool runs in a separate process boundary and would need the projection fetched or recomputed across it. v1 keeps MCP behavior scoped to its current boundary instead of pretending the same projection exists everywhere. |
+| Reusing `AgentAccessSummary` inside the agent-facing `admin_permission_list` MCP output                         | Deferred | The unified summary is computed in the control/application layer; the runner/MCP tool runs in a separate process boundary and would need the projection fetched or recomputed across it. v1 keeps MCP behavior scoped to its current boundary instead of pretending the same projection exists everywhere.                                                                                                                         |

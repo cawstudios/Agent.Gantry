@@ -9,11 +9,7 @@ import {
   GraphTeamsSetupDiscoveryClient,
   trimTeamsSetupCredentials,
 } from '../channels/teams-setup-discovery.js';
-import { upsertEnvFile } from '../config/env/file.js';
-import {
-  envFilePath,
-  ensureRuntimeLayout,
-} from '../config/settings/runtime-home.js';
+import { ensureRuntimeLayout } from '../config/settings/runtime-home.js';
 import {
   ensureConfiguredConversationBinding,
   loadRuntimeSettings,
@@ -31,6 +27,7 @@ import {
   createProfileFileMirrorExists,
   createProfileFileMirrorWriter,
 } from '../platform/profile-file-mirror.js';
+import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
 
 type TeamsChannelChoice =
   | { type: 'selected'; channel: TeamsDiscoveredChannel }
@@ -268,6 +265,40 @@ export async function runTeamsConnectCommand(
   }
   p.log.success(validation.message);
 
+  const clientIdSecret = await planRuntimeSecretInput({
+    runtimeHome,
+    name: 'TEAMS_CLIENT_ID',
+    value: credentials.clientId,
+    actor: 'cli:teams-connect',
+    label: 'Teams client ID',
+  });
+  if (!clientIdSecret) {
+    p.outro('Teams connect cancelled.');
+    return 1;
+  }
+  const clientSecretRef = await planRuntimeSecretInput({
+    runtimeHome,
+    name: 'TEAMS_CLIENT_SECRET',
+    value: credentials.clientSecret,
+    actor: 'cli:teams-connect',
+    label: 'Teams client secret',
+  });
+  if (!clientSecretRef) {
+    p.outro('Teams connect cancelled.');
+    return 1;
+  }
+  const tenantIdSecret = await planRuntimeSecretInput({
+    runtimeHome,
+    name: 'TEAMS_TENANT_ID',
+    value: credentials.tenantId,
+    actor: 'cli:teams-connect',
+    label: 'Teams tenant ID',
+  });
+  if (!tenantIdSecret) {
+    p.outro('Teams connect cancelled.');
+    return 1;
+  }
+
   const channelChoice = await chooseTeamsChannelForConnect(
     credentials,
     discoveryClient,
@@ -320,14 +351,30 @@ export async function runTeamsConnectCommand(
     );
   }
 
-  upsertEnvFile(envFilePath(runtimeHome), {
-    TEAMS_CLIENT_ID: credentials.clientId,
-    TEAMS_CLIENT_SECRET: credentials.clientSecret,
-    TEAMS_TENANT_ID: credentials.tenantId,
-  });
+  await Promise.all([
+    clientIdSecret.persist(),
+    clientSecretRef.persist(),
+    tenantIdSecret.persist(),
+  ]);
   const settings = loadRuntimeSettings(runtimeHome);
   const previousSettings = structuredClone(settings);
   settings.providers.teams.enabled = true;
+  const providerConnectionId =
+    settings.providers.teams.defaultConnection || 'teams_default';
+  settings.providers.teams.defaultConnection = providerConnectionId;
+  settings.providerConnections[providerConnectionId] = {
+    provider: 'teams',
+    label:
+      settings.providerConnections[providerConnectionId]?.label ||
+      'Teams Default',
+    runtimeSecretRefs: {
+      ...(settings.providerConnections[providerConnectionId]
+        ?.runtimeSecretRefs || {}),
+      client_id: clientIdSecret.ref,
+      client_secret: clientSecretRef.ref,
+      tenant_id: tenantIdSecret.ref,
+    },
+  };
   if (registeredFolder) {
     ensureConfiguredConversationBinding(settings, {
       agentId: registeredFolder,
@@ -347,10 +394,10 @@ export async function runTeamsConnectCommand(
   });
 
   if (channelChoice.type === 'selected') {
-    p.outro('Teams conversation is configured and ready.');
+    p.outro('Teams connected. Secret stored encrypted in Gantry.');
   } else {
     p.outro(
-      'Teams credentials saved. Next: run `gantry provider connect teams` to register a conversation.',
+      'Teams connected. Secret stored encrypted in Gantry. Next: run `gantry provider connect teams` to register a conversation.',
     );
   }
   return 0;

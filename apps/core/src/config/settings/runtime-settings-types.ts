@@ -253,8 +253,8 @@ export interface RuntimePermissionSettings {
 // Optional in-memory per-provider request rate caps enforced at the model
 // gateway. Maps a model provider id (validated against the executable provider
 // registry) to a requests-per-minute cap for that provider, per app.
-// Absent/empty -> no caps (no behavior change). This is restart-owned config
-// (settings.yaml is the source of truth); no DB projection, no spend ledger.
+// Absent/empty -> no caps (no behavior change). This is desired-state config
+// stored in settings revisions and rendered into settings.yaml; no spend ledger.
 export interface RuntimeProviderLimit {
   requestsPerMinute: number;
 }

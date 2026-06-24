@@ -121,6 +121,23 @@ export async function storeModelCredentialInput(input: {
   );
 }
 
+export async function storeRuntimeSecretInput(input: {
+  runtimeHome: string;
+  name: string;
+  value: string;
+  actor?: string;
+}): Promise<void> {
+  const name = normalizeCapabilitySecretName(input.name);
+  await withCredentialServices(input.runtimeHome, ({ capability }) =>
+    capability.set({
+      appId: DEFAULT_APP_ID,
+      name,
+      value: input.value,
+      actor: input.actor ?? 'cli',
+    }),
+  );
+}
+
 async function runModelCredentialCommand(
   runtimeHome: string,
   action = 'status',

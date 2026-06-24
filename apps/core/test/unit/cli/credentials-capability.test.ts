@@ -74,6 +74,7 @@ afterEach(() => {
   vi.doUnmock('@clack/prompts');
   vi.doUnmock('@core/adapters/storage/postgres/factory.js');
   vi.doUnmock('@core/cli/browser.js');
+  vi.doUnmock('@core/config/settings/runtime-settings.js');
   process.env = { ...originalEnv };
 });
 
@@ -217,6 +218,45 @@ describe('credentials capability CLI', () => {
     );
     expect(JSON.stringify(publish.mock.calls)).not.toContain(
       'secret-token-value',
+    );
+  });
+
+  it('stores a runtime secret without loading full runtime settings', async () => {
+    const { repository, upsertSecret } = makeSecretRepository();
+    vi.doMock('@core/config/settings/runtime-settings.js', () => ({
+      ensureRuntimeSettings: vi.fn(() => {
+        throw new Error('full runtime settings should not load');
+      }),
+    }));
+    vi.doMock('@core/adapters/storage/postgres/factory.js', () => ({
+      createStorageRuntime: () => ({
+        service: {
+          migrate: vi.fn(async () => undefined),
+          close: vi.fn(async () => undefined),
+        },
+        runtimeEventNotifier: { close: vi.fn(async () => undefined) },
+        runtimeEvents: { publish: vi.fn(async () => undefined) },
+        repositories: {
+          capabilitySecrets: repository,
+          modelCredentials: makeModelCredentialRepository(),
+        },
+      }),
+    }));
+
+    const { storeRuntimeSecretInput } =
+      await import('@core/cli/credentials.js');
+
+    await storeRuntimeSecretInput({
+      runtimeHome: '/tmp/gantry-fresh-provider-connect',
+      name: 'TELEGRAM_BOT_TOKEN',
+      value: 'token',
+      actor: 'cli:test',
+    });
+
+    expect(upsertSecret).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'TELEGRAM_BOT_TOKEN',
+      }),
     );
   });
 

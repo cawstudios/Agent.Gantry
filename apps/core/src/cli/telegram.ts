@@ -156,7 +156,8 @@ export async function verifyTelegramChatAccess(options: {
     return {
       ok: false,
       message: 'Telegram token is empty.',
-      nextAction: 'Set TELEGRAM_BOT_TOKEN before checking chat access.',
+      nextAction:
+        'Run `gantry provider connect telegram` or configure the Telegram bot_token runtime secret ref.',
     };
   }
 

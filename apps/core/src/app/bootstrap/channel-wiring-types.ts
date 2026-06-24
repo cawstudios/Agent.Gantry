@@ -151,6 +151,7 @@ export interface ChannelWiring {
   setDurableOutboundAttemptFactory: (
     factory: DurableOutboundAttemptFactory | undefined,
   ) => void;
+  setRuntimeSecrets: (provider: RuntimeSecretProvider) => void;
   setMessageActionHandler: (
     handler: ((input: MessageActionCallbackInput) => Promise<void>) | undefined,
   ) => void;

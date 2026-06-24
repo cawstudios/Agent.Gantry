@@ -5,6 +5,7 @@ import { parseRuntimeSettingsObject } from '../../../config/settings/runtime-set
 import {
   importFleetSettingsRevision,
   importWorkstationSettings,
+  SettingsRevisionConflictError,
   settingsFromRevisionDocument,
 } from '../../../config/settings/settings-import-service.js';
 import type { AppId } from '../../../domain/app/app.js';
@@ -150,18 +151,6 @@ async function handleDesiredState(
     }
     const storage = getRuntimeStorage();
     if (currentDeploymentMode(ctx) === 'workstation') {
-      if (
-        body.expectedRevision !== undefined &&
-        body.expectedRevision !== null
-      ) {
-        sendError(
-          res,
-          400,
-          'INVALID_REQUEST',
-          'expectedRevision is only supported for fleet settings revisions.',
-        );
-        return true;
-      }
       let revision = 0;
       try {
         const outcome = await importWorkstationSettings(
@@ -179,11 +168,36 @@ async function handleDesiredState(
               note: typeof body.note === 'string' ? body.note : null,
               logWarn: (context, message) => logger.warn(context, message),
             },
+            revisionMirrorRequired: true,
+            expectedRevision:
+              typeof body.expectedRevision === 'number'
+                ? body.expectedRevision
+                : null,
           },
           parsed,
         );
-        revision = outcome.revision ?? 0;
+        revision =
+          outcome.revision ??
+          (
+            await storage.repositories.settingsRevisions.getLatestSettingsRevision(
+              appId,
+            )
+          )?.revision ??
+          0;
       } catch (err) {
+        if (err instanceof SettingsRevisionConflictError) {
+          sendError(
+            res,
+            409,
+            'REVISION_CONFLICT',
+            `expectedRevision ${err.expectedRevision} does not match the current revision ${err.actualRevision}.`,
+            {
+              expectedRevision: err.expectedRevision,
+              actualRevision: err.actualRevision,
+            },
+          );
+          return true;
+        }
         sendError(
           res,
           400,

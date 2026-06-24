@@ -93,6 +93,7 @@ export function providerToResponse(provider: Provider) {
     id: provider.id,
     displayName: provider.displayName,
     capabilities: provider.capabilityFlags,
+    runtimeSecretKeys: provider.allowedRuntimeSecretKeys ?? [],
     status: placeholder ? 'unavailable' : 'available',
     placeholder: placeholder || undefined,
     createdAt: provider.createdAt,

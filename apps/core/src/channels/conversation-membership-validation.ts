@@ -4,6 +4,10 @@ import type {
   ConversationMembershipValidator,
 } from '../application/provider-conversations/conversation-administration-service.js';
 import type { RuntimeSecretProvider } from '../domain/ports/runtime-secret-provider.js';
+import {
+  getOptionalRuntimeSecret,
+  normalizeRuntimeSecretRefString,
+} from '../domain/ports/runtime-secret-provider.js';
 import { normalizeProviderId } from './provider-registry.js';
 
 const TOKEN_BOUND_HTTP_GUIDANCE = 'Verify provider credentials and retry.';
@@ -104,9 +108,9 @@ export class RuntimeSecretConversationMembershipValidator implements Conversatio
   private async validateTelegram(
     input: ConversationMembershipValidationInput,
   ): Promise<ConversationMembershipValidationResult> {
-    const token = this.resolveSecret(
+    const token = await this.resolveSecret(
       input.providerConnection.runtimeSecretRefs,
-      ['TELEGRAM_BOT_TOKEN'],
+      ['bot_token'],
     );
     if (!token) {
       return {
@@ -166,9 +170,9 @@ export class RuntimeSecretConversationMembershipValidator implements Conversatio
   private async validateSlack(
     input: ConversationMembershipValidationInput,
   ): Promise<ConversationMembershipValidationResult> {
-    const botToken = this.resolveSecret(
+    const botToken = await this.resolveSecret(
       input.providerConnection.runtimeSecretRefs,
-      ['SLACK_BOT_TOKEN'],
+      ['bot_token'],
     );
     if (!botToken) {
       return {
@@ -224,9 +228,9 @@ export class RuntimeSecretConversationMembershipValidator implements Conversatio
   private async validateDiscord(
     input: ConversationMembershipValidationInput,
   ): Promise<ConversationMembershipValidationResult> {
-    const botToken = this.resolveSecret(
+    const botToken = await this.resolveSecret(
       input.providerConnection.runtimeSecretRefs,
-      ['DISCORD_BOT_TOKEN'],
+      ['bot_token'],
     );
     if (!botToken) {
       return {
@@ -314,17 +318,17 @@ export class RuntimeSecretConversationMembershipValidator implements Conversatio
   private async validateTeams(
     input: ConversationMembershipValidationInput,
   ): Promise<ConversationMembershipValidationResult> {
-    const clientId = this.resolveSecret(
+    const clientId = await this.resolveSecret(
       input.providerConnection.runtimeSecretRefs,
-      ['TEAMS_CLIENT_ID'],
+      ['client_id'],
     );
-    const clientSecret = this.resolveSecret(
+    const clientSecret = await this.resolveSecret(
       input.providerConnection.runtimeSecretRefs,
-      ['TEAMS_CLIENT_SECRET'],
+      ['client_secret'],
     );
-    const tenantId = this.resolveSecret(
+    const tenantId = await this.resolveSecret(
       input.providerConnection.runtimeSecretRefs,
-      ['TEAMS_TENANT_ID'],
+      ['tenant_id'],
     );
     if (!clientId || !clientSecret || !tenantId) {
       return {
@@ -414,13 +418,17 @@ export class RuntimeSecretConversationMembershipValidator implements Conversatio
     return members;
   }
 
-  private resolveSecret(refs: string[], preferred: string[]): string {
-    const candidates = [
-      ...preferred.filter((ref) => refs.includes(ref)),
-      ...refs,
-    ].filter((ref, index, all) => all.indexOf(ref) === index);
+  private async resolveSecret(
+    refs: Record<string, string>,
+    preferredKeys: string[],
+  ): Promise<string> {
+    const candidates = preferredKeys
+      .map((key) => refs[key])
+      .filter((ref): ref is string => Boolean(ref?.trim()));
     for (const ref of candidates) {
-      const value = this.secrets.getOptionalSecret({ env: ref });
+      const value = await getOptionalRuntimeSecret(this.secrets, {
+        ref: normalizeRuntimeSecretRefString(ref),
+      });
       if (value) return value;
     }
     return '';

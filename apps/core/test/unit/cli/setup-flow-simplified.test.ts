@@ -264,6 +264,7 @@ async function loadGroupStep() {
   const spinner = { start: vi.fn(), stop: vi.fn() };
   const ensureConfiguredConversationBinding = vi.fn();
   const saveRuntimeSettings = vi.fn();
+  const writeDesiredRuntimeSettings = vi.fn();
   const registerSlackMainGroup = vi.fn(async () => ({
     folder: 'main_agent',
     groupName: 'Gantry',
@@ -298,6 +299,7 @@ async function loadGroupStep() {
   vi.doMock('@core/config/settings/runtime-settings.js', () => ({
     loadRuntimeSettings: vi.fn(() => settings),
     saveRuntimeSettings,
+    writeDesiredRuntimeSettings,
     ensureConfiguredConversationBinding,
   }));
   const { runGroupStep } = await import('@core/cli/setup-flow-final-steps.js');

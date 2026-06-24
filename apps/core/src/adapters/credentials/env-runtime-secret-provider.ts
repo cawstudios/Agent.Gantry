@@ -6,6 +6,10 @@ import type {
   RuntimeSecretProvider,
   RuntimeSecretRef,
 } from '../../domain/ports/runtime-secret-provider.js';
+import {
+  isForbiddenRuntimeSecretEnvName,
+  runtimeSecretRefTarget,
+} from '../../domain/ports/runtime-secret-provider.js';
 import { getGantryHome } from '../../shared/gantry-home.js';
 import { parseEnvContent } from '../../shared/env-file.js';
 
@@ -16,15 +20,6 @@ let cachedRuntimeEnv:
       values: Map<string, string>;
     }
   | undefined;
-
-function isForbiddenRuntimeSecretEnvName(key: string): boolean {
-  const normalized = key.trim().toUpperCase();
-  return (
-    normalized.includes('API_KEY') ||
-    normalized.includes('OAUTH_TOKEN') ||
-    normalized.endsWith('_AUTH_TOKEN')
-  );
-}
 
 function readRuntimeHomeEnvValues(): Map<string, string> {
   const envPath = path.join(getGantryHome(), '.env');
@@ -55,17 +50,19 @@ export class EnvRuntimeSecretProvider implements RuntimeSecretProvider {
   getSecret(ref: RuntimeSecretRef): string {
     const value = this.getOptionalSecret(ref);
     if (!value) {
-      throw new Error(`${ref.env} is required.`);
+      throw new Error(`${runtimeSecretRefTarget(ref).name} is required.`);
     }
     return value;
   }
 
   getOptionalSecret(ref: RuntimeSecretRef): string | undefined {
-    if (isForbiddenRuntimeSecretEnvName(ref.env)) return undefined;
-    const direct = this.source[ref.env]?.trim();
+    const target = runtimeSecretRefTarget(ref);
+    if (target.source !== 'env') return undefined;
+    if (isForbiddenRuntimeSecretEnvName(target.name)) return undefined;
+    const direct = this.source[target.name]?.trim();
     if (direct) return direct;
     if (this.source !== process.env) return undefined;
-    const runtimeValue = readRuntimeHomeEnvValues().get(ref.env)?.trim();
+    const runtimeValue = readRuntimeHomeEnvValues().get(target.name)?.trim();
     return runtimeValue || undefined;
   }
 
@@ -74,7 +71,7 @@ export class EnvRuntimeSecretProvider implements RuntimeSecretProvider {
   ): Promise<CredentialBrokerHealth> {
     const missing = refs
       .filter((ref) => !this.getOptionalSecret(ref))
-      .map((ref) => ref.env);
+      .map((ref) => runtimeSecretRefTarget(ref).name);
     if (missing.length > 0) {
       return {
         status: 'fail',

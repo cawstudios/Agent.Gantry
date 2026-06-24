@@ -1,4 +1,6 @@
 import type { AppId } from '../../domain/app/app.js';
+import type { SettingsRevisionRepository } from '../../domain/ports/fleet-capability-state.js';
+import type { SettingsRevisionMirror } from './settings-import-service.js';
 import type {
   SettingsDesiredStateOps,
   SettingsDesiredStateRepositories,
@@ -82,6 +84,9 @@ export async function syncRuntimeSettingsFromProjection(input: {
   repositories: SettingsDesiredStateRepositories;
   appId?: AppId;
   reloadRuntimeState?: () => Promise<void>;
+  settingsRevisions?: SettingsRevisionRepository;
+  pool?: SettingsRevisionMirror['pool'];
+  createdBy?: string;
 }): Promise<void> {
   const settings = loadRuntimeSettings(input.runtimeHome);
   const service = new SettingsDesiredStateService({
@@ -89,9 +94,38 @@ export async function syncRuntimeSettingsFromProjection(input: {
     repositories: input.repositories,
     appId: input.appId,
   });
+  const exported = await service.exportCurrent(settings);
+  if (input.settingsRevisions) {
+    const appId = input.appId ?? ('default' as AppId);
+    const { importWorkstationSettings } =
+      await import('./settings-import-service.js');
+    await importWorkstationSettings(
+      {
+        runtimeHome: input.runtimeHome,
+        ops: input.ops,
+        repositories: input.repositories,
+        appId,
+        previousSettings: settings,
+        reloadRuntimeState: input.reloadRuntimeState,
+        revisionMirror: {
+          settingsRevisions: input.settingsRevisions,
+          pool: input.pool,
+          createdBy: input.createdBy ?? 'projection-sync',
+        },
+        revisionMirrorRequired: true,
+      },
+      exported,
+    );
+    return;
+  }
+  if (exported.runtime.deploymentMode === 'fleet') {
+    throw new Error(
+      'Fleet settings projection sync requires the settings revisions repository.',
+    );
+  }
   await applyRuntimeSettingsDesiredState({
     ...input,
-    settings: await service.exportCurrent(settings),
+    settings: exported,
     previousSettings: settings,
   });
 }
@@ -104,6 +138,9 @@ export async function addAgentToolRulesToSyncedRuntimeSettings(input: {
   repositories: SettingsDesiredStateRepositories;
   appId?: AppId;
   reloadRuntimeState?: () => Promise<void>;
+  settingsRevisions?: SettingsRevisionRepository;
+  pool?: SettingsRevisionMirror['pool'];
+  createdBy?: string;
 }): Promise<void> {
   const previousSettings = loadRuntimeSettings(input.runtimeHome);
   const nextSettings = structuredClone(previousSettings);
@@ -118,6 +155,34 @@ export async function addAgentToolRulesToSyncedRuntimeSettings(input: {
     repositories: input.repositories,
     appId: input.appId ?? ('default' as AppId),
   });
+  if (input.settingsRevisions) {
+    const appId = input.appId ?? ('default' as AppId);
+    const { importWorkstationSettings } =
+      await import('./settings-import-service.js');
+    await importWorkstationSettings(
+      {
+        runtimeHome: input.runtimeHome,
+        ops: input.ops,
+        repositories: input.repositories,
+        appId,
+        previousSettings,
+        reloadRuntimeState: input.reloadRuntimeState,
+        revisionMirror: {
+          settingsRevisions: input.settingsRevisions,
+          pool: input.pool,
+          createdBy: input.createdBy ?? 'permission:persistent-tool-rule',
+        },
+        revisionMirrorRequired: true,
+      },
+      nextSettings,
+    );
+    return;
+  }
+  if (nextSettings.runtime.deploymentMode === 'fleet') {
+    throw new Error(
+      'Fleet tool-rule settings mutation requires the settings revisions repository.',
+    );
+  }
   await applyRuntimeSettingsDesiredState({
     runtimeHome: input.runtimeHome,
     settings: nextSettings,
@@ -181,6 +246,9 @@ export async function removeAgentToolRulesFromSyncedRuntimeSettings(input: {
   repositories: SettingsDesiredStateRepositories;
   appId?: AppId;
   reloadRuntimeState?: () => Promise<void>;
+  settingsRevisions?: SettingsRevisionRepository;
+  pool?: SettingsRevisionMirror['pool'];
+  createdBy?: string;
 }): Promise<void> {
   const previousSettings = loadRuntimeSettings(input.runtimeHome);
   const nextSettings = structuredClone(previousSettings);
@@ -189,6 +257,34 @@ export async function removeAgentToolRulesFromSyncedRuntimeSettings(input: {
     input.agentFolder,
     input.rules,
   );
+  if (input.settingsRevisions) {
+    const appId = input.appId ?? ('default' as AppId);
+    const { importWorkstationSettings } =
+      await import('./settings-import-service.js');
+    await importWorkstationSettings(
+      {
+        runtimeHome: input.runtimeHome,
+        ops: input.ops,
+        repositories: input.repositories,
+        appId,
+        previousSettings,
+        reloadRuntimeState: input.reloadRuntimeState,
+        revisionMirror: {
+          settingsRevisions: input.settingsRevisions,
+          pool: input.pool,
+          createdBy: input.createdBy ?? 'permission:persistent-tool-rule',
+        },
+        revisionMirrorRequired: true,
+      },
+      nextSettings,
+    );
+    return;
+  }
+  if (nextSettings.runtime.deploymentMode === 'fleet') {
+    throw new Error(
+      'Fleet tool-rule settings mutation requires the settings revisions repository.',
+    );
+  }
   await applyRuntimeSettingsDesiredState({
     runtimeHome: input.runtimeHome,
     settings: nextSettings,

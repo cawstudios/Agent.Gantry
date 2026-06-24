@@ -4,7 +4,7 @@ export type ProviderConnectionInput = {
   label: string;
   config?: Record<string, unknown>;
   externalRef?: Record<string, unknown>;
-  runtimeSecretRefs?: string[];
+  runtimeSecretRefs?: Record<string, string>;
   enabled?: boolean;
   metadata?: Record<string, unknown>;
 };
@@ -14,7 +14,7 @@ export type ProviderConnectionPatch = {
   status?: 'active' | 'inactive' | 'disabled' | 'archived';
   config?: Record<string, unknown>;
   externalRef?: Record<string, unknown> | null;
-  runtimeSecretRefs?: string[];
+  runtimeSecretRefs?: Record<string, string>;
   enabled?: boolean;
   metadata?: Record<string, unknown>;
 };

@@ -315,14 +315,14 @@ describe('provider conversation onboarding control SDK integration', () => {
           label: 'Engineering Slack',
           externalRef: { kind: 'provider_connection', id: 'T123' },
           config: { workspace: 'engineering' },
-          runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+          runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
         }),
       );
       expect(providerConnection).toMatchObject({
         appId: 'app-one',
         providerId: 'slack',
         status: 'active',
-        runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+        runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
       });
       expect(syncRuntimeSettingsFromProjection).toHaveBeenCalledTimes(1);
       expect(syncRuntimeSettingsFromProjection).toHaveBeenLastCalledWith(
@@ -423,7 +423,7 @@ describe('provider conversation onboarding control SDK integration', () => {
       label: 'Slack',
       status: 'active',
       config: {},
-      runtimeSecretRefs: [],
+      runtimeSecretRefs: {},
       createdAt: '2026-04-28T00:00:00.000Z',
       updatedAt: '2026-04-28T00:00:00.000Z',
     });
@@ -502,7 +502,7 @@ describe('provider conversation onboarding control SDK integration', () => {
         label: 'Engineering Slack',
         status: 'active',
         config: {},
-        runtimeSecretRefs: [],
+        runtimeSecretRefs: {},
         createdAt: '2026-04-28T00:00:00.000Z',
         updatedAt: '2026-04-28T00:00:00.000Z',
       });
@@ -556,7 +556,7 @@ describe('provider conversation onboarding control SDK integration', () => {
       label: 'Slash Workspace',
       status: 'active',
       config: {},
-      runtimeSecretRefs: [],
+      runtimeSecretRefs: {},
       createdAt: '2026-04-28T00:00:00.000Z',
       updatedAt: '2026-04-28T00:00:00.000Z',
     });

@@ -12,6 +12,7 @@ import {
   activateRuntimeModelAliases,
   withRuntimeModelAliases,
 } from './runtime-settings.js';
+import { normalizeConfiguredCapabilitiesInSettings } from './configured-capability-normalization.js';
 import { parseRuntimeSettingsObject } from './runtime-settings-parser.js';
 import { validateLoadedRuntimeSettings } from './runtime-settings-validation.js';
 import type { RuntimeSettings } from './runtime-settings-types.js';
@@ -19,6 +20,10 @@ import {
   PostgresSettingsRevisionNotifier,
   type SettingsRevisionWakeup,
 } from './settings-revision-notify.js';
+import type {
+  ProviderConnectionId,
+  ProviderId,
+} from '../../domain/provider/provider.js';
 
 /**
  * Reader version of the settings-revision contract this build understands. A
@@ -26,7 +31,7 @@ import {
  * applied) by an older worker until it is upgraded (ADR-3 skew safety contract).
  * Bump this whenever a settings-schema change would break older readers.
  */
-export const CURRENT_SETTINGS_READER_VERSION = 3;
+export const CURRENT_SETTINGS_READER_VERSION = 4;
 
 export interface SettingsImportValidationResult {
   ok: boolean;
@@ -49,6 +54,25 @@ export interface SettingsRevisionMirror {
   createdBy: string;
   note?: string | null;
   logWarn?: (context: Record<string, unknown>, message: string) => void;
+}
+
+export class SettingsRevisionConflictError extends Error {
+  readonly expectedRevision: number;
+  readonly actualRevision: number;
+
+  constructor(input: {
+    expectedRevision: number;
+    actualRevision: number;
+    message?: string;
+  }) {
+    super(
+      input.message ??
+        `settings revision conflicted: expected revision ${input.expectedRevision}, actual revision ${input.actualRevision}`,
+    );
+    this.name = 'SettingsRevisionConflictError';
+    this.expectedRevision = input.expectedRevision;
+    this.actualRevision = input.actualRevision;
+  }
 }
 
 /**
@@ -83,23 +107,127 @@ export async function validateSettingsForImport(
 
 /**
  * Workstation import: validate, then write `settings.yaml` and reconcile through
- * the existing desired-state apply path (unchanged behavior). `settings.yaml`
- * remains the restart source of truth for workstation (AGENTS.md). Throws a
- * combined path-level error message on validation failure.
+ * the existing desired-state apply path. When a required revision mirror is
+ * provided, append the `settings_revisions` row before mutating local runtime
+ * projection. Fleet authority is the revision log; a failed local projection can
+ * be retried from that committed revision without accepting an uncommitted file
+ * change.
  */
 export async function importWorkstationSettings(
   deps: SettingsImportServiceDeps & {
     previousSettings?: RuntimeSettings;
     reloadRuntimeState?: () => Promise<void>;
     revisionMirror?: SettingsRevisionMirror;
+    revisionMirrorRequired?: boolean;
+    expectedRevision?: number | null;
   },
   settings: RuntimeSettings,
 ): Promise<{ revision?: number }> {
+  if (
+    deps.revisionMirrorRequired &&
+    (!deps.previousSettings || !deps.revisionMirror)
+  ) {
+    throw new Error(
+      'Settings mutation requires previous settings and a settings revision mirror for stale revision protection.',
+    );
+  }
   const validation = await validateSettingsForImport(deps, settings);
   if (!validation.ok) {
     throw new Error(
       ['settings validation failed.', ...validation.errors].join('\n'),
     );
+  }
+  const appId = deps.appId ?? ('default' as AppId);
+  if (deps.revisionMirrorRequired && deps.revisionMirror) {
+    const revisionSettings = (
+      await normalizeConfiguredCapabilitiesInSettings({
+        settings,
+        repositories: deps.repositories,
+        appId,
+      })
+    ).settings;
+    const latest =
+      await deps.revisionMirror.settingsRevisions.getLatestSettingsRevision(
+        appId,
+      );
+    const actualRevision = latest?.revision ?? 0;
+    if (
+      deps.expectedRevision !== undefined &&
+      deps.expectedRevision !== null &&
+      deps.expectedRevision !== actualRevision
+    ) {
+      throw new SettingsRevisionConflictError({
+        expectedRevision: deps.expectedRevision,
+        actualRevision,
+      });
+    }
+    if (
+      latest &&
+      stableJson(latest.settingsDocument) !==
+        stableJson(settingsToRevisionDocument(deps.previousSettings!))
+    ) {
+      throw new Error(
+        'Settings mutation is based on stale settings; reload latest desired state and retry.',
+      );
+    }
+    if (
+      latest &&
+      stableJson(latest.settingsDocument) ===
+        stableJson(settingsToRevisionDocument(revisionSettings))
+    ) {
+      await applyRuntimeSettingsDesiredState({
+        runtimeHome: deps.runtimeHome,
+        settings: revisionSettings,
+        ops: deps.ops,
+        repositories: deps.repositories,
+        appId: deps.appId,
+        previousSettings: deps.previousSettings,
+        reloadRuntimeState: deps.reloadRuntimeState,
+      });
+      activateRuntimeModelAliases(revisionSettings);
+      return {};
+    }
+    await validateProjectionPreconditions({
+      settings: revisionSettings,
+      repositories: deps.repositories,
+      appId,
+    });
+    const outcome = await importFleetSettingsRevision(
+      {
+        runtimeHome: deps.runtimeHome,
+        ops: deps.ops,
+        repositories: deps.repositories,
+        appId: deps.appId,
+        settingsRevisions: deps.revisionMirror.settingsRevisions,
+        pool: deps.revisionMirror.pool,
+        createdBy: deps.revisionMirror.createdBy,
+        logWarn: deps.revisionMirror.logWarn,
+      },
+      revisionSettings,
+      {
+        expectedRevision: deps.expectedRevision ?? actualRevision,
+        note: deps.revisionMirror.note ?? null,
+      },
+    );
+    if (outcome.status === 'invalid') {
+      throw new Error(
+        ['settings validation failed.', ...outcome.errors].join('\n'),
+      );
+    }
+    if (outcome.status === 'conflict') {
+      throw new SettingsRevisionConflictError(outcome);
+    }
+    const appliedSettings = await applyRuntimeSettingsDesiredState({
+      runtimeHome: deps.runtimeHome,
+      settings: revisionSettings,
+      ops: deps.ops,
+      repositories: deps.repositories,
+      appId: deps.appId,
+      previousSettings: deps.previousSettings,
+      reloadRuntimeState: deps.reloadRuntimeState,
+    });
+    activateRuntimeModelAliases(appliedSettings);
+    return { revision: outcome.revision };
   }
   const appliedSettings = await applyRuntimeSettingsDesiredState({
     runtimeHome: deps.runtimeHome,
@@ -113,6 +241,17 @@ export async function importWorkstationSettings(
   activateRuntimeModelAliases(appliedSettings);
   if (!deps.revisionMirror) return {};
   try {
+    const latest =
+      await deps.revisionMirror.settingsRevisions.getLatestSettingsRevision(
+        appId,
+      );
+    if (
+      latest &&
+      stableJson(latest.settingsDocument) ===
+        stableJson(settingsToRevisionDocument(appliedSettings))
+    ) {
+      return {};
+    }
     const outcome = await importFleetSettingsRevision(
       {
         runtimeHome: deps.runtimeHome,
@@ -125,9 +264,15 @@ export async function importWorkstationSettings(
         logWarn: deps.revisionMirror.logWarn,
       },
       appliedSettings,
-      { note: deps.revisionMirror.note ?? null },
+      {
+        note: deps.revisionMirror.note ?? null,
+      },
     );
     if (outcome.status === 'invalid') {
+      const error = new Error(
+        ['settings validation failed.', ...outcome.errors].join('\n'),
+      );
+      if (deps.revisionMirrorRequired) throw error;
       deps.revisionMirror.logWarn?.(
         { errors: outcome.errors },
         'settings revision mirror failed validation after workstation settings applied',
@@ -135,6 +280,10 @@ export async function importWorkstationSettings(
       return {};
     }
     if (outcome.status === 'conflict') {
+      const error = new Error(
+        `settings revision conflicted: expected revision ${outcome.expectedRevision}, actual revision ${outcome.actualRevision}`,
+      );
+      if (deps.revisionMirrorRequired) throw error;
       deps.revisionMirror.logWarn?.(
         {
           expectedRevision: outcome.expectedRevision,
@@ -307,6 +456,60 @@ export function settingsFromRevisionDocument(
   document: Record<string, unknown>,
 ): RuntimeSettings {
   return parseRuntimeSettingsObject(document);
+}
+
+export async function settingsMatchesLatestRevision(input: {
+  appId: AppId;
+  settings: RuntimeSettings;
+  settingsRevisions: SettingsRevisionRepository;
+}): Promise<boolean> {
+  const latest = await input.settingsRevisions.getLatestSettingsRevision(
+    input.appId,
+  );
+  if (!latest) return false;
+  return (
+    stableJson(latest.settingsDocument) ===
+    stableJson(settingsToRevisionDocument(input.settings))
+  );
+}
+
+export function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, nested]) => nested !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function validateProjectionPreconditions(input: {
+  settings: RuntimeSettings;
+  repositories: SettingsDesiredStateRepositories;
+  appId: AppId;
+}): Promise<void> {
+  const providerConnections = input.repositories.providerConnections;
+  if (!providerConnections) return;
+  for (const [connectionId, connection] of Object.entries(
+    input.settings.providerConnections,
+  )) {
+    const existing = await providerConnections.getProviderConnection(
+      connectionId as ProviderConnectionId,
+    );
+    if (!existing) continue;
+    if (existing.appId !== input.appId) {
+      throw new Error(
+        `provider_connections.${connectionId} already belongs to another app`,
+      );
+    }
+    if (existing.providerId !== (connection.provider as ProviderId)) {
+      throw new Error(
+        `provider_connections.${connectionId}.provider cannot change from ${existing.providerId} to ${connection.provider}; use a new provider connection id.`,
+      );
+    }
+  }
 }
 
 function mapRecord<T>(

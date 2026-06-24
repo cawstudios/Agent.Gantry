@@ -89,7 +89,8 @@ export async function listSlackRecentChats(options: {
       ok: false,
       chats: [],
       message: 'Slack bot token is empty.',
-      nextAction: 'Set SLACK_BOT_TOKEN before auto-discovery.',
+      nextAction:
+        'Run `gantry provider connect slack` or configure the Slack bot_token runtime secret ref.',
     };
   }
 

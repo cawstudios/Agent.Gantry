@@ -16,7 +16,7 @@ import {
   getRuntimeStorage,
 } from '../adapters/storage/postgres/runtime-store.js';
 import { SettingsDesiredStateService } from '../config/settings/desired-state-service.js';
-import { applyRuntimeSettingsDesiredState } from '../config/settings/restart-sync.js';
+import { importWorkstationSettings } from '../config/settings/settings-import-service.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { validateRuntimePreflightWithStorage } from '../config/preflight.js';
 import { TaskHandler } from './ipc-types.js';
@@ -409,16 +409,25 @@ export const requestSettingsUpdateHandler: TaskHandler = async (context) => {
         );
         return;
       }
-      await applyRuntimeSettingsDesiredState({
-        runtimeHome: GANTRY_HOME,
-        settings: parsed,
-        previousSettings: parseRuntimeSettings(beforeYaml),
-        ops: storage.ops,
-        repositories: storage.repositories,
-        reloadRuntimeState: deps.reloadRuntimeState,
-      });
+      await importWorkstationSettings(
+        {
+          runtimeHome: GANTRY_HOME,
+          ops: storage.ops,
+          repositories: storage.repositories,
+          previousSettings: parseRuntimeSettings(beforeYaml),
+          reloadRuntimeState: deps.reloadRuntimeState,
+          revisionMirror: {
+            settingsRevisions: storage.repositories.settingsRevisions,
+            pool: storage.service?.pool,
+            createdBy: `admin-settings-update:${sourceAgentFolder}`,
+            logWarn: (context, warning) => logger.warn(context, warning),
+          },
+          revisionMirrorRequired: true,
+        },
+        parsed,
+      );
       message =
-        'Approved settings update. settings.yaml was written and reconciled; restart may be required for topology changes.';
+        'Approved settings update. A settings revision was written and settings.yaml was synced; restart may be required for topology changes.';
       accept(message, 'settings_updated');
     } catch (err) {
       logger.error({ err, sourceAgentFolder }, 'Settings update review failed');

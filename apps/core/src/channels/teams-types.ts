@@ -1,5 +1,6 @@
 import type { ChannelOpts } from './channel-provider.js';
 import type { RuntimeSecretProvider } from '../domain/ports/runtime-secret-provider.js';
+import { getProviderRuntimeSecret } from './provider-runtime-secrets.js';
 import type {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
@@ -133,16 +134,37 @@ export function teamsConversationIdFromJid(jid: string): string | null {
   return conversationId || null;
 }
 
-export function readTeamsCredentials(
+export async function readTeamsCredentials(
   secrets?: RuntimeSecretProvider,
-): TeamsChannelCredentials | null {
-  if (!secrets) return null;
-  const clientId =
-    secrets.getOptionalSecret({ env: 'TEAMS_CLIENT_ID' })?.trim() || '';
-  const clientSecret =
-    secrets.getOptionalSecret({ env: 'TEAMS_CLIENT_SECRET' })?.trim() || '';
-  const tenantId =
-    secrets.getOptionalSecret({ env: 'TEAMS_TENANT_ID' })?.trim() || '';
+  settings?: {
+    providers: Record<string, { defaultConnection?: string } | undefined>;
+    providerConnections: Record<
+      string,
+      { runtimeSecretRefs: Record<string, string | undefined> } | undefined
+    >;
+  },
+): Promise<TeamsChannelCredentials | null> {
+  const clientId = await getProviderRuntimeSecret({
+    providerId: 'teams',
+    key: 'client_id',
+    defaultEnvName: 'TEAMS_CLIENT_ID',
+    settings,
+    secrets,
+  });
+  const clientSecret = await getProviderRuntimeSecret({
+    providerId: 'teams',
+    key: 'client_secret',
+    defaultEnvName: 'TEAMS_CLIENT_SECRET',
+    settings,
+    secrets,
+  });
+  const tenantId = await getProviderRuntimeSecret({
+    providerId: 'teams',
+    key: 'tenant_id',
+    defaultEnvName: 'TEAMS_TENANT_ID',
+    settings,
+    secrets,
+  });
   if (!clientId || !clientSecret || !tenantId) return null;
   return { clientId, clientSecret, tenantId };
 }

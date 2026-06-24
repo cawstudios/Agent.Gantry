@@ -139,7 +139,7 @@ export function createChannelWiring(
             conversations: repositories.conversations,
           },
           new RuntimeSecretConversationMembershipValidator(
-            new EnvRuntimeSecretProvider(),
+            resolved.runtimeSecrets,
           ),
         );
         return service.isControlApproverAllowed({
@@ -184,7 +184,9 @@ export function createChannelWiring(
     conversationRoutes: () => app.getConversationRoutes(),
     runtimeSettings: () => currentRuntimeSettings,
     runtimeLease: { tryAcquire: tryAcquireRuntimeAdvisoryLease },
-    runtimeSecrets: resolved.runtimeSecrets,
+    get runtimeSecrets() {
+      return resolved.runtimeSecrets;
+    },
     isControlApproverAllowed,
     onMessageAction: messageActionRouter.handle,
   };
@@ -703,6 +705,9 @@ export function createChannelWiring(
   }
   return {
     getRuntimeAppId: () => resolved.appId,
+    setRuntimeSecrets: (provider) => {
+      resolved.runtimeSecrets = provider;
+    },
     describeDestinationJid,
     connectEnabledChannels,
     hasConnectedChannels,

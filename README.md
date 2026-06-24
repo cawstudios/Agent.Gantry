@@ -134,7 +134,8 @@ gantry service install|start|stop|restart
 
 Browser stays host-managed through Gantry IPC. Stdio MCP servers, local CLIs, skills, jobs, and native subagents follow the configured sandbox provider. The sandbox does not install tools: missing CLI or MCP dependencies are setup blockers, not permission grants. In `sandbox_runtime`, networked tools must use standard proxy-aware clients (`HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY`); tools that bypass those proxies fail closed.
 
-To switch modes, edit `~/gantry/settings.yaml`:
+To switch modes, update desired settings through the CLI/API or edit
+`~/gantry/settings.yaml` and let Gantry import the edit:
 
 ```yaml
 runtime:
@@ -154,7 +155,7 @@ gantry status
 Defaults in v1:
 
 - runtime home: `~/gantry`
-- runtime settings file: `~/gantry/settings.yaml` (validated before `start`/`restart`)
+- runtime settings file: `~/gantry/settings.yaml` (canonical readable copy synced with Postgres revisions)
 - setup flow: guided multi-channel first run (choose Telegram or Slack)
 - storage: Postgres through `GANTRY_DATABASE_URL`; guided setup validates URLs but does not create Docker containers
 - memory: on
@@ -166,7 +167,13 @@ Defaults in v1:
 
 Runtime home is a single-cut contract. Gantry reads `~/gantry` by default unless `--runtime-home` or `GANTRY_HOME` is set.
 
-Human-editable runtime settings live in `~/gantry/settings.yaml`. Validate edits with `gantry settings validate`; it performs strict schema parsing without requiring Postgres, provider credentials, or runtime preflight checks. The common shape is compact and only includes values users normally change:
+Human-editable runtime settings live in `~/gantry/settings.yaml`, while the
+durable desired-state authority is the latest Postgres `settings_revisions`
+row. Validate edits with `gantry settings validate`; it performs strict schema
+parsing without requiring Postgres, provider credentials, or runtime preflight
+checks. When Gantry is running, a valid file edit is imported into Postgres and
+then rendered back as canonical YAML. The common shape is compact and only
+includes values users normally change:
 
 ```yaml
 defaults:
@@ -179,7 +186,7 @@ defaults:
 providers:
   telegram:
     enabled: true
-    bot_token_env: TELEGRAM_BOT_TOKEN
+    bot_token_ref: gantry-secret:TELEGRAM_BOT_TOKEN
 
 agents:
   main_agent:
@@ -225,10 +232,11 @@ conversations:
 
 ### Settings Ownership
 
-`settings.yaml` is desired state. Users and admins may edit it directly, but
-the safer path is setup, local CLI commands, Control API admin calls, or the
-reviewed Gantry MCP settings tools. Agents do not mutate it by themselves; they
-can request reviewed changes, and Gantry writes the file only after the
+Desired settings are revisioned in Postgres and mirrored to `settings.yaml`.
+Users and admins may edit the file directly, but the safer path is setup, local
+CLI commands, Control API admin calls, or the reviewed Gantry MCP settings
+tools. Agents do not mutate it by themselves; they can request reviewed
+changes, and Gantry appends a revision before syncing the file after the
 appropriate user/admin approval.
 
 | Setting area                                                    | Who changes it                              | Purpose                                                                                                                                                                         |
@@ -245,7 +253,7 @@ appropriate user/admin approval.
 | `permissions`                                                   | User/admin                                  | YOLO-mode denylist additions and egress hostname denylist.                                                                                                                      |
 | `browser`                                                       | User/admin                                  | Browser usage policy and per-site limits.                                                                                                                                       |
 | `runtime.queue`                                                 | User/admin                                  | Runtime concurrency and retry tuning. Restart after changing it.                                                                                                                |
-| `storage`                                                       | Advanced user/admin                         | Postgres URL env key and schema. Secrets stay in `.env` or credential stores.                                                                                                   |
+| `storage`                                                       | Advanced user/admin                         | Postgres URL env key and schema. Runtime secrets resolve through `env:`, `gantry-secret:`, or `aws-sm:` refs.                                                                   |
 | `model_access`                                                  | Advanced user/admin                         | Gantry model gateway enablement and loopback bind host. Model provider credentials stay in Credential Center.                                                                   |
 | `desired_state`                                                 | Admin/export flow                           | Reconcile/export mode switch for settings-owned desired state.                                                                                                                  |
 
@@ -386,19 +394,19 @@ gantry provider connect teams
 
 Notes:
 
-- Telegram uses `TELEGRAM_BOT_TOKEN`; create it in Telegram by chatting with `@BotFather` and sending `/newbot`.
+- Telegram uses a `bot_token` runtime secret ref; guided setup stores the token encrypted in Gantry by default. Create the token in Telegram by chatting with `@BotFather` and sending `/newbot`.
 - For Telegram groups, add the bot to the group and send a message before discovery; if Gantry must see every group message, make the bot an admin or disable Group Privacy in BotFather with `/setprivacy`.
 - `gantry provider connect telegram` auto-discovers recent chats and can register one without manual chat ID copy/paste. The human sender from the selected discovery message is added as a conversation approver, so `/new`, `/model`, `/dream`, and `/memory-status` work immediately.
 - Telegram registers `/gantry` for command discovery. Direct `/stop` and `!stop` remain the fast stop path, and active progress messages include a Stop action where Telegram supports inline callbacks. Approval prompts stay in the originating conversation today so restart recovery can still resolve the pending interaction.
-- Slack uses Socket Mode with `SLACK_BOT_TOKEN` (`xoxb-...`) and `SLACK_APP_TOKEN` (`xapp-...`); create a Slack app, add a bot user/scopes, enable Socket Mode, generate the app-level token, install/reinstall the app, then invite it to the target channel or DM it once.
+- Slack uses Socket Mode with `bot_token` (`xoxb-...`) and `app_token` (`xapp-...`) runtime secret refs; guided setup stores both encrypted in Gantry by default. Create a Slack app, add a bot user/scopes, enable Socket Mode, generate the app-level token, install/reinstall the app, then invite it to the target channel or DM it once.
 - Slack bot scopes for normal channel and DM operation are: `chat:write`, `app_mentions:read`, `channels:read`, `channels:history`, `groups:read`, `groups:history`, `im:read`, `im:history`, `mpim:read`, and `mpim:history`. Reinstall the Slack app after any scope change.
 - For Slack DMs, open the Slack app configuration, go to App Home, enable the Messages Tab, and enable the setting that lets users send messages from the messages tab. Without this, Slack can show "Sending messages to this app has been turned off" even when Socket Mode is connected.
 - `gantry provider connect slack` auto-discovers accessible conversations and can register one directly.
 - Slack registers `/gantry` for command discovery. Direct `/stop` and `!stop` remain the fast stop path, and active progress messages include a Stop action.
 - Slack tool permission approvals are deny-by-default until approvers are listed on the target conversation in `settings.yaml`. Guided setup asks for comma-separated Slack member IDs like `U0123456789`; these users must be members of that conversation to approve tool permissions and answer interactive prompts. Gantry sends approval prompts ephemerally to configured approvers when Slack accepts that surface and falls back to the conversation prompt otherwise.
 - Slack UX uses native Slack surfaces: threads, streaming updates, ephemeral prompts, and actions.
-- Discord setup uses `DISCORD_BOT_TOKEN` and `DISCORD_APPLICATION_ID`, discovers guild text channels through Discord REST, registers `dc:` conversation IDs plus a guild `/gantry` command, and runs the Discord Gateway/REST transport for live messages and Stop actions.
-- Teams setup uses Microsoft Teams app auth through `RuntimeSecretProvider` (`TEAMS_CLIENT_ID`, `TEAMS_CLIENT_SECRET`, `TEAMS_TENANT_ID`), discovers Teams channels through Microsoft Graph, and registers `teams:` conversation IDs. Live Teams message transport remains behind the `TeamsSdkClient` adapter seam; this checkout includes tested normalization and Adaptive Card approval scaffolding, but not a concrete Bot Framework transport.
+- Discord setup uses `bot_token` and `application_id` runtime secret refs, discovers guild text channels through Discord REST, registers `dc:` conversation IDs plus a guild `/gantry` command, and runs the Discord Gateway/REST transport for live messages and Stop actions.
+- Teams setup uses Microsoft Teams app auth through `RuntimeSecretProvider` (`client_id`, `client_secret`, `tenant_id` refs), discovers Teams channels through Microsoft Graph, and registers `teams:` conversation IDs. Live Teams message transport remains behind the `TeamsSdkClient` adapter seam; this checkout includes tested normalization and Adaptive Card approval scaffolding, but not a concrete Bot Framework transport.
 
 ### Capability Management
 

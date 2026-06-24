@@ -5,7 +5,7 @@ import { ensureRuntimeWritable } from '../config/settings/runtime-home.js';
 import {
   ensureConfiguredConversationBinding,
   loadRuntimeSettings,
-  saveRuntimeSettings,
+  writeDesiredRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 import {
   formatDoctorReport,
@@ -79,7 +79,7 @@ export async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
       );
       return { type: 'goto', step: 'storage' };
     }
-    persistOnboardingConfig({
+    await persistOnboardingConfig({
       runtimeHome: draft.runtimeHome,
       postgresDatabaseUrl: draft.postgresDatabaseUrl || undefined,
       postgresSchema: draft.postgresSchema || undefined,
@@ -142,6 +142,7 @@ export async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
         draft.telegramPermissionApproverIds || draft.telegramAdminSenderId,
       );
       const settings = loadRuntimeSettings(draft.runtimeHome);
+      const previousSettings = structuredClone(settings);
       ensureConfiguredConversationBinding(settings, {
         agentId: result.folder,
         agentName: result.groupName,
@@ -152,7 +153,12 @@ export async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
         requiresTrigger: false,
         approverIds,
       });
-      saveRuntimeSettings(draft.runtimeHome, settings);
+      await writeDesiredRuntimeSettings({
+        runtimeHome: draft.runtimeHome,
+        settings,
+        previousSettings,
+        createdBy: 'cli:onboarding',
+      });
       draft.workspaceKey = result.folder;
       draft.conversationLabel = conversationLabel;
       spinner.stop(`Registered ${result.groupName} (${result.folder})`);

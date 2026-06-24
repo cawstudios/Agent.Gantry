@@ -33,7 +33,7 @@ export const providerConnectionsPostgres = pgTable(
     configJson: text('config_json').notNull().default('{}'),
     runtimeSecretRefsJson: text('runtime_secret_refs_json')
       .notNull()
-      .default('[]'),
+      .default('{}'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .notNull()
       .defaultNow(),

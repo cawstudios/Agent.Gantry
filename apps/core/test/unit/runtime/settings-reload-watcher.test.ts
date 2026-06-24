@@ -210,7 +210,7 @@ describe('settings reload watcher', () => {
     }
   });
 
-  it('reloads local settings when the best-effort revision lookup fails', async () => {
+  it('keeps last good settings when the revision lookup fails', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-settings-watch-'),
     );
@@ -220,7 +220,9 @@ describe('settings reload watcher', () => {
     const previous = createDefaultRuntimeSettings();
     saveRuntimeSettings(runtimeHome, previous);
     const deps = makeDeps();
-    const repo = new FakeSettingsRevisionRepository(previous);
+    const repo = new FakeSettingsRevisionRepository(
+      loadRuntimeSettings(runtimeHome),
+    );
     repo.latestError = new Error('settings revisions unavailable');
     const watcher = startSettingsReloadWatcher({
       runtimeHome,
@@ -235,9 +237,52 @@ describe('settings reload watcher', () => {
       next.agent.defaultModel = 'sonnet';
       saveRuntimeSettings(runtimeHome, next);
 
-      await waitFor(() => deps.app.loadState.mock.calls.length === 1);
+      await new Promise((resolve) => setTimeout(resolve, 80));
 
-      expect(repo.appended).toHaveLength(1);
+      expect(deps.app.loadState).not.toHaveBeenCalled();
+      expect(repo.appended).toHaveLength(0);
+    } finally {
+      watcher.close();
+    }
+  });
+
+  it('retries a pending file change after transient revision lookup failure', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-settings-watch-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    stubRuntimeEnv();
+
+    const previous = createDefaultRuntimeSettings();
+    saveRuntimeSettings(runtimeHome, previous);
+    const deps = makeDeps();
+    const repo = new FakeSettingsRevisionRepository(
+      loadRuntimeSettings(runtimeHome),
+    );
+    repo.latestError = new Error('settings revisions unavailable');
+    const watcher = startSettingsReloadWatcher({
+      runtimeHome,
+      ...deps,
+      settingsRevisions: repo,
+      pollIntervalMs: 20,
+    });
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const next = createDefaultRuntimeSettings();
+      next.agent.defaultModel = 'sonnet';
+      saveRuntimeSettings(runtimeHome, next);
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(repo.appended).toHaveLength(0);
+
+      repo.latestError = null;
+      await waitFor(() => repo.appended.length === 1);
+
+      expect(deps.app.loadState).toHaveBeenCalledTimes(1);
+      expect(repo.appended[0]?.settingsDocument).toEqual(
+        settingsToRevisionDocument(next),
+      );
     } finally {
       watcher.close();
     }

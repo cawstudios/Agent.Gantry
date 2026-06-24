@@ -13,7 +13,10 @@ vi.mock(
   () => durabilityMocks,
 );
 
-import { DiscordChannel } from '@core/channels/discord.js';
+import {
+  createDiscordChannel,
+  DiscordChannel,
+} from '@core/channels/discord.js';
 import type { ChannelOpts } from '@core/channels/channel-provider.js';
 
 class FakeWebSocket {
@@ -62,6 +65,39 @@ describe('DiscordChannel', () => {
     durabilityMocks.bindPendingPermissionInteractionMessage.mockReset();
     durabilityMocks.resolveDurablePermissionInteractionByRequestId.mockReset();
     durabilityMocks.resolveDurableQuestionInteractionByRequestId.mockReset();
+  });
+
+  it('creates the runtime channel from configured runtime secret refs', async () => {
+    const channel = await createDiscordChannel(
+      opts({
+        conversationRoutes: vi.fn(() => ({})),
+        runtimeSettings: () =>
+          ({
+            providers: { discord: { defaultConnection: 'discord_default' } },
+            providerConnections: {
+              discord_default: {
+                runtimeSecretRefs: {
+                  bot_token: 'gantry-secret:DISCORD_BOT_TOKEN',
+                  application_id: 'gantry-secret:DISCORD_APPLICATION_ID',
+                },
+              },
+            },
+          }) as never,
+        runtimeSecrets: {
+          getSecret: vi.fn(),
+          getOptionalSecret: vi.fn(),
+          getOptionalSecretAsync: vi.fn(async (ref) =>
+            ref.ref === 'gantry-secret:DISCORD_BOT_TOKEN'
+              ? 'bot-token'
+              : ref.ref === 'gantry-secret:DISCORD_APPLICATION_ID'
+                ? 'app-id'
+                : undefined,
+          ),
+        },
+      }),
+    );
+
+    expect(channel).toBeInstanceOf(DiscordChannel);
   });
 
   it('sends messages through Discord REST with Stop buttons', async () => {

@@ -6,7 +6,6 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 vi.mock('@core/config/index.js', () => ({
   ASSISTANT_NAME: 'Andy',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
-  getTelegramBotToken: () => process.env.TELEGRAM_BOT_TOKEN || '',
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));
 
@@ -108,6 +107,7 @@ vi.mock('grammy', () => ({
 }));
 
 import fs from 'fs';
+import { EnvRuntimeSecretProvider } from '@core/adapters/credentials/env-runtime-secret-provider.js';
 import {
   createTelegramChannel,
   TelegramChannel,
@@ -3597,14 +3597,15 @@ describe('TelegramChannel', () => {
 });
 
 describe('createTelegramChannel factory', () => {
-  it('returns null when TELEGRAM_BOT_TOKEN is not set', () => {
+  it('returns null when TELEGRAM_BOT_TOKEN is not set', async () => {
     const saved = process.env.TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
     try {
-      const result = createTelegramChannel({
+      const result = await createTelegramChannel({
         onMessage: vi.fn(),
         onChatMetadata: vi.fn(),
         conversationRoutes: () => ({}),
+        runtimeSecrets: new EnvRuntimeSecretProvider(),
       });
       expect(result).toBeNull();
       expect(logger.warn).toHaveBeenCalledWith(
@@ -3615,14 +3616,15 @@ describe('createTelegramChannel factory', () => {
     }
   });
 
-  it('returns a TelegramChannel when token is available', () => {
+  it('returns a TelegramChannel when token is available', async () => {
     const saved = process.env.TELEGRAM_BOT_TOKEN;
     process.env.TELEGRAM_BOT_TOKEN = 'test-token-from-env';
     try {
-      const result = createTelegramChannel({
+      const result = await createTelegramChannel({
         onMessage: vi.fn(),
         onChatMetadata: vi.fn(),
         conversationRoutes: () => ({}),
+        runtimeSecrets: new EnvRuntimeSecretProvider(),
       });
       expect(result).not.toBeNull();
       expect(result).toBeInstanceOf(TelegramChannel);
@@ -3630,5 +3632,35 @@ describe('createTelegramChannel factory', () => {
       if (saved !== undefined) process.env.TELEGRAM_BOT_TOKEN = saved;
       else delete process.env.TELEGRAM_BOT_TOKEN;
     }
+  });
+
+  it('returns a TelegramChannel from configured runtime secret refs', async () => {
+    const result = await createTelegramChannel({
+      onMessage: vi.fn(),
+      onChatMetadata: vi.fn(),
+      conversationRoutes: () => ({}),
+      runtimeSettings: () =>
+        ({
+          providers: { telegram: { defaultConnection: 'telegram_default' } },
+          providerConnections: {
+            telegram_default: {
+              runtimeSecretRefs: {
+                bot_token: 'gantry-secret:TELEGRAM_BOT_TOKEN',
+              },
+            },
+          },
+        }) as never,
+      runtimeSecrets: {
+        getSecret: vi.fn(),
+        getOptionalSecret: vi.fn(),
+        getOptionalSecretAsync: vi.fn(async (ref) =>
+          ref.ref === 'gantry-secret:TELEGRAM_BOT_TOKEN'
+            ? 'test-token-from-store'
+            : undefined,
+        ),
+      },
+    });
+
+    expect(result).toBeInstanceOf(TelegramChannel);
   });
 });

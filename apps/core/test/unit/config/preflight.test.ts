@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings-defaults.js';
 import { saveRuntimeSettings } from '@core/config/settings/runtime-settings.js';
-import { inspectRuntimeStorageReadiness } from '@core/adapters/storage/postgres/storage-readiness.js';
+import {
+  inspectRuntimeSecretReadiness,
+  inspectRuntimeStorageReadiness,
+} from '@core/adapters/storage/postgres/storage-readiness.js';
 import { validateRuntimePreflightWithStorage } from '@core/config/preflight.js';
 
 vi.mock('@core/adapters/storage/postgres/storage-readiness.js', () => ({
@@ -14,10 +17,17 @@ vi.mock('@core/adapters/storage/postgres/storage-readiness.js', () => ({
     status: 'pass',
     message: 'storage ready',
   })),
+  inspectRuntimeSecretReadiness: vi.fn(async () => ({
+    status: 'pass',
+    message: 'secrets ready',
+  })),
 }));
 
 const mockedInspectRuntimeStorageReadiness = vi.mocked(
   inspectRuntimeStorageReadiness,
+);
+const mockedInspectRuntimeSecretReadiness = vi.mocked(
+  inspectRuntimeSecretReadiness,
 );
 const runtimeHomes: string[] = [];
 const originalDatabaseUrl = process.env.GANTRY_DATABASE_URL;
@@ -106,5 +116,50 @@ describe('runtime preflight', () => {
       },
     });
     expect(mockedInspectRuntimeStorageReadiness).not.toHaveBeenCalled();
+  });
+
+  it('fails when enabled provider runtime secret refs do not resolve', async () => {
+    mockedInspectRuntimeSecretReadiness.mockResolvedValueOnce({
+      status: 'fail',
+      message: 'Runtime secret preflight failed.',
+      details: [
+        'providers.slack.bot_token runtime secret ref gantry-secret:SLACK_BOT_TOKEN did not resolve.',
+        'providers.slack.app_token runtime secret ref gantry-secret:SLACK_APP_TOKEN did not resolve.',
+      ],
+    });
+    const runtimeHome = createRuntimeHome();
+    process.env.GANTRY_DATABASE_URL =
+      'postgres://gantry:gantry@localhost:5432/gantry_test';
+    process.env.SECRET_ENCRYPTION_KEY = strongEncryptionKey;
+    const settings = createDefaultRuntimeSettings();
+    settings.providers.slack.enabled = true;
+    settings.providers.slack.defaultConnection = 'slack_default';
+    settings.providerConnections.slack_default = {
+      provider: 'slack',
+      label: 'Slack Default',
+      runtimeSecretRefs: {
+        bot_token: 'gantry-secret:SLACK_BOT_TOKEN',
+        app_token: 'gantry-secret:SLACK_APP_TOKEN',
+      },
+    };
+    saveRuntimeSettings(runtimeHome, settings);
+    fs.writeFileSync(
+      path.join(runtimeHome, '.env'),
+      `GANTRY_DATABASE_URL=${process.env.GANTRY_DATABASE_URL}\nSECRET_ENCRYPTION_KEY=${strongEncryptionKey}\n`,
+    );
+
+    const result = await validateRuntimePreflightWithStorage(runtimeHome);
+
+    expect(result).toMatchObject({
+      ok: false,
+      failure: {
+        summary: 'Runtime secret preflight failed.',
+        details: [
+          'providers.slack.bot_token runtime secret ref gantry-secret:SLACK_BOT_TOKEN did not resolve.',
+          'providers.slack.app_token runtime secret ref gantry-secret:SLACK_APP_TOKEN did not resolve.',
+        ],
+      },
+    });
+    expect(mockedInspectRuntimeSecretReadiness).toHaveBeenCalled();
   });
 });

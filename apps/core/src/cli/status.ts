@@ -6,6 +6,11 @@ import { DoctorReport, runDoctorWithNetwork } from './doctor.js';
 import { getServiceStatus } from '../infrastructure/service/manager.js';
 import { envFilePath } from '../config/settings/runtime-home.js';
 import { ensureRuntimeSettings } from '../config/settings/runtime-settings.js';
+import { runtimeSecretKeyForEnv } from '../domain/provider/provider-runtime-secret-keys.js';
+import {
+  collectUnresolvedRuntimeSecretProviderIds,
+  isMissingRuntimeCredential,
+} from './runtime-secret-status.js';
 import { inspectMemoryHealth } from './memory-health.js';
 import { isStorageUnavailableError } from '../adapters/storage/postgres/runtime-store.js';
 import {
@@ -67,7 +72,7 @@ export interface RuntimeStatusSummary {
     id: string;
     label: string;
     enabled: boolean;
-    missingEnvKeys: string[];
+    missingCredentialKeys: string[];
   }>;
   accessNeedsApprovalCount: number;
   modelCredentialReady: boolean;
@@ -101,6 +106,8 @@ export async function collectRuntimeStatus(
       (connection) => connection.provider,
     ),
   );
+  const unresolvedRuntimeSecretProviderIds =
+    await collectUnresolvedRuntimeSecretProviderIds(runtimeHome, settings);
 
   const channels = listConnectableChannelProviders()
     .filter(
@@ -109,10 +116,23 @@ export async function collectRuntimeStatus(
         connectedProviderIds.has(provider.id),
     )
     .map((provider) => {
-      const missingEnvKeys: string[] = [];
+      const missingCredentialKeys: string[] = [];
+      const connectionId = settings.providers[provider.id]?.defaultConnection;
+      const refs = connectionId
+        ? settings.providerConnections[connectionId]?.runtimeSecretRefs
+        : undefined;
       for (const envKey of provider.setup.envKeys) {
-        if (!env[envKey]?.trim()) {
-          missingEnvKeys.push(envKey);
+        const refKey = runtimeSecretKeyForEnv(provider.id, envKey);
+        if (
+          isMissingRuntimeCredential({
+            providerId: provider.id,
+            envKey,
+            rawRef: refs?.[refKey],
+            env,
+            unresolvedRuntimeSecretProviderIds,
+          })
+        ) {
+          missingCredentialKeys.push(envKey);
         }
       }
 
@@ -120,7 +140,7 @@ export async function collectRuntimeStatus(
         id: provider.id,
         label: provider.label,
         enabled: settings.providers[provider.id]?.enabled ?? false,
-        missingEnvKeys,
+        missingCredentialKeys,
       };
     });
 
@@ -497,7 +517,8 @@ export function formatRuntimeStatus(summary: RuntimeStatusSummary): string {
           providers: summary.channels.map((channel) => ({
             id: channel.id,
             label: channel.label,
-            ready: channel.enabled && channel.missingEnvKeys.length === 0,
+            ready:
+              channel.enabled && channel.missingCredentialKeys.length === 0,
           })),
           accessNeedsApprovalCount: summary.accessNeedsApprovalCount,
           memoryStatus: summary.memoryStatus,

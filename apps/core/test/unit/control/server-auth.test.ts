@@ -24,6 +24,7 @@ import {
 import { getControlEnvValue } from '@core/config/index.js';
 import { signExternalIngressRequest } from '@core/application/external-ingress/signature.js';
 import { preflightModelPreset } from '@core/adapters/llm/model-preset-preflight.js';
+import { listSlackRecentChats } from '@core/cli/slack-chat-discovery.js';
 
 vi.mock('@core/adapters/llm/model-preset-preflight.js', () => ({
   preflightModelPreset: vi.fn(async () => ({
@@ -33,8 +34,17 @@ vi.mock('@core/adapters/llm/model-preset-preflight.js', () => ({
   })),
 }));
 
+vi.mock('@core/cli/slack-chat-discovery.js', () => ({
+  listSlackRecentChats: vi.fn(async () => ({
+    ok: true,
+    chats: [],
+    message: 'ok',
+  })),
+}));
+
 const mockedPreflightModelPreset = vi.mocked(preflightModelPreset);
 const mockedGetControlEnvValue = vi.mocked(getControlEnvValue);
+const mockedListSlackRecentChats = vi.mocked(listSlackRecentChats);
 
 vi.mock('@core/config/index.js', async () => {
   const runtimeHome = '/tmp/gantry-control-test-home';
@@ -312,6 +322,9 @@ const domainRepositories = {
   },
   messages: {
     listMessages: vi.fn(async () => []),
+  },
+  capabilitySecrets: {
+    getSecret: vi.fn(async () => null),
   },
 };
 
@@ -640,6 +653,12 @@ beforeEach(() => {
     [],
   );
   domainRepositories.messages.listMessages.mockResolvedValue([]);
+  domainRepositories.capabilitySecrets.getSecret.mockResolvedValue(null);
+  mockedListSlackRecentChats.mockResolvedValue({
+    ok: true,
+    chats: [],
+    message: 'ok',
+  });
   memoryService.isEnabled.mockReturnValue(true);
   memoryService.save.mockClear();
   memoryService.list.mockClear();
@@ -2454,7 +2473,7 @@ describe('control server runtime hardening', () => {
         label: 'Slack',
         status: 'disabled',
         config: {},
-        runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+        runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
       },
@@ -2488,6 +2507,84 @@ describe('control server runtime hardening', () => {
     }
   });
 
+  it('resolves discovery runtime secrets from the authenticated app', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'providers-admin-token',
+        scopes: ['providers:admin'],
+        appId: 'app-two',
+      },
+    ]);
+    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
+      {
+        id: 'providerConnection-1',
+        appId: 'app-two',
+        providerId: 'slack',
+        label: 'Slack',
+        status: 'active',
+        config: {},
+        runtimeSecretRefs: { bot_token: 'gantry-secret:SLACK_BOT_TOKEN' },
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      },
+    );
+    domainRepositories.capabilitySecrets.getSecret.mockImplementation(
+      async ({ appId, name }) => ({
+        appId,
+        name,
+        value: `${appId}:${name}`,
+        updatedAt: new Date(0).toISOString(),
+      }),
+    );
+    mockedListSlackRecentChats.mockResolvedValue({
+      ok: true,
+      chats: [
+        {
+          chatJid: 'sl:C12345678',
+          chatTitle: 'engineering',
+          chatType: 'public_channel',
+          sourceTs: 0,
+        },
+      ],
+      message: 'ok',
+    });
+    const handle = startControlServer({
+      app: {
+        registerGroup: vi.fn(),
+        queue: { enqueueMessageCheck: vi.fn() },
+      } as any,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/provider-connections/providerConnection-1/discover-conversations`,
+        'providers-admin-token',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ limit: 10 }),
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(
+        domainRepositories.capabilitySecrets.getSecret,
+      ).toHaveBeenCalledWith({
+        appId: 'app-two',
+        name: 'SLACK_BOT_TOKEN',
+      });
+      expect(mockedListSlackRecentChats).toHaveBeenCalledWith(
+        expect.objectContaining({
+          botToken: 'app-two:SLACK_BOT_TOKEN',
+        }),
+      );
+    } finally {
+      await handle.close();
+    }
+  });
+
   it('returns contract-valid channel onboarding responses', async () => {
     const port = await reservePort();
     process.env.GANTRY_CONTROL_PORT = String(port);
@@ -2514,7 +2611,7 @@ describe('control server runtime hardening', () => {
       label: 'App',
       status: 'active',
       config: { workspace: 'local' },
-      runtimeSecretRefs: [],
+      runtimeSecretRefs: {},
       createdAt: iso,
       updatedAt: iso,
     };
@@ -2847,7 +2944,7 @@ describe('control server runtime hardening', () => {
             label: 'Slack',
             status: 'active',
             config: {},
-            runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+            runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
             createdAt: iso,
             updatedAt: iso,
           };
@@ -2860,7 +2957,7 @@ describe('control server runtime hardening', () => {
             label: 'Teams',
             status: 'active',
             config: {},
-            runtimeSecretRefs: ['TEAMS_CLIENT_ID'],
+            runtimeSecretRefs: { client_id: 'env:TEAMS_CLIENT_ID' },
             createdAt: iso,
             updatedAt: iso,
           };
@@ -2944,7 +3041,7 @@ describe('control server runtime hardening', () => {
       label: 'App',
       status: 'active',
       config: {},
-      runtimeSecretRefs: [],
+      runtimeSecretRefs: {},
       createdAt: iso,
       updatedAt: iso,
     };
@@ -3204,7 +3301,7 @@ describe('control server runtime hardening', () => {
         label: 'Slack',
         status: 'active',
         config: {},
-        runtimeSecretRefs: [],
+        runtimeSecretRefs: {},
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
       },
@@ -3312,7 +3409,7 @@ describe('control server runtime hardening', () => {
         label: 'Slack',
         status: 'active',
         config: {},
-        runtimeSecretRefs: [],
+        runtimeSecretRefs: {},
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
       },

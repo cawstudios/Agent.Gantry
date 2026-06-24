@@ -92,6 +92,26 @@ function depsWithAdminTools(
   };
 }
 
+function fakeSettingsRevisions() {
+  return {
+    getLatestSettingsRevision: vi.fn(async () => null),
+    appendSettingsRevision: vi.fn(async (input: any) => ({
+      status: 'appended',
+      revision: {
+        appId: input.appId,
+        revision: 1,
+        settingsDocument: input.settingsDocument,
+        minReaderVersion: input.minReaderVersion,
+        createdBy: input.createdBy,
+        note: input.note ?? null,
+        createdAt: new Date(0).toISOString(),
+      },
+    })),
+    getSettingsRevision: vi.fn(async () => null),
+    listRecentSettingsRevisions: vi.fn(async () => []),
+  };
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.doUnmock('@core/adapters/storage/postgres/runtime-store.js');
@@ -314,6 +334,7 @@ describe('runtime admin IPC handlers', () => {
             listSkills: vi.fn(async () => []),
           },
           mcpServers: { getServer: vi.fn(async () => null) },
+          settingsRevisions: fakeSettingsRevisions(),
         },
       }),
     }));
@@ -429,6 +450,7 @@ describe('runtime admin IPC handlers', () => {
             listSkills: vi.fn(async () => []),
           },
           mcpServers: { getServer: vi.fn(async () => null) },
+          settingsRevisions: fakeSettingsRevisions(),
         },
       }),
     }));
@@ -532,6 +554,7 @@ describe('runtime admin IPC handlers', () => {
             listSkills: vi.fn(async () => []),
           },
           mcpServers: { getServer: vi.fn(async () => null) },
+          settingsRevisions: fakeSettingsRevisions(),
         },
       }),
     }));

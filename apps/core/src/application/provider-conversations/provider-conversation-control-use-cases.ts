@@ -26,6 +26,12 @@ import type { Clock } from '../common/clock.js';
 import { ApplicationError } from '../common/application-error.js';
 import type { IdGenerator } from '../common/id-generator.js';
 import type { ProviderCatalogPort } from './provider-catalog-ports.js';
+import {
+  isForbiddenRuntimeSecretEnvName,
+  normalizeRuntimeSecretRefString,
+  parseRuntimeSecretRefString,
+} from '../../domain/ports/runtime-secret-provider.js';
+import { isProviderRuntimeSecretRefTarget } from '../../domain/provider/provider-runtime-secret-keys.js';
 
 export interface ProviderConnectionPatch {
   label?: string;
@@ -33,7 +39,7 @@ export interface ProviderConnectionPatch {
   enabled?: boolean;
   config?: Record<string, unknown>;
   externalInstallationRef?: ExternalRef<'provider_connection'> | null;
-  runtimeSecretRefs?: string[];
+  runtimeSecretRefs?: Record<string, string>;
 }
 
 export interface AgentBindingPatch {
@@ -95,16 +101,46 @@ function assertNoRawSecrets(value: unknown, path: string): void {
 
 function assertAllowedRuntimeSecretRefs(
   provider: Provider,
-  refs: string[] | undefined,
+  refs: Record<string, string> | undefined,
 ): void {
   if (refs === undefined) return;
-  const allowed = new Set(provider.allowedRuntimeSecretRefs ?? []);
-  const invalid = refs.filter((ref) => !allowed.has(ref));
+  const allowed = new Set(provider.allowedRuntimeSecretKeys ?? []);
+  const invalid = Object.keys(refs).filter((key) => !allowed.has(key));
   if (invalid.length > 0) {
     throw new ApplicationError(
       'INVALID_REQUEST',
-      `runtimeSecretRefs contains unsupported refs for provider ${provider.id}: ${invalid.join(', ')}`,
+      `runtimeSecretRefs contains unsupported keys for provider ${provider.id}: ${invalid.join(', ')}`,
     );
+  }
+  for (const [key, ref] of Object.entries(refs)) {
+    try {
+      const normalized = normalizeRuntimeSecretRefString(
+        ref,
+        `runtimeSecretRefs.${key}`,
+      );
+      const parsed = parseRuntimeSecretRefString(normalized);
+      if (
+        parsed.source === 'env' &&
+        isForbiddenRuntimeSecretEnvName(parsed.name)
+      ) {
+        throw new Error(
+          `${parsed.name} is not allowed for provider '${provider.id}' runtime secret ref ${normalized}. Use a channel runtime secret name, not model/provider credential authority.`,
+        );
+      }
+      if (!isProviderRuntimeSecretRefTarget(provider.id, key, normalized)) {
+        throw new Error(
+          `runtimeSecretRefs.${key} must point to the canonical ${provider.id} credential for ${key}.`,
+        );
+      }
+      refs[key] = normalized;
+    } catch (error) {
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        error instanceof Error
+          ? error.message
+          : `Invalid runtimeSecretRefs.${key}`,
+      );
+    }
   }
 }
 
@@ -206,7 +242,7 @@ export class ProviderConnectionControlService {
     label: string;
     config?: Record<string, unknown>;
     externalInstallationRef?: ExternalRef<'provider_connection'>;
-    runtimeSecretRefs?: string[];
+    runtimeSecretRefs?: Record<string, string>;
     enabled?: boolean;
   }): Promise<ProviderConnection> {
     assertNoRawSecrets(input.config, 'config');
@@ -229,7 +265,7 @@ export class ProviderConnectionControlService {
       label: input.label.trim(),
       status: input.enabled === false ? 'disabled' : 'active',
       config: input.config ?? {},
-      runtimeSecretRefs: input.runtimeSecretRefs ?? [],
+      runtimeSecretRefs: input.runtimeSecretRefs ?? {},
       createdAt: now,
       updatedAt: now,
     };
@@ -256,7 +292,7 @@ export class ProviderConnectionControlService {
         id: existing.providerId,
         displayName: String(existing.providerId),
         capabilityFlags: [],
-        allowedRuntimeSecretRefs: [],
+        allowedRuntimeSecretKeys: [],
         createdAt: existing.createdAt,
       },
       input.patch.runtimeSecretRefs,

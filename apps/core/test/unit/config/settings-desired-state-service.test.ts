@@ -177,11 +177,13 @@ function makeRepositories(overrides: Record<string, unknown> = {}) {
         label: id,
         status: 'active',
         config: {},
-        runtimeSecretRefs: [],
+        runtimeSecretRefs: {},
         createdAt: '2026-05-02T00:00:00.000Z',
         updatedAt: '2026-05-02T00:00:00.000Z',
       })),
       saveProviderConnection: vi.fn(async () => undefined),
+      listProviderConnections: vi.fn(async () => []),
+      disableProviderConnection: vi.fn(async () => undefined),
       saveAgentConversationBinding: vi.fn(async () => undefined),
     },
     ...overrides,
@@ -964,6 +966,236 @@ describe('SettingsDesiredStateService', () => {
     );
   });
 
+  it('persists provider connections before conversations are selected', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.providers.slack.enabled = true;
+    settings.providers.slack.defaultConnection = 'slack_default';
+    settings.providerConnections.slack_default = {
+      provider: 'slack',
+      label: 'Slack Default',
+      runtimeSecretRefs: { bot_token: 'SLACK_BOT_TOKEN' },
+    };
+    const existingProviderConnection = {
+      id: 'slack_default',
+      appId: 'default',
+      providerId: 'slack',
+      externalInstallationRef: {
+        kind: 'provider_connection',
+        value: 'workspace:T123',
+      },
+      label: 'Old Slack Label',
+      status: 'active',
+      config: { workspaceId: 'T123' },
+      runtimeSecretRefs: { bot_token: 'env:OLD_SLACK_BOT_TOKEN' },
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    };
+    const repositories = makeRepositories({
+      providerConnections: {
+        ...makeRepositories().providerConnections,
+        getProviderConnection: vi.fn(async () => existingProviderConnection),
+        saveProviderConnection: vi.fn(async () => undefined),
+        saveAgentConversationBinding: vi.fn(async () => undefined),
+      },
+    });
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+      clock: { now: () => '2026-05-02T00:00:00.000Z' },
+    });
+
+    const result = await service.reconcile(settings);
+
+    expect(result.applied).toContain('provider_connection:slack_default');
+    expect(
+      repositories.providerConnections.saveProviderConnection,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'slack_default',
+        providerId: 'slack',
+        externalInstallationRef: {
+          kind: 'provider_connection',
+          value: 'workspace:T123',
+        },
+        label: 'Slack Default',
+        config: { workspaceId: 'T123' },
+        runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
+        createdAt: '2026-05-01T00:00:00.000Z',
+      }),
+    );
+    expect(
+      repositories.providerConnections.saveAgentConversationBinding,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('disables configured provider connections when their provider is disabled', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.providers.slack.enabled = false;
+    settings.providers.slack.defaultConnection = 'slack_default';
+    settings.providerConnections.slack_default = {
+      provider: 'slack',
+      label: 'Slack Default',
+      runtimeSecretRefs: { bot_token: 'SLACK_BOT_TOKEN' },
+    };
+    const repositories = makeRepositories();
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+      clock: { now: () => '2026-05-02T00:00:00.000Z' },
+    });
+
+    await service.reconcile(settings);
+
+    expect(
+      repositories.providerConnections.saveProviderConnection,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'slack_default',
+        providerId: 'slack',
+        status: 'disabled',
+      }),
+    );
+  });
+
+  it('disables active provider connections removed from desired settings', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.desiredState.authoritative = true;
+    const repositories = makeRepositories({
+      providerConnections: {
+        ...makeRepositories().providerConnections,
+        listProviderConnections: vi.fn(async () => [
+          {
+            id: 'slack_default',
+            appId: 'default',
+            providerId: 'slack',
+            label: 'Slack Default',
+            status: 'active',
+            config: {},
+            runtimeSecretRefs: {},
+            createdAt: '2026-05-01T00:00:00.000Z',
+            updatedAt: '2026-05-01T00:00:00.000Z',
+          },
+          {
+            id: 'app_default',
+            appId: 'default',
+            providerId: 'app',
+            label: 'App',
+            status: 'active',
+            config: {},
+            runtimeSecretRefs: {},
+            createdAt: '2026-05-01T00:00:00.000Z',
+            updatedAt: '2026-05-01T00:00:00.000Z',
+          },
+        ]),
+        disableProviderConnection: vi.fn(async () => undefined),
+      },
+    });
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+      clock: { now: () => '2026-05-02T00:00:00.000Z' },
+    });
+
+    const result = await service.reconcile(settings);
+
+    expect(result.applied).toContain(
+      'provider_connection:slack_default:disabled_absent',
+    );
+    expect(
+      repositories.providerConnections.disableProviderConnection,
+    ).toHaveBeenCalledOnce();
+    expect(
+      repositories.providerConnections.disableProviderConnection,
+    ).toHaveBeenCalledWith({
+      appId: 'default',
+      id: 'slack_default',
+      updatedAt: '2026-05-02T00:00:00.000Z',
+    });
+  });
+
+  it('keeps active provider connections omitted from non-authoritative settings', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.desiredState.authoritative = false;
+    const repositories = makeRepositories({
+      providerConnections: {
+        ...makeRepositories().providerConnections,
+        listProviderConnections: vi.fn(async () => [
+          {
+            id: 'slack_default',
+            appId: 'default',
+            providerId: 'slack',
+            label: 'Slack Default',
+            status: 'active',
+            config: {},
+            runtimeSecretRefs: {},
+            createdAt: '2026-05-01T00:00:00.000Z',
+            updatedAt: '2026-05-01T00:00:00.000Z',
+          },
+        ]),
+        disableProviderConnection: vi.fn(async () => undefined),
+      },
+    });
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+      clock: { now: () => '2026-05-02T00:00:00.000Z' },
+    });
+
+    const result = await service.reconcile(settings);
+
+    expect(result.applied).not.toContain(
+      'provider_connection:slack_default:disabled_absent',
+    );
+    expect(
+      repositories.providerConnections.disableProviderConnection,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('rejects changing the provider behind an existing connection id', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.providers.telegram.enabled = true;
+    settings.providers.telegram.defaultConnection = 'default_connection';
+    settings.providerConnections.default_connection = {
+      provider: 'telegram',
+      label: 'Telegram Default',
+      runtimeSecretRefs: { bot_token: 'TELEGRAM_BOT_TOKEN' },
+    };
+    const repositories = makeRepositories({
+      providerConnections: {
+        ...makeRepositories().providerConnections,
+        getProviderConnection: vi.fn(async () => ({
+          id: 'default_connection',
+          appId: 'default',
+          providerId: 'slack',
+          externalInstallationRef: {
+            kind: 'provider_connection',
+            value: 'workspace:T123',
+          },
+          label: 'Slack',
+          status: 'active',
+          config: { workspaceId: 'T123' },
+          runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        })),
+        saveProviderConnection: vi.fn(async () => undefined),
+        saveAgentConversationBinding: vi.fn(async () => undefined),
+      },
+    });
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+      clock: { now: () => '2026-05-02T00:00:00.000Z' },
+    });
+
+    await expect(service.reconcile(settings)).rejects.toThrow(
+      'provider_connections.default_connection.provider cannot change from slack to telegram',
+    );
+    expect(
+      repositories.providerConnections.saveProviderConnection,
+    ).not.toHaveBeenCalled();
+  });
+
   it('persists top-level conversation bindings per agent without id collisions', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.providers.slack.enabled = true;
@@ -1341,7 +1573,7 @@ describe('SettingsDesiredStateService', () => {
       label: 'Telegram Default',
       status: 'active',
       config: {},
-      runtimeSecretRefs: ['TELEGRAM_BOT_TOKEN'],
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
       createdAt: '2026-05-02T00:00:00.000Z',
       updatedAt: '2026-05-02T00:00:00.000Z',
     };
@@ -1419,7 +1651,7 @@ describe('SettingsDesiredStateService', () => {
       expect.objectContaining({
         id: 'telegram_default',
         providerId: 'telegram',
-        runtimeSecretRefs: ['TELEGRAM_BOT_TOKEN'],
+        runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
       }),
     );
     expect(conversations.saveConversation).toHaveBeenCalledWith(
@@ -1567,7 +1799,7 @@ describe('SettingsDesiredStateService', () => {
           label: id,
           status: 'active',
           config: {},
-          runtimeSecretRefs: [],
+          runtimeSecretRefs: {},
           createdAt: '2026-05-02T00:00:00.000Z',
           updatedAt: '2026-05-02T00:00:00.000Z',
         })),
@@ -2093,7 +2325,10 @@ describe('SettingsDesiredStateService', () => {
             label: 'Slack Workspace',
             status: 'active',
             config: {},
-            runtimeSecretRefs: ['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN'],
+            runtimeSecretRefs: {
+              bot_token: 'env:SLACK_BOT_TOKEN',
+              app_token: 'env:SLACK_APP_TOKEN',
+            },
             createdAt: '2026-05-01T00:00:00.000Z',
             updatedAt: '2026-05-01T00:00:00.000Z',
           },
@@ -2223,8 +2458,8 @@ describe('SettingsDesiredStateService', () => {
       provider: 'slack',
       label: 'Slack Workspace',
       runtimeSecretRefs: {
-        bot_token: 'SLACK_BOT_TOKEN',
-        app_token: 'SLACK_APP_TOKEN',
+        bot_token: 'env:SLACK_BOT_TOKEN',
+        app_token: 'env:SLACK_APP_TOKEN',
       },
     });
     expect(exported.conversations.sales).toEqual(

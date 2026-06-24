@@ -183,6 +183,32 @@ function parseJsonArray<T extends string>(value: unknown): T[] {
     ? (parsed.filter((v) => typeof v === 'string') as T[])
     : [];
 }
+export function parseRuntimeSecretRefsJson(
+  value: unknown,
+  providerId: string,
+): Record<string, string> {
+  const parsed =
+    typeof value === 'string'
+      ? value.length > 0
+        ? JSON.parse(value)
+        : {}
+      : (value ?? {});
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(
+      `provider connection ${providerId} runtimeSecretRefs must be a JSON object keyed by credential name`,
+    );
+  }
+  const refs: Record<string, string> = {};
+  for (const [key, ref] of Object.entries(parsed)) {
+    if (typeof ref !== 'string') {
+      throw new Error(
+        `provider connection ${providerId} runtimeSecretRefs.${key} must be a string ref`,
+      );
+    }
+    refs[key] = ref;
+  }
+  return refs;
+}
 function safeIdPart(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9._:@-]/g, '_');
 }
@@ -408,7 +434,10 @@ export class PostgresProviderConnectionRepository implements ProviderConnectionR
       label: row.label,
       status: row.status as ProviderConnection['status'],
       config: parseJson<Record<string, unknown>>(row.configJson, {}),
-      runtimeSecretRefs: parseJsonArray(row.runtimeSecretRefsJson),
+      runtimeSecretRefs: parseRuntimeSecretRefsJson(
+        row.runtimeSecretRefsJson,
+        row.providerId,
+      ),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     } as unknown as ProviderConnection;

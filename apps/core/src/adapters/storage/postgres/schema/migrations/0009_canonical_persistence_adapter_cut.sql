@@ -86,7 +86,7 @@ CREATE TABLE channel_installations (
   external_ref_json text,
   label text NOT NULL,
   status text NOT NULL DEFAULT 'active',
-  runtime_secret_refs_json text NOT NULL DEFAULT '[]',
+  runtime_secret_refs_json text NOT NULL DEFAULT '{}',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );

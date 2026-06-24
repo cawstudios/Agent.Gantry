@@ -669,12 +669,13 @@ export class TeamsChannel implements ChannelAdapter {
   }
 }
 
-export function createTeamsChannel(
+export async function createTeamsChannel(
   opts: ChannelOpts,
   deps: TeamsChannelDependencies = {},
-): TeamsChannel | null {
+): Promise<TeamsChannel | null> {
   const credentials =
-    deps.credentials ?? readTeamsCredentials(opts.runtimeSecrets);
+    deps.credentials ??
+    (await readTeamsCredentials(opts.runtimeSecrets, opts.runtimeSettings?.()));
   if (!credentials) {
     logger.warn(
       'Teams: TEAMS_CLIENT_ID, TEAMS_CLIENT_SECRET, and TEAMS_TENANT_ID are required',

@@ -302,14 +302,14 @@ describe('@gantry/sdk transport', () => {
       appId: 'app-one',
       providerId: 'slack',
       label: 'Slack',
-      runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+      runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
     });
     await client.providerConnections.list();
     await client.providerConnections.get('providerConnection/1');
     await client.providerConnections.update('providerConnection/1', {
       label: 'Slack workspace',
       enabled: false,
-      runtimeSecretRefs: ['SLACK_BOT_TOKEN_V2'],
+      runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN_V2' },
     });
     await client.providerConnections.delete('providerConnection/1');
     await client.providerConnections.discoverConversations(
@@ -372,7 +372,7 @@ describe('@gantry/sdk transport', () => {
           appId: 'app-one',
           providerId: 'slack',
           label: 'Slack',
-          runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+          runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
         },
       },
       { method: 'GET', url: '/v1/provider-connections', body: null },
@@ -387,7 +387,7 @@ describe('@gantry/sdk transport', () => {
         body: {
           label: 'Slack workspace',
           enabled: false,
-          runtimeSecretRefs: ['SLACK_BOT_TOKEN_V2'],
+          runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN_V2' },
         },
       },
       {

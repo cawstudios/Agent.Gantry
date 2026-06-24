@@ -1,4 +1,5 @@
 import { GANTRY_HOME } from '../index.js';
+import type { SettingsRevisionRepository } from '../../domain/ports/fleet-capability-state.js';
 import type { RuntimeConversationRouteRepository } from '../../domain/repositories/ops-repo.js';
 import type { SettingsDesiredStateRepositories } from './desired-state-service.js';
 import { mirrorAgentToolRulesToRuntimeSettings } from './runtime-settings.js';
@@ -8,7 +9,9 @@ import {
 } from './restart-sync.js';
 
 export type AgentToolRuleSettingsRepositories =
-  SettingsDesiredStateRepositories;
+  SettingsDesiredStateRepositories & {
+    settingsRevisions?: SettingsRevisionRepository;
+  };
 
 export function createAgentToolRuleSettingsMirror(input: {
   opsRepository: RuntimeConversationRouteRepository;
@@ -29,6 +32,7 @@ export function createAgentToolRuleSettingsMirror(input: {
         repositories: input.repositories,
         appId: options?.appId as never,
         reloadRuntimeState: input.reloadRuntimeState,
+        settingsRevisions: input.repositories.settingsRevisions,
       };
       return options?.mode === 'remove'
         ? removeAgentToolRulesFromSyncedRuntimeSettings(shared)

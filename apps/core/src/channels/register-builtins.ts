@@ -1,4 +1,4 @@
-import { ChannelOpts } from './channel-provider.js';
+import type { ChannelAdapter, ChannelOpts } from './channel-provider.js';
 import {
   Provider,
   ChannelProviderSetupContext,
@@ -7,25 +7,23 @@ import {
 
 async function createTelegramBuiltInChannel(
   opts: ChannelOpts,
-): Promise<
-  ReturnType<(typeof import('./telegram.js'))['createTelegramChannel']>
-> {
+): Promise<ChannelAdapter | null> {
   const mod = await import('./telegram.js');
-  return mod.createTelegramChannel(opts);
+  return await mod.createTelegramChannel(opts);
 }
 
 async function createSlackBuiltInChannel(
   opts: ChannelOpts,
-): Promise<ReturnType<(typeof import('./slack.js'))['createSlackChannel']>> {
+): Promise<ChannelAdapter | null> {
   const mod = await import('./slack.js');
-  return mod.createSlackChannel(opts);
+  return await mod.createSlackChannel(opts);
 }
 
 async function createTeamsBuiltInChannel(
   opts: ChannelOpts,
-): Promise<ReturnType<(typeof import('./teams.js'))['createTeamsChannel']>> {
+): Promise<ChannelAdapter | null> {
   const mod = await import('./teams.js');
-  return mod.createTeamsChannel(opts);
+  return await mod.createTeamsChannel(opts);
 }
 
 async function createDiscordBuiltInChannel(

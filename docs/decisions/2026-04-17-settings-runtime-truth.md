@@ -4,11 +4,22 @@
 
 Gantry must present one runtime truth across runtime code, CLI, diagnostics, setup, docs, and shipped skills. Runtime behavior settings were previously split between `settings.yaml` and `.env`, which created conflicting states and unclear operator UX.
 
+> Superseded in part by
+> [2026-06-11 — Settings Authority Per Deployment Mode](./2026-06-11-settings-authority.md):
+> managed workstation/personal and fleet runtimes now use Postgres
+> `settings_revisions` as the durable desired-state authority, with
+> `settings.yaml` as the canonical readable copy and import/export surface.
+
 ## Decision
 
 1. Runtime mode is fixed to host runtime only.
-2. `settings.yaml` is the canonical runtime behavior surface for non-secret settings.
-3. `.env` is for secrets and channel credentials only.
+2. Postgres `settings_revisions` is the durable desired-state authority for
+   non-secret settings in managed workstation/personal and fleet runtimes.
+   `settings.yaml` is the canonical human-readable copy plus import/export
+   surface.
+3. Runtime secrets are referenced from settings as `env:`, `gantry-secret:`, or
+   `aws-sm:` refs. `.env` is only one runtime secret source, not the settings
+   authority.
 4. Memory runtime behavior is controlled only by `settings.yaml`:
    - `memory.enabled`
    - `memory.embeddings.enabled`
@@ -20,7 +31,6 @@ Gantry must present one runtime truth across runtime code, CLI, diagnostics, set
    `conversations.*`. Advanced sections such as `provider_connections.*`,
    `storage.*`, `model_access.*`, `memory.*`, and
    `desired_state.authoritative` are omitted when they match built-in defaults.
-   There is no versioned settings lane because Gantry is still early-stage.
 6. `model_access.*` stores only non-secret model gateway configuration.
    Model provider keys live in typed encrypted model credential records, and
    `SECRET_ENCRYPTION_KEY` stays in runtime `.env`.
@@ -40,17 +50,17 @@ Gantry must present one runtime truth across runtime code, CLI, diagnostics, set
 
 ## Consequences
 
-- CLI mutation commands update `settings.yaml`.
+- CLI mutation commands append a settings revision and sync `settings.yaml`.
 - Agent-requested local configuration changes use reviewed Gantry admin tools.
   Only agents with selected admin tool capabilities can use
   `settings_desired_state` to inspect and `request_settings_update` to ask the
   host to validate and write a replacement file after approval. Settings
   updates carry the revision returned by `settings_desired_state`; stale
   revisions are rejected, and writes are atomic.
-- Runtime watches `settings.yaml`; valid safe changes reconcile live, while
-  storage, credential broker, and channel topology changes are reported as
-  restart-required.
-- `gantry status` and `gantry doctor` report memory/storage/embeddings/dreaming state from `settings.yaml`.
+- Runtime watches `settings.yaml` as an import surface; valid safe changes append
+  a revision and reconcile live, while storage, credential broker, and channel
+  topology changes are reported as restart-required.
+- `gantry status` and `gantry doctor` report memory/storage/embeddings/dreaming state from the resolved desired state.
 - Unsupported runtime and memory env keys are surfaced as warnings in doctor/config surfaces.
 - Direct YAML edits remain first-class with strict validation and actionable path-level errors.
 

@@ -32,21 +32,21 @@ describe('exportCurrentDesiredState', () => {
               providerId: 'control-http',
               label: 'Control',
               status: 'active',
-              runtimeSecretRefs: [],
+              runtimeSecretRefs: {},
             },
             {
               id: 'app-default',
               providerId: 'app',
               label: 'App',
               status: 'active',
-              runtimeSecretRefs: [],
+              runtimeSecretRefs: {},
             },
             {
               id: 'slack-default',
               providerId: 'slack',
               label: 'Slack',
               status: 'active',
-              runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+              runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
             },
           ]),
           listAgentConversationBindings: vi.fn(async () => []),
@@ -88,7 +88,7 @@ describe('exportCurrentDesiredState', () => {
       'slack-default': {
         provider: 'slack',
         label: 'Slack',
-        runtimeSecretRefs: { bot_token: 'SLACK_BOT_TOKEN' },
+        runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
       },
     });
     expect(Object.values(exported.conversations)).toEqual([

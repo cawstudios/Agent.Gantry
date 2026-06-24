@@ -82,7 +82,9 @@ describe('channel CLI command', () => {
 
     expect(code).toBe(0);
     expect(note).toHaveBeenCalledWith(
-      expect.stringContaining('Telegram: enabled | credentials: configured'),
+      expect.stringContaining(
+        'Telegram: enabled | credentials: secret refs configured',
+      ),
       'Provider Status',
     );
   });
@@ -266,7 +268,7 @@ describe('channel CLI command', () => {
       label: 'App',
       status: 'active',
       config: {},
-      runtimeSecretRefs: [],
+      runtimeSecretRefs: {},
       createdAt: iso,
       updatedAt: iso,
     };
@@ -377,7 +379,7 @@ describe('channel CLI command', () => {
                 label: 'Telegram',
                 status: 'active',
                 config: {},
-                runtimeSecretRefs: [],
+                runtimeSecretRefs: {},
                 createdAt: iso,
                 updatedAt: iso,
               })),

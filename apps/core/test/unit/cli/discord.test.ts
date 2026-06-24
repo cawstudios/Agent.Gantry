@@ -37,6 +37,14 @@ afterEach(() => {
   }
 });
 
+function mockRuntimeSecretStorage() {
+  const storeRuntimeSecretInput = vi.fn(async () => undefined);
+  vi.doMock('@core/cli/credentials.js', () => ({
+    storeRuntimeSecretInput,
+  }));
+  return storeRuntimeSecretInput;
+}
+
 function makeRuntimeHome(): string {
   const runtimeHome = fs.mkdtempSync(
     path.join(os.tmpdir(), 'gantry-discord-test-'),
@@ -103,21 +111,35 @@ describe('cli discord helpers', () => {
     const runtimeHome = makeRuntimeHome();
     mockPrompts('skip');
     const discovery = fakeDiscordDiscovery();
+    const storeRuntimeSecretInput = mockRuntimeSecretStorage();
 
     const { runDiscordConnectCommand } = await import('@core/cli/discord.js');
     const code = await runDiscordConnectCommand(runtimeHome, discovery);
 
     expect(code).toBe(0);
-    expect(readEnvFile(envFilePath(runtimeHome))).toEqual(
-      expect.objectContaining({
-        DISCORD_BOT_TOKEN: 'discord-token',
-        DISCORD_APPLICATION_ID: '123456789',
-      }),
+    expect(storeRuntimeSecretInput).toHaveBeenCalledWith({
+      runtimeHome,
+      name: 'DISCORD_BOT_TOKEN',
+      value: 'discord-token',
+      actor: 'cli:discord-connect',
+    });
+    expect(storeRuntimeSecretInput).toHaveBeenCalledWith({
+      runtimeHome,
+      name: 'DISCORD_APPLICATION_ID',
+      value: '123456789',
+      actor: 'cli:discord-connect',
+    });
+    expect(readEnvFile(envFilePath(runtimeHome))).not.toHaveProperty(
+      'DISCORD_BOT_TOKEN',
     );
     const settings = loadRuntimeSettings(runtimeHome);
     expect(settings.providers.discord.enabled).toBe(false);
     expect(settings.providerConnections.discord_default).toMatchObject({
       provider: 'discord',
+      runtimeSecretRefs: {
+        bot_token: 'gantry-secret:DISCORD_BOT_TOKEN',
+        application_id: 'gantry-secret:DISCORD_APPLICATION_ID',
+      },
     });
   });
 
@@ -128,6 +150,7 @@ describe('cli discord helpers', () => {
     settings.providers.discord.enabled = true;
     saveRuntimeSettings(runtimeHome, settings);
     mockPrompts('skip');
+    mockRuntimeSecretStorage();
 
     const { runDiscordConnectCommand } = await import('@core/cli/discord.js');
     const code = await runDiscordConnectCommand(
@@ -145,6 +168,7 @@ describe('cli discord helpers', () => {
     vi.resetModules();
     const runtimeHome = makeRuntimeHome();
     const { error, info } = mockPrompts('dc:1234567890');
+    mockRuntimeSecretStorage();
     const discovery = fakeDiscordDiscovery({
       registerGantryCommand: vi.fn(async () => ({
         ok: false,
@@ -174,6 +198,7 @@ describe('cli discord helpers', () => {
     const runtimeHome = makeRuntimeHome();
     mockPrompts('dc:1234567890');
     const discovery = fakeDiscordDiscovery();
+    const storeRuntimeSecretInput = mockRuntimeSecretStorage();
 
     const { runDiscordConnectCommand } = await import('@core/cli/discord.js');
     const code = await runDiscordConnectCommand(runtimeHome, discovery);
@@ -182,6 +207,12 @@ describe('cli discord helpers', () => {
     expect(loadRuntimeSettings(runtimeHome).providers.discord.enabled).toBe(
       true,
     );
+    expect(storeRuntimeSecretInput).toHaveBeenCalledWith({
+      runtimeHome,
+      name: 'DISCORD_BOT_TOKEN',
+      value: 'discord-token',
+      actor: 'cli:discord-connect',
+    });
     expect(groupsStore.get('dc:1234567890')).toEqual(
       expect.objectContaining({ folder: 'main_agent' }),
     );

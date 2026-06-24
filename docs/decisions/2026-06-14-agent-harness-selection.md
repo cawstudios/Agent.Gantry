@@ -144,8 +144,8 @@ implementation already satisfies the target contract.
    values to `auto`, and rejects old writable `agent_engine` settings outside
    historical docs/tests.
 2. API, SDK, CLI, setup, and reviewed Gantry MCP/admin settings paths can set
-   `agentHarness`; all of them update `settings.yaml` as durable desired state
-   rather than making Postgres the only source of truth.
+   `agentHarness`; all of them append desired-state revisions and sync
+   `settings.yaml` as the canonical readable copy.
 3. Agent read/status/model-why responses show selected `agentHarness` and
    internal/read-only `executionProviderId` where diagnostics already expose
    execution routing.

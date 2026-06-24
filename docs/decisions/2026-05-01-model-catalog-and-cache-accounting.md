@@ -108,10 +108,10 @@ Model presets are:
 
 `gantry setup`, `gantry model use-preset`, `gantry model set chat`,
 `gantry model set jobs`, `gantry model reset`, and `PATCH /v1/models/defaults`
-all write `settings.yaml`. Postgres projections are not the source of truth for
-model defaults. Memory extraction, dreaming, and consolidation read the current
-validated settings at call time so new runs pick up model changes without a
-service restart.
+append desired-state revisions and sync `settings.yaml`. Runtime projection rows
+are not an independent source of truth for model defaults. Memory extraction,
+dreaming, and consolidation read the current validated settings at call time so
+new runs pick up model changes without a service restart.
 
 Catalog entries expose `responseFamily` as the canonical API shape, `anthropic`
 or `openai`. OpenAI-endpoint chat models are executable through the

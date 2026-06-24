@@ -71,6 +71,7 @@ import type {
   RuntimeSettings,
 } from './runtime-settings-types.js';
 import { resolveAgentToolReference } from '../../domain/tools/agent-tool-catalog-references.js';
+import { normalizeRuntimeSecretRefString } from '../../domain/ports/runtime-secret-provider.js';
 import { nowIso } from '../../shared/time/datetime.js';
 
 export class SettingsDesiredStateService {
@@ -143,6 +144,53 @@ export class SettingsDesiredStateService {
     const configuredFolders = new Set(Object.keys(settings.agents));
     const configuredJids = new Set<string>();
     const bindingsByAgent = configuredRoutingBindingsByAgent(settings);
+    const providerConnectionEntries = Object.entries(
+      settings.providerConnections,
+    );
+
+    if (this.deps.repositories.providerConnections) {
+      const desiredProviderConnectionIds = new Set<string>();
+      for (const [connectionId, connection] of providerConnectionEntries) {
+        desiredProviderConnectionIds.add(connectionId);
+        await this.saveDesiredProviderConnection({
+          connectionId,
+          connection,
+          status:
+            settings.providers[connection.provider]?.enabled === false
+              ? 'disabled'
+              : 'active',
+          now: this.clock.now(),
+        });
+        applied.push(`provider_connection:${connectionId}`);
+      }
+      if (settings.desiredState.authoritative) {
+        const storedProviderConnections = this.deps.repositories
+          .providerConnections.listProviderConnections
+          ? await this.deps.repositories.providerConnections.listProviderConnections(
+              this.appId,
+            )
+          : [];
+        for (const connection of storedProviderConnections) {
+          if (
+            connection.status !== 'active' ||
+            desiredProviderConnectionIds.has(connection.id) ||
+            isInternalProviderConnection(connection.providerId)
+          ) {
+            continue;
+          }
+          await this.deps.repositories.providerConnections.disableProviderConnection(
+            {
+              appId: this.appId,
+              id: connection.id,
+              updatedAt: this.clock.now(),
+            },
+          );
+          applied.push(`provider_connection:${connection.id}:disabled_absent`);
+        }
+      }
+    } else if (providerConnectionEntries.length > 0) {
+      skipped.push('provider_connections:missing-repository');
+    }
 
     for (const [folder, agent] of Object.entries(settings.agents)) {
       const agentId = agentIdForFolder(folder);
@@ -275,6 +323,45 @@ export class SettingsDesiredStateService {
     return { applied, skipped, invalidReferences: [] };
   }
 
+  private async saveDesiredProviderConnection(input: {
+    connectionId: string;
+    connection: RuntimeProviderConnectionSettings;
+    status: ProviderConnection['status'];
+    now: string;
+  }): Promise<void> {
+    const providerConnections = this.deps.repositories.providerConnections;
+    if (!providerConnections) return;
+    const id = input.connectionId as ProviderConnectionId;
+    const providerId = input.connection.provider as ProviderId;
+    const existing = await providerConnections.getProviderConnection(id);
+    if (existing && existing.appId !== this.appId) {
+      throw new Error(
+        `provider_connections.${input.connectionId} already belongs to another app`,
+      );
+    }
+    if (existing && existing.providerId !== providerId) {
+      throw new Error(
+        `provider_connections.${input.connectionId}.provider cannot change from ${existing.providerId} to ${providerId}; use a new provider connection id.`,
+      );
+    }
+    const existingForApp = existing ?? null;
+    await providerConnections.saveProviderConnection({
+      id,
+      appId: this.appId,
+      providerId,
+      externalInstallationRef: existingForApp?.externalInstallationRef,
+      label: input.connection.label,
+      status: input.status,
+      config: existingForApp?.config ?? {},
+      runtimeSecretRefs: normalizeRuntimeSecretRefs({
+        refs: input.connection.runtimeSecretRefs,
+        pathPrefix: `provider_connections.${input.connectionId}.runtime_secret_refs`,
+      }),
+      createdAt: existingForApp?.createdAt ?? input.now,
+      updatedAt: input.now,
+    } satisfies ProviderConnection);
+  }
+
   private async ensureDesiredConversation(input: {
     key: string;
     conversation: RuntimeConfiguredConversation;
@@ -297,20 +384,6 @@ export class SettingsDesiredStateService {
       input.providerConnections,
     );
     const externalConversationId = stripProviderPrefix(jid);
-
-    if (this.deps.repositories.providerConnections) {
-      await this.deps.repositories.providerConnections.saveProviderConnection({
-        id: input.conversation.providerConnection as ProviderConnectionId,
-        appId: this.appId,
-        providerId: connectionSettings.provider as ProviderId,
-        label: connectionSettings.label,
-        status: 'active',
-        config: {},
-        runtimeSecretRefs: Object.values(connectionSettings.runtimeSecretRefs),
-        createdAt: input.now,
-        updatedAt: input.now,
-      } satisfies ProviderConnection);
-    }
 
     const providerId = connectionSettings.provider as ProviderId;
     const providerConnectionId = input.conversation
@@ -596,4 +669,20 @@ function normalizeUserIds(userIds: string[]): string[] {
 
 function isValidExternalUserId(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(value);
+}
+
+function isInternalProviderConnection(providerId: ProviderId): boolean {
+  return providerId === 'app' || providerId === 'control-http';
+}
+
+function normalizeRuntimeSecretRefs(input: {
+  refs: Record<string, string>;
+  pathPrefix: string;
+}): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(input.refs).map(([key, value]) => [
+      key,
+      normalizeRuntimeSecretRefString(value, `${input.pathPrefix}.${key}`),
+    ]),
+  );
 }

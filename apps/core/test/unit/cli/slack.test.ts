@@ -124,6 +124,14 @@ afterEach(() => {
   }
 });
 
+function mockRuntimeSecretStorage() {
+  const storeRuntimeSecretInput = vi.fn(async () => undefined);
+  vi.doMock('@core/cli/credentials.js', () => ({
+    storeRuntimeSecretInput,
+  }));
+  return storeRuntimeSecretInput;
+}
+
 describe('cli slack helpers', () => {
   function makeRuntimeHome(): string {
     const runtimeHome = fs.mkdtempSync(
@@ -492,6 +500,7 @@ describe('cli slack helpers', () => {
         .fn()
         .mockResolvedValueOnce('xoxb-valid-token')
         .mockResolvedValueOnce('xapp-valid-token'),
+      select: vi.fn(async () => 'gantry'),
       text: vi.fn(),
       outro,
       log: {
@@ -503,6 +512,7 @@ describe('cli slack helpers', () => {
     vi.doMock('@core/cli/slack-connect-chat-picker.js', () => ({
       chooseSlackChatForConnect: vi.fn(async () => ({ type: 'cancel' })),
     }));
+    mockRuntimeSecretStorage();
 
     const { runSlackConnectCommand } = await import('@core/cli/slack.js');
     const code = await runSlackConnectCommand(runtimeHome);
@@ -568,6 +578,7 @@ describe('cli slack helpers', () => {
         .fn()
         .mockResolvedValueOnce('xoxb-valid-token')
         .mockResolvedValueOnce('xapp-valid-token'),
+      select: vi.fn(async () => 'gantry'),
       text: vi.fn().mockResolvedValueOnce('U123'),
       outro: vi.fn(),
       log: {
@@ -582,11 +593,24 @@ describe('cli slack helpers', () => {
         chatJid: 'sl:C0123456789',
       })),
     }));
+    const storeRuntimeSecretInput = mockRuntimeSecretStorage();
 
     const { runSlackConnectCommand } = await import('@core/cli/slack.js');
     const code = await runSlackConnectCommand(runtimeHome);
 
     expect(code).toBe(0);
+    expect(storeRuntimeSecretInput).toHaveBeenCalledWith({
+      runtimeHome,
+      name: 'SLACK_BOT_TOKEN',
+      value: 'xoxb-valid-token',
+      actor: 'cli:slack-connect',
+    });
+    expect(storeRuntimeSecretInput).toHaveBeenCalledWith({
+      runtimeHome,
+      name: 'SLACK_APP_TOKEN',
+      value: 'xapp-valid-token',
+      actor: 'cli:slack-connect',
+    });
     expect(fetchSpy).toHaveBeenCalledTimes(3);
     const settings = loadRuntimeSettings(runtimeHome);
     expect(settings.conversations?.slack_default_c0123456789).toEqual(

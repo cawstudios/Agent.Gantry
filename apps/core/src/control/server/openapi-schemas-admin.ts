@@ -2,6 +2,10 @@ import type { JsonSchema } from './openapi-route-helpers.js';
 
 const isoDateTime = { type: 'string', format: 'date-time' };
 const metadata = { type: 'object', additionalProperties: true };
+const runtimeSecretRefs = {
+  type: 'object',
+  additionalProperties: { type: 'string' },
+};
 const stringArray = { type: 'array', items: { type: 'string' } };
 const envelope = (name: string, schema: JsonSchema): JsonSchema => ({
   type: 'object',
@@ -23,6 +27,7 @@ export const adminOpenApiSchemas: Record<string, JsonSchema> = {
       displayName: { type: 'string' },
       description: { type: 'string' },
       capabilities: metadata,
+      runtimeSecretKeys: stringArray,
     },
   },
   ProviderListResponse: arrayEnvelope('providers', 'Provider'),
@@ -37,7 +42,7 @@ export const adminOpenApiSchemas: Record<string, JsonSchema> = {
       status: { type: 'string' },
       enabled: { type: 'boolean' },
       config: metadata,
-      runtimeSecretRefs: { type: 'array', items: metadata },
+      runtimeSecretRefs,
       externalRef: metadata,
       createdAt: isoDateTime,
       updatedAt: isoDateTime,
@@ -63,7 +68,7 @@ export const adminOpenApiSchemas: Record<string, JsonSchema> = {
       providerId: { type: 'string' },
       label: { type: 'string' },
       config: metadata,
-      runtimeSecretRefs: { type: 'array', items: metadata },
+      runtimeSecretRefs,
       externalRef: metadata,
       enabled: { type: 'boolean' },
     },

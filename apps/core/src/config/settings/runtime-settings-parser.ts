@@ -50,6 +50,7 @@ import {
   modelAliasesToCatalogEntries,
   parseModelAliases,
 } from './runtime-settings-model-aliases-parser.js';
+import { normalizeRuntimeSecretRefString } from '../../domain/ports/runtime-secret-provider.js';
 import {
   containsControlCharacter,
   parseBooleanValue,
@@ -185,6 +186,10 @@ function parseProviderConnections(
       }
       runtimeSecretRefs[key] = parseStringValue(
         value,
+        `${pathPrefix}.runtime_secret_refs.${key}`,
+      );
+      runtimeSecretRefs[key] = normalizeRuntimeSecretRefString(
+        runtimeSecretRefs[key],
         `${pathPrefix}.runtime_secret_refs.${key}`,
       );
     }

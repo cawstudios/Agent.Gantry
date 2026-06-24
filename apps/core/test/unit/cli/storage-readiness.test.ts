@@ -14,6 +14,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
   vi.doUnmock('@core/adapters/storage/postgres/storage-service.js');
+  vi.doUnmock('@core/adapters/storage/postgres/factory.js');
 });
 
 function createRuntimeHome(): string {
@@ -115,6 +116,49 @@ describe('inspectRuntimeStorageReadiness', () => {
         postgresPlaintextHostAllowlist: ['postgres'],
       }),
     );
+    expect(close).toHaveBeenCalled();
+  });
+});
+
+describe('inspectRuntimeSecretReadiness', () => {
+  it('fails when enabled provider storage-backed runtime secret refs are missing', async () => {
+    const runtimeHome = createRuntimeHome();
+    const settings = loadRuntimeSettings(runtimeHome);
+    settings.providers.slack.enabled = true;
+    settings.providers.slack.defaultConnection = 'slack_default';
+    settings.providerConnections.slack_default = {
+      provider: 'slack',
+      label: 'Slack Default',
+      runtimeSecretRefs: {
+        bot_token: 'gantry-secret:SLACK_BOT_TOKEN',
+        app_token: 'gantry-secret:SLACK_APP_TOKEN',
+      },
+    };
+    saveRuntimeSettings(runtimeHome, settings);
+    const close = vi.fn(async () => undefined);
+    vi.doMock('@core/adapters/storage/postgres/factory.js', () => ({
+      createStorageRuntime: vi.fn(() => ({
+        repositories: {
+          capabilitySecrets: {
+            getSecret: vi.fn(async () => null),
+          },
+        },
+        service: { close },
+      })),
+    }));
+    const { inspectRuntimeSecretReadiness } =
+      await import('@core/adapters/storage/postgres/storage-readiness.js');
+
+    const result = await inspectRuntimeSecretReadiness(runtimeHome, settings);
+
+    expect(result).toEqual({
+      status: 'fail',
+      message: 'Runtime secret preflight failed.',
+      details: [
+        'providers.slack.bot_token runtime secret ref gantry-secret:SLACK_BOT_TOKEN did not resolve.',
+        'providers.slack.app_token runtime secret ref gantry-secret:SLACK_APP_TOKEN did not resolve.',
+      ],
+    });
     expect(close).toHaveBeenCalled();
   });
 });

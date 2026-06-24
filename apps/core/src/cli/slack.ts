@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
 import '../channels/register-builtins.js';
 
-import { readEnvFile, upsertEnvFile } from '../config/env/file.js';
+import { readEnvFile } from '../config/env/file.js';
 import {
   safeSlackErrorCode,
   TOKEN_BOUND_HTTP_GUIDANCE,
@@ -29,6 +29,7 @@ import {
   createProfileFileMirrorExists,
   createProfileFileMirrorWriter,
 } from '../platform/profile-file-mirror.js';
+import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
 
 export interface SlackTokenValidation {
   ok: boolean;
@@ -258,7 +259,8 @@ export async function verifySlackChatAccess(options: {
     return {
       ok: false,
       message: 'Slack bot token is empty.',
-      nextAction: 'Set SLACK_BOT_TOKEN before checking chat access.',
+      nextAction:
+        'Run `gantry provider connect slack` or configure the Slack bot_token runtime secret ref.',
     };
   }
 
@@ -498,6 +500,29 @@ export async function runSlackConnectCommand(
   }
   p.log.success(appValidation.message);
 
+  const botSecret = await planRuntimeSecretInput({
+    runtimeHome,
+    name: 'SLACK_BOT_TOKEN',
+    value: botTokenInput,
+    actor: 'cli:slack-connect',
+    label: 'Slack bot token',
+  });
+  if (!botSecret) {
+    p.outro('Slack connect cancelled.');
+    return 1;
+  }
+  const appSecret = await planRuntimeSecretInput({
+    runtimeHome,
+    name: 'SLACK_APP_TOKEN',
+    value: appTokenInput,
+    actor: 'cli:slack-connect',
+    label: 'Slack app token',
+  });
+  if (!appSecret) {
+    p.outro('Slack connect cancelled.');
+    return 1;
+  }
+
   const chatChoice = await chooseSlackChatForConnect(botTokenInput);
   if (chatChoice.type === 'cancel') {
     p.outro('Slack connect cancelled.');
@@ -549,13 +574,25 @@ export async function runSlackConnectCommand(
     );
   }
 
-  upsertEnvFile(envFilePath(runtimeHome), {
-    SLACK_BOT_TOKEN: botTokenInput,
-    SLACK_APP_TOKEN: appTokenInput,
-  });
+  await Promise.all([botSecret.persist(), appSecret.persist()]);
   const settings = loadRuntimeSettings(runtimeHome);
   const previousSettings = structuredClone(settings);
   settings.providers.slack.enabled = true;
+  const providerConnectionId =
+    settings.providers.slack.defaultConnection || 'slack_default';
+  settings.providers.slack.defaultConnection = providerConnectionId;
+  settings.providerConnections[providerConnectionId] = {
+    provider: 'slack',
+    label:
+      settings.providerConnections[providerConnectionId]?.label ||
+      'Slack Default',
+    runtimeSecretRefs: {
+      ...(settings.providerConnections[providerConnectionId]
+        ?.runtimeSecretRefs || {}),
+      bot_token: botSecret.ref,
+      app_token: appSecret.ref,
+    },
+  };
   if (registeredFolder) {
     ensureConfiguredConversationBinding(settings, {
       agentId: registeredFolder,
@@ -576,10 +613,10 @@ export async function runSlackConnectCommand(
   });
 
   if (normalizedChatJid) {
-    p.outro('Slack conversation is configured and ready.');
+    p.outro('Slack connected. Secret stored encrypted in Gantry.');
   } else {
     p.outro(
-      'Slack tokens saved. Next: run `gantry provider connect slack` to register a conversation.',
+      'Slack connected. Secret stored encrypted in Gantry. Next: run `gantry provider connect slack` to register a conversation.',
     );
   }
 

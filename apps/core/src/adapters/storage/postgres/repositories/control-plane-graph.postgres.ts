@@ -120,7 +120,7 @@ export async function ensureControlGraph(
       externalRefJson: JSON.stringify({ adapter: 'app', appId }),
       label: 'App',
       status: 'active',
-      runtimeSecretRefsJson: '[]',
+      runtimeSecretRefsJson: '{}',
       createdAt: now,
       updatedAt: now,
     })
@@ -131,7 +131,7 @@ export async function ensureControlGraph(
         externalRefJson: JSON.stringify({ adapter: 'app', appId }),
         label: 'App',
         status: 'active',
-        runtimeSecretRefsJson: '[]',
+        runtimeSecretRefsJson: '{}',
         updatedAt: now,
       },
     });

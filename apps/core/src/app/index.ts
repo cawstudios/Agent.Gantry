@@ -42,6 +42,7 @@ import {
 import type { AppId } from '../domain/app/app.js';
 import {
   formatRuntimePreflightFailure,
+  validateRuntimePreflight,
   validateRuntimePreflightWithStorage,
 } from '../config/preflight.js';
 import { startLiveRecoveryCoordinatorLeaseAcquisition } from './bootstrap/live-recovery-coordinator.js';
@@ -53,6 +54,7 @@ import { isSchedulerReady } from '../jobs/scheduler.js';
 import { getOldestWaitingLiveAdmissionSeconds } from './bootstrap/runtime-services.js';
 import type { HostnameLookup } from '../domain/network/public-address-policy.js';
 import { defaultHostnameLookup } from '../infrastructure/network/hostname-lookup.js';
+import { createRepositoryRuntimeSecretProvider } from '../adapters/credentials/repository-runtime-secret-provider.js';
 
 export { escapeXml, formatMessages } from '../messaging/router.js';
 export {
@@ -75,12 +77,6 @@ export async function startGantryRuntime(
   // Postgres before the production sandbox gate can evaluate the real settings.
   const processRole = resolveProcessRole(process.env);
   const shouldDeferPreflightForFleetRole = processRole !== 'all';
-  if (!options.skipPreflight && !shouldDeferPreflightForFleetRole) {
-    const validation = await validateRuntimePreflightWithStorage(GANTRY_HOME);
-    if (!validation.ok && validation.failure) {
-      throw new Error(formatRuntimePreflightFailure(validation.failure));
-    }
-  }
 
   // Thread the role capability struct into every subsystem. Workstation default
   // (env unset) is `all`, which keeps full single-process behaviour; a wrong
@@ -122,8 +118,19 @@ export async function startGantryRuntime(
     isControlApproverAllowed: channelWiring.isControlApproverAllowed,
   });
 
-  let { runtimeSettings } = await runStartup(app);
+  let { runtimeSettings } = await runStartup(app, {
+    settingsAuthority: shouldDeferPreflightForFleetRole ? 'file' : 'revision',
+    validateSettingsImportPreflight: options.skipPreflight
+      ? () => ({ ok: true })
+      : validateRuntimePreflight,
+  });
   const storage = getRuntimeStorage();
+  channelWiring.setRuntimeSecrets(
+    createRepositoryRuntimeSecretProvider({
+      appId: 'default' as AppId,
+      repository: storage.repositories.capabilitySecrets,
+    }),
+  );
   const isFleet =
     getDeploymentMode() === 'fleet' || shouldDeferPreflightForFleetRole;
 
@@ -144,11 +151,7 @@ export async function startGantryRuntime(
       runtimeSettings = loadRuntimeSettings(GANTRY_HOME);
     }
   }
-  if (
-    !options.skipPreflight &&
-    shouldDeferPreflightForFleetRole &&
-    fleetSettingsLoaded
-  ) {
+  if (!options.skipPreflight && fleetSettingsLoaded) {
     const validation = await validateRuntimePreflightWithStorage(GANTRY_HOME);
     if (!validation.ok && validation.failure) {
       throw new Error(formatRuntimePreflightFailure(validation.failure));

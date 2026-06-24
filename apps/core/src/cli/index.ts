@@ -30,7 +30,7 @@ import {
   ensureRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 
-configureDesiredSettingsStorageProvider(async () => {
+configureDesiredSettingsStorageProvider(async (input) => {
   const {
     getRuntimeStorage,
     initializeRuntimeStorage,
@@ -41,15 +41,21 @@ configureDesiredSettingsStorageProvider(async () => {
     return {
       ops: storage.ops,
       repositories: storage.repositories,
+      settingsRevisions: storage.repositories.settingsRevisions,
+      pool: storage.service.pool,
     };
   } catch {
     // CLI invocations usually run outside the runtime process.
   }
   try {
-    const storage = await initializeRuntimeStorage();
+    const storage = await initializeRuntimeStorage({
+      runtimeSettings: input?.settings,
+    });
     return {
       ops: storage.ops,
       repositories: storage.repositories,
+      settingsRevisions: storage.repositories.settingsRevisions,
+      pool: storage.service.pool,
     };
   } catch (err) {
     if (!isStorageUnavailableError(err)) throw err;
@@ -148,31 +154,10 @@ async function runStatusCommand(
   return summary.doctor.ok ? 0 : 1;
 }
 
-function loadRuntimePreflightModule() {
-  return import('../config/preflight.js');
-}
-
-async function validateRuntimePreflightForCommand(
-  runtimeHome: string,
-): Promise<boolean> {
-  const { formatRuntimePreflightFailure, validateRuntimePreflightWithStorage } =
-    await loadRuntimePreflightModule();
-  const validation = await validateRuntimePreflightWithStorage(runtimeHome);
-  if (!validation.ok && validation.failure) {
-    p.log.error(formatRuntimePreflightFailure(validation.failure));
-    return false;
-  }
-  return true;
-}
-
 async function runStartCommand(runtimeHome: string): Promise<number> {
-  if (!(await validateRuntimePreflightForCommand(runtimeHome))) {
-    return 1;
-  }
-
   process.env.GANTRY_HOME = runtimeHome;
   const runtime = await import('../app/index.js');
-  await runtime.startGantryRuntime({ skipPreflight: true });
+  await runtime.startGantryRuntime();
   return 0;
 }
 
@@ -242,9 +227,6 @@ function restartService(runtimeHome: string): ReturnType<typeof stopService> {
 }
 
 async function runRestartCommand(runtimeHome: string): Promise<number> {
-  if (!(await validateRuntimePreflightForCommand(runtimeHome))) {
-    return 1;
-  }
   const outcome = restartService(runtimeHome);
   if (!outcome.ok) {
     p.log.error(`Service restart failed: ${outcome.message}`);
@@ -270,9 +252,6 @@ async function runServiceCommand(
   }
 
   if (action === 'start') {
-    if (!(await validateRuntimePreflightForCommand(runtimeHome))) {
-      return 1;
-    }
     const outcome = startService(runtimeHome);
     if (!outcome.ok) {
       p.log.error(`Service start failed: ${outcome.message}`);
@@ -293,9 +272,6 @@ async function runServiceCommand(
   }
 
   if (action === 'restart') {
-    if (!(await validateRuntimePreflightForCommand(runtimeHome))) {
-      return 1;
-    }
     const outcome = restartService(runtimeHome);
     if (!outcome.ok) {
       p.log.error(`Service restart failed: ${outcome.message}`);
@@ -391,7 +367,7 @@ async function runSmartEntrypoint(runtimeHome: string): Promise<number> {
   }
 
   const { validateRuntimePreflightWithStorage } =
-    await loadRuntimePreflightModule();
+    await import('../config/preflight.js');
   const validation = await validateRuntimePreflightWithStorage(runtimeHome);
   const { hasProcessableGroupForConfiguredChannel, hasRuntimeConfig } =
     await import('./doctor.js');
@@ -423,14 +399,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const [command, ...rest] = parsed.command;
   const subcommand = rest[0];
 
-  // Allow `gantry doctor` to run even when settings.yaml is malformed so it can
-  // report actionable recovery guidance instead of failing at top-level parse.
+  // Commands that can diagnose or restore revision-backed settings run without
+  // parsing the local settings.yaml mirror first.
   if (
     command &&
     command !== 'doctor' &&
     command !== 'setup' &&
     command !== 'local' &&
     command !== 'stop' &&
+    command !== 'start' &&
+    command !== 'restart' &&
     command !== 'logs'
   ) {
     ensureRuntimeSettings(runtimeHome);

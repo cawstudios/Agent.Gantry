@@ -9,11 +9,7 @@ import {
   RestDiscordSetupDiscoveryClient,
   trimDiscordSetupCredentials,
 } from '../channels/discord-setup-discovery.js';
-import { upsertEnvFile } from '../config/env/file.js';
-import {
-  envFilePath,
-  ensureRuntimeLayout,
-} from '../config/settings/runtime-home.js';
+import { ensureRuntimeLayout } from '../config/settings/runtime-home.js';
 import {
   ensureConfiguredConversationBinding,
   loadRuntimeSettings,
@@ -31,6 +27,7 @@ import {
   createProfileFileMirrorExists,
   createProfileFileMirrorWriter,
 } from '../platform/profile-file-mirror.js';
+import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
 
 type DiscordChannelChoice =
   | { type: 'selected'; channel: DiscordDiscoveredChannel }
@@ -192,6 +189,23 @@ export async function runDiscordConnectCommand(
   }
   p.log.success(validation.message);
 
+  const botSecret = await planRuntimeSecretInput({
+    runtimeHome,
+    name: 'DISCORD_BOT_TOKEN',
+    value: credentials.botToken,
+    actor: 'cli:discord-connect',
+    label: 'Discord bot token',
+  });
+  if (!botSecret) return 1;
+  const applicationSecret = await planRuntimeSecretInput({
+    runtimeHome,
+    name: 'DISCORD_APPLICATION_ID',
+    value: credentials.applicationId,
+    actor: 'cli:discord-connect',
+    label: 'Discord application ID',
+  });
+  if (!applicationSecret) return 1;
+
   const channelChoice = await chooseDiscordChannelForConnect(
     credentials,
     discoveryClient,
@@ -249,10 +263,7 @@ export async function runDiscordConnectCommand(
     );
   }
 
-  upsertEnvFile(envFilePath(runtimeHome), {
-    DISCORD_BOT_TOKEN: credentials.botToken,
-    DISCORD_APPLICATION_ID: credentials.applicationId,
-  });
+  await Promise.all([botSecret.persist(), applicationSecret.persist()]);
   const settings = loadRuntimeSettings(runtimeHome);
   const previousSettings = structuredClone(settings);
   const previousDiscordEnabled = settings.providers.discord?.enabled ?? false;
@@ -262,12 +273,16 @@ export async function runDiscordConnectCommand(
     enabled: channelChoice.type === 'selected' || previousDiscordEnabled,
     defaultConnection: providerConnectionId,
   };
-  settings.providerConnections[providerConnectionId] ??= {
+  settings.providerConnections[providerConnectionId] = {
     provider: 'discord',
-    label: 'Discord Default',
+    label:
+      settings.providerConnections[providerConnectionId]?.label ||
+      'Discord Default',
     runtimeSecretRefs: {
-      bot_token: 'DISCORD_BOT_TOKEN',
-      application_id: 'DISCORD_APPLICATION_ID',
+      ...(settings.providerConnections[providerConnectionId]
+        ?.runtimeSecretRefs || {}),
+      bot_token: botSecret.ref,
+      application_id: applicationSecret.ref,
     },
   };
   if (registeredFolder) {
@@ -289,8 +304,8 @@ export async function runDiscordConnectCommand(
   });
   p.outro(
     channelChoice.type === 'selected'
-      ? 'Discord conversation is configured.'
-      : 'Discord credentials saved. Next: run `gantry provider connect discord` to register a conversation.',
+      ? 'Discord connected. Secret stored encrypted in Gantry.'
+      : 'Discord connected. Secret stored encrypted in Gantry. Next: run `gantry provider connect discord` to register a conversation.',
   );
   return 0;
 }

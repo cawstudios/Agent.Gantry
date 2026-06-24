@@ -42,6 +42,7 @@ import {
 import { sendDiscordProgressUpdate } from './discord-progress.js';
 import { DiscordGatewayConnection } from './discord-gateway.js';
 import { agentTodoStopActions } from './agent-todo-render.js';
+import { getProviderRuntimeSecret } from './provider-runtime-secrets.js';
 import type {
   DiscordInteraction,
   DiscordInteractionOption,
@@ -671,11 +672,20 @@ export class DiscordChannel implements ChannelAdapter {
 export async function createDiscordChannel(
   opts: ChannelOpts,
 ): Promise<ChannelAdapter | null> {
-  const botToken = opts.runtimeSecrets?.getOptionalSecret({
-    env: 'DISCORD_BOT_TOKEN',
+  const settings = opts.runtimeSettings?.();
+  const botToken = await getProviderRuntimeSecret({
+    providerId: 'discord',
+    key: 'bot_token',
+    defaultEnvName: 'DISCORD_BOT_TOKEN',
+    settings,
+    secrets: opts.runtimeSecrets,
   });
-  const applicationId = opts.runtimeSecrets?.getOptionalSecret({
-    env: 'DISCORD_APPLICATION_ID',
+  const applicationId = await getProviderRuntimeSecret({
+    providerId: 'discord',
+    key: 'application_id',
+    defaultEnvName: 'DISCORD_APPLICATION_ID',
+    settings,
+    secrets: opts.runtimeSecrets,
   });
   if (!botToken || !applicationId) {
     logger.warn(

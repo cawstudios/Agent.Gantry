@@ -95,7 +95,7 @@ maybeDescribe('Postgres domain repositories', () => {
       label: 'Test Slack',
       status: 'active',
       config: { workspace: 'test' },
-      runtimeSecretRefs: [],
+      runtimeSecretRefs: {},
       createdAt: now,
       updatedAt: now,
     });
@@ -209,7 +209,7 @@ maybeDescribe('Postgres domain repositories', () => {
       label: 'Selected Slack',
       status: 'active',
       config: { workspace: 'selected' },
-      runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+      runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
       createdAt: now,
       updatedAt: now,
     });
@@ -310,7 +310,7 @@ maybeDescribe('Postgres domain repositories', () => {
       label: 'Partial Slack',
       status: 'active',
       config: { workspace: 'partial', locale: 'en' },
-      runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+      runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
       createdAt: now,
       updatedAt: now,
     });
@@ -325,7 +325,7 @@ maybeDescribe('Postgres domain repositories', () => {
     ).resolves.toMatchObject({
       label: 'Renamed Slack',
       config: { workspace: 'partial', locale: 'en' },
-      runtimeSecretRefs: ['SLACK_BOT_TOKEN'],
+      runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
     });
   });
 

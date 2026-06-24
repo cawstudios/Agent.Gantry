@@ -4,6 +4,7 @@ import type {
   RuntimeProviderConnectionSettings,
   RuntimeSettings,
 } from './runtime-settings-types.js';
+import { envRuntimeSecretRef } from '../../domain/ports/runtime-secret-provider.js';
 
 export interface SettingsProviderJidInfo {
   id: string;
@@ -95,24 +96,26 @@ export function configuredConversationKind(
 export function defaultRuntimeSecretRefs(
   providerId: string,
 ): Record<string, string> {
-  if (providerId === 'telegram') return { bot_token: 'TELEGRAM_BOT_TOKEN' };
+  if (providerId === 'telegram') {
+    return { bot_token: envRuntimeSecretRef('TELEGRAM_BOT_TOKEN') };
+  }
   if (providerId === 'slack') {
     return {
-      bot_token: 'SLACK_BOT_TOKEN',
-      app_token: 'SLACK_APP_TOKEN',
+      bot_token: envRuntimeSecretRef('SLACK_BOT_TOKEN'),
+      app_token: envRuntimeSecretRef('SLACK_APP_TOKEN'),
     };
   }
   if (providerId === 'teams') {
     return {
-      client_id: 'TEAMS_CLIENT_ID',
-      client_secret: 'TEAMS_CLIENT_SECRET',
-      tenant_id: 'TEAMS_TENANT_ID',
+      client_id: envRuntimeSecretRef('TEAMS_CLIENT_ID'),
+      client_secret: envRuntimeSecretRef('TEAMS_CLIENT_SECRET'),
+      tenant_id: envRuntimeSecretRef('TEAMS_TENANT_ID'),
     };
   }
   if (providerId === 'discord') {
     return {
-      bot_token: 'DISCORD_BOT_TOKEN',
-      application_id: 'DISCORD_APPLICATION_ID',
+      bot_token: envRuntimeSecretRef('DISCORD_BOT_TOKEN'),
+      application_id: envRuntimeSecretRef('DISCORD_APPLICATION_ID'),
     };
   }
   return {};

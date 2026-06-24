@@ -2,7 +2,7 @@ import * as p from '@clack/prompts';
 
 import { ConversationAdministrationService } from '../application/provider-conversations/conversation-administration-service.js';
 import { ApplicationError } from '../application/common/application-error.js';
-import { EnvRuntimeSecretProvider } from '../adapters/credentials/env-runtime-secret-provider.js';
+import { createRepositoryRuntimeSecretProvider } from '../adapters/credentials/repository-runtime-secret-provider.js';
 import { RuntimeSecretConversationMembershipValidator } from '../channels/conversation-membership-validation.js';
 import {
   getProvider,
@@ -11,6 +11,7 @@ import {
 import { readEnvFile } from '../config/env/file.js';
 import { envFilePath } from '../config/settings/runtime-home.js';
 import { ensureRuntimeSettings } from '../config/settings/runtime-settings.js';
+import { runtimeSecretKeyForEnv } from '../domain/provider/provider-runtime-secret-keys.js';
 import type { DoctorReport } from './doctor.js';
 import { nowIso } from '../shared/time/datetime.js';
 
@@ -31,12 +32,21 @@ function formatProviderList(runtimeHome: string): string {
   const lines = ['Providers', ''];
   for (const provider of listConnectableChannelProviders()) {
     const enabled = settings.providers?.[provider.id]?.enabled ?? false;
-    const missing = provider.setup.envKeys.filter(
-      (envKey) => !env[envKey]?.trim(),
-    );
+    const connectionId = settings.providers?.[provider.id]?.defaultConnection;
+    const refs =
+      (connectionId
+        ? settings.providerConnections[connectionId]?.runtimeSecretRefs
+        : undefined) ?? {};
+    const missing = provider.setup.envKeys.filter((envKey) => {
+      const key = runtimeSecretKeyForEnv(provider.id, envKey);
+      const hasRef = Boolean(refs[key]?.trim());
+      return !hasRef && !env[envKey]?.trim();
+    });
     lines.push(
       `${provider.label}: ${enabled ? 'enabled' : 'disabled'} | credentials: ${
-        missing.length === 0 ? 'configured' : `missing ${missing.join(', ')}`
+        missing.length === 0
+          ? 'secret refs configured'
+          : `missing ${missing.join(', ')}`
       }`,
     );
   }
@@ -245,7 +255,10 @@ async function conversationAdministrationService(): Promise<ConversationAdminist
       conversations: repositories.conversations,
     },
     new RuntimeSecretConversationMembershipValidator(
-      new EnvRuntimeSecretProvider(),
+      createRepositoryRuntimeSecretProvider({
+        appId: 'default' as never,
+        repository: repositories.capabilitySecrets,
+      }),
     ),
   );
 }

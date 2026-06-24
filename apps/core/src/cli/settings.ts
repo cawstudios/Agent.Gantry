@@ -8,7 +8,6 @@ import {
   initializeRuntimeStorage,
 } from '../adapters/storage/postgres/runtime-store.js';
 import {
-  applyRuntimeSettingsDesiredState,
   getDeploymentMode,
   loadRuntimeSettings,
   loadRuntimeSettingsFromPath,
@@ -29,8 +28,7 @@ function usage(): string {
     '  gantry settings drift',
     '  gantry settings revisions list',
     '',
-    'Workstation import writes settings.yaml (the restart source of truth).',
-    'Fleet import (or --fleet) appends a desired-state revision in Postgres.',
+    'Import/export appends a desired-state revision in Postgres and syncs settings.yaml.',
   ].join('\n');
 }
 
@@ -103,17 +101,26 @@ export async function runSettingsCommand(
 
     if (subcommand === 'export') {
       const exported = await service.exportCurrent(settings);
-      await applyRuntimeSettingsDesiredState({
-        runtimeHome,
-        settings: exported,
-        ops: storage.ops,
-        repositories: storage.repositories,
-        appId: 'default' as AppId,
-        previousSettings: settings,
-      });
+      await importWorkstationSettings(
+        {
+          runtimeHome,
+          ops: storage.ops,
+          repositories: storage.repositories,
+          appId: 'default' as AppId,
+          previousSettings: settings,
+          revisionMirror: {
+            settingsRevisions: storage.repositories.settingsRevisions,
+            pool: storage.service.pool,
+            createdBy: 'cli:settings-export',
+            logWarn: (_context, message) => p.log.warn(message),
+          },
+          revisionMirrorRequired: true,
+        },
+        exported,
+      );
       const agentCount = Object.keys(exported.agents).length;
       p.log.success(
-        `Exported ${agentCount} agent desired-state record(s) to settings.yaml.`,
+        `Exported ${agentCount} agent desired-state record(s) to a settings revision and settings.yaml.`,
       );
       p.log.info(
         'Review settings.yaml before setting desired_state.authoritative=true.',
@@ -190,6 +197,10 @@ async function runImport(
             note: flags.note ?? null,
             logWarn: (_context, message) => p.log.warn(message),
           },
+          revisionMirrorRequired: true,
+          expectedRevision: Number.isInteger(flags.expectedRevision)
+            ? flags.expectedRevision
+            : null,
         },
         parsed,
       );
@@ -200,10 +211,10 @@ async function runImport(
       return 1;
     }
     const revisionText =
-      outcome.revision === undefined
-        ? ''
-        : ` and mirrored revision ${outcome.revision}`;
-    p.log.success(`Imported ${flags.file} into settings.yaml${revisionText}.`);
+      outcome.revision === undefined ? '' : ` ${outcome.revision}`;
+    p.log.success(
+      `Imported ${flags.file} into settings revision${revisionText} and settings.yaml.`,
+    );
     return 0;
   }
 

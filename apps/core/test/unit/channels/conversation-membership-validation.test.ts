@@ -8,6 +8,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function secretRefName(ref: { ref?: string; env?: string }): string {
+  return String(ref.ref ?? ref.env ?? '').replace(/^[^:]+:/, '');
+}
+
 describe('RuntimeSecretConversationMembershipValidator', () => {
   it('normalizes Telegram prefix provider IDs before validating approvers', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -24,11 +28,11 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
     const validator = new RuntimeSecretConversationMembershipValidator({
       getSecret(ref) {
         const value = this.getOptionalSecret(ref);
-        if (!value) throw new Error(`missing ${ref.env}`);
+        if (!value) throw new Error(`missing ${secretRefName(ref)}`);
         return value;
       },
       getOptionalSecret(ref) {
-        return { TELEGRAM_BOT_TOKEN: '123:telegram-token' }[ref.env];
+        return { TELEGRAM_BOT_TOKEN: '123:telegram-token' }[secretRefName(ref)];
       },
     });
 
@@ -41,7 +45,7 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
         label: 'Telegram',
         status: 'active',
         config: {},
-        runtimeSecretRefs: ['TELEGRAM_BOT_TOKEN'],
+        runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
         createdAt: iso,
         updatedAt: iso,
       },
@@ -97,7 +101,7 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
     const validator = new RuntimeSecretConversationMembershipValidator({
       getSecret(ref) {
         const value = this.getOptionalSecret(ref);
-        if (!value) throw new Error(`missing ${ref.env}`);
+        if (!value) throw new Error(`missing ${secretRefName(ref)}`);
         return value;
       },
       getOptionalSecret(ref) {
@@ -105,7 +109,7 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
           TEAMS_CLIENT_ID: 'client-id',
           TEAMS_CLIENT_SECRET: 'client-secret',
           TEAMS_TENANT_ID: 'tenant-id',
-        }[ref.env];
+        }[secretRefName(ref)];
       },
     });
 
@@ -118,11 +122,11 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
         label: 'Teams',
         status: 'active',
         config: {},
-        runtimeSecretRefs: [
-          'TEAMS_CLIENT_ID',
-          'TEAMS_CLIENT_SECRET',
-          'TEAMS_TENANT_ID',
-        ],
+        runtimeSecretRefs: {
+          client_id: 'env:TEAMS_CLIENT_ID',
+          client_secret: 'env:TEAMS_CLIENT_SECRET',
+          tenant_id: 'env:TEAMS_TENANT_ID',
+        },
         createdAt: iso,
         updatedAt: iso,
       },
@@ -176,11 +180,11 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
     const validator = new RuntimeSecretConversationMembershipValidator({
       getSecret(ref) {
         const value = this.getOptionalSecret(ref);
-        if (!value) throw new Error(`missing ${ref.env}`);
+        if (!value) throw new Error(`missing ${secretRefName(ref)}`);
         return value;
       },
       getOptionalSecret(ref) {
-        return { DISCORD_BOT_TOKEN: 'discord-token' }[ref.env];
+        return { DISCORD_BOT_TOKEN: 'discord-token' }[secretRefName(ref)];
       },
     });
 
@@ -193,7 +197,10 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
         label: 'Discord',
         status: 'active',
         config: {},
-        runtimeSecretRefs: ['DISCORD_BOT_TOKEN', 'DISCORD_APPLICATION_ID'],
+        runtimeSecretRefs: {
+          bot_token: 'env:DISCORD_BOT_TOKEN',
+          application_id: 'env:DISCORD_APPLICATION_ID',
+        },
         createdAt: iso,
         updatedAt: iso,
       },
@@ -258,11 +265,11 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
     const validator = new RuntimeSecretConversationMembershipValidator({
       getSecret(ref) {
         const value = this.getOptionalSecret(ref);
-        if (!value) throw new Error(`missing ${ref.env}`);
+        if (!value) throw new Error(`missing ${secretRefName(ref)}`);
         return value;
       },
       getOptionalSecret(ref) {
-        return { DISCORD_BOT_TOKEN: 'discord-token' }[ref.env];
+        return { DISCORD_BOT_TOKEN: 'discord-token' }[secretRefName(ref)];
       },
     });
 
@@ -275,7 +282,7 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
         label: 'Discord',
         status: 'active',
         config: {},
-        runtimeSecretRefs: ['DISCORD_BOT_TOKEN'],
+        runtimeSecretRefs: { bot_token: 'env:DISCORD_BOT_TOKEN' },
         createdAt: iso,
         updatedAt: iso,
       },
@@ -330,7 +337,7 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
     const validator = new RuntimeSecretConversationMembershipValidator({
       getSecret(ref) {
         const value = this.getOptionalSecret(ref);
-        if (!value) throw new Error(`missing ${ref.env}`);
+        if (!value) throw new Error(`missing ${secretRefName(ref)}`);
         return value;
       },
       getOptionalSecret(ref) {
@@ -338,7 +345,7 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
           TEAMS_CLIENT_ID: 'client-id',
           TEAMS_CLIENT_SECRET: 'client-secret',
           TEAMS_TENANT_ID: 'tenant-id',
-        }[ref.env];
+        }[secretRefName(ref)];
       },
     });
 
@@ -354,11 +361,11 @@ describe('RuntimeSecretConversationMembershipValidator', () => {
           teamId: 'team-1',
           channelId: 'channel-1',
         },
-        runtimeSecretRefs: [
-          'TEAMS_CLIENT_ID',
-          'TEAMS_CLIENT_SECRET',
-          'TEAMS_TENANT_ID',
-        ],
+        runtimeSecretRefs: {
+          client_id: 'env:TEAMS_CLIENT_ID',
+          client_secret: 'env:TEAMS_CLIENT_SECRET',
+          tenant_id: 'env:TEAMS_TENANT_ID',
+        },
         createdAt: iso,
         updatedAt: iso,
       },

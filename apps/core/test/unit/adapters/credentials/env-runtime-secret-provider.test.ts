@@ -5,6 +5,12 @@ import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { EnvRuntimeSecretProvider } from '@core/adapters/credentials/env-runtime-secret-provider.js';
+import {
+  envRuntimeSecretRef,
+  gantryRuntimeSecretRef,
+  normalizeRuntimeSecretRefString,
+  parseRuntimeSecretRefString,
+} from '@core/domain/ports/runtime-secret-provider.js';
 
 describe('EnvRuntimeSecretProvider', () => {
   const originalHome = process.env.GANTRY_HOME;
@@ -63,6 +69,23 @@ describe('EnvRuntimeSecretProvider', () => {
 
     expect(provider.getOptionalSecret({ env: 'TELEGRAM_BOT_TOKEN' })).toBe(
       undefined,
+    );
+  });
+
+  it('normalizes and validates runtime secret refs', () => {
+    expect(envRuntimeSecretRef('slack_bot_token')).toBe('env:SLACK_BOT_TOKEN');
+    expect(gantryRuntimeSecretRef('slack_bot_token')).toBe(
+      'gantry-secret:SLACK_BOT_TOKEN',
+    );
+    expect(normalizeRuntimeSecretRefString('SLACK_BOT_TOKEN')).toBe(
+      'env:SLACK_BOT_TOKEN',
+    );
+    expect(parseRuntimeSecretRefString('aws-sm:/gantry/slack/bot')).toEqual({
+      source: 'aws-sm',
+      name: '/gantry/slack/bot',
+    });
+    expect(() => parseRuntimeSecretRefString('xoxb-secret')).toThrow(
+      'must use env:<VAR>',
     );
   });
 

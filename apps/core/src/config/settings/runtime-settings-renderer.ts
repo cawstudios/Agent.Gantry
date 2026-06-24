@@ -649,7 +649,7 @@ function renderProviderConnectionsInlineYaml(
         connection.runtimeSecretRefs,
       ).sort(([a], [b]) => a.localeCompare(b))) {
         lines.push(
-          `    ${quoteYamlKey(`${key}_env`)}: ${quoteYamlString(value)}`,
+          `    ${quoteYamlKey(`${key}_ref`)}: ${quoteYamlString(value)}`,
         );
       }
     } else if (connectionId) {

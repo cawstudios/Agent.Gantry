@@ -54,7 +54,7 @@ maybeDescribe('PostgresOutboundDeliveryRepository integration', () => {
       label: 'Outbound Delivery Connection',
       status: 'active',
       config: {},
-      runtimeSecretRefs: [],
+      runtimeSecretRefs: {},
       createdAt: '2026-05-08T00:00:00.000Z',
       updatedAt: '2026-05-08T00:00:00.000Z',
     });
@@ -69,7 +69,7 @@ maybeDescribe('PostgresOutboundDeliveryRepository integration', () => {
       label: 'Other Connection',
       status: 'active',
       config: {},
-      runtimeSecretRefs: [],
+      runtimeSecretRefs: {},
       createdAt: '2026-05-08T00:00:00.000Z',
       updatedAt: '2026-05-08T00:00:00.000Z',
     });
