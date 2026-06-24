@@ -1224,4 +1224,30 @@ describe('Postgres migration journal', () => {
     expect(schema).toContain('idx_live_turns_recoverable_leased');
     expect(schema).toContain('idx_live_turns_recoverable_unleased');
   });
+
+  it('registers provider runtime secret ref object cutover migration', () => {
+    const journalPath = path.resolve(
+      'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
+    );
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as {
+      entries: Array<{ idx: number; tag: string }>;
+    };
+    const entry = journal.entries.find(
+      (item) => item.tag === '0088_provider_runtime_secret_ref_object',
+    );
+    expect(entry).toMatchObject({ idx: 88 });
+
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0088_provider_runtime_secret_ref_object.sql',
+      ),
+      'utf8',
+    );
+    expect(migration).toContain(
+      'ALTER COLUMN "runtime_secret_refs_json" SET DEFAULT',
+    );
+    expect(migration).toContain(
+      'WHERE left(btrim("runtime_secret_refs_json"), 1) =',
+    );
+  });
 });
