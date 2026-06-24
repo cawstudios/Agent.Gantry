@@ -5,8 +5,6 @@ on:
   push:
     branches:
       - develop
-    paths-ignore:
-      - '.github/**'
 
 env:
   AWS_REGION: ap-south-1
@@ -52,6 +50,20 @@ jobs:
       - name: Download task definition
         run: aws ecs describe-task-definition --task-definition ${{ env.TASK_NAME }} --query taskDefinition > task-definition.json
 
+      - name: Normalize task definition for sandbox runtime
+        run: |
+          jq --arg container "${{ env.CONTAINER_NAME }}" '
+            .containerDefinitions |= map(
+              if .name == $container then
+                .dockerSecurityOptions = (((.dockerSecurityOptions // []) + ["seccomp=unconfined"]) | unique)
+                | .linuxParameters = ((.linuxParameters // {}) + { initProcessEnabled: true })
+              else
+                .
+              end
+            )
+          ' task-definition.json > task-definition.normalized.json
+          mv task-definition.normalized.json task-definition.json
+
       - name: Fill in the new image ID in the Amazon ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -59,6 +71,15 @@ jobs:
             task-definition: task-definition.json
             container-name: ${{ env.CONTAINER_NAME }}
             image: ${{ steps.build-image.outputs.image }}
+
+      - name: Verify sandbox runtime task options
+        run: |
+          jq -e --arg container "${{ env.CONTAINER_NAME }}" '
+            .containerDefinitions[]
+            | select(.name == $container)
+            | (.dockerSecurityOptions // [])
+            | index("seccomp=unconfined")
+          ' "${{ steps.task-def.outputs.task-definition }}" >/dev/null
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
