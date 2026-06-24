@@ -176,7 +176,14 @@ async function handleDesiredState(
           },
           parsed,
         );
-        revision = outcome.revision ?? 0;
+        revision =
+          outcome.revision ??
+          (
+            await storage.repositories.settingsRevisions.getLatestSettingsRevision(
+              appId,
+            )
+          )?.revision ??
+          0;
       } catch (err) {
         if (err instanceof SettingsRevisionConflictError) {
           sendError(

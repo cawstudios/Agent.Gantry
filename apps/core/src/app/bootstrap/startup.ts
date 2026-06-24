@@ -65,13 +65,7 @@ export async function runStartup(
   };
 
   resolved.ensureRuntimeLayoutDirectories(GANTRY_HOME);
-  let storage = await resolved.initializeRuntimeStorage({
-    loadSessionAppMemoryItems: loadSessionAppMemoryItems,
-    storageConfig:
-      resolved.settingsAuthority === 'revision'
-        ? (resolveRuntimeBootstrapStorageConfigFromEnv() ?? undefined)
-        : undefined,
-  });
+  let storage = await initializeStartupStorage(resolved);
   resolved.logger.info('Database initialized');
   const runtimeSettings = await (async () => {
     if (resolved.settingsAuthority !== 'revision') {
@@ -145,6 +139,43 @@ async function closeStartupStorage(
 ): Promise<void> {
   await storage.runtimeEventNotifier?.close?.().catch(() => undefined);
   await storage.service?.close?.().catch(() => undefined);
+}
+
+async function initializeStartupStorage(
+  resolved: StartupDeps,
+): ReturnType<typeof initializeRuntimeStorage> {
+  const baseOptions = {
+    loadSessionAppMemoryItems: loadSessionAppMemoryItems,
+  };
+  if (resolved.settingsAuthority !== 'revision') {
+    return resolved.initializeRuntimeStorage(baseOptions);
+  }
+  const bootstrapStorageConfig =
+    resolveRuntimeBootstrapStorageConfigFromEnv() ?? undefined;
+  if (!resolved.settingsFileExists(GANTRY_HOME)) {
+    return resolved.initializeRuntimeStorage({
+      ...baseOptions,
+      storageConfig: bootstrapStorageConfig,
+    });
+  }
+  try {
+    return await resolved.initializeRuntimeStorage(baseOptions);
+  } catch (err) {
+    if (!bootstrapStorageConfig || !isRuntimeStorageSettingsError(err)) {
+      throw err;
+    }
+    return resolved.initializeRuntimeStorage({
+      ...baseOptions,
+      storageConfig: bootstrapStorageConfig,
+    });
+  }
+}
+
+function isRuntimeStorageSettingsError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    err.message.startsWith('Invalid runtime storage settings:')
+  );
 }
 
 async function loadRevisionAuthoritySettings(input: {

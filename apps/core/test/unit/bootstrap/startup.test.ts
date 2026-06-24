@@ -408,6 +408,55 @@ describe('runStartup', () => {
     expect(result.runtimeSettings.agent.name).toBe('File Agent');
   });
 
+  it('uses settings.yaml storage config for revision-authority startup when it exists', async () => {
+    const originalDatabaseUrl = process.env.GANTRY_DATABASE_URL;
+    const fileSettings = createDefaultRuntimeSettings();
+    fileSettings.agent.name = 'File Agent';
+    const settingsRevisions = {
+      getLatestSettingsRevision: vi.fn(async () => null),
+    };
+    const initializeRuntimeStorage = vi.fn(
+      async () =>
+        ({
+          ops: {},
+          repositories: { settingsRevisions },
+          runtimeEventNotifier: { close: vi.fn(async () => undefined) },
+          service: {
+            pool: undefined,
+            close: vi.fn(async () => undefined),
+          },
+        }) as any,
+    );
+
+    try {
+      process.env.GANTRY_DATABASE_URL =
+        'postgres://gantry:gantry@127.0.0.1:5432/bootstrap';
+
+      await runStartup(makeApp(), {
+        ensureRuntimeLayoutDirectories: vi.fn(),
+        initializeRuntimeStorage,
+        importWorkstationSettings: vi.fn(async () => ({ revision: 1 })),
+        settingsAuthority: 'revision',
+        settingsFileExists: vi.fn(() => true),
+        loadRuntimeSettings: vi.fn(() => fileSettings),
+        logger: { info: vi.fn(), warn: vi.fn() },
+      });
+
+      expect(initializeRuntimeStorage).toHaveBeenNthCalledWith(
+        1,
+        expect.not.objectContaining({
+          storageConfig: expect.anything(),
+        }),
+      );
+    } finally {
+      if (originalDatabaseUrl === undefined) {
+        delete process.env.GANTRY_DATABASE_URL;
+      } else {
+        process.env.GANTRY_DATABASE_URL = originalDatabaseUrl;
+      }
+    }
+  });
+
   it('keeps booting from the latest revision when settings.yaml is invalid', async () => {
     const originalDatabaseUrl = process.env.GANTRY_DATABASE_URL;
     const originalSettingsSchema = process.env.GANTRY_SETTINGS_POSTGRES_SCHEMA;
@@ -422,18 +471,21 @@ describe('runStartup', () => {
     };
     const importWorkstationSettings = vi.fn(async () => ({}));
     const warn = vi.fn();
-    const initializeRuntimeStorage = vi.fn(
-      async () =>
-        ({
-          ops: {},
-          repositories: { settingsRevisions },
-          runtimeEventNotifier: { close: vi.fn(async () => undefined) },
-          service: {
-            pool: undefined,
-            close: vi.fn(async () => undefined),
-          },
-        }) as any,
-    );
+    const storageRuntime = {
+      ops: {},
+      repositories: { settingsRevisions },
+      runtimeEventNotifier: { close: vi.fn(async () => undefined) },
+      service: {
+        pool: undefined,
+        close: vi.fn(async () => undefined),
+      },
+    } as any;
+    const initializeRuntimeStorage = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error('Invalid runtime storage settings: invalid yaml'),
+      )
+      .mockResolvedValue(storageRuntime);
 
     try {
       process.env.GANTRY_DATABASE_URL =
@@ -454,6 +506,12 @@ describe('runStartup', () => {
 
       expect(initializeRuntimeStorage).toHaveBeenNthCalledWith(
         1,
+        expect.not.objectContaining({
+          storageConfig: expect.anything(),
+        }),
+      );
+      expect(initializeRuntimeStorage).toHaveBeenNthCalledWith(
+        2,
         expect.objectContaining({
           storageConfig: expect.objectContaining({
             postgresUrlEnv: 'GANTRY_DATABASE_URL',
