@@ -1059,6 +1059,7 @@ describe('SettingsDesiredStateService', () => {
 
   it('disables active provider connections removed from desired settings', async () => {
     const settings = createDefaultRuntimeSettings();
+    settings.desiredState.authoritative = true;
     const repositories = makeRepositories({
       providerConnections: {
         ...makeRepositories().providerConnections,
@@ -1110,6 +1111,44 @@ describe('SettingsDesiredStateService', () => {
       id: 'slack_default',
       updatedAt: '2026-05-02T00:00:00.000Z',
     });
+  });
+
+  it('keeps active provider connections omitted from non-authoritative settings', async () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.desiredState.authoritative = false;
+    const repositories = makeRepositories({
+      providerConnections: {
+        ...makeRepositories().providerConnections,
+        listProviderConnections: vi.fn(async () => [
+          {
+            id: 'slack_default',
+            appId: 'default',
+            providerId: 'slack',
+            label: 'Slack Default',
+            status: 'active',
+            config: {},
+            runtimeSecretRefs: {},
+            createdAt: '2026-05-01T00:00:00.000Z',
+            updatedAt: '2026-05-01T00:00:00.000Z',
+          },
+        ]),
+        disableProviderConnection: vi.fn(async () => undefined),
+      },
+    });
+    const service = new SettingsDesiredStateService({
+      ops: makeOps(),
+      repositories,
+      clock: { now: () => '2026-05-02T00:00:00.000Z' },
+    });
+
+    const result = await service.reconcile(settings);
+
+    expect(result.applied).not.toContain(
+      'provider_connection:slack_default:disabled_absent',
+    );
+    expect(
+      repositories.providerConnections.disableProviderConnection,
+    ).not.toHaveBeenCalled();
   });
 
   it('rejects changing the provider behind an existing connection id', async () => {

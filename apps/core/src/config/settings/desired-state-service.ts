@@ -163,28 +163,30 @@ export class SettingsDesiredStateService {
         });
         applied.push(`provider_connection:${connectionId}`);
       }
-      const storedProviderConnections = this.deps.repositories
-        .providerConnections.listProviderConnections
-        ? await this.deps.repositories.providerConnections.listProviderConnections(
-            this.appId,
-          )
-        : [];
-      for (const connection of storedProviderConnections) {
-        if (
-          connection.status !== 'active' ||
-          desiredProviderConnectionIds.has(connection.id) ||
-          isInternalProviderConnection(connection.providerId)
-        ) {
-          continue;
+      if (settings.desiredState.authoritative) {
+        const storedProviderConnections = this.deps.repositories
+          .providerConnections.listProviderConnections
+          ? await this.deps.repositories.providerConnections.listProviderConnections(
+              this.appId,
+            )
+          : [];
+        for (const connection of storedProviderConnections) {
+          if (
+            connection.status !== 'active' ||
+            desiredProviderConnectionIds.has(connection.id) ||
+            isInternalProviderConnection(connection.providerId)
+          ) {
+            continue;
+          }
+          await this.deps.repositories.providerConnections.disableProviderConnection(
+            {
+              appId: this.appId,
+              id: connection.id,
+              updatedAt: this.clock.now(),
+            },
+          );
+          applied.push(`provider_connection:${connection.id}:disabled_absent`);
         }
-        await this.deps.repositories.providerConnections.disableProviderConnection(
-          {
-            appId: this.appId,
-            id: connection.id,
-            updatedAt: this.clock.now(),
-          },
-        );
-        applied.push(`provider_connection:${connection.id}:disabled_absent`);
       }
     } else if (providerConnectionEntries.length > 0) {
       skipped.push('provider_connections:missing-repository');
