@@ -147,7 +147,7 @@ export async function startGantryRuntime(
       runtimeSettings = loadRuntimeSettings(GANTRY_HOME);
     }
   }
-  if (fleetSettingsLoaded) {
+  if (!options.skipPreflight && fleetSettingsLoaded) {
     const validation = await validateRuntimePreflightWithStorage(GANTRY_HOME);
     if (!validation.ok && validation.failure) {
       throw new Error(formatRuntimePreflightFailure(validation.failure));

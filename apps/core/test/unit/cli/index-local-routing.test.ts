@@ -27,6 +27,76 @@ afterEach(() => {
 });
 
 describe('CLI local routing', () => {
+  it('does not override CLI settings storage resolution when URL lives in runtime .env', async () => {
+    const runtimeHome = makeRuntimeHome();
+    const originalGantryHome = process.env.GANTRY_HOME;
+    const originalDatabaseUrl = process.env.GANTRY_DATABASE_URL;
+    delete process.env.GANTRY_DATABASE_URL;
+    process.env.GANTRY_HOME = runtimeHome;
+    fs.writeFileSync(
+      path.join(runtimeHome, '.env'),
+      'GANTRY_DATABASE_URL=postgres://user:pass@localhost:5432/gantry\n',
+    );
+    let storageProvider:
+      | Parameters<
+          (typeof import('@core/config/settings/runtime-settings.js'))['configureDesiredSettingsStorageProvider']
+        >[0]
+      | undefined;
+    const initializeRuntimeStorage = vi.fn(async () => ({
+      ops: {},
+      repositories: { settingsRevisions: {} },
+      service: { pool: {} },
+    }));
+    vi.doMock('@core/config/settings/runtime-settings.js', () => ({
+      configureDesiredSettingsStorageProvider: vi.fn((provider) => {
+        storageProvider = provider;
+      }),
+      ensureRuntimeSettings: vi.fn(),
+    }));
+    vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
+      getRuntimeStorage: vi.fn(() => {
+        throw new Error('runtime storage not initialized');
+      }),
+      initializeRuntimeStorage,
+      isStorageUnavailableError: vi.fn(() => false),
+    }));
+
+    try {
+      await import('@core/cli/index.js');
+      await storageProvider?.({
+        settings: {
+          storage: {
+            postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
+          },
+        },
+      } as any);
+    } finally {
+      if (originalGantryHome === undefined) {
+        delete process.env.GANTRY_HOME;
+      } else {
+        process.env.GANTRY_HOME = originalGantryHome;
+      }
+      if (originalDatabaseUrl === undefined) {
+        delete process.env.GANTRY_DATABASE_URL;
+      } else {
+        process.env.GANTRY_DATABASE_URL = originalDatabaseUrl;
+      }
+    }
+
+    expect(initializeRuntimeStorage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeSettings: expect.objectContaining({
+          storage: {
+            postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
+          },
+        }),
+      }),
+    );
+    expect(initializeRuntimeStorage.mock.calls[0]?.[0]).not.toHaveProperty(
+      'storageConfig',
+    );
+  });
+
   it('bypasses top-level settings validation for local status and prints Compose guidance', async () => {
     const runtimeHome = makeRuntimeHome();
     fs.writeFileSync(
