@@ -15,6 +15,7 @@ import { ensureRuntimeLayoutDirectories } from '../../platform/runtime-layout.js
 import { initializeRuntimeStorage } from '../../adapters/storage/postgres/runtime-store.js';
 import { SettingsDesiredStateService } from '../../config/settings/desired-state-service.js';
 import {
+  CURRENT_SETTINGS_READER_VERSION,
   importWorkstationSettings,
   settingsFromRevisionDocument,
   settingsToRevisionDocument,
@@ -193,6 +194,13 @@ async function loadRevisionAuthoritySettings(input: {
       appId,
     );
   if (latest) {
+    if (latest.minReaderVersion > CURRENT_SETTINGS_READER_VERSION) {
+      throw new Error(
+        `Settings revision ${latest.revision} requires settings reader version ` +
+          `${latest.minReaderVersion}; this runtime supports ${CURRENT_SETTINGS_READER_VERSION}. ` +
+          'Upgrade Gantry before applying this revision.',
+      );
+    }
     const settings = settingsFromRevisionDocument(latest.settingsDocument);
     if (input.settingsFileExists(input.runtimeHome)) {
       let fileSettings: RuntimeSettings | null = null;

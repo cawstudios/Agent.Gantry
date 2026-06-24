@@ -408,6 +408,41 @@ describe('runStartup', () => {
     expect(result.runtimeSettings.agent.name).toBe('File Agent');
   });
 
+  it('rejects settings revisions that require a newer reader during revision-authority startup', async () => {
+    const revisionSettings = createDefaultRuntimeSettings();
+    const settingsRevisions = {
+      getLatestSettingsRevision: vi.fn(async () => ({
+        revision: 3,
+        minReaderVersion: 999,
+        settingsDocument: settingsToRevisionDocument(revisionSettings),
+      })),
+    };
+
+    await expect(
+      runStartup(makeApp(), {
+        ensureRuntimeLayoutDirectories: vi.fn(),
+        initializeRuntimeStorage: vi.fn(
+          async () =>
+            ({
+              ops: {},
+              repositories: { settingsRevisions },
+              runtimeEventNotifier: { close: vi.fn(async () => undefined) },
+              service: {
+                pool: undefined,
+                close: vi.fn(async () => undefined),
+              },
+            }) as any,
+        ),
+        settingsAuthority: 'revision',
+        settingsFileExists: vi.fn(() => true),
+        loadRuntimeSettings: vi.fn(() => revisionSettings),
+        logger: { info: vi.fn(), warn: vi.fn() },
+      }),
+    ).rejects.toThrow(
+      'Settings revision 3 requires settings reader version 999',
+    );
+  });
+
   it('uses settings.yaml storage config for revision-authority startup when it exists', async () => {
     const originalDatabaseUrl = process.env.GANTRY_DATABASE_URL;
     const fileSettings = createDefaultRuntimeSettings();

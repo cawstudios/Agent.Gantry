@@ -41,6 +41,7 @@ import {
   hasRuntimeCredentialConfigured,
   resolveRuntimeEnvValue,
 } from './runtime-credential-check.js';
+import { collectUnresolvedRuntimeSecretProviderIds } from './runtime-secret-status.js';
 import { resolveTelegramTokenForDoctor } from './telegram-doctor-token.js';
 import { openRuntimeGroupDb } from './runtime-group-db.js';
 import {
@@ -69,6 +70,10 @@ export interface DoctorReport {
 export interface DoctorNetworkOptions {
   validateTelegramToken?: boolean;
   telegramTimeoutMs?: number;
+}
+
+interface DoctorRuntimeSecretOptions {
+  unresolvedRuntimeSecretProviderIds?: Set<string>;
 }
 
 export function hasRuntimeConfig(runtimeHome: string): boolean {
@@ -138,6 +143,7 @@ function loadSettingsForDoctor(runtimeHome: string): {
 export function runDoctor(
   importMetaUrl: string,
   runtimeHome: string,
+  runtimeSecretOptions: DoctorRuntimeSecretOptions = {},
 ): DoctorReport {
   const checks: DoctorCheck[] = [];
 
@@ -405,25 +411,22 @@ export function runDoctor(
   const sandboxCheck = inspectRunnerSandbox(settings);
   if (sandboxCheck) add(checks, sandboxCheck);
   const credentialMode = settings?.credentialBroker.mode || 'gantry';
+  const unresolvedRuntimeSecretProviderIds =
+    runtimeSecretOptions.unresolvedRuntimeSecretProviderIds;
 
   for (const provider of providers) {
     const enabled = settings?.providers[provider.id]?.enabled ?? false;
-    const configuredKeys = provider.setup.envKeys.filter((envKey) =>
+    const credentialConfigured = (envKey: string) =>
       hasRuntimeCredentialConfigured({
         settings,
         env,
         providerId: provider.id,
         envKey,
-      }),
-    );
+        unresolvedRuntimeSecretProviderIds,
+      });
+    const configuredKeys = provider.setup.envKeys.filter(credentialConfigured);
     const missingKeys = provider.setup.envKeys.filter(
-      (envKey) =>
-        !hasRuntimeCredentialConfigured({
-          settings,
-          env,
-          providerId: provider.id,
-          envKey,
-        }),
+      (envKey) => !credentialConfigured(envKey),
     );
     const envCheckId =
       provider.id === 'telegram'
@@ -587,12 +590,17 @@ export async function runDoctorWithNetwork(
   runtimeHome: string,
   options: DoctorNetworkOptions = {},
 ): Promise<DoctorReport> {
-  let report = runDoctor(importMetaUrl, runtimeHome);
+  const settings = loadSettingsForDoctor(runtimeHome).settings;
+  const unresolvedRuntimeSecretProviderIds = settings
+    ? await collectUnresolvedRuntimeSecretProviderIds(runtimeHome, settings)
+    : undefined;
+  let report = runDoctor(importMetaUrl, runtimeHome, {
+    unresolvedRuntimeSecretProviderIds,
+  });
   const validateTelegramToken = options.validateTelegramToken !== false;
   if (validateTelegramToken) {
     const telegramProvider = getProvider('telegram');
     if (telegramProvider) {
-      const settings = loadSettingsForDoctor(runtimeHome).settings;
       if (settings?.providers[telegramProvider.id]?.enabled) {
         const env = readEnvFile(envFilePath(runtimeHome));
         const token = await resolveTelegramTokenForDoctor({
@@ -661,7 +669,6 @@ export async function runDoctorWithNetwork(
       : undefined,
   });
 
-  const settings = loadSettingsForDoctor(runtimeHome).settings;
   if (settings) {
     report = addToReport(
       report,

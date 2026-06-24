@@ -46,4 +46,16 @@ describe('runtime credential readiness', () => {
       }),
     ).toBe(true);
   });
+
+  it('treats unresolved stored runtime secret refs as missing', () => {
+    expect(
+      hasRuntimeCredentialConfigured({
+        settings: settingsWithRef('gantry-secret:TELEGRAM_BOT_TOKEN'),
+        env: {},
+        providerId: 'telegram',
+        envKey: 'TELEGRAM_BOT_TOKEN',
+        unresolvedRuntimeSecretProviderIds: new Set(['telegram']),
+      }),
+    ).toBe(false);
+  });
 });
