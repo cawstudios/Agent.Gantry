@@ -81,7 +81,6 @@ async function withCredentialServices<T>(
     capability: CapabilitySecretService;
   }) => Promise<T>,
 ): Promise<T> {
-  ensureRuntimeSettings(runtimeHome);
   process.env.GANTRY_HOME = runtimeHome;
   const { createStorageRuntime } =
     await import('../adapters/storage/postgres/factory.js');

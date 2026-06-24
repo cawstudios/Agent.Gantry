@@ -1,3 +1,6 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const originalSecretEncryptionKey = process.env.SECRET_ENCRYPTION_KEY;
@@ -51,7 +54,7 @@ describe('runtime secret ref prompt', () => {
     });
   });
 
-  it('can save env and AWS refs without storing the entered validation secret', async () => {
+  it('can save env and AWS refs without storing AWS validation secrets', async () => {
     const storeRuntimeSecretInput = vi.fn(async () => undefined);
     const text = vi
       .fn()
@@ -70,14 +73,17 @@ describe('runtime secret ref prompt', () => {
 
     const { planRuntimeSecretInput } =
       await import('@core/cli/runtime-secret-ref-prompt.js');
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-secret-ref-test-'),
+    );
     const envPlan = await planRuntimeSecretInput({
-      runtimeHome: '/tmp/gantry-secret-ref-test',
+      runtimeHome,
       name: 'SLACK_BOT_TOKEN',
       value: 'xoxb-token',
       actor: 'test',
     });
     const awsPlan = await planRuntimeSecretInput({
-      runtimeHome: '/tmp/gantry-secret-ref-test',
+      runtimeHome,
       name: 'SLACK_APP_TOKEN',
       value: 'xapp-token',
       actor: 'test',
@@ -87,6 +93,9 @@ describe('runtime secret ref prompt', () => {
     expect(awsPlan?.ref).toBe('aws-sm:prod/slack/bot');
     await envPlan?.persist();
     await awsPlan?.persist();
+    expect(fs.readFileSync(path.join(runtimeHome, '.env'), 'utf-8')).toContain(
+      'SLACK_TOKEN_FROM_ENV=xoxb-token',
+    );
     expect(storeRuntimeSecretInput).not.toHaveBeenCalled();
   });
 
@@ -105,8 +114,11 @@ describe('runtime secret ref prompt', () => {
 
     const { planRuntimeSecretInput } =
       await import('@core/cli/runtime-secret-ref-prompt.js');
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-secret-ref-test-no-encryption-'),
+    );
     const plan = await planRuntimeSecretInput({
-      runtimeHome: '/tmp/gantry-secret-ref-test-no-encryption',
+      runtimeHome,
       name: 'SLACK_BOT_TOKEN',
       value: 'xoxb-token',
       actor: 'test',
@@ -122,6 +134,9 @@ describe('runtime secret ref prompt', () => {
     );
     expect(plan?.ref).toBe('env:SLACK_BOT_TOKEN');
     await plan?.persist();
+    expect(fs.readFileSync(path.join(runtimeHome, '.env'), 'utf-8')).toContain(
+      'SLACK_BOT_TOKEN=xoxb-token',
+    );
     expect(storeRuntimeSecretInput).not.toHaveBeenCalled();
   });
 });

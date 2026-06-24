@@ -61,7 +61,7 @@ export async function planRuntimeSecretInput(input: {
     {
       value: 'env',
       label: 'Use environment variable',
-      hint: 'save an env ref',
+      hint: 'write runtime .env and save an env ref',
     },
   ];
   const initialValue = gantryStorageAvailable ? 'gantry' : 'env';
@@ -87,7 +87,12 @@ export async function planRuntimeSecretInput(input: {
         value?.trim() ? undefined : 'Environment variable is required.',
     });
     if (envName === null) return null;
-    return { ref: envRuntimeSecretRef(envName), persist: async () => {} };
+    return {
+      ref: envRuntimeSecretRef(envName),
+      persist: async () => {
+        writeRuntimeEnvValue(input.runtimeHome, envName, input.value);
+      },
+    };
   }
   if (source === 'aws-sm') {
     const secretName = await promptForValue({
@@ -137,4 +142,26 @@ function readRuntimeEnvFile(runtimeHome: string): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+function writeRuntimeEnvValue(
+  runtimeHome: string,
+  name: string,
+  value: string,
+): void {
+  const env = readRuntimeEnvFile(runtimeHome);
+  env[name.trim().toUpperCase()] = value;
+  fs.mkdirSync(runtimeHome, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(
+    path.join(runtimeHome, '.env'),
+    `${Object.keys(env)
+      .sort((a, b) => a.localeCompare(b))
+      .map((key) => `${key}=${encodeRuntimeEnvValue(env[key] ?? '')}`)
+      .join('\n')}\n`,
+    { encoding: 'utf-8', mode: 0o600 },
+  );
+}
+
+function encodeRuntimeEnvValue(value: string): string {
+  return /^[A-Za-z0-9_./:-]+$/.test(value) ? value : JSON.stringify(value);
 }
